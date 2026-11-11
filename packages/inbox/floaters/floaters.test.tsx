@@ -1,20 +1,3 @@
-/**
- * Floating reply drafts and Ask AI in the corner (approval "inbox-reply-floaters"), over a scripted Inbox (fetch
- * stubbed, nothing started). Failures to catch:
- * - a draft that does not float after the person typed and left (or closed the box), or that floats after they only
- *   read the thread;
- * - a floating draft's Send posting to the wrong thread or message, or leaving its draft behind (it would come back
- *   in the thread and float again); Discard leaving it; a thread with picks waiting sent without them;
- * - Ask's window listing drafts (the owner: separate windows, "no drafts in Ask's menu");
- * - a draft coming back after Discard because a file was still uploading; Undo losing the files or failing silently;
- * - the window closing itself when the person empties the words to rewrite them; Escape minimizing it (Ask's window
- *   takes no Escape, and this is Ask's window); the bin working while a Send is on its way;
- * - Ask's return arrow pressable with nothing to ask, or not turning into Stop while an answer runs;
- * - a draft floating while "Float reply drafts" is off (the default, the owner 2026-11-08), or a draft that floated
- *   before staying in the corner once it is known to be off; no Ask row in the corner.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act, createRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -39,9 +22,7 @@ interface Fake {
   threads: Map<string, InboxThread>;
   posts: { path: string; body: Record<string, unknown> }[];
   saves: number;
-  /** Draft saves answer 409 draft_conflict (another window wrote meanwhile). */
   refuseSaves: boolean;
-  /** The reply POST waits for this. */
   holdReply: Promise<void> | null;
 }
 let fake: Fake;
@@ -129,7 +110,6 @@ beforeEach(() => {
     if (m) {
       if (fake.holdReply) await fake.holdReply;
       const owner = [...fake.threads.values()].find((t) => t.messages.some((msg) => msg.id === decodeURIComponent(m![1]!)));
-      // The server's compare-and-set clear: the draft named by `clear_draft` goes.
       if (owner && fake.drafts.get(owner.thread_id)?.updated_at === body.clear_draft) fake.drafts.delete(owner.thread_id);
       return json({ message_id: m[1], questions: [], reply: { id: 'msg_reply' }, replayed: false });
     }
@@ -139,7 +119,6 @@ beforeEach(() => {
       return found ? json({ serverSession: 's', cursor: 1, thread: found }) : new Response('{}', { status: 404 });
     }
     if (path.includes('/sessions')) return json({ serverSession: 's', home: '/h', project: PROJECT, sessions: [] });
-    // The drafts list holds every reply draft, so a menu that read it would list them.
     if (path.endsWith('/drafts')) return json({ serverSession: 's', drafts: [], replies: [...fake.drafts.keys()].map((id) => row(id)) });
     if (path.endsWith('/ask')) return json({ chats: [{ thread_id: 'thr_ask', subject: 'Ledger schema review', project: 'billing', host: 'claude-code', at: T0, unread: false, answering: false }] });
     if (path.includes('/skills')) return json({ skills: [] });
@@ -183,7 +162,6 @@ let setThreadId: (id: string | null) => void = () => {};
 let setRows: (rows: InboxReplyDraftRow[]) => void = () => {};
 let setFloatDrafts: (on: boolean | null) => void = () => {};
 
-/** `floatDrafts`: Settings → "Float reply drafts" (on here unless a test says otherwise; null: settings not read yet). */
 function Harness({ start, rows: first, ask, floatDrafts: firstFloat = true }: { start: string | null; rows: InboxReplyDraftRow[]; ask: import('../ask/useInboxAsk').AskCorner; floatDrafts?: boolean | null }) {
   const [threadId, setThread] = useState<string | null>(start);
   const [rows, setRowsState] = useState(first);
@@ -217,17 +195,14 @@ test('a draft floats once its thread is left after typing, or its box closed; a 
   fake.drafts.set('thr_a', draft('thr_a', 'Do the small fix first'));
   fake.drafts.set('thr_b', draft('thr_b', 'Already here before the visit'));
   await act(async () => root!.render(<Harness start="thr_a" rows={[row('thr_a'), row('thr_b')]} ask={fakeAsk()} />));
-  // Typed in A (its draft saved again), then left for B.
   fake.drafts.set('thr_a', draft('thr_a', 'Do the small fix first: key on invoice_id', '2026-11-07T10:01:00.000Z'));
   act(() => setThreadId('thr_b'));
   await until(() => floating().includes('thr_a'), 'A to float');
   act(() => setRows([row('thr_a'), row('thr_b')]));
   await until(() => card('thr_a') !== null, "A's row in the corner");
-  // B only read: its draft is as it was when B opened. Leaving it floats nothing.
   act(() => setThreadId('thr_c'));
   await wait(600);
   expect(floating()).toEqual(['thr_a']);
-  // T6's down arrow in C after typing: C floats, but shows only once the person is elsewhere.
   fake.drafts.set('thr_c', draft('thr_c', 'Write down the 23 reports', '2026-11-07T10:02:00.000Z'));
   act(() => setRows([row('thr_a'), row('thr_b'), row('thr_c')]));
   act(() => mods.replyBoxSetAside('thr_c'));
@@ -235,7 +210,6 @@ test('a draft floats once its thread is left after typing, or its box closed; a 
   expect(card('thr_c')).toBeNull();
   act(() => setThreadId(null));
   await until(() => card('thr_c') !== null, "C's row once out of C");
-  // A stray half word set aside floats nowhere.
   fake.threads.set('thr_d', thread('thr_d'));
   act(() => setThreadId('thr_d'));
   fake.drafts.set('thr_d', draft('thr_d', 'ok', '2026-11-07T10:03:00.000Z'));
@@ -254,11 +228,9 @@ test('Send from a floating draft posts to that thread’s message and clears its
   mods.floatThread('thr_a', Date.now() - 10_000);
   await act(async () => root!.render(<Harness start={null} rows={[row('thr_a'), row('thr_b')]} ask={fakeAsk()} />));
   await until(() => card('thr_a') !== null, 'the corner');
-  // Two rows: a press spreads first, then opens.
   act(() => card('thr_a')!.click());
   act(() => card('thr_a')!.click());
   await until(() => document.querySelector<HTMLTextAreaElement>('[data-rf-box="thr_a"] textarea')?.value === 'Key the retry on invoice_id alone', "A's words in its window");
-  // Only that draft: no other draft's words, and no Ask transcript.
   expect(document.querySelector('[data-rf-box="thr_a"]')!.textContent).not.toContain('Leave the ledger');
   await until(() => document.querySelector('[data-rf-box="thr_a"] [data-rf-peek]') !== null, 'the thread read');
   act(() => document.querySelector<HTMLElement>('[data-rf-box="thr_a"] [data-rf-send]')!.click());
@@ -273,7 +245,6 @@ test('Send from a floating draft posts to that thread’s message and clears its
   expect(floating()).toEqual(['thr_b']);
   await until(() => document.querySelector('[data-rf-box]') === null, 'the window to close');
 
-  // Discard, from the bin.
   await until(() => card('thr_b') !== null, "B's row");
   act(() => card('thr_b')!.click());
   await until(() => document.querySelector<HTMLTextAreaElement>('[data-rf-box="thr_b"] textarea')?.value === 'Leave the ledger for next sprint', "B's words");
@@ -308,13 +279,10 @@ test('the corner never lists Ask’s chat, only the drafts, and Ask’s own menu
   const ask = fakeAsk({ threadId: 'thr_ask', hasChat: true, subject: 'Ledger schema review' });
   await act(async () => root!.render(<Harness start="thr_ask" rows={[row('thr_a')]} ask={ask} />));
   await until(() => card('thr_a') !== null, "the draft's row");
-  // No Ask row in the corner (the owner, 2026-11-09): this thread's chat, minimized, has no button there.
   expect(card('ask')).toBeNull();
   expect(document.querySelectorAll('[data-rf-card]').length).toBe(1);
   act(() => root!.unmount());
 
-  // Ask's header menu, beside the corner with a draft floating (the corner lists it; the drafts list the server
-  // answers holds it too): chats only.
   root = createRoot(host!);
   const chat = { thread_id: 'thr_ask', subject: 'Ledger schema review', project: 'billing', host: 'claude-code', at: T0, unread: false, answering: false };
   await act(async () =>
@@ -355,14 +323,12 @@ test('Ask’s return arrow is grey and off while the box is empty, sends once th
   expect(ask().hasAttribute('data-ready')).toBe(true);
   act(() => ask().click());
   expect(sends).toBe(1);
-  // It sits at the right end of the row (the bin's place on a computer), never as the thread's Send pill.
   expect(ask().closest('.ib-rrow')).not.toBeNull();
   expect(ask().classList.contains('ib-rsend')).toBe(false);
   await act(async () => root!.render(box('Why did the retry charge twice?', true)));
   expect(document.querySelector('[aria-label="Ask"]')).toBeNull();
   act(() => document.querySelector<HTMLElement>('[aria-label="Stop"]')!.click());
   expect(stops).toBe(1);
-  // A phone draws an up arrow (its Enter makes a new line).
   await act(async () => root!.render(box('', false, true)));
   expect(ask().querySelector('[data-ask-glyph="up"]')).not.toBeNull();
   expect(ask().disabled).toBe(true);
@@ -429,7 +395,6 @@ test('Discard while a file still uploads: the upload stops and no draft comes ba
     const deletedAt = fake.posts.findIndex((p) => p.path.endsWith('/threads/thr_b/draft/delete'));
     finish();
     await wait(500);
-    // Nothing saved the thread's draft again after the bin (the real store would keep a file-only draft).
     expect(fake.posts.slice(deletedAt + 1).filter((p) => p.path.endsWith('/threads/thr_b/draft'))).toEqual([]);
     expect(aborted).toBe(1);
     expect(fake.drafts.has('thr_b')).toBe(false);
@@ -443,22 +408,18 @@ test('emptying the words to rewrite them keeps the window open; Escape does not 
   await openFloating('thr_a', 'Key the retry on invoice_id alone');
   typeInto(field('thr_a')!, '');
   await until(() => !fake.drafts.has('thr_a'), 'the empty save to delete the draft');
-  // What App does on the drafts event: tell the floaters, then read the drafts list again (it no longer has A).
   act(() => mods.emitFloaterEvent('draft', 'thr_a'));
   act(() => setRows([...fake.drafts.keys()].map((id) => row(id))));
   await wait(300);
   expect(box('thr_a')).not.toBeNull();
   expect(floating()).toEqual(['thr_a']);
-  // Escape: Ask's window takes none, and neither does this one.
   act(() => {
     field('thr_a')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
   });
   await wait(50);
   expect(box('thr_a')).not.toBeNull();
-  // Rewritten: the draft is back, in the same window.
   typeInto(field('thr_a')!, 'Key it on the invoice and the attempt');
   await until(() => fake.drafts.get('thr_a')?.body === 'Key it on the invoice and the attempt', 'the new words saved');
-  // Emptied again and minimized: nothing to float, so the float entry goes too.
   typeInto(field('thr_a')!, '');
   await until(() => !fake.drafts.has('thr_a'), 'the draft gone again');
   act(() => setRows([]));
@@ -482,7 +443,6 @@ test('Undo after Discard brings back the words and the files; a refused Undo say
   expect(restore.body.files_add).toEqual([{ upload_id: 'up_9' }]);
   await until(() => floating().includes('thr_b'), 'it floats again');
 
-  // Refused (another window wrote a draft meanwhile): a toast says it, nothing is thrown away quietly.
   fake.refuseSaves = true;
   act(() => undo());
   await until(() => toasts.some((t) => t.icon === 'warn' && t.lead === 'The reply could not be restored.'), 'the refused toast');
@@ -510,18 +470,15 @@ test('"Float reply drafts" off (the default): typing and leaving floats nothing,
   for (const id of ['thr_a', 'thr_b', 'thr_ask']) fake.threads.set(id, thread(id));
   fake.drafts.set('thr_a', draft('thr_a', 'Do the small fix first'));
   fake.drafts.set('thr_old', draft('thr_old', 'Floated under 0.28.54, before the setting'));
-  // A draft floating from before the upgrade; the settings not read yet: it is kept, and nothing shows.
   mods.floatThread('thr_old', Date.now() - 10_000);
   const ask = fakeAsk({ threadId: 'thr_ask', hasChat: true, subject: 'Ledger schema review', minimized: true });
   ask.store.setMinimized(true);
   await act(async () => root!.render(<Harness start="thr_a" rows={[row('thr_a'), row('thr_old')]} ask={ask} floatDrafts={null} />));
   expect(card('thr_old')).toBeNull();
   expect(floating()).toEqual(['thr_old']);
-  // Read as off: it stops floating, and stays a draft.
   act(() => setFloatDrafts(false));
   await until(() => floating().length === 0, 'the old float to stop');
   expect(fake.drafts.has('thr_old')).toBe(true);
-  // Typed in A, then left; then T6's down arrow in B after typing: neither floats, no draft row, no draft window.
   fake.drafts.set('thr_a', draft('thr_a', 'Do the small fix first: key on invoice_id', '2026-11-07T10:01:00.000Z'));
   act(() => setThreadId('thr_b'));
   fake.drafts.set('thr_b', draft('thr_b', 'Write down the 23 reports', '2026-11-07T10:02:00.000Z'));
@@ -532,9 +489,7 @@ test('"Float reply drafts" off (the default): typing and leaving floats nothing,
   expect(floating()).toEqual([]);
   expect(document.querySelector('[data-rf-card][data-kind="draft"]')).toBeNull();
   expect(document.querySelector('[data-rf-box]')).toBeNull();
-  // Ask minimized has no row in the corner: nothing is there.
   expect(document.querySelectorAll('[data-rf-card], [data-rf-corner]').length).toBe(0);
-  // Turned on (0.28.54's behaviour): typing and leaving floats again.
   act(() => setFloatDrafts(true));
   act(() => setThreadId('thr_a'));
   await wait(50);
