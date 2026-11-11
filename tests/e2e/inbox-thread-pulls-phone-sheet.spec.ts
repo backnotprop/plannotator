@@ -16,12 +16,12 @@
  */
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { E2E_LAUNCH_OFF, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -37,6 +37,24 @@ test.beforeAll(async () => {
   const root = inboxScratch('plannotator-thread-pulls-sheet-');
   const dataDir = join(root, 'data');
   markTourDecided(dataDir);
+  // Every first-run and update-day dialog settled, as the other phone specs settle them: nothing may cover the thread
+  // or draw its own list (the list intro's demo) while the test opens the PRs. The CI binary is 0.0.0-dev.
+  const past = '2026-10-01T10:00:00.000Z';
+  writeFileSync(join(dataDir, 'update-state.json'), JSON.stringify({ inboxVersion: '0.0.0-dev' }));
+  writeFileSync(
+    join(dataDir, 'config.json'),
+    JSON.stringify({
+      ...JSON.parse(readFileSync(join(dataDir, 'config.json'), 'utf8')),
+      ...E2E_LAUNCH_OFF,
+      inboxNotifications: { dismissed: true },
+      inboxAgentNotes: { offered: true, asked: ['claude-code', 'codex', 'opencode', 'pi', 'gemini', 'qwen', 'cursor'] },
+      inboxSound: { dialogShownFor: '0.0.0-dev' },
+      inboxListIntro: { shownAt: past, version: 2 },
+      inboxVoiceIntro: { shownAt: past },
+      favicon: 'glass',
+      inboxReveals: { lastShownAt: past, sidebar_tip: { shownAt: past } },
+    }),
+  );
   for (const dir of ['claude', 'codex', 'xdg']) mkdirSync(join(root, dir), { recursive: true });
   // Nothing reaches a forge: gh and glab are signed-out fakes.
   const stubs = join(root, 'stubs');
@@ -84,8 +102,9 @@ test.afterAll(async () => {
 
 async function openPulls(browser: Browser, viewport: { width: number; height: number }): Promise<Page> {
   const page = await (await browser.newContext({ viewport, isMobile: true, hasTouch: true, reducedMotion: 'reduce' })).newPage();
-  await page.goto(world.url);
-  await page.locator(`.ib-lbody [data-thread-id="${world.threadId}"]`).first().click();
+  // Straight to the thread, as the other phone specs open one: never through the list, whose rows group and fold.
+  await page.goto(`${world.url}#thread=${world.threadId}`);
+  await expect(page.locator('section.ib-pane').getByRole('heading', { name: SUBJECT })).toBeVisible();
   const button = page.locator('[data-pr-button]').first();
   await expect(button).toHaveAttribute('data-pr-n', '3');
   await button.tap();
