@@ -185,6 +185,8 @@ packages/inbox/pasteDraft.test.tsx
 packages/inbox/questionCardPhone.test.tsx
 packages/inbox/markRead.test.tsx
 packages/inbox/markUnread.test.tsx
+packages/inbox/markReadWarning.test.tsx
+packages/inbox/markReadWarningWindow.test.tsx
 packages/inbox/ack.test.tsx
 packages/inbox/reactionLanding.test.ts
 packages/inbox/reactionTray.test.tsx
