@@ -54,6 +54,9 @@ export const EMPTY_ASK_DOCUMENT_LATCH: AskDocumentLatch = { current: null, histo
 /** How many earlier documents a note lists. */
 export const MAX_ASK_DOCUMENT_HISTORY = 10;
 
+/** Text pasted for a document without a file goes in whole up to here (about 75,000 tokens), then is cut with a marker. */
+export const MAX_ASK_DOCUMENT_CONTENT_CHARS = 300_000;
+
 /** A path the agent can open: absolute on POSIX or Windows, never a URL. */
 export function isReadableDocumentPath(path: string | null | undefined): path is string {
   if (!path) return false;
@@ -211,8 +214,12 @@ export function planAskDocumentContext(
   // A text already sent in this chat (the reviewer came back to it) is not sent again.
   const sentBefore = earlier.some(e => e.key === doc.key);
   if (!doc.path && !options.sessionBridge && !sentBefore && doc.content?.trim()) {
-    // Whole: Ask AI never answers from part of a document (through 0.28.61 it was cut at 60,000 characters).
-    const text = doc.content;
+    // Whole up to MAX_ASK_DOCUMENT_CONTENT_CHARS (the session context's bound in packages/ai/context.ts),
+    // past it cut with a marker the model reads (through 0.28.61 the cut was at 60,000 characters).
+    let text = doc.content;
+    if (text.length > MAX_ASK_DOCUMENT_CONTENT_CHARS) {
+      text = `${text.slice(0, MAX_ASK_DOCUMENT_CONTENT_CHARS)}\n\n... [truncated for context window: ${MAX_ASK_DOCUMENT_CONTENT_CHARS.toLocaleString('en-US')} of ${doc.content.length.toLocaleString('en-US')} characters shown]`;
+    }
     const fence = fenceFor(text);
     const lang = doc.renderAs === 'html' ? 'html' : 'markdown';
     lines.push('', `Its text (sent once; later questions about it will not repeat it):`, `${fence}${lang}`, text, fence);
