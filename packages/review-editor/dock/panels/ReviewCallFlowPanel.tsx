@@ -12,7 +12,7 @@ import {
   selectionForCallFlowNode,
 } from '../../components/CallFlowTreeView';
 import { CallFlowRawView } from '../../components/CallFlowRawView';
-import { CallTree } from '../../components/callTree/CallTree';
+import { CallTreeList } from '../../components/callTree/CallTreeList';
 import { callTreeFromEntry } from '@plannotator/shared/call-tree';
 import { formatCallFlowInstallSize } from '../../utils/callFlowPresentation';
 
@@ -249,6 +249,7 @@ export function ReviewCallFlowPanel() {
     () => (readyData ? readyData.trees.map((tree, index) => callTreeFromEntry(tree, index, { from: readyData.from, to: readyData.to })) : []),
     [readyData],
   );
+  const entryTrees = useMemo(() => entryDocs.map((doc) => ({ key: doc.rootPath, doc })), [entryDocs]);
 
   const openNode = (node: CallFlowNode) => {
     if (!node.file) return;
@@ -416,16 +417,14 @@ export function ReviewCallFlowPanel() {
         )}
 
         {view === 'tree' && callTreeRequest ? (
-          <div className="call-flow-call-trees">
-            <CallTree
-              key={`${callTreeRequest.doc.rootPath}:${callTreeRequest.token}`}
-              doc={callTreeRequest.doc}
-              onOpen={openTreeNode}
-              loadNodeSource={loadNodeSource}
-              onAnnotateTargets={state.onAddCallFlowAnnotation}
-              onBack={state.returnFromCallTree}
-              autoFocus
-              headerAccessory={state.clearCallTreeRequest && (
+          <CallTreeList
+            key={`${callTreeRequest.doc.rootPath}:${callTreeRequest.token}`}
+            trees={[{
+              key: callTreeRequest.doc.rootPath,
+              doc: callTreeRequest.doc,
+              ...(state.returnFromCallTree ? { onBack: state.returnFromCallTree } : {}),
+              autoFocus: true,
+              headerAccessory: state.clearCallTreeRequest && (
                 <button
                   type="button"
                   className="call-flow-icon-button"
@@ -435,9 +434,13 @@ export function ReviewCallFlowPanel() {
                 >
                   <X aria-hidden="true" size={14} />
                 </button>
-              )}
-            />
-          </div>
+              ),
+            }]}
+            onOpen={openTreeNode}
+            loadNodeSource={loadNodeSource}
+            onAnnotateTargets={state.onAddCallFlowAnnotation}
+            findShortcutActive={state.isCallFlowActive}
+          />
         ) : view === 'tree' ? (
           data.trees.length === 0 ? (
             <div className="call-flow-empty">
@@ -446,17 +449,13 @@ export function ReviewCallFlowPanel() {
               <p>This is syntactic call analysis; the ordinary and semantic diffs may still contain changes.</p>
             </div>
           ) : (
-            <div className="call-flow-call-trees">
-              {entryDocs.map((doc) => (
-                <CallTree
-                  key={doc.rootPath}
-                  doc={doc}
-                  onOpen={openTreeNode}
-                  loadNodeSource={loadNodeSource}
-                  onAnnotateTargets={state.onAddCallFlowAnnotation}
-                />
-              ))}
-            </div>
+            <CallTreeList
+              trees={entryTrees}
+              onOpen={openTreeNode}
+              loadNodeSource={loadNodeSource}
+              onAnnotateTargets={state.onAddCallFlowAnnotation}
+              findShortcutActive={state.isCallFlowActive}
+            />
           )
         ) : view === 'raw' ? (
           <CallFlowRawView

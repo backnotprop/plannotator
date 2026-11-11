@@ -277,12 +277,56 @@ export interface CallTreeRow {
   callerFile?: string;
   /** The row or something below it changed. */
   hasChange: boolean;
+  /** The row matches the search. */
+  match: boolean;
 }
 
 export interface CallTreeRowOptions {
   /** Rows the person folded or unfolded, by id: true = folded. Others use the default. */
   folds?: ReadonlyMap<string, boolean>;
   changesOnly?: boolean;
+  /**
+   * Search: keep only the rows that match and their callers, every one of
+   * them open (folds then hold only what the person folded while searching).
+   * A row with no match below it shows no calls. Empty: no search.
+   */
+  query?: string;
+}
+
+/**
+ * Whether a call matches a search, by the Paths view's rule (CallFlowTreeView):
+ * the query, trimmed and case-insensitive, appears in the call's label or its
+ * file path.
+ */
+export function callTreeNodeMatches(node: CallTreeNode, query: string): boolean {
+  const normalized = query.trim().toLocaleLowerCase();
+  if (!normalized) return false;
+  return `${node.label}\n${node.file ?? ""}`.toLocaleLowerCase().includes(normalized);
+}
+
+const searchCache = new WeakMap<CallTreeNode, { query: string; below: Set<CallTreeNode> }>();
+
+/** Nodes that match or have a match below them, computed once per tree and query (iteratively). */
+function searchFacts(root: CallTreeNode, query: string): Set<CallTreeNode> {
+  const cached = searchCache.get(root);
+  if (cached && cached.query === query) return cached.below;
+  const order: CallTreeNode[] = [];
+  const stack: CallTreeNode[] = [root];
+  const seen = new Set<CallTreeNode>();
+  while (stack.length > 0) {
+    const node = stack.pop()!;
+    if (seen.has(node)) continue;
+    seen.add(node);
+    order.push(node);
+    for (const child of node.children) stack.push(child);
+  }
+  const below = new Set<CallTreeNode>();
+  for (let index = order.length - 1; index >= 0; index--) {
+    const node = order[index]!;
+    if (callTreeNodeMatches(node, query) || node.children.some((child) => below.has(child))) below.add(node);
+  }
+  searchCache.set(root, { query, below });
+  return below;
 }
 
 interface TreeFacts {
@@ -350,12 +394,17 @@ export function buildCallTreeRows(doc: CallTreeDoc, options: CallTreeRowOptions 
   const { hasChange, signature } = treeFacts(doc.root);
   const folds = options.folds;
   const changesOnly = options.changesOnly === true;
+  const query = options.query?.trim() ?? "";
+  const searching = query.length > 0;
+  const matchBelow = searching ? searchFacts(doc.root, query) : null;
   const rows: CallTreeRow[] = [];
   const expandedSignatures = new Set<number>();
   const visibleChildren = (node: CallTreeNode): Array<[CallTreeNode, number]> => {
     const out: Array<[CallTreeNode, number]> = [];
     node.children.forEach((child, index) => {
-      if (!changesOnly || hasChange.get(child)) out.push([child, index]);
+      if (changesOnly && !hasChange.get(child)) return;
+      if (matchBelow && !matchBelow.has(child)) return;
+      out.push([child, index]);
     });
     return out;
   };
@@ -385,8 +434,9 @@ export function buildCallTreeRows(doc: CallTreeDoc, options: CallTreeRowOptions 
     const changed = hasChange.get(node) ?? false;
     const kids = visibleChildren(node);
     const sig = signature.get(node)!;
-    const repeat = kids.length > 0 && expandedSignatures.has(sig);
-    const folded = !repeat && kids.length > 0 && (folds?.get(frame.id) ?? foldedByDefault(depth, changed));
+    // While searching every kept row leads to a match, so none is a repeat and all are open.
+    const repeat = !searching && kids.length > 0 && expandedSignatures.has(sig);
+    const folded = !repeat && kids.length > 0 && (folds?.get(frame.id) ?? (searching ? false : foldedByDefault(depth, changed)));
     const ownChange = node.status === "same" ? null : node.status;
     const band = ownChange && frame.parentStatus !== ownChange ? ownChange : null;
     rows.push({
@@ -403,6 +453,7 @@ export function buildCallTreeRows(doc: CallTreeDoc, options: CallTreeRowOptions 
       dot: ownChange && !band ? ownChange : null,
       ...(frame.callerFile ? { callerFile: frame.callerFile } : {}),
       hasChange: changed,
+      match: searching && callTreeNodeMatches(node, query),
     });
     if (repeat || folded || kids.length === 0) continue;
     expandedSignatures.add(sig);

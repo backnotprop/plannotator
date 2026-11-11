@@ -12,7 +12,7 @@ import { useHoverPreview } from '@plannotator/ui/hooks/useHoverPreview';
 import type { CallFlowAnnotationTarget } from '@plannotator/ui/types';
 import { splitCallFlowSignature } from '../../utils/callFlowPresentation';
 import type { CallFlowNodeSource, CallFlowNodeSourceLoader } from '../../hooks/useCallFlowNodeSource';
-import { annotationTargetForCallFlowNode, CALL_FLOW_PREVIEW_CONTEXT_LINES } from '../CallFlowTreeView';
+import { annotationTargetForCallFlowNode, CALL_FLOW_PREVIEW_CONTEXT_LINES, highlightSlice, searchRanges } from '../CallFlowTreeView';
 import { useReviewCallTreeShortcuts } from './callTree.shortcuts';
 
 /**
@@ -37,6 +37,22 @@ export interface CallTreeProps {
   readonly autoFocus?: boolean;
   /** Extra controls drawn at the end of the header line. */
   readonly headerAccessory?: React.ReactNode;
+  /**
+   * Search, owned by the host (one field can search several trees, as the
+   * Paths view does): the tree narrows to matching rows and their callers,
+   * all open, and marks the matched text. Empty: no search.
+   */
+  readonly searchQuery?: string;
+  /** Which of this tree's matches is the current one (moves the current row there); null for none. */
+  readonly activeMatch?: number | null;
+  /** How many rows match the search in this tree as drawn (Changes only included). */
+  readonly onMatchCountChange?: (count: number) => void;
+}
+
+/** Text with the search's matches marked, the Paths view's way (same rule, same mark). */
+function Marked({ text, query, start = 0, end = text.length }: { readonly text: string; readonly query: string; readonly start?: number; readonly end?: number }) {
+  if (!query) return <>{text.slice(start, end)}</>;
+  return <>{highlightSlice(text, searchRanges(text, query), start, end)}</>;
 }
 
 /** The last two path segments: `shapes/note/NoteShapeUtil.tsx` -> `note/NoteShapeUtil.tsx`. */
@@ -51,20 +67,25 @@ export function callTreeLocationText(row: Pick<CallTreeRow, 'node' | 'callerFile
   return node.file === row.callerFile ? `:${node.line}` : `${shortCallTreePath(node.file)}:${node.line}`;
 }
 
-function RowLabel({ node }: { readonly node: CallTreeNode }) {
-  if (node.kind === 'branch') return <span className="call-tree-branch-label">{node.label}</span>;
-  const parts = splitCallFlowSignature(node.label);
+function RowLabel({ node, query }: { readonly node: CallTreeNode; readonly query: string }) {
+  const label = node.label;
+  if (node.kind === 'branch') return <span className="call-tree-branch-label"><Marked text={label} query={query} /></span>;
+  const parts = splitCallFlowSignature(label);
+  // Matches are found on the whole label and marked across the receiver/name split, as in Paths.
+  const nameStart = parts.receiver.length;
+  const restStart = nameStart + parts.name.length;
   return (
     <span className="call-tree-signature">
-      {parts.receiver && <span className="call-tree-receiver">{parts.receiver}</span>}
-      <span className="call-tree-name">{parts.name}</span>
-      {parts.rest && <span className="call-tree-args">{parts.rest}</span>}
+      {parts.receiver && <span className="call-tree-receiver"><Marked text={label} query={query} start={0} end={nameStart} /></span>}
+      <span className="call-tree-name"><Marked text={label} query={query} start={nameStart} end={restStart} /></span>
+      {parts.rest && <span className="call-tree-args"><Marked text={label} query={query} start={restStart} /></span>}
     </span>
   );
 }
 
 interface RowProps {
   readonly row: CallTreeRow;
+  readonly query: string;
   readonly domId: string;
   readonly current: boolean;
   readonly openable: boolean;
@@ -77,8 +98,28 @@ interface RowProps {
   readonly registerRow: (id: string, element: HTMLElement | null) => void;
 }
 
+/**
+ * Rows are rebuilt on every fold, filter and keystroke, so compare what a row
+ * draws rather than its object: an unchanged row is not drawn again, which
+ * keeps typing in the search and moving with the arrows cheap on big trees.
+ */
+function sameRow(a: RowProps, b: RowProps): boolean {
+  const x = a.row;
+  const y = b.row;
+  const sameDrawn = x === y || (
+    x.id === y.id && x.node === y.node && x.depth === y.depth && x.branch === y.branch
+    && x.guides.length === y.guides.length && x.guides.every((guide, index) => guide === y.guides[index])
+    && x.childCount === y.childCount && x.folded === y.folded && x.repeat === y.repeat
+    && x.band === y.band && x.dot === y.dot && x.callerFile === y.callerFile && x.match === y.match
+  );
+  return sameDrawn && a.query === b.query && a.domId === b.domId && a.current === b.current && a.openable === b.openable
+    && a.commentable === b.commentable && a.commenting === b.commenting && a.loadNodeSource === b.loadNodeSource
+    && a.onSelect === b.onSelect && a.onToggle === b.onToggle && a.onComment === b.onComment && a.registerRow === b.registerRow;
+}
+
 const CallTreeRowView = memo(function CallTreeRowView({
   row,
+  query,
   domId,
   current,
   openable,
@@ -105,6 +146,7 @@ const CallTreeRowView = memo(function CallTreeRowView({
     current ? 'call-tree-row-current' : '',
     commenting ? 'call-tree-row-commenting' : '',
     openable ? 'call-tree-row-openable' : '',
+    row.match ? 'call-tree-row-match' : '',
   ].filter(Boolean).join(' ');
 
   return (
@@ -165,7 +207,7 @@ const CallTreeRowView = memo(function CallTreeRowView({
         {node.status === 'removed' && <span className="sr-only">Removed: </span>}
         <span className={`call-tree-label call-tree-label-${node.status}`}>
           {node.provenance === 'agent' && <span className="call-tree-pencil" aria-hidden="true">✎ </span>}
-          <RowLabel node={node} />
+          <RowLabel node={node} query={query} />
         </span>
         {node.notes?.map((note, index) => (
           <span key={index} className="call-tree-note">
@@ -197,7 +239,7 @@ const CallTreeRowView = memo(function CallTreeRowView({
             title={openable ? `Open ${fullLocation}` : 'Outside the reviewed patch'}
             aria-label={openable ? `Open ${fullLocation}` : `Source ${fullLocation} is outside the reviewed patch`}
           >
-            {location}
+            <Marked text={location} query={query} />
           </button>
         )}
       </span>
@@ -216,7 +258,7 @@ const CallTreeRowView = memo(function CallTreeRowView({
       )}
     </div>
   );
-});
+}, sameRow);
 
 /** The nearest row still drawn for an id that may have been folded away. */
 function nearestDrawn(id: string, drawn: ReadonlySet<string>, fallback: string): string {
@@ -238,10 +280,25 @@ export function CallTree({
   onBack,
   autoFocus = false,
   headerAccessory,
+  searchQuery = '',
+  activeMatch = null,
+  onMatchCountChange,
 }: CallTreeProps) {
   const [folds, setFolds] = useState<ReadonlyMap<string, boolean>>(() => new Map());
+  const query = searchQuery.trim();
+  const searching = query.length > 0;
+  // Folds made while searching live apart and go with the search, so clearing
+  // it gives back the folds the person had.
+  const [searchFolds, setSearchFolds] = useState<ReadonlyMap<string, boolean>>(() => new Map());
+  useEffect(() => {
+    if (!searching) setSearchFolds(new Map());
+  }, [searching]);
   const [changesOnly, setChangesOnly] = useState(false);
-  const rows = useMemo(() => buildCallTreeRows(doc, { folds, changesOnly }), [doc, folds, changesOnly]);
+  const rows = useMemo(
+    () => buildCallTreeRows(doc, { folds: searching ? searchFolds : folds, changesOnly, query }),
+    [doc, folds, searchFolds, searching, changesOnly, query],
+  );
+  const matchIds = useMemo(() => rows.filter((row) => row.match).map((row) => row.id), [rows]);
   const rowIndex = useMemo(() => new Map(rows.map((row, index) => [row.id, index])), [rows]);
   const [currentId, setCurrentId] = useState(doc.rootPath);
   const resolvedCurrentId = rowIndex.has(currentId)
@@ -276,6 +333,10 @@ export function CallTree({
   }, []);
 
   const toggle = useCallback((row: CallTreeRow) => {
+    if (searching) {
+      setSearchFolds((current) => new Map(current).set(row.id, !row.folded));
+      return;
+    }
     setFolds((current) => {
       const next = new Map(current);
       const folded = !row.folded;
@@ -283,7 +344,15 @@ export function CallTree({
       else next.set(row.id, folded);
       return next;
     });
-  }, []);
+  }, [searching]);
+
+  useEffect(() => {
+    onMatchCountChange?.(matchIds.length);
+  }, [matchIds.length, onMatchCountChange]);
+  const activeMatchId = activeMatch !== null ? matchIds[activeMatch] : undefined;
+  useEffect(() => {
+    if (activeMatchId) reveal(activeMatchId);
+  }, [activeMatchId, reveal]);
 
   const select = useCallback((row: CallTreeRow, open: boolean) => {
     setCurrentId(row.id);
@@ -408,6 +477,7 @@ export function CallTree({
           <CallTreeRowView
             key={row.id}
             row={row}
+            query={row.match ? query : ''}
             domId={domIdOf(index)}
             current={row.id === resolvedCurrentId}
             openable={isOpenable(row.node)}

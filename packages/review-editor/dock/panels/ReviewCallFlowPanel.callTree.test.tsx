@@ -2,8 +2,10 @@
  * DOM-gated: the Call flow tab shows the Call tree beside the Paths cards.
  *
  * Regressions guarded:
- *  - the approved Paths cards no longer being the tab's first view, or the
- *    Call tree not reachable from it;
+ *  - the tab not opening on the Call tree (owner's decision, 2026-11-10, once
+ *    the tree had search), or Paths and Raw not one click away;
+ *  - search across the tab's trees: the count, the next match moving the
+ *    current row into the tree holding it, Cmd/Ctrl+F reaching the field;
  *  - a hunk's "Call tree" entry not landing on its tree (with the caller
  *    trail), Close not returning to the tab's own trees, or Escape not going
  *    back to the hunk;
@@ -81,13 +83,11 @@ afterEach(async () => {
 });
 
 describe('ReviewCallFlowPanel Call tree view', () => {
-  test.skipIf(!hasDom)('Paths stays first; Call tree draws every entry as a tree and opens rows through the review', async () => {
+  test.skipIf(!hasDom)('the tab opens on the Call tree; Paths and Raw are one click away; rows open through the review', async () => {
     const opened: string[] = [];
     await render(state({ openCallTreeNode: (node) => opened.push(node.key) }));
-    expect(viewButton('Paths').getAttribute('aria-pressed')).toBe('true');
-    expect(host!.querySelector('.call-flow-trees')).not.toBeNull();
-
     await act(async () => viewButton('Call tree').click());
+    expect(viewButton('Call tree').getAttribute('aria-pressed')).toBe('true');
     expect(host!.querySelector('[role="tree"]')).not.toBeNull();
     const layout = [...host!.querySelectorAll<HTMLElement>('[role="treeitem"]')].find((r) => r.textContent?.includes('parley.layout'))!;
     await act(async () => layout.click());
@@ -95,6 +95,50 @@ describe('ReviewCallFlowPanel Call tree view', () => {
 
     await act(async () => viewButton('Paths').click());
     expect(host!.querySelector('.call-flow-trees')).not.toBeNull();
+    await act(async () => viewButton('Raw').click());
+    expect(host!.querySelector('[role="tree"]')).toBeNull();
+    await act(async () => viewButton('Call tree').click());
+    expect(host!.querySelector('[role="tree"]')).not.toBeNull();
+  });
+
+  test.skipIf(!hasDom)('one search across the tab\'s trees: Cmd/Ctrl+F, the count, next moves into the tree holding the match', async () => {
+    const twoTrees: CallFlowTree[] = [
+      trees[0]!,
+      { entry: 'other', tree: { key: 'other', label: 'other()', status: 'same', file: 'src/other.ts', line: 1, children: [
+        { key: 'layout2', label: 'parley.layout(x)', status: 'added', file: 'src/other.ts', line: 4, children: [] },
+      ] } },
+    ];
+    const base = state();
+    await render(state({
+      callFlowAnalysis: { status: 'ready', data: { ...(base.callFlowAnalysis as { data: object }).data, trees: twoTrees } } as never,
+    }));
+    await act(async () => viewButton('Call tree').click());
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', metaKey: true }));
+    });
+    const input = host!.querySelector<HTMLInputElement>('input[placeholder="Find calls or files"]')!;
+    expect(document.activeElement).toBe(input);
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(input, 'layout');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(host!.querySelector('.call-flow-search-count')?.textContent).toBe('1/2');
+    const current = () => host!.querySelector<HTMLElement>('[role="treeitem"][aria-selected="true"].call-tree-row-match');
+    const selected = () => [...host!.querySelectorAll<HTMLElement>('[role="treeitem"][aria-selected="true"]')].map((r) => r.textContent ?? '');
+    expect(selected().some((text) => text.includes('parley.layout()'))).toBe(true);
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    });
+    expect(host!.querySelector('.call-flow-search-count')?.textContent).toBe('2/2');
+    expect(selected().some((text) => text.includes('parley.layout(x)'))).toBe(true);
+    expect(current()).not.toBeNull();
+    // Escape clears the search: the trees come back as they were.
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(host!.querySelector('input[type="search"]')).toBeNull();
+    expect(host!.querySelectorAll('.call-tree-row-match')).toHaveLength(0);
   });
 
   test.skipIf(!hasDom)('a hunk\'s request shows its tree with the trail; Escape goes back, Close shows the tab\'s trees', async () => {

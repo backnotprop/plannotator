@@ -10,7 +10,10 @@
  *  - a repeated call expanded again instead of marked "↑ above";
  *  - Changes only dropping the root or keeping unchanged branches;
  *  - fold defaults hiding a changed path, or a folded row losing its count;
- *  - a deep or large tree overflowing the stack or taking seconds.
+ *  - a deep or large tree overflowing the stack or taking seconds;
+ *  - search: a match hidden in a folded branch, a lost caller on the way to
+ *    a match, unmatched rows left in, Changes only ignored, matching that
+ *    differs from the Paths view's rule (label or file, trimmed, any case).
  */
 import { describe, expect, test } from "bun:test";
 import {
@@ -18,6 +21,7 @@ import {
   calleeName,
   callTreeAt,
   callTreeFromEntry,
+  callTreeNodeMatches,
   findCallTreeRoot,
   type CallTreeNode,
   type CallTreeSourceTree,
@@ -228,5 +232,39 @@ describe("calleeName", () => {
     expect(calleeName("textMeasure.measureHtml(html, { a })")).toBe("measureHtml");
     expect(calleeName("new Foo.Bar(x)")).toBe("Bar");
     expect(calleeName("if (x)")).toBe("if");
+  });
+});
+
+describe("search rows", () => {
+  const doc = callTreeFromEntry(entry, 0);
+
+  test("keeps matches and their callers, all open, even inside a branch folded by default", () => {
+    // helper -> log() is folded by default (no change below it).
+    expect(buildCallTreeRows(doc).some((row) => row.node.key === "log")).toBe(false);
+    const rows = buildCallTreeRows(doc, { query: "LOG(" });
+    expect(rows.map((row) => row.node.key)).toEqual(["root", "adjust", "helper", "log"]);
+    expect(rows.filter((row) => row.match).map((row) => row.node.key)).toEqual(["log"]);
+    expect(rows.every((row) => !row.folded)).toBe(true);
+  });
+
+  test("matches the file path too, trimmed, in any case (the Paths rule)", () => {
+    expect(callTreeNodeMatches(n("x", "foo()", "src/Text.ts", 1), "  text.TS ")).toBe(true);
+    expect(callTreeNodeMatches(n("x", "foo()", "src/a.ts", 1), "   ")).toBe(false);
+    const rows = buildCallTreeRows(doc, { query: "text.ts" });
+    expect(rows.filter((row) => row.match).map((row) => row.node.key)).toEqual(["rect", "parley"]);
+  });
+
+  test("with Changes only, only changed paths are searched", () => {
+    const all = buildCallTreeRows(doc, { query: "()" }).filter((row) => row.match).length;
+    const changed = buildCallTreeRows(doc, { query: "()", changesOnly: true }).filter((row) => row.match);
+    expect(changed.length).toBeLessThan(all);
+    expect(changed.every((row) => row.hasChange)).toBe(true);
+  });
+
+  test("no match leaves the root alone; a fold made while searching hides that branch only", () => {
+    expect(buildCallTreeRows(doc, { query: "nothing-matches" }).map((row) => row.node.key)).toEqual(["root"]);
+    const rows = buildCallTreeRows(doc, { query: "()", folds: new Map([["onBeforeCreate:0/adjust:0/getLabelSize:0", true]]) });
+    expect(rows.some((row) => row.node.key === "measure")).toBe(false);
+    expect(rows.some((row) => row.node.key === "log")).toBe(true);
   });
 });

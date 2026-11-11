@@ -10,7 +10,11 @@
  *  - arrow keys leaking to the file tree's window handler (switching files)
  *    or not moving / folding;
  *  - a folded branch without its count, Changes only keeping unchanged rows,
- *    bands on every row of a new subtree, a repeat expanded again.
+ *    bands on every row of a new subtree, a repeat expanded again;
+ *  - search: clearing it not giving back the folds the person had, marks
+ *    missing on the name or the location, the source preview not opening on
+ *    a search result, and a count that differs from the Paths view's search
+ *    for the same query.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -18,6 +22,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { callTreeFromEntry, type CallTreeDoc, type CallTreeNode } from '@plannotator/shared/call-tree';
 import type { CallFlowAnnotationTarget } from '@plannotator/ui/types';
 import { CallTree } from './CallTree';
+import { CallTreeList } from './CallTreeList';
+import { CallFlowTreeView } from '../CallFlowTreeView';
 import { createCallFlowNodeSourceLoader } from '../../hooks/useCallFlowNodeSource';
 
 const hasDom = typeof document !== 'undefined';
@@ -251,5 +257,92 @@ describe('CallTree source preview (#2322)', () => {
     expect(preview!.textContent).toContain('old line 5');
     expect(preview!.textContent).not.toContain('new line');
     expect(calls[0]).toContain('snapshot=snap-1');
+  });
+});
+
+async function search(text: string) {
+  const trigger = host!.querySelector<HTMLButtonElement>('button[aria-label="Search call paths"]');
+  if (trigger) await act(async () => trigger.click());
+  const input = host!.querySelector<HTMLInputElement>('input[placeholder="Find calls or files"]')!;
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    setter?.call(input, text);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  return input;
+}
+
+describe('CallTree search', () => {
+  test.skipIf(!hasDom)('narrows to matches, opens the folded branch holding one, marks the text, and clearing gives back the person\'s folds', async () => {
+    await mount(<CallTreeList trees={[{ key: 'k', doc }]} onOpen={() => {}} />);
+    // The person folds getLabelSize before searching.
+    await act(async () => row('getLabelSize').querySelector<HTMLElement>('.call-tree-twist')!.click());
+    expect(row('getLabelSize').getAttribute('aria-expanded')).toBe('false');
+
+    const input = await search('getTheme');
+    expect(host!.querySelector('.call-flow-search-count')?.textContent).toBe('1/1');
+    // util.getTheme() was folded by default; its file theme.ts holds no match, the call does.
+    expect(row('util.getTheme()').className).toContain('call-tree-row-match');
+    expect(host!.textContent).not.toContain('getLabelSize');
+    expect(row('util.getTheme()').querySelector('mark.call-flow-tree-match')?.textContent).toBe('getTheme');
+    expect(row('util.getTheme()').getAttribute('aria-selected')).toBe('true');
+
+    await search('src/theme');
+    // A file match marks the location and opens the folded branch to the calls in it.
+    expect(row('a()').querySelector('.call-tree-location mark')?.textContent).toBe('src/theme');
+    expect(host!.querySelector('.call-flow-search-count')?.textContent).toBe('1/2');
+
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+    expect(row('getLabelSize').getAttribute('aria-expanded')).toBe('false');
+    expect(row('util.getTheme()').getAttribute('aria-expanded')).toBe('false');
+    expect(host!.querySelectorAll('mark')).toHaveLength(0);
+  });
+
+  test.skipIf(!hasDom)('Changes only and search together keep only changed matches', async () => {
+    await mount(<CallTreeList trees={[{ key: 'k', doc }]} onOpen={() => {}} />);
+    await act(async () => [...host!.querySelectorAll('button')].find((b) => b.textContent === 'Changes only')!.click());
+    await search('e');
+    const labels = [...host!.querySelectorAll('.call-tree-row-match')].map((r) => r.querySelector('.call-tree-label')?.textContent);
+    expect(labels.some((label) => label?.includes('getTheme'))).toBe(false);
+    expect(labels.some((label) => label?.includes('parley.layout'))).toBe(true);
+  });
+
+  test.skipIf(!hasDom)('a search result keeps the #2322 source preview on its file:line', async () => {
+    const calls: string[] = [];
+    const loader = createCallFlowNodeSourceLoader({
+      files: [{ path: 'src/text.ts' }],
+      fetchImpl: (async (input: RequestInfo | URL) => {
+        calls.push(String(input));
+        return new Response(JSON.stringify({ oldContent: numbered('old'), newContent: numbered('new') }), { status: 200 });
+      }) as typeof fetch,
+    });
+    await mount(<CallTreeList trees={[{ key: 'k', doc }]} onOpen={() => {}} loadNodeSource={loader} />);
+    await search('parley.layout');
+    const location = row('parley.layout').querySelector<HTMLElement>('.call-tree-location')!;
+    await act(async () => {
+      location.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      await wait(250);
+    });
+    expect(document.querySelector('[data-code-snippet-preview="src/text.ts"] [data-target-line="true"]')?.textContent).toContain('new line 8');
+  });
+
+  test.skipIf(!hasDom)('finds as many matches as the Paths search for the same query', async () => {
+    const flowTrees = [{ entry: 'onBeforeCreate', tree: doc.root as never }];
+    for (const query of ['layout', 'src/', 'MEASURE', 'a()']) {
+      await mount(<CallFlowTreeView trees={flowTrees} onOpenNode={() => {}} initialContext="all" />);
+      await search(query);
+      const paths = host!.querySelector('.call-flow-search-count')?.textContent;
+      await act(async () => root?.unmount());
+      host?.remove();
+      await mount(<CallTreeList trees={[{ key: 'k', doc }]} onOpen={() => {}} />);
+      await search(query);
+      expect(host!.querySelector('.call-flow-search-count')?.textContent).toBe(paths!);
+      await act(async () => root?.unmount());
+      host?.remove();
+      root = null;
+      host = null;
+    }
   });
 });
