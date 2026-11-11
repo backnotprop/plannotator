@@ -151,7 +151,47 @@ for (const phone of [
     const browser: Browser = phone.browserName === 'webkit' ? await webkit.launch({ args: [] }) : await chromium.launch();
     try {
       const context = await browser.newContext({ ...device, colorScheme: 'light' });
+      // DIAG (temporary): what the page sees around the hold and the tap on Mark read.
+      if (phone.browserName === 'chromium')
+        await context.addInitScript(() => {
+          const w = window as unknown as { __lp: string[] };
+          w.__lp = [];
+          const t0 = performance.now();
+          const name = (n: EventTarget | null) =>
+            n instanceof Element ? `${n.tagName.toLowerCase()}${n.className && typeof n.className === 'string' ? '.' + n.className.trim().split(/\s+/).join('.') : ''}${n.getAttribute('data-row-action') ? `[${n.getAttribute('data-row-action')}]` : ''}` : String(n);
+          for (const type of ['contextmenu', 'pointerdown', 'pointerup', 'pointercancel', 'touchstart', 'touchend', 'touchcancel', 'mousedown', 'mouseup', 'click', 'selectstart', 'dragstart', 'focusin', 'cancel', 'close']) {
+            window.addEventListener(
+              type,
+              (e) => {
+                const at = Math.round(performance.now() - t0);
+                const pt = (e as PointerEvent).pointerType;
+                setTimeout(() => w.__lp.push(`${at} ${type}${pt !== undefined ? `(${pt})` : ''} ${name(e.target)} prevented=${e.defaultPrevented}`), 0);
+              },
+              { capture: true },
+            );
+          }
+          new MutationObserver((records) => {
+            const at = Math.round(performance.now() - t0);
+            for (const r of records) {
+              for (const n of r.addedNodes) if (n instanceof Element && (n.matches('[data-dialog]') || n.querySelector('[data-dialog]'))) w.__lp.push(`${at} +dialog ${(n.matches('[data-dialog]') ? n : n.querySelector('[data-dialog]'))!.getAttribute('data-dialog')}`);
+              for (const n of r.removedNodes) if (n instanceof Element && (n.matches('[data-dialog]') || n.querySelector('[data-dialog]'))) w.__lp.push(`${at} -dialog ${(n.matches('[data-dialog]') ? n : n.querySelector('[data-dialog]'))!.getAttribute('data-dialog')}`);
+            }
+          }).observe(document, { childList: true, subtree: true });
+        });
       const page = await context.newPage();
+      const diag: string[] = [];
+      if (phone.browserName === 'chromium') {
+        page.on('request', (r) => {
+          const path = new URL(r.url()).pathname;
+          if (r.method() !== 'GET' || /settings|threads\/[^/]+\/read/.test(path)) diag.push(`req ${r.method()} ${path} ${(r.postData() ?? '').slice(0, 200)}`);
+        });
+        page.on('response', async (r) => {
+          const path = new URL(r.url()).pathname;
+          if (path === '/api/inbox/settings') diag.push(`settings ${r.status()} mark_read_warning=${JSON.stringify(((await r.json().catch(() => ({}))) as { mark_read_warning?: unknown }).mark_read_warning)}`);
+          else if (r.request().method() !== 'GET') diag.push(`res ${r.status()} ${r.request().method()} ${path}`);
+        });
+        page.on('console', (m) => diag.push(`console.${m.type()} ${m.text().slice(0, 300)}`));
+      }
       const errors: string[] = [];
       page.on('pageerror', (e) => errors.push(String(e)));
       // Mark read's warning is on once the window has read its settings (until then a Mark read asks nothing).
@@ -182,8 +222,32 @@ for (const phone of [
 
       if (phone.browserName === 'chromium') {
         // Mark read from the sheet on a thread with an open question asks first, as the right-click's does.
-        await menu(page).locator('[data-row-action="read"]').tap();
-        await expect(page.locator('[data-dialog="mark-read-warning"] h2')).toHaveText('Set aside 1 open question?');
+        // DIAG (temporary): the state over time around the tap.
+        const snap = (label: string) =>
+          page
+            .evaluate(
+              ({ label, id }) => {
+                const row = document.querySelector(`[data-thread-id="${id}"]`);
+                const dialogs = [...document.querySelectorAll('[data-dialog]')].map((d) => `${d.getAttribute('data-dialog')}(open=${(d as HTMLDialogElement).open})`);
+                const a = document.activeElement;
+                return `${label} t=${Math.round(performance.now())} dialogs=[${dialogs.join(',')}] menu=${document.querySelectorAll('[data-row-menu]').length} scrim=${document.querySelectorAll('.ib-pm-scrim').length} row=${JSON.stringify(row?.textContent?.slice(0, 160))} rowattrs=${row ? [...row.attributes].map((x) => `${x.name}=${x.value}`).join(' ') : 'none'} active=${a ? a.tagName + '.' + (a as HTMLElement).className : 'none'} sel=${JSON.stringify(String(getSelection()))} url=${location.hash} platform=${navigator.platform} tp=${navigator.maxTouchPoints}`;
+              },
+              { label, id: world.ask },
+            )
+            .then((s) => diag.push(s))
+            .catch((e) => diag.push(`${label} snap failed ${e}`));
+        await snap('before-tap');
+        try {
+          await menu(page).locator('[data-row-action="read"]').tap();
+          for (const step of [0, 50, 100, 250, 600, 1500]) {
+            if (step) await page.waitForTimeout(step);
+            await snap(`after-tap+${step}`);
+          }
+          await expect(page.locator('[data-dialog="mark-read-warning"] h2')).toHaveText('Set aside 1 open question?');
+        } finally {
+          const events = await page.evaluate(() => (window as unknown as { __lp: string[] }).__lp ?? []).catch(() => ['(no events)']);
+          console.log(`\n===LP-DIAG===\n${[...diag, '--- events', ...events].join('\n')}\n===LP-DIAG-END===\n`);
+        }
         await page.keyboard.press('Escape');
         await expect(page.locator('[data-dialog="mark-read-warning"]')).toHaveCount(0);
       } else {
