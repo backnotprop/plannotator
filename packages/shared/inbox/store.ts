@@ -109,7 +109,6 @@ import {
   inboxAgentName,
   INBOX_HOST_NAMES,
   INBOX_MCP_WAKING_HOSTS,
-  INBOX_TAGS_MAX,
   INBOX_THREAD_NAME_MAX,
   INBOX_SESSION_ID_PATTERN,
   type InboxParticipant,
@@ -595,14 +594,13 @@ function tagOf(message: InboxMessage, session: string): InboxTag | null {
 
 /**
  * The tags a Send asked for, as the server resolved them: each session once,
- * in the order typed, at most INBOX_TAGS_MAX, never the reply's owner (who
+ * in the order typed, any number, never the reply's owner (who
  * gets it anyway), each entry shaped exactly (fail closed: anything else is
  * a validation error, nothing written).
  */
 export function normalizeInboxTags(value: unknown, owner: string | null): InboxTag[] {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value)) throw new InboxError("validation_error", "tags: a list of tagged sessions.", { field: "tags" });
-  if (value.length > INBOX_TAGS_MAX) throw new InboxError("validation_error", `tags: at most ${INBOX_TAGS_MAX} sessions.`, { field: "tags" });
   const out: InboxTag[] = [];
   for (const entry of value) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new InboxError("validation_error", "tags: each one { host, session, wakes }.", { field: "tags" });
@@ -612,8 +610,8 @@ export function normalizeInboxTags(value: unknown, owner: string | null): InboxT
     }
     if (host !== null && (typeof host !== "string" || host.length > 64)) throw new InboxError("validation_error", "tags: host a string or null.", { field: "tags" });
     if (typeof wakes !== "boolean") throw new InboxError("validation_error", "tags: wakes true or false.", { field: "tags" });
-    if (name !== undefined && name !== null && (typeof name !== "string" || name.length > 80)) {
-      throw new InboxError("validation_error", "tags: name a short string.", { field: "tags" });
+    if (name !== undefined && name !== null && typeof name !== "string") {
+      throw new InboxError("validation_error", "tags: name a string.", { field: "tags" });
     }
     if (label !== undefined && label !== null && (typeof label !== "string" || label.length > 120 || /[\u0000-\u001f\u007f]/.test(label))) {
       throw new InboxError("validation_error", "tags: label a short line.", { field: "tags" });
