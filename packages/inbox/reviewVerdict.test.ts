@@ -1,15 +1,3 @@
-/**
- * The person's verdict on a review (code review in the Inbox). What regresses:
- *
- *  - a decision sending the wrong verdict, or the review's comments riding
- *    (or not riding) the wrong one: the primary with comments asks for
- *    changes, the approvals keep or drop them as their labels say;
- *  - an agent's title adding lines to the person's words, or running on;
- *  - a retry of the same verdict getting a new idempotency key (two replies
- *    for one verdict after a lost answer), or a different verdict reusing one;
- *  - the note on a decision lost before its verdict went (DOM: kept per
- *    review in the window's storage until cleared).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { InboxAnnotationRecord } from '@plannotator/core/inbox-types';
 import { INBOX_REVIEW_TITLE_MAX } from '@plannotator/core/inbox-review';

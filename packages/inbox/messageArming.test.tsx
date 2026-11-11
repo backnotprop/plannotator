@@ -1,17 +1,4 @@
-/**
- * A long thread's far messages draw their tooltips and menus plain until they come near (messageArming.tsx, #2948).
- * On a thread of 245 open messages the tooltip and menu roots held about 100 of the window's 160 MB of JS heap; the
- * heavy-thread e2e budget (tests/e2e/inbox-heavy-thread-budget.spec.ts) guards the memory. These guard what a person
- * must never notice, on the real ThreadPane (DOM-gated: DOM_TESTS=1):
- *  - a far message's ⋯ and head line are the same element, class, label and content plain as armed;
- *  - a press on a far message's ⋯ opens its menu at once;
- *  - a message near the view is armed (its tooltips are real), and one that goes far is disarmed, never while focus
- *    or an open menu is inside it;
- *  - focus that lands in a disarmed message stays on the same control once its controls are armed.
- *
- * happy-dom lays nothing out: each article's box is placed by hand (2000 px apart, the view 768 px tall), and the
- * IntersectionObserver is a stub the test reports through, as the browser would after a scroll.
- */
+/** happy-dom lays nothing out: each article's box is placed by hand and the IntersectionObserver is a stub the test reports through. */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -25,7 +12,6 @@ const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as ty
 const PROJECT: InboxProject = { id: 'prj_1', key: 'shop-abcdef', name: 'shop', root: '/work/shop', created_at: '2026-11-08T09:00:00.000Z' };
 const CLAUDE: Extract<InboxAuthor, { kind: 'agent' }> = { kind: 'agent', host: 'claude-code', session: 'ses_a', name: null };
 const IDS = Array.from({ length: 6 }, (_, i) => `msg_01M62DTT05NJ59ZR4AJCDJ70${String(i).padStart(2, '0')}`);
-/** Each article's top, in px from the view's top: the first is in view, the rest far below it. */
 const TOP = 2000;
 
 function thread(): InboxThread {
@@ -138,11 +124,9 @@ async function render() {
 const article = (id: string) => document.querySelector<HTMLElement>(`[data-message-article="${id}"]`)!;
 const more = (id: string) => document.querySelector<HTMLButtonElement>(`[data-message-more="${id}"]`)!;
 const head = (id: string) => article(id).querySelector<HTMLElement>('[data-open-head]')!;
-/** The tooltips a message has mounted: Base UI marks each trigger it drives. */
 const tooltipTriggers = (id: string) => article(id).querySelectorAll('[data-base-ui-tooltip-trigger]').length;
 const armed = (id: string) => tooltipTriggers(id) > 0;
 
-/** What the browser's observers would say for one article: near the view (within ARM_MARGIN), and within DISARM_MARGIN. */
 async function report(id: string, near: boolean, within: boolean) {
   await act(async () => {
     for (const o of observers) {
@@ -163,7 +147,6 @@ async function press(el: HTMLElement) {
   });
 }
 
-/** An element as a person sees it: tags, classes, labels and text in order, without the ids and hooks Base UI adds. */
 function looks(el: Element): string {
   const skip = (name: string) => name === 'id' || name.startsWith('data-base-ui') || name === 'aria-describedby' || name === 'style' || name === 'tabindex' || name === 'data-trigger-disabled';
   const attrs = el
@@ -180,7 +163,6 @@ test.skipIf(!hasDom)('a message in view is armed when drawn; one far from it dra
   expect(observers.map((o) => o.margin).sort()).toEqual([ARM_MARGIN, DISARM_MARGIN].sort());
   expect(armed(IDS[0]!)).toBe(true);
   for (const id of IDS.slice(2)) expect(armed(id)).toBe(false);
-  // Every control is still there, with its label: Reply and ⋯ on each head line.
   for (const id of IDS) {
     expect(more(id).getAttribute('aria-label')).toStartWith('More: Claude Code, ');
     expect(head(id).querySelector('button[aria-label="Reply"]')).not.toBeNull();
@@ -207,8 +189,7 @@ test.skipIf(!hasDom)("a press on a far message's ⋯ opens its menu at once", as
   expect(items).toEqual(['Copy message', 'Copy link to message', 'Copy thread']);
 });
 
-// The window's styles are scoped to its root (`.pn-inbox svg.ib-ic` draws the icons as outlines): a menu drawn on
-// the page's body shows its icons as filled black shapes and loses the theme's sizes.
+// The window's styles are scoped to its root (`.pn-inbox svg.ib-ic`): a menu drawn on the page's body shows filled black icons.
 test.skipIf(!hasDom)("a far message's menu is drawn inside the window's root, opened by a press or once it comes near", async () => {
   await render();
   const pressed = IDS[5]!;
@@ -233,7 +214,6 @@ test.skipIf(!hasDom)('a message that goes far from the view is disarmed, but nev
   await report(kept, true, true);
   await report(left, true, true);
   expect(armed(kept) && armed(left)).toBe(true);
-  // Focus on the first message's fold button (no tooltip of its own), then both scroll far away.
   await act(async () => head(kept).querySelector<HTMLButtonElement>('button[data-fold-head]')!.focus());
   await report(kept, false, false);
   await report(left, false, false);
@@ -249,8 +229,7 @@ test.skipIf(!hasDom)('focus that lands in a far message stays on the same contro
   await act(async () => more(id).focus());
   await settle();
   expect(armed(id)).toBe(true);
-  // A new ⋯ was mounted for the real menu; focus is on it, not lost to the page. (Compared as a boolean: bun's diff
-  // of two happy-dom elements never ends.)
+  // Compared as a boolean: bun's diff of two happy-dom elements never ends.
   expect(document.activeElement?.isConnected).toBe(true);
   expect(document.activeElement?.getAttribute('data-message-more')).toBe(id);
   expect(document.activeElement === more(id)).toBe(true);

@@ -1,12 +1,3 @@
-/**
- * "Open in" for a file a reference names (`OpenInFile`, approval
- * "code-review-launch-build" item 7). The window's own control with the Inbox's
- * routes answered here: what is proved is what it asks, when it draws nothing,
- * and that a pick sends the scope, the path and the line (and never a root).
- * The server's half is packages/server/inbox-open-in.test.ts.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act, type ReactNode } from 'react';
 import { GuideCodeSpanContext, renderInlineMarkdown } from '@plannotator/guide-viewer/renderInlineMarkdown';
@@ -22,7 +13,6 @@ type Asked = { method: string; url: string; body: Record<string, unknown> | null
 
 const APPS = { available: true, platform: 'mac', apps: [{ id: 'reveal', label: 'Finder', kind: 'file-manager', icon: 'finder' }, { id: 'vscode', label: 'VS Code', kind: 'editor', icon: 'vscode' }] };
 const REAL = '/work/app/src/a.ts';
-/** Fifty lines: `line 1` to `line 50`. */
 const FILE = `${Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join('\n')}\n`;
 
 let root: Root | null = null;
@@ -69,7 +59,6 @@ async function settle() {
 const caret = () => host!.querySelector('[data-open-in-caret]');
 const fileReads = () => asked.filter((a) => a.url.includes('/open-in/file') && !a.url.includes('/file/code') && a.method === 'GET');
 
-// First: a page keeps the apps route's first real answer, and a refusal is not one.
 test.skipIf(!hasDom)('through the tailnet: the apps route refuses, so nothing draws and no file is asked about', async () => {
   answers.apps = { status: 403, body: { code: 'local_only' } };
   await act(async () => root!.render(<OpenInFile scope={{ thread: 'msg_tailnet' }} path="src/a.ts" />));
@@ -364,7 +353,6 @@ describe('words that name a file', () => {
 describe('words with a comment\'s marks around them', () => {
   const scope = { thread: 'msg_mark' };
   const codeWindow = () => document.querySelector('[data-code-snippet-preview]') as HTMLElement | null;
-  /** What a selection or a saved comment does: the text beside the words moves into a mark. */
   const markTheWordsAfter = () => {
     const after = host!.querySelector('[data-after]')!.firstChild!;
     const mark = document.createElement('mark');
@@ -396,7 +384,6 @@ describe('words with a comment\'s marks around them', () => {
     markTheWordsAfter();
     await rest();
     expect(codeWindow()).not.toBeNull();
-    // A message's window stays under the toast and decision mode's pill.
     expect(codeWindow()!.hasAttribute('data-code-hover-raised')).toBe(false);
     expect([...host!.querySelector('p')!.childNodes]).toEqual(before);
   });
@@ -410,7 +397,6 @@ describe('words with a comment\'s marks around them', () => {
     words.querySelector('code')!.appendChild(highlight);
     await rest();
     expect(codeWindow()).toBeNull();
-    // The same element, so a comment's highlight on the words is still there, and it says why on this first rest.
     expect(host!.querySelector('[data-code-hover]')).toBe(words);
     expect(words.contains(highlight)).toBe(true);
     expect(document.querySelector('[data-pn-tooltip]')?.textContent).toBe('Not on this computer');
@@ -425,7 +411,6 @@ describe('words with a comment\'s marks around them', () => {
   });
 });
 
-/** A host's element with the region's handlers on it, as Ask AI's layer has them. */
 function Region({ scope, on, children }: { scope: { thread: string }; on: boolean; children: ReactNode }) {
   const region = useOpenInCodeRegion(scope, on);
   return (
@@ -477,9 +462,7 @@ describe('code spans drawn as HTML: Ask AI\'s answers', () => {
     expect(reads()[0]).toContain('thread=msg_ask');
     expect(reads()[0]).toContain(encodeURIComponent('src/a.ts'));
     expect(codeWindow()).not.toBeNull();
-    // Raised: it opens over a floating window.
     expect(codeWindow()!.hasAttribute('data-code-hover-raised')).toBe(true);
-    // The host's own element holds the words: nothing is drawn between.
     expect(document.getElementById('a')!.closest('[data-host]')!.parentElement).toBe(host);
     await over('b');
     expect(document.querySelectorAll('[data-code-snippet-preview]')).toHaveLength(1);
@@ -504,7 +487,6 @@ describe('code spans drawn as HTML: Ask AI\'s answers', () => {
 
   test.skipIf(!hasDom)('off with Code review: nothing is asked, a link is left alone, and the host\'s element is as it was', async () => {
     await draw(false);
-    // Only the host's own element and what it holds: nothing drawn around or beside it.
     expect(host!.firstElementChild!.hasAttribute('data-host')).toBe(true);
     expect(host!.children).toHaveLength(1);
     expect(host!.firstElementChild!.children).toHaveLength(1);

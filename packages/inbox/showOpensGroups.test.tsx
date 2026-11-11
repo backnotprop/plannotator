@@ -1,13 +1,3 @@
-/**
- * Show on the held list's "N new" opens the groups the rows it brings in land in (the owner, 2026-11-08: "When I
- * hit this two new, I want it to open up whatever groups they appear in. Otherwise it just shows, but they don't
- * open up."). What is proved, on the window's own InboxList fed as App feeds it (held.ts `showLandsIn` for the
- * notice, the latest read adopted on Show): a closed group a new row lands in opens with the press and the row is
- * drawn; it stays open as a click on its header leaves it (this browser's choice, kept across a remount); a closed
- * group no new row lands in stays closed; the List view (no groups) opens none and still draws the row.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -75,11 +65,9 @@ function row(id: string, section: InboxSectionId, at = LONG_AGO): InboxListRow {
 const LABELS: Partial<Record<InboxListGroupId, string>> = { holding: 'Holding up work', waiting: 'Waiting on you', quiet: 'Quiet' };
 const section = (id: InboxListGroupId, threads: InboxListRow[]): InboxListSection => ({ id, label: LABELS[id]!, threads });
 
-/** On screen: one row in each group. The latest read: a new agent thread waiting on the person. */
 const SHOWN = [section('holding', [row('t_hold', 'holding')]), section('waiting', [row('t_wait', 'waiting')]), section('quiet', [row('t_quiet', 'quiet')])];
 const LATEST = [section('holding', [row('t_hold', 'holding')]), section('waiting', [row('t_new', 'waiting', NOW), row('t_wait', 'waiting')]), section('quiet', [row('t_quiet', 'quiet')])];
 
-/** The list as App holds it: the notice names the groups Show's rows land in, and Show adopts the latest read. */
 function HeldList() {
   const [shown, setShown] = useState(SHOWN);
   const held = shown !== LATEST;
@@ -115,7 +103,6 @@ const drawn = (threadId: string) => host!.querySelector(`[data-thread-id="${thre
 const show = () => act(() => host!.querySelector<HTMLButtonElement>('[data-inbox-notice]')!.click());
 
 test.skipIf(!hasDom)('Show opens a closed group its new row lands in, and the row is on screen', () => {
-  // The person closed Waiting on you; Quiet is closed by default.
   stored.set(LIST_GROUPS_COOKIE, 'waiting:1762400000000');
   draw();
   expect(isOpen('waiting')).toBe(false);
@@ -127,11 +114,9 @@ test.skipIf(!hasDom)('Show opens a closed group its new row lands in, and the ro
   expect(host!.querySelector('[data-inbox-notice]')).toBeNull();
   expect(isOpen('waiting')).toBe(true);
   expect(drawn('t_new')).toBe(true);
-  // The groups no new row lands in stay as they were.
   expect(isOpen('quiet')).toBe(false);
   expect(isOpen('holding')).toBe(true);
 
-  // Opened as a click on its header opens it: this browser's choice, still open after a reload.
   expect(stored.get(LIST_GROUPS_COOKIE) ?? '').not.toContain('waiting');
   act(() => root?.unmount());
   host?.remove();

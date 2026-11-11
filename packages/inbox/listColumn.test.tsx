@@ -1,16 +1,3 @@
-/**
- * The list column beside an open thread has the sidebar's resize edge
- * (shell/ListColumnEdge.tsx over the same useResizablePanel, CollapsibleEdge
- * and ResizeHandle). What this catches: the separator losing its keyboard
- * contract or its announced range, the width escaping [380, room - 480], the
- * width not persisting, the edge showing where it must not (the full list, a
- * phone), a click on it not hiding the list beside a thread (or a drag
- * hiding it), and the rows not following the column across the wide rows' width
- * (or swapping on every resize instead of once at the boundary). Pixel drags
- * on the compiled binary are proved in tests/e2e/inbox-list-resize.spec.ts.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -56,8 +43,6 @@ function row(id: string): InboxListRow {
 
 const SECTIONS: InboxListSection[] = [{ id: 'waiting', label: 'Waiting on you', threads: [row('msg_a'), row('msg_b')] }];
 
-// A ResizeObserver that reports what a browser would for the list: its border
-// box (the inline width) and a content box 1px narrower (its right border).
 const observed: Array<{ el: Element; callback: ResizeObserverCallback }> = [];
 const savedObserver = hasDom ? globalThis.ResizeObserver : undefined;
 function reportListWidth() {
@@ -84,8 +69,7 @@ beforeEach(() => {
   });
   savedInnerWidth = window.innerWidth;
   room = ROOM;
-  // happy-dom lays nothing out: `.ib-main` reports the room from its first
-  // layout, as a browser's would (the edge measures it before the first paint).
+  // happy-dom lays nothing out: `.ib-main` reports the room from its first layout (the edge measures it before the first paint).
   Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
     configurable: true,
     get(this: HTMLElement) {
@@ -161,7 +145,6 @@ function press(sep: HTMLElement, key: string) {
 const column = (el: HTMLElement) => el.querySelector<HTMLElement>('.ib-listcol')!;
 
 const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-/** A pointer gesture on the edge's hit area: down at the edge, a move by `dx` (a frame drawn), up. */
 async function gesture(el: HTMLElement, dx: number) {
   const hit = el.querySelector<HTMLElement>('.ib-handle-hit')!;
   const x = LIST_COLUMN_MIN;
@@ -190,13 +173,11 @@ describe.if(hasDom)('the list column beside an open thread', () => {
     expect(sep.getAttribute('aria-valuemax')).toBe(String(max()));
     expect(sep.getAttribute('aria-valuenow')).toBe(String(LIST_COLUMN_MIN));
     expect(column(el).style.width).toBe(`${LIST_COLUMN_MIN}px`);
-    // It names the column it resizes.
     expect(column(el).id).not.toBe('');
     expect(sep.getAttribute('aria-controls')).toBe(column(el).id);
   });
 
   test('the range is measured from the column’s room on mount, with no resize event', () => {
-    // The window is narrower than the room here, so a window-based max would differ.
     expect(window.innerWidth - READING_PANE_MIN).not.toBe(max());
     const el = render(true);
     expect(separator(el).getAttribute('aria-valuemax')).toBe(String(max()));
@@ -235,13 +216,11 @@ describe.if(hasDom)('the list column beside an open thread', () => {
     expect(sep.getAttribute('aria-valuenow')).toBe(String(LIST_COLUMN_MIN));
     press(sep, 'ArrowLeft');
     expect(sep.getAttribute('aria-valuenow')).toBe(String(LIST_COLUMN_MIN));
-    // Nothing to collapse: Enter leaves the width alone.
     press(sep, 'ArrowRight');
     press(sep, 'Enter');
     expect(sep.getAttribute('aria-valuenow')).toBe('390');
     expect(stored.get(LIST_COLUMN_WIDTH_KEY)).toBe('390');
 
-    // A reload restores it.
     act(() => root?.unmount());
     host?.remove();
     const again = render(true);
@@ -261,13 +240,11 @@ describe.if(hasDom)('the list column beside an open thread', () => {
     act(reportListWidth);
     expect(el.querySelectorAll('.ib-nrow').length).toBe(2);
     expect(el.querySelectorAll('.ib-row').length).toBe(0);
-    // Just under the boundary: still two-line, and the same row elements.
     const before = el.querySelector('.ib-nrow[data-thread-id="msg_a"]');
     for (let i = 0; LIST_COLUMN_MIN + 10 * i < WIDE_ROWS_MIN_LIST_WIDTH - 10; i++) press(sep, 'ArrowRight');
     act(reportListWidth);
     expect(Number(sep.getAttribute('aria-valuenow'))).toBe(WIDE_ROWS_MIN_LIST_WIDTH - 10);
     expect(el.querySelector('.ib-nrow[data-thread-id="msg_a"]')).toBe(before);
-    // Across it: wide rows, the open thread still marked.
     press(sep, 'ArrowRight');
     act(reportListWidth);
     expect(el.querySelectorAll('.ib-nrow').length).toBe(0);
@@ -277,7 +254,6 @@ describe.if(hasDom)('the list column beside an open thread', () => {
     press(sep, 'ArrowRight');
     act(reportListWidth);
     expect(el.querySelector('.ib-row[data-thread-id="msg_a"]')).toBe(wide);
-    // And back.
     press(sep, 'Home');
     act(reportListWidth);
     expect(el.querySelectorAll('.ib-nrow').length).toBe(2);
@@ -286,8 +262,6 @@ describe.if(hasDom)('the list column beside an open thread', () => {
   test('beside a thread a click on the edge hides the list; a drag resizes and never hides', async () => {
     let hides = 0;
     const el = render(true, () => hides++);
-    // A click, and a wiggle within the 4px threshold: each hides, and the width is left as it was. The click focuses
-    // the edge, as a press would (the thread then moves focus off the hidden list).
     await gesture(el, 0);
     expect(hides).toBe(1);
     expect(document.activeElement === separator(el)).toBe(true);
@@ -296,12 +270,10 @@ describe.if(hasDom)('the list column beside an open thread', () => {
     expect(column(el).style.width).toBe(`${LIST_COLUMN_MIN}px`);
     expect(separator(el).getAttribute('aria-valuenow')).toBe(String(LIST_COLUMN_MIN));
     expect(stored.has(LIST_COLUMN_WIDTH_KEY)).toBe(false);
-    // A drag past the threshold: it resizes, and the list stays.
     await gesture(el, 100);
     expect(hides).toBe(2);
     expect(separator(el).getAttribute('aria-valuenow')).toBe(String(LIST_COLUMN_MIN + 100));
     expect(stored.get(LIST_COLUMN_WIDTH_KEY)).toBe(String(LIST_COLUMN_MIN + 100));
-    // Enter and Space on the focused edge hide it too.
     press(separator(el), 'Enter');
     press(separator(el), ' ');
     expect(hides).toBe(4);
@@ -330,7 +302,7 @@ describe.if(hasDom)('the list column beside an open thread', () => {
     act(() => root?.unmount());
     host?.remove();
     Object.defineProperty(window, 'innerWidth', { value: 375, configurable: true, writable: true });
-    // A phone is a media query (phone.ts); happy-dom does not evaluate it against innerWidth, so it answers here.
+    // happy-dom does not evaluate the phone media query against innerWidth, so it answers here.
     const savedMatchMedia = window.matchMedia;
     window.matchMedia = ((query: string) => ({
       matches: query === PHONE_QUERY,

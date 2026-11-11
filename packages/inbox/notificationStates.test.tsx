@@ -1,11 +1,3 @@
-/**
- * Notifications that never fail silently, the window's half: the line above
- * the list in each state (ask, moved, blocked, the tab slept), and Settings →
- * General's status, Allow, the blocked steps, Send a test notification with
- * the macOS hint, and "Notifications reach you".
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

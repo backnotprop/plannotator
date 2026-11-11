@@ -1,11 +1,3 @@
-/**
- * One composer's dictation with no microphone, no timers and no browser: a scripted recorder, a scripted field, and a
- * clock the test moves.
- *
- * What regresses: anything that sends by itself; a late answer writing into a box that was cancelled or closed; a hold
- * that turns into a tap (or the other way round); a clip dropped when the design keeps it for Retry; a silent clip
- * posted; a recording running past 2:00; two recordings at once.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createVoiceSession, VOICE_ASKING_GIVE_UP_MS, VOICE_CAP_MS, VOICE_OPENING_GIVE_UP_MS, VOICE_OPENING_SLOW_MS, VOICE_QUIET_STOP_MS, type VoiceAnswer, type VoiceLate, type VoiceDeps, type VoiceField, type VoiceSession } from './voiceSession';
 import { openVoiceRecorder, type VoiceRecorder } from './voiceRecorder';
@@ -114,7 +106,6 @@ function script(options: { prompts?: boolean; refuseMic?: string; throwMic?: num
     log,
     posted,
     signals,
-    /** The signal each open was given. */
     opens,
     session,
     field,
@@ -139,7 +130,6 @@ function script(options: { prompts?: boolean; refuseMic?: string; throwMic?: num
     },
     openMic: () => pending.shift()!.resolve(recorder()),
     micEnded: () => ended?.(),
-    /** Move the clock, with the session's ticker running. */
     pass: (ms: number) => {
       for (let left = ms; left > 0; left -= TICK) {
         clock += Math.min(TICK, left);
@@ -160,7 +150,6 @@ const settle = async () => {
   for (let i = 0; i < 12; i++) await Promise.resolve();
 };
 
-/** A press that became a tap: recording, nothing held. */
 async function tapped(world: ReturnType<typeof script>) {
   world.session.press();
   world.session.release();
@@ -263,7 +252,6 @@ describe('hold and tap', () => {
     await tapped(tap);
     tap.session.lost();
     expect(tap.session.view().phase).toBe('listening');
-    // Pressed again to stop, and the system took that pointer: still a tap, not a press waiting for a release.
     tap.session.press();
     tap.session.lost();
     expect(tap.session.view()).toMatchObject({ phase: 'listening', mode: 'tap' });
@@ -517,7 +505,6 @@ describe('every path returns to rest, and no press does nothing', () => {
     expect(w.session.view().phase).toBe('opening');
     w.pass(200);
     expect(w.session.view()).toMatchObject({ phase: 'idle', trouble: 'micfailed' });
-    // The mic that answers late is closed at once, never recorded from.
     w.openMic();
     await settle();
     expect(w.session.view().phase).toBe('idle');
@@ -586,7 +573,6 @@ describe('every path returns to rest, and no press does nothing', () => {
       expect(contexts[0]!.state).not.toBe('closed');
       w.pass(VOICE_OPENING_GIVE_UP_MS + 100);
       expect(w.session.view()).toMatchObject({ phase: 'idle', trouble: 'micfailed' });
-      // At once: getUserMedia has not settled, and may never.
       expect(contexts[0]!.state).toBe('closed');
       const track = { stopped: false, stop: () => void (track.stopped = true) };
       tracks.push(track);
@@ -614,7 +600,6 @@ describe('every path returns to rest, and no press does nothing', () => {
     w.session.press();
     w.session.release();
     await settle();
-    // Past the first take's 10 s, short of the second's.
     w.pass(VOICE_OPENING_GIVE_UP_MS - 500);
     expect(w.session.view()).toMatchObject({ phase: 'opening', trouble: null });
     expect(w.opens[1]!.aborted).toBe(false);
@@ -667,7 +652,6 @@ describe('failures', () => {
     [{ code: 'voice_codex_failed' }, 'codexfailed'],
     [new Error('the Inbox went away'), 'inboxgone'],
     [{ code: null }, 'inboxgone'],
-    // A newer Inbox's code: never a crash, a plain failure that keeps the clip.
     [{ code: 'voice_from_a_newer_inbox' as string as InboxVoiceFailure }, 'failed'],
   ] as const)('%p keeps the clip: only a press retries, and the same clip goes again', async (answer, trouble) => {
     const w = world();
@@ -787,7 +771,6 @@ describe('failures', () => {
 });
 
 describe('the field goes while the words are on their way', () => {
-  /** A take at its answer, held, with a host that takes the words once there is no field. */
   const taken = async () => {
     const late: VoiceLate[] = [];
     const w = world({ late: (outcome) => late.push(outcome) });
@@ -816,7 +799,6 @@ describe('the field goes while the words are on their way', () => {
     const { w, late, answer } = await taken();
     w.detach();
     const again = w.session.attach(w.field);
-    // It reads this field as the first one was read: the wash and the caret follow what is typed here.
     w.type('more ');
     expect(w.session.view().caret).toBe(w.value().length);
     answer({ text: 'words' });
@@ -833,14 +815,12 @@ describe('the field goes while the words are on their way', () => {
     await settle();
     expect(gone.late).toEqual([{ failed: true, retry: expect.any(Function) }]);
     expect(gone.w.session.view().trouble).toBeNull();
-    // Retry resends the clip it kept, and the words go the same way.
     gone.w.answer({ text: 'second try' });
     (gone.late[0] as { retry: () => void }).retry();
     await settle();
     expect(gone.w.posted).toHaveLength(2);
     expect(gone.late[1]).toEqual({ text: 'second try' });
 
-    // A clip that cannot be sent again: nothing to retry.
     const empty = await taken();
     empty.w.detach();
     empty.answer({ code: 'voice_empty' });

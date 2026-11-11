@@ -1,15 +1,3 @@
-/**
- * A sent `#Shape`'s preview (approval "board-hashtags") on a touch screen and
- * for a screen reader. What regresses: the first tap going to the Board
- * instead of previewing, the second tap not going, Escape not closing it, the
- * tag not saying its preview is open (`aria-expanded`, `aria-controls`), or a
- * column badge read as "In review2".
- *
- * Hover and focus timing are RefHoverCard's, guarded there; placement needs a
- * layout (the build's shots).
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -40,7 +28,6 @@ afterEach(() => {
   window.location.hash = '';
 });
 
-/** A message body as Thread draws it: the tag's link, and Thread's click rule (a tap previews first). */
 function Body() {
   const ref = useRef<HTMLDivElement>(null);
   const peek = useInitiativePeek(ref);
@@ -90,7 +77,6 @@ test.if(hasDom)('a touch screen: the first tap previews, the second goes to the 
   expect(window.location.hash).toBe('#thread=msg_here');
   expect(tag.getAttribute('aria-expanded')).toBe('true');
   expect(tag.getAttribute('aria-controls')).toBe(peek.id);
-  // Each badge reads as its words: "In review 2", not "In review2".
   expect([...peek.querySelectorAll('[data-tag-peek-columns] li')].map((li) => li.textContent!.replace(/ /g, ' '))).toEqual(['In review 2', 'Done 1']);
 
   act(() => {

@@ -1,18 +1,3 @@
-/**
- * Bro mode's one-time offer in a DOM (approval "bro-mode"; its moment, approval "inbox-one-time-dialogs"): the line's
- * hook (reveal.ts `useLineReveal`) with Bro mode's moment (`broRevealLeaveCounts`) driving `BroIntro`, as App wires them.
- *
- * What regresses: the card showing on load, or for a thread whose last agent message is short, a thread left too soon
- * or for another thread, the tour or another one-time dialog this load, or something typed; Bro mode turned on by the
- * card showing or by any way out but "Turn it on"; Not now or Escape not telling the Inbox (the line's three-day gap);
- * "Turn it on" not saving the switch; a second claim after any way out; the card opening once another window turned
- * it on.
- *
- * Idle: the page going idle on such a thread (a thread kept open beside the list) not being its moment, or being it on
- * a short message or on the list.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -78,7 +63,6 @@ const press = (selector: string) => act(() => document.querySelector<HTMLButtonE
 
 const ROW = { thread_id: 'msg_a', section: 'sent', unseen: 0 } as InboxListRow;
 
-/** A thread as the window loads it (App's `noteRevealThread`): its last agent message has `words` words. */
 function loaded(threadId: string, words: number) {
   const body = Array.from({ length: words }, (_, i) => `word${i}`).join(' ');
   reveal.noteRevealThread({ thread_id: threadId, messages: [{ author: { kind: 'agent', host: 'claude-code', session: 's1' }, body }] } as unknown as InboxThread);
@@ -89,7 +73,6 @@ interface State {
   blocked: boolean;
   toast: boolean;
   thread: string | null;
-  /** The page is idle (App: idleClock.ts). */
   idle?: boolean;
 }
 
@@ -150,7 +133,6 @@ function mount(state: State) {
   return (next: State) => act(() => root!.render(<Harness state={next} />));
 }
 
-/** A thread whose last agent message is long, open long enough: what comes next is leaving it. */
 async function readThread(state: State = BASE, words = 150) {
   loaded('msg_a', words);
   const render = mount(state);
@@ -281,7 +263,6 @@ describe.skipIf(!hasDom)('the Bro mode offer', () => {
     expect(notNows()[0]!.body.id).toBe('bro');
     expect(saves()).toHaveLength(0);
     expect(shownOn).toBe(false);
-    // The next visit and leave asks nothing more.
     render({ ...BASE, thread: 'msg_a' });
     await wait(TIMES.broReadMs + 20);
     render({ ...BASE, thread: null });

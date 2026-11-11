@@ -1,10 +1,4 @@
-/**
- * The comments on a guided review's diffs ride a Send as the review app's own
- * export. The Inbox window cannot import the review app's exporter (its strict
- * typecheck does not reach review-editor), so it writes the per-file sections
- * itself; this keeps them equal to `exportReviewFeedback`, so a change to the
- * review app's format that is not made here fails.
- */
+/** Keeps the Inbox's per-file sections equal to the review app's `exportReviewFeedback`; the window cannot import that exporter. */
 import { describe, expect, test } from 'bun:test';
 import type { InboxAnnotationRecord } from '@plannotator/core/inbox-types';
 import type { CodeAnnotation } from '@plannotator/ui/types';
@@ -119,7 +113,6 @@ describe('guided-review comments as feedback', () => {
   });
 
   test("global comments come first, under Global comments, in the review app's own export", () => {
-    // Given newest first: both exports put them in the order they were made, ahead of every file.
     const mixed = [comments[0]!, globals[1]!, comments[2]!, globals[0]!];
     const sections = guideCommentSections(mixed);
     expect(sections).toBe(exportReviewFeedback([comments[0]!, globals[0]!, comments[2]!, globals[1]!]).replace(/^# Code Review Feedback\n\n/, ''));
@@ -133,12 +126,10 @@ describe('guided-review comments as feedback', () => {
     expect(text.indexOf('## Global comments')).toBeLessThan(text.indexOf('## src/auth.ts'));
     expect(text.indexOf('Split the retry')).toBeLessThan(text.indexOf('## src/auth.ts'));
     expect(text.indexOf('The guard reads well.')).toBeLessThan(text.indexOf('## src/auth.ts'));
-    // Only global comments: no line-number note, still sent.
     const only = guideFeedback([record(globals[0]!)]);
     expect(only).toContain('under "Global comments": they are on the whole review, not on a line or a file.');
     expect(only).not.toContain('Line numbers');
     expect(attachmentFeedback([record(globals[0]!)], [], new Map(), '/p')).toContain('Split the retry into its own PR.');
-    // Without any, the line under the heading is as it was.
     expect(guideFeedback([record(comments[0]!)])).toContain('The following comments are on the diffs of the guided review "Token refresh" you sent, one section per file.');
   });
 
@@ -154,9 +145,7 @@ describe('guided-review comments as feedback', () => {
   });
 });
 
-// A record written before the store checked its fields can hold a label's decorations as a string (or a label that is
-// not one). The export reads them defensively: one bad comment must never make every Send on the thread fail.
-// Guards the wrong code going to GitHub unnoticed: past a hunk that added lines, the sides number apart.
+// A record written before the store checked its fields can hold a label's decorations as a string; one bad comment must never make every Send fail.
 test('a comment on an opened line quotes the text of its own side', () => {
   const contents = { oldContent: 'one\ntwo\nthree\n', newContent: 'added\none\ntwo\nthree\n' };
   expect(openedLinesQuote(contents, 'old', 2, 3)).toBe('two\nthree');

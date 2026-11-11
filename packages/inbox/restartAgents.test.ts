@@ -1,9 +1,3 @@
-/**
- * The sidebar's reload row (restartAgents.ts; owner approval "reload-hosts"):
- * one runtime names itself with its own verb, several read "Reload agents",
- * an older Inbox's Claude Code count still shows, and a malformed field never
- * draws a row.
- */
 import { expect, test } from 'bun:test';
 import { parseRestartAgents, restartAgentsDescription, restartAgentsLabel, restartAgentsOf } from './restartAgents';
 
@@ -28,7 +22,6 @@ test('an older Inbox without restart_agents: its Claude Code count; a malformed 
   expect(restartAgentsOf(undefined, 0).total).toBe(0);
   expect(restartAgentsOf({ total: -1 }, 0).total).toBe(0);
   expect(parseRestartAgents('3')).toBeNull();
-  // Unknown runtimes and bad counts are dropped, the total kept.
   expect(parseRestartAgents({ total: 2, runtimes: { pi: 2, codex: 4, opencode: 'x' } })).toEqual({ total: 2, runtimes: { pi: 2 } });
 });
 
@@ -39,7 +32,6 @@ test('Claude Code sessions whose plugin on disk is behind: the row keeps that, a
   const said = restartAgentsDescription(behind);
   expect(said.indexOf('update the plugin')).toBeGreaterThanOrEqual(0);
   expect(said.indexOf('update the plugin')).toBeLessThan(said.indexOf('/reload-plugins'));
-  // After the update, a reload alone: no update step.
   expect(restartAgentsDescription(parseRestartAgents({ total: 2, runtimes: { 'claude-code': 2 } })!)).not.toContain('update the plugin');
   expect(parseRestartAgents({ total: 1, runtimes: { 'claude-code': 1 }, update_first: 'x' })).toEqual({ total: 1, runtimes: { 'claude-code': 1 } });
 });

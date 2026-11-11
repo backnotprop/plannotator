@@ -1,23 +1,3 @@
-/**
- * The reload line for Pi, Oh My Pi and OpenCode 2 as the window draws it
- * (owner approval "reload-hosts", 2026-10-26): the whole window (InboxApp)
- * over a REAL Inbox 0.28.25 (tests/helpers/inbox-dom-server.ts
- * `reload-hosts`), with each session's connection polling what it loaded
- * and what is on disk (`plugin: { version, on_disk, host }`). What is proved:
- * under a reply that waits on a busy session (the "can't go in sooner"
- * band), each runtime's own command leads with a Copy for exactly it
- * (Pi `/reload`, Oh My Pi `/restart`, OpenCode `opencode2 reload` to run in a
- * shell), never Claude Code's `/reload-plugins`; Pi folds quit and
- * `pi --continue`, OpenCode folds `opencode2 service restart` under one quiet
- * line, Oh My Pi folds nothing; OpenCode behind this Inbox names its
- * configured spec, or the pin to change; the same rule as Claude
- * Code (no line once the plugin has Send now); Settings → Agents leads with
- * the same command per runtime, the update first when the package on disk is
- * itself behind this Inbox; the sidebar's row names the agents and clears
- * once they reload.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -61,7 +41,6 @@ function loopback(path: string, method = 'GET', body?: string): Promise<{ status
   });
 }
 
-/** A session's connection polls: Pi and Oh My Pi as host `pi`, OpenCode 2 as `opencode`. */
 async function polls(session: string, hostId: 'pi' | 'opencode', body: Record<string, unknown>): Promise<void> {
   const stdin = child!.stdin as import('bun').FileSink;
   stdin.write(`${JSON.stringify({ poll: { session, body: { host: hostId, ...body } } })}\n`);
@@ -166,7 +145,6 @@ async function renderApp(hash = '') {
   await until(() => !!document.querySelector('.ib-side'), 'the sidebar');
 }
 
-/** The commands a box shows (its code elements), in order. */
 const codesIn = (el: Element) => [...el.querySelectorAll('code')].map((c) => c.textContent);
 const delivered = () => document.querySelector<HTMLElement>('.ib-delivered');
 const note = () => document.querySelector<HTMLElement>('[data-restart-note]');
@@ -176,7 +154,6 @@ async function openThread(thread: string) {
   await until(() => delivered()?.getAttribute('data-delivery') === 'queued' && delivered()!.textContent!.includes('is working'), 'the queued line');
 }
 
-/** A plugin from before Send now (0.28.23), with 0.28.25 now on disk: a reload alone brings it up to date. */
 const STALE = (h?: 'oh-my-pi') => ({ version: '0.28.23', on_disk: '0.28.25', ...(h ? { host: h } : { host: 'pi' }) });
 
 async function copyLead(lead: HTMLElement): Promise<string> {
@@ -226,7 +203,6 @@ test.skipIf(!hasDom)('OpenCode 2 with its plugin generation deleted: opencode2 r
   const lead = note()!.querySelector<HTMLElement>('[data-reload-lead="restart"]')!;
   expect(lead.getAttribute('data-reload-command')).toBe('opencode2 reload');
   expect(await copyLead(lead)).toBe('opencode2 reload');
-  // One quiet line on what a reload cancels; nothing about quitting.
   expect(note()!.querySelectorAll('[data-opencode-quiet]')).toHaveLength(1);
   expect(note()!.querySelector('[data-opencode-quit-note]')).toBeNull();
   const toggle = note()!.querySelector<HTMLButtonElement>('[data-restart-toggle]')!;
@@ -247,14 +223,12 @@ test.skipIf(!hasDom)('the same rule as Claude Code: a Pi on a plugin that has Se
 }, 30_000);
 
 test.skipIf(!hasDom)('Settings → Agents: per runtime, the reload leads with Copy; the update first when the package on disk is behind this Inbox', async () => {
-  // This world's Pi: the extension on disk (0.28.24) is itself behind Inbox 0.28.25. Its Oh My Pi: a reload alone.
   await polls(ids.hosts.pi.session, 'pi', { busy: false, plugin: { version: '0.28.24', on_disk: '0.28.24', host: 'pi' } });
   await polls(ids.hosts.omp.session, 'pi', { busy: false, plugin: STALE('oh-my-pi') });
   await polls(ids.hosts.opencode.session, 'opencode', { busy: false, plugin: { version: '0.28.24', on_disk: '0.28.24' } });
   await renderApp('#settings/agents');
   await until(() => !!document.querySelector('[data-agent-sessions="pi"] [data-reload-sessions="pi"] [data-reload-lead="update_plugin"]'), 'the Pi update lead');
   const pi = document.querySelector<HTMLElement>('[data-agent-sessions="pi"]')!;
-  // Two steps: `pi update --extensions`, then /reload.
   const update = pi.querySelector<HTMLElement>('[data-reload-sessions="pi"] [data-reload-lead="update_plugin"]')!;
   const [updateCopy, reloadCopy] = [...update.querySelectorAll<HTMLButtonElement>('[data-restart-copy]')];
   copied = [];
@@ -262,20 +236,16 @@ test.skipIf(!hasDom)('Settings → Agents: per runtime, the reload leads with Co
   await act(async () => reloadCopy!.click());
   await settle(100);
   expect(copied).toEqual(['pi update --extensions', '/reload']);
-  // Oh My Pi's own group (earlier worlds' Pi sessions need only /reload: their group leads with it alone).
   const omp = pi.querySelector<HTMLElement>('[data-reload-sessions="oh-my-pi"] [data-reload-lead="restart"]')!;
   expect(omp.getAttribute('data-reload-command')).toBe('/restart');
   expect(await copyLead(omp)).toBe('/restart');
   expect(codesIn(pi)).not.toContain('/reload-plugins');
-  // OpenCode: the deleted generation (earlier world) reloads with `opencode2 reload`; this one's plugin is behind on disk
-  // and OpenCode's config is unknown here, so the update names no target (and says it updates every plugin).
   const opencode = document.querySelector<HTMLElement>('[data-agent-sessions="opencode"]')!;
   const leads = [...opencode.querySelectorAll<HTMLElement>('[data-reload-sessions="opencode"] [data-reload-lead="restart"]')];
   expect(leads.map((l) => l.getAttribute('data-reload-command')).sort()).toEqual(['opencode2 models && opencode2 plugin update', 'opencode2 reload']);
   const copiedFrom = [];
   for (const lead of leads) copiedFrom.push(await copyLead(lead));
   expect(copiedFrom.sort()).toEqual(['opencode2 models && opencode2 plugin update', 'opencode2 reload']);
-  // Each OpenCode box: one quiet line (what a reload cancels; that an untargeted update updates every plugin), no quitting note.
   for (const box of opencode.querySelectorAll('[data-reload-sessions="opencode"]')) expect(box.querySelectorAll('[data-opencode-quiet]')).toHaveLength(1);
   expect(opencode.querySelector('[data-opencode-quit-note]')).toBeNull();
   expect(opencode.querySelector(`[data-session-row="${ids.hosts.opencode.session}"]`)).not.toBeNull();
@@ -297,7 +267,6 @@ test.skipIf(!hasDom)('the sidebar: "Reload agents N" when more than one runtime 
   await until(() => !!document.querySelector('[data-reload-sessions="pi"]'), 'the Pi reload');
 }, 30_000);
 
-/** OpenCode's global config in the Inbox's scratch HOME (read at most every 2 s): OpenCode 2's `plugins`, or OpenCode 1's `plugin` pair our installer writes. */
 async function openCodeConfig(spec: string | null, key: 'plugins' | 'plugin' = 'plugins') {
   const folder = join(dir!, '.config', 'opencode');
   mkdirSync(folder, { recursive: true });
@@ -316,13 +285,11 @@ test.skipIf(!hasDom)('OpenCode behind this Inbox: the update names its configure
     let lead = note()!.querySelector<HTMLElement>('[data-reload-lead="restart"]')!;
     expect(lead.getAttribute('data-reload-command')).toBe('opencode2 models && opencode2 plugin update @plannotator/opencode@latest');
     expect(await copyLead(lead)).toBe('opencode2 models && opencode2 plugin update @plannotator/opencode@latest');
-    // An update with a target cancels nothing a reload does, updates nothing else: no quiet line, no server restart folded.
     expect(note()!.querySelector('[data-opencode-quiet]')).toBeNull();
     expect(note()!.querySelector('[data-restart-toggle]')).toBeNull();
     act(() => root?.unmount());
     host?.remove();
 
-    // The pin under OpenCode 1's `plugin` key, as our installer writes it.
     await openCodeConfig('@plannotator/opencode@0.28.23', 'plugin');
     await polls(ids.hosts.opencode.session, 'opencode', { busy: true, plugin: { version: '0.28.23', on_disk: '0.28.23' } });
     await openThread(ids.hosts.opencode.thread);
@@ -330,10 +297,8 @@ test.skipIf(!hasDom)('OpenCode behind this Inbox: the update names its configure
     lead = note()!.querySelector<HTMLElement>('[data-reload-lead="pin"]')!;
     expect(lead.getAttribute('data-reload-command')).toBe('opencode2 reload');
     expect(codesIn(lead)).toEqual(['@plannotator/opencode@0.28.23', '@plannotator/opencode@latest', 'opencode2 reload']);
-    // One Copy, right after the value of the first step: what to write in the config.
     expect(lead.querySelectorAll('[data-restart-copy]')).toHaveLength(1);
     expect(await copyLead(lead)).toBe('@plannotator/opencode@latest');
-    // Not a reload alone: the sidebar does not count it (as Pi's update and Claude Code's are not counted).
     const list = JSON.parse((await loopback('/api/inbox/threads')).text) as { restart_agents: { runtimes: Record<string, number> } };
     const agents = JSON.parse((await loopback('/api/inbox/agents')).text) as { sessions: { opencode: { sessions: { session: string; outdated: { fix: string } | null }[] } } };
     expect(agents.sessions.opencode.sessions.find((x) => x.session === ids.hosts.opencode.session)!.outdated!.fix).toBe('update_extension');

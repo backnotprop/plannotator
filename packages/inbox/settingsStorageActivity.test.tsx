@@ -1,12 +1,3 @@
-/**
- * Settings → Storage's Delete and Settings → Activity (approval "settings-storage-activity", 2026-11-08), on the
- * Settings page alone over a scripted `fetch`. Storage: a thread's row and a project's row delete with the same
- * button, each named for what it deletes, and only on a second click. Activity: the chart, then the decision numbers
- * under it; nothing asks the server to count decisions until Activity is shown, and Decision data has no row of its
- * own. The window over a real Inbox (the old address, focus) is `settingsSections.test.tsx`.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -20,7 +11,6 @@ const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as t
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
-/** Every request the page made, as its URL. */
 let requests: string[] = [];
 
 beforeEach(() => {
@@ -31,7 +21,6 @@ beforeEach(() => {
     const url = String(input);
     requests.push(url);
     if (url.includes('/api/inbox/sessions')) return new Response(JSON.stringify({ serverSession: 's', home: '/home/u', projects: [] }));
-    // A count that never answers: the section's wait is all these tests need of it.
     if (url.includes('/api/inbox/decision-data')) return new Promise<Response>(() => {});
     return new Response('{}');
   }) as typeof fetch;
@@ -126,7 +115,6 @@ describe('Settings → Storage: Delete from Inbox', () => {
   test.skipIf(!hasDom)('a project and its threads delete with one button, each named for what it deletes', () => {
     const el = render('storage');
     const buttons = deleteButtons(el);
-    // The first project opens with the page: its row, then its two threads, then the next project.
     expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual([
       'Delete from Inbox: harbor',
       'Delete from Inbox: Retry the upload',
@@ -171,7 +159,6 @@ describe('Settings → Activity: the chart and the decision numbers', () => {
     const chart = el.querySelector('[data-activity]')!;
     const decisions = el.querySelector('[data-decision-data]')!;
     expect(chart.compareDocumentPosition(decisions) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // Leaving asks for nothing more; coming back asks once.
     render('about');
     expect(el.querySelector('[data-decision-data]')).toBeNull();
     expect(counts()).toBe(1);

@@ -1,20 +1,3 @@
-/**
- * Starred threads as pills above the list (approval "inbox-starred-pills"): "Keep starred above the list" in the
- * list's ⋮ menu, the pills it draws, and the sidebar's Starred section it takes away.
- *
- * What this catches: the choice on in an untouched browser, or today's sidebar section changed while it is off; the
- * starred threads in both places at once, or in neither; a choice forgotten on the next load; a click on the star
- * that also opens its thread, or a click on the pill that unstars; Move left and Move right moving the wrong way or
- * offered past an end; a third line of pills instead of "+N", a "+N" with no dot while a hidden thread waits, or one
- * whose menu loses a thread; a pill a screen reader hears without its state or "starred"; an empty band of pills
- * with nothing starred; a touch on the star unstarring; a long press that opens the thread.
- *
- * The list and the sidebar are drawn over a small holder of the stars that applies each action the way the window
- * does (pins.ts `movePin`), so no Inbox runs. The real window over the real server, the pills' look and the phone's
- * sideways line are proved against the compiled binary by tests/e2e/inbox-starred-pills.spec.ts.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -102,7 +85,6 @@ interface Calls {
   actions: Array<[string, PinnedAction]>;
 }
 
-/** The window's part: it holds the stars and applies an action as App.tsx does (Unstar drops one, a move is `movePin`). */
 function Window({ start, calls, phone, tour, open }: { start: readonly InboxListRow[]; calls: Calls; phone: boolean; tour: boolean; open: string | null }) {
   const [pins, setPins] = useState(start);
   const onAction = (r: InboxListRow, action: PinnedAction) => {
@@ -229,7 +211,6 @@ describe('the choice', () => {
     expect(el.querySelector('[data-starred-pills]')).toBeNull();
     expect(sidebarStars(el)).toEqual(STARS.map((r) => r.thread_id));
     expect(stored.has(STARRED_ABOVE_COOKIE)).toBe(false);
-    // The item is there to turn on, unchecked, a checkbox a screen reader hears with its state.
     act(() => el.querySelector<HTMLButtonElement>('[data-tidy-menu]')!.click());
     await settle();
     const item = document.querySelector<HTMLElement>('[data-starred-above-option]')!;
@@ -244,7 +225,6 @@ describe('the choice', () => {
     expect(item!.getAttribute('aria-checked')).toBe('true');
     expect(pillIds(el)).toEqual(STARS.map((r) => r.thread_id));
     expect(el.querySelector('[data-pinned-section]')).toBeNull();
-    // Above the list's rows, under its header.
     const nav = el.querySelector('[data-starred-pills]')!;
     expect(nav.previousElementSibling?.classList.contains('ib-lhead')).toBe(true);
     expect(nav.compareDocumentPosition(el.querySelector('.ib-lbody')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -270,7 +250,6 @@ describe('the choice', () => {
     stored.set(STARRED_ABOVE_COOKIE, '1');
     const { el } = draw({ start: [] });
     expect(el.querySelector('[data-starred-pills]')).toBeNull();
-    // The list follows the header; only the list's own "N new" pill holder (ListNewPill.tsx), which takes no room, is between.
     expect([...el.querySelectorAll('.ib-lhead ~ :not(.ib-lnew)')][0]?.classList.contains('ib-lbody')).toBe(true);
     expect(el.querySelector<HTMLElement>('.ib-lnew [data-list-new-pill]')!.hasAttribute('data-off')).toBe(true);
     expect(el.querySelector('[data-pinned-section]')).toBeNull();
@@ -323,15 +302,12 @@ describe('a pill', () => {
     expect(pill(el, STOP.thread_id).querySelector('.ib-spill')!.getAttribute('data-k')).toBe('stop');
     expect(pill(el, NEWS.thread_id).querySelector('.ib-pdot')).not.toBeNull();
     expect(pill(el, QUIET.thread_id).querySelector('.ib-star-q, .ib-spill, .ib-pdot')).toBeNull();
-    // Waiting pills stand out; a quiet one steps back.
     expect(pills(el).map((p) => p.hasAttribute('data-wake'))).toEqual([false, true, true, true]);
     expect(pills(el).map((p) => p.getAttribute('aria-current'))).toEqual([null, 'true', null, null]);
-    // No agent mark on a pill: the star takes its place.
     expect(el.querySelector('[data-starred-pills] li[data-pill-item] .ib-mk')).toBeNull();
   });
 
   test.skipIf(!hasDom)('one open question reads "1 question", and a state with no words leaves no empty part in the name', () => {
-    // The list's own count is empty for exactly one question (a row shows its glyph alone).
     const one = row('msg_one', 'Diff style', 'waiting', { questions: { open: 1, picked: 0, stopped: false, holds_up: [] } });
     const { el } = draw({ start: [one, ...STARS] });
     expect(pill(el, 'msg_one').getAttribute('aria-label')).toBe('Diff style, billing-svc, 1 question, starred');
@@ -353,7 +329,6 @@ describe('a pill', () => {
     const star = el.querySelector<HTMLButtonElement>(`[data-pill-unstar="${WAIT.thread_id}"]`)!;
     expect(star.getAttribute('aria-label')).toBe('Unstar Invoice retries');
     expect(star.tabIndex).toBe(-1);
-    // Not inside the pill's button: a press on it cannot reach the pill.
     expect(pill(el, WAIT.thread_id).contains(star)).toBe(false);
     act(() => star.click());
     expect(calls.actions).toEqual([[WAIT.thread_id, 'unpin']]);
@@ -380,15 +355,12 @@ describe('a pill', () => {
   });
 
   test.skipIf(!hasDom)("the label is the list row's bold line: the thread's name, never a subject that starts with it", async () => {
-    // The sidebar's Starred row shows this thread's subject (it starts with the name); the pill and the list row do not.
     const named = row('msg_named', 'Highlight fixes: three highlighting bugs found and fixed', 'new', { thread_name: 'Highlight fixes', unseen: 1 });
     const { el } = draw({ start: [named, QUIET] });
     const target = pill(el, 'msg_named');
     expect(target.querySelector('.ib-star-n')!.textContent).toBe('Highlight fixes');
     expect(target.getAttribute('aria-label')).toBe('Highlight fixes, billing-svc, New, starred');
-    // A thread with no name falls back as its row does, to the subject.
     expect(pill(el, QUIET.thread_id).querySelector('.ib-star-n')!.textContent).toBe('Release train');
-    // The subject is the tooltip's second line, above the agent.
     const tip = await tooltipOf(target);
     expect(tip).toContain('Highlight fixes: three highlighting bugs found and fixed');
     expect(tip).toContain('Claude Code in billing-svc');
@@ -431,7 +403,6 @@ describe("a pill's menu", () => {
     expect(pillIds(el)).toEqual([ids[1], ids[0], ids[2], ids[3]]);
     await choose((await menuOf(pill(el, ids[3]!)))!, 'left');
     expect(pillIds(el)).toEqual([ids[1], ids[0], ids[3], ids[2]]);
-    // The sidebar's own moves: the same order is what the Starred section shows with the choice off.
     expect(calls.actions).toEqual([
       [ids[0], 'down'],
       [ids[3], 'up'],
@@ -510,7 +481,6 @@ describe('"+N"', () => {
   });
 
   test.skipIf(!hasDom)('past two lines the rest go behind "+N", which opens them as a menu; a hidden waiting thread gives it a dot', async () => {
-    // Three 100 px pills a line (two gaps of 6): two lines hold 6, or 5 and "+N".
     layout(100, 50, 330);
     const rows = many(25, 20);
     const { el, calls } = draw({ start: rows });
@@ -520,7 +490,6 @@ describe('"+N"', () => {
     expect(more.textContent).toBe('+20');
     expect(more.getAttribute('aria-label')).toBe('20 more starred, 1 waiting on you');
     expect(more.querySelector('[data-pills-more-dot]')).not.toBeNull();
-    // The hidden pills are out of the tab order and the accessibility tree; the menu is the way to them.
     expect(pill(el, rows[9]!.thread_id).tabIndex).toBe(-1);
     act(() => more.click());
     await settle();
@@ -541,7 +510,6 @@ describe('"+N"', () => {
     act(() => more().click());
     await settle();
     const menu = document.querySelector<HTMLElement>('[data-pills-more-menu]')!;
-    // The star takes the agent mark's place, as on a pill, and is not inside the row's item.
     expect(menu.querySelector('.ib-mk')).toBeNull();
     const star = menu.querySelector<HTMLButtonElement>(`[data-pills-more-unstar="${rows[6]!.thread_id}"]`)!;
     expect(star.getAttribute('aria-label')).toBe('Unstar Thread 6');
@@ -551,12 +519,10 @@ describe('"+N"', () => {
     await settle();
     expect(calls.actions).toEqual([[rows[6]!.thread_id, 'unpin']]);
     expect(calls.opened).toEqual([]);
-    // Still open, without that row; "+N" counts one fewer; focus is on the row now in its place.
     const left = [...document.querySelectorAll<HTMLElement>('[data-pills-more-item]')];
     expect(left.map((item) => item.dataset.pillsMoreItem)).toEqual([rows[5], rows[7], rows[8]].map((r) => r!.thread_id));
     expect(more().textContent).toBe('+3');
     expect(document.activeElement).toBe(left[1]!);
-    // The rest of a row still opens its thread.
     act(() => left[2]!.click());
     expect(calls.opened).toEqual([rows[8]!.thread_id]);
   });
@@ -587,7 +553,6 @@ describe('"+N"', () => {
     const rows = many(7, null);
     const { el } = draw({ start: rows });
     await settle();
-    // Seven pills: five and "+2". One unstarred leaves six, which fit on two lines.
     act(() => el.querySelector<HTMLButtonElement>('[data-pills-more]')!.click());
     await settle();
     act(() => document.querySelector<HTMLButtonElement>(`[data-pills-more-unstar="${rows[6]!.thread_id}"]`)!.click());
@@ -617,14 +582,10 @@ describe('"+N"', () => {
   });
 
   test('the fit: whole lines of pills, "+N" at the end of the last line, never fewer than one pill', () => {
-    // 3 per line at 330 (100 + 6 + 100 + 6 + 100 = 312).
     expect(fitPills([100, 100, 100, 100, 100, 100], 50, 330, 6)).toBe(6);
     expect(fitPills([100, 100, 100, 100, 100, 100, 100], 50, 330, 6)).toBe(5);
-    // "+N" that does not fit beside the fifth pill takes one more pill with it.
     expect(fitPills([100, 100, 100, 100, 100, 100, 100], 130, 330, 6)).toBe(4);
-    // Uneven widths wrap where a pill no longer fits its line.
     expect(fitPills([200, 150, 120, 60, 300], 40, 330, 6)).toBe(3);
-    // A list narrower than one pill still shows one (it is cut by its own ellipsis).
     expect(fitPills([200, 200, 200], 50, 120, 6)).toBe(1);
     expect(fitPills([], 50, 330, 6)).toBe(0);
   });

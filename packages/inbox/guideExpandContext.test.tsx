@@ -1,19 +1,3 @@
-/**
- * The "N unmodified lines" arrows in the Inbox: a host passes a reader of whole
- * files (`GuideReader` `fileContents`; a thread's guided review through
- * ReviewPane, against `GET /api/inbox/messages/:id/guide/file`), and the real
- * reader, AllFilesCodeView and Pierre's diff do the rest.
- *
- * The failures this catches: a read before anyone opens an arrow (a whole file
- * read and tokenized per mounted file froze the page on real code); no arrows
- * in a read-only diff or a comment-only one (the review app's gate stopped
- * both); a click that opens nothing, or a box that does not grow with what it
- * opened; a file with no text to open keeping its arrows or logging an error; a
- * added or deleted file showing arrows; a request from a host that
- * passed no reader. (A real browser's boxes: tests/e2e/inbox-pull-requests.spec.ts.)
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { plugin } from 'bun';
 import { afterEach, beforeEach, expect, mock, spyOn, test } from 'bun:test';
 import { act } from 'react';
@@ -101,13 +85,11 @@ let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let savedObserver: typeof ResizeObserver;
 let savedHeight: PropertyDescriptor | undefined;
-/** The content's size changed: what the browser's ResizeObservers would hear. */
 let observers: (() => void)[] = [];
 
 const views = () => [...host!.querySelectorAll('diffs-container')];
 const inView = <T extends Element>(selector: string) => views().flatMap((view) => [...view.shadowRoot!.querySelectorAll<T>(selector)]);
 const arrows = () => inView<HTMLElement>('[data-expand-button]');
-/** One code column's rows, however it is laid out. */
 const rows = () => inView('[data-code] [data-line]').length;
 
 beforeEach(() => {
@@ -176,7 +158,6 @@ test.skipIf(!hasDom)("a thread's guided review: the arrows come from the message
     return Response.json({});
   }) as typeof fetch;
   await draw(<ReviewPane thread={thread} message={message} codeReview={false} onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />);
-  // Nobody opened anything: the arrows are there, and the file is not read.
   expect(asked).toEqual([]);
   expect(arrows().length).toBeGreaterThan(0);
   const before = rows();
@@ -217,7 +198,6 @@ test.skipIf(!hasDom)('a read-only diff (a resolved thread, a PR with no comments
 test.skipIf(!hasDom)('nothing to open (no contents, text that does not fit): the first click takes the arrows away, the diff as it came, nothing logged', async () => {
   const answers: (() => Promise<{ oldContent: string | null; newContent: string | null; failed?: true }>)[] = [
     async () => ({ oldContent: null, newContent: null }),
-    // Contents that do not reconcile with the patch's hunks: the file moved on.
     async () => ({ oldContent: whole(OLD), newContent: whole([...NEW, 'one more']) }),
   ];
   const logged = spyOn(console, 'error');
@@ -238,7 +218,6 @@ test.skipIf(!hasDom)('nothing to open (no contents, text that does not fit): the
   logged.mockRestore();
 });
 
-// Guards a slow first click looking like a dead one.
 test.skipIf(!hasDom)('while a first read is on its way the file says so; once it lands it stops', async () => {
   let land: (contents: { oldContent: string; newContent: string }) => void = () => {};
   await draw(reader(MODIFIED, ['a.ts'], () => new Promise((resolve) => (land = resolve))));
@@ -251,7 +230,6 @@ test.skipIf(!hasDom)('while a first read is on its way the file says so; once it
   expect(view.hasAttribute('data-reading-whole-file')).toBe(false);
 });
 
-// Guards a brief forge failure taking the arrows away until a reload.
 test.skipIf(!hasDom)('a read that failed keeps the arrows, and the next click asks again and opens', async () => {
   const logged = spyOn(console, 'error').mockImplementation(() => {});
   for (const failure of [

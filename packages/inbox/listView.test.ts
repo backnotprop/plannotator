@@ -1,12 +1,3 @@
-/**
- * The List view's rows (listView.ts `flatRows`) and the remembered choice.
- *
- * What this catches: List hiding a thread the grouped view shows (Quiet, Sent) or showing a snoozed one outside its
- * band; List not newest first; a row that moves in List while the groups hold it still (its time changed in place:
- * the person's Send in the open thread, Mark read's note, an agent's message held behind "N new"); a sort that never
- * comes (Show, a close) or that moves the open thread beside a refresh; and a choice that is not remembered, or that
- * leaves a cookie behind for Grouped.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection, InboxListGroupId } from '@plannotator/core/inbox-types';
 import { resetStorageBackend, setStorageBackend } from '@plannotator/ui/utils/storage';
@@ -41,24 +32,20 @@ describe('flatRows', () => {
     expect(ids(rows)).toEqual(['wait', 'new2', 'sent', 'q2', 'new1', 'q1', 'stop']);
     const grouped = LIST.filter((s) => s.id !== 'snoozed').flatMap((s) => s.threads.map((r) => r.thread_id));
     expect([...ids(rows)].sort()).toEqual([...grouped].sort());
-    // Each row keeps the group it is drawn in: its actions (Mark read, the row menu) read that.
     expect(rows.find(({ row }) => row.thread_id === 'q2')!.drawn).toBe('quiet');
   });
 
   test('a time changed in place moves nothing until the list is sorted whole; then it sorts', () => {
     const first = flatRows(LIST, null, { epoch: 1, keep: null });
-    // The person replies in the open "q1" (its row shows its state in place, Mark read's note does the same).
     const inPlace = LIST.map((s) => ({ ...s, threads: s.threads.map((r) => (r.thread_id === 'q1' ? { ...r, last_at: T(30) } : r)) }));
     const held = flatRows(inPlace, first.places, { epoch: 1, keep: null });
     expect(ids(held.rows)).toEqual(ids(first.rows));
-    // Show, a close, a refresh: the list is sorted whole.
     expect(ids(flatRows(inPlace, held.places, { epoch: 2, keep: null }).rows)[0]).toBe('q1');
   });
 
   test('agent news held behind "N new" moves no row in List either', () => {
     const shown = listGroups({ sections: LIST.filter((s) => s.id !== 'snoozed'), snoozed: [] });
     const first = flatRows(shown, null, { epoch: 1, keep: null });
-    // An agent writes again in the oldest row and starts a new thread: the held list keeps both out.
     const latest = listGroups({
       sections: groups({ ...Object.fromEntries(shown.map((s) => [s.id, s.threads])), new: [row('fresh', T(40), 'new'), row('stop', T(41), 'new'), ...shown.find((s) => s.id === 'new')!.threads] }).filter((s) => s.id !== 'snoozed'),
       snoozed: [],
@@ -78,7 +65,6 @@ describe('flatRows', () => {
   test('a row that settles into another group alone takes its place by its time; the others hold', () => {
     const shown = LIST.filter((s) => s.id !== 'snoozed');
     const first = flatRows(shown, null, { epoch: 1, keep: null });
-    // "new1" got the person's Send in place (held), then "q1" alone moves to New with a newer time.
     const moved = shown.map((s) => ({
       ...s,
       threads:

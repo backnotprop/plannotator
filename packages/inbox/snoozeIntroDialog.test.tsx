@@ -1,15 +1,3 @@
-/**
- * The one-time Snooze announcement in a DOM (approval "inbox-snooze-announce"): the page's calm-moment gate
- * (snoozeIntro.ts `useSnoozeIntro`) driving the real dialog (components/SnoozeIntro.tsx), and Try it against the real
- * Snooze menus (snoozeIntroTry.ts with the real header ⋯ menu, the ⋯ sheet and the row's right-click menu).
- *
- * What regresses: the dialog showing on load, or with any one blocker present (a thread left too soon, too young a
- * page, a thread answered or typed in, too few read-and-left rows or rows, the tour or another dialog this load, a
- * toast, something typed or open, a page not clear, a list that has not settled, a page that snoozed); a second claim after any dismiss (Got it, Escape, a click outside); a dialog drawn before
- * the Inbox stamped it; Try it snoozing anything, or not opening the menu.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act, useState, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -29,11 +17,8 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let savedTimes: typeof intro.SNOOZE_INTRO_TIMES;
-/** Every POST the page made, by path. */
 let posts: string[] = [];
-/** What the Inbox answers a claim: the first one shows it, as the compare-and-set does. */
 let stamped = false;
-/** Holds the claim's answer back until it settles (a slow Inbox), when a test sets it. */
 let claimHeld: Promise<void> | null = null;
 
 beforeEach(() => {
@@ -77,7 +62,6 @@ async function until(done: () => boolean, ms = 2_000): Promise<void> {
   const end = Date.now() + ms;
   while (!done() && Date.now() < end) await wait(10);
 }
-/** A settling wait far longer than the steps a test takes inside it, for a test that acts before the page settles. */
 const SLOW_SETTLE_MS = 600;
 const claims = () => posts.filter((p) => p.endsWith('/api/inbox/snooze-intro')).length;
 const dialog = () => document.querySelector<HTMLDialogElement>('dialog[data-dialog="snooze-intro"]');
@@ -111,7 +95,6 @@ function row(id: string, over: Partial<InboxListRow> = {}): InboxListRow {
   };
 }
 
-/** Three rows, two (msg_b, msg_c) read and left two days ago; msg_a is the thread the person opens and leaves. */
 const ROWS = [row('msg_a'), row('msg_b'), row('msg_c')];
 
 interface State {
@@ -127,7 +110,6 @@ interface State {
 
 const BASE: State = { due: true, blocked: false, snoozedHere: false, rows: ROWS, toast: false, thread: 'msg_a', clear: true, held: false };
 
-/** The window's wiring, as App does it: the gate, then the dialog while it is open. */
 function Harness({ state, onTry }: { state: State; onTry?: (target: string | null, close: () => void) => void }) {
   const z = intro.useSnoozeIntro({
     due: state.due,
@@ -159,10 +141,6 @@ function mount(state: State, onTry?: (target: string | null, close: () => void) 
   };
 }
 
-/**
- * The calm moment: the page past its age (`young`: not), the person opens msg_a and reads it past the read time
- * (`early`: not), then leaves it for the list. `state` applies one blocker.
- */
 async function leave(state: Partial<State> = {}, options: { early?: boolean; young?: boolean } = {}) {
   const set = mount({ ...BASE, ...state, thread: null });
   if (!options.young) await wait(TIMES.pageAgeMs + 20);
@@ -176,7 +154,6 @@ async function leave(state: Partial<State> = {}, options: { early?: boolean; you
 describe.skipIf(!hasDom)('the calm moment', () => {
   test('leaving a waiting thread after reading it, on a settled page past its age: claimed once, then drawn', async () => {
     mount({ ...BASE });
-    // Never on load: nothing while the thread is open, however long.
     await wait(TIMES.pageAgeMs + 100);
     expect(claims()).toBe(0);
     expect(dialog()).toBeNull();
@@ -277,12 +254,10 @@ describe.skipIf(!hasDom)('every dismiss is final', () => {
       const set = await leave();
       await until(() => dialog() !== null);
       expect(dialog()).not.toBeNull();
-      // The Inbox stamped it when this page claimed it, before the dialog drew.
       expect(stamped).toBe(true);
       expect(claims()).toBe(1);
       act(() => dismiss(dialog()!));
       expect(dialog()).toBeNull();
-      // Another calm moment on this load: nothing.
       set({ thread: 'msg_a' });
       await wait(TIMES.readMs + 20);
       set({ thread: null });

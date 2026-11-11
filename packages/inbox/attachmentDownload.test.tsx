@@ -1,18 +1,3 @@
-/**
- * Download from where the files are (the owner, 2026-11-08: "a simple,
- * better, faster way to download attachments ... the context menu should
- * also have Download"). A right-click on a tile at a message's foot, or on an
- * Artifacts card, opens the tile's menu at the pointer with Download: the
- * version the tile opens, saved under the file's own name (an HTML page and a
- * Markdown file too, never opened). On this computer the tile's ⋯ holds the
- * same list, and a picture in the gallery opens it too; an image's list has
- * Copy image, which pastes back into a reply as the same file. A touch keeps
- * the browser's own menu.
- * The viewer's bar beside the thread has Download for every kind, for the
- * version on screen.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -49,14 +34,11 @@ const plan = file('att_01K7AAAAAAAAAAAAAAAAAAAAAA', 'plan.md', 'markdown');
 const page = file('att_01K7BBBBBBBBBBBBBBBBBBBBBB', 'checkout.html', 'html');
 const shot = file('att_01K7CCCCCCCCCCCCCCCCCCCCCC', 'shot.png', 'image', { media_type: 'image/png', width: 1280, height: 800 });
 const spec = file('att_01K7DDDDDDDDDDDDDDDDDDDDDD', 'spec.pdf', 'pdf', { media_type: 'application/pdf' });
-/** Edited on disk after it was sent: the tile opens it as it is now. */
 const edited = file('att_01K7EEEEEEEEEEEEEEEEEEEEEE', 'notes.md', 'markdown', {
   changed_since_sent: true,
   current: { sha256: 'b'.repeat(64), size: 1200, mtime: '2026-10-10T12:00:00.000Z' },
 });
-/** An image gone from disk: its picture is the version it sent. */
 const gonePicture = file('att_01K7GGGGGGGGGGGGGGGGGGGGGG', 'before.png', 'image', { media_type: 'image/png', current: null, unavailable: { code: 'attachment_missing', message: 'gone' } });
-/** Gone from disk: the tile opens the version it sent. */
 const gone = file('att_01K7FFFFFFFFFFFFFFFFFFFFFF', 'old.md', 'markdown', { current: null, unavailable: { code: 'attachment_missing', message: 'gone' } });
 
 let root: Root | null = null;
@@ -64,7 +46,6 @@ let host: HTMLElement | null = null;
 const realFetch = globalThis.fetch;
 
 beforeEach(() => {
-  // The view route reads text files; the apps list answers for "Open in" on this computer.
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.includes('/open-in/apps')) {
@@ -115,7 +96,6 @@ const contextMenu = () => document.querySelector<HTMLElement>('[data-tile-contex
 const downloadIn = (menu: ParentNode) => menu.querySelector<HTMLAnchorElement>('[data-tile-download]');
 const labelsOf = (menu: ParentNode) => [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].map((item) => item.textContent);
 
-/** A right-click at `el` (a mouse, or the platform's long press when `touch`): the event, to see whether ours took it. */
 async function rightClick(el: Element, touch = false): Promise<MouseEvent> {
   const event = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 200, clientY: 120 });
   if (touch) Object.defineProperty(event, 'pointerType', { value: 'touch' });
@@ -134,19 +114,15 @@ async function closeMenu() {
 test.skipIf(!hasDom)('a right-click on a tile opens its menu with Download: the version it opens, under its own name', async () => {
   await render(<AttachmentTiles attachments={[plan, page, spec, edited, gone]} annotationCounts={new Map()} onOpen={() => {}} />);
   for (const attachment of [plan, page, spec, edited]) {
-    // On the tile's name, not just its edge: anywhere on the tile is the tile.
     const event = await rightClick(host!.querySelector(`[data-attachment-id="${attachment.id}"] .ib-nm`)!);
     await until(() => contextMenu() !== null, `${attachment.name}'s menu`);
-    // Ours, not the browser's.
     expect(event.defaultPrevented).toBe(true);
     const download = downloadIn(contextMenu()!)!;
     expect(download.getAttribute('href')).toBe(`/api/inbox/attachments/${attachment.id}/download`);
-    // An HTML page and a Markdown file are saved as files, never opened.
     expect(download.getAttribute('download')).toBe(attachment.name);
     expect(download.textContent).toBe('Download');
     await closeMenu();
   }
-  // A file gone from disk opens (and downloads) the version it sent.
   await rightClick(host!.querySelector(`[data-attachment-id="${gone.id}"]`)!);
   await until(() => contextMenu() !== null, `${gone.name}'s menu`);
   expect(downloadIn(contextMenu()!)!.getAttribute('href')).toBe(`/api/inbox/attachments/${gone.id}/download?version=sent`);
@@ -171,7 +147,6 @@ test.skipIf(!hasDom)('on this computer the tile ⋯ and the right-click list the
   await until(() => contextMenu() !== null, 'the right-click menu');
   expect(labelsOf(contextMenu()!)).toEqual(dotsLabels);
   expect(dotsLabels).toEqual(['Open side by side', 'Open full screen', 'Download', 'VS Code', 'Default app', 'Copy path']);
-  // An item acts as the ⋯'s does.
   await act(async () => contextMenu()!.querySelector<HTMLElement>('[data-open-as="side"]')!.click());
   expect(opened).toEqual([`${plan.id}:side`]);
 });
@@ -183,7 +158,6 @@ test.skipIf(!hasDom)('a right-click on the big picture of an attached image open
   const touch = await rightClick(picture, true);
   expect(touch.defaultPrevented).toBe(false);
   expect(contextMenu()).toBeNull();
-  // By mouse: ours, with Download and Copy image.
   const event = await rightClick(picture);
   await until(() => contextMenu() !== null, 'the menu');
   expect(event.defaultPrevented).toBe(true);
@@ -191,7 +165,6 @@ test.skipIf(!hasDom)('a right-click on the big picture of an attached image open
   expect(downloadIn(contextMenu()!)!.getAttribute('download')).toBe(shot.name);
   expect(labelsOf(contextMenu()!)).toEqual(['Download', 'Copy image']);
   await closeMenu();
-  // A file that is not an image has no Copy image.
   act(() => root!.unmount());
   host!.remove();
   await render(<AttachmentTiles attachments={[plan]} annotationCounts={new Map()} onOpen={() => {}} />);
@@ -209,7 +182,6 @@ test.skipIf(!hasDom)('Copy image leaves what the browser’s Copy Image does: pa
     constructor(readonly items: Record<string, Blob | Promise<Blob>>) {}
   };
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write: async (items: { items: Record<string, Blob | Promise<Blob>> }[]) => void written.push(items[0]!.items) } });
-  // The page's own origin: what the copied address and the paste are judged against.
   const happy = (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM;
   const savedUrl = location.href;
   happy.setURL('http://localhost:4000/');
@@ -224,9 +196,7 @@ test.skipIf(!hasDom)('Copy image leaves what the browser’s Copy Image does: pa
       await act(async () => contextMenu()!.querySelector<HTMLElement>(`[data-tile-copy-image="${image.id}"]`)!.click());
       await until(() => written.length > 0, 'the clipboard write');
       const item = written.pop()!;
-      // A paste anywhere else is a picture.
       expect((await item['image/png'])!.type).toBe('image/png');
-      // A paste into a reply: the composer's paste reads the HTML and finds this file (ComposeFiles.tsx `paste`).
       const html = await (await item['text/html'])!.text();
       const clip = { getData: (type: string) => (type === 'text/html' ? html : '') };
       expect(ownAttachmentInPaste(clip, location.origin)).toEqual({
@@ -268,7 +238,6 @@ test.skipIf(!hasDom)('a right-click on an Artifacts card opens its menu with Dow
     await until(() => contextMenu() !== null, `${attachment.name}'s card menu`);
     expect(event.defaultPrevented).toBe(true);
     const download = downloadIn(contextMenu()!)!;
-    // An edited file: as it is now, the version the card opens.
     expect(download.getAttribute('href')).toBe(`/api/inbox/attachments/${attachment.id}/download`);
     expect(download.getAttribute('download')).toBe(attachment.name);
     await closeMenu();

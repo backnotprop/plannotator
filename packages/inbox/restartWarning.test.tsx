@@ -1,19 +1,3 @@
-/**
- * The restart warning as the window draws it (owner approval
- * "restart-warning", 2026-10-19): the whole window (InboxApp) over a REAL
- * Inbox (tests/helpers/inbox-dom-server.ts `restart`: Inbox 0.28.25, Claude
- * Code's plugin registry a scratch file recording plugin 0.28.25), with the
- * Claude Code session's connection polling as the test says. What is proved:
- * the line under a reply leads with `/reload-plugins` and a Copy for it, and
- * folds `/exit` and the resume command behind a disclosure
- * (aria-expanded/aria-controls); Copy says so in a polite live region; nothing shows while the session is idle, while
- * it has Send now, or once it runs the installed plugin; the sidebar's
- * "Reload Claude Code N" under the What's new spot,
- * which opens Settings → Agents with the "Open sessions" row: the same lead,
- * the sessions as a list, and a Copy restart per session behind the fold.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -54,7 +38,6 @@ function loopback(path: string, method = 'GET', body?: string): Promise<{ status
   });
 }
 
-/** The Claude Code session's connection polls with these fields (what it loaded, whether it works). */
 async function sessionPolls(body: Record<string, unknown>): Promise<void> {
   const stdin = child!.stdin as import('bun').FileSink;
   stdin.write(`${JSON.stringify({ poll: { session: ids.restart.session, body: { project_path: ids.restart.project, ...body } } })}\n`);
@@ -67,7 +50,6 @@ async function sessionPolls(body: Record<string, unknown>): Promise<void> {
   }
 }
 
-/** The command as the Inbox writes it: the home folder (the server's HOME, the scratch dir) as ~. */
 const resumeLine = () => `cd ~${ids.restart.project.slice(dir!.length)} && claude --resume ${ids.restart.session}`;
 
 const OLD = () => ({ version: '0.28.23', root: ids.restart.oldPath, loaded_at: Date.parse('2026-10-16T00:00:00Z') });
@@ -177,7 +159,6 @@ test.skipIf(!hasDom)('a busy session on an older plugin: the lead copies /reload
   await openThread();
   await until(() => !!note(), 'the restart note');
   expect(!!delivered()!.querySelector('[data-send-now]')).toBe(false);
-  // The lead: /reload-plugins as code, with a Copy that copies exactly that.
   const lead = note()!.querySelector<HTMLElement>('[data-reload-lead="restart"]')!;
   expect(lead.querySelector('code')!.textContent).toBe('/reload-plugins');
   const reloadCopy = lead.querySelector<HTMLButtonElement>('[data-restart-copy]')!;
@@ -187,7 +168,6 @@ test.skipIf(!hasDom)('a busy session on an older plugin: the lead copies /reload
   expect(copied).toEqual(['/reload-plugins']);
   expect(lead.querySelector('[data-restart-live]')!.getAttribute('aria-live')).toBe('polite');
   expect(lead.querySelector('[data-restart-live]')!.textContent).toBe('/reload-plugins copied.');
-  // The manual path is folded: a real button with aria-expanded / aria-controls.
   const toggle = note()!.querySelector<HTMLButtonElement>('[data-restart-toggle]')!;
   expect(toggle.tagName).toBe('BUTTON');
   expect(toggle.getAttribute('aria-expanded')).toBe('false');
@@ -250,13 +230,11 @@ test.skipIf(!hasDom)('the sidebar: "Reload Claude Code N", a real button, opens 
   await until(() => !!document.querySelector('[data-restart-sidebar]'), 'the sidebar row');
   const row = document.querySelector<HTMLButtonElement>('[data-restart-sidebar]')!;
   expect(row.tagName).toBe('BUTTON');
-  // The count is this Inbox's Claude Code sessions on an older plugin; other worlds' sessions polled too.
   const count = Number(row.getAttribute('data-restart-sidebar'));
   expect(count).toBeGreaterThanOrEqual(1);
   expect(row.querySelector('.ib-rw-label')!.textContent).toBe('Reload Claude Code');
   expect(row.querySelector('.ib-n')!.textContent).toBe(String(count));
   expect(row.textContent).toContain('the plugin from before the update; /reload-plugins loads the new one. Opens Settings, Agents.');
-  // Under the What's new spot and above Settings (its row in the sidebar layout's slot, #2924).
   const foot = document.querySelector('.ib-side-foot')!;
   const order = [...foot.children].map((el) => (el.matches('[data-restart-sidebar]') ? 'restart' : el.matches('.ib-setrow, [data-sidebar-item="settings"]') ? 'settings' : 'other'));
   expect(order.indexOf('restart')).toBeLessThan(order.indexOf('settings'));
@@ -265,20 +243,16 @@ test.skipIf(!hasDom)('the sidebar: "Reload Claude Code N", a real button, opens 
   await until(() => !!document.querySelector('[data-agent-sessions="claude-code"]'), 'Open sessions');
   const sessions = document.querySelector<HTMLElement>('[data-agent-sessions="claude-code"]')!;
   expect(sessions.querySelector('.ib-agk')!.textContent).toBe('Open sessions');
-  // Other worlds' sessions run other versions: "on plugin X" when one, "on an older plugin" when several.
   expect(sessions.querySelector('.ib-agv')!.textContent).toMatch(/on (plugin 0\.28\.23|an older plugin)/);
   expect(document.querySelector('[data-agent="claude-code"] .ib-agstate')!.textContent).toMatch(/Connected · \d+ needs? a reload/);
-  // The lead: /reload-plugins with Copy, before anything else.
   const lead = sessions.querySelector<HTMLElement>('[data-reload-lead="restart"]')!;
   expect(lead.querySelector('code')!.textContent).toBe('/reload-plugins');
   await act(async () => lead.querySelector<HTMLButtonElement>('[data-restart-copy]')!.click());
   await settle(100);
   expect(copied).toEqual(['/reload-plugins']);
-  // The sessions as a short list with no buttons.
   const mine = sessions.querySelector<HTMLElement>(`[data-session-row="${ids.restart.session}"]`)!;
   expect(mine.textContent).toContain('working');
   expect(mine.querySelector('button')).toBeNull();
-  // Copy restart only behind the fold.
   const toggle = sessions.querySelector<HTMLButtonElement>('[data-restart-toggle]')!;
   const fold = document.getElementById(toggle.getAttribute('aria-controls')!)!;
   expect(toggle.getAttribute('aria-expanded')).toBe('false');
@@ -292,11 +266,9 @@ test.skipIf(!hasDom)('the sidebar: "Reload Claude Code N", a real button, opens 
   await act(async () => copy.click());
   await settle(100);
   expect(copied).toEqual([resumeLine()]);
-  // Settings' nav carries the warning dot on Agents.
   expect(!!document.querySelector('[data-settings-link="agents"] [data-agents-dot]')).toBe(true);
 }, 30_000);
 
-/** Claude Code's plugin registry the Inbox reads (the DOM server's scratch `<data>/claude`). */
 function installedPlugin(version: string) {
   const folder = join(dir!, 'data', 'claude', 'plugins', 'cache', 'plannotator', 'plannotator', version);
   mkdirSync(folder, { recursive: true });
@@ -324,8 +296,6 @@ test.skipIf(!hasDom)('the installed plugin behind this Inbox (0.28.24 under Inbo
     host?.remove();
     await openThread();
     await until(() => !!note()?.querySelector('[data-reload-lead="update_plugin"]'), 'the update lead under the reply');
-    // The sidebar's "Reload Claude Code N" counts it too (once the plugin is not updated by itself, nothing else in view
-    // says so), marked as needing the update first, and opens the Settings → Agents above.
     act(() => root?.unmount());
     host?.remove();
     await renderApp();
@@ -334,7 +304,6 @@ test.skipIf(!hasDom)('the installed plugin behind this Inbox (0.28.24 under Inbo
     expect(Number(behind.getAttribute('data-restart-update'))).toBeGreaterThanOrEqual(1);
     await act(async () => behind.click());
     await until(() => !!document.querySelector('[data-agent-sessions="claude-code"] [data-reload-lead="update_plugin"]'), 'the update lead from the row');
-    // The person updates the plugin: the row stays (a /reload-plugins is still due), without the update step.
     act(() => root?.unmount());
     host?.remove();
     installedPlugin('0.28.25');
@@ -349,7 +318,6 @@ test.skipIf(!hasDom)('the installed plugin behind this Inbox (0.28.24 under Inbo
 }, 30_000);
 
 test.skipIf(!hasDom)('the row clears itself once those sessions restart (read at the next list read)', async () => {
-  // Every world's Claude Code session (ses_r0.. from the earlier tests) restarts on the installed plugin.
   for (let i = 0; i < TESTS; i++) {
     const stdin = child!.stdin as import('bun').FileSink;
     stdin.write(`${JSON.stringify({ poll: { session: `ses_r${i}`, body: { busy: false, plugin: { version: '0.28.25', root: ids.restart.installPath, loaded_at: Date.now() } } } })}\n`);

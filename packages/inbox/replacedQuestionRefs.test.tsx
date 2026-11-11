@@ -1,7 +1,3 @@
-/**
- * A replaced question's prompt and old choices link `#123` refs into the
- * thread's repo, as the message body does (#1932).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';

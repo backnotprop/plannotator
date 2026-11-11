@@ -1,19 +1,3 @@
-/**
- * The tab icon dialog in a DOM ("Which favicon do you prefer?"; the owner, 2026-11-09: "Ship it as shown"): the page's
- * moment (tabIconChoice.ts `useTabIconChoice`, on the line's `useLineReveal`) driving the dialog
- * (components/TabIconChoice.tsx) and this tab's real icon link (tabCount.ts `useTabCount`, faviconChoice.ts), as App
- * wires them.
- *
- * What regresses: the dialog opening without the line (`reveal.next` not `tab_icon`), before the page is 15 s old, over
- * something typed or open, or going around the line's claim; the dialog waiting for a thread read and left, for the
- * line's 60 s, or for a page left still (the owner, 2026-11-10: "Fifteen seconds after the inbox opens"); a choice
- * saving anything (it only shows on this tab); the primary button not following the pick, or not saving the pick
- * through Settings' own write (`POST /api/inbox/settings { favicon }`), Keep Glass included; Escape or a click outside
- * saving anything, sending a Not now, or leaving the tried icon on the tab; the dialog showing again on the same load;
- * a pick made in Settings on this page before the moment not dropping it; a Not now button appearing.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -93,7 +77,6 @@ interface State {
   thread: string | null;
 }
 
-/** The line has it next; the person is reading a thread. */
 const READING: State = { due: true, held: false, thread: 'thr_a' };
 
 function Harness({ state }: { state: State }) {
@@ -146,7 +129,6 @@ function mount(state: State) {
   };
 }
 
-/** The page 15 s old (shrunk), a thread open: the dialog opens by itself. */
 async function opened() {
   const set = mount(READING);
   await until(() => dialog() !== null);
@@ -157,13 +139,11 @@ async function opened() {
 describe.skipIf(!hasDom)('the tab icon dialog', () => {
   test('15 s into the page, with no thread left and no stillness: never while the page is younger; something typed makes it wait, not give up', async () => {
     const set = mount({ ...READING, held: true });
-    // A person looking around: the pointer never rests, the whole time.
     const moving = setInterval(() => window.dispatchEvent(new Event('pointermove')), 15);
     try {
       await wait(TIMES.pageAgeMs / 2);
       expect(claims()).toHaveLength(0);
       expect(dialog()).toBeNull();
-      // Old enough now, but something is typed: it waits (several moments come and go).
       await wait(TIMES.pageAgeMs + TIMES.settledMs * 6);
       expect(claims()).toHaveLength(0);
       set({ held: false });
@@ -214,15 +194,12 @@ describe.skipIf(!hasDom)('the tab icon dialog', () => {
   test('a choice shows on this tab only; the one button follows the pick and saves it as Settings does', async () => {
     await opened();
     const d = dialog()!;
-    // Glass is in use (nothing chosen yet): tagged, and the button keeps it. One button: no Not now.
     expect(d.querySelector('[data-tab-icon-choice="glass"] .ib-lvc-inuse')).not.toBeNull();
     expect(d.querySelectorAll('[data-tab-icon-choice] .ib-lvc-inuse')).toHaveLength(1);
     expect(d.querySelectorAll('button')).toHaveLength(1);
-    // The owner's labels, pinned on purpose.
     expect(primary().textContent).toBe('Keep Glass');
     expect(tabIcon()).toBe(LOADED);
 
-    // Three choices in Settings' order; P is gone.
     expect([...d.querySelectorAll<HTMLInputElement>('input[type="radio"]')].map((r) => r.value)).toEqual(['glass', 'yellow', 'totman']);
     choose('yellow');
     expect(primary().textContent).toBe('Use Yellow');
@@ -230,7 +207,6 @@ describe.skipIf(!hasDom)('the tab icon dialog', () => {
     choose('totman');
     expect(primary().textContent).toBe('Use Face');
     expect(tabIcon()).toBe(core.faviconDataUrl('totman'));
-    // Back to the one in use: the tab shows the icon it loaded with.
     choose('glass');
     expect(primary().textContent).toBe('Keep Glass');
     expect(tabIcon()).toBe(LOADED);
@@ -267,7 +243,6 @@ describe.skipIf(!hasDom)('the tab icon dialog', () => {
       await wait(TIMES.settledMs * 3);
       expect(saves()).toHaveLength(0);
       expect(posts.filter((p) => p.body.answer !== undefined)).toHaveLength(0);
-      // Another moment on the same load: never again.
       set({ thread: 'thr_c' });
       set({ thread: null });
       await wait(TIMES.settledMs * 4);

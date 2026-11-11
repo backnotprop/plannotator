@@ -1,39 +1,3 @@
-/**
- * Inbox search's palette (search/SearchPalette.tsx) in a DOM, its server
- * answers scripted through `fetch`:
- *
- * - combobox and listbox semantics; groups labelled by their headings; the
- *   first row highlighted when the rows change; ↓ ↑ wrap and move
- *   `aria-activedescendant`; `pointermove` moves the highlight;
- * - Enter opens the highlighted result (the hash, and a message's landing
- *   with the query's terms and a question's key); Enter during IME
- *   composition does nothing; an Enter while a newer query is still settling
- *   opens that query's first row once it lands;
- * - typing is debounced (one request for a burst), a stale answer is dropped,
- *   the last results stay dimmed while the next are on their way;
- * - the live region speaks once per settled answer;
- * - "Show all" asks for the group and expands it in place;
- * - a chip's menu: arrows, Enter, Escape closes the menu before the palette;
- *   a set chip has a ×; "No matches" names the scope and Search everywhere
- *   clears it;
- * - the index still building: skeletons, the indexing line, asked again;
- * - the route failing: "Search isn't answering" and Try again;
- * - recent searches: a click runs one; Clear forgets them; opening a
- *   result remembers its query;
- * - the landing highlight finds the words in the message's text nodes;
- * - the query's words marked only in a field the row's document indexes (a
- *   thread row's chip and project, on the indexed name; a message row's agent;
- *   a project row's whole folder), never a message or file row's chip or
- *   project; a file name kept whole when its cut
- *   would hide a match; results found inside a filter say so under the list,
- *   with Search everywhere, named from the filters the shown answer was asked
- *   with until the next one lands;
- * - a message's mark from its agent's host, every mark first and hidden;
- *   the time column and the key footer (desktop), the time in the meta
- *   line and no footer (phone).
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -163,13 +127,11 @@ test.skipIf(!hasDom)('combobox over a listbox; the first row highlighted; arrows
   expect(list.getAttribute('aria-label')).toBe('Search results');
   await type('rate lim');
   await waitFor(() => options().length === 10);
-  // Groups labelled by their headings, in order; "Show all 12 messages" ends Messages.
   const groups = [...host!.querySelectorAll('[role="group"]')];
   expect(groups.map((g) => host!.querySelector(`#${g.getAttribute('aria-labelledby')}`)!.textContent)).toEqual(['Threads', 'Messages12']);
   expect(options().at(-1)!.textContent).toBe('Show all 12 messages');
   expect(input().getAttribute('aria-activedescendant')).toBe(options()[0]!.id);
   expect(options()[0]!.getAttribute('aria-selected')).toBe('true');
-  // Matched words in semibold, only where they matched.
   expect([...options()[0]!.querySelectorAll('.ib-sp-m')].map((m) => m.textContent)).toEqual(['rate']);
   await key(input(), { key: 'ArrowUp' });
   expect(input().getAttribute('aria-activedescendant')).toBe(options().at(-1)!.id);
@@ -181,7 +143,6 @@ test.skipIf(!hasDom)('combobox over a listbox; the first row highlighted; arrows
     options()[3]!.dispatchEvent(new PointerEvent('pointermove', { bubbles: true }));
   });
   expect(options()[3]!.getAttribute('aria-selected')).toBe('true');
-  // The live region spoke once for the settled answer.
   expect(host!.querySelector('[data-search-live]')!.textContent).toBe('13 results in 2 groups');
 });
 
@@ -191,13 +152,11 @@ test.skipIf(!hasDom)('Enter opens: the hash and a message landing with its terms
   await type('rate lim');
   await waitFor(() => options().length === 10);
   await key(input(), { key: 'ArrowDown' });
-  // A composing Enter (an IME committing text) is not an open.
   await key(input(), { key: 'Enter', isComposing: true });
   expect(opened).toEqual([]);
   await key(input(), { key: 'Enter' });
   expect(opened).toEqual([{ hash: '#thread=msg_t2&msg=msg_m0', land: { messageId: 'msg_m0', terms: ['rate', 'lim'], questionKey: 'q-abc' } }]);
   expect(closed).toEqual(['opened']);
-  // Opening a result remembers its words.
   await waitFor(() => calls.some((c) => c.url.pathname === '/api/inbox/search/recent'));
   expect(calls.find((c) => c.url.pathname === '/api/inbox/search/recent')!.body).toMatchObject({ q: 'rate lim' });
 });
@@ -215,7 +174,6 @@ test.skipIf(!hasDom)('typing is debounced; a stale answer is dropped; Enter duri
   await waitFor(() => searches().length === 2);
   expect(searches()[1]!.url.searchParams.get('q')).toBe('rate');
   await waitFor(() => options().length > 0);
-  // A slow query then a quick one: the slow answer, landing last, is dropped.
   await type('slow');
   await waitFor(() => searches().some((c) => c.url.searchParams.get('q') === 'slow'));
   expect(host!.querySelector('.ib-sp-list')!.hasAttribute('data-dim')).toBe(true);
@@ -259,14 +217,12 @@ test.skipIf(!hasDom)('focus stays in the input: a mouse press in the list takes 
   await render();
   await type('rate');
   await waitFor(() => options().length === 10);
-  // A press on a row, a group heading and Show all is not a focus change (the click still runs).
   for (const target of [options()[1]!, host!.querySelector('.ib-sp-gh')!, options().at(-1)!]) {
     const press = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
     target.dispatchEvent(press);
     expect(press.defaultPrevented).toBe(true);
   }
   expect(options().every((o) => !o.hasAttribute('title'))).toBe(true);
-  // Show all: focus back in the input (even from elsewhere), and the arrows move on from the expanded group.
   input().blur();
   await act(async () => {
     options().at(-1)!.click();
@@ -291,7 +247,6 @@ test.skipIf(!hasDom)('while an IME composes, the arrows and Escape are its own; 
   await key(input(), { key: 'ArrowDown', isComposing: true });
   expect(input().getAttribute('aria-activedescendant')).toBe(at);
   await key(input(), { key: 'Escape', isComposing: true });
-  // The dialog's cancel while a composition is under way closes nothing either.
   await act(async () => {
     input().dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
     host!.querySelector('dialog')!.dispatchEvent(new Event('cancel', { cancelable: true }));
@@ -303,7 +258,6 @@ test.skipIf(!hasDom)('while an IME composes, the arrows and Escape are its own; 
   });
   await key(input(), { key: 'ArrowDown' });
   expect(input().getAttribute('aria-activedescendant')).not.toBe(at);
-  // No matches: shown in the list, spoken by the one live region.
   await type('jitter');
   await waitFor(() => host!.querySelector('[data-search-none]') !== null);
   expect(host!.querySelector('[role="listbox"] [role="status"]')).toBeNull();
@@ -315,7 +269,6 @@ test.skipIf(!hasDom)('while an IME composes, the arrows and Escape are its own; 
 
 test.skipIf(!hasDom)('opened inside a project, search starts everywhere: no Only in chip, the open project only the tie boost, and other projects\' results show', async () => {
   const api = { id: 'prj_01M4V7JERHR0Y3XQERK1MR604B', name: 'api' };
-  // A server that keeps only the asked project's rows, as the real one does.
   respond = async (call) => {
     const q = call.url.searchParams.get('q');
     if (!q) return answer({});
@@ -347,7 +300,6 @@ test.skipIf(!hasDom)('chips: a menu by keys; Escape closes the menu before the p
   };
   await render({ currentProject: project.id });
   await waitFor(() => searches().length === 1);
-  // Pick Status → Archived by keys.
   await type('jitter');
   const status = host!.querySelector<HTMLElement>('[data-chip="status"]')!;
   await act(async () => {
@@ -360,7 +312,6 @@ test.skipIf(!hasDom)('chips: a menu by keys; Escape closes the menu before the p
   expect(host!.querySelector('[role="menu"]')).toBeNull();
   await waitFor(() => host!.querySelector('[data-search-none]') !== null);
   expect(host!.querySelector('[data-search-none]')!.textContent).toBe('No matches for “jitter”Searched only Archived. Search everywhere');
-  // Escape with a menu open closes the menu, not the palette.
   await act(async () => {
     host!.querySelector<HTMLElement>('[data-chip="from"]')!.click();
   });
@@ -432,7 +383,6 @@ test.skipIf(!hasDom)('recent searches: a click runs one, Clear forgets them', as
 
 test.skipIf(!hasDom)('the landing highlight finds the words in the text, not in the message header', () => {
   const article = document.createElement('article');
-  // An open message's head row as Thread.tsx draws it: its text sits beside the fold button, not inside it.
   article.innerHTML =
     '<div class="ib-fline ib-is-open" data-open-head=""><button type="button" class="ib-fl-hit" data-fold-head="" aria-label="Claude Code retry"></button>' +
     '<span class="ib-fl-nm ib-who"><bdi>Claude Code retry</bdi></span><span class="ib-fl-meta"><span class="ib-fl-in">in <bdi>retry-budget</bdi> </span>' +
@@ -463,18 +413,14 @@ test.skipIf(!hasDom)("compose's Actions: below real results unless the words nam
       />,
     );
   });
-  // Three letters of "message": the action, after the real matches.
   await type('mes');
   await waitFor(() => headings().includes('Threads') && headings().includes('Actions'));
   expect(headings()).toEqual(['Threads', 'Messages12', 'Actions']);
   expect(options()[0]!.textContent).toContain('Relay: rate limit');
-  // Two letters call nothing.
   await type('me');
   await waitFor(() => searches().at(-1)?.url.searchParams.get('q') === 'me' && !headings().includes('Actions'));
-  // The whole word: the action first.
   await type('new');
   await waitFor(() => headings()[0] === 'Actions');
-  // While the index builds: the action, above the skeletons.
   await type('idle');
   await waitFor(() => host!.querySelector('[data-search-indexing]') !== null);
   expect(host!.querySelector('[data-compose-action="new"]')).not.toBeNull();
@@ -484,15 +430,11 @@ test.skipIf(!hasDom)('every result in a thread draws the list’s thread chip: i
   const where = { project, section: 'quiet' as const, archived: false, at: '2026-10-09T14:03:00Z' };
   const longSubject = 'Investigate why the nightly deploy of the customer-portal-frontend fails only on the second retry when the CDN cache is warm';
   const messages: InboxSearchRow[] = [
-    // A named thread: its name in the chip, the subject in its title and words.
     { type: 'message', id: 'msg_a', thread_id: 'msg_t1', ...where, author: { kind: 'agent', name: 'Claude Code' }, title: longSubject, thread_name: 'nightly-deploy', snippet: { text: 'The nightly deploy fails on the second retry', marks: [] }, question: null },
-    // An unnamed thread: its subject in the chip.
     { type: 'message', id: 'msg_b', thread_id: 'msg_t2', ...where, author: { kind: 'me', name: 'You' }, title: 'Deploy', thread_name: null, snippet: { text: 'We should deploy tomorrow morning', marks: [] }, question: null },
-    // An unnamed thread whose subject the message's own words are: no chip repeats it.
     { type: 'message', id: 'msg_c', thread_id: 'msg_t3', ...where, author: { kind: 'agent', name: 'Pi' }, title: 'Schema migration for the comments table', thread_name: null, snippet: { text: '…Schema migration for the comments table…', marks: [] }, question: null },
   ];
   const files: InboxSearchRow[] = [
-    // The subject starts with the name: a result still shows the name (its subject is not on the row).
     { type: 'file', id: 'att_1', thread_id: 'msg_t4', message_id: 'msg_t4', ...where, name: 'retry-policy.md', name_marks: [], folder: 'docs', kind: 'md', title: 'Retry storm on the relay after a deploy', thread_name: 'retry' },
   ];
   const threads: InboxSearchRow[] = [
@@ -510,7 +452,6 @@ test.skipIf(!hasDom)('every result in a thread draws the list’s thread chip: i
   const row = (type: string, id: string) => host!.querySelector<HTMLElement>(`[data-result="${type}"][data-result-id="${id}"]`)!;
   const chip = (type: string, id: string) => row(type, id).querySelector<HTMLElement>('[data-result-thread]');
 
-  // The list's chip, its whole text in the DOM and its tooltip naming the whole thread.
   const named = chip('message', 'msg_a')!;
   expect(named.classList.contains('ib-key')).toBe(true);
   expect(named.getAttribute('data-result-thread')).toBe('name');
@@ -518,19 +459,15 @@ test.skipIf(!hasDom)('every result in a thread draws the list’s thread chip: i
   expect(named.querySelector('.ib-keyt')!.getAttribute('dir')).toBe('auto');
   expect(named.hasAttribute('title')).toBe(false);
   expect(await tooltipOf(named)).toBe(`Thread: nightly-deploy: ${longSubject}`);
-  // A screen reader hears the thread, then ", " where each "·" is drawn, and before the time (its own column on a desktop).
   expect(row('message', 'msg_a').textContent).toContain(`Thread: nightly-deploy, ${longSubject}, Claude Code·, plannotator, `);
-  // No name: the subject in the chip, even a short one met inside the text.
   expect(chip('message', 'msg_b')!.getAttribute('data-result-thread')).toBe('subject');
   expect(chip('message', 'msg_b')!.querySelector('.ib-keyt')!.textContent).toBe('Deploy');
   expect(chip('message', 'msg_c')).toBeNull();
   expect(row('message', 'msg_c').textContent).toContain('plannotator');
   expect(chip('file', 'att_1')!.querySelector('.ib-keyt')!.textContent).toBe('retry');
-  // Thread rows: the list's rule (no chip when the subject starts with the name; none without a name).
   expect(chip('thread', 'msg_t4')).toBeNull();
   expect(chip('thread', 'msg_t1')!.querySelector('.ib-keyt')!.textContent).toBe('nightly-deploy');
   expect(chip('thread', 'msg_t5')).toBeNull();
-  // One chip per row, never more.
   for (const option of options()) expect(option.querySelectorAll('.ib-key').length).toBeLessThanOrEqual(1);
 });
 
@@ -556,29 +493,21 @@ test.skipIf(!hasDom)('why a result matched: the words marked only in the fields 
   await waitFor(() => options().length === 4);
   const marked = (el: Element | null) => [...(el?.querySelectorAll('.ib-sp-m') ?? [])].map((m) => m.textContent);
   const thread = host!.querySelector('[data-result="thread"]')!;
-  // The thread row matched by its name: the chip shows it whole, the words marked.
   expect(thread.querySelector('.ib-keyt')!.textContent).toBe(name);
   expect(marked(thread.querySelector('.ib-key'))).toEqual(['Plannotator', 'Cloud']);
-  // The project, as this window names it, marked by the same rule.
   expect(marked(thread.querySelector('.ib-sp-pj'))).toEqual(['plannotator']);
-  // The agent's name, which the index also searches.
   const message = host!.querySelector('[data-result="message"]')!;
   expect(marked(message.querySelector('.ib-sp-lead'))).toEqual(['Cloud', 'Plannotator']);
   expect(marked(message.querySelector('.ib-sp-snip'))).toEqual(['Plannotator', 'Cloud']);
-  // The message was not found by its thread's name or its project (its document holds neither): the chip and the
-  // project show the words unmarked, though both contain them.
   expect(message.querySelector('.ib-keyt')!.textContent).toBe(name);
   expect(marked(message.querySelector('.ib-key'))).toEqual([]);
   expect(message.querySelector('.ib-sp-pj > bdi')!.textContent).toBe('plannotator');
   expect(marked(message.querySelector('.ib-sp-pj'))).toEqual([]);
-  // The middle cut would take the matched words: the whole name instead, marked.
   const file = host!.querySelector('[data-result="file"]')!;
   expect(file.querySelector('.ib-sp-p')!.textContent).toBe(longFile);
   expect(marked(file.querySelector('.ib-sp-p'))).toEqual(['plannotator', 'cloud']);
-  // Nor a file by them: its folder is marked when it matches, its chip and project never.
   expect(marked(file.querySelector('.ib-key'))).toEqual([]);
   expect(marked(file.querySelector('.ib-sp-pj'))).toEqual([]);
-  // A project row's folder is searched: drawn whole (no "…" cut in the text), its matched words marked.
   const projectRow = host!.querySelector('[data-result="project"]')!;
   const second = projectRow.querySelector('.ib-sp-s')!;
   expect(second.textContent).toContain(longRoot);
@@ -596,7 +525,6 @@ test.skipIf(!hasDom)('a renamed project: a thread row marks the indexed name onl
             threads: [
               threadRow('msg_t1', 'Relay'),
               threadRow('msg_t2', 'Board', { project: { id: 'prj_01M4V7JERHR0Y3XQERK1MR604B', name: 'plannotator' } }),
-              // Found by its subject; its project is indexed as "web", only renamed to hold the word.
               threadRow('msg_t3', 'Plannotator launch', { title_marks: [[0, 11]], project: { id: 'prj_01M4V7JERHR0Y3XQERK1MR604C', name: 'web' } }),
             ],
           },
@@ -622,12 +550,9 @@ test.skipIf(!hasDom)('a renamed project: a thread row marks the indexed name onl
   await type('plannotator');
   await waitFor(() => options().length === 3);
   const pj = (id: string) => host!.querySelector(`[data-result-id="${id}"] .ib-sp-pj > bdi`)!;
-  // Found by "plannotator", shown as "Cloud app": nothing on screen is the indexed word, so nothing is marked.
   expect(pj('msg_t1').textContent).toBe('Cloud app');
   expect(pj('msg_t1').querySelectorAll('.ib-sp-m').length).toBe(0);
-  // Shown as "plannotator fork": the indexed name inside it is marked.
   expect([...pj('msg_t2').querySelectorAll('.ib-sp-m')].map((m) => m.textContent)).toEqual(['plannotator']);
-  // Shown as "plannotator web" but indexed as "web": the shown word was not searched, so it is not marked.
   expect(pj('msg_t3').textContent).toBe('plannotator web');
   expect(pj('msg_t3').querySelectorAll('.ib-sp-m').length).toBe(0);
 });
@@ -644,14 +569,12 @@ test.skipIf(!hasDom)('a picked project: the chip says Only in, the results say w
   });
   await waitFor(() => searches().at(-1)!.url.searchParams.get('project') === project.id);
   expect(host!.querySelector('[data-chip="project"]')!.textContent).toBe('Only in plannotator');
-  // No words yet: nothing to say about results.
   expect(host!.querySelector('[data-search-scope]')).toBeNull();
   await type('rate');
   await waitFor(() => options().length === 10);
   expect(host!.querySelector('[data-search-scope]')!.textContent).toBe('Searched only plannotator. Search everywhere');
   expect(host!.querySelector('[data-search-live]')!.textContent).toBe('13 results in 2 groups. Searched only plannotator');
   const asked = searches().length;
-  // The everywhere answer is held: until it lands, the rows shown are still plannotator's, and the line says so.
   let release: () => void = () => {};
   const held = new Promise<void>((resolve) => (release = resolve));
   respond = async (call) => {
@@ -682,16 +605,13 @@ test.skipIf(!hasDom)('the subject chip is left out only when the first line is, 
     type: 'message', id: 'msg_x', thread_id: 'msg_t', ...where, author: { kind: 'agent', name: 'Pi' }, title, thread_name, snippet: { text, marks: [] }, question: null,
   });
   const text = (row: InboxSearchRow) => rowThreadChip(row)?.text ?? null;
-  // A word inside the text is not the subject being shown.
   expect(text(message('Deploy', 'We should deploy tomorrow morning'))).toBe('Deploy');
   expect(text(message('Tests', 'All tests pass now'))).toBe('Tests');
   expect(text(message('Auth bug', '…the auth bug is in the session check…'))).toBe('Auth bug');
-  // Is, begins with, or is a start of at least 12 characters: left out.
   expect(text(message('Keep the rate limit?', 'Keep the rate limit?'))).toBeNull();
   expect(text(message('Schema migration', 'Schema migration for the comments table runs in 4 s'))).toBeNull();
   expect(text(message('Investigate why the nightly deploy fails on the second retry', 'Investigate why the nightly…'))).toBeNull();
   expect(text(message('Investigate why the nightly deploy fails', 'Investigate…'))).toBe('Investigate why the nightly deploy fails');
-  // A name always shows.
   expect(rowThreadChip(message('Keep the rate limit?', 'Keep the rate limit?', 'relay'))).toEqual({ text: 'relay', kind: 'name', subject: 'Keep the rate limit?' });
 });
 
@@ -730,7 +650,6 @@ const markedResults = (q: string): Answer =>
       threads: [threadRow('msg_t1', 'Bookmarks sidebar syncs', { title_marks: [[0, 6]] })],
       messages: [
         { ...(messageRow('msg_c', 'msg_t1', 'saved from codex') as Extract<InboxSearchRow, { type: 'message' }>), author: { kind: 'agent', name: 'Codex', host: 'codex' } },
-        // An older Inbox sends no host: the generic agent mark.
         messageRow('msg_o', 'msg_t1', 'saved by an older inbox'),
         { ...(messageRow('msg_y', 'msg_t1', 'saved by me') as Extract<InboxSearchRow, { type: 'message' }>), author: { kind: 'me', name: 'You', host: null } },
       ],
@@ -763,7 +682,6 @@ test.skipIf(!hasDom)('desktop: the time in its own column and the key footer; a 
   const thread = resultRows()[0]!;
   expect(thread.querySelector(':scope > [data-result-time]')!.textContent).toBe(', Oct 9');
   expect(thread.querySelector('.ib-sp-at')).toBeNull();
-  // A file row shows no time, as before.
   expect(resultRows()[4]!.querySelector('[data-result-time]')).toBeNull();
   expect(host!.querySelector('[data-search-keys]')).not.toBeNull();
 
@@ -778,13 +696,10 @@ test.skipIf(!hasDom)('desktop: the time in its own column and the key footer; a 
   expect(host!.querySelector('[data-search-keys]')).toBeNull();
 });
 
-// ── the Type chip (approval "inbox-search-type-filter", option B) ──
-
 function fileRow(i: number): InboxSearchRow {
   return { type: 'file', id: `att_f${i}`, thread_id: 'msg_t1', message_id: 'msg_m0', project, section: 'quiet', archived: false, at: '2026-10-09T14:03:00Z', name: `relay-${i}.md`, name_marks: [[0, 5]], folder: 'docs', kind: 'md', title: 'Relay: rate limit' };
 }
 const typeTotals = totals({ threads: 1, messages: 12, files: 60 });
-/** The server's shape: a capped first answer, or one group's page from `offset` (`group=`), totals for all four either way. */
 const typeAnswers = async (call: Call): Promise<Answer> => {
   const p = call.url.searchParams;
   const q = p.get('q') ?? '';
@@ -836,13 +751,11 @@ test.skipIf(!hasDom)('the Type chip: All types sends the request as before; a pi
   await renderTyped(true);
   await type('relay');
   await waitFor(() => groupHeadings().includes('Threads'));
-  // All types: no group, no limit, every group with its cap, Actions after the results.
   const plain = searches().at(-1)!.url.searchParams;
   expect([plain.get('group'), plain.get('limit'), plain.get('offset')]).toEqual([null, null, null]);
   expect(groupHeadings()).toEqual(['Threads', 'Messages12', 'Files60', 'Actions']);
   expect([...host!.querySelectorAll('[data-chip]')].map((c) => c.getAttribute('data-chip'))).toEqual(['type', 'project', 'status', 'from']);
 
-  // The menu, labelled Type, with each type's total from the answer.
   await act(async () => {
     typeChip().click();
   });
@@ -864,7 +777,6 @@ test.skipIf(!hasDom)('the Type chip: All types sends the request as before; a pi
   // Pinned on purpose: the ×'s accessible name from the approved design notes.
   expect(host!.querySelector('[data-unset="type"]')!.getAttribute('aria-label')).toBe('Clear the type filter');
 
-  // Show 10 more asks from 50, and appends.
   await act(async () => {
     options().at(-1)!.click();
   });
@@ -874,11 +786,9 @@ test.skipIf(!hasDom)('the Type chip: All types sends the request as before; a pi
   expect(new Set(options().map((o) => o.getAttribute('data-result-id'))).size).toBe(60);
   expect(host!.querySelector('[data-show-more]')).toBeNull();
 
-  // Edited words keep the type; every query asks for the group.
   await type('relay-');
   await waitFor(() => searches().at(-1)!.url.searchParams.get('q') === 'relay-' && options().length === 51);
   expect(searches().at(-1)!.url.searchParams.get('group')).toBe('files');
-  // No words: the request is the recent view's, and the list says what to do.
   await type('');
   await waitFor(() => host!.querySelector('[data-search-type-empty]') !== null);
   expect(searches().at(-1)!.url.searchParams.get('group')).toBeNull();
@@ -889,7 +799,6 @@ test.skipIf(!hasDom)('Show 50 more drops a row already shown (a message that cam
   respond = async (call) => {
     const p = call.url.searchParams;
     if (p.get('group') === 'files' && p.get('offset') === '50') {
-      // One new file came first since the last page: the page starts one row early.
       return answer({ q: p.get('q') ?? '', terms: [p.get('q') ?? ''], totals: typeTotals, groups: { files: Array.from({ length: 11 }, (_, i) => fileRow(49 + i)) }, recent: null });
     }
     return typeAnswers(call);
@@ -926,7 +835,6 @@ test.skipIf(!hasDom)('the Type chip goes back to All types on ×, on Clear filte
 
   await pickType('Files');
   await waitFor(() => groupHeadings()[0] === 'Files60');
-  // A project too (search opened in one starts everywhere), so Clear filters shows; it clears both.
   await act(async () => {
     host!.querySelector<HTMLElement>('[data-chip="project"]')!.click();
   });
@@ -940,7 +848,6 @@ test.skipIf(!hasDom)('the Type chip goes back to All types on ×, on Clear filte
   await plainAgain();
   expect(host!.querySelector('[data-chip="project"]')!.textContent).toBe('All projects');
 
-  // A type with no match: No matches names it, and Search everywhere clears it.
   respond = async (call) => (call.url.searchParams.get('group') === 'projects' ? answer({ q: 'relay', terms: ['relay'], totals: typeTotals, groups: { projects: [] }, recent: null }) : typeAnswers(call));
   await pickType('Projects');
   await waitFor(() => host!.querySelector('[data-search-none]') !== null);
@@ -950,7 +857,6 @@ test.skipIf(!hasDom)('the Type chip goes back to All types on ×, on Clear filte
   });
   await plainAgain();
 
-  // Closed and opened again: All types, whatever was picked.
   await pickType('Files');
   await waitFor(() => groupHeadings()[0] === 'Files60');
   await renderTyped(false);
@@ -961,7 +867,6 @@ test.skipIf(!hasDom)('the Type chip goes back to All types on ×, on Clear filte
 });
 
 test.skipIf(!hasDom)('a type change on its way draws the last answer as it was asked, never under the new chip', async () => {
-  // Answers to a type's page wait until let go, so the last answer is still the one on screen.
   let holding = false;
   let release: (() => void) | null = null;
   respond = async (call) => {
@@ -985,7 +890,6 @@ test.skipIf(!hasDom)('a type change on its way draws the last answer as it was a
   const row = highlighted();
   holding = true;
 
-  // All types → Files, its page held: the chip says Files, the list is still the All types answer, whole and dimmed.
   await pickType('Files');
   await waitFor(() => release !== null);
   expect(typeChip().textContent).toBe('Files');
@@ -1000,7 +904,6 @@ test.skipIf(!hasDom)('a type change on its way draws the last answer as it was a
   const filesPage = drawn();
   expect(filesPage).toHaveLength(51);
 
-  // Files → All types, its answer held: the Files page as it was, no Actions added, its Show more kept.
   await act(async () => {
     host!.querySelector<HTMLElement>('[data-unset="type"]')!.click();
   });
@@ -1031,17 +934,14 @@ test.skipIf(!hasDom)('Best match | Newest: shown for words, asks again in the or
     const sortSwitch = () => host!.querySelector<HTMLElement>('[data-search-sort]');
     const radio = (value: string) => host!.querySelector<HTMLInputElement>(`[data-search-sort] input[value="${value}"]`)!;
     await renderTyped(true);
-    // No words: nothing to order, no switch.
     expect(sortSwitch()).toBeNull();
     await type('rate');
     await waitFor(() => options().length > 0 && searches().some((c) => c.url.searchParams.get('q') === 'rate'));
     expect(sortSwitch()!.getAttribute('role')).toBe('radiogroup');
-    // Filter row "Up": on a desktop the order is at the search box's end, not in the filter row.
     expect(sortSwitch()!.closest('.ib-sp-inrow')).not.toBeNull();
     expect(host!.querySelector('[data-search-filter-bar] [data-search-sort]')).toBeNull();
     expect([...sortSwitch()!.querySelectorAll('label')].map((l) => l.textContent)).toEqual(['Best match', 'Newest']);
     expect(radio('best').checked).toBe(true);
-    // Best match is today's request: no sort sent.
     expect(searches().at(-1)!.url.searchParams.get('sort')).toBeNull();
 
     const before = searches().length;
@@ -1054,7 +954,6 @@ test.skipIf(!hasDom)('Best match | Newest: shown for words, asks again in the or
     expect(radio('newest').checked).toBe(true);
     expect(storage.getItem(SEARCH_SORT_COOKIE)).toBe('newest');
 
-    // "Show all" goes on in the order picked.
     await waitFor(() => host!.querySelector('[data-show-more]') !== null);
     await act(async () => {
       host!.querySelector<HTMLElement>('[data-show-more]')!.click();
@@ -1062,7 +961,6 @@ test.skipIf(!hasDom)('Best match | Newest: shown for words, asks again in the or
     await waitFor(() => calls.some((c) => c.url.searchParams.get('group') === 'messages'));
     expect(calls.find((c) => c.url.searchParams.get('group') === 'messages')!.url.searchParams.get('sort')).toBe('newest');
 
-    // Closed and opened again: still Newest, and the first words go out in that order.
     await renderTyped(false);
     await renderTyped(true);
     await type('limit');
@@ -1071,7 +969,6 @@ test.skipIf(!hasDom)('Best match | Newest: shown for words, asks again in the or
     await waitFor(() => sortSwitch() !== null);
     expect(radio('newest').checked).toBe(true);
 
-    // Back to Best match: forgotten (the default), and asked again without a sort.
     const again = searches().length;
     await act(async () => {
       radio('best').click();
@@ -1091,7 +988,6 @@ test.skipIf(!hasDom)('Tab reaches the order once (the chosen half), as a radio g
   await waitFor(() => host!.querySelector('[data-search-sort]') !== null);
   const stops: string[] = [];
   input().focus();
-  // One full turn: Tab until the search box again.
   for (let i = 0; i < 20; i++) {
     await key(document.activeElement!, { key: 'Tab' });
     const el = document.activeElement as HTMLElement;
@@ -1099,7 +995,6 @@ test.skipIf(!hasDom)('Tab reaches the order once (the chosen half), as a radio g
     stops.push(el instanceof HTMLInputElement && el.type === 'radio' ? `radio:${el.value}` : (el.getAttribute('data-chip') ?? el.className));
   }
   expect(stops.filter((s) => s.startsWith('radio:'))).toEqual(['radio:best']);
-  // In reading order: the search box, the order beside it, then the filters (Cancel shows on a phone only).
   expect(stops.filter((s) => s !== 'ib-sp-cancel').slice(0, 5)).toEqual(['radio:best', 'type', 'project', 'status', 'from']);
 });
 
@@ -1108,14 +1003,12 @@ test.skipIf(!hasDom)('a phone: the order is pinned at the end of the filter line
   await render({ phone: true });
   await waitFor(() => searches().length === 1);
   const bar = () => host!.querySelector<HTMLElement>('[data-search-filter-bar]')!;
-  // No words: no order, the filters have the line to themselves.
   expect(host!.querySelector('[data-search-sort]')).toBeNull();
   expect(bar().querySelector('.ib-sp-pin')).toBeNull();
   await type('rate');
   await waitFor(() => host!.querySelector('[data-search-sort]') !== null);
   expect(host!.querySelectorAll('[data-search-sort]')).toHaveLength(1);
   expect(host!.querySelector('.ib-sp-inrow [data-search-sort]')).toBeNull();
-  // One line: the filters (which scroll) and, after them, the pinned order; no row of its own.
   expect([...bar().children].map((el) => el.className)).toEqual(['ib-sp-filters', 'ib-sp-pin']);
   expect(bar().querySelector('.ib-sp-pin [data-search-sort]')).not.toBeNull();
   expect(host!.querySelector('.ib-sp-sortrow')).toBeNull();

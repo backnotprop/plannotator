@@ -1,19 +1,4 @@
-/**
- * Click a word (ui's Viewer: one click on a word highlights it) is OFF in a
- * thread's messages and ON in a file opened from the thread (the owner,
- * 2026-11-10: "Off in thread messages, on in documents, files and plan
- * review").
- *
- * Failures to catch: a click on a word of an agent's message opening the
- * selection bar (a thread is read and clicked through all day); a drag over
- * words in a message no longer offering the comment; the click switched off
- * in an attached Markdown file too.
- *
- * The real MessageBody, ThreadPane, ui Viewer and web-highlighter, with fetch
- * answering for the Inbox; no Inbox server. happy-dom has no layout: the caret
- * under a point is stubbed to a position the test sets.
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
+/** happy-dom has no layout: the caret under a point is stubbed to a position the test sets. */
 import { afterEach, beforeAll, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -104,7 +89,6 @@ async function until(check: () => boolean, what: string, ms = 3000) {
   }
 }
 
-/** The text node holding `word` in the document that holds `near`, and a position inside the word. */
 function wordIn(near: string, word: string) {
   const article = [...document.querySelectorAll('article')].find((a) => a.textContent?.includes(near));
   if (!article) throw new Error(`no document with "${near}"`);
@@ -122,7 +106,6 @@ const pointer = (type: string): Event => {
 };
 const mouse = (type: string) => new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: 0, clientY: 0, detail: 1 });
 
-/** One click on `word`, then the wait a word click takes to become a highlight. */
 async function clickWord(near: string, word: string) {
   const target = wordIn(near, word);
   caret = { node: target.node, offset: target.at + 1 };

@@ -1,15 +1,3 @@
-/**
- * Picks made while the reply box is open (the owner: "When i edit a reply,
- * and then add new answers... do they get added to the reply? Because I dont
- * see them"). An agent asks six pick-one questions; the person picks one,
- * opens the reply (Edit draft), adds words, then picks more on the cards.
- * Every pick saves; the box lists every answer live under the words and
- * never writes them into the words (until 0.28.25 Edit draft seeded a
- * one-time summary that went stale). A row jumps to its card. The window over a REAL Inbox
- * (tests/helpers/inbox-dom-server.ts).
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -176,7 +164,6 @@ const SIX = [
   ].flatMap(([prompt, a, b]) => [':::question', prompt!, '', `- [ ] ${a}`, `- [ ] ${b}`, ':::', '']),
 ].join('\n');
 
-/** An agent writes while the test runs (the server's stdin). */
 async function agentSends(body: string, reply_to?: string): Promise<string> {
   const before = lines.length;
   (child!.stdin as import('bun').FileSink).write(`${JSON.stringify({ send: { project: world.project, session: 'ses_six', body, ...(reply_to ? { reply_to } : {}) } })}\n`);
@@ -202,7 +189,6 @@ function type(text: HTMLTextAreaElement, words: string) {
   });
 }
 
-/** A person's click: focus leaves the reply box for the card, then the click. */
 function clickChoice(input: HTMLInputElement) {
   act(() => {
     (document.activeElement as HTMLElement | null)?.blur();
@@ -237,7 +223,6 @@ async function personReplies(message: string) {
 
 test.skipIf(!hasDom)('picks made while the reply box is open save, and the box lists every answer live', async () => {
   const { el, message } = await openSix();
-  // One pick, then the reply box from the foot's Edit draft.
   clickChoice(choice(cards(el)[0]!, 0));
   await until(async () => (await serverQuestions(message))[0]!.state === 'picked', 'the first pick saved');
   await settle();
@@ -245,14 +230,11 @@ test.skipIf(!hasDom)('picks made while the reply box is open save, and the box l
   await settle();
   const text = textarea(el);
   expect(text).not.toBeNull();
-  // The box holds the person's words only: the answers are listed beside them, never written into
-  // the words as a summary that would go stale (and reach the agent twice).
   expect(text.value).toBe('');
   expect(el.querySelector('[data-reply-answers]')?.textContent).toContain('Your answer goes with this reply');
   expect(answerRows(el)).toEqual(['Q1 Which layout should the invoice list use? Cards']);
   type(text, 'Cards because the list is short.');
   await settle();
-  // More picks while the box is open, focus in the words.
   for (const n of [1, 2, 3]) {
     act(() => text.focus());
     clickChoice(choice(cards(el)[n]!, 0));
@@ -269,15 +251,12 @@ test.skipIf(!hasDom)('picks made while the reply box is open save, and the box l
     'Q3 Which currency format? Symbol first',
     'Q4 Where does the export button go? Header',
   ]);
-  // A changed pick shows at once, and the words are as the person left them.
   clickChoice(choice(cards(el)[0]!, 1));
   await settle();
   expect(answerRows(el)[0]).toBe('Q1 Which layout should the invoice list use? A dense table');
   expect(textarea(el).value).toBe('Cards because the list is short.');
-  // The last two stay open by default (approval "inbox-explicit-skip"), then Send: the words once, every answer once.
   expect(el.querySelector('[data-skip-chip]')?.getAttribute('data-skip-chip')).toBe('keep');
   await until(async () => (await serverQuestions(message))[0]!.answer?.selected?.[0] === 'A dense table', 'the changed pick saved');
-  // The box's own Send (approval "inbox-reply-box", T6: Send sits in the box's row).
   act(() => (el.querySelector('.ib-rbox [data-reply-send]') as HTMLButtonElement).click());
   await until(async () => (await personReplies(message)).length === 1, 'the reply');
   const body = (await personReplies(message))[0]!.body;
@@ -285,7 +264,6 @@ test.skipIf(!hasDom)('picks made while the reply box is open save, and the box l
   expect(body).toContain('### Q1. Which layout should the invoice list use?');
   expect(body).toContain('Answer: A dense table');
   expect(body).toContain('Answer: Header');
-  // No summary line of the picks in the words.
   expect(body).not.toContain('Which layout should the invoice list use: ');
   const qs = await serverQuestions(message);
   expect(qs.map((q) => q.state)).toEqual(['sent', 'sent', 'sent', 'sent', 'open', 'open']);
@@ -319,7 +297,6 @@ test.skipIf(!hasDom)('answers to two messages: grouped under each message, "go w
   act(() => (el.querySelector('[data-edit-draft]') as HTMLButtonElement).click());
   await settle();
   const list = el.querySelector('[data-reply-answers]')!;
-  // The group is named by its visible heading, not a repeated aria-label.
   const heading = list.querySelector('.ib-ranswers-h')!;
   expect(list.getAttribute('aria-labelledby')).toBe(heading.id);
   expect(list.hasAttribute('aria-label')).toBe(false);
@@ -327,11 +304,9 @@ test.skipIf(!hasDom)('answers to two messages: grouped under each message, "go w
   const groups = [...list.querySelectorAll('[data-reply-answers-group]')].map((g) => g.getAttribute('data-reply-answers-group'));
   expect(groups).toEqual([message, later]);
   expect(answerRows(el)).toEqual(['Q1 Which layout should the invoice list use? Cards', 'Q1 Ship it behind a flag? Yes, a flag']);
-  // Each Q1 says which message it answers, for a screen reader too.
   const labels = [...list.querySelectorAll('[data-reply-answer]')].map((b) => b.getAttribute('aria-label'));
   expect(labels[0]).toMatch(/^Q1, Which layout should the invoice list use\?: Cards\. Claude Code's message, .+\. Show the question\.$/);
   expect(el.querySelector('[data-picks-chip]')?.textContent).toContain('2 picks');
-  // A pick still being saved counts in both at once.
   clickChoice(choice(cards(el)[1]!, 0));
   expect(el.querySelector('[data-picks-chip]')?.textContent).toContain('3 picks');
   expect(heading.textContent).toBe('Your 3 answers go with your replies');

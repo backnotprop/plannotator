@@ -1,18 +1,3 @@
-/**
- * The thread's foot with the reply box closed (approval "thread-foot-status-right",
- * option A): the buttons first, in today's order, then the draft status (drawn at
- * the row's right end, or on its own line above the buttons where the row is
- * narrow: CSS, proved in tests/e2e/inbox-mark-read.spec.ts). One count per thing
- * (approval "reply-bar-pairs"): the open questions count the unanswered ones, the
- * draft counts the picks, and the skip for this Send is the open questions list's
- * first row. Send and Edit draft are described by the draft and the skip. The
- * error after a failed Send sits above the button row, not under it.
- *
- * The window over a REAL Inbox (tests/helpers/inbox-dom-server.ts), its fetches
- * carried over loopback; the failed Send is a reply POST answered with a 500.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -37,7 +22,6 @@ let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let savedEventSource: unknown;
 let posted: { path: string; body: Record<string, unknown> }[] = [];
-/** When set, a reply POST answers this error instead of reaching the Inbox (a failed Send). */
 let failReplies = false;
 const lines: string[] = [];
 
@@ -187,7 +171,6 @@ async function pickFirst(el: HTMLElement) {
   await until(() => !!el.querySelector('[data-foot-status] [data-draft-foot]'), 'the draft status');
 }
 
-/** Base UI opens a menu on the pointer's press, as a person's click does. */
 async function press(target: HTMLElement) {
   await act(async () => {
     target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }));
@@ -198,7 +181,6 @@ async function press(target: HTMLElement) {
   });
 }
 
-/** What Send is described by, read as a screen reader reads it. */
 const described = (el: HTMLElement) =>
   el
     .getAttribute('aria-describedby')!
@@ -209,23 +191,18 @@ const described = (el: HTMLElement) =>
 test.skipIf(!hasDom)('one count per thing: the draft status after the buttons counts the pick, the open questions only the unanswered one; both describe Send and Edit draft', async () => {
   const el = await renderApp(`#thread=${world.stopped}`);
   await until(() => !!foot(el), 'the foot');
-  // Before a pick: the buttons alone, no status.
   expect(foot(el).querySelector('[data-foot-status]')).toBeNull();
   expect(labels(foot(el))).toEqual(['Reply', '2 open questions']);
 
   await pickFirst(el);
   const row = foot(el);
   const [buttons, status] = [...row.children] as HTMLElement[];
-  // The order a screen reader reads: the buttons in today's order, then the status.
   expect(buttons!.matches('[data-foot-buttons]')).toBe(true);
   expect(status!.matches('[data-foot-status]')).toBe(true);
-  // The picked question is the draft's: the open questions count only the other one (approval "reply-bar-pairs").
   expect(labels(buttons!)).toEqual(['Send', 'Edit draft', '1 open question']);
   expect(status!.querySelector('[data-draft-foot]')!.textContent).toContain('1 pick');
-  // No skip chip in the foot: it is the open questions list's first row now.
   expect(row.querySelector('[data-skip-chip], [data-skip-toggle]') === null).toBe(true);
 
-  // Send and Edit draft name the status as their description: the draft note and the skip sentence.
   for (const name of ['Send', 'Edit draft']) {
     const ids = button(buttons!, name).getAttribute('aria-describedby')!.split(' ');
     const text = ids.map((id) => document.getElementById(id)?.textContent ?? '').join(' ');
@@ -244,7 +221,6 @@ test.skipIf(!hasDom)('the skip for this Send is the list\'s first row: Skip it r
   const toggle = () => skipRow()?.querySelector<HTMLElement>('[data-skip-toggle]') ?? null;
   await press(questions());
   await until(() => !!skipRow(), 'the skip row');
-  // The first thing in the list, before the question rows.
   const first = list()!.querySelector('[role="menuitem"]');
   expect(first === toggle()).toBe(true);
   expect(skipRow()!.getAttribute('data-open-questions-skip-row')).toBe('keep');
@@ -252,22 +228,18 @@ test.skipIf(!hasDom)('the skip for this Send is the list\'s first row: Skip it r
   const picksBefore = posted.filter((p) => p.path.includes('/picks')).length;
   await press(toggle()!);
   await until(() => skipRow()?.getAttribute('data-open-questions-skip-row') === 'skip', 'skipped for this Send');
-  // The list stays open so the change shows; the button and Send say it.
   expect(list() !== null).toBe(true);
   expect(skipRow()!.textContent).toBe('1 skipped when you sendKeep open');
   expect(questions().textContent?.trim()).toBe('1 to skip');
   expect(questions().getAttribute('aria-label')).toBe('1 question skipped when you send');
-  // Said in the list's live region, as the toggle stays put.
   const live = () => document.querySelector('[data-open-questions-select-live]')?.textContent ?? '';
   expect(live()).toBe('1 skipped when you send');
   expect(described(button(foot(el), 'Send'))).toContain('1 question will be skipped');
-  // Keep open undoes it.
   await press(toggle()!);
   await until(() => skipRow()?.getAttribute('data-open-questions-skip-row') === 'keep', 'kept open again');
   expect(questions().textContent?.trim()).toBe('1 open question');
   expect(live()).toBe('1 stays open when you send');
   expect(described(button(foot(el), 'Send'))).toContain('1 question stays open');
-  // A skip for one Send is not saved: no pick was written by the toggle.
   expect(posted.filter((p) => p.path.includes('/picks')).length).toBe(picksBefore);
 });
 
@@ -280,9 +252,7 @@ test.skipIf(!hasDom)('the error after a failed Send renders above the button row
   const error = el.querySelector('.ib-pfoot .ib-error') as HTMLElement;
   expect(error.getAttribute('role')).toBe('alert');
   expect(error.getAttribute('data-foot-error')).toBe('above');
-  // Before the row in the foot, never after it.
   expect(error.compareDocumentPosition(foot(el)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(error.nextElementSibling).toBe(foot(el));
-  // Nothing was sent; the pick is still waiting.
   expect(foot(el).querySelector('[data-draft-foot]')).not.toBeNull();
 });

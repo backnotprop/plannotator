@@ -1,7 +1,3 @@
-/**
- * Paste to attach (compose/paste.ts): which pastes carry files, which leave
- * the browser's text paste alone, and the name a clipboard image gets.
- */
 import { describe, expect, test } from 'bun:test';
 import { chosenFileNames, clipboardFiles, clipboardHasText, pastedFileName, pastedImageOwnLink, pastedFiles, pasteStamp } from './compose/paste';
 
@@ -44,7 +40,6 @@ describe('what a paste carries', () => {
     expect(pastedFiles(data([text, { ...picture, file: file('Pasted Graphic 2.png', 'image/png') }], 'Revenue'), [], at)).toEqual([]);
     const fromFinder = file('chart.png', 'image/png');
     expect(pastedFiles(data([text, { kind: 'file', type: 'image/png', file: fromFinder }], 'chart.png'), [], at)).toEqual([fromFinder]);
-    // A screenshot, and Chrome's "Copy image" (HTML, no plain text): no plain text, so the picture attaches.
     expect(pastedFiles(data([picture]), [], at)).toHaveLength(1);
     expect(pastedFiles(data([{ kind: 'string', type: 'text/html' }, picture], ''), [], at)).toHaveLength(1);
     expect(pastedFiles(data([text, picture], '   '), [], at)).toHaveLength(1);
@@ -75,14 +70,11 @@ describe('what a paste carries', () => {
     const copied = data([text, html, picture], ` ${url}\n`, '<meta charset="utf-8"><img src="https://example.com/board/header.png?w=2&amp;h=1" alt="">');
     expect(pastedImageOwnLink(copied, true)).toBe(true);
     expect(pastedFiles(copied, [], at, { phone: true })).toHaveLength(1);
-    // A desktop keeps today's rule: text with an unnamed picture is text.
     expect(pastedImageOwnLink(copied, false)).toBe(false);
     expect(pastedFiles(copied, [], at)).toEqual([]);
-    // An Excel or Numbers cell whose value is a URL: its text, an HTML table and a picture of the cell. Text, on both.
     const cell = data([text, html, picture], url, `<table><tr><td>${url.replace('&', '&amp;')}</td></tr></table>`);
     expect(pastedFiles(cell, [], at, { phone: true })).toEqual([]);
     expect(pastedFiles(cell, [], at)).toEqual([]);
-    // A link with no HTML, an <img> of another address, a sentence, a file:// link: text.
     expect(pastedImageOwnLink(data([text, picture], url), true)).toBe(false);
     expect(pastedImageOwnLink(data([text, html, picture], url, '<img src="https://example.com/other.png">'), true)).toBe(false);
     expect(pastedImageOwnLink(data([text, html, picture], `See ${url}`, `<img src="${url}">`), true)).toBe(false);

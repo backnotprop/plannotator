@@ -1,26 +1,3 @@
-/**
- * A long paste as a file (approval "inbox-paste-attachment", Option A), as the
- * window does it: the whole window (InboxApp) over a REAL Inbox server in a
- * temp data dir (its own process, tests/helpers/inbox-dom-server.ts), its
- * fetches and uploads carried to it over loopback. What is proved:
- *  - a paste of 32 KB or more in the reply box is prevented and becomes a
- *    pasted text tile (`pasted-text-<stamp>.txt`); the words around it stay;
- *  - Undo (its first 10 s) and Put back in box (after them) put the exact text
- *    back where it was pasted, after edits around it, with the caret after it;
- *    a selection the paste would have replaced goes, as a paste takes it;
- *    focus on Undo stays on the control at the 10 s swap, whose name says
- *    which paste; CRLF text goes back with `\n` line ends (the file keeps
- *    its bytes); a named file pasted beside long text leaves the text a tile;
- *  - the browser's own undo (`historyUndo`) puts it back as the field's very
- *    next edit, and stands down after any other edit;
- *  - Send carries it as an ordinary upload with the paste's bytes;
- *  - New message: a tile alone is sent (words or files), Put back works there,
- *    and 32 KB pasted into the thread-name chip becomes a tile, not words;
- *  - a reply too long for a draft says so above the box, and is never posted;
- *    any other refusal of a save never says "too long".
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -35,12 +12,10 @@ import { NO_BROWSER } from '../../tests/helpers/no-browser';
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
 const { ComposeFileTiles } = (hasDom ? await import('./compose/ComposeFiles') : {}) as typeof import('./compose/ComposeFiles');
-/** The update control's restart guard: what a restart would lose (null: nothing). */
 const { unsentReply } = (hasDom ? await import('./unsent') : {}) as typeof import('./unsent');
 
 const SERVER_SCRIPT = resolve(import.meta.dir, '../../tests/helpers/inbox-dom-server.ts');
 const PASTED = /^pasted-text-\d{4}-\d\d-\d\d-\d{4}(-\d+)?\.txt$/;
-/** A 40 KB log: over the 32 KB line, so it becomes a tile. */
 const LOG = Array.from({ length: 800 }, (_, i) => `2026-11-01T21:10:${String(i % 60).padStart(2, '0')}Z worker retry ${i} charged`).join('\n') + '\n';
 
 type World = { project: string; waiting: string };
@@ -55,11 +30,8 @@ let savedFetch: typeof fetch;
 let savedEventSource: unknown;
 let savedXhr: unknown;
 let posted: { path: string; body: Record<string, unknown> }[] = [];
-/** The reply draft's next save is refused with this (422), then saves go on as usual. */
 let refuseDraft: { code: string; error: string; field?: string } | null = null;
-/** The window's uploads, as they start (their paths). */
 let uploadsStarted: string[] = [];
-/** This test's fetch calls not answered yet: afterEach waits for none before the real fetch is back. */
 let inflight = 0;
 
 function loopback(path: string, method = 'GET', body?: string | Buffer, headers: Record<string, string> = {}): Promise<{ status: number; text: string }> {
@@ -75,7 +47,6 @@ function loopback(path: string, method = 'GET', body?: string | Buffer, headers:
   });
 }
 
-/** One poll from an agent connection working in `project`: the session is live for 30 s after it. */
 async function poll(session: string, hostName: string, project: string) {
   const { token } = JSON.parse(readFileSync(join(dir!, 'data', 'inbox', 'inbox.json'), 'utf8')) as { token: string };
   const answer = await loopback(
@@ -87,7 +58,6 @@ async function poll(session: string, hostName: string, project: string) {
   expect(answer.status).toBe(200);
 }
 
-/** The window's upload (api.ts uploadFile): an XMLHttpRequest, carried over loopback with the file's bytes. */
 class LoopbackXhr {
   status = 0;
   responseText = '';
@@ -162,7 +132,6 @@ beforeEach(() => {
       const method = init?.method ?? 'GET';
       const body = init?.body ? String(init.body) : undefined;
       if (method === 'POST') posted.push({ path, body: body ? JSON.parse(body) : {} });
-      // A refusal the test asks for, once: the reply draft's next save.
       if (refuseDraft && method === 'POST' && path.endsWith('/draft')) {
         const refusal = refuseDraft;
         refuseDraft = null;
@@ -207,7 +176,6 @@ afterEach(async () => {
  * so a save queued behind an answer has started its request by the second read.
  */
 async function requestsSettled() {
-  // About 5 s, so a slow runner still settles.
   for (let i = 0; i < 250; i++) {
     if (inflight === 0) {
       await act(async () => void (await new Promise((r) => setTimeout(r, 0))));
@@ -252,7 +220,6 @@ function button(el: ParentNode, text: string): HTMLButtonElement {
   return found as HTMLButtonElement;
 }
 
-/** Typing: the field's new value and its `input` (with the `beforeinput` a browser sends first). */
 function type(text: HTMLTextAreaElement, words: string, caret = words.length) {
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
   act(() => {
@@ -265,7 +232,6 @@ function type(text: HTMLTextAreaElement, words: string, caret = words.length) {
   });
 }
 
-/** The browser's undo (⌘Z, Edit → Undo) as the page sees it: a `beforeinput` of type historyUndo. True when the page took it. */
 function browserUndo(text: HTMLTextAreaElement): boolean {
   const event = new Event('beforeinput', { bubbles: true, cancelable: true });
   Object.defineProperty(event, 'inputType', { value: 'historyUndo' });
@@ -275,7 +241,6 @@ function browserUndo(text: HTMLTextAreaElement): boolean {
   return event.defaultPrevented;
 }
 
-/** A paste of plain text on `target`. Returns whether the browser's own paste was prevented. */
 function paste(target: HTMLElement, words: string): boolean {
   const items = [{ kind: 'string', type: 'text/plain', getAsFile: () => null }];
   const event = new Event('paste', { bubbles: true, cancelable: true });
@@ -303,7 +268,6 @@ test.skipIf(!hasDom)('the reply box: 32 KB pasted between words becomes a tile; 
   const el = await renderApp(`#thread=${world.waiting}`);
   const text = await openReply(el);
   type(text, BEFORE + AFTER, BEFORE.length);
-  // Under the line: text, as before.
   const short = 'x'.repeat(32 * 1024 - 1);
   expect(paste(text, short)).toBe(false);
   expect(pastedTiles(el)).toHaveLength(0);
@@ -312,12 +276,10 @@ test.skipIf(!hasDom)('the reply box: 32 KB pasted between words becomes a tile; 
   await until(() => pastedTiles(el).length === 1, 'the tile');
   const tile = pastedTiles(el)[0]!;
   expect(tile.getAttribute('data-compose-file-name')).toMatch(PASTED);
-  // Its name is the paste's first words; the box's words are untouched.
   expect(tile.querySelector('.ib-pt-nm')?.textContent).toBe(LOG.split('\n')[0]);
   expect(text.value).toBe(BEFORE + AFTER);
   await until(() => el.querySelector('[data-fold-live]')?.textContent?.startsWith('Attached pasted-text-') === true, 'the announcement');
 
-  // Words typed before the paste's place meanwhile: the paste still goes back between "run." and " The third".
   type(text, `Hi. ${BEFORE}${AFTER}`, 4 + BEFORE.length);
   act(() => (tile.querySelector('[data-pasted-undo]') as HTMLButtonElement).click());
   expect(pastedTiles(el)).toHaveLength(0);
@@ -331,7 +293,6 @@ test.skipIf(!hasDom)('after 10 s the tile offers Put back in box; a selection th
   const el = await renderApp(`#thread=${world.waiting}`);
   const text = await openReply(el);
   type(text, `${BEFORE} OLD WORDS${AFTER}`);
-  // "OLD WORDS" selected: the paste takes their place.
   act(() => text.setSelectionRange(BEFORE.length + 1, BEFORE.length + 1 + 'OLD WORDS'.length));
   expect(paste(text, LOG)).toBe(true);
   await until(() => pastedTiles(el).length === 1 && text.value === `${BEFORE} ${AFTER}`, 'the tile, the selection gone');
@@ -343,11 +304,9 @@ test.skipIf(!hasDom)('after 10 s the tile offers Put back in box; a selection th
   expect(tile().querySelector('[data-pasted-undo]')).toBeNull();
   expect(tile().querySelector('[data-pasted-line]')?.textContent).toContain('Put back in box');
   const back = tile().querySelector('[data-pasted-put-back]') as HTMLButtonElement;
-  // Its name says which paste (two tiles never give two identical buttons), and holds the words it shows.
   const name = tile().getAttribute('data-compose-file-name')!;
   expect(back.getAttribute('aria-label')).toContain(name);
   expect(back.getAttribute('aria-label')).toContain('Put back in box');
-  // Typed after the paste's place: those words stay after it.
   type(text, `${BEFORE} ${AFTER} Thanks.`, `${BEFORE} ${AFTER} Thanks.`.length);
   act(() => (tile().querySelector('[data-pasted-put-back]') as HTMLButtonElement).click());
   expect(text.value).toBe(`${BEFORE} ${LOG}${AFTER} Thanks.`);
@@ -355,7 +314,6 @@ test.skipIf(!hasDom)('after 10 s the tile offers Put back in box; a selection th
 }, 40_000);
 
 test.skipIf(!hasDom)('a keyboard user on Undo as its 10 s pass: focus stays on the same control, which now reads Put back in box', async () => {
-  // The tile alone, pasted 9.8 s ago: the swap comes in 0.2 s.
   host = document.createElement('div');
   document.body.appendChild(host);
   const file = { key: 'k1', name: 'pasted-text-2026-11-02-0109.txt', size: LOG.length, state: 'done' as const, progress: 1, upload: null, error: null, preview: null, pasted: { text: LOG, preview: 'The log', at: Date.now() - 9_800 } };
@@ -383,7 +341,6 @@ test.skipIf(!hasDom)('CRLF line ends: Undo puts back the words as the box holds 
   expect(text.value).toBe(BEFORE + LOG + AFTER);
   expect(text.selectionStart).toBe((BEFORE + LOG).length);
 
-  // Two pastes: each control names its own tile.
   type(text, BEFORE + AFTER, BEFORE.length);
   expect(paste(text, crlf)).toBe(true);
   expect(paste(text, `${LOG}second\n`)).toBe(true);
@@ -391,7 +348,6 @@ test.skipIf(!hasDom)('CRLF line ends: Undo puts back the words as the box holds 
   const labels = pastedTiles(el).map((tile) => tile.querySelector('[data-pasted-undo]')!.getAttribute('aria-label'));
   expect(new Set(labels).size).toBe(2);
   pastedTiles(el).forEach((tile, i) => expect(labels[i]).toContain(tile.getAttribute('data-compose-file-name')!));
-  // The second goes (×); the CRLF one is sent with its bytes as pasted.
   act(() => (pastedTiles(el)[1]!.querySelector('.ib-cp-fx') as HTMLButtonElement).click());
   await until(() => pastedTiles(el)[0]?.getAttribute('data-compose-file') === 'done', 'the upload');
   act(() => button(el, 'Send').click());
@@ -433,15 +389,12 @@ test.skipIf(!hasDom)('a reply draft refused for anything but its length never sa
   await until(() => refuseDraft === null, 'the refused save');
   await wait(300);
   const saidTooLong = el.querySelector('[data-draft-too-long]') !== null;
-  // The words are not saved: the restart guard asks, with no further typing.
   const guardAsked = unsentReply() !== null;
-  // The next pause in typing saves (and leaves no "too long" behind for the next test, whatever was said).
   type(text, 'Ship it today.');
   await until(() => posted.some((p) => p.path.endsWith('/draft') && p.body.body === 'Ship it today.'), 'the save');
   expect(saidTooLong).toBe(false);
   expect(guardAsked).toBe(true);
   expect(el.querySelector('[data-draft-too-long]')).toBeNull();
-  // Saved: the guard is quiet again.
   await until(() => unsentReply() === null, 'the guard at rest');
 }, 30_000);
 
@@ -456,7 +409,6 @@ test.skipIf(!hasDom)("the browser's undo puts the paste back as the very next ed
   expect(text.value).toBe(BEFORE + LOG + AFTER);
   expect(text.selectionStart).toBe((BEFORE + LOG).length);
 
-  // Again, then a word typed: the next undo is the browser's own, and the tile stays.
   type(text, BEFORE + AFTER, BEFORE.length);
   expect(paste(text, LOG)).toBe(true);
   await until(() => pastedTiles(el).length === 1, 'the tile again');
@@ -491,7 +443,6 @@ test.skipIf(!hasDom)('New message: a tile alone is sent; Put back works there; 3
   await until(() => !!dialog()?.querySelector('[data-compose-to="ses-paste-text"]'), 'To picked');
   const text = dialog().querySelector('textarea') as HTMLTextAreaElement;
 
-  // Put back in New message: at the caret, between the words.
   type(text, BEFORE + AFTER, BEFORE.length);
   expect(paste(text, LOG)).toBe(true);
   await until(() => pastedTiles(dialog()).length === 1, 'the tile');
@@ -499,7 +450,6 @@ test.skipIf(!hasDom)('New message: a tile alone is sent; Put back works there; 3
   expect(text.value).toBe(BEFORE + LOG + AFTER);
   expect(text.selectionStart).toBe((BEFORE + LOG).length);
 
-  // The thread-name chip: 32 KB is not a name, and goes to the message as a tile, not as words.
   type(text, '');
   const chip = dialog().querySelector('input[aria-label="Thread name"]') as HTMLInputElement;
   expect(paste(chip, LOG)).toBe(true);
@@ -507,7 +457,6 @@ test.skipIf(!hasDom)('New message: a tile alone is sent; Put back works there; 3
   expect(text.value).toBe('');
   expect(dialog().querySelector('[data-compose-thread-name-note]')?.textContent).toContain('attached');
 
-  // Only the tile, no words: it is sent, as a reply of files is.
   await until(() => pastedTiles(dialog())[0]?.getAttribute('data-compose-file') === 'done', 'the upload');
   const name = pastedTiles(dialog())[0]!.getAttribute('data-compose-file-name')!;
   act(() => (dialog().querySelector('[data-compose-send]') as HTMLButtonElement).click());
@@ -536,7 +485,6 @@ test.skipIf(!hasDom)('a reply too long for a draft says so above the box and is 
 }, 30_000);
 
 test.skipIf(!hasDom)("New message: a draft too long to keep says so plainly, never the Inbox's field words", async () => {
-  // No agent is live in this world's project, so the dialog offers Save draft.
   const el = await renderApp();
   act(() => (el.querySelector('.ib-side [data-open-compose]') as HTMLButtonElement).click());
   const dialog = () => document.querySelector('dialog[data-compose]') as HTMLDialogElement;

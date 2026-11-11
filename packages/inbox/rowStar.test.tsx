@@ -1,11 +1,3 @@
-/**
- * The star a list row shows (the owner, 2026-11-05): a press on it unstars, everything else on the row opens. The star
- * sits inside the row's own button, so one wrong branch in the row's click either opens a thread instead of unstarring it
- * or takes a row's Enter away. Starring stays in the menus: an unstarred row has no star at all. The whole window, with
- * the server, is pinnedThreads.test.tsx.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, mock, setSystemTime, spyOn, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -61,7 +53,6 @@ afterEach(() => {
   root = null;
 });
 
-/** The list, with these rows waiting and these starred. Returns what the row's presses called. */
 function draw(rows: InboxListRow[], opts: { pinned?: string[]; narrow?: boolean; phone?: boolean; machines?: MachinesModel } = {}) {
   const onOpen = mock((_: InboxListRow) => {});
   const onUnstar = mock((_: InboxListRow) => {});
@@ -98,7 +89,6 @@ function draw(rows: InboxListRow[], opts: { pinned?: string[]; narrow?: boolean;
 
 let lastDraw: { sections: InboxListSection[]; opts: { narrow?: boolean; phone?: boolean; machines?: MachinesModel }; onOpen: (row: InboxListRow) => void; onUnstar: (row: InboxListRow) => void } | null = null;
 
-/** The list as last drawn, with its rows anew and nothing starred. */
 function draw2(ids: string[]) {
   const { opts, onOpen, onUnstar } = lastDraw!;
   const sections: InboxListSection[] = [{ id: 'waiting', label: 'Waiting on you', threads: ids.map((id) => row(id)) }];
@@ -142,7 +132,6 @@ for (const [shape, opts] of [['wide', {}], ['three-line', { narrow: true }], ['p
     pointerClick(star('starred')!);
     expect(ids(onUnstar)).toEqual(['starred']);
     expect(onOpen).not.toHaveBeenCalled();
-    // Enter or Space on the row: a click with no pointer, whose target is the row.
     act(() => rowEl('starred').click());
     expect(ids(onOpen)).toEqual(['starred']);
     pointerClick(rowEl('plain'));
@@ -159,7 +148,6 @@ test.skipIf(!hasDom)('a list with no star draws no star column', () => {
 test.skipIf(!hasDom)("linked machines: this machine's own star unstars; a star on another machine's row is a mark, and a press there opens", () => {
   setSystemTime(new Date(clock));
   clock += 10_000;
-  // The merged list stamps this machine's id on its own rows too, so "has a machine" is not "another machine's".
   const { onOpen, onUnstar } = draw([row('mine', SELF), row('theirs', OTHER)], { machines: MACHINES, pinned: ['mine', 'theirs'] });
   pointerClick(star('mine')!);
   expect(ids(onUnstar)).toEqual(['mine']);
@@ -169,12 +157,10 @@ test.skipIf(!hasDom)("linked machines: this machine's own star unstars; a star o
   expect(ids(onOpen)).toEqual(['theirs']);
 });
 
-/** The star at x 100..113, y 100..113. */
 function placeStar(id: string) {
   spyOn(star(id)!, 'getBoundingClientRect').mockImplementation(() => ({ left: 100, right: 113, top: 100, bottom: 113, x: 100, y: 100, width: 13, height: 13, toJSON: () => ({}) }) as DOMRect);
 }
 
-/** A real press: its pointerdown, then its click, on the row (not the star) at this place. */
 function pressAt(target: Element, x: number, y: number, pointerType: 'mouse' | 'touch' = 'mouse', detail = 1) {
   act(() => {
     target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerType, clientX: x, clientY: y }));
@@ -223,19 +209,15 @@ test.skipIf(!hasDom)('a double press on the star: the second does nothing, even 
   placeStar('s');
   pressAt(star('s')!, 106, 106);
   expect(onUnstar.mock.calls.length).toBe(1);
-  // The list has read the unstar: the row is drawn again with no star.
   draw2(['s']);
   setSystemTime(new Date(start + 400));
   pressAt(rowEl('s'), 108, 104);
   expect(onOpen).not.toHaveBeenCalled();
   expect(onUnstar.mock.calls.length).toBe(1);
-  // Enter, inside the moment: a real open.
   act(() => rowEl('s').click());
   expect(onOpen.mock.calls.length).toBe(1);
-  // Elsewhere on the row, inside the moment.
   pressAt(rowEl('s'), 106 + 25, 106);
   expect(onOpen.mock.calls.length).toBe(2);
-  // Past the moment, on the same place.
   setSystemTime(new Date(start + 401));
   pressAt(rowEl('s'), 106, 106);
   expect(onOpen.mock.calls.length).toBe(3);
@@ -253,10 +235,8 @@ test.skipIf(!hasDom)("a slow double click, at the person's own speed: the system
   setSystemTime(new Date(start + 500));
   pressAt(rowEl('s'), 106, 106, 'mouse', 2);
   expect(onOpen).not.toHaveBeenCalled();
-  // Counted as a double, but elsewhere on the row.
   pressAt(rowEl('s'), 106 + 25, 106, 'mouse', 2);
   expect(onOpen.mock.calls.length).toBe(1);
-  // The same spot, not counted as a double, past the 400 ms.
   pressAt(rowEl('s'), 106, 106, 'mouse', 1);
   expect(onOpen.mock.calls.length).toBe(2);
 });

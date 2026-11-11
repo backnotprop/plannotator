@@ -1,15 +1,3 @@
-/**
- * Grow brings the board back where the person left it (approval "review-show-me", q-db7db55f). A link on the board over
- * the thread opens the review with the board shrunk to the corner card; the review mounts a board of its own, so
- * without the kept place Grow showed the first view instead of the one the person was on. What regresses:
- *  - the place the person was on is not kept at the link click, or is kept for another board;
- *  - the kept place outlives the board (a board opened again from its Pebble starts at its first view);
- *  - the review's board under the corner card does not start on the kept view and panel, so Grow lands elsewhere.
- *
- * The diff reader and the board are stubbed (the board records the view and panel it starts on).
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, mock, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -23,7 +11,6 @@ import type { ShapeBoardPlace, ShapeBoardProps } from './shape/types';
 const hasDom = typeof document !== 'undefined';
 if (hasDom) {
   mock.module('#guide-reader', () => ({ default: () => null }));
-  // A board that starts where it is told and reports each move, as ShapeSurface does.
   mock.module('#shape-board', () => ({
     default: ({ initialView, initialPanel, onNavigate }: ShapeBoardProps) => {
       const [view, setView] = useState(initialView ?? 'picture');
@@ -76,20 +63,16 @@ test.skipIf(!hasDom)("a link keeps the board's view and panel until the board cl
   const p = () => places!;
   const changed: ShapeBoardPlace = { view: 'changed', panel: 'refs' };
   act(() => p().moved('shp_a', { view: 'picture', panel: null }));
-  // Nothing kept before a link.
   expect(p().placeOf('shp_a')).toBeNull();
   act(() => p().moved('shp_a', changed));
   act(() => p().leave('shp_a'));
   expect(p().placeOf('shp_a')).toEqual(changed);
   expect(p().placeOf('shp_b')).toBeNull();
-  // The review's board moves on: Back to the thread opens there.
   act(() => p().moved('shp_a', { view: 'know', panel: null }));
   expect(p().placeOf('shp_a')).toEqual({ view: 'know', panel: null });
-  // The board closes: opened again, it starts at its first view.
   act(() => setOpen(null));
   expect(p().placeOf('shp_a')).toBeNull();
   act(() => setOpen('shp_b'));
-  // A link on a board the person never moved on keeps nothing from another board.
   act(() => p().leave('shp_b'));
   expect(p().placeOf('shp_b')).toBeNull();
 });
@@ -152,7 +135,6 @@ test.skipIf(!hasDom)("Grow from the corner card shows the board on the view and 
   );
   await settle();
   const layer = () => document.querySelector<HTMLElement>('[data-shape-layer="shp_a"]')!;
-  // Opened from a link: the code, with the board under the corner card.
   expect(document.querySelector('[data-show-me-corner]')).not.toBeNull();
   expect(layer().hidden).toBe(true);
   act(() => document.querySelector<HTMLButtonElement>('[data-show-me-corner] [aria-label="Grow the board"]')!.click());
@@ -162,7 +144,6 @@ test.skipIf(!hasDom)("Grow from the corner card shows the board on the view and 
   const board = layer().querySelector<HTMLElement>('[data-stub-board]')!;
   expect(board.dataset.view).toBe('changed');
   expect(board.dataset.panel).toBe('refs');
-  // Its moves reach the window, which keeps them for Back to the thread.
   act(() => board.querySelector<HTMLButtonElement>('[data-to-how]')!.click());
   expect(moves.at(-1)).toEqual({ view: 'how', panel: 'refs' });
 });

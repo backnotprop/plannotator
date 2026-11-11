@@ -1,16 +1,9 @@
-/**
- * When the question sound rings (sound.ts `decideRing`): once per burst,
- * only while no Inbox tab is in front, never with the sound off. A burst is
- * questions less than 30 s apart; coming to the front ends it; a ring another
- * tab reported joins this tab to that burst.
- */
 import { describe, expect, test } from 'bun:test';
 import { DING_DONG, decideRing, heardRing, QUIET_GATE, RING_BURST_MS, type RingGate } from './sound';
 import { inboxNotificationOptions } from './notify';
 
 const away = { enabled: true, inFront: false, otherTabInFront: false };
 
-/** Questions arriving at these times (ms), all while away: which of them ring. */
 function rings(times: number[], start: RingGate = QUIET_GATE): boolean[] {
   let gate = start;
   return times.map((now) => {
@@ -40,7 +33,6 @@ describe('decideRing', () => {
     const front = decideRing(gate, { ...away, now: 1000, inFront: true });
     expect(front).toEqual({ ring: false, gate: QUIET_GATE });
     expect(decideRing(gate, { ...away, now: 1000, otherTabInFront: true })).toEqual({ ring: false, gate: QUIET_GATE });
-    // Away again a moment later: the next question starts a new burst and rings.
     gate = front.gate;
     expect(decideRing(gate, { ...away, now: 2000 }).ring).toBe(true);
   });
@@ -54,13 +46,12 @@ describe('decideRing', () => {
   test('a ring another tab reported puts this tab in the same burst', () => {
     const gate = heardRing(QUIET_GATE, 1000);
     expect(decideRing(gate, { ...away, now: 2500 }).ring).toBe(false);
-    // An older report never shortens a later burst.
     expect(heardRing({ lastAt: 9000 }, 1000)).toEqual({ lastAt: 9000 });
   });
 });
 
 describe('the sound itself', () => {
-  // Pinned on purpose: the owner chose this exact sound (tile #9, "Ding-dong") from twelve.
+  // Pinned on purpose: this exact sound ("Ding-dong").
   test('two triangle notes a major third apart, the second at +0.32 s, each with a quiet sine an octave up', () => {
     const triangles = DING_DONG.filter((n) => n.type === 'triangle');
     expect(triangles.map((n) => n.t)).toEqual([0, 0.32]);

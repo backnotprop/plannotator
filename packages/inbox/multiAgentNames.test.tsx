@@ -1,18 +1,3 @@
-/**
- * Two agents in one thread (handoff "multi-agent-thread-model", option A:
- * say what is true). Claude Code started the thread and Pi wrote last: the
- * person's reply goes to Pi, so the line under it says "to Pi", its delivery
- * line "Delivered to Pi" (or "Saved for Cursor" for an agent with no wake),
- * and the reply box "Reply to Pi" (its field; the recipient pill under it
- * says "to Pi", approval "inbox-reply-recipient"). They used to name the
- * thread's first agent, Claude Code, which never got the reply. A thread with
- * one agent reads exactly as before.
- *
- * Also (handoff "reply-box-layout-safety", existing gap): a draft save that
- * did not land said "Saved <the last good time>"; it says "Not saved" now.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -22,7 +7,6 @@ import { DRAFT_NOT_SAVED_FAILED } from './components/DraftLabel';
 const hasDom = typeof document !== 'undefined';
 // Viewer pulls in web-highlighter, which reads `window` at module-eval time.
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
-/** The update control's restart guard: what a restart would lose (null: nothing). */
 const { unsentReply } = (hasDom ? await import('./unsent') : {}) as typeof import('./unsent');
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'superfans-abcdef', name: 'superfans', root: '/work/superfans', created_at: '2026-11-01T10:00:00.000Z' };
@@ -72,7 +56,6 @@ const threadOf = (...messages: InboxMessageWire[]): InboxThread => ({ thread_id:
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
-/** How the draft route answers a save (POST); null: it saves. */
 let draftSave: (() => Response | Promise<Response>) | null = null;
 let serverDraft: { body: string; updated_at: string } | null = null;
 let saves = 0;
@@ -151,10 +134,6 @@ function type(el: HTMLElement, words: string) {
   });
 }
 
-/**
- * The "to" line under a message, the last reply's delivery line, and the reply box: any label above it (none, approval
- * "inbox-reply-recipient"), its field's name, and the recipient pill's name (only in a thread with more than one agent).
- */
 const toLine = (el: HTMLElement, id: string) => el.querySelector(`[data-message-article="${id}"] .ib-to`)?.textContent ?? null;
 const deliveryText = (el: HTMLElement) => el.querySelector('.ib-delivered .ib-dl-text')?.textContent ?? null;
 async function boxHead(el: HTMLElement) {
@@ -210,7 +189,6 @@ test.skipIf(!hasDom)('one agent that named itself: its own name, as before, wher
     at: '2026-11-01T10:52:00.000Z',
     checked_at: null,
   });
-  // The thread's name for its one agent (the root's), whichever message the reply answers.
   expect(toLine(el, R1)).toBe('to Cursor');
   expect(deliveryText(el)).toBe('Saved for Cursor. It sees it when it next reads this thread.');
   expect(await boxHead(el)).toEqual({ head: null, field: 'Reply to Cursor', pill: null });
@@ -242,11 +220,9 @@ test.skipIf(!hasDom)('a draft save that did not land says "Not saved", never the
   await settle();
   type(el, 'Ship the usage panel');
   await settle(700);
-  // A computer saves silently (approval "inbox-reply-box", T6): no Saved time in the box, only a failure shows.
   expect(serverDraft?.body).toBe('Ship the usage panel');
   expect(el.querySelector('[data-draft-head]')).toBeNull();
 
-  // The Inbox stops answering: the save fails and reading the draft back finds the older words.
   draftSave = () => {
     throw new TypeError('Failed to fetch');
   };
@@ -256,7 +232,6 @@ test.skipIf(!hasDom)('a draft save that did not land says "Not saved", never the
   expect(el.querySelector('[data-draft-head] .ib-draft-saved')?.textContent).toBe(DRAFT_NOT_SAVED_FAILED);
   expect(el.querySelector('[data-draft-head]')?.hasAttribute('data-draft-failed')).toBe(true);
 
-  // A refusal says the same.
   draftSave = () => Response.json({ error: 'base: not a time', code: 'validation_error' }, { status: 400 });
   type(el, 'Ship the usage panel, and the totals fix, today');
   await settle(700);
@@ -281,8 +256,6 @@ test.skipIf(!hasDom)('an emptied box whose save did not land: the restart guard 
   expect(serverDraft?.body).toBe('Ship it');
   expect(unsentReply()).toBeNull();
 
-  // The Inbox stops answering, and the person empties the box: that save (a delete) fails, and the read-back
-  // finds the older words. A restart brings them back, so nothing would be lost.
   draftSave = () => {
     throw new TypeError('Failed to fetch');
   };
@@ -292,7 +265,6 @@ test.skipIf(!hasDom)('an emptied box whose save did not land: the restart guard 
   expect(saves).toBe(2);
   expect(unsentReply()).toBeNull();
 
-  // Words typed again that do not land: those a restart would lose, so the guard asks.
   type(el, 'Ship it today');
   await settle(700);
   await settle(50);

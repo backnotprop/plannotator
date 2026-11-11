@@ -1,10 +1,3 @@
-/**
- * A code attachment in the window: the pane draws the file in the code review
- * engine's single-file view with line comments (a shell `#` comment never
- * becomes a heading), and the tile names the kind. The phone surface's one
- * code block stays plain text over the highlight bound, never one long
- * synchronous Shiki pass.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -93,7 +86,6 @@ test.skipIf(!hasDom)('the pane draws a script in the code view (Pierre), with li
   await openPane(SCRIPT);
   const view = host!.querySelector('[data-code-view]');
   expect(view).not.toBeNull();
-  // The code review engine's single-file view, never the markdown pipeline (a `#` comment is not a heading).
   expect(view!.querySelector('diffs-container')).not.toBeNull();
   expect(host!.querySelector('.ib-docscroll')).toBeNull();
   expect(host!.querySelector('.ib-toolstrip')).toBeNull();
@@ -113,7 +105,6 @@ test.skipIf(!hasDom)('the tile names the kind of a code attachment', async () =>
   expect(host!.querySelector(`[data-attachment-id="${attachment.id}"]`)?.textContent).toContain('Code (.sh)');
 });
 
-// Row 44: logs, YAML, CSV and JSON ran their lines together through the markdown pipeline (# read as a heading).
 test('data and log files are drawn as code; .txt and markdown keep their own view', () => {
   for (const name of ['worker.log', 'config.yaml', 'ci.yml', 'data.csv', 'rows.tsv', 'package.json', 'Cargo.toml', 'app.ini', 'site.conf', 'feed.xml', '.env.example']) {
     expect(inboxViewKind('text', name)).toBe('code');
@@ -153,7 +144,6 @@ test.skipIf(!hasDom)('a YAML file sent as text opens in the code view, and a tex
   expect(chip).toBeDefined();
 });
 
-// Row 60: a comment on a minified file's one line stored the whole 323 KB line.
 test('a comment on a very long line keeps an excerpt with the length and a hash; old whole-line records still match', () => {
   const line = `var a=${'x'.repeat(330_000)};`;
   const stored = codeRangeOf(codeCommentAnnotation({ id: 'a', lineStart: 1, lineEnd: 1, text: 'too long', code: line }))!;
@@ -164,15 +154,12 @@ test('a comment on a very long line keeps an excerpt with the length and a hash;
   expect(codeRangeMatches(stored, line.replace('x;', 'y;'))).toBe(false);
   expect(codeRangeMatches(stored, `${line} `)).toBe(false);
 
-  // A short comment is kept whole, with no hash: the same record as before.
   const short = codeRangeOf(codeCommentAnnotation({ id: 'b', lineStart: 2, lineEnd: 2, text: 'ok', code: 'const a = 1;' }))!;
   expect(short).toEqual({ lineStart: 2, lineEnd: 2, code: 'const a = 1;' });
-  // A record from before excerpts (the whole lines, no hash) matches by its text.
   expect(codeRangeMatches({ lineStart: 1, lineEnd: 1, code: line }, line)).toBe(true);
   expect(codeRangeMatches({ lineStart: 1, lineEnd: 1, code: line }, `${line} `)).toBe(false);
 });
 
-// Row 59: a minified file's one line could not wrap.
 test('a line over the wrap bound is found on any line, and short lines are not', () => {
   expect(hasLineLongerThan('a\nb\n', 1000)).toBe(false);
   expect(hasLineLongerThan(`a\n${'x'.repeat(1001)}\nb`, 1000)).toBe(true);

@@ -1,10 +1,3 @@
-/**
- * Remote launch, the folder menu grouped by machine (approval "remote-launch", the picker's A), its rules alone
- * (`launchGroups`, `launchHistory` in compose/model.ts). What can regress: a person with no linked machine seeing a
- * caption or any change at all; the machine used last not on top; a project on two machines listed once; an asleep
- * machine's projects gone; a machine where the agent can't start offering projects that would fail; the default
- * start picking another machine's folder at the same path as the project the person is looking at.
- */
 import { describe, expect, test } from 'bun:test';
 import type { InboxComposeLaunch } from '@plannotator/core/inbox-types';
 import { defaultStartProject, launchGroups, launchHistory, type LaunchMachine, type MachineLaunchRead } from './compose/model';
@@ -62,7 +55,6 @@ describe('linked machines: one group per machine', () => {
     expect(out.grouped).toBe(true);
     expect(names(out)).toEqual(['MacBook', 'Mac mini']);
     expect(out.groups.map((g) => g.quiet)).toEqual(['this computer', 'asleep']);
-    // The asleep machine's last good read still lists its projects, each naming its machine.
     expect(out.groups[1]!.asleep).toBe(true);
     expect(out.groups[1]!.projects.map((p) => [p.id, p.machine, p.machine_name])).toEqual([
       ['prj_infra', MINI, 'Mac mini'],
@@ -118,7 +110,6 @@ describe('linked machines: one group per machine', () => {
       'Run `claude` on Mac mini once to sign in, then try again. Already signed in there? In Terminal on Mac mini itself, run `plannotator inbox restart`.',
     );
     expect(fixOn('codex', signedOut('codex', 'Codex', false))).toBe('Run `codex login` on Mac mini, then try again. Already signed in there? In Terminal on Mac mini itself, run `plannotator inbox restart`.');
-    // The other reasons keep their one line: launch off there, and a missing plugin (its command is the Copy button).
     const off = launchGroups({ agent: 'claude-code', self, machines: [SELF_VIEW, machine(MINI, 'Mac mini', { launch: false })], reads: new Map() });
     expect(off.groups[1]!.notice?.fix ?? null).toBeNull();
     const pluginOff: InboxComposeLaunch = { agents: [], projects: mini.projects, not_ready: [{ agent: 'claude-code', name: 'Claude Code', code: 'plugin_off' }] };
@@ -131,7 +122,6 @@ describe('linked machines: one group per machine', () => {
   });
 
   test("the machine's switch turned since the link connected: its last sessions read decides, not the link's health", () => {
-    // Turned off there: health still said on, the read has no launch block. Turned on there: health said off, the read has one.
     const out = launchGroups({
       agent: 'claude-code',
       self,

@@ -1,18 +1,3 @@
-/**
- * A question's prototypes on the card and in the window (approval
- * "inbox-question-tradeoffs"):
- * - the card: "Try prototypes" ("Try prototype" for one page) hangs from the
- *   options' tray; picture tiles keep only their zoom (no ▷ on a tile: the tab is the one way in); the
- *   option lines leave the meaning line, and Pros and Cons sit in a closed
- *   "Trade-offs" table with no Recommended tag;
- * - the window: it opens on the recommended option's page, ‹ › skip options
- *   with no page, and Pick picks (the card stays unsent) then closes after
- *   a beat.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- * The window's app pages ask the API, answered here as a stopped app (the
- * plain line); the bar is what is checked.
- */
 import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -116,13 +101,11 @@ test.skipIf(!hasDom)("the card: the tab under the tray, no ▷ on a picture tile
   const tiles = Array.from(host!.querySelectorAll<HTMLElement>('[data-question-tile]'));
   expect(tiles).toHaveLength(2);
   for (const tile of tiles) {
-    // Only the zoom button: no play, no Try, nothing about a prototype on the tile.
     const buttons = Array.from(tile.querySelectorAll('button'));
     expect(buttons.map((b) => b.hasAttribute('data-question-zoom'))).toEqual([true]);
     expect(tile.textContent).not.toMatch(/prototype|Prototype:|Pros:|Cons:/);
   }
   const tab = host!.querySelector<HTMLButtonElement>('[data-question-tray-host] > .ib-qtab-row > button[data-try-prototype]')!;
-  // Two options' pages: plural.
   expect(tab.textContent).toBe('Try prototypes');
   expect(tab.closest('[data-question-tile]')).toBeNull();
   await act(async () => tab.click());
@@ -132,7 +115,6 @@ test.skipIf(!hasDom)("the card: the tab under the tray, no ▷ on a picture tile
   const table = host!.querySelector<HTMLElement>('[data-question-tradeoffs]')!;
   expect(toggle.getAttribute('aria-expanded')).toBe('false');
   expect(table.hidden).toBe(true);
-  // It sits under Why.
   const why = host!.querySelector('[data-question-part="why"]')!;
   expect(why.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   await act(async () => toggle.click());
@@ -174,7 +156,6 @@ test.skipIf(!hasDom)('the window opens on the recommended page; ‹ › skip an 
     expect(caption()).toBe('C');
     expect(step('next').getAttribute('aria-disabled')).toBe('true');
     await act(async () => step('prev').click());
-    // B has no page: one step back is A.
     expect(caption()).toBe('A');
     expect(step('prev').getAttribute('aria-disabled')).toBe('true');
     await act(async () => step('prev').click());

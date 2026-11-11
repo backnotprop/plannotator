@@ -1,11 +1,3 @@
-/**
- * Comments made in a question's prototype window ride the next Send filed
- * under the option the page shows (approval "inbox-question-tradeoffs"): a
- * running app's section and an attached HTML file's section are each headed
- * by the option's name, then the address or file. A page no option names
- * keeps its plain heading. Pure: the names come from the thread's messages
- * (prototypes.ts), the text from attachmentFeedback, as Send builds it.
- */
 import { expect, test } from 'bun:test';
 import type { InboxAnnotationRecord, InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { attachmentFeedback } from './attachments';
@@ -82,7 +74,6 @@ test("Send files a prototype's comments under the option's name, then its addres
   expect(named).toMatch(/## Prototype of "A · Classic": proto\/a\.html \(the version you sent\)\n/);
   expect(named).toContain('Make Pay bigger.');
   expect(named).toContain('The total reads small.');
-  // Without names (an older window, a page no option names): the address and the file, as before.
   const plain = attachmentFeedback(records, [FILE_A], new Map(), ROOT);
   expect(plain).toContain(`## ${APP_B.url} (live site)\n`);
   expect(plain).not.toContain('Prototype of');

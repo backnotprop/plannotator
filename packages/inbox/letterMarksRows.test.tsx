@@ -1,14 +1,4 @@
-/**
- * Letter marks on the list's rows (approval "inbox-letter-marks", 2026-11-07), drawn from the Rows look (config.json
- * `inboxRows`, listLook.ts): all off by default, three styles (Inline, Avatar, Dot), and Agent icons off.
- * What this catches: a mark drawn while marks are off (the Inbox must look exactly as before); a style that draws
- * in the wrong place or not at all on a wide, three-line or phone row; a mark a screen reader would read (the name is
- * already in text); the row's hover card keeping the agent's mark with Agent icons off; the onboarding tour drawing
- * the person's marks.
- *
- * happy-dom matches `:focus-visible` for every focus, so a keyboard focus is a plain `focus()` here (as rowBadges).
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
+/** happy-dom matches `:focus-visible` for every focus, so a keyboard focus is a plain `focus()` here. */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -68,7 +58,6 @@ let host: HTMLElement | null = null;
 beforeEach(() => {
   const stored = new Map<string, string>();
   setStorageBackend({ getItem: (k) => stored.get(k) ?? null, setItem: (k, v) => void stored.set(k, v), removeItem: (k) => void stored.delete(k) });
-  // The project pictures are never asked for here (no picture set, both switches off); a save answers as the server would.
   globalThis.fetch = (async (_url: unknown, init?: { body?: string }) =>
     new Response(JSON.stringify({ rows: (JSON.parse(init?.body ?? '{}') as { rows: unknown[] }).rows }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as typeof fetch;
   resetListLookForTests();
@@ -84,7 +73,6 @@ afterEach(() => {
   host = null;
 });
 
-/** The person's saved look: the defaults (smaller names) plus `on`. */
 function look(...on: InboxRowsOption[]) {
   act(() => adoptSavedRows(['smallNames', ...on], 1));
 }
@@ -141,7 +129,6 @@ describe.if(hasDom)('letter marks on the rows', () => {
       expect(project!.classList.contains('ib-lm-badge')).toBe(true);
       expect(project!.textContent).toBe('BC');
       if (shape !== 'wide') expect(rowOf(el, 'msg_hold').hasAttribute('data-lm-av')).toBe(true);
-      // Nothing else on the row: no tile before the title, no dot.
       expect(rowOf(el, 'msg_hold').querySelectorAll('.ib-lm-tt').length).toBe(0);
       act(() => root!.unmount());
       host!.remove();
@@ -162,7 +149,6 @@ describe.if(hasDom)('letter marks on the rows', () => {
     el = mount('wide');
     const dot = rowOf(el, 'msg_hold').querySelector('.ib-lm-tt[data-take="dot"] > .ib-lm-dot')!;
     expect(dot).not.toBeNull();
-    // Threads only: no project mark, and no letters in the list.
     expect(rowOf(el, 'msg_hold').querySelector('.ib-lm')).toBeNull();
   });
 
@@ -189,14 +175,12 @@ describe.if(hasDom)('letter marks on the rows', () => {
       act(() => rowOf(el, 'msg_hold').focus());
       await settle(50);
       const foot = document.querySelector('[data-wait-card] .ib-wc-foot')!;
-      // The agent stays named in words; only its mark goes.
       expect(foot.textContent).toContain('Claude Code');
       expect(foot.firstElementChild!.classList.contains('ib-wc-agent')).toBe(true);
       act(() => rowOf(el, 'msg_hold').blur());
       act(() => root!.unmount());
       host!.remove();
     }
-    // Agent icons on: the card keeps its mark.
     look('marksThreads');
     const el = mount('narrow');
     act(() => rowOf(el, 'msg_hold').focus());

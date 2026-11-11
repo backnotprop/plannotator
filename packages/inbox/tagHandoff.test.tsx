@@ -1,18 +1,3 @@
-/**
- * Ask, Add and Hand off from the reply box (approval "inbox-tag-handoff",
- * option A2), as the window draws them: the whole window (InboxApp) over a
- * REAL Inbox in a temp data dir (tests/helpers/inbox-dom-server.ts `tags`,
- * the tag world's live connections). What is proved: after a pick the one
- * line under the box says Send asks the agent, with "Add instead" and "Hand
- * off instead"; each switch reads back with "Ask instead", which restores the
- * Ask exactly; Send carries the mode on the tag; a hand-off shows the line in
- * the thread with Undo, who has the thread now and the toast with Undo, and
- * Undo turns it into an Ask; Add marks the session joined and says so; Hand
- * off is offered for one agent only, and neither switch for an agent that is
- * not woken.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -182,7 +167,6 @@ async function openReply(el: HTMLElement): Promise<HTMLTextAreaElement> {
   const reply = [...el.querySelectorAll('section.ib-pane .ib-pfoot button')].find((b) => b.textContent?.trim() === 'Reply') as HTMLButtonElement;
   act(() => reply.click());
   await until(() => replyBox(el) !== null, 'the reply box');
-  // The live sessions and the MCP agents are read once the box is open.
   await settle(60);
   return replyBox(el)!;
 }
@@ -190,7 +174,6 @@ async function openReply(el: HTMLElement): Promise<HTMLTextAreaElement> {
 const modeLine = (el: HTMLElement) => el.querySelector('[data-tag-mode]');
 const modeWords = (el: HTMLElement) => el.querySelector('[data-tag-mode-words]')?.textContent ?? null;
 const modeLinks = (el: HTMLElement) => [...el.querySelectorAll('[data-tag-mode-to]')].map((b) => b.textContent);
-/** Whom the reply box names (its field's name: nothing sits above the box, approval "inbox-reply-recipient"). */
 const draftLabel = (el: HTMLElement) => replyBox(el)?.getAttribute('aria-label') ?? '';
 
 async function tagPi(el: HTMLElement, words: string): Promise<HTMLTextAreaElement> {
@@ -213,7 +196,6 @@ test.skipIf(!hasDom)('Hand off: the line switches and back, Send carries it, the
   const S = tags.sessions;
   const el = await renderApp(`#thread=${tags.ids.t1}`);
   const box = await tagPi(el, 'This is the queue side.');
-  // Today's tag until a link is pressed.
   expect(modeLine(el)!.getAttribute('data-tag-mode')).toBe('ask');
   expect(modeWords(el)).toBe('Asks Pi');
   expect(modeLinks(el)).toEqual(['Add instead', 'Hand off instead']);
@@ -224,27 +206,22 @@ test.skipIf(!hasDom)('Hand off: the line switches and back, Send carries it, the
   expect(modeWords(el)).toBe('Hands this thread to Pi');
   expect(modeLinks(el)).toEqual(['Ask instead']);
   expect(draftLabel(el)).toBe('Reply to Pi');
-  // The pressed link is gone once the line switches: focus is back in the field, so Mod+Enter still sends.
   expect(document.activeElement).toBe(box);
-  // Ask instead goes back to exactly the Ask.
   await click(el.querySelector('[data-tag-mode-to="ask"]'));
   expect(modeWords(el)).toBe('Asks Pi');
   expect(draftLabel(el)).toBe(asked);
   await click(el.querySelector('[data-tag-mode-to="handoff"]'));
-  // The reply box keeps its keys: Mod+Enter sends.
   await press(box, 'Enter', { metaKey: true });
   await until(async () => posted.some((p) => p.path.endsWith('/reply')), 'the Send');
   expect(posted.filter((p) => p.path.endsWith('/reply')).at(-1)!.body.tags).toEqual([{ host: 'pi', session: S.pi, label: 'Pi', mode: 'handoff' }]);
   const stored = (await serverMessages(tags.ids.t1)).at(-1)!;
   expect(stored.to).toEqual({ host: 'pi', session: S.pi });
-  // After Send: the line in the thread with Undo, who has it now, the toast with Undo, and the box resets to an Ask.
   await until(() => el.querySelector('[data-thread-move="handoff"]') !== null, 'the hand-off line');
   const moved = el.querySelector('[data-thread-move="handoff"]')!;
   expect(moved.textContent).toContain('You handed this thread to Pi');
   expect(moved.querySelector('[data-handoff-undo]')).not.toBeNull();
   expect(el.querySelector('[data-thread-owner]')!.textContent).toContain('Now with Pi');
   await until(() => document.querySelector('[data-inbox-toast] .ib-tlead')?.textContent === 'Handed to Pi', 'the toast');
-  // Undo from the toast.
   await click(document.querySelector('[data-inbox-toast] [data-toast-undo]'));
   await until(() => posted.some((p) => p.path.endsWith(`/messages/${stored.id}/handoff/undo`)), 'the Undo');
   await until(async () => !!(await serverMessages(tags.ids.t1)).at(-1)!.handoff?.undone_at, 'the hand-off taken back');
@@ -262,7 +239,6 @@ test.skipIf(!hasDom)('Add: Send carries it, the added session is marked, and the
   await click(el.querySelector('[data-tag-mode-to="add"]'));
   expect(document.activeElement).toBe(box);
   expect(modeWords(el)).toBe('Adds Pi to this thread');
-  // The box's Send button, clicked (the line's buttons are not the Send).
   await click(el.querySelector('section.ib-pane .ib-pfoot .ib-rbox [data-reply-send]'));
   await until(async () => posted.some((p) => p.path.endsWith('/reply')), 'the Send');
   expect(posted.filter((p) => p.path.endsWith('/reply')).at(-1)!.body.tags).toEqual([{ host: 'pi', session: S.pi, label: 'Pi', mode: 'add' }]);

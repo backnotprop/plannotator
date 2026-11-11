@@ -1,9 +1,3 @@
-/**
- * Links in a message to the files it attached (links.ts): a link to one of
- * THAT message's attachments opens it beside the thread, a link to any other
- * local path is inert text that never reaches the server, and an external
- * link keeps opening in a new tab.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -45,11 +39,8 @@ test('a link matches an attachment by its path from the sender folder or the pro
   expect(attachmentForLink('design/mock.html?x=1', options)?.id).toBe('att_mock');
   expect(attachmentForLink('../docs/plan.md', options)?.id).toBe('att_plan');
   expect(attachmentForLink(`${ROOT}/design/mock.html`, options)?.id).toBe('att_mock');
-  // The path the agent named, for a symlink.
   expect(attachmentForLink('docs/current-plan.md', options)?.id).toBe('att_plan');
-  // A bare file name: the one attachment with that name.
   expect(attachmentForLink('plan.md', options)?.id).toBe('att_plan');
-  // Not attached: another file, a name in another folder, a path out of the project.
   expect(attachmentForLink('notes.md', options)).toBeNull();
   expect(attachmentForLink('other/mock.html', options)).toBeNull();
   expect(attachmentForLink('../../../etc/passwd', options)).toBeNull();
@@ -69,7 +60,6 @@ test("an attachment's display path is relative to the project, its deep link the
   expect(attachmentDisplayPath(attachment('att_out', '/elsewhere/x.md'), ROOT)).toBe('/elsewhere/x.md');
   const link = attachmentDeepLink('msg_1', 'att_2');
   expect(link).toBe('#thread=msg_1&file=att_2');
-  // App.tsx reads the route from the hash with URLSearchParams.
   const params = new URLSearchParams(link.slice(1));
   expect([params.get('thread'), params.get('file')]).toEqual(['msg_1', 'att_2']);
 });
@@ -114,7 +104,6 @@ async function mount(node: React.ReactNode) {
 }
 
 test.skipIf(!hasDom)('in a message, an attached file opens beside the thread; an unattached one is inert; an external link is unchanged', async () => {
-  // The Inbox draws ui's hover text as component tooltips (App.tsx configurePlannotatorUI).
   setComponentTooltips(true);
   const opened: string[] = [];
   const fetched: string[] = [];
@@ -150,27 +139,21 @@ test.skipIf(!hasDom)('in a message, an attached file opens beside the thread; an
       />,
     );
 
-    // The link inside the question's context is a real, focusable link that opens the pane.
     const mock = [...host!.querySelectorAll<HTMLAnchorElement>('a[data-local-link="open"]')].find((a) => a.textContent?.includes('the mock'))!;
     expect(mock).toBeDefined();
-    // Its href is the window's own deep link to the file, so a new tab opens it there.
     expect(mock.getAttribute('href')).toBe('#thread=msg_01K7ZZZZZZZZZZZZZZZZZZZZZZ&file=att_mock');
-    // The tooltip (a component, never a native title) names the file by its path in the project, not its bare name.
     expect(mock.hasAttribute('title')).toBe(false);
     expect(await tooltipOf(mock)).toBe('Open design/mock.html beside the thread');
     unhover(mock);
-    // A screen reader still hears it, as the link's description.
     expect(document.getElementById(mock.getAttribute('aria-describedby') ?? '')?.textContent).toBe('Open design/mock.html beside the thread');
     await act(async () => mock.click());
     expect(opened).toEqual(['att_mock']);
 
-    // A raw-HTML link to the same attachment opens it too.
     const rawMock = [...host!.querySelectorAll<HTMLAnchorElement>('a[data-local-link="open"]')].find((a) => a.textContent === 'raw mock')!;
     expect(rawMock.getAttribute('href')).toBe('#thread=msg_01K7ZZZZZZZZZZZZZZZZZZZZZZ&file=att_mock');
     await act(async () => rawMock.click());
     expect(opened).toEqual(['att_mock', 'att_mock']);
 
-    // A Cmd/Ctrl click is the browser's (a new tab at the deep link), never the pane.
     for (const link of [mock, rawMock]) {
       const modified = new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true });
       await act(async () => {
@@ -180,7 +163,6 @@ test.skipIf(!hasDom)('in a message, an attached file opens beside the thread; an
     }
     expect(opened).toEqual(['att_mock', 'att_mock']);
 
-    // Not attached: no href anywhere, so a click goes nowhere and nothing is fetched.
     const notes = host!.querySelector<HTMLElement>('[data-local-link="unavailable"]')!;
     expect(notes.textContent).toBe('my notes');
     expect(notes.tagName).toBe('SPAN');
@@ -198,7 +180,6 @@ test.skipIf(!hasDom)('in a message, an attached file opens beside the thread; an
     expect(host!.querySelector('a[href="notes.md"], a[href="secret.md"]')).toBeNull();
     expect(fetched.filter((url) => url.includes('notes.md') || url.includes('secret.md'))).toEqual([]);
 
-    // External: a new tab, no opener, as before.
     const external = host!.querySelector<HTMLAnchorElement>('a[href="https://example.com/docs"]')!;
     expect(external.getAttribute('target')).toBe('_blank');
     expect(external.getAttribute('rel')).toBe('noopener noreferrer');
@@ -263,7 +244,6 @@ test('the project file a link that names no attachment may mean: relative to the
   expect(projectFileOfLink('src/a.ts:12:4')).toEqual({ path: 'src/a.ts', line: 12 });
   expect(projectFileOfLink('src/a.ts:12:4')).toEqual({ path: 'src/a.ts', line: 12 });
   expect(projectFileOfLink('my%20file.ts')).toEqual({ path: 'my file.ts' });
-  // The path stays as written: the server knows the folder the agent wrote from.
   expect(projectFileOfLink('/work/wt/src/a.ts')).toEqual({ path: '/work/wt/src/a.ts' });
   expect(projectFileOfLink('../a.ts')).toEqual({ path: '../a.ts' });
   expect(projectFileOfLink('#top')).toBeNull();

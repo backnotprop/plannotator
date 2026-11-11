@@ -1,11 +1,3 @@
-/**
- * The What's new page's header as drawn (approvals
- * .product/approved/inbox-whats-new-header/, variant Toolbar, and
- * inbox-whats-new-tldr, round 2): the bar's way back and its actions,
- * "Plannotator 0.28.22" on one line, the standing meta in its states
- * (current, behind, development build), Update only when the page's release
- * can be installed, and no "Also in the releases since X" box.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -77,10 +69,8 @@ const chip = (el: HTMLElement) => el.querySelector<HTMLElement>('[data-whats-new
 test.skipIf(!hasDom)('the standing: current, behind with the releases in between, a development build, past it', () => {
   expect(whatsNewStanding(model({ current: '0.28.22' }))).toEqual({ kind: 'current' });
   expect(whatsNewStanding(model())).toEqual({ kind: 'behind', current: '0.28.19', between: 2 });
-  // The releases in between are counted from the panel's releases and the notes' own list, each once.
   expect(whatsNewStanding(model({ skipped: [] }), ['0.28.22', '0.28.21', '0.28.20', '0.28.19', '0.28.18'])).toEqual({ kind: 'behind', current: '0.28.19', between: 2 });
   expect(whatsNewStanding(model(), ['0.28.21'])).toEqual({ kind: 'behind', current: '0.28.19', between: 2 });
-  // A development build is never "You have dev", whatever the release.
   expect(whatsNewStanding(model({ current: 'dev' }))).toEqual({ kind: 'dev' });
   expect(whatsNewStanding(model({ current: '0.0.0-dev' }))).toEqual({ kind: 'dev' });
   expect(whatsNewStanding(model({ current: '0.28.23' }))).toEqual({ kind: 'ahead', current: '0.28.23' });
@@ -92,7 +82,6 @@ test.skipIf(!hasDom)('on the version: one quiet line, no Update, no jump, and no
   expect(chip(el)?.tagName).toBe('SPAN');
   expect(chip(el)?.textContent).toBe("You're on this version");
   expect(el.querySelector('[data-whats-new-update]')).toBeNull();
-  // The box is gone (approval inbox-whats-new-tldr): the panel tags your version instead.
   expect(el.querySelector('[data-skipped-releases]')).toBeNull();
   expect(el.textContent).not.toContain('Also in the releases since');
 });
@@ -112,7 +101,6 @@ test.skipIf(!hasDom)('behind: the meta names the version and the releases in bet
     fetched_at: null,
     releases: ['0.28.22', '0.28.21', '0.28.20', '0.28.19'].map((version) => ({ version, published_at: null, tldr: [], listed: null, sentence: null, saved: true })),
   };
-  // A window wide enough for the panel (under 1100 px the meta opens the sheet instead).
   const realMatch = window.matchMedia;
   window.matchMedia = ((query: string) => ({ matches: query.includes('min-width: 1100px'), media: query, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
   const el = render({ model: model({ skipped: [] }), releases });
@@ -133,11 +121,9 @@ test.skipIf(!hasDom)('behind: the meta names the version and the releases in bet
   mine.getBoundingClientRect = () => ({ top: 700, height: 80, bottom: 780, left: 0, right: 300, width: 300, x: 0, y: 700, toJSON() {} }) as DOMRect;
   act(() => button.click());
   expect(pageScrolled).toBe(false);
-  // 600 px below the list's top, centred in its 200 px: 600 - (200 - 80) / 2.
   expect(listScrolls).toEqual([540]);
   expect(document.activeElement).toBe(mine);
   window.matchMedia = realMatch;
-  // No Also box, whatever is skipped.
   expect(el.querySelector('[data-skipped-releases]')).toBeNull();
 });
 
@@ -164,12 +150,10 @@ test.skipIf(!hasDom)('Update shows only when this release can be installed today
   let pressed = 0;
   const el = render({ model: model(), update: update('available'), onUpdate: () => pressed++ });
   const button = el.querySelector<HTMLButtonElement>('[data-whats-new-update]')!;
-  // A deliberate action label: the button names the version it installs ("to 0.28.22" may drop visually on a narrow phone).
   expect(button.getAttribute('aria-label')).toBe('Update to 0.28.22');
   expect(button.querySelector('.ib-wn-to')?.textContent).toBe('to 0.28.22');
   act(() => button.click());
   expect(pressed).toBe(1);
-  // Behind with update checks off: no Update in the bar.
   act(() => root!.unmount());
   host!.remove();
   const off = render({ model: model(), update: null });
@@ -188,12 +172,9 @@ test.skipIf(!hasDom)('the bar: the way back on the left, the release on GitHub i
   expect(github.href).toBe(model().release_url);
   expect(github.target).toBe('_blank');
   expect(github.rel).toContain('noopener');
-  // The sidebar toggle stays on the page.
   expect(bar.querySelector('[data-sidebar="trigger"]')).not.toBeNull();
-  // One way back only: the old right-side "← Inbox" and the old meta line are gone.
   expect(el.querySelectorAll('[data-whats-new-back]')).toHaveLength(1);
   expect(el.querySelector('.ib-wn-head')).toBeNull();
-  // One line: the product, then the version (no "What's new in Plannotator" above it).
   expect(el.querySelector('.ib-wn-hero h1')?.textContent).toBe('Plannotator 0.28.22');
   expect(el.querySelector('.ib-wn-pre')).toBeNull();
   expect(el.querySelector('.ib-wn-meta')?.textContent).toContain('Released Oct 15, 2026');

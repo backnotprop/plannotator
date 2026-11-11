@@ -1,7 +1,3 @@
-/**
- * What a failed Send says (approval "inbox-reply-box", decision D3): one plain line a person reads at a glance, and the
- * Inbox's own words (a path, an errno, a long server message) behind Details, never in the line.
- */
 import { expect, test } from 'bun:test';
 import { InboxApiError } from './api';
 import { SEND_NOT_SENT, sendFailure } from './sendFailure';

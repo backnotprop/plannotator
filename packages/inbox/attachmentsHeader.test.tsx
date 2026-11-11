@@ -1,15 +1,3 @@
-/**
- * Attachments in the message header (design record
- * "inbox-attachments-header", variant Count, approved 2026-10-11), as the
- * window draws it over a REAL Inbox server in a temp data dir (its own
- * process, tests/helpers/inbox-dom-server.ts with its `header-files` seed).
- * The failure this catches: a long message whose files the reader never
- * learns about, a count that disagrees with the tiles (or says "changed"
- * when nothing changed), a band that stays open or traps Escape, and a file
- * opened from the header going somewhere other than where its tile goes.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -121,7 +109,6 @@ async function settle(ms = 40) {
   }
 }
 
-/** Act until `check` holds (the window's reads go to another process), or fail after 5 s. */
 async function until(check: () => boolean, what: string) {
   for (let i = 0; i < 100; i++) {
     if (check()) return;
@@ -153,7 +140,6 @@ const press = (key: string, target: EventTarget) =>
     target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
   });
 
-/** The first message open (a later visit folds what was already looked at), its attachments' states read (the changed count needs them). */
 async function firstOpen(el: HTMLElement) {
   await until(() => el.querySelector(`[data-message-article="${ids.files.first}"]`) !== null, 'the thread');
   const first = article(el, ids.files.first);
@@ -170,23 +156,18 @@ async function openThread() {
 test.skipIf(!hasDom)('an agent message with files says so in its "to you" line, with the changed count; a message without files does not', async () => {
   const el = await openThread();
   const first = countOf(el, ids.files.first)!;
-  // The quiet count, beside "to you": 3 attachments · 1 changed (plan.html was edited after it was sent).
   expect(first.closest('.ib-fl-meta')?.textContent).toContain('to you');
   expect(words(first).replace(/\s*·\s*/g, ' · ')).toBe('3 attachments · 1 changed');
   expect(first.getAttribute('aria-label')).toBe('3 attachments, 1 changed');
-  // A disclosure that starts closed, naming the band it opens.
   expect(first.getAttribute('aria-expanded')).toBe('false');
   const band = el.querySelector(`#${CSS.escape(first.getAttribute('aria-controls')!)}`) as HTMLElement;
   expect(band).toBe(bandOf(el, ids.files.first)!);
   expect(band.hidden).toBe(true);
   expect(band.querySelectorAll('[data-attachment-id]')).toHaveLength(0);
-  // A short message with one unchanged file: the count, no "changed".
   expect(words(countOf(el, ids.files.last))).toBe('1 attachment');
   expect(countOf(el, ids.files.last)!.getAttribute('aria-label')).toBe('1 attachment');
-  // The message with no files keeps its header as it was.
   expect(countOf(el, ids.files.middle)).toBeNull();
   expect(article(el, ids.files.middle).querySelector('.ib-fl-meta .ib-hcount')).toBeNull();
-  // The foot tiles are there as always.
   expect(article(el, ids.files.first).querySelectorAll('.ib-attachments:not(.ib-hatts-tiles) [data-attachment-id]')).toHaveLength(3);
 });
 
@@ -200,7 +181,6 @@ test.skipIf(!hasDom)('a thread whose messages carry no files has no count; a one
 
   const el = await renderApp(`#thread=${ids.filed}`);
   await until(() => countOf(el, ids.filed) !== null, 'the count');
-  // One message: no fold button, the count sits in the plain sender line.
   expect(el.querySelector('[data-fold-head]')).toBeNull();
   expect(words(countOf(el, ids.filed))).toBe('1 attachment');
 });
@@ -213,7 +193,6 @@ test.skipIf(!hasDom)('the count opens the same tiles in a band under the sender;
   expect(count.getAttribute('aria-expanded')).toBe('true');
   expect(band.hidden).toBe(false);
   expect(band.getAttribute('role')).toBe('region');
-  // The same tiles as the foot, in the same order, with the same changed line; no second heading, the note under them.
   const headerTiles = [...band.querySelectorAll('[data-attachment-id]')].map((t) => t.getAttribute('data-attachment-name'));
   const footTiles = [...article(el, ids.files.first).querySelectorAll('.ib-attachments:not(.ib-hatts-tiles) [data-attachment-id]')].map((t) => t.getAttribute('data-attachment-name'));
   expect(headerTiles).toEqual(['spec.md', 'plan.html', 'run.sh']);
@@ -221,14 +200,11 @@ test.skipIf(!hasDom)('the count opens the same tiles in a band under the sender;
   expect(words(band.querySelector('[data-attachment-name="plan.html"]'))).toContain('Changed since it was sent');
   expect(band.querySelector('.ib-attach-h')).toBeNull();
   expect(words(band)).toContain('Also at the end of the message.');
-  // Detail ids stay unique with both sets on the page.
   const described = [...el.querySelectorAll('[aria-describedby]')].map((t) => t.getAttribute('aria-describedby'));
   expect(new Set(described).size).toBe(described.length);
-  // The band sits above the message body, under the sender row.
   const msg = article(el, ids.files.first).querySelector('.ib-msg')!;
   expect(msg.firstElementChild).toBe(band);
 
-  // Escape from a tile in the band closes it and puts focus on the count.
   const tile = band.querySelector<HTMLButtonElement>('[data-attachment-name="spec.md"]')!;
   tile.focus();
   press('Escape', tile);
@@ -238,7 +214,6 @@ test.skipIf(!hasDom)('the count opens the same tiles in a band under the sender;
   await settle();
   expect(window.location.hash).toContain(`thread=${ids.files.thread}`);
 
-  // Escape on the count itself closes it too; a click closes it again as well.
   act(() => count.click());
   expect(band.hidden).toBe(false);
   press('Escape', count);
@@ -248,7 +223,6 @@ test.skipIf(!hasDom)('the count opens the same tiles in a band under the sender;
   act(() => count.click());
   act(() => count.click());
   expect(count.getAttribute('aria-expanded')).toBe('false');
-  // Closed, Escape is the window's again: the thread closes.
   press('Escape', count);
   await until(() => !window.location.hash.includes('thread='), 'the thread closed');
 });
@@ -261,9 +235,7 @@ test.skipIf(!hasDom)('a file opened from the header opens beside the thread exac
   await until(() => el.querySelector(`[data-attachment-pane="${specId}"]`) !== null, 'the file beside the thread');
   const fromHeader = window.location.hash;
   expect(fromHeader).toContain(`file=${specId}`);
-  // Focus goes into the pane, as from a tile.
   await until(() => el.querySelector(`[data-attachment-pane="${specId}"]`)!.contains(document.activeElement), 'focus in the pane');
-  // The band stays open; its tile and the foot's are both marked as the open file, and keep their words.
   expect(bandOf(el, ids.files.first)!.hidden).toBe(false);
   const current = [...el.querySelectorAll(`[data-attachment-id="${specId}"][aria-current="true"]`)];
   expect(current).toHaveLength(2);
@@ -271,10 +243,8 @@ test.skipIf(!hasDom)('a file opened from the header opens beside the thread exac
     expect(tile.querySelector('.ib-open')!.textContent!.trim()).toBe('Open');
     expect(tile.getAttribute('aria-label')).toBe('Open spec.md');
   }
-  // Stepping order is the thread's, whichever tile opened it: spec, plan, run, listing.
   expect(words(el.querySelector('[data-attachment-pane]'))).toContain('1 of 4');
 
-  // The same file from the foot lands on the same route.
   act(() => root?.unmount());
   host?.remove();
   const again = await openThread();
@@ -288,7 +258,6 @@ test.skipIf(!hasDom)('folding: the fold button still folds the message; a folded
   const count = countOf(el, ids.files.first)!;
   act(() => count.click());
   expect(bandOf(el, ids.files.first)!.hidden).toBe(false);
-  // The fold button lies under the sender; the count is not inside it (no button in a button).
   const head = article(el, ids.files.first).querySelector<HTMLButtonElement>('[data-fold-head]')!;
   expect(head.contains(count)).toBe(false);
   expect(head.getAttribute('aria-label')).toContain('Fold this message');
@@ -308,7 +277,6 @@ test.skipIf(!hasDom)('nothing is remembered: after another thread, the band star
   const el = await openThread();
   act(() => countOf(el, ids.files.first)!.click());
   expect(bandOf(el, ids.files.first)!.hidden).toBe(false);
-  // Another thread in the same window, then back (the thread pane stays mounted across threads).
   act(() => {
     window.location.hash = `#thread=${ids.filed}`;
     window.dispatchEvent(new HashChangeEvent('hashchange'));

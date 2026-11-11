@@ -1,21 +1,3 @@
-/**
- * Delete on a linked machine's message (approval "inbox-toolbar-delete"): Delete
- * shows on every agent message. An Inbox from before Delete came back refuses
- * one (422, `annotation.type: "COMMENT" …`, its store's words): the owner
- * pressed Delete on a thread of another machine and got those words in the
- * thread's foot. Now, when the machine does not say `message_deletions` (its
- * health, carried on the machine view) and the save is refused with 422, the
- * line says "<machine> needs an update to delete words · Update".
- *
- * Failures to catch: Delete hidden on a linked machine; the store's raw words
- * back for a too-old machine; Update missing or not naming the machine; the
- * refused words still highlighted; another failure losing its own words; a
- * newer machine's Delete not reaching that machine.
- *
- * Driven through the real ThreadPane, ui Viewer and web-highlighter; fetch is
- * stubbed, no Inbox server. DOM-gated (DOM_TESTS=1), listed in
- * tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -34,7 +16,6 @@ const M1 = 'msg_01KLINKEDDELETE00000000001';
 const WORDS = 'only if a specific kind of code still matters to you';
 const BODY = `Keep hill climbing, ${WORDS}. Otherwise I would pause it.`;
 
-/** The Mac mini as the machines block names it; `message_deletions` absent: an Inbox from before Delete. */
 const macMini = (extra: Partial<MachineView> = {}): MachineView => ({
   id: MAC,
   name: 'Mac mini',
@@ -77,7 +58,6 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let posts: { url: string; body: { annotation: { type: string; originalText: string } } }[] = [];
-/** How the message's machine answers a save: taken, too old (its store's 422), or another failure. */
 let answer: 'save' | 'too-old' | 'gone' = 'save';
 let updates: string[] = [];
 
@@ -131,7 +111,6 @@ async function render(machine: MachineView | null) {
   return host;
 }
 
-/** Select `phrase` in the message the way a drag does, and let the viewer hear the pointer go up. */
 async function select(scope: HTMLElement, phrase: string) {
   const body = scope.querySelector<HTMLElement>(`[data-message-id="${M1}"][data-text-comments]`);
   expect(body).not.toBeNull();
@@ -169,7 +148,6 @@ test.skipIf(!hasDom)("an older machine's message: Delete shows; refused there, t
   await pressDelete();
   expect(posts.map((p) => [p.url, p.body.annotation.type])).toEqual([[`/api/inbox/m/${MAC}/messages/${M1}/annotations`, 'DELETION']]);
   expect(errorLine()?.textContent).toBe('Mac mini needs an update to delete words · Update');
-  // The refused words are not left marked.
   expect(highlights(el)).toBe(0);
   await act(async () => errorLine()!.querySelector<HTMLButtonElement>('button[data-error-update]')!.click());
   expect(updates).toEqual([MAC]);

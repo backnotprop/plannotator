@@ -1,14 +1,3 @@
-/**
- * The list renders only the rows that changed. Every list read brings new
- * row objects (JSON from the server), so InboxList memoizes each row on its
- * content: a read where one row changed renders that one row again, not all
- * of them (with thousands of threads, re-rendering every row on each agent
- * event cost hundreds of ms of main-thread work). A row's time is drawn by
- * format.shortTime once per row render, so its calls count the rows rendered.
- * The callbacks are the latest props' even for a row that did not render.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -44,7 +33,6 @@ function row(n: number): InboxListRow {
   };
 }
 
-/** A list read: new objects every time, the same content unless changed. */
 function read(change?: (rows: InboxListRow[]) => void): InboxListSection[] {
   const rows = Array.from({ length: 20 }, (_, i) => row(i));
   change?.(rows);
@@ -85,7 +73,6 @@ test.skipIf(!hasDom)('a list read renders only the rows that changed', () => {
 
     shortTime.mockClear();
     draw(read(), () => {});
-    // Same content in new objects, and a new onOpen: no row renders again.
     expect(shortTime.mock.calls.length).toBe(0);
 
     shortTime.mockClear();

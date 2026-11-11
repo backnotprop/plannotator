@@ -1,9 +1,3 @@
-/**
- * The dot on the sidebar toggle (the owner, 2026-10-24: "Yes, add the dot"):
- * while the sidebar is closed (docked closed, or the phone sheet closed) and
- * an update the Update button offers is waiting, the toggle carries a small
- * dot and its accessible name says so; open, or with no update, nothing.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -62,9 +56,7 @@ const dot = (button: HTMLElement) => button.querySelector<HTMLElement>('.ib-sb-t
 test('the notice follows what the Update button offers', () => {
   expect(sidebarUpdateNotice('available', false)).toEqual({ tone: 'primary', label: 'update available' });
   expect(sidebarUpdateNotice('ready', false)).toEqual({ tone: 'primary', label: 'update ready' });
-  // Failed is neutral, never the error colour (the Update button's rule).
   expect(sidebarUpdateNotice('failed', false)).toEqual({ tone: 'neutral', label: 'update failed' });
-  // In progress invites nothing; no update (up to date, snoozed, a tailnet guest's page) is no dot.
   expect(sidebarUpdateNotice('updating', false)).toBeNull();
   expect(sidebarUpdateNotice('available', true)).toBeNull();
   expect(sidebarUpdateNotice(null, false)).toBeNull();
@@ -75,16 +67,11 @@ test('a guest over the tailnet is offered no update (the update routes answer it
   type Update = Parameters<typeof updateForPage>[0];
   const offered = update as unknown as Update;
   expect(updateForPage(offered, { via: 'local' })).toBe(offered);
-  // An Inbox that predates `via` is this computer's.
   expect(updateForPage(offered, {})).toBe(offered);
-  // The owner's phone: the same button and dot as the computer.
   expect(updateForPage(offered, { via: 'tailnet', guest: false })).toBe(offered);
-  // A guest: no Update button, so no dot either.
   expect(updateForPage(offered, { via: 'tailnet', guest: true })).toBeNull();
   expect(sidebarUpdateNotice(updateForPage(offered, { via: 'tailnet', guest: true })?.state, false)).toBeNull();
-  // An Inbox that predates `guest` and came through the tailnet: not known to be the owner, so a guest.
   expect(updateForPage(offered, { via: 'tailnet' })).toBeNull();
-  // Before the settings read answers, the page does not yet know where it came from.
   expect(updateForPage(offered, null)).toBeNull();
   expect(updateForPage(null, { via: 'local' })).toBeNull();
 });
@@ -95,7 +82,6 @@ test.skipIf(!hasDom)('closed sidebar with an update: the dot, hidden from screen
   expect(dot(button)!.getAttribute('aria-hidden')).toBe('true');
   expect(dot(button)!.dataset.tone).toBe('primary');
   expect(button.getAttribute('aria-label')).toBe('Toggle Sidebar, update available');
-  // A component tooltip rule: no native title.
   expect(button.hasAttribute('title')).toBe(false);
 });
 
@@ -124,7 +110,6 @@ test.skipIf(!hasDom)('no update: no dot', () => {
 test.skipIf(!hasDom)('a phone: the sheet closed shows the dot, the sheet open hides it', () => {
   phone = true;
   const button = render(true, sidebarUpdateNotice('ready', false));
-  // The docked `open` does not count on a phone: the sheet starts closed.
   expect(dot(button)).not.toBeNull();
   expect(button.getAttribute('aria-label')).toBe('Toggle Sidebar, update ready');
   act(() => button.click());

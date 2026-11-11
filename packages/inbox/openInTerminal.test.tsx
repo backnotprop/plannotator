@@ -1,12 +1,3 @@
-/**
- * Open in Terminal on a launched thread's run line, as the window draws it: it shows only when a session
- * waits on Terminal or can't start, on the Inbox's own computer, for any host. The failures this catches: a
- * button a tailnet window can only be refused on, a host whose stuck session has no way to its terminal (a
- * host may offer no attach command while something still has the session), and a line left stale after the
- * host handed the session over. The ⋯ menu and Terminal itself are in tests/e2e/inbox-launch-claude.spec.ts.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

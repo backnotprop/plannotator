@@ -1,9 +1,3 @@
-/**
- * Images in a message (#1813): a message body drawn by ui's Viewer
- * the way the thread draws it (images based on the message) asks the Inbox's
- * per-message route for a relative or absolute image, markdown and HTML
- * alike, and never the bare `/api/image` the Inbox does not serve.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -65,15 +59,12 @@ test.skipIf(!hasDom)('a message image loads from /api/inbox/messages/<id>/image 
   const src = (alt: string) => host!.querySelector<HTMLImageElement>(`img[alt="${alt}"]`)?.getAttribute('src');
   expect(src('after')).toBe(`/api/inbox/messages/${ID}/image?path=${encodeURIComponent('.walkthrough/shots/after.png')}`);
   expect(src('before')).toBe(`/api/inbox/messages/${ID}/image?path=${encodeURIComponent('/abs/shots/before.png')}`);
-  // Remote images keep their URL (the window's CSP does not load them).
   expect(src('remote')).toBe('https://example.com/x.png');
 });
 
 test('the resolver routes only a message or Markdown attachment marker; anything else keeps the default URL', () => {
   expect(inboxImageSrcResolver('a.png', inboxMessageImageBase(ID))).toBe(`/api/inbox/messages/${ID}/image?path=a.png`);
-  // An image inside an attached Markdown file loads from that attachment's route, for the version on screen (#2228).
   expect(inboxImageSrcResolver('shots/a b.png', inboxMarkdownImageBase('att_01K7Z', 'sent'))).toBe('/api/inbox/attachments/att_01K7Z/markdown-image?path=shots%2Fa%20b.png&version=sent');
-  // One in a Markdown file a link in it opened: that document's own images, named by its path in the folder (#2230).
   expect(inboxImageSrcResolver('../a.png', inboxMarkdownImageBase('att_01K7Z', 'current', 'sub/peer notes.md'))).toBe('/api/inbox/attachments/att_01K7Z/markdown-image?path=..%2Fa.png&version=current&document=sub%2Fpeer%20notes.md');
   expect(inboxImageSrcResolver('a.png', 'inbox-message:../../evil')).toBe('/api/image?path=a.png&base=inbox-message%3A..%2F..%2Fevil');
   expect(inboxImageSrcResolver('a.png')).toBe('/api/image?path=a.png');

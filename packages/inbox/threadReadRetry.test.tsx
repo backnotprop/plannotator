@@ -1,29 +1,3 @@
-/**
- * Opening a thread whose read fails or hangs. Context: the owner (0.28.25)
- * saw the right side stay empty for 5-10 s after opening a thread link; why
- * his read failed is not known. Measured in a sandbox Inbox: a thread of that
- * shape opens in about 0.5 s cold, but ONE failed read of
- * `GET /api/inbox/threads/:id` (a dropped connection, a 5xx) left the right
- * side blank, with no word and no retry, until some agent wrote anywhere in
- * the Inbox (the event stream re-reads the open thread), and a read with no
- * answer waited for good.
- *
- * What is proved, over the whole window (InboxApp) and a REAL Inbox in a temp
- * data dir (its own process, tests/helpers/inbox-dom-server.ts): with the
- * first read failing as a dropped connection and as a 500, and NO store line
- * written meanwhile (the event stream is a stand-in nobody pokes), the thread
- * is on screen within the first retry and its look is recorded; a read with
- * no answer fails after THREAD_READ_TIMEOUT_MS and is read again; while the
- * read is failing the thread's place says so and offers Try again, which
- * reads at once and, holding focus, hands it to the thread's subject; opening
- * another thread or closing stops the retries; a thread the server does not
- * have (404) says so with Close and is not read again. And once the thread is
- * on screen, a record's re-read that fails (it used to leave the agent's new
- * message off screen until another record came) is read again on the same
- * waits until it lands, then stops; closing stops it.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -50,11 +24,8 @@ let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let savedEventSource: unknown;
 let savedMatchMedia: typeof window.matchMedia;
-/** How each read of the thread fails, first to last; past the list it is answered by the server. */
 let failures: ('reset' | 500 | 'hang')[] = [];
-/** Every read of `GET /api/inbox/threads/<id>` the window made. */
 let threadReads: string[] = [];
-/** When each of them was made (performance.now()). */
 let readAt: number[] = [];
 /**
  * While set, a read past `failures` (one the server would answer) waits here first. The window draws the thread's
@@ -88,14 +59,12 @@ async function readLine(): Promise<string> {
   return line.trim();
 }
 
-/** An agent writes in the store (the window does not hear it until the stream is poked). */
 async function agentSends(body: string, reply_to: string): Promise<string> {
   (child!.stdin as import('bun').FileSink).write(`${JSON.stringify({ send: { project: world.project, session: 'ses_late', body, reply_to } })}\n`);
   (child!.stdin as import('bun').FileSink).flush();
   return (JSON.parse(await readLine()) as { sent: string }).sent;
 }
 
-/** The stand-in stream's `record` frame, as a store line would send it. */
 let pokeStream: (() => void) | null = null;
 
 const TESTS = 7;
@@ -146,7 +115,6 @@ beforeEach(() => {
       readAt.push(performance.now());
       const failure = failures.shift();
       if (failure === 'reset') throw new TypeError('Failed to fetch');
-      // No answer: only the window's own timeout (its AbortSignal) ends it.
       if (failure === 'hang')
         return await new Promise<Response>((_, fail) => {
           const signal = init?.signal;
@@ -159,7 +127,6 @@ beforeEach(() => {
     const answer = await loopback(path, method, init?.body ? String(init.body) : undefined);
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
-  // The event stream is a stand-in that fires only when a test pokes it: no store line re-reads the open thread here.
   savedEventSource = (globalThis as Record<string, unknown>).EventSource;
   (globalThis as Record<string, unknown>).EventSource = class {
     addEventListener(type: string, listener: (event: MessageEvent<string>) => void) {
@@ -199,7 +166,6 @@ async function wait(ms: number) {
   });
 }
 
-/** A test's own budget: past every `until` in it, so a wait that fails says what it waited for (and what was on screen). */
 const TEST_MS = 20_000;
 
 /**
@@ -218,7 +184,6 @@ async function until(check: () => boolean, what: string, ms = 5000) {
   throw new Error(`timed out waiting for ${what} (${threadReads.length} thread reads; the thread's place shows: ${place})`);
 }
 
-/** Open the window straight on a thread link, as a click on `…/#thread=<id>` does. */
 function renderAt(hash: string): HTMLElement {
   window.location.hash = hash;
   host = document.createElement('div');
@@ -237,25 +202,20 @@ for (const kind of ['reset', 500] as const) {
   test(`a first read that fails (${kind === 'reset' ? 'a dropped connection' : 'a 500'}) is read again by itself, with no event-stream re-read`, async () => {
     if (!hasDom) return;
     failures = [kind];
-    // The retry's read is answered only once the failed line was seen (see `hold`).
     let answer!: () => void;
     hold = new Promise<void>((done) => (answer = done));
     const el = renderAt(`#thread=${world.waiting}`);
-    // While the read is failing, the thread's place says so (it used to be blank).
     await until(() => waiting(el)?.getAttribute('data-thread-wait') === 'failed', 'the failed line');
     expect(waiting(el)!.textContent).toContain("Couldn't load this thread");
     expect(el.querySelector('[data-thread-wait-retry]')).not.toBeNull();
-    // Read again by itself, after the first wait and no later: no store line, no event, no click.
     await until(() => threadReads.length === 2, 'the retry', 3000);
     expect(readAt[1]! - readAt[0]!).toBeGreaterThanOrEqual(THREAD_READ_RETRY_MS[0] - 20);
     expect(readAt[1]! - readAt[0]!).toBeLessThan(THREAD_READ_RETRY_MS[0] + 2500);
-    // Still the failed line while that read is out; answered, the thread takes its place.
     expect(waiting(el)?.getAttribute('data-thread-wait')).toBe('failed');
     answer();
     await until(() => pane(el, world.waiting) !== null, 'the thread', 3000);
     expect(threadReads.length).toBe(2);
     expect(waiting(el)).toBeNull();
-    // Its look is recorded, as for a read that lands at once.
     await until(() => posted.some((p) => p === `/api/inbox/threads/${world.waiting}/seen`), 'the look');
   }, TEST_MS);
 }
@@ -265,11 +225,9 @@ test('Try again reads at once; a read that keeps failing keeps being tried', asy
   failures = ['reset', 'reset', 500, 500, 500, 500];
   const el = renderAt(`#thread=${world.stopped}`);
   await until(() => waiting(el)?.getAttribute('data-thread-wait') === 'failed', 'the failed line');
-  // The first retry fails too (THREAD_READ_RETRY_MS[0]), then the window waits longer.
   await until(() => threadReads.length === 2, 'the first retry', 2000);
   await wait(200);
   expect(threadReads.length).toBe(2);
-  // Try again: one read now, not after the wait.
   failures = [];
   const retry = el.querySelector<HTMLButtonElement>('[data-thread-wait-retry]')!;
   act(() => {
@@ -278,7 +236,6 @@ test('Try again reads at once; a read that keeps failing keeps being tried', asy
   });
   await until(() => pane(el, world.stopped) !== null, 'the thread after Try again', 1500);
   expect(threadReads.length).toBe(3);
-  // Focus was on Try again: it goes to the thread's subject, not to the page.
   expect(document.activeElement).toBe(pane(el, world.stopped)!.querySelector('.ib-subject'));
 }, TEST_MS);
 
@@ -301,7 +258,6 @@ test('opening another thread, or closing, stops the retries', async () => {
   failures = Array.from({ length: 50 }, () => 'reset' as const);
   const el = renderAt(`#thread=${world.waiting}`);
   await until(() => threadReads.length >= 2, 'a retry of the first thread', 2000);
-  // Another thread opens (its reads are answered): the first one is not read again.
   failures = [];
   act(() => {
     window.location.hash = `#thread=${world.stopped}`;
@@ -312,7 +268,6 @@ test('opening another thread, or closing, stops the retries', async () => {
   const before = firstReads();
   await wait(THREAD_READ_RETRY_MS[1] + THREAD_READ_RETRY_MS[2] + 300);
   expect(firstReads()).toBe(before);
-  // A failing thread, then closed: no read after the close.
   failures = Array.from({ length: 50 }, () => 'reset' as const);
   act(() => {
     window.location.hash = `#thread=${world.waiting}`;
@@ -335,22 +290,17 @@ test("a record's re-read of the open thread that fails is read again until it la
   const el = renderAt(`#thread=${world.waiting}`);
   await until(() => pane(el, world.waiting) !== null && pokeStream !== null, 'the thread');
   await wait(300);
-  // An agent writes in the open thread; the record's re-read fails twice (a dropped connection, a 500).
   const body = `Canary at 25%; error rate flat (${Date.now()}).`;
   await agentSends(body, world.waiting);
   const before = threadReads.length;
   failures = ['reset', 500];
   act(() => pokeStream!());
-  // No other record, no click: the message is on screen after the waits (250 ms, then 1 s).
   await until(() => pane(el, world.waiting)?.textContent?.includes(body) === true, "the agent's message", THREAD_READ_RETRY_MS[0] + THREAD_READ_RETRY_MS[1] + 2500);
   expect(threadReads.length - before).toBe(3);
-  // The thread stayed on screen throughout: no wait line in its place.
   expect(waiting(el)).toBeNull();
-  // Landed: no more reads.
   await wait(THREAD_READ_RETRY_MS[2] + 300);
   expect(threadReads.length - before).toBe(3);
 
-  // Failing for good, then closed: no read after the close.
   failures = Array.from({ length: 50 }, () => 'reset' as const);
   const second = threadReads.length;
   act(() => pokeStream!());

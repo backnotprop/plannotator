@@ -1,16 +1,3 @@
-/**
- * The review opened from a Shape board at a place (ReviewPane, with Code review on or off: approval "inbox-one-review-screen") (approval "shape-whats-changed": `#thread=…&guide=…&code=…`,
- * `&step=N`, `&files`). The Inbox's doors are stubbed at `fetch` and the diff reader is stubbed to record what it is
- * told. What regresses:
- *  - a board's `file:line` opens the review at its top, not at that file with the lines painted;
- *  - a guide step opens a chapter other than that step's, or Full review opens the walkthrough;
- *  - the place is not let go once there (a reload would jump again), or is let go before the review is read;
- *  - the painted line is left off screen or under the corner card (the review paints it but does not scroll to it);
- *  - a stack badge's "Read it in the review" showing the whole chapter, or no way back, or "Show the whole stack" not
- *    bringing the chapter's other files back.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -29,11 +16,9 @@ if (hasDom) {
   mock.module('#guide-reader', () => ({
     default: (props: ReaderProps) => {
       reader = props;
-      // The painted row, as Pierre marks it, in its file's box.
       const lit = props.highlight;
       return (
         <>
-          {/* A heading per chapter, as the reader draws them: a jump waits for these. */}
           {props.snapshot?.guide.sections.map((_, i) => <div key={i} data-guide-section={i} />)}
           {lit && (
             <div data-guide-file-shell={lit.path}>
@@ -64,7 +49,6 @@ const snapshot = buildGuideSnapshot({
   review: { rawPatch: patch, gitRef: 'main...HEAD', source: { kind: 'local' } },
   exportedAt: '2026-11-05T10:40:00.000Z',
 });
-// A stack's review: the second chapter (one PR) changed two files; a badge's part holds only one of them.
 const stackSnapshot = buildGuideSnapshot({
   guide: {
     title: 'Kettle',
@@ -180,7 +164,6 @@ test.skipIf(!hasDom)('Full review opens All files; Guided review opens the walkt
   expect(reader?.mode).toBe('walkthrough');
   expect(reader?.reveal ?? null).toBeNull();
   expect(reader?.highlight ?? null).toBeNull();
-  // Nothing to let go.
   expect(guided.landed()).toBe(0);
 });
 
@@ -225,7 +208,6 @@ test.skipIf(!hasDom)("a board's file:line scrolls the review until the painted l
     await frames(600);
     const body = document.querySelector<HTMLElement>('.ib-gbody')!;
     const top = 1500 - body.scrollTop;
-    // In view, below the file's sticky header, in the upper part of the room.
     expect(top).toBeGreaterThanOrEqual(100 + 72);
     expect(top).toBeLessThan(900 / 2);
   } finally {
@@ -234,7 +216,6 @@ test.skipIf(!hasDom)("a board's file:line scrolls the review until the painted l
 });
 
 test.skipIf(!hasDom)('the person scrolling first keeps their scroll; a line already in view does not move', async () => {
-  // The diff is still drawing when the person scrolls.
   let drawn = false;
   const restore = layOut(1500, () => drawn);
   try {
@@ -260,17 +241,13 @@ test.skipIf(!hasDom)('the person scrolling first keeps their scroll; a line alre
 
 test.skipIf(!hasDom)('the line lands clear of the corner card: above its top, on a desktop and on a phone', () => {
   const view = { top: 100, bottom: 900 };
-  // Desktop: the card's top at y=622. Phone (844 high): the card spans the width from y=470.
   for (const [bottom, card] of [[900, 622], [844, 470]] as const) {
     const by = lineScrollBy({ top: 1500, bottom: 1520 }, { top: view.top, bottom }, card);
     expect(1500 - by).toBeGreaterThanOrEqual(view.top + 72);
     expect(1520 - by).toBeLessThanOrEqual(card);
   }
-  // Under the card but on screen: it still moves up.
   expect(lineScrollBy({ top: 700, bottom: 720 }, view, 622)).toBeGreaterThan(0);
-  // Clear of both already: no scroll.
   expect(lineScrollBy({ top: 300, bottom: 320 }, view, 622)).toBe(0);
-  // A range taller than the room: its first line at the top of the room.
   expect(lineScrollBy({ top: 1500, bottom: 2600 }, view, 622)).toBe(1500 - (100 + 72));
 });
 
@@ -283,11 +260,9 @@ test.skipIf(!hasDom)("a stack badge's \"Read it in the review\" shows the PR's c
   expect(bar?.textContent).toContain('Back to the board');
   expect(bar?.textContent).toContain('The timer');
   expect(bar?.textContent).toContain('1 of the 2 files in this chapter');
-  // The PR's number keeps its board colour: the chip carries the hue it came with.
   const pr = bar?.querySelector<HTMLElement>('.ib-rv-narrow-pr');
   expect(pr?.hasAttribute('data-hue')).toBe(true);
   expect(pr?.style.getPropertyValue('--shp-h')).toBe('72');
-  // The jump to the chapter's narrowed file holds (the reader drew first), and focus starts on the way back.
   for (let i = 0; i < 20 && reader?.reveal?.path !== 'src/timer.ts'; i++) await act(async () => new Promise((r) => setTimeout(r, 20)));
   expect(reader?.reveal?.path).toBe('src/timer.ts');
   expect(document.activeElement).toBe(document.querySelector('[data-review-narrow-back]'));

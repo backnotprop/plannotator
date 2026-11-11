@@ -1,15 +1,3 @@
-/**
- * A note on a question card reaches the agent with the Send (the owner: "When
- * I skip a message but add a note, that note needs to go to the reply"). The
- * person writes the note and presses Send right away, before the window's
- * copy of the thread has caught up with the saved picks: the reply must still
- * carry the note under "Answers to your questions". Cases: Skip plus a note;
- * a note alone with the default (Keep open, approval "inbox-explicit-skip");
- * a note alone with Skip them. The window
- * over a REAL Inbox (tests/helpers/inbox-dom-server.ts).
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -177,7 +165,6 @@ function note(card: HTMLElement, words: string) {
 function typeNote(card: HTMLElement, words: string, from = 0) {
   const text = card.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
-  // Typed one character at a time, as a person types: each keystroke saves.
   for (let i = from + 1; i <= words.length; i++) {
     act(() => {
       setter.call(text, words.slice(0, i));
@@ -201,7 +188,6 @@ async function openStopped() {
   return el;
 }
 
-/** The Send in view: the foot's, or the reply box's when it is open. */
 const sendButton = (el: ParentNode) => {
   const all = [...el.querySelectorAll('button')].filter((b) => b.textContent?.replace(/\s+/g, ' ').trim() === 'Send');
   if (all.length === 0) throw new Error('no Send button');
@@ -209,7 +195,6 @@ const sendButton = (el: ParentNode) => {
 };
 
 async function sentReply() {
-  // A refused Send shows its reason instead of a reply.
   for (let i = 0; i < 40; i++) {
     if ((await readThread(world.stopped)).thread.messages.some((m) => m.author.kind === 'person')) break;
     await settle(25);
@@ -224,14 +209,12 @@ const el = () => current!;
 test.skipIf(!hasDom)('Skip and a note on a card, Send pressed while the note is still saving: the reply carries the skip and the note', async () => {
   current = await openStopped();
   act(() => button(cards(el())[0]!, 'Skip').click());
-  // The skip saved: the foot offers Send.
   await until(() => [...el().querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Send'), 'the foot Send');
   note(cards(el())[0]!, 'Ask me after the design review');
   act(() => sendButton(el()).click());
   const body = await sentReply();
   expect(body).toContain('### Q1. Which layout should the invoice list use? (line 4)\nSkipped\nNote: Ask me after the design review');
   const qs = (await readThread(world.stopped)).thread.messages[0]!.questions!;
-  // The card's own Skip is the person's; the other question stays open (a Send never skips on its own).
   expect(qs.map((q) => q.state)).toEqual(['sent', 'open']);
   expect(qs[0]!.answer).toMatchObject({ skipped: true, note: 'Ask me after the design review' });
 }, 20_000);
@@ -257,11 +240,9 @@ test.skipIf(!hasDom)('a note alone, then Skip them: the note goes, the other que
   await settle();
   note(cards(el())[0]!, 'Leaning to cards');
   await settle();
-  // The default keeps the other question open whatever the Send carries: Skip them instead.
   expect(el().querySelector('[data-skip-chip]')?.getAttribute('data-skip-chip')).toBe('keep');
   act(() => (el().querySelector('[data-skip-toggle]') as HTMLButtonElement).click());
   expect(el().querySelector('[data-skip-chip]')?.getAttribute('data-skip-chip')).toBe('skip');
-  // More of the note, and Send while it saves.
   typeNote(cards(el())[0]!, 'Leaning to cards, for now', 'Leaning to cards'.length);
   act(() => sendButton(el()).click());
   const body = await sentReply();
@@ -289,8 +270,6 @@ test.skipIf(!hasDom)('Re-ask pressed while a pick and a note are still saving: t
   act(() => (cards(el())[0]!.querySelector('[data-question-option] input') as HTMLInputElement).click());
   await until(async () => (await readThread(world.stopped)).thread.messages[0]!.questions![0]!.state === 'picked', 'the first pick saved');
   await settle();
-  // The second question is still open as drawn: the open-questions list (Re-ask at its foot, owner,
-  // 2026-10-23) is offered. Open it now, so pressing Re-ask below is one synchronous click.
   const trigger = el().querySelector('[data-open-questions]') as HTMLElement;
   expect(trigger).not.toBeNull();
   await act(async () => {
@@ -301,12 +280,10 @@ test.skipIf(!hasDom)('Re-ask pressed while a pick and a note are still saving: t
     trigger.click();
   });
   await until(() => !!document.querySelector('[data-open-questions-list] [data-reask]'), 'Re-ask in the list');
-  // Pick the second and write a note on the first; Re-ask before either save lands.
   act(() => (cards(el())[1]!.querySelector('[data-question-option] input') as HTMLInputElement).click());
   note(cards(el())[0]!, 'Keep it simple');
   act(() => (document.querySelector('[data-open-questions-list] [data-reask]') as HTMLElement).click());
   const body = await sentReply();
-  // Nothing is open any more, so no Re-ask note: one plain reply carrying both picks and the note.
   expect(body).toContain('### Q1. Which layout should the invoice list use? (line 4)\nAnswer: Cards\nNote: Keep it simple');
   expect(body).toContain('### Q2. Should overdue invoices sort to the top? (line 13)\nAnswer: Yes');
   const qs = (await readThread(world.stopped)).thread.messages[0]!.questions!;

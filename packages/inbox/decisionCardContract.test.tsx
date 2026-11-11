@@ -1,19 +1,3 @@
-/**
- * Decision mode's card with the agent contract lines (approval
- * "inbox-decision-mode", "Agent contract lines", 2026-10-24; drawn as
- * contract-compare.html has them): the Stakes line, a Shows picture leading,
- * the Why line, picture choices as the thread card's own tiles, and a
- * `Reversible: no` question's One-way badge and confirm step.
- *
- * What regresses if this fails: a picture choice's picture no longer answers
- * (or a zoom answers, or a pick opens the viewer), a one-way pick counts
- * without its confirm (whichever choice the agent recommended: the grammar
- * does not say which one is one-way), a Skip asks, Escape answers instead of
- * cancelling, a one-way or picture question swipes, or Stakes /
- * Why / Shows stop showing.
- *
- * DOM-gated (DOM_TESTS=1, happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -62,7 +46,6 @@ function decision(q: InboxQuestion, pictures: InboxDecision['pictures'] = { inli
 }
 
 const DRAWERS = question({
-  // As an agent writes them (after the label, lower case): the card draws each as a sentence.
   stakes: 'ships to all of checkout on Thursday; changing it later costs a week of QA.',
   why: 'on a 320 px screen only B keeps the total next to the button.',
   holds_up: ['the 4.2 release'],
@@ -90,8 +73,7 @@ const INVOICES = question({
   recommendation: 'Wait for month-end close',
 });
 
-// happy-dom fetches an <img>'s URL and fires `error` when nothing answers (the card then draws text rows):
-// a loopback server answers every image path with a 1x1 GIF, and the page's URL points at it.
+// happy-dom fetches an <img>'s URL and fires `error` when nothing answers: a loopback server answers every image path with a 1x1 GIF.
 const GIF = Uint8Array.from(atob('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw=='), (c) => c.charCodeAt(0));
 let images: ReturnType<typeof Bun.serve> | null = null;
 let savedUrl = '';
@@ -149,7 +131,6 @@ function render(d: InboxDecision, opts: { touch?: boolean } = {}): Seen {
 
 const $ = <T extends Element = HTMLElement>(sel: string) => host!.querySelector<T>(sel);
 const $$ = <T extends Element = HTMLElement>(sel: string) => [...host!.querySelectorAll<T>(sel)];
-/** A click as a pointer makes it: the press (the card answers a click, never an arrow key), then the click. */
 function press(el: Element) {
   act(() => {
     el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: 'mouse' }));
@@ -196,7 +177,6 @@ describe.skipIf(!hasDom)('decision mode: the contract lines', () => {
     expect(stakes.textContent).toContain('Ships to all of checkout on Thursday');
     expect($('[data-decision-card]')!.getAttribute('aria-describedby')).toBe(stakes.id);
     expect($('[data-decision-why]')!.textContent).toBe('Why Claude Code recommends it: On a 320 px screen only B keeps the total next to the button.');
-    // ui's QuestionPictureTiles, one tile per choice, the captured image as each picture.
     const tiles = $$('[data-decision-tiles] [data-question-tile]');
     expect(tiles).toHaveLength(3);
     expect($$<HTMLImageElement>('[data-question-picture]').map((img) => img.getAttribute('src'))).toEqual([
@@ -205,11 +185,8 @@ describe.skipIf(!hasDom)('decision mode: the contract lines', () => {
       '/api/inbox/attachments/att_c/image',
     ]);
     expect(tiles[1]!.textContent).toContain('Recommended');
-    // The answer is the label as written; a description is drawn as a sentence.
     expect(tiles[0]!.querySelector('[data-question-tile-description]')!.textContent).toBe('Closest to today');
-    // The choice pictures are their tiles, never the hero on the left.
     expect($('[data-decision-pictures]')).toBeNull();
-    // Real radios, so the keyboard reaches each tile.
     expect($$<HTMLInputElement>('[data-question-tile] input[type="radio"]')).toHaveLength(3);
   });
 
@@ -217,7 +194,6 @@ describe.skipIf(!hasDom)('decision mode: the contract lines', () => {
     const seen = render(decision(DRAWERS, DRAWER_PICTURES));
     press($$('[data-question-zoom]')[2]!);
     expect(seen.answers).toHaveLength(0);
-    // The viewer names each picture by its choice (letter and label), not the picture's alt text.
     expect(seen.images).toEqual([{ names: ['A · Total on top', 'B · Total pinned with Pay', 'C · Three steps'], index: 2 }]);
     press($$('[data-question-picture]')[1]!);
     expect(seen.images).toHaveLength(1);
@@ -271,16 +247,13 @@ describe.skipIf(!hasDom)('decision mode: the contract lines', () => {
     render(decision(file, { inline: [], attachments: [{ attachment_id: 'att_plan', name: 'docs-nav-plan.md', kind: 'markdown', size: 400, media_type: null }] }));
     const ref = $('[data-decision-shows]')!;
     expect(ref.textContent).toBe('the nav plan');
-    // The attached file it names leads, and is not listed twice.
     expect($$('.ib-dm-refs .ib-dm-file')).toHaveLength(1);
   });
 
   test('Reversible: no: the One-way badge, no tag on any one choice, no swipe', () => {
     render(decision(INVOICES), { touch: true });
     expect($('[data-decision-one-way]')!.textContent).toContain('One-way');
-    // The grammar does not say which choice is one-way, so no choice is marked as the one.
     expect($('[data-decision-irreversible]')).toBeNull();
-    // A two-way choice on a touch screen would offer a swipe; a one-way one never does.
     expect($('.ib-dm-swipehint')).toBeNull();
   });
 
@@ -292,15 +265,12 @@ describe.skipIf(!hasDom)('decision mode: the contract lines', () => {
     expect(box.getAttribute('role')).toBe('alertdialog');
     expect(box.textContent).toContain('Delete now?');
     expect(box.textContent).toContain("Delete now? Can't be undone: deleted invoices cannot be restored.");
-    // One way to answer at a time: no Answer button beside the step.
     expect($('[data-decision-answer]')).toBeNull();
-    // The safe button holds focus: Enter there cancels, never deletes.
     expect(document.activeElement).toBe($('[data-decision-confirm-cancel]'));
     press($('[data-decision-confirm-cancel]')!);
     expect($('[data-decision-confirm-pick]')).toBeNull();
     expect(seen.answers).toHaveLength(0);
     expect($$<HTMLInputElement>('.ib-dm-choice input')[0]!.checked).toBe(false);
-    // The safe choice is recommended, and it asks too.
     press($$('.ib-dm-choice input')[1]!);
     expect(seen.answers).toHaveLength(0);
     expect($('[data-decision-confirm-pick]')!.textContent).toContain('Wait for month-end close?');
@@ -364,7 +334,6 @@ describe.skipIf(!hasDom)('decision mode: the contract lines', () => {
     const d = decision(question({}), { inline: [], attachments: files });
     expect(showsFile(d, 'docs/plan.md')?.attachment_id).toBe('att_new');
     expect(showsFile(d, './archive/plan.md')?.attachment_id).toBe('att_old');
-    // No path matches (an older Inbox sends no paths, or another folder): the name.
     expect(showsFile(d, 'other/plan.md')?.attachment_id).toBe('att_old');
     expect(showsFile(d, 'plan.md')?.attachment_id).toBe('att_old');
     expect(showsFile(d, 'missing.md')).toBeNull();

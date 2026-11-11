@@ -1,17 +1,3 @@
-/**
- * The Sidebar tip in a DOM (sidebarTip.ts): its hook (`useSidebarTip`) driving `SidebarTipCard` beside a sidebar, as
- * App wires them.
- *
- * What regresses: the tip showing on load, or to an Inbox that does not report it due (already shown, or the sidebar
- * already customized); a claim spent while the sidebar is closed, or while another one-time dialog is claiming, open
- * or was shown on this load (the tip must stand down unclaimed, so a later load still has it); the other reveals not
- * held back once it is up; the card shown after the Inbox refused the claim (another window showed it); focus moving
- * to the card; Got it, Escape, a right-click on the sidebar or the Customize panel not closing it; Escape taken from
- * a menu that is open over it; a second claim after it closed; the arrow a different colour from its card (this one
- * and the Launch tip's), which happened when another component's rule for the same class name repainted the card.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -78,7 +64,6 @@ async function until(done: () => boolean, ms = 2_000): Promise<void> {
 }
 const claims = () => posts.filter((p) => p.path.endsWith('/api/inbox/reveal'));
 const card = () => document.querySelector<HTMLElement>('[data-sidebar-tip]');
-/** Long enough for a moment to settle, the tip to yield and a claim to come back. */
 const settle = () => wait(TIMES.settledMs + TIP_TIMES.yieldMs + 120);
 
 const ROW = { thread_id: 'msg_a', section: 'sent', unseen: 0 } as InboxListRow;
@@ -138,14 +123,12 @@ function mount(state: State) {
   return (next: State) => act(() => root!.render(<Harness state={next} />));
 }
 
-/** A thread read on a page old enough: what comes next is leaving it. */
 async function readThread(state: State = BASE) {
   const render = mount(state);
   await wait(Math.max(TIMES.readMs, TIMES.pageAgeMs) + 20);
   return render;
 }
 
-/** The tip on screen, after a thread read and left. */
 async function shown(state: State = BASE) {
   const render = await readThread(state);
   render({ ...state, thread: null });
@@ -228,7 +211,6 @@ describe.skipIf(!hasDom)('the Sidebar tip', () => {
   test('another reveal takes the same moment: the tip yields and stands down unclaimed', async () => {
     const render = await readThread();
     render({ ...BASE, thread: null });
-    // The moment settles; the other reveal's claim lands while the tip yields.
     await wait(TIMES.settledMs + 30);
     expect(claims()).toHaveLength(0);
     render({ ...BASE, thread: null, blocked: true });
@@ -306,7 +288,6 @@ describe.skipIf(!hasDom)('the Sidebar tip', () => {
     act(() => void document.querySelector('[data-inbox-nav]')!.dispatchEvent(event));
     await until(() => card() === null);
     expect(card()).toBeNull();
-    // The sidebar's own handler still gets it.
     expect(event.defaultPrevented).toBe(false);
   });
 
@@ -349,10 +330,6 @@ describe.skipIf(!hasDom)('sidebarTipDue and sidebarTipPlace', () => {
   });
 });
 
-/**
- * The `background` inbox.css gives an element, by its classes and attributes alone: among the rules whose selector is
- * one compound of classes the element wears (with `.pn-inbox` before it or not), the most specific, then the last.
- */
 function surfaceOf(css: string, el: Element): string | null {
   let best: { weight: number; at: number; value: string } | null = null;
   let at = 0;

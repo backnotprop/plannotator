@@ -1,12 +1,3 @@
-/**
- * The feedback a Send wrote after the person's words is drawn as its own
- * block (replyFeedback.ts), the hook inbox.css sizes its headings by. The
- * feedback is built by the real export (`attachmentFeedback`), so a change to
- * its section headings that the split no longer finds fails here; an agent's
- * message with the same headings never gets the block, so its headings keep
- * their size. The sizes themselves are proved in a real browser
- * (tests/e2e/inbox-reply-feedback-size.spec.ts).
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -60,13 +51,10 @@ const feedback = () => attachmentFeedback(RECORDS, [IMAGE], new Map(), ROOT, { p
 test("the split finds the export's section after the person's words, never one in a code block", () => {
   const text = feedback();
   expect(splitReplyFeedback(`Notes below.\n\n${text}`)).toEqual({ words: 'Notes below.', feedback: text });
-  // Feedback alone: no words.
   expect(splitReplyFeedback(text)?.words).toBe('');
-  // The heading quoted in a fence is the person's own words.
   const fenced = 'Like this:\n\n```md\n# Feedback on the attached files\n```';
   expect(splitReplyFeedback(fenced)).toBeNull();
   expect(splitReplyFeedback(`${fenced}\n\n${text}`)?.words).toBe(fenced);
-  // A heading glued to a paragraph line is not the export's.
   expect(splitReplyFeedback('Notes.\n# Feedback on the attached files')).toBeNull();
 });
 
@@ -107,7 +95,6 @@ test.skipIf(!hasDom)("the person's reply draws its feedback as its own block; th
   const block = el.querySelector('[data-reply-feedback]')!;
   expect(block.querySelector('h1')?.textContent).toBe('Feedback on the attached files');
   expect(block.querySelector('h2 a[data-local-link="open"]')?.textContent).toBe('design/checkout.png');
-  // The person's words stay outside it.
   expect(block.textContent).not.toContain('Notes below.');
   expect(el.textContent).toContain('Notes below.');
 });

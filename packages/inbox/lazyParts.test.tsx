@@ -1,12 +1,3 @@
-/**
- * The window's parts loaded on first use (lazyParts.tsx, #2593). What
- * regresses: a part already fetched still going through Suspense on its first
- * open, where React holds the fallback at least 300 ms (a guided review took
- * ~345 ms to draw its diff where the inline bundle took ~50 ms); and a load
- * that failed once (the Inbox restarting) never tried again.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act, Suspense } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -29,7 +20,6 @@ function Reader({ title }: { title: string }) {
   return <p data-reader="">{title}</p>;
 }
 
-/** Renders `node` in one synchronous commit; what is on screen right after it. */
 function renderNow(node: React.ReactNode): HTMLElement {
   host = document.createElement('div');
   document.body.appendChild(host);

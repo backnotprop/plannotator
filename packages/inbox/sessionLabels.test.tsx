@@ -1,19 +1,3 @@
-/**
- * Session labels past the To picker (issue #2450): the `@` picker's rows and the
- * `@` token, a list row's agents, Send to another session, and an agent
- * message's author, all from one map (the list's `session_labels`) or the
- * route's own `label`. The failures this catches: an unnamed session that reads
- * any differently than before; two sessions named alike (or a session named
- * "Pi") becoming the same `@` token; a label too long for the reply route's tag
- * or for a phone's line; a row's agents that never say the name; a message whose
- * author drops the agent's name or never adds the session's (owner's decision,
- * "Claude Code · Fix login redirect"), or that keeps a name the list no longer
- * gives; and a window that never reads the list again
- * when only a label changed.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- * The pure parts run without it.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -53,9 +37,7 @@ describe('the @ picker', () => {
   test('a named session is offered by its name; an unnamed one reads exactly as it did with no names at all', () => {
     const sessions = [live('ses-owner', 'claude-code', 'Fix login redirect'), live('ses-docs', 'claude-code', 'Docs pass'), live('ses-plain', 'claude-code'), live('ses-pi', 'pi')];
     const named = labelsOf(model(sessions, 'ses-owner'), 'ses-owner');
-    // The unnamed one keeps the words an unnamed session has always had beside another of its agent.
     expect(named).toEqual({ 'ses-owner': 'Fix login redirect', 'ses-docs': 'Docs pass', 'ses-plain': 'Claude Code (another session)', 'ses-pi': 'Pi' });
-    // With no names at all, every row reads as it did before labels (the strings the earlier picker gave).
     expect(labelsOf(model(withoutLabels(sessions), 'ses-owner'), 'ses-owner')).toEqual({
       'ses-owner': 'Claude Code',
       'ses-docs': 'Claude Code (another session)',
@@ -96,7 +78,6 @@ describe("a row's agents in words", () => {
     const labels = { 'ses-a': 'Fix login redirect', 'ses-b': 'Docs pass' };
     expect(rowAgentWords(rowAgentGroups(participants, agent, labels))).toBe('3 Claude Code sessions (Fix login redirect, Docs pass, 1 unnamed) and Pi');
     expect(rowAgentWords(rowAgentGroups(participants, agent))).toBe('3 Claude Code sessions and Pi');
-    // One agent, no participants: the row's own author.
     expect(rowAgentWords(rowAgentGroups(undefined, agent, labels))).toBe('Fix login redirect (Claude Code)');
     expect(rowAgentWords(rowAgentGroups(undefined, agent, {}))).toBe('Claude Code');
   });
@@ -112,17 +93,14 @@ test('shortLabel keeps whole characters at both ends', () => {
   expect(shortLabel('short')).toBe('short');
   const cut = shortLabel(`${'\u{1F600}'.repeat(30)}tail`, 10);
   expect(Array.from(cut)).toHaveLength(10);
-  // No lone surrogate: every UTF-16 high half is followed by its low half.
   expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(cut)).toBe(false);
   expect(cut.endsWith('tail')).toBe(true);
 });
 
 test('shortLabel never splits a family emoji, wherever the cut falls', () => {
-  // Seven code points, one character: a code-point cut leaves a man, or a ZWJ, on either side of the "…".
   const family = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}';
   const segmenter = new Intl.Segmenter('en', { granularity: 'grapheme' });
   const whole = (text: string) => Array.from(segmenter.segment(text), (s) => s.segment).every((g) => !g.includes('\u200D') || g === family);
-  // max 10 keeps 5 at the head and 4 at the tail: put the family at each edge of each kept end, and at the cut itself.
   for (let at = 0; at < 20; at += 1) {
     const chars = Array.from('abcdefghijklmnopqrst');
     chars[at] = family;
@@ -141,8 +119,6 @@ test('the deliveries frame says when a label changed; an older frame is a delive
   dispatchInboxFrame({ name: 'deliveries', data: '', id: null }, handlers);
   expect(seen).toEqual([{ labels: true, sessions: false, agents: false }, { labels: false, sessions: false, agents: false }, { labels: false, sessions: false, agents: false }]);
 });
-
-// --- Drawn ---------------------------------------------------------------------------------------------------------
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'ai-collab-abcdef', name: 'ai-collab', root: '/w/ai-collab', created_at: '2026-11-03T09:00:00.000Z' };
 const claude = (session: string): InboxAuthor => ({ kind: 'agent', host: 'claude-code', session, name: 'Claude Code' });
@@ -222,23 +198,19 @@ describe('drawn', () => {
     setSessionLabels({ 'ses-login': 'Fix login redirect', 'ses-docs': long, 'ses-other': 'Not in this thread' });
     const el = await draw(<ThreadPane thread={THREAD} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} />);
     const nameOf = (id: string) => el.querySelector(`[data-message-article="${id}"] .ib-fl-nm`)!;
-    // Both names, the agent first, the label in its own quieter part.
     expect(nameOf('msg_1').textContent).toBe('Claude Code · Fix login redirect');
     expect(nameOf('msg_1').querySelector('[data-author-agent]')!.textContent).toBe('Claude Code');
     expect(nameOf('msg_1').querySelector('.ib-fl-lbl [data-author-label]')!.textContent).toBe('Fix login redirect');
     expect(nameOf('msg_1').hasAttribute('data-session-label')).toBe(true);
-    // A long label is cut in the middle, both ends kept; the agent's name is whole.
     expect(nameOf('msg_2').querySelector('[data-author-agent]')!.textContent).toBe('Claude Code');
     expect(nameOf('msg_2').querySelector('[data-author-label]')!.textContent).toBe(shortLabel(long, 32));
     expect(nameOf('msg_2').querySelector('[data-author-label]')!.textContent).toStartWith('Fix the login');
     expect(nameOf('msg_2').querySelector('[data-author-label]')!.textContent).toEndWith('console');
-    // Unnamed: the same element and words as before.
     expect(nameOf('msg_3').textContent).toBe('Claude Code');
     expect(nameOf('msg_3').hasAttribute('data-session-label')).toBe(false);
     expect(nameOf('msg_3').querySelector('.ib-fl-lbl')).toBeNull();
     expect(el.querySelector('[data-message-article="msg_3"] [data-fold-head]')!.getAttribute('aria-label')).toStartWith('Claude Code, ');
     expect(el.querySelector('.ib-pbody')!.hasAttribute('data-session-labels')).toBe(true);
-    // A screen reader hears both names, the whole label, on the fold button (folded and open heads alike).
     for (const id of ['msg_1', 'msg_2']) {
       const want = id === 'msg_1' ? 'Claude Code (Fix login redirect), ' : `Claude Code (${long}), `;
       expect(el.querySelector(`[data-message-article="${id}"] [data-fold-head]`)!.getAttribute('aria-label')).toStartWith(want);
@@ -258,7 +230,6 @@ describe('drawn', () => {
     const el = await draw(<ThreadPane thread={thread} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} />);
     const name = el.querySelector('[data-message-article="msg_1"] .ib-fl-nm.ib-who')!;
     expect(name.hasAttribute('aria-hidden')).toBe(false);
-    // What is drawn (the cut label) is hidden; what is heard has both names and the whole label.
     expect(name.querySelector('[data-author-agent]')!.getAttribute('aria-hidden')).toBe('true');
     expect(name.querySelector('.ib-fl-lbl')!.getAttribute('aria-hidden')).toBe('true');
     expect(name.querySelector('.ib-sr')!.textContent).toBe(`Claude Code (${long})`);
@@ -313,7 +284,6 @@ describe('drawn', () => {
 
 describe('a session id that is a name Object has', () => {
   test('lookups find nothing in the prototype', () => {
-    // A plain object, as a caller might pass: its prototype's names are no labels.
     const labels: Record<string, string> = { 'ses-a': 'Fix login' };
     for (const id of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) expect(labelOf(labels, id)).toBeNull();
     expect(labelOf(labels, 'ses-a')).toBe('Fix login');

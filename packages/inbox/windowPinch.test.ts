@@ -1,7 +1,3 @@
-/**
- * The window zoom's release (windowPinch.ts): the clamp on the viewport tag
- * must always come off, however often the pane asks.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { releaseWindowZoom } from './windowPinch';
 
@@ -39,8 +35,6 @@ afterEach(() => {
   g.requestAnimationFrame = saved.requestAnimationFrame;
 });
 
-// Failure to catch: a second release before the first one's frames saving the clamped tag as the original, which
-// leaves maximum-scale=1 on the Inbox and pinch off until a reload (two quick file changes, or a hidden tab).
 test('two releases in a row leave the viewport tag as it was', () => {
   releaseWindowZoom();
   expect(meta.content).toBe(`${ORIGINAL}, maximum-scale=1`);
@@ -49,7 +43,6 @@ test('two releases in a row leave the viewport tag as it was', () => {
   expect(meta.content).toBe(ORIGINAL);
 });
 
-// Failure to catch: the pending guard sticking after its frames, so a later zoom is never released.
 test('a release after the last one finished clamps again', () => {
   releaseWindowZoom();
   runFrames();

@@ -1,14 +1,3 @@
-/**
- * The debug log's `voice_miss` (voiceMiss.ts) and the offset on `voice_press` (voicePress.ts), written through the
- * window's real recorder, so they reach the Inbox's debug.log.
- *
- * What regresses: a near miss of a live mic that leaves no line (the taps the owner calls "a pain" stay unseen); a far
- * tap logged as a miss; a tap on Send or Save draft that reads as a plain miss (no `other`); a second finger during a
- * hold that reads as a stop tap (no `mode`); a listener or a layout read while the debug log is off; a burst of taps
- * flooding the log; a field the Inbox's filter would drop.
- *
- * DOM (DOM_TESTS=1): the recorder stores in localStorage and wraps `fetch`, both restored after.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { cleanWindowRecord, INBOX_DEBUG_ON_HEADER } from '../shared/inbox/debug-log';
@@ -23,7 +12,6 @@ const BUFFER = 'plannotator-inbox-debug-buffer';
 type Rec = Record<string, unknown>;
 const stored = (): Rec[] => JSON.parse(window.localStorage.getItem(BUFFER) ?? '[]') as Rec[];
 const misses = () => stored().filter((r) => r.ev === 'voice_miss');
-/** Past the recorder's save delay, so what was noted is in the store. */
 const settle = () => new Promise((done) => setTimeout(done, 350));
 
 const debugOn = () => learnDebugLog(new Response('{}', { status: 200, headers: { [INBOX_DEBUG_ON_HEADER]: '1' } }));
@@ -35,10 +23,8 @@ afterEach(() => {
   for (const undo of restore.splice(0).reverse()) undo();
 });
 
-/** A 36px phone mic at (100, 100), a plain spot of the page, and a Send button beside the mic. */
 function setup() {
   const realFetch = globalThis.fetch;
-  // The Inbox is never reached: the recorder's sends are refused, so its lines stay in the store to be read.
   globalThis.fetch = (async () => new Response('', { status: 503 })) as unknown as typeof fetch;
   const button = document.createElement('button');
   button.className = 'ib-vmic';
@@ -85,7 +71,6 @@ describe.skipIf(!hasDom)('voice_miss in the debug log', () => {
     const mic = setup();
     debugOn();
     mic.watch();
-    // 10px below the bottom edge, level with its centre.
     mic.tap(118, 146);
     await settle();
     const lines = misses();
@@ -99,15 +84,15 @@ describe.skipIf(!hasDom)('voice_miss in the debug log', () => {
     const mic = setup();
     debugOn();
     mic.watch();
-    mic.tap(118, 170); // 34px below: meant for something else.
+    mic.tap(118, 170);
     mic.tick(VOICE_MISS_GAP_MS);
-    mic.tap(118, 118, mic.button); // a hit: voice_press has it.
+    mic.tap(118, 118, mic.button);
     mic.tick(VOICE_MISS_GAP_MS);
     mic.setPhase('sending');
     mic.tap(118, 146);
     mic.tick(VOICE_MISS_GAP_MS);
     mic.setPhase('opening');
-    mic.tap(90, 118); // 10px to the left, while opening: a miss.
+    mic.tap(90, 118);
     await settle();
     expect(misses().map((r) => [r.edge, r.px, r.phase])).toEqual([['left', 10, 'opening']]);
   });
@@ -116,7 +101,6 @@ describe.skipIf(!hasDom)('voice_miss in the debug log', () => {
     const mic = setup();
     debugOn();
     mic.watch();
-    // Send's inner span, 6px right of the mic.
     mic.tap(142, 118, mic.send.firstElementChild!);
     mic.tick(VOICE_MISS_GAP_MS);
     mic.setMode('hold');
@@ -189,7 +173,7 @@ describe.skipIf(!hasDom)('voice_miss in the debug log', () => {
     mic.tick(VOICE_MISS_GAP_MS - 101);
     mic.tap(118, 150);
     mic.tick(1);
-    mic.tap(140, 118); // 300 ms after the first line: 4px to the right.
+    mic.tap(140, 118);
     await settle();
     expect(misses().map((r) => [r.edge, r.px])).toEqual([
       ['below', 10],

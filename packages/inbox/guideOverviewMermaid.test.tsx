@@ -1,24 +1,3 @@
-/**
- * A guide's Mermaid overview diagram in the Inbox: drawn, not left as its
- * source in a grey code box. The guide brief offers agents `{ kind:
- * "mermaid" }`, and the guided review, the walkthrough and the pull request
- * page all draw guides through GuideReader. The full-window review is the pane
- * here (as guideGlobalComment.test.tsx), with the Inbox's doors stubbed at
- * `fetch` and the Mermaid runtime stood in for through ui's test hook. What
- * regresses:
- *
- *  - the pane no longer handing a Mermaid diagram to Plannotator's renderer
- *    (the source shows in the guide chain's code box again);
- *  - a source that does not render showing the red error panel instead of
- *    its plain fence;
- *  - GuideReader drawing it only for a host that passes a renderer (the
- *    pull request page passes none; its snapshot has no overview today);
- *  - the diagram's box wider than the title's column (the owner on #2887:
- *    under the words, as wide as the title), read from the window's own
- *    `.gv-` rules.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { plugin } from 'bun';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, mock, test } from 'bun:test';
 import { act } from 'react';
@@ -53,7 +32,6 @@ mock.module(resolve(import.meta.dir, '../review-editor/workerPool.tsx'), () => (
 
 const hasDom = typeof document !== 'undefined';
 const { ReviewPane } = (hasDom ? await import('./components/ReviewPane') : {}) as typeof import('./components/ReviewPane');
-// Through `#guide-reader` (the window's strict typecheck sees its shape, not review-editor's code).
 const GuideReader = (hasDom ? (await import('#guide-reader')).default : null)!;
 const mermaid = hasDom ? await import('@plannotator/ui/utils/mermaid') : null;
 const diagramSvg = hasDom ? await import('@plannotator/ui/test-setup/diagramSvg') : null;
@@ -61,7 +39,6 @@ const diagramSvg = hasDom ? await import('@plannotator/ui/test-setup/diagramSvg'
 const PROJECT: InboxProject = { id: 'prj_1', key: 'demo-abcdef', name: 'demo', root: '/work/demo', created_at: '2026-10-11T10:00:00.000Z' };
 const MESSAGE = 'msg_01M4H6G73M9H3Z32T859E72DPY';
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40" data-drawn-overview=""><rect width="120" height="40"/></svg>';
-/** A source the stand-in runtime refuses, the way Mermaid refuses a parse error. */
 const BROKEN = 'flowchart LR\n  A -->';
 
 const overviewOf = (source: string): GuideSnapshot => {
@@ -91,7 +68,6 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let restoreParser: (() => void) | null = null;
-/** The sources the stand-in runtime was asked to draw. */
 let rendered: string[] = [];
 
 beforeAll(() => {
@@ -161,7 +137,6 @@ test.skipIf(!hasDom)('the guide pane draws a Mermaid overview diagram instead of
   expect(box() !== null).toBe(true);
   expect(rendered).toContain(DRAWN);
   expect(box()!.querySelector('svg[data-drawn-overview]') !== null).toBe(true);
-  // Drawn: no source in a code box, and the block's Show source is there to read it.
   expect(box()!.querySelector('pre') === null).toBe(true);
   expect(box()!.querySelector('[aria-label="Show source"]') !== null).toBe(true);
 });
@@ -173,7 +148,6 @@ test.skipIf(!hasDom)('a Mermaid source that does not render stays readable as it
   expect(box()!.querySelector('pre')?.textContent).toBe(BROKEN);
   expect(box()!.textContent).not.toContain('Error');
   expect(box()!.textContent).not.toContain('Parse error');
-  // The final fallback, not the pending state (which also shows the source).
   expect(box()!.querySelector('[data-diagram-pending]') === null).toBe(true);
   expect(box()!.textContent).not.toContain('Rendering diagram');
 });
@@ -185,7 +159,6 @@ test.skipIf(!hasDom)('the reader draws it on its own, for a host with no diagram
   expect(box()!.querySelector('pre') === null).toBe(true);
 });
 
-/** The guide heading's and overview's rules of the window's stylesheet (`.gv-` lines outside the phone block), as the page has them. */
 function guideRules(): string {
   return readFileSync(join(import.meta.dir, 'inbox.css'), 'utf8')
     .split('\n')
@@ -203,17 +176,14 @@ test.skipIf(!hasDom)("the diagram sits under the overview's words, no wider than
     const overview = document.querySelector<HTMLElement>('[data-guide-overview]');
     const diagram = box() as HTMLElement | null;
     expect(title !== null && overview !== null && diagram !== null).toBe(true);
-    // Under the words, in the overview (not a column beside the heading).
     expect(diagram!.parentElement === overview).toBe(true);
     expect(overview!.querySelector('.gv-prose')!.compareDocumentPosition(diagram!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // Its box takes the title's measure: the same maximum width, in the same type size and weight (a ch is the font's own).
     const t = getComputedStyle(title!);
     const d = getComputedStyle(diagram!);
     expect(t.maxWidth !== '' && t.maxWidth !== 'none').toBe(true);
     expect(d.maxWidth).toBe(t.maxWidth);
     expect(d.fontSize).toBe(t.fontSize);
     expect(d.fontWeight).toBe(t.fontWeight);
-    // The drawing is inside that box.
     expect(diagram!.querySelector('svg[data-drawn-overview]') !== null).toBe(true);
   } finally {
     sheet.remove();

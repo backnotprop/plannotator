@@ -1,8 +1,3 @@
-/**
- * The window's half of the Snooze announcement's rules (approval "inbox-snooze-announce"). What regresses: a row
- * counting as "read and left" when it is unread, typed in, snoozed, fresh, Sent or Quiet; one such row being enough;
- * a snoozed or Sent thread counting as waiting on the person.
- */
 import { describe, expect, test } from "bun:test";
 import type { InboxListRow } from "@plannotator/core/inbox-types";
 import { snoozeIntroNeed, snoozeIntroReadAndLeft, snoozeIntroWaits } from "./snoozeIntroRows";

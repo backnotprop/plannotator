@@ -1,10 +1,3 @@
-/**
- * Whether a list read shows anything new (listSame.ts). Failures to catch: a
- * read that changed a row, a section, a count or anything else the window
- * draws taken as nothing new (the change would not show until the next one);
- * and the other way, a read with nothing new taken as new, which draws the
- * whole window and the open thread again for each record and each own save.
- */
 import { expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { keepSame, sameListModel } from './listSame';

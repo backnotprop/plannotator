@@ -1,13 +1,4 @@
-/**
- * The held list's "N new" line stays ONE line (the owner, 2026-11-02: "1 new in appnotes ·
- * Users/ramos/workspaces/projects" wrapped onto two lines beside Show and "looks bugged out"). The
- * count and Show never shrink and the project's name is the part that is cut with "…"; while it is
- * cut, the whole line is the tooltip. The page's real stylesheet is loaded, so the rules that keep it
- * on one line are the ones the window uses. happy-dom has no layout, so a test gives the project's
- * name the widths that make it cut.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
+/** happy-dom has no layout: a test gives the project's name the widths that make it cut. */
 import { afterEach, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -33,7 +24,6 @@ afterEach(() => {
   sheet = null;
 });
 
-/** The `.ib-notice` rules of the window's stylesheet (outside the phone block), as the page has them. */
 function noticeRules(): string {
   const css = readFileSync(join(import.meta.dir, 'inbox.css'), 'utf8');
   return css
@@ -66,7 +56,6 @@ function sized(node: HTMLElement, scroll: number, client: number) {
   Object.defineProperty(node, 'clientWidth', { configurable: true, get: () => client });
 }
 
-/** The pointer comes to rest on `target`, the way a mouse does. */
 function hover(target: HTMLElement) {
   act(() => {
     for (const type of ['pointerover', 'pointerenter', 'mouseover', 'mouseenter', 'pointermove', 'mousemove']) {
@@ -82,7 +71,6 @@ async function wait(ms: number) {
   });
 }
 
-/** A popup outside `el` whose text is exactly `text`: the tooltip, portaled to the body. */
 const tooltipWith = (el: HTMLElement, text: string) => [...document.body.querySelectorAll('*')].some((n) => !el.contains(n) && n.children.length === 0 && n.textContent === text);
 
 const LONG = 'appnotes · a-very-long-parent-folder-name-that-does-not-fit-beside-show';

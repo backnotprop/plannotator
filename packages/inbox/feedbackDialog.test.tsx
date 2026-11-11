@@ -1,15 +1,3 @@
-/**
- * Sidebar → Feedback (components/FeedbackDialog.tsx) through the window's
- * real client (`inboxApi.sendFeedback`) with `fetch` stubbed: what regresses
- * is the window sending more than the person typed (thread content, extra
- * fields), sending without Send, losing the words on a failure, a silent
- * failure, the cap not enforced before the round trip, the category not
- * clearable, a Sent state that never shows, and the copy prompt losing the
- * draft or the "only after I say yes" rule. Plus the sidebar row: above
- * Settings, only when the window gives it a handler.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -38,7 +26,6 @@ afterEach(() => {
 
 type Call = { url: string; method: string; body: Record<string, unknown> };
 
-/** Stubs window.fetch for the test: records each call and answers with `answer`. */
 function stubFetch(answer: (call: Call) => Response | Promise<Response>): Call[] {
   const calls: Call[] = [];
   const original = globalThis.fetch;
@@ -102,7 +89,6 @@ function render(
   };
 }
 
-/** Types into a React-controlled field the way a person does (the native setter, then `input`). */
 function type(el: HTMLTextAreaElement | HTMLInputElement, value: string) {
   const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
   act(() => {
@@ -111,7 +97,6 @@ function type(el: HTMLTextAreaElement | HTMLInputElement, value: string) {
   });
 }
 
-/** Past the search's pause after typing (FeedbackDialog's SEARCH_PAUSE_MS), and the search's answer. */
 async function searched() {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 320));
@@ -125,7 +110,6 @@ async function press(button: HTMLButtonElement) {
   await act(async () => {
     button.click();
   });
-  // The fetch's answer, then React's update.
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
@@ -135,9 +119,7 @@ describe.skipIf(!hasDom)('the Feedback dialog', () => {
   test('Send posts only what was typed to the Inbox, then shows the sent state', async () => {
     const calls = stubFetch(() => Response.json({ ok: true }));
     const dialog = render();
-    // The box takes focus on open: the person types at once.
     expect(document.activeElement).toBe(dialog.box());
-    // The line says what is sent, naming this version (the data it must keep truthful), the OS and the agents.
     expect(dialog.what().textContent).toContain('0.28.33');
     expect(dialog.what().textContent).toMatch(/\bOS\b/);
     expect(dialog.what().textContent).toMatch(/\bagents\b/);
@@ -146,7 +128,6 @@ describe.skipIf(!hasDom)('the Feedback dialog', () => {
     type(dialog.box(), '  Reload loses my place in the list  ');
     await press(dialog.cat('bug'));
     type(dialog.contact(), ' ada@example.com ');
-    // Typing and choosing sends nothing: only Send does.
     expect(calls).toHaveLength(0);
     await press(dialog.send());
 
@@ -179,13 +160,9 @@ describe.skipIf(!hasDom)('the Feedback dialog', () => {
 
   test('the service or the Inbox unavailable: one plain line, never a network error or a status, and the words stay', async () => {
     const answers: Array<() => Response | Promise<Response>> = [
-      // The Inbox's 502 when the Worker is unreachable, not deployed or silent.
       () => Response.json({ error: FEEDBACK_UNAVAILABLE, code: 'feedback_not_sent' }, { status: 502 }),
-      // The Inbox itself gone: the browser's own network error.
       () => Promise.reject(new TypeError('Failed to fetch')),
-      // Something in the way answering a page, not the Inbox's JSON.
       () => new Response('<html>Bad gateway</html>', { status: 503, headers: { 'Content-Type': 'text/html' } }),
-      // The window's own time limit (an Inbox that holds the request).
       () => Promise.reject(new DOMException('The operation was aborted.', 'AbortError')),
     ];
     let next = 0;
@@ -212,7 +189,6 @@ describe.skipIf(!hasDom)('the Feedback dialog', () => {
     document.body.append(main, opener);
     opener.focus();
     render();
-    // The drawer that held the Feedback row unmounts when the row is picked.
     opener.remove();
     act(() => root?.unmount());
     root = null;
@@ -244,12 +220,10 @@ describe.skipIf(!hasDom)('the Feedback dialog', () => {
   test('email and category are optional, and say so: with neither, Send sends just the message', async () => {
     const calls = stubFetch(() => Response.json({ ok: true }));
     const dialog = render();
-    // Optional where a person sees it (the placeholder) and where a screen reader hears it (the field's and the group's names).
     expect(dialog.contact().getAttribute('placeholder')).toContain('(optional)');
     expect(dialog.contact().getAttribute('aria-label')).toBe('Email (optional)');
     expect(dialog.contact().required).toBe(false);
     expect(dialog.host.querySelector('[role="group"]')?.getAttribute('aria-label')).toBe('Category (optional)');
-    // No line above the row says it again (approval "inbox-feedback-faq").
     expect(dialog.host.textContent).not.toContain('Category and email are optional');
     type(dialog.box(), 'Just the words');
     await press(dialog.send());
@@ -295,7 +269,6 @@ describe.skipIf(!hasDom)('the Feedback dialog', () => {
     expect(tabs.map((tab) => tab.textContent)).toEqual(['Message', 'Common questions']);
     expect(dialog.tab('message').getAttribute('aria-selected')).toBe('true');
     expect(dialog.tab('questions').getAttribute('aria-selected')).toBe('false');
-    // One tab stop for the list; each tab names the panel it shows.
     expect(dialog.tab('message').tabIndex).toBe(0);
     expect(dialog.tab('questions').tabIndex).toBe(-1);
     expect(dialog.form().getAttribute('role')).toBe('tabpanel');
@@ -331,7 +304,6 @@ describe.skipIf(!hasDom)('the Feedback dialog', () => {
     await press(questions[0]!);
     expect(questions[0]!.getAttribute('aria-expanded')).toBe('true');
     expect(answerOf(questions[0]!).hidden).toBe(false);
-    // Its link is real release notes, opened in a new tab.
     const link = answerOf(questions[0]!).querySelector<HTMLAnchorElement>('a')!;
     expect(link.href).toStartWith('https://github.com/backnotprop/plannotator/releases/tag/v');
     expect(link.target).toBe('_blank');
@@ -385,7 +357,6 @@ describe.skipIf(!hasDom)('the Feedback dialog', () => {
     await press(line.querySelector<HTMLButtonElement>('[data-feedback-known-action]')!);
     expect(actions).toEqual(['simple-list']);
 
-    // A feature and an experimental switch: no "Fixed", an Experimental lead, and the action that opens their Settings.
     type(dialog.box(), 'can agents start themselves');
     await searched();
     expect(dialog.known()!.textContent).toBe('New message can start Claude Code or Pi for you · Open Settings → Agents');
@@ -395,11 +366,9 @@ describe.skipIf(!hasDom)('the Feedback dialog', () => {
     await press(dialog.known()!.querySelector<HTMLButtonElement>('[data-feedback-known-action]')!);
     expect(actions).toEqual(['simple-list', 'settings-experimental']);
 
-    // Unrelated words: no known line.
     type(dialog.box(), 'the agent moves files around in my repo');
     await searched();
     expect(dialog.known()).toBeNull();
-    // Nothing typed went anywhere: the matching runs in the window.
     expect(calls).toHaveLength(0);
   });
 
@@ -428,7 +397,6 @@ describe.skipIf(!hasDom)('the Feedback dialog', () => {
     });
     expect(dialog.tab('message').getAttribute('aria-selected')).toBe('true');
 
-    // On Message, Send is the last stop: Tab from it wraps to the first (the ×), not into the hidden questions.
     dialog.send().focus();
     const tab = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
     act(() => {
@@ -452,9 +420,8 @@ describe.skipIf(!hasDom)('the Feedback dialog', () => {
 describe('the copy prompt', () => {
   test('the command reads `plannotator feedback`, with the installed binary only as the fallback; the agent asks first', () => {
     const prompt = feedbackPrompt([BIN, 'inbox', 'mcp']);
-    // Pinned on purpose (owner, 2026-10-27): installed users see `plannotator feedback …`, never an execPath.
-    // The text goes on stdin: a QUOTED heredoc with an end word no feedback quotes (bash; feedback-command.test.ts runs it),
-    // or a single-quoted here-string with UTF-8 output (PowerShell). Never double quotes, which expand $VAR and backticks.
+    // Pinned on purpose: installed users see `plannotator feedback …`, never an execPath.
+    // The text goes on stdin: a QUOTED heredoc with an end word no feedback quotes (bash), or a single-quoted here-string with UTF-8 output (PowerShell). Never double quotes, which expand $VAR and backticks.
     expect(prompt).toContain(`<<'${FEEDBACK_HEREDOC_END}'\n${FEEDBACK_PROMPT_TEXT_LINE}\n${FEEDBACK_HEREDOC_END}\n`);
     expect(prompt).toContain(`$OutputEncoding = [Text.UTF8Encoding]::new($false)\n@'\n${FEEDBACK_PROMPT_TEXT_LINE}\n'@ | plannotator feedback --stdin`);
     expect(prompt).not.toContain("<<'EOF'");
@@ -462,12 +429,10 @@ describe('the copy prompt', () => {
     expect(prompt).toContain('`plannotator feedback --help`');
     expect(prompt).toContain(`If \`plannotator\` is not found, use ${BIN} in its place.`);
     expect(prompt).not.toContain(`${BIN} feedback`);
-    // Windows: the .exe is the installed binary too.
     expect(feedbackPrompt(['C:\\Users\\ada\\AppData\\Local\\plannotator\\plannotator.exe', 'inbox', 'mcp'])).toContain('plannotator.exe');
-    // Pinned on purpose: the owner's rule that the agent shows the exact text and waits for a yes.
+    // Pinned on purpose: the agent shows the exact text and waits for a yes.
     expect(prompt).toContain('Show me the exact text you will send');
     expect(prompt).toContain('Only after I say yes');
-    // No draft: no quote.
     expect(prompt).not.toContain('> ');
   });
 

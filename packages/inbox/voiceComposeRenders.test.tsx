@@ -1,11 +1,3 @@
-/**
- * Dictating in New message re-renders nothing at audio rate, and words that land are one change, not one per word. The
- * level reaches the screen by direct writes (voiceSession.ts `subscribeMeter`), so a host that subscribed to the meter
- * would cost a whole dialog 30 times a second, and a phone would feel it. A production build has no render count, so
- * this holds the real dialog in a Profiler, with a microphone made of plain objects and a fake answer from the Inbox.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act, Profiler } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -22,7 +14,6 @@ let commits = 0;
 let ticks = 0;
 const saved: Record<string, unknown> = {};
 
-/** What the recorder reads: a level that comes and goes, as speech does, one reading per tick of the session. */
 class FakeContext {
   sampleRate = 24_000;
   destination = {};
@@ -152,16 +143,13 @@ describe.skipIf(!hasDom)('dictating in New message', () => {
     const button = await openDialog();
     press(button, 'pointerdown');
     press(button, 'pointerup');
-    // In the same moment as the tap, before any wait: lit, with the spinner, and Send off.
     const mic = () => host!.querySelector('[data-voice-mic]')!;
     expect(mic().getAttribute('data-state')).toBe('live');
     expect(mic().querySelector('.ib-spin')).not.toBeNull();
     expect(host!.querySelector<HTMLButtonElement>('[data-compose-send]')!.disabled).toBe(true);
-    // Its words follow a moment later, with Cancel.
     await until(() => host!.querySelector('[data-voice-line="opening"]') !== null);
     expect(host!.querySelector('[data-voice-line="opening"] [data-voice-cancel]')).not.toBeNull();
 
-    // A second tap: nothing cancelled, the busy look stays.
     press(mic(), 'pointerdown');
     press(mic(), 'pointerup');
     expect(mic().querySelector('.ib-spin')).not.toBeNull();

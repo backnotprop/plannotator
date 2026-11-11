@@ -1,17 +1,3 @@
-/**
- * An attachment and a review's diff draw once their code and math can draw
- * finished (threadDrawReady.ts, #2593), as a thread does. The grammars and
- * KaTeX are chunks the Inbox serves on first use. What regresses without the
- * gate: a Markdown file paints its fence plain (or its math as TeX) for a frame
- * or two before ui swaps the finished markup in, a code file paints its lines
- * plain in Pierre's view, and a review's diff paints its lines plain. And a
- * grammar chunk the Inbox no longer has (a tab older than its build) fetched
- * again on every open.
- *
- * `@pierre/diffs` and the KaTeX loader are stood in for through ui's seams, so
- * a test holds a grammar or KaTeX "in flight" and sees what is on screen.
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -27,7 +13,6 @@ const { lazyParts, drawReady } = (hasDom
   ? { lazyParts: await import('./lazyParts'), drawReady: await import('./threadDrawReady') }
   : {}) as { lazyParts: typeof import('./lazyParts'); drawReady: typeof import('./threadDrawReady') };
 
-/** The fence theme the pane's ui CodeBlock draws in with no ThemeProvider (Plannotator, dark). */
 const FENCE = resolveFenceTheme('plannotator', 'dark');
 
 let root: Root | null = null;
@@ -92,7 +77,6 @@ function file(name: string, kind: string, text: string): InboxAttachmentState {
   } as InboxAttachmentState;
 }
 
-/** Opens the pane on `shown`, whose view route answers `text`; returns once the read has answered. */
 async function openPane(shown: InboxAttachmentState, text: string) {
   globalThis.fetch = (async () =>
     Response.json({ serverSession: 's', attachment: shown, version: 'current', text, html: null })) as unknown as typeof fetch;
@@ -128,13 +112,11 @@ async function openPane(shown: InboxAttachmentState, text: string) {
 
 test.skipIf(!hasDom)('a Markdown file with a fence draws once its grammar is in: the fence paints highlighted on its first write', async () => {
   const pierre = heldPierre();
-  // Every write ui makes to a fence's <code>: the first must already be highlighted (no plain frame).
   const writes: string[] = [];
   const off = onCodeHighlightSwap((el) => writes.push(el.innerHTML));
   try {
     await openPane(file('notes.md', 'markdown', '# Notes\n\n```lua\nlocal x = 1\n```\n'), '# Notes\n\n```lua\nlocal x = 1\n```\n');
     expect(pierre.asked).toContain(`lua ${FENCE}`);
-    // Held: the file is not drawn yet, so nothing paints plain.
     expect(host!.querySelector('.ib-docscroll') !== null).toBe(false);
     expect(writes).toEqual([]);
     await act(async () => pierre.release());
@@ -164,7 +146,6 @@ test.skipIf(!hasDom)("a code file draws once its grammar is in, in Pierre's them
   const text = 'local x = 1\nprint(x)\n';
   await openPane(file('init.lua', 'code', text), text);
   expect(pierre.asked).toEqual(expect.arrayContaining(['lua pierre-dark', 'lua pierre-light']));
-  // Held: Pierre's file view is not mounted, so it cannot paint the lines plain.
   expect(host!.querySelector('[data-code-view]') !== null).toBe(false);
   await act(async () => pierre.release());
   await ticks();
@@ -194,7 +175,6 @@ test.skipIf(!hasDom)("a review's diff draws once its files' grammars are in, in 
 });
 
 test.skipIf(!hasDom)('a grammar chunk the Inbox answers 404 for is not fetched again on the next open; one a dropped link lost is', async () => {
-  // A page served by the Inbox, so the failed chunk is on this page's origin.
   const happy = (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM;
   const was = window.location.href;
   happy.setURL('http://localhost:4000/');
@@ -215,7 +195,6 @@ async function grammarGone() {
     },
     getHighlighterIfLoaded: () => undefined,
   } as unknown as typeof import('@pierre/diffs'));
-  // The Inbox: elixir's chunk is not in its build; haskell's is (its first fetch was lost on the way).
   const heads: string[] = [];
   globalThis.fetch = (async (url: string, init?: RequestInit) => {
     heads.push(`${init?.method} ${url}`);

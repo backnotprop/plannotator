@@ -16,7 +16,6 @@ const context = (overrides: Partial<InboxHtmlLinkContext> = {}): InboxHtmlLinkCo
   attachments: [
     att('att_sheet', `${FOLDER}/SHEET.html`),
     att('att_frame', `${FOLDER}/frames/A-1440-light.png`),
-    // Attached through a symlink: the link may name the path the agent gave.
     att('att_notes', '/real/elsewhere/notes.md', `${FOLDER}/NOTES.md`),
   ],
   assetRoute: '/api/html-assets/tok123/',
@@ -39,12 +38,10 @@ describe('resolveInboxHtmlLink', () => {
       name: 'B-cards.html',
       hash: 'pr1',
     });
-    // From a linked page in a subfolder, `..` climbs back into the folder.
     expect(resolveInboxHtmlLink('../C%20between.htm', context({ baseDir: `${FOLDER}/sub` }))).toMatchObject({
       kind: 'page',
       relative: 'C between.htm',
     });
-    // Root-relative means the page's own folder.
     expect(resolveInboxHtmlLink('/A-story.html', context())).toMatchObject({ kind: 'page', relative: 'A-story.html' });
   });
 
@@ -93,7 +90,6 @@ test('Markdown links resolve from the current document and retain fragments with
   expect(resolveInboxHtmlLink('../peer.md', { ...ctx, baseDir: `${FOLDER}/sub` })).toMatchObject({ kind: 'page', relative: 'peer.md' });
   for (const href of ['../escape.md', '.hidden/secret.md', 'not-attached.html']) expect(resolveInboxHtmlLink(href, ctx).kind).toBe('refused');
   expect(resolveInboxHtmlLink('peer.md', context()).kind).toBe('refused');
-  // A Markdown file has no asset route, so an image beside it does not open, and the note promises none.
   const image = resolveInboxHtmlLink('shot.png', ctx);
   expect(image.kind).toBe('refused');
   expect(image.kind === 'refused' && image.note).not.toContain('image');

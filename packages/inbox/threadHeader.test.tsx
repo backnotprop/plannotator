@@ -1,26 +1,3 @@
-/**
- * The open thread's header (approval "inbox-thread-header", 2026-11-02). Off a
- * phone the bar reads [full screen] | read button, Snooze clock, subject …
- * Artifacts, Expand, ⋯ | ×; the read button and the clock are icons whose
- * words are in their tooltips (E with Mark read). On a phone the bar is
- * ‹ Inbox, subject, Artifacts, Expand, ⋯, and the ⋯ sheet leads with every
- * read action the desktop has in that state, then Snooze (which swaps the
- * sheet for "‹ Snooze until"), a divider, and the rest. The title has room on
- * a phone at 320 and 390 px. The title is the thread's name by the list's
- * rule, else its subject once the body's heading scrolls away (as on main;
- * the owner, 2026-11-02), with the whole subject in its tooltip and no name
- * pill on the meta line; the body's heading stays the subject.
- *
- * The failures this catches: the read button or the clock drifting to the
- * right (or after the subject), either one showing in a phone's bar, the
- * phone's ⋯ losing a read action the desktop has (or their order), the clock
- * not opening the times (or Pick a time not snoozing), a Snooze or an Escape
- * from the clock disturbing the read button or the thread, a tooltip losing
- * its words or the E, the phone's title vanishing for want of room, and the
- * same words shown twice.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -64,7 +41,6 @@ const THREAD: InboxThread = {
   messages: [message(ROOT, 10), message('msg_H2', 11), message('msg_H3', 12)],
 };
 
-/** Six files on the first message: the Artifacts button with its count. */
 const ATTACHMENTS = Array.from({ length: 6 }, (_, i) => ({
   id: `att_${i}`,
   message_id: ROOT,
@@ -80,15 +56,11 @@ const ATTACHMENTS = Array.from({ length: 6 }, (_, i) => ({
   unavailable: null,
 }));
 
-/** The list row the header reads (markRead.ts): only the fields its rules look at. */
 function row(over: Partial<InboxListRow>): InboxListRow {
   return { section: 'quiet', unseen: 0, answered_not_sent: false, resolved_at: null, read_at: null, agent_after_archive: false, unread: false, sent: null, snoozed: null, ...over } as unknown as InboxListRow;
 }
-/** Read by opening it, an agent having written last: the header offers Mark unread. */
 const OPENED = row({});
-/** A question waits on the person: Mark read. */
 const WAITING = row({ section: 'waiting', unread: true, waiting_since: '2026-10-20T18:12:00.000Z' });
-/** Marked read: the pressed Read. */
 const MARKED = row({ read_at: '2026-10-20T18:20:00.000Z' });
 
 let root: Root | null = null;
@@ -199,7 +171,6 @@ async function press(el: Element) {
 
 const head = () => host!.querySelector<HTMLElement>('.ib-phead')!;
 
-/** The bar's controls and its subject, left to right (DOM order is the drawn order: one flex row). */
 function bar(): string[] {
   const names: string[] = [];
   for (const el of head().querySelectorAll<HTMLElement>('button, [data-header-subject], .ib-vsep')) {
@@ -213,7 +184,6 @@ function bar(): string[] {
   return names;
 }
 
-/** An open menu's items and dividers, top to bottom ("—" for a divider). */
 function menuItems(menu: Element): string[] {
   return [...menu.querySelectorAll('[role="menuitem"], [role="separator"]')].map((el) => (el.getAttribute('role') === 'separator' ? '—' : el.textContent?.trim() ?? ''));
 }
@@ -281,10 +251,8 @@ for (const phone of [false, true]) {
     const menu = await openMore();
     await press(menu.querySelector('[data-thread-snooze-item]')!);
     await until(() => !!threadMenu()?.querySelector('[data-snooze-back]'), 'the times');
-    // The times come from the menu's own rule: Later today is gone from 6 PM, and a choice on the time of one above it is dropped.
     const labels = inboxSnoozeChoices(new Date()).map((choice) => choice.label);
     expect(menuItems(threadMenu()!)).toEqual(['Snooze until', ...labels.map((label) => expect.stringContaining(label)), '—', 'Pick a time…'] as never);
-    // A phone's sheet keeps the thread's subject as its title.
     expect(threadMenu()!.querySelector('.ib-pm-title')?.textContent ?? null).toBe(phone ? SUBJECT : null);
     await press(threadMenu()!.querySelector('[data-snooze-back]')!);
     await until(() => !!threadMenu()?.querySelector('[data-thread-snooze-item]'), 'the menu again');
@@ -318,7 +286,6 @@ test.skipIf(!hasDom)("desktop: ⋯ › Snooze's times snooze; Pick a time's list
   expect(snoozed).toHaveLength(1);
   expect(Number.isNaN(Date.parse(snoozed[0]!))).toBe(false);
   await until(() => !threadMenu(), 'the menu to close');
-  // Pick a time, as before: its two lists, ‹ Pick a time back to the times, and its Snooze.
   await openTimes();
   await press(threadMenu()!.querySelector('[data-snooze-pick-time]')!);
   await until(() => !!threadMenu()?.querySelector('[data-snooze-picker]'), 'the picker');
@@ -415,19 +382,11 @@ for (const width of [320, 390]) {
   });
 }
 
-/**
- * The bar's title (the owner, 2026-11-02): the thread's name by the list's rule (`threadChipName`), else the subject,
- * shown as main shows it (a name always; the subject once the body's heading has scrolled away). The body keeps the
- * subject as the thread's heading. Its tooltip is the whole subject. No name pill on the meta line.
- */
 const title = () => host!.querySelector<HTMLElement>('.ib-phead [data-header-subject]');
-/** The title's words inside its box: the tooltip's trigger. */
 const words = () => title()!.querySelector<HTMLElement>('[data-header-title]');
 const heading = () => host!.querySelector<HTMLElement>('.ib-pbody > h2.ib-subject');
 const namePill = () => host!.querySelector('.ib-pbody [data-thread-meta] .ib-key');
 
-// The owner, 2026-11-08: over a short name ("PRs") the tooltip opened far to the right, over the empty room after the
-// words, because it hung on the title's box, which takes all the bar's free room. It hangs on the words now.
 test.skipIf(!hasDom)("the title's tooltip opens over its words, not centred on the box's empty room", async () => {
   await render(OPENED);
   const box = title()!;
@@ -447,7 +406,6 @@ test.skipIf(!hasDom)("the title's tooltip opens over its words, not centred on t
   });
   expect(await tooltipOf(tipped)).toBe(SUBJECT);
   const popup = [...document.querySelectorAll<HTMLElement>('[data-pn-tooltip]')].at(-1)!;
-  // Base UI's positioner names its anchor's size: the words' 40 px, not the box's 800.
   expect(popup.parentElement!.style.getPropertyValue('--anchor-width')).toBe('40px');
 });
 
@@ -459,7 +417,6 @@ test.skipIf(!hasDom)('a named thread: the bar shows the name at once, its toolti
   expect(heading()!.textContent).toBe(SUBJECT);
   expect(await tooltipOf(words()!)).toBe(SUBJECT);
   expect(namePill()).toBeNull();
-  // Seen words only: the screen-reader line ("Thread name: …") is the one extra, on purpose (threadNameMeta.test).
   const seen = [...host!.querySelectorAll('.ib-sr')].reduce((t, el) => t.replace(el.textContent!, ''), host!.textContent!);
   expect(seen.split('customize row look').length - 1).toBe(1);
 });
@@ -489,7 +446,6 @@ test.skipIf(!hasDom)('a name equal to the subject, or one the subject starts wit
 });
 
 test.skipIf(!hasDom)("opened from Reviews, a review thread's bar says the review's title once it landed: the row's and the heading's name, not New review's", async () => {
-  // A New review thread: the box named it from the question; the agent's guide then landed with its own title.
   const guideTitle = 'How a webhook delivery is retried when the subscriber is down';
   const started = { kind: 'walkthrough', changes: null, branch: null, base: null, ask: 'custom', host: 'claude-code', project_id: PROJECT.id, at: '', name: 'Webhook delivery' };
   const reviewRow = (review: unknown) =>
@@ -510,12 +466,10 @@ test.skipIf(!hasDom)("opened from Reviews, a review thread's bar says the review
     for (const undo of restore.splice(0).reverse()) undo();
   }
 
-  // Still curating: no title yet, so the row, the heading and the bar all keep the thread's name.
   const curating = reviewRow(null);
   await render(OPENED, false, thread, 'quiet', view(curating));
   expect(reviewRowTitle(curating, () => '')).toBe('Webhook delivery');
   expect(title()!.textContent).toBe('Webhook delivery');
   expect(heading()!.textContent).toBe('Webhook delivery');
-  // Under the request, a walkthrough being written says so in its own words, not "Curating the review…".
   expect(document.querySelector('[data-review-curating]')?.textContent).toBe('Writing the walkthrough…');
 });

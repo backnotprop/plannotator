@@ -1,14 +1,3 @@
-/**
- * The whole window (InboxApp) over a REAL Inbox (its own process,
- * tests/helpers/inbox-dom-server.ts), for an action item's Done waiting in
- * the reply draft (approval "inbox-action-items-in-reply"). Failures to
- * catch: a note typed under the Done, saved after its typing pause, finding
- * the item already sent (another window's Send) and showing an error toast
- * the person can do nothing about; and, the other way, the person's own
- * take-back of an item already sent going unreported.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -35,7 +24,6 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let savedEventSource: unknown;
-/** The window's action saves, with the server's answer. */
 let saves: { body: Record<string, unknown>; status: number }[] = [];
 
 function loopback(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string }> {
@@ -51,7 +39,6 @@ function loopback(path: string, method = 'GET', body?: string): Promise<{ status
   });
 }
 
-/** An agent asks the person to do one thing, as the server's stdin command does. Returns the message id. */
 async function agentAsks(task: string): Promise<string> {
   const stdin = child!.stdin as import('bun').FileSink;
   stdin.write(`${JSON.stringify({ send: { project: world.project, session: SESSION, body: `Release 4.2 is built.\n\n:::action\n${task}\nStopped: release 4.2 waits on it\n:::` } })}\n`);
@@ -70,7 +57,6 @@ async function actionOf(messageId: string): Promise<InboxQuestion> {
   return model.thread.messages.find((m) => m.id === messageId)!.questions!.find((q) => q.kind === 'action')!;
 }
 
-/** Another window's Send carrying the item: the server's own reply route. */
 async function sentElsewhere(messageId: string, key: string): Promise<void> {
   const answer = await loopback(`/api/inbox/messages/${messageId}/reply`, 'POST', JSON.stringify({ idempotency_key: `elsewhere-${key}`, words: '', questions: [], actions: [{ key }] }));
   expect(answer.status).toBe(200);
@@ -171,7 +157,6 @@ async function renderApp(hash: string) {
 const card = (el: HTMLElement) => el.querySelector<HTMLElement>('section.ib-pane [data-action-card]');
 const toasts = (el: HTMLElement) => [...el.querySelectorAll('.ib-toast')].map((t) => t.textContent ?? '');
 
-/** Done from the open row's button: the item goes into the draft, its note field under it. */
 async function markDone(el: HTMLElement) {
   await until(() => card(el)?.querySelector('[data-action-done]') != null, 'the action item');
   act(() => card(el)!.querySelector<HTMLButtonElement>('[data-action-done]')!.click());
@@ -188,14 +173,11 @@ test.skipIf(!hasDom)("a note saved after the item was sent from another window: 
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(note, 'Promoted from the CLI.');
     note.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  // Inside the note's typing pause, another window's Send carries the item.
   await sentElsewhere(asked, key);
-  // The pause ends: the note's save goes out, and the server refuses it.
   await until(() => saves.some((s) => s.body.note === 'Promoted from the CLI.'), 'the note save');
   await wait(200);
   expect(saves.find((s) => s.body.note === 'Promoted from the CLI.')!.status).toBe(409);
   expect(toasts(el)).toEqual([]);
-  // The thread reads it as it is now: sent, no draft.
   await until(() => card(el)?.getAttribute('data-action-state') === 'done', 'the item read as sent');
 }, 30_000);
 
@@ -205,7 +187,6 @@ test.skipIf(!hasDom)("the person's own take-back of an item already sent elsewhe
   await markDone(el);
   const key = (await actionOf(asked)).key;
   await sentElsewhere(asked, key);
-  // This window has not read the thread again: the item still reads as in the draft, and its tick takes it back.
   expect(card(el)!.getAttribute('data-action-state')).toBe('pending');
   await wait(550);
   act(() => card(el)!.querySelector<HTMLButtonElement>('[data-action-tick]')!.click());

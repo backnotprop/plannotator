@@ -1,26 +1,3 @@
-/**
- * Action items as a checklist (approval "action-items-checklist", option A;
- * first approved as one card per item, "inbox-next-actions"), as the window
- * draws them. Failures to catch: adjacent `:::action` blocks drawn as separate
- * cards, or blocks separated by prose gathered into one (the run rule); the
- * block's own lines drawn beside the card; more than one row open, or a row
- * whose disclosure is not wired (aria-expanded / aria-controls); the tick not
- * marking Done, or not offering the Undo while its window runs; the next open
- * item not opening after Done; Open dropped when an item also has a command
- * (the old card's bug); the Holds up words dropped; the command cut; Can't do
- * it sent without its reason; a settled row still offering Done; a header
- * that contradicts its rows when items were replaced ("0 things… 0 of 0
- * done"); a double-click on the tick doing Done then Undo; the tick dropping
- * keyboard focus while it saves (disabled) or changing its name; the copy
- * result not announced; the row's count; an action item reaching the picks
- * or the Send (the api split). In the reply draft (approval
- * "inbox-action-items-in-reply"): a Done offering an Undo timer instead of
- * "in your draft"; its note not saved (typing, leaving the field) or saved
- * loud; the agent's own done hiding the person's note; the old "Add note…"
- * and "10 s" words coming back.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { act } from 'react';
@@ -124,7 +101,6 @@ function mount(node: React.ReactNode): HTMLElement {
 }
 
 const rerender = (node: React.ReactNode) => act(() => root!.render(node));
-/** A fresh card (its open row is decided when it mounts). */
 const remount = (node: React.ReactNode) => {
   act(() => root!.render(<></>));
   act(() => root!.render(node));
@@ -159,7 +135,6 @@ function wireMessage(questions: InboxQuestion[]): InboxMessageWire {
 
 test.skipIf(!hasDom)('adjacent `:::action` blocks are one card; blocks separated by prose are separate cards, each in its place', () => {
   const message = splitMessageActions(wireMessage([record(0), record(1), record(2)]));
-  // Out of `questions`: nothing that picks or sends answers meets them.
   expect(message.questions).toBeUndefined();
   expect(message.actions!.map((a) => a.key)).toEqual(PARSED.map((p) => p.key));
   const runs: string[][] = [];
@@ -187,7 +162,6 @@ test.skipIf(!hasDom)('adjacent `:::action` blocks are one card; blocks separated
   expect(cards[1]!.querySelectorAll('[data-action-card]')).toHaveLength(1);
   expect(runs.at(-2)).toEqual([PARSED[0]!.key, PARSED[1]!.key]);
   expect(runs.at(-1)).toEqual([PARSED[2]!.key]);
-  // The prose between the two runs stays between the two cards.
   const text = el.textContent!;
   const first = text.indexOf('Set the GitHub App private key');
   const prose = text.indexOf('After both of those, one more thing:');
@@ -195,7 +169,6 @@ test.skipIf(!hasDom)('adjacent `:::action` blocks are one card; blocks separated
   expect(first).toBeGreaterThan(text.indexOf('Staging is almost ready.'));
   expect(prose).toBeGreaterThan(first);
   expect(second).toBeGreaterThan(prose);
-  // The block's own lines are never drawn as a callout beside the card.
   expect(text).not.toContain('Where: https://github.com');
   expect(text).not.toContain('Run: ');
 });
@@ -208,7 +181,6 @@ test.skipIf(!hasDom)('refs in a task stay plain text in its toggle (a button); i
   expect(toggle.textContent).toContain('Merge acme/web#12 and #3, not acme/web#13');
   const why = el.querySelector('[data-action-why]')!;
   expect([...why.querySelectorAll('a[href]')].map((a) => a.getAttribute('href'))).toContain('https://gitlab.example.com/team/app/-/issues/4');
-  // The task's text holds no link even where refs would link (a renderer given a repo).
   const html = renderToStaticMarkup(<InlineMarkdown text={taskMarkdown(action.prompt)} githubRepo="group/web" repoHost="gitlab.example.com" />);
   expect(html).not.toContain('acme/web/-/issues/12');
   expect(html).not.toContain('`');
@@ -223,7 +195,6 @@ test.skipIf(!hasDom)('the header: how many, how many done, one badge (Holds up s
   expect(card.querySelector('[data-action-badge]')!.textContent).toBe('Holds up 3');
   expect(card.querySelectorAll('[data-action-watching]')).toHaveLength(1);
   expect(card.querySelector('[data-action-watching]')!.textContent).toBe("Claude Code is watching: the staging secret list; I'll see it appear.");
-  // A Done goes with the person's Send: there is no Undo window to explain.
   expect(card.querySelector('[data-action-hint]')).toBeNull();
   expect(card.textContent).not.toContain('10 s');
   act(() => root!.render(<ActionChecklist actions={[record(2), record(0)]} agent="Claude Code" onMark={async () => true} />));
@@ -233,7 +204,6 @@ test.skipIf(!hasDom)('the header: how many, how many done, one badge (Holds up s
 });
 
 test.skipIf(!hasDom)("the why is markdown, as a question's context: bold, code, a list and a link (opened safely), never the raw marks", () => {
-  // The owner's report (0.28.31): `**App Manifest**` and `slack-app.yaml` in backticks came through literally.
   const context = [
     "Steps: api.slack.com/apps → **App Manifest** → replace it with the contents of `slack-app.yaml` → **Save**.",
     '',
@@ -295,7 +265,6 @@ test.skipIf(!hasDom)('an open row: why, the Holds up words, Open for its link an
   expect(open.href).toBe('https://github.com/organizations/acme/settings/apps/appnotes-staging');
   expect(open.rel).toBe('noopener noreferrer');
   expect(open.textContent).toBe('Open github.com');
-  // The command, whole: every character is in the DOM, and the stylesheet wraps it rather than cutting it.
   const cmd = panel.querySelector('[data-action-cmd]')!;
   expect(cmd.textContent!.replace(/^\$\s/, '')).toBe(CLIENT_CMD);
   expect(panel.querySelector('[data-action-copy]')).not.toBeNull();
@@ -304,7 +273,6 @@ test.skipIf(!hasDom)('an open row: why, the Holds up words, Open for its link an
   expect(rule).toContain('white-space: pre-wrap');
   expect(rule).not.toContain('text-overflow');
   expect(rule).not.toContain('nowrap');
-  // The second item's two hold-ups, and a Stopped item's words.
   expect(panelOf(rowOf(el, 1)).querySelector('[data-action-holds]')!.textContent).toBe('Holds up the agent opening PRs on staging; the release notes');
   act(() => root!.render(<ActionChecklist actions={[record(2)]} agent="Claude Code" onMark={async () => true} />));
   expect(el.querySelector('[data-action-stopped]')!.textContent).toBe('Stopped release 4.2 waits on it');
@@ -323,7 +291,6 @@ test.skipIf(!hasDom)("the row's tick is Done into the reply draft: the row is st
   expect(toggleOf(rowOf(el, 1)).getAttribute('aria-expanded')).toBe('true');
   expect(toggleOf(rowOf(el, 0)).getAttribute('aria-expanded')).toBe('false');
 
-  // The server's answer: picked and staged, waiting for the Send.
   const result = { outcome: 'done' as const, note: null, at: '2026-10-21T15:12:00.000Z', by: 'person' as const, staged: true };
   rerender(<ActionChecklist actions={[record(0, { state: 'picked', revision: 1, action_result: result }), record(1)]} agent="Claude Code" onMark={onMark} />);
   const done = rowOf(el, 0);
@@ -335,10 +302,8 @@ test.skipIf(!hasDom)("the row's tick is Done into the reply draft: the row is st
   expect(el.querySelector('[data-action-progress]')!.textContent).toBe('1 of 2 done');
   expect(el.querySelector('[data-action-badge]')!.textContent).toBe('Holds up 2');
   const undoTick = done.querySelector<HTMLButtonElement>('[data-action-tick]')!;
-  // The same name; aria-pressed carries the state.
   expect(undoTick.getAttribute('aria-label')).toBe('Done: Set the GitHub App client secret on staging');
   expect(undoTick.getAttribute('aria-pressed')).toBe('true');
-  // The tick takes it back, but not within half a second of Done (the second click of a fast double-click).
   const before = marks.length;
   click(undoTick);
   await settle();
@@ -371,7 +336,6 @@ test.skipIf(!hasDom)('the note under a Done in the draft saves quietly as it is 
     await new Promise((resolve) => setTimeout(resolve, 650));
   });
   expect(marks).toEqual([{ outcome: 'done', note: 'Rotated the old one too.', quiet: true }]);
-  // Leaving the field saves at once (a Send right after carries it); the same words twice save once.
   type(area, 'Rotated the old one too. Staging only.');
   act(() => area.dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
   await settle();
@@ -390,7 +354,6 @@ test.skipIf(!hasDom)('the note under a Done in the draft saves quietly as it is 
   type(reason, '');
   act(() => reason.dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
   await settle();
-  // An emptied reason is never saved, and the field never shows less than what goes: the saved reason comes back.
   expect(marks).toHaveLength(count);
   expect(reason.value).toBe('No access.');
 });
@@ -418,7 +381,6 @@ test.skipIf(!hasDom)('a note still inside its typing pause goes as the page goes
     expect(sent[0]!.url).toMatch(/\/api\/inbox\/messages\/[^/]+\/actions\/a-/);
     expect(sent[0]!.init.keepalive).toBe(true);
     expect(JSON.parse(String(sent[0]!.init.body))).toMatchObject({ outcome: 'done', note: 'Rotated the old one too.', note_only: true, staged: true });
-    // Sent once: the pause's timer is gone, and the row going away has nothing left to save.
     act(() => window.dispatchEvent(new Event('pagehide')));
     act(() => root!.render(<></>));
     await act(async () => {
@@ -446,7 +408,6 @@ test.skipIf(!hasDom)('a note still inside its typing pause is saved when its row
   act(() => root!.render(<></>));
   await settle();
   expect(marks).toEqual([{ outcome: 'done', note: 'Rotated the old one too.', quiet: true }]);
-  // Nothing left waiting: the timer is gone, so no second save later.
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 650));
   });
@@ -477,7 +438,6 @@ test.skipIf(!hasDom)("the agent saw it done while the person's note waited in th
   act(() => area.dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
   await settle();
   expect(marks).toEqual([null]);
-  // Sent: the note went; no field.
   remount(<ActionChecklist actions={[record(0, { state: 'closed', revision: 2, sent_revision: 2, action_result: result })]} agent="Claude Code" onMark={async () => true} />);
   expect(el.querySelector('[data-action-draft-note]')).toBeNull();
 });
@@ -505,12 +465,10 @@ test.skipIf(!hasDom)('a double-click on the tick is Done once: its second click,
     });
   press(1);
   await settle();
-  // Done landed: the row is in its Undo window before the second click arrives.
   const result = { outcome: 'done' as const, note: null, at: '2026-10-21T15:12:00.000Z', by: 'person' as const };
   rerender(<ActionChecklist actions={[record(0, { state: 'picked', revision: 1, action_result: result }), record(1)]} agent="Claude Code" onMark={onMark} />);
   press(2);
   await settle();
-  // A slow double-click arrives as two single clicks: the half second after Done still holds.
   press(1);
   await settle();
   expect(marks).toEqual([{ outcome: 'done' }]);
@@ -585,7 +543,6 @@ test.skipIf(!hasDom)("Can't do it asks for the reason; nothing goes without one"
   const marks: unknown[] = [];
   const el = mount(<ActionChecklist actions={[record(0)]} agent="Claude Code" onMark={async (_a, mark) => (marks.push(mark), true)} />);
   const panel = panelOf(rowOf(el, 0));
-  // Done and Can't do it…, no separate Add note… (the note goes under a marked row).
   expect(panel.querySelector('[data-action-note]')).toBeNull();
   click(panel.querySelector('[data-action-cant]')!);
   const send = panel.querySelector<HTMLButtonElement>('[data-action-cant-send]')!;
@@ -615,11 +572,9 @@ test.skipIf(!hasDom)("Escape or Cancel in Can't do it's note puts focus back on 
   act(() => {
     area.dispatchEvent(escape);
   });
-  // One rung: the note closes and the key stops there.
   expect(escape.defaultPrevented).toBe(true);
   expect(panel.querySelector('textarea')).toBeNull();
   expect(document.activeElement).toBe(cant());
-  // Cancel does the same.
   click(cant());
   expect(document.activeElement).toBe(panel.querySelector('textarea'));
   click(panel.querySelector('[data-action-cant-cancel]')!);
@@ -670,17 +625,14 @@ test.skipIf(!hasDom)('replaced items are counted apart: the header never says "0
   expect(el.querySelector('[data-action-progress]')).toBeNull();
   expect(el.querySelector('[data-action-badge]')).toBeNull();
   expect(el.querySelector('[data-action-hint]')).toBeNull();
-  // The agent's watch on replaced items is over: no watching line.
   expect(el.querySelector('[data-action-foot]')).toBeNull();
   expect([...el.querySelectorAll('[data-action-card] .ib-badge')].map((b) => b.textContent)).toEqual(['Replaced', 'Replaced']);
   expect(el.querySelector('[data-action-tick]')).toBeNull();
   rerender(<ActionChecklist actions={[record(0, { state: 'superseded', superseded_by: superseded })]} agent="Claude Code" onMark={async () => true} />);
   expect(el.querySelector('[data-action-title]')!.textContent).toBe('1 action item, replaced');
-  // Mixed: the open items are the count, the replaced ones said after it.
   remount(<ActionChecklist actions={[record(0, { state: 'superseded', superseded_by: superseded }), record(1), record(2)]} agent="Claude Code" onMark={async () => true} />);
   expect(el.querySelector('[data-action-title]')!.textContent).toBe('2 things only you can do');
   expect(el.querySelector('[data-action-progress]')!.textContent).toBe('0 of 2 done · 1 replaced');
-  // The first OPEN item starts open, not the replaced one.
   expect(toggleOf(rowOf(el, 1)).getAttribute('aria-expanded')).toBe('true');
   click(toggleOf(rowOf(el, 0)));
   expect(panelOf(rowOf(el, 0)).querySelector('[data-action-settled]')!.textContent).toBe('Claude Code replaced this action item.');
@@ -713,7 +665,6 @@ test.skipIf(!hasDom)('set aside and closed rows: their chip and line, a dashed m
   expect(el.querySelector('[data-action-tick]')).toBeNull();
   expect(el.querySelector('[data-action-done]')).toBeNull();
   expect(el.querySelector('[data-action-hint]')).toBeNull();
-  // Read-only still shows what to do: the open row's why, link and command.
   expect(panelOf(rowOf(el, 0)).hidden).toBe(false);
   expect(panelOf(rowOf(el, 0)).querySelector('[data-action-open]')).not.toBeNull();
   expect(panelOf(rowOf(el, 0)).querySelector('[data-action-cmd]')).not.toBeNull();
@@ -751,7 +702,6 @@ test.skipIf(!hasDom)('the row draws open action items as the box pill and open q
     waiting_on_person: true,
     project: { id: 'prj_1', name: 'web' },
     thread_name: null,
-    // Waiting on you: nothing blocked, so both marks are open (the fill steps are rowBadges.test.tsx's).
     section: 'waiting',
     unread: true,
     answered_not_sent: false,
@@ -768,11 +718,8 @@ test.skipIf(!hasDom)('the row draws open action items as the box pill and open q
     </SidebarProvider>
   );
   const el = mount(list(false, false));
-  // What a row draws for its open counts (approval "inbox-row-action-icon", 2026-10-29): the action pill (the
-  // drawn number, its accessible words, its icon the checklist's box with no tick) and `?N` (the drawn number,
-  // its words, its icon). Read off the row's open counts only, in the order they sit.
   const box = 'M6.75 3.75h10.5a3 3 0 0 1 3 3v10.5a3 3 0 0 1-3 3H6.75a3 3 0 0 1-3-3V6.75a3 3 0 0 1 3-3Z';
-  // Pinned on purpose: the owner's pick for the question count is Q3, Lucide's message-circle-question-mark.
+  // Pinned on purpose: Lucide's message-circle-question-mark for the question count.
   const bubble = 'M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01';
   const counts = (scope: Element) =>
     [...scope.querySelectorAll('[data-action-count], .ib-qn')].map((c) => ({
@@ -789,24 +736,18 @@ test.skipIf(!hasDom)('the row draws open action items as the box pill and open q
     msg_b: [pill('1', '1 action to do'), q('2', '2 questions')],
     msg_c: [q('2', '2 questions')],
     msg_d: [pill('12', '12 actions to do'), q('2', '2 questions')],
-    // Past 99 the drawn number is "99+" (both at full length would run over a wide row's badge); the words keep it exact.
     msg_f: [pill('99+', '128 actions to do'), q('99+', '128 questions')],
     msg_e: [],
   };
   const rowOf = (shape: string, id: string) => el.querySelector(`${shape}[data-thread-id="${id}"]`)!;
-  // A wide row: both sit in the open counts' column before the time; the words column says nothing for them.
   for (const [id, want] of Object.entries(expected)) {
     expect(counts(rowOf('.ib-row', id).querySelector('.ib-cq')!)).toEqual(want as never);
     if (id !== 'msg_e') expect(rowOf('.ib-row', id).querySelector('.ib-cw')!.textContent).toBe('');
   }
-  // Words of their own (here an older Inbox's "Answered") still take the place of the counts.
   expect(rowOf('.ib-row', 'msg_e').querySelector('.ib-cw [data-count-words]')!.getAttribute('data-count-words')).toBe('Answered, not sent');
-  // The row's accessible name (its text less what is hidden from a screen reader) carries the counts' words apart.
   const named = rowOf('.ib-row', 'msg_b').cloneNode(true) as Element;
   named.querySelectorAll('[aria-hidden="true"]').forEach((n) => n.remove());
-  // (Whitespace collapsed, as an accessible name is.)
   expect(named.textContent!.replace(/\s+/g, ' ')).toContain(' 1 action to do 2 questions ');
-  // Beside a thread and on a phone: at line 3's end, the action pill then `?N`.
   for (const [narrow, phone, shape, line] of [[true, false, '.ib-nrow', '.ib-l3'], [false, true, '.ib-mrow', '.ib-m3']] as const) {
     rerender(list(narrow, phone));
     for (const [id, want] of Object.entries(expected)) expect(counts(rowOf(shape, id))).toEqual(want as never);
@@ -819,10 +760,8 @@ test.skipIf(!hasDom)('a message stored before the reader dropped a task box from
   const body = ":::action\n- [ ] Let this MacBook's key into the Mac mini\n\n  ```\n  ssh-copy-id user@host\n  ```\n:::";
   const [parsed] = parseInboxActionBlocks(body);
   expect(parsed!.prompt).toBe("Let this MacBook's key into the Mac mini");
-  // The record kept the key its first line had then ("[ ] Let this…").
   const stored = { ...record(0), key: 'a-0badc0de', position: 0, prompt: "[ ] Let this MacBook's key into the Mac mini" };
   expect(actionForBlock(body, [stored], { startLine: parsed!.startLine, content: '' })?.key).toBe('a-0badc0de');
-  // A record with its own key wins over one at the same place.
   const fresh = { ...record(0), key: parsed!.key, position: 0 };
   expect(actionForBlock(body, [stored, fresh], { startLine: parsed!.startLine, content: '' })?.key).toBe(parsed!.key);
 });

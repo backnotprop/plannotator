@@ -1,20 +1,3 @@
-/**
- * A chapter's diagram in the Inbox (approval "guide-chapter-diagrams": diagrams live inside chapters, not above
- * them). The guided review, the walkthrough and the pull request page draw guides through GuideReader; the pane here
- * is the full-window review (as guideOverviewMermaid.test.tsx), with the Inbox's doors stubbed at `fetch` and the
- * Mermaid runtime stood in for through ui's test hook. What regresses:
- *
- *  - a chapter's Mermaid diagram not drawn, or drawn outside its chapter's code pane or below its first file
- *    (placement A: the top of the code pane, full width);
- *  - a chapter without a diagram looking any different from before;
- *  - two chapters' drawings sharing one id (one would draw over the other);
- *  - an old guide whose overview carries a diagram no longer opening, or losing that diagram;
- *  - Chapter diagrams off (Settings → Capabilities): a diagram that still arrives drawn open, or drawn at all before
- *    the person opens it, or its Diagram header taking more than one click to open, or the person's own folds
- *    (kept for when the switch is on) written over.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { plugin } from 'bun';
 import { afterAll, afterEach, beforeAll, beforeEach, expect, mock, test } from 'bun:test';
 import { act } from 'react';
@@ -28,8 +11,7 @@ import type { InboxShapes } from './shape/useInboxShapes';
 
 const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, rowShown: false, subscribe: () => () => {}, refresh: () => {} };
 
-// The window's tsconfig points `#guide-reader` at the reader's type shape (reader-module.d.ts), which Bun
-// would load as the module; the real reader is package.json's `imports` entry (as guideDiffStyle.test.tsx).
+// Bun would load `#guide-reader`'s type shape (reader-module.d.ts) as the module; the real reader is package.json's `imports` entry.
 plugin({
   name: 'inbox-guide-reader',
   setup(build) {
@@ -48,7 +30,6 @@ mock.module(resolve(import.meta.dir, '../review-editor/workerPool.tsx'), () => (
 
 const hasDom = typeof document !== 'undefined';
 const { ReviewPane } = (hasDom ? await import('./components/ReviewPane') : {}) as typeof import('./components/ReviewPane');
-// Through `#guide-reader` (the window's strict typecheck sees its shape, not review-editor's code).
 const GuideReader = (hasDom ? (await import('#guide-reader')).default : null)!;
 const mermaid = hasDom ? await import('@plannotator/ui/utils/mermaid') : null;
 const diagramSvg = hasDom ? await import('@plannotator/ui/test-setup/diagramSvg') : null;
@@ -56,7 +37,6 @@ const diagramSvg = hasDom ? await import('@plannotator/ui/test-setup/diagramSvg'
 const PROJECT: InboxProject = { id: 'prj_1', key: 'demo-abcdef', name: 'demo', root: '/work/demo', created_at: '2026-10-11T10:00:00.000Z' };
 const MESSAGE = 'msg_01M4H6G73M9H3Z32T859E72DPY';
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40" data-drawn-overview=""><rect width="120" height="40"/></svg>';
-/** A source the stand-in runtime refuses, the way Mermaid refuses a parse error. */
 const BROKEN = 'flowchart LR\n  A -->';
 
 let snapshot: GuideSnapshot = FIXTURE_V2_OVERVIEW;
@@ -81,7 +61,6 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let restoreParser: (() => void) | null = null;
-/** The sources the stand-in runtime was asked to draw. */
 let rendered: string[] = [];
 
 beforeAll(() => {
@@ -147,7 +126,6 @@ async function mount(element: React.ReactElement) {
 
 const LR = 'flowchart LR\n  a[request] --> b[guard] --> c[refresh] --> d[retry]';
 const TD = 'flowchart TD\n  x[bump] --> y[publish]';
-/** FIXTURE_V1_LOCAL with diagrams on the chapters given, as a version-5 snapshot. */
 const withChapterDiagrams = (sources: Array<string | null>, base: GuideSnapshot = FIXTURE_V1_LOCAL): GuideSnapshot => ({
   ...base,
   version: 5,
@@ -169,18 +147,14 @@ test.skipIf(!hasDom)("the pane draws a chapter's Mermaid diagram at the top of t
   expect(box!.querySelector('svg[data-drawn-overview]') !== null).toBe(true);
   expect(box!.querySelector('[aria-label="Expand diagram"]') !== null).toBe(true);
   expect(box!.querySelector('pre') === null).toBe(true);
-  // In the code pane, above the chapter's first file; not in the chapter's text column.
   expect(chapter(0)!.querySelector('[data-guide-section-narrative] [data-guide-chapter-diagram]') === null).toBe(true);
   const firstFile = chapter(0)!.querySelector('[data-guide-file-shell]')!;
   expect(box!.compareDocumentPosition(firstFile) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  // The other chapter has none; nothing above the chapters either.
   expect(chapter(1)!.querySelector('[data-guide-chapter-diagram]') === null).toBe(true);
   expect(document.querySelector('[data-guide-overview-diagram]') === null).toBe(true);
 });
 
 test.skipIf(!hasDom)('a chapter without a diagram is drawn exactly as before', async () => {
-  // Its text column byte for byte (the code pane's diff carries layout numbers that vary between mounts), and no
-  // diagram anywhere in it.
   const text = () => chapter(1)!.querySelector('[data-guide-section-narrative]')!.innerHTML;
   snapshot = { ...withChapterDiagrams([]), version: 1 };
   await mount(pane());
@@ -224,7 +198,6 @@ test.skipIf(!hasDom)('Chapter diagrams off: a chapter diagram that arrives draws
   await mount(pane(false));
   const box = chapter(0)!.querySelector<HTMLElement>('[data-guide-chapter-diagram="mermaid"]')!;
   const header = box.querySelector<HTMLButtonElement>('button[aria-expanded]')!;
-  // Folded: the header is there and closed, the drawing is not, and the runtime was never asked for it.
   expect([box.hasAttribute('data-folded'), header.getAttribute('aria-expanded'), header.textContent]).toEqual([true, 'false', 'Diagram']);
   expect(box.querySelector('[data-guide-chapter-diagram-body]') === null).toBe(true);
   expect(rendered).not.toContain(LR);
@@ -233,7 +206,6 @@ test.skipIf(!hasDom)('Chapter diagrams off: a chapter diagram that arrives draws
   expect([box.hasAttribute('data-folded'), header.getAttribute('aria-expanded')]).toEqual([false, 'true']);
   expect(box.querySelector('[data-guide-chapter-diagram-body] svg[data-drawn-overview]') !== null).toBe(true);
   expect(rendered).toContain(LR);
-  // Folded again and opened again by hand: nothing is kept, so the person's own folds stay theirs for when it is on.
   await act(async () => header.click());
   expect(localStorage.getItem('plannotator-guide-diagram-folds') ?? '').toBe('');
 });

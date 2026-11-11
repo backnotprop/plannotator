@@ -1,15 +1,3 @@
-/**
- * "+" on a project row (approval "launch-create-clone", F1-F7). The row's "+" is its own button beside ⋯ (never inside
- * the row's open button), named by its tip, and a press opens New message filled: To names a new session of the agent
- * started last (else that machine's first agent) in that project, on its machine, and the cursor is in the message. A
- * project on an asleep machine still opens it, and Send says it waits for that machine.
- *
- * The failures this catches: "+" opening the project instead (a button inside a button), a "+" with no name for a
- * screen reader, New message opening empty or on another machine's project, an agent that machine doesn't have left
- * in To (Send dead), and the cursor left on To.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. Fetch is mocked: no server.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -97,7 +85,6 @@ test('the tip names the project, its machine when it is another, and that it wai
   const rows = [
     { created_at: '2026-11-07T09:00:00Z', run: null, addressee: { host: 'pi' } },
     { created_at: '2026-11-07T10:00:00Z', run: 'working', addressee: { host: 'claude-code' } },
-    // A thread the person did not launch: not an agent they started.
     { created_at: '2026-11-07T11:00:00Z', addressee: { host: 'codex' } },
   ];
   expect(lastLaunchAgent(rows)).toBe('claude-code');
@@ -110,10 +97,8 @@ test('"+" shows only while launch is on and never on a tailnet guest\'s page; a 
   expect(projectPlusOn(false, false)).toBe(false);
   expect(projectPlusOn(undefined, false)).toBe(false);
   const bill = { id: 'prj_bill', root: '/Users/me/code/billing-svc' };
-  // Not read yet, or an asleep machine never read: shown (it starts when that machine is back, F4).
   expect(projectCanStart(bill, null)).toBe(true);
   expect(projectCanStart(bill, HERE)).toBe(true);
-  // No agent to start there, launch off there, or the folder gone (a failed clone's project): no "+".
   expect(projectCanStart(bill, { ...HERE, agents: [] })).toBe(false);
   expect(projectCanStart(bill, null, false)).toBe(false);
   expect(projectCanStart(bill, { ...HERE, projects: [{ id: 'prj_bill', name: 'billing-svc', root: bill.root, exists: false }] })).toBe(false);
@@ -133,7 +118,6 @@ test.skipIf(!hasDom)('F1, F2: "+" is its own button beside ⋯, named by its tip
   act(() => plus.click());
   expect(pressed).toEqual(['new']);
   act(() => root!.unmount());
-  // Launch off (no `newSession`): no "+".
   mount(<ProjectRow project={SITE} count={2} on={false} held={false} readable phone={false} onOpen={() => {}} onAction={() => {}} />);
   expect(document.querySelector('[data-pplus]')).toBeNull();
 });
@@ -158,7 +142,6 @@ test.skipIf(!hasDom)('F3: pressed, New message names a new session of the last a
 
 test.skipIf(!hasDom)("F5: a project on an asleep machine opens on that machine, the agent that machine has, and Send waits for it", async () => {
   machines = [view(SELF, 'MacBook', { self: true, launch: null }), view(MINI, 'Mac mini', { state: 'offline' })];
-  // Pi isn't on Mac mini: To takes its first agent instead.
   open({ projectId: 'prj_infra', machine: MINI, agent: 'pi' });
   await until(() => inDialog('[data-compose-folder="prj_infra"]') !== null, "Mac mini's project in To");
   expect(inDialog('[data-compose-to]')!.textContent).toContain('New Claude Code session');

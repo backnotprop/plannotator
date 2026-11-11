@@ -1,10 +1,3 @@
-/**
- * Settings -> Decision data's section over a scripted `fetch`: what shows for each state of the data, that Ask never
- * waits on the count, and that a count is asked for once and let go when the reader moves on. Whether Settings asks for
- * it at all is `settingsSections.test.tsx`; the numbers themselves are `packages/shared/inbox/decision-data.test.ts`.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -38,7 +31,6 @@ const model = (over: Partial<DecisionDataSummary> = {}): DecisionDataSummary => 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
-/** Each count the section asked for: its query and its signal. `answer` says what it gets. */
 let counts: { url: string; signal: AbortSignal | undefined }[] = [];
 let answer: (url: string) => Promise<Response> = async () => new Response(JSON.stringify(model()));
 let sessions: unknown[] = [];
@@ -111,7 +103,6 @@ test.skipIf(!hasDom)('the quiet place waits a moment before it shows, so a count
   await act(async () => {
     await new Promise((r) => setTimeout(r, 20));
   });
-  // A stalled machine may have run past the patience: only a look inside it can say anything.
   if (performance.now() - begun < 100) expect(el.querySelector('[data-decision-counting]')).toBeNull();
   await until(() => el.querySelector('[data-decision-counting]') !== null, 'the quiet place');
 });
@@ -199,7 +190,6 @@ test.skipIf(!hasDom)('changing the range lets the old count go and asks for the 
   await act(async () => radio('30 days').click());
   await until(() => counts.length === 2, 'the 30-day count');
   expect(counts[1]!.url).toContain('days=30');
-  // The numbers already there stay while the next ones come.
   expect(el.querySelector('[data-decision-insights]')).not.toBeNull();
   await act(async () => radio('All').click());
   await until(() => counts.length === 3, 'the All count');
@@ -244,7 +234,6 @@ test.skipIf(!hasDom)('a narrow section lists who asks; a wider one has the table
   act(() => root?.unmount());
   host?.remove();
 
-  // Where the table's number columns would leave too little of an ordinary name ("Claud…"), it is the list.
   const tight = await open(568);
   await until(() => tight.querySelector('ul.ib-dd-gl') !== null, 'the list at 568');
   expect(tight.querySelector('[data-group] table')).toBeNull();
@@ -262,33 +251,26 @@ test.skipIf(!hasDom)('a narrow section lists who asks; a wider one has the table
 test.skipIf(!hasDom)('an insight line shows only with enough behind it', () => {
   const keys = (m: DecisionDataSummary) => insightsOf(m).map((insight) => insight.key);
   expect(keys(model())).toEqual([]);
-  // Took: 20 offered and three in four taken.
   expect(keys(model({ agents: [group({ offered: 20, taken: 15 })] }))).toEqual(['taken']);
   expect(keys(model({ agents: [group({ offered: 19, taken: 19 })] }))).toEqual([]);
   expect(keys(model({ agents: [group({ offered: 20, taken: 14 })] }))).toEqual([]);
-  // Stopped waits: five.
   expect(keys(model({ stopped_wait: { n: 5, median_ms: 60_000 } }))).toEqual(['stopped']);
   expect(keys(model({ stopped_wait: { n: 4, median_ms: 60_000 } }))).toEqual([]);
-  // Replaced: five.
   expect(keys(model({ agents: [group({ replaced: 5 })] }))).toEqual(['replaced']);
   expect(keys(model({ agents: [group({ replaced: 4 })] }))).toEqual([]);
-  // Skipped or closed in a project: 15% of at least 20.
   expect(keys(model({ projects: [group({ answered: 17, skipped: 2, set_aside: 1 })] }))).toEqual(['closed']);
   expect(keys(model({ projects: [group({ answered: 17, skipped: 1, set_aside: 1 })] }))).toEqual([]);
-  // Pace: 20 on each side.
   expect(keys(model({ pace: { fast: { offered: 20, taken: 18 }, slow: { offered: 20, taken: 14 } } }))).toEqual(['pace']);
   expect(keys(model({ pace: { fast: { offered: 20, taken: 18 }, slow: { offered: 19, taken: 14 } } }))).toEqual([]);
   expect(keys(model({ settled_in_words: 1 }))).toEqual(['words']);
 });
 
 test.skipIf(!hasDom)('the chart stays readable however much history there is', () => {
-  // Halves of the axis stay whole numbers.
   for (const most of [1, 2, 3, 5, 7, 11, 25, 41, 57, 301]) {
     const top = axisTop(most);
     expect(top).toBeGreaterThanOrEqual(most);
     expect(Number.isInteger(top / 2)).toBe(true);
   }
-  // Date labels never run together: each gets at least its 54 px, even years into a phone.
   for (const band of [40, 12, 3, 1, 0.3, 0.05]) expect(labelStep(band) * band).toBeGreaterThanOrEqual(54);
   expect(waitWords(20_000)).toBe('under a minute');
   expect(waitWords(157 * 60_000)).toBe('2 h 37 min');

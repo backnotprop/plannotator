@@ -1,21 +1,3 @@
-/**
- * A phone's swipe between images (approval "inbox-image-swipe",
- * 2026-10-28): a question's picture choices open as a set of their own
- * (Option sets), captioned with the choice on screen (Option caption); an
- * image follows the finger with the next one beside it, steps past a third
- * of the width or on a flick, springs back short of that and resists at the
- * ends (Follow the finger); a drag down closes the viewer (Swipe down to
- * close). Under reduced motion nothing follows the finger.
- *
- * What is proved here, on the pane as the thread drives it on a phone: the
- * set's order and its ends, the caption and the pill, the sheet still listing
- * every file, the follow thresholds, the neighbour drawn beside the image and
- * over it while the step lands, the drag down, one image alone, and reduced
- * motion. Which way a zoomed image pans first is in imageZoom.test.tsx; the
- * real-touch proof is tests/e2e/inbox-image-swipe.spec.ts.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeAll, expect, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -88,7 +70,6 @@ const QUESTION = {
   choices: [choice('Gmail-style ⋯', 'A', true), choice('Quiet hover menu', 'B'), choice('Hover copy icon', 'C'), choice('Header menu only', 'D')],
 };
 const MESSAGES = [message(M1, '2026-10-10T10:42:00.000Z'), message(M2, '2026-10-10T11:06:00.000Z', { questions: [QUESTION] })];
-// The thread's files, every one of them; the images are the message's text images (the choices' pictures).
 const ALL_STEPS: AttachmentStep[] = attachmentSequence(MESSAGES, ALL).map((s) => (s.attachment.kind === 'image' ? { ...s, inline: true } : s));
 const SET: OptionSet = optionSetOf(MESSAGES, ALL_STEPS, optionSetId(M2, 'q-design'))!;
 
@@ -104,7 +85,6 @@ function stubViews() {
   }) as unknown as typeof fetch;
 }
 
-/** The pane as the thread drives it on a phone; `set`: the thread opened it over the question's choices. */
 function Pane({ start, opened, closed, set, only, setOf = SET }: { start: InboxAttachmentState; opened: string[]; closed: () => void; set: boolean; only?: boolean; setOf?: OptionSet }) {
   const [open, setOpen] = useState(start);
   const noop = () => {};
@@ -164,10 +144,8 @@ async function render(start: InboxAttachmentState, { set = true, only = false, s
 }
 
 const area = () => host!.querySelector<HTMLElement>('.ib-docarea')!;
-/** The picture on screen (what follows the finger), and the layer the neighbours are drawn in beside it. */
 const picture = () => area().querySelector<HTMLElement>('.ib-imgstage > .ib-zoomstage')!;
 const beside = () => host!.querySelector<HTMLElement>('.ib-imgpeeks');
-/** What stays put while the picture moves: the file area, the image's stage with its size bar, the comment box. */
 const stayingPut = () => [area(), area().querySelector<HTMLElement>('.ib-imgstage')!, area().querySelector<HTMLElement>('.ib-imgbar')!, area().querySelector<HTMLElement>('.ib-imgcompose')!].map((el) => el.style.transform);
 const pane = () => host!.querySelector<HTMLElement>('[data-attachment-pane]')!;
 const pill = () => host!.querySelector<HTMLButtonElement>('[data-full-view-bar] [data-full-view-position]')!;
@@ -175,7 +153,7 @@ const caption = () => host!.querySelector<HTMLElement>('[data-option-caption]');
 const live = () => host!.querySelector('[data-step-live]')!.textContent;
 const peek = (place: string) => host!.querySelector(`.ib-imgpeek[data-image-peek="${place}"]`);
 
-/** The phone's size for the file and the body around it, where the swipe is heard (happy-dom lays nothing out). */
+/** happy-dom lays nothing out: the phone's sizes are given here. */
 function sized(el: HTMLElement, width = 390, height = 700) {
   for (const node of [el, el.parentElement!]) node.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: width, bottom: height, width, height, toJSON: () => ({}) }) as DOMRect;
 }
@@ -201,10 +179,6 @@ function touchEvent(target: EventTarget, type: string, points: { x: number; y: n
   target.dispatchEvent(event);
 }
 
-/**
- * One finger from (200, 300) by (dx, dy) in `moves` moves, then lifted (unless `lift` is false). `rest`: the finger
- * stops before it lifts (a last move where it is, a moment later), so the release is no flick.
- */
 async function drag(dx: number, dy = 0, { moves = 6, lift = true, rest = false } = {}) {
   const target = area().querySelector('.ib-imgstage') ?? area();
   const from = { x: 200, y: 300 };
@@ -231,17 +205,14 @@ test.skipIf(!hasDom)('a picture choice opens its question\'s choices: the captio
   const { opened } = await render(optB);
   expect(caption()!.getAttribute('data-option-caption')).toBe('B');
   expect(caption()!.querySelector('.ib-optcap-label')!.textContent).toBe('Option B: Quiet hover menu');
-  // One row: no question, dots, end note or arrows (a phone swipes).
   for (const gone of ['.ib-optcap-prompt', '[data-option-dots]', '[data-option-end]', '[data-option-step]']) expect(caption()!.querySelector(gone)).toBeNull();
   expect(caption()!.querySelector('[data-option-recommended]')).toBeNull();
   expect(caption()!.querySelector('[data-option-end]')).toBeNull();
   expect(pill().textContent).toContain('2/4');
   expect(pill().getAttribute('aria-label')).toBe('2/4: option 2 of 4, opt-b.png. Show every file');
   expect(pane().getAttribute('aria-label')).toBe('opt-b.png, option 2 of 4');
-  // The thread's step chip gives way to the caption.
   expect(host!.querySelector('[data-full-view-chip]')).toBeNull();
 
-  // Finger left: the next choice, in choice order (C, then D), never the thread's other files.
   await drag(-200);
   await settle(40);
   expect(opened).toEqual([optC.id]);
@@ -250,14 +221,12 @@ test.skipIf(!hasDom)('a picture choice opens its question\'s choices: the captio
   await drag(-200);
   await settle(40);
   expect(opened).toEqual([optC.id, optD.id]);
-  // The last choice: the live region says where the thread's other files are (the card does not).
   expect(live()).toBe('Option D of 4: Header menu only. Last option. 2 other files under the 4/4 button');
   await drag(-200);
   await settle(40);
   expect(opened).toEqual([optC.id, optD.id]);
   expect(live()).toBe('Last option');
 
-  // Finger right, back to A (recommended), and no further.
   for (let i = 0; i < 3; i++) {
     await drag(200);
     await settle(40);
@@ -270,7 +239,6 @@ test.skipIf(!hasDom)('a picture choice opens its question\'s choices: the captio
   expect(live()).toBe('First option');
 });
 
-/** The card on its own: `steps` collects what its arrows ask for. */
 async function captionAlone(at: number, phone: boolean) {
   const steps: number[] = [];
   host = document.createElement('div');
@@ -311,10 +279,8 @@ test.skipIf(!hasDom)('one row on a phone too: the letter, the name, no arrows, n
 
 test.skipIf(!hasDom)('a neighbour is drawn at the Fit its image will have, between the rows the image keeps clear', () => {
   const stage = { left: 0, top: 0, width: 400, height: 660, pad: 12 };
-  // No rows: as the stage fits it. Rows: the same width, moved below the top row.
   expect(peekFit({ width: 1600, height: 1000 }, stage)).toEqual({ left: 12, top: 212.5, width: 376, height: 235 });
   expect(peekFit({ width: 1600, height: 1000 }, stage, { top: 62, bottom: 248 })).toEqual({ left: 12, top: 62 + 57.5, width: 376, height: 235 });
-  // A picture that has to shrink to fit between them.
   const portrait = peekFit({ width: 1000, height: 1600 }, stage, { top: 62, bottom: 248 });
   expect(portrait.height).toBe(350 - 24);
   expect(portrait.top).toBe(62 + 12);
@@ -348,7 +314,6 @@ test.skipIf(!hasDom)('the pill\'s sheet still lists every file of the thread; it
   await act(async () => sheet.querySelector<HTMLElement>(`[data-peek-item="${notes.id}"]`)!.click());
   await settle();
   expect(opened).toEqual([notes.id]);
-  // Out of the set: the thread's own count and its chip, no caption.
   expect(caption()).toBeNull();
   expect(pill().textContent).toContain(`1/${ALL_STEPS.length}`);
 });
@@ -357,11 +322,9 @@ test.skipIf(!hasDom)('the image follows the finger with the next image beside it
   stubViews();
   reducedMotion(false);
   const { opened } = await render(optB);
-  // Both neighbours are drawn beside the image, ready before a swipe needs them; no "Next · name" card for an image.
   expect(peek('previous')).not.toBeNull();
   expect(peek('next')).not.toBeNull();
   await drag(-100, 0, { lift: false, rest: true });
-  // Only the picture and the neighbours beside it move (approval mock 2): the size bar and the comment box stay put.
   expect(picture().style.transform).toBe('translateX(-100px)');
   expect(beside()!.style.transform).toBe('translateX(-100px)');
   expect(stayingPut()).toEqual(['', '', '', '']);
@@ -372,7 +335,6 @@ test.skipIf(!hasDom)('the image follows the finger with the next image beside it
   expect(picture().style.transform).toBe('');
   expect(beside()!.style.transform).toBe('');
 
-  // Past a third of the width: the image and its neighbour slide a full width and the gap, then the step.
   await drag(-200);
   expect(picture().style.transform).toBe('translateX(-406px)');
   expect(beside()!.style.transform).toBe('translateX(-406px)');
@@ -381,17 +343,14 @@ test.skipIf(!hasDom)('the image follows the finger with the next image beside it
   expect(opened).toEqual([optC.id]);
   expect(picture().style.transform).toBe('');
   expect(beside()!.style.transform).toBe('');
-  // The image stepped to stays drawn over the area until the new image is on screen (here it never loads: its timer).
   expect(peek('cover')).not.toBeNull();
   await settle(SWIPE_HANDOFF_MAX_MS + 60);
   expect(peek('cover')).toBeNull();
 
-  // A flick: short, but fast.
   await drag(-60, 0, { moves: 2 });
   await settle(SWIPE_SLIDE_MS + 60);
   expect(opened).toEqual([optC.id, optD.id]);
 
-  // At the last choice it resists (a third of the finger's travel) and does not step.
   await drag(-150, 0, { lift: false });
   expect(picture().style.transform).toBe('translateX(-50px)');
   expect(stayingPut()).toEqual(['', '', '', '']);
@@ -415,11 +374,9 @@ test.skipIf(!hasDom)('a finger that comes back while the step is still sliding l
     await release(target, 140, 300);
   };
   await flick();
-  // Still sliding toward C (nothing stepped yet) when the second flick begins.
   expect(picture().style.transform).toBe('translateX(-406px)');
   expect(opened).toEqual([]);
   await flick();
-  // The first step landed as the finger came down; the second slides on from C.
   expect(opened).toEqual([optC.id]);
   await settle(SWIPE_SLIDE_MS + 60);
   expect(opened).toEqual([optC.id, optD.id]);
@@ -430,9 +387,7 @@ test.skipIf(!hasDom)('a drag down closes the viewer the way Back does; short of 
   stubViews();
   reducedMotion(false);
   const { closes } = await render(optB);
-  // Short of the line, and the finger stops before it lifts (no flick).
   await drag(2, 80, { lift: false, rest: true });
-  // The picture follows the finger down; its size bar and comment box stay where they are and fade.
   expect(picture().style.transform).toBe('translateY(80px)');
   expect(stayingPut()).toEqual(['', '', '', '']);
   expect(pane().hasAttribute('data-dismissing')).toBe(true);
@@ -468,7 +423,6 @@ test.skipIf(!hasDom)('under reduced motion nothing follows the finger: the step 
   stubViews();
   reducedMotion(true);
   const { opened, closes } = await render(optB);
-  // No neighbour drawn beside the image (nothing slides in).
   expect(peek('next')).toBeNull();
   await drag(-200, 0, { lift: false });
   expect(picture().style.transform).toBe('');
@@ -490,11 +444,9 @@ test.skipIf(!hasDom)('the card holds every name of the set (unseen) so it is one
   expect(sizers).toHaveLength(4);
   expect(sizers.join('|')).toContain(SET.choices[3]!.label);
   for (const el of caption()!.querySelectorAll('.ib-optcap-size')) expect(el.getAttribute('aria-hidden')).toBe('true');
-  // The name read aloud is the visible row's only (not four names).
   expect(caption()!.querySelector('.ib-optcap-main .ib-optcap-label')!.textContent).toContain(SET.choices[1]!.label);
   expect(caption()!.querySelectorAll('.ib-optcap-main .sr-only')).toHaveLength(1);
 
-  // A pinch (Ctrl + wheel) over an arrow: held off the page and handed to the picture's stage.
   host!.className = 'ib-view';
   const stage = document.createElement('div');
   stage.setAttribute('data-image-zoom-stage', 'fit');

@@ -1,12 +1,3 @@
-/**
- * On a phone, holding Reply opens the reaction tray (owner, 2026-11-07, approval "inbox-reaction-tray"), on the
- * real ThreadPane. Failures to catch: a hold that does not open the tray; a hold that opens the reply box as
- * well (the click that ends it not swallowed); a plain tap on Reply no longer opening the reply box, or opening
- * the tray; a finger that moves (a scroll starting on Reply) still counting as a hold; the browser's long-press
- * menu not blocked; a computer's Reply taking holds at all.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -106,7 +97,6 @@ const replyBox = () => $('.ib-rbox');
 
 const touch = (type: string, x = 20, y = 20) => new PointerEvent(type, { bubbles: true, cancelable: true, button: 0, pointerType: 'touch', clientX: x, clientY: y });
 
-/** A finger on Reply for `ms`, then lifted where it went down (the browser's click follows a lift that did not move). */
 async function finger(el: HTMLElement, ms: number, moveTo?: { x: number; y: number }) {
   await act(async () => {
     el.dispatchEvent(touch('pointerdown'));
@@ -131,12 +121,10 @@ test.skipIf(!hasDom)('a phone: holding Reply opens the reaction tray and not the
   expect(replyBox()).toBeNull();
   // The hold is the tray's: no text selection or callout (inbox.css keys on this mark).
   expect(button.hasAttribute('data-reply-hold')).toBe(true);
-  // The browser's own long-press menu is blocked.
   const menu = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
   act(() => void button.dispatchEvent(menu));
   expect(menu.defaultPrevented).toBe(true);
 
-  // While the finger rests, the light cue; at the hold, the tray, and the click that ends it opens nothing.
   await act(async () => {
     button.dispatchEvent(touch('pointerdown'));
   });
@@ -152,7 +140,6 @@ test.skipIf(!hasDom)('a phone: holding Reply opens the reaction tray and not the
   expect(replyBox()).toBeNull();
   expect(tray()).not.toBeNull();
 
-  // The tray it opened is the real one: the saved emoji reacts with its name.
   await act(async () => $('[data-reaction-tray] [data-reaction="saved-0"]')!.click());
   await wait(60);
   expect(acks).toEqual([[M1, true, { emoji: '🚀', label: 'Ship it' }]]);
@@ -165,7 +152,6 @@ test.skipIf(!hasDom)('a phone: a tap on Reply still opens the reply box, with no
   expect(replyBox()).not.toBeNull();
   expect(acks).toEqual([]);
 
-  // A scroll starting on Reply: the finger moves away, rests past the hold, and nothing opens.
   act(() => root?.unmount());
   host?.remove();
   await render(true);
@@ -173,7 +159,6 @@ test.skipIf(!hasDom)('a phone: a tap on Reply still opens the reply box, with no
   expect(tray()).toBeNull();
   expect(replyBox()).toBeNull();
 
-  // And a tap after a hold is a tap again (the hold's swallowed click does not stick).
   await finger(reply(), HOLD_MS + 80);
   expect(tray()).not.toBeNull();
   expect(replyBox()).toBeNull();

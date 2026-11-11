@@ -1,16 +1,3 @@
-/**
- * Replying when the session that asked has ended (design record "replying
- * when the asking agent's session has ended", not in this repo), as the
- * window draws it: the quiet notice before replying, the recipient pill doing
- * the old choice's job at Send (approval "inbox-reply-recipient": its list
- * opens once, Esc, the race), Send at once when nothing is live, and the
- * delivered line's "(another session)". The route choice's own parts stay
- * tested below (Re-ask still opens it).
- * The failure this catches: a reply sent to a session that is gone without
- * the person knowing, or sent somewhere they did not pick.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -66,7 +53,6 @@ function questions(picked: boolean, messageId = M1): InboxQuestion[] {
   }));
 }
 
-/** The asking message; sent through a waking connection (`wakes`) unless said otherwise. */
 function asking(picked = false, wakes = true): InboxMessageWire {
   return {
     id: M1,
@@ -111,14 +97,8 @@ let posted: { path: string; body: Record<string, unknown> }[] = [];
 let sessions: { sessions: ReturnType<typeof live>[]; asker?: { session: string; live: boolean; stuck?: string[] } } = { sessions: [] };
 let replyAnswer: () => Response = () => new Response('{}');
 let annotations: InboxAnnotationRecord[] = [];
-/** Which sessions are still there, by id (answers `?asker=` for any session); null: `sessions.asker` as set. */
 let liveness: Record<string, boolean> | null = null;
-/** What `/to` refuses with, when it does. */
 let moveRefusal: string | null = null;
-/**
- * A session whose `?asker=` reads wait (a slow /sessions round trip): each read waits on its own, in order, until
- * `held[i]` is called; null: none waits.
- */
 let holdAsker: { session: string; held: (() => void)[] } | null = null;
 
 beforeEach(() => {
@@ -141,7 +121,6 @@ beforeEach(() => {
     }
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations });
     if (path.includes('/sessions')) {
-      // With `liveness`, `?asker=` is answered for whichever session the window asks about.
       const asked = new URL(path, 'http://inbox.test').searchParams.get('asker');
       if (holdAsker && asked === holdAsker.session) {
         const held = holdAsker.held;
@@ -216,7 +195,6 @@ async function writeReply(el: HTMLElement, words = WORDS) {
 
 const replies = () => posted.filter((p) => p.path.endsWith('/reply'));
 const key = (target: Element, init: KeyboardEventInit) => act(() => void target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })));
-/** The recipient pill under the box (approval "inbox-reply-recipient"), its list, and the list's rows in order. */
 const pill = (el: HTMLElement) => el.querySelector('[data-recipient]') as HTMLButtonElement | null;
 const pillList = (el: HTMLElement) => el.querySelector('[data-recipient-list]');
 const pillRows = (el: HTMLElement) => [...el.querySelectorAll('[data-recipient-row]')].map((r) => [r.getAttribute('data-recipient-row'), r.querySelector('.ib-rpick-l')?.textContent, r.querySelector('.ib-rpick-q')?.textContent ?? null]);
@@ -229,11 +207,9 @@ test.skipIf(!hasDom)('ended, live sessions exist: "session ended" on the asking 
   const note = el.querySelector('[data-asker-ended]') as HTMLElement;
   expect(note.getAttribute('data-asker-ended')).toBe('live');
   expect(note.querySelector('b')?.textContent).toBe('This Claude Code session has ended.');
-  // The note lives in one always-mounted status region.
   const region = el.querySelector('[data-asker-note]') as HTMLElement;
   expect(region.getAttribute('role')).toBe('status');
   expect(region.contains(note)).toBe(true);
-  // The box open: the pill under it names the asker, ended (approval "inbox-reply-recipient"), and the note goes.
   await writeReply(el);
   expect(el.querySelector('[data-asker-ended]')).toBeNull();
   expect(pill(el)?.hasAttribute('data-ended')).toBe(true);
@@ -246,7 +222,6 @@ test.skipIf(!hasDom)('a session with no evidence it wakes (MCP-only, OpenCode 1)
   expect(el.querySelector('[data-session-ended]')).toBeNull();
   await writeReply(el);
   expect(el.querySelector('[data-asker-ended]')).toBeNull();
-  // The status region stays mounted, empty.
   expect(el.querySelector('[data-asker-note]')?.textContent).toBe('');
   act(() => button(el, 'Send').click());
   await settle();
@@ -276,7 +251,6 @@ test.skipIf(!hasDom)('the pill does the old choice\'s job: Send opens its list o
   act(() => button(el, 'Send').click());
   await settle();
   expect(replies()).toEqual([]);
-  // "Where should this reply go?" is gone (approval "inbox-reply-recipient").
   expect(el.querySelector('[data-route-choice]')).toBeNull();
   expect(pillList(el)).not.toBeNull();
   expect(pillRows(el)).toEqual([
@@ -284,7 +258,6 @@ test.skipIf(!hasDom)('the pill does the old choice\'s job: Send opens its list o
     ['ses_pi', 'Pi', null],
     ['ses_asker', 'Claude Code', 'ended'],
   ]);
-  // An ended agent can't be a second recipient; a live one can.
   expect((el.querySelector('[data-recipient-tick="ses_pi"]') as HTMLButtonElement).disabled).toBe(false);
   expect(text.value).toBe(WORDS);
   pickOnly(el, 'ses_pi');
@@ -307,7 +280,6 @@ test.skipIf(!hasDom)('Esc closes the pill\'s list with the words kept; Send pres
   await settle();
   expect(pillList(el)).not.toBeNull();
   expect(replies()).toEqual([]);
-  // Escape closes the list before anything else hears it (the window's own Esc closes the thread otherwise).
   const esc = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
   act(() => void text.dispatchEvent(esc));
   await settle();
@@ -325,7 +297,6 @@ test.skipIf(!hasDom)('Esc closes the pill\'s list with the words kept; Send pres
 test.skipIf(!hasDom)('the race: the session picked ended before the reply went; nothing sent, the list opens with it ended and its circle off, the error says so', async () => {
   sessions = { sessions: [live('ses_other', 'claude-code'), live('ses_pi', 'pi')], asker: { session: 'ses_asker', live: false } };
   replyAnswer = () => {
-    // The server's live list no longer has it either (the 409 came from that list).
     sessions = { ...sessions, sessions: sessions.sessions.filter((s) => s.session !== 'ses_other') };
     return Response.json({ error: 'That session is not live any more.', code: 'session_not_live' }, { status: 409 });
   };
@@ -345,7 +316,6 @@ test.skipIf(!hasDom)('the race: the session picked ended before the reply went; 
   expect(pillRows(el).find((r) => r[0] === 'ses_other')?.[2]).toBe('ended');
   expect((el.querySelector('[data-recipient-tick="ses_asker"]') as HTMLButtonElement).disabled).toBe(true);
   expect(el.textContent).toContain('That Claude Code session ended before your reply went. Nothing was sent.');
-  // Pi picked: it goes there.
   pickOnly(el, 'ses_pi');
   await settle();
   replyAnswer = () => Response.json({ reply: {}, questions: [], replayed: false });
@@ -366,7 +336,6 @@ test.skipIf(!hasDom)('picks with no text: Send from the foot opens the box with 
   expect(el.querySelector('textarea:not([data-question-other])')).not.toBeNull();
   expect(pillList(el)).not.toBeNull();
   expect(replies()).toEqual([]);
-  // The asker's answer follows the agent picked.
   pickOnly(el, 'ses_pi');
   await settle();
   act(() => button(el, 'Send').click());
@@ -395,7 +364,6 @@ test.skipIf(!hasDom)('none live: the note says the reply will wait, Send sends a
   expect(after.querySelector('[data-delivery]')?.textContent).toBe(
     "Saved for Claude Code. That session has ended; it gets this only if it's resumed.",
   );
-  // The note is for before replying: once the reply is the last message, its own line says where it went.
   expect(after.querySelector('[data-asker-ended]')).toBeNull();
 });
 
@@ -420,7 +388,6 @@ test.skipIf(!hasDom)('delivered to another session: "(another session)" only whe
     threadOf(asking(), personReply({ to: { host: 'claude-code', session: 'ses_other' }, delivery: { state: 'delivered', host: 'claude-code', session: 'ses_other', at } })),
     { at, checked_at: at },
   );
-  // The day too when it is not today (format.ts whenTime).
   const time = whenTime(at);
   expect(same.querySelector(`[data-message-article="${R1}"] .ib-to`)?.textContent).toBe('to Claude Code (another session)');
   expect(same.querySelector('[data-delivery]')?.textContent).toBe(`Delivered to Claude Code (another session), ${time}`);
@@ -451,7 +418,6 @@ test.skipIf(!hasDom)('a Send answering two sessions: `to` rides only the ended a
       ? Response.json({ error: 'That session is not live any more.', code: 'session_not_live' }, { status: 409 })
       : Response.json({ reply: {}, questions: [], replayed: false });
   const el = await render({ ...threadOf(other, mine), thread_id: M0 });
-  // The pill names the ended asker (it wrote last): Send opens its list, and a live session is picked there.
   act(() => button(el.querySelector('.ib-pfoot') as HTMLElement, 'Send').click());
   await settle();
   await settle();
@@ -491,9 +457,6 @@ test.skipIf(!hasDom)('"Show N more": a selected row past the first five shows in
   expect(order()).toEqual(['ses_0', 'ses_1', 'ses_2', 'ses_3', 'ses_4', 'ses_5', 'ses_6', 'ses_7', 'leave']);
 });
 
-// Two sessions in one thread: A asked (its question picked), then B posted a
-// later update with no question. A Send of picks only answers A alone, so the
-// asker the window watches (and offers a choice for) is A, never B.
 const B = 'msg_01M4HB2W6Q8X0P5T7R9V3K1N4D';
 function laterUpdate(): InboxMessageWire {
   return {
@@ -530,19 +493,14 @@ test.skipIf(!hasDom)("picks only on A's older question, the latest message from 
   act(() => button(el.querySelector('.ib-pfoot') as HTMLElement, 'Send').click());
   await settle();
   await settle();
-  // The pill takes the route choice's place (approval "inbox-reply-recipient"): its agent, B, gets the ended asker's answer.
   expect(el.querySelector('[data-route-choice]')).toBeNull();
   expect(replies().map((r) => [r.path.includes(M1) ? 'A' : 'B', r.body.to ?? null])).toEqual([['A', { host: 'claude-code', session: 'ses_b' }]]);
 });
 
-// Handoff "multi-agent-thread-model", failure 2: a pick on ended A's question while the words go to live B.
-// The words' session is live, so A's answer used to go to A, which had ended, and sat there undelivered with no
-// line. Every session a Send reaches is checked now: A's answer follows the live agent the pill names.
 test.skipIf(!hasDom)("a pick on ended A's question and words for live B: A's answer follows the agent the pill names (B), B gets the words", async () => {
   liveness = { ses_asker: false, ses_b: true };
   sessions = { sessions: [live('ses_b', 'claude-code', { wrote_thread: true }), live('ses_other', 'pi')] };
   const el = await render(threadOf(asking(true), laterUpdate()));
-  // The pick waits in the draft: the foot opens it with Edit draft.
   act(() => button(el, 'Edit draft').click());
   await settle();
   const text = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
@@ -562,8 +520,6 @@ test.skipIf(!hasDom)("a pick on ended A's question and words for live B: A's ans
   ]);
 });
 
-// The same Send pressed before the read of A lands (the words moved the Send's sessions from A alone to B and A):
-// "not read yet" used to read as "not ended", so A's answer went to A, ended.
 test.skipIf(!hasDom)("a pick on ended A's question, words for live B, Send before A's read lands: Send waits for it, then A's answer follows B", async () => {
   liveness = { ses_asker: false, ses_b: true };
   sessions = { sessions: [live('ses_b', 'claude-code', { wrote_thread: true }), live('ses_other', 'pi')] };
@@ -580,22 +536,18 @@ test.skipIf(!hasDom)("a pick on ended A's question, words for live B, Send befor
   await settle();
   act(() => button(el, 'Send').click());
   await settle();
-  // A's read has not landed: nothing goes yet.
   expect(replies()).toEqual([]);
   await act(async () => {
     release();
   });
   await settle();
   await settle();
-  // "Not read yet" never sends A's answer to A: it follows B, the pill's agent.
   expect(replies().map((r) => [r.path.includes(M1) ? 'A' : 'B', r.body.to ?? null])).toEqual([
     ['A', { host: 'claude-code', session: 'ses_b' }],
     ['B', null],
   ]);
 });
 
-// The same Send pressed twice while the first waits for A's read: the second press must not send too, or the first,
-// when its read lands, posts every reply again with new keys.
 test.skipIf(!hasDom)("a pick on A's question, words for B, both live, Send pressed twice before A's read lands: the replies go once", async () => {
   liveness = { ses_asker: true, ses_b: true };
   sessions = { sessions: [live('ses_asker', 'claude-code', { wrote_thread: true }), live('ses_b', 'claude-code', { wrote_thread: true }), live('ses_other', 'pi')] };
@@ -609,11 +561,9 @@ test.skipIf(!hasDom)("a pick on A's question, words for B, both live, Send press
     text.dispatchEvent(new Event('input', { bubbles: true }));
   });
   await settle();
-  // The effect's read of A waits; the first Send waits on its own read of A.
   act(() => button(el, 'Send').click());
   await settle();
   expect(holdAsker.held.length).toBe(2);
-  // The effect's read lands (A is read now), and Send is pressed again while the first still waits.
   await act(async () => {
     holdAsker!.held.shift()!();
   });
@@ -628,7 +578,6 @@ test.skipIf(!hasDom)("a pick on A's question, words for B, both live, Send press
   expect(replies().map((r) => (r.path.includes(M1) ? 'A' : 'B'))).toEqual(['A', 'B']);
 });
 
-// A Send that waited for the ended check went on with what the press saw. Both cases below hold A's read, as above.
 async function typeInBox(el: HTMLElement, words: string) {
   const text = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
   act(() => {
@@ -671,7 +620,6 @@ test.skipIf(!hasDom)('a Send waiting for the ended check, and the person opens a
     resolved_at: null,
     messages: [{ ...laterUpdate(), id: T2, thread_id: T2, reply_to: null, author: { kind: 'agent', host: 'pi', session: 'ses_other', name: null }, subject: 'Another thread', body: 'Shall I bump the cache?' }],
   };
-  // The pane stays mounted (no key per thread): the same ThreadPane draws the other thread.
   act(() =>
     root!.render(
       <div className="pn-inbox">
@@ -718,12 +666,10 @@ test.skipIf(!hasDom)('ended, another live: Send to another session and Archive s
   expect(inFoot(el, 'Reply')).toBe(true);
   expect(inFoot(el, 'Send to another session')).toBe(true);
   expect(inFoot(el, 'Archive')).toBe(true);
-  // The actions first, then what is open, right after them (the owner, 2026-11-08: "I want them next to the button").
   const order = [...el.querySelectorAll('[data-foot-buttons] button')];
   const archiveAt = order.findIndex((b) => b.hasAttribute('data-ended-archive'));
   expect(archiveAt).toBeGreaterThan(order.findIndex((b) => b.hasAttribute('data-reply-button')));
   expect(order.findIndex((b) => b.hasAttribute('data-open-questions'))).toBe(archiveAt + 1);
-  // The open questions are the ended pair's next neighbour in the row: nothing sits between them to push them away.
   expect(el.querySelector('[data-foot-buttons] > [data-foot-ended]')!.nextElementSibling!.hasAttribute('data-open-questions')).toBe(true);
 
   act(() => button(el, 'Send to another session').click());
@@ -740,8 +686,6 @@ test.skipIf(!hasDom)('ended, another live: Send to another session and Archive s
   expect(posted.some((p) => p.path.endsWith(`/messages/${M1}/resolve`) && p.body.resolved === true)).toBe(true);
 });
 
-// A phone draws the pair on a line of its own under Reply and the open questions: it comes last in the markup too, so
-// Tab and a screen reader go in the order on screen (Reply, the open questions, then the pair).
 test.skipIf(!hasDom)('ended, on a phone: Send to another session and Archive come after the open questions, last in the row; the first opens the box with the sheet of who gets the reply', async () => {
   sessions = { sessions: [live('ses_other', 'claude-code')], asker: { session: 'ses_asker', live: false } };
   const el = await render(threadOf(asking()), null, undefined, { phone: true });
@@ -752,8 +696,6 @@ test.skipIf(!hasDom)('ended, on a phone: Send to another session and Archive com
   expect(at('[data-foot-ended]')).toBe(parts.length - 1);
   const pair = [...parts[parts.length - 1]!.querySelectorAll('button')].map((b) => b.textContent?.trim());
   expect(pair).toEqual(['Send to another session', 'Archive']);
-  // The first opens the box with who gets the reply open: on a phone that is the bottom sheet (approval
-  // "inbox-phone-composer-picker"), the live session first and the asker, ended, last.
   act(() => button(el, 'Send to another session').click());
   await settle();
   await settle();
@@ -766,7 +708,6 @@ test.skipIf(!hasDom)('ended, on a phone: Send to another session and Archive com
     ['ses_other', 'Claude Code 2', 'ledger'],
     ['ses_asker', 'Claude Code', 'ended'],
   ]);
-  // A row: that session only. The sheet closes and the control names it, not ended.
   await act(async () => (sheet.querySelector('[data-recipient-row="ses_other"]') as HTMLElement).click());
   await settle();
   expect(pill(el)?.getAttribute('aria-expanded')).toBe('false');
@@ -804,7 +745,6 @@ test.skipIf(!hasDom)('a reply saved for a session that ended can move: the plain
 });
 
 test.skipIf(!hasDom)('a reply its live session took and will never deliver (`asker.stuck`): the line stops saying it is on its way, and it can move', async () => {
-  // Without the claim: the live session gets it, so nothing offers the move.
   sessions = { sessions: [live('ses_asker', 'claude-code'), live('ses_other', 'pi')], asker: { session: 'ses_asker', live: true } };
   const waiting = await render(threadOf(asking(), personReply()), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
   expect(waiting.querySelector('[data-delivery]')?.getAttribute('data-delivery')).not.toBe('undelivered');
@@ -887,7 +827,6 @@ test.skipIf(!hasDom)('an older linked machine refuses a plain move: the form sta
 });
 
 test.skipIf(!hasDom)('after a move: the next reply answers the moved one, and it is to the new session', async () => {
-  // The session that asked reads as ended, as it does in the window.
   sessions = { sessions: [live('ses_other', 'pi')] };
   liveness = { ses_asker: false, ses_other: true };
   const moved = personReply({ to: { host: 'pi', session: 'ses_other' }, took_over: true, delivery: { host: 'pi', session: 'ses_other', state: 'delivered', at: '2026-10-11T10:53:00.000Z' } });
@@ -902,15 +841,11 @@ test.skipIf(!hasDom)('after a move: the next reply answers the moved one, and it
   expect(replies()[0]!.path).toEndWith(`/messages/${R1}/reply`);
 });
 
-// A launched agent that stopped is not "ended": a reply starts it again. Only that session: another agent in the same
-// thread that ended is gone as it is anywhere, and a stopped launched session never reads as ended because of whom the
-// words go to.
 const LAUNCHED_ROOT = 'msg_01M4H6G73M9H3Z32T859E72L00';
 const LAUNCHED_ASKER = { kind: 'agent' as const, host: 'claude-code', session: 'ses_launched', name: null };
 const TAGGED_AGENT = { kind: 'agent' as const, host: 'claude-code', session: 'ses_tagged', name: null };
 const stoppedRun = { state: 'stopped', launch_id: 'lch_a', agent: 'claude-code', project: 'ledger', folder: '/work/ledger', since: '2026-10-11T10:50:00.000Z', again: false, stopped_by_person: true, cause: null, untrusted: false, attach_command: null } as InboxRun;
 
-/** A thread the person launched (its root names the session), its agent's question, then a tagged agent's message. */
 function launchedThread(picked: boolean): InboxThread {
   const inThread = { project_id: PROJECT.id, thread_id: LAUNCHED_ROOT, subject: null, resolved_at: null, idempotency_key: null };
   return {
@@ -995,18 +930,14 @@ test.skipIf(!hasDom)('a launched thread, its agent gone: the words and the form 
   const saved = savedIn(asked, M1);
   const withSaved = { ...thread, messages: [rootMessage, asked, saved] };
   expect(await read(withSaved)).toEqual({ words: true, form: true });
-  // Taken already, by delivery or by a read that settled it: refused as already delivered.
   const taken = { ...saved, delivery: { host: 'claude-code', session: 'ses_launched', state: 'delivered', at: '2026-10-11T10:51:00.000Z' } } as InboxMessageWire;
   expect(await read({ ...thread, messages: [rootMessage, asked, taken] })).toEqual({ words: false, form: false });
   const read9 = { ...rootMessage, agent_checked_seq: 9 } as InboxMessageWire;
   expect(await read({ ...thread, messages: [read9, asked, { ...saved, seq: 2 } as InboxMessageWire] })).toEqual({ words: false, form: false });
-  // Archived: refused as resolved.
   const at = '2026-10-11T11:00:00.000Z';
   expect(await read({ ...thread, resolved_at: at, messages: [{ ...rootMessage, resolved_at: at }, asked, saved] })).toEqual({ words: false, form: false });
-  // Every other live session took it through a tag: nowhere to send it, and no form.
   const tagged = { ...saved, tags: [{ host: 'pi', session: 'ses_other', wakes: true, delivery: { host: 'pi', session: 'ses_other', state: 'delivered', at: '2026-10-11T10:51:00.000Z' } }] } as InboxMessageWire;
   expect(await read({ ...thread, messages: [rootMessage, asked, tagged] })).toEqual({ words: false, form: false });
-  // No other session running: the words say nothing of it; the form stays, since opening it reads the sessions again.
   sessions = { sessions: [] };
   expect((await read(withSaved)).words).toBe(false);
 });

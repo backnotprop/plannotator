@@ -1,9 +1,3 @@
-/**
- * The window's store of each machine's agents (agentsList.ts) and the frame that reads them again. The failures this
- * catches: a list read with the same agents drawing again (each read moves nothing else), a malformed group from
- * another machine reaching what draws, an `agents` frame lost on the way in, and the list read again for agents while
- * nothing draws them.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { dispatchInboxFrame } from './api';
 import { inboxAgentsFlat, inboxAgentsNow, inboxAgentsWatched, setInboxAgents, subscribeInboxAgents } from './agentsList';

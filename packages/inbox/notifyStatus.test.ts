@@ -1,8 +1,3 @@
-/**
- * What the window says about notifications (notifyStatus.ts): every way they
- * fail silently has its own words, and "Notifications reach you" follows the
- * server's count of open windows.
- */
 import { describe, expect, test } from 'bun:test';
 import { blockedSteps, browserAppName, browserName, notifyStatusKind, notifyStatusText, reachText, testMissHint } from './notifyStatus';
 
@@ -18,7 +13,6 @@ describe('the browser by name', () => {
     expect(browserName(SAFARI)).toBe('Safari');
     expect(browserName(FIREFOX)).toBe('Firefox');
     expect(browserName('curl/8')).toBe('this browser');
-    // Headless Chrome is still Chrome (never "Safari" from its trailing Safari/ token).
     expect(browserName(CHROME.replace('Chrome/', 'HeadlessChrome/'))).toBe('Chrome');
     expect(browserAppName('Chrome')).toBe('Google Chrome');
     expect(browserAppName('Edge')).toBe('Microsoft Edge');

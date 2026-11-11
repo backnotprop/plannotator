@@ -1,15 +1,3 @@
-/**
- * Clone from a git URL in compose's folder menu (approval "launch-create-clone", C1-C17, B5, D4, D7, D9). A URL in
- * the filter turns each machine's group into its clone row, into the folder that machine answers; a pick puts the git
- * mark in To and the clone in the foot, and Send asks that machine to clone (`to.launch.clone`) into that folder.
- *
- * The failures this catches: a clone row asked of (or a Send gone to) the wrong machine, a Send that drops the clone
- * or names another folder, a machine whose git can't read the repo hidden or made unpickable (C11 dims it), a repo
- * already there cloned again (C9), an unknown host offered before it is checked (C7, C8), the URL lost when the chip
- * is reopened (D4, D7), a git URL in the folder field read as a path (B5), and a reopened draft that forgot its clone.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. Fetch is mocked: no server.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -45,14 +33,11 @@ const MINI_BLOCK: InboxComposeLaunch = {
   clone: { into: '/Users/mini/work' },
 };
 
-/** Each machine's folders under its home, by `~/…` path. */
 const TREES: Record<string, Record<string, string[]>> = {
   self: { '~': ['code'], '~/code': ['api-gateway', 'web', 'web-app'], '~/code/web': ['docs', 'src'] },
   [MINI]: { '~': ['work'], '~/work': ['infra'] },
 };
-/** Where each machine would clone, by `<machine>:<into>`: the repo's name, or what it answers (C9, C10). */
 const ALREADY = new Set(['self:~/code:api-gateway']);
-/** The quiet check's answer per machine (C11) and for unknown hosts (C7, C8). */
 let reach: Record<string, string> = {};
 
 let root: Root | null = null;
@@ -189,7 +174,6 @@ test.skipIf(!hasDom)("C1, C11, C13: a URL gives each machine its clone row into 
   expect(filter().placeholder).toBe('Find a project or paste a git URL');
   type(filter(), URL_HTTPS);
   await until(() => cloneRow('self')?.getAttribute('data-clone-path') === '~/code/billing-api' && cloneRow(MINI)?.hasAttribute('data-clone-cant') === true, 'both clone rows answered');
-  // Each machine was asked through its own route; no project rows while a URL is in the filter.
   expect(requests.some((r) => r.path.startsWith(`/api/inbox/m/${MINI}/launch/clone?`))).toBe(true);
   expect(requests.some((r) => r.path.startsWith('/api/inbox/launch/clone?'))).toBe(true);
   expect(all('[data-compose-folder-option]')).toHaveLength(0);
@@ -201,7 +185,6 @@ test.skipIf(!hasDom)("C1, C11, C13: a URL gives each machine its clone row into 
     "Cloned with that machine's own git sign-in, into the folder where its other projects live. Claude Code starts when the clone is done.",
   );
 
-  // C11: still pickable. ↓ walks to it (MacBook's clone, its another folder, then Mac mini's), Enter picks it.
   key(filter(), 'ArrowDown');
   key(filter(), 'ArrowDown');
   expect(cloneRow(MINI)!.getAttribute('aria-selected')).toBe('true');
@@ -212,7 +195,6 @@ test.skipIf(!hasDom)("C1, C11, C13: a URL gives each machine its clone row into 
   expect(inDialog('[data-compose-folder]')!.getAttribute('aria-label')).toBe('Start in: billing-api, ~/work/billing-api, cloned from github.com/acme/billing-api when you send, on Mac mini. Change');
   expect(inDialog('[data-compose-status]')!.textContent).toBe('Clones acme/billing-api, then starts Claude Code.');
 
-  // D4, D7: reopened, the URL is still in the filter and Mac mini's row has the ✓; ↑ to MacBook, Enter switches.
   act(() => inDialog('[data-compose-folder]')!.click());
   await until(() => cloneRow('self') !== null, 'the clone rows again');
   expect(filter().value).toBe(URL_HTTPS);
@@ -232,7 +214,6 @@ test.skipIf(!hasDom)('C9, C10: the same repo there starts in it without a clone;
   type(filter(), 'git@github.com:acme/api-gateway.git');
   await until(() => cloneRow('self')?.hasAttribute('data-clone-already') === true, 'already cloned');
   expect(cloneRow('self')!.textContent).toBe('Start in api-gateway · already cloned~/code/api-gateway');
-  // Nothing to clone elsewhere: no "another folder" row for it.
   expect(all('[data-compose-folder-clone-other]')).toHaveLength(0);
   type(filter(), 'https://github.com/other/web');
   await until(() => cloneRow('self')?.getAttribute('data-clone-path') === '~/code/web-2', 'the next free name');
@@ -265,7 +246,6 @@ test.skipIf(!hasDom)('C6, C7, C8: an account is said; an unknown host is checked
   type(filter(), 'https://git.acme.dev/team/tool');
   await until(() => cloneRow('self') !== null, 'the self-hosted clone row');
   expect(cloneRow('self')!.textContent).toBe('Clone tool and start~/code/tool');
-  // A bare owner/repo stays a project search (C3).
   type(filter(), 'acme/billing-api');
   expect(cloneRow('self')).toBeNull();
 });
@@ -299,7 +279,6 @@ test.skipIf(!hasDom)("C15: in this computer's clone browser, a folder that is th
   type(pathField(), '~/code/web/');
   await until(() => inDialog('[data-home-folder-clone="~/code/web/billing-api"]') !== null, 'Clone here into web');
   expect(all('[data-home-folder-row]').map((r) => r.getAttribute('data-home-folder-row'))).toEqual(['cloneHere', 'folder', 'folder']);
-  // A new name is the clone's own folder.
   type(pathField(), '~/code/invoices');
   await until(() => inDialog('[data-home-folder-row="cloneInto"]') !== null, 'Clone into invoices');
   expect(inDialog('[data-home-folder-row="cloneInto"]')!.textContent).toBe('Clone into invoices and start~/code/invoices');
@@ -333,7 +312,6 @@ test.skipIf(!hasDom)('D9: a reopened draft keeps its clone pick; checked again, 
   expect(inDialog('[data-compose-status]')!.textContent).toBe('Clones acme/billing-api, then starts Claude Code.');
   act(() => root!.unmount());
   host!.remove();
-  // ~/code/web is there now: the pick starts in it, without the git mark.
   await open({ draft: draft('~/code/web') });
   await until(() => requests.some((r) => r.path.includes('launch/folders')), 'the check');
   await until(() => inDialog('[data-compose-folder]') !== null && !inDialog('[data-compose-folder]')!.hasAttribute('data-compose-folder-clone'), 'the mark dropped');
@@ -342,7 +320,6 @@ test.skipIf(!hasDom)('D9: a reopened draft keeps its clone pick; checked again, 
 test.skipIf(!hasDom)("a URL typed key by key is checked once, when the typing stops (each check is a network git run on that machine), and the same URL again asks no one", async () => {
   await open();
   await startAndOpenMenu();
-  // Every prefix of the repo's name reads as a repo of its own.
   for (let n = 'github.com/acme/b'.length; n <= 'github.com/acme/billing-api'.length; n++) type(filter(), 'github.com/acme/billing-api'.slice(0, n));
   await until(() => cloneRow('self')?.getAttribute('data-clone-path') === '~/code/billing-api', 'the clone row');
   const checks = () => requests.filter((r) => r.path.startsWith('/api/inbox/launch/clone-check?'));
@@ -351,7 +328,6 @@ test.skipIf(!hasDom)("a URL typed key by key is checked once, when the typing st
     await new Promise((r) => setTimeout(r, 900));
   });
   expect(checks().map((r) => new URLSearchParams(r.path.split('?')[1]).get('url'))).toEqual(['github.com/acme/billing-api']);
-  // Cleared and typed again: answered from the check already made.
   type(filter(), '');
   type(filter(), 'github.com/acme/billing-api');
   await act(async () => {

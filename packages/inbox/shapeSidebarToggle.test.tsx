@@ -1,17 +1,3 @@
-/**
- * The board can close the main sidebar (the owner: "I still need to be
- * able to close the main sidebar in this view. It takes up a lot of
- * horizontal space."). The board, opened from the Shape row or over its
- * thread, covers the page's head, so it has the sidebar toggle every full
- * page has at the left of its title, and it closes and
- * opens the sidebar through the shell's own state (the window stores that
- * choice, as on every page); ⌘/Ctrl+B does the same with the board open. What
- * regresses: the board (on the Shape page or over a thread) losing its
- * toggle, the toggle not reaching the
- * sidebar, or a phone (where the sidebar is a sheet) gaining one.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, mock, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -53,7 +39,6 @@ function board(): ShapeLoaded {
   return { shape: made.record, version: store.read(made.id)!, seen: 1, notes: [], session: { state: 'live', agent: 'Claude Code' } };
 }
 
-/** The window as a phone (the Inbox's PHONE_QUERY matches) or a desktop. */
 function windowIs(phone: boolean) {
   const saved = window.matchMedia;
   window.matchMedia = ((query: string) => ({
@@ -65,10 +50,6 @@ function windowIs(phone: boolean) {
   restore.push(() => (window.matchMedia = saved));
 }
 
-/**
- * The shell with the board laid over the page, as App.tsx draws it: the sidebar's open state is the window's
- * (`stored` records each change, as App's onOpenChange stores it).
- */
 async function mount(options: { thread?: InboxThread; phone?: boolean } = {}): Promise<{ el: HTMLElement; stored: boolean[] }> {
   windowIs(options.phone ?? false);
   // happy-dom lays nothing out, so every width reads 0, a phone's: the board is desktop-wide.
@@ -117,7 +98,6 @@ async function mount(options: { thread?: InboxThread; phone?: boolean } = {}): P
 const sidebarState = (el: ParentNode) => el.querySelector('[data-slot="sidebar"][data-state]')?.getAttribute('data-state') ?? null;
 const boardToggle = (el: ParentNode) => el.querySelector<HTMLButtonElement>('.shp-head [data-sidebar="trigger"]');
 
-/** A thread the board hangs off (only the board's Thread tab reads its messages). */
 const THREAD = { thread_id: 'thr_1', messages: [], project: { root: '/work/relay', repo: null } } as unknown as InboxThread;
 
 for (const [where, thread] of [['the Shape page', undefined], ['a board over its thread', THREAD]] as const) {
@@ -126,7 +106,6 @@ for (const [where, thread] of [['the Shape page', undefined], ['a board over its
     const toggle = boardToggle(el);
     expect(toggle).not.toBeNull();
     expect(toggle!.getAttribute('aria-label')).toBe('Toggle Sidebar');
-    // On the title's line, before it; Global comment and the × stay at its right.
     const row = el.querySelector('.shp-title-row')!;
     expect(row.firstElementChild!.contains(toggle)).toBe(true);
     expect(row.children[1]!.tagName).toBe('H1');
@@ -134,7 +113,6 @@ for (const [where, thread] of [['the Shape page', undefined], ['a board over its
 
     act(() => toggle!.click());
     expect(sidebarState(el)).toBe('collapsed');
-    // Still there with the sidebar closed: the way back.
     expect(boardToggle(el)).toBe(toggle);
     act(() => toggle!.click());
     expect(sidebarState(el)).toBe('expanded');

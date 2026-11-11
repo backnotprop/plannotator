@@ -1,9 +1,3 @@
-/**
- * The connect snippets are commands a person pastes into a shell or a config
- * file. Whatever path the CLI lives at (spaces, quotes, non-ASCII), each must
- * come back as exactly that path: a wrong quote is a command that fails on
- * someone's machine with nothing on screen to say why.
- */
 import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import fc from 'fast-check';
@@ -38,7 +32,7 @@ describe('connect snippets', () => {
     expect(goose.searchParams.getAll('arg')).toEqual(['inbox', 'mcp']);
   });
 
-  // After NonoElRobot's fork (c6a02a0): the settings.json entry, never `qwen mcp add` (it writes the other servers' ${VAR} values out).
+  // The settings.json entry, never `qwen mcp add` (it writes the other servers' ${VAR} values out).
   test('the Qwen Code panel gives the settings.json entry with the stdio command, and no qwen mcp add', () => {
     const panel = harnessPanel('qwen', ctx('/Users/a b/.local/bin/plannotator'));
     const entry = panel.artefacts[0];

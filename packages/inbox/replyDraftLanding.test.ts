@@ -1,8 +1,3 @@
-/**
- * Dictated words whose box is not open join that thread's draft (`landWordsInReplyDraft`): after what the draft holds
- * then, read again if another save got there first, after a Send on its way, and not at all if this window discards the
- * draft once they have started. Words that could not be saved stay on offer (lateVoice.ts).
- */
 import { beforeEach, expect, test } from 'bun:test';
 import type { ReplyDraftStore, ReplyDraftSaveInput } from '@plannotator/core/inbox-reply-draft';
 import type { InboxReplyDraft } from '@plannotator/core/inbox-types';
@@ -104,7 +99,6 @@ test('a read or a save that fails stays on offer, and Retry lands the same words
     expect(saves).toHaveLength(0);
     const miss = lateVoiceMissOf('thr_a');
     expect(miss?.retry).toBeFunction();
-    // Back up: Retry goes through the store it was given.
     if (broken === 'read') failing.read = store.read;
     else failing.save = store.save;
     miss!.retry!();

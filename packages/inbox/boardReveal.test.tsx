@@ -1,21 +1,3 @@
-/**
- * The Board reveal in a DOM (approval "inbox-feature-reveal", 2026-11-03): the calm-moment gate (reveal.ts
- * `useBoardReveal`) driving the Board's existing first-visit dialog (board/BoardIntro.tsx), as App wires them.
- *
- * What regresses: the dialog showing on load, or with any one blocker present (a thread left too soon or for another
- * thread, too young a page, under five rows, the tour or another one-time dialog this load, a toast, something typed
- * or open, a page not clear, not armed); the Board turned on by the dialog showing, or by any way out but "Turn it on"
- * (Not now, Escape, a click outside: the owner, 2026-11-04, reveals are opt-in); "Turn it on" not saving the switch or
- * not showing the Board's row; a second claim after any way out (or a reload); a dialog drawn the Inbox did not grant;
- * a claim whose answer was lost not sent again with its key (review of #2598, finding 2), or an answer from the Inbox
- * sent again; the offer opening once the settings say the Board is on (another window turned it on, finding 6); a
- * failed save leaving the row up (App's own `turnOnFromReveal`, revealTurnOn.ts, not a copy of it: finding 3).
- * The Checklist's dialog (steps/ChecklistIntro.tsx): its two buttons and Escape doing anything but their one thing.
- * Idle (idleClock.ts): the page going idle with a thread kept open beside the list not being the Board's moment, or
- * the Checklist's on a long agent run; being either's with a blocker present, or the Checklist's on a short thread.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -36,19 +18,12 @@ let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let savedTimes: typeof reveal.REVEAL_TIMES;
 let posts: { path: string; body: unknown }[] = [];
-/** The Inbox's compare-and-set: the first claim shows it. */
 let stamped = false;
-/** The key the stamping claim sent. */
 let stampedKey: string | null = null;
-/** Whether the Inbox grants the claim at all (false: another tab won, or it is no longer next). */
 let grants = true;
-/** Another tab or device already turned the Board on: a refused claim's answer says `board.on`. */
 let onElsewhere = false;
-/** How the next claims go before the Inbox answers: `lost` (the network drops: no answer), or an HTTP status. */
 let claimFails: ('lost' | number)[] = [];
-/** Held: the claim's answer waits for this (another window acts meanwhile). */
 let claimGate: Promise<void> | null = null;
-/** The switch's save fails (the phone's network dropped mid-save): the settings read fails the same way. */
 let saveFails = false;
 
 beforeEach(() => {
@@ -72,14 +47,11 @@ beforeEach(() => {
       const body = JSON.parse(String(init?.body ?? '{}')) as { key?: string };
       const fail = claimFails.shift();
       if (fail !== undefined && fail !== 'lost') return new Response(JSON.stringify({ error: 'down' }), { status: fail, headers: { 'Content-Type': 'application/json' } });
-      // The Inbox's compare-and-set, keyed: the claim that stamped it, sent again with its key, is shown it again.
       const show = grants && (!stamped || (body.key !== undefined && body.key === stampedKey));
       if (!stamped && grants) stampedKey = body.key ?? null;
       stamped = true;
-      // Stamped, then the answer is lost on the way back.
       if (fail === 'lost') throw new TypeError('Load failed');
       if (claimGate) await claimGate;
-      // The claim turns nothing on: `board.on` only says another tab or device turned it on.
       return new Response(JSON.stringify({ show, reveal: { next: null }, board: { on: onElsewhere } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
     if (path.endsWith('/api/inbox/settings') && init?.method === 'POST') {
@@ -110,7 +82,6 @@ const claims = () => posts.filter((p) => p.path.endsWith('/api/inbox/reveal'));
 const switchSaves = () => posts.filter((p) => p.path.endsWith('/api/inbox/settings'));
 const dialog = () => document.querySelector<HTMLDialogElement>('dialog[data-dialog="board-intro"]');
 
-/** A row; `project` 2 puts it in a second project (the Board's need: two projects or more). */
 function row(id: string, project: 1 | 2 = 1): InboxListRow {
   const at = new Date(Date.now() - 60_000).toISOString();
   return {
@@ -150,17 +121,13 @@ interface State {
   clear: boolean;
   held: boolean;
   firstRun: boolean;
-  /** The page is idle (App: idleClock.ts). */
   idle?: boolean;
 }
 
 const BASE: State = { due: true, blocked: false, rows: ROWS, toast: false, thread: null, clear: true, held: false, firstRun: false };
 
-/** What App holds: whether the Board is on (the sidebar's row reads it). */
 let boardOn = false;
-/** The toasts App would show. */
 let toasts: string[] = [];
-/** Another window turned a switch: the frame App's onCapabilities applies (capabilities.ts). */
 let hearFrame: (frame: { board?: { on: boolean } }) => void = () => {};
 
 type HeldSettings = { serverSession: string; board?: { on: boolean } };
@@ -193,14 +160,12 @@ function Harness({ state }: { state: State }) {
           mcpCommand={null}
           phone={false}
           onClose={r.close}
-          // App's own: close, the row at once, the switch saved as Settings saves it.
           onTurnOn={() =>
             void turnOnFromReveal('board', r.close, {
               save: () => inboxApi.saveBoard(true).then((saved) => saved.board),
               setSettings,
               showToast: (toast) => void toasts.push(`${toast.lead} · ${toast.action?.label ?? ''}`),
               dismissToast: () => {},
-              // The settings read fails as the save did.
               refreshSettings: () => Promise.resolve(),
               openSettings: () => {},
             })
@@ -226,7 +191,6 @@ function mount(state: State) {
   };
 }
 
-/** The calm moment: the page past its age, msg_a opened and read, then back to the list. `state` applies a blocker. */
 async function leave(state: Partial<State> = {}, options: { early?: boolean; young?: boolean; to?: string } = {}) {
   const set = mount({ ...BASE, ...state });
   if (!options.young) await wait(TIMES.pageAgeMs + 20);
@@ -240,19 +204,15 @@ async function leave(state: Partial<State> = {}, options: { early?: boolean; you
 describe.skipIf(!hasDom)('the calm moment', () => {
   test('back on the list after reading a thread: one claim, its first-visit dialog as an offer, the Board still off; Turn it on turns it on', async () => {
     const set = mount({ ...BASE, thread: 'msg_a' });
-    // Never on load, however long the thread stays open.
     await wait(TIMES.pageAgeMs + 100);
     expect(claims()).toHaveLength(0);
     set({ thread: null });
     await until(() => dialog() !== null);
     expect(claims().map((c) => c.body)).toEqual([{ id: 'board', key: expect.any(String) }]);
-    // Showing it turns nothing on.
     expect(boardOn).toBe(false);
     expect(document.querySelector('[data-sidebar-board]')).toBeNull();
     expect(switchSaves()).toHaveLength(0);
-    // The offer: Not now and Turn it on, never Copy prompt (there is no Board to fill yet).
     expect(dialog()!.querySelector('[data-board-intro-copy]')).toBeNull();
-    // Nor the line about the prompt: it would point at a button the offer does not have.
     expect(dialog()!.querySelector('.ib-bi-q')).toBeNull();
     expect(dialog()!.querySelector('[data-board-intro-close]')!.textContent).toBe('Not now');
     const on = dialog()!.querySelector<HTMLButtonElement>('[data-board-intro-on]')!;
@@ -302,7 +262,6 @@ describe.skipIf(!hasDom)('the calm moment', () => {
     claimGate = new Promise((resolve) => (release = resolve));
     await leave();
     await until(() => claims().length === 1);
-    // The live frame (event: capabilities) arrives before this page's claim answer.
     act(() => hearFrame({ board: { on: true } }));
     expect(document.querySelector('[data-sidebar-board]')).not.toBeNull();
     release();
@@ -349,7 +308,6 @@ describe.skipIf(!hasDom)('the calm moment', () => {
     ['the thread was open under the read time', {}, { early: true }],
     ['the page is younger than its age', {}, { young: true }],
     ['under five rows', { rows: ROWS.slice(0, 4) }],
-    // Approval "inbox-one-time-dialogs": five threads in flight in two projects or more.
     ['five rows in one project', { rows: ['msg_a', 'msg_b', 'msg_c', 'msg_d', 'msg_e'].map((id) => row(id)) }],
     ['the first-run screen', { firstRun: true }],
     ['the tour, an update or another one-time dialog this load', { blocked: true }],
@@ -425,7 +383,6 @@ describe.skipIf(!hasDom)('every way out but Turn it on is Not now: final, and th
       act(() => dismiss(dialog()!));
       expect(dialog()).toBeNull();
       expect(boardOn).toBe(false);
-      // Another calm moment on this load: nothing.
       set({ thread: 'msg_b' });
       await wait(TIMES.readMs + 20);
       set({ thread: null });
@@ -482,7 +439,6 @@ describe.skipIf(!hasDom)('the Checklist dialog (ChecklistIntro): an offer', () =
   });
 });
 
-/** The Checklist's reveal as App wires it (`useStepsReveal`), with the page's idle. */
 function Steps({ state }: { state: State }) {
   const r = reveal.useStepsReveal({
     due: state.due,
@@ -502,7 +458,6 @@ function Steps({ state }: { state: State }) {
   return r.stage === 'open' ? <div data-steps-offer="" /> : null;
 }
 
-/** A thread as the window loads it (App's `noteRevealThread`): `count` messages from one agent session. */
 function loadedRun(threadId: string, count: number) {
   const messages = Array.from({ length: count }, () => ({ author: { kind: 'agent', host: 'claude-code', session: 's1' }, body: 'step done' }));
   reveal.noteRevealThread({ thread_id: threadId, messages } as unknown as Parameters<typeof reveal.noteRevealThread>[0]);
@@ -555,12 +510,6 @@ describe.skipIf(!hasDom)('the page idle, with a thread kept open beside the list
   });
 });
 
-/**
- * The star ask's card (approval "star-ask") in the same load as the line's reveals, as App wires them: App's
- * `revealBlocked` reads `oneTimeDialogShownThisLoad()`, so once the star card is up, Snooze, the Board and the
- * Checklist hold back for the rest of the load (the star ask stamps nothing of the line, so this is the only thing that
- * keeps two one-time dialogs off one load).
- */
 function StarThenBoard({ state }: { state: State }) {
   const common = { listLoaded: true, firstRun: false, rows: state.rows, toast: false, thread: state.thread, clear: true, place: state.thread ?? '', heldBack: () => false };
   const star = reveal.useStarReveal({ ...common, due: true, blocked: false });
@@ -576,7 +525,6 @@ function StarThenBoard({ state }: { state: State }) {
 describe.skipIf(!hasDom)('the star card holds the line’s reveals back for the load', () => {
   test('once the star card opens, the Board reveal never claims on this load, even at its own moment', async () => {
     expect(reveal.oneTimeDialogShownThisLoad()).toBe(false);
-    // Too few rows for the Board's moment: the first calm moment is the star ask's alone.
     let state: State = { ...BASE, rows: ROWS.slice(0, 2) };
     host = document.createElement('div');
     document.body.appendChild(host);
@@ -595,7 +543,6 @@ describe.skipIf(!hasDom)('the star card holds the line’s reveals back for the 
     await until(() => document.querySelector('[data-star-card]') !== null);
     expect(claims().map((c) => (c.body as { id: string }).id)).toEqual(['star']);
     expect(reveal.oneTimeDialogShownThisLoad()).toBe(true);
-    // Later in the load the Board's moment comes (five rows in two projects, a thread read and left): no claim.
     set({ rows: ROWS });
     set({ thread: 'msg_b' });
     await wait(TIMES.readMs + 20);

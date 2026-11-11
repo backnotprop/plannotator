@@ -1,18 +1,3 @@
-/**
- * Settings → Activity's chart in the DOM (components/ActivityChart.tsx), over a
- * stubbed `GET /api/inbox/activity`. What regresses: the read asks for the wrong
- * span or project; the preview or Expand no longer opens the full screen, or
- * Escape, × or the backdrop no longer close it; hovering a mark there shows no
- * tooltip or the wrong thread's facts; a click (or a second tap on a touch
- * screen) opens nothing or the wrong thread; the chart takes a key (the owner:
- * mouse and touch only); an empty or failed read leaves no way to another
- * range or project; a linked machine's project as the list's filter is read
- * (a lasting 404); Escape in the project menu closes the full screen too.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- * The server half is packages/shared/inbox/activity.test.ts; the layout and keys'
- * model is packages/inbox/activityChart.test.ts.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -46,7 +31,6 @@ let savedWidth: PropertyDescriptor | undefined;
 let savedHeight: PropertyDescriptor | undefined;
 let asked: string[] = [];
 const ok = (model: InboxActivityModel) => new Response(JSON.stringify(model), { status: 200, headers: { 'Content-Type': 'application/json' } });
-/** The stubbed server: every read answers MODEL unless a test says otherwise. */
 let respond: (url: URL) => Response = () => ok(MODEL);
 const EMPTY: InboxActivityModel = { ...MODEL, threads: [] };
 const PROJECTS = [
@@ -112,7 +96,6 @@ async function mount(opened: [string, string | null][] = [], { projects = [] as 
 
 const dialog = (host: HTMLElement) => host.querySelector<HTMLDialogElement>('dialog[data-dialog="activity"]');
 
-/** Open the full screen with Expand; its chart. */
 async function expand(host: HTMLElement) {
   await act(async () => host.querySelector<HTMLButtonElement>('[data-activity-expand]')!.click());
   const svg = dialog(host)?.querySelector<SVGSVGElement>('.ib-activity-plot[data-size="full"] .ib-activity-svg');
@@ -120,7 +103,6 @@ async function expand(host: HTMLElement) {
   return svg;
 }
 
-/** Where a mark is in the full screen, in the page (happy-dom puts the SVG at 0,0). */
 function at(row: number, hour: number) {
   const layout = chart.activityLayout(WIDTH, MODEL.hour_count, MODEL.threads.length, 'blend', 'full', HEIGHT);
   return { clientX: chart.activityX(layout, hour), clientY: chart.activityY(layout, row) };
@@ -163,7 +145,6 @@ test.skipIf(!hasDom)("in the full screen, hovering a mark shows that thread's na
   });
   expect(tip(host)).toContain('Retry queue');
   expect(tip(host)).toContain('5 messages');
-  // Between marks: no tooltip.
   await act(async () => {
     svg.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse', ...at(0, 25) }));
   });
@@ -189,7 +170,6 @@ test.skipIf(!hasDom)('on a touch screen the first tap on a mark shows its toolti
   await tap(0, 40);
   expect(tip(host)).toContain('Retry queue');
   expect(opened).toEqual([]);
-  // A tap on another mark moves the tooltip there; it does not open the first.
   await tap(1, 12);
   expect(tip(host)).toContain('Ledger export');
   expect(opened).toEqual([]);
@@ -230,7 +210,6 @@ test.skipIf(!hasDom)('an empty week still opens the full screen, where a wider r
   expect(expandButton.disabled).toBe(false);
   await act(async () => expandButton.click());
   const dlg = dialog(host)!;
-  // The note names the way out the full screen has.
   expect(dlg.querySelector('[data-activity-empty]')?.textContent).toBe('No messages in billing this week. Try a longer range or another project. Or come back later once you’ve gotten some work done.');
   expect(host.querySelector('.ib-activity-box [data-activity-empty]')?.textContent).toBe('No messages in billing this week. Expand to try a longer range or another project. Or come back later once you’ve gotten some work done.');
   await act(async () => dlg.querySelector<HTMLInputElement>('input[name="ib-activity-range"][value="30"]')!.click());
@@ -259,7 +238,6 @@ test.skipIf(!hasDom)('a failed read still opens the full screen, where another p
 test.skipIf(!hasDom)("a linked machine's project as the list's filter starts on every project, also when the projects arrive later", async () => {
   await mount([], { projects: PROJECTS, project: 'prj_remote' });
   expect(asked.map((u) => new URL(u, 'http://x').searchParams.get('project'))).toEqual([null]);
-  // The projects not loaded yet at first: the filter goes once they arrive.
   act(() => root?.unmount());
   document.body.innerHTML = '';
   asked = [];

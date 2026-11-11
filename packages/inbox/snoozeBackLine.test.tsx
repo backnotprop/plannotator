@@ -1,12 +1,3 @@
-/**
- * "Back from snooze" as the thread draws it (approval `snooze-back-line`,
- * 2026-11-05): the existing divider's words when there is news, the same line
- * above the last message when there is none, whoever sent it. The rules behind
- * it are in snoozeBack.test.ts; the real browser proof, on screen included, is
- * tests/e2e/inbox-snooze-back.spec.ts.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -20,7 +11,6 @@ const AGENT: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 'ses_a
 const PERSON: InboxAuthor = { kind: 'person' };
 const ROOT = 'msg_1';
 const BACK = new Date(new Date().setHours(8, 0, 0, 0)).toISOString();
-/** Pinned on purpose: the approval names these exact words. */
 const WORDS = 'Back from snooze · 8:00 AM';
 
 function message(id: string, author: InboxAuthor, seq: number, extra: Partial<InboxMessageWire> = {}): InboxMessageWire {
@@ -45,12 +35,9 @@ function threadOf(messages: InboxMessageWire[], id = ROOT): InboxThread {
   return { thread_id: id, project: PROJECT, subject: 'Search for the docs site', thread_name: null, resolved_at: null, messages };
 }
 
-/** Everything read, the agent last. */
 const agentLast = (lookAt = 9) => threadOf([message(ROOT, AGENT, 1, { person_seen_seq: lookAt }), message('msg_2', PERSON, 2), message('msg_3', AGENT, 3)]);
-/** Everything read, the person last. */
 const personLast = () => threadOf([message(ROOT, AGENT, 1, { person_seen_seq: 1 }), message('msg_2', PERSON, 2)]);
 const oneMessage = () => threadOf([message(ROOT, AGENT, 1, { person_seen_seq: 1 })]);
-/** Read through seq 2: two messages came in during the snooze. */
 const withNews = () => threadOf([message(ROOT, AGENT, 1, { person_seen_seq: 2 }), message('msg_2', AGENT, 2), message('msg_3', AGENT, 3), message('msg_4', AGENT, 4)]);
 
 let root: Root | null = null;
@@ -195,10 +182,6 @@ test.skipIf(!hasDom)('the person replying during the visit ends "new", and the l
   expect(below(backLine(el)!)).toBe('msg_3');
 });
 
-/**
- * happy-dom has no layout. The line (the back line or the divider) sits at 900
- * and the message above it at 850, `aboveHeight` tall, in a view 700 tall.
- */
 function layout(aboveHeight: number) {
   const isLine = (el: Element | null | undefined) => !!el && (el.hasAttribute('data-snooze-back-line') || el.hasAttribute('data-new-divider'));
   const define = (target: object, key: string, get: (this: HTMLElement) => number) => {

@@ -1,11 +1,3 @@
-/**
- * What voice dictation paints in the composer's mirror layer, and that with voice off the field is exactly what it was.
- * The mirror stands behind a transparent textarea, so a character out of place there is text the person can't line up
- * with their cursor. Also the insert: it must reach the host's `onChange` without the browser's own insert (a phone
- * goes this way, so its keyboard stays down).
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

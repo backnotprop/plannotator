@@ -1,9 +1,3 @@
-/**
- * Artifact pins in the window (approval "inbox-artifact-stars"; the word is Pin). DOM-gated (DOM_TESTS=1).
- * What would regress: the thread grid's Pinned group (its order, the newest pin first; "Everything else" after it;
- * the grid as it always was with nothing pinned in this thread), a card's pin and the viewer's pin not saving on the
- * server or not showing at once, a refused pin staying shown, and the Wall's filters not reaching its read.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -24,7 +18,6 @@ const OTHER = 'msg_01M6XV5A3QFRSQX5MXKS88YFED';
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
-/** The server's pins, and what each POST asked. */
 let serverPins: InboxArtifactPin[] = [];
 let posts: { thread_id: string; key: string; pinned: boolean }[] = [];
 let refuse = false;
@@ -89,7 +82,6 @@ function grid() {
 const tilesIn = (el: Element, selector: string) => [...el.querySelectorAll<HTMLElement>(`${selector} [data-artifact-tile]`)].map((t) => t.getAttribute('data-artifact-tile'));
 
 test.skipIf(!hasDom)('the Pinned group comes first, the newest pin first; Everything else keeps the grid order', () => {
-  // Pinned guide 1, then guide 3 (pin order); this thread's only.
   resetArtifactPinsForTest([pin(1), pin(3), pin(2, OTHER)]);
   const el = grid();
   expect(el.querySelector('[data-artifacts-group="pinned"] h3')?.textContent).toBe('Pinned2');
@@ -105,7 +97,6 @@ test.skipIf(!hasDom)('with nothing pinned in this thread the grid is one list, a
   expect(el.querySelector('[data-artifacts-group]')).toBeNull();
   expect(el.querySelectorAll('ul.ib-art-grid').length).toBe(1);
   expect(tilesIn(el, 'ul.ib-art-grid')).toEqual(['guide:msg_4', 'guide:msg_3', 'guide:msg_2', 'guide:msg_1', 'guide:msg_0']);
-  // The tour's grid (no thread) has no pins at all.
   act(() => root!.render(<ArtifactsView artifacts={[0, 1].map(guide)} annotationCounts={new Map()} openId={null} onOpen={() => {}} onOpenGuide={() => {}} />));
   expect(el.querySelector('[data-artifact-pin]')).toBeNull();
 });
@@ -119,7 +110,6 @@ test.skipIf(!hasDom)('a card’s pin saves on the server and moves the card at o
   expect(button.getAttribute('aria-label')).toBe('Pin Guide 1');
   expect(button.getAttribute('aria-pressed')).toBe('false');
   act(() => button.click());
-  // Shown at once, before the server answers; the tile under the pin did not open.
   expect(tilesIn(el, '[data-artifacts-group="pinned"]')).toEqual(['guide:msg_1']);
   expect(opened).toBe(0);
   await settle();
@@ -154,8 +144,6 @@ test.skipIf(!hasDom)('the viewer bar’s pin reads and saves the same pins as th
   expect(button.getAttribute('aria-label')).toBe('Pin shot.png');
 });
 
-// A phone's HTML page has no room in its bar for the pin (320 px, the reply's pill or card on the row): Pin /
-// Unpin is the first item of full screen's ⋯ there, saving the same pins as the bar's button.
 test.skipIf(!hasDom)('full screen’s ⋯ holds Pin / Unpin when the pane hands it the pin, and saves it', async () => {
   resetArtifactPinsForTest([]);
   const attachment = { id: 'att_page', name: 'report.html', kind: 'html', sent_sha256: 'a'.repeat(64), current: null } as unknown as import('@plannotator/core/inbox-types').InboxAttachmentState;
@@ -170,7 +158,6 @@ test.skipIf(!hasDom)('full screen’s ⋯ holds Pin / Unpin when the pane hands 
   act(() => item()!.click());
   await settle();
   expect(posts).toEqual([{ thread_id: THREAD, key: 'att_page', pinned: true }]);
-  // Without the pin (the bar draws it): no item.
   act(() => root!.render(menu(null)));
   await settle();
   expect(item()).toBeNull();

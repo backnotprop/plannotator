@@ -1,9 +1,3 @@
-/**
- * "Session ended" on a list row (the server's `session_ended`). The failure this catches: the mark taking the place
- * of what the row must keep saying, the open questions' count, or showing on a row whose host cannot tell.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

@@ -1,13 +1,3 @@
-/**
- * The size of an HTML page on a phone (pageSize.ts; approval
- * "inbox-html-attachments-phone", part B "Fit the page").
- *
- * Guards: a page only counts as wide when it lays out past its frame by more
- * than rounding; the fit scale is the box over 1280 and never enlarges; a
- * picked size is kept per file, read back by a fresh read (a reload), wins
- * over the page's own width, and the oldest picks go first once the store is
- * full; a broken or foreign value in the store reads as no pick.
- */
 import { describe, expect, test } from 'bun:test';
 import { PAGE_DESKTOP_WIDTH, PAGE_SIZE_KEPT, PAGE_SIZE_KEY, desktopFitScale, pageIsWide, readPageSize, shownPageSize, writePageSize } from './pageSize';
 
@@ -23,12 +13,10 @@ function memoryStore(initial: Record<string, string> = {}) {
 describe('a wide page', () => {
   test('is one that lays out clearly past its frame', () => {
     expect(pageIsWide({ width: 1180, viewport: 390 })).toBe(true);
-    // The line: 1.5 times the frame. A 768 px desktop layout is far past it.
     expect(pageIsWide({ width: 585, viewport: 390 })).toBe(true);
     expect(pageIsWide({ width: 768, viewport: 390 })).toBe(true);
   });
   test('a phone-friendly page with one long hash or URL poking out is not', () => {
-    // A 64-character commit hash in <code>, or an unwrapped URL: about 500 px on a 390 px phone.
     expect(pageIsWide({ width: 500, viewport: 390 })).toBe(false);
     expect(pageIsWide({ width: 584, viewport: 390 })).toBe(false);
   });
@@ -52,7 +40,6 @@ describe('the picked size', () => {
     expect(readPageSize('/work/a/report.html', store)).toBeNull();
     writePageSize('/work/a/report.html', 'phone', store);
     writePageSize('/work/b/report.html', 'desktop', store);
-    // A reload: a new read of the same store.
     const reloaded = memoryStore({ [PAGE_SIZE_KEY]: store.raw()! });
     expect(readPageSize('/work/a/report.html', reloaded)).toBe('phone');
     expect(readPageSize('/work/b/report.html', reloaded)).toBe('desktop');
@@ -69,7 +56,6 @@ describe('the picked size', () => {
   test('a new pick replaces the old one, and the oldest files go first once the store is full', () => {
     const store = memoryStore();
     for (let i = 0; i < PAGE_SIZE_KEPT; i++) writePageSize(`/f/${i}.html`, 'desktop', store);
-    // Picked again: it becomes the newest, so it outlives the files picked after it once.
     writePageSize('/f/0.html', 'phone', store);
     writePageSize('/f/new.html', 'desktop', store);
     expect(readPageSize('/f/0.html', store)).toBe('phone');

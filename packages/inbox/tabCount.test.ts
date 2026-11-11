@@ -1,9 +1,3 @@
-/**
- * The tab count's rule (approval "inbox-tab-count"): threads with agent
- * messages the person has not looked at, never the waiting-on-you count, and
- * archived threads only when they came back. The window's wiring (title and
- * favicon over a real Inbox) is proved by tabCountWindow.test.tsx.
- */
 import { describe, expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection, InboxSectionId } from '@plannotator/core/inbox-types';
 import { drawTabIcon, inboxTabCount, setAppBadge, tabBadgeLabel, tabIconSvg, tabTitle } from './tabCount';
@@ -85,7 +79,6 @@ describe('the tab', () => {
     const ctx = { drawImage() {}, beginPath() {}, fill() {}, stroke() {}, fillText() {} };
     const doc = { createElement: () => ({ width: 0, height: 0, getContext: () => ctx, toDataURL: () => 'data:image/png;base64,X' }) } as unknown as Document;
     expect(drawTabIcon({} as CanvasImageSource, 3, doc)).toBeNull();
-    // With the whole API the PNG comes back.
     const full = { ...ctx, roundRect() {} };
     const fullDoc = { createElement: () => ({ width: 0, height: 0, getContext: () => full, toDataURL: () => 'data:image/png;base64,X' }) } as unknown as Document;
     expect(drawTabIcon({} as CanvasImageSource, 3, fullDoc)).toBe('data:image/png;base64,X');
@@ -95,7 +88,6 @@ describe('the tab', () => {
     const calls: (number | 'clear')[] = [];
     const nav = { setAppBadge: async (n?: number) => void calls.push(n!), clearAppBadge: async () => void calls.push('clear') };
     setAppBadge(3, nav);
-    // Past nine the number goes as it is: the system shortens it its own way.
     setAppBadge(12, nav);
     setAppBadge(0, nav);
     expect(calls).toEqual([3, 12, 'clear']);

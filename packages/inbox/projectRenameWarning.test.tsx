@@ -1,11 +1,3 @@
-/**
- * The rename warning (approval "project-combine"): a typed name that is another
- * project's asks to combine, with Cancel and Combine and no way to keep both.
- * The real ProjectRow, driven through its own menu; only the window's two
- * callbacks are stand-ins, recording what the field asked for.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -43,7 +35,6 @@ const clash = () => document.querySelector<HTMLElement>('[data-project-clash]');
 const cancel = () => document.querySelector<HTMLButtonElement>('[data-project-combine-cancel]');
 const combineFor = (id: string) => document.querySelector<HTMLButtonElement>(`[data-project-combine="${id}"]`);
 
-/** The row with the given other projects, its field open through ⋯ and Rename…. */
 async function openField(others: readonly LabeledProject[], combine: ((into: LabeledProject) => Promise<boolean>) | null = async (into) => {
   combined.push(into.id);
   return true;
@@ -88,7 +79,6 @@ async function openField(others: readonly LabeledProject[], combine: ((into: Lab
   expect(field()).not.toBeNull();
 }
 
-/** Types as a person does: React's own value setter, then the input event. */
 async function type(text: string) {
   const input = field()!;
   await act(async () => {
@@ -113,7 +103,6 @@ test.skipIf(!hasDom)('a name another project has asks, in words, and says so to 
   expect([...clash()!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Cancel', 'Combine']);
   expect(said).toEqual(['docs already exists. Enter combines them, Escape cancels.']);
   expect(document.getElementById(field()!.getAttribute('aria-describedby')!)!.textContent).toContain('Enter combines them');
-  // The line goes as soon as the name is no longer another project's.
   await type('Docs2');
   expect(clash()).toBeNull();
 });

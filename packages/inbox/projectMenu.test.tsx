@@ -1,18 +1,3 @@
-/**
- * The project menu as the window draws it (design record
- * "inbox-project-menu", approved 2026-10-14): the whole window (InboxApp)
- * over a REAL Inbox server in a temp data dir (its own process,
- * tests/helpers/inbox-dom-server.ts), the window's fetches carried to it
- * over loopback. What is proved: ⋯ and a right-click open the same menu, its
- * two items, Mark all as read greyed out when nothing waits, Mark all as
- * read and Archive all with their toast and one Undo (the button and `Z`),
- * a project with nothing listed leaving the sidebar (the one the list shows
- * staying, with its empty state, until the person leaves it) and coming
- * back with the next agent message, and the phone's always-shown ⋯ and
- * sheet.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -61,7 +46,6 @@ async function serverSections(): Promise<Map<string, string>> {
   return new Map(model.sections.flatMap((s) => s.threads.map((r) => [r.thread_id, s.id] as const)));
 }
 
-/** An agent writes, as the server's stdin command does. */
 async function agentWrites(project: string, body: string, replyTo?: string): Promise<void> {
   const stdin = child!.stdin as import('bun').FileSink;
   stdin.write(`${JSON.stringify({ send: { project, session: 'ses_back', body, ...(replyTo ? { reply_to: replyTo } : {}) } })}\n`);
@@ -172,7 +156,6 @@ async function renderApp(hash = '') {
     root = createRoot(host!);
     root.render(<InboxApp />);
   });
-  // The projects, or (every project hidden) the line that says where they went.
   await until(() => !!document.querySelector('.ib-projrow, [data-projects-hidden]'), 'the sidebar');
 }
 
@@ -205,7 +188,6 @@ async function choose(action: 'read' | 'archive') {
 }
 
 const toast = () => document.querySelector<HTMLElement>('[data-inbox-toast]');
-/** The project's name as the sidebar shows it (billing-N: one world per test). */
 const projectName = () => projectRow()!.querySelector('.ib-name')!.textContent!;
 
 test.skipIf(!hasDom)('⋯ is a real button beside the row, named for the project, and opens the two items', async () => {
@@ -213,7 +195,6 @@ test.skipIf(!hasDom)('⋯ is a real button beside the row, named for the project
   const row = projectRow()!;
   const open = row.querySelector<HTMLButtonElement>('.ib-proj')!;
   const more = row.querySelector<HTMLButtonElement>('.ib-pmore')!;
-  // Two buttons side by side, never one inside the other.
   expect(open.contains(more)).toBe(false);
   expect(more.getAttribute('aria-label')).toBe(`${projectName()} options`);
   expect(more.getAttribute('aria-haspopup')).toBe('menu');
@@ -244,15 +225,12 @@ test.skipIf(!hasDom)('Mark all as read: one batch, the warning toast, and one Un
   await until(() => !!toast(), 'the toast');
   const call = posted.find((p) => p.path === `/api/inbox/projects/${ids.project}/read`)!;
   expect(typeof call.body.batch_id).toBe('string');
-  // An agent was stopped on one of them: the warning, and no Reply (several threads).
   expect(toast()!.textContent).toContain('Marked 6 threads read');
-  // The warning is the whole detail (one line); the project rides only the live region.
   expect(toast()!.querySelector('.ib-tdetail')?.textContent).toBe('Claude Code was stopped');
   await until(() => (document.querySelector('[data-inbox-live]')?.textContent ?? '').startsWith(`Marked 6 threads read in ${name}. Claude Code was stopped.`), 'the live region names the project');
   expect(toast()!.querySelector('[data-toast-reply]')).toBeNull();
   const after = await serverSections();
   for (const id of [ids.stopped, ids.waiting, ids.mixed, ids.same, ids.picked, ids.filed]) expect(after.get(id)).toBe('quiet');
-  // Nothing waits there now: the item greys out.
   await openMenu();
   expect(item('read')!.hasAttribute('data-disabled')).toBe(true);
   await act(async () => {
@@ -279,7 +257,6 @@ test.skipIf(!hasDom)('Archive all hides the project; the toast Undo brings it ba
   expect(toast()!.textContent).toContain('Archived 6 threads');
   await until(() => (document.querySelector('[data-inbox-live]')?.textContent ?? '').startsWith(`Archived 6 threads in ${name}.`), 'the live region names the project');
   await until(() => projectRow() === null, 'the project to leave the sidebar');
-  // Focus never falls to the page.
   expect(document.activeElement).not.toBe(document.body);
   await act(async () => {
     toast()!.querySelector<HTMLButtonElement>('[data-toast-undo]')!.click();
@@ -296,7 +273,6 @@ test.skipIf(!hasDom)('the project the list shows stays while the person is there
   await choose('archive');
   await until(() => !!document.querySelector('[data-project-archived]'), 'the empty state');
   expect(document.querySelector('[data-project-archived]')!.textContent).toContain(`Everything in ${name} is archived.`);
-  // The rows stay drawn, archived and faded, under it until the list settles (approval "inbox-list-view", R7).
   expect(document.querySelectorAll('.ib-lbody [data-row]:not([data-archived])').length).toBe(0);
   expect(projectRow()!.hasAttribute('data-held')).toBe(true);
   const inbox = [...document.querySelectorAll<HTMLButtonElement>('.ib-nav')].find((b) => b.textContent?.includes('Inbox'))!;
@@ -327,7 +303,6 @@ test.skipIf(!hasDom)('with a thread open the list holds still: Mark all as read 
   await openMenu();
   await choose('read');
   await until(() => !!toast(), 'the toast');
-  // The person's own write: nothing moved on screen while the thread is open.
   expect(placed()).toEqual(before);
   expect((await serverSections()).get(ids.stopped)).toBe('quiet');
   await act(async () => {
@@ -337,8 +312,6 @@ test.skipIf(!hasDom)('with a thread open the list holds still: Mark all as read 
   await openMenu();
   await choose('archive');
   await until(() => !!toast() && toast()!.textContent!.includes('Archived'), 'the archive toast');
-  // Still on screen, shown archived, while the thread is open (the list is the Inbox, not this project:
-  // the project itself leaves the sidebar, as it is not the list's filter).
   const archivedRow = document.querySelector(`.ib-listcol [data-row="${ids.stopped}"]`);
   expect(archivedRow).not.toBeNull();
   expect(archivedRow!.textContent).toContain('Archived');
@@ -346,14 +319,12 @@ test.skipIf(!hasDom)('with a thread open the list holds still: Mark all as read 
 });
 
 test.skipIf(!hasDom)('with every project hidden the sidebar says where they went', async () => {
-  // Archive every remaining world's project, this one included.
   for (const w of [ids, ...worlds]) await loopback(`/api/inbox/projects/${w.project}/resolve`, 'POST', JSON.stringify({ resolved: true }));
   const others = JSON.parse((await loopback('/api/inbox/projects')).text) as { projects: { id: string; listed: number }[] };
   for (const p of others.projects) if (p.listed > 0) await loopback(`/api/inbox/projects/${p.id}/resolve`, 'POST', JSON.stringify({ resolved: true }));
   await renderApp();
   await until(() => !!document.querySelector('[data-projects-hidden]'), 'the empty line');
   expect(document.querySelector('[data-projects-hidden]')!.textContent).toBe('Nothing open. Archived projects are in Settings → Archived.');
-  // Leave the rest for the phone test: bring this world back.
   await loopback(`/api/inbox/projects/${ids.project}/resolve`, 'POST', JSON.stringify({ resolved: false, threads: { resolved: [ids.stopped, ids.waiting, ids.mixed, ids.same, ids.picked, ids.filed], read: [] } }));
   worlds.unshift(ids);
 });
@@ -367,7 +338,6 @@ test.skipIf(!hasDom)('a phone: ⋯ always shown on every row, the menu a sheet t
     root = createRoot(host!);
     root.render(<InboxApp />);
   });
-  // The navigation is a sheet on a phone: open it.
   await until(() => !!document.querySelector('[data-sidebar="trigger"]'), 'the trigger');
   const trigger = document.querySelector<HTMLButtonElement>('[data-sidebar="trigger"]')!;
   await act(async () => {
@@ -378,7 +348,6 @@ test.skipIf(!hasDom)('a phone: ⋯ always shown on every row, the menu a sheet t
   const positioner = menu()!.closest('.ib-pm-pos')!;
   expect(positioner.hasAttribute('data-phone')).toBe(true);
   expect(menu()!.querySelector('.ib-pm-title')!.textContent).toBe(projectRow()!.querySelector('.ib-name')!.textContent);
-  // The popup is named by the project; the title is for the eye only.
   expect(menu()!.querySelector('.ib-pm-title')!.getAttribute('aria-hidden')).toBe('true');
   expect(menu()!.getAttribute('aria-label')).toBe(projectRow()!.querySelector('.ib-name')!.textContent);
 });

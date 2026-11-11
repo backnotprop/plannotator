@@ -1,18 +1,3 @@
-/**
- * A reply waiting on a busy agent (owner approval "inbox-busy-agent-reply",
- * 2026-10-21), as the window draws it: the list row's "Undelivered N min"
- * badge in place of the count (blue while it can go in now, grey when it
- * cannot), Send now on the row only on hover and keyboard focus, the band
- * under the reply ("Undelivered 3 min · Claude Code is working · goes in by
- * itself in 2 min · Send now"), the grey band that says why it cannot go in
- * sooner and the fix, and the line after it went in by itself. The failures
- * this catches: a waiting reply that still reads as quietly queued, a
- * countdown promised where nothing can take it, and a Send now that posts
- * nothing. happy-dom has no layout; the real browser shots are in
- * tests/e2e/inbox-undelivered.spec.ts.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -73,8 +58,6 @@ async function settle() {
     });
   }
 }
-
-// ── The list row ──
 
 function delivery(extra: Partial<InboxRowDelivery>): InboxRowDelivery {
   return { kind: 'reply', state: 'queued', reason: 'working', send_now: false, message_id: 'msg_r', at: null, host: 'claude-code', name: null, ...extra };
@@ -146,20 +129,16 @@ for (const shape of ['wide', 'narrow', 'phone'] as const) {
   const wide = shape === 'wide';
   test.skipIf(!hasDom)(`${shape} row: ${wide ? '"Undelivered N min"' : '"Undelivered Nm"'} in place of the count, blue where it can go in now, grey where it cannot`, () => {
     const el = renderList(SECTIONS, { phone: shape === 'phone', narrow: shape === 'narrow' });
-    // A three-line or phone row draws the short form (approval "inbox-row-byline", option A); a wide row the full
-    // words (the owner, 2026-10-29).
     expect(badge(el, CAN.thread_id)!.textContent).toBe(wide ? 'Undelivered 3 min' : 'Undelivered 3m');
     expect(badge(el, CAN.thread_id)!.hasAttribute('data-stuck')).toBe(false);
     expect(badge(el, STUCK.thread_id)!.textContent).toBe(wide ? 'Undelivered 12 min' : 'Undelivered 12m');
     expect(badge(el, STUCK.thread_id)!.hasAttribute('data-stuck')).toBe(true);
-    // In the count's cell: the row's name reads the full words (hidden text beside a short form).
     const cell = badge(el, CAN.thread_id)!.closest('.ib-c')!;
     if (wide) expect(cell.querySelector('.ib-sr')).toBeNull();
     else {
       expect(badge(el, CAN.thread_id)!.closest('[aria-hidden="true"]')).not.toBeNull();
       expect(cell.querySelector('.ib-sr')!.textContent).toBe('Undelivered 3 min');
     }
-    // An older Inbox sends no wait: no badge.
     expect(badge(el, QUEUED_OLD.thread_id)).toBeNull();
   });
 }
@@ -185,7 +164,6 @@ test.skipIf(!hasDom)('Send now on the row: only where it can go in now, a siblin
   expect(actionOf(CAN.thread_id)).not.toBeNull();
   expect(actionOf(STUCK.thread_id)).toBeNull();
   expect(actionOf(QUEUED_OLD.thread_id)).toBeNull();
-  // A real button, never inside the row's own button, named for the row.
   const button = actionOf(CAN.thread_id) as HTMLButtonElement;
   expect(button.tagName).toBe('BUTTON');
   expect(button.closest('.ib-row')).toBeNull();
@@ -197,8 +175,6 @@ test.skipIf(!hasDom)('Send now on the row: only where it can go in now, a siblin
   const phone = renderList(SECTIONS, { phone: true, onSendNow: () => {} });
   expect(phone.querySelector('[data-row-send-now]')).toBeNull();
 });
-
-// ── The line under the reply ──
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'ledger-abcdef', name: 'ledger', root: '/work/ledger', created_at: '2026-10-21T10:00:00.000Z' };
 const ASKED = 'msg_01M4XXVG0ZCPSD10B1KPG7DPMB';
@@ -250,14 +226,12 @@ async function renderThread(value: InboxThread, sent: { at: string; checked_at: 
   return host;
 }
 
-/** The server's clock for the reply on that session (the sessions route's `connection.waits`). */
 const waitsFor = (id: string, since: string, autoSince: string | null = since) => ({ [id]: { since, auto_since: autoSince } });
 
 const band = (el: HTMLElement) => el.querySelector<HTMLElement>('[data-undelivered].ib-delivered');
 
 test.skipIf(!hasDom)('it can go in now: "Undelivered 3 min · Claude Code is working · goes in by itself in 2 min" and a filled Send now', async () => {
   connection = { busy: true, idle_since: null, send_now: true, auto_send_after_ms: 5 * MIN, waits: waitsFor(REPLY, ago(3.5 * MIN)) };
-  // Sent long ago (for a session that was gone): the minutes are the server's clock, not created_at.
   const el = await renderThread(thread({ created_at: ago(90 * MIN) }));
   const b = band(el)!;
   expect(b.getAttribute('data-delivery')).toBe('queued');
@@ -269,7 +243,6 @@ test.skipIf(!hasDom)('it can go in now: "Undelivered 3 min · Claude Code is wor
   await act(async () => send.click());
   await settle();
   expect(posted.filter((p) => p.endsWith('/send-now'))).toEqual([`/api/inbox/messages/${REPLY}/send-now`]);
-  // No reason line: it can go in.
   expect(b.querySelector('[data-stuck-why]')).toBeNull();
 });
 
@@ -279,7 +252,6 @@ test.skipIf(!hasDom)('under a minute left: "goes in by itself in under a minute"
   expect(band(el)!.textContent).toContain('Undelivered 4 min · Claude Code is working · goes in by itself in under a minute');
   act(() => root?.unmount());
   host?.remove();
-  // Waited 12 minutes, able to take it for 1: the countdown runs from the 1, the label from the 12.
   connection = { busy: true, idle_since: null, send_now: true, auto_send_after_ms: 5 * MIN, waits: waitsFor(REPLY, ago(12.2 * MIN), ago(1.2 * MIN)) };
   el = await renderThread(thread());
   expect(band(el)!.textContent).toContain('Undelivered 12 min · Claude Code is working · goes in by itself in 4 min');
@@ -291,7 +263,6 @@ test.skipIf(!hasDom)('under a minute left: "goes in by itself in under a minute"
   expect(band(el)!.querySelector('[data-send-now]')).not.toBeNull();
   act(() => root?.unmount());
   host?.remove();
-  // The server has not started a clock (it just saw the session busy): the plain queued line, however old the reply.
   connection = { busy: true, idle_since: null, send_now: true, auto_send_after_ms: 5 * MIN, waits: {} };
   el = await renderThread(thread({ created_at: ago(90 * MIN) }));
   expect(band(el)).toBeNull();
@@ -326,7 +297,6 @@ test.skipIf(!hasDom)("it can't go in sooner: grey, no button, no countdown; why,
   expect(why.textContent).toContain("It can't go in sooner: this session runs an older Plannotator plugin. Type /reload-plugins in that Claude Code to fix it.");
   expect(why.querySelector('code')!.textContent).toBe('/reload-plugins');
   expect(why.querySelector<HTMLButtonElement>('[data-restart-copy]')!.getAttribute('aria-label')).toBe('Copy /reload-plugins');
-  // The manual path stays folded.
   expect(b.querySelector('[data-restart-toggle]')!.getAttribute('aria-expanded')).toBe('false');
 });
 
@@ -345,7 +315,6 @@ test.skipIf(!hasDom)('after it went in by itself: "Delivered to Claude Code, <ti
   expect(line.textContent).toMatch(/^Delivered to Claude Code, .+ · went into its turn by itself after 5 min$/);
   act(() => root?.unmount());
   host?.remove();
-  // Its own Ask question held the turn: it went in when the turn ended, not by itself mid-turn.
   el = await renderThread(thread({ ...auto, ...delivered(false) }), { at: sentAt, checked_at: deliveredAt });
   line = el.querySelector<HTMLElement>('[data-delivery]')!;
   expect(line.textContent).toMatch(/^Delivered to Claude Code, .+ · went in when its turn ended$/);
@@ -377,7 +346,6 @@ test.skipIf(!hasDom)('a 👍 waiting on a busy session says how long and that it
   const el = await renderThread(acked, null);
   await settle();
   const pill = el.querySelector<HTMLElement>('[data-ack-pill]')!;
-  // The owner's decision: a 👍 waits for the turn to end. How long it waited, no countdown.
   expect(INBOX_AUTO_SEND_ACK_NOTES).toBe(false);
   expect(pill.textContent).toContain('Undelivered 3 min · Claude Code is working · it gets this when its turn ends');
   expect(pill.textContent).not.toContain('by itself');

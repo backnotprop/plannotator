@@ -1,18 +1,3 @@
-/**
- * Keycaps and `aria-keyshortcuts` come from the registry, and the two
- * keyboard settings act on them (approval "inbox-keyboard-shortcuts"). What
- * would regress:
- *
- * - a hand-written `<kbd>` or `aria-keyshortcuts` literal in the Inbox (its key
- *   drifts from the key that acts; the settings never reach it);
- * - Show keys on buttons off still drawing a keycap, or dropping
- *   `aria-keyshortcuts` with it (a screen reader would lose the key);
- * - Single-key shortcuts off still naming a single key that no longer acts,
- *   or dropping a chord that still does;
- * - the settings not surviving a reload (their cookies).
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
@@ -52,8 +37,7 @@ test('no keycap or aria-keyshortcuts is written by hand anywhere in the Inbox', 
     const text = readFileSync(file, 'utf8');
     text.split('\n').forEach((line, i) => {
       if (/^\s*(\*|\/\/)/.test(line)) return;
-      // The drawing screen's line names the image annotator's own keys (packages/ui ImageAnnotator: Enter adds,
-      // Escape cancels), which no Inbox scope binds; it is the one hand-written keycap.
+      // The drawing screen's line names the image annotator's own keys, which no Inbox scope binds: the one hand-written keycap.
       if (name === join('components', 'Markup.tsx') && line.includes('className="ib-markkey"')) return;
       if (/<kbd[\s>]/.test(line) || /aria-keyshortcuts=["'`]/.test(line) || /aria-keyshortcuts=\{\s*["'`]/.test(line) || /aria-keyshortcuts=\{[^}]*\?\s*["'`]/.test(line)) offenders.push(`${name}:${i + 1}: ${line.trim()}`);
     });
@@ -61,9 +45,6 @@ test('no keycap or aria-keyshortcuts is written by hand anywhere in the Inbox', 
   expect(offenders).toEqual([]);
 });
 
-// The owner: "Nobody needs to see command enter for send. That's intuitive" (approval "inbox-send-no-shortcut-hint").
-// No Send in the Inbox draws ⌘↵ (no keycap, no tooltip naming it); the key still acts, the shortcut map still lists it,
-// and each Send names it in `aria-keyshortcuts`.
 test('no Send button shows its ⌘↵: no keycap, no tooltip with the key; aria-keyshortcuts names it', () => {
   const shown: string[] = [];
   const unnamed: string[] = [];
@@ -75,7 +56,6 @@ test('no Send button shows its ⌘↵: no keycap, no tooltip with the key; aria-
       if (/^\s*(\*|\/\/)/.test(line)) return;
       if (/action="send"/.test(line) || /(withShortcut|TipKeys)\b.*action: 'send'/.test(line) || /<Tip content=.*⌘↵/.test(line)) shown.push(`${name}:${i + 1}: ${line.trim()}`);
       if (!/data-(reply|compose|pulls-reply|rf)-send=""/.test(line)) return;
-      // The Send button's tag so far: from its `<button` to the end of this line.
       const upTo = lines.slice(0, i + 1).join('\n');
       if (!/aria-keyshortcuts=\{/.test(upTo.slice(upTo.lastIndexOf('<button')))) unnamed.push(`${name}:${i + 1}: ${line.trim()}`);
     });
@@ -120,7 +100,6 @@ test.skipIf(!hasDom)('Single-key shortcuts off: single keys are neither drawn no
   act(() => prefs.setSingleKeys(false));
   expect([...host.querySelectorAll('[data-shortcut-hint]')].map((el) => el.getAttribute('data-shortcut-hint'))).toEqual(['inbox-search.openSearch']);
   expect(shortcutAria({ scope: scopes.inboxThreadShortcuts, action: 'reply' })).toBeUndefined();
-  // ⌘K stays, `/` goes.
   expect(shortcutAria({ scope: scopes.inboxSearchShortcuts, action: 'openSearch' }, prefs.shortcutPrefs(), 'mac')).toBe('Meta+K');
   act(() => prefs.setSingleKeys(true));
   expect(shortcutAria({ scope: scopes.inboxSearchShortcuts, action: 'openSearch' }, prefs.shortcutPrefs(), 'mac')).toBe('Meta+K /');

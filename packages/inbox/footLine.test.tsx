@@ -1,19 +1,3 @@
-/**
- * The thread's bottom bar, B1 (approval "inbox-reaction-tray", addendum 2026-11-07): its line shows only while
- * thread text scrolls under it. The thread all fits, or is scrolled to its end: no line. Scrolled anywhere above
- * the end, or grown past the view with no scroll (a message arrives, the reply box opens): the line. Also the
- * window's stylesheet: no line and no shadow without `data-under`, both with it, and what is open (the open
- * questions, the checklist) right after the actions, never pushed to the bar's far end.
- *
- * What regresses: a line drawn over nothing at the end of a thread, a line missing while text runs under the
- * bar, a line that never comes back after the thread grows, and the open things pushed away from Reply to the
- * bar's far end (the owner, 2026-11-08: "I want them next to the button").
- *
- * happy-dom has no layout: the thread's body gets its scroll sizes from the test, and a stand-in
- * ResizeObserver reports a size change when the test says so.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -64,16 +48,13 @@ const threadOf = (...messages: InboxMessageWire[]): InboxThread => ({
   messages,
 });
 
-/** The thread body's scroll sizes, as the test sets them. */
 const view = { scrollHeight: 600, clientHeight: 600, scrollTop: 0 };
-/** Each stand-in ResizeObserver and what it observes: a size change reaches only the observers of that element. */
 const observers: { fire: () => void; observed: Set<Element> }[] = [];
 const restore: (() => void)[] = [];
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 
-/** On the thread's body only: every other element keeps happy-dom's own value. */
 function stubOnBody(key: 'scrollHeight' | 'clientHeight' | 'scrollTop') {
   const saved = Object.getOwnPropertyDescriptor(Element.prototype, key) ?? Object.getOwnPropertyDescriptor(HTMLElement.prototype, key);
   const target = HTMLElement.prototype;
@@ -185,11 +166,9 @@ function scrollTo(top: number) {
   act(() => void body().dispatchEvent(new Event('scroll')));
 }
 
-/** `el` changed size (no scroll): the observers watching it hear of it, and no other. */
 function resized(el: Element) {
   act(() => observers.filter((o) => o.observed.has(el)).forEach((o) => o.fire()));
 }
-/** What a message landing grows: the body's own box keeps its size, only its content (a child) gets taller. */
 const content = () => body().lastElementChild!;
 
 describe.skipIf(!hasDom)('the bar in the thread pane', () => {
@@ -216,13 +195,11 @@ describe.skipIf(!hasDom)('the bar in the thread pane', () => {
     await render(threadOf(message(ROOT, 1, 'The full log.')));
     scrollTo(2400);
     expect(lineShown()).toBe(false);
-    // A message lands below the end.
     view.scrollHeight = 3400;
     resized(content());
     expect(lineShown()).toBe(true);
     scrollTo(2800);
     expect(lineShown()).toBe(false);
-    // The reply box opens: the thread's view (the body's own box) gets shorter.
     view.clientHeight = 400;
     resized(body());
     expect(lineShown()).toBe(true);
@@ -248,7 +225,6 @@ describe.skipIf(!hasDom)('the bar in the thread pane', () => {
   });
 });
 
-// The window's stylesheet: happy-dom computes the cascade, not the layout.
 test.skipIf(!hasDom)('the stylesheet: no line or shadow without text under the bar, both with it; the open things sit next to the actions', async () => {
   const css = await Bun.file(new URL('./inbox.css', import.meta.url)).text();
   const style = document.createElement('style');
@@ -277,8 +253,6 @@ test.skipIf(!hasDom)('the stylesheet: no line or shadow without text under the b
     expect(under.borderTopColor).not.toBe('transparent');
     expect(['', 'none']).toContain(end.boxShadow);
     expect(under.boxShadow).toContain('18px');
-    // Nothing pushes the open things away from the actions: the buttons do not stretch across the row on a computer,
-    // and no auto margin opens a gap before the open questions or the checklist (the buttons' 8 px gap is the space).
     expect(getComputedStyle(at('end').querySelector('[data-foot-buttons]')!).flexGrow).not.toBe('1');
     const startOf = (k: string, sel: string) => getComputedStyle(at(k).querySelector(sel)!).marginInlineStart;
     for (const [k, sel] of [['both', '[data-open-questions]'], ['both', '[data-steps-button]'], ['steps', '[data-steps-button]']] as const) {

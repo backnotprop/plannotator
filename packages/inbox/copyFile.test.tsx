@@ -1,14 +1,3 @@
-/**
- * Copy file in a code attachment (approval "inbox-copy-file", Strip): the
- * code's top row leads with a labelled Copy file, in every view; a press puts
- * the raw text of the version on screen on the clipboard as plain text, says
- * "Copied" for a moment and tells the live region; images, videos and
- * documents get none; and in full screen the row starts below the changed
- * note, measured, so the note never covers it. The browser proof is
- * tests/e2e/inbox-copy-file.spec.ts.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -22,10 +11,8 @@ const { COPY_FILE_FEEDBACK_MS, CopyFileButton } = (hasDom ? await import('./comp
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 const realFetch = globalThis.fetch;
-/** What the clipboard was given, in order. */
 let written: string[] = [];
 let clipboardFails = false;
-/** Set: the clipboard answers only when the test calls it (a slow or prompting browser). */
 let hold: ((answer: () => void) => void) | null = null;
 let restoreClipboard: (() => void) | null = null;
 let restoreGlobals: (() => void) | null = null;
@@ -87,13 +74,11 @@ function file(id: string, name: string, kind: string, extra: Partial<InboxAttach
   };
 }
 
-// Raw text: CRLF, a tab, trailing spaces and a `#` the markdown pipeline would read as a heading.
 const SENT = '# Slack app manifest\r\ndisplay_information:\r\n  name: Standup  \r\n\tfeatures: {}\r\n';
 const CURRENT = '# Slack app manifest\ndisplay_information:\n  name: Standup bot\n';
 const manifest = file('att_01K7AAAAAAAAAAAAAAAAAAAAAA', 'manifest.yaml', 'text');
 const changed = file('att_01K7BBBBBBBBBBBBBBBBBBBBBB', 'manifest.yaml', 'text', { changed_since_sent: true, current: { sha256: 'b'.repeat(64), size: 900, mtime: '2026-10-26T11:00:00.000Z' } });
 
-/** The view route: the sent text for `?version=sent`, the file as it is now otherwise. */
 function stubViews() {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input);
@@ -221,7 +206,7 @@ test.skipIf(!hasDom)('a copy the browser refuses says so and is never reported a
   expect(live()).toContain('manifest.yaml was not copied');
 });
 
-/** Lay the note and the code out as a browser would (happy-dom has no layout): the note's bottom and the code's top, in px from the window's top. */
+/** Lay the note and the code out as a browser would (happy-dom has no layout). */
 function layOut(noteBottom: number, codeTop: number) {
   const real = Element.prototype.getBoundingClientRect;
   Element.prototype.getBoundingClientRect = function (this: Element) {
@@ -235,12 +220,10 @@ function layOut(noteBottom: number, codeTop: number) {
 }
 
 test.skipIf(!hasDom)("in full screen the code's top row starts below the changed note, as tall as the note is", async () => {
-  // A phone's note wraps onto two lines: 70 px tall from the top.
   layOut(80, 0);
   await openPane(changed, { full: true });
   expect(host!.querySelector('[data-full-view-changed]')).not.toBeNull();
   const row = host!.querySelector<HTMLElement>('[data-code-row]')!;
-  // The row's content (Copy file first) begins below the note's bottom edge.
   expect(parseFloat(row.style.paddingTop)).toBe(80 + CODE_ROW_BELOW_NOTE);
 });
 
@@ -255,7 +238,6 @@ test.skipIf(!hasDom)('with no note to clear (beside the thread, or a file unchan
   expect(host!.querySelector<HTMLElement>('[data-code-row]')!.style.paddingTop).toBe('');
 });
 
-/** The feedback timers the button starts and clears, counted through the real ones (restored after). */
 function watchTimers() {
   const realSet = globalThis.setTimeout;
   const realClear = globalThis.clearTimeout;
@@ -276,7 +258,6 @@ function watchTimers() {
     globalThis.clearTimeout = realClear;
     restore?.();
   };
-  /** Feedback timers still pending. */
   return { started, pending: () => [...started].filter((id) => !cleared.has(id)).length };
 }
 
@@ -334,7 +315,6 @@ test.skipIf(!hasDom)('another file: Copied and its timer do not carry over, and 
   draw(CURRENT);
   expect(button().textContent).toBe('Copy file');
   expect(timers.pending()).toBe(0);
-  // A press on the new file whose answer comes after the next switch.
   let answer: (() => void) | null = null;
   hold = (resolve) => {
     answer = resolve;

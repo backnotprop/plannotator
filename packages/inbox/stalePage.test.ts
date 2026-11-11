@@ -1,13 +1,3 @@
-/**
- * The stale page notice (stalePage.ts): a page older than the Inbox it talks to says so, and never otherwise.
- *
- * What would regress: a dev Inbox or a page with no build nagging on every load; an older Inbox (the version matrix
- * runs today's page on a 0.28.10 build) asking for a reload that changes nothing; a server restarted onto a newer
- * release under an open page going unnoticed until a reload; a dismissed notice nagging on every return to the tab,
- * or never coming back for a newer release; the notice showing during the person's own Restart; a Reload that goes
- * ahead while something the person wrote is not saved; and Reload's switch to the running Inbox's session leaking
- * past it (the old page's writes would no longer be refused) or reaching another Inbox on the same port.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { reportUnsentReply } from './unsent';
 import { createStalePageChecker, flushBeforeReload, newerInbox, onPageReturn, registerReloadFlush, reloadOntoInbox, type ReloadOntoInbox } from './stalePage';
@@ -22,7 +12,6 @@ describe('newerInbox', () => {
     expect(newerInbox('0.28.46', '0.28.47')).toBe('0.28.47');
     expect(newerInbox('0.28.46', '0.29.0')).toBe('0.29.0');
     expect(newerInbox('0.28.46', '1.0.0')).toBe('1.0.0');
-    // Compared as numbers, not text.
     expect(newerInbox('0.28.9', '0.28.10')).toBe('0.28.10');
   });
 
@@ -37,14 +26,12 @@ describe('newerInbox', () => {
     expect(newerInbox('0.28.46', '0.0.0-dev')).toBeNull();
     expect(newerInbox('0.28.46', '0.0.0')).toBeNull();
     expect(newerInbox('0.0.0', '0.28.46')).toBeNull();
-    // A page with no build (a test, a bare bundle) and a pre-release.
     expect(newerInbox(null, '0.28.47')).toBeNull();
     expect(newerInbox('0.28.46', '0.28.47-rc.1')).toBeNull();
     expect(newerInbox('0.28.46', undefined)).toBeNull();
   });
 });
 
-/** A checker over an Inbox whose release the test sets, recording what the notice shows. */
 function world(page: string | null, inbox: string) {
   const state = { inbox, reads: 0, fail: false, paused: false, shown: [] as (string | null)[] };
   const checker = createStalePageChecker(
@@ -66,7 +53,6 @@ describe('createStalePageChecker', () => {
     const { state, checker, notice } = world('0.28.46', '0.28.46');
     checker.saw('0.28.46');
     expect(notice()).toBeNull();
-    // The Inbox updates and restarts; the event stream's hello asks again.
     state.inbox = '0.28.47';
     await checker.recheck();
     expect(notice()).toBe('0.28.47');
@@ -77,7 +63,6 @@ describe('createStalePageChecker', () => {
     checker.saw('0.28.47');
     checker.dismiss();
     expect(notice()).toBeNull();
-    // Each return to the tab and each reconnect asks again: the same release says nothing.
     await checker.recheck();
     await checker.recheck();
     expect(notice()).toBeNull();
@@ -202,7 +187,6 @@ describe('flushBeforeReload', () => {
 
 describe('reloadOntoInbox', () => {
   const SELF = 'ibx_01JC0000000000000000000000';
-  /** A page whose writes carry `session`; `flushed` records the session the saves carried, `reloads` the reloads. */
   function page(options: { health?: () => Promise<{ serverSession: string; inbox_id?: string }>; self?: string | null; saved?: boolean }) {
     const state = { session: 'old' as string | null, flushed: [] as (string | null)[], reloads: 0 };
     const deps: ReloadOntoInbox = {

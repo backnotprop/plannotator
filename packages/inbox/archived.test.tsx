@@ -1,21 +1,3 @@
-/**
- * Archived threads out of the list, and Settings' Archived block (owner
- * ruling 2026-10-12): the whole window (InboxApp) over a REAL Inbox server in
- * a temp data dir (its own process, tests/helpers/inbox-dom-server.ts), the
- * window's fetches carried to it over loopback. What is proved: archiving the
- * open thread keeps its row in place (shown archived) until the person leaves
- * the thread, then the row is gone from every section; Settings lists it with
- * its project, agent and message count; Unarchive puts it back in the list
- * and opens it there; a deep link still opens an archived thread with
- * Unarchive in its foot; several projects group the rows under a header
- * per project (no dropdown); an agent's reply into an archived thread brings
- * it back to the list and out of the block; nothing archived says so.
- *
- * The tests share one server (the window keeps the first server session it
- * saw), so each archives its own world's threads and puts back what it took.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, setDefaultTimeout, test } from 'bun:test';
 
 // Each test waits on another process's answers several times over.
@@ -55,7 +37,6 @@ function loopback(path: string, method = 'GET', body?: string): Promise<{ status
   });
 }
 
-/** Archive or unarchive a thread straight on the server (the thread id is its first message's). */
 async function setArchived(threadId: string, resolved: boolean) {
   const answer = await loopback(`/api/inbox/messages/${threadId}/resolve`, 'POST', JSON.stringify({ resolved }));
   expect(answer.status).toBe(200);
@@ -104,7 +85,6 @@ beforeEach(() => {
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
   savedEventSource = (globalThis as Record<string, unknown>).EventSource;
-  // The event stream is not needed: every action reads the list again itself.
   (globalThis as Record<string, unknown>).EventSource = class {
     addEventListener() {}
     close() {}
@@ -168,7 +148,6 @@ const go = async (hash: string) => {
   await settle();
 };
 
-/** Base UI opens a menu on the pointer's press, as a person's click does. */
 async function press(target: HTMLElement) {
   await act(async () => {
     target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }));
@@ -179,7 +158,6 @@ async function press(target: HTMLElement) {
   });
 }
 
-/** The header's ⋯ opened; its Archive / Unarchive item (Archive left the header for this menu). */
 async function archiveItem(el: HTMLElement): Promise<HTMLElement> {
   await until(() => el.querySelector('section.ib-pane [data-thread-more]') !== null, 'the header ⋯');
   await press(el.querySelector<HTMLElement>('section.ib-pane [data-thread-more]')!);
@@ -187,7 +165,6 @@ async function archiveItem(el: HTMLElement): Promise<HTMLElement> {
   return document.querySelector<HTMLElement>('[data-thread-menu] [data-thread-archive-item]')!;
 }
 
-// First, while the server holds nothing archived.
 test.skipIf(!hasDom)('Settings says when nothing is archived', async () => {
   const el = await renderApp('#settings/archived');
   await until(() => el.querySelector('[data-archived-empty]') !== null, 'the empty Archived block');
@@ -204,14 +181,12 @@ test.skipIf(!hasDom)('archive the open thread: its row stays until the person le
   expect(item.textContent).toContain('Archive thread');
   await act(async () => item.click());
   await until(() => el.textContent?.includes('Archived. The next message from') ?? false, 'the archived foot');
-  // The person's own write never reorders the list while the thread is open: the row stays, shown archived.
   const held = listRow(el, world.waiting)!;
   expect(held).not.toBeNull();
   expect(held.textContent).toContain('Archived');
 
   act(() => (el.querySelector('.ib-phead [aria-label="Close the thread"]') as HTMLButtonElement).click());
   await until(() => listRow(el, world.waiting) === null, 'the row gone from the list');
-  // Gone from every section, Quiet included; the rest of the world is still there.
   expect(listRow(el, world.stopped)).not.toBeNull();
 
   await go('#settings/archived');
@@ -235,7 +210,6 @@ test.skipIf(!hasDom)('Archive lives in the header ⋯ menu, not the header: it a
   const world = worlds[0]!;
   const el = await renderApp(`#thread=${world.stopped}`);
   await until(() => el.querySelector('section.ib-pane [data-thread-more]') !== null, 'the header');
-  // No Archive icon in the header, by its hook or its name.
   expect(el.querySelector('section.ib-pane .ib-phead [data-archive]')).toBeNull();
   expect(el.querySelector('section.ib-pane .ib-phead [aria-label="Archive the thread"]')).toBeNull();
 
@@ -246,11 +220,9 @@ test.skipIf(!hasDom)('Archive lives in the header ⋯ menu, not the header: it a
   await until(() => el.textContent?.includes('Archived. The next message from') ?? false, 'the archived foot');
   expect((await loopback('/api/inbox/threads/archived')).text).toContain(world.stopped);
 
-  // The same item now says Unarchive.
   expect((await archiveItem(el)).textContent).toContain('Unarchive thread');
   act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
 
-  // The toast's Undo puts it back.
   await until(() => el.querySelector('[data-toast-undo]') !== null, 'the toast Undo');
   await act(async () => (el.querySelector('[data-toast-undo]') as HTMLButtonElement).click());
   await until(() => !(el.textContent?.includes('Archived. The next message from') ?? false), 'the thread back');
@@ -286,7 +258,6 @@ test.skipIf(!hasDom)('several projects: rows grouped under a header per project 
     expect(block.querySelector('select')).toBeNull();
     expect(el.querySelector('[data-archived-count]')?.textContent).toBe('3 archived threads');
     const groups = [...block.querySelectorAll('[data-archived-group]')];
-    // The project archived most recently first, each with its own rows in order.
     expect(groups.map((g) => g.getAttribute('data-archived-group'))).toEqual([a.project, b.project]);
     expect(groups.map((g) => g.querySelector('h3')?.textContent?.replace(/\s+/g, ' ').trim())).toEqual([expect.stringMatching(/ · 2$/), expect.stringMatching(/ · 1$/)]);
     expect([...groups[0]!.querySelectorAll('[data-archived-thread]')].map((r) => r.getAttribute('data-archived-thread'))).toEqual([a.filed, a.stopped]);
@@ -298,7 +269,6 @@ test.skipIf(!hasDom)('several projects: rows grouped under a header per project 
   }
 });
 
-/** An agent's reply_to reply, over the Inbox's own MCP (stateless: one tools/call). */
 function agentReply(replyTo: string, body: string, project = 'billing-1'): Promise<{ status: number; text: string }> {
   const payload = JSON.stringify({
     jsonrpc: '2.0',
@@ -330,7 +300,6 @@ test.skipIf(!hasDom)("an agent's reply into an archived thread brings it back to
     const answer = await agentReply(world.filed, 'One more thing.\n\n:::question\nShip the CSV export today?\n\n- [ ] Yes\n- [ ] No\n:::');
     expect(answer.status).toBe(200);
     expect(answer.text).not.toContain('"isError":true');
-    // The event stream is stubbed here, so load the window again to read the store as it now is.
     act(() => root?.unmount());
     host?.remove();
     const list = await renderApp('#');
@@ -339,7 +308,6 @@ test.skipIf(!hasDom)("an agent's reply into an archived thread brings it back to
     await go('#settings/archived');
     await until(() => list.querySelector('[data-settings-archived]')?.getAttribute('data-settings-archived') === '0', 'the Archived block without it');
     expect(archivedRow(list, world.filed)).toBeNull();
-    // Opened, it still says archived (the agent wrote after it), with Unarchive in its foot.
     await go(`#thread=${world.filed}`);
     await until(() => list.querySelector('[data-came-back]')?.textContent?.includes('Unarchive') ?? false, 'the came-back foot');
   } finally {
@@ -365,7 +333,6 @@ test.skipIf(!hasDom)('a came-back thread is answered without unarchiving: its la
     const el = await renderApp(`#thread=${world.waiting}`);
     await until(() => el.querySelector('[data-came-back]') !== null, 'the came-back note');
     expect(el.querySelector('[data-came-back]')!.textContent).toContain('wrote after you archived it. Your reply goes to it; the thread stays archived.');
-    // Not the read-only archived foot: the reply box is offered.
     expect(el.textContent).not.toContain('starts a new thread');
     act(() => button(el.querySelector('.ib-pfoot')!, 'Reply').click());
     await settle();

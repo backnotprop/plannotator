@@ -1,20 +1,3 @@
-/**
- * Thread steps in the window (approval "inbox-thread-steps", 2026-11-03, A1 "Linear"):
- *
- *  - the rules (steps/model.ts): what a row says at its right (a done step's time, a note, "Waiting on you"),
- *    "3/6" counting no dropped step, "as of" only once the session ended, where "Waiting on you ›" goes (that
- *    session's open question, else its action item, else any), and the pie's wedge;
- *  - the thread's foot (ThreadPane): no button while the switch is off (and no read), "◑ 3/6" beside the open
- *    questions while it is on, the popover's rows in their states, the presence class that turns the in-progress
- *    mark, "Waiting on you ›" closing the list and ringing the question, a phone's sheet with its close;
- *  - live: a steps change for this thread (or every thread) reads again; another thread's does not, and an older
- *    answer never lands over a newer one;
- *  - the wire: `event: capabilities` reaches the window's handler.
- *
- * What regresses: steps shown (or read) with the switch off, a dropped step counted, a dead session's mark still
- * turning or no "as of", the waiting row going nowhere or to another agent's question, a list that never updates,
- * and a window that misses another window's switch.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -80,7 +63,6 @@ function message(n: number, author: InboxAuthor, body: string): InboxMessageWire
   };
 }
 
-/** Codex asks first (M2), Claude Code asks last (M3): "Waiting on you" from Claude Code's list must go to M3. */
 const THREAD: InboxThread = {
   thread_id: M1,
   project: PROJECT,
@@ -112,7 +94,6 @@ function list(presence: InboxStepsWire['presence'], author = A): InboxStepsWire 
   };
 }
 
-/** The same list with the given statuses, in order (fewer steps than the list's seven). */
 function withStatuses(statuses: InboxStepsWire['steps'][number]['status'][], presence: InboxStepsWire['presence'] = 'working'): InboxStepsWire {
   const base = list(presence);
   return { ...base, steps: statuses.map((status, i) => ({ ...base.steps[i]!, status })) };
@@ -141,7 +122,6 @@ describe('the rules (steps/model.ts)', () => {
     expect(threadBoardCard(cards.slice(0, 1), M1)).toBeNull();
   });
 
-  // Review of #2571, finding 2: two sessions of one agent must not read the same.
   test('heads: each agent\'s name; two sessions of one agent numbered in the order their lists began, kept as they tick', () => {
     const second = { ...list('working'), id: 'stp_02', agent: { ...A, session: 'ses_a2' } };
     const first = { ...list('idle'), id: 'stp_01' };
@@ -180,7 +160,6 @@ describe('the rules (steps/model.ts)', () => {
   });
 });
 
-// The foot button's mark (approval "inbox-checklist-spinners-2026-11-07", mock 1 and its 11:25Z addendum).
 describe('the button (steps/model.ts)', () => {
   test('its mark: the amber pause while a step waits, else the spinner while one is worked on, else the pie (fresh, all done); a dropped step never counts', () => {
     expect(stepsButtonMark(withStatuses(['todo', 'todo', 'todo']))).toBeNull();
@@ -198,7 +177,6 @@ describe('the button (steps/model.ts)', () => {
     expect(stepsButtonList([])).toBeNull();
   });
 
-  // Review 2 of #2847: the button waits by the server's rule (`inboxStepsWaitOnPerson`).
   test('the waiting rule: never an ended session\'s list, never once the person answered (a reply or a 👍) since the list was written', () => {
     const waiting = withStatuses(['done', 'waiting', 'doing']);
     const answered = (when: string) => (since: string) => Date.parse(when) >= Date.parse(since);
@@ -207,7 +185,6 @@ describe('the button (steps/model.ts)', () => {
     expect(stepsListWaits(waiting, answered(at(14, 45)))).toBe(false);
     expect(stepsListWaits(waiting, answered(at(14, 40)))).toBe(false);
     expect(stepsListWaits(waiting, answered(at(14, 30)))).toBe(true);
-    // Answered: the spinner of the step still worked on, and no "waiting on you" in the name.
     expect(stepsButtonMark(waiting, answered(at(14, 45)))).toBe('doing');
     expect(stepsWaitingNameTail(waiting)).toBe('; waiting on you: Retry worker on pg-boss');
     expect(stepsWaitingNameTail(waiting, answered(at(14, 45)))).toBe('');
@@ -219,7 +196,6 @@ describe('the button (steps/model.ts)', () => {
     const stale = { ...withStatuses(['waiting', 'todo'], 'ended'), id: 'stp_ended' };
     expect(stepsButtonList([stale, live])?.id).toBe('stp_live');
     expect(stepsButtonMark(stepsButtonList([stale, live])!)).toBe('waiting');
-    // Only the ended one: the newest shows, with no amber.
     expect(stepsButtonList([stale])?.id).toBe('stp_ended');
     expect(stepsButtonMark(stale)).toBeNull();
   });
@@ -249,12 +225,9 @@ describe('the wire', () => {
   });
 });
 
-// ── The window ──
-
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
-/** What the steps read answers, and how many times it was asked. */
 let answer: () => Promise<Response>;
 let stepsReads = 0;
 
@@ -362,7 +335,6 @@ test.skipIf(!hasDom)('on: "3/6" after the open questions, named for whose steps,
   expect(foot[oq + 1]).toBe(button()!);
   expect(button()!.textContent).toBe('3/6');
   expect(button()!.getAttribute('aria-label')).toBe("Claude Code's checklist: 3 of 6 steps done; waiting on you: Ship it behind a flag");
-  // A step waits on the person (and another is worked on): the button wears the amber pause, not the pie.
   expect(button()!.querySelector('[data-step-mark]')!.getAttribute('data-step-mark')).toBe('waiting');
   expect(button()!.querySelector('[data-steps-pie]')).toBeNull();
   act(() => root?.unmount());
@@ -380,7 +352,6 @@ test.skipIf(!hasDom)('the panel: "Checklist 3/6", one row per step in its state,
   await openPanel();
   const head = panel()!.querySelector('[data-steps-head]')!;
   expect(head.textContent).toBe('Checklist3/6');
-  // "Checklist" is never cut, so no tooltip repeats it.
   expect(head.querySelector('.ib-st-lbl')!.hasAttribute('title')).toBe(false);
   expect(panel()!.querySelector('[data-steps-as-of]')).toBeNull();
   expect(rows().map((r) => [r.dataset.stepStatus, r.querySelector('.ib-st-t')!.textContent, r.querySelector('.ib-st-m')?.textContent ?? ''])).toEqual([
@@ -400,7 +371,6 @@ test.skipIf(!hasDom)('an ended session: the mark stops (no working class), and t
   answer = async () => Response.json({ serverSession: 's', on: true, steps: [list('ended')] });
   await render();
   await until(() => !!button(), 'the steps button');
-  // The owner (approval addendum): "2/4 · as of 2:40 PM" on the button too; its name says it.
   expect(button()!.className).toContain('ib-st-ended');
   expect(button()!.className).not.toContain('ib-st-working');
   expect(button()!.querySelector('[data-steps-as-of]')!.textContent).toMatch(/^as of /);
@@ -422,7 +392,6 @@ test.skipIf(!hasDom)('"Waiting on you ›" closes the list and rings the questio
   expect(el.querySelector(`[data-message-id="${M2}"] [data-question-key].ib-q-target`)).toBeNull();
 });
 
-// Review 2 of #2847: the button waits by the row's rule; a 👍 Looks good (or a reply) after the list is an answer.
 test.skipIf(!hasDom)('answered: a 👍 on the agent\'s message after the list was written ends the amber and the name\'s "waiting on you"; one from before does not', async () => {
   const acked = (when: string): InboxThread => ({
     ...THREAD,
@@ -441,23 +410,18 @@ test.skipIf(!hasDom)('answered: a 👍 on the agent\'s message after the list wa
 });
 
 test.skipIf(!hasDom)('two sessions: each list under its agent\'s name; the button shows the one waiting on the person, else the newest', async () => {
-  // Codex's list is the newest but waits on nobody; Claude Code's waits on the person, so the button shows it.
   answer = async () => Response.json({ serverSession: 's', on: true, steps: [{ ...list('idle', B), steps: list('idle', B).steps.slice(0, 2) }, list('working')] });
   await render();
   await until(() => !!button(), 'the steps button');
-  // "+1": another session's list is there too, and the button's name says so.
   expect(button()!.textContent).toBe('3/6+1');
   expect(button()!.getAttribute('aria-label')).toEndWith(', and 1 more checklist');
   await openPanel();
   expect(button()!.getAttribute('aria-label')).toStartWith("Claude Code's checklist");
-  // The panel keeps the server's order (the newest first).
   expect([...panel()!.querySelectorAll('.ib-st-lbl')].map((n) => n.textContent)).toEqual(['Codex', 'Claude Code']);
-  // A name can be cut with an ellipsis: its title says it whole.
   expect([...panel()!.querySelectorAll('.ib-st-lbl')].map((n) => n.getAttribute('title'))).toEqual(['Codex', 'Claude Code']);
   expect(panel()!.getAttribute('aria-label')).toBe('Checklist');
 });
 
-// Part 4: "the head reads Steps ◑ 3/6 plus a small Board icon that opens the thread's card".
 test.skipIf(!hasDom)('the head\'s Board icon: there only when a card links the thread; it closes the list and opens the card', async () => {
   await render();
   await until(() => !!button(), 'the steps button');
@@ -489,7 +453,6 @@ test.skipIf(!hasDom)('a phone: the sheet over a scrim, with a close', async () =
   await until(() => !panel(), 'the sheet to close');
 });
 
-// Review of #2571, finding 3: presence moves often; a thread showing no list has nothing it could change.
 test.skipIf(!hasDom)('live: presence moving reads again only while a list shows', async () => {
   const { bus } = await render();
   await until(() => !!button(), 'the steps button');
@@ -503,7 +466,6 @@ test.skipIf(!hasDom)('live: presence moving reads again only while a list shows'
   act(() => bus.emit('presence'));
   await settle();
   expect(stepsReads).toBe(cleared);
-  // A catch-up still reads (a steps line may have come meanwhile).
   act(() => bus.emit('*'));
   await until(() => stepsReads === cleared + 1, 'a catch-up read');
 });
@@ -515,7 +477,6 @@ test.skipIf(!hasDom)('live: a change for this thread or every thread reads again
   act(() => bus.emit('msg_another'));
   await settle();
   expect(stepsReads).toBe(reads);
-  // The next read is slow and says 3/6; the one after it is quick and says 4/6: 4/6 stays.
   let release: () => void = () => {};
   answer = () => new Promise<Response>((done) => (release = () => done(Response.json({ serverSession: 's', on: true, steps: [list('working')] }))));
   act(() => bus.emit(M1));
@@ -531,9 +492,6 @@ test.skipIf(!hasDom)('live: a change for this thread or every thread reads again
   expect(button()!.textContent).toBe('4/6');
 });
 
-// Break-ui #1: the step row's class once was `.ib-st`, which is also the foot's status words (the draft note, the
-// archived note), Settings → Archived and the Open in caret: its padding and hover moved all of them. Checked with the
-// window's own stylesheet, so a rule that reaches them again fails here.
 test.skipIf(!hasDom)('the checklist\'s row styles never reach the foot\'s status words', async () => {
   const css = await Bun.file(new URL('./inbox.css', import.meta.url)).text();
   const style = document.createElement('style');
@@ -546,7 +504,6 @@ test.skipIf(!hasDom)('the checklist\'s row styles never reach the foot\'s status
   try {
     const status = getComputedStyle(box.querySelector('.ib-st')!);
     const row = getComputedStyle(box.querySelector('.ib-st-row')!);
-    // The stylesheet is in force: the step row has its 10 px sides.
     expect(row.paddingLeft).toBe('10px');
     expect(status.paddingLeft === '' || status.paddingLeft === '0px').toBe(true);
     expect(status.display).not.toBe('flex');
@@ -556,7 +513,6 @@ test.skipIf(!hasDom)('the checklist\'s row styles never reach the foot\'s status
   }
 });
 
-// Break-ui #2: on a phone every done time read "2:…". A time never shrinks; a note does.
 test.skipIf(!hasDom)('a step\'s time keeps its width; only a note gives way', async () => {
   const css = await Bun.file(new URL('./inbox.css', import.meta.url)).text();
   const style = document.createElement('style');
@@ -570,14 +526,12 @@ test.skipIf(!hasDom)('a step\'s time keeps its width; only a note gives way', as
     const noted = rows().find((r) => r.dataset.stepStatus === 'doing')!.querySelector<HTMLElement>('.ib-st-m')!;
     expect(getComputedStyle(done).flexShrink).toBe('0');
     expect(getComputedStyle(noted).flexShrink).toBe('1');
-    // The step's own words read in their own direction (an Arabic step starts at its right).
     expect(rows()[0]!.querySelector('.ib-st-t')!.getAttribute('dir')).toBe('auto');
   } finally {
     style.remove();
   }
 });
 
-// The crowded phone foot (amendment 3, approved as shown): 👍 Looks good sits before the checklist.
 test.skipIf(!hasDom)('the foot: 👍 Looks good comes before the checklist', async () => {
   const quiet: InboxThread = { ...THREAD, messages: [message(1, A, 'Starting the retry worker.')] };
   await render({ thread: quiet, onAck: () => {} });
@@ -589,8 +543,6 @@ test.skipIf(!hasDom)('the foot: 👍 Looks good comes before the checklist', asy
   expect(steps).toBeGreaterThan(ack);
 });
 
-// Amendment 3: the checklist gives way first (its chevron), from the row's `steps` step or the buttons' own fit; on
-// a phone a step's words wrap to two lines in the sheet. Checked with the window's stylesheet.
 test.skipIf(!hasDom)('the stylesheet: the checklist\'s chevron and its "as of" go at the steps fit, and phone steps wrap to two lines', async () => {
   const css = await Bun.file(new URL('./inbox.css', import.meta.url)).text();
   const style = document.createElement('style');
@@ -612,13 +564,11 @@ test.skipIf(!hasDom)('the stylesheet: the checklist\'s chevron and its "as of" g
     expect(chevOf('plain')).not.toBe('none');
     expect(chevOf('row')).toBe('none');
     expect(chevOf('own')).toBe('none');
-    // An ended session's "as of" on the button gives way with the chevron (the name and the list's head keep it).
     const asOfOf = (k: string) => getComputedStyle(box.querySelector(`[data-k="${k}"] .ib-st-asof`)!).display;
     expect(asOfOf('plain')).not.toBe('none');
     expect(asOfOf('row')).toBe('none');
     expect(asOfOf('own')).toBe('none');
     const text = (k: string) => getComputedStyle(box.querySelector(`[data-k="${k}"]`)!);
-    // (happy-dom computes no line clamp: the wrap is what it can read.)
     expect(text('sheet').whiteSpace).toBe('normal');
     expect(text('desk').whiteSpace).toBe('nowrap');
   } finally {
@@ -639,7 +589,6 @@ async function withStylesheet(run: () => Promise<void> | void) {
   }
 }
 
-// Mock 1: the button carries the current step's mark; the pie only when nothing is worked on or waits.
 test.skipIf(!hasDom)('the button\'s mark follows the list: the pie while fresh, the spinner while a step is worked on, the pie with every step done', async () => {
   const cases: [InboxStepsWire, string | null, string][] = [
     [withStatuses(['todo', 'todo', 'todo', 'todo']), null, '0/4'],
@@ -658,7 +607,6 @@ test.skipIf(!hasDom)('the button\'s mark follows the list: the pie while fresh, 
       expect(button()!.querySelector('[data-steps-pie]')!.getAttribute('data-steps-pie')).toBe(count);
       expect(button()!.querySelector('[data-step-mark]')).toBeNull();
     }
-    // The presence class sits on the button, so its spinner turns only while the session works.
     expect(button()!.className).toContain('ib-st-working');
     act(() => root?.unmount());
     host?.remove();
@@ -685,17 +633,13 @@ test.skipIf(!hasDom)('the stylesheet: the spinner turns while a step is in progr
   });
 });
 
-// The owner (addendum): "Keep same basic color as reply button too (use theme obv)". The button is `.ib-btn`, as
-// Reply is, so it takes Reply's surface, text colour and border from the theme; no rule on the button itself may
-// paint it otherwise, closed or open (open takes Reply's own hover surface). (happy-dom computes no var() colours,
-// so the rules are read from the stylesheet.)
+// happy-dom computes no var() colours, so the rules are read from the stylesheet.
 test.skipIf(!hasDom)('the stylesheet: the checklist button keeps Reply\'s colours, closed and open', async () => {
   await render();
   await until(() => !!button(), 'the steps button');
   expect(button()!.classList.contains('ib-btn')).toBe(true);
   const css = await Bun.file(new URL('./inbox.css', import.meta.url)).text();
   const rules = [...css.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({ selector: m[1]!.trim(), body: m[2]! }));
-  // Rules whose selector ends on the button itself (not a part inside it).
   const own = rules.filter((rule) => rule.selector.split(',').some((one) => /\.ib-st-btn(\[[^\]]*\])*(:[a-z-]+)*\s*$/.test(one.trim())));
   expect(own.length).toBeGreaterThan(0);
   for (const rule of own) {
@@ -705,8 +649,6 @@ test.skipIf(!hasDom)('the stylesheet: the checklist button keeps Reply\'s colour
   }
 });
 
-// The checklist lives only in its thread (owner, 2026-11-09: "There should be nothing there"): a list row shows no
-// checklist mark, not even while the server says a step waits on the person (`steps_waiting`).
 test.skipIf(!hasDom)('the list row never shows a checklist mark, even while a step waits on the person', async () => {
   const listRow = (id: string, waiting: boolean): InboxListRow => ({
     thread_id: id,
@@ -747,11 +689,9 @@ test.skipIf(!hasDom)('the list row never shows a checklist mark, even while a st
     const rowEl = (id: string) => host!.querySelector<HTMLElement>(`[data-thread-id="${id}"]`)!;
     const waitingRow = rowEl('msg_wait');
     expect(waitingRow).not.toBeNull();
-    // No step mark, spinner or pie, and no "Checklist" in anything it says or shows on hover.
     expect(waitingRow.querySelector('[data-step-mark], [data-row-steps-waiting], [class*="ib-stg"], [class*="ib-st-"]')).toBeNull();
     const said = [waitingRow.textContent ?? '', ...[...waitingRow.querySelectorAll('[aria-label], [title]')].flatMap((el) => [el.getAttribute('aria-label') ?? '', el.getAttribute('title') ?? ''])];
     for (const words of said) expect(words).not.toMatch(/checklist|steps?\b/i);
-    // The row draws the same with or without a waiting checklist.
     expect(waitingRow.innerHTML.replaceAll('msg_wait', 'msg_X')).toBe(rowEl('msg_work').innerHTML.replaceAll('msg_work', 'msg_X'));
     act(() => root?.unmount());
     host.remove();

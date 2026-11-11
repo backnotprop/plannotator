@@ -1,12 +1,3 @@
-/**
- * The picked app's check in every Open in list is a stroked tick. The menus
- * portal to the body, outside .pn-inbox, so the check's stroke must come from
- * a rule that reaches it there. Full screen's ⋯ lists the apps without the
- * Open in menu's own attribute, and its check drew as a solid black triangle
- * (the owner, 2026-11-03). The window's real stylesheet is loaded.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeAll, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -55,7 +46,6 @@ afterEach(() => {
 });
 
 async function render(node: ReactNode): Promise<void> {
-  // The local app list: an editor and Finder. HTML lists Browser first, checked.
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     if (String(input).includes('/open-in/apps')) {
       return new Response(
@@ -86,7 +76,6 @@ async function click(el: Element | null): Promise<void> {
   });
 }
 
-/** The check beside the picked app, and how it paints. */
 function checkPaint(menuSelector: string): { item: string; fill: string; stroke: string } {
   const menu = document.querySelector<HTMLElement>(menuSelector);
   expect(menu).not.toBeNull();

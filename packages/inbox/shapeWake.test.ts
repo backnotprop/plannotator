@@ -1,12 +1,3 @@
-/**
- * In a code review, a Change it on a board wakes the session that drew it, so
- * the redraw comes without the person going back to the agent. What regresses:
- * a board with Code review off waking anyone (notes wait, as Shape always did),
- * a question being taken for a change, a burst of changes each asking the agent,
- * a change made during a wake never being picked up, a spare wake when the agent
- * has read every note, a change made during another turn being lost, or a
- * refused wake retrying with no pause while another thread's turn holds the session.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { emitAskChange } from './ask/askEvents';
 import { createInboxShapeHost } from './shape/inboxShapeHost';
@@ -21,9 +12,7 @@ function agentWorld() {
   const prompts: string[] = [];
   const queries: Array<{ busyPolicy?: string }> = [];
   const hold: { release: Array<() => void> } = { release: [] };
-  /** The notes the Inbox holds: a Change it waits until the agent reads it. */
   const notes: Array<{ kind: string; from: string; delivered: string | null }> = [];
-  /** Another turn holds the thread's Ask: a POST is refused, and the read says who runs. */
   const ask: { running: string | null; heldElsewhere: boolean; posts: number; reads: number } = { running: null, heldElsewhere: false, posts: 0, reads: 0 };
   const reply = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
   const route = async (url: string, init?: RequestInit): Promise<Response> => {
@@ -123,7 +112,6 @@ test('a Change it during another turn is not lost: it wakes the session once tha
   const host = createInboxShapeHost({ subscribe: () => () => {}, wakeOnChange: () => true });
   await host.note(ID, change);
   await w.settle();
-  // Still running: the Ask's news of something else moves nothing.
   emitAskChange('thr_1');
   await w.settle();
   expect(w.prompts).toEqual([]);
@@ -143,16 +131,13 @@ test("the session is answering another thread: this thread's read says nothing r
   const host = createInboxShapeHost({ subscribe: () => () => {}, wakeOnChange: () => true });
   await host.note(ID, change);
   await new Promise((resolve) => setTimeout(resolve, 150));
-  // One refusal, then quiet: no pause would be hundreds here.
   expect(w.ask.posts).toBe(1);
   expect(w.ask.reads).toBe(1);
 
-  // News while it is still held: one more try, one more refusal, quiet again.
   emitAskChange('thr_other');
   await new Promise((resolve) => setTimeout(resolve, 100));
   expect(w.ask.posts).toBe(2);
 
-  // That turn ends: the news goes through, once, and goes no further.
   w.ask.heldElsewhere = false;
   emitAskChange('thr_other');
   await w.settle();
@@ -161,7 +146,6 @@ test("the session is answering another thread: this thread's read says nothing r
   emitAskChange('thr_other');
   await new Promise((resolve) => setTimeout(resolve, 60));
   expect(w.prompts).toHaveLength(1);
-  // It has stopped listening: more news reads nothing.
   expect(w.ask.reads).toBe(reads);
   w.hold.release.shift()?.();
 });

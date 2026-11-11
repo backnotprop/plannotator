@@ -1,9 +1,3 @@
-/**
- * Bare `#123` refs in a message (#1840): with the project's `origin` from the
- * thread payload they link to that repository's issue on its forge, in a new
- * tab with no opener, and no repo badge is drawn on the message; without one
- * they stay the styled span they were.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -65,7 +59,6 @@ test.skipIf(!hasDom)("an agent's #123 links to the issue in the project's GitHub
   expect(link.getAttribute('target')).toBe('_blank');
   expect(link.getAttribute('rel')).toBe('noopener noreferrer');
   expect(host!.querySelector('a[href="https://github.com/acme/widgets/issues/45"]')).not.toBeNull();
-  // Links only: the repo badge `repoInfo` would draw is not on the message.
   expect(host!.textContent).not.toContain('acme/widgets');
 });
 
@@ -87,7 +80,6 @@ test.skipIf(!hasDom)('without a repo (a folder, or an older Inbox) the ref stays
 });
 
 test.skipIf(!hasDom)("with the Inbox's own configuration, a digit-only #186379 is an issue link, not a colour swatch (#1932)", async () => {
-  // App.tsx configures ui at import (digitHexIssueRefs: true); dropping the flag there fails this.
   await import('./App');
   await render('Merged in #186379.', { display: 'home-assistant/core', host: 'github.com' });
   expect(host!.querySelector('a[href="https://github.com/home-assistant/core/issues/186379"]')).not.toBeNull();
@@ -95,7 +87,6 @@ test.skipIf(!hasDom)("with the Inbox's own configuration, a digit-only #186379 i
 });
 
 test.skipIf(!hasDom)("with the Inbox's own configuration, owner/repo#N links on github.com in a project with no repo; #N stays plain", async () => {
-  // App.tsx turns on crossRepoRefsWithoutRepo: agents are told to write owner/repo#N for another repo's PR.
   await import('./App');
   for (const repo of [null, undefined]) {
     await render('The crash fix (backnotprop/plannotator#2948) is merged, and #12 too.', repo);
@@ -128,7 +119,6 @@ test.skipIf(!hasDom)('in a repoless thread of a mostly-GitLab Inbox, owner/repo#
     learnDefaultRefHost([{ repo_host: 'gitlab.example.com' }, { repo_host: 'gitlab.example.com' }, { repo_host: 'github.com' }, {}]);
     await render('See group/project#7 and #3.', null);
     expect([...host!.querySelectorAll('a')].map((a) => a.getAttribute('href'))).toEqual(['https://gitlab.example.com/group/project/-/issues/7']);
-    // A later list read where github.com ties: the message already on screen re-renders on github.com.
     act(() => learnDefaultRefHost([{ repo_host: 'gitlab.example.com' }, { repo_host: 'github.com' }]));
     expect([...host!.querySelectorAll('a')].map((a) => a.getAttribute('href'))).toEqual(['https://github.com/group/project/issues/7']);
   } finally {

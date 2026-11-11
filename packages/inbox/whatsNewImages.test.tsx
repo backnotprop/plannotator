@@ -1,9 +1,3 @@
-/**
- * Images on the What's new page: an image the Inbox saved loads from its own
- * route (never from GitHub: the window's CSP allows only its own origin), and
- * one it did not save is drawn as its alt text in a quiet chip, never as a
- * broken image.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -50,7 +44,6 @@ const model = (images: string[] | undefined): WhatsNewModel => ({
   ...(images ? { images } : {}),
 });
 
-/** Every <img> src the page put in the DOM (this DOM has no server, so a load fails and ui swaps the image for its chip). */
 let drawn: string[] = [];
 if (hasDom) {
   const setAttribute = Element.prototype.setAttribute;
@@ -85,9 +78,6 @@ test.skipIf(!hasDom)('saved images load from the Inbox; the rest are their alt t
   });
   const srcs = drawn;
   expect(srcs).toContain(routeFor(SAVED));
-  // The raw-HTML <img> is decided the same way (ui's host media resolver);
-  // this DOM cannot draw a raw HTML block, so the e2e screenshot shows it.
-  // Nothing points at another origin.
   for (const src of srcs) expect(src).toStartWith('/api/inbox/whats-new/image?');
   const chips = [...el.querySelectorAll('[data-image-unavailable]')].map((chip) => chip.textContent);
   expect(chips).toContain('A screenshot we did not keep');

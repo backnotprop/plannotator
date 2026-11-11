@@ -1,29 +1,3 @@
-/**
- * Paste to attach, as the window does it (the owner: "I need to be able to
- * paste in as well when I'm in the new message or if I'm focused in a
- * reply"): the whole window (InboxApp) over a REAL Inbox server in a temp
- * data dir (its own process, tests/helpers/inbox-dom-server.ts), its fetches
- * and its uploads (XMLHttpRequest) carried to it over loopback. What is
- * proved: a paste carrying an image in compose, or in the reply box, makes a
- * tile named `pasted-image-<date>-<time>.png`, the upload lands on the
- * server, and Send carries it (the thread's attachment, the reply's
- * attachment on the message that carries the words); a reply of a pasted
- * image alone is sent as a words-only reply; a paste of text alone makes no
- * tile and is left to the browser, as is text copied from a spreadsheet with
- * the picture Chromium adds beside it; closing the reply box keeps its files as its draft;
- * a file pasted while a Send is in flight stays for the next one; a retry
- * whose contents changed is a new reply, never the earlier one replayed; and
- * each attach by paste is said in a polite live region. On a phone (iOS
- * offers no Paste for a picture in a plain text field) the reply box's
- * paperclip names its file as a paste is; and an image copied from a page with
- * only its link as the text attaches. The reply box's paperclip and a drop on
- * the box add tiles, a drop anywhere over the thread opens a closed reply box
- * with the files, a drag of text or one that started on the page attaches
- * nothing, a drop on New message adds a tile, and Send carries them
- * (approval "inbox-reply-attach").
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -59,7 +33,6 @@ let posted: { path: string; body: Record<string, unknown> }[] = [];
 let replyGate: Promise<void> | null = null;
 /** Set: the next reply POST reaches the server, and the window is told it failed (it went through). */
 let replyFailsAfter = false;
-/** The Inbox is down: a reply and a thread read fail before reaching it. */
 let inboxDown = false;
 
 function loopback(path: string, method = 'GET', body?: string | Buffer, headers: Record<string, string> = {}): Promise<{ status: number; text: string }> {
@@ -87,7 +60,6 @@ async function poll(session: string, hostName: string, project: string) {
   expect(answer.status).toBe(200);
 }
 
-/** The window's upload (api.ts uploadFile): an XMLHttpRequest, carried over loopback with the file's bytes. */
 class LoopbackXhr {
   status = 0;
   responseText = '';
@@ -232,10 +204,6 @@ function type(text: HTMLTextAreaElement, words: string) {
 
 const image = (name = 'image.png') => new File([PNG], name, { type: 'image/png' });
 
-/**
- * A paste on `target`, carrying `files` (a screenshot: a file item) and/or
- * text. Returns whether the browser's own paste was prevented.
- */
 function paste(target: HTMLElement, content: { files?: File[]; text?: string; html?: string }): boolean {
   const files = content.files ?? [];
   const items = [
@@ -255,11 +223,6 @@ const tiles = (scope: ParentNode) => [...scope.querySelectorAll<HTMLElement>('[d
 
 const replyBox = (el: HTMLElement) => el.querySelector('.ib-rbox') as HTMLElement | null;
 
-/**
- * A drag event on `target` carrying `files` (a drag from the file manager) or,
- * with `text`, a drag of selected text or a link. Returns whether the page took
- * it (`preventDefault`: a drop target said yes).
- */
 function drag(target: Element, type: 'dragenter' | 'dragover' | 'drop', content: { files?: File[]; text?: string }): boolean {
   const files = content.files ?? [];
   const types = [...(content.text !== undefined ? ['text/plain'] : []), ...(files.length > 0 ? ['Files'] : [])];
@@ -271,7 +234,6 @@ function drag(target: Element, type: 'dragenter' | 'dragover' | 'drop', content:
   return event.defaultPrevented;
 }
 
-/** Choose `files` with an `<input type="file">` (the paperclip). */
 function choose(input: HTMLInputElement, files: File[]) {
   Object.defineProperty(input, 'files', { configurable: true, value: files });
   act(() => {
@@ -287,7 +249,6 @@ test.skipIf(!hasDom)('compose: a pasted image makes a tile with a dated name, up
   const el = await renderApp();
   act(() => (el.querySelector('.ib-side [data-open-compose]') as HTMLButtonElement).click());
   const dialog = () => document.querySelector('dialog[data-compose]') as HTMLDialogElement;
-  // A plain New message opens with To empty: pick the session, as a person does.
   await until(() => !!dialog()?.querySelector('button[data-compose-to="choose"]:not([data-loading])'), 'To loaded');
   act(() => (dialog().querySelector('button[data-compose-to]') as HTMLButtonElement).click());
   await until(() => !!dialog().querySelector('[role="option"][data-compose-session="ses-paste"]'), 'the picker');
@@ -297,21 +258,16 @@ test.skipIf(!hasDom)('compose: a pasted image makes a tile with a dated name, up
 
   expect(paste(text, { text: 'just words' })).toBe(false);
   expect(tiles(dialog())).toHaveLength(0);
-  // A cell copied in a spreadsheet: its text and the picture Chromium adds. The text is the paste; nothing attaches.
   expect(paste(text, { text: 'Q3\t1,204\t+8%', files: [image()] })).toBe(false);
   expect(tiles(dialog())).toHaveLength(0);
 
-  // A screenshot: an image and no text. The window takes it; the browser pastes nothing.
   expect(paste(text, { files: [image()] })).toBe(true);
   await until(() => tiles(dialog())[0]?.getAttribute('data-compose-file') === 'done', 'the upload');
   const name = tiles(dialog())[0]!.getAttribute('data-compose-file-name')!;
   expect(name).toMatch(PASTED);
-  // Said in the dialog's own polite region (the window's sits outside the modal dialog).
   await until(() => dialog().querySelector('[data-compose-paste-live]')?.textContent === `Attached ${name}`, 'the announcement');
   expect(dialog().querySelector('[data-compose-paste-live]')?.getAttribute('aria-live')).toBe('polite');
 
-  // A drop on the dialog (the shared useFileDrop): a text drag is not taken; files show "Drop files to attach"
-  // and the drop adds a tile with the file's own name.
   expect(drag(dialog(), 'dragover', { text: 'some words' })).toBe(false);
   expect(dialog().querySelector('.ib-cp-drop')).toBeNull();
   expect(drag(text, 'dragover', { files: [markdown('legend-notes.md')] })).toBe(true);
@@ -340,16 +296,12 @@ test.skipIf(!hasDom)('the reply box: two pasted images make two tiles (the secon
   await until(() => replyBox(el) !== null, 'the reply box');
   const text = replyBox(el)!.querySelector('textarea') as HTMLTextAreaElement;
 
-  // A spreadsheet cell whose value is a URL (its text, an HTML table, a picture of the cell): text, as before.
   const cellUrl = 'https://example.com/q3';
   expect(paste(text, { text: cellUrl, html: `<table><tr><td>${cellUrl}</td></tr></table>`, files: [image()] })).toBe(false);
-  // Even an <img> of that very link: a desktop keeps today's rule (text with an unnamed picture is text).
   expect(paste(text, { text: cellUrl, html: `<img src="${cellUrl}">`, files: [image()] })).toBe(false);
   expect(el.querySelector('[data-reply-files]')).toBeNull();
-  // Text alone (a dictation app's synthetic paste included): never prevented, nothing attached.
   expect(paste(text, { text: 'some words' })).toBe(false);
   expect(el.querySelector('[data-reply-files]')).toBeNull();
-  // An image copied from a page brings HTML too: the image attaches and the browser's own paste still runs.
   expect(paste(text, { files: [image()], html: '<img src="x.png">' })).toBe(false);
   await until(() => tiles(replyBox(el)!).length === 1, 'the image beside text');
   act(() => (replyBox(el)!.querySelector('[data-compose-file] button') as HTMLButtonElement).click());
@@ -374,7 +326,6 @@ test.skipIf(!hasDom)('the reply box: two pasted images make two tiles (the secon
   const reply = model.thread.messages.at(-1)!;
   expect(reply.author.kind).toBe('person');
   expect(reply.attachments!.map((a) => a.name)).toEqual(names);
-  // The sent reply shows them in the thread's read-only tiles.
   const replyTiles = () => [...el.querySelectorAll(`[data-message-article="${reply.id}"] .ib-att-t[data-attachment-id]`)].map((t) => t.getAttribute('data-attachment-name'));
   await until(() => replyTiles().length === 2, 'the reply\'s tiles');
   expect(replyTiles()).toEqual(names);
@@ -387,11 +338,9 @@ test.skipIf(!hasDom)('the reply box: pasted images alone are sent as a words-onl
   await until(() => replyBox(el) !== null, 'the reply box');
   expect(paste(replyBox(el)!.querySelector('textarea')!, { files: [image()] })).toBe(true);
   await until(() => tiles(replyBox(el)!)[0]?.getAttribute('data-compose-file') === 'done', 'the first upload');
-  // Closed (the box's chevron): the file stays, as the reply's draft (the box's files are part of it).
   act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
   await until(async () => (await draftUploads()).length === 1, 'the file in the draft');
   const kept = (await draftUploads())[0]!;
-  // The thread's foot now offers Edit draft, which brings its tile back.
   act(() => button(el, 'Edit draft').click());
   await until(() => replyBox(el) !== null && tiles(replyBox(el)!).length === 1, 'the reply box again, with the tile');
 
@@ -409,11 +358,9 @@ test.skipIf(!hasDom)('the reply box: pasted images alone are sent as a words-onl
   const model = JSON.parse((await loopback(`/api/inbox/threads/${world.waiting}`)).text) as { thread: { messages: (InboxMessage & { questions?: { state: string }[] })[] } };
   expect(model.thread.messages[0]!.questions!.map((q) => q.state)).toEqual(['open']);
   expect(model.thread.messages.at(-1)!.attachments).toHaveLength(2);
-  // Nothing is left as a draft.
   await until(async () => (await draftUploads()).length === 0 && JSON.parse((await loopback(`/api/inbox/threads/${world.waiting}/draft`)).text).draft === null, 'no draft left');
 }, 30_000);
 
-/** The upload ids the thread's reply draft keeps. */
 async function draftUploads(): Promise<string[]> {
   const { draft } = JSON.parse((await loopback(`/api/inbox/threads/${world.waiting}/draft`)).text) as { draft: { files?: { upload_id: string }[] } | null };
   return (draft?.files ?? []).map((file) => file.upload_id);
@@ -440,7 +387,6 @@ test.skipIf(!hasDom)('a file pasted while a Send is in flight stays in the box f
     const second = tiles(replyBox(el)!)[1]!.getAttribute('data-compose-file-name')!;
     open();
     await until(() => tiles(replyBox(el) ?? document.createElement('div')).length === 1, 'the Send done');
-    // The box stays, holding only the file pasted while the Send was in flight; its words went.
     expect(tiles(replyBox(el)!).map((t) => t.getAttribute('data-compose-file-name'))).toEqual([second]);
     expect((replyBox(el)!.querySelector('textarea') as HTMLTextAreaElement).value).toBe('');
     const sent = posted.filter((p) => p.path.endsWith('/reply'));
@@ -449,8 +395,6 @@ test.skipIf(!hasDom)('a file pasted while a Send is in flight stays in the box f
     const model = JSON.parse((await loopback(`/api/inbox/threads/${world.waiting}`)).text) as { thread: { messages: InboxMessage[] } };
     expect(model.thread.messages.at(-1)!.attachments!.map((a) => a.name)).toEqual([first]);
 
-    // The next Send carries it. Send stays off until the first Send has read the thread and the files again (its tile
-    // goes before that), as the person sees it: a click before then does nothing, so wait for Send to come back.
     await until(() => !button(el, 'Send').disabled, 'Send back after the first Send');
     act(() => button(el, 'Send').click());
     await until(() => el.querySelector('.ib-rbox') === null, 'the second Send');
@@ -471,7 +415,6 @@ test.skipIf(!hasDom)('a Send that went through but answered an error is read bac
   type(text, 'Looks off.');
   replyFailsAfter = true;
   act(() => button(el, 'Send').click());
-  // The reply went (its key is in the thread): finished as if the answer had come.
   await until(() => el.querySelector('.ib-rbox') === null, 'the box closed');
   expect(el.querySelector('.ib-error')).toBeNull();
   const model = JSON.parse((await loopback(`/api/inbox/threads/${world.waiting}`)).text) as { thread: { messages: InboxMessage[] } };
@@ -489,10 +432,8 @@ test.skipIf(!hasDom)('a Send the Inbox never got, then a file pasted and the sam
   act(() => button(el, 'Send').click());
   await until(() => !!el.querySelector('.ib-error'), 'the error');
   inboxDown = false;
-  // The person pastes the screenshot they meant to send, and sends the same words again.
   expect(paste(text, { files: [image()] })).toBe(true);
   await until(() => tiles(replyBox(el)!)[0]?.getAttribute('data-compose-file') === 'done', 'the upload');
-  // The error shows before the failed Send has finished looking for its reply; Send is off until then.
   await until(() => !button(el, 'Send').disabled, 'Send back after the failed Send');
   act(() => button(el, 'Send').click());
   await until(() => el.querySelector('.ib-rbox') === null, 'the Send');
@@ -518,13 +459,11 @@ test.skipIf(!hasDom)('a phone: the reply box has an attach button; a chosen imag
     dispatchEvent: () => false,
   })) as typeof window.matchMedia;
   try {
-    // A phone draws one screen at a time: the thread, no sidebar.
     const el = await renderApp(`#thread=${world.waiting}`, 'fieldset[data-question-key]');
     act(() => button(el, 'Reply').click());
     await until(() => replyBox(el) !== null, 'the reply box');
     const input = el.querySelector<HTMLInputElement>('input[type="file"][data-reply-attach]')!;
     expect(input).not.toBeNull();
-    // The picker offers the photo library and Files; the button is named, with no native title.
     expect(input.accept).toBe('image/*,*/*');
     const label = input.closest('label')!;
     expect(label.getAttribute('aria-label')).toBe('Attach files');
@@ -538,12 +477,9 @@ test.skipIf(!hasDom)('a phone: the reply box has an attach button; a chosen imag
     await until(() => el.querySelector('[data-fold-live]')?.textContent === 'Attached header.png', 'the announcement');
 
     const text = replyBox(el)!.querySelector('textarea') as HTMLTextAreaElement;
-    // A spreadsheet cell whose value is a URL: text on a phone too; nothing attaches.
     const link = 'https://example.com/board/header.png';
     expect(paste(text, { text: link, html: `<table><tr><td>${link}</td></tr></table>`, files: [image()] })).toBe(false);
     expect(tiles(replyBox(el)!)).toHaveLength(1);
-    // An image copied from a page on a phone: the picture, its link as the plain text and an <img> of that link.
-    // The picture attaches and the link is not pasted into the words.
     expect(paste(text, { files: [image()], text: link, html: `<img src="${link}">` })).toBe(true);
     await until(() => tiles(replyBox(el)!).length === 2 && tiles(replyBox(el)!).every((t) => t.getAttribute('data-compose-file') === 'done'), 'the pasted picture');
 
@@ -567,7 +503,6 @@ test.skipIf(!hasDom)('a desktop reply box: the paperclip beside its Send and a d
   act(() => button(el, 'Reply').click());
   await until(() => replyBox(el) !== null, 'the reply box');
 
-  // The paperclip comes right after Send in the box's own row (approval "inbox-reply-box", T6), the way to browse for any file.
   const input = replyBox(el)!.querySelector<HTMLInputElement>('[data-reply-row] input[type="file"][data-reply-attach]')!;
   expect(input).not.toBeNull();
   const beforeClip = input.closest('label')!.previousElementSibling;
@@ -576,13 +511,10 @@ test.skipIf(!hasDom)('a desktop reply box: the paperclip beside its Send and a d
   expect(input.accept).toBe('');
   choose(input, [markdown('currency-notes.md')]);
   await until(() => tiles(replyBox(el)!)[0]?.getAttribute('data-compose-file') === 'done', 'the chosen file');
-  // A desktop's file keeps its own name (a phone's is named as a paste is).
   expect(tiles(replyBox(el)!)[0]!.getAttribute('data-compose-file-name')).toBe('currency-notes.md');
 
-  // A drag of selected text over the box: not taken, no outline.
   expect(drag(replyBox(el)!, 'dragover', { text: 'some words' })).toBe(false);
   expect(replyBox(el)!.hasAttribute('data-drop-over')).toBe(false);
-  // Files dragged over the box: the box takes them and says so; the pane's own target stays off.
   expect(drag(replyBox(el)!, 'dragover', { files: [image('ledger-q3-export.png')] })).toBe(true);
   expect(replyBox(el)!.hasAttribute('data-drop-over')).toBe(true);
   expect(replyBox(el)!.querySelector('[data-box-drop]')).not.toBeNull();
@@ -608,12 +540,9 @@ test.skipIf(!hasDom)('files dropped anywhere over the thread with the reply clos
   await until(() => el.querySelectorAll('fieldset[data-question-key]').length === 1, 'the question');
   expect(replyBox(el)).toBeNull();
   const pane = el.querySelector('section.ib-pane')!;
-  // Over the agent's message, far from the closed reply: a link or text dragged is left alone.
   const message = el.querySelector('fieldset[data-question-key]')!;
   expect(drag(message, 'dragover', { text: 'https://example.com/q3' })).toBe(false);
   expect(pane.querySelector('[data-pane-drop]')).toBeNull();
-  // A drag that started on the page (an image in a message dragged a little), even one a browser gives a Files
-  // type: no target, nothing taken, until it ends.
   act(() => {
     message.dispatchEvent(new Event('dragstart', { bubbles: true }));
   });
@@ -624,12 +553,10 @@ test.skipIf(!hasDom)('files dropped anywhere over the thread with the reply clos
     message.dispatchEvent(new Event('dragend', { bubbles: true }));
   });
   expect(replyBox(el)).toBeNull();
-  // Files: the whole pane is the target.
   expect(drag(message, 'dragover', { files: [image('ledger-q3-export.png')] })).toBe(true);
   expect(pane.querySelector('[data-pane-drop]')).not.toBeNull();
   expect(drag(message, 'drop', { files: [image('ledger-q3-export.png')] })).toBe(true);
   expect(pane.querySelector('[data-pane-drop]')).toBeNull();
-  // The drop opened the reply box with the file in it.
   await until(() => replyBox(el) !== null && tiles(replyBox(el)!)[0]?.getAttribute('data-compose-file') === 'done', 'the box with the dropped file');
   expect(tiles(replyBox(el)!).map((t) => t.getAttribute('data-compose-file-name'))).toEqual(['ledger-q3-export.png']);
 

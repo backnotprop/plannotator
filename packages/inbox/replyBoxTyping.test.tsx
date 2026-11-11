@@ -1,16 +1,3 @@
-/**
- * Typing in the reply box stays in the box (the owner's report of 2026-11-02 from an iPhone: "poor
- * responsiveness in reply box"). Every key used to re-render the whole thread pane: each open message body,
- * its question cards, the foot. On a long thread that was 50 to 90 ms a key on a phone. The words now live
- * outside the pane's state (replyText.ts), so:
- *
- * - a key re-renders no message body (a render counter: React gives a component a new props object each
- *   time its parent draws it, so a body whose props object is the one it had before typing was not drawn);
- * - the draft is still saved once typing stops (REPLY_DRAFT_SAVE_MS), with every word typed, and not per key;
- * - the reply box's comments chip shows only with a comment ("No comments" took room and said nothing).
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -84,7 +71,6 @@ function message(n: number, body: string): InboxMessageWire {
   };
 }
 
-/** Three new agent messages (all open): two with a table and code, the last with a four-question card. */
 const thread = (): InboxThread => ({
   thread_id: THREAD,
   project: PROJECT,
@@ -113,7 +99,6 @@ beforeEach(() => {
         saves.push({ at: Date.now(), body });
         return Response.json({ serverSession: 's', draft: draft(body) });
       }
-      // The thread opens with a saved draft, as in the owner's screenshot: the box opens holding it.
       return Response.json({ serverSession: 's', draft: draft(KEPT) });
     }
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
@@ -158,7 +143,6 @@ const pane = () => (
 
 type Fiber = { type: unknown; return: Fiber | null; alternate: Fiber | null; memoizedProps: unknown };
 
-/** Each open message's MessageBody fiber, found from a node it drew. */
 function bodyFibers(el: HTMLElement): Fiber[] {
   return [...el.querySelectorAll<HTMLElement>('[data-message-article] .ib-msg')].map((msg) => {
     const node = msg.querySelector('p, table, [data-block-type]') ?? msg.firstElementChild!;
@@ -170,7 +154,6 @@ function bodyFibers(el: HTMLElement): Fiber[] {
   });
 }
 
-/** The props objects a body's two fibers hold now: a render of the body gives it a new one. */
 const propsOf = (fiber: Fiber) => [fiber.memoizedProps, fiber.alternate?.memoizedProps].filter(Boolean);
 
 function typeKey(field: HTMLTextAreaElement, char: string) {
@@ -192,7 +175,6 @@ async function openWithDraft(): Promise<{ el: HTMLElement; field: HTMLTextAreaEl
 test.skipIf(!hasDom)('a key typed in the reply box re-renders no message body', async () => {
   const { el, field } = await openWithDraft();
   const bodies = bodyFibers(el);
-  // Every message is open and drawn: two with a table and code, the last with its four question cards.
   expect(bodies.length).toBe(3);
   expect(el.querySelectorAll('[data-message-article] input[type="radio"]').length).toBeGreaterThanOrEqual(8);
   const before = bodies.map((fiber) => new Set(propsOf(fiber)));

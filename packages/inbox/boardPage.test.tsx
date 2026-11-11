@@ -1,18 +1,3 @@
-/**
- * The Board page (approval "inbox-board", step 2) as the window draws it,
- * over a scripted fetch (no server): the lanes (columns v2) and a card's two
- * lines, bold while unread, no "on you" pill on a lane; the agents' drops above the
- * lanes with "Got it"; the opened card beside the lanes with its history,
- * its links read only once it opens, and Mark done, Cancel with a reason;
- * Start on an agent's Todo card telling that agent in the card's thread
- * and marking the card sent; New card into Backlog; the empty Board's line;
- * the phone's stacked list with Done and Cancelled folded. What regresses: a
- * lane out of order, "You: …" in an agent's lane, a card fetching its links
- * before it is opened, a Start that moves the card, a drop that never asks
- * for its reason, a phone that lays the lanes side by side.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -69,13 +54,11 @@ const CARDS: InboxCardWire[] = [
   card('crd_sqlite', { title: 'Spike: SQLite for the store', column: 'dropped', aside_from: 'in_progress', dropped: { at: NEW, by: CODEX, reason: 'Superseded by the JSONL store', seen_at: null } }),
 ];
 
-/** Cards waiting on the person, for the "You: …" way in: sent in a thread, linked to two threads, linked to none. */
 const YOU_CARDS: InboxCardWire[] = [
   card('crd_sent', { title: 'Fixed address', column: 'in_review', you: 'Pick a dialog', threads: ['msg_new', 'msg_sent'], sent: { at: OLD, to: CLAUDE, thread_id: 'msg_sent' } }),
   card('crd_two', { title: 'Caret anywhere', column: 'in_review', you: 'Merge #15', threads: ['msg_new', 'msg_old'] }),
   card('crd_none', { title: 'Settings search', column: 'in_review', you: 'Choose fuzzy or prefix' }),
 ];
-// The lane card's second line (approval board-lane-card, r1): only "You: …" or a pending "Sent to …", never the agent's last word.
 const LINE_CARDS: InboxCardWire[] = [
   card('crd_said', { title: 'Hero scene timers', column: 'in_progress', said: 'Option 3 of 6 rendered' }),
   card('crd_owe', { title: 'Pricing page', column: 'in_review', you: 'Read the copy, then say go', said: 'Copy drafted' }),
@@ -100,7 +83,6 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
-/** A scripted Inbox: the routes the Board reads and writes, every call recorded. */
 function scriptFetch(sessions: unknown[] = []) {
   const original = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -120,7 +102,6 @@ function scriptFetch(sessions: unknown[] = []) {
     const one = url.pathname.match(/^\/api\/inbox\/cards\/([^/]+)$/);
     if (one && method === 'GET') {
       const found = [...CARDS, ...YOU_CARDS, ...LINE_CARDS].find((c) => c.id === one[1]);
-      // The agent's last word is in the opened card's history.
       return json({ card: found, history: [...(found?.said ? [{ kind: 'said', at: NEW, by: CLAUDE, text: found.said }] : []), { kind: 'created', at: OLD, by: CLAUDE }] });
     }
     if (one && method === 'POST') return json({ card: { ...[...CARDS, ...YOU_CARDS].find((c) => c.id === one[1])!, sent: body?.op === 'send' ? { at: NEW, to: CLAUDE, thread_id: body.thread_id } : null } });
@@ -201,22 +182,18 @@ test.if(hasDom)('the lanes in order, the title row, bold while unread, no "on yo
   draw();
   await settle();
   expect($$('.ib-blanes [data-lane]').map((lane) => lane.dataset.lane)).toEqual(['backlog', 'todo', 'in_progress', 'in_review', 'done']);
-  // No counts in the header (owner, 2026-11-02): its two links alone.
   expect($('[data-board-summary]')).toBeNull();
   expect($('.ib-bhead')!.textContent).not.toContain('in flight');
   expect($('[data-board-link="done"]')!.textContent).toBe('All done');
   expect($('[data-board-link="cancelled"]')!.textContent).toBe('Cancelled 1');
   expect($('[data-board-link="icebox"]')).toBeNull();
   expect(cardEl('crd_price')!.querySelector('.ib-bc-line')!.textContent).toBe('You: Read the copy, then say go');
-  // The marks and the age sit in the title row, in this order; a card with nothing owed or pending is that row alone.
   expect([...cardEl('crd_vite')!.querySelectorAll('.ib-bc-top .ib-bc-meta > *')].map((el) => el.className.split(' ')[0])).toEqual(['ib-bc-mark', 'ib-bc-who', 'ib-bc-age']);
   expect(cardEl('crd_vite')!.querySelector('.ib-bc-bot')).toBeNull();
-  // Heard after the look: bold. Before it: not.
   expect(cardEl('crd_auto')!.hasAttribute('data-unread')).toBe(true);
   expect(cardEl('crd_hero')!.hasAttribute('data-unread')).toBe(false);
   expect(cardEl('crd_tab')).toBeNull();
   expect($('.ib-onyou')).toBeNull();
-  // A card is a button that opens it, named with its state.
   const open = cardEl('crd_auto')!.querySelector<HTMLButtonElement>('[data-card-open]')!;
   expect(open.getAttribute('aria-label')).toContain('Auto-update for users');
   act(() => open.click());
@@ -231,22 +208,17 @@ test.if(hasDom)('a second line only when the person owes something or a send is 
   expect(second('crd_owe')).toBe('You: Read the copy, then say go');
   expect(second('crd_wait')).toBe('Sent to Codex');
   expect(second('crd_said')).toBeNull();
-  // Never the agent's word on a lane card, whether or not it has a second line.
   for (const c of LINE_CARDS) expect(cardEl(c.id)!.textContent).not.toContain(c.said!);
-  // The opened card has it.
   await settle();
   expect($('[data-card-panel="crd_said"]')!.textContent).toContain('Option 3 of 6 rendered');
 });
 
-// Review of #2248: the title is inline, so its own box never reads as cut; the clamp is on the title button.
-// What regresses: a title cut at three lines (or a long word cut at the edge) with no way to read it whole.
 test.if(hasDom)('a lane card title cut by its clamp opens the full title in a tooltip; one that fits opens none', async () => {
   scriptFetch();
   draw({ model: { serverSession: 's', cursor: 1, cards: LINE_CARDS, dropped_unseen: 0, seen_seq: LOOK } });
   await settle();
   const title = (id: string) => cardEl(id)!.querySelector<HTMLElement>('.ib-bc-t')!;
   const main = (id: string) => cardEl(id)!.querySelector<HTMLElement>('.ib-bc-main')!;
-  // Clamped: the button's content is taller than the button.
   Object.defineProperty(main('crd_said'), 'scrollHeight', { configurable: true, get: () => 66 });
   Object.defineProperty(main('crd_said'), 'clientHeight', { configurable: true, get: () => 59 });
   expect(await tooltipOf(title('crd_said'))).toBe('Hero scene timers');
@@ -266,11 +238,8 @@ test.if(hasDom)('"You: …" opens the thread where the person makes the call, a 
   });
   await settle();
   const link = (id: string) => cardEl(id)!.querySelector<HTMLButtonElement>('[data-card-you-link]')!;
-  // Two buttons on each card: the title opens the card, "You: …" its thread.
   expect(cardEl('crd_two')!.querySelectorAll('button').length).toBe(2);
-  // Its name holds the words it shows (WCAG 2.5.3), so a voice user can say what they see.
   for (const id of ['crd_two', 'crd_sent']) expect(link(id).getAttribute('aria-label')!.startsWith(link(id).textContent!)).toBe(true);
-  // The sent thread first; else the linked thread that spoke last.
   act(() => link('crd_sent').click());
   act(() => link('crd_two').click());
   expect(threads).toEqual([
@@ -278,12 +247,10 @@ test.if(hasDom)('"You: …" opens the thread where the person makes the call, a 
     { card: 'crd_two', thread: 'msg_new' },
   ]);
   expect(drawn.opened).toEqual([]);
-  // No thread linked: "You: …" is plain words, no second tab stop; a click on them opens the card.
   expect(cardEl('crd_none')!.querySelector('[data-card-you-link]')).toBeNull();
   expect(cardEl('crd_none')!.querySelectorAll('button').length).toBe(1);
   act(() => cardEl('crd_none')!.querySelector<HTMLElement>('.ib-bc-youw')!.click());
   expect(drawn.opened).toEqual(['crd_none']);
-  // The title, and anywhere else on the card, open the card, never a thread.
   act(() => cardEl('crd_two')!.querySelector<HTMLButtonElement>('[data-card-open]')!.click());
   act(() => cardEl('crd_sent')!.querySelector<HTMLElement>('.ib-bc-age')!.click());
   expect(drawn.opened).toEqual(['crd_none', 'crd_two', 'crd_sent']);
@@ -303,16 +270,13 @@ test.if(hasDom)('the opened card: Open thread at the top to the same thread; wit
   });
   await settle();
   const open = $('[data-card-panel] .ib-crdp-top [data-card-open-thread]') as HTMLButtonElement;
-  // Named by its own words (no aria-label to drift from them), described by what the person owes.
   expect(open.hasAttribute('aria-label')).toBe(false);
   expect(document.getElementById(open.getAttribute('aria-describedby')!)!.textContent).toContain('Merge #15');
   expect($('[data-card-create-thread]')).toBeNull();
   act(() => open.click());
   expect(threads).toEqual([{ card: 'crd_two', thread: 'msg_new' }]);
-  // Ask for an update: by History, never beside the agent.
   expect($('[data-card-panel] .ib-crdp-hhead [data-card-ask]')!.textContent).toBe('Ask for an update');
   expect($('[data-card-panel] .ib-crdp-who [data-card-ask]')).toBeNull();
-  // No thread linked: no Open thread; Create thread goes to the card’s live agent.
   drawn.rerender({ openCard: 'crd_none' });
   await settle();
   expect($('[data-card-open-thread]')).toBeNull();
@@ -365,7 +329,6 @@ test.if(hasDom)('the opened card: its history and links read now, then Mark done
     { id: 'crd_vite', move: { op: 'move', column: 'done' } },
     { id: 'crd_vite', move: { op: 'drop', reason: 'Folded into the plan' } },
   ]);
-  // Escape closes it.
   act(() => panel.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
   expect(drawn.opened).toContain(null);
 });
@@ -397,7 +360,6 @@ test.if(hasDom)('a card the person made gets Send to an agent, not Start; no liv
   document.body.innerHTML = '';
   draw({ openCard: 'crd_poly' });
   await settle();
-  // The person's own Backlog idea: Send to an agent, no Start.
   expect($('[data-card-start]')).toBeNull();
   expect($('[data-card-panel="crd_poly"] [data-card-send]')).not.toBeNull();
 });
@@ -443,20 +405,18 @@ test.if(hasDom)('a phone: one stacked list, Done and Cancelled folded at the end
     ['done', 'false'],
     ['dropped', 'false'],
   ]);
-  // A folded group keeps its body (aria-controls names it), hidden. Booleans, so a failure
-  // prints one word, never the React node.
+  // Booleans, so a failure prints one word, never the React node.
   const shown = () => {
     const el = cardEl('crd_tab');
     return el === null ? 'absent' : el.closest('[hidden]') ? 'hidden' : 'shown';
   };
-  // Done long ago: not in the fold's last seven days; All done shows it, and takes focus to it (the button leaves).
   expect(shown()).toBe('absent');
   act(() => $('[data-board-fold="done"]')!.click());
   expect(shown()).toBe('absent');
   act(() => ($('[data-board-done-all]') as HTMLButtonElement).click());
   expect(shown()).toBe('shown');
   expect($('[data-board-done-all]')).toBeNull();
-  // Compared with ===: toBe on DOM nodes did not fail here with focus on <body> (review of #2524, D4).
+  // Compared with ===: toBe on DOM nodes did not fail with focus on <body>.
   expect(document.activeElement === cardEl('crd_tab')!.querySelector('[data-card-open]')).toBe(true);
 });
 
@@ -475,9 +435,7 @@ test.if(hasDom)('the Done lane: cards done in the last seven days, the rest behi
   expect([...lane('done').querySelectorAll<HTMLElement>('[data-card-id]')].map((el) => el.dataset.cardId)).toEqual(['crd_fresh']);
   expect(lane('done').querySelector('.ib-lane-n')!.textContent).toBe('1');
   expect(cardEl('crd_stale')).toBeNull();
-  // A Board whose only lane cards were done this week is not empty.
   expect($('[data-board-empty]')).toBeNull();
-  // The person moves a done card back as any other: drag it to a lane.
   const transfer = { effectAllowed: '', dropEffect: '', setData() {} };
   act(() => {
     cardEl('crd_fresh')!.dispatchEvent(Object.assign(new Event('dragstart', { bubbles: true }), { dataTransfer: transfer }));
@@ -511,11 +469,9 @@ test.if(hasDom)('"Waiting on you": a card before In review whose thread waits on
   await settle();
   const second = (id: string) => cardEl(id)!.querySelector('.ib-bc-bot .ib-bc-line')?.textContent ?? null;
   expect(second('crd_q')).toBe('Waiting on you: Page numbers in pager');
-  // In review keeps its own "You: …"; nothing waiting, or done: no line.
   expect(second('crd_r')).toBe('You: Merge #42');
   expect(second('crd_n')).toBeNull();
   expect(second('crd_s')).toBeNull();
-  // The card stays in its lane; the header counts nothing.
   expect($('[data-board-summary]')).toBeNull();
   expect(cardEl('crd_q')!.closest('[data-lane]')!.getAttribute('data-lane')).toBe('in_progress');
   const link = cardEl('crd_q')!.querySelector<HTMLButtonElement>('[data-card-waiting]')!;
@@ -550,27 +506,22 @@ test.if(hasDom)('a lane card shows its linked PR as a mark: quiet until read, th
   scriptFetch();
   seeEveryCard();
   draw({ marks: true });
-  // Before the answer: the neutral mark, named without a state.
   const neutral = $('.ib-bcard[data-card-id="crd_vite"] [data-card-mark]');
   expect(neutral?.dataset.cardMark).toBe('unknown');
   expect($('.ib-bcard[data-card-id="crd_vite"] [data-card-open]')!.getAttribute('aria-label')).toEndWith('. Pull request #12');
-  // Cards with no link carry no mark.
   expect($('.ib-bcard[data-card-id="crd_hero"] [data-card-mark]')).toBeNull();
   await act(async () => {
     await new Promise((done) => setTimeout(done, 300));
   });
   await settle();
   const asked = calls.filter((c) => c.path === '/api/inbox/cards/marks');
-  // One request for the cards in view, naming only those that link something.
   expect(asked).toHaveLength(1);
   expect(asked[0]!.body!.cards).toEqual(['crd_vite']);
   const mark = $('.ib-bcard[data-card-id="crd_vite"] [data-card-mark]')!;
   expect(mark.dataset.cardMark).toBe('merged');
   expect(mark.querySelector('svg')!.getAttribute('aria-hidden')).toBe('true');
   expect($('.ib-bcard[data-card-id="crd_vite"] [data-card-open]')!.getAttribute('aria-label')).toEndWith('. Pull request #12, merged');
-  // A component tooltip, never a native title.
   expect(document.querySelector('.ib-bcard [title]')).toBeNull();
-  // Moving the card, or a re-render, asks nothing more while the mark is fresh.
   await act(async () => {
     await new Promise((done) => setTimeout(done, 300));
   });
@@ -588,7 +539,6 @@ test.if(hasDom)('a page that may not read marks (over the tailnet) asks nothing 
   expect($('.ib-bcard[data-card-id="crd_vite"] [data-card-mark]')!.dataset.cardMark).toBe('unknown');
 });
 
-// Columns v2: Backlog is not in flight, yet a Board of Backlog ideas only must still draw its lanes.
 test.if(hasDom)('a Board holding only Backlog ideas draws them, never the empty Board line', async () => {
   scriptFetch();
   draw({ model: { serverSession: 's', cursor: 1, cards: [card('crd_idea', { title: 'Themes for the Board', agent: null, created_by: PERSON, heard_by: PERSON })], dropped_unseen: 0, seen_seq: LOOK } });
@@ -617,9 +567,6 @@ test.if(hasDom)('a card linking only a Jira issue (a link only) draws no lane ma
   expect(asked.flatMap((c) => c.body!.cards as string[])).toEqual(['crd_both']);
 });
 
-// The checklist lives only in its thread (owner, 2026-11-09: "This feature should have nothing to do with anywhere
-// else in the app"): neither the lane card nor the opened card shows one, even while the cards read carries the
-// thread's lists and the thread's row says a step waits on the person (`steps_waiting`).
 function checklist(steps: { step: string; status: InboxStepStatus }[]): InboxStepsWire {
   return { id: 'stp_auto', project_id: 'prj_1', thread_id: 'msg_auto', agent: CLAUDE as Extract<InboxAuthor, { kind: 'agent' }>, updated_at: NEW, presence: 'working', steps: steps.map((s) => ({ ...s, note: null, at: NEW })) };
 }

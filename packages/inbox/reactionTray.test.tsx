@@ -1,18 +1,3 @@
-/**
- * The reaction tray on 👍 Looks good (approval "inbox-reaction-tray"), as the window draws it. Failures to
- * catch: the tray not being 👍, the saved emoji, the free +, then … in that order; the always-one-free-+ rule
- * broken (two at the start, one from one saved to four, none at five); words drawn on the tray; a + that
- * reacts instead of saving, or a save that loses its optional name (or invents one), a click away that throws
- * the typed name away; the name not reaching config.json through POST /api/inbox/settings `{ reaction_change }`;
- * the tray coming back after the name with a gap (it blinks) or a fade; Escape after a keyboard save dropping
- * focus to the page; … saving its emoji, or not reacting with it;
- * a saved emoji not reacting with its name; the 👍 no longer one click (a tray in the way, two calls, or a
- * reaction where Looks good was), or not taking the mark back when pressed; Escape not closing the tray or
- * the picker; a just-saved emoji that cannot react until the person names it or closes and opens the tray
- * again (the owner's phone, 2026-11-07): the row under the name field must react at once, named or not.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -27,7 +12,6 @@ let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let posted: { path: string; body: Record<string, unknown> }[] = [];
 let acks: unknown[][] = [];
-/** config.json's list as the server keeps it, and its save count. */
 let onServer: InboxReaction[] = [];
 let rev = 0;
 
@@ -86,7 +70,6 @@ const $$ = (selector: string) => [...document.querySelectorAll<HTMLElement>(sele
 const tray = () => $('[data-reaction-tray]');
 const cells = () => $$('[data-reaction-tray] .ib-react-cells > [data-reaction]').map((el) => el.getAttribute('data-reaction'));
 
-/** Base UI opens on the pointer's press, as a person's click does. */
 async function press(el: HTMLElement) {
   await act(async () => {
     el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }));
@@ -98,7 +81,6 @@ async function press(el: HTMLElement) {
   await settle();
 }
 
-/** The keyboard's way in: "More reactions" after the 👍. */
 async function openTray() {
   const more = $('[data-react-more]')!;
   await act(async () => {
@@ -134,7 +116,6 @@ async function pickEmoji(emoji: string) {
 
 const settingsPosts = () => posted.filter((p) => p.path === '/api/inbox/settings').map((p) => p.body.reaction_change);
 
-/** The + → 🚀 → the name field, with `name` typed. */
 async function saveRocket(name: string) {
   await openTray();
   await press($('[data-reaction="add"]')!);
@@ -158,14 +139,12 @@ test.skipIf(!hasDom)('the tray is 👍, the saved emoji, the free +, then …; o
     await render({ saved: SAVED.slice(0, Number(n)) });
     await openTray();
     expect(cells(), `${n} saved`).toEqual(layout);
-    // No words on the tray: each cell is its emoji (or a + / …); a name is only a tooltip and the cell's name.
     expect(tray()!.querySelector('.ib-react-cells')!.textContent!.replace(/\s/g, '')).toBe(['👍', ...SAVED.slice(0, Number(n)).map((r) => r.emoji)].join(''));
     if (Number(n) >= 1) {
       expect($('[data-reaction="saved-0"]')!.getAttribute('data-tip')).toBe('Ship it');
       expect($('[data-reaction="saved-0"]')!.getAttribute('aria-label')).toBe('🚀 Ship it');
     }
     if (Number(n) >= 2) expect($('[data-reaction="saved-1"]')!.hasAttribute('data-tip')).toBe(false);
-    // Escape closes the tray.
     await key('Escape');
     expect(tray()).toBeNull();
     act(() => root?.unmount());
@@ -182,7 +161,6 @@ test.skipIf(!hasDom)('a + saves an emoji with the name typed (Enter keeps it), i
   expect($('.ib-emo')).not.toBeNull();
   expect(tray()).toBeNull();
   await pickEmoji('🚀');
-  // Saved at once, the light name field over the tray.
   expect(savedReactions()).toEqual([{ emoji: '🚀' }]);
   const field = $('[data-name-field]') as HTMLInputElement;
   expect(field).not.toBeNull();
@@ -191,23 +169,18 @@ test.skipIf(!hasDom)('a + saves an emoji with the name typed (Enter keeps it), i
   await act(async () => {
     field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
   });
-  // Back in the same moment, where the field's row was: no gap for it to blink in, no fade-in.
   await act(async () => {});
   expect(tray()).not.toBeNull();
   expect(tray()!.hasAttribute('data-instant')).toBe(true);
   await settle(300);
   expect(savedReactions()).toEqual([{ emoji: '🚀', label: 'Ship it' }]);
-  // One change at a time, the name after the save it names.
   expect(settingsPosts()).toEqual([{ op: 'add', emoji: '🚀' }, { op: 'name', emoji: '🚀', label: 'Ship it' }]);
   expect(onServer).toEqual([{ emoji: '🚀', label: 'Ship it' }]);
-  // The tray is back, the new emoji in it with its name as the tooltip, and still one free +.
   expect(cells()).toEqual(['looks-good', 'saved-0', 'add', 'any']);
   expect($('[data-reaction="saved-0"]')!.getAttribute('data-tip')).toBe('Ship it');
-  // Saving reacts with nothing.
   expect(acks).toEqual([]);
   expect(posted.filter((p) => p.path.endsWith('/ack'))).toEqual([]);
 
-  // The saved one now reacts with its emoji and name in one click.
   await press($('[data-reaction="saved-0"]')!);
   expect(acks).toEqual([[true, { emoji: '🚀', label: 'Ship it' }]]);
 });
@@ -240,7 +213,6 @@ test.skipIf(!hasDom)('a click away from the name field keeps the name typed (a p
   expect(savedReactions()).toEqual([{ emoji: '🚀', label: 'Ship it' }]);
   expect(settingsPosts()).toEqual([{ op: 'add', emoji: '🚀' }, { op: 'name', emoji: '🚀', label: 'Ship it' }]);
 
-  // The second + on 🧪, nothing typed, a click away: saved with no name, and no name sent.
   posted = [];
   await openTray();
   await press($('[data-reaction="add"]')!);
@@ -271,7 +243,6 @@ test.skipIf(!hasDom)('… reacts once with any emoji: the agent\'s message gets 
   await openTray();
   await press($('[data-reaction="any"]')!);
   expect($('.ib-emo')).not.toBeNull();
-  // Escape closes the picker without reacting.
   await key('Escape');
   await settle(200);
   expect($('.ib-emo')).toBeNull();
@@ -283,7 +254,6 @@ test.skipIf(!hasDom)('… reacts once with any emoji: the agent\'s message gets 
   expect(acks).toEqual([[true, { emoji: '🦄' }]]);
   expect($('.ib-emo')).toBeNull();
   expect(tray()).toBeNull();
-  // Not saved: the tray and config.json are as they were.
   expect(savedReactions()).toEqual([{ emoji: '🚀', label: 'Ship it' }]);
   expect(settingsPosts()).toEqual([]);
 });
@@ -299,7 +269,6 @@ test.skipIf(!hasDom)('👍 is still one click: Looks good at once, no tray in th
   expect(tray()).toBeNull();
   expect($('.ib-emo')).toBeNull();
 
-  // Marked with a saved emoji: the button shows it, and one click takes it back (the one taken back named).
   act(() => root?.unmount());
   host?.remove();
   acks = [];
@@ -311,7 +280,6 @@ test.skipIf(!hasDom)('👍 is still one click: Looks good at once, no tray in th
   await settle();
   expect(acks).toEqual([[false, { emoji: '🚀', label: 'Ship it' }]]);
 
-  // Another emoji on a marked message is a change, sent with the one it had (so Z puts that back, never unmarks).
   act(() => root?.unmount());
   host?.remove();
   acks = [];
@@ -326,21 +294,17 @@ test.skipIf(!hasDom)('a phone: the emoji just saved reacts at once from the row 
   await openTray();
   await press($('[data-reaction="add"]')!);
   await pickEmoji('🚀');
-  // The name field is there, optional: a phone does not even focus it.
   const field = $('[data-name-field]') as HTMLInputElement;
   expect(field).not.toBeNull();
   expect(document.activeElement).not.toBe(field);
-  // Its row is the tray, live: 👍, the new emoji, one free +, then ….
   const row = $$('.ib-react-namer [data-row-press]').map((el) => el.getAttribute('data-row-press'));
   expect(row).toEqual(['looks-good', 'saved-0', 'add', 'any']);
-  // One tap on the new emoji reacts with it: nothing typed, nothing closed or opened again first.
   await act(async () => $('.ib-react-namer [data-row-press="saved-0"]')!.click());
   await settle(200);
   expect(acks).toEqual([[true, { emoji: '🚀' }]]);
   expect($('[data-name-field]')).toBeNull();
   expect(tray()).toBeNull();
   expect(savedReactions()).toEqual([{ emoji: '🚀' }]);
-  // No name was made up for it.
   expect(settingsPosts()).toEqual([{ op: 'add', emoji: '🚀' }]);
 });
 
@@ -352,7 +316,6 @@ test.skipIf(!hasDom)('a name typed before the tap goes with the reaction; the ro
   expect(acks).toEqual([[true, { emoji: '🚀', label: 'Ship it' }]]);
   expect(settingsPosts()).toEqual([{ op: 'add', emoji: '🚀' }, { op: 'name', emoji: '🚀', label: 'Ship it' }]);
 
-  // From the name field's row, + opens the picker again for the next save (no reopening the tray).
   acks = [];
   await openTray();
   await press($('[data-reaction="add"]')!);

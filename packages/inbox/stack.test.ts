@@ -1,16 +1,8 @@
-/**
- * When a pane covers the one under it in a window too narrow for both
- * (stack.ts). The failures these catch: a wide desktop window starting to
- * stack (it must be drawn as before), an iPad on its side losing the list
- * beside the thread, a narrow window squeezing the thread again, and the
- * widths here drifting from the columns inbox.css draws.
- */
 import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { FILE_MIN_WIDTH, LIST_MIN_WIDTH, THREAD_BESIDE_FILE_WIDTH, THREAD_MIN_WIDTH, paneGutters, stackFor } from './stack';
 
-// The docked sidebar's default width.
 const SIDEBAR = 232;
 const NONE = { thread: false, file: false };
 
@@ -26,9 +18,7 @@ test('an iPad on its side (1080) keeps the list beside a 468 px thread, as iPad 
 test('an iPad upright and a 900 px window: the thread covers the list, a file covers the thread', () => {
   expect(stackFor(810 - SIDEBAR, 810)).toEqual({ thread: true, file: true });
   expect(stackFor(900 - SIDEBAR, 900)).toEqual({ thread: true, file: true });
-  // At 1000 the thread covers the list; the file has room beside its thread.
   expect(stackFor(1000 - SIDEBAR, 1000)).toEqual({ thread: true, file: false });
-  // With the sidebar collapsed a 900 px window has room for the list beside the thread.
   expect(stackFor(900, 900).thread).toBe(false);
 });
 
@@ -37,7 +27,6 @@ test('the edges: stacking starts exactly where a pane would get less than its mi
   expect(stackFor(LIST_MIN_WIDTH + THREAD_BESIDE_FILE_WIDTH - 1, 2000).thread).toBe(true);
   expect(stackFor(2000, THREAD_BESIDE_FILE_WIDTH + FILE_MIN_WIDTH).file).toBe(false);
   expect(stackFor(2000, THREAD_BESIDE_FILE_WIDTH + FILE_MIN_WIDTH - 1).file).toBe(true);
-  // Not measured yet (0): nothing stacks.
   expect(stackFor(0, 0)).toEqual(NONE);
 });
 

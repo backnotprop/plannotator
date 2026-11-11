@@ -1,12 +1,3 @@
-/**
- * The one-time "The Inbox can ring now" dialog as drawn
- * (components/SoundIntro.tsx): the notification line in each of its four
- * states, the buttons, and the keyboard (Keep it on has the first focus,
- * Escape keeps the sound on, Tab stays inside, focus follows the line when
- * it changes).
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -53,7 +44,6 @@ function render(props: SoundIntroDialogProps) {
 const button = (dialog: HTMLElement, name: string) =>
   [...dialog.querySelectorAll('button')].find((b) => (b.getAttribute('aria-label') ?? b.textContent?.trim()) === name) as HTMLButtonElement;
 
-/** The dialog's Play: named by its own words, "Play" or "Playing…". */
 const playButton = (dialog: HTMLElement) => dialog.querySelector('[data-sound-play]') as HTMLButtonElement;
 
 function key(target: Element, init: KeyboardEventInit) {
@@ -75,7 +65,6 @@ describe.if(hasDom)('the sound dialog', () => {
     expect(dialog.querySelector('[data-sound-nline]')).toBeNull();
     expect([...dialog.querySelectorAll('.ib-acts-row button')].map((b) => b.textContent)).toEqual(['Turn it off', 'Keep it on']);
     expect(playButton(dialog).textContent).toBe('Play');
-    // No aria-label: the words themselves ("Play", "Playing…") are what a screen reader announces.
     expect(playButton(dialog).hasAttribute('aria-label')).toBe(false);
   });
 

@@ -1,18 +1,3 @@
-/**
- * An HTML attachment in full screen: the floating card offers Comment and
- * Reply, Comment first, as on an image (the owner, 2026-11-08: "either
- * comment on the artifact, like HTML, or send the reply. With commenting
- * being the default"). The Comment tab is a comment on the whole page, kept
- * on the attachment as a general comment (it rides the next Send with the
- * file's other comments); the Reply tab is the thread's reply, unchanged.
- *
- * What would regress: the card on an HTML page back to Reply only, opening on
- * Reply with no reply draft waiting, a page comment that never reaches the
- * attachment (or lands as something the export cannot name), or words typed
- * in the Comment tab lost when the person leaves full screen and comes back.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -83,7 +68,6 @@ function serve(): { saved: { attachment_id: string; annotation: Record<string, u
   return server;
 }
 
-/** The thread's reply as Thread.tsx hands it to full screen: one draft, held here. */
 function composerFor(words: string, onChange: (text: string) => void): FullScreenComposerValue {
   return {
     threadId: THREAD,
@@ -197,7 +181,6 @@ test.skipIf(!hasDom)('an HTML page in full screen: the card offers Comment and R
   await render(<Pane onSaved={(record) => saved.push(record)} />);
   await waitFor(() => expect(card()).not.toBeNull());
 
-  // Both tabs, Comment picked (no reply draft waits), and its field is the page's own row.
   expect(radio('comment')).not.toBeNull();
   expect(radio('reply')).not.toBeNull();
   expect(radio('comment')!.getAttribute('aria-checked')).toBe('true');
@@ -207,7 +190,6 @@ test.skipIf(!hasDom)('an HTML page in full screen: the card offers Comment and R
   expect(pageField()).not.toBeNull();
   expect(replyField()).toBeNull();
 
-  // Comment: saved on the attachment as a general comment on the page, the field cleared.
   const save = card()!.querySelector<HTMLButtonElement>('[data-html-page-comment-save]')!;
   expect(save.disabled).toBe(true);
   await type(pageField()!, 'The total should sit above the fold.');
@@ -219,13 +201,11 @@ test.skipIf(!hasDom)('an HTML page in full screen: the card offers Comment and R
   await waitFor(() => expect(saved).toHaveLength(1));
   await waitFor(() => expect(pageField()!.value).toBe(''));
 
-  // Reply: the thread's reply field, writing the thread's draft, as before.
   await act(async () => radio('reply')!.click());
   expect(radio('reply')!.getAttribute('aria-checked')).toBe('true');
   expect(replyField()).not.toBeNull();
   await type(replyField()!, 'Ship it once the total moves.');
   expect(replyWords).toBe('Ship it once the total moves.');
-  // No more comments went to the attachment.
   expect(server.saved).toHaveLength(1);
 });
 

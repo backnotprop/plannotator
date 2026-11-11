@@ -1,15 +1,3 @@
-/**
- * useInboxNotifications against a recording Notification constructor and a
- * scripted "tab in front" (approval "inbox-notify-every-thread"): a new
- * thread (its root's first line) notifies in front or away, a question
- * notifies in front unless its thread is open and visible, plain news never
- * does, a later line of a root (an Unarchive of a thread archived before the
- * page loaded) is never a new thread, a burst collapses into one notice and
- * drops a thread the person opened, a notice is silent only when the bell
- * owns its sound, and two tabs raise each item once.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -29,7 +17,6 @@ interface Raised {
 }
 
 let raised: Raised[] = [];
-/** The notices raised, as the browser would hold them: a test clicks one with `onclick`. */
 let notices: { onclick: (() => void) | null }[] = [];
 let front = { visible: true, focused: true };
 const saved: { notification?: unknown; hasFocus?: () => boolean; visibility?: PropertyDescriptor } = {};
@@ -72,13 +59,11 @@ function restoreStubs() {
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
-/** One hook per tab: tabs[0] is this tab; a second Probe stands for another tab (same storage). */
 const tabs: InboxNotifications[] = [];
 let onScreen: string | null = null;
 let questionsHeard = 0;
 let bell = false;
 let otherTabInFront = false;
-/** What a click on a notice does to the route. */
 let onOpenThread: (threadId: string) => void = () => {};
 let onOpenList: () => void = () => {};
 
@@ -101,7 +86,6 @@ function Probe({ index }: { index: number }) {
 const claude: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 'ses_a', name: null };
 let seq = 0;
 
-/** A message line; a root's is its first line unless `first: false` (a rewrite: a look, an archive, an Unarchive). */
 function message(id: string, threadId: string, over: Partial<InboxMessage> = {}, first = true): InboxEvent {
   return {
     seq: ++seq,
@@ -146,14 +130,12 @@ function list(threads: { id: string; section: InboxSectionId; project?: string }
   return { sections: [{ id: 'new', label: 'New', threads: rows }] } as unknown as ListModel;
 }
 
-/** One event-stream batch, then the list read that follows it, in every tab given (this one by default). */
 async function batch(events: InboxEvent[], after: ListModel, which: InboxNotifications[] = [tabs[0]!]) {
   await act(async () => {
     for (const tab of which) {
       for (const event of events) tab.observe(event);
       tab.flush(after);
     }
-    // The claim (claimNotices) settles on a microtask.
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
 }
@@ -200,7 +182,6 @@ describe.if(hasDom)('useInboxNotifications', () => {
     window.localStorage.clear();
     installStubs();
     mountTabs(1);
-    // The page's first list read: these threads were already here.
     await batch([], list([{ id: 'old', section: 'waiting' }]));
   });
   afterEach(() => {
@@ -221,7 +202,6 @@ describe.if(hasDom)('useInboxNotifications', () => {
   });
 
   test('an Unarchive of a thread archived before the page loaded is not a new thread', async () => {
-    // Unknown to the page (the window's list leaves archived threads out), created before load, open again, never looked at.
     const unarchived = message('arch', 'arch', { created_at: '2026-10-01T09:00:00.000Z', resolved_at: null }, false);
     await batch([unarchived], list([{ id: 'old', section: 'waiting' }, { id: 'arch', section: 'quiet' }]));
     expect(raised).toHaveLength(0);
@@ -231,7 +211,6 @@ describe.if(hasDom)('useInboxNotifications', () => {
     onScreen = 'old';
     await batch([message('m1', 'old'), question('m1', 'q-1')], list([{ id: 'old', section: 'waiting' }]));
     expect(raised).toHaveLength(0);
-    // The sound still hears it (it decides for itself, and rings only with no Inbox tab in front).
     expect(questionsHeard).toBe(1);
 
     away();
@@ -283,13 +262,11 @@ describe.if(hasDom)('useInboxNotifications', () => {
     away();
     await batch([message('t2', 't2'), question('t2', 'q-1')], list([{ id: 't1', section: 'new' }, { id: 't2', section: 'waiting' }]));
     expect(raised).toHaveLength(2);
-    // One thread in this burst: its own banner, not "2 … in billing-svc".
     expect(raised[1]!.body).toBe('Subject t2');
   });
 
   test('in front, a thread the person opened leaves the burst', async () => {
     await batch([message('t1', 't1')], list([{ id: 't1', section: 'new' }]));
-    // The person opens t1; the next new thread is a notice of its own, not "2 new".
     onScreen = 't1';
     await batch([message('t2', 't2')], list([{ id: 't1', section: 'new' }, { id: 't2', section: 'new' }]));
     expect(raised).toHaveLength(2);
@@ -298,14 +275,10 @@ describe.if(hasDom)('useInboxNotifications', () => {
 
   test('silent only when the bell owns the sound: a question, this tab away, the bell on', async () => {
     bell = true;
-    // In front: the bell never rings here, so the notice keeps the system's sound.
     await batch([message('m1', 'old'), question('m1', 'q-1')], list([{ id: 'old', section: 'waiting' }]));
     away();
-    // Away, a new thread that asks nothing: the bell does not ring for it.
     await batch([message('t1', 't1')], list([{ id: 'old', section: 'waiting' }, { id: 't1', section: 'new' }]));
-    // Away, a question: the bell's.
     await batch([message('t2', 't2'), question('t2', 'q-2')], list([{ id: 't2', section: 'waiting' }]));
-    // The bell off (or not armed): the system's sound again.
     bell = false;
     await batch([message('t3', 't3'), question('t3', 'q-3')], list([{ id: 't3', section: 'waiting' }]));
     expect(raised.map((r) => r.silent)).toEqual([false, false, true, false]);
@@ -323,7 +296,6 @@ describe.if(hasDom)('useInboxNotifications', () => {
     await batch([message('t2', 't2')], list([{ id: 't1', section: 'waiting' }, { id: 't2', section: 'new' }]), [tabs[1]!, tabs[0]!]);
     expect(raised).toHaveLength(2);
 
-    // Another Inbox tab is in front: this one, away, leaves it to that tab.
     otherTabInFront = true;
     await batch([message('t3', 't3')], list([{ id: 't3', section: 'new' }]), [tabs[0]!]);
     expect(raised).toHaveLength(2);
@@ -339,7 +311,6 @@ describe.if(hasDom)('useInboxNotifications', () => {
     Recording.permission = 'denied';
     await batch([message('t2', 't2'), question('t2', 'q-2')], list([{ id: 't2', section: 'waiting' }]));
     expect(window.localStorage.getItem(NOTICE_CLAIMS_KEY)).toBeNull();
-    // The same item, in a tab allowed to notify: it raises it.
     Recording.permission = 'granted';
     act(() => window.dispatchEvent(new Event('focus')));
     away();
@@ -412,7 +383,6 @@ describe.if(hasDom)('useInboxNotifications', () => {
     } finally {
       Date.now = realNow;
     }
-    // A reload after Memory Saver discarded the tab.
     act(() => root?.unmount());
     host?.remove();
     tabs.length = 0;
@@ -450,12 +420,10 @@ describe.if(hasDom)('useInboxNotifications', () => {
     const Recording = (window as unknown as { Notification: { permission: NotificationPermission } }).Notification;
     try {
       const { subscribeInboxEvents } = await import('./api');
-      // Opened while the browser had not been asked.
       Recording.permission = 'default';
       back();
       const stop = subscribeInboxEvents(0, { onRecord: () => {}, onStatus: () => {}, onConnect: tabs[0]!.reportWindow }, tabs[0]!.windowReport());
       expect(sources[0]!.url).toContain('permission=default');
-      // Allowed since; then the stream drops and reconnects (past the grace, or the Inbox restarted).
       Recording.permission = 'granted';
       back();
       posted.length = 0;
@@ -473,7 +441,6 @@ describe.if(hasDom)('useInboxNotifications', () => {
     }
   });
 
-  /** Run a click with the address starting at `start`: every hash it passes through, and the one it ends on. */
   async function addressesDuring(start: string, click: () => void): Promise<{ steps: string[]; end: string }> {
     const real = window.history.replaceState;
     window.history.replaceState(null, '', start || window.location.pathname);

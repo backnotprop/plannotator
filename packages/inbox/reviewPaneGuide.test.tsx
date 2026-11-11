@@ -1,21 +1,3 @@
-/**
- * One review screen (approval "inbox-one-review-screen"): every guide or
- * review an agent sends opens the full-window review, whatever Settings →
- * Capabilities → Code review says. What regresses:
- *
- *  - a guide (no `review: true`) or a review with Code review off offering
- *    Approve or Send feedback: there is no verdict the agent waits for, and
- *    the server refuses `review_verdict` while Code review is off;
- *  - Code review's own parts (Viewed ticks, Show me and Ask on selected lines,
- *    Open in, the live-session reads behind a verdict) showing, or asking the
- *    server, with Code review off;
- *  - a guide's comments sent, dropped or marked sent by the review itself:
- *    they wait for the person's next Send from the thread, which carries them
- *    as before ("Feedback on the guided review" in the reply to the guide).
- *
- * The diff reader is stubbed to read the props the review hands it.
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, mock, spyOn, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -27,7 +9,6 @@ import type { InboxShapes } from './shape/useInboxShapes';
 const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, rowShown: false, subscribe: () => () => {}, refresh: () => {} };
 
 const hasDom = typeof document !== 'undefined';
-/** The props the review handed the reader on its last draw. */
 let readerProps: Record<string, unknown> | null = null;
 if (hasDom) {
   mock.module('#guide-reader', () => ({
@@ -79,11 +60,9 @@ const commentRecord = (id: string, text: string): InboxAnnotationRecord =>
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
-/** Every request the review made, as `METHOD path`. */
 let asked: string[] = [];
 let annotations: InboxAnnotationRecord[] = [];
 let writeReplies = 0;
-/** The pull list's answer waits for this (a test that reads the header while the list loads). */
 let pullsGate: Promise<void> = Promise.resolve();
 const PR_KEY = 'github.com/acme/ledger#880';
 let pullsListed: Record<string, unknown>[] = [];
@@ -163,16 +142,12 @@ test.skipIf(!hasDom)('a guide (no review flag) opens the full review: Walkthroug
   expect(has('[data-review-mode-choice="files"]')).toBe(true);
   expect(has('[data-review-jump]')).toBe(true);
   expect(readerProps !== null).toBe(true);
-  // No verdict: no decision control, no Approve, no Send feedback.
   expect(has('[data-review-decision]')).toBe(false);
   expect(has('[data-decision-primary]')).toBe(false);
   expect(pane()!.textContent).not.toContain('Approve');
-  // The way out with the comments: back to the thread's reply box.
   expect(document.querySelector('[data-review-write-reply]')?.textContent).toContain('Write the reply');
-  // Not Code review's review, even with it on: no Viewed ticks, no Show me (the server keeps both for reviews only).
   expect(readerProps!.viewed).toBeUndefined();
   expect(readerProps!.selectionActions).toBeUndefined();
-  // Open in follows the switch alone, as it did on a guide.
   expect(typeof readerProps!.fileOpenIn).toBe('function');
 });
 
@@ -186,9 +161,7 @@ test.skipIf(!hasDom)('Code review off: a review opens the full review with none 
   expect(readerProps!.viewed).toBeUndefined();
   expect(readerProps!.selectionActions).toBeUndefined();
   expect(readerProps!.fileOpenIn).toBeUndefined();
-  // The heading's Show me (the host's head actions) draws nothing.
   expect((readerProps!.renderHeadActions as () => unknown)()).toBeNull();
-  // Only the guide and its comments were read: no Ask, drawings, live sessions or pull requests.
   expect(asked.filter((line) => !/\/guide$|\/guide\?|\/attachments/.test(line))).toEqual([]);
 });
 
@@ -199,7 +172,6 @@ test.skipIf(!hasDom)('with Code review on, the same review keeps its verdict and
   expect(readerProps!.viewed).toBeDefined();
 });
 
-/** Opens the top bar's chapter menu and says whether it has the "N of M" line at its foot. */
 async function menuProgress(): Promise<string | null> {
   await act(async () => {
     document.querySelector<HTMLElement>('[data-review-jump]')!.click();
@@ -232,10 +204,8 @@ test.skipIf(!hasDom)("a guide's comments wait for the next Send: the panel says 
   expect(document.querySelector('[data-guide-comments]')?.getAttribute('data-guide-comments')).toBe('2');
   await act(async () => document.querySelector<HTMLElement>('[data-review-write-reply]')!.click());
   expect(writeReplies).toBe(1);
-  // Nothing written by the review: no reply, no removal, no verdict.
   expect(asked.filter((line) => line.startsWith('POST'))).toEqual([]);
 
-  // The thread's Send carries them on its reply to the guide, as the review app's export.
   const thread = threadOf(messageOf(false));
   const { carried } = routeSendAnnotations(thread, sendTargetsOf(thread), annotations);
   expect(carried.get(GUIDE)?.map((r) => r.id)).toEqual(['ann-1', 'ann-2']);
@@ -308,10 +278,8 @@ test.skipIf(!hasDom)('wide, a Code review review with comments: the panel starts
     expect(panel().dataset.reviewPanel).toBe('closed');
     expect(pane()!.classList.contains('ib-rv-shut')).toBe(true);
     expect(document.activeElement === commentsButton()).toBe(true);
-    // Closed is not gone: the count stays on the button and the verdict still carries them.
     expect(commentsButton().getAttribute('aria-label')).toBe('Comments, 2');
     expect(document.querySelector('[data-review-decision] [data-decision-primary]')?.textContent).toContain('Send Feedback');
-    // Escape in the open panel closes it before anything else.
     await act(async () => commentsButton().click());
     const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
     await act(async () => panel().querySelector<HTMLElement>('[aria-label="Close the comments"]')!.dispatchEvent(escape));
@@ -347,6 +315,5 @@ test.skipIf(!hasDom)("a teammate's PR review: nothing in the decision's place un
     open();
     for (let i = 0; i < 4; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
   });
-  // Not listed (closed, or not read): the agent's way, which for a teammate's PR is the reply.
   expect(has('[data-review-write-reply]')).toBe(true);
 });

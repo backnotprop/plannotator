@@ -1,13 +1,3 @@
-/**
- * The keys of approval "inbox-keyboard-keys-2026-11-07" that live in one component (DOM_TESTS=1 for the DOM ones).
- * What would regress: an arrow in the Artifacts grid or on the Board landing on the wrong tile (or moving at all from
- * outside one); H opening the header clock's menu without focus in it, snoozing on its own, or opening again by
- * itself when the clock mounts again; H on a row opening another row's menu, or a menu on a row that cannot snooze;
- * Shift+E archiving the wrong thread; C and G P / G D firing while typing, on the tour, or where their page is
- * hidden; Shift+F10 on a message head not opening its ⋯ menu, or opening it from a text field. Shift+R (approval
- * "inbox-refresh-key") not running the page's refresh from the list or an open thread, running it while typing, under a
- * dialog, with single keys off or where the page has none, or taking plain R from Reply.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -56,16 +46,14 @@ const press = (el: Element, key: string, init: KeyboardEventInit = {}) =>
     el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init }));
   });
 
-/** A 3-column grid of 100 × 80 boxes with a 10 px gap, in reading order. */
 const grid = (n: number): Box[] => Array.from({ length: n }, (_, i) => ({ left: (i % 3) * 110, top: Math.floor(i / 3) * 90, width: 100, height: 80 }));
 
 test('the Artifacts grid: ← → in reading order, ↑ ↓ by column, Home End the ends, nothing past an edge', () => {
-  const boxes = grid(8); // rows: 0 1 2 / 3 4 5 / 6 7
+  const boxes = grid(8);
   expect(gridStep(boxes, 4, 'ArrowRight')).toBe(5);
   expect(gridStep(boxes, 3, 'ArrowLeft')).toBe(2);
   expect(gridStep(boxes, 1, 'ArrowDown')).toBe(4);
   expect(gridStep(boxes, 4, 'ArrowUp')).toBe(1);
-  // The last row is short: ↓ from the third column lands on the nearest tile below.
   expect(gridStep(boxes, 5, 'ArrowDown')).toBe(7);
   expect(gridStep(boxes, 0, 'Home')).toBeNull();
   expect(gridStep(boxes, 4, 'Home')).toBe(0);
@@ -82,7 +70,6 @@ test('the Board: ↑ ↓ within a lane, ← → the nearest card in the next lan
   expect(laneStep(lanes, { lane: 0, card: 1 }, 'ArrowDown')).toEqual({ lane: 0, card: 2 });
   expect(laneStep(lanes, { lane: 0, card: 2 }, 'ArrowDown')).toBeNull();
   expect(laneStep(lanes, { lane: 0, card: 0 }, 'ArrowUp')).toBeNull();
-  // The empty lane between is passed over; the card at the same height is the one.
   expect(laneStep(lanes, { lane: 0, card: 2 }, 'ArrowRight')).toEqual({ lane: 2, card: 2 });
   expect(laneStep(lanes, { lane: 2, card: 4 }, 'ArrowLeft')).toEqual({ lane: 0, card: 2 });
   expect(laneStep(lanes, { lane: 2, card: 0 }, 'ArrowRight')).toBeNull();
@@ -122,10 +109,8 @@ test.skipIf(!hasDom)('arrow keys move focus between the Artifacts tiles, and onl
   expect(document.activeElement).toBe(tiles[0]!);
   press(tiles[0]!, 'End');
   expect(document.activeElement).toBe(tiles[4]!);
-  // With a modifier the arrows are the page's.
   press(tiles[4]!, 'ArrowLeft', { shiftKey: true });
   expect(document.activeElement).toBe(tiles[4]!);
-  // From the heading Shift+O lands on: ↓ → Home go to the first tile, End to the last, ↑ ← stay the page's.
   const heading = el.querySelector<HTMLElement>('#ib-art-h')!;
   for (const [key, to] of [['ArrowDown', 0], ['ArrowRight', 0], ['Home', 0], ['End', 4]] as const) {
     act(() => heading.focus());
@@ -137,7 +122,6 @@ test.skipIf(!hasDom)('arrow keys move focus between the Artifacts tiles, and onl
     press(heading, key);
     expect(document.activeElement).toBe(heading);
   }
-  // Outside the section (the page body), nothing moves.
   act(() => (document.activeElement as HTMLElement).blur());
   press(document.body, 'ArrowDown');
   expect(document.activeElement).toBe(document.body);
@@ -202,14 +186,10 @@ test('Shift+E archives the row the keyboard is on, else the open thread by its f
   const open = { thread_id: 'thr_open', resolved_at: null, messages: [{ id: 'msg_root' }, { id: 'msg_2' }] };
   const resolved: Record<string, string | null> = { thr_open: null, thr_row: null, thr_done: '2026-11-07T10:00:00.000Z' };
   const resolvedOf = (id: string) => resolved[id];
-  // A row the keyboard is on wins over the thread open beside the list.
   expect(archiveTarget({ keyRow: 'thr_row', open, routeThread: 'thr_open', resolvedOf })).toEqual({ threadId: 'thr_row', messageId: 'thr_row' });
-  // No keyboard row (a clicked row is passed as none): the open thread, by its first message.
   expect(archiveTarget({ keyRow: null, open, routeThread: 'thr_open', resolvedOf })).toEqual({ threadId: 'thr_open', messageId: 'msg_root' });
-  // Archived already, as a row or as the open thread: nothing.
   expect(archiveTarget({ keyRow: 'thr_done', open, routeThread: 'thr_open', resolvedOf })).toBeNull();
   expect(archiveTarget({ keyRow: null, open: { ...open, resolved_at: '2026-11-07T10:00:00.000Z' }, routeThread: 'thr_open', resolvedOf })).toBeNull();
-  // A row that is not in the list, or a thread the route has left: nothing.
   expect(archiveTarget({ keyRow: 'thr_gone', open, routeThread: 'thr_open', resolvedOf })).toBeNull();
   expect(archiveTarget({ keyRow: null, open, routeThread: null, resolvedOf })).toBeNull();
 });
@@ -234,7 +214,6 @@ test.skipIf(!hasDom)('C opens New message and G P / G D go to their pages, only 
   key('d');
   expect(calls).toEqual(['compose', 'pulls', 'drafts']);
   calls.length = 0;
-  // Typing in a field: the letters are the field's.
   const field = el.querySelector<HTMLElement>('[data-test-field]')!;
   act(() => field.focus());
   key('c', field);
@@ -242,7 +221,6 @@ test.skipIf(!hasDom)('C opens New message and G P / G D go to their pages, only 
   key('p', field);
   expect(calls).toEqual([]);
   act(() => field.blur());
-  // New message already open: C stands down. A hidden Pull requests or Drafts row: G P / G D stand down.
   Object.assign(pages, { composing: true, pulls: false, drafts: false });
   key('c');
   key('g');
@@ -250,7 +228,6 @@ test.skipIf(!hasDom)('C opens New message and G P / G D go to their pages, only 
   key('g');
   key('d');
   expect(calls).toEqual([]);
-  // On the tour, nothing.
   Object.assign(pages, { page: 'tour', composing: false, pulls: true, drafts: true });
   key('c');
   key('g');
@@ -324,7 +301,6 @@ test.skipIf(!hasDom)('H on a row opens that row’s menu at the times; an archiv
   press(document.activeElement ?? document.body, 'Escape');
   await frames();
   expect(menuOf('thr_b')).toBeNull();
-  // A thread whose agent cannot snooze (a linked machine's), and an archived one: no menu.
   await pressH('thr_linked');
   expect(menuOf('thr_linked')).toBeNull();
   const done = rowButton('thr_done');
@@ -384,7 +360,6 @@ test('Shift+R runs the refresh of the page on screen, route by route; none where
   ];
   for (const [where, over, kind] of rows) expect([where, refreshKind({ ...base, ...over })]).toEqual([where, kind]);
 
-  // Each kind runs the window's own refreshes, the thread's beside the Board's or Reviews'.
   const ran: string[] = [];
   const act = { inbox: () => ran.push('inbox'), board: () => ran.push('board'), reviews: () => ran.push('reviews'), thread: () => ran.push('thread') };
   for (const [kind, runs] of [['inbox', ['inbox']], ['board', ['board']], ['board+thread', ['board', 'thread']], ['reviews', ['reviews']], ['reviews+thread', ['reviews', 'thread']]] as const) {
@@ -450,40 +425,33 @@ test.skipIf(!hasDom)('Shift+R runs the page’s refresh from the list and from a
   expect(replyButton()).not.toBeNull();
   const shiftR = (target: Element, init: KeyboardEventInit = {}) => press(target, 'R', { code: 'KeyR', shiftKey: true, ...init });
 
-  // From the list (a row with focus), Shift+R refreshes, and opens nothing.
   const row = el.querySelector<HTMLElement>('[data-thread-id="thr_row"]')!;
   act(() => row.focus());
   shiftR(row);
   expect(refreshes).toBe(1);
-  // From inside the open thread (its Reply button with focus), the same; the reply box stays shut.
   act(() => replyButton()!.focus());
   shiftR(replyButton()!);
   await settle();
   expect(refreshes).toBe(2);
   expect(box()).toBeNull();
-  // Plain R is still Reply: the box opens, nothing refreshes.
   act(() => (document.activeElement as HTMLElement | null)?.blur());
   press(document.body, 'r', { code: 'KeyR' });
   await settle();
   expect(box()).not.toBeNull();
   expect(refreshes).toBe(2);
-  // Typing in the reply box: Shift+R is a capital R.
   act(() => box()!.focus());
   shiftR(box()!);
   expect(refreshes).toBe(2);
   act(() => box()!.blur());
-  // ⌘⇧R and Ctrl+Shift+R stay the browser's hard reload.
   shiftR(document.body, { metaKey: true });
   shiftR(document.body, { ctrlKey: true });
   expect(refreshes).toBe(2);
-  // Under a dialog, nothing.
   const dialog = document.createElement('dialog');
   dialog.setAttribute('open', '');
   document.body.append(dialog);
   shiftR(document.body);
   dialog.remove();
   expect(refreshes).toBe(2);
-  // Single-key shortcuts off (Settings → General): nothing; back on, it refreshes again.
   act(() => prefs.setSingleKeys(false));
   try {
     shiftR(document.body);
@@ -493,14 +461,12 @@ test.skipIf(!hasDom)('Shift+R runs the page’s refresh from the list and from a
   }
   shiftR(document.body);
   expect(refreshes).toBe(3);
-  // A page with no refresh (Drafts, Settings): nothing, and the key is left alone.
   view.run = null;
   const left = new KeyboardEvent('keydown', { key: 'R', code: 'KeyR', shiftKey: true, bubbles: true, cancelable: true });
   act(() => {
     document.body.dispatchEvent(left);
   });
   expect(left.defaultPrevented).toBe(false);
-  // On the tour, nothing either.
   view.run = () => (refreshes += 1);
   view.page = 'tour';
   shiftR(document.body);
@@ -527,14 +493,12 @@ test.skipIf(!hasDom)('the list’s ↻: its tooltip reads Refresh with the two k
     </SidebarProvider>,
   );
   const button = () => el.querySelector<HTMLButtonElement>('.ib-lhead [data-list-refresh]')!;
-  // Nothing pops out beside the ↻: no keycap on the button itself, its icon the tooltip's own trigger.
   expect(button().querySelector('kbd')).toBeNull();
   expect(button().querySelector('[data-list-refresh-icon] svg.ib-ic-refresh')).not.toBeNull();
   expect(button().getAttribute('aria-keyshortcuts')).toBe('Shift+R');
   expect(document.getElementById(button().getAttribute('aria-describedby')!)?.textContent?.trim()).toBe('Refresh the list');
   act(() => button().click());
   expect(refreshed).toBe(1);
-  // The tooltip's words (the same withShortcut the ↻ hands its Tip): Refresh, then one cap per key.
   const tipHost = document.createElement('div');
   document.body.append(tipHost);
   const tipRoot = createRoot(tipHost);
@@ -559,7 +523,6 @@ test.skipIf(!hasDom)('the list’s ↻: its tooltip reads Refresh with the two k
       });
     }
   }
-  // Single keys off: the button's key name goes too.
   act(() => prefs.setSingleKeys(false));
   try {
     expect(button().hasAttribute('aria-keyshortcuts')).toBe(false);

@@ -1,14 +1,3 @@
-/**
- * The delivery glyph before a row's time ("Ticks", approval
- * "inbox-row-delivery"): one shape per state on wide, three-line and phone
- * rows; the state in words in the row's accessible name; the thread's line
- * as ui's tooltip (no native title); the delivery time once delivered; and
- * a Sent row keeps its real subject. An older Inbox (no `delivery`) keeps
- * the words it had. happy-dom has no layout; the real browser shots are in
- * the e2e (tests/e2e/inbox-send-now.spec.ts).
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -56,7 +45,6 @@ function row(id: string, subject: string, d: InboxRowDelivery | null | undefined
 const QUEUED = row('msg_q', 'Retry policy for the Stripe webhook', delivery('queued', 'working', { send_now: true }));
 const SENDING = row('msg_s', 'Drop the legacy share portal route?', delivery('sending', 'idle'));
 const SAVED = row('msg_v', 'App Store screenshots: light or dark?', delivery('saved', 'reads', { host: 'codex', name: 'Codex' }));
-// Quiet is folded on first draw: a delivered reply to a woken session stays Sent until an agent reads the thread.
 const DELIVERED = row('msg_d', 'Search index for the docs site', delivery('delivered', 'delivered', { at: DELIVERED_AT }));
 const UNDELIVERED = row('msg_u', 'Why does staging pull the old image?', delivery('undelivered', 'undelivered', { kind: 'message', host: 'pi' }));
 const OLDER = row('msg_o', 'From an older Inbox', undefined);
@@ -106,7 +94,6 @@ function render(options: { phone?: boolean; narrow?: boolean } = {}): HTMLElemen
 const rowEl = (el: HTMLElement, id: string) => el.querySelector<HTMLElement>(`[data-thread-id="${id}"]`)!;
 const tick = (el: HTMLElement, id: string) => rowEl(el, id).querySelector<HTMLElement>('.ib-tick');
 
-/** The row's accessible name, as a screen reader builds it here: text, with a role="img" child's label in its place. */
 function accessibleName(node: Element): string {
   const walk = (n: Node): string => {
     if (n.nodeType === 3) return n.textContent ?? '';
@@ -145,10 +132,8 @@ test.skipIf(!hasDom)('one shape per state, on wide, three-line and phone rows; a
     expect(tick(el, DELIVERED.thread_id)!.querySelectorAll('svg.ib-dcheck path').length).toBe(2);
     expect(tick(el, UNDELIVERED.thread_id)!.dataset.tick).toBe('undelivered');
     expect(tick(el, OLDER.thread_id)).toBeNull();
-    // The glyph sits in the time cell, before the time.
     const time = rowEl(el, QUEUED.thread_id).querySelector('.ib-t')!;
     expect(time.firstElementChild!.firstElementChild!.classList.contains('ib-tick')).toBe(true);
-    // Send now stays in the thread: the row never offers it.
     expect(rowEl(el, QUEUED.thread_id).parentElement!.querySelector('[data-row-send-now], [data-send-now]')).toBeNull();
     act(() => root?.unmount());
     host?.remove();
@@ -162,7 +147,6 @@ test.skipIf(!hasDom)("the state in words is in the row's name; a Sent row keeps 
   expect(accessibleName(rowEl(el, UNDELIVERED.thread_id))).toContain('Not delivered,');
   expect(accessibleName(rowEl(el, DELIVERED.thread_id))).toContain(`Delivered to Claude Code, ${shortTime(DELIVERED_AT)}`);
   expect(rowEl(el, SENDING.thread_id).querySelector('.ib-title')!.textContent).toBe('Drop the legacy share portal route?');
-  // No glyph: the older wording stays.
   expect(rowEl(el, OLDER.thread_id).querySelector('.ib-title')!.textContent).toBe('Queued for Claude Code; it gets this as its next turn.');
 });
 

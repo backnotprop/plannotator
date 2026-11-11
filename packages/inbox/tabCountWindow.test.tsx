@@ -1,16 +1,4 @@
-/**
- * The count on the tab (approval "inbox-tab-count"), as the window keeps it:
- * the whole window (InboxApp) over a REAL Inbox in a temp data dir (its own
- * process, tests/helpers/inbox-dom-server.ts). What is proved: the title
- * reads "(N) Plannotator Inbox" and the favicon link carries a badged icon
- * while threads hold agent messages the person has not looked at; a seen
- * thread with an open question does not count; an agent's new message raises
- * it; opening a thread lowers it; at zero the title and the plain icon come
- * back. happy-dom has no 2D canvas, so the icon here is the SVG form; the PNG
- * a browser draws is shown by the screenshots in the PR.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
+/** happy-dom has no 2D canvas, so the icon here is the SVG form. */
 import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -39,11 +27,9 @@ let savedFetch: typeof fetch;
 let savedEventSource: unknown;
 let pokeStream: (() => void) | null = null;
 let restoreBadge: (() => void) | null = null;
-/** While true, every list read answers 503: a window that cannot load its list. */
 let listReadsFail = false;
 let failedListReads = 0;
 
-/** Every write to the installed app's badge (one badge for all of the app's windows), in order. */
 function watchBadge(): (number | 'clear')[] {
   const badges: (number | 'clear')[] = [];
   const nav = navigator as { setAppBadge?: unknown; clearAppBadge?: unknown };
@@ -80,7 +66,6 @@ async function readLine(): Promise<string> {
   return line.trim();
 }
 
-/** An agent starts a thread while the window is open (the server's stdin). */
 async function agentSends(body: string): Promise<string> {
   (child!.stdin as import('bun').FileSink).write(`${JSON.stringify({ send: { project: world.project, session: 'ses_tab', body } })}\n`);
   (child!.stdin as import('bun').FileSink).flush();
@@ -138,7 +123,6 @@ beforeEach(() => {
     }
     close() {}
   };
-  // The page as apps/inbox/index.html serves it.
   document.title = 'Plannotator Inbox';
   document.head.querySelector('link[rel="icon"]')?.remove();
   const link = document.createElement('link');
@@ -153,7 +137,6 @@ afterEach(() => {
   if (!hasDom) return;
   act(() => root?.unmount());
   host?.remove();
-  // After the unmount, so a write made by a window going away is still recorded.
   restoreBadge?.();
   restoreBadge = null;
   listReadsFail = false;
@@ -190,8 +173,6 @@ function openThread(id: string) {
 }
 
 test.skipIf(!hasDom)('the tab counts threads with news the person has not looked at, and clears as they look', async () => {
-  // Every seeded thread is looked at but the one an agent is stopped on. The waiting
-  // thread keeps its open question, which the sidebar counts and the tab does not.
   for (const row of await serverRows()) {
     if (row.thread_id !== world.stopped) await loopback(`/api/inbox/threads/${row.thread_id}/seen`, 'POST', '{}');
   }
@@ -199,7 +180,6 @@ test.skipIf(!hasDom)('the tab counts threads with news the person has not looked
   expect(waitingRow.questions.open).toBeGreaterThan(0);
   expect(waitingRow.unseen).toBe(0);
 
-  // An installed app's icon (the Dock) gets the same count through the Badging API.
   const badges = watchBadge();
 
   host = document.createElement('div');
@@ -212,27 +192,22 @@ test.skipIf(!hasDom)('the tab counts threads with news the person has not looked
   expect(badges.at(-1)).toBe(1);
   await until(() => iconLabel() === '1', 'the badged icon');
   expect(iconHref().startsWith('data:image/svg+xml')).toBe(true);
-  // The badge is drawn over Glass's hand-pixelled 32 (the server's /favicon.png), not the .ico.
   expect(decodeURIComponent(iconHref())).toContain(`href="${FAVICON_PNG_DATA_URL}"`);
 
-  // An agent starts a thread: the count rises.
   const fresh = await agentSends('A fresh finding about the build.');
   act(() => pokeStream?.());
   await until(() => document.title === '(2) Plannotator Inbox' && iconLabel() === '2', 'the agent message counted');
   expect(badges.at(-1)).toBe(2);
 
-  // Opening it is the look: the count falls.
   openThread(fresh);
   await until(() => document.title === '(1) Plannotator Inbox' && iconLabel() === '1', 'the opened thread cleared');
 
-  // Opening the last one: no prefix, the plain icon again.
   openThread(world.stopped);
   await until(() => document.title === 'Plannotator Inbox' && iconHref() === '/favicon.ico', 'the plain tab');
   expect(badges.at(-1)).toBe('clear');
 });
 
 test.skipIf(!hasDom)('a favicon picked in Settings is the tab icon at once, the badge drawn over it, and saved for every page', async () => {
-  // One thread with news, so the tab carries a badge over the plain icon.
   const fresh = await agentSends('A thread for the favicon pick.');
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -254,14 +229,11 @@ test.skipIf(!hasDom)('a favicon picked in Settings is the tab icon at once, the 
   expect(document.querySelector<HTMLInputElement>('input[name="ib-favicon"][value="glass"]')?.checked).toBe(true);
 
   act(() => choice()!.click());
-  // No reload: the badge is drawn again, over the Face icon.
   await until(() => decodeURIComponent(iconHref()).includes(FACE_FAVICON_PNG_DATA_URL) && iconLabel() !== null, 'the badge over the Face icon');
-  // Saved to config.json, so /favicon.png (every page's first frame) answers with it too.
   await until(async () => JSON.parse((await loopback('/api/inbox/settings')).bytes.toString('utf8')).favicon === 'totman', 'the saved choice');
   const served = await loopback('/favicon.png');
   expect(new Uint8Array(served.bytes)).toEqual(FACE_FAVICON_PNG_BYTES);
 
-  // The last thread seen: the plain icon is now the Face icon, not the one the page loaded with.
   await loopback(`/api/inbox/threads/${fresh}/seen`, 'POST', '{}');
   for (const row of await serverRows()) await loopback(`/api/inbox/threads/${row.thread_id}/seen`, 'POST', '{}');
   act(() => pokeStream?.());
@@ -281,7 +253,6 @@ test.skipIf(!hasDom)("the app's badge is one for every window: a window with no 
   const count = badges.at(-1);
   const writes = badges.length;
 
-  // A second window whose list never loads knows nothing about what is unread.
   listReadsFail = true;
   failedListReads = 0;
   const secondHost = document.createElement('div');
@@ -295,7 +266,6 @@ test.skipIf(!hasDom)("the app's badge is one for every window: a window with no 
   await wait(200);
   expect(badges.slice(writes)).toEqual([]);
 
-  // Either window going away is not the person reading anything.
   act(() => second!.unmount());
   secondHost.remove();
   act(() => root!.unmount());

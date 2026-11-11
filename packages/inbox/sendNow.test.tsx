@@ -1,13 +1,3 @@
-/**
- * The line under the person's sent reply, and Send now, as the thread draws
- * them from the sessions route's `asker.connection` (the owner's request,
- * 2026-10-16: "It should say this message is queued up or something. And
- * then maybe an option just to send it immediately."). The failures this
- * catches: a reply to a working agent that reads as dropped, a Send now that
- * is offered where nothing can take it, and a press that posts nothing.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -131,14 +121,12 @@ async function render(value: InboxThread, sent: { at: string; checked_at: string
 const line = (el: HTMLElement) => el.querySelector('[data-delivery]') as HTMLElement;
 
 test.skipIf(!hasDom)('Claude Code at work: "Undelivered · … is working" (approval "inbox-busy-agent-reply"), and Send now posts the send-now route for the reply', async () => {
-  // The server's clock for the reply on that busy session (`waits`): the line's minutes.
   connection = { busy: true, idle_since: null, send_now: true, waits: { [REPLY]: { since: new Date(Date.now() - 4 * 60_000).toISOString(), auto_since: null } } };
   let changed = 0;
   const el = await render(thread(), undefined, async () => {
     changed += 1;
   });
   expect(line(el).getAttribute('data-delivery')).toBe('queued');
-  // How long it waited on the busy session and what happens next.
   expect(line(el).textContent).toMatch(/^Undelivered \d+ min · Claude Code is working · it gets this when its turn ends/);
   const button = el.querySelector('[data-send-now]') as HTMLButtonElement;
   expect(button.textContent).toBe('Send now');
@@ -211,7 +199,6 @@ test.skipIf(!hasDom)('Send now refused (the connection went away): the reason sh
   expect(line(el).getAttribute('data-delivery')).toBe('queued');
 });
 
-/** A thread whose last word is the agent's, marked 👍 and sent through to its waking session (`note_id`), not taken yet. */
 function ackedThread(): InboxThread {
   const value = thread();
   const asked = value.messages[0]!;
@@ -226,7 +213,6 @@ test.skipIf(!hasDom)('a 👍 sent through reads the same honest words as a reply
   await settle();
   expect(pill(el).getAttribute('data-ack-pill')).toBe('queued');
   expect(pill(el).textContent).toContain('Queued · Claude Code is working; it gets this when its turn ends.');
-  // A 👍 asks nothing of the agent: it never goes into the running turn.
   expect([...el.querySelectorAll('button')].some((button) => /send now/i.test(button.textContent ?? ''))).toBe(false);
   expect(posted.some((entry) => entry.path.endsWith('/send-now'))).toBe(false);
 });

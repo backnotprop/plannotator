@@ -1,23 +1,4 @@
-/**
- * The skill (/) list in the Inbox's composer stays inside what the person can
- * see (the owner's iPhone, a thread open, the keyboard up: the list opened
- * above the reply box and only the bottom of its last row showed, cut at the
- * reply foot's top edge and covered by the thread).
- *
- * The causes this file pins down: the list was drawn inside the reply foot,
- * which scrolls in its own box on an iPhone with the keyboard up and is its
- * own stacking context (so the list was cut and covered); its room was the
- * layout viewport from y 0 (`innerHeight`, which keeps the full height under
- * the iOS keyboard, and the thread's header counted as room); and the keyboard
- * opening after the list did not move it.
- *
- * happy-dom does no layout: each box the composer measures gets a rect here,
- * the list its natural height (rows × 44), and the menu's on-screen rect is
- * derived from the placement it committed (side + max-height), as the CSS
- * resolves it (6 px from the box it hangs off).
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
+/** happy-dom does no layout: each box the composer measures gets a rect here, and the menu's on-screen rect is derived from the placement it committed. */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -41,14 +22,12 @@ interface Box {
   bottom: number;
 }
 
-/** The layout this test lays out: the window, what is visible of it, the thread's header and the reply field. */
 const layout = {
   innerHeight: 800,
   seen: { top: 0, bottom: 800 } as Box,
   header: { top: 0, bottom: 56 } as Box,
   foot: { top: 260, bottom: 800 } as Box,
   field: { top: 300, bottom: 360 } as Box,
-  /** Something drawn over the field (full view, a sheet), as hit-testing finds it; null: the field is on top. */
   cover: null as Element | null,
 };
 
@@ -61,24 +40,20 @@ let restoreRect: (() => void) | null = null;
 let viewport: (EventTarget & { height: number; offsetTop: number; width: number; offsetLeft: number }) | null = null;
 const original = hasDom ? { innerHeight: Object.getOwnPropertyDescriptor(window, 'innerHeight'), visualViewport: Object.getOwnPropertyDescriptor(window, 'visualViewport') } : null;
 
-/** Every box the composer and the menu measure, by what it is; anything else has no size. */
 function stubRects() {
   const proto = HTMLElement.prototype;
   const own = proto.getBoundingClientRect;
   proto.getBoundingClientRect = function (this: HTMLElement) {
     if (this.classList.contains('ib-skanchor')) {
-      // Laid out where its style puts it, in the root's coordinates (the root sits at 0, 0).
       const top = parseFloat(this.style.top) || 0;
       return rect({ top, bottom: top + (parseFloat(this.style.height) || 0) }, parseFloat(this.style.left) || 0, parseFloat(this.style.width) || 0);
     }
-    // The field and every box of its own (the token textarea's wrapper clips like a scroll box).
     if (this.closest('.ib-cfield')) return rect(layout.field);
     if (this.matches('.ib-phead')) return rect(layout.header, 0, 400);
     if (this.matches('.ib-pfoot')) return rect(layout.foot, 0, 400);
     if (this.matches('.ib-pane, .pn-inbox')) return rect({ top: 0, bottom: layout.innerHeight }, 0, 400);
     return rect({ top: 0, bottom: 0 }, 0, 0);
   };
-  // Hit-testing: whatever covers the field, else the field itself.
   Object.defineProperty(document, 'elementFromPoint', {
     configurable: true,
     writable: true,
@@ -107,7 +82,6 @@ function Reply() {
   return <InboxComposerField value={value} onChange={setValue} placeholder="Write a reply" ariaLabel="Reply" destination="your reply" />;
 }
 
-/** The Inbox's shape around the reply box: the root, a thread pane with its header, body, and the reply foot that scrolls in its own box (iOS, keyboard up). */
 async function drawThread() {
   mount = document.createElement('div');
   mount.className = 'pn-inbox';
@@ -125,16 +99,14 @@ async function drawThread() {
     root = createRoot(foot);
     root.render(<Reply />);
   });
-  await act(async () => {}); // the catalog's fetch
+  await act(async () => {});
   const field = foot.querySelector('textarea') as HTMLTextAreaElement;
-  // The person types in it: it has focus.
   await act(async () => field.focus());
   return field;
 }
 
 const textSetter = () => Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
 
-/** One key typed where the caret is, as the browser does it: no act around it beyond React's own commit. */
 function typeAtCaret(el: HTMLTextAreaElement, ch: string) {
   act(() => {
     const at = el.selectionStart;
@@ -156,7 +128,6 @@ async function type(el: HTMLTextAreaElement, value: string) {
 
 const menu = () => document.querySelector<HTMLElement>('[data-skill-menu]');
 
-/** The list's rows are 44 px; its natural height follows the rows it holds. */
 function stubListHeight() {
   const list = document.querySelector<HTMLElement>('[data-skill-menu-list]')!;
   Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => list.querySelectorAll('[data-skill-item]').length * ROW });
@@ -171,7 +142,6 @@ async function settle() {
   });
 }
 
-/** Where the menu is on screen, from what it committed: its side, and its list's height (natural, capped). */
 function menuBox(): Box & { side: string } {
   const el = menu()!;
   const list = el.querySelector<HTMLElement>('[data-skill-menu-list]')!;
@@ -216,13 +186,11 @@ describe.skipIf(!hasDom)('the skill list in the reply box', () => {
     await type(field, '/');
     // Booleans, never elements: a failing match on a happy-dom element hangs bun's diff printer.
     expect(menu() !== null).toBe(true);
-    // The owner's picture: inside `.ib-pfoot` (overflow-y: auto under the keyboard) the list above the box was cut at the foot's top.
     expect(menu()!.closest('.ib-pfoot') === null).toBe(true);
     expect(menu()!.closest('.pn-inbox') !== null).toBe(true);
   });
 
   test('opening above, it stops under the thread header, never under or over it', async () => {
-    // The keyboard is up and the box sits on it: the room is above the box, between it and the header.
     setViewport(800, { top: 0, bottom: 380 });
     layout.foot = { top: 280, bottom: 380 };
     const field = await drawThread();
@@ -236,7 +204,6 @@ describe.skipIf(!hasDom)('the skill list in the reply box', () => {
   });
 
   test('with the keyboard up, it fits in the visual viewport, not the layout viewport (innerHeight keeps the full height)', async () => {
-    // iOS: the keyboard covers 440 of 800; innerHeight still reads 800. The box sits high, just under the header.
     setViewport(800, { top: 0, bottom: 360 });
     layout.field = { top: 70, bottom: 130 };
     layout.foot = { top: 60, bottom: 360 };
@@ -258,7 +225,6 @@ describe.skipIf(!hasDom)('the skill list in the reply box', () => {
     stubListHeight();
     await settle();
     expect(menuBox().bottom).toBeLessThanOrEqual(800);
-    // The keyboard: only the visual viewport changes, and only it says so.
     await act(async () => {
       layout.seen = { top: 0, bottom: 380 };
       viewport!.height = 380;
@@ -290,8 +256,6 @@ describe.skipIf(!hasDom)('the skill list in the reply box', () => {
 
 describe.skipIf(!hasDom)('the skill list is drawn only while its field is in sight', () => {
   test('full view opening over the reply box takes the list away, and its rows with it', async () => {
-    // The review's case: "Hi /b" in a thread's reply box, then the attachment opens in full view. At the Inbox's root
-    // the list was above the whole shell: it stayed over the document, and a press on a row wrote into the hidden reply.
     const field = await drawThread();
     await type(field, 'Hi /skill-0');
     expect(menu() !== null).toBe(true);
@@ -303,10 +267,8 @@ describe.skipIf(!hasDom)('the skill list is drawn only while its field is in sig
     });
     await settle();
     expect(menu() === null).toBe(true);
-    // Nothing to press, and the arrows are the field's again: none moves through a list nobody sees.
     expect(document.querySelector('[data-skill-item]') === null).toBe(true);
     expect(field.getAttribute('aria-expanded') === 'true').toBe(false);
-    // Full view closes: the list is back where it was.
     await act(async () => {
       layout.cover = null;
       full.remove();

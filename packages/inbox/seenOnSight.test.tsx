@@ -1,18 +1,3 @@
-/**
- * Seen on sight, as the thread pane does it (design record
- * "inbox-new-in-open-thread", variant A, approved 2026-10-12; not in this
- * repo): an agent message that arrives while the thread is open counts as
- * seen once its first lines have been on screen for a second, with the tab
- * visible, the window focused and nothing over the thread. happy-dom has no
- * layout and no IntersectionObserver, so the test gives the elements their
- * boxes and drives a stand-in observer. Time is the test's: the dwell, the
- * recheck and every other timer run on fake timers that `wait` advances, so
- * the result never depends on how fast the runner is. The real browser proof is
- * tests/e2e/inbox-seen-on-sight.spec.ts; the rules alone are checked at the
- * bottom without a DOM.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, describe, expect, jest, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -60,7 +45,6 @@ function message(id: string, author: InboxAuthor, seq: number, body: string, ext
   };
 }
 
-/** The thread as it was when the person opened it: the agent's message, their reply. The look covered seq 2. */
 const OPENED: InboxMessageWire[] = [
   message(ROOT, AGENT, 2, 'The refund webhook is wired.', { person_seen_seq: 2 }),
   message('msg_P1', PERSON, 4, 'Good. Retries?'),
@@ -77,11 +61,7 @@ const thread = (...arrivals: InboxMessageWire[]): InboxThread => threadOf(OPENED
 const A2 = message('msg_A2', AGENT, 6, 'Retries are on, three attempts.');
 const A3 = message('msg_A3', AGENT, 8, 'And the dashboard shows them.');
 
-// ── the stand-ins: boxes, the observer, the window in front ──
-
-/** Each message's box in the view (the body is 0..800). Absent: far below. */
 let boxes: Record<string, { top: number; height: number }> = {};
-/** Things drawn over the thread (a sheet, a popover, the toast): the vertical span each covers. */
 let covers: { top: number; bottom: number }[] = [];
 const coverElement = typeof document !== 'undefined' ? document.createElement('div') : null;
 const observers: { fire: () => void; observed: Element[] }[] = [];
@@ -125,12 +105,10 @@ beforeEach(() => {
       const article = this.closest<HTMLElement>('[data-message-article]');
       const box = article ? (boxes[article.getAttribute('data-message-article')!] ?? { top: 5000, height: 300 }) : null;
       if (!box) return rect(0, 0);
-      // The sender row: the top 30 px of its message.
       if (this.classList.contains('ib-fline')) return rect(box.top, 30);
       return this === article ? rect(box.top, box.height) : rect(box.top, 0);
     },
   });
-  // What is drawn on top at a point: a cover over it, else the message whose box holds it, else the thread's body.
   stub(document, 'elementFromPoint', {
     value: (_x: number, y: number) => {
       if (covers.some((c) => y >= c.top && y < c.bottom)) return coverElement;
@@ -185,12 +163,6 @@ afterEach(() => {
   }
 });
 
-/**
- * Let `ms` of the test's time pass: every timer due in it fires, in order, then the page settles.
- * Never await a real timer here (or anywhere in these tests): the fake timers
- * never fire it, and bun's per-test timeout cannot fire under fake timers
- * either, so the test would hang until the job's timeout-minutes.
- */
 async function wait(ms: number) {
   await act(async () => {
     await settle();
@@ -205,7 +177,6 @@ interface PaneProps {
   file?: { id: string; version: 'current' | 'sent'; focus: string | null } | null;
   phone?: boolean;
   covered?: boolean;
-  /** The thread as the person opened it (default OPENED), and the look before and at the open. */
   base?: InboxMessageWire[];
   lookSeq?: number;
   seenThrough?: number;
@@ -233,7 +204,6 @@ function pane({ thread, onSeen, file = null, phone = false, covered = false, loo
   );
 }
 
-/** Open the thread as it was, then let `arrivals` land in it (the event stream's re-read). */
 async function openThenArrive(props: Omit<PaneProps, 'thread'>, ...arrivals: InboxMessageWire[]) {
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -350,30 +320,23 @@ describe.skipIf(!hasDom)('seen on sight in the thread pane', () => {
     });
     const el = await openThenArrive({ onSeen: (through) => seen.push(through) }, A2);
     const pill = el.querySelector<HTMLButtonElement>('[data-new-pill]')!;
-    // The root was new when the thread opened (it carries the New tag) but it is in view: only the arrival counts.
     expect(el.querySelector('[data-message-article="msg_A1"]')!.hasAttribute('data-new')).toBe(false);
     expect(pill.textContent).toBe('1 new');
     expect(pill.hasAttribute('data-off')).toBe(false);
     await wait(SEEN_DWELL_MS + 200);
     expect(seen).toEqual([]);
     act(() => pill.click());
-    // The first new message below: the arrival, here also the first new one, so it lands at its divider.
     expect(scrolled.at(-1)).toBe('divider');
     expect(document.activeElement).toBe(el.querySelector('[data-message-article="msg_A2"] [data-fold-head]'));
-    // The person reaches it: the scroll brings its first lines into view.
     boxes.msg_A2 = { top: 500, height: 200 };
     act(() => void el.querySelector('.ib-pbody')!.dispatchEvent(new Event('scroll')));
     await wait(SEEN_DWELL_MS + 150);
     expect(seen).toEqual([6]);
-    // Seen: it leaves the pill's count even when scrolled away again.
     boxes.msg_A2 = { top: 2000, height: 200 };
     act(() => void el.querySelector('.ib-pbody')!.dispatchEvent(new Event('scroll')));
     expect(pill.hasAttribute('data-off')).toBe(true);
   });
 
-  // The failure this guards: a phone's New message sheet (or
-  // the annotations list, the Mark read toast) drawn over the end of the thread
-  // hid the arrival, and it was still marked seen.
   test('something drawn over the first lines (a sheet) hides them: nothing is seen until it goes, and a cover mid-dwell restarts it', async () => {
     boxes = { msg_A2: { top: 400, height: 200 } };
     covers = [{ top: 300, bottom: 800 }];
@@ -381,11 +344,9 @@ describe.skipIf(!hasDom)('seen on sight in the thread pane', () => {
     await openThenArrive({ onSeen: (through) => seen.push(through) }, A2);
     await wait(SEEN_DWELL_MS + 200);
     expect(seen).toEqual([]);
-    // Only the lower half of the first lines under the toast: still hidden.
     covers = [{ top: 450, bottom: 800 }];
     await wait(SEEN_DWELL_MS + RECHECK_MS);
     expect(seen).toEqual([]);
-    // The sheet goes (no event: the recheck notices); a cover for a moment mid-dwell restarts it.
     covers = [];
     await wait(RECHECK_MS + 350);
     covers = [{ top: 300, bottom: 800 }];
@@ -397,9 +358,6 @@ describe.skipIf(!hasDom)('seen on sight in the thread pane', () => {
     expect(seen).toEqual([6]);
   });
 
-  // The failure this guards: the pill counted every message new at the open
-  // as well as the arrival, and went to the first new message below the view,
-  // an older one, so reaching the arrival took several clicks.
   test('the pill counts and goes to the unseen arrivals first; only when none waits below, to what was new at the open', async () => {
     const R = message(ROOT, AGENT, 2, 'The refund webhook is wired.');
     const B1 = message('msg_B1', AGENT, 3, 'Retries next.');
@@ -416,14 +374,11 @@ describe.skipIf(!hasDom)('seen on sight in the thread pane', () => {
     const seen: number[] = [];
     const el = await openThenArrive({ onSeen: (through) => seen.push(through), base: [R, B1, B2, B3], lookSeq: 2, seenThrough: 7 }, C);
     const pill = el.querySelector<HTMLButtonElement>('[data-new-pill]')!;
-    // Three messages were new at the open and are below too; the pill counts the arrival alone.
     expect(['msg_B1', 'msg_B2', 'msg_B3', 'msg_C'].every((id) => el.querySelector(`[data-message-article="${id}"]`)!.hasAttribute('data-new'))).toBe(true);
     expect(pill.textContent).toBe('1 new');
-    // One click lands on the arrival, not the first new message.
     act(() => pill.click());
     expect(scrolled).toEqual(['msg_C']);
     expect(document.activeElement).toBe(el.querySelector('[data-message-article="msg_C"] [data-fold-head]'));
-    // Seen there; scrolled back up, the pill falls back to what was new at the open, and goes to its divider.
     boxes.msg_C = { top: 400, height: 200 };
     act(() => void el.querySelector('.ib-pbody')!.dispatchEvent(new Event('scroll')));
     await wait(SEEN_DWELL_MS + 150);
@@ -436,7 +391,6 @@ describe.skipIf(!hasDom)('seen on sight in the thread pane', () => {
   });
 
   test('first lines under the pill do not count', async () => {
-    // A3 sits below the view (the pill shows), A2's first lines in the pill's band at the bottom.
     boxes = { msg_A2: { top: 760, height: 400 }, msg_A3: { top: 2000, height: 200 } };
     const seen: number[] = [];
     await openThenArrive({ onSeen: (through) => seen.push(through) }, A2, A3);
@@ -445,14 +399,12 @@ describe.skipIf(!hasDom)('seen on sight in the thread pane', () => {
   });
 
   test('the look never passes an arrival the person was not shown: the later one seen alone records nothing', async () => {
-    // Scrolled past A2 (its first lines above the view), A3 on screen.
     boxes = { msg_A2: { top: -400, height: 300 }, msg_A3: { top: 200, height: 200 } };
     const seen: number[] = [];
     const el = await openThenArrive({ onSeen: (through) => seen.push(through) }, A2, A3);
     await wait(SEEN_DWELL_MS + 200);
     expect(seen).toEqual([]);
     expect(el.querySelector('[data-message-article="msg_A3"]')!.hasAttribute('data-sighted')).toBe(true);
-    // Back up to A2: now both are seen, and the look goes up to A3.
     boxes = { msg_A2: { top: 100, height: 300 }, msg_A3: { top: 600, height: 200 } };
     fireObservers();
     await wait(SEEN_DWELL_MS + 150);
@@ -492,11 +444,6 @@ describe.skipIf(!hasDom)('seen on sight in the thread pane', () => {
     expect(scrolls).toEqual([]);
   });
 
-  // The failures these guard (the owner, 2026-10-16: "Why does this whole
-  // 'one new' thing keep showing, even though I've seen the whole message?
-  // Shows when I scroll up."): the pill counted every message below the view
-  // that was new at the open or not yet seen on sight, so a message the person
-  // had read came back into its count as soon as they scrolled up past it.
   test('an arrival read with the window in the background (no dwell) leaves the pill for good: scrolling up never brings it back', async () => {
     focused = false;
     boxes = { msg_A1: { top: 0, height: 300 }, msg_P1: { top: 300, height: 200 }, msg_A2: { top: 2000, height: 200 } };
@@ -505,13 +452,11 @@ describe.skipIf(!hasDom)('seen on sight in the thread pane', () => {
     const pill = el.querySelector<HTMLButtonElement>('[data-new-pill]')!;
     const body = el.querySelector('.ib-pbody')!;
     expect(pill.hasAttribute('data-off')).toBe(false);
-    // The person scrolls down and reads it while typing in another window: not seen on sight (no focus)...
     boxes = { msg_A1: { top: -1700, height: 300 }, msg_P1: { top: -1400, height: 200 }, msg_A2: { top: 300, height: 200 } };
     act(() => void body.dispatchEvent(new Event('scroll')));
     await wait(SEEN_DWELL_MS + 200);
     expect(seen).toEqual([]);
     expect(pill.hasAttribute('data-off')).toBe(true);
-    // ...but it was on screen: back up at the top, the pill stays away.
     boxes = { msg_A1: { top: 0, height: 300 }, msg_P1: { top: 300, height: 200 }, msg_A2: { top: 2000, height: 200 } };
     act(() => void body.dispatchEvent(new Event('scroll')));
     expect(pill.hasAttribute('data-off')).toBe(true);
@@ -521,13 +466,11 @@ describe.skipIf(!hasDom)('seen on sight in the thread pane', () => {
     const R = message(ROOT, AGENT, 2, 'The refund webhook is wired.');
     const B1 = message('msg_B1', AGENT, 3, 'Retries next.');
     const B2 = message('msg_B2', AGENT, 5, 'Retries are on.');
-    // B1 on screen at the open, B2 below it.
     boxes = { [ROOT]: { top: 0, height: 300 }, msg_B1: { top: 400, height: 200 }, msg_B2: { top: 1200, height: 200 } };
     const el = await openThenArrive({ onSeen: () => {}, base: [R, B1, B2], lookSeq: 2, seenThrough: 5 });
     const pill = el.querySelector<HTMLButtonElement>('[data-new-pill]')!;
     const body = el.querySelector('.ib-pbody')!;
     expect(pill.textContent).toBe('1 new');
-    // Scrolled down to B2, then back to the top: both have been on screen.
     boxes = { [ROOT]: { top: -800, height: 300 }, msg_B1: { top: -400, height: 200 }, msg_B2: { top: 400, height: 200 } };
     act(() => void body.dispatchEvent(new Event('scroll')));
     expect(pill.hasAttribute('data-off')).toBe(true);
@@ -541,7 +484,6 @@ describe.skipIf(!hasDom)('seen on sight in the thread pane', () => {
     stub(HTMLElement.prototype, 'clientHeight', { get: () => 800 });
     stub(HTMLElement.prototype, 'scrollTop', { get: () => 400, set: () => {} });
     stub(HTMLElement.prototype, 'scrollBy', { value: () => {} });
-    // The last message, fully visible above the foot, its top inside the pill's 56 px band.
     boxes = { msg_A2: { top: 752, height: 40 } };
     const seen: number[] = [];
     const el = await openThenArrive({ onSeen: (through) => seen.push(through) }, A2);
@@ -588,7 +530,6 @@ describe.skipIf(!hasDom)('seen on sight in the thread pane', () => {
     article.appendChild(sender);
     document.body.appendChild(article);
     try {
-      // Drawn 6 px low while its entrance runs.
       boxes = { msg_X: { top: 406, height: 200 } };
       expect(measureFirstLines(article)).toEqual({ top: 406, bottom: 436 + FIRST_LINES_PX, line: 436 });
       article.setAttribute('data-arrived', '');
@@ -611,14 +552,11 @@ describe('the rules', () => {
     expect(firstLines({ top: 100, bottom: 600 }, null, null)).toEqual({ top: 100, bottom: 100 + FIRST_LINES_PX, line: 100 + FIRST_LINE_PX });
   });
 
-  // The failure this guards: on a view shorter than the first lines plus the
-  // pill's band (a phone on its side, the keyboard up) nothing could ever be seen.
   test('a view too short for the first lines above the pill needs only the first line', () => {
     const lines = { top: 100, bottom: 226, line: 130 };
     expect(requiredLines(lines, { top: 0, bottom: 800 }, 56)).toEqual({ top: 100, bottom: 226 });
     expect(requiredLines(lines, { top: 0, bottom: 160 }, 56)).toEqual({ top: 100, bottom: 130 });
     expect(firstLinesInView(requiredLines({ top: 10, bottom: 136, line: 40 }, { top: 0, bottom: 160 }, 56), { top: 0, bottom: 160 }, 56)).toBe(true);
-    // Without the pill the same view holds the first lines whole.
     expect(requiredLines(lines, { top: 0, bottom: 160 }, 0)).toEqual({ top: 100, bottom: 226 });
     expect(requiredLines(lines, { top: 0, bottom: 100 }, 0)).toEqual({ top: 100, bottom: 130 });
   });

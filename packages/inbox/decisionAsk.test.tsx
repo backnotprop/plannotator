@@ -1,9 +1,3 @@
-/**
- * Settings -> Decision data's Ask box, over a scripted `fetch`: who it asks, what a press sends, what no agent running
- * shows, and what a press that fails leaves behind. The agent's side is `packages/server/inbox-decision-ask.test.ts`.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -89,7 +83,6 @@ async function open() {
 const box = (el: ParentNode) => el.querySelector('input') as HTMLInputElement;
 const go = (el: ParentNode) => el.querySelector('[data-ask-go]') as HTMLButtonElement | null;
 const copy = (el: ParentNode) => el.querySelector('[data-ask-copy]') as HTMLButtonElement | null;
-/** The line under the heading: the part that says who would answer, when someone can. */
 const lede = (el: ParentNode) => el.querySelector('[data-decision-ask] > p')!.textContent ?? '';
 
 function type(el: ParentNode, words: string) {
@@ -156,7 +149,6 @@ test.skipIf(!hasDom)('with no agent running it says so and offers Copy of the qu
   await press(el);
   expect(sends).toEqual([]);
   expect(window.location.hash).toBe('#settings/activity');
-  // Changing the question takes the Copied mark back.
   type(el, 'And when?');
   expect(copy(el)!.textContent).not.toContain('Copied');
 });
@@ -174,7 +166,6 @@ test.skipIf(!hasDom)('with several agents the choice holds by session, even when
   });
   expect(go(el)!.textContent).toContain('Pi');
   type(el, 'Why?');
-  // The agent went while this was open: nothing was sent, and the box reads the sessions there are now.
   live = [group('lantern', [b]), group('harbor', [a])];
   answer = () => new Response(JSON.stringify({ error: 'gone', code: 'session_not_live' }), { status: 409 });
   await press(el);

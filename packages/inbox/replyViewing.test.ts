@@ -1,4 +1,3 @@
-/** What the floating box's Send says was on screen: the window's half of the line (the server names the file). */
 import { expect, test } from 'bun:test';
 import { replyViewingOf } from './replyViewing';
 

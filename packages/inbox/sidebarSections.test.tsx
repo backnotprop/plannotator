@@ -1,17 +1,3 @@
-/**
- * Pinned and Projects open and close like folders (owner's pick, direction C
- * "The section is the folder"). What is proved, on the window's own Sidebar:
- * a click on a header closes and opens its section (aria-expanded, and
- * aria-controls naming the rows), the choice is this browser's cookie and
- * survives a remount; closed, the current row stays (the project the list
- * shows, the open pinned thread); a closed Pinned counts the pins waiting on
- * the person and a closed Projects shows no count; Unpin from a closed
- * section moves focus to the next row on screen, then the Pinned header, then
- * Inbox; the onboarding tour's sidebar ignores the cookie. Pinning while
- * Pinned is closed opening it needs the window's pin write: pinnedThreads.test.tsx.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { readFileSync } from 'node:fs';
@@ -67,7 +53,6 @@ function pin(id: string, section: string, extra: Record<string, unknown> = {}): 
     ...extra,
   } as unknown as InboxListRow;
 }
-// Stopped, Holds and a question count wait on the person; news (a dot) and a quiet thread do not.
 const PINS = [pin('t_stop', 'stopped'), pin('t_hold', 'holding'), pin('t_wait', 'waiting'), pin('t_new', 'new', { unseen: 1 }), pin('t_quiet', 'quiet')];
 
 const noop = () => {};
@@ -120,7 +105,6 @@ test.skipIf(!hasDom)('a header closes and opens its section, says so, and the ch
     const h = header(section);
     expect(h.tagName).toBe('BUTTON');
     expect(h.getAttribute('aria-expanded')).toBe('true');
-    // aria-controls names the element that holds the section's rows; the section is labelled by its header.
     const body = document.getElementById(h.getAttribute('aria-controls')!)!;
     expect(body.getAttribute('aria-labelledby')).toBe(h.id);
   }
@@ -146,7 +130,6 @@ test.skipIf(!hasDom)('a header closes and opens its section, says so, and the ch
   click(header('projects'));
   expect(pinIds()).toHaveLength(5);
   expect(projectNames()).toEqual(['alpha', 'beta']);
-  // Both open is the default: no cookie left behind.
   expect(storage.getItem(SIDEBAR_CLOSED_COOKIE)).toBeNull();
 });
 
@@ -157,7 +140,6 @@ test.skipIf(!hasDom)('closed, a section still shows where the person is: the pro
   expect(document.querySelector('.ib-proj')!.getAttribute('aria-current')).toBe('page');
   expect(pinIds()).toEqual(['t_new']);
   expect(document.querySelector('[data-pinned-row="t_new"]')!.getAttribute('aria-current')).toBe('true');
-  // Off the list (Settings), nothing is current: the closed sections show their headers only.
   draw({ page: 'settings', projectId: 'prj_b', openThreadId: 't_new' });
   expect(projectNames()).toEqual([]);
   expect(pinIds()).toEqual([]);
@@ -168,8 +150,7 @@ test.skipIf(!hasDom)('a closed Pinned counts the pins waiting on the person; ope
   expect(header('pinned').querySelector('.ib-n')).toBeNull();
   click(header('pinned'));
   click(header('projects'));
-  // Stopped, Holds and the question count: 3. The news dot and the quiet thread are not on the person.
-  // "N waiting on you" is pinned on purpose: it is the header's accessible name for a screen reader.
+  // "N waiting on you" is the header's accessible name for a screen reader.
   expect(header('pinned').querySelector('.ib-n')!.textContent).toBe('3 waiting on you');
   expect(header('pinned').textContent).toContain('Starred');
   expect(header('projects').querySelector('.ib-n')).toBeNull();
@@ -188,7 +169,6 @@ async function press(el: HTMLElement) {
   });
 }
 
-/** Unpin the open pinned thread from its ⋯ (the only pinned row a closed Pinned shows), then draw the pins without it. */
 async function unpinFromMenu(id: string, rest: InboxListRow[], over: Partial<SidebarProps>) {
   const more = document.querySelector<HTMLElement>(`[data-pin-more="${id}"]`)!;
   more.focus();
@@ -203,19 +183,16 @@ test.skipIf(!hasDom)('Unpin in a closed section: focus goes to the next row on s
   const unpinned: string[] = [];
   const onPinAction = (row: InboxListRow) => void unpinned.push(row.thread_id);
   storage.setItem(SIDEBAR_CLOSED_COOKIE, 'pinned');
-  // Pinned closed, Projects open: the next row on screen is the first project.
   draw({ openThreadId: 't_stop', onPinAction });
   await unpinFromMenu('t_stop', PINS.slice(1), { onPinAction });
   expect(unpinned).toEqual(['t_stop']);
   expect(document.activeElement?.textContent).toContain('alpha');
 
-  // Both closed, no project current: no row on screen, so the Pinned header.
   storage.setItem(SIDEBAR_CLOSED_COOKIE, 'pinned,projects');
   remount({ openThreadId: 't_hold', onPinAction, pins: PINS.slice(1) });
   await unpinFromMenu('t_hold', PINS.slice(2), { onPinAction });
   expect(document.activeElement).toBe(header('pinned'));
 
-  // The last pin: Pinned goes with it, so Inbox.
   remount({ openThreadId: 't_quiet', onPinAction, pins: [PINS[4]!] });
   await unpinFromMenu('t_quiet', [], { onPinAction });
   expect(document.querySelector('[data-sidebar-section="pinned"]')).toBeNull();
@@ -229,7 +206,6 @@ test.skipIf(!hasDom)('the focused current row going away under a closed header (
   draw({ openThreadId: null, projectId: 'prj_b' });
   expect(pinIds()).toEqual([]);
   expect(document.activeElement).toBe(header('pinned'));
-  // The project the list showed, left by Back: the Projects header.
   act(() => document.querySelector<HTMLElement>('.ib-proj')!.focus());
   draw({ openThreadId: null, projectId: null });
   expect(projectNames()).toEqual([]);
@@ -253,7 +229,6 @@ test.skipIf(!hasDom)("the onboarding tour's sidebar ignores the cookie: Projects
   );
   expect(header('projects').getAttribute('aria-expanded')).toBe('true');
   expect(projectNames()).toEqual([fixture.project]);
-  // A toggle there is the tour's own: the person's choice stays as it was.
   click(header('projects'));
   expect(header('projects').getAttribute('aria-expanded')).toBe('false');
   expect(storage.getItem(SIDEBAR_CLOSED_COOKIE)).toBe('pinned,projects');

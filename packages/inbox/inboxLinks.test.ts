@@ -1,9 +1,3 @@
-/**
- * Which links open in this window (links.ts `inboxLinkHash`): the address has
- * to be this Inbox, under any of its spellings, and the hash a route the window
- * reads. Everything else stays the browser's new tab, so a linked machine's
- * thread never opens as an empty one here.
- */
 import { describe, expect, test } from 'bun:test';
 import { inboxLinkHash, type InboxHere } from './links';
 

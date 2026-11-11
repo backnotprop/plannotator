@@ -1,34 +1,3 @@
-/**
- * Assertions compare booleans and strings, never elements: a failed `expect(element)` makes bun print a happy-dom
- * node, which can take the test process down instead of failing the test.
- *
- * The reply box's foot on a phone (approval "inbox-reply-foot-phone", variant B "Summary"): one quiet line naming
- * only what goes with this Send ("4 questions open · 3 comments"), over the box's row (approval "inbox-reply-box",
- * T6). The owner, of the stacked chips it replaces: "very bad looking on mobile. not good, not acceptable".
- *
- * - The row (T6, and the owner's note on it: "maybe we don't need delete icon. I like attachment on left"): the
- *   paperclip first, then Skills (and, in a thread with several agents, who gets the reply: approval
- *   "inbox-phone-composer-picker"), the mic and Send (a round arrow, still named "Send") at the right edge; no bin,
- *   and Discard stays on the Draft line above the box.
- * - Nothing waiting: no line, and no "2 picks" chip (the answers list above says it).
- * - Comments only: the line opens the comments list itself, and closing the list puts focus back on the line.
- * - Questions: the line opens a sheet; its "Skip them" skips them for this Send, and the line says so.
- * - Both: the sheet holds both; "Review" opens the comments list.
- * - Picks on a replaced question that won't be sent: in the sheet.
- * - Where the row is too narrow for the full words (a 320 px phone): "4 open · 3 comments".
- * - Focus: Escape, × and the scrim's click close the sheet, back on the line; the scrim's press alone does not.
- * - Questions gone while the sheet is open: it closes for good; a later question does not reopen it or take focus.
- * - The last comment removed from the list: focus goes to the field.
- * - The line's name is its own words; the full sentence is its description.
- * - A computer shows the chips while they fit (ReplyRow.tsx folds them into the line when they don't).
- * - A failed Send (decision D3): one plain line, the Inbox's own words behind Details; a refusal written for people
- *   stays as it is.
- *
- * The layout (one row, 44 px targets at 390 and 320, the box's cap, the row still while dictating) is proved in
- * tests/e2e/inbox-reply-foot-phone.spec.ts.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -62,7 +31,6 @@ const CARD = [
 const PROSE = 'The worker drains in order, and the dead-letter path is wired.';
 
 type Tweak = (q: InboxQuestion) => InboxQuestion;
-/** The first choice picked. */
 const answerOf = (q: InboxQuestion) => ({ v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: [q.choices[0]!.label] }) as InboxQuestion['answer'];
 function questionsOf(messageId: string, body: string, tweak: Tweak): InboxQuestion[] {
   return parseInboxQuestionBlocks(body).map((q) =>
@@ -148,9 +116,7 @@ let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let comments: InboxAnnotationRecord[] = [];
 let closes = 0;
-/** What a reply's POST gets back; null: the stub's plain `{}`. */
 let replyAnswer: (() => Response) | null = null;
-/** The draft route's answer in place of the stub's (null: the stub's own), and the DELETEs it took. */
 let draftAnswer: ((init?: RequestInit) => Response) | null = null;
 let draftDeletes = 0;
 
@@ -167,12 +133,10 @@ beforeEach(() => {
     const path = String(input);
     if (path.includes('/draft') && init?.method === 'DELETE') draftDeletes += 1;
     if (path.includes('/draft') && draftAnswer) return draftAnswer(init);
-    // A saved draft: the box opens holding it.
     if (path.includes('/draft')) return Response.json({ serverSession: 's', draft: draft(init?.method === 'POST' ? JSON.parse(String(init.body)).body : 'Mostly yes.') });
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: comments.length ? [file] : [], annotations: comments });
     if (path.includes('/sessions')) return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, sessions: [] });
     if (path.endsWith('/reply') && replyAnswer) return replyAnswer();
-    // The thread read again after a Send that failed: the reply is not in it, so nothing went.
     if (path.endsWith(`/threads/${THREAD}`) && (!init?.method || init.method === 'GET')) return Response.json({ serverSession: 's', thread: thread(false) });
     return Response.json({});
   }) as typeof fetch;
@@ -198,7 +162,6 @@ async function settle(turns = 4, ms = 20) {
   }
 }
 
-/** The pane drawn (again) with this thread: a re-render is the thread's questions changing under an open box. */
 function draw(questions: boolean, tweak: Tweak | undefined, phone: boolean) {
   root!.render(
     <div className="pn-inbox">
@@ -235,29 +198,23 @@ const description = (el: HTMLElement | null) => {
 const buttonIn = (el: ParentNode | null, name: string) =>
   [...(el?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find((b) => b.textContent?.trim() === name || b.getAttribute('aria-label') === name) ?? null;
 
-/** The row's controls in order, by what each is: what a press there does, not how it looks. */
 const rowOrder = (el: HTMLElement) =>
   [...el.querySelectorAll<HTMLElement>('.ib-rbox [data-reply-row] :is([data-reply-attach], [data-reply-skills], [data-recipient], [data-voice-mic], [data-reply-send], [data-reply-discard])')].map((c) =>
     c.hasAttribute('data-reply-attach') ? 'attach' : c.hasAttribute('data-reply-skills') ? 'skills' : c.hasAttribute('data-recipient') ? 'recipient' : c.hasAttribute('data-voice-mic') ? 'mic' : c.hasAttribute('data-reply-send') ? 'send' : 'bin',
   );
 
 test.skipIf(!hasDom)('a phone: the row is the paperclip first, Skills, then the mic and Send (an arrow named "Send") at the right edge; no bin, and Discard is on the Draft line above the box', async () => {
-  // The mic is in the row only with voice on.
   const { adoptVoiceSettings } = await import('./voice');
   adoptVoiceSettings({ on: true, phones_only: false, engine: 'codex', key: { source: null, last4: null }, computer: null, intro_due: false, guest: false });
   try {
     const el = await open({ questions: false });
-    // One agent here: no recipient control, as on a computer (it comes only with several agents:
-    // replyRecipient.test.tsx). Send is the arrow; the word is still its name.
     expect(rowOrder(el)).toEqual(['attach', 'skills', 'mic', 'send']);
     const send = el.querySelector('.ib-rbox [data-reply-send]')!;
     expect(!!send.querySelector('svg.ib-rsend-i')).toBe(true);
     expect(send.textContent?.trim()).toBe('Send');
     expect(!!el.querySelector('.ib-rbox [data-reply-discard]')).toBe(false);
-    // The draft the box opened with is saved: the line above the box says so, with its Discard.
     expect(el.querySelector('[data-draft-above] [data-draft-stamp]')?.textContent).toContain('Saved');
     expect(!!el.querySelector('[data-draft-above] [data-draft-discard]')).toBe(true);
-    // Nothing goes with this reply: no line over the row, and none of a computer's chips.
     expect(!!(line(el))).toBe(false);
     expect(!!(el.querySelector('.ib-rbox [data-annotations-chip], .ib-rbox [data-skip-chip], .ib-rbox [data-picks-chip]'))).toBe(false);
   } finally {
@@ -271,7 +228,6 @@ test.skipIf(!hasDom)('a computer: Send first, the paperclip, Skills and the mic,
   try {
     const el = await open({ questions: false, phone: false });
     expect(rowOrder(el)).toEqual(['send', 'attach', 'skills', 'mic', 'bin']);
-    // Nothing sits above the box on a computer: the bin is its Discard.
     expect(!!el.querySelector('[data-draft-above]')).toBe(false);
     expect(el.querySelector('.ib-rbox [data-reply-discard]')?.getAttribute('aria-label')).toBe('Discard draft');
   } finally {
@@ -283,14 +239,12 @@ test.skipIf(!hasDom)('a computer: Send says Send and no more: no tooltip on hove
   const { tooltipOf, unhover } = await import('./testing/tooltip');
   const el = await open({ questions: false, phone: false });
   const send = el.querySelector<HTMLButtonElement>('.ib-rbox [data-reply-send]')!;
-  // The owner: "Nobody needs to see command enter for send" (approval "inbox-send-no-shortcut-hint").
   expect(await tooltipOf(send.closest('[data-tip-wrap]') ?? send)).toBeNull();
   unhover(send.closest('[data-tip-wrap]') ?? send);
   expect(!!send.querySelector('kbd, [data-shortcut-hint]')).toBe(false);
   expect(send.getAttribute('aria-keyshortcuts') ?? '').toMatch(/^(Meta|Control)\+Enter$/);
 });
 
-/** Words typed into the box, as a person types them. */
 function typeInBox(el: HTMLElement, words: string) {
   const text = el.querySelector('.ib-rbox textarea') as HTMLTextAreaElement;
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
@@ -302,7 +256,6 @@ function typeInBox(el: HTMLElement, words: string) {
 
 test.skipIf(!hasDom)('a computer, after a conflict: the bin is "Discard mine": only this window\'s words go, the other window\'s draft stays and comes into the box', async () => {
   const el = await open({ questions: false, phone: false });
-  // Another window saved "Theirs." meanwhile: this window's save is refused, and the draft read back is theirs.
   let stored = 'Mostly yes.';
   const draftOf = (body: string): InboxReplyDraft => ({ v: 1, thread_id: THREAD, body, created_at: '2026-11-02T10:10:00.000Z', updated_at: new Date().toISOString() });
   draftAnswer = (init) => {
@@ -320,7 +273,6 @@ test.skipIf(!hasDom)('a computer, after a conflict: the bin is "Discard mine": o
   expect(bin?.getAttribute('aria-label')).toBe('Discard my words');
   await press(bin);
   await settle();
-  // Nothing was deleted on the server: the other window's words are the draft, and now in the box.
   expect(draftDeletes).toBe(0);
   expect(stored).toBe('Theirs.');
   expect((el.querySelector('.ib-rbox textarea') as HTMLTextAreaElement | null)?.value).toBe('Theirs.');
@@ -378,7 +330,6 @@ test.skipIf(!hasDom)('Skills with a skill to pick types a real "/" at the caret,
   }
 });
 
-/** The words a failed Send leaves under the box, and its Details. */
 const failure = (el: HTMLElement) => {
   const alert = el.querySelector<HTMLElement>('.ib-pfoot .ib-error[role="alert"]');
   const details = alert?.querySelector<HTMLDetailsElement>('[data-error-details]') ?? null;
@@ -401,7 +352,6 @@ for (const phone of [false, true]) {
       details: "EACCES: permission denied, open '/Users/me/.plannotator/inbox/projects/ledger-abcdef/threads/msg_01M6RF.jsonl'",
       folded: true,
     });
-    // Nothing was lost: the box is still open with the words, and Send can be pressed again.
     expect((el.querySelector('.ib-rbox textarea') as HTMLTextAreaElement | null)?.value).toBe('Mostly yes.');
     expect(el.querySelector<HTMLButtonElement>('.ib-rbox [data-reply-send]')?.disabled).toBe(false);
   });
@@ -437,7 +387,6 @@ test.skipIf(!hasDom)('questions only: the line opens a sheet whose Skip them ski
   await press(buttonIn(sheet(), 'Skip them'));
   expect(status()).toContain('4 questions will be skipped when you send.');
   expect(words(el)).toBe('4 questions to skip');
-  // The sheet stays, its switch now the way back.
   await press(buttonIn(sheet(), 'Keep open'));
   expect(status()).not.toContain('will be skipped');
   expect(words(el)).toBe('4 questions open');
@@ -458,12 +407,10 @@ test.skipIf(!hasDom)('Escape and × close the sheet, focus back on the line', as
   const el = await open({ questions: true, n: 1 });
   await press(line(el));
   expect(document.activeElement === sheet()).toBe(true);
-  // Escape pressed in the sheet (focus is on it).
   await act(async () => sheet()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
   await settle(2);
   expect(!!(sheet())).toBe(false);
   expect(document.activeElement === line(el)).toBe(true);
-  // Escape went to the sheet alone: the reply box is still open and the thread was not closed.
   expect(!!(el.querySelector('.ib-rbox textarea'))).toBe(true);
   expect(closes).toBe(0);
   await press(line(el));
@@ -478,8 +425,6 @@ test.skipIf(!hasDom)('the sheet is modal; a press on its scrim stays there, and 
   expect(sheet()?.getAttribute('aria-modal')).toBe('true');
   const scrim = document.querySelector<HTMLElement>('[data-foot-sheet] .ib-fsheet-scrim');
   expect(!!scrim).toBe(true);
-  // The press: kept from the page (no focus move), and the sheet still there, so the tap's click lands on the scrim
-  // and not on what is under it once the sheet is gone.
   let kept = false;
   await act(async () => {
     const down = new PointerEvent('pointerdown', { bubbles: true, cancelable: true });
@@ -505,9 +450,7 @@ test.skipIf(!hasDom)('questions gone while the sheet is open (answered elsewhere
   await settle(2);
   expect(!!sheet()).toBe(false);
   expect(!!line(el)).toBe(false);
-  // Focus did not fall to the page: the paperclip has it (not the field, which would raise the keyboard).
   expect(document.activeElement?.hasAttribute('data-reply-attach') ?? false).toBe(true);
-  // The person types again; then the agent asks again.
   const field = el.querySelector<HTMLTextAreaElement>('.ib-rbox textarea')!;
   act(() => field.focus());
   act(() => draw(true, oneOpen, true));
@@ -567,7 +510,6 @@ test.skipIf(!hasDom)('where the full words do not fit (a 320 px phone), the line
   try {
     const el = await open({ questions: true, n: 3 });
     expect(words(el)).toBe('4 open · 3 comments');
-    // Its name is the words it shows (a voice-control user says "4 open"); its description says it whole.
     expect(line(el)?.hasAttribute('aria-label')).toBe(false);
     expect(description(line(el))).toBe('4 questions stay open, 3 comments');
   } finally {
@@ -577,7 +519,6 @@ test.skipIf(!hasDom)('where the full words do not fit (a 320 px phone), the line
 });
 
 test.skipIf(!hasDom)('a smaller text size, the row as wide as before: the line is fitted again and says it whole', async () => {
-  // At 14 the words take 8 px a character in a 170 px box (short); at 12 there is room (the box fits 400 px of them).
   const { chooseTextSize, resetInboxTextSizeForTests } = await import('./textSize');
   const proto = HTMLElement.prototype;
   const saved = { scroll: Object.getOwnPropertyDescriptor(proto, 'scrollWidth'), client: Object.getOwnPropertyDescriptor(proto, 'clientWidth') };
@@ -615,13 +556,11 @@ test.skipIf(!hasDom)('a narrow computer pane (the summary line in place of the c
   try {
     const el = await open({ questions: true, n: 3, phone: false });
     expect(!!el.querySelector('.ib-rbox [data-reply-row] [data-skip-chip]')).toBe(false);
-    // (Long or short words: this DOM measures no text.)
     expect(words(el)).toMatch(/^4 (questions )?open · 3 comments$/);
     await press(line(el));
     const skip = buttonIn(sheet(), 'Skip them');
     act(() => skip?.focus());
     await press(skip);
-    // The press changed what goes with the reply; the line was not drawn anew under the person.
     expect(!!sheet()).toBe(true);
     expect(document.activeElement === buttonIn(sheet(), 'Keep open')).toBe(true);
     expect(words(el)).toMatch(/^4 (questions )?to skip · 3 comments$/);
@@ -632,7 +571,6 @@ test.skipIf(!hasDom)('a narrow computer pane (the summary line in place of the c
 });
 
 test.skipIf(!hasDom)('a computer with the comments list open from its chip: a change in what goes with the reply keeps the chip and its list (the open list is never measured as chips)', async () => {
-  // The chips fit (200 of 300 px); the open list makes the cell scroll wide (900), as a popover inside it does.
   const proto = HTMLElement.prototype;
   const saved = { scroll: Object.getOwnPropertyDescriptor(proto, 'scrollWidth'), client: Object.getOwnPropertyDescriptor(proto, 'clientWidth') };
   const isLayer = (el: HTMLElement) => el.classList.contains('ib-rlayer');
@@ -644,7 +582,6 @@ test.skipIf(!hasDom)('a computer with the comments list open from its chip: a ch
     expect(!!chip()).toBe(true);
     await press(chip());
     expect(!!el.querySelector('[data-comments-list]')).toBe(true);
-    // Three questions answered elsewhere meanwhile: the skip chip's words change.
     act(() => draw(true, oneOpen, false));
     await settle(2);
     expect(!!chip()).toBe(true);
@@ -657,11 +594,8 @@ test.skipIf(!hasDom)('a computer with the comments list open from its chip: a ch
 });
 
 test('the closed foot is today\'s bar: no style redraws the open questions button\'s words as a bare count, or moves its buttons', () => {
-  // Its words are footFit's forms ("2 open", "Questions", the icon alone), never a count CSS draws (which reads "0"
-  // when the open items are action items or permissions, or every question is answered in the draft).
   const css = readFileSync(join(import.meta.dir, 'inbox.css'), 'utf8');
   expect(css).not.toMatch(/attr\(data-oq-(?:n|actions|permission|label)\)/);
-  // The closed foot's buttons keep today's order (the bottom-bar question is the owner's).
   expect(css).not.toMatch(/\[data-open-questions\][^{}]*\{[^}]*(?:^|[;\s])order\s*:/m);
   expect(css).not.toMatch(/\.ib-footbtns[^{}]*\.ib-pri[^{}]*\{[^}]*(?:^|[;\s])order\s*:/m);
 });

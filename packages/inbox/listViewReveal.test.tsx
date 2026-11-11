@@ -1,20 +1,3 @@
-/**
- * The List view's one-time choice in a DOM (approval "inbox-list-view-dialog"), registered with the Inbox's schedule
- * of one-time dialogs (approval "inbox-one-time-dialogs", the change): the line's hook (reveal.ts `useLineReveal`)
- * with List view's own moment and need, driving `ListViewIntro`, as App wires them.
- *
- * What regresses: the dialog arming without the line (settings `reveal.next` is not `list_view` and `reveal.ahead`
- * does not name it, or an older Inbox reports no line); opening without the line's claim (`POST /api/inbox/reveal`
- * `list_view`) or after the Inbox refused it; showing on load, or with any one blocker present (the list not taller
- * than the screen, the list already Simple, another one-time dialog this load, a toast, something typed or open, a
- * thread left for another thread while the page is not idle); the page going idle not being its moment in a split
- * view, where a thread stays open beside the list and the person goes thread to thread, never back to the list (the
- * owner, 2026-11-08: "Some people may never see them"), or an idle page claiming before the page's age; "Simple list"
- * not switching the list at once or not remembering it as the ⋮ menu
- * does; Escape or a click outside not counting as the line's Not now, or a pick counting as one.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -41,7 +24,6 @@ let savedTimes: typeof reveal.REVEAL_TIMES;
 let savedIdleMs = 0;
 let savedFetch: typeof fetch;
 let posts: { path: string; body: Record<string, unknown> }[] = [];
-/** Whether the Inbox grants the claim (false: not its turn any more, or another tab won). */
 let grants = true;
 
 beforeEach(() => {
@@ -56,7 +38,6 @@ beforeEach(() => {
   savedTimes = { ...reveal.REVEAL_TIMES };
   Object.assign(reveal.REVEAL_TIMES, TIMES);
   savedIdleMs = idleClock.IDLE_CLOCK.idleMs;
-  // The tab in front (the idle clock counts only then).
   Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
   Object.defineProperty(document, 'hasFocus', { configurable: true, value: () => true });
   savedFetch = globalThis.fetch;
@@ -120,12 +101,10 @@ function row(id: string, n: number): InboxListRow {
 }
 const FIVE = ['a', 'b', 'c', 'd', 'e'].map(row);
 
-/** The settings' line for this load: `reveal` as the Inbox reports it (none: an older Inbox). */
 type Line = { next: InboxRevealId | null; ahead?: InboxRevealId[] } | undefined;
 
 interface State {
   blocked: boolean;
-  /** The list is taller than the screen (App: `listTallerThanScreen` of the list's body). */
   taller: boolean;
   toast: boolean;
   thread: string | null;
@@ -133,10 +112,8 @@ interface State {
 }
 const BASE: State = { blocked: false, taller: true, toast: false, thread: null, held: false };
 
-/** The view the list would draw (App reads the same hook). */
 let drawn: ListView = 'grouped';
 
-/** App's wiring (App.tsx): armed from the load's latch of `reveal`, the line's claim, Not now from Escape. */
 function Harness({ state, line }: { state: State; line: Line }) {
   const [view, setView] = listView.useListView();
   drawn = view;
@@ -195,7 +172,6 @@ function mount(state: State, line: Line) {
 
 const NEXT: Line = { next: 'list_view', ahead: [] };
 
-/** The calm moment: the page past its age, a thread opened, then back to the list (or on to `to`). */
 async function leave(line: Line, state: Partial<State> = {}, to: string | null = null) {
   const set = mount({ ...BASE, ...state }, line);
   await wait(TIMES.pageAgeMs + 20);
@@ -213,29 +189,23 @@ describe.skipIf(!hasDom)('the List view choice, through the line', () => {
     expect(dialog()).toBeNull();
     set({ thread: null });
     await until(() => dialog() !== null);
-    // The line's claim, with the page's key: the Inbox stamps it and decides the day.
     expect(claims().map((c) => c.body)).toEqual([{ id: 'list_view', key: expect.any(String) }]);
-    // Named and described for a screen reader; focus on the question, so neither choice looks picked.
     expect(document.getElementById(dialog()!.getAttribute('aria-labelledby')!)?.textContent).toBe('Which view do you prefer?');
     expect(document.getElementById(dialog()!.getAttribute('aria-describedby')!)?.textContent).toBe('You can change this any time in the ⋮ menu.');
     expect(document.activeElement?.id).toBe('ib-lvc-title');
-    // Two equals, each with the person's own rows in its picture: the groups with their band, the list without.
     const col = (key: string) => dialog()!.querySelector(`[data-list-view-choice="${key}"]`)!.closest('.ib-lvc-col')!;
     expect(dialog()!.querySelectorAll('.ib-lvc-col [data-list-intro-preview]').length).toBe(2);
     expect(col('smart').querySelector('.ib-band')).not.toBeNull();
     expect(col('simple').querySelector('.ib-band')).toBeNull();
     expect(col('simple').querySelectorAll('[data-thread-id]').length).toBe(FIVE.length);
-    // Smart groups' button is the primary one (the owner's pick); Simple list's is plain.
     expect(dialog()!.querySelector('[data-list-view-choice="smart"]')!.classList.contains('ib-pri')).toBe(true);
     expect(dialog()!.querySelector('[data-list-view-choice="simple"]')!.classList.contains('ib-pri')).toBe(false);
-    // What the list draws now is marked "In use": the groups.
     expect([...dialog()!.querySelectorAll('[data-list-view-in-use]')].map((tag) => tag.closest('.ib-lvc-col')?.querySelector('[data-list-view-choice]')?.getAttribute('data-list-view-choice'))).toEqual(['smart']);
     expect(drawn).toBe('grouped');
     act(() => dialog()!.querySelector<HTMLButtonElement>('[data-list-view-choice="simple"]')!.click());
     expect(dialog()).toBeNull();
     expect(drawn).toBe('list');
     expect(stored.get(listView.LIST_VIEW_COOKIE)).toBe('list');
-    // A pick is an answer, not a Not now.
     await wait(50);
     expect(notNows()).toHaveLength(0);
   });
@@ -309,7 +279,6 @@ describe.skipIf(!hasDom)('the List view choice, through the line', () => {
   test('split view: a thread kept open beside the list, thread to thread, never back on the list: the page going idle is the moment', async () => {
     idleClock.IDLE_CLOCK.idleMs = 150;
     const set = mount({ ...BASE, thread: 'a' }, NEXT);
-    // Busy reading and moving between threads: no idle, no moment, past the page's age.
     for (const thread of ['b', 'c', 'd']) {
       await wait(100);
       act(() => void window.dispatchEvent(new Event('pointerdown')));
@@ -317,7 +286,6 @@ describe.skipIf(!hasDom)('the List view choice, through the line', () => {
     }
     await wait(60);
     expect(claims()).toHaveLength(0);
-    // Then the page rests on thread d: the moment, the line's claim, and the dialog over the open thread.
     await until(() => dialog() !== null);
     expect(claims().map((c) => c.body)).toEqual([{ id: 'list_view', key: expect.any(String) }]);
   });
@@ -325,7 +293,6 @@ describe.skipIf(!hasDom)('the List view choice, through the line', () => {
   test('an idle page waits for the page\'s age before it claims', async () => {
     idleClock.IDLE_CLOCK.idleMs = 100;
     mount({ ...BASE, thread: 'a' }, NEXT);
-    // Idle from 100 ms, but the page is younger than its age (300 ms): no claim yet.
     await wait(230);
     expect(claims()).toHaveLength(0);
     await until(() => dialog() !== null);
@@ -334,7 +301,6 @@ describe.skipIf(!hasDom)('the List view choice, through the line', () => {
 
   test('idle with the real list on the page: an open Smart group band and a sidebar section (aria-expanded, no popup) never keep it away', async () => {
     idleClock.IDLE_CLOCK.idleMs = 100;
-    // InboxList.tsx's band (groups open by default) and Sidebar.tsx's section toggle, as they render.
     document.body.insertAdjacentHTML(
       'beforeend',
       '<nav><button type="button" aria-expanded="true" data-sidebar-section="">Projects</button></nav><div class="ib-listcol"><div class="ib-lbody"><div class="ib-group" data-section-id="new"><button type="button" class="ib-band" aria-expanded="true">New since you looked</button></div></div></div>',

@@ -50,7 +50,6 @@ describe('the window recorder', () => {
     stalled.save();
     expect(stalled.openRequests()).toBe(1);
 
-    // The refresh: a new page, the same buffer, and the Inbox reachable again.
     const posted: Rec[][] = [];
     const next = createDebugRecorder({
       storage,

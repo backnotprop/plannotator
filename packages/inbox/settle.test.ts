@@ -1,10 +1,3 @@
-/**
- * The settle's plan (settle.ts): which rows slide, fade in or fade out when
- * the list on screen catches up, and where focus goes when its row left.
- * What this catches: a row redrawn at another width stretched by a FLIP, rows
- * nobody can see animated (cost with no benefit), a row that did not move
- * animated anyway, and focus handed to the wrong neighbour (or to nobody).
- */
 import { describe, expect, test } from 'bun:test';
 import { planSettle, rowInSlot, type Box } from './settle';
 

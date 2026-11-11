@@ -1,12 +1,3 @@
-/**
- * "Enter saves a comment" (#1934) on the Inbox's own comment composers,
- * against the REAL components (DOM-gated, DOM_TESTS=1): an image file's
- * comment box, a video's comment row, and the reply box's "N annotations"
- * list, where a waiting comment is edited in place. (Comments on a message's
- * text, a markdown or HTML file and a guided review use ui's CommentPopover
- * and code review's toolbar, covered beside those.) The setting is the same
- * cookie Settings → General writes in plan review, annotate and code review.
- */
 import { afterEach, beforeEach } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

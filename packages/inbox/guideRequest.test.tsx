@@ -1,14 +1,3 @@
-/**
- * Request guided review (the thread header's ⋯; guideRequest.ts). The
- * failures this catches: the item offered where nobody can act on it (an
- * archived thread, a host that gets no guided reviews, a session that has
- * ended), the request reaching another session than a typed reply would, a
- * double click sending it twice, and the request eating the person's
- * half-written reply.
- *
- * The rules are pure; the menu runs on the real ThreadPane, DOM-gated
- * (DOM_TESTS=1, from tests/dom-test-list.txt).
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -22,7 +11,6 @@ const PROJECT: InboxProject = { id: 'prj_1', key: 'billing-abcdef', name: 'billi
 const CLAUDE: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 'ses_claude', name: null };
 const PI: InboxAuthor = { kind: 'agent', host: 'pi', session: 'ses_pi', name: null };
 const [M1, M2, M3, M4, M5] = ['msg_01M62DTT05NJ59ZR4AJCDJ70XK', 'msg_01M62DTW6WCYD3ZH6Z17MFMA8G', 'msg_01M62DTXR00R23JW3GNA2KTM9H', 'msg_01M62DTXR74RT77ZXA4ZWGPMC8', 'msg_01M62DTXR74RT77ZXA4ZWGPMC9'] as const;
-/** The person's reply that hands the thread from Claude Code to Pi (settled). */
 const HANDOFF = (minute = 12) =>
   message(M3, { kind: 'person' }, 'Pi, take this over.', minute, {
     to: { host: 'pi', session: 'ses_pi' },
@@ -52,16 +40,12 @@ function threadOf(messages: InboxMessageWire[], extra: Partial<InboxThread> = {}
   return { thread_id: M1, project: PROJECT, subject: 'Retry worker for Stripe 409s', thread_name: null, resolved_at: null, messages, ...extra };
 }
 
-/** Claude Code did the work: the plan, then the PR. */
 const worked = (author: InboxAuthor = CLAUDE) =>
   threadOf([message(M1, author, 'I will retry a 409 with the same key.', 1), message(M2, author, 'Done: worker/retry.ts and its tests. PR #142 is open.', 9)]);
-
-// ── Who the request goes to (pure) ──
 
 test('the request answers the message a typed reply answers, and reaches its session', () => {
   expect(guideRequestTarget(worked())).toEqual({ message: worked().messages[1]!, to: { host: 'claude-code', session: 'ses_claude' } });
   expect(guideRequestTarget(worked(PI))?.to).toEqual({ host: 'pi', session: 'ses_pi' });
-  // Each host a reply wakes gets it: Codex and Qwen Code through MCP too.
   for (const host of ['opencode', 'codex', 'qwen']) {
     expect(guideRequestTarget(worked({ kind: 'agent', host, session: 'ses_x', name: null }))?.to.host).toBe(host);
   }
@@ -107,13 +91,10 @@ test('the words name a guided review (pinned on purpose: the agent tool lists ge
   expect(GUIDE_REQUEST_WORDS).toContain('guided review');
 });
 
-// ── The menu (DOM) ──
-
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let posted: { path: string; body: Record<string, unknown> }[] = [];
-/** The sessions the window asks about (`?asker=`), live unless named here as not. */
 let liveness: Record<string, boolean> = {};
 let replyAnswer: () => Promise<Response> = async () => Response.json({ reply: {}, questions: [], replayed: false });
 
@@ -196,7 +177,6 @@ const offered = () => requestItem() !== null;
 const labels = () => [...(threadMenu()?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])].map((el) => el.textContent?.trim());
 const replies = () => posted.filter((p) => p.path.endsWith('/reply'));
 
-/** Base UI opens on the pointer's press, as a person's click does. */
 async function openMenu() {
   const el = document.querySelector<HTMLButtonElement>('[data-thread-more]')!;
   await act(async () => {
@@ -219,7 +199,6 @@ test.skipIf(!hasDom)('the item sits in its own group above Archive, and sends on
   await render(worked());
   await openMenu();
   expect(labels()).toEqual(['Copy thread', 'Copy link', 'Copy thread ID', 'Add a pull request…', 'Request guided review', 'Archive thread']);
-  // A double click: the second press finds the request in flight and sends nothing more.
   await act(async () => {
     requestItem()!.click();
     requestItem()?.click();
@@ -228,7 +207,6 @@ test.skipIf(!hasDom)('the item sits in its own group above Archive, and sends on
   await settle();
   expect(replies()).toHaveLength(1);
   const [reply] = replies();
-  // The reply route of the agent's latest message: the session a typed reply reaches, no `to` of its own.
   expect(reply!.path).toEndWith(`/api/inbox/messages/${M2}/reply`);
   expect(reply!.body.words).toBe(GUIDE_REQUEST_WORDS);
   expect(reply!.body.to).toBeUndefined();
@@ -251,7 +229,6 @@ test.skipIf(!hasDom)('a half-written reply stays: the request carries none of it
   await settle();
   expect(replies()[0]!.body.words).toBe(GUIDE_REQUEST_WORDS);
   expect(replies()[0]!.body.clear_draft).toBeUndefined();
-  // The box and its words are as the person left them.
   const after = el.querySelector('textarea') as HTMLTextAreaElement;
   expect(after.value).toBe(WORDS);
   act(() => button(el, 'Send').click());
@@ -274,7 +251,6 @@ test.skipIf(!hasDom)('hidden, not disabled: an archived thread, a host without g
   act(() => root?.unmount());
   host?.remove();
 
-  // The session that wrote it came through a waking connection and has not been heard from since.
   liveness = { ses_claude: false };
   await render(worked());
   await until(() => !!document.querySelector('[data-session-ended]'), 'the session read as ended');
@@ -295,13 +271,11 @@ test.skipIf(!hasDom)('a refused request says so and sends again with the same ke
   await openMenu();
   await act(async () => requestItem()!.click());
   await until(() => replies().length === 2, 'the retry');
-  // The retry is the same request: the server answers a replay, never a second reply.
   expect(replies()[1]!.body.idempotency_key).toBe(replies()[0]!.body.idempotency_key);
 });
 
 test.skipIf(!hasDom)("after a hand-off the new owner's session decides: ended, no item; live, the request goes to it", async () => {
   const handed = threadOf([...worked().messages, HANDOFF()]);
-  // The former owner is live; the new owner has ended.
   liveness = { ses_claude: true, ses_pi: false };
   await render(handed);
   await until(() => posted.length === 0 && !!document.querySelector('[data-thread-more]'), 'the thread');
@@ -323,7 +297,6 @@ test.skipIf(!hasDom)("after a hand-off the new owner's session decides: ended, n
 });
 
 test.skipIf(!hasDom)("a request that failed in one thread does not hand its key to the next thread's request", async () => {
-  // The Inbox refuses a key it has seen on a reply to another message (`idempotency_key_reused`), as it does.
   const keys = new Map<string, string>();
   replyAnswer = async () => {
     const last = replies().at(-1)!;
@@ -338,7 +311,6 @@ test.skipIf(!hasDom)("a request that failed in one thread does not hand its key 
   await openMenu();
   await act(async () => requestItem()!.click());
   await until(() => !!el.querySelector('.ib-error'), 'the first request refused');
-  // The same pane now shows another thread.
   const other: InboxThread = { ...threadOf([message(M4, PI, 'Done: the refund worker and its tests.', 20, { reply_to: null, thread_id: M4, subject: 'Refund worker' })]), thread_id: M4, subject: 'Refund worker' };
   act(() =>
     root!.render(
