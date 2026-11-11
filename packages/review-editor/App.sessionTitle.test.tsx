@@ -16,7 +16,6 @@ import {
 } from "@plannotator/ui/utils/storage";
 import { configStore } from "@plannotator/ui/config";
 
-// Vite-only virtual module (`?worker&inline`), stubbed like App.panelView.test.tsx.
 mock.module("./workerPool", () => ({
   useIsWorkerPoolReadyOrDisabled: () => true,
   useWorkerPoolThemeSync: () => {},
@@ -64,8 +63,6 @@ class StubEventSource {
 }
 
 function makeFetch(title: string | undefined): typeof fetch {
-  // SAFETY: the app only ever calls fetch(input, init); the double implements
-  // that call signature and not `fetch.preconnect`.
   const impl = async (input: RequestInfo | URL) => {
     const rawUrl = input instanceof Request ? input.url : String(input);
     if (rawUrl.startsWith("https://")) return new Response(null, { status: 404 });
@@ -120,7 +117,6 @@ async function mount(title: string | undefined): Promise<void> {
   seedUnrelatedAnnouncementsSeen();
   configStore.loadFromBackend();
   globalThis.fetch = makeFetch(title);
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = StubEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -128,7 +124,6 @@ async function mount(title: string | undefined): Promise<void> {
   await act(async () => {
     root?.render(<App />);
   });
-  // The header's repository label: /api/diff has been applied.
   await waitFor(() => document.body.textContent?.includes("add-refund-flow") ?? false, "the review to load");
   await settle();
 }

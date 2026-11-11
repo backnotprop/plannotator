@@ -1,11 +1,3 @@
-/**
- * Demo tour data for development mode.
- *
- * Loaded by useTourData when jobId === DEMO_TOUR_ID, so the dialog renders
- * with realistic content without needing an agent run. Toggle via the dev-only
- * floating button in App.tsx (only shown when import.meta.env.DEV is true).
- */
-
 import type { CodeTourData } from './hooks/tour/useTourData';
 
 export const DEMO_TOUR_ID = 'demo-tour';

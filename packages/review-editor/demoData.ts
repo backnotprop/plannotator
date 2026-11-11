@@ -1,11 +1,3 @@
-/**
- * Demo diff data for development mode
- */
-
-/**
- * Full old/new file contents for demo files that need file-content serving
- * (e.g. for hideWhitespace to work in demo mode). Keyed by file path.
- */
 export const DEMO_FILE_CONTENTS: Record<string, { oldContent: string; newContent: string }> = {
   'src/config/settings.ts': {
     oldContent: `import { z } from 'zod';

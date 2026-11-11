@@ -36,8 +36,6 @@ import {
   type StorageBackend,
 } from "@plannotator/ui/utils/storage";
 
-// Vite-only virtual module (`?worker&inline`) — bun cannot resolve it, so the
-// pool hooks are stubbed exactly like AllFilesCodeView.lifecycle.test.tsx does.
 mock.module("./workerPool", () => ({
   useIsWorkerPoolReadyOrDisabled: () => true,
   useWorkerPoolThemeSync: () => {},
@@ -58,9 +56,6 @@ const memoryBackend: StorageBackend = {
   removeItem: (key) => void memory.delete(key),
 };
 
-/** Suppress the one-time dialog chain (guide intro → look-and-feel → edit
- *  mode → token hover → terminal tools) so the header is interactable on
- *  first render. */
 function seedFirstRunSeen(): void {
   memory.set("plannotator-plan-look-choice-resolved", "true");
   memory.set("plannotator-announce-tui-herdr-seen", "1");
@@ -71,9 +66,6 @@ function seedFirstRunSeen(): void {
   memory.set("plannotator-review-dest-spotlight-seen", "1");
 }
 
-/** External annotations delivered as the stream's opening snapshot, so a test
- *  can seed the session with pre-existing findings without driving the diff
- *  annotation flow. Read by the EventSource double at construction time. */
 let seededExternalAnnotations: unknown[] = [];
 
 class StubEventSource {
@@ -113,12 +105,10 @@ class StubEventSource {
 
 interface SubmittedBody {
   endpoint: "feedback" | "exit" | "pr-action";
-  /** /api/pr-action only: the review event the dialog posted (#1611). */
   action?: string;
   body?: string;
   approved?: boolean;
   feedback?: string;
-  /** /api/feedback only: set by the platform path's status post, never by an agent-path decision. */
   platform?: unknown;
   annotations?: Array<{
     id?: string;
@@ -132,25 +122,13 @@ interface SubmittedBody {
 }
 
 let submissions: SubmittedBody[] = [];
-/** How many upcoming /api/feedback POSTs answer 500. Each failed attempt is
- *  still recorded in `submissions` so its captured body can be asserted. */
 let failFeedbackPosts = 0;
-/** Upcoming /api/feedback POSTs that reject as a network error (a stopped
- *  server), recorded first. */
 let feedbackNetworkFailures = 0;
-/** When true, /api/diff carries `approvalNotesSupported: true` — the capable
- *  server. Default false mimics an OLD server whose payload has no such
- *  field at all, pinning that absent reads as not-capable. */
 let advertiseApprovalNotes = false;
-/** Extra fields merged into the /api/diff payload — a PR session is entered by
- *  shipping `prMetadata` (+ `platformUser`) exactly the way the server does. */
 let prDiffExtras: Record<string, unknown> | null = null;
-/** Set: /api/pr-action answers with this error, as the server does when the forge refuses. */
 let prActionRefusal: string | null = null;
-/** What /api/ai/capabilities answers; Ask AI is off unless a test says so. */
 let aiCapabilities: Record<string, unknown> = { available: false, providers: [] };
 
-/** GithubPRMetadata shape the diff payload carries in PR mode. */
 const PR_METADATA = {
   platform: "github",
   host: "github.com",
@@ -186,8 +164,6 @@ function seedPlatformSession(options?: { selfAuthored?: boolean; gitlab?: boolea
     prMetadata: metadata,
     platformUser: options?.selfAuthored ? metadata.author : "reviewer",
   };
-  // The submission's success path opens the PR in a new tab by default;
-  // window.open is not a browser here, so keep the toggle off.
   memory.set("plannotator-platform-open-pr", "false");
 }
 
@@ -215,8 +191,6 @@ const EXTERNAL_FINDING = {
 };
 
 function makeFetch(): typeof fetch {
-  // SAFETY: the app only ever calls fetch(input, init); the double implements
-  // that call signature and not `fetch.preconnect`.
   const impl = async (input: RequestInfo | URL, init?: RequestInit) => {
     const rawUrl = input instanceof Request ? input.url : String(input);
     if (rawUrl.startsWith("https://")) return new Response(null, { status: 404 });
@@ -231,8 +205,6 @@ function makeFetch(): typeof fetch {
         diffType: "uncommitted",
         base: null,
         hideWhitespace: false,
-        // Absent (not false) in the old-server shape: the pre-advert payload
-        // simply had no such field.
         ...(advertiseApprovalNotes ? { approvalNotesSupported: true } : {}),
         ...(prDiffExtras ?? {}),
       });
@@ -296,12 +268,8 @@ async function settle(): Promise<void> {
   });
 }
 
-/** seedFirstRunSeen minus the terminal-tools announcement, so one test can
- *  watch that dialog take its turn at the end of the chain. */
 function seedFirstRunSeenExceptTerminalTools(): void {
   seedFirstRunSeen();
-  // Not in seedFirstRunSeen: this harness leaves the token hover announcement
-  // pending, and it sits directly ahead of the terminal-tools one.
   memory.set("plannotator-token-hover-announcement-seen", "1");
   memory.delete("plannotator-announce-tui-herdr-seen");
 }
@@ -313,7 +281,6 @@ async function mount(
   setStorageBackend(memoryBackend);
   seed();
   globalThis.fetch = makeFetch();
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = StubEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -398,9 +365,6 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
     const body = submissions[0]!;
     expect(body.endpoint).toBe("feedback");
     expect(body.approved).toBe(true);
-    // Empty since PR5: consumers print approve-time feedback, so the old
-    // placeholder would be appended to every approval; '' is also what lets
-    // the archive record a bare approval as `lgtm` with no sidecar.
     expect(body.feedback).toBe("");
     expect(body.annotations).toEqual([]);
   });
@@ -420,8 +384,6 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
     expect(body.approved).toBe(false);
     expect((body.annotations ?? []).some((a) => a.id === "ext-1")).toBe(true);
     expect(body.feedback).toContain("still drops null");
-    // Agent-path feedback is never marked as the platform status post: a host
-    // that saw the flag would log it instead of delivering it.
     expect("platform" in body).toBe(false);
   });
 
@@ -444,7 +406,6 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
       lineEnd: 0,
       text: "rebase on main before merging",
     });
-    // The export the agent reads carries the note under ## Global comments.
     expect(body.feedback).toContain("## Global comments");
     expect(body.feedback).toContain("rebase on main before merging");
   });
@@ -461,28 +422,20 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
     await act(async () => discardItem.click());
     await settle();
 
-    // Frozen copy (maintainer-approved): 'Discard & approve' is the confirm.
     const confirm = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
       .find((el) => el.textContent === "Discard & approve");
     if (!confirm) throw new Error("discard confirm did not open");
-    expect(submissions).toHaveLength(0); // nothing sent before the confirm
+    expect(submissions).toHaveLength(0);
     await act(async () => confirm.click());
     await settle();
 
     expect(submissions).toHaveLength(1);
     const body = submissions[0]!;
     expect(body.approved).toBe(true);
-    // Discard means discard: bare approval, no placeholder, no annotations.
     expect(body.feedback).toBe("");
     expect(body.annotations).toEqual([]);
   });
 
-  // HIGH-1 repro (stage review): ConfirmDialog owns Mod+Enter through its own
-  // window-level handler, and stopPropagation cannot stop same-target
-  // listeners — without the sentinel guard in the app's Mod+Enter effect, one
-  // keystroke over the open discard confirm posted TWO contradictory
-  // decisions (this effect's approved:false send AND the confirm's
-  // approved:true LGTM), leaving the session outcome to a race.
   test("Mod+Enter over the open discard confirm posts exactly one decision — the confirm's", async () => {
     seededExternalAnnotations = [EXTERNAL_FINDING];
     await mountReview();
@@ -510,10 +463,6 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
     expect(body.annotations).toEqual([]);
   });
 
-  // MEDIUM-1 (stage review): the armed-note failure path. A failed POST must
-  // keep the committed note in state (the primary flips to Send Feedback with
-  // the count), the next primary invocation must retry the SAME note-carrying
-  // body, and success must clear the armed decision so nothing re-dispatches.
   test("a failed note submit stays armed; the primary retries the note-carrying body once", async () => {
     failFeedbackPosts = 1;
     await mountReview();
@@ -522,15 +471,13 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
     await typeNote("hold the line");
     await pressNoteKey("Enter", { metaKey: true });
 
-    // First attempt: captured note body, but the POST failed — no completion.
     expect(submissions).toHaveLength(1);
     expect(submissions[0]!.approved).toBe(false);
     expect((submissions[0]!.annotations ?? []).some((a) => a.scope === "general" && a.text === "hold the line")).toBe(true);
     const primary = primaryButton();
-    expect(primary).not.toBeNull(); // still reviewable, not submitted
-    expect(primary!.title).toContain("Send"); // the note kept the feedback state
+    expect(primary).not.toBeNull();
+    expect(primary!.title).toContain("Send");
 
-    // Retry via the primary: the same note-carrying body posts and succeeds.
     await act(async () => primary!.click());
     await settle();
 
@@ -542,7 +489,6 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
     expect(notes[0]!.text).toBe("hold the line");
     expect(retry.feedback).toContain("hold the line");
 
-    // Cleared on success: nothing left to re-dispatch.
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true, cancelable: true }));
     });
@@ -563,10 +509,6 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
     expect(submissions[0]!.annotations).toEqual([]);
   });
 
-  // Spec §2.2's single mechanism + the compatibility matrix (spec §6.4):
-  // the mock /api/diff here carries NO approvalNotesSupported field — the
-  // old-server shape — which must read as not-capable, so an approve-carrying
-  // item can never render where its note would be silently discarded.
   test("approve-with-notes items are absent when the server sends no advert (old server)", async () => {
     seededExternalAnnotations = [EXTERNAL_FINDING];
     await mountReview();
@@ -575,19 +517,13 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
 
     await openMenu();
     expect(menuItem("Approve with notes")).toBeUndefined();
-    expect(menuItem("discard 1 annotation")).toBeDefined(); // the menu itself is live
+    expect(menuItem("discard 1 annotation")).toBeDefined();
     await act(async () => {
       document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
     });
     await settle();
   });
 
-  // PR5 delivery, App-level (spec §6.4): under a capable server's advert the
-  // menu offers `Approve with notes`, and choosing it posts `approved: true`
-  // with the live annotations riding AND their export as the feedback — the
-  // string consumers print after the approved prompt. A regression to the old
-  // handleApprove (empty annotations, placeholder feedback) approves while
-  // silently discarding the reviewer's findings.
   test("under the advert, Approve with notes delivers the live annotations on the approval", async () => {
     advertiseApprovalNotes = true;
     seededExternalAnnotations = [EXTERNAL_FINDING];
@@ -616,11 +552,6 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
     expect(menuItem("Request changes")).toBeDefined();
   });
 
-  // Spec §3.3 / test 17 — the state-driven proof, wired end to end: the
-  // sidebar's "+ General comment" goes through the App handler (durable,
-  // history-recorded, NOT PR-stamped) and the header control flips on the
-  // same state. Guards the wiring a component test cannot see: the prop being
-  // dropped from the sidebar mount, or the handler stamping PR context.
   test("a sidebar general comment flips the header to Send Feedback and rides the posted body", async () => {
     await mountReview();
     expect(primaryButton()!.textContent).toContain("Approve");
@@ -631,7 +562,7 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
     await settle();
 
     const addButton = document.querySelector<HTMLButtonElement>("[data-add-general-comment]");
-    expect(addButton).not.toBeNull(); // reachable at totalCount === 0
+    expect(addButton).not.toBeNull();
     await act(async () => addButton!.click());
     await settle();
 
@@ -648,8 +579,6 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
     });
     await settle();
 
-    // The control is state-driven: one durable comment flips the primary.
-    // The label carries no count (maintainer ruling); the count lives in the menu copy only.
     expect(primaryButton()!.textContent).toContain("Send Feedback");
     expect(primaryButton()!.textContent).not.toMatch(/\d/);
 
@@ -666,20 +595,13 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
       lineEnd: 0,
       text: "Split this into two PRs.",
     });
-    // Not withPRContext-stamped — what lets it survive an in-place PR switch.
     expect((general as Record<string, unknown>).prUrl).toBeUndefined();
   });
 
-  // Guards the exact regression this project exists to fix on the surface
-  // that has no Mod+Enter (E16-review): compact at zero must offer a visible
-  // positive decision row, and it must post the bare approval body.
   test("the terminal-tools announcement takes its turn once the rest of the chain is done", async () => {
     const DIALOG = "[data-terminal-tools-announcement-dialog]";
     await mount(() => document.querySelector(DIALOG), seedFirstRunSeenExceptTerminalTools);
 
-    // Every other test in this file seeds the key and sees no dialog, so this
-    // pair is what proves the review chain hands the last turn over rather
-    // than swallowing it.
     expect(document.querySelector(DIALOG)).not.toBeNull();
 
     const gotIt = Array.from(document.querySelectorAll<HTMLButtonElement>(`${DIALOG} button`))
@@ -722,7 +644,6 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
     expect(memory.get("plannotator-announce-inbox-seen")).toBe("1");
     expect(submissions).toHaveLength(0);
 
-    // Seen: the next load does not show it again.
     await act(async () => root?.unmount());
     root = null;
     host?.remove();
@@ -794,8 +715,6 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
   });
 
   test("compact touch offers a positive decision row at zero and it posts", async () => {
-    // SAFETY: implements the MediaQueryList surface the shell hooks consume;
-    // coarse-pointer matches put the app in its compact touch layout.
     window.matchMedia = ((query: string) => ({
       matches: query.includes("pointer: coarse"),
       media: query,
@@ -814,7 +733,6 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
     });
     await settle();
 
-    // Frozen copy (maintainer-approved): the positive row is 'Approve'.
     const positive = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
       .find((el) => el.textContent?.trim() === "Approve");
     expect(positive).toBeDefined();
@@ -828,12 +746,6 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
   });
 });
 
-// PR6 (§3.4): platform mode adopts the control's SHAPE. Every action must
-// open the EXISTING ReviewSubmissionDialog (the only note field on this side)
-// and never post a decision by itself — the failures these guard are a menu
-// item bypassing the dialog straight into /api/pr-action or /api/feedback,
-// the self-approval mute regressing into a dead end or a live approve, and
-// Mod+Enter double-firing while the dialog is open.
 describe.if(hasDom)("review decision control (platform mode)", () => {
   const submissionDialogOpen = (title: "Post Review Comments" | "Request Changes" | `Approve ${string}`) =>
     Array.from(document.querySelectorAll("h2")).some((el) => el.textContent === title);
@@ -869,20 +781,15 @@ describe.if(hasDom)("review decision control (platform mode)", () => {
     await settle();
     await settle();
 
-    // Frozen copy (maintainer-approved): 'Post Comments' is the platform primary.
     expect(primaryButton()!.textContent).toContain("Post Comments");
     await act(async () => primaryButton()!.click());
     await settle();
 
     expect(submissionDialogOpen("Post Review Comments")).toBe(true);
-    // The dialog owns submission: opening it must post NOTHING.
     expect(submissions).toHaveLength(0);
-    // #1611: the primary keeps the plain comment flow, no event choice.
     expect(document.querySelector("[data-review-event-choice]")).toBeNull();
   });
 
-  // #1611: the menu promised a request-changes choice that did not exist and
-  // every review posted as COMMENT. These guard the choice reaching the wire.
   test("Post comments, then… offers Comment / Request changes and posts the chosen event", async () => {
     seedPlatformSession();
     seededExternalAnnotations = [EXTERNAL_FINDING];
@@ -911,14 +818,9 @@ describe.if(hasDom)("review decision control (platform mode)", () => {
     const posted = submissions.filter((s) => s.endpoint === "pr-action");
     expect(posted).toHaveLength(1);
     expect(posted[0]!.action).toBe("request_changes");
-    // GitHub refuses an empty REQUEST_CHANGES body; inline-only gets the placeholder.
     expect(posted[0]!.body?.trim()).toBeTruthy();
   });
 
-  // The status post that follows a platform submission is the ONLY
-  // /api/feedback body that may carry `platform: true`. Hosts used to infer it
-  // from an empty annotations array, which silently dropped agent-path
-  // feedback made only of PR description / PR comment / editor comments.
   test("the status post after a platform submission marks itself platform: true", async () => {
     seedPlatformSession();
     seededExternalAnnotations = [EXTERNAL_FINDING];
@@ -973,7 +875,7 @@ describe.if(hasDom)("review decision control (platform mode)", () => {
     await openMenu();
     const item = menuItem("Approve with comments");
     if (!item) throw new Error("Approve with comments… did not render");
-    expect(item.disabled).toBe(false); // not self-authored
+    expect(item.disabled).toBe(false);
     await act(async () => item.click());
     await settle();
 
@@ -988,7 +890,6 @@ describe.if(hasDom)("review decision control (platform mode)", () => {
     await settle();
     await settle();
 
-    // The primary is Post Comments — never muted by self-authorship.
     expect(primaryButton()!.getAttribute("aria-disabled")).toBeNull();
 
     await openMenu();
@@ -1017,23 +918,15 @@ describe.if(hasDom)("review decision control (platform mode)", () => {
     expect(submissionDialogOpen("Approve PR")).toBe(true);
     expect(submissions).toHaveLength(0);
 
-    // While the dialog is open, Mod+Enter belongs to the dialog: exactly one
-    // /api/pr-action submit, and the header handler must not also fire (a
-    // second dialog or a decision POST of its own).
     await pressModEnter();
 
     expect(submissions.filter((s) => s.endpoint === "pr-action")).toHaveLength(1);
-    // The post-success status message is an FYI to the agent session, not a
-    // decision: approved stays false.
     const statuses = submissions.filter((s) => s.endpoint === "feedback");
     expect(statuses).toHaveLength(1);
     expect(statuses[0]!.approved).toBe(false);
     expect(statuses[0]!.feedback).toContain("approved on GitHub");
   });
 
-  // GitLab lets an author approve their own MR unless the project forbids it:
-  // Approve stays live, and a refusal shows GitLab's answer in the open
-  // dialog, with nothing sent to the agent, so the review goes on.
   test("own GitLab MR: Approve is live; GitLab's refusal shows in the dialog and the review stays open", async () => {
     seedPlatformSession({ selfAuthored: true, gitlab: true });
     const refusal = "GitLab refused the approval (401 Unauthorized). The project may not let you approve this merge request.";
@@ -1054,7 +947,6 @@ describe.if(hasDom)("review decision control (platform mode)", () => {
     expect(document.body.textContent).toContain(refusal);
     expect(submissions.filter((s) => s.endpoint === "feedback")).toHaveLength(0);
 
-    // Request changes is still there to choose.
     await act(async () => Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Cancel")?.click());
     await settle();
     await openMenu();
@@ -1067,14 +959,11 @@ describe.if(hasDom)("review decision control (platform mode)", () => {
 
     const primary = primaryButton()!;
     expect(primary.getAttribute("aria-disabled")).toBe("true");
-    // Frozen copy (maintainer-approved): the self-approval reason. The muted
-    // primary carries it as a persistent accessible description (the visual
-    // tooltip is the Tooltip component, not a native title).
     const describedBy = primary.getAttribute("aria-describedby");
     expect(describedBy).toBeTruthy();
     expect(document.getElementById(describedBy!)?.textContent)
       .toBe("You can't approve your own pull request on GitHub.");
-    expect(primary.title).toBe(""); // no native title doubling the tooltip
+    expect(primary.title).toBe("");
 
     await act(async () => primary.click());
     await settle();
@@ -1082,8 +971,6 @@ describe.if(hasDom)("review decision control (platform mode)", () => {
     expect(submissionDialogOpen("Approve PR")).toBe(false);
     expect(submissions).toHaveLength(0);
 
-    // GitHub refuses REQUEST_CHANGES on your own PR like APPROVE (#1611), so
-    // Request changes… mutes with the reason; Comment… is the live path.
     await openMenu();
     const approveItem = menuItem("Approve with a comment");
     if (!approveItem) throw new Error("muted approve item must render, not disappear");
@@ -1095,8 +982,6 @@ describe.if(hasDom)("review decision control (platform mode)", () => {
     const commentItem = menuItem("Comment…");
     if (!commentItem) throw new Error("Comment… did not render");
     expect(commentItem.disabled).toBe(false);
-    // Roving focus skips the dead rows: initial focus lands on the first
-    // NON-disabled row, so keyboard users are never stranded on the mute.
     expect(document.activeElement).toBe(commentItem);
     await act(async () => requestItem.click());
     await settle();
@@ -1104,7 +989,6 @@ describe.if(hasDom)("review decision control (platform mode)", () => {
     await act(async () => commentItem.click());
     await settle();
     expect(submissionDialogOpen("Post Review Comments")).toBe(true);
-    // The dialog's Request changes option is disabled with the reason.
     expect(eventRadio("comment")?.checked).toBe(true);
     expect(eventRadio("request_changes")?.disabled).toBe(true);
     expect(document.getElementById("review-request-changes-reason")?.textContent)
@@ -1121,7 +1005,6 @@ describe.if(hasDom)("review decision control (platform mode)", () => {
 
     expect(primaryButton()!.textContent).toContain("Post Comments");
 
-    // A tap is Alt going down and coming up alone (the registry's double-tap).
     const tapAlt = () => {
       window.dispatchEvent(new KeyboardEvent("keydown", { key: "Alt", altKey: true, bubbles: true }));
       window.dispatchEvent(new KeyboardEvent("keyup", { key: "Alt", bubbles: true }));
@@ -1135,7 +1018,6 @@ describe.if(hasDom)("review decision control (platform mode)", () => {
     };
 
     await doubleTapAlt();
-    // Agent spec, same annotation count — the flip swaps the spec, never the state.
     expect(primaryButton()!.textContent).toContain("Send Feedback");
 
     await doubleTapAlt();
@@ -1159,18 +1041,9 @@ describe.if(hasDom)("review decision control (platform mode)", () => {
   });
 });
 
-/**
- * #1392 in code review: a send to a stopped server (or one that answered
- * 500) used to set a "Failed to send" string nothing displayed, so the page
- * looked the same as before the click. It must say the feedback was not sent
- * and offer Retry and Copy feedback, with the review left as it was.
- */
 describe.if(hasDom)("review: a send that does not reach Plannotator", () => {
-  // Sonner keeps earlier tests' toasts in its module store, so find this one
-  // by its title rather than taking the first toast on the page.
   const failureToast = () =>
     Array.from(document.querySelectorAll<HTMLElement>("[data-sonner-toast]"))
-      // A dismissed toast stays in the DOM while it animates out.
       .filter((el) => el.getAttribute("data-removed") !== "true")
       .find((el) => el.querySelector("[data-title]")?.textContent?.endsWith(" not sent"));
   const toastButton = (label: string) =>
@@ -1200,13 +1073,11 @@ describe.if(hasDom)("review: a send that does not reach Plannotator", () => {
       await waitFor(failureToast, "the failure message");
 
       expect(completionState()).toBeNull();
-      // Deliberate copy: the title says the feedback did not go out, and why.
       expect(failureToast()!.textContent).toContain("Feedback not sent");
       expect(failureToast()!.textContent).toContain("isn't running");
 
       await act(async () => toastButton("Copy feedback")!.click());
       await waitFor(() => copied.length > 0, "the copy");
-      // The same markdown the review's Copy feedback copies and the send carried.
       expect(copied[0]).toBe(submissions[0]!.feedback!);
 
       await act(async () => toastButton("Retry")!.click());

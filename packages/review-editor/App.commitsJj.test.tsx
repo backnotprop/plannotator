@@ -25,7 +25,6 @@ import {
 } from "@plannotator/ui/utils/storage";
 import { configStore } from "@plannotator/ui/config";
 
-// Vite-only virtual module (`?worker&inline`), stubbed like App.panelView.test.tsx.
 mock.module("./workerPool", () => ({
   useIsWorkerPoolReadyOrDisabled: () => true,
   useWorkerPoolThemeSync: () => {},
@@ -100,8 +99,6 @@ class StubEventSource {
 let switchRequests: Array<{ diffType: string; base?: string }> = [];
 
 function makeFetch(initialDiffType: string, gitContext: object = JJ_CONTEXT): typeof fetch {
-  // SAFETY: the app only ever calls fetch(input, init); the double implements
-  // that call signature and not `fetch.preconnect`.
   const impl = async (input: RequestInfo | URL, init?: RequestInit) => {
     const rawUrl = input instanceof Request ? input.url : String(input);
     if (rawUrl.startsWith("https://")) return new Response(null, { status: 404 });
@@ -188,7 +185,6 @@ async function mount(initialDiffType = "jj-current", gitContext: object = JJ_CON
   configStore.loadFromBackend();
   switchRequests = [];
   globalThis.fetch = makeFetch(initialDiffType, gitContext);
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = StubEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -218,7 +214,6 @@ afterAll(() => {
 describe.if(hasDom)("Commits view in a jj session", () => {
   test("offers Commits, opens the top row as jj-commit, and restores the jj diff on exit", async () => {
     await mount();
-    // jj has no git status sections; the Commits segment is the new one.
     expect(panelSegment("Git status")).toBeUndefined();
     const commits = panelSegment("Commits");
     expect(commits).toBeDefined();
@@ -226,7 +221,6 @@ describe.if(hasDom)("Commits view in a jj session", () => {
     await act(async () => commits!.click());
     await waitFor(() => switchRequests.length > 0, "the auto-select switch");
     expect(switchRequests[0].diffType).toBe(`jj-commit:${HEAD_ID}`);
-    // The working copy row carries jj's own badge.
     await waitFor(() => document.body.textContent?.includes("wire the parser") ?? false, "the rail");
     const badges = Array.from(document.querySelectorAll("span")).map((el) => el.textContent?.trim());
     expect(badges).toContain("@");
@@ -240,14 +234,10 @@ describe.if(hasDom)("Commits view in a jj session", () => {
   test("a reload that lands on a jj-commit diff snaps back to the session default", async () => {
     await mount(`jj-commit:${HEAD_ID}`);
     await waitFor(() => switchRequests.length > 0, "the snap-back switch");
-    // The persisted default (a git type) is not offered here, so the jj
-    // session's first option is where the review resumes.
     expect(switchRequests[0].diffType).toBe("jj-current");
   });
 
   test("the snap-back to a saved Evolution diff default uses the previous evolog entry as its base", async () => {
-    // Failure caught: the fallback sending the line base (trunk()) with
-    // jj-evolog, which diffs the whole line of work as "Evolution diff".
     memory.set("plannotator-review-defaults", JSON.stringify({ jj: { defaultDiffType: "jj-evolog" } }));
     await mount(`jj-commit:${HEAD_ID}`, {
       ...JJ_CONTEXT,

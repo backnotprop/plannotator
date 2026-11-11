@@ -22,8 +22,6 @@ import {
 } from "@plannotator/ui/utils/storage";
 import { configStore } from "@plannotator/ui/config";
 
-// Vite-only virtual module (`?worker&inline`) — bun cannot resolve it, so the
-// pool hooks are stubbed exactly like App.decisionControl.test.tsx does.
 mock.module("./workerPool", () => ({
   useIsWorkerPoolReadyOrDisabled: () => true,
   useWorkerPoolThemeSync: () => {},
@@ -54,9 +52,6 @@ const PATCH = [
   "",
 ].join("\n");
 
-/** A plain local-git session that CAN serve both panel views: since-base is a
- *  resolvable diff option and the sections sidecar is present. This is exactly
- *  the session the removed chooser used to interrupt. */
 const DIFF_PAYLOAD = {
   rawPatch: PATCH,
   gitRef: "HEAD",
@@ -98,8 +93,6 @@ class StubEventSource {
 }
 
 function makeFetch(): typeof fetch {
-  // SAFETY: the app only ever calls fetch(input, init); the double implements
-  // that call signature and not `fetch.preconnect`.
   const impl = async (input: RequestInfo | URL) => {
     const rawUrl = input instanceof Request ? input.url : String(input);
     if (rawUrl.startsWith("https://")) return new Response(null, { status: 404 });
@@ -135,10 +128,6 @@ async function settle(): Promise<void> {
   });
 }
 
-/** Retire the unrelated one-time announcements (guide intro, look-and-feel,
- *  Edit Mode, token hover, terminal tools) so the review renders its panel.
- *  Deliberately seeds NO panel-view or review-setup key: what these tests
- *  measure is what a profile that never chose a view opens on. */
 function seedUnrelatedAnnouncementsSeen(): void {
   memory.set("plannotator-plan-look-choice-resolved", "true");
   memory.set("plannotator-announce-tui-herdr-seen", "1");
@@ -154,11 +143,8 @@ async function mount(seed: () => void = () => {}): Promise<void> {
   setStorageBackend(memoryBackend);
   seedUnrelatedAnnouncementsSeen();
   seed();
-  // configStore is a module singleton that resolves cookies once per process,
-  // so a per-test seed only reaches it through this host re-hydration hook.
   configStore.loadFromBackend();
   globalThis.fetch = makeFetch();
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = StubEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -193,19 +179,12 @@ describe.if(hasDom)("opening panel view", () => {
     await mount();
 
     expect(selectedPanelSegment()).toBe("Tree");
-    expect(panelSegment("Git status")).toBeDefined(); // still one click away
-    // No setup chooser interrupts the session. With every UNRELATED one-time
-    // announcement retired above, any remaining chain dialog would have to be
-    // a review-setup one, so the absence of a modal overlay is the assertion.
+    expect(panelSegment("Git status")).toBeDefined();
     expect(document.querySelector('[class*="fixed inset-0"][class*="z-[100]"]')).toBeNull();
-    // The removal is not a server-config change: reviewPanelView is a
-    // cookie-only setting, so a fresh profile must POST nothing to /api/config.
     expect(memory.get("plannotator-review-panel-view")).toBe("tree");
   });
 
   test("a persisted sections cookie still opens on Git status", async () => {
-    // Failure caught: the default flip reaching existing users. Anyone who
-    // chose Git status in Settings keeps it.
     await mount(() => {
       memory.set("plannotator-review-panel-view", "sections");
     });
@@ -214,8 +193,6 @@ describe.if(hasDom)("opening panel view", () => {
   });
 
   test("the last-used memo still layers over the persisted default", async () => {
-    // Failure caught: removing the initializer taking the memo with it — the
-    // panel toggle's only persistence.
     await mount(() => {
       memory.set("plannotator-review-panel-view", "tree");
       memory.set("plannotator-review-panel-view-last-used", "sections");

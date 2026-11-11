@@ -1,13 +1,3 @@
-/**
- * Demo guide data for development mode.
- *
- * Loaded by useGuideData when jobId === DEMO_GUIDE_ID, so the Guided Review
- * screen renders with realistic content without needing an agent run. Section
- * diffs reference the real file paths from demoData.ts's DEMO_DIFF so the
- * per-section DiffViewers resolve against the actual demo files array instead
- * of hitting the "outdated" chip.
- */
-
 import type { CodeGuideData } from '@plannotator/shared/guide';
 
 export const DEMO_GUIDE_ID = 'demo-guide';

@@ -20,7 +20,6 @@ import {
 } from "@plannotator/ui/utils/storage";
 import { configStore } from "@plannotator/ui/config";
 
-// Vite-only virtual module (`?worker&inline`): stubbed like App.panelView.test.tsx.
 mock.module("./workerPool", () => ({
   useIsWorkerPoolReadyOrDisabled: () => true,
   useWorkerPoolThemeSync: () => {},
@@ -54,8 +53,6 @@ function filePatch(path: string): string[] {
 
 const PATCH = [...filePatch("src/a.ts"), ...filePatch("src/b.ts"), ...filePatch("src/c.ts"), ""].join("\n");
 
-// src/b.ts is split across chapters 1 and 2; src/gone.ts is a stale ref (not
-// in the diff on screen).
 const GUIDE = {
   title: "Parser rework",
   intent: "Why the parser changed.",
@@ -143,7 +140,6 @@ interface Calls {
 let calls: Calls = { progress: [], prViewed: [], reviewedPuts: [] };
 
 function makeFetch(pr: boolean): typeof fetch {
-  // SAFETY: the app only ever calls fetch(input, init).
   const impl = async (input: RequestInfo | URL, init?: RequestInit) => {
     const rawUrl = input instanceof Request ? input.url : String(input);
     if (rawUrl.startsWith("https://")) return new Response(null, { status: 404 });
@@ -208,7 +204,6 @@ async function waitFor(check: () => boolean, label: string): Promise<void> {
   throw new Error(`timed out waiting for ${label}`);
 }
 
-/** Retire every one-time announcement so nothing covers the guide. */
 function seedAnnouncementsSeen(): void {
   memory.set("plannotator-plan-look-choice-resolved", "true");
   memory.set("plannotator-announce-tui-herdr-seen", "1");
@@ -227,7 +222,6 @@ async function mount(pr: boolean): Promise<void> {
   setStorageBackend(memoryBackend);
   configStore.loadFromBackend();
   globalThis.fetch = makeFetch(pr);
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = StubEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -247,7 +241,6 @@ async function unmount(): Promise<void> {
   if (hasDom) document.body.replaceChildren();
 }
 
-/** Push a done guide job through the agent-jobs stream: the guide auto-opens. */
 async function openLiveGuide(): Promise<void> {
   const stream = StubEventSource.instances.find((es) => es.url.includes("/api/agents/jobs/stream"));
   if (!stream) throw new Error("agent jobs stream not opened");
@@ -257,7 +250,6 @@ async function openLiveGuide(): Promise<void> {
   await waitFor(() => tickButtons().length === 2, "the guide's sections");
 }
 
-/** Open the guide takeover, then the saved guide from "Previous guides". */
 async function openSavedGuide(): Promise<void> {
   const guideButton = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
     .find((b) => b.title === "Open guided review");
@@ -274,8 +266,6 @@ async function openSavedGuide(): Promise<void> {
 }
 
 function tickButtons(): HTMLButtonElement[] {
-  // One per section: the open card's "Reviewed" button (title), or the
-  // collapsed card's checkbox (aria-label) once a section is ticked.
   return Array.from(
     document.querySelectorAll<HTMLButtonElement>('button[title$="as reviewed"], button[aria-label$="as reviewed"]'),
   );
@@ -311,13 +301,11 @@ describe.if(hasDom)("Guided Review: ticking a section marks its files viewed", (
     await mount(false);
     await openLiveGuide();
 
-    // Chapter 1 shows a.ts and half of b.ts: only a.ts is fully read.
     await tick(0);
     expect(viewedWrites()).toEqual([{ path: "src/a.ts", viewed: true }]);
     expect(calls.progress[0].key).toBe("scope-1");
     expect(calls.progress[0].changes[0].fingerprint).toBe("fa");
 
-    // Chapter 2 completes b.ts and shows c.ts; the stale ref is skipped.
     await tick(1);
     expect(viewedWrites()).toEqual([
       { path: "src/a.ts", viewed: true },
@@ -325,15 +313,12 @@ describe.if(hasDom)("Guided Review: ticking a section marks its files viewed", (
       { path: "src/c.ts", viewed: true },
     ]);
 
-    // Un-ticking keeps the files viewed.
     await tick(0);
     expect(viewedWrites().some((write) => !write.viewed)).toBe(false);
     expect(viewedWrites()).toHaveLength(3);
 
-    // Local review: no platform sync.
     expect(calls.prViewed).toEqual([]);
 
-    // The tick still saves itself (debounced PUT).
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 600));
     });
@@ -345,7 +330,6 @@ describe.if(hasDom)("Guided Review: ticking a section marks its files viewed", (
     await openSavedGuide();
 
     await tick(1);
-    // Chapter 2 alone: c.ts is complete, b.ts still has chapter 1 to go.
     expect(viewedWrites()).toEqual([{ path: "src/c.ts", viewed: true }]);
     expect(calls.prViewed).toEqual([{ filePaths: ["src/c.ts"], viewed: true }]);
 
