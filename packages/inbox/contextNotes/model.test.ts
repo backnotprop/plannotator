@@ -1,21 +1,10 @@
-/**
- * Context notes' one model (approval "inbox-context-notes"): which writer's
- * notes land on which lines of a review. What regresses: a note drawn on lines
- * that hold other code now (an earlier review's numbers, a place outside the
- * diff), a medium or low risk marking code, an Ask's answer pinned to the lines
- * it was asked about (the owner: it stays in the thread), the stale line naming
- * the wrong round.
- */
 import { describe, expect, test } from 'bun:test';
 import type { InboxPullRiskJudgment } from '@plannotator/core/inbox-types';
 import { askRiskPlaces, guideNotes, noteHolds, noteReviews, pictureNotes, RISK_PLACES_ASK_MS, riskNotes, staleWords, takeRiskPlaces, threadNotes, type NoteFile, type NoteMessage } from './model';
 
 const patch = (...body: string[]) => `diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1,3 +1,${body.length} @@\n${body.join('\n')}\n`;
-/** Round 1: new lines 1 one, 2 two, 3 three, 4 four. */
 const ROUND_1: NoteFile[] = [{ path: 'a.ts', patch: patch(' one', '+two', ' three', ' four') }];
-/** Round 2: two lines above, "two" moved to line 4, text the same. */
 const ROUND_2: NoteFile[] = [{ path: 'a.ts', patch: patch(' one', '+zero', '+zero2', '+two', ' three', ' four') }];
-/** Round 3: "two" rewritten in place, its neighbours unchanged. */
 const ROUND_3: NoteFile[] = [{ path: 'a.ts', patch: patch(' one', '+TWO', ' three', ' four') }];
 
 const agent = (id: string, body: string, extra: Partial<NoteMessage> = {}): NoteMessage => ({ id, body, author: { kind: 'agent' }, ...extra });
