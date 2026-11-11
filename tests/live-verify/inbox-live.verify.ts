@@ -271,13 +271,24 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
       p.on('pageerror', (e) => errors.push(`${n}: ${e.message.slice(0, 200)}`));
       traffic.attach(p, n);
     }
-    const throttle = async (p: Page) => {
+    const cdps = new Map<Page, import('@playwright/test').CDPSession>();
+    const conditions = (offline: boolean) => {
       const prof = PROFILES[PROFILE];
-      if (!prof) return;
+      const bps = prof ? (prof.mbit * 1_000_000) / 8 : -1;
+      return { offline, latency: prof?.latency ?? 0, downloadThroughput: bps, uploadThroughput: bps };
+    };
+    const throttle = async (p: Page) => {
+      if (!PROFILES[PROFILE]) return;
       const cdp = await p.context().newCDPSession(p);
+      cdps.set(p, cdp);
       await cdp.send('Network.enable');
-      const bps = (prof.mbit * 1_000_000) / 8;
-      await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: prof.latency, downloadThroughput: bps, uploadThroughput: bps });
+      await cdp.send('Network.emulateNetworkConditions', conditions(false));
+    };
+    /** The page's link down or up: through its throttle when it has one (the throttle's own `offline: false` wins over the context's). */
+    const setLink = async (p: Page, offline: boolean) => {
+      const cdp = cdps.get(p);
+      if (cdp) await cdp.send('Network.emulateNetworkConditions', conditions(offline));
+      else await p.context().setOffline(offline);
     };
     for (const p of Object.values(pages)) await throttle(p);
     const go = async (p: Page) => {
@@ -738,18 +749,21 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
       await openThread(C, T.open!);
       await pause(500);
       const n = await C.evaluate(new Function(`return ${msgCount(T.open!)}`) as () => number);
-      await other.setOffline(true);
+      await setLink(C, true);
       await ag.send({ project_path: project, reply_to: T.open!, body: `While away ${i}.` });
       await pause(8000);
+      // The drop must have held: the message is not on screen yet (a 0 ms catch-up would mean the link never went down).
+      add('reconnectDropHeld', 'count', (await C.evaluate(new Function(`return ${msgCount(T.open!)}`) as () => number)) === n ? 1 : 0);
       await arm(C, `g${i}`, `return ${msgCount(T.open!)} > ${n}`, 120_000);
       const t0 = Date.now();
-      await other.setOffline(false);
+      await setLink(C, false);
       add('reconnectCatchUp', 'ms', await landed(C, `g${i}`, t0, 125_000));
     }
     await toList(C);
     await check('LV-16', 'After the stream drops and comes back, a window catches up on what it missed with no reload (within 10 s)', async () => {
       const xs = samples.reconnectCatchUp!.xs;
-      return { pass: !xs.some((x) => x < 0) && Math.max(...xs) <= 10_000, ms: Math.max(...xs) };
+      const held = samples.reconnectDropHeld!.xs.every((x) => x === 1);
+      return { pass: held && !xs.some((x) => x < 0) && Math.max(...xs) <= 10_000, ms: Math.max(...xs), detail: held ? undefined : 'the link drop did not hold: nothing was missed' };
     });
 
     // Network held: every API write from tab A is left unanswered.
