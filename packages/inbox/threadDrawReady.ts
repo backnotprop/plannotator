@@ -37,16 +37,13 @@ import { DEFAULT_SYNTAX_THEME, resolveFenceTheme } from '@plannotator/ui/utils/s
  */
 export const DRAW_READY_CAP_MS = 4000;
 let capMs = DRAW_READY_CAP_MS;
-/** Test seam: a shorter cap (undefined: back to DRAW_READY_CAP_MS). */
 export function __setDrawReadyCapForTests(ms: number | undefined): void {
   capMs = ms ?? DRAW_READY_CAP_MS;
 }
 
 type ThemePair = { dark: string; light: string };
 
-/** The fence theme the window draws in now, kept by WarmCodeHighlight (inside the ThemeProvider). */
 let theme = resolveFenceTheme('plannotator', 'dark');
-/** The theme pair Pierre's diff views draw in now (usePierreTheme's `syntaxTheme`, else Pierre's own). */
 let diffThemes: ThemePair = DEFAULT_SYNTAX_THEME;
 export function setThreadFenceTheme(next: string): void {
   theme = next;
@@ -55,11 +52,9 @@ export function setDiffThemes(next: ThemePair | undefined): void {
   diffThemes = next ?? DEFAULT_SYNTAX_THEME;
 }
 
-/** `$…$`, `\(…\)`, `\[…\]` or `$$`: a body that may hold math (over-matching only loads KaTeX once). */
 const MATH_HINT = /\$[^\s$][^$\n]*\$|\$\$|\\\(|\\\[/;
 const FENCE_HINT = /```|~~~/;
 
-/** What a Markdown text needs before it draws finished: the fence languages ui highlights, and KaTeX. */
 interface Needs {
   langs: readonly string[];
   math: boolean;
@@ -73,7 +68,6 @@ export function needs(body: string): Needs {
   const walk = (blocks: Block[]) => {
     for (const block of blocks) {
       if (block.type === 'code') {
-        // Diagrams draw through their own runtime, never as a highlighted fence.
         if (block.language && !isMermaidLanguage(block.language) && !isGraphvizLanguage(block.language)) langs.add(block.language);
       } else if (block.type === 'math') math = true;
       else if (block.type === 'directive') walk(parseMarkdownToBlocks(block.content, { frontmatter: false }));
@@ -84,18 +78,13 @@ export function needs(body: string): Needs {
   return { langs: [...langs], math };
 }
 
-/** The last thread read's needs per message id, with the body they were read from: a re-read parses only what changed. */
 let parsed = new Map<string, { body: string; needs: Needs }>();
 
-/** A load that outlived the cap once and is still on its way: later reads do not wait for it again. */
 const stalled = new WeakSet<Promise<unknown>>();
 
-/** Pairs whose chunk the Inbox answered 404 for: asking again cannot bring it this session. */
 const gone = new Set<string>();
-/** Loads already looked at once they failed. */
 const checked = new WeakSet<Promise<boolean>>();
 
-/** `lang` attached in every theme of `themes`, asking again for a pair that failed before, unless its chunk is gone. */
 function grammar(lang: string, themes: readonly string[]): Promise<unknown>[] {
   return themes.map((name) => {
     const key = `${lang} ${name}`;
@@ -112,7 +101,6 @@ function grammar(lang: string, themes: readonly string[]): Promise<unknown>[] {
   });
 }
 
-/** One HEAD for a failed pair's chunk, as ui's LazyLoadNotice does: a 404 is remembered, anything else asks again. */
 function checkGone(lang: string, name: string, key: string): void {
   const url = failedChunkUrl(highlightRejection(lang, name)?.cause);
   if (url === null || typeof fetch !== 'function') return;
@@ -124,7 +112,6 @@ function checkGone(lang: string, name: string, key: string): void {
   );
 }
 
-/** Resolves when every load has settled, or at the cap; a load that stalled once is not waited for again. */
 function settle(loads: Promise<unknown>[]): Promise<void> {
   const live = loads.filter((load) => !stalled.has(load));
   if (live.length === 0) return Promise.resolve();
@@ -156,7 +143,6 @@ function waitFor(langs: Iterable<string>, themes: readonly string[], math: boole
   return settle(loads);
 }
 
-/** Resolves when every fence of the thread can paint highlighted and its math typeset (or at the cap). Never rejects. */
 export function threadDrawReady(thread: InboxThread): Promise<void> {
   const langs = new Set<string>();
   let math = false;
@@ -173,15 +159,9 @@ export function threadDrawReady(thread: InboxThread): Promise<void> {
   return waitFor(langs, [theme], math);
 }
 
-/** The needs of the last Markdown and text files read, by name, with the text they were read from. */
 const read = new Map<string, { text: string; needs: Needs }>();
 const READ_KEPT = 8;
 
-/**
- * The same for an attachment the pane draws: a Markdown or text file through ui's Viewer (its fences and math),
- * a code file through Pierre's file view (its language, in Pierre's own themes). `highlight` false: a code file
- * too long to highlight, drawn plain on purpose.
- */
 export function attachmentDrawReady(kind: string, name: string, text: string, highlight = true): Promise<void> {
   if (kind === 'code') {
     if (!highlight) return Promise.resolve();
@@ -200,7 +180,6 @@ export function attachmentDrawReady(kind: string, name: string, text: string, hi
   return Promise.resolve();
 }
 
-/** A guided or code review's diff languages, as Pierre names them: each file's, before and after a rename. */
 export function diffLanguages(rawPatch: string): string[] {
   const langs = new Set<string>();
   for (const file of parseDiffToFiles(rawPatch)) {
@@ -213,13 +192,11 @@ export function diffLanguages(rawPatch: string): string[] {
   return [...langs];
 }
 
-/** Whether Pierre would draw these languages' diff lines highlighted on its first render, as things stand. */
 export function diffReadyNow(langs: readonly string[]): boolean {
   if (langs.length === 0) return true;
   return getHighlighterIfLoaded() !== undefined && areThemesAttached(diffThemes) && areLanguagesAttached([...langs]);
 }
 
-/** The same wait for a review's diff: its languages, in the diff themes. */
 export function diffDrawReady(langs: readonly string[]): Promise<void> {
   return waitFor(langs, [diffThemes.dark, diffThemes.light], false);
 }

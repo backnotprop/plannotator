@@ -1,14 +1,4 @@
-/**
- * Pair a phone, step by step (design of record
- * `.product/approved/inbox-settings-tabs/`, section 4): the words and the
- * gate, kept pure so they are tested without a window.
- *
- * The owner's no-loop rule (approval, decision 5): the computer-side checks
- * are advisory, never a gate. A failing check shows its fix and the person
- * can still continue. The ONLY gate on the code is a way being switched on
- * (`canShowCode`), because a code with no address in it is what sent the
- * owner's phone nowhere.
- */
+/** Computer-side checks are advisory, never a gate: the only gate on the code is a way being switched on (`canShowCode`). */
 
 import type { LanState, PairingAttempt, PairingChecks, TailnetState } from './api';
 
@@ -17,26 +7,19 @@ export type CheckStatus = 'ok' | 'warn' | 'fail' | 'later';
 export interface CheckLine {
   status: CheckStatus;
   text: string;
-  /** The fix, in one line, for a check that is not ok. */
   fix?: string;
 }
 
-/** Which ways are switched on, as the person set them (on even while not working: the card says why). */
 export function waysOn(lan: LanState | null, tailnet: TailnetState | null): { wifi: boolean; tailscale: boolean } {
   return { wifi: lan?.on === true, tailscale: tailnet?.on === true };
 }
 
-/**
- * The one gate on step 2: at least one way is switched on. Never a check:
- * a check can be wrong (a firewall that macOS asks about, a Wi-Fi name it
- * hides), and a person who knows better must never be held in step 1.
- */
+/** Never a check: a check can be wrong (a firewall macOS asks about, a hidden Wi-Fi name), and a person who knows better must not be held in step 1. */
 export function canShowCode(lan: LanState | null, tailnet: TailnetState | null): boolean {
   const on = waysOn(lan, tailnet);
   return on.wifi || on.tailscale;
 }
 
-/** What this computer can tell about the Wi-Fi way. */
 export function wifiCheckLines(checks: PairingChecks['wifi']): CheckLine[] {
   const lines: CheckLine[] = [];
   if (checks.address) {
@@ -66,13 +49,11 @@ export function wifiCheckLines(checks: PairingChecks['wifi']): CheckLine[] {
   return lines;
 }
 
-/** What this computer can tell about the Tailscale way. */
 export function tailscaleCheckLines(checks: PairingChecks['tailscale']): CheckLine[] {
   const installed: CheckLine = { status: 'ok', text: 'Tailscale is installed' };
   const later: CheckLine = { status: 'later', text: 'The rest is checked once it runs.' };
   switch (checks.state) {
     case 'cli_missing':
-      // ENOENT: no command on PATH and (on a Mac) no /Applications/Tailscale.app whose own CLI stands in for it.
       return [
         {
           status: 'fail',
@@ -123,7 +104,6 @@ export function hasFailure(lines: readonly CheckLine[]): boolean {
   return lines.some((line) => line.status === 'fail');
 }
 
-/** What the phone needs for the Wi-Fi way: what this computer cannot check. */
 export function wifiPhoneNeeds(network: string | null): string[] {
   return [
     `Joined to the same Wi-Fi${network ? `, “${network}”` : ' as this computer'}. A guest network often keeps devices apart.`,
@@ -131,12 +111,10 @@ export function wifiPhoneNeeds(network: string | null): string[] {
   ];
 }
 
-/** What the phone needs for the Tailscale way. */
 export function tailscalePhoneNeeds(login: string | null): string[] {
   return [`The Tailscale app, signed in to the same tailnet${login ? ` (${login})` : ''} and switched on.`];
 }
 
-/** The line beside Continue: what happens next, or what is missing. */
 export function continueHint(on: { wifi: boolean; tailscale: boolean }, network: string | null): string {
   if (!on.wifi && !on.tailscale) return 'Turn on a way to continue.';
   const wifi = network ? `on “${network}”` : 'on this Wi-Fi';
@@ -147,16 +125,10 @@ export function continueHint(on: { wifi: boolean; tailscale: boolean }, network:
 
 const VIA: Record<PairingAttempt['via'], string> = { wifi: 'over Wi-Fi', tailnet: 'over Tailscale', local: "on this computer's own address" };
 
-/**
- * What the computer saw while the code showed, newest first, as notes: a
- * phone that came and failed says what to do. A pairing is not a note
- * (step 3 says it).
- */
 export interface AttemptNote {
   key: string;
   kind: PairingAttempt['result'];
   via: PairingAttempt['via'];
-  /** `wrong_code`: tries left on the code. */
   triesLeft?: number;
   title: string;
   text: string;
@@ -189,12 +161,10 @@ export function attemptNotes(attempts: readonly PairingAttempt[]): AttemptNote[]
   return notes;
 }
 
-/** How the phone reached the computer, for step 3, from the pairing's own attempt. */
 export function pairedVia(attempts: readonly PairingAttempt[]): PairingAttempt['via'] | null {
   return [...attempts].reverse().find((a) => a.result === 'redeemed')?.via ?? null;
 }
 
-/** The numbered list when the code expired and no phone reached this computer, for the ways that were on. */
 export function troubleshooting(
   on: { wifi: boolean; tailscale: boolean },
   network: string | null,

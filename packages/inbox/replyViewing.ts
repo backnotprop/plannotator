@@ -1,8 +1,3 @@
-/**
- * What a Send from full screen's floating box says was on screen (the owner, 2026-11-04: "It doesn't mean I'm choosing
- * that one, it just means, oh, the user was on top of this image when they sent this comment"). The server reads the
- * file's name and message from the thread, and the agent's read words it (`inboxViewingLine`); the window draws nothing.
- */
 import type { InboxAttachmentState, InboxMessageWire } from '@plannotator/core/inbox-types';
 import { whenTime } from './format';
 
@@ -27,7 +22,6 @@ export function replyViewingOf(
     attachment_id: attachment.id,
     ...(sentAt ? { time: time(sentAt) } : {}),
     ...(page ? { page } : {}),
-    // Sent and current are one picture until the file changes. With the file gone or unreadable, the sent copy is what the viewer shows.
     ...((open.version === 'sent' && attachment.changed_since_sent) || attachment.unavailable ? { as_sent: true as const } : {}),
   };
 }

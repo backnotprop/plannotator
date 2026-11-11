@@ -1,8 +1,3 @@
-/**
- * Where an arrow key goes between tiles laid out on screen (approval "inbox-keyboard-keys-2026-11-07", items 1 and
- * 6): the Artifacts grid and the Board's lanes. Pure: the boxes are the tiles' rectangles, in reading order.
- */
-
 export type GridKey = 'ArrowLeft' | 'ArrowRight' | 'ArrowUp' | 'ArrowDown' | 'Home' | 'End';
 
 export interface Box {
@@ -17,10 +12,6 @@ export const isGridKey = (key: string): key is GridKey => ['ArrowLeft', 'ArrowRi
 const centerX = (box: Box) => box.left + box.width / 2;
 const centerY = (box: Box) => box.top + box.height / 2;
 
-/**
- * A grid that wraps (the Artifacts tiles): ← → the tile before or after in reading order, ↑ ↓ the tile in the row
- * above or below nearest the current one's middle, Home End the first or last tile. Null: nowhere to go (an edge).
- */
 export function gridStep(boxes: readonly Box[], from: number, key: GridKey): number | null {
   const last = boxes.length - 1;
   const here = boxes[from];
@@ -31,7 +22,6 @@ export function gridStep(boxes: readonly Box[], from: number, key: GridKey): num
   if (key === 'ArrowRight') return from < last ? from + 1 : null;
   const down = key === 'ArrowDown';
   const mid = centerY(here);
-  // The rows past this one, in the key's direction: the nearest row is the one whose middle is closest.
   const ahead = boxes.map((box, index) => ({ box, index })).filter(({ box }) => (down ? centerY(box) > mid + here.height / 2 : centerY(box) < mid - here.height / 2));
   if (ahead.length === 0) return null;
   const rowY = ahead.reduce((best, { box }) => (Math.abs(centerY(box) - mid) < Math.abs(best - mid) ? centerY(box) : best), centerY(ahead[0]!.box));
@@ -40,10 +30,6 @@ export function gridStep(boxes: readonly Box[], from: number, key: GridKey): num
   return row.reduce((best, item) => (Math.abs(centerX(item.box) - x) < Math.abs(centerX(best.box) - x) ? item : best)).index;
 }
 
-/**
- * Lanes of cards (the Board): ↑ ↓ within the lane, Home End its first or last card, ← → the card nearest this one's
- * height in the next lane that has cards. Null: nowhere to go.
- */
 export function laneStep(lanes: readonly (readonly Box[])[], at: { lane: number; card: number }, key: GridKey): { lane: number; card: number } | null {
   const cards = lanes[at.lane];
   const here = cards?.[at.card];

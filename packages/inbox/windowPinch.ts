@@ -1,24 +1,7 @@
-/**
- * Pinching over an HTML page on a phone zooms the whole Inbox window: the frame
- * sits in the window, and the browser keeps pinch for itself (approval
- * "inbox-html-attachments-phone": one finger is the page's, pinch the window's).
- * So the toolbar, the pill and the card grow with the window and slide out of
- * the view, and they tuck while it is zoomed.
- *
- * The scale is read here, in the parent: the page in the frame has no way to
- * set it, and no message of its own is involved.
- *
- * The web has no call that sets a window's zoom back. The one lever is the
- * viewport meta: a `maximum-scale` of 1 makes a browser that honors it clamp the
- * zoom, and the meta goes back at once so pinch keeps working. Chromium honors
- * it. iOS Safari lets people zoom past a page's limits on purpose, so there it
- * is expected to do nothing, and a zoom can stay on the next file; the tools stay
- * tucked there until the person pinches out.
- */
+/** Pinch over an HTML page on a phone zooms the whole window. The only lever to undo it is the viewport meta: `maximum-scale` 1 clamps the zoom in browsers that honor it (Chromium), then the meta goes back. iOS Safari lets people zoom past it on purpose, so there it does nothing. */
 
 import { useCallback, useSyncExternalStore } from 'react';
 
-/** Over this the window counts as zoomed (a pinch that barely moved does not). */
 export const PINCH_TUCK_SCALE = 1.05;
 
 function subscribe(onChange: () => void): () => void {
@@ -38,7 +21,6 @@ export function isWindowPinched(): boolean {
 
 const never = () => () => {};
 
-/** Whether the window is zoomed now, and again whenever that changes. Off (`enabled` false): always false, with no listener. */
 export function useWindowPinched(enabled: boolean): boolean {
   const read = useCallback(() => enabled && isWindowPinched(), [enabled]);
   return useSyncExternalStore(enabled ? subscribe : never, read, () => false);
@@ -47,10 +29,7 @@ export function useWindowPinched(enabled: boolean): boolean {
 /** A release whose two frames have not run yet: the tag as it was before the clamp. */
 let pending: { meta: HTMLMetaElement; original: string } | null = null;
 
-/**
- * Ask the browser to take a zoomed window back to its full view (see the header for how far that goes). A second
- * call while one is pending does nothing: it would read the clamped tag as the original and keep pinch off.
- */
+/** A second call while one is pending does nothing: it would read the clamped tag as the original and keep pinch off. */
 export function releaseWindowZoom(): void {
   if (pending || !isWindowPinched()) return;
   const meta = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');

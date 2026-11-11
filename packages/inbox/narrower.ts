@@ -1,18 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 
-/**
- * Whether an element is narrower than `min`, read before paint and on every
- * resize: a screen picks its narrow layout from its own width, not the
- * window's (the list beside a thread). Unmeasured (no layout, no
- * ResizeObserver) reads as `unmeasured`. `drawn` is false while the element
- * is not in the DOM yet (a screen still loading draws something else): it is
- * measured once it turns true.
- *
- * Crossing `min` swaps every row element for the other shape, which would
- * drop keyboard focus: the row that held it (`[data-thread-id]`) is noted
- * just before the swap and focused again (without scrolling) once the new
- * rows are in the DOM.
- */
+/** Whether an element is narrower than `min`, read before paint and on every resize. Crossing `min` swaps the row elements, which would drop keyboard focus: the focused row is noted before the swap and refocused (without scrolling) after. */
 export function useNarrowerThan<T extends HTMLElement = HTMLElement>(min: number, unmeasured: boolean, drawn = true) {
   const ref = useRef<T>(null);
   const [narrower, setNarrower] = useState(unmeasured);
@@ -56,5 +44,4 @@ export function useNarrowerThan<T extends HTMLElement = HTMLElement>(min: number
   return [ref, narrower] as const;
 }
 
-/** The attributes that name a row whose focus a layout swap keeps. */
 const ROW_ATTRS = ['data-thread-id'];

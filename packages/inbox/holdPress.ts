@@ -1,14 +1,6 @@
-/**
- * A hold on a touch screen, apart from the tap: on a phone, holding Reply opens the reaction tray while a tap
- * still opens the reply box (owner, 2026-11-07, approval "inbox-reaction-tray"). A mouse never holds. The
- * finger moving (a scroll starting on the button) or lifting early is a tap or nothing; the click that ends a
- * hold is the hold's (`swallowClick`), so the reply box never opens under the tray. `holding` is true while
- * the finger is down and the hold not yet reached, for a light cue.
- */
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 
 export const HOLD_MS = 450;
-/** How far the finger may move (px) before it is a scroll, not a hold. */
 const SLOP = 10;
 
 export function useHoldPress(enabled: boolean, onHold: () => void) {
@@ -58,7 +50,6 @@ export function useHoldPress(enabled: boolean, onHold: () => void) {
           onContextMenu: (e: ReactMouseEvent) => e.preventDefault(),
         }
       : {},
-    /** True once for the click that ends a hold: the caller skips its tap action. */
     swallowClick: (): boolean => {
       if (!held.current) return false;
       held.current = false;

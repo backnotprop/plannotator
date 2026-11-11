@@ -1,8 +1,3 @@
-/**
- * What an Artifacts wall tile says about its file, as plain functions (WallFace.tsx draws them): the type under its
- * name, a Markdown file's first blocks, a CSV's first rows and a PDF's page count.
- */
-
 import { readInboxAttachmentKind } from '@plannotator/core/inbox-types';
 import type { InboxArtifactRow } from '@plannotator/core/inbox-artifact-pins';
 import { plural } from './format';
@@ -23,7 +18,6 @@ export function isTable(name: string): boolean {
   return ext === 'csv' || ext === 'tsv';
 }
 
-/** The type under a tile's name: "PNG image", "Markdown", "TypeScript", "CSV table", "PDF · 3 pages", "TGZ file". */
 export function wallTypeLabel(row: Pick<InboxArtifactRow, 'attachment'>, pages: number | null = null): string {
   const attachment = row.attachment;
   if (!attachment) return 'Guided review';
@@ -56,7 +50,6 @@ export function wallTypeLabel(row: Pick<InboxArtifactRow, 'attachment'>, pages: 
   }
 }
 
-/** A PDF's page count from its bytes (`/Type /Pages … /Count N`, else the `/Type /Page` objects), or null. */
 export function pdfPageCount(bytes: string): number | null {
   let most = 0;
   for (const match of bytes.matchAll(/\/Type\s*\/Pages\b[^]*?\/Count\s+(\d+)/g)) most = Math.max(most, Number(match[1]));
@@ -65,7 +58,6 @@ export function pdfPageCount(bytes: string): number | null {
   return pages > 0 ? pages : null;
 }
 
-/** Inline Markdown words without their marks: `**bold**`, `code`, [label](url), images gone. */
 function plainInline(text: string): string {
   return text
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
@@ -78,7 +70,6 @@ function plainInline(text: string): string {
 
 export type Block = { kind: 'h1' | 'h2' | 'p' | 'li'; text: string };
 
-/** The first blocks of a Markdown (or plain text) file: headings, paragraphs and list items; fences and tables skipped. */
 export function documentBlocks(text: string, markdown: boolean, max = 12): Block[] {
   const blocks: Block[] = [];
   let fence = false;
@@ -111,7 +102,6 @@ export function documentBlocks(text: string, markdown: boolean, max = 12): Block
   return blocks;
 }
 
-/** The first rows of a CSV or TSV: up to 6 rows of 4 cells (quoted cells kept whole). */
 export function tableRows(text: string, tab: boolean, rows = 6, cols = 4): string[][] {
   const out: string[][] = [];
   for (const line of text.replace(/^﻿/, '').split(/\r?\n/)) {

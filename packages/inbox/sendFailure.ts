@@ -1,14 +1,4 @@
-/**
- * What a failed Send says (approval "inbox-reply-box", decision D3): one plain line, and the Inbox's own words behind
- * Details when they are not already that line. The person must see at once that nothing went; a path, an errno or a
- * 230-character server message is for the Details.
- *
- * - A refusal (4xx) the Inbox wrote for people, short and with no path in it, is the line as it is: it says what to do.
- * - The disk is full (an upload's `upload_no_space`, or ENOSPC in the words of a reply the Inbox could not write):
- *   "The reply was not sent: the disk is full. …".
- * - Any other failure of the Inbox (5xx): "The reply was not sent: the Inbox could not write it. Send again to retry."
- * - No answer at all (the Inbox is down, the network dropped): "The reply was not sent. Send again to retry."
- */
+/** One plain line says nothing went; the Inbox's own words go behind Details. Paths, errnos and long server messages are for the Details only. */
 import { InboxApiError } from './api';
 
 export interface SendFailure {
@@ -16,9 +6,7 @@ export interface SendFailure {
   details: string | null;
 }
 
-/** Past this, a server's words are details, not a line. */
 const LINE_MAX = 160;
-/** A path (`/Users/…/inbox/x.jsonl`, `C:\…`) or an errno code: words for the Details, not the line. */
 const TECHNICAL = /(?:^|[\s'"(])(?:\/[^\s/'"]+){2,}|[A-Za-z]:\\|\bE[A-Z]{3,}\b/;
 
 export const SEND_NOT_SENT = 'The reply was not sent. Send again to retry.';
@@ -37,7 +25,6 @@ export function sendFailure(cause: unknown): SendFailure {
     : cause.status >= 500
       ? 'The reply was not sent: the Inbox could not write it. Send again to retry.'
       : 'The reply was not sent.';
-  // "Internal error." says nothing the line does not, nor do an upload's disk-full words (an ENOSPC's say where).
   const details = words && cause.code !== 'upload_no_space' && words !== 'Internal error.' && words !== line ? words : null;
   return { line, details };
 }

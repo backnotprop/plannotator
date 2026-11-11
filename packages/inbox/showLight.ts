@@ -1,21 +1,7 @@
-/**
- * Show's light (design record "inbox-polish", item 6; inbox.css `data-lit`, `ib-lit`): the rows Show brought in
- * light up where they landed, for `SHOW_LIT_MS`, and the light is then taken off. One run at a time: a new one
- * takes the last one's place.
- *
- * Show never scrolls the list (the owner: "instead of scrolling me down all over the … place"). So each row's
- * light waits until that row is in view in the list, and then runs its whole time in front of the reader. The
- * rows still out of view are `unseen`, each with the edge of the list it is past: the list's pill counts them
- * (components/ListNewPill.tsx), and its press is `go`, the only thing here that scrolls.
- *
- * Where the rows are is measured when something can have moved them: the list scrolls, changes size, or is drawn
- * again. Never on a timer.
- */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { prefersReducedMotion, SHOW_LIT_MS } from './settle';
 
 export type ListEdge = 'top' | 'bottom';
-/** A row Show brought in that the reader has not had in view yet, and the edge of the list it is past. */
 export interface UnseenRow {
   id: string;
   edge: ListEdge;
@@ -23,9 +9,7 @@ export interface UnseenRow {
 
 const NONE: ReadonlySet<string> = new Set();
 const NO_ROWS: readonly UnseenRow[] = [];
-/** The share of a row that must show in the list for it to be in view. */
 const IN_VIEW = 0.6;
-/** `go` holds the count back until its scroll ends (`scrollend`), at most this long (a browser without that event, or no scroll needed). */
 const GO_MS = 1200;
 
 interface Run {
@@ -49,19 +33,15 @@ function startRun(ids: ReadonlySet<string>, after: number, body: HTMLElement | n
     setLit((lit) => new Set([...lit, ...rows]));
     later(() => setLit((lit) => new Set([...lit].filter((id) => !rows.includes(id)))), SHOW_LIT_MS);
   };
-  // No list to measure in (a compose send's own row, lit where it is drawn): every row at once.
   if (!body) {
     later(() => turnOn([...ids]), after);
     return { stop: () => timers.forEach(clearTimeout), go: () => {} };
   }
 
   const find = (id: string) => [...body.querySelectorAll<HTMLElement>(`[data-thread-id="${CSS.escape(id)}"]`)].find((el) => el.getClientRects().length > 0) ?? null;
-  /** The rows not yet in view, with the edge each is past. */
   const waiting = new Map<string, { el: HTMLElement; edge: ListEdge }>();
-  /** `go` is scrolling the list: the count is held back until the scroll ends, so the pill does not flash on the way. */
   let going = false;
   let started = false;
-  /** `go` asked before the rows had slid into place (the pill's press that is also Show): it goes once they are measured. */
   let goFirst: ListEdge | null = null;
   const publish = () => {
     if (!going) setUnseen([...waiting].map(([id, row]) => ({ id, edge: row.edge })));
@@ -71,7 +51,6 @@ function startRun(ids: ReadonlySet<string>, after: number, body: HTMLElement | n
     const view = body.getBoundingClientRect();
     const seen: string[] = [];
     for (const [id, row] of [...waiting]) {
-      // Drawn again (another shape), or gone (its group was closed): the row on screen now, or none.
       if (!row.el.isConnected || row.el.getClientRects().length === 0) {
         const next = find(id);
         if (!next) {
@@ -82,9 +61,7 @@ function startRun(ids: ReadonlySet<string>, after: number, body: HTMLElement | n
       }
       const rect = row.el.getBoundingClientRect();
       const showing = Math.min(rect.bottom, view.bottom) - Math.max(rect.top, view.top);
-      // A list with no height cannot say (no layout): the row counts as in view. While `go` scrolls the list no row
-      // is taken as seen: one in view when the press came, or passed on the way, would spend its light as the list
-      // leaves it. They are read where the scroll ends.
+      // A list with no height cannot say (no layout): the row counts as in view. While `go` scrolls, no row is taken as seen: it would spend its light as the list leaves it.
       if (!going && (view.height === 0 || showing >= rect.height * IN_VIEW)) {
         waiting.delete(id);
         seen.push(id);
@@ -101,7 +78,6 @@ function startRun(ids: ReadonlySet<string>, after: number, body: HTMLElement | n
     resize?.disconnect();
     redraw?.disconnect();
   };
-  // Once the rows have slid into place.
   later(() => {
     for (const id of ids) {
       const el = find(id);
@@ -120,7 +96,6 @@ function startRun(ids: ReadonlySet<string>, after: number, body: HTMLElement | n
       going = true;
       return;
     }
-    // The nearest of the rows past that edge; focus follows the reader there.
     const rows = [...waiting.values()].filter((row) => row.edge === edge).map((row) => ({ el: row.el, top: row.el.getBoundingClientRect().top }));
     rows.sort((a, b) => (edge === 'bottom' ? a.top - b.top : b.top - a.top));
     const el = rows[0]?.el;
@@ -149,16 +124,9 @@ function startRun(ids: ReadonlySet<string>, after: number, body: HTMLElement | n
 }
 
 export function useShowLight(): {
-  /** The rows lit now (`data-lit`). */
   lit: ReadonlySet<string>;
-  /** The rows of this run not yet in view. */
   unseen: readonly UnseenRow[];
-  /**
-   * Light `ids` no sooner than `after` ms (the rows' slide into place). With `body`, the list's scroll box, each
-   * row is lit when it is in view there; without it, all at once.
-   */
   light: (ids: ReadonlySet<string>, after: number, body?: HTMLElement | null) => void;
-  /** Scroll the list to the nearest unseen row past that edge, bringing it to the middle. */
   go: (edge: ListEdge) => void;
 } {
   const [lit, setLit] = useState(NONE);

@@ -1,10 +1,3 @@
-/**
- * The "themes" dialog's pictures, brought in only when the dialog is about to open (the claim is spent): the four
- * sheets for this layout (the fan's or the phone deck's) and the three of "Choose your own", each in its own script
- * (the window splits at every dynamic import). Every picture is decoded, and the title's face loaded, before the
- * dialog draws, so nothing decodes or reflows mid-motion (the build notes). A page that never shows the dialog fetches
- * and decodes none of it.
- */
 import { STAR_ASK_DISPLAY_FONT } from '@plannotator/ui/utils/starAskFonts';
 import type { ThemeChooserHalf, ThemeChooserThemeId } from './themeChooser';
 
@@ -13,7 +6,6 @@ export interface ThemeChooserArt {
   own: Readonly<Record<string, string>>;
 }
 
-/** How long the dialog waits for its pictures to decode before it opens anyway. */
 const DECODE_WAIT_MS = 4_000;
 
 async function decoded(src: string): Promise<void> {

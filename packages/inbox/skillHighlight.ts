@@ -1,39 +1,13 @@
-/**
- * The skill references in the person's sent message, painted as the composer
- * paints them (approval "inbox-skill-references", shot 06): `$write-better`
- * in the primary color on a light wash, a human-only one also underlined
- * dotted. Painted with the CSS Custom Highlight API, like search's landing
- * highlight (search/highlight.ts), so the Viewer's DOM is never changed. The
- * skills are the ones the message's own block names (what was sent), never
- * the live catalog, so a skill uninstalled since still reads as it was sent.
- * Where the API is missing (an older browser, the DOM tests) nothing is
- * painted and the words read as plain text.
- */
 import type { InboxSkillReference } from '@plannotator/core/skill-reference-block';
 import { QUESTION_ANSWERS_HEADING } from '@plannotator/core/question-block';
 import { findSkillReferenceTokens, type SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
 import { ATTACHMENT_FEEDBACK_HEADING, GUIDE_FEEDBACK_TITLE, MESSAGE_FEEDBACK_HEADING } from './attachments';
 
-/** The highlights' names in `CSS.highlights` (inbox.css styles `::highlight(…)`). */
 export const SKILL_REF_HIGHLIGHT = 'ib-skill-ref';
 export const SKILL_REF_HUMAN_HIGHLIGHT = 'ib-skill-ref-human';
 
-/**
- * Text the references are never found in: code, the folded block itself, a
- * message's head row (folded or open), form fields, and a sent reply's answers
- * list (the agent's prompts and the choices, SentAnswers).
- */
 const SKIP = 'pre, code, [data-skills-line], [data-fold-head], [data-open-head], [data-sent-answers], script, style, textarea';
 
-/**
- * Where the person's own words end: the first heading of what the Send wrote
- * after them (the answers section, the feedback on the agent's messages, the
- * attached files' or a guided review's). Those quote agent text, so a `$name`
- * there is not the person's. A sent reply drawn in the person's words
- * (sentReply.ts) ends them at its answers list or, without one, at the rest
- * of the body (`[data-sent-rest]`), or at its feedback (`[data-reply-feedback]`,
- * replyFeedback.ts), whatever its headings say.
- */
 const SECTION_HEADINGS = [QUESTION_ANSWERS_HEADING, MESSAGE_FEEDBACK_HEADING.title, ATTACHMENT_FEEDBACK_HEADING.title, GUIDE_FEEDBACK_TITLE];
 
 function wordsEnd(root: Node): Element | null {
@@ -47,7 +21,6 @@ function wordsEnd(root: Node): Element | null {
   return null;
 }
 
-/** The ranges of the named skills' references in the person's own words under `root` (before the sections a Send writes after them). */
 export function skillReferenceRanges(root: Node, skills: readonly InboxSkillReference[]): { plain: Range[]; human: Range[] } {
   const out = { plain: [] as Range[], human: [] as Range[] };
   if (skills.length === 0) return out;
@@ -89,7 +62,6 @@ function api(): HighlightApi | null {
   return css?.highlights && typeof Highlight === 'function' ? { highlights: css.highlights, Highlight } : null;
 }
 
-// One registry name per kind for the whole window, so every sent message's ranges are gathered here.
 const painted = new Map<string, { plain: Range[]; human: Range[] }>();
 
 function publish(registry: HighlightApi): void {
@@ -101,11 +73,6 @@ function publish(registry: HighlightApi): void {
   else registry.highlights.delete(SKILL_REF_HUMAN_HIGHLIGHT);
 }
 
-/**
- * Paint one message's references under `root`, again whenever its DOM
- * changes (the Viewer redrawing a block would leave stale ranges). Returns
- * the cleanup that unpaints it.
- */
 export function paintSkillReferences(key: string, root: HTMLElement, skills: readonly InboxSkillReference[]): () => void {
   const registry = api();
   if (!registry || skills.length === 0) return () => {};

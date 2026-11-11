@@ -14,7 +14,6 @@ const REFUSED = new Set([401, 403, 404]);
 export function inboxRefTransport(get: (href: string, signal: AbortSignal) => Promise<Response>): RefCardTransport {
   let off = false;
   let answered = false;
-  /** The ask in flight while the route has not answered yet. */
   let probe: Promise<unknown> | null = null;
   return async (href, _ref, signal) => {
     while (!answered && probe) {

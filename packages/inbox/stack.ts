@@ -1,46 +1,17 @@
-/**
- * A window too narrow for two panes side by side, but not a phone (an iPad
- * in portrait, a narrow desktop window, a Stage Manager tile): the pane on
- * top covers the one under it, as on a phone, while the window keeps its
- * desktop chrome (the docked sidebar, the headers, the desktop history of a
- * file).
- *
- * - A thread covers the list when the list's narrowest column (380 px) and a
- *   440 px thread (the column a thread keeps beside an open file) do not both
- *   fit. So an iPad on its side (1080 px) keeps the list beside a 468 px
- *   thread, as iPad Mail does, and an iPad upright (810 px) stacks.
- * - An open file covers its thread when the thread's 440 px column and a
- *   480 px file do not fit the window.
- *
- * Wide windows never stack, so a desktop at 1280 px and over is drawn
- * exactly as before.
- */
-
 import { useLayoutEffect, useState, type DependencyList, type RefObject } from 'react';
 
-/** The list column's narrowest width beside a thread (inbox.css `.ib-listcol.ib-resizable`). */
 export const LIST_MIN_WIDTH = 380;
-/** The room #1854's resize edge leaves the thread beside the list (inbox.css `max-width: calc(100% - 480px)`); it never shrinks the list below 380 px for it. */
 export const THREAD_MIN_WIDTH = 480;
-/** The thread column beside an open file (inbox.css `.ib-pane.ib-withfile`), and the narrowest thread drawn beside the list. */
 export const THREAD_BESIDE_FILE_WIDTH = 440;
-/** An open file's narrowest readable width beside the thread. */
 export const FILE_MIN_WIDTH = 480;
 
 export interface Stack {
-  /** A thread covers the list. */
   thread: boolean;
-  /** An open file covers its thread. */
   file: boolean;
 }
 
 export const NO_STACK: Stack = { thread: false, file: false };
 
-/**
- * Which panes cover which, for the room the list and its pane share
- * (`.ib-main`, the window less the docked sidebar) and the window's width (an
- * open file closes the sidebar, so it shares the whole window with its thread).
- */
 export function stackFor(mainWidth: number, windowWidth: number): Stack {
   return {
     thread: mainWidth > 0 && mainWidth < LIST_MIN_WIDTH + THREAD_BESIDE_FILE_WIDTH,
@@ -67,12 +38,6 @@ function mainWidthOf(root: HTMLElement): number {
   return root.getBoundingClientRect().width - (inner ? inner.getBoundingClientRect().width : 0);
 }
 
-/**
- * The room the floating panes' gutters take: one on each side of `.ib-main` and one between its two panes,
- * read from inbox.css's `--ib-gutter`, 8 px while the Soft look's panes switch (`--ib-soft-panes`) is on and
- * 0 while it is off (today's flat window). Measured rooms leave them out, so two panes stack rather than draw
- * narrower than their readable widths.
- */
 export function paneGutters(el?: Element | null): number {
   if (typeof document === 'undefined') return 0;
   const root = el ?? document.querySelector('.pn-inbox');
@@ -81,14 +46,6 @@ export function paneGutters(el?: Element | null): number {
   return Number.isFinite(gutter) ? 3 * gutter : 0;
 }
 
-/**
- * The stack for the window (`.pn-inbox`). Read before paint whenever one of
- * `deps` changes (the caller passes what moves the sidebar's target: the
- * route, the sidebar's open state, an open file), so a thread opened from its
- * link, or a sidebar toggled, never draws squeezed first; a ResizeObserver
- * (the window, the sidebar's resize edge) handles everything else. Off on a
- * phone, which shows one screen at a time already (phone.ts).
- */
 export function useStack(ref: RefObject<HTMLElement | null>, phone: boolean, deps: DependencyList): Stack {
   const [stack, setStack] = useState<Stack>(NO_STACK);
   const measure = () => {
@@ -97,7 +54,6 @@ export function useStack(ref: RefObject<HTMLElement | null>, phone: boolean, dep
     const next = phone || !root ? NO_STACK : stackFor(mainWidthOf(root) - gutters, root.getBoundingClientRect().width - gutters);
     setStack((current) => (same(current, next) ? current : next));
   };
-  // The caller's deps are what change the sidebar's target in the same commit.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useLayoutEffect(measure, [phone, ...deps]);
   useLayoutEffect(() => {
@@ -113,7 +69,6 @@ export function useStack(ref: RefObject<HTMLElement | null>, phone: boolean, dep
       observer.disconnect();
       window.removeEventListener('resize', measure);
     };
-    // `measure` reads the ref at call time; re-subscribing on every render is not needed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ref, phone]);
   return stack;

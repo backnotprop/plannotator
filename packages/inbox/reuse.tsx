@@ -1,15 +1,3 @@
-/**
- * Add a file already in the Inbox to the message being written (approval
- * "reuse-attachments"): one quiet button on a tile, a big preview, a picture in
- * a message's text, an Artifacts card and the viewer; in an archived thread, which
- * takes no reply, it opens New message with the file. The composer's files
- * (ComposeFiles.tsx `addExisting`) do the rest: a pending upload naming the same
- * blob (POST /api/inbox/uploads/reuse), so nothing is written and the message
- * carries an ordinary attachment. See docs/agent-guides/inbox-files-and-guides.md.
- *
- * No provider, no button: another machine's thread (its files are not this
- * Inbox's), the tour, and a host of these parts draw what they drew.
- */
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import type { InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { readableVersion } from './attachments';
@@ -18,7 +6,6 @@ import { Tip } from './components/Tip';
 
 export type ReuseVersion = 'current' | 'sent';
 
-/** What the composer needs from a file: the version on screen and its bytes' hash. */
 export interface ReuseSource {
   id: string;
   name: string;
@@ -41,18 +28,15 @@ export function sourceOf(file: InboxAttachmentState, version: ReuseVersion, imag
 }
 
 export interface ReuseApi {
-  /** `reply`: into this thread's reply box. `new`: no reply can be written here (archived): New message with it. */
   target: 'reply' | 'new';
   isAdded: (file: InboxAttachmentState, version?: ReuseVersion) => boolean;
   toggle: (file: InboxAttachmentState, version?: ReuseVersion) => void;
-  /** The thread's files by id: a picture in a message's text is named by its id. */
   fileOf: (id: string) => InboxAttachmentState | undefined;
 }
 
 export const ReuseContext = createContext<ReuseApi | null>(null);
 export const useReuse = () => useContext(ReuseContext);
 
-/** A paperclip with a small plus: "attach this", not "new". */
 export function ReuseIcon({ size = 15 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -68,7 +52,6 @@ function reuseWords(file: Pick<InboxAttachmentState, 'name'>, target: ReuseApi['
   return { tip: 'Add to your reply', label: `Add ${file.name} to your reply` };
 }
 
-/** The button. `surface` sets its place and size in inbox.css. */
 export function ReuseButton({ file, surface, version, className = '', big = false }: { file: InboxAttachmentState; surface: 'tile' | 'gallery' | 'inline' | 'card' | 'pane' | 'bar'; version?: ReuseVersion; className?: string; big?: boolean }) {
   const reuse = useReuse();
   if (!reuse) return null;
@@ -101,14 +84,6 @@ export function ReuseButton({ file, surface, version, className = '', big = fals
 
 const MIN_PICTURE = 72;
 
-/**
- * The button over a picture a message's text shows. The picture is drawn by
- * the shared Viewer (packages/ui, untouched), so these sit in a layer over the
- * message's body, placed from each picture's box. Each is a real button, in
- * the tab order after the message's text; it shows on the picture's hover or
- * its own focus. A picture with no captured file (remote, refused) gets none,
- * and a very small one gets none here (the viewer still has it).
- */
 export function InlineReuseLayer({ bodyRef }: { bodyRef: RefObject<HTMLElement | null> }) {
   const reuse = useReuse();
   const layer = useRef<HTMLDivElement>(null);

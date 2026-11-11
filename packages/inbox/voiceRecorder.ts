@@ -1,14 +1,7 @@
-/**
- * The browser's half of voice dictation: the microphone, the samples and the level. Audio stays in this page's memory
- * until the clip is posted to this page's own Inbox.
- *
- * The worklet comes from the Inbox's own origin (`/api/inbox/voice/worklet.js`): the window's CSP refuses one from
- * `blob:` or `data:`, on purpose.
- */
+/** The worklet comes from the Inbox's own origin: the window's CSP refuses one from `blob:` or `data:`, on purpose. */
 import { debugNote } from './debugLog';
 import { inboxUrl } from './inboxUrl';
 
-/** One step of opening, for the opt-in debug log: its name, the time since the press, the AudioContext's state. Never audio. */
 export type VoiceOpenNote = (fields: { step: 'context' | 'stream' | 'worklet' | 'ready'; ok: boolean; ms: number; audio?: string; error?: string }) => void;
 
 const noteOpen: VoiceOpenNote = (fields) => debugNote('voice_open', fields);
@@ -19,25 +12,18 @@ const errorName = (cause: unknown): string => {
 
 export interface VoiceRecorder {
   rate: number;
-  /** The loudness now, dBFS. */
   db(): number;
-  /** Stop and hand over every sample. */
   stop(): Promise<Float32Array[]>;
-  /** Stop and drop everything. */
   abort(): void;
-  /** The microphone went away (unplugged, a phone call). */
   onEnded(listener: () => void): void;
 }
 
-/** The worklet's last samples arrive within a render quantum; never wait long for them. */
 const FLUSH_WAIT_MS = 500;
 
-/** Whether this page can reach a microphone at all: browsers allow it only on https or on the computer itself. */
 export function microphoneUsable(): boolean {
   return typeof window !== 'undefined' && window.isSecureContext === true && typeof navigator.mediaDevices?.getUserMedia === 'function' && typeof AudioWorkletNode !== 'undefined';
 }
 
-/** Whether the browser will ask first. Unknown (a browser with no such query) counts as yes: the press is then a tap. */
 export async function microphoneWillPrompt(): Promise<boolean> {
   try {
     return (await navigator.permissions.query({ name: 'microphone' as PermissionName })).state === 'prompt';
@@ -49,12 +35,8 @@ export async function microphoneWillPrompt(): Promise<boolean> {
 const aborted = () => new DOMException('The take ended before the microphone opened', 'AbortError');
 
 /**
- * Open the microphone. Called inside the press: the AudioContext is made before the first await, or iOS leaves it
- * suspended. The browser's own echo, noise and gain handling stay on.
- *
- * `signal` aborts when the take ended first (Cancel, the box closing, the session giving up on a mic that never
- * answers): the AudioContext closes at once, not when `getUserMedia` settles, which may be never, and a stream that
- * arrives later has its tracks stopped before anything else runs.
+ * Called inside the press: the AudioContext is made before the first await, or iOS leaves it suspended.
+ * `signal` aborts when the take ended first: the context closes at once rather than when `getUserMedia` settles (maybe never), and a stream arriving later has its tracks stopped first.
  */
 export function openVoiceRecorder(signal?: AbortSignal, note: VoiceOpenNote = noteOpen): Promise<VoiceRecorder> {
   const started = performance.now();

@@ -1,7 +1,3 @@
-/**
- * What the mic's status says at this moment, from the session's state. Pure, so the moments it changes are tested
- * without waiting for them.
- */
 import { voiceClock } from './voiceAudio';
 import { VOICE_CAP_MS, VOICE_COUNTDOWN_MS, VOICE_NO_VOICE_MS, VOICE_QUIET_STOP_MS, VOICE_QUIET_WARN_MS, type VoiceMeter, type VoiceView } from './voiceSession';
 
@@ -12,11 +8,9 @@ export interface VoiceLine {
   word: string;
   hint: string;
   time?: string;
-  /** The level, and whether it is lit. */
   bars?: 'voice' | 'quiet';
 }
 
-/** Nothing to say while idle, or in the first moment the mic opens with no prompt (the button shows it then). */
 export function voiceLine(view: VoiceView, meter: VoiceMeter, phone: boolean): VoiceLine | null {
   const { elapsedMs, voice, voiceSeen, quietMs } = meter;
   const time = voiceClock(elapsedMs);

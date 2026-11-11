@@ -1,35 +1,14 @@
-/**
- * The replies one Send makes (pure, for the tests): the agent messages it
- * answers, and which reply each waiting annotation rides.
- */
 import { inboxActionInDraft, type InboxAnnotationRecord, type InboxMessageWire, type InboxThread } from '@plannotator/core/inbox-types';
 import { activeHandoff } from './tags';
 import { isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 
-/**
- * One reply of a Send: the message it answers, its picks and the questions it
- * skips, on any of that session's messages (one Send to one session is one
- * reply, approval "inbox-explicit-skip", 2026-10-21). A pick or skip on
- * another message than `message` names it with `message_id`.
- */
 export interface SendTarget {
   message: InboxMessageWire;
   questions: { message_id?: string; key: string; revision: number }[];
   skip: { message_id?: string; key: string }[];
-  /** The action items whose Done or Can't do it waits in the draft (approval "inbox-action-items-in-reply"). */
   actions: { message_id?: string; key: string }[];
 }
 
-/**
- * Where each waiting annotation goes (review of #1997): a comment on an agent
- * message's text goes to the session that wrote that message. One whose
- * message the last reply already reaches (that message, or one its session
- * wrote) rides the last reply with the words, the file and the guide
- * comments; any other rides a reply to its own message, which joins the
- * targets in thread order when it is not one already (a comment never goes
- * to two replies). Returns the targets and the annotations each carries,
- * keyed by the message the reply answers.
- */
 export function routeSendAnnotations(
   thread: InboxThread,
   targets: readonly SendTarget[],
@@ -46,7 +25,6 @@ export function routeSendAnnotations(
       put(last.message.id, record);
       continue;
     }
-    // A reply already going to that message's session carries it (one reply per session).
     const going = [...targets, ...extra].find((t) => t.message.id === message.id || sameSession(t.message, message));
     if (going) {
       put(going.message.id, record);
@@ -61,27 +39,11 @@ export function routeSendAnnotations(
   return { targets: [...before, last], carried };
 }
 
-/** Two agent messages one session wrote (a message with no session matches none). */
 export function sameSession(a: InboxMessageWire, b: InboxMessageWire): boolean {
   if (a.author.kind !== 'agent' || b.author.kind !== 'agent') return false;
   return !!a.author.session && a.author.session === b.author.session && (a.author.host ?? '') === (b.author.host ?? '');
 }
 
-/**
- * The replies a Send makes, in thread order: ONE per agent session it answers
- * (approval "inbox-explicit-skip", 2026-10-21), carrying every pick waiting
- * on that session's messages and the questions the person chose to skip
- * (`skip`: ids `<message id>/<key>`, from "Skip them"; empty, the default,
- * skips nothing). A Send never skips on its own. Each reply answers the
- * latest of that session's messages it touches; a message with no session
- * is a reply of its own. The person's words (which ride the last reply) go
- * to the agent that wrote most recently, never to an older asker: when the
- * latest agent message's session has a reply, that reply comes last;
- * otherwise the latest agent message comes last, with nothing of its own.
- * `wordsAt`: the message the words answer instead, when the person aimed the
- * reply at another agent (the recipient pill, approval "inbox-reply-recipient":
- * that agent's latest message).
- */
 export function sendTargetsOf(thread: InboxThread, skip: ReadonlySet<string> = new Set(), wordsAt?: InboxMessageWire): SendTarget[] {
   const groups = new Map<string, SendTarget>();
   for (const m of thread.messages) {
@@ -95,11 +57,9 @@ export function sendTargetsOf(thread: InboxThread, skip: ReadonlySet<string> = n
     target.questions.push(...picks.map((q) => ({ message_id: m.id, key: q.key, revision: q.revision })));
     target.skip.push(...skips.map((q) => ({ message_id: m.id, key: q.key })));
     target.actions.push(...drafted.map((a) => ({ message_id: m.id, key: a.key })));
-    // The reply answers the latest message of the session it touches (thread order: the last seen).
     target.message = m;
     groups.set(group, target);
   }
-  // Each answer on the reply's own message names no message (the route's default).
   let targets = [...groups.values()].map((t) => ({
     message: t.message,
     questions: t.questions.map((q) => (q.message_id === t.message.id ? { key: q.key, revision: q.revision } : q)),
@@ -115,33 +75,18 @@ export function sendTargetsOf(thread: InboxThread, skip: ReadonlySet<string> = n
   return targets;
 }
 
-/**
- * The person's reply that holds the thread now because a session that ended was replaced (`took_over`, set by the
- * server), while no agent has written since: that session's latest reply, so moving it or aiming the next one follows.
- * Null otherwise: a reply aimed elsewhere while the asker is live never takes over.
- */
 export function tookOverReply(thread: InboxThread): InboxMessageWire | null {
   if (activeHandoff(thread)) return null;
   for (let index = thread.messages.length - 1; index >= 0; index--) {
     const m = thread.messages[index]!;
     if (m.author.kind === 'agent' && !isInboxPermissionSession(m.author.session)) return null;
     if (!m.took_over || !m.to) continue;
-    // That session's latest since (the server's owner too): a stale tab's reply to another session does not take it.
     const owner = m.to.session;
     return thread.messages.slice(index + 1).filter((later) => later.to?.session === owner).at(-1) ?? m;
   }
   return null;
 }
 
-/**
- * The message the person's words answer: the latest agent message, except
- * when a session took over from one that ended (`tookOverReply`: that reply,
- * addressed as it is, until an agent writes), and in a thread handed to
- * another session (approval "inbox-tag-handoff"): then the new owner's latest
- * message after the hand-off, else the hand-off reply itself (a reply to it is
- * addressed as it is, to the new owner). So the former owner writing again
- * never takes the person's words back.
- */
 export function wordsMessage(thread: InboxThread): InboxMessageWire {
   const tookOver = tookOverReply(thread);
   if (tookOver) return tookOver;
@@ -155,20 +100,15 @@ export function wordsMessage(thread: InboxThread): InboxMessageWire {
   return thread.messages.filter((m) => m.author.kind === 'agent' && !isInboxPermissionSession(m.author.session)).at(-1) ?? thread.messages[0]!;
 }
 
-/** The reply a message's questions ride: its session's, or its own when it has none. */
 function groupKey(m: InboxMessageWire): string {
   return m.author.kind === 'agent' && m.author.session ? `s:${m.author.host ?? ''}\u0000${m.author.session}` : `m:${m.id}`;
 }
 
-/** What one reply of a Send carried, for a retry's key (`replyKeysToRenew`). */
 export interface SentContents {
-  /** The message it answers and what rides it besides answers (words, files, tags, comments), as a string. */
   value: string;
-  /** Its picks (`a:<message id>/<key>`) and skips (`s:…`). */
   answers: string[];
 }
 
-/** A reply's picks and skips, as `SentContents.answers` lists them. */
 export function sendTargetAnswerIds(target: SendTarget): string[] {
   return [
     ...target.questions.map((q) => `a:${q.message_id ?? target.message.id}/${q.key}`),
@@ -177,14 +117,6 @@ export function sendTargetAnswerIds(target: SendTarget): string[] {
   ];
 }
 
-/**
- * The replies of a retried Send that must take a new idempotency key: one
- * whose words, files or comments changed, or that carries a pick or a skip
- * the last try did not (a replay of the old key would answer the old reply
- * and drop the new answer). A pick that went with the last try is sent now
- * and only leaves the list, which keeps the key, so a reply that went with
- * its answer lost is replayed, not written twice.
- */
 export function replyKeysToRenew(before: ReadonlyMap<string, SentContents> | null, now: ReadonlyMap<string, SentContents>): string[] {
   if (!before) return [];
   const renew: string[] = [];

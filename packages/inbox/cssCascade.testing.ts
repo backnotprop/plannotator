@@ -1,25 +1,6 @@
 /**
- * Test-only: the cascade of inbox.css for one element, worked out the way a
- * browser does it, so a DOM test can ask what colour a part of the window
- * draws in. happy-dom cannot answer that itself: it does not apply the
- * space-toggle the Soft switches are built on (a custom property set to
- * `initial` is guaranteed-invalid, so `var(--token, <today's>)` falls back),
- * and it drops whole rules it cannot resolve. Selector matching is the real
- * DOM's (`Element.matches`); everything else is here:
- *
- * - origin order: `@layer` rules lose to unlayered ones, `!important` wins
- *   over both, then specificity, then source order; inline `style` beats
- *   every normal rule;
- * - `@supports` blocks apply (the browsers the Inbox supports have relative
- *   colours); `@media` blocks never do (the tests ask about a desktop window
- *   with a mouse); `@keyframes`, `@font-face` and the like are skipped;
- * - custom properties inherit; one set to `initial`, or naming a property that
- *   is not set without a fallback, is invalid; `var(--x, <fallback>)` takes
- *   the fallback then. A palette token (any name not starting `--ib-`, such
- *   as `--muted-foreground`) that nothing on the element's way up sets is
- *   the theme's (packages/ui/themes) and is left as written, `var(--name)`.
- *
- * Not a general CSS engine: enough for "which colour does this element take".
+ * Test-only: the cascade of inbox.css for one element. happy-dom does not apply the space-toggle (a custom property set to `initial` makes `var(--token, fallback)` fall back) and drops rules it cannot resolve.
+ * Not a general CSS engine.
  */
 
 interface Declaration {
@@ -43,10 +24,8 @@ export interface Winner {
 }
 
 export interface Cascade {
-  /** The declaration that wins `prop` on `el` (its own, not inherited), if any. Cached per element: build a
-   *  new cascade after the DOM changes. */
+  /** The declaration that wins `prop` on `el`. Cached per element: build a new cascade after the DOM changes. */
   winner(el: Element, prop: string): Winner | undefined;
-  /** `prop`'s value on `el` with every `var()` resolved; inherited properties come from the parent. */
   resolved(el: Element, prop: string): string | undefined;
 }
 
@@ -79,7 +58,6 @@ function skipString(s: string, i: number): number {
   return j + 1;
 }
 
-/** Splits at `sep` outside parentheses, brackets and strings. */
 function splitTop(s: string, sep: string): string[] {
   const parts: string[] = [];
   let depth = 0;
@@ -99,7 +77,6 @@ function splitTop(s: string, sep: string): string[] {
   return parts;
 }
 
-/** The index of the `}` closing the block whose `{` is at `open`. */
 function closeOf(s: string, open: number): number {
   let depth = 0;
   for (let i = open; i < s.length; i++) {
@@ -166,7 +143,6 @@ function compareSpec(a: Spec, b: Spec): number {
   return a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
 }
 
-/** Selectors Level 4 specificity of one complex selector. */
 export function specificity(selector: string): Spec {
   let spec: Spec = [0, 0, 0];
   let i = 0;
@@ -224,7 +200,6 @@ function safeMatches(el: Element, selector: string): boolean {
   }
 }
 
-/** The text of `var(...)` calls in `value`, resolved by `lookup`; undefined when one is invalid with no fallback. */
 function substitute(value: string, lookup: (name: string) => string | undefined | null): string | undefined {
   let out = '';
   let i = 0;
@@ -305,20 +280,17 @@ export function loadCascade(cssText: string): Cascade {
     return best?.w;
   }
 
-  /** A custom property's computed value: the string, undefined when it is invalid here, or null when it is the
-   *  palette's own (not an `--ib-` token, and nothing on the way up sets it). */
   function custom(el: Element | null, name: string, seen: Set<string> = new Set()): string | undefined | null {
     if (!el) return name.startsWith('--ib-') ? undefined : null;
     const w = winner(el, name);
     if (!w) return custom(el.parentElement, name, seen);
     if (w.value.trim() === 'initial') return undefined;
     if (w.value.trim() === 'inherit') return custom(el.parentElement, name, seen);
-    if (seen.has(name)) return undefined; // a cycle is invalid
+    if (seen.has(name)) return undefined;
     const next = new Set(seen).add(name);
     return substitute(w.value, (n) => (declared.has(n) ? custom(el, n, next) : external(n)))?.trim();
   }
 
-  /** A property this stylesheet never sets: the palette's own when it is not an `--ib-` token, else unset. */
   function external(name: string): undefined | null {
     return name.startsWith('--ib-') ? undefined : null;
   }
@@ -328,7 +300,6 @@ export function loadCascade(cssText: string): Cascade {
     const parent = el.parentElement;
     if (!w) return INHERITED.has(prop) && parent ? resolved(parent, prop) : undefined;
     const value = substitute(w.value, (n) => (declared.has(n) ? custom(el, n) : external(n)))?.trim();
-    // Invalid at computed-value time: an inherited property inherits, another takes its initial value.
     if (value === undefined || value === 'inherit' || (prop === 'color' && value.toLowerCase() === 'currentcolor')) {
       return INHERITED.has(prop) && parent ? resolved(parent, prop) : undefined;
     }

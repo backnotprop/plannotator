@@ -1,40 +1,19 @@
-/**
- * "Open in" for an attachment (design record "inbox-open-in", approved
- * 2026-10-14): what the pane header's split button and a tile's ⋯ menu
- * offer, from the per-kind policy the server enforces too
- * (`inboxOpenInPolicy`, @plannotator/core). A plain list: Browser (HTML),
- * the editors this computer has, the default app where the policy allows
- * it, the file manager; then Copy path. The current choice is checked.
- * A referenced file (Shape, a review's diff headers) has the same list, by its
- * kind on disk, with no Browser: only an attachment has a page to open.
- */
-
 import { INBOX_OPEN_IN_DEFAULT_APP, inboxOpenInPolicy, readInboxAttachmentKind, type InboxAttachmentState } from '@plannotator/core/inbox-types';
 import type { OpenInPlatform } from '@plannotator/core/open-in-apps';
 import type { DetectedOpenInApp } from '@plannotator/ui/hooks/useOpenInApps';
 import { attachmentImageUrl, attachmentPageUrl } from './attachments';
 
 export type OpenInItem =
-  /** A new tab of the page (a link in the window; nothing launches). */
   | { kind: 'browser'; id: 'browser'; label: string; href: string }
-  /** The OS default app (`app_id: "default"`). */
   | { kind: 'default'; id: typeof INBOX_OPEN_IN_DEFAULT_APP; label: string }
-  /** A catalog editor or the file manager, launched by the server. */
   | { kind: 'app'; id: string; label: string; icon: string };
 
 export interface OpenInMenu {
   items: OpenInItem[];
-  /** What the split button's left half does, checked in the menu. */
   primary: OpenInItem | null;
-  /** The file is no longer on disk as it was: the apps are disabled (Copy path still works). */
   missing: boolean;
 }
 
-/**
- * The menu for one attachment. `version` is the one the window shows: a new
- * tab shows that version; the apps always open the file as it is now
- * (owner's recommendation 1: no temp copy of the sent bytes).
- */
 export function openInMenu(
   attachment: InboxAttachmentState,
   detected: readonly DetectedOpenInApp[],
@@ -45,7 +24,6 @@ export function openInMenu(
   return openInMenuFor(attachment, detected, platform, remembered, attachmentPageUrl(attachment, version), attachment.unavailable !== null);
 }
 
-/** The menu for a file of a kind: `browserPage` is its new-tab page, if it has one; `missing` disables the apps. */
 export function openInMenuFor(
   file: { kind: unknown; path: string },
   detected: readonly DetectedOpenInApp[],
@@ -67,7 +45,6 @@ export function openInMenuFor(
   const launchable = items.filter((item) => item.kind !== 'browser');
   const primary =
     items.find((item) => item.kind === 'browser') ??
-    // Images, PDFs, videos and recordings open in their viewer; everything else in the remembered app, else the first editor.
     (['image', 'pdf', 'video', 'audio'].includes(readInboxAttachmentKind(file.kind)) ? items.find((item) => item.kind === 'default') : undefined) ??
     (remembered ? launchable.find((item) => item.id === remembered) : undefined) ??
     launchable.find((item) => item.kind === 'app' && item.id !== reveal?.id) ??
@@ -76,15 +53,10 @@ export function openInMenuFor(
   return { items, primary, missing };
 }
 
-/** Whether picking this item is remembered in the shared cookie (a catalog app; never Browser or the default app). */
 export function remembersOpenInItem(item: OpenInItem): boolean {
   return item.kind === 'app';
 }
 
-/**
- * Over the tailnet and on a phone the only "Open in" is a new tab: the page
- * route for HTML, the image route for an image, nothing for anything else.
- */
 export function newTabUrl(attachment: InboxAttachmentState, version: 'current' | 'sent'): string | null {
   const kind = readInboxAttachmentKind(attachment.kind);
   if (kind === 'html') return attachmentPageUrl(attachment, version);
