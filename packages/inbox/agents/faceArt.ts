@@ -15,7 +15,6 @@ import transparentDark from '../assets/agent-marks/transparent-dark.svg';
 import type { OurFace } from './faceChoices';
 import { GLASS_COLOURS, glassDataUrl } from './glassArt';
 
-/** Each face's picture: one source, or Transparent's light and dark pair. */
 export const AGENT_FACE_SRC: Readonly<Record<OurFace, string | { light: string; dark: string }>> = {
   ...(Object.fromEntries(GLASS_COLOURS.map((colour) => [colour.id, glassDataUrl(colour)])) as Record<(typeof GLASS_COLOURS)[number]['id'], string>),
   transparent: { light: transparentLight, dark: transparentDark },
@@ -24,7 +23,6 @@ export const AGENT_FACE_SRC: Readonly<Record<OurFace, string | { light: string; 
 
 const picture = (src: string, className = 'am-art') => `<img class="${className}" src="${src}" alt="" draggable="false">`;
 
-/** Each face as markup for a mark (our own sources only). */
 export const AGENT_FACE_ART: Readonly<Record<OurFace, string>> = Object.fromEntries(
   Object.entries(AGENT_FACE_SRC).map(([face, src]) => [face, typeof src === 'string' ? picture(src) : picture(src.light, 'am-art am-art-l') + picture(src.dark, 'am-art am-art-d')]),
 ) as Record<OurFace, string>;

@@ -1,28 +1,16 @@
-/**
- * The faces an agent's mark can show: its own mark, the Glass colours (glassArt.ts), Transparent and Face (the
- * mascot). The picker (FaceFan.tsx) offers all of them; a click on the mark steps through the first cycle, as before.
- */
-
-// The face ids are the Inbox's (core inbox-types.ts, "Agent faces": the server keeps each agent's face).
 import { INBOX_AGENT_FACES, INBOX_GLASS_FACES, isInboxAgentFace, isInboxOwnFace, type InboxAgentFace, type InboxBuiltInFace, type InboxGlassFace, type InboxOwnFace } from '@plannotator/core/inbox-types';
 
-/** The Glass colours, round the hue wheel: Black and Yellow keep the ids they were stored under (`glass`, `yellow`). */
 export const GLASS_FACES = INBOX_GLASS_FACES;
 export type GlassFace = InboxGlassFace;
-/** A face: the agent's own mark, one of ours, or a picture the person uploaded (`own:<hash>`, "Your own…"). */
 export type AgentFace = InboxAgentFace;
-/** Our faces: the built-in pictures (faceArt.ts). */
 export type OurFace = Exclude<InboxBuiltInFace, 'agent'>;
 export type OwnFace = InboxOwnFace;
 export const isOwnFace = isInboxOwnFace;
 
-/** Every built-in face, in the picker's order. */
 export const AGENT_FACES: readonly InboxBuiltInFace[] = INBOX_AGENT_FACES;
 
-/** The click cycle (the owner, 2026-11-09): each stays until the next click. */
 export const AGENT_FACE_CYCLE: readonly AgentFace[] = ['agent', 'glass', 'yellow', 'transparent', 'totman'];
 
-/** The face a click shows next: the cycle's next; from a colour only the picker gives, the step after the colours. */
 export function nextAgentFace(face: AgentFace): AgentFace {
   const at = AGENT_FACE_CYCLE.indexOf(face);
   return at < 0 ? 'transparent' : AGENT_FACE_CYCLE[(at + 1) % AGENT_FACE_CYCLE.length]!;
@@ -30,7 +18,6 @@ export function nextAgentFace(face: AgentFace): AgentFace {
 
 export const isAgentFace = isInboxAgentFace;
 
-/** Each of our faces' name (a picker choice's accessible name). */
 export const FACE_LABELS: Readonly<Record<OurFace, string>> = {
   glass: 'Black glass',
   'glass-red': 'Red glass',

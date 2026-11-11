@@ -11,17 +11,6 @@ import { agentFaceArtReady, agentRigOf, mountAgentMark, nextAgentFace, showAgent
 
 export { loadAgentFaceArt } from './faceArtLoad';
 
-/**
- * An agent's animated mark (motion.ts), 24 px, with no tile: always alive, the same whatever the agent is doing, its
- * own life seeded by the agent's id. It is a button of its own beside the row's (the row's click opens the thread;
- * this one never does):
- * - a click shows the next face of the cycle (the agent, Glass, Yellow, Transparent, Face);
- * - the pointer resting on it, Enter or Space, or a long press on a touch screen opens the picker (FaceFan.tsx) with
- *   every face, the Glass colours among them.
- * The face is kept for that agent until changed (agentFaces.ts), and every other icon of it shows it too. A host
- * with no rig shows its plain mark, moved as a whole, and has the same faces. `agent`: the sessions it is (absent:
- * only its id), so its threads' icons find the face.
- */
 export function AgentMark({ id, host, name, agent }: { id: string; host: string | null; name: string; agent?: Pick<InboxAgent, 'id' | 'session' | 'continues'> }) {
   const ref = useRef<HTMLSpanElement>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -58,13 +47,11 @@ export function AgentMark({ id, host, name, agent }: { id: string; host: string 
     };
   }, [face, rig, id]);
 
-  // The picker: opened by a rest of the pointer, a key or a long press; mounted from its first opening on.
   const [fan, setFan] = useState<{ open: boolean; by: FanOpenedBy } | null>(null);
   const [sources, setSources] = useState<FaceSources | null>(agentFaceSources);
   const dwell = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const press = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number } | null>(null);
   const pressed = useRef(false);
-  // Just closed: the pointer resting where it was (the fan's plate gone from under it) opens nothing until it moves.
   const quiet = useRef(false);
   useEffect(
     () => () => {
@@ -88,8 +75,6 @@ export function AgentMark({ id, host, name, agent }: { id: string; host: string 
     clearTimeout(dwell.current);
     setFan((was) => (was ? { ...was, open: false } : was));
   };
-  // "Your own…" and "Sets": the fan's last two inner places open the agent icon dialog in the middle of the window
-  // (AgentIconDialog.tsx). The face takes focus first, so the dialog gives it back when it closes.
   const [dialog, setDialog] = useState<AgentIconPlace | null>(null);
   const openDialog = (place: AgentIconPlace) => {
     closeFan();
@@ -152,7 +137,6 @@ export function AgentMark({ id, host, name, agent }: { id: string; host: string 
     }
     if (press.current && Math.hypot(event.clientX - press.current.x, event.clientY - press.current.y) > 8) endPress();
   };
-  // Enter or Space opens the picker (its own keys move in it); a click with the pointer still steps the cycle.
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();

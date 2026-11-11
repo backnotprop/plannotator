@@ -19,7 +19,6 @@ const STEP_MS = 20_000;
 const within = <T,>(work: Promise<T>): Promise<T> => Promise.race([work, new Promise<never>((_, no) => setTimeout(() => no(new Error('timeout')), STEP_MS))]);
 const EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/svg+xml': 'svg' };
 
-/** Picture handed back → the picture it replaced, re-read whenever the pictures change (a hand-back adds one). */
 function useAnimatedOriginals(): ReadonlyMap<string, string> {
   const icons = useOwnIcons();
   const key = (icons ?? []).map((icon) => icon.id).join();
@@ -32,9 +31,7 @@ function useAnimatedOriginals(): ReadonlyMap<string, string> {
         const list = Array.isArray(answer.results) ? (answer.results as { icon?: unknown; result?: unknown }[]) : [];
         if (live) setOriginals(new Map(list.flatMap((r) => (typeof r.icon === 'string' && typeof r.result === 'string' ? [[r.result, r.icon] as const] : []))));
       })
-      .catch(() => {
-        // An Inbox from before "Animate it", or offline: no way back is offered until a read answers.
-      });
+      .catch(() => {});
     return () => {
       live = false;
     };
@@ -42,13 +39,6 @@ function useAnimatedOriginals(): ReadonlyMap<string, string> {
   return originals;
 }
 
-/**
- * "Animate it", under the agent's own picture in the icon dialog's "Your own…" (OwnIconsBody.tsx). One press keeps a
- * request with the Inbox (packages/server/inbox-icon-animate.ts) and opens New message filled in (compose/openComposer.ts):
- * the words (animatePrompt.ts), the picture attached, To open on the running agents and "New <agent> session". The
- * person sends it. The agent's hand-back changes this icon in every window by itself; a picture an agent handed back
- * offers "Use the original" in its place.
- */
 export function AnimateIt({ agent, face, onDone }: { agent: AgentFaceRef; face: AgentFace; onDone: () => void }) {
   const originals = useAnimatedOriginals();
   const [busy, setBusy] = useState(false);
