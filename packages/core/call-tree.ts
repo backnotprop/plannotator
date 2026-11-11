@@ -189,10 +189,39 @@ export function findCallTreeRoot(
     });
     if (found) return found;
   }
-  return search((node, isEntryRoot) => (
+  const found = search((node, isEntryRoot) => (
     node.children.some((child) => writtenIn(child, hunk, hunkRange))
     || (isEntryRoot && writtenIn(node, hunk, hunkRange))
   ));
+  return found ? liftOutOfCallArguments(found, hunk, hunkRange) : null;
+}
+
+/**
+ * CallDiff nests a call written inside another call's arguments (an options
+ * object, a callback) under that call. Without sem, a change in such an
+ * argument would root the tree at the call it is passed to; the function
+ * around the hunk is the one that makes that call, so step up while the
+ * changed calls sit inside the root's own call expression.
+ */
+function liftOutOfCallArguments(
+  location: CallTreeLocation,
+  hunk: CallTreeHunk,
+  range: { newStart: number; newEnd: number; oldStart: number; oldEnd: number },
+): CallTreeLocation {
+  let { path, childIndexes } = location;
+  while (path.length > 1) {
+    const root = path[path.length - 1]!;
+    if (!root.file || !root.line || !root.endLine || root.endLine <= root.line) break;
+    const inHunk = root.children.filter((child) => writtenIn(child, hunk, range));
+    const allInsideCall = inHunk.length > 0 && inHunk.every((child) => (
+      child.status !== "removed" && child.file === root.file && child.line !== undefined
+      && child.line >= root.line! && child.line <= root.endLine!
+    ));
+    if (!allInsideCall) break;
+    path = path.slice(0, -1);
+    childIndexes = childIndexes.slice(0, -1);
+  }
+  return { treeIndex: location.treeIndex, path, childIndexes };
 }
 
 /** Cut a Call tree document out of the analysis at a found location. */

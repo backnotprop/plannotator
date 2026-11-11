@@ -109,6 +109,25 @@ describe("findCallTreeRoot", () => {
     expect(callTreeAt([deep, shallow], location!).trail).toEqual(["c"]);
   });
 
+  test("without sem, a change inside another call's arguments roots at the function making that call", () => {
+    // The shape CallDiff gave for this repo's #1663 change: the new call sits in
+    // the options object passed to runCommand(...), so it is nested under it.
+    const tree: CallTreeSourceTree = {
+      entry: "install",
+      tree: n("install", "install()", "cf.ts", 846, [
+        n("validate", "validatePrunedLanguage(nodePath)", "cf.ts", 930, [
+          { ...n("run", "runCommand(executable, args, options)", "cf.ts", 651, [
+            n("env", "gitColorFreeEnvironment(environment)", "cf.ts", 662, [], "added"),
+          ]), endLine: 670 },
+        ]),
+      ]),
+    };
+    const location = findCallTreeRoot([tree], { file: "cf.ts", newStart: 657, newEnd: 665, oldStart: 657, oldEnd: 664 });
+    const doc = callTreeAt([tree], location!);
+    expect(doc.title).toBe("validatePrunedLanguage");
+    expect(doc.trail).toEqual(["install"]);
+  });
+
   test("a hunk with no calls in it finds no tree", () => {
     expect(findCallTreeRoot([entry], { file: "other.ts", newStart: 1, newEnd: 30, oldStart: 1, oldEnd: 30 })).toBeNull();
   });
