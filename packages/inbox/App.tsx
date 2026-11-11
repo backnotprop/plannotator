@@ -1084,6 +1084,8 @@ function Inbox() {
    */
   const [rowPatches, setRowPatches] = useState<ReadonlyMap<string, RowPatch>>(new Map());
   const [pinPatches, setPinPatches] = useState<ReadonlyMap<string, boolean>>(new Map());
+  /** A Mark read drawn and still on its way, per thread: Move back waits for it, so the two writes land in order. */
+  const readWrites = useRef(new Map<string, Promise<unknown>>());
   /** Wakes the open effect's wait between retries when another read lands the thread. */
   const wakeThreadRetry = useRef<(() => void) | null>(null);
   /**
@@ -3573,16 +3575,27 @@ function Inbox() {
    * `putReadRowBack`).
    */
   const markRead = async (threadId: string, read: boolean, drawnBefore: InboxListSection[] | null = null) => {
+    // Move back pressed while the Mark read it undoes is still on its way: after it, never before.
+    if (!read) await readWrites.current.get(threadId)?.catch(() => {});
     const listAtPress = read ? shownRef.current : null;
     // Mark read is drawn now (rowActions.ts), even while a look on its way is waited for below; Move back waits for
     // its answer. A press that turns out to write nothing takes the drawn row away again.
     const drawnRow = read ? shownRowOf(shownRef.current, threadId) : null;
-    const unpatch = () => setRowPatches((current) => withEntry<RowPatch>(current, threadId, undefined));
+    let finished = () => {};
+    const unpatch = () => {
+      setRowPatches((current) => withEntry<RowPatch>(current, threadId, undefined));
+      finished();
+    };
     const undraw = () => {
       unpatch();
       if (drawnRow) setShown((current) => (current ? replaceHeldRow(current, drawnRow) : current));
     };
     if (read) {
+      const pending = new Promise<void>((done) => (finished = done));
+      readWrites.current.set(threadId, pending);
+      void pending.then(() => {
+        if (readWrites.current.get(threadId) === pending) readWrites.current.delete(threadId);
+      });
       const patch = readRowPatch(new Date().toISOString());
       setRowPatches((current) => withEntry(current, threadId, patch));
       setShown((current) => (current ? patchShownRow(current, threadId, patch) : current));
@@ -7283,6 +7296,7 @@ function Inbox() {
             onQuestions={patchQuestions}
             onPickSaves={onPickSaves}
             onChanged={afterWrite}
+            readPending={rowPatches.get(thread.thread_id)?.read_at !== undefined}
             onSentRead={async (model) => {
               // The Send's answer carried the thread: drawn from it, and only the list is read after (afterWrite reads both).
               if (routeRef.current.thread !== model.thread.thread_id) return false;

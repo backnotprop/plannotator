@@ -1265,6 +1265,11 @@ export interface ThreadPaneProps {
    * from it and reads only the list after. False: not drawn (the person moved on, or no such read), so `onChanged` reads.
    */
   onSentRead?: (model: ThreadModel) => Promise<boolean>;
+  /**
+   * Mark read is drawn (the header's Read pressed) but its write and the reads after it have not landed: the line
+   * under the header ("Read … N questions were closed …") waits for them, so it never shows half of what it says.
+   */
+  readPending?: boolean;
   /** The questions (`<message id>/<key>`) with an answer saving, each time they change; none: the last one landed, or the pane closed. */
   onPickSaves?: (ids: ReadonlySet<string>, paneClosed?: boolean) => void;
   /** Something was written (a Send, resolve): read the thread and the list again. */
@@ -1728,7 +1733,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
   /**
    * The questions this pane's own saves brought back (by `<message id>/<key>`), and how many saves landed. The thread
    * drawn is the one read, its questions never older than these: a read that left before the last keys were saved
@@ -6634,7 +6639,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             )}
           </div>
         )}
-        {readAt !== null && !resolved && (
+        {readAt !== null && !resolved && !readPending && (
           <div className="ib-readline" data-read-line="">
             <Icon name="checkCircle" size={16} />
             <div>
