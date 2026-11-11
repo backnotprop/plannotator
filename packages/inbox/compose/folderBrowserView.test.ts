@@ -1,10 +1,3 @@
-/**
- * Create a folder and Paste a path (approval "launch-create-clone", A1-A12, B1-B3): what the folder browser offers for
- * a typed path, from the folder listing's answers. Each case guards a rule the person relies on: a folder that is
- * there always leads (Enter never forces them deeper, except at home); a name that isn't there becomes Create, last
- * and quiet while a folder still starts with it; only the last folder can be made; a file, a folder that can't be
- * opened, one that can't be written, a hidden or system one is said, never offered; a drive's root is started in.
- */
 import { describe, expect, test } from 'bun:test';
 import { cleanPastedPath, cloneAt, folderBrowserView, looksLikePath, needsNameRead, type CloneTargetRead, type FolderRead } from './homeFolders';
 
@@ -34,7 +27,6 @@ describe('folderBrowserView', () => {
 
   test('A3: a partial name: the matches first, Create last and quiet, so Enter still goes into the match', () => {
     expect(kinds(folderBrowserView({ typed: '~/code/ex', read: CODE, nameRead: missing }))).toEqual(['folder:experiments', 'create:ex (quiet)']);
-    // web next to web-app (decision 5a): typing "web" starts in web; "we" offers both and a quiet Create.
     expect(kinds(folderBrowserView({ typed: '~/code/we', read: CODE, nameRead: missing }))).toEqual(['folder:web', 'folder:web-app', 'create:we (quiet)']);
   });
 
@@ -95,13 +87,11 @@ describe('folderBrowserView', () => {
     expect(folderBrowserView({ typed: '/etc', read: null, nameRead: null, error: "System folders aren't offered." }).note).toBe("System folders aren't offered.");
   });
 
-  // Any folder but a system or hidden one (approval "inbox-launch-any-folder").
   test("a drive's root leads with Start in <drive>; the folder drives are in, and a folder above home, never start", () => {
     const ssd: FolderRead = { exists: true, state: 'folder', folders: ['footage', 'renders'], writable: true };
     expect(kinds(folderBrowserView({ typed: '/Volumes/Studio SSD/', read: ssd, nameRead: null }))).toEqual(['start:Studio SSD', 'folder:footage', 'folder:renders']);
     const volumes: FolderRead = { exists: true, state: 'folder', folders: ['Backup', 'Studio SSD'], start: false, writable: false };
     expect(kinds(folderBrowserView({ typed: '/Volumes/', read: volumes, nameRead: null }))).toEqual(['folder:Backup', 'folder:Studio SSD']);
-    // The disk's top: "/Volumes" typed exactly is a folder to go into, never to start in.
     const top: FolderRead = { exists: true, state: 'folder', folders: ['Users', 'Volumes'], nostart: ['Users', 'Volumes'], start: false, writable: false };
     expect(kinds(folderBrowserView({ typed: '/Volumes', read: top, nameRead: null }))).toEqual(['folder:Volumes']);
   });
@@ -164,9 +154,7 @@ describe('folderBrowserView, cloning into another folder', () => {
     expect(cloneKinds(folderBrowserView({ typed: '~/code/', read: CODE, nameRead: null, clone: { repo: 'billing-api', target: target('~/code') } }))[0]).toBe('cloneHere:~/code/billing-api');
     const web: FolderRead = { exists: true, state: 'folder', folders: ['docs', 'src'], writable: true };
     expect(cloneKinds(folderBrowserView({ typed: '~/code/web/', read: web, nameRead: null, clone: { repo: 'billing-api', target: target('~/code/web') } }))).toEqual(['cloneHere:~/code/web/billing-api', 'folder:docs', 'folder:src']);
-    // Without the slash, the same lead (the folder named is where the clone goes).
     expect(cloneAt('~/code/web', CODE, null)).toBe('~/code/web');
-    // A target for another folder (an older answer) offers nothing until the right one comes.
     expect(cloneKinds(folderBrowserView({ typed: '~/code/web/', read: web, nameRead: null, clone: { repo: 'billing-api', target: target('~/code') } }))).toEqual(['folder:docs', 'folder:src']);
   });
 
