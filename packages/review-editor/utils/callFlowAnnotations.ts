@@ -2,7 +2,6 @@ import type { CallFlowAnnotationTarget, CodeAnnotationScope } from '@plannotator
 import type { DiffFile } from '../types';
 import { isLineRangeInPatch } from './patchParser';
 
-/** Native annotation placement plus the complete normalized Call Flow target set. */
 export interface CallFlowAnnotationPlacement {
   readonly scope: CodeAnnotationScope;
   readonly filePath: string;
@@ -26,13 +25,6 @@ function hasSourceRange(target: CallFlowAnnotationTarget): target is CallFlowAnn
   );
 }
 
-/**
- * Resolve a Call Flow selection onto the strongest native review anchor.
- *
- * An in-hunk source range becomes an inline comment. If none exists, the
- * first located step becomes a file comment; a fully structural selection is
- * review-scoped. Every selected target is retained in all three cases.
- */
 export function resolveCallFlowAnnotationPlacement(
   targets: readonly CallFlowAnnotationTarget[],
   files: readonly DiffFile[],

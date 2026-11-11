@@ -1,25 +1,12 @@
-/**
- * The model behind the tree's "All files" (approved design record
- * "review-explorer", step 1): the whole repository at the diff's new side as
- * folders, with the review's changed files merged in.
- *
- * Built for big repositories: the folder index is built once per listing
- * (linear in paths), and only the rows of expanded folders are ever walked, so
- * the virtualized list renders a window of a flat row array.
- */
-
 export interface RepoFolder {
-  /** "" for the root. */
   path: string;
   dirs: string[];
   files: string[];
-  /** Lazy listings: the server has not sent this folder's children yet. */
   loaded: boolean;
 }
 
 export interface RepoTreeIndex {
   folders: Map<string, RepoFolder>;
-  /** Every file path known (listed or changed). */
   fileCount: number;
 }
 
@@ -66,9 +53,8 @@ function sortFolders(folders: Map<string, RepoFolder>): void {
 }
 
 /**
- * Index a whole listing. `extra` are paths the review holds that the listing
- * does not (a file the diff deletes), so a changed file never drops out of
- * the tree.
+ * `extra` are paths the review holds that the listing does not (a file the diff deletes), so a
+ * changed file never drops out of the tree.
  */
 export function buildRepoTreeIndex(paths: readonly string[], extra: readonly string[] = []): RepoTreeIndex {
   const folders = new Map<string, RepoFolder>();
@@ -83,16 +69,11 @@ export function buildRepoTreeIndex(paths: readonly string[], extra: readonly str
   return { folders, fileCount: seen.size };
 }
 
-/** One folder's children as the server sent them (lazy listings). */
 export interface RepoDirEntryLike {
   path: string;
   type: 'file' | 'dir';
 }
 
-/**
- * Add one folder's children to a lazy index (returns a new index). Folders the
- * entries name start unloaded; the folder itself becomes loaded.
- */
 export function addRepoDirEntries(
   index: RepoTreeIndex,
   dir: string,
@@ -126,7 +107,6 @@ export function addRepoDirEntries(
       added += 1;
     }
   }
-  // Changed files under this folder that the listing does not hold.
   for (const path of extra) {
     if (parentOf(path) === dir && !target.files.includes(path)) target.files.push(path);
   }
@@ -135,14 +115,12 @@ export function addRepoDirEntries(
   return { folders, fileCount: index.fileCount + added };
 }
 
-/** An empty lazy index whose root is not loaded yet. */
 export function emptyLazyRepoTreeIndex(): RepoTreeIndex {
   const folders = new Map<string, RepoFolder>();
   folders.set('', { path: '', dirs: [], files: [], loaded: false });
   return { folders, fileCount: 0 };
 }
 
-/** Every folder above a path ("" excluded), outermost first. */
 export function repoAncestors(path: string): string[] {
   const out: string[] = [];
   let dir = parentOf(path);
@@ -153,7 +131,6 @@ export function repoAncestors(path: string): string[] {
   return out;
 }
 
-/** The rows on screen: folders and files under expanded folders, depth first. */
 export function flattenRepoTree(
   index: RepoTreeIndex,
   expanded: ReadonlySet<string>,
@@ -185,7 +162,6 @@ export function flattenRepoTree(
   return rows;
 }
 
-/** Folders to open first: the ancestors of every changed file (and of the active one). */
 export function initialRepoExpansion(changedPaths: Iterable<string>, activePath?: string | null): Set<string> {
   const open = new Set<string>();
   for (const path of changedPaths) for (const dir of repoAncestors(path)) open.add(dir);

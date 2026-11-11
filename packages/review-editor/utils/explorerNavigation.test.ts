@@ -1,10 +1,3 @@
-/**
- * Back / forward and the jump-target line (approved design record
- * "review-explorer", step 3). Regressions guarded: Forward surviving a new
- * jump, Back and Forward losing the place they left, a repeated jump from the
- * same place filling Back with copies, and a definition opened at the wrong
- * line when the tab shows another revision than the working tree.
- */
 import { describe, expect, test } from 'bun:test';
 import {
   EMPTY_NAV_HISTORY,
@@ -47,7 +40,6 @@ describe('findSymbolLine', () => {
   test('the line itself, else the nearest whole-word match, else null', () => {
     expect(findSymbolLine(content, 'build', 4)).toBe(4);
     expect(findSymbolLine(content, 'build', 6)).toBe(4);
-    // `rebuild` is not `build`.
     expect(findSymbolLine(content, 'build', 5)).toBe(4);
     expect(findSymbolLine(content, 'missing', 4)).toBeNull();
     expect(findSymbolLine(content, 'build', 400, 10)).toBeNull();

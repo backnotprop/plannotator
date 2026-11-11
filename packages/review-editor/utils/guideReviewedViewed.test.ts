@@ -15,7 +15,6 @@ describe('filesViewedByTickingSection (#1786)', () => {
     expect(filesViewedByTickingSection(sections, [false, false, false], 0, inDiff)).toEqual(['a.ts']);
     expect(filesViewedByTickingSection(sections, [true, false, false], 1, inDiff)).toEqual(['c.ts']);
     expect(filesViewedByTickingSection(sections, [true, true, false], 2, inDiff)).toEqual(['b.ts']);
-    // Order of ticking does not matter: the last one ticked completes it.
     expect(filesViewedByTickingSection(sections, [false, true, true], 0, inDiff)).toEqual(['a.ts', 'b.ts']);
   });
 

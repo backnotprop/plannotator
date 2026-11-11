@@ -12,34 +12,25 @@ import {
 const UNKNOWN_RESULT_ERROR =
   'The platform may have accepted part of this review, but Plannotator could not confirm the result. Automatic retry is blocked to avoid duplicate comments. Inspect the pull request or merge request before starting another review.';
 
-/** Fetch-compatible capability used to submit one platform review target. */
 export type PlatformReviewFetch = (
   input: string,
   init: RequestInit,
 ) => Promise<Response>;
 
-/** Caller-visible result of submitting one target through `/api/pr-action`. */
 export interface PlatformReviewTargetResult {
   target: SubmissionTarget;
   prUrl?: string;
-  /** The decision went as a plain comment (a GitLab without request changes). */
   postedAs?: 'comment';
 }
 
-/** Result of one complete multi-target platform submission attempt. */
 export interface PlatformReviewAttemptResult {
   targets: SubmissionTarget[];
   allComplete: boolean;
   recovery: ReviewSubmissionRecovery | null;
   openUrls: string[];
-  /** Some target's decision went as a plain comment: the confirmation says so, not the button pressed. */
   postedAs?: 'comment';
 }
 
-/**
- * Preserve an existing narrowed retry after a server-confirmed safe failure.
- * A first-attempt failure has no known mutation and remains broadly retryable.
- */
 export function markPlatformReviewSafeFailure(
   target: SubmissionTarget,
   error: string,
@@ -49,7 +40,6 @@ export function markPlatformReviewSafeFailure(
     : { ...target, status: 'failed', error, partial: undefined };
 }
 
-/** Block replay when the platform may have mutated but no result was confirmed. */
 export function markPlatformReviewAmbiguous(
   target: SubmissionTarget,
   error = UNKNOWN_RESULT_ERROR,
@@ -58,9 +48,8 @@ export function markPlatformReviewAmbiguous(
 }
 
 /**
- * Submit one platform target and translate the HTTP boundary into a retry-safe
- * target state. Network loss and unrecognized 2xx payloads block automatic
- * replay because the remote mutation outcome is unknowable.
+ * Network loss and unrecognized 2xx payloads block automatic replay because the remote mutation
+ * outcome is unknowable.
  */
 export async function submitPlatformReviewTarget(options: {
   target: SubmissionTarget;
@@ -97,7 +86,6 @@ export async function submitPlatformReviewTarget(options: {
   }
 
   if (!response.ok) {
-    // Nothing was posted: this tab's server was replaced. Show the reload prompt.
     if (response.status === 409 && (rawResponse as { code?: unknown } | null)?.code === SERVER_SESSION_MISMATCH_CODE) {
       markServerSessionReplaced();
     }
@@ -124,7 +112,6 @@ export async function submitPlatformReviewTarget(options: {
       ...(parsed.prUrl ? { prUrl: parsed.prUrl } : {}),
     };
   }
-  // A retry after a partial post completes what that post began, as it went.
   const postedAs = parsed.submission.postedAs ?? target.partial?.postedAs;
   return {
     target: {

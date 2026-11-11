@@ -1,15 +1,3 @@
-/**
- * Where a hunk's "Call tree" entry goes and which function it opens.
- *
- * Regressions guarded:
- *  - the entry drawn on a line the diff does not show (it would vanish) or
- *    below the change instead of just above it;
- *  - a deletion-only hunk read on the new side;
- *  - sem's outer class chosen over the inner method around the hunk;
- *  - a hunk with no tree still getting an entry;
- *  - without sem, an entry defined in the hunk's context lines winning over
- *    the function the changed lines are in.
- */
 import { describe, expect, test } from 'bun:test';
 import type { SemanticDiffChange } from '@plannotator/shared/semantic-diff-types';
 import { callTreeHunkTargets, functionAroundHunk, listPatchHunks } from './callTreeHunks';
@@ -54,7 +42,6 @@ describe('functionAroundHunk', () => {
     const [first, second] = listPatchHunks({ path: 'src/a.ts', patch });
     const changes = [change('Note', 1, 100), change('measure', 11, 20), change('other', 30, 50, 38, 45)];
     expect(functionAroundHunk(changes, first!)?.name).toBe('measure');
-    // Old line 40 is inside `other` on the old side only.
     expect(functionAroundHunk(changes, second!)?.name).toBe('other');
     expect(functionAroundHunk([], first!)).toBeUndefined();
   });

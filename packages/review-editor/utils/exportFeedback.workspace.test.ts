@@ -16,7 +16,6 @@ const ann = (overrides: Partial<CodeAnnotation> = {}): CodeAnnotation => ({
 
 describe("exportReviewFeedback - workspace mode", () => {
   it("workspace mode: uses generic header, no PR content (same as local mode)", () => {
-    // In workspace mode, prMetadata is explicitly undefined even if workspace exists
     const result = exportReviewFeedback([ann()], undefined);
     expect(result).toStartWith("# Code Review Feedback\n\n");
     expect(result).not.toContain("PR Review");
@@ -29,7 +28,6 @@ describe("exportReviewFeedback - workspace mode", () => {
       ann({ filePath: "repo-a/src/index.ts", lineStart: 5, text: "first" }),
       ann({ filePath: "repo-b/src/index.ts", lineStart: 1, text: "second" }),
     ]);
-    // Different repos with same relative path should be separate groups
     expect(result).toContain("## repo-a/src/index.ts");
     expect(result).toContain("## repo-b/src/index.ts");
   });
@@ -44,12 +42,10 @@ describe("exportReviewFeedback - workspace mode", () => {
     const laterIdx = result.indexOf("later");
     const middleInRepoB = result.indexOf("middle in repo-b");
     expect(earlierIdx).toBeLessThan(laterIdx);
-    // Both repo-a annotations should come before repo-b (alphabetical by path)
     expect(laterIdx).toBeLessThan(middleInRepoB);
   });
 
   it("handles nested repo labels with overlapping paths", () => {
-    // Tests the longest-prefix matching behavior from resolveWorkspaceFilePath
     const result = exportReviewFeedback([
       ann({ filePath: "apps/api/src/server.ts", text: "in nested repo" }),
       ann({ filePath: "apps/web/src/app.ts", text: "in sibling repo" }),
@@ -74,7 +70,6 @@ describe("exportReviewFeedback - workspace mode", () => {
       ann({ filePath: "repo-b/src/index.ts", lineStart: 10, text: "second comment" }),
       ann({ filePath: "repo-a/src/index.ts", lineStart: 15, text: "third comment" }),
     ]);
-    // All repo-a comments should be grouped together
     const repoAHeaderIdx = result.indexOf("## repo-a/src/index.ts");
     const repoBHeaderIdx = result.indexOf("## repo-b/src/index.ts");
     const firstCommentIdx = result.indexOf("first comment");

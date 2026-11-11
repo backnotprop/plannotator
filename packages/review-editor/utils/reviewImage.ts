@@ -1,31 +1,16 @@
-/**
- * Client half of the code-review image preview (#1598): fetch one side of a
- * changed image from `/api/review-image` as a Blob, and keep a small LRU of
- * object URLs so scrolling back to a card does not refetch.
- *
- * Why `fetch` → Blob → `URL.createObjectURL` rather than `<img src=/api/…>`:
- * the JSON error reason stays readable, the request is abortable when a card
- * unmounts mid-scroll, and the byte size and a digest are known, which is what
- * "Contents unchanged" and the size delta are computed from. SVG is only ever
- * shown through `<img src=blob:…>`: no script, no external fetch, no DOM.
- */
-
 export type ReviewImageSide = 'old' | 'new';
 
 export interface ReviewImageData {
   url: string;
   bytes: number;
   contentType: string;
-  /** SHA-256 of the bytes, hex; equal digests mean identical contents. */
   digest: string;
-  /** From the server's header parse; the <img> fills these in otherwise. */
   width?: number;
   height?: number;
 }
 
 export interface ReviewImageError {
   status: number;
-  /** Server reason (`not-image`, `too-large`, `lfs-pointer`, …) or `network`. */
   reason: string;
   bytes?: number;
   width?: number;
@@ -37,7 +22,6 @@ export type ReviewImageResult =
   | { ok: false; error: ReviewImageError };
 
 const MAX_CACHED_IMAGES = 64;
-/** Byte ceiling for the cache: 64 sides at the 10 MB cap would be 640 MB. */
 export const MAX_CACHED_IMAGE_BYTES = 128 * 1024 * 1024;
 const cache = new Map<string, ReviewImageData>();
 let cachedBytes = 0;
@@ -69,10 +53,8 @@ function revokeAll(): void {
 }
 
 /**
- * Move the cache to `snapshot` when a request for it STARTS (switching back to
- * an earlier diff reuses its snapshot id, so that must stay allowed). A new
- * snapshot makes every cached side meaningless, so they are dropped. Responses
- * never move the cache: see the check in `fetchReviewImage`.
+ * Move the cache to `snapshot` when a request for it STARTS (switching back to an earlier diff
+ * reuses its snapshot id, so that must stay allowed).
  */
 function enterSnapshot(snapshot: string): void {
   if (cachedSnapshot === snapshot) return;
@@ -80,10 +62,6 @@ function enterSnapshot(snapshot: string): void {
   cachedSnapshot = snapshot;
 }
 
-/**
- * Mark an object URL as in use by a mounted <img>. Returns the release
- * function; the URL is revoked on release if it was evicted meanwhile.
- */
 export function retainReviewImageUrl(url: string): () => void {
   urlUsers.set(url, (urlUsers.get(url) ?? 0) + 1);
   let released = false;
@@ -100,7 +78,6 @@ export function retainReviewImageUrl(url: string): () => void {
   };
 }
 
-/** Synchronous cache read, so a remounted card paints without a loading frame. */
 export function peekReviewImage(
   snapshot: string,
   path: string,
@@ -110,7 +87,6 @@ export function peekReviewImage(
   const key = cacheKey(snapshot, path, side);
   const entry = cache.get(key);
   if (entry) {
-    // Refresh recency.
     cache.delete(key);
     cache.set(key, entry);
   }
@@ -150,7 +126,6 @@ export async function fetchReviewImage(
     try {
       body = (await response.json()) as Partial<ReviewImageError>;
     } catch {
-      // Non-JSON error body: the status alone has to do.
     }
     return {
       ok: false,
@@ -168,8 +143,6 @@ export async function fetchReviewImage(
   const contentType = response.headers.get('content-type') ?? 'application/octet-stream';
   const digest = await sha256Hex(buffer);
   if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
-  // The page moved to a newer snapshot while this was in flight: its card is
-  // gone, and caching it would evict the current snapshot's entries.
   if (cachedSnapshot !== snapshot) throw new DOMException('Superseded', 'AbortError');
 
   const image: ReviewImageData = {
@@ -181,8 +154,6 @@ export async function fetchReviewImage(
     height: numericHeader(response, 'x-image-height'),
   };
   const key = cacheKey(snapshot, path, side);
-  // Two fetches for the same side can overlap (a card remounting mid-fetch).
-  // The first one's URL may already be on screen, so keep it and discard ours.
   const existing = cache.get(key);
   if (existing) {
     URL.revokeObjectURL(image.url);
@@ -190,26 +161,21 @@ export async function fetchReviewImage(
   }
   cache.set(key, image);
   cachedBytes += image.bytes;
-  // Evict least recently used first, by count and by bytes; the entry just
-  // added always survives so the caller gets a live URL.
   while ((cache.size > MAX_CACHED_IMAGES || cachedBytes > MAX_CACHED_IMAGE_BYTES) && cache.size > 1) {
     dropEntry(cache.keys().next().value as string);
   }
   return { ok: true, image };
 }
 
-/** Test seam: drop every cached side. */
 export function resetReviewImageCache(): void {
   revokeAll();
   cachedSnapshot = undefined;
 }
 
-/** Test seam: what the cache currently holds. */
 export function reviewImageCacheStats(): { entries: number; bytes: number; snapshot?: string } {
   return { entries: cache.size, bytes: cachedBytes, snapshot: cachedSnapshot };
 }
 
-/** `12.4 KB`, `3.1 MB`, `512 B`. */
 export function formatImageBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;

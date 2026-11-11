@@ -48,8 +48,6 @@ describe('pending "View on platform" tab (#1583)', () => {
     expect(openPendingTab(throwing, 'GitHub')).toBeNull();
   });
 
-  // The regression: opening after the async submit is what browsers block.
-  // With a placeholder, success navigates it and never calls open() again.
   test('success navigates the placeholder rather than opening a new window', () => {
     const tab = fakeTab();
     const { opener, calls } = recordingOpener(() => null);

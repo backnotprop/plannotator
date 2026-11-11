@@ -5,22 +5,11 @@ import { exportAnnotations, parseMarkdownToBlocks } from '@plannotator/ui/utils/
 import { artifactAnchorLabel } from './artifactAnnotations';
 import { codeFenceFor } from '@plannotator/core/markdown-structure';
 
-/**
- * Quoted code in a fence longer than any backtick run in it (CommonMark), so
- * a ``` line in the code can never close the quote early. Unchanged (three
- * backticks) for code without such a run. The Inbox's guideCommentEntry
- * writes the same (packages/inbox/guideFeedback.test.ts keeps them equal).
- */
 function fenced(code: string): string {
   const fence = codeFenceFor(code);
   return `${fence}\n${code}\n${fence}\n`;
 }
 
-/**
- * Format a conventional comment prefix per the Conventional Comments spec:
- * `**label (decorations):** ` — entire label+decorations+colon wrapped in bold.
- * See https://conventionalcomments.org for examples.
- */
 export function formatConventionalPrefix(
   label?: ConventionalLabel,
   decorations?: ConventionalDecoration[],
@@ -30,28 +19,15 @@ export function formatConventionalPrefix(
   return `**${label}${decs}:** `;
 }
 
-/**
- * Describes what the reviewer was looking at in local-review mode — diff mode,
- * optional base branch, optional worktree. Threaded into the feedback header so
- * the receiving agent knows which diff the annotations are anchored to. Ignored
- * in PR mode, where `prMeta` already carries equivalent context.
- */
 export interface FeedbackDiffContext {
   mode: string;
   base?: string;
   worktreePath?: string | null;
-  /** Subject of the active commit when mode is `commit:<sha>` — header readability only. */
   commitSubject?: string;
-  /** Display id of the active commit (the short CHANGE id in a jj session). */
   commitShortId?: string;
-  /** Exact server snapshot for providers whose line anchors can outlive a refresh. */
   snapshotId?: string;
 }
 
-/** The sha when a `commit:<sha>` diff (or a jj session's `jj-commit:<commit
- *  id>`) is or was the anchor, else undefined. Shared with App's
- *  annotation-stamping context and every other "is a commit detour on
- *  screen?" check, so they can never parse the mode differently. */
 export function commitShaFromMode(mode: string | undefined): string | undefined {
   if (!mode) return undefined;
   for (const prefix of ['commit:', 'jj-commit:']) {
@@ -66,7 +42,6 @@ function describeDiff(ctx: FeedbackDiffContext): string {
   const commitSha = commitShaFromMode(mode);
   if (commitSha) {
     const subject = ctx.commitSubject ? ` — ${ctx.commitSubject}` : '';
-    // jj users read change ids; git keeps its 7-char sha.
     const shown = mode.startsWith('jj-commit:') && ctx.commitShortId ? ctx.commitShortId : commitSha.slice(0, 7);
     return `Commit \`${shown}\`${subject} (diff vs its parent)${worktreePath ? ` _(worktree: ${worktreePath})_` : ''}`;
   }
@@ -80,7 +55,7 @@ function describeDiff(ctx: FeedbackDiffContext): string {
   ] as const) {
     if (!mode.startsWith(prefix)) continue;
     let target = mode.slice(prefix.length);
-    try { target = decodeURIComponent(target); } catch { /* keep encoded fallback */ }
+    try { target = decodeURIComponent(target); } catch { }
     label = `GitButler ${kind} \`${target}\` (committed changes)`;
     return worktreePath ? `${label} _(worktree: ${worktreePath})_` : label;
   }
@@ -102,26 +77,15 @@ function describeDiff(ctx: FeedbackDiffContext): string {
     case "branch":       label = base ? `Branch diff vs \`${base}\`` : "Branch diff"; break;
     case "merge-base":   label = base ? `Committed changes vs \`${base}\`` : "Committed changes"; break;
     case "all":          label = "Every file"; break;
-    default:             label = mode; // p4-* or anything else — show raw
+    default:             label = mode;
   }
   return worktreePath ? `${label} _(worktree: ${worktreePath})_` : label;
 }
 
 /**
- * Build markdown feedback from code review annotations.
- *
- * In PR mode (prMeta provided), the header includes repo, PR number,
- * title, branches, and URL so the receiving agent has full context.
- *
- * In local mode, an optional diffContext adds one line describing which
- * diff the reviewer was looking at — otherwise the agent only sees file
- * paths and line numbers and has to guess which diff those anchor to.
- */
-/**
- * Anchor-mismatch note: an annotation made on a commit:<sha> diff carries
- * line numbers from THAT commit's diff-vs-parent — exporting it under any
- * other diff header (or vice versa) without saying so would silently point
- * the agent at the wrong code. Empty when the anchor matches the header.
+ * In local mode, an optional diffContext adds one line describing which diff the reviewer was
+ * looking at — otherwise the agent only sees file paths and line numbers and has to guess which
+ * diff those anchor to.
  */
 function commitMismatchNote(ann: CodeAnnotation, currentCommitSha?: string): string {
   if (ann.commitSha && ann.commitSha !== currentCommitSha) {
@@ -134,24 +98,14 @@ function commitMismatchNote(ann: CodeAnnotation, currentCommitSha?: string): str
   return '';
 }
 
-/**
- * Outdated label (#1590): a restored PR comment whose anchored lines no
- * longer read the same. Its line numbers refer to an earlier version of the
- * PR, so the agent must not read them against the diff above. The label text
- * is deliberately fixed (maintainer-specified wording).
- */
 export const OUTDATED_ANNOTATION_LABEL = '[Outdated — the code changed after this comment]';
 
 function outdatedNote(ann: CodeAnnotation): string {
   return ann.outdated ? `${OUTDATED_ANNOTATION_LABEL}\n` : '';
 }
 
-/** The heading suffix of a comment on lines outside the diff (a file the
- *  review does not change, or a changed file's lines outside its hunks). */
 export const OUTSIDE_DIFF_ANNOTATION_LABEL = '(not in the diff)';
 
-/** A comment outside the diff carries the code it was written on, fenced, so
- *  the agent reads it without the diff around it. */
 function outsideDiffCodeBlock(ann: CodeAnnotation): string {
   if (!ann.outsideDiff) return '';
   const code = ann.anchorText ?? ann.originalCode;
@@ -173,11 +127,6 @@ function callFlowInlineCode(value: string): string {
   return `\`${value.replace(/`/g, '\u02cb')}\``;
 }
 
-/**
- * Serialize the complete Call Flow selection carried by one review annotation.
- * The annotation may be inline, file-scoped, or review-scoped; this context
- * keeps every Shift-clicked step in agent feedback and hosted submission.
- */
 export function formatCallFlowAnnotationTargets(annotation: CodeAnnotation): string {
   if (!annotation.callFlowTargets?.length) return '';
   const rows = annotation.callFlowTargets.map((target) => {
@@ -204,11 +153,6 @@ const MARKDOWN_PREVIEW_CONTEXT_LABEL: Record<NonNullable<MarkdownPreviewAnchor['
   unchanged: 'in unchanged text',
 };
 
-/**
- * The quoted text of a comment made in a Markdown file's rendered preview,
- * as a Markdown quote, plus where in the rendered diff it was when that says
- * something (removed text no longer exists in the file).
- */
 export function markdownPreviewQuote(anchor: MarkdownPreviewAnchor): string {
   const quote = anchor.originalText.trim().split('\n').map((line) => `> ${line}`).join('\n');
   const where = anchor.diffContext && anchor.diffContext !== 'unchanged'
@@ -281,7 +225,6 @@ function formatFileAnnotations(fileAnnotations: CodeAnnotation[], headingLevel =
     output += formatCallFlowAnnotationTargets(ann);
     output += formatSelectedTextBlock(ann);
     output += outsideDiffCodeBlock(ann);
-    // The code block already quotes the lines; a suggestion still shows what it replaces.
     output += ann.outsideDiff && !ann.suggestedCode ? '' : formatSuggestionBlocks(ann);
     output += '\n';
   }
@@ -290,11 +233,9 @@ function formatFileAnnotations(fileAnnotations: CodeAnnotation[], headingLevel =
 }
 
 /**
- * The highlighted-text payload for a comment created inside an edit session:
- * the exact text the reviewer had selected in the editor. When the selection
- * overlapped the reviewer's own in-progress edits, the line anchor points at
- * the pristine lines that region replaces (approximate), and the note says so
- * — otherwise the anchored lines and the highlighted text are the same code.
+ * When the selection overlapped the reviewer's own in-progress edits, the line anchor points at the
+ * pristine lines that region replaces (approximate), and the note says so — otherwise the anchored
+ * lines and the highlighted text are the same code.
  */
 function formatSelectedTextBlock(ann: CodeAnnotation): string {
   if (!ann.selectedText) return '';
@@ -306,17 +247,6 @@ function formatSelectedTextBlock(ann: CodeAnnotation): string {
   return output;
 }
 
-/**
- * The suggestion payload for one annotation: an optional "Replaces:" block
- * (the exact current lines the suggestion swaps out — the applying agent
- * must verify these against the file before applying, and skip with a note
- * if they no longer match) followed by the "Suggested code:" block. Both
- * SuggestionModal-authored and edit-session-derived suggestions carry
- * `originalCode`, so both sources export through this one format. A
- * deletion-only suggestion (no suggestedCode; the annotation text describes
- * the removal) still emits its "Replaces:" block so the anchor stays
- * verifiable.
- */
 function formatSuggestionBlocks(ann: CodeAnnotation): string {
   let output = '';
   if ((ann.suggestedCode || ann.text) && ann.originalCode) {
@@ -328,12 +258,6 @@ function formatSuggestionBlocks(ann: CodeAnnotation): string {
   return output;
 }
 
-/**
- * The heading review-level comments (`scope: 'general'`, the "Global comment"
- * button, a decision's note) go under, ahead of the per-file sections. The
- * Inbox's guided-review export writes the same (GUIDE_GLOBAL_COMMENTS_HEADING,
- * kept equal by packages/inbox/guideFeedback.test.ts).
- */
 export const GLOBAL_COMMENTS_HEADING = 'Global comments';
 
 function renderGeneralComments(annotations: CodeAnnotation[]): string {
@@ -407,8 +331,6 @@ export function exportReviewFeedback(
     return '# Code Review\n\nNo feedback provided.';
   }
 
-  // Global (review-level) comments belong to no file — render them in their own
-  // section, first, and group only the rest by file.
   const general = annotations.filter(a => (a.scope ?? 'line') === 'general');
   const placed = annotations.filter(a => (a.scope ?? 'line') !== 'general');
   const generalSection = general.length > 0 ? renderGeneralComments(general) : '';
@@ -436,7 +358,6 @@ export function exportReviewFeedback(
     return output;
   }
 
-  // Multi-PR: group by prUrl, then by file within each
   let output = isMultiPR ? '# Multi-PR Review\n\n' : '# Code Review\n\n';
   output += generalSection;
 
@@ -470,11 +391,6 @@ export function exportReviewFeedback(
   return output;
 }
 
-/**
- * The prose-annotation feedback block (PR description notes + PR comment notes),
- * joined. Shared by the agent feedback (feedbackMarkdown) and the GitHub review
- * body seed, so the two never drift. Returns '' when there are no prose notes.
- */
 export function buildProseFeedback(
   descriptionAnnotations: Annotation[],
   commentAnnotations: CommentAnnotation[],
@@ -508,11 +424,6 @@ export function buildProseFeedback(
   return parts.join('\n\n');
 }
 
-/**
- * Format feedback from PR comment annotations. Unlike code (the agent can read
- * the repo) a PR comment is invisible to the agent, so the full comment body is
- * quoted inline alongside the reviewer's note.
- */
 export function exportCommentAnnotations(annotations: CommentAnnotation[]): string {
   if (annotations.length === 0) return '';
   let output = '# PR Comment Feedback\n\n';
@@ -555,7 +466,6 @@ function artifactFeedbackEntry(
   return output;
 }
 
-/** Artifact notes share this block for local-agent delivery and GitHub reviews. */
 export function exportArtifactAnnotations(
   descriptionAnnotations: Array<Annotation & { artifact: ArtifactAnnotationMeta }>,
   commentAnnotations: Array<CommentAnnotation & { artifact: ArtifactAnnotationMeta }>,

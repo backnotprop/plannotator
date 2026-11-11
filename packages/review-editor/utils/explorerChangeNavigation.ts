@@ -1,17 +1,3 @@
-/**
- * Next / previous change (⌥F5 / ⇧⌥F5, approved design record
- * "review-explorer", step 3): walks the runs of changed lines in the view on
- * screen. It reads what Pierre drew (`data-line-type="change-…"` rows inside
- * each `diffs-container`'s shadow root) and, for the Whole file view, the
- * lines its host lists in `data-change-lines`. A run is a block of changed
- * rows; in a split view the two sides of one block are one run.
- *
- * The view's reading position is a third of the way down its scroll box: a
- * jump puts the run's first row there, so the next press finds the run after.
- * Views that draw only what is near the screen (All files, a long diff) are
- * scrolled on until a run appears or the view ends.
- */
-
 export type ChangeStep = 1 | -1;
 export type ChangeStepResult = 'moved' | 'end';
 
@@ -46,7 +32,6 @@ function changeRows(container: HTMLElement): Element[] {
   return rows;
 }
 
-/** Blocks of changed rows, top to bottom, in viewport coordinates. */
 export function changeRuns(container: HTMLElement): Run[] {
   const rects = changeRows(container)
     .map((row) => row.getBoundingClientRect())
@@ -67,7 +52,6 @@ function parentAcrossShadow(node: Element): Element | null {
   return root instanceof ShadowRoot ? root.host : null;
 }
 
-/** The scroll box the view's rows move in. */
 export function changeScroller(container: HTMLElement): HTMLElement | null {
   const first = changeRows(container)[0] ?? container.querySelector('diffs-container');
   let node: Element | null = first ?? null;
@@ -83,18 +67,12 @@ export function changeScroller(container: HTMLElement): HTMLElement | null {
 
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
-/**
- * Moves the view to the next (1) or previous (-1) run. `edge` picks the first
- * or last run regardless of position (a file just opened). Answers `end` when
- * there is none that way, leaving the view where it was.
- */
 export async function stepChange(
   container: HTMLElement,
   direction: ChangeStep,
   options: { edge?: 'first' | 'last'; maxScrolls?: number } = {},
 ): Promise<ChangeStepResult> {
   const scroller = changeScroller(container);
-  // Everything fits on screen: nothing to move to in this view.
   if (!scroller) return 'end';
   const startTop = scroller.scrollTop;
   const anchorOf = () => {

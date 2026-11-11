@@ -8,7 +8,6 @@ import { parsePRReviewSubmissionPartial } from './prActionResponse';
 
 const STORAGE_KEY_PREFIX = 'plannotator-pr-review-recovery-v1:';
 
-/** Minimal session-storage capability used by review recovery. */
 export interface ReviewRecoveryStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
@@ -37,10 +36,7 @@ type RetainedSubmissionTarget =
       partial?: PRReviewSubmissionPartial;
     });
 
-/** Retry-safe progress retained for one root PR review within a browser tab. */
 export interface ReviewSubmissionRecovery {
-  /** The event every target of this submission posts (#1611: a stacked
-   *  review never mixes Comment and Request changes across its targets). */
   action: PRReviewAction;
   generalComment: string;
   targets: RetainedSubmissionTarget[];
@@ -146,7 +142,6 @@ function blockedCorruptRecovery(rootPrUrl: string): ReviewSubmissionRecovery {
   };
 }
 
-/** Load retry-safe progress for one root PR URL from tab-scoped storage. */
 export function loadReviewSubmissionRecovery(
   storage: ReviewRecoveryStorage,
   rootPrUrl: string,
@@ -164,10 +159,6 @@ export function loadReviewSubmissionRecovery(
   }
 }
 
-/**
- * Persist or clear retry-safe progress for one root PR URL.
- * Returns whether tab-scoped refresh recovery is available.
- */
 export function saveReviewSubmissionRecovery(
   storage: ReviewRecoveryStorage,
   rootPrUrl: string,
@@ -269,7 +260,6 @@ function restoreTarget(
   };
 }
 
-/** Merge retained progress into a freshly rebuilt annotation submission. */
 export function restoreReviewSubmission(
   freshSubmission: ReviewSubmission,
   recovery: ReviewSubmissionRecovery,

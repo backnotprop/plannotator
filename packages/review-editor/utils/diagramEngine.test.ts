@@ -1,9 +1,3 @@
-/**
- * The on-demand diagram engine loader: the advert is read strictly, the
- * engine is imported once per page (concurrent fences share the import), the
- * host carries the page's own modules and the runtime URLs before the import,
- * and a failed or mismatched import is forgotten so the next fence retries.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import * as React from 'react';
 import * as MathSlot from '@plannotator/ui/utils/math';
@@ -58,12 +52,9 @@ describe('loadDiagramEngine', () => {
     expect(imported).toEqual([URLS.engine]);
     expect(peekDiagramEngine(URLS)).toBe(a);
 
-    // The engine gets the page's own instances (one React, one math slot)
-    // and the runtimes' URLs, never its own copies.
     expect(Object.keys(hostAtImport!.modules).sort()).toEqual([...DIAGRAM_ENGINE_SHARED_MODULES].sort());
     expect((hostAtImport!.modules.react as typeof React).useState).toBe(React.useState);
     expect((hostAtImport!.modules['ui:utils/math'] as typeof MathSlot).getMathRenderer).toBe(MathSlot.getMathRenderer);
-    // The engine's first read of each runtime URL is the plain URL.
     expect(hostAtImport!.runtimeUrls.mermaid).toBe(URLS.mermaid);
     expect(hostAtImport!.runtimeUrls.graphviz).toBe(URLS.graphviz);
   });
@@ -77,7 +68,6 @@ describe('loadDiagramEngine', () => {
     expect(host!.runtimeUrls.mermaid).toBe(URLS.mermaid);
     expect(host!.runtimeUrls.mermaid).toBe(`${URLS.mermaid}?r=1`);
     expect(host!.runtimeUrls.mermaid).toBe(`${URLS.mermaid}?r=2`);
-    // Each runtime counts its own reads.
     expect(host!.runtimeUrls.graphviz).toBe(URLS.graphviz);
     expect(host!.runtimeUrls.graphviz).toBe(`${URLS.graphviz}?r=1`);
   });
@@ -96,7 +86,6 @@ describe('loadDiagramEngine', () => {
     await expect(loadDiagramEngine(URLS, flaky)).rejects.toThrow('offline');
     expect(await loadDiagramEngine(URLS, flaky)).toBe(ENGINE as never);
     expect(imported).toEqual([URLS.engine, `${URLS.engine}?r=1`, `${URLS.engine}?r=2`]);
-    // Loaded under its advertised URL, whatever query the import used.
     expect(peekDiagramEngine(URLS)).toBe(ENGINE as never);
     expect(await loadDiagramEngine(URLS, flaky)).toBe(ENGINE as never);
     expect(imported).toHaveLength(3);

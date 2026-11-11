@@ -17,11 +17,6 @@ export function buildCodeNavRequest(
   };
 }
 
-/**
- * The hover variant. Cmd+click resolves the token the user aimed at; hover has
- * no such aim, so it stitches the fragmented spans back into one identifier
- * first and declines (null) for anything that is not a symbol worth searching.
- */
 export function buildTokenHoverRequest(
   props: DiffTokenEventBaseProps,
   filePath: string,

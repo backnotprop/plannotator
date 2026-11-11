@@ -1,11 +1,10 @@
 /**
- * The lines a file keeps after its diff's last hunk, from the file's whole new text: what Pierre's trailing row counts
- * once it has the whole file ("N unmodified lines"). Zero when the last hunk reaches the end of the file.
+ * The lines a file keeps after its diff's last hunk, from the file's whole new text: what Pierre's
+ * trailing row counts once it has the whole file ("N unmodified lines").
  */
 export function linesAfterLastHunk(hunks: readonly { additionStart: number; additionCount: number }[], newContent: string): number {
   const last = hunks.at(-1);
   if (!last) return 0;
-  // A hunk that adds nothing names the line before it (git's "+N,0").
   const end = last.additionCount > 0 ? last.additionStart + last.additionCount - 1 : last.additionStart;
   const lines = newContent === '' ? 0 : newContent.split('\n').length - (newContent.endsWith('\n') ? 1 : 0);
   return Math.max(0, lines - end);

@@ -1,17 +1,3 @@
-/**
- * Comments outside the diff (approved design record "review-explorer",
- * answer 3): a comment on a file the review does not change, or on a changed
- * file's lines outside its hunks.
- *
- * Regressions guarded:
- *  - such a comment posted inline on a PR (every platform refuses it) instead
- *    of in the review body with the quoted code and a permalink;
- *  - the agent getting it without the code or without the "(not in the diff)"
- *    label;
- *  - a diff re-check (a push, a restored draft) marking it Outdated because
- *    its lines are not in the patch;
- *  - the Whole file view's change bars on the wrong lines.
- */
 import { describe, expect, test } from 'bun:test';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import { prBlobPermalink, type PRMetadata } from '@plannotator/shared/pr-types';
@@ -145,7 +131,6 @@ describe('to the agent', () => {
     expect(markdown).toContain(`### Lines 49-52 (new) ${OUTSIDE_DIFF_ANNOTATION_LABEL}`);
     expect(markdown).toContain('Should this move to a worker?');
     expect(markdown).toContain('**Code:**\n```\nfunction buildTrie() {\n  const root = {};\n```');
-    // An ordinary comment keeps its heading.
     expect(exportReviewFeedback([inline])).not.toContain(OUTSIDE_DIFF_ANNOTATION_LABEL);
   });
 });

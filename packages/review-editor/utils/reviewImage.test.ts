@@ -1,9 +1,3 @@
-/**
- * Client image cache (#1598). Regressions guarded:
- *  - memory: 64 sides at the 10 MB cap would hold ~640 MB, so bytes are capped;
- *  - a late response for an older snapshot must not wipe the current one;
- *  - eviction must not revoke a URL a mounted <img> is still using.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import {
   MAX_CACHED_IMAGE_BYTES,
@@ -57,7 +51,6 @@ describe('review image cache', () => {
     const stats = reviewImageCacheStats();
     expect(stats.bytes).toBeLessThanOrEqual(MAX_CACHED_IMAGE_BYTES);
     expect(stats.entries).toBe(Math.floor(MAX_CACHED_IMAGE_BYTES / size));
-    // The oldest were evicted, the newest survive.
     expect(peekReviewImage('snap', 'img-0.png', 'new')).toBeUndefined();
     expect(peekReviewImage('snap', 'img-19.png', 'new')).toBeDefined();
   });
@@ -96,7 +89,6 @@ describe('review image cache', () => {
     const first = await fetchReviewImage('snap', 'a.png', 'new', signal());
     if (!first.ok) throw new Error('expected ok');
     const release = retainReviewImageUrl(first.image.url);
-    // Two more 64 MB sides push the first out of the 128 MB cache.
     await fetchReviewImage('snap', 'b.png', 'new', signal());
     await fetchReviewImage('snap', 'c.png', 'new', signal());
     expect(peekReviewImage('snap', 'a.png', 'new')).toBeUndefined();

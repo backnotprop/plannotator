@@ -24,7 +24,6 @@ export function buildExplainFindingPrompt(annotation: CodeAnnotation): string {
   ].filter(Boolean).join('\n\n');
 }
 
-/** What the chat shows for the question: the finding, not the instructions. */
 export function explainFindingDisplayPrompt(annotation: CodeAnnotation): string {
   const finding = (annotation.text ?? '').replace(/\s+/g, ' ').trim();
   if (!finding) return 'Explain this finding';
@@ -32,7 +31,6 @@ export function explainFindingDisplayPrompt(annotation: CodeAnnotation): string 
   return `Explain this finding: ${cut}`;
 }
 
-/** Only findings from a review agent this session launched (its job source). */
 export function isAgentGeneratedFinding(
   annotation: Pick<CodeAnnotation, 'source'>,
   registeredSources: ReadonlySet<string> | undefined,

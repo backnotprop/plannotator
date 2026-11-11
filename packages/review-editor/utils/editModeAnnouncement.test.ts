@@ -79,9 +79,6 @@ describe('editModeAnnouncementCanShow (never-stack chain gate)', () => {
   });
 
   test('shows for an existing user who has already seen every other chain dialog', () => {
-    // Existing users have consumed the guide-intro and look-and-feel
-    // cookies, so all earlier visibilities are false on load and the
-    // announcement stands alone.
     expect(
       editModeAnnouncementCanShow({
         announcementPending: true,
