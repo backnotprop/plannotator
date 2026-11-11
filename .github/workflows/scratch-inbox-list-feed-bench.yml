@@ -1,0 +1,85 @@
+name: Scratch Inbox list feed bench
+
+# Scratch, temporary (stage 3, PR 5): per agent message, the server's cost and bytes for the list feed's frame vs
+# today's list read, before (the row cache, PR 3) and after (this commit minus the bench), on one runner,
+# interleaved, both record logs, 3,000 and 30,560 threads; and the store's list read after a write (the row cache's
+# numbers) on both. Runs only on push to its own branch, which is deleted after the run. No secrets, no PR.
+
+on:
+  push:
+    branches:
+      - scratch/inbox-list-feed-bench
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 170
+    env:
+      BEFORE_SHA: 463baca77
+      OUT: ${{ github.workspace }}/bench-out
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      - name: Machine
+        run: nproc; free -g; lscpu | grep "Model name"; uptime
+
+      - name: Trees
+        run: |
+          bun install --frozen-lockfile > /dev/null
+          git worktree add --detach /tmp/before "$BEFORE_SHA"
+          (cd /tmp/before && bun install --frozen-lockfile > /dev/null)
+          git log --oneline -1; git -C /tmp/before log --oneline -1
+
+      - name: Make the Inboxes
+        run: |
+          mkdir -p "$OUT/results" "$OUT/results-feed"
+          for SHAPE in long wide; do
+            bun bench-stage3/make.ts /tmp/before "$SHAPE" "/tmp/inbox-$SHAPE"
+            du -sh /tmp/inbox-$SHAPE/*
+          done
+
+      # Pair p: before and after back to back, the first alternating per pair. Each feed process gets its own copy.
+      - name: The feed vs today's list read, interleaved
+        run: |
+          for P in 1 2 3; do
+            for SHAPE in long wide; do
+              for LOG in jsonl sqlite; do
+                if [ $((P % 2)) = 1 ]; then ORDER="before after"; else ORDER="after before"; fi
+                for TREE in $ORDER; do
+                  if [ "$TREE" = before ]; then ROOT=/tmp/before; else ROOT="$GITHUB_WORKSPACE"; fi
+                  rm -rf /tmp/run /tmp/run-home && mkdir /tmp/run-home && cp -R "/tmp/inbox-$SHAPE/jsonl" /tmp/run
+                  HOME=/tmp/run-home TREE_NAME=$TREE timeout 1200 bun bench-stage3/feed.ts "$ROOT" /tmp/run "$LOG" "$TREE" 20 2>/dev/null | grep '^{' | tee -a "$OUT/results-feed/$SHAPE-p$P.jsonl"
+                  echo "  load $(cut -d' ' -f1 /proc/loadavg)"
+                done
+              done
+            done
+          done
+
+      - name: The store's list read after a write (the row cache), interleaved
+        run: |
+          for P in 1 2; do
+            for SHAPE in long wide; do
+              for LOG in jsonl sqlite; do
+                if [ $((P % 2)) = 1 ]; then ORDER="before after"; else ORDER="after before"; fi
+                for TREE in $ORDER; do
+                  if [ "$TREE" = before ]; then ROOT=/tmp/before; else ROOT="$GITHUB_WORKSPACE"; fi
+                  TREE_NAME=$TREE bun bench-stage3/run.ts "$ROOT" "/tmp/inbox-$SHAPE/$LOG" "$LOG" on 20 | tee -a "$OUT/results/$SHAPE-p$P.jsonl"
+                done
+              done
+            done
+          done
+
+      - name: Tables
+        run: |
+          bun bench-stage3/summarize-feed.ts "$OUT/results-feed" | tee -a "$GITHUB_STEP_SUMMARY"
+          bun bench-stage3/summarize.ts "$OUT/results" | tee -a "$GITHUB_STEP_SUMMARY"
