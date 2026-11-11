@@ -13,7 +13,7 @@
  * an Inbox on a port it picks (refuses 49606 and 59812), stopped only through the scratch helpers. Run it through
  * `bun scripts/inbox-live-verify.ts run`, never directly: that script makes the sandbox and merges the results.
  *
- * Env: LIVE_SIZE small|10k|100k · LIVE_PROFILE local|throttled · LIVE_RUNS (samples per stat) · LIVE_OUT (json path)
+ * Env: LIVE_SIZE small|10k|100k · LIVE_PROFILE local|throttled|hotel (hotel: only the hotel WiFi checks, hotel.ts) · LIVE_RUNS (samples per stat) · LIVE_OUT (json path)
  *      · LIVE_QUERY (appended to the page address, e.g. `?data=db`) · LIVE_LOG (progress lines)
  */
 import { chromium, test, type Browser, type BrowserContext, type Page, type Request } from '@playwright/test';
@@ -26,6 +26,7 @@ import { seedInboxSearchWorld } from '../../scripts/inbox-large-store';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from '../e2e/inbox-scratch';
+import { HOTEL, runHotel } from './hotel';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -42,8 +43,11 @@ const SIZES = {
   '10k': { threads: 300, messages: 10_000, projects: 12, textBytes: 18 * 1024 * 1024 },
   '100k': { threads: 3000, messages: 100_000, projects: 40, textBytes: 120 * 1024 * 1024 },
 } as const;
-/** Links: loopback, or Chromium's throttle (40 ms each way, 10 Mbit) on every page, as a remote tailnet device. */
-const PROFILES = { local: null, throttled: { latency: 40, mbit: 10 } } as const;
+/**
+ * Links: loopback, or Chromium's throttle (40 ms each way, 10 Mbit) on every page, as a remote tailnet device, or hotel
+ * WiFi (hotel.ts: 400 ms with jitter, 1 Mbit, 3 % loss, one drop), which runs only its own three checks.
+ */
+const PROFILES = { local: null, throttled: { latency: 40, mbit: 10 }, hotel: { latency: HOTEL.latency, mbit: HOTEL.mbit } } as const;
 /** Pass budget for "a change made elsewhere paints here", per link. A check fails past it. */
 const BUDGET_MS = PROFILE === 'local' ? 1000 : 2500;
 
@@ -232,6 +236,7 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
       T[key] = r.thread_id as string;
       return r.thread_id as string;
     };
+    if (PROFILE === 'hotel') await newThread('hotel', QUESTIONS('hotel'));
     for (const k of ['open', 'rowc', 'pins2', 'arch', 'read', 'pins', 'snooze', 'resolve', 'race', 'scroll', 'type', 'held', 'sent']) await newThread(k, k === 'race' || k === 'held' ? QUESTIONS(k) : `Hello from ${k}.`);
     for (let i = 0; i < RUNS; i++) await newThread(`pick${i}`, QUESTIONS(`pick${i}`));
     for (let i = 0; i < Math.min(RUNS, 3); i++) await newThread(`draft${i}`, `Draft target ${i}.`);
@@ -272,10 +277,13 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
       traffic.attach(p, n);
     }
     const cdps = new Map<Page, import('@playwright/test').CDPSession>();
-    const conditions = (offline: boolean) => {
+    /** The latency each page's throttle has now (hotel WiFi moves it: jitter), and whether its link is down. */
+    const latencyNow = new Map<Page, number>();
+    const offlineNow = new Map<Page, boolean>();
+    const conditions = (offline: boolean, latency?: number) => {
       const prof = PROFILES[PROFILE];
       const bps = prof ? (prof.mbit * 1_000_000) / 8 : -1;
-      return { offline, latency: prof?.latency ?? 0, downloadThroughput: bps, uploadThroughput: bps };
+      return { offline, latency: latency ?? prof?.latency ?? 0, downloadThroughput: bps, uploadThroughput: bps };
     };
     const throttle = async (p: Page) => {
       if (!PROFILES[PROFILE]) return;
@@ -286,9 +294,14 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
     };
     /** The page's link down or up: through its throttle when it has one (the throttle's own `offline: false` wins over the context's). */
     const setLink = async (p: Page, offline: boolean) => {
+      offlineNow.set(p, offline);
       const cdp = cdps.get(p);
-      if (cdp) await cdp.send('Network.emulateNetworkConditions', conditions(offline));
+      if (cdp) await cdp.send('Network.emulateNetworkConditions', conditions(offline, latencyNow.get(p)));
       else await p.context().setOffline(offline);
+    };
+    const setLatency = async (p: Page, ms: number) => {
+      latencyNow.set(p, ms);
+      await cdps.get(p)?.send('Network.emulateNetworkConditions', conditions(offlineNow.get(p) ?? false, ms));
     };
     for (const p of Object.values(pages)) await throttle(p);
     const go = async (p: Page) => {
@@ -320,511 +333,534 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
       p.evaluate(({ sel, card, n }) => (document.querySelectorAll(`${sel} [data-lv-card="${card}"] [data-question-option]`)[n] as HTMLElement | undefined)?.click() !== undefined, { sel: paneSel(id), card, n });
     const checkedIndex = (id: string, card: number) => `[...document.querySelectorAll('${paneSel(id)} [data-lv-card="${card}"] [data-question-option]')].findIndex((o) => !!o.querySelector('input:checked'))`;
 
-    log('setup done; first paint and thread open');
-    // ---- First paint and thread open (stats only) ----
-    for (const [n, p] of Object.entries(pages)) {
+    if (PROFILE === 'hotel') {
+      // Hotel WiFi: one desktop page, its three checks (hotel.ts); the other checks' budgets are for good links.
       t = Date.now();
-      await go(p);
-      if (n === 'A') add('firstListPaint', 'ms', Date.now() - t);
-    }
-    for (let i = 1; i < RUNS; i++) {
-      const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-      const p = await ctx.newPage();
-      await throttle(p);
-      t = Date.now();
-      await go(p);
+      await go(A);
       add('firstListPaint', 'ms', Date.now() - t);
-      await ctx.close();
-    }
-    for (let i = 0; i < RUNS; i++) {
-      const id = i % 2 ? T.open! : T.scroll!;
-      await toList(A);
-      await pause(300);
-      t = Date.now();
-      const row = await A.$(rowSel(id));
-      if (row) await row.click();
-      else await A.evaluate((id) => (location.hash = `#thread=${encodeURIComponent(id)}`), id);
-      await A.waitForSelector(`${paneSel(id)} [data-message-article]`, { timeout: 60_000 });
-      add('threadOpen', 'ms', Date.now() - t);
-    }
-    await toList(A);
-    await showNews(A);
-    await showNews(B);
-    await showNews(C);
-    await showNews(P);
-
-    log('stats: agent messages');
-    // ---- Stats: agent message → second window, list row, unread count; requests and bytes per event ----
-    await openThread(A, T.open!);
-    await openThread(B, T.open!);
-    await openThread(P, T.open!);
-    await pause(1000);
-    for (let i = 0; i < RUNS; i++) {
-      const token = `zebra-${i}-${Date.now() % 100000}`;
-      const n = await A.evaluate(new Function(`return ${msgCount(T.open!)}`) as () => number);
-      for (const p of [A, B, P]) await arm(p, `m${i}`, `return ${msgCount(T.open!)} > ${n}`);
-      // An agent message in a thread C lists: by design the row waits and "N new" says so (held list).
-      await showNews(C);
-      await arm(C, `m${i}`, `return !!document.querySelector('[data-inbox-notice]')`);
-      const t0 = Date.now();
-      // The same agent writes into the thread open in A, B and P, and into one that C's list shows (an unread row stays in view).
-      await Promise.all([ag.send({ project_path: project, reply_to: T.open!, body: `Note ${token}.` }), ag.send({ project_path: project, reply_to: T.rowc!, body: `Row note ${token}.` })]);
-      add('agentMsgToOpenThreadSameTab', 'ms', await landed(A, `m${i}`, t0));
-      add('agentMsgToOpenThreadSecondTab', 'ms', await landed(B, `m${i}`, t0));
-      add('agentMsgToOpenThreadPhone', 'ms', await landed(P, `m${i}`, t0));
-      add('agentMsgToOtherDeviceNotice', 'ms', await landed(C, `m${i}`, t0));
-      await pause(1500);
-    }
-    // Requests and bytes one agent message costs: every window's reads in the 2.5 s after it (A, B and P show that thread; C lists it).
-    for (let i = 0; i < RUNS; i++) {
-      await pause(1500);
-      const t0 = Date.now();
-      await ag.send({ project_path: project, reply_to: T.open!, body: `Cost probe ${i}.` });
-      await pause(2500);
-      const tr = traffic.between(t0, t0 + 2500);
-      add('requestsPerAgentMsg_4windows', 'count', tr.count);
-      add('bytesPerAgentMsg_4windows', 'bytes', tr.bytes);
-      if (i === 0) out.trafficExample = tr;
-    }
-    log('stats: new threads');
-    // New unread thread → the tab count of a list window (C), and the held notice.
-    for (let i = 0; i < RUNS; i++) {
-      await showNews(C);
-      const title = await C.title();
-      await arm(C, `t${i}`, `return document.title !== ${JSON.stringify(title)}`);
-      await arm(C, `h${i}`, `return !!document.querySelector('[data-inbox-notice]')`);
-      const t0 = Date.now();
-      await newThread(`count${i}`, `Count ${i}.`);
-      add('agentNewThreadToTabCount', 'ms', await landed(C, `t${i}`, t0));
-      add('agentNewThreadToHeldNotice', 'ms', await landed(C, `h${i}`, t0));
-      await pause(600);
-    }
-
-    // ---- Rules ----
-    await check('LV-01', 'An agent message reaches the open thread in this tab, a second tab and a phone, within budget', async () => {
-      const s = (k: string) => samples[k]!.xs;
-      const worst = Math.max(...s('agentMsgToOpenThreadSameTab'), ...s('agentMsgToOpenThreadSecondTab'), ...s('agentMsgToOpenThreadPhone'));
-      const missed = [...s('agentMsgToOpenThreadSameTab'), ...s('agentMsgToOpenThreadSecondTab'), ...s('agentMsgToOpenThreadPhone')].filter((x) => x < 0).length;
-      return { pass: missed === 0 && worst <= BUDGET_MS, ms: worst, detail: { missed } };
-    });
-    await check('LV-02', 'An agent message in a listed thread shows on another device as "N new" (the row waits, by design), within budget', async () => {
-      const xs = samples.agentMsgToOtherDeviceNotice!.xs;
-      const worst = Math.max(...xs);
-      return { pass: !xs.some((x) => x < 0) && worst <= BUDGET_MS, ms: worst };
-    });
-    await check('LV-04', 'A new unread thread changes the tab title count of a list window, within budget', async () => {
-      const xs = samples.agentNewThreadToTabCount!.xs;
-      return { pass: !xs.some((x) => x < 0) && Math.max(...xs) <= BUDGET_MS, ms: Math.max(...xs), detail: { title: await C.title() } };
-    });
-
-    await check('LV-03', 'News never reorders the list on screen: a new thread waits behind "N new", the rows keep their order, Show brings it in', async () => {
-      await showNews(C);
-      await pause(800);
-      const before = await rowOrder(C);
-      await arm(C, 'h3', `return !!document.querySelector('[data-inbox-notice]')`);
-      const t0 = Date.now();
-      const id = await newThread('heldcheck', 'Held check.');
-      const ms = await landed(C, 'h3', t0);
-      await pause(600);
-      const after = await rowOrder(C);
-      const shownEarly = after.includes(id);
-      const sameOrder = JSON.stringify(before) === JSON.stringify(after);
-      await showNews(C);
-      await pause(500);
-      const brought = (await rowOrder(C)).includes(id);
-      return { pass: ms >= 0 && ms <= BUDGET_MS && sameOrder && !shownEarly && brought, ms, detail: { sameOrder, shownEarly, brought } };
-    });
-
-    log('stats: picks');
-    // Picks across tabs (stat + rule).
-    for (let i = 0; i < RUNS; i++) {
-      const id = T[`pick${i}`]!;
-      await openThread(A, id);
-      await openThread(B, id);
-      await pause(500);
-      await markCards(A, id);
-      await markCards(B, id);
-      await arm(B, `p${i}`, `return ${checkedIndex(id, 0)} === 1`);
-      await arm(A, `pa${i}`, `return ${checkedIndex(id, 0)} === 1`);
-      const t0 = Date.now();
-      await clickOption(A, id, 0, 1);
-      add('pickPaintSameTab', 'ms', await landed(A, `pa${i}`, t0));
-      add('pickToSecondTab', 'ms', await landed(B, `p${i}`, t0));
-    }
-    await check('LV-05', 'A pick in one tab shows in the other tab, within budget', async () => {
-      const xs = samples.pickToSecondTab!.xs;
-      return { pass: !xs.some((x) => x < 0) && Math.max(...xs) <= BUDGET_MS, ms: Math.max(...xs) };
-    });
-
-    await check('LV-06', 'Words typed in "Other" in one tab reach the other tab and never go backwards there', async () => {
-      const id = T.pick0!;
-      const sel = `${paneSel(id)} [data-lv-card="1"] input[aria-label^="Other answer"]`;
-      await openThread(A, id);
-      await openThread(B, id);
-      await markCards(A, id);
-      await markCards(B, id);
-      if (!(await A.$(sel))) return { pass: false, detail: 'no Other box on the card' };
-      const WORDS = 'keep the totals pinned at the bottom';
-      await B.evaluate((sel) => {
-        const w = window as any;
-        w.__vals = [];
-        let last: string | null = null;
-        const tick = () => {
-          const v = (document.querySelector(sel) as HTMLInputElement | null)?.value ?? '';
-          if (v !== last) w.__vals.push(v), (last = v);
-          if (w.__vals.length < 500) requestAnimationFrame(tick);
-        };
-        tick();
-      }, sel);
-      await arm(B, 'o6', `return document.querySelector('${sel}')?.value === ${JSON.stringify(WORDS)}`);
-      await A.click(sel);
-      await A.keyboard.type(WORDS, { delay: 35 });
-      const lastKey = Date.now();
-      const ms = await landed(B, 'o6', lastKey);
-      const vals: string[] = await B.evaluate(() => (window as any).__vals);
-      const backwards = vals.filter((v, i) => i > 0 && !v.startsWith(vals[i - 1]!)).length;
-      return { pass: ms >= 0 && ms <= BUDGET_MS && backwards === 0, ms, detail: { backwards, steps: vals.length } };
-    });
-
-    log('stats: drafts');
-    // Reply draft: typed in A, saved on the server, shown in B (stat + rule).
-    for (let i = 0; i < Math.min(RUNS, 3); i++) {
-      const id = T[`draft${i}`]!;
-      await openThread(A, id);
-      await openThread(B, id);
-      await pause(400);
-      const foot = A.locator('.ib-pfoot');
-      const edit = foot.getByRole('button', { name: /^(Reply|Edit draft)$/ });
-      if (await edit.count()) await edit.first().click();
-      const box = A.getByRole('textbox', { name: /^Reply to/ });
-      await box.waitFor({ timeout: 10_000 });
-      const words = `draft ${i} from tab A ${Date.now() % 10000}`;
-      await box.fill('');
-      // B (the thread open, its box closed) shows the foot's Edit draft; C's list row says Draft.
-      await arm(B, `d${i}`, `return [...document.querySelectorAll('.ib-pfoot button')].some((b) => b.textContent?.trim() === 'Edit draft') || [...document.querySelectorAll('${paneSel(id)} textarea')].some((x) => x.value === ${JSON.stringify(words)})`);
-      await arm(C, `dc${i}`, `return /Draft/.test(document.querySelector('${rowSel(id)}')?.textContent ?? '')`);
-      await box.pressSequentially(words, { delay: 20 });
-      const lastKey = Date.now();
-      let saved = -1;
-      for (let k = 0; k < 200; k++) {
-        const d = await get(`/threads/${encodeURIComponent(id)}/draft`).catch(() => null);
-        if (d?.draft?.body === words) {
-          saved = Date.now() - lastKey;
-          break;
-        }
-        await pause(25);
+      await runHotel({
+        A,
+        base,
+        log,
+        check,
+        add,
+        get,
+        post,
+        agentSend: (threadId, body) => ag.send({ project_path: project, reply_to: threadId, body }),
+        threads: { hotel: T.hotel!, open: T.open!, read: T.read!, arch: T.arch! },
+        setLink,
+        setLatency,
+        openThread,
+        paneSel,
+        rowSel,
+      });
+    } else {
+      log('setup done; first paint and thread open');
+      // ---- First paint and thread open (stats only) ----
+      for (const [n, p] of Object.entries(pages)) {
+        t = Date.now();
+        await go(p);
+        if (n === 'A') add('firstListPaint', 'ms', Date.now() - t);
       }
-      add('draftSavedOnServerAfterLastKey', 'ms', saved);
-      add('draftShownInSecondTabAfterLastKey', 'ms', await landed(B, `d${i}`, lastKey, 8000));
-      add('draftShownInOtherDeviceRowAfterLastKey', 'ms', await landed(C, `dc${i}`, lastKey, 8000));
-      await A.keyboard.press('Escape').catch(() => {});
-    }
-    await check('LV-07', 'A reply draft typed in one tab is saved and shows in the other tab (pause + budget)', async () => {
-      const s = samples.draftSavedOnServerAfterLastKey!.xs;
-      const b = [...samples.draftShownInSecondTabAfterLastKey!.xs, ...samples.draftShownInOtherDeviceRowAfterLastKey!.xs];
-      // The box saves after a typing pause (500 ms): the budget counts from the last key and includes it.
-      const worst = Math.max(...s, ...b);
-      return { pass: !s.some((x) => x < 0) && !b.some((x) => x < 0) && worst <= 500 + BUDGET_MS, ms: worst, detail: { saved: s, shown: b } };
-    });
+      for (let i = 1; i < RUNS; i++) {
+        const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+        const p = await ctx.newPage();
+        await throttle(p);
+        t = Date.now();
+        await go(p);
+        add('firstListPaint', 'ms', Date.now() - t);
+        await ctx.close();
+      }
+      for (let i = 0; i < RUNS; i++) {
+        const id = i % 2 ? T.open! : T.scroll!;
+        await toList(A);
+        await pause(300);
+        t = Date.now();
+        const row = await A.$(rowSel(id));
+        if (row) await row.click();
+        else await A.evaluate((id) => (location.hash = `#thread=${encodeURIComponent(id)}`), id);
+        await A.waitForSelector(`${paneSel(id)} [data-message-article]`, { timeout: 60_000 });
+        add('threadOpen', 'ms', Date.now() - t);
+      }
+      await toList(A);
+      await showNews(A);
+      await showNews(B);
+      await showNews(C);
+      await showNews(P);
 
-    await check('LV-08', 'Words being typed in the reply box are never moved or overwritten by an agent message arriving in that thread', async () => {
-      const id = T.type!;
-      await openThread(A, id);
-      const edit = A.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ });
-      if (await edit.count()) await edit.first().click();
-      const box = A.getByRole('textbox', { name: /^Reply to/ });
-      await box.waitFor({ timeout: 10_000 });
-      const words = 'I am typing a long reply while the agent keeps writing in this very thread';
-      const typing = box.pressSequentially(words, { delay: 30 });
-      await pause(400);
-      await ag.send({ project_path: project, reply_to: id, body: 'An interruption one.' });
-      await pause(300);
-      await ag.send({ project_path: project, reply_to: id, body: 'An interruption two.' });
-      await typing;
-      await pause(1500);
-      const value = await box.inputValue();
-      const focused = await A.evaluate(() => document.activeElement?.tagName === 'TEXTAREA');
-      return { pass: value === words && focused, detail: { value, focused } };
-    });
-
-    await check('LV-21', 'Scrolled up in a long thread, an arriving message does not move the words on screen', async () => {
-      const id = T.scroll!;
-      await openThread(A, id);
-      await pause(800);
-      const probe = () =>
-        A.evaluate((sel) => {
-          const pane = document.querySelector(sel)!;
-          const arts = [...pane.querySelectorAll('[data-message-article]')] as HTMLElement[];
-          const target = arts[2]!;
-          target.setAttribute('data-lv-anchor', '');
-          return target.getBoundingClientRect().top;
-        }, paneSel(id));
-      await A.evaluate((sel) => {
-        const arts = [...document.querySelectorAll(`${sel} [data-message-article]`)] as HTMLElement[];
-        arts[2]?.scrollIntoView({ block: 'center' });
-      }, paneSel(id));
-      await pause(600);
-      await probe();
-      // Then the person scrolls up a little by hand (a wheel), and the page is left still for 2 s.
-      await A.mouse.move(700, 450);
-      await A.mouse.wheel(0, -200);
-      await pause(2000);
-      const top = () => A.evaluate(() => (document.querySelector('[data-lv-anchor]') as HTMLElement | null)?.getBoundingClientRect().top ?? null);
-      const still1 = await top();
+      log('stats: agent messages');
+      // ---- Stats: agent message → second window, list row, unread count; requests and bytes per event ----
+      await openThread(A, T.open!);
+      await openThread(B, T.open!);
+      await openThread(P, T.open!);
       await pause(1000);
-      const before = await top();
-      await ag.send({ project_path: project, reply_to: id, body: 'Arrives below while the person reads above.' });
-      await pause(2000);
-      const after = await top();
-      const steady = still1 !== null && before !== null && Math.abs(still1 - before) < 2;
-      return { pass: steady && after !== null && Math.abs(after - before!) < 2, detail: { still1, before, after, steady } };
-    });
-
-    await check('LV-20', 'A message that arrives in view in the open thread counts as seen by itself (the server says so)', async () => {
-      const id = T.open!;
-      await openThread(A, id);
-      await A.bringToFront();
-      await pause(800);
-      const t0 = Date.now();
-      await ag.send({ project_path: project, reply_to: id, body: 'Seen on sight check.' });
-      let ms = -1;
-      for (let k = 0; k < 160; k++) {
-        const r = await serverRow(id);
-        if (r && r.unseen === 0 && Date.now() - t0 > 100) {
-          ms = Date.now() - t0;
-          break;
-        }
-        await pause(50);
-      }
-      return { pass: ms >= 0 && ms <= 4000, ms };
-    });
-
-    // Actions made elsewhere (HTTP: what another window or the phone sends), seen on the other device's list (C) and the phone (P).
-    await toList(A);
-    await toList(B);
-    await toList(P);
-    await showNews(C);
-    await showNews(P);
-    await pause(800);
-    const firstMessageId = async (id: string) => (await get(`/threads/${encodeURIComponent(id)}`)).thread.messages[0].id as string;
-
-    await check('LV-09', 'Archive in another window shows on another device and the phone (row gone or shown archived), within budget', async () => {
-      // Gone from the list, or shown archived in place (the held list keeps the row): either tells the person.
-      const gone = `return !document.querySelector('${rowSel(T.arch!)}') || document.querySelector('${rowSel(T.arch!)}')?.hasAttribute('data-archived') === true`;
-      await arm(C, 'a9', gone);
-      await arm(P, 'a9', gone);
-      const mid = await firstMessageId(T.arch!);
-      const t0 = Date.now();
-      const r = await post(`/messages/${mid}/resolve`, { resolved: true });
-      const c = await landed(C, 'a9', t0);
-      const p = await landed(P, 'a9', t0);
-      return { pass: r.status === 200 && c >= 0 && p >= 0 && Math.max(c, p) <= BUDGET_MS, ms: Math.max(c, p), detail: { status: r.status, C: c, P: p } };
-    });
-    await check('LV-10', 'Mark read in another window unbolds the row on another device, within budget', async () => {
-      const bold = await C.evaluate((s) => document.querySelector(s)?.classList.contains('ib-u') ?? null, rowSel(T.read!));
-      await arm(C, 'r10', `return document.querySelector('${rowSel(T.read!)}')?.classList.contains('ib-u') === false`);
-      const t0 = Date.now();
-      const r = await post(`/threads/${T.read}/read`, {});
-      const ms = await landed(C, 'r10', t0);
-      return { pass: bold === true && r.status === 200 && ms >= 0 && ms <= BUDGET_MS, ms, detail: { boldBefore: bold, status: r.status } };
-    });
-    await check('LV-11', 'A pin made in another window shows on another device, within budget', async () => {
-      // The sidebar's Pinned section names the thread (its thread name).
-      await arm(C, 'p11', `return (document.querySelector('[data-pinned-section]')?.textContent ?? '').includes('live-pins')`);
-      const t0 = Date.now();
-      const r = await post(`/threads/${T.pins}/pin`, { pinned: true });
-      const ms = await landed(C, 'p11', t0);
-      return { pass: r.status === 200 && ms >= 0 && ms <= BUDGET_MS, ms, detail: { status: r.status } };
-    });
-    await check('LV-12', 'A snooze made in another window moves that row on another device, within budget', async () => {
-      const where = `(document.querySelector('${rowSel(T.snooze!)}')?.getAttribute('data-section') ?? 'gone')`;
-      const before = await C.evaluate(new Function(`return ${where}`) as () => string);
-      await arm(C, 's12', `return ${where} !== ${JSON.stringify(before)}`);
-      const t0 = Date.now();
-      const r = await post(`/threads/${T.snooze}/snooze`, { until: new Date(Date.now() + 3 * 3600_000).toISOString() });
-      const ms = await landed(C, 's12', t0);
-      return { pass: r.status === 200 && ms >= 0 && ms <= BUDGET_MS, ms, detail: { before, after: await C.evaluate(new Function(`return ${where}`) as () => string) } };
-    });
-    await check('LV-13', 'An agent archiving its own thread shows on another device and the phone (row gone or shown archived), within budget', async () => {
-      // Gone from the list, or shown archived in place (the held list keeps the row): either tells the person.
-      const gone = `return !document.querySelector('${rowSel(T.resolve!)}') || document.querySelector('${rowSel(T.resolve!)}')?.hasAttribute('data-archived') === true`;
-      await arm(C, 'x13', gone);
-      await arm(P, 'x13', gone);
-      const mid = await firstMessageId(T.resolve!);
-      const t0 = Date.now();
-      await ag.resolve(mid);
-      const c = await landed(C, 'x13', t0);
-      const p = await landed(P, 'x13', t0);
-      return { pass: c >= 0 && p >= 0 && Math.max(c, p) <= BUDGET_MS, ms: Math.max(c, p), detail: { C: c, P: p } };
-    });
-    await check('LV-14', 'A capability switched on in another window (the Board) appears on another device without a reload', async () => {
-      const has = `[...document.querySelectorAll('a,button,[role="link"],[role="button"]')].some((e) => /^Board\\b/.test(e.textContent?.trim() ?? ''))`;
-      const before = await C.evaluate(new Function(`return ${has}`) as () => boolean);
-      await arm(C, 'c14', `return ${has} !== ${before}`);
-      const t0 = Date.now();
-      const r = await post('/settings', { board: { on: !before } });
-      const ms = await landed(C, 'c14', t0, 8000);
-      await post('/settings', { board: { on: before } });
-      return { pass: r.status === 200 && ms >= 0 && ms <= BUDGET_MS, ms, detail: { status: r.status, body: r.text.slice(0, 120), boardBefore: before } };
-    });
-    await check('LV-15', "A rows look saved in another window (Roomy) reaches another device's list at once", async () => {
-      const look = `[...(document.querySelector('.ib-listcol')?.classList ?? [])].includes('ib-lk-roomy')`;
-      const before = await C.evaluate(new Function(`return ${look}`) as () => boolean);
-      await arm(C, 'l15', `return ${look}`);
-      const t0 = Date.now();
-      const r = await post('/settings', { rows: ['roomy'] });
-      const ms = await landed(C, 'l15', t0, 8000);
-      await post('/settings', { rows: [] });
-      return { pass: before === false && r.status === 200 && ms >= 0 && ms <= BUDGET_MS, ms, detail: { status: r.status, roomyBefore: before } };
-    });
-    await check('LV-23', "A reply's row follows the agent reading it, in place, on another device (Sent: saved → read)", async () => {
-      const id = T.sent!;
-      await openThread(A, id);
-      const edit = A.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ });
-      if (await edit.count()) await edit.first().click();
-      const box = A.getByRole('textbox', { name: /^Reply to/ });
-      await box.waitFor({ timeout: 10_000 });
-      await box.fill('Here is my answer for the row check.');
-      await A.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
-      const tick = `(document.querySelector('${rowSel(id)} .ib-tick')?.getAttribute('data-tick') ?? null)`;
-      // Wait for C to show the Sent row with its saved tick (the person's own Send, from another window).
-      await C.waitForFunction(new Function(`return ${tick} !== null`) as () => boolean, null, { timeout: 15_000 }).catch(() => {});
-      const before = await C.evaluate(new Function(`return ${tick}`) as () => string | null);
-      await arm(C, 'd23', `return ${tick} !== ${JSON.stringify(before)}`);
-      const t0 = Date.now();
-      await ag.readThread(id);
-      const ms = await landed(C, 'd23', t0, 8000);
-      return { pass: before !== null && ms >= 0 && ms <= BUDGET_MS, ms, detail: { before, after: await C.evaluate(new Function(`return ${tick}`) as () => string | null) } };
-    });
-    await toList(A);
-
-    await check('LV-22', 'A new question raises exactly one notification across two tabs of one browser', async () => {
-      await A.evaluate(() => ((window as any).__notes = []));
-      await B.evaluate(() => ((window as any).__notes = []));
-      await newThread('notify', QUESTIONS('notify'));
-      await pause(4000);
-      const a = await A.evaluate(() => (window as any).__notes.length);
-      const b = await B.evaluate(() => (window as any).__notes.length);
-      return { pass: a + b === 1, detail: { A: a, B: b } };
-    });
-
-    // ---- Consistency ----
-    await check('LV-17', 'Two tabs picking different answers on one question 50 ms apart end showing the same answer as the server', async () => {
-      const id = T.race!;
-      await openThread(A, id);
-      await openThread(B, id);
-      await pause(600);
-      await markCards(A, id);
-      await markCards(B, id);
-      await clickOption(A, id, 0, 0);
-      await pause(50);
-      await clickOption(B, id, 0, 1);
-      await pause(4000);
-      const a = await A.evaluate(new Function(`return ${checkedIndex(id, 0)}`) as () => number);
-      const b = await B.evaluate(new Function(`return ${checkedIndex(id, 0)}`) as () => number);
-      const q = (await get(`/threads/${encodeURIComponent(id)}`)).thread.messages[0].questions?.[0];
-      const label = q?.answer?.selected?.[0] ?? null;
-      const server = label === null ? -1 : /Cards/i.test(String(label)) || label === 0 ? 0 : 1;
-      const errA = await A.evaluate((sel) => document.querySelector(sel)?.textContent?.match(/changed since you read it[^.]*\./)?.[0] ?? null, paneSel(id));
-      const errB = await B.evaluate((sel) => document.querySelector(sel)?.textContent?.match(/changed since you read it[^.]*\./)?.[0] ?? null, paneSel(id));
-      return { pass: a === b && a === server, detail: { A: a, B: b, server, serverAnswer: q?.answer ?? null, errA, errB } };
-    });
-    await check('LV-18', 'Rapid alternating pin and unpin from several writers: every window ends on the server state', async () => {
-      await toList(A);
-      await toList(B);
-      for (let i = 0; i < 7; i++) void post(`/threads/${T.pins2}/pin`, { pinned: i % 2 === 0 });
-      await pause(3500);
-      const pins = (await get(LIST)).pins?.map((p: any) => p.thread_id) ?? [];
-      const serverPinned = pins.includes(T.pins2);
-      const shown = async (p: Page) => p.evaluate(() => (document.querySelector('[data-pinned-section]')?.textContent ?? '').includes('live-pins2'));
-      const counts = { A: await shown(A), B: await shown(B), C: await shown(C) };
-      // Every window's Pinned section agrees with the server.
-      return { pass: Object.values(counts).every((x) => x === serverPinned), detail: { serverPinned, shownPinned: counts } };
-    });
-
-    log('stats: reconnect');
-    // Reconnect after the stream drops (stat + rule): C goes offline, the agent writes, C comes back.
-    for (let i = 0; i < Math.min(RUNS, 3); i++) {
-      await showNews(C);
-      await openThread(C, T.open!);
-      await pause(500);
-      const n = await C.evaluate(new Function(`return ${msgCount(T.open!)}`) as () => number);
-      await setLink(C, true);
-      await ag.send({ project_path: project, reply_to: T.open!, body: `While away ${i}.` });
-      await pause(8000);
-      // The drop must have held: the message is not on screen yet (a 0 ms catch-up would mean the link never went down).
-      add('reconnectDropHeld', 'count', (await C.evaluate(new Function(`return ${msgCount(T.open!)}`) as () => number)) === n ? 1 : 0);
-      await arm(C, `g${i}`, `return ${msgCount(T.open!)} > ${n}`, 120_000);
-      const t0 = Date.now();
-      await setLink(C, false);
-      add('reconnectCatchUp', 'ms', await landed(C, `g${i}`, t0, 125_000));
-    }
-    await toList(C);
-    await check('LV-16', 'After the stream drops and comes back, a window catches up on what it missed with no reload (within 10 s)', async () => {
-      const xs = samples.reconnectCatchUp!.xs;
-      const held = samples.reconnectDropHeld!.xs.every((x) => x === 1);
-      return { pass: held && !xs.some((x) => x < 0) && Math.max(...xs) <= 10_000, ms: Math.max(...xs), detail: held ? undefined : 'the link drop did not hold: nothing was missed' };
-    });
-
-    // Network held: every API write from tab A is left unanswered.
-    await check('LV-19a', 'With every write held unanswered, a typed key and a pick still paint at once (under 100 ms)', async () => {
-      const id = T.held!;
-      await openThread(A, id);
-      await pause(500);
-      await markCards(A, id);
-      const held: { route: any }[] = [];
-      await A.route('**/api/inbox/**', (route) => (route.request().method() === 'POST' ? held.push({ route }) : route.continue()));
-      try {
-        // Three picks (first, second, first choice): the median, so one slow frame does not decide.
-        const picks: number[] = [];
-        for (const [k, n] of [0, 1, 0].entries()) {
-          await arm(A, `k19-${k}`, `return ${checkedIndex(id, 0)} === ${n}`);
-          const t0 = Date.now();
-          await clickOption(A, id, 0, n);
-          picks.push(await landed(A, `k19-${k}`, t0));
-          await pause(150);
-        }
-        const pick = picks.includes(-1) ? -1 : [...picks].sort((x, y) => x - y)[1]!;
-        const sel = `${paneSel(id)} [data-lv-card="1"] input[aria-label^="Other answer"]`;
-        let key = -1;
-        if (await A.$(sel)) {
-          await A.click(sel);
-          await arm(A, 'k19b', `return document.querySelector('${sel}')?.value === 'x'`);
-          const t1 = Date.now();
-          await A.keyboard.type('x');
-          key = await landed(A, 'k19b', t1);
-        }
-        return { pass: pick >= 0 && pick <= 100 && key >= 0 && key <= 100, ms: Math.max(pick, key), detail: { picks, key, held: held.length } };
-      } finally {
-        await A.unroute('**/api/inbox/**');
-        for (const h of held) await h.route.continue().catch(() => {});
-      }
-    });
-    await check('LV-19b', 'With every write held unanswered, Send shows the sent message in the thread at once (under 200 ms)', async () => {
-      const id = T.held!;
-      await openThread(A, id);
-      const edit = A.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ });
-      if (await edit.count()) await edit.first().click();
-      const box = A.getByRole('textbox', { name: /^Reply to/ });
-      await box.waitFor({ timeout: 10_000 });
-      const words = `held send ${Date.now() % 10000}`;
-      await box.fill(words);
-      await pause(800);
-      const held: { route: any }[] = [];
-      await A.route('**/api/inbox/**', (route) => (route.request().method() === 'POST' ? held.push({ route }) : route.continue()));
-      try {
-        await arm(A, 's19', `return [...document.querySelectorAll('${paneSel(id)} [data-message-article]')].some((m) => m.textContent?.includes(${JSON.stringify(words)}))`, 3000);
+      for (let i = 0; i < RUNS; i++) {
+        const token = `zebra-${i}-${Date.now() % 100000}`;
+        const n = await A.evaluate(new Function(`return ${msgCount(T.open!)}`) as () => number);
+        for (const p of [A, B, P]) await arm(p, `m${i}`, `return ${msgCount(T.open!)} > ${n}`);
+        // An agent message in a thread C lists: by design the row waits and "N new" says so (held list).
+        await showNews(C);
+        await arm(C, `m${i}`, `return !!document.querySelector('[data-inbox-notice]')`);
         const t0 = Date.now();
-        await A.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
-        const ms = await landed(A, 's19', t0, 4000);
-        return { pass: ms >= 0 && ms <= 200, ms, detail: { held: held.length } };
-      } finally {
-        await A.unroute('**/api/inbox/**');
-        for (const h of held) await h.route.continue().catch(() => {});
+        // The same agent writes into the thread open in A, B and P, and into one that C's list shows (an unread row stays in view).
+        await Promise.all([ag.send({ project_path: project, reply_to: T.open!, body: `Note ${token}.` }), ag.send({ project_path: project, reply_to: T.rowc!, body: `Row note ${token}.` })]);
+        add('agentMsgToOpenThreadSameTab', 'ms', await landed(A, `m${i}`, t0));
+        add('agentMsgToOpenThreadSecondTab', 'ms', await landed(B, `m${i}`, t0));
+        add('agentMsgToOpenThreadPhone', 'ms', await landed(P, `m${i}`, t0));
+        add('agentMsgToOtherDeviceNotice', 'ms', await landed(C, `m${i}`, t0));
         await pause(1500);
       }
-    });
+      // Requests and bytes one agent message costs: every window's reads in the 2.5 s after it (A, B and P show that thread; C lists it).
+      for (let i = 0; i < RUNS; i++) {
+        await pause(1500);
+        const t0 = Date.now();
+        await ag.send({ project_path: project, reply_to: T.open!, body: `Cost probe ${i}.` });
+        await pause(2500);
+        const tr = traffic.between(t0, t0 + 2500);
+        add('requestsPerAgentMsg_4windows', 'count', tr.count);
+        add('bytesPerAgentMsg_4windows', 'bytes', tr.bytes);
+        if (i === 0) out.trafficExample = tr;
+      }
+      log('stats: new threads');
+      // New unread thread → the tab count of a list window (C), and the held notice.
+      for (let i = 0; i < RUNS; i++) {
+        await showNews(C);
+        const title = await C.title();
+        await arm(C, `t${i}`, `return document.title !== ${JSON.stringify(title)}`);
+        await arm(C, `h${i}`, `return !!document.querySelector('[data-inbox-notice]')`);
+        const t0 = Date.now();
+        await newThread(`count${i}`, `Count ${i}.`);
+        add('agentNewThreadToTabCount', 'ms', await landed(C, `t${i}`, t0));
+        add('agentNewThreadToHeldNotice', 'ms', await landed(C, `h${i}`, t0));
+        await pause(600);
+      }
 
+      // ---- Rules ----
+      await check('LV-01', 'An agent message reaches the open thread in this tab, a second tab and a phone, within budget', async () => {
+        const s = (k: string) => samples[k]!.xs;
+        const worst = Math.max(...s('agentMsgToOpenThreadSameTab'), ...s('agentMsgToOpenThreadSecondTab'), ...s('agentMsgToOpenThreadPhone'));
+        const missed = [...s('agentMsgToOpenThreadSameTab'), ...s('agentMsgToOpenThreadSecondTab'), ...s('agentMsgToOpenThreadPhone')].filter((x) => x < 0).length;
+        return { pass: missed === 0 && worst <= BUDGET_MS, ms: worst, detail: { missed } };
+      });
+      await check('LV-02', 'An agent message in a listed thread shows on another device as "N new" (the row waits, by design), within budget', async () => {
+        const xs = samples.agentMsgToOtherDeviceNotice!.xs;
+        const worst = Math.max(...xs);
+        return { pass: !xs.some((x) => x < 0) && worst <= BUDGET_MS, ms: worst };
+      });
+      await check('LV-04', 'A new unread thread changes the tab title count of a list window, within budget', async () => {
+        const xs = samples.agentNewThreadToTabCount!.xs;
+        return { pass: !xs.some((x) => x < 0) && Math.max(...xs) <= BUDGET_MS, ms: Math.max(...xs), detail: { title: await C.title() } };
+      });
+
+      await check('LV-03', 'News never reorders the list on screen: a new thread waits behind "N new", the rows keep their order, Show brings it in', async () => {
+        await showNews(C);
+        await pause(800);
+        const before = await rowOrder(C);
+        await arm(C, 'h3', `return !!document.querySelector('[data-inbox-notice]')`);
+        const t0 = Date.now();
+        const id = await newThread('heldcheck', 'Held check.');
+        const ms = await landed(C, 'h3', t0);
+        await pause(600);
+        const after = await rowOrder(C);
+        const shownEarly = after.includes(id);
+        const sameOrder = JSON.stringify(before) === JSON.stringify(after);
+        await showNews(C);
+        await pause(500);
+        const brought = (await rowOrder(C)).includes(id);
+        return { pass: ms >= 0 && ms <= BUDGET_MS && sameOrder && !shownEarly && brought, ms, detail: { sameOrder, shownEarly, brought } };
+      });
+
+      log('stats: picks');
+      // Picks across tabs (stat + rule).
+      for (let i = 0; i < RUNS; i++) {
+        const id = T[`pick${i}`]!;
+        await openThread(A, id);
+        await openThread(B, id);
+        await pause(500);
+        await markCards(A, id);
+        await markCards(B, id);
+        await arm(B, `p${i}`, `return ${checkedIndex(id, 0)} === 1`);
+        await arm(A, `pa${i}`, `return ${checkedIndex(id, 0)} === 1`);
+        const t0 = Date.now();
+        await clickOption(A, id, 0, 1);
+        add('pickPaintSameTab', 'ms', await landed(A, `pa${i}`, t0));
+        add('pickToSecondTab', 'ms', await landed(B, `p${i}`, t0));
+      }
+      await check('LV-05', 'A pick in one tab shows in the other tab, within budget', async () => {
+        const xs = samples.pickToSecondTab!.xs;
+        return { pass: !xs.some((x) => x < 0) && Math.max(...xs) <= BUDGET_MS, ms: Math.max(...xs) };
+      });
+
+      await check('LV-06', 'Words typed in "Other" in one tab reach the other tab and never go backwards there', async () => {
+        const id = T.pick0!;
+        const sel = `${paneSel(id)} [data-lv-card="1"] input[aria-label^="Other answer"]`;
+        await openThread(A, id);
+        await openThread(B, id);
+        await markCards(A, id);
+        await markCards(B, id);
+        if (!(await A.$(sel))) return { pass: false, detail: 'no Other box on the card' };
+        const WORDS = 'keep the totals pinned at the bottom';
+        await B.evaluate((sel) => {
+          const w = window as any;
+          w.__vals = [];
+          let last: string | null = null;
+          const tick = () => {
+            const v = (document.querySelector(sel) as HTMLInputElement | null)?.value ?? '';
+            if (v !== last) w.__vals.push(v), (last = v);
+            if (w.__vals.length < 500) requestAnimationFrame(tick);
+          };
+          tick();
+        }, sel);
+        await arm(B, 'o6', `return document.querySelector('${sel}')?.value === ${JSON.stringify(WORDS)}`);
+        await A.click(sel);
+        await A.keyboard.type(WORDS, { delay: 35 });
+        const lastKey = Date.now();
+        const ms = await landed(B, 'o6', lastKey);
+        const vals: string[] = await B.evaluate(() => (window as any).__vals);
+        const backwards = vals.filter((v, i) => i > 0 && !v.startsWith(vals[i - 1]!)).length;
+        return { pass: ms >= 0 && ms <= BUDGET_MS && backwards === 0, ms, detail: { backwards, steps: vals.length } };
+      });
+
+      log('stats: drafts');
+      // Reply draft: typed in A, saved on the server, shown in B (stat + rule).
+      for (let i = 0; i < Math.min(RUNS, 3); i++) {
+        const id = T[`draft${i}`]!;
+        await openThread(A, id);
+        await openThread(B, id);
+        await pause(400);
+        const foot = A.locator('.ib-pfoot');
+        const edit = foot.getByRole('button', { name: /^(Reply|Edit draft)$/ });
+        if (await edit.count()) await edit.first().click();
+        const box = A.getByRole('textbox', { name: /^Reply to/ });
+        await box.waitFor({ timeout: 10_000 });
+        const words = `draft ${i} from tab A ${Date.now() % 10000}`;
+        await box.fill('');
+        // B (the thread open, its box closed) shows the foot's Edit draft; C's list row says Draft.
+        await arm(B, `d${i}`, `return [...document.querySelectorAll('.ib-pfoot button')].some((b) => b.textContent?.trim() === 'Edit draft') || [...document.querySelectorAll('${paneSel(id)} textarea')].some((x) => x.value === ${JSON.stringify(words)})`);
+        await arm(C, `dc${i}`, `return /Draft/.test(document.querySelector('${rowSel(id)}')?.textContent ?? '')`);
+        await box.pressSequentially(words, { delay: 20 });
+        const lastKey = Date.now();
+        let saved = -1;
+        for (let k = 0; k < 200; k++) {
+          const d = await get(`/threads/${encodeURIComponent(id)}/draft`).catch(() => null);
+          if (d?.draft?.body === words) {
+            saved = Date.now() - lastKey;
+            break;
+          }
+          await pause(25);
+        }
+        add('draftSavedOnServerAfterLastKey', 'ms', saved);
+        add('draftShownInSecondTabAfterLastKey', 'ms', await landed(B, `d${i}`, lastKey, 8000));
+        add('draftShownInOtherDeviceRowAfterLastKey', 'ms', await landed(C, `dc${i}`, lastKey, 8000));
+        await A.keyboard.press('Escape').catch(() => {});
+      }
+      await check('LV-07', 'A reply draft typed in one tab is saved and shows in the other tab (pause + budget)', async () => {
+        const s = samples.draftSavedOnServerAfterLastKey!.xs;
+        const b = [...samples.draftShownInSecondTabAfterLastKey!.xs, ...samples.draftShownInOtherDeviceRowAfterLastKey!.xs];
+        // The box saves after a typing pause (500 ms): the budget counts from the last key and includes it.
+        const worst = Math.max(...s, ...b);
+        return { pass: !s.some((x) => x < 0) && !b.some((x) => x < 0) && worst <= 500 + BUDGET_MS, ms: worst, detail: { saved: s, shown: b } };
+      });
+
+      await check('LV-08', 'Words being typed in the reply box are never moved or overwritten by an agent message arriving in that thread', async () => {
+        const id = T.type!;
+        await openThread(A, id);
+        const edit = A.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ });
+        if (await edit.count()) await edit.first().click();
+        const box = A.getByRole('textbox', { name: /^Reply to/ });
+        await box.waitFor({ timeout: 10_000 });
+        const words = 'I am typing a long reply while the agent keeps writing in this very thread';
+        const typing = box.pressSequentially(words, { delay: 30 });
+        await pause(400);
+        await ag.send({ project_path: project, reply_to: id, body: 'An interruption one.' });
+        await pause(300);
+        await ag.send({ project_path: project, reply_to: id, body: 'An interruption two.' });
+        await typing;
+        await pause(1500);
+        const value = await box.inputValue();
+        const focused = await A.evaluate(() => document.activeElement?.tagName === 'TEXTAREA');
+        return { pass: value === words && focused, detail: { value, focused } };
+      });
+
+      await check('LV-21', 'Scrolled up in a long thread, an arriving message does not move the words on screen', async () => {
+        const id = T.scroll!;
+        await openThread(A, id);
+        await pause(800);
+        const probe = () =>
+          A.evaluate((sel) => {
+            const pane = document.querySelector(sel)!;
+            const arts = [...pane.querySelectorAll('[data-message-article]')] as HTMLElement[];
+            const target = arts[2]!;
+            target.setAttribute('data-lv-anchor', '');
+            return target.getBoundingClientRect().top;
+          }, paneSel(id));
+        await A.evaluate((sel) => {
+          const arts = [...document.querySelectorAll(`${sel} [data-message-article]`)] as HTMLElement[];
+          arts[2]?.scrollIntoView({ block: 'center' });
+        }, paneSel(id));
+        await pause(600);
+        await probe();
+        // Then the person scrolls up a little by hand (a wheel), and the page is left still for 2 s.
+        await A.mouse.move(700, 450);
+        await A.mouse.wheel(0, -200);
+        await pause(2000);
+        const top = () => A.evaluate(() => (document.querySelector('[data-lv-anchor]') as HTMLElement | null)?.getBoundingClientRect().top ?? null);
+        const still1 = await top();
+        await pause(1000);
+        const before = await top();
+        await ag.send({ project_path: project, reply_to: id, body: 'Arrives below while the person reads above.' });
+        await pause(2000);
+        const after = await top();
+        const steady = still1 !== null && before !== null && Math.abs(still1 - before) < 2;
+        return { pass: steady && after !== null && Math.abs(after - before!) < 2, detail: { still1, before, after, steady } };
+      });
+
+      await check('LV-20', 'A message that arrives in view in the open thread counts as seen by itself (the server says so)', async () => {
+        const id = T.open!;
+        await openThread(A, id);
+        await A.bringToFront();
+        await pause(800);
+        const t0 = Date.now();
+        await ag.send({ project_path: project, reply_to: id, body: 'Seen on sight check.' });
+        let ms = -1;
+        for (let k = 0; k < 160; k++) {
+          const r = await serverRow(id);
+          if (r && r.unseen === 0 && Date.now() - t0 > 100) {
+            ms = Date.now() - t0;
+            break;
+          }
+          await pause(50);
+        }
+        return { pass: ms >= 0 && ms <= 4000, ms };
+      });
+
+      // Actions made elsewhere (HTTP: what another window or the phone sends), seen on the other device's list (C) and the phone (P).
+      await toList(A);
+      await toList(B);
+      await toList(P);
+      await showNews(C);
+      await showNews(P);
+      await pause(800);
+      const firstMessageId = async (id: string) => (await get(`/threads/${encodeURIComponent(id)}`)).thread.messages[0].id as string;
+
+      await check('LV-09', 'Archive in another window shows on another device and the phone (row gone or shown archived), within budget', async () => {
+        // Gone from the list, or shown archived in place (the held list keeps the row): either tells the person.
+        const gone = `return !document.querySelector('${rowSel(T.arch!)}') || document.querySelector('${rowSel(T.arch!)}')?.hasAttribute('data-archived') === true`;
+        await arm(C, 'a9', gone);
+        await arm(P, 'a9', gone);
+        const mid = await firstMessageId(T.arch!);
+        const t0 = Date.now();
+        const r = await post(`/messages/${mid}/resolve`, { resolved: true });
+        const c = await landed(C, 'a9', t0);
+        const p = await landed(P, 'a9', t0);
+        return { pass: r.status === 200 && c >= 0 && p >= 0 && Math.max(c, p) <= BUDGET_MS, ms: Math.max(c, p), detail: { status: r.status, C: c, P: p } };
+      });
+      await check('LV-10', 'Mark read in another window unbolds the row on another device, within budget', async () => {
+        const bold = await C.evaluate((s) => document.querySelector(s)?.classList.contains('ib-u') ?? null, rowSel(T.read!));
+        await arm(C, 'r10', `return document.querySelector('${rowSel(T.read!)}')?.classList.contains('ib-u') === false`);
+        const t0 = Date.now();
+        const r = await post(`/threads/${T.read}/read`, {});
+        const ms = await landed(C, 'r10', t0);
+        return { pass: bold === true && r.status === 200 && ms >= 0 && ms <= BUDGET_MS, ms, detail: { boldBefore: bold, status: r.status } };
+      });
+      await check('LV-11', 'A pin made in another window shows on another device, within budget', async () => {
+        // The sidebar's Pinned section names the thread (its thread name).
+        await arm(C, 'p11', `return (document.querySelector('[data-pinned-section]')?.textContent ?? '').includes('live-pins')`);
+        const t0 = Date.now();
+        const r = await post(`/threads/${T.pins}/pin`, { pinned: true });
+        const ms = await landed(C, 'p11', t0);
+        return { pass: r.status === 200 && ms >= 0 && ms <= BUDGET_MS, ms, detail: { status: r.status } };
+      });
+      await check('LV-12', 'A snooze made in another window moves that row on another device, within budget', async () => {
+        const where = `(document.querySelector('${rowSel(T.snooze!)}')?.getAttribute('data-section') ?? 'gone')`;
+        const before = await C.evaluate(new Function(`return ${where}`) as () => string);
+        await arm(C, 's12', `return ${where} !== ${JSON.stringify(before)}`);
+        const t0 = Date.now();
+        const r = await post(`/threads/${T.snooze}/snooze`, { until: new Date(Date.now() + 3 * 3600_000).toISOString() });
+        const ms = await landed(C, 's12', t0);
+        return { pass: r.status === 200 && ms >= 0 && ms <= BUDGET_MS, ms, detail: { before, after: await C.evaluate(new Function(`return ${where}`) as () => string) } };
+      });
+      await check('LV-13', 'An agent archiving its own thread shows on another device and the phone (row gone or shown archived), within budget', async () => {
+        // Gone from the list, or shown archived in place (the held list keeps the row): either tells the person.
+        const gone = `return !document.querySelector('${rowSel(T.resolve!)}') || document.querySelector('${rowSel(T.resolve!)}')?.hasAttribute('data-archived') === true`;
+        await arm(C, 'x13', gone);
+        await arm(P, 'x13', gone);
+        const mid = await firstMessageId(T.resolve!);
+        const t0 = Date.now();
+        await ag.resolve(mid);
+        const c = await landed(C, 'x13', t0);
+        const p = await landed(P, 'x13', t0);
+        return { pass: c >= 0 && p >= 0 && Math.max(c, p) <= BUDGET_MS, ms: Math.max(c, p), detail: { C: c, P: p } };
+      });
+      await check('LV-14', 'A capability switched on in another window (the Board) appears on another device without a reload', async () => {
+        const has = `[...document.querySelectorAll('a,button,[role="link"],[role="button"]')].some((e) => /^Board\\b/.test(e.textContent?.trim() ?? ''))`;
+        const before = await C.evaluate(new Function(`return ${has}`) as () => boolean);
+        await arm(C, 'c14', `return ${has} !== ${before}`);
+        const t0 = Date.now();
+        const r = await post('/settings', { board: { on: !before } });
+        const ms = await landed(C, 'c14', t0, 8000);
+        await post('/settings', { board: { on: before } });
+        return { pass: r.status === 200 && ms >= 0 && ms <= BUDGET_MS, ms, detail: { status: r.status, body: r.text.slice(0, 120), boardBefore: before } };
+      });
+      await check('LV-15', "A rows look saved in another window (Roomy) reaches another device's list at once", async () => {
+        const look = `[...(document.querySelector('.ib-listcol')?.classList ?? [])].includes('ib-lk-roomy')`;
+        const before = await C.evaluate(new Function(`return ${look}`) as () => boolean);
+        await arm(C, 'l15', `return ${look}`);
+        const t0 = Date.now();
+        const r = await post('/settings', { rows: ['roomy'] });
+        const ms = await landed(C, 'l15', t0, 8000);
+        await post('/settings', { rows: [] });
+        return { pass: before === false && r.status === 200 && ms >= 0 && ms <= BUDGET_MS, ms, detail: { status: r.status, roomyBefore: before } };
+      });
+      await check('LV-23', "A reply's row follows the agent reading it, in place, on another device (Sent: saved → read)", async () => {
+        const id = T.sent!;
+        await openThread(A, id);
+        const edit = A.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ });
+        if (await edit.count()) await edit.first().click();
+        const box = A.getByRole('textbox', { name: /^Reply to/ });
+        await box.waitFor({ timeout: 10_000 });
+        await box.fill('Here is my answer for the row check.');
+        await A.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
+        const tick = `(document.querySelector('${rowSel(id)} .ib-tick')?.getAttribute('data-tick') ?? null)`;
+        // Wait for C to show the Sent row with its saved tick (the person's own Send, from another window).
+        await C.waitForFunction(new Function(`return ${tick} !== null`) as () => boolean, null, { timeout: 15_000 }).catch(() => {});
+        const before = await C.evaluate(new Function(`return ${tick}`) as () => string | null);
+        await arm(C, 'd23', `return ${tick} !== ${JSON.stringify(before)}`);
+        const t0 = Date.now();
+        await ag.readThread(id);
+        const ms = await landed(C, 'd23', t0, 8000);
+        return { pass: before !== null && ms >= 0 && ms <= BUDGET_MS, ms, detail: { before, after: await C.evaluate(new Function(`return ${tick}`) as () => string | null) } };
+      });
+      await toList(A);
+
+      await check('LV-22', 'A new question raises exactly one notification across two tabs of one browser', async () => {
+        await A.evaluate(() => ((window as any).__notes = []));
+        await B.evaluate(() => ((window as any).__notes = []));
+        await newThread('notify', QUESTIONS('notify'));
+        await pause(4000);
+        const a = await A.evaluate(() => (window as any).__notes.length);
+        const b = await B.evaluate(() => (window as any).__notes.length);
+        return { pass: a + b === 1, detail: { A: a, B: b } };
+      });
+
+      // ---- Consistency ----
+      await check('LV-17', 'Two tabs picking different answers on one question 50 ms apart end showing the same answer as the server', async () => {
+        const id = T.race!;
+        await openThread(A, id);
+        await openThread(B, id);
+        await pause(600);
+        await markCards(A, id);
+        await markCards(B, id);
+        await clickOption(A, id, 0, 0);
+        await pause(50);
+        await clickOption(B, id, 0, 1);
+        await pause(4000);
+        const a = await A.evaluate(new Function(`return ${checkedIndex(id, 0)}`) as () => number);
+        const b = await B.evaluate(new Function(`return ${checkedIndex(id, 0)}`) as () => number);
+        const q = (await get(`/threads/${encodeURIComponent(id)}`)).thread.messages[0].questions?.[0];
+        const label = q?.answer?.selected?.[0] ?? null;
+        const server = label === null ? -1 : /Cards/i.test(String(label)) || label === 0 ? 0 : 1;
+        const errA = await A.evaluate((sel) => document.querySelector(sel)?.textContent?.match(/changed since you read it[^.]*\./)?.[0] ?? null, paneSel(id));
+        const errB = await B.evaluate((sel) => document.querySelector(sel)?.textContent?.match(/changed since you read it[^.]*\./)?.[0] ?? null, paneSel(id));
+        return { pass: a === b && a === server, detail: { A: a, B: b, server, serverAnswer: q?.answer ?? null, errA, errB } };
+      });
+      await check('LV-18', 'Rapid alternating pin and unpin from several writers: every window ends on the server state', async () => {
+        await toList(A);
+        await toList(B);
+        for (let i = 0; i < 7; i++) void post(`/threads/${T.pins2}/pin`, { pinned: i % 2 === 0 });
+        await pause(3500);
+        const pins = (await get(LIST)).pins?.map((p: any) => p.thread_id) ?? [];
+        const serverPinned = pins.includes(T.pins2);
+        const shown = async (p: Page) => p.evaluate(() => (document.querySelector('[data-pinned-section]')?.textContent ?? '').includes('live-pins2'));
+        const counts = { A: await shown(A), B: await shown(B), C: await shown(C) };
+        // Every window's Pinned section agrees with the server.
+        return { pass: Object.values(counts).every((x) => x === serverPinned), detail: { serverPinned, shownPinned: counts } };
+      });
+
+      log('stats: reconnect');
+      // Reconnect after the stream drops (stat + rule): C goes offline, the agent writes, C comes back.
+      for (let i = 0; i < Math.min(RUNS, 3); i++) {
+        await showNews(C);
+        await openThread(C, T.open!);
+        await pause(500);
+        const n = await C.evaluate(new Function(`return ${msgCount(T.open!)}`) as () => number);
+        await setLink(C, true);
+        await ag.send({ project_path: project, reply_to: T.open!, body: `While away ${i}.` });
+        await pause(8000);
+        // The drop must have held: the message is not on screen yet (a 0 ms catch-up would mean the link never went down).
+        add('reconnectDropHeld', 'count', (await C.evaluate(new Function(`return ${msgCount(T.open!)}`) as () => number)) === n ? 1 : 0);
+        await arm(C, `g${i}`, `return ${msgCount(T.open!)} > ${n}`, 120_000);
+        const t0 = Date.now();
+        await setLink(C, false);
+        add('reconnectCatchUp', 'ms', await landed(C, `g${i}`, t0, 125_000));
+      }
+      await toList(C);
+      await check('LV-16', 'After the stream drops and comes back, a window catches up on what it missed with no reload (within 10 s)', async () => {
+        const xs = samples.reconnectCatchUp!.xs;
+        const held = samples.reconnectDropHeld!.xs.every((x) => x === 1);
+        return { pass: held && !xs.some((x) => x < 0) && Math.max(...xs) <= 10_000, ms: Math.max(...xs), detail: held ? undefined : 'the link drop did not hold: nothing was missed' };
+      });
+
+      // Network held: every API write from tab A is left unanswered.
+      await check('LV-19a', 'With every write held unanswered, a typed key and a pick still paint at once (under 100 ms)', async () => {
+        const id = T.held!;
+        await openThread(A, id);
+        await pause(500);
+        await markCards(A, id);
+        const held: { route: any }[] = [];
+        await A.route('**/api/inbox/**', (route) => (route.request().method() === 'POST' ? held.push({ route }) : route.continue()));
+        try {
+          // Three picks (first, second, first choice): the median, so one slow frame does not decide.
+          const picks: number[] = [];
+          for (const [k, n] of [0, 1, 0].entries()) {
+            await arm(A, `k19-${k}`, `return ${checkedIndex(id, 0)} === ${n}`);
+            const t0 = Date.now();
+            await clickOption(A, id, 0, n);
+            picks.push(await landed(A, `k19-${k}`, t0));
+            await pause(150);
+          }
+          const pick = picks.includes(-1) ? -1 : [...picks].sort((x, y) => x - y)[1]!;
+          const sel = `${paneSel(id)} [data-lv-card="1"] input[aria-label^="Other answer"]`;
+          let key = -1;
+          if (await A.$(sel)) {
+            await A.click(sel);
+            await arm(A, 'k19b', `return document.querySelector('${sel}')?.value === 'x'`);
+            const t1 = Date.now();
+            await A.keyboard.type('x');
+            key = await landed(A, 'k19b', t1);
+          }
+          return { pass: pick >= 0 && pick <= 100 && key >= 0 && key <= 100, ms: Math.max(pick, key), detail: { picks, key, held: held.length } };
+        } finally {
+          await A.unroute('**/api/inbox/**');
+          for (const h of held) await h.route.continue().catch(() => {});
+        }
+      });
+      await check('LV-19b', 'With every write held unanswered, Send shows the sent message in the thread at once (under 200 ms)', async () => {
+        const id = T.held!;
+        await openThread(A, id);
+        const edit = A.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ });
+        if (await edit.count()) await edit.first().click();
+        const box = A.getByRole('textbox', { name: /^Reply to/ });
+        await box.waitFor({ timeout: 10_000 });
+        const words = `held send ${Date.now() % 10000}`;
+        await box.fill(words);
+        await pause(800);
+        const held: { route: any }[] = [];
+        await A.route('**/api/inbox/**', (route) => (route.request().method() === 'POST' ? held.push({ route }) : route.continue()));
+        try {
+          await arm(A, 's19', `return [...document.querySelectorAll('${paneSel(id)} [data-message-article]')].some((m) => m.textContent?.includes(${JSON.stringify(words)}))`, 3000);
+          const t0 = Date.now();
+          await A.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
+          const ms = await landed(A, 's19', t0, 4000);
+          return { pass: ms >= 0 && ms <= 200, ms, detail: { held: held.length } };
+        } finally {
+          await A.unroute('**/api/inbox/**');
+          for (const h of held) await h.route.continue().catch(() => {});
+          await pause(1500);
+        }
+      });
+
+    }
     out.memory.rssEndMB = rssMB(pid);
     out.errors = errors;
   } finally {

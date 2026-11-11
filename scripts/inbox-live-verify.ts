@@ -1,7 +1,7 @@
 /**
  * The Inbox live-behaviour verifier: run it against a build, save a baseline, compare a later build with it.
  *
- *   bun scripts/inbox-live-verify.ts run [--binary <path>] [--sizes small,10k,100k] [--profiles local,throttled]
+ *   bun scripts/inbox-live-verify.ts run [--binary <path>] [--sizes small,10k,100k] [--profiles local,throttled,hotel]
  *                                        [--runs 5] [--query "?data=db"] [--out <file.json>]
  *   bun scripts/inbox-live-verify.ts compare <baseline.json> <new.json> [--md <table.md>]
  *   bun scripts/inbox-live-verify.ts table <result.json> [--md <table.md>]
