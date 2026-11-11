@@ -6,10 +6,7 @@ import { join } from 'node:path';
 import { startReviewServer as startBunReviewServer } from './review';
 import { startReviewServer as startPiReviewServer } from '../../apps/pi-extension/server';
 
-// Config reads resolve the data dir lazily, so per-test PLANNOTATOR_DATA_DIR
-// sandboxes genuinely isolate settings POSTs. Snapshot the real config anyway
-// as a safety net: a regression back to a process-frozen config path must not
-// corrupt the developer's real configuration.
+// Config reads resolve the data dir lazily; snapshot the real config anyway as a safety net so a regression cannot corrupt the developer's configuration.
 const { getPlannotatorDataDir } = await import('@plannotator/shared/data-dir');
 const realConfigPath = join(getPlannotatorDataDir(), 'config.json');
 let realConfigSnapshot: Buffer | null = null;
@@ -64,8 +61,6 @@ afterEach(() => {
 });
 
 afterAll(() => {
-  // Restore the exact bytes present before this suite, or restore absence
-  // when no config existed. This mirrors call-flow-install-endpoint.test.ts.
   try {
     if (realConfigSnapshot === null) rmSync(realConfigPath, { force: true });
     else writeFileSync(realConfigPath, realConfigSnapshot);
@@ -267,10 +262,7 @@ describe('Call flow endpoint capability guards', () => {
 
     test.skipIf(process.platform === 'win32')(`${runtime} stale read-only advert refresh yields to a newer settings mutation`, async () => {
       const dataDir = makeDataDir();
-      // The read-only GET only probes the node runtime while Call flow is
-      // enabled, so enable it in this test's own sandbox. (Before config
-      // reads became lazy this worked by accident: earlier tests' settings
-      // POSTs leaked callFlow=true through the process-frozen config path.)
+      // The read-only GET only probes the node runtime while Call flow is enabled, so enable it in this test's own sandbox.
       writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ reviewAnalysis: { callFlow: true } }), 'utf8');
       const binDir = mkdtempSync(join(tmpdir(), 'plannotator-call-flow-stale-read-node-'));
       tempDirs.push(binDir);

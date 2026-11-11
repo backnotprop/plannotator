@@ -22,9 +22,6 @@ import {
 } from "../../apps/pi-extension/server/ai-runtime";
 
 const SPA_HTML = "<!doctype html><html><body>SPA fallback</body></html>";
-// The built app carries its code-split chunks packed behind the page
-// (packages/shared/packed-app.ts): every server must serve the page without
-// the pack, and each chunk at its own URL.
 const SPA_CHUNK = "export default 'packed chunk';";
 const SPA_BUNDLE = packApp(SPA_HTML, {
   "/assets/index-test.js": { type: "text/javascript; charset=utf-8", text: SPA_CHUNK },
@@ -221,9 +218,7 @@ async function startOnRandomLocalPort(
 describe("API route 404 guards", () => {
   beforeAll(() => {
     archivePath = mkdtempSync(join(tmpdir(), "plannotator-api-404-"));
-    // /favicon.png now answers from the persisted favicon style, so this suite
-    // reads config.json. Point it at a temp dir: it must never depend on (or
-    // touch) the real ~/.plannotator of whoever runs the tests.
+    // This suite reads config.json: point it at a temp dir so it never touches the real ~/.plannotator.
     dataDirPath = mkdtempSync(join(tmpdir(), "plannotator-api-404-data-"));
     savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
     process.env.PLANNOTATOR_DATA_DIR = dataDirPath;
@@ -268,26 +263,17 @@ describe("API route 404 guards", () => {
         const faviconResponse = await fetch(`${server.url}/favicon.png`);
         expect(faviconResponse.status).toBe(200);
         expect(faviconResponse.headers.get("content-type")).toBe("image/png");
-        // Was `public, max-age=86400`. One URL has three possible bodies
-        // (the style is a live preference), so a day-long cache would re-paint
-        // the previous icon on the next session after a switch.
         expect(faviconResponse.headers.get("cache-control")).toBe("no-cache");
         expect(new Uint8Array(await faviconResponse.arrayBuffer())).toEqual(
           FAVICON_PNG_BYTES,
         );
 
-        // /favicon.ico, what the entry HTML links: Glass's multi-size .ico on Bun and Pi alike.
         const icoResponse = await fetch(`${server.url}/favicon.ico`);
         expect(icoResponse.status).toBe(200);
         expect(icoResponse.headers.get("content-type")).toBe("image/x-icon");
         expect(icoResponse.headers.get("cache-control")).toBe("no-cache");
         expect(new Uint8Array(await icoResponse.arrayBuffer())).toEqual(FAVICON_ICO_BYTES);
 
-        // Cross-runtime parity for the other styles: Bun and Pi must agree on
-        // both the bytes and the content type, since the entry HTML's
-        // <link rel="icon"> declares no type of its own.
-        // Face has no .ico: /favicon.ico answers its PNG. A 'classic' left by
-        // 0.28.57 (the removed P) answers the default, Glass, on both URLs.
         for (const [style, png, ico, icoType] of [
           ["yellow", YELLOW_FAVICON_PNG_BYTES, YELLOW_FAVICON_ICO_BYTES, "image/x-icon"],
           ["totman", FACE_FAVICON_PNG_BYTES, FACE_FAVICON_PNG_BYTES, "image/png"],
@@ -308,7 +294,6 @@ describe("API route 404 guards", () => {
         expect(spaResponse.headers.get("content-type")).toContain("text/html");
         expect(await spaResponse.text()).toBe(SPA_HTML);
 
-        // A local session: the chunk as built, uncompressed like the page.
         const chunkResponse = await fetch(`${server.url}/assets/index-test.js`, {
           headers: { "Accept-Encoding": "gzip" },
         });
@@ -322,7 +307,6 @@ describe("API route 404 guards", () => {
         expect(head.headers.get("content-length")).toBe(String(SPA_CHUNK.length));
         expect(await head.text()).toBe("");
 
-        // Under /assets/ only exact packed names answer; nothing falls back to the page.
         for (const path of ["/assets/missing.js", "/assets/index-test.js.map", "/assets/INDEX-TEST.js"]) {
           const missing = await fetch(`${server.url}${path}`);
           expect({ path, status: missing.status }).toEqual({ path, status: 404 });

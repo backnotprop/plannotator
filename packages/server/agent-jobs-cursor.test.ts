@@ -1,13 +1,4 @@
-/**
- * Cursor agent jobs never start another program named `agent`.
- *
- * Cursor's installer links `cursor-agent` and `agent`; Grok Build (and other
- * tools) install an `agent` too. With PATH holding only a scratch folder of
- * fake programs (plus /usr/bin:/bin for the shell), /api/agents/capabilities
- * lists Cursor only when `cursor-agent` is there or the `agent` answers like
- * Cursor's CLI, and a launched job starts that program. The real Cursor and
- * Grok CLIs are never run.
- */
+/** Cursor agent jobs never start another program named `agent` (Grok Build and other tools install one too). */
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,7 +13,6 @@ const log = join(root, "ran.log");
 let bin = "";
 let realPath: string | undefined;
 
-/** A fake CLI: `--version` prints `version`; anything else logs its argv and prints nothing. */
 function fake(name: string, version: string): string {
   const path = join(bin, name);
   writeFileSync(path, `#!/bin/sh\necho "${name} $*" >> '${log}'\nif [ "$1" = "--version" ]; then echo "${version}"; fi\nexit 0\n`);
@@ -79,7 +69,6 @@ describe.if(posix)("Cursor agent jobs and another program named agent", () => {
     expect(await cursorAvailable(h)).toBe(false);
     const res = await launch(h);
     expect(res?.status).toBe(400);
-    // Only its `--version` was read; it was never started as a review.
     expect(ran()).toEqual(["agent --version"]);
   });
 

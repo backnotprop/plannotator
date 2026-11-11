@@ -1,15 +1,4 @@
-/**
- * POST /api/code-nav/hover — dual-runtime (Bun + Pi).
- *
- * Guards two things, both of them the repo's standing two-runtime hazard:
- *  1. Both servers answer the SAME response shape, including the forward
- *     compatibility fields a later tier fills (`source`, `symbolKind`,
- *     `signature`, `doc`) — a Pi mirror that drifts to `/resolve`'s shape
- *     would render an empty card in one runtime and a full one in the other.
- *  2. A session with no local checkout is refused by both with 400, so the
- *     hook renders nothing rather than hovering over confidently-wrong
- *     results from whatever directory the process happened to start in.
- */
+/** Both runtimes answer the same response shape, and a session with no local checkout is refused with 400, so the hook renders nothing rather than results from whatever directory the process started in. */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -137,7 +126,6 @@ describe('POST /api/code-nav/hover', () => {
         expect(res.status).toBe(200);
         const data = await res.json() as Record<string, unknown>;
 
-        // The shape both runtimes owe the client, tier-independent.
         expect(Object.keys(data).sort()).toEqual([
           'alternateDefinition',
           'backend',
@@ -175,7 +163,6 @@ describe('POST /api/code-nav/hover', () => {
         expect(definition.signature).toBe('export function charge(amount, key) {');
         expect(definition.signatureApproximate).toBe(true);
         expect(definition.doc).toBe('Charges the card.');
-        // Present in the shape both runtimes owe, null until a consumer exists.
         expect(definition.preview).toBeNull();
         // The two call sites, and only those — the definition line is not
         // double-counted as a reference.

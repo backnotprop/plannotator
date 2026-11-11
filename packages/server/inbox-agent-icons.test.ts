@@ -1,15 +1,4 @@
-/**
- * The pictures uploaded for agents' icons ("Your own…"): packages/server/inbox-agent-icons.ts and its stills
- * (inbox-agent-icon-still.ts), through the Inbox's real door (temp data dir and HOME, loopback; nothing real is asked).
- *
- * What this catches: a picture past the cap or of another type kept (or refused with words that are not Set
- * picture…'s); a picture kept twice under two names; an SVG served without its sandbox headers; a tailnet guest
- * reading or adding one; another site or another session's tab adding one; a removal that leaves agents pointing at a
- * picture that is gone, or that no window hears; the cap taking a picture an agent still shows; a moving picture
- * with no still (a GIF, an APNG, an animated WebP, an SVG's CSS or SMIL animation), a still that still moves, or a
- * still made for a picture that never moved; the faces file's version bumped (an older Plannotator would then
- * refuse every face change) or an `own:` face an older reader cannot skip.
- */
+/** Uploaded agent icon pictures and their stills, through the Inbox's real door (temp data dir and HOME, loopback; nothing real is asked). */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -48,7 +37,6 @@ const scratch = (prefix: string) => {
   return root;
 };
 
-/** A scripted tailscale that publishes the Inbox (as inbox-project-picture-route.test.ts): no real tailscale runs. */
 function scriptedTailscale(magic: string, owner: string): TailscaleRunner {
   const serve = new Map<number, string>();
   return (args) => {
@@ -106,23 +94,19 @@ describe("POST /api/inbox/agent-icons", () => {
     expect(answer.icon).toMatchObject({ id, type: "image/png" });
     expect(answer.icons!.map((icon) => icon.id)).toEqual([id]);
     expect(readdirSync(join(w.dataDir, "inbox", "agent-icons"))).toEqual([`${id}.png`]);
-    // The same bytes again (another file name, another agent): the same picture, not a second copy.
     const again = await iconOf(await w.post({ picture: dataUrl(PNG, "application/octet-stream") }));
     expect(again.icon.id).toBe(id);
     expect(again.icons).toHaveLength(1);
     expect((await w.faces()).icons!.map((icon) => icon.id)).toEqual([id]);
 
-    // A phone photo's data URL far past the limit, and one byte past the cap: the size words.
     for (const big of [`data:image/jpeg;base64,${"A".repeat(900_000)}`, dataUrl(new Uint8Array(512 * 1024 + 1).fill(0x89), "image/png")]) {
       const refused = await w.post({ picture: big });
       expect(refused.status).toBe(422);
       expect((await errorOf(refused)).error).toBe("Picture: at most 512 KB.");
     }
-    // Exactly the cap is taken (a PNG padded with bytes after its end, as some exporters write).
     const atCap = new Uint8Array(512 * 1024);
     atCap.set(PNG);
     expect((await w.post({ picture: dataUrl(atCap, "image/png") })).status).toBe(200);
-    // Not one of the five (an icon, a page named .png, an empty file, not a string): the type words.
     for (const bad of [dataUrl(ICO, "image/x-icon"), dataUrl(text("<html><script>1</script></html>"), "image/png"), dataUrl(new Uint8Array(0), "image/png"), "hello", 42]) {
       const refused = await w.post({ picture: bad });
       expect(refused.status).toBe(422);
@@ -152,7 +136,6 @@ describe("POST /api/inbox/agent-icons", () => {
     expect(Object.keys(removed.faces)).toEqual(["ses_c"]);
     expect(removed.icons!.map((kept) => kept.id)).toEqual([other.id]);
     expect((await w.get(icon.id)).status).toBe(404);
-    // A picture no agent shows: still a save, so every window's "Your own…" loses it.
     const lone = (await (await w.post({ remove: other.id })).json()) as InboxAgentFacesWire;
     expect(lone.rev).toBe(before + 2);
     expect(lone.icons).toEqual([]);
@@ -181,7 +164,6 @@ describe("GET /api/inbox/agent-icons/:hash", () => {
     expect(served.headers.get("content-disposition")).toBe("attachment");
     expect(served.headers.get("cross-origin-resource-policy")).toBe("same-origin");
     expect(new Uint8Array(await served.arrayBuffer())).toEqual(hostile);
-    // It does not move: its still is itself.
     expect(new Uint8Array(await (await w.get(icon.id, "?still=1")).arrayBuffer())).toEqual(hostile);
 
     expect((await w.get(icon.id, "", { "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
@@ -215,7 +197,6 @@ describe("stills: a picture that moves shows its first frame outside the sidebar
   test("GIF, APNG and animated WebP: the first frame alone, the same type; a picture that never moved has none", () => {
     const gif = agentIconStill("image/gif", fixture("anim.gif"))!;
     expect(gif).not.toBeNull();
-    // One image descriptor (0x2C after the header and palette), no looping block.
     const frames = (bytes: Uint8Array) => {
       let count = 0;
       let at = 13 + (bytes[10]! & 0x80 ? 3 * (1 << ((bytes[10]! & 7) + 1)) : 0);
@@ -291,11 +272,9 @@ describe("the faces file with uploaded pictures", () => {
     const raw = JSON.parse(readFileSync(join(dir, INBOX_AGENT_FACES_FILE), "utf8"));
     expect(raw.v).toBe(1);
     expect(createInboxAgentFacesFile(dir, () => {}).wire().faces.ses_own).toEqual({ face: `own:${id}`, sessions: [] });
-    // Not an uploaded picture's id: refused like any unknown face.
     for (const bad of ["own:", `own:${"A".repeat(64)}`, `own:${id}0`, "own:../x"]) expect(isInboxAgentFace(bad)).toBe(false);
     expect(readInboxAgentFaces({ x: { face: "own:nothex", sessions: [] } })).toEqual({});
 
-    // 0.28.60's reader, as released: a closed list of faces, entries it does not know dropped one by one.
     const RELEASED = ["agent", "glass", "glass-red", "glass-orange", "yellow", "glass-green", "glass-teal", "glass-blue", "glass-purple", "glass-pink", "glass-ice", "transparent", "totman"];
     const releasedRead = (file: { v?: unknown; faces?: unknown }) => {
       if (typeof file.v === "number" && file.v > 1) return "newer";
@@ -322,7 +301,6 @@ describe("the faces file with uploaded pictures", () => {
     expect(kept).toHaveLength(INBOX_AGENT_ICONS_KEPT);
     expect(kept).toContain(ids[0]!);
     expect(kept).not.toContain(ids[1]!);
-    // Read again from disk (another process): the same pictures, newest first.
     expect(createAgentIcons({ dir }).list().map((icon) => icon.id)).toEqual(kept);
   });
 });

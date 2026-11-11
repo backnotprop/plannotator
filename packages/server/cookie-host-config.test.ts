@@ -1,12 +1,4 @@
-/**
- * "Open Plannotator at plannotator.localhost" (#2184) through the Bun servers:
- * POST /api/config `{ cookieHost }` writes or removes `urlHost:
- * "plannotator.localhost"`, never replaces another `urlHost` (a tailnet name,
- * `auto`, an IP), is locked while PLANNOTATOR_URL_HOST is set, and is refused
- * (and not advertised) in remote mode and `--tailscale` sessions. Also: a live
- * app session stays on localhost, and /api/update's Host check accepts the
- * configured name and no other subdomain.
- */
+/** POST /api/config `{ cookieHost }` writes or removes `urlHost: "plannotator.localhost"`, never replaces another `urlHost`, is locked while PLANNOTATOR_URL_HOST is set, and is refused in remote mode and `--tailscale` sessions. */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

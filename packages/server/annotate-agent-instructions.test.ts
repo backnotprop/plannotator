@@ -1,12 +1,4 @@
-/**
- * The annotate "Agent Instructions" payload is a contract an external agent
- * executes literally: it copies the read command, the POST bodies and the
- * PATCH bodies out of the clipboard text and runs them against the session.
- * These tests do exactly that against a real annotate server for every
- * surface, so an instruction that drifts from the server (a renamed payload
- * field, a body the validator refuses, a field POST silently drops) fails
- * here instead of in an agent's hands.
- */
+/** An external agent executes the "Agent Instructions" payload literally; these tests run it against a real annotate server so drift from the server fails here. */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -43,12 +35,9 @@ interface CurlCall {
   method: string;
   url: string;
   body?: string;
-  /** Fields of a `jq -r .a` or `jq -r '.a // .b'` filter, in fallback order. */
   jqFields?: string[];
 }
 
-/** What the agent's `jq -r` filter prints for a response: the first
- *  non-null field of the `//` chain, or "null" like jq itself. */
 function jqOutput(call: CurlCall, json: any): string {
   for (const field of call.jqFields ?? []) {
     const value = json?.[field];
@@ -57,8 +46,6 @@ function jqOutput(call: CurlCall, json: any): string {
   return "null";
 }
 
-/** Every `curl` command in the text, parsed the way a shell would see it
- *  (line continuations joined; single-quoted `-d` bodies may span lines). */
 function curlCalls(text: string): CurlCall[] {
   const joined = text.replace(/\\\n\s*/g, " ");
   const chunks = joined.split(/(?=\bcurl -s )/).filter((chunk) => chunk.startsWith("curl -s "));
@@ -74,7 +61,6 @@ function curlCalls(text: string): CurlCall[] {
   });
 }
 
-/** ```json blocks are complete POST bodies. */
 function jsonBlocks(text: string): string[] {
   return [...text.matchAll(/```json\n([\s\S]*?)```/g)].map((m) => m[1]);
 }
@@ -96,7 +82,7 @@ async function runInstructions(
   for (const call of [...posts, ...rest]) {
     let target = call.url.replace("<uuid>", lastId);
     for (const [from, to] of Object.entries(substitutions)) target = target.replace(from, encodeURIComponent(to));
-    if (call.method === "DELETE") continue; // cleanup lines; run last by the caller if needed
+    if (call.method === "DELETE") continue;
     const res = await fetch(target, {
       method: call.method,
       headers: call.body ? { "Content-Type": "application/json" } : undefined,

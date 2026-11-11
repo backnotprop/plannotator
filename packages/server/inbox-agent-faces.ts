@@ -1,17 +1,4 @@
-/**
- * Plannotator Inbox: the face each agent's icon shows, for every window (core `inbox-types.ts` ("Agent faces"), the file in
- * packages/shared/inbox/agent-faces.ts). The window's routes (same origin for every POST, the page's
- * `serverSession`, as the pins' routes). Bun only: the Inbox runs on the Bun server; the Pi server serves no Inbox route.
- *
- *   GET  /api/inbox/agent-faces   `{ faces, rev }`
- *   POST /api/inbox/agent-faces   `{ agent, sessions?, face }`: one agent's face (`agent`: its own mark again); `{ faces, rev }`
- *   POST /api/inbox/agent-faces   `{ adopt: { [agent id]: face } }`: this browser's faces from before, once; `{ faces, rev }`
- *
- * Every answer and event also carries `icons`, the pictures uploaded for "Your own…" (inbox-agent-icons.ts).
- *
- * A save tells every window (`event: agent-faces` with `{ faces, rev }`). Agents, the MCP, search, the phone's door and
- * a linked machine's forward never see faces: they stay on the computer whose Inbox the window shows.
- */
+/** The face each agent's icon shows, for every window. Bun only: the Inbox runs on the Bun server. */
 
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { checkInboxAgentFaceChange, type InboxAgentFacesFile } from "@plannotator/shared/inbox/agent-faces";
@@ -25,7 +12,6 @@ export function createInboxAgentFaces(options: {
   serverSession: string;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   json: (body: unknown, status?: number) => Response;
-  /** The uploaded pictures ("Your own…", inbox-agent-icons.ts), carried with the faces. */
   icons?: () => InboxAgentIcon[];
 }) {
   const { file, serverSession, json } = options;

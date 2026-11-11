@@ -1,13 +1,4 @@
-/**
- * Path-keyed annotate drafts (packages/shared/annotate-draft.ts), driven over
- * HTTP against a real annotate server. Shared by the Bun suite
- * (annotate-draft.test.ts) and the Pi mirror
- * (apps/pi-extension/server/serverAnnotate-drafts.test.ts), so both runtimes
- * answer the same scenarios.
- *
- * Every test runs under a temp PLANNOTATOR_DATA_DIR; nothing touches the
- * real ~/.plannotator.
- */
+/** Path-keyed annotate drafts, shared by the Bun suite and the Pi mirror. */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -24,7 +15,6 @@ export type StartDraftScenarioServer = (options: {
   filePath: string;
   mode?: "annotate" | "annotate-folder";
   folderPath?: string;
-  /** Bearer token for /api/host/* (#1709); absent leaves host control off. */
   hostControlToken?: string;
 }) => Promise<DraftScenarioServer>;
 
@@ -86,7 +76,6 @@ export function defineAnnotateDraftScenarios(runtime: string, start: StartDraftS
       rmSync(root, { recursive: true, force: true });
     });
 
-    /** Write the file with this text and open it alone. */
     async function openFile(name: string, text: string, hostControlToken?: string): Promise<DraftScenarioServer> {
       const filePath = join(docDir, name);
       writeFileSync(filePath, text);
@@ -119,8 +108,6 @@ export function defineAnnotateDraftScenarios(runtime: string, start: StartDraftS
       headers: Record<string, string> = {},
     ) => post(server, "/api/draft/document", { documents }, headers);
 
-    // A reader that keeps the session's roots (#2291): a tab on this machine
-    // may keep copies of documents anywhere, as /api/doc serves it them.
     const FORWARDED = { "X-Forwarded-For": "192.0.2.10" };
 
     test("a comment comes back after the file is edited and the review reopened", async () => {
@@ -133,7 +120,6 @@ export function defineAnnotateDraftScenarios(runtime: string, start: StartDraftS
       expect(res.status).toBe(200);
       const draft = await res.json();
       expect(idsOf(draft)).toEqual(["c1"]);
-      // Server bookkeeping never reaches the client.
       expect(draft).not.toHaveProperty("patchKey");
       expect(draft).not.toHaveProperty("patchKeys");
       expect(draft).not.toHaveProperty("patchChanged");
@@ -147,14 +133,11 @@ export function defineAnnotateDraftScenarios(runtime: string, start: StartDraftS
       await post(onB, "/api/draft", draftBody(5, ["b"]));
       close(onB);
 
-      // Back to text A: its own copy (generation 3) is older than the path
-      // copy written on B (generation 5), so the newer comments win.
       const backOnA = await openFile("plan.md", "# Plan\n\nText A\n");
       expect(idsOf(await (await fetch(`${backOnA.url}/api/draft`)).json())).toEqual(["b"]);
       await post(backOnA, "/api/draft", draftBody(6, ["a2"]));
       close(backOnA);
 
-      // Text B's own copy is now the older one.
       const backOnB = await openFile("plan.md", "# Plan\n\nText B\n");
       expect(idsOf(await (await fetch(`${backOnB.url}/api/draft`)).json())).toEqual(["a2"]);
     });
@@ -165,16 +148,12 @@ export function defineAnnotateDraftScenarios(runtime: string, start: StartDraftS
       expect((await post(first, "/api/feedback", { feedback: "fix it", annotations: [comment("c1")], draftGeneration: 2 })).ok).toBe(true);
       close(first);
 
-      // Neither the edited file nor the unchanged one gets the submitted comments back.
       const edited = await openFile("spec.md", "# Spec\n\nv2\n");
       const missing = await fetch(`${edited.url}/api/draft`);
       expect(missing.status).toBe(404);
       expect((await missing.json()).draftGeneration).toBeGreaterThanOrEqual(2);
-      // A stale tab's save at or below the decision's generation is refused
-      // and reported; a newer one lands.
       const stale = await post(edited, "/api/draft", draftBody(2, ["ghost"]));
       expect(stale.status).toBe(409);
-      // The refusal names the generation to save above (the client adopts it).
       const refusal = await stale.json();
       expect(refusal.ok).toBe(false);
       expect(refusal.draftGeneration).toBeGreaterThanOrEqual(2);
@@ -191,14 +170,11 @@ export function defineAnnotateDraftScenarios(runtime: string, start: StartDraftS
       await post(session, "/api/draft", draftBody(5, ["sent"]));
       expect((await post(session, "/api/feedback", { feedback: "x", annotations: [comment("sent")], draftGeneration: 6 })).ok).toBe(true);
 
-      // A second tab of the same review saves at a generation the tombstone
-      // would let through.
       const late = await post(session, "/api/draft", draftBody(7, ["sent"]));
       expect(late.status).toBe(409);
       expect((await late.json()).decided).toBe(true);
       close(session);
 
-      // The sent comments do not come back, on the same text or an edited one.
       const same = await openFile("decided.md", "# Decided\n\nv1\n");
       expect((await fetch(`${same.url}/api/draft`)).status).toBe(404);
       close(same);
@@ -218,19 +194,14 @@ export function defineAnnotateDraftScenarios(runtime: string, start: StartDraftS
         headers: { Authorization: `Bearer ${HOST_TOKEN}` },
       });
       expect(closed.status).toBe(200);
-      // The session draft and the linked document's copy both count.
       expect(await closed.json()).toEqual({ unsentAnnotations: 2 });
 
-      // The tab's debounced save for a comment typed just before the close
-      // arrives after it, and lands: an agent close deletes nothing, so the
-      // kept draft must be complete. Same for a document copy.
+      // A debounced save arriving after an agent close must still land: a close deletes nothing, so the kept draft must be complete.
       expect((await post(session, "/api/draft", draftBody(4, ["kept", "typed-at-close"]))).ok).toBe(true);
       expect((await saveDocuments(session, [{ path: linked, annotations: [comment("kept-linked"), comment("linked-at-close")] }])).ok).toBe(true);
-      // The closed tab's "everything removed" DELETE deletes nothing.
       await fetch(`${session.url}/api/draft?generation=11`, { method: "DELETE" });
       close(session);
 
-      // The next session, after the agent edited the file, gets the comments back.
       const reopened = await openFile("kept.md", "# Kept\n\nv2, edited\n");
       expect(idsOf(await (await fetch(`${reopened.url}/api/draft`)).json())).toEqual(["kept", "typed-at-close"]);
       const linkedCopy = await fetch(`${reopened.url}/api/draft/document?path=${encodeURIComponent(linked)}`);
@@ -256,9 +227,7 @@ export function defineAnnotateDraftScenarios(runtime: string, start: StartDraftS
     test("a URL session has no path copy, but its linked documents get copies", async () => {
       const server = await start({ markdown: "# Page\n", filePath: "https://example.invalid/page" });
       servers.push(server);
-      // Linked documents get copies (linked-documents.scenarios.ts covers them).
       expect((await (await fetch(`${server.url}/api/plan`)).json()).documentDrafts).toBe(true);
-      // The session draft is content-keyed only: a save is never refused as stale.
       expect((await post(server, "/api/draft", draftBody(1, ["u"]))).status).toBe(200);
     });
 
@@ -291,7 +260,6 @@ export function defineAnnotateDraftScenarios(runtime: string, start: StartDraftS
       writeFileSync(covered, "# C\n");
       writeFileSync(untouched, "# U\n");
 
-      // An earlier session left comments on a file this session never opens.
       const earlier = await openFolder();
       await saveDocuments(earlier, [{ path: untouched, annotations: [comment("keep")] }]);
       close(earlier);
@@ -308,8 +276,6 @@ export function defineAnnotateDraftScenarios(runtime: string, start: StartDraftS
       expect(idsOf(await kept.json())).toEqual(["keep"]);
     });
 
-    // A page names itself with `?client=` (one id per page load), as the
-    // editor does; a reload is a new page with a new id.
     const savePageDocuments = (server: DraftScenarioServer, page: string, documents: { path: string; annotations: unknown[] }[]) =>
       post(server, `/api/draft/document?client=${page}`, { documents });
     const readPageDocument = (server: DraftScenarioServer, page: string, path: string) =>
@@ -330,10 +296,6 @@ export function defineAnnotateDraftScenarios(runtime: string, start: StartDraftS
       return files;
     };
 
-    // The reported loss: a comment on each of three files, the tab reloads
-    // (or crashes and is reopened), only one file is opened again, and the
-    // feedback is sent. Upstream offered nothing on the reload and the send
-    // then deleted the two unopened files' copies.
     test("a folder reload offers every file's comments, and sending from the new page keeps the ones it never opened", async () => {
       const [alpha, beta, gamma] = threeFiles();
       const folder = await openFolder();
@@ -343,20 +305,16 @@ export function defineAnnotateDraftScenarios(runtime: string, start: StartDraftS
         { path: gamma, annotations: [comment("on-gamma")] },
       ]);
 
-      // The reload: the new page's session draft load offers all three.
       expect(await offeredPaths(folder)).toEqual([
         [alpha, ["on-alpha"]],
         [beta, ["on-beta"]],
         [gamma, ["on-gamma"]],
       ]);
 
-      // The new page opens gamma alone and sends.
       expect(idsOf(await (await readPageDocument(folder, "page-2", gamma)).json())).toEqual(["on-gamma"]);
       expect((await post(folder, "/api/feedback?client=page-2", { feedback: "x", annotations: [comment("on-gamma")] })).ok).toBe(true);
       close(folder);
 
-      // Gamma was sent and is gone; alpha and beta were never sent: their
-      // copies stay, and the next session offers them again.
       const next = await openFolder();
       expect(await copyIds(next, gamma)).toBe(404);
       expect(await copyIds(next, alpha)).toEqual(["on-alpha"]);
@@ -371,7 +329,6 @@ export function defineAnnotateDraftScenarios(runtime: string, start: StartDraftS
       const files = threeFiles();
       const folder = await openFolder();
       await savePageDocuments(folder, "page-1", files.map((path, i) => ({ path, annotations: [comment(`c${i}`)] })));
-      // Draft Recovered's Restore reads each copy under the new page's id.
       for (const path of files) expect((await readPageDocument(folder, "page-2", path)).status).toBe(200);
       expect((await post(folder, "/api/feedback?client=page-2", { feedback: "x", annotations: [] })).ok).toBe(true);
       close(folder);
@@ -414,12 +371,10 @@ export function defineAnnotateDraftScenarios(runtime: string, start: StartDraftS
       writeFileSync(linked, "# Linked\n");
       const session = await openFile("root.md", "# Root\n\n[linked](linked.md)\n");
       await savePageDocuments(session, "page-1", [{ path: linked, annotations: [comment("on-linked")] }]);
-      // The root itself has no comments: the offer still comes back.
       expect(await offeredPaths(session)).toEqual([[linked, ["on-linked"]]]);
       expect((await post(session, "/api/feedback?client=page-2", { feedback: "x", annotations: [] })).ok).toBe(true);
       close(session);
 
-      // Never opened by the deciding page, so never deleted by it.
       const reopened = await openFile("root.md", "# Root\n\n[linked](linked.md)\n");
       expect(await copyIds(reopened, linked)).toEqual(["on-linked"]);
     });
@@ -451,7 +406,6 @@ export function defineAnnotateDraftScenarios(runtime: string, start: StartDraftS
       const alone = await openFile("own.md", "# Own\n");
       const own = await saveDocuments(alone, [{ path: join(docDir, "own.md"), annotations: [comment("z")] }]);
       expect((await own.json()).rejected).toEqual([join(docDir, "own.md")]);
-      // A symlink alias of the session's own file is the same file.
       const alias = join(docDir, "own-alias.md");
       symlinkSync(join(docDir, "own.md"), alias);
       expect((await fetch(`${alone.url}/api/draft/document?path=${encodeURIComponent(alias)}`)).status).toBe(403);

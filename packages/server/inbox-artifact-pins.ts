@@ -1,18 +1,4 @@
-/**
- * Plannotator Inbox: pinned artifacts and the Artifacts wall (approval
- * "inbox-artifact-stars", .product/approved/inbox-artifact-stars/; the word
- * is Pin). The window's routes (the page's `serverSession` on a write; reads
- * refuse another site, as the attachment routes do). Bun only: the Inbox
- * runs on the Bun server; the Pi server serves no Inbox route.
- *
- *   GET  /api/inbox/artifact-pins   `{ pins: [{ key, thread_id, pinned_at }] }`, in pin order
- *   POST /api/inbox/artifact-pins   `{ thread_id, key, pinned: boolean }`: pin or unpin one artifact; `{ pins }`
- *   GET  /api/inbox/artifacts       the Wall: every thread's artifacts, newest first, paged, with filters
- *
- * Not the sidebar's thread pins (inbox-pins.ts): another file, other routes.
- * A change tells every window (`event: artifact-pins` on the window's stream).
- * Agents, the MCP, search and the phone's door never see artifact pins.
- */
+/** Pinned artifacts and the Artifacts wall. Bun only: the Inbox runs on the Bun server. Not the sidebar's thread pins (inbox-pins.ts). */
 
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import {
@@ -43,7 +29,6 @@ interface WallEntry {
   pinnedAt: string | null;
 }
 
-/** `?name=` one of `values`, or null when absent; anything else is refused. */
 function oneOf<T extends string>(url: URL, name: string, values: readonly T[]): T | null {
   const value = url.searchParams.get(name);
   if (value === null || value === "") return null;
@@ -59,11 +44,6 @@ function whole(url: URL, name: string, min: number, max: number): number | null 
   return n;
 }
 
-/**
- * Every artifact of every thread the list shows, newest message first; inside
- * a message, its own order (the thread grid's order, artifacts.ts
- * `artifactsNewestFirst`). Archived threads only with `archived`.
- */
 export function inboxWallEntries(store: InboxStore, includeArchived: boolean): WallEntry[] {
   const pinned = new Map(store.artifactPins().map((pin) => [pin.key, pin.pinned_at]));
   const out: { entry: WallEntry; at: string; order: number }[] = [];
@@ -78,12 +58,10 @@ export function inboxWallEntries(store: InboxStore, includeArchived: boolean): W
       out.push({ entry: { ref, row, type, archived, pinnedAt: pinned.get(ref.key) ?? null }, at: ref.message.created_at, order: order++ });
     }
   }
-  // Newest message first; the same moment keeps reading order.
   out.sort((a, b) => (a.at === b.at ? a.order - b.order : a.at < b.at ? 1 : -1));
   return out.map((x) => x.entry);
 }
 
-/** The Wall's page for a request's filters (`pinned=1`, `type=`, `archived=include|exclude`, `cursor=`, `limit=`). */
 export async function inboxArtifactsPage(store: InboxStore, url: URL): Promise<InboxArtifactsPage> {
   const pinnedOnly = (() => {
     const value = url.searchParams.get("pinned");

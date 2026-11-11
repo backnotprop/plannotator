@@ -1,14 +1,4 @@
-/**
- * #2037: an agent's edit to the open file becomes a version
- * (POST /api/plan/versions, packages/shared/annotate-live-version.ts), driven
- * over HTTP against a real annotate server. Shared by the Bun suite
- * (annotate-live-version.test.ts) and the Pi mirror
- * (apps/pi-extension/server/serverAnnotate-live-version.test.ts), so both
- * runtimes answer the same scenarios.
- *
- * Every test runs under a temp PLANNOTATOR_DATA_DIR; nothing touches the real
- * ~/.plannotator.
- */
+/** An agent's edit to the open file becomes a version; shared by the Bun suite and the Pi mirror. */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -113,7 +103,6 @@ export function defineAnnotateLiveVersionScenarios(runtime: string, start: Start
       expect(opened.liveVersions).toBe(true);
 
       writeFileSync(path, "# Notes\n\nv2\n");
-      // A plain GET never writes history: the reload alone saves nothing.
       expect((await plan(server)).versionInfo?.version).toBe(1);
       expect(versionFiles()).toHaveLength(1);
 
@@ -128,7 +117,6 @@ export function defineAnnotateLiveVersionScenarios(runtime: string, start: Start
       });
       expect(versionFiles()).toHaveLength(2);
 
-      // A tab reload now describes the new version.
       const reloaded = await plan(server);
       expect(reloaded.plan).toBe("# Notes\n\nv2\n");
       expect(reloaded.previousPlan).toBe("# Notes\n\nv1\n");
@@ -136,7 +124,6 @@ export function defineAnnotateLiveVersionScenarios(runtime: string, start: Start
       const listed = await (await fetch(`${server.url}/api/plan/versions`)).json();
       expect(listed.versions).toHaveLength(2);
 
-      // The next edit diffs against v2, not the version at open.
       writeFileSync(path, "# Notes\n\nv3\n");
       const third = await (await saveVersion(server, { hash: hashOf("# Notes\n\nv3\n") })).json();
       expect(third).toMatchObject({ saved: true, previousPlan: "# Notes\n\nv2\n", versionInfo: { version: 3 } });

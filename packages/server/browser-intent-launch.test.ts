@@ -1,16 +1,4 @@
-/**
- * PLANNOTATOR_BROWSER=none opens nothing, proved on a real process.
- *
- * Each case runs a child Bun process with an explicit environment (nothing
- * inherited) whose PATH holds only stand-in `open`, `xdg-open` and `glimpseui`
- * scripts that append to a log and open nothing, a scratch data dir, and a
- * VS Code IPC registry that points at a recording server in this process. So
- * every way Bun's openBrowser can launch something leaves a trace here, and a
- * mistake can never open a real browser: the real openers are not on PATH.
- *
- * The control cases (BROWSER=true, #756) show the stand-ins and the IPC
- * recorder are actually reached when the default chain runs.
- */
+/** PLANNOTATOR_BROWSER=none opens nothing, proved on a real process: a child Bun with an explicit env whose PATH holds only stand-in openers, so a mistake can never open a real browser. */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -56,7 +44,6 @@ beforeAll(() => {
       return new Response("ok");
     },
   });
-  // Every cwd starts with "/", so this registry matches the child's.
   writeFileSync(join(dataDir, "vscode-ipc.json"), JSON.stringify({ "/": ipcServer.port }));
 
   childScript = join(root, "child.ts");
@@ -129,7 +116,6 @@ describe.if(posix)("PLANNOTATOR_BROWSER=none on the Bun runtime", () => { // no-
       expect(result.stderr).not.toContain("Could not open a browser");
     }, 30_000);
 
-    // The Inbox, `sessions --open` and `t3 login` call openBrowser directly.
     test(`openBrowser itself opens nothing for a ${where} caller and says why`, async () => {
       const result = await run("open", remote, {
         PLANNOTATOR_BROWSER: "OFF", // the approved list, any case
@@ -143,15 +129,12 @@ describe.if(posix)("PLANNOTATOR_BROWSER=none on the Bun runtime", () => { // no-
     }, 30_000);
   }
 
-  // #756 stays: BROWSER=true is a host's marker, read as unset, so the default
-  // chain still runs. These also prove the stand-ins and the IPC recorder above
-  // are reachable, so the empty logs in the none cases mean something.
+  // BROWSER=true is a host's marker, read as unset, so the default chain still runs; these prove the stand-ins and the IPC recorder are reachable, so the empty logs in the none cases mean something.
   test("BROWSER=true still launches the default opener locally", async () => {
     const result = await run("open", false, { BROWSER: "true" });
     expect(JSON.parse(result.stdout)).toEqual({ opened: true });
     const opener = process.platform === "darwin" ? "open" : "xdg-open";
     expect(launches()).toContain(`${opener} ${URL}\n`);
-    // Glimpse is tried first; its stand-in exits at once, so the opener runs.
     expect(launches()).toContain("glimpseui ");
   }, 30_000);
 

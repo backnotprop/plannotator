@@ -1,21 +1,11 @@
-/**
- * PATH in an environment copy, on every platform. Windows names the variable
- * in any case (`Path` is usual) and matches it case-insensitively, but a
- * plain object copy of the environment does not: `{ ...process.env, PATH: x }`
- * holds both `Path` and `PATH`, and the child may get the old one. Its folders
- * are joined with `;` there (a `C:\` folder holds a colon), `:` elsewhere.
- *
- * Off Windows every function here behaves exactly as `env.PATH` and `:` did.
- */
+/** PATH in an environment copy, on every platform. Windows names the variable in any case and matches it case-insensitively, but a plain object copy of the environment holds both `Path` and `PATH` and the child may get the old one. */
 
 export type EnvCopy = Record<string, string>;
 
-/** The separator between PATH's folders on `platform`. */
 export function pathDelimiterOf(platform: NodeJS.Platform = process.platform): string {
   return platform === "win32" ? ";" : ":";
 }
 
-/** Whether `name` names PATH on `platform`. */
 export function isPathName(name: string, platform: NodeJS.Platform = process.platform): boolean {
   return platform === "win32" ? name.toUpperCase() === "PATH" : name === "PATH";
 }
@@ -37,14 +27,12 @@ export function foldEnvPath<T extends Record<string, string | undefined>>(env: T
   return out;
 }
 
-/** A copy of `env` with PATH set to `value`, under the one key `PATH`. */
 export function withEnvPath<T extends Record<string, string | undefined>>(env: T, value: string, platform: NodeJS.Platform = process.platform): T {
   const out = Object.fromEntries(Object.entries(env).filter(([name]) => !isPathName(name, platform))) as T;
   (out as Record<string, string | undefined>).PATH = value;
   return out;
 }
 
-/** PATH's folders, in order, without empty entries. */
 export function pathFoldersOf(value: string | undefined, platform: NodeJS.Platform = process.platform): string[] {
   return (value ?? "").split(pathDelimiterOf(platform)).filter(Boolean);
 }

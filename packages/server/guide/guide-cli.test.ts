@@ -96,12 +96,11 @@ describe("plannotator guide", () => {
     expect(toStdout.stdout).toContain('src="http://localhost:8787/v1/viewer.');
     const env = { PLANNOTATOR_GUIDE_VIEWER_URL: "https://cdn.example.test/guides/" } as NodeJS.ProcessEnv;
     const toFile = await runGuideCli(["export", "--id", "1000-exportable", "--out", "sub/out.html"], env, workDir);
-    expect(toFile.code).toBe(1); // parent dir does not exist → write fails honestly
+    expect(toFile.code).toBe(1);
     expect(toFile.stderr).toContain("Could not write");
     const ok = await runGuideCli(["export", "--id", "1000-exportable", "--out", "out.html"], env, workDir);
     expect(ok.code).toBe(0);
     expect(readFileSync(join(workDir, "out.html"), "utf-8")).toContain('src="https://cdn.example.test/guides/viewer.');
-    // A non-https override is ignored, not embedded.
     const bad = await runGuideCli(["export", "--id", "1000-exportable", "--out", "-", "--viewer-url", "javascript:alert(1)"], {}, workDir);
     expect(bad.stdout).toContain('src="https://guides.show/v1/viewer.');
   });
@@ -157,7 +156,6 @@ describe("plannotator guide", () => {
     expect(snap.source.branch).toBe("feature/refresh");
     expect(snap.source.headSha).toMatch(/^[0-9a-f]{40}$/);
     expect(snap.generator).toEqual({ engine: "claude-code", model: "claude-opus-5", generatedAt: "2026-08-15T00:00:00.000Z" });
-    // The file the guide did not place lands in "Everything else".
     expect(snap.guide.unplacedFiles).toEqual(["package.json"]);
     expect(snap.guide.sections[0].diffs[0]).toEqual({ file: "src/auth.ts", summary: "Adds the refresh guard." });
   });
@@ -224,7 +222,6 @@ describe("plannotator guide", () => {
   // What regresses: an imported guide lands on a shelf the review session
   // never reads, so it silently never shows up under Guides.
   describe("import", () => {
-    /** A review session as the review servers build it: PR mode has no git cwd; branch mode reads git in the repo. */
     const session = (
       pr: { url: string; headSha: string; label: string } | null = null,
       dirs: { gitCwd?: string; fallbackDir?: string } = { gitCwd: workDir },
@@ -248,7 +245,6 @@ describe("plannotator guide", () => {
       execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"], { cwd: workDir });
       if (remote) execFileSync("git", ["remote", "add", "origin", remote], { cwd: workDir });
     };
-    /** Every file under the guides dir, relative to it. */
     const guideFiles = () => (existsSync(join(dataDir, "guides")) ? (readdirSync(join(dataDir, "guides"), { recursive: true }) as string[]).sort() : []);
 
     test("import --guide/--patch is listed by a review of the same repository, and exports like a generated guide", async () => {
@@ -293,7 +289,6 @@ describe("plannotator guide", () => {
       expect(badGuide.stderr).toContain("These files are not in the patch: src/nope.ts");
       writeFileSync(join(workDir, "snap.json"), JSON.stringify({ ...FIXTURE_V1_PR, extra: 1 }));
       expect((await runGuideCli(["import", "--snapshot", "snap.json"], {}, workDir)).code).toBe(1);
-      // A snapshot whose own PR URL is not one Plannotator can key a shelf by.
       writeFileSync(join(workDir, "snap.json"), JSON.stringify({ ...FIXTURE_V1_PR, source: { ...FIXTURE_V1_PR.source, pr: { ...FIXTURE_V1_PR.source.pr!, url: "https://example.com/x" } } }));
       expect((await runGuideCli(["import", "--snapshot", "snap.json"], {}, workDir)).code).toBe(1);
       expect(existsSync(join(dataDir, "guides"))).toBe(false);
@@ -334,7 +329,6 @@ describe("plannotator guide", () => {
         writeFileSync(join(plain, "guide.patch"), TWO_FILE_PATCH);
         const outside = await runGuideCli(["import", "--guide", "guide.json", "--patch", "guide.patch"], {}, plain);
         expect(outside.code).toBe(0);
-        // A review with no git context (agent cwd only) of the same directory.
         expect((await session(null, { fallbackDir: plain }).listSaved()).map((r) => r.id)).toEqual([outside.stdout!.trim()]);
       } finally {
         rmSync(plain, { recursive: true, force: true });
@@ -377,7 +371,6 @@ describe("plannotator guide", () => {
         expect(res.code).toBe(1);
         expect(res.stderr).toContain("Could not save the guide");
         expect(res.stderr).toContain("EISDIR");
-        // The CLI reports the failure once; the store does not log it too.
         expect(logged).not.toHaveBeenCalled();
       } finally {
         logged.mockRestore();
@@ -438,7 +431,6 @@ describe("plannotator guide", () => {
       expect(loadGuide("github.com__acme__widgets", variant.stdout!.trim())?.prUrl).toBe(canonical);
       expect((await session({ url: canonical, headSha: "", label: "PR #7" }).listSaved()).map((r) => r.id)).toEqual([variant.stdout!.trim()]);
 
-      // The repository path keeps its case (the existing key); only a warning says so.
       const cased = await runGuideCli(["import", "--guide", "guide.json", "--patch", "guide.patch", "--pr", "https://github.com/Acme/Widgets/pull/7"], {}, workDir);
       expect(cased.code).toBe(0);
       expect(cased.stderr).toContain("Warning: the PR URL spells the repository differently from origin (github.com__Acme__Widgets vs github.com__acme__widgets)");
@@ -459,7 +451,6 @@ describe("plannotator guide", () => {
       expect(fromGuide.stderr).toContain("is not the PR the guide names");
       expect(existsSync(join(dataDir, "guides"))).toBe(false);
 
-      // The same PR spelled differently is not a conflict.
       const same = await runGuideCli(["import", "--snapshot", "snap.json", "--pr", FIXTURE_V1_PR.source.pr!.url.replace("https://", "https://www.")], {}, workDir);
       expect(same.code).toBe(0);
     });
@@ -478,7 +469,6 @@ describe("plannotator guide", () => {
 
   describe("share / unshare", () => {
     interface Call { url: string; method: string; headers: Record<string, string>; body?: Record<string, unknown> }
-    /** A stand-in for the guide host: records calls, answers 201 (POST) / 204 (DELETE) unless told otherwise. */
     const fakeService = (respond?: (call: Call) => Response) => {
       const calls: Call[] = [];
       const doFetch: typeof fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -525,7 +515,6 @@ describe("plannotator guide", () => {
       if (restored.ok) expect(restored.value.review.rawPatch).toBe(PATCH);
       expect(res.stderr).toContain("plannotator guide unshare SharedId0123456789abcd --token del-tok");
       expect(res.stderr).toContain("encrypted");
-      // The saved guide remembers its link (the same record the in-app share menu reads).
       expect(loadGuide("shelf-a", "1000-exportable")!.share).toEqual({
         id: "SharedId0123456789abcd",
         url,
@@ -544,7 +533,6 @@ describe("plannotator guide", () => {
       expect(again.stderr).toContain("already has a share link");
       expect(again.stderr).toContain("plannotator guide unshare SharedId0123456789abcd --token del-tok");
       expect(svc.calls.length).toBe(1);
-      // The first link's record survives untouched.
       expect(loadGuide("shelf-a", "1000-exportable")!.share?.deleteToken).toBe("del-tok");
     });
 
@@ -555,12 +543,10 @@ describe("plannotator guide", () => {
         : new Response(null, { status: 204 }));
       expect((await runGuideCli(["share", "--id", "1000-exportable"], { PLANNOTATOR_GUIDE_SHARE_URL: "https://self.example" }, workDir, { fetch: svc.fetch })).code).toBe(0);
       expect(loadGuide("shelf-a", "1000-exportable")!.share?.serviceUrl).toBe("https://self.example");
-      // Configured host is guides.show now; the record still knows where the upload lives.
       const res = await runGuideCli(["unshare", "SelfId", "--token", "t-self"], { PLANNOTATOR_GUIDE_SHARE_URL: "https://guides.show" }, workDir, { fetch: svc.fetch });
       expect(res.code).toBe(0);
       expect(svc.calls[1].url).toBe("https://self.example/api/g/SelfId");
       expect(loadGuide("shelf-a", "1000-exportable")!.share).toBeUndefined();
-      // No record → the configured host.
       const configured = fakeService();
       await runGuideCli(["unshare", "SelfId", "--token", "t-self"], { PLANNOTATOR_GUIDE_SHARE_URL: "https://other.example" }, workDir, { fetch: configured.fetch });
       expect(configured.calls[0].url).toBe("https://other.example/api/g/SelfId");
@@ -579,7 +565,6 @@ describe("plannotator guide", () => {
       expect(JSON.parse(body.data)).toEqual(FIXTURE_V1_PR);
       expect(JSON.parse(res.stdout!)).toEqual({ id: "PubId", url: "http://localhost:8788/g/PubId", deleteToken: "t2", expiresAt: "2026-08-22T00:00:00.000Z" });
       expect(res.stderr).toContain("expires 2026-08-22T00:00:00.000Z");
-      // A sub-path host keeps its path.
       const viaEnv = fakeService();
       await runGuideCli(["share", "--snapshot", "snap.json"], { PLANNOTATOR_GUIDE_SHARE_URL: "https://guides.example.test/sub/" }, workDir, { fetch: viaEnv.fetch });
       expect(viaEnv.calls[0].url).toBe("https://guides.example.test/sub/api/g");
@@ -605,7 +590,6 @@ describe("plannotator guide", () => {
       const viaConfig = await runGuideCli(["share", "--id", "1000-exportable"], {}, workDir, { fetch: svc.fetch });
       expect(viaConfig.code).toBe(1);
       expect(svc.calls.length).toBe(0);
-      // Env re-enables over config.
       const reenabled = await runGuideCli(["share", "--id", "1000-exportable"], { PLANNOTATOR_SHARE: "enabled" }, workDir, { fetch: svc.fetch });
       expect(reenabled.code).toBe(0);
       expect(svc.calls.length).toBe(1);
@@ -617,7 +601,6 @@ describe("plannotator guide", () => {
       expect((await runGuideCli(["share", "--id", "1000-exportable", "--ttl", "soon"], {}, workDir, { fetch: svc.fetch })).code).toBe(2);
       expect((await runGuideCli(["share", "--id", "1000-exportable", "--bogus"], {}, workDir, { fetch: svc.fetch })).code).toBe(2);
       expect((await runGuideCli(["share"], {}, workDir, { fetch: svc.fetch })).code).toBe(2);
-      // Usage problems never reach the host, even when sharing is disabled.
       expect(svc.calls.length).toBe(0);
       const missing = await runGuideCli(["share", "--id", "9999-none"], {}, workDir, { fetch: svc.fetch });
       expect(missing.code).toBe(1);

@@ -1,20 +1,4 @@
-/**
- * Archived threads out of the window's list (owner ruling 2026-10-12), through
- * the Inbox's real doors on a running Inbox (temp data dir, loopback), the
- * agent side over the official MCP client:
- *
- * - `GET /api/inbox/threads` without `archived` keeps them in Quiet, so an
- *   older window and the phone read what they read before;
- * - `?archived=exclude` (the window) leaves them out of every section;
- * - `GET /api/inbox/threads/archived` lists them newest archived first, a
- *   page at a time, with a project filter and per-project counts;
- * - Unarchive brings a thread back to the list and out of the archived set;
- * - a thread's own read carries its row, an archived thread's too;
- * - a thread that came back (an agent's reply_to after the archive line) is
- *   answerable without unarchiving: the agent reads the answer with
- *   read_thread, the event stream says its question is open, and once
- *   handled it is archived again.
- */
+/** Archived threads out of the window's list, through the Inbox's real doors on a running Inbox (temp data dir, loopback), the agent side over the official MCP client. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -59,7 +43,6 @@ async function setup() {
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
   clients.push(client);
   let n = 0;
-  /** A new thread (each send names its own thread). */
   const send = async (projectPath: string, subject: string, body = "A note.") => {
     n += 1;
     const sent = (await client.callTool({
@@ -69,7 +52,6 @@ async function setup() {
     const threadId = sent.structuredContent.thread_id;
     return { thread_id: threadId, project_id: server.store.thread(threadId)!.project.id };
   };
-  /** An agent's reply_to reply into a thread (archived or not). */
   const reply = async (projectPath: string, messageId: string, body: string) => {
     const sent = (await client.callTool({
       name: "send_message",
@@ -109,7 +91,6 @@ describe("archived threads", () => {
     const model = await getJson<ListModel>(server, "/api/inbox/threads?archived=exclude");
     expect(model.sections.map((s) => s.id)).toEqual(before.sections.map((s) => s.id));
     expect(ids(allRows(model))).toEqual([kept.thread_id]);
-    // The sidebar's folder counts are the same either way.
     expect(model.projects).toEqual(before.projects);
 
     const bad = await fetch(url(server, "/api/inbox/threads?archived=hide"));
@@ -139,7 +120,6 @@ describe("archived threads", () => {
     expect(onlyBilling.project).toBe(a.project_id);
     expect(ids(onlyBilling.threads)).toEqual([c.thread_id, a.thread_id]);
     expect(onlyBilling.total).toBe(2);
-    // The filter's choices stay every project with archived threads.
     expect(onlyBilling.projects).toHaveLength(2);
   });
 
@@ -186,14 +166,11 @@ describe("archived threads", () => {
     expect(back.thread_id).toBe(t.thread_id);
     const model = await getJson<ListModel>(server, "/api/inbox/threads?archived=exclude");
     const row = allRows(model).find((r) => r.thread_id === t.thread_id)!;
-    // News again, placed by its question; still resolved until the person acts.
     expect(row).toMatchObject({ section: "waiting", unread: true, agent_after_archive: true, back_from_archive: true });
     expect(row.resolved_at).not.toBeNull();
     expect((await getJson<ArchivedModel>(server, "/api/inbox/threads/archived")).total).toBe(0);
-    // The default list (the phone) places it the same way.
     const phone = await getJson<ListModel>(server, "/api/inbox/threads");
     expect(phone.sections.find((s) => s.id === "waiting")!.threads.map((r) => r.thread_id)).toContain(t.thread_id);
-    // Its read still says archived.
     const read = await getJson<{ thread: { resolved_at: string | null } }>(server, `/api/inbox/threads/${t.thread_id}`);
     expect(read.thread.resolved_at).not.toBeNull();
   });
@@ -223,7 +200,6 @@ describe("archived threads", () => {
     })) as { structuredContent: { message_id: string } };
     const messageId = asked.structuredContent.message_id;
 
-    // The event stream's question line, replayed from the start: open, so notifications and the sound fire.
     const controller = new AbortController();
     const events = await fetch(url(server, "/api/inbox/events?cursor=0"), { signal: controller.signal });
     const reader = events.body!.getReader();
@@ -233,7 +209,6 @@ describe("archived threads", () => {
     const questionEvent = text.split("\n").find((line) => line.startsWith("data:") && line.includes('"kind":"question"') && line.includes(messageId))!;
     expect(JSON.parse(questionEvent.slice(5)).question.state).toBe("open");
 
-    // The person answers without unarchiving.
     const thread = await getJson<{ thread: { messages: { id: string; questions?: { key: string; revision: number }[] }[] } }>(server, `/api/inbox/threads/${t.thread_id}`);
     const q = thread.thread.messages.find((m) => m.id === messageId)!.questions![0]!;
     const picked = await fetch(url(server, `/api/inbox/messages/${messageId}/picks`), {
@@ -250,7 +225,6 @@ describe("archived threads", () => {
     expect(sent.status).toBe(200);
     const got = (await client.callTool({ name: "read_thread", arguments: { thread_id: t.thread_id, agent_session: "ses_arch" } })) as { structuredContent: { thread: { messages: { body: string }[] } } };
     expect(got.structuredContent.thread.messages.at(-1)!.body).toContain("Ship it.");
-    // The agent has the reply, nothing waits: the thread is archived again, by itself, still resolved.
     const archived = await getJson<ArchivedModel>(server, "/api/inbox/threads/archived");
     expect(ids(archived.threads)).toContain(t.thread_id);
     expect(ids(allRows(await getJson<ListModel>(server, "/api/inbox/threads?archived=exclude")))).not.toContain(t.thread_id);
@@ -258,7 +232,6 @@ describe("archived threads", () => {
 
   test("the event stream marks a message's first line: an archive and an Unarchive rewrite the root, never as its first", async () => {
     const { server, billing, send } = await setup();
-    // Live lines (a replay sends only each record's latest line).
     const controller = new AbortController();
     const events = await fetch(url(server, `/api/inbox/events?cursor=${server.store.cursor()}`), { signal: controller.signal });
     const reader = events.body!.getReader();
@@ -281,7 +254,6 @@ describe("archived threads", () => {
     }
     clearTimeout(timer);
     controller.abort();
-    // The send, the archive, the Unarchive (resolved_at null again, like the send): only the send is first.
     expect(rootLines().map((e) => [e.first, e.message.resolved_at === null])).toEqual([
       [true, true],
       [false, false],

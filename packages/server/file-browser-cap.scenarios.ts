@@ -1,14 +1,4 @@
-/**
- * The annotate file browser over a folder that holds more supported files
- * than PLANNOTATOR_FILE_BROWSER_MAX_FILES: GET /api/reference/files on a real
- * annotate folder session says it left files out (`truncated`, `fileLimit`),
- * lists the folder's top levels first (breadth-first), and never counts the
- * heavy folders. Shared by the Bun suite (file-browser-cap.test.ts) and the Pi
- * mirror (apps/pi-extension/server/file-browser-cap.test.ts).
- *
- * Every test runs under a temp PLANNOTATOR_DATA_DIR; nothing touches the real
- * ~/.plannotator.
- */
+/** Annotate file browser over a folder with more files than PLANNOTATOR_FILE_BROWSER_MAX_FILES, shared by the Bun suite and the Pi mirror. */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -72,11 +62,7 @@ function seedFolder(root: string): void {
   for (let i = 0; i < 50; i++) writeFileSync(join(heavy, `readme-${i}.md`), `# ${i}\n`);
 }
 
-/**
- * `defaultCap`: the cap with PLANNOTATOR_FILE_BROWSER_MAX_FILES unset. Bun
- * keeps 5,000; Pi's file browser never had a cap, so it lists every file
- * unless the variable is set (null).
- */
+/** `defaultCap`: the cap with PLANNOTATOR_FILE_BROWSER_MAX_FILES unset. */
 export function defineFileBrowserCapScenarios(
   runtime: string,
   start: StartFileBrowserCapServer,
@@ -154,7 +140,6 @@ export function defineFileBrowserCapScenarios(
       expect(files).toHaveLength(10);
       for (const file of ["README.md", "notes.md", "docs/guide.md", "docs/plan.md"]) expect(files).toContain(file);
       expect(files.some((file) => file.startsWith("node_modules/"))).toBe(false);
-      // Breadth-first in name order: the six deep files that fill the rest are the first six by name.
       expect(files.filter((file) => file.startsWith("aaa-archive/"))).toEqual(
         Array.from({ length: 6 }, (_, i) => `aaa-archive/2019/q1/raw/entry-0${i}.md`),
       );

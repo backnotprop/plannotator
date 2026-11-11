@@ -1,9 +1,3 @@
-/**
- * The Inbox note in each agent's instructions file (inbox-agent-notes.ts),
- * in a scratch home (tests/helpers/fake-agents.ts): where it goes per agent,
- * the marked block (append, idempotent, CRLF, symlink, damaged markers, the
- * person's edit), removal, and the uninstall scan.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
@@ -80,7 +74,6 @@ describe("where each agent's note goes", () => {
     // A BOM is text to Codex (Rust's trim keeps it): that override is read, so the note goes there.
     writeFileSync(file(".codex", "AGENTS.override.md"), Buffer.from([0xef, 0xbb, 0xbf, 0x0a]));
     expect(noteTarget("codex", e).path).toBe(file(".codex", "AGENTS.override.md"));
-    // A folder by that name is not a file Codex reads.
     rmSync(file(".codex", "AGENTS.override.md"));
     mkdirSync(file(".codex", "AGENTS.override.md"));
     expect(noteTarget("codex", e).path).toBe(file(".codex", "AGENTS.md"));
@@ -116,7 +109,6 @@ describe("where each agent's note goes", () => {
     expect(noteTarget("qwen", e)).toEqual({ path: file(".qwen", "QWEN.md"), create: true, reason: null });
     write(file(".qwen", "settings.json"), '{ // mine\n "context": { "fileName": "CONTEXT.md" } }');
     expect(noteTarget("qwen", e).path).toBe(file(".qwen", "CONTEXT.md"));
-    // A name with a folder in it is not a file name: the default.
     write(file(".qwen", "settings.json"), '{ "context": { "fileName": ["../escape.md"] } }');
     expect(noteTarget("qwen", e).path).toBe(file(".qwen", "QWEN.md"));
     // QWEN_HOME replaces ~/.qwen (Gemini's GEMINI_CLI_HOME is a parent folder; Qwen's is not).
@@ -138,7 +130,6 @@ describe("above a Gemini CLI or Qwen Code memory section", () => {
   // next heading, and the fact would land inside the note's markers.
   const MEMORIES = "## Gemini Added Memories\n- likes tabs\n";
 
-  /** What Gemini CLI 0.43.0's save_memory writes (computeGlobalMemoryContent, its global scope). */
   function geminiRemembers(text: string, fact: string): string {
     const header = "## Gemini Added Memories";
     const at = text.indexOf(header);
@@ -158,7 +149,6 @@ describe("above a Gemini CLI or Qwen Code memory section", () => {
     write(path, geminiRemembers(read(path), "uses bun"));
     expect(read(path)).toBe(`# Mine\n\n${INBOX_NOTE_BLOCK}\n\n## Gemini Added Memories\n- likes tabs\n- uses bun\n`);
     expect(noteStatus("gemini", dataDir, e).state).toBe("added");
-    // Removal takes the note and only the note.
     expect(removeInboxNote("gemini", dataDir, e)).toMatchObject({ ok: true, action: "removed" });
     expect(read(path)).toBe("# Mine\n\n## Gemini Added Memories\n- likes tabs\n- uses bun\n");
   });
@@ -189,12 +179,10 @@ describe("above a Gemini CLI or Qwen Code memory section", () => {
       write(path, before);
       expect(addInboxNote("gemini", dataDir, e)).toMatchObject({ ok: true, action: "added" });
       const after = read(path);
-      // Above the header's line, outside the section.
       expect(after.indexOf(INBOX_NOTE_END)).toBeLessThan(after.indexOf("## Gemini Added Memories"));
       expect(addInboxNote("gemini", dataDir, e)).toMatchObject({ ok: true, action: "unchanged" });
       expect(removeInboxNote("gemini", dataDir, e)).toMatchObject({ ok: true });
       expect(JSON.stringify(read(path))).toBe(JSON.stringify(before));
-      // Without the record: uninstall reads the same from the file alone.
       addInboxNote("gemini", dataDir, e);
       rmSync(join(dataDir, "inbox", "agent-notes.json"), { force: true });
       for (const item of planInboxNoteRemoval(dataDir, e, INBOX_AGENT_LABELS).items) expect(item.apply()).toMatchObject({ ok: true });
@@ -212,19 +200,15 @@ describe("above a Gemini CLI or Qwen Code memory section", () => {
   test("an untouched note left after the section (an earlier Plannotator) moves above it at the next add, and at the next start; an edited one never moves", () => {
     const path = file(".gemini", "GEMINI.md");
     write(path, `# Mine\n\n${MEMORIES}`);
-    // Where an earlier Plannotator put it: at the end, after the section.
     write(path, `# Mine\n\n${MEMORIES}\n${INBOX_NOTE_BLOCK}\n`);
-    // With no record the block is Plannotator's only by its exact text; the add takes it and moves it.
     expect(addInboxNote("gemini", dataDir, e)).toMatchObject({ ok: true, action: "updated" });
     expect(read(path)).toBe(`# Mine\n\n${INBOX_NOTE_BLOCK}\n\n${MEMORIES}`);
 
-    // At the start (refreshInboxNotes): the record's very block, after the section, moves; nothing else changes.
     write(path, `# Mine\n\n${MEMORIES}\n${INBOX_NOTE_BLOCK}\n`);
     expect(refreshInboxNotes(dataDir, e)).toEqual([{ agent: "gemini", path: realpathSync(path), result: "moved" }]);
     expect(read(path)).toBe(`# Mine\n\n${INBOX_NOTE_BLOCK}\n\n${MEMORIES}`);
     expect(refreshInboxNotes(dataDir, e)).toEqual([{ agent: "gemini", path: realpathSync(path), result: "current" }]);
 
-    // An earlier version the record names, after the section: brought up to date and moved in the same write.
     const v7 = INBOX_NOTE_EARLIER_BLOCKS[6]!;
     write(path, `# Mine\n\n${MEMORIES}\n${v7}\n`);
     const notesFile = join(dataDir, "inbox", "agent-notes.json");
@@ -235,7 +219,6 @@ describe("above a Gemini CLI or Qwen Code memory section", () => {
     expect(read(path)).toBe(`# Mine\n\n${INBOX_NOTE_BLOCK}\n\n${MEMORIES}`);
     expect(readInboxAgentNotes(dataDir).notes.gemini?.version).toBe(INBOX_NOTE_VERSION);
 
-    // Gemini already wrote a fact inside the block: the person's text now, never moved or rewritten.
     const edited = INBOX_NOTE_BLOCK.replace("\n## Plannotator Inbox", "\n- a fact\n## Plannotator Inbox");
     write(path, `# Mine\n\n${MEMORIES}\n${edited}\n`);
     expect(refreshInboxNotes(dataDir, e)).toEqual([{ agent: "gemini", path: realpathSync(path), result: "edited" }]);
@@ -259,7 +242,6 @@ describe("the marked section", () => {
     const path = file(".codex", "AGENTS.md");
     write(path, "# My rules\nBe brief.");
     expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "added", path: "~/.codex/AGENTS.md" });
-    // The file ended without a line break, so the block ends it the same way (removal reads that).
     expect(read(path)).toBe(`# My rules\nBe brief.\n\n${INBOX_NOTE_BLOCK}`);
     const mtime = statSync(path).mtimeMs;
     Bun.sleepSync(20);
@@ -295,7 +277,6 @@ describe("the marked section", () => {
     const override = file(".codex", "AGENTS.override.md");
     write(agents, "Mine.\n");
     expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "added" });
-    // The person adds an override later, and copies the section into it.
     write(override, `Override.\n\n${INBOX_NOTE_BLOCK}\n`);
     expect(noteStatus("codex", dataDir, e).state).toBe("added");
     write(override, "Override.\n");
@@ -306,7 +287,6 @@ describe("the marked section", () => {
     expect(read(agents)).toBe("Mine.\n");
     expect(read(override)).toBe("Override.\n");
     expect(noteStatus("codex", dataDir, e).state).toBe("absent");
-    // With the copy in both: both go.
     write(agents, "Mine.\n");
     addInboxNote("codex", dataDir, e);
     write(agents, `Mine.\n\n${INBOX_NOTE_BLOCK}\n`);
@@ -329,13 +309,11 @@ describe("the marked section", () => {
         write(path, before);
         expect(addInboxNote(agent, dataDir, e)).toMatchObject({ ok: true });
         expect(read(path)).toContain(INBOX_NOTE_START);
-        // A second add changes nothing.
         expect(addInboxNote(agent, dataDir, e)).toMatchObject({ ok: true, action: "unchanged" });
         expect(removeInboxNote(agent, dataDir, e)).toMatchObject({ ok: true });
         expect([agent, JSON.stringify(read(path))]).toEqual([agent, JSON.stringify(before)]);
       }
     }
-    // Codex's override file too (an empty one is skipped, as Codex skips it: the note goes in AGENTS.md).
     const override = file(".codex", "AGENTS.override.md");
     for (const before of ["abc", "a\r\nb", "x\n"]) {
       write(override, before);
@@ -345,7 +323,6 @@ describe("the marked section", () => {
       expect(JSON.stringify(read(override))).toBe(JSON.stringify(before));
     }
     rmSync(override);
-    // Uninstall with the record gone reads the same from the file alone.
     const agents = file(".codex", "AGENTS.md");
     for (const before of ["abc", "a\r\nb", "", "x\n"]) {
       write(agents, before);
@@ -361,7 +338,6 @@ describe("the marked section", () => {
     for (const before of [" ", "\t", "  \n\t", "  \r\n\t", "\r\n\r\n "]) {
       write(path, before);
       expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "added" });
-      // Never glued to the person's last line: the section reads as one, not damaged.
       expect(read(path).split(/\r?\n/)).toContain(INBOX_NOTE_START);
       expect(noteStatus("codex", dataDir, e).state).toBe("added");
       expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "unchanged" });
@@ -431,7 +407,6 @@ describe("the marked section", () => {
     "<!-- plannotator-inbox:end -->",
   ].join("\n");
   const sha = (text: string) => new Bun.CryptoHasher("sha256").update(text).digest("hex");
-  /** agent-notes.json as 0.28.x left it: one v1 record for `agent`, naming the file's resolved path. */
   const v1Record = (agent: string, path: string) => {
     mkdirSync(join(dataDir, "inbox"), { recursive: true });
     const record = { path: realpathSync(path), created: true, version: 1, block_sha256: sha(V1_BLOCK), at: "2026-10-01T00:00:00.000Z" };
@@ -446,7 +421,6 @@ describe("the marked section", () => {
     expect(addInboxNote("claude-code", dataDir, e)).toMatchObject({ ok: true, action: "updated" });
     expect(read(path)).toBe(`${INBOX_NOTE_BLOCK}\n`);
     expect(readInboxAgentNotes(dataDir).notes["claude-code"]).toMatchObject({ version: INBOX_NOTE_VERSION, block_sha256: sha(INBOX_NOTE_BLOCK), created: true });
-    // Switching it off afterwards still deletes the file the note was all of.
     expect(removeInboxNote("claude-code", dataDir, e)).toMatchObject({ ok: true, action: "deleted" });
     expect(existsSync(path)).toBe(false);
   });
@@ -473,7 +447,6 @@ describe("the marked section", () => {
     expect(read(path)).toBe(`Shared.\n\n${INBOX_NOTE_BLOCK}\n`);
     expect(noteStatus("pi", dataDir, e).state).toBe("added");
     expect(readInboxAgentNotes(dataDir).notes.pi).toMatchObject({ version: INBOX_NOTE_VERSION, block_sha256: sha(INBOX_NOTE_BLOCK) });
-    // And Off for both gives the file back as the person had it.
     expect(removeInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "kept-shared" });
     expect(removeInboxNote("pi", dataDir, e)).toMatchObject({ ok: true, action: "removed" });
     expect(read(path)).toBe("Shared.\n");
@@ -487,7 +460,6 @@ describe("the marked section", () => {
     expect(noteStatus("codex", dataDir, e).state).toBe("edited");
     expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "kept-edited" });
     expect(read(path)).toBe(`${edited}\n`);
-    // With the record lost too.
     rmSync(join(dataDir, "inbox", "agent-notes.json"));
     expect(addInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "kept-edited" });
     expect(read(path)).toBe(`${edited}\n`);
@@ -520,7 +492,6 @@ test("uninstall: every recorded note, plus a file with our markers whose record 
   write(file(".codex", "AGENTS.md"), "Mine.\n");
   addInboxNote("codex", dataDir, e);
   addInboxNote("gemini", dataDir, e);
-  // Qwen's note whose record is gone: found by its markers in the file Qwen reads.
   write(file(".qwen", "QWEN.md"), `Qwen rules\n\n${INBOX_NOTE_BLOCK}\n`);
   write(file(".pi", "agent", "CLAUDE.md"), `Pi rules\n\n${INBOX_NOTE_BLOCK}\n`);
   const { items } = planInboxNoteRemoval(dataDir, e, INBOX_AGENT_LABELS);

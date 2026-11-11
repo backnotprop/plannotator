@@ -1,13 +1,4 @@
-/**
- * The installed notes brought up to date by the Inbox's start
- * (refreshInboxNotes), with no action by the person. The owner's terms: it
- * must find the beginning and end of our note reliably and deterministically,
- * and touch nothing else. The failures these catch: a note the person edited,
- * removed or locked rewritten; a file with broken markers rewritten; another
- * writer's change lost; line endings, BOM, mode or a symlink changed; a file
- * two agents share written twice or left reading "edited" for one of them.
- * Every case runs in a scratch home (tests/helpers/fake-agents.ts).
- */
+/** Installed notes brought up to date by the Inbox's start (refreshInboxNotes) with no action by the person: find our note's beginning and end deterministically and touch nothing else. Every case runs in a scratch home. */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { appendFileSync, chmodSync, linkSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -50,7 +41,6 @@ const V1_BLOCK = [
   "<!-- plannotator-inbox:end -->",
 ].join("\n");
 
-/** agent-notes.json as 0.28.x left it: a v1 record per agent, naming the file's resolved path. */
 function v1Records(entries: Record<string, string>): void {
   mkdirSync(join(dataDir, "inbox"), { recursive: true });
   const notes = Object.fromEntries(
@@ -66,9 +56,7 @@ const swapped = (text: string) => text.replace(OLD_REPLY, NEW_REPLY);
 const results = (options?: Parameters<typeof refreshInboxNotes>[2]) => refreshInboxNotes(dataDir, e, options).map((r) => `${r.agent}:${r.result}`);
 
 test("every version's block is frozen: a released note's bytes never change without a new version", () => {
-  // v1 (0.28.x, on users' disks), v2 (never released), v3 (0.28.34, on users' disks), v4 (0.28.36, on users' disks), v5 (on users' disks), v6 (on users' disks), v7 (on users' disks), v8 (0.28.47, on users' disks), v9. A change here means notes on disk would read as
-  // the person's edit and never be refreshed again: add a version instead (INBOX_NOTE_VERSION, the old block
-  // into INBOX_NOTE_EARLIER_BLOCKS).
+  // Frozen hashes: a change here means notes on disk would read as the person's edit and never be refreshed again; add a version instead (INBOX_NOTE_VERSION, the old block into INBOX_NOTE_EARLIER_BLOCKS).
   expect([...INBOX_NOTE_EARLIER_BLOCKS, INBOX_NOTE_BLOCK].map(sha)).toEqual([
     "d148fe3c13935975729d19c64323b2ad75c1b2b76b7f22d62178695b8faab628",
     "af390369f084bb0a400a204dcb0d0492d566ece20a74c9c2f69ec543cfb9604a",
@@ -116,7 +104,6 @@ describe("refreshInboxNotes: each case of the file, decided by the markers and t
 
   test("a v3 block (0.28.34, on users' disks) is Plannotator's own too: refreshed to this version", () => {
     const path = file(".codex", "AGENTS.md");
-    // The frozen v3 block, whose hash the test above pins to what v3 builds wrote.
     const v3 = INBOX_NOTE_EARLIER_BLOCKS[2]!;
     expect(v3).toContain("start v3 ·");
     write(path, `# Mine\n\n${v3}\n`);
@@ -128,7 +115,6 @@ describe("refreshInboxNotes: each case of the file, decided by the markers and t
 
   test("a v4 block (0.28.36, on users' disks) is Plannotator's own too: refreshed to this version", () => {
     const path = file(".claude", "rules", "plannotator-inbox.md");
-    // The frozen v4 block, whose hash the test above pins to what v4 builds wrote.
     const v4 = INBOX_NOTE_EARLIER_BLOCKS[3]!;
     expect(v4).toContain("start v4 ·");
     write(path, `${v4}\n`);
@@ -307,7 +293,6 @@ describe("refreshInboxNotes: each case of the file, decided by the markers and t
     expect(read(real)).toBe(`Shared.\n\n${INBOX_NOTE_BLOCK}\n`);
     expect(noteStatus("codex", dataDir, e).state).toBe("added");
     expect(noteStatus("pi", dataDir, e).state).toBe("added");
-    // Off for both still gives the file back as the person had it.
     expect(removeInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "kept-shared" });
     expect(removeInboxNote("pi", dataDir, e)).toMatchObject({ ok: true, action: "removed" });
     expect(read(real)).toBe("Shared.\n");
@@ -366,8 +351,7 @@ describe("refreshInboxNotes: each case of the file, decided by the markers and t
     expect(read(path)).toBe(swapped(`${INBOX_NOTE_EARLIER_BLOCKS[1]}\n`));
   });
 
-  // The state a crash between the record write and the note's rename leaves (or a failed put-back): the
-  // record already names this version, the note is still the earlier block Plannotator wrote.
+  // The state a crash between the record write and the note's rename leaves: the record already names this version, the note is still the earlier block.
   const recordAhead = (path: string) => {
     mkdirSync(join(dataDir, "inbox"), { recursive: true });
     writeFileSync(

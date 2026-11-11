@@ -1,20 +1,4 @@
-/**
- * Code review's diagram engine, served on demand (owner approval
- * "review-diagrams-on-demand"), on BOTH review servers (Bun and the Pi
- * mirror) so the two cannot drift.
- *
- * Regressions guarded:
- *  - the `/api/diff` advert missing, or naming a file the route does not
- *    serve;
- *  - a served file without its JavaScript type, immutable caching, nosniff
- *    or same-origin resource policy (a module script needs the type; the
- *    hash in the name is what makes immutable safe);
- *  - a guessed or stale name answered with the app page (the SPA catch-all)
- *    instead of a 404, or a non-GET answered at all;
- *  - a host without the files advertising an engine (the page would then
- *    try to import a file that is not there instead of showing code);
- *  - remote sessions getting the ~8 MB files uncompressed.
- */
+/** Code review's diagram engine, served on demand by both review servers: the `/api/diff` advert, JS type / immutable caching / nosniff / same-origin resource policy, a 404 (not the app page) for guessed names, and no advert on a host without the files. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -65,7 +49,6 @@ describe("createDiagramEngineAssets", () => {
       expect(advert[name]).toMatch(new RegExp(`^${DIAGRAM_ENGINE_ROUTE_PREFIX}${name}-[0-9a-f]{16}\\.js$`));
       expect(await assets.file(advert[name])).toBe(SOURCES[name]);
     }
-    // Another body, another name: a cached file never outlives its contents.
     const changed = await createDiagramEngineAssets({ ...SOURCES, engine: `${SOURCES.engine} ` }).advert();
     expect(changed!.engine).not.toBe(advert.engine);
     expect(changed!.mermaid).toBe(advert.mermaid);
@@ -136,7 +119,6 @@ for (const [runtime, start] of RUNTIMES) {
           expect(res.headers["cross-origin-resource-policy"]).toBe("same-origin");
           expect(res.headers["content-encoding"]).toBeUndefined();
         }
-        // A guessed name is a 404, never the app page.
         const guessed = await rawRequest(`${server.url}${DIAGRAM_ENGINE_ROUTE_PREFIX}engine.js`);
         expect(guessed.status).toBe(404);
         expect(guessed.body.toString("utf8")).not.toContain("<title>review</title>");
@@ -154,7 +136,6 @@ for (const [runtime, start] of RUNTIMES) {
         expect(diff.diagramEngine).toBeUndefined();
         const res = await rawRequest(`${server.url}${DIAGRAM_ENGINE_ROUTE_PREFIX}engine-0000000000000000.js`);
         expect(res.status).toBe(404);
-        // The app page itself is unchanged.
         expect((await rawRequest(`${server.url}/`)).body.toString("utf8")).toBe(HTML);
       } finally {
         await server.stop();

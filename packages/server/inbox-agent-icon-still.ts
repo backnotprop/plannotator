@@ -1,17 +1,6 @@
 /**
- * The still of an uploaded agent icon that moves (packages/server/inbox-agent-icons.ts): its first frame, made from
- * the bytes on the server, so every window shows the same still and none has to draw one. A picture that does not
- * move has no still: the window's still address serves the picture itself.
- *
- * - SVG: the same file with every CSS animation and transition turned off and its SMIL elements (`<animate>`,
- *   `<animateTransform>`, `<animateMotion>`, `<animateColor>`, `<set>`) taken out, so it shows its rest pose. Inside an
- *   `<img>` a moving SVG ignores the system's reduced-motion setting, so the window needs this file to stay still.
- * - GIF: the header, the palette and the first image only.
- * - APNG: the PNG without its animation chunks (`acTL`, `fcTL`, `fdAT`): the default image every plain PNG reader shows.
- * - Animated WebP: its first frame as a plain WebP (the frame's own bitstream and alpha, the frame's size).
- *
- * Nothing here decodes pixels: each is a cut of the file's own blocks. A file that does not parse as expected has no
- * still (the window then shows the picture as uploaded).
+ * The first frame of an uploaded agent icon that moves, cut from the file's own blocks (nothing decodes pixels), so every window shows the same still. A picture that does not move or parse has no still: the window shows it as uploaded.
+ * SVG: CSS animations and transitions turned off and SMIL elements removed (a moving SVG in an `<img>` ignores reduced-motion). GIF: header, palette and first image. APNG: the PNG without its animation chunks (`acTL`, `fcTL`, `fdAT`). Animated WebP: its first frame as a plain WebP.
  */
 
 const ascii = (b: Uint8Array, from: number, to: number) => String.fromCharCode(...b.subarray(from, to));
@@ -29,8 +18,6 @@ function concat(parts: readonly Uint8Array[]): Uint8Array<ArrayBuffer> {
   return out;
 }
 
-/* ---------- SVG ---------- */
-
 const SVG_MOTION = /@keyframes|\banimation(?:-name)?\s*:|<(?:animate|animateTransform|animateMotion|animateColor|set)\b/i;
 const SMIL_PAIRED = /<(animate|animateTransform|animateMotion|animateColor|set)\b[^>]*?(?<!\/)>[\s\S]*?<\/\1\s*>/gi;
 const SMIL_EMPTY = /<(?:animate|animateTransform|animateMotion|animateColor|set)\b[^>]*\/>/gi;
@@ -42,14 +29,10 @@ function svgStill(text: string): string | null {
   if (!open) return null;
   const at = open.index + open[0].length;
   const body = text.slice(at).replace(SMIL_PAIRED, "").replace(SMIL_EMPTY, "");
-  // A self-closing root (`<svg … />`) has nothing to animate.
   if (open[0].endsWith("/>")) return null;
   return `${text.slice(0, at)}${STILL_STYLE}${body}`;
 }
 
-/* ---------- GIF ---------- */
-
-/** The bytes after a run of sub-blocks starting at `at` (each a length byte and that many bytes, ending with 0). */
 function skipSubBlocks(b: Uint8Array, at: number): number {
   while (at < b.length) {
     const size = b[at]!;
@@ -97,8 +80,6 @@ function gifStill(b: Uint8Array): Uint8Array<ArrayBuffer> | null {
   return concat([head, ...kept, first, new Uint8Array([0x3b])]);
 }
 
-/* ---------- PNG / APNG ---------- */
-
 function pngStill(b: Uint8Array): Uint8Array<ArrayBuffer> | null {
   const parts: Uint8Array[] = [b.subarray(0, 8)];
   let at = 8;
@@ -115,8 +96,6 @@ function pngStill(b: Uint8Array): Uint8Array<ArrayBuffer> | null {
   }
   return animated ? concat(parts) : null;
 }
-
-/* ---------- WebP ---------- */
 
 function riffChunk(type: string, payload: Uint8Array): Uint8Array {
   const pad = payload.byteLength & 1;
@@ -138,7 +117,6 @@ function webpStill(b: Uint8Array): Uint8Array<ArrayBuffer> | null {
     if (type === "ANMF" && size >= 16) {
       const width = u24le(b, body + 6) + 1;
       const height = u24le(b, body + 9) + 1;
-      // The frame's own chunks: an optional ALPH, then VP8 or VP8L.
       const frame: Uint8Array[] = [];
       let alpha = false;
       let inner = body + 16;
@@ -170,7 +148,6 @@ function webpStill(b: Uint8Array): Uint8Array<ArrayBuffer> | null {
   return null;
 }
 
-/** The still of a picture that moves (its first frame, as the same type), or null for one that does not. */
 export function agentIconStill(type: string, bytes: Uint8Array): Uint8Array<ArrayBuffer> | null {
   try {
     if (type === "image/svg+xml") {

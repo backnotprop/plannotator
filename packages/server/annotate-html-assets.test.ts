@@ -66,7 +66,6 @@ describe("annotate raw HTML assets", () => {
       ]);
       expect(response?.headers.get("x-content-type-options")).toBe("nosniff");
     }
-    // The page itself keeps its document policy (scripts run, at an opaque origin).
     const page = new URL(`${base}page.html`, "http://localhost");
     expect((await assets.handle(new Request(String(page)), page))?.headers.get("content-security-policy")).toBe("sandbox allow-scripts allow-modals");
     rmSync(dir, { recursive: true, force: true });
@@ -100,8 +99,6 @@ describe("annotate raw HTML assets", () => {
       expect(svg?.headers.get("content-security-policy")).toBe(HTML_ASSET_SUBRESOURCE_CSP);
       expect(svg?.headers.get("x-content-type-options")).toBe("nosniff");
 
-      // An XML file in the same folder, reached the way a page's <base href>
-      // reaches it: the SVG's token with another name.
       const svgPath = rawHtml.match(/"([^"]+chart\.svg)"/)![1];
       const xmlUrl = new URL(svgPath.replace(/chart\.svg$/, "data.xml"), "http://localhost");
       const xml = await assets.handle(new Request(String(xmlUrl)), xmlUrl);
@@ -110,7 +107,6 @@ describe("annotate raw HTML assets", () => {
 
       const png = await get("logo.png");
       expect(png?.status).toBe(200);
-      // Every non-HTML asset, not only the scriptable types (a response CSP never applies to an <img> load).
       expect(png?.headers.get("content-security-policy")).toBe(HTML_ASSET_SUBRESOURCE_CSP);
       expect(png?.headers.get("x-content-type-options")).toBe("nosniff");
     } finally {
@@ -260,7 +256,6 @@ describe("annotate raw HTML assets", () => {
     writeFileSync(htmlPath, html, "utf-8");
 
     const shareHtml = inlineHtmlLocalAssets(html, htmlPath);
-    // The symlinked secret must not be base64-embedded into the portable share.
     expect(shareHtml).not.toContain("base64");
     expect(Buffer.from(shareHtml).toString("utf-8")).not.toContain("SECRET_OUTSIDE_CONTENT");
     expect(shareHtml).not.toContain(Buffer.from("SECRET_OUTSIDE_CONTENT").toString("base64"));
@@ -320,8 +315,6 @@ describe("annotate embedded local documents", () => {
     const { assets, base } = registerPage(dir, '<html><head></head><body><iframe src="sub/deep.html"></iframe></body></html>');
 
     expect((await get(assets, `${base}sub/deep.html`))?.status).toBe(200);
-    // sub/deep.html loads at <base>/sub/deep.html, so its own ../shared.css
-    // resolves back inside the same token root.
     expect((await get(assets, `${base}shared.css`))?.status).toBe(200);
   });
 
@@ -369,16 +362,13 @@ describe("annotate embedded local documents", () => {
     expect((await get(assets, `${base}huge.html`, { "sec-fetch-dest": "iframe" }))?.status).toBe(413);
   });
 
-  // The bug this whole change is about: the catch-all rendering the editor app
-  // inside an annotated page's embed.
   test("framedDocumentNotFound answers a framed request instead of letting the app be served", () => {
     const url = new URL("http://localhost/prototype-slash.html");
     const framed = framedDocumentNotFound(new Request(String(url), { headers: { "sec-fetch-dest": "iframe" } }), url);
     expect(framed?.status).toBe(404);
     expect(framed?.headers.get("content-type")).toContain("text/html");
     expect(framedDocumentNotFound(new Request(String(url)), url)).toBeNull();
-    // ...but never for the app document itself, which is how the VS Code
-    // extension loads a session (#1561 regression).
+    // Never for the app document itself: the VS Code extension frames it.
     const root = new URL("http://localhost/");
     expect(
       framedDocumentNotFound(new Request(String(root), { headers: { "sec-fetch-dest": "iframe" } }), root),
@@ -403,15 +393,7 @@ describe("annotate embedded local documents", () => {
   });
 });
 
-/**
- * The catch-all's framed guard, over a real server.
- *
- * #1561 scoped the guard to `Sec-Fetch-Dest` alone, so it also answered 404 for
- * the APP document — and the VS Code extension frames the session URL
- * (`panel-manager.ts` puts it in an `<iframe src>`, and every subcommand
- * launched from a VS Code terminal is routed there by `PLANNOTATOR_BROWSER`),
- * so an annotate session opened from the editor showed "404 Not found".
- */
+/** The catch-all's framed guard must not answer 404 for the app document, which the VS Code extension frames in an `<iframe>`. */
 describe("annotate catch-all: framed requests", () => {
   const APP_SHELL = "<html><body>PLANNOTATOR_APP_SHELL</body></html>";
   let savedPort: string | undefined;
@@ -473,8 +455,6 @@ describe("annotate catch-all: framed requests", () => {
 
   test("a framed path under a directory is a file reference; a bare word is not", async () => {
     await withServer(async (url) => {
-      // Only a root-relative embed is spelled with a directory segment; the app
-      // has no nested routes, so this is a miss worth naming.
       expect((await framed(url, "/assets/frame")).status).toBe(404);
       // One bare segment stays with the app, so a future SPA route cannot 404
       // inside a frame.
@@ -486,7 +466,6 @@ describe("annotate catch-all: framed requests", () => {
 
   test("a plain request for a missing path still gets the app, as before #1561", async () => {
     await withServer(async (url) => {
-      // (Not under /assets/: that prefix is the packed chunks route, where a miss is 404.)
       for (const path of ["/prototype-slash.html", "/docs/frame", "/"]) {
         const response = await fetch(`${url}${path}`);
         expect(response.status).toBe(200);
@@ -578,9 +557,6 @@ for (const [runtime, startServer] of [["Bun", startAnnotateServer], ["Pi", start
   });
 
   test(`${runtime} folder session: a page inside a hidden folder keeps its own assets`, async () => {
-    // `.drafts/page.html` is not widened to the folder root (its base would be
-    // `.drafts/`, which the hidden rule refuses): its own folder is its root,
-    // as on main, while pages outside hidden folders keep the refusal.
     const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-folder-hidden-doc-")));
     mkdirSync(join(root, ".drafts"));
     mkdirSync(join(root, "lessons"));
@@ -615,17 +591,12 @@ for (const [runtime, startServer] of [["Bun", startAnnotateServer], ["Pi", start
   });
 
   test(`${runtime} folder session: a page keeps the hidden folders in its own directory`, async () => {
-    // v0.28.18 served `site/.vendor/x.css` to `site/page.html` (its folder was
-    // its root). The page's own directory keeps that rule, hidden segments and
-    // all; the rest of the selected folder is reachable minus hidden paths.
     const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-folder-own-hidden-")));
     for (const dir of ["site/.vendor", "lessons", "assets", ".secrets"]) mkdirSync(join(root, dir), { recursive: true });
     const pagePath = join(root, "site", "page.html");
     writeFileSync(pagePath, '<html><head><link rel="stylesheet" href=".vendor/x.css"><link rel="stylesheet" href="linked.css"></head><body></body></html>');
     writeFileSync(join(root, "site", ".vendor", "x.css"), "VENDOR_STYLE");
     writeFileSync(join(root, ".secrets", "linked.css"), "LINKED_SECRET");
-    // In the page's directory, but it leads into a hidden folder elsewhere in
-    // the selected folder: judged by the folder rule on its real path.
     symlinkSync(join(root, ".secrets", "linked.css"), join(root, "site", "linked.css"));
     const lessonPath = join(root, "lessons", "lesson.html");
     writeFileSync(lessonPath, '<html><head><link rel="stylesheet" href="../assets/lesson.css"></head><body><script src="../.secrets/x.json"></script></body></html>');

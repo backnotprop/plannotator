@@ -1,13 +1,4 @@
-/**
- * The agent icons' faces file (packages/shared/inbox/agent-faces.ts) and its route (inbox-agent-faces.ts).
- *
- * What this catches: a face not kept for its agent or not found by one of its sessions; a choice of the agent's own
- * mark kept on disk; a continued session (a poll's `continues`) or a launch's session not linked to the face, so its
- * threads lose it after it ends; a link that writes on every poll; the file growing past its cap; this browser's
- * faces from before written over another window's choice, or adopted twice; a newer file written over; a write
- * with no event for the other windows; another site reading the faces. No Inbox is started: the route is called
- * directly with a temp folder.
- */
+/** The agent icons' faces file and its route, called directly with a temp folder; no Inbox is started. */
 import { beforeEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, statSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -30,7 +21,6 @@ test('a face is kept for its agent, found by its sessions, and its own mark forg
   faces.change({ agent: 'lnc_1', sessions: ['ses_a', 'launch:lnc_1'], face: 'glass-blue' });
   expect(faces.wire().faces.lnc_1).toEqual({ face: 'glass-blue', sessions: ['ses_a', 'launch:lnc_1'] });
   expect(heard.map((w) => w.rev)).toEqual([1]);
-  // A second process reads the same file.
   expect(createInboxAgentFacesFile(dir, () => {}).wire()).toEqual({ faces: { lnc_1: { face: 'glass-blue', sessions: ['ses_a', 'launch:lnc_1'] } }, rev: 1 });
   expect(statSync(join(dir, INBOX_AGENT_FACES_FILE)).mode & 0o777).toBe(0o600);
   faces.change({ agent: 'lnc_1', face: 'agent' });
@@ -59,7 +49,6 @@ test('a continued session and a launch session are linked once, by a poll', () =
   expect(faces.wire().faces.ses_1!.sessions).toEqual(['ses_2']);
   expect(faces.wire().faces.lnc_9!.sessions).toEqual(['launch:lnc_9', 'ses_9']);
   expect(heard.length).toBe(before + 2);
-  // The next polls of a linked session, and of a session that is no agent with a face, write nothing.
   faces.link('ses_2', () => {
     asked++;
     return ['ses_1'];
@@ -75,7 +64,6 @@ test('the file keeps the latest choices only', () => {
   const keys = Object.keys(faces.wire().faces);
   expect(keys.length).toBe(INBOX_AGENT_FACES_KEPT);
   expect(keys[0]).toBe('ses_5');
-  // A choice again moves the agent last, so it is kept longest.
   faces.change({ agent: 'ses_5', face: 'glass-red' });
   expect(Object.keys(faces.wire().faces).at(-1)).toBe('ses_5');
   expect(readFileSync(join(dir, INBOX_AGENT_FACES_FILE), 'utf8').length).toBeLessThan(40_000);

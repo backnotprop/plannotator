@@ -1,13 +1,4 @@
-/**
- * The note written by itself (autoAddInboxNotes in inbox-agent-notes.ts;
- * approval "inbox-agent-note-auto", which superseded the one-time dialog):
- * for every connected agent proven to load it, once per agent; never for Qwen
- * Code (offered) or Cursor (copied by hand); never for an agent already asked
- * (an old dialog's Not now, a 0.28.18 config), one turned off, or with
- * PLANNOTATOR_INBOX_NOTES=0; and what the window's line says. Fake agent CLIs
- * in a scratch home (tests/helpers/fake-agents.ts); config.json lives in a
- * scratch PLANNOTATOR_DATA_DIR. No Inbox is started.
- */
+/** Notes written by themselves (autoAddInboxNotes): once per connected agent proven to load it, never for an agent already asked, one turned off, or with PLANNOTATOR_INBOX_NOTES=0. Fake agent CLIs in a scratch home; no Inbox is started. */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { appendFileSync, chmodSync, existsSync, linkSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -59,11 +50,9 @@ test("a new person: every connected agent proven to load the note gets it, once;
   expect(read(file(".claude", "rules", "plannotator-inbox.md"))).toBe(`${INBOX_NOTE_BLOCK}\n`);
   expect(read(file(".codex", "AGENTS.md"))).toBe(`Mine.\n\n${INBOX_NOTE_BLOCK}\n`);
   expect(read(file(".gemini", "GEMINI.md"))).toBe(`${INBOX_NOTE_BLOCK}\n`);
-  // Each one is answered: never written again by itself.
   expect(loadConfig().inboxAgentNotes?.asked).toEqual(["claude-code", "codex", "gemini"]);
   expect(unsaidAutoNotes()).toEqual(added);
   expect(await autoAddInboxNotes(options())).toEqual([]);
-  // Said: the line is gone, the record of who was asked stays.
   markAutoNotesSaid();
   expect(unsaidAutoNotes()).toEqual([]);
   expect(loadConfig().inboxAgentNotes?.asked).toEqual(["claude-code", "codex", "gemini"]);
@@ -84,7 +73,6 @@ test("Qwen Code (not proven) and Cursor (copied by hand) are never written by th
   await connect();
   expect(await autoAddInboxNotes(options())).toEqual([]);
   expect(existsSync(file(".qwen", "QWEN.md"))).toBe(false);
-  // Still not asked: the window's question offers them.
   expect(loadConfig().inboxAgentNotes?.asked ?? []).toEqual([]);
 });
 
@@ -114,7 +102,6 @@ test("a note turned off in Settings → Agents, or removed by hand, stays off", 
   fake.install("codex");
   await connect();
   await autoAddInboxNotes(options());
-  // Settings' switch off: removes it and records the agent as answered (inbox.ts saveAgent).
   expect(removeInboxNote("codex", dataDir, environment())).toMatchObject({ ok: true, action: "deleted" });
   await markNotesAsked(["codex"], options());
   expect(await autoAddInboxNotes(options())).toEqual([]);
@@ -134,7 +121,6 @@ test("PLANNOTATOR_INBOX_NOTES=0: nothing is written and nobody is marked asked",
 test("a note that cannot be written is left unasked (tried again next time) and not said", async () => {
   fake.install("codex");
   await connect();
-  // A damaged section: two start markers.
   mkdirSync(file(".codex"), { recursive: true });
   const damaged = "<!-- plannotator-inbox:start v8 -->\n<!-- plannotator-inbox:start v8 -->\n";
   writeFileSync(file(".codex", "AGENTS.md"), damaged);
@@ -143,9 +129,7 @@ test("a note that cannot be written is left unasked (tried again next time) and 
   expect(loadConfig().inboxAgentNotes?.asked ?? []).toEqual([]);
 });
 
-// The guards the start's refresh already keeps (review of #2903): with nobody's yes, a file the person locked,
-// a hard-linked dotfile, or one that already has the note pasted by hand is left alone, and answered (skipped),
-// so it is never tried again by itself; a file changed between the read and the write is never clobbered.
+// The start's refresh guards: with nobody's yes, a locked file, a hard-linked dotfile, or one already holding the note pasted by hand is left alone and answered; a file changed between the read and the write is never clobbered.
 
 test("a read-only file (no owner write bit) is left alone, its mode too, and never tried again by itself", async () => {
   fake.install("codex");
@@ -158,7 +142,6 @@ test("a read-only file (no owner write bit) is left alone, its mode too, and nev
     expect(read(path)).toBe("Mine.\n");
     expect(statSync(path).mode & 0o777).toBe(0o444);
     expect(loadConfig().inboxAgentNotes?.asked).toEqual(["codex"]);
-    // Writable again later: still answered, so still not written by itself.
     chmodSync(path, 0o644);
     expect(await autoAddInboxNotes(options())).toEqual([]);
     expect(read(path)).toBe("Mine.\n");

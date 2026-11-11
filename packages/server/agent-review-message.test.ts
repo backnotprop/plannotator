@@ -73,13 +73,10 @@ describe("buildAgentReviewUserMessage", () => {
   });
 
   test("uses the inline patch as Ask AI context for static patch reviews", () => {
-    // given
     const diffType = "static-patch";
 
-    // when
     const message = buildAgentReviewUserMessage(patch, diffType, undefined, undefined, true);
 
-    // then
     expect(message).toContain(patch);
     expect(message).not.toContain("working tree");
   });
@@ -229,11 +226,6 @@ describe("buildAgentReviewUserMessage — contextOnly (custom review skill)", ()
   });
 });
 
-// Coverage for the scenarios Ask AI relies on (it reuses this exact machine via
-// the review server's buildCurrentAiReviewContext). These fill the gaps the
-// existing suite didn't cover: plain PR, PR full-stack default framing, the PR
-// local-access "don't use stale local main" warning, untracked-file mention,
-// jj-evolog, and the workspace prompt-context lines in isolation.
 describe("buildAgentReviewUserMessage — Ask AI scenario coverage", () => {
   const prMetadata = {
     url: "https://github.com/o/r/pull/3",
@@ -246,7 +238,6 @@ describe("buildAgentReviewUserMessage — Ask AI scenario coverage", () => {
     expect(message).toContain("git diff origin/main...HEAD");
     expect(message.toLowerCase()).toContain("verify the pr files exist");
     expect(message.toLowerCase()).toContain("warming up");
-    // Still no pasted diff — the agent fetches it from the worktree itself.
     expect(message).not.toContain(patch);
     expect(message).not.toContain("```diff");
   });

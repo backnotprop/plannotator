@@ -1,15 +1,4 @@
-/**
- * Action items (approval "inbox-next-actions") through the Inbox's real doors: an
- * agent sends a `:::action` block over the official MCP client, the person's
- * Done / Can't do it / Undo go through `POST /api/inbox/messages/:id/actions/:key`
- * on a running Inbox (temp data dir, loopback, the Undo window shortened), and
- * the answer comes back as the person's reply: over the bridge with the exact
- * wake text, and in read_thread. The window stages its marks
- * (`staged: true`, approval "inbox-action-items-in-reply"): they go only with
- * the person's Send (`actions` on the reply route). Failures to catch:
- * anything sent inside the Undo window, or a staged mark sent on a timer; a wake text that drifts; `done` accepted for another
- * thread or a question; the route open to another site or a stale tab.
- */
+/** Action items through the Inbox's real doors: a `:::action` block over the MCP client, Done / Can't do it / Undo via the actions route on a running Inbox (temp data dir, loopback, shortened Undo window), the answer returning as the person's reply. Staged marks go only with the person's Send. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -108,7 +97,6 @@ describe("an agent sends an action item", () => {
     expect(sent.actions).toEqual([{ key: expect.stringMatching(/^a-[0-9a-f]{8}$/), prompt: "Approve the production deploy on Vercel" }]);
     const row = await rowOf(server, sent.thread_id);
     expect(row).toMatchObject({ section: "stopped", unread: true, questions: { open: 1, actions: 1, stopped: true } });
-    // read_thread's text numbers it A1 and says "action item", never Q1.
     const { client } = (await setupClientFor(server));
     const read = (await client.callTool({ name: "read_thread", arguments: { thread_id: sent.thread_id } })) as { content: { text: string }[] };
     expect(read.content[0]!.text).toContain(`${sent.message_id}/${sent.actions![0]!.key} (A1) action item, open: Approve the production deploy on Vercel`);
@@ -131,7 +119,6 @@ describe("the person's Done", () => {
     expect(answer.status).toBe(200);
     expect(((await answer.json()) as { questions: InboxQuestion[] }).questions.find((q) => q.key === key)).toMatchObject({ state: "picked", action_result: { outcome: "done", by: "person" } });
     expect(await poll(server)).toEqual([]);
-    // No reply written yet: the person's last word is still the agent's.
     expect((await rowOf(server, sent.thread_id)).last_author).toBe("agent");
 
     await sleep(DELAY + 250);
@@ -158,11 +145,9 @@ describe("the person's Done", () => {
       structuredContent: { thread: { messages: { body: string }[] } };
     };
     expect(replied.structuredContent.thread.messages.at(-1)!.body).toBe(body);
-    // The action item reads A1, not Q1, with its result.
     expect(replied.content[0]!.text).toContain(`A1 ${key} done`);
     expect((await actionOf(server, sent.thread_id, sent.message_id)).state).toBe("sent");
     expect((await rowOf(server, sent.thread_id)).section).not.toBe("stopped");
-    // Sent: no Undo.
     expect((await mark(server, sent.message_id, key, { outcome: null })).status).toBe(409);
   });
 
@@ -251,7 +236,6 @@ describe("the window's Done goes with the person's reply (approval \"inbox-actio
       body: ["Did 1 action item.", "Go ahead with the release.", "## Action items you asked for", "1 of 1 done.", `### A1. Approve the production deploy on Vercel\nDone, ${inboxActionTime(at)}.\nNote: Approved.`].join("\n\n"),
     });
     expect((await actionOf(server, sent.thread_id, sent.message_id)).state).toBe("sent");
-    // No second reply on a timer: only that one (the bridge hands it again until it is taken).
     await sleep(DELAY + 250);
     expect((await poll(server)).map((c) => c.id)).toEqual([commands[0]!.id]);
   });

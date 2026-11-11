@@ -1,12 +1,3 @@
-/**
- * End-to-end: a guide job launched through the review server can be exported
- * as a portable HTML whose embedded snapshot carries the diff the guide was
- * generated against (decision record D6) — through the live-job path
- * (session launch review) and, after restart, the persisted path
- * (`saved:{id}` from the store).
- *
- * Uses a fake `claude` binary on PATH that returns a valid stream-json result.
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -101,7 +92,6 @@ describe("guide export end to end (Bun review server)", () => {
       expect(launch.status).toBe(201);
       const { job } = (await launch.json()) as { job: Record<string, unknown> };
       jobId = job.id as string;
-      // The patch never rides the broadcast job object.
       expect("launchReview" in job).toBe(false);
 
       const finished = await waitForJob(server.url, jobId);
@@ -124,7 +114,6 @@ describe("guide export end to end (Bun review server)", () => {
       expect(snapshot.generator?.engine).toBe("claude");
       expect(snapshot.generator?.customInstructions).toBe("Be brief.");
 
-      // Persisted beside the guide, so it survives the session.
       const saved = listGuides(repoKey);
       expect(saved.length).toBe(1);
       expect(saved[0].envelope.review?.patchFile).toBe(`${saved[0].id}.patch`);
@@ -132,7 +121,6 @@ describe("guide export end to end (Bun review server)", () => {
       server.stop();
     }
 
-    // Restart: the live id is gone, the saved id exports the identical diff.
     server = await startReviewServer({ rawPatch: "", gitRef: "HEAD", origin: "claude-code", htmlContent: SPA_HTML });
     try {
       expect((await fetch(`${server.url}/api/guide/${jobId}/export`)).status).toBe(404);

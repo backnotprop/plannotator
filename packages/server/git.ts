@@ -1,10 +1,3 @@
-/**
- * Git utilities for code review
- *
- * Centralized git operations for diff collection and branch detection.
- * Used by both Claude Code hook and OpenCode plugin.
- */
-
 import { childEnv } from "@plannotator/shared/child-env";
 import { readFileCapped } from "@plannotator/shared/repo-file";
 import { lstat, open, readlink, realpath } from "node:fs/promises";
@@ -45,16 +38,8 @@ export type {
 } from "@plannotator/shared/review-core";
 
 /**
- * Process-group leaders of git commands started with `interaction: "forbid"`
- * (#1553). Those run detached in their own group so a timeout can kill the
- * whole transport tree — but a server that exits while one is still in flight
- * left the git/ssh pair orphaned: the parent-side timer dies with the parent,
- * so nothing was ever going to reap them. On a smartcard-backed SSH setup the
- * orphan keeps the agent busy long after the review window closed.
- *
- * POSIX only: the negative-pid group signal has no Windows equivalent, and the
- * timeout path already special-cases win32 with taskkill. A Windows exit is
- * left as it was rather than spawning a process from an exit handler.
+ * Process-group leaders of git commands started with `interaction: "forbid"`: detached in their own group so a timeout kills the whole transport tree, and reaped on exit because the parent-side timer dies with the parent.
+ * POSIX only: the negative-pid group signal has no Windows equivalent.
  */
 const isolatedGitGroups = new Set<number>();
 let isolatedGitExitHookInstalled = false;
@@ -74,19 +59,14 @@ export function trackIsolatedGitGroup(pid: number): () => void {
   if (process.platform === "win32") return () => {};
   if (!isolatedGitExitHookInstalled) {
     isolatedGitExitHookInstalled = true;
-    // "exit" only: it runs on every process.exit(), which is where this
-    // server's SIGINT/SIGTERM handling already routes, and the callback must
-    // be synchronous — process.kill is.
+    // "exit" only: it runs on every process.exit(), and the callback must be synchronous, as process.kill is.
     process.on("exit", reapIsolatedGitGroups);
   }
   isolatedGitGroups.add(pid);
   return () => isolatedGitGroups.delete(pid);
 }
 
-/**
- * Stop a git command and, when it runs in its own group (`isolateProcessGroup`), everything it started: ssh,
- * git-remote-https, fetch-pack. A SIGKILL to the group on POSIX, `taskkill /t` on Windows, else the command alone.
- */
+/** Stop a git command and, when it runs in its own group (`isolateProcessGroup`), everything it started (ssh, git-remote-https, fetch-pack): SIGKILL to the group on POSIX, `taskkill /t` on Windows. */
 export function killGitTree(proc: { pid: number; kill: (signal?: number | NodeJS.Signals) => void }, isolated: boolean): void {
   if (isolated && process.platform !== "win32") {
     try {
@@ -132,10 +112,7 @@ async function runGit(
     timer = setTimeout(() => killGitTree(proc, command.isolateProcessGroup), options.timeoutMs);
   }
 
-  // try/finally so a rejected stream read cannot leave the group leader in the
-  // exit reaper's set (the node:http mirror untracks on both "close" and
-  // "error" for the same reason): a stale pid there is a pid that could be
-  // recycled before the process exits.
+  // try/finally so a rejected stream read cannot leave the group leader in the exit reaper's set: a stale pid there could be recycled before the process exits.
   try {
     const [stdout, stderr, exitCode] = await Promise.all([
       new Response(proc.stdout).text(),
@@ -149,10 +126,6 @@ async function runGit(
   }
 }
 
-/**
- * Drain a stream as raw bytes, stopping (and killing the producer) once
- * `maxBytes` is passed so an oversized blob is never held in full.
- */
 export async function readCappedBytes(
   stream: ReadableStream<Uint8Array>,
   kill: () => void,
@@ -189,7 +162,6 @@ export async function readCappedBytes(
   return { bytes, truncated };
 }
 
-/** The git runner with undecoded stdout and a hard `maxOutputBytes` ceiling (image blobs). */
 async function runGitBytes(
   args: string[],
   options?: GitCommandOptions,
@@ -240,16 +212,11 @@ export async function readFileBytesCapped(path: string, maxBytes: number): Promi
   }
 }
 
-/**
- * Decode bytes exactly as `Bun.file(path).text()` does (a UTF-8 BOM is
- * stripped, a UTF-16LE BOM switches to UTF-16), so reads through
- * repo-file.ts keep Bun's old output.
- */
+/** Decode bytes as `Bun.file(path).text()` does: a UTF-8 BOM is stripped, a UTF-16LE BOM switches to UTF-16. */
 export function decodeBunText(bytes: Uint8Array): Promise<string> {
   return new Blob([bytes as Uint8Array<ArrayBuffer>]).text();
 }
 
-/** Bun-based git runtime. Exported for use with shared utilities (worktree, etc.) */
 export const runtime: ReviewGitRuntime = {
   runGit,
   runGitBytes,

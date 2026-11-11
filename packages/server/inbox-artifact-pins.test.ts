@@ -1,10 +1,3 @@
-/**
- * The Artifacts wall's read and the artifact pin routes (inbox-artifact-pins.ts),
- * on a real store without a server. What can regress: the order (newest message
- * first, a message's own order inside it), the filters (pinned, type, archived
- * out by default), the counts the filter bar shows, paging that skips or repeats
- * a row, and the route guards (another site, a stale page's serverSession).
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -27,7 +20,6 @@ function file(name: string, kind: InboxAttachment["kind"]): InboxAttachment {
   return { id: inboxId("att"), path: `/nowhere/${name}`, named_path: null, name, kind, sent_sha256: "0".repeat(64), size: 10, sent_at: at, sent_mtime: at };
 }
 
-/** Three threads: "web" (a page, then two pictures), "docs" (a doc and a plain file), "old" (archived, a picture). */
 function world() {
   const dir = mkdtempSync(join(tmpdir(), "plannotator-inbox-wall-"));
   roots.push(dir);
@@ -92,11 +84,9 @@ describe("the Artifacts wall read", () => {
     const pinned = await page(store, "?pinned=1");
     expect(keys(pinned)).toEqual([f.shotB.id, f.doc.id]);
     expect(pinned.artifacts[0]!.pinned_at).toEqual(expect.any(String));
-    // All / Pinned under the type; each type under the pinned filter.
     expect(pinned.counts).toEqual({ all: 5, pinned: 2, types: { images: 1, pages: 0, documents: 1, other: 0 } });
     expect((await page(store, "?type=images")).counts).toEqual({ all: 2, pinned: 1, types: { images: 2, pages: 1, documents: 1, other: 1 } });
     expect(keys(await page(store, "?pinned=1&type=images"))).toEqual([f.shotB.id]);
-    // A pin on an archived thread shows only with archived included.
     const { old } = { old: store.threadIds().find((id) => store.thread(id)!.subject === "Old work")! };
     store.setArtifactPinned(old, f.oldShot.id, true);
     expect(keys(await page(store, "?pinned=1"))).toEqual([f.shotB.id, f.doc.id]);
@@ -151,7 +141,6 @@ describe("the artifact pin routes", () => {
     expect((await r.route(cross, new URL(cross.url)))!.status).toBe(403);
     const unpinned = await r.route(post({ thread_id: web.thread_id, key: f.shotA.id, pinned: false }), new URL("http://localhost/api/inbox/artifact-pins"));
     expect(((await unpinned!.json()) as { pins: unknown[] }).pins).toEqual([]);
-    // Another path is not this module's.
     expect(await r.route(new Request("http://localhost/api/inbox/pins"), new URL("http://localhost/api/inbox/pins"))).toBeNull();
   });
 });

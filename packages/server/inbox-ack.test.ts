@@ -1,12 +1,4 @@
-/**
- * 👍 Looks good (design record "inbox-acknowledge", approved 2026-10-15,
- * amended 2026-10-16: it reaches the agent) through the Inbox's real doors:
- * `POST /api/inbox/messages/:id/ack` on a running Inbox (temp data dir,
- * loopback), the agent side over the official MCP client, the wake over the
- * bridge. Inside the Undo window (shortened here) nothing is sent; after it
- * the 👍 is delivered once as a wake turn to a connection's session, and
- * read_thread shows it.
- */
+/** Thumbs-up acknowledgements through the Inbox's real doors (route, MCP client, bridge wake): inside the Undo window nothing is sent; after it the thumbs-up is delivered once as a wake turn. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -113,7 +105,6 @@ describe("POST /api/inbox/messages/:id/ack", () => {
     expect(answer.thread.section).toBe("quiet");
     expect(answer.thread.read_at).not.toBeNull();
     expect(answer.thread.ack).toMatchObject({ label: "Looks good" });
-    // Inside the Undo window nothing is written for the agent.
     expect(server.store.thread(threadId)!.messages).toHaveLength(1);
     expect(server.store.pendingReplies(SESSION)).toEqual([]);
     expect((await windowMessage(server, threadId, messageId)).ack).toMatchObject({ label: "Looks good" });
@@ -137,7 +128,6 @@ describe("POST /api/inbox/messages/:id/ack", () => {
     const row = await rowOf(server, threadId);
     expect(row.section).toBe("new");
     expect(row.ack ?? null).toBeNull();
-    // The ack stays on the older message as history.
     expect((await windowMessage(server, threadId, messageId)).ack).toMatchObject({ label: "Looks good" });
   });
 
@@ -158,7 +148,6 @@ describe("POST /api/inbox/messages/:id/ack", () => {
     const person = await ack(server, replyId);
     expect(person.status).toBe(422);
     expect(((await person.json()) as { code: string }).code).toBe("ack_not_allowed");
-    // The person already replied after the agent's latest message: the reply is the answer, and the row stays Sent.
     const afterReply = await ack(server, later.message_id);
     expect(afterReply.status).toBe(409);
     expect(((await afterReply.json()) as { code: string }).code).toBe("ack_after_reply");
@@ -204,7 +193,6 @@ describe("what the agent sees", () => {
   test("read_thread carries the ack only after the Undo window, and reading it marks it seen", async () => {
     const { server, client, threadId, messageId } = await setup();
     await ack(server, messageId);
-    // Inside the window: not there yet, in the thread or in the list of threads.
     expect((await readThread(client, threadId)).structuredContent.thread.messages[0]!.ack ?? null).toBeNull();
     const listed = (await client.callTool({ name: "read_thread", arguments: { project_path: server.store.project(server.store.message(threadId)!.project_id)!.root, agent_session: SESSION } })) as {
       structuredContent: { threads: Record<string, unknown>[] };
@@ -240,15 +228,12 @@ describe("what the agent sees", () => {
     expect(inboxWakeText(command)).toBe(
       `Plannotator Inbox: ${command.subject} (${command.id})\nThe person reacted 👍 Looks good to your message (${messageId}).\n\n[thread ${threadId}]`,
     );
-    // Another session is never handed it.
     expect(await poll(server, "ses_other")).toEqual([]);
-    // Before delivery the window's line has no delivery yet.
     expect((await windowMessage(server, threadId, messageId)).ack!.delivered_at ?? null).toBeNull();
     expect((await delivered(server, SESSION, command.id)).status).toBe(200);
     expect((await delivered(server, SESSION, command.id)).status).toBe(200);
     expect(await poll(server, SESSION)).toEqual([]);
     expect((await windowMessage(server, threadId, messageId)).ack!.delivered_at).toEqual(expect.any(String));
-    // The note is not a message of the thread, for the window or for read_thread; the row stays Quiet with the 👍.
     expect(server.store.windowThread(threadId)!.messages.map((m) => m.id)).toEqual([messageId]);
     expect((await readThread(client, threadId)).structuredContent.thread.messages.map((m) => m.id)).toEqual([messageId]);
     const row = await rowOf(server, threadId);
@@ -281,7 +266,6 @@ describe("what the agent sees", () => {
     expect(await poll(after.server, SESSION)).toHaveLength(1);
     await ack(after.server, after.messageId, false);
     expect(await poll(after.server, SESSION)).toEqual([]);
-    // A new 👍 later is sent again, once.
     await ack(after.server, after.messageId);
     await Bun.sleep(DELAY + 400);
     expect(await poll(after.server, SESSION)).toHaveLength(1);
@@ -325,7 +309,6 @@ describe("what the agent sees", () => {
     await Bun.sleep(100);
     expect(next.store.message(messageId)!.ack!.settled_seq).toEqual(expect.any(Number));
     expect(next.store.thread(threadId)!.messages).toHaveLength(1);
-    // Settled at the start, it is sent then: one command for the session.
     expect(next.store.pendingReplies(SESSION).map((m) => m.ack_of)).toEqual([messageId]);
   });
 });

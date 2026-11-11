@@ -68,8 +68,6 @@ describe("PATCH /api/external-annotations", () => {
       return (await res!.json()) as { annotation: { source?: string; text?: string } };
     };
 
-    // The reproduced bypass: PATCH {"source": ""} cleared the field and
-    // re-armed verbatim SKILL.md injection for a tool-submitted comment.
     const cleared = await patch({ source: "" });
     expect(cleared.annotation.source).toBe("rogue-agent");
 
@@ -79,15 +77,11 @@ describe("PATCH /api/external-annotations", () => {
     const nulled = await patch({ source: null });
     expect(nulled.annotation.source).toBe("rogue-agent");
 
-    // Legitimate field patches still work, with source intact.
     const edited = await patch({ text: "edited text" });
     expect(edited.annotation.text).toBe("edited text");
     expect(edited.annotation.source).toBe("rogue-agent");
   });
 
-  // PATCH merges arbitrary fields, so it was the one way to create an
-  // inReplyTo self-reference or cycle (which the export used to drop while
-  // still counting). The invalid state is refused at ingest.
   test("refuses an inReplyTo that is self, missing, or would close a cycle; accepts a valid reply", async () => {
     const handler = createExternalAnnotationHandler("plan");
     const added = handler.addAnnotations({
@@ -116,27 +110,15 @@ describe("PATCH /api/external-annotations", () => {
     expect(ok.status).toBe(200);
     expect(ok.body.annotation?.inReplyTo).toBe(first);
 
-    // second -> first is in place; first -> second would close the loop.
     const cycle = await patch(first, { inReplyTo: second });
     expect(cycle.status).toBe(400);
     expect(cycle.body.error).toContain("cycle");
 
-    // Clearing stays allowed, and an unrelated patch does not touch the field.
     expect((await patch(second, { inReplyTo: null })).status).toBe(200);
     expect((await patch(second, { text: "still fine" })).status).toBe(200);
   });
 });
 
-// ---------------------------------------------------------------------------
-// PATCH body validation (#1560 follow-up)
-// ---------------------------------------------------------------------------
-
-/**
- * PATCH used to merge its body verbatim, so it could store values POST
- * refuses. `{"diagramAnchor": null}` was answered 200 and then took the whole
- * page down when the renderer read `.family` off it. Every field a PATCH can
- * set now runs the validator POST runs.
- */
 describe("PATCH /api/external-annotations: body validation", () => {
   const seed = (handler: ReturnType<typeof createExternalAnnotationHandler>, body: unknown) => {
     const added = handler.addAnnotations(body);
@@ -170,7 +152,6 @@ describe("PATCH /api/external-annotations: body validation", () => {
     });
     const patch = patchWith(handler, id);
 
-    // The reported crash vector first: `null` answered 200 and blanked the page.
     const nulled = await patch({ diagramAnchor: null });
     expect(nulled.status).toBe(400);
     expect(nulled.body.error).toContain("diagramAnchor");
@@ -188,7 +169,6 @@ describe("PATCH /api/external-annotations: body validation", () => {
       expect(res.status).toBe(400);
     }
 
-    // The stored anchor is untouched by every refused patch.
     const url = "http://localhost/api/external-annotations";
     const snapshot = (await (await handler.handle(new Request(url), new URL(url)))!.json()) as {
       annotations: Array<{ id: string; diagramAnchor?: unknown }>;
@@ -204,11 +184,9 @@ describe("PATCH /api/external-annotations: body validation", () => {
     const ok = await patch({ diagramAnchor: { ...VALID_ANCHOR, label: "x".repeat(600), stowaway: "dropped" } });
     expect(ok.status).toBe(200);
     const stored = ok.body.annotation?.diagramAnchor as Record<string, unknown>;
-    // Parser caps (400) and drops unknown keys — the same normalization POST applies.
     expect((stored.label as string).length).toBe(400);
     expect(stored).not.toHaveProperty("stowaway");
 
-    // An out-of-range source line drops to null while the target survives.
     const negative = await patch({ diagramAnchor: { ...VALID_ANCHOR, sourceLine: [-3, -3] } });
     expect(negative.status).toBe(200);
     expect((negative.body.annotation?.diagramAnchor as { sourceLine: unknown }).sourceLine).toBeNull();
@@ -270,7 +248,6 @@ describe("PATCH /api/external-annotations: body validation", () => {
     expect((await patch({ decorations: ["explode"] })).status).toBe(400);
     expect((await patch({ suggestedCode: "const a = 1;" })).status).toBe(200);
     expect((await patch({ lineStart: "3" })).status).toBe(400);
-    // A plan-only field is not a review field: dropped, not stored.
     const dropped = await patch({ diagramAnchor: VALID_ANCHOR });
     expect(dropped.status).toBe(200);
     expect(dropped.body.annotation).not.toHaveProperty("diagramAnchor");

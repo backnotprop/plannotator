@@ -1,17 +1,7 @@
-/**
- * Schema materialization for the Codex output-schema flag, across all three
- * review surfaces.
- *
- * Run: bun test packages/server/codex-command-builders.test.ts
- */
-
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-// Imported statically and BEFORE any PLANNOTATOR_DATA_DIR is set: these modules
-// used to capture the data directory at import, so changing the env var later
-// left every derived path (and the materialized schema) in the old location.
 import { buildCodexCommand, CODEX_REVIEW_SCHEMA } from "./codex-review";
 import { buildGuideCodexCommand, GUIDE_SCHEMA_JSON } from "./guide/guide-review";
 import { buildTourCodexCommand, TOUR_SCHEMA_JSON } from "./tour/tour-review";
@@ -38,7 +28,6 @@ beforeEach(() => {
 
 afterEach(() => env.restore());
 
-/** The path passed to `--output-schema`. */
 function schemaPath(command: string[]): string {
   const index = command.indexOf("--output-schema");
   expect(index).toBeGreaterThanOrEqual(0);

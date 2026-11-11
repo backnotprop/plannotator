@@ -15,7 +15,6 @@ interface Captured {
   body: unknown;
 }
 
-/** A fake guide host: records the request, answers with `respond`. */
 function fakeService(respond: (req: Captured) => Response | Promise<Response>) {
   const calls: Captured[] = [];
   const doFetch: typeof fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -52,7 +51,6 @@ describe("shareGuide", () => {
     // The viewer pin is the manifest exactly, and never a base URL (the host uses its own /v1/).
     expect(body.viewer).toEqual(GUIDE_VIEWER_MANIFEST as unknown as Record<string, unknown>);
     expect("baseUrl" in body.viewer).toBe(false);
-    // The host sees ciphertext only: nothing about the guide is in the clear.
     expect(body.data).not.toContain(FIXTURE_V1_PR.guide.title);
     expect(body.data).toMatch(/^[A-Za-z0-9_-]+$/);
 
@@ -64,7 +62,6 @@ describe("shareGuide", () => {
     const key = new URLSearchParams(fragment).get("key");
     expect(res.url.startsWith(`${SERVICE}/g/AbCdEfGhIjKlMnOpQrStUv#key=`)).toBe(true);
     expect(key).toBeTruthy();
-    // The viewer's decode path: decrypt → decompress → parse.
     const restored = parseGuideSnapshot(await decompress(await decrypt(body.data, key!)));
     expect(restored.ok).toBe(true);
     if (restored.ok) expect(restored.value).toEqual(FIXTURE_V1_PR);

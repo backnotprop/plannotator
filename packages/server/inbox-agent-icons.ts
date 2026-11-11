@@ -1,22 +1,6 @@
 /**
- * Plannotator Inbox: the pictures a person uploads for their agents' icons ("Your own…" in the face picker; core
- * `inbox-types.ts`, "Agent faces"). Bun only: the Inbox runs on the Bun server; the Pi server serves no Inbox route.
- *
- *   inbox/agent-icons/<sha256>.<ext>          the picture as uploaded (PNG, JPEG, GIF, WebP or SVG, at most 512 KB)
- *   inbox/agent-icons/<sha256>.still.<ext>    its first frame, for one that moves (inbox-agent-icon-still.ts)
- *
- * Kept by content hash, so one picture is kept once however many agents show it, and an agent's face names it as
- * `own:<sha256>` in agent-faces.json. The same rules as a project's Set picture… (inbox-project-pictures.ts): the
- * type is sniffed from the bytes, the cap is the server's, and a picture is served from the Inbox's own origin with
- * nosniff, a sandbox policy, `attachment` for SVG and same-origin CORP. The window only ever draws one as an `<img>`
- * (never inlined), where an SVG runs no script and loads nothing.
- *
- *   GET  /api/inbox/agent-icons/<sha256>[?still=1]   the picture (`still=1`: its first frame, or itself when it does not move)
- *   POST /api/inbox/agent-icons  `{ picture: "data:image/…;base64,…" }`  keep it; `{ icon, faces, rev, icons }`
- *   POST /api/inbox/agent-icons  `{ remove: <sha256> }`  take it away (agents showing it go back to their own mark)
- *
- * This computer's windows and the owner's over the tailnet, as Set picture…: a tailnet guest's window draws each
- * agent's own mark. A change tells every window through `event: agent-faces` (the wire carries the pictures).
+ * The pictures a person uploads for their agents' icons ("Your own…" in the face picker). Bun only.
+ * Kept by content hash under inbox/agent-icons/<sha256>.<ext>, with a `.still.` file for one that moves. Served from the Inbox's own origin with nosniff, a sandbox policy, `attachment` for SVG and same-origin CORP; the window draws one only as an `<img>`.
  */
 
 import { createHash } from "node:crypto";
@@ -33,29 +17,22 @@ import { PROJECT_PICTURE_MAX_BYTES } from "./inbox-project-pictures";
 
 export const INBOX_AGENT_ICONS_PATH = "/api/inbox/agent-icons";
 export const INBOX_AGENT_ICONS_DIR = "agent-icons";
-/** The same cap as Set picture…, and its words. */
 export const AGENT_ICON_MAX_BYTES = PROJECT_PICTURE_MAX_BYTES;
 export const AGENT_ICON_TOO_BIG = "Picture: at most 512 KB.";
 export const AGENT_ICON_NOT_IMAGE = "Picture: a PNG, JPEG, GIF, WebP or SVG image.";
 const TOO_BIG = AGENT_ICON_TOO_BIG;
 const NOT_IMAGE = AGENT_ICON_NOT_IMAGE;
 
-/** The five Set picture… takes, and each one's file ending. */
 const EXT: Readonly<Record<string, string>> = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp", "image/svg+xml": "svg" };
 const TYPE_OF_EXT = Object.fromEntries(Object.entries(EXT).map(([type, ext]) => [ext, type])) as Readonly<Record<string, string>>;
 const HASH = /^[0-9a-f]{64}$/;
 const FILE = /^([0-9a-f]{64})\.(png|jpg|gif|webp|svg)$/;
 
 export interface AgentIcons {
-  /** The pictures, newest first. */
   list(): InboxAgentIcon[];
-  /** Keep a picture (sniffed; at most 512 KB). The same bytes again are the same picture, made newest. */
   add(bytes: Uint8Array): { ok: true; icon: InboxAgentIcon } | { ok: false; reason: "not_image" | "too_big" | "not_saved" };
-  /** Take one away (its still too); true when there was one. */
   remove(id: string): boolean;
-  /** A picture's bytes and type, its still with `still` (itself when it does not move), or null. */
   read(id: string, still: boolean): { type: string; body: Uint8Array<ArrayBuffer> } | null;
-  /** Past the cap, the oldest pictures no agent shows go (`shown`: the faces in use). */
   prune(shown: ReadonlySet<string>): void;
 }
 
@@ -106,7 +83,6 @@ export function createAgentIcons(options: { dir: string; now?: () => number }): 
         mkdirSync(dir, { recursive: true, mode: 0o700 });
         const file = pathOf(icon);
         if (files().some((kept) => kept.id === id)) {
-          // Already kept: only made the newest.
           utimesSync(file, new Date(icon.at), new Date(icon.at));
         } else {
           writeFileSync(file, bytes, { mode: 0o600 });
@@ -174,12 +150,10 @@ export function createInboxAgentIcons(options: {
   localOnly: () => Response;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   json: (body: unknown, status?: number) => Response;
-  /** Pictures kept past the cap besides the ones agents show ("Animate it"'s originals and results). */
   kept?: () => ReadonlySet<string>;
 }) {
   const { icons, faces, serverSession, json } = options;
   const withIcons = (wire: InboxAgentFacesWire): InboxAgentFacesWire => ({ ...wire, icons: icons.list() });
-  /** `owner`: this computer's window, or the owner's over the tailnet (`ownerOrLocal`). */
   const route = async (req: Request, url: URL, owner: boolean): Promise<Response | null> => {
     const path = url.pathname;
     if (path !== INBOX_AGENT_ICONS_PATH && !path.startsWith(`${INBOX_AGENT_ICONS_PATH}/`)) return null;
@@ -200,10 +174,8 @@ export function createInboxAgentIcons(options: {
       const had = icons.remove(body.remove);
       const shownBefore = faces.wire().rev;
       const wire = faces.dropFace(`own:${body.remove}`);
-      // No agent showed it: still one save, so every window's "Your own…" loses it.
       return json(withIcons(had && wire.rev === shownBefore ? faces.touch() : wire));
     }
-    // Only the approved words reach the toast: too big (however long the data URL), or not one of the five.
     const given = typeof body.picture === "string" ? body.picture : "";
     if (given.length > 800_000) throw new InboxError("validation_error", TOO_BIG, { field: "picture" });
     const dataUrl = /^data:[a-z0-9.+/-]*;base64,([A-Za-z0-9+/=\s]+)$/i.exec(given);

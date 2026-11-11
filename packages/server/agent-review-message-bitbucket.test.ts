@@ -1,8 +1,4 @@
-/**
- * Agent jobs on a PR without a ready local checkout: GitHub/GitLab agents can
- * read the PR through gh/glab, so the prompt carries only the URL; no CLI a
- * job may run can read a Bitbucket PR, so its prompt must carry the diff.
- */
+/** GitHub/GitLab jobs read the PR through gh/glab, so the prompt carries only the URL; no job CLI can read a Bitbucket PR, so its prompt must carry the diff. */
 import { describe, expect, test } from "bun:test";
 import { buildAgentReviewUserMessage } from "./agent-review-message";
 import { buildGuideUserMessage } from "@plannotator/shared/guide-prompt";
