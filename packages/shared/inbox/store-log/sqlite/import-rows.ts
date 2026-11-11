@@ -160,6 +160,7 @@ export class ImportRows {
       else this.questionEvents.set(eventKey, [this.events.length]);
     }
     this.events.push({
+      id: this.events.length + 1,
       seq: line.seq,
       at: line.at,
       v: line.v,

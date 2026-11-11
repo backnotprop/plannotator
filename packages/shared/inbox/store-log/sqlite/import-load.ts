@@ -52,9 +52,9 @@ export function loadImportRows(sqlite: Database, rows: ImportRows): void {
   sqlite.run("PRAGMA journal_mode = WAL");
 }
 
-/** The change log's rows with the ids a live write would give them: in write order, a removed typing row's id left unused. */
+/** The change log's rows (each carries its id: in write order, a removed typing row's id left unused). */
 function* eventsWithIds(events: readonly (ImportRow | null)[]): Iterable<ImportRow> {
-  for (let i = 0; i < events.length; i++) if (events[i]) yield { id: i + 1, ...events[i] };
+  for (const event of events) if (event) yield event;
 }
 
 /**
@@ -63,16 +63,19 @@ function* eventsWithIds(events: readonly (ImportRow | null)[]): Iterable<ImportR
  */
 function insertAll(sqlite: Database, table: string, rows: Iterable<ImportRow>): void {
   const columns = sqlite.query<{ name: string }, []>(`SELECT name FROM pragma_table_info('${table}')`).all().map((c) => c.name);
-  let full: ReturnType<Database["prepare"]> | null = null;
-  let batch: (string | number | null)[] = [];
-  let count = 0;
+  const width = columns.length;
   const statement = (n: number) => sqlite.prepare(`INSERT INTO "${table}" (${columns.map((c) => `"${c}"`).join(", ")}) VALUES ${Array.from({ length: n }, () => `(${columns.map(() => "?").join(", ")})`).join(", ")}`);
+  let full: ReturnType<Database["prepare"]> | null = null;
+  // One array of values, filled in place and bound whole: no array or argument list made per batch.
+  const batch: (string | number | null)[] = new Array(ROWS_PER_INSERT * width).fill(null);
+  let count = 0;
   for (const row of rows) {
-    for (const column of columns) batch.push(row[column] ?? null);
+    const at = count * width;
+    for (let c = 0; c < width; c++) batch[at + c] = row[columns[c]!] ?? null;
     if (++count === ROWS_PER_INSERT) {
       full ??= statement(ROWS_PER_INSERT);
-      full.run(...batch);
-      batch = [];
+      // An array binds positionally (bun:sqlite), though its types only name a spread.
+      full.run(batch as never);
       count = 0;
     }
   }
@@ -80,6 +83,6 @@ function insertAll(sqlite: Database, table: string, rows: Iterable<ImportRow>): 
   full?.finalize();
   if (count === 0) return;
   const rest = statement(count);
-  rest.run(...batch);
+  rest.run(batch.slice(0, count * width) as never);
   rest.finalize();
 }
