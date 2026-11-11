@@ -1,17 +1,3 @@
-/**
- * The agent marks' life (approval "inbox-agent-icon-motion", the owner 2026-11-09: always alive, never the agent's
- * state, a subtle lean toward the pointer), on motion.ts and on the window's own Sidebar.
- *
- * What this catches: a mark that moves differently (or restarts) when its agent's state changes; two marks of one
- * kind running the same loop, so a list moves in unison; a mark with nothing to do between state changes (no gesture
- * of its own); a plain mark (a host with no rig) left still; the lean toward the pointer going past its small bound,
- * snapping, following a touch, following outside the sidebar, or never letting go (the pointer gone, or still);
- * reduced motion or an off-screen mark following the pointer; an unmounted list leaving animations, a frame or the
- * page's pointer listener behind.
- *
- * Web Animations and IntersectionObserver are stood in for (happy-dom has neither to watch). DOM-gated: runs under
- * DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. No server, no fetch.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -22,7 +8,6 @@ import type { AgentRigKind } from './rigs';
 
 const hasDom = typeof document !== 'undefined';
 
-/* ---------- stand-ins, before motion.ts reads them at load ---------- */
 let reduce = false;
 interface FakeAnimation {
   target: Element;
@@ -71,7 +56,6 @@ if (hasDom) {
         resolve();
       },
     };
-    // A finite animation ends on its own (soon, here); a loop runs until paused or cancelled.
     if (opts.iterations !== Infinity) setTimeout(() => record.playState === 'running' && an.finish(), 5);
     return an as unknown as Animation;
   } as typeof Element.prototype.animate;
@@ -172,11 +156,9 @@ const mark = (id: string) => document.querySelector<HTMLElement>(`[data-agent-ma
 const running = (el: Element) => made.filter((an) => el.contains(an.target) && an.playState === 'running');
 const loops = (el: Element) => running(el).filter((an) => an.options.iterations === Infinity);
 
-/* ---------- a sidebar drawn by hand, with places on the page (happy-dom lays nothing out) ---------- */
 const place = (el: Element, left: number, top: number, width: number, height: number) => {
   el.getBoundingClientRect = () => ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
 };
-/** A 232 px sidebar with a mark in every row from y = 100, 36 px apart, each 24 px at x = 17. */
 function handSidebar(rigs: (AgentRigKind | null)[]): HTMLElement[] {
   const side = document.createElement('aside');
   side.className = 'ib-side';
@@ -200,7 +182,6 @@ function pointerTo(x: number, y: number, type = 'mouse') {
   Object.assign(event, { clientX: x, clientY: y, pointerType: type });
   document.dispatchEvent(event);
 }
-/** What the pointer has done to a mark: its lean in px and degrees, and its eyes' shift in px (all 0 at rest). */
 function lean(el: HTMLElement) {
   const read = (text: string | undefined) => {
     const m = /translate\((-?[\d.]+)px,\s*(-?[\d.]+)px\)(?:\s*rotate\((-?[\d.]+)deg\))?/.exec(text ?? '');
@@ -217,15 +198,12 @@ test.skipIf(!hasDom)("a mark's motion never depends on its agent's state: a chan
   const before = made.length;
   const live = [...loops(mark('ses_c')), ...loops(mark('ses_x'))];
   expect(live.length).toBeGreaterThan(0);
-  // (An ended agent leaves the list, and its mark with it.)
   for (const state of ['working', 'waiting', 'idle'] as const) {
     sidebar([agent('ses_c', { state, waiting: state === 'waiting' ? 1 : 0 }), agent('ses_x', { host: 'codex', state })]);
     await wait(20);
-    // The same animations, still running; none made for the new state.
     expect(made.length).toBe(before);
     expect(live.every((an) => an.playState === 'running')).toBe(true);
   }
-  // The row still says the state in words (its hover card); the mark carries none.
   expect(document.querySelector('[data-sidebar-agent="ses_c"]')!.getAttribute('data-agent-state')).toBe('idle');
   expect(mark('ses_c').hasAttribute('data-state')).toBe(false);
 });
@@ -234,14 +212,11 @@ test.skipIf(!hasDom)('every mark has a life of its own: an idle agent gestures b
   motion.agentMotionOptions.clock = 200;
   sidebar([agent('ses_a', { host: 'codex' }), agent('ses_b', { host: 'codex' }), agent('ses_plain', { host: 'some-new-agent' })]);
   await wait(20);
-  // The host with no rig draws its plain mark inside a moving layer.
   expect(mark('ses_plain').getAttribute('data-rig')).toBe('plain');
   expect(mark('ses_plain').querySelector('.am-plain .ib-mk')).not.toBeNull();
   expect(loops(mark('ses_plain')).length).toBeGreaterThan(0);
-  // Same kind, same state, different agents: their loops differ in length, so they never line up.
   const lengths = (id: string) => [...new Set(loops(mark(id)).map((an) => Number(an.options.duration)))].sort().join();
   expect(lengths('ses_a')).not.toBe(lengths('ses_b'));
-  // Left alone (no state change, no pointer), each does something now and then.
   for (const id of ['ses_a', 'ses_plain']) {
     const el = mark(id);
     const start = made.filter((an) => el.contains(an.target)).length;
@@ -256,17 +231,14 @@ test.skipIf(!hasDom)('the pointer in the sidebar: each mark leans toward it with
   const [claude, codex, plain] = handSidebar(['claude', 'codex', null]) as [HTMLElement, HTMLElement, HTMLElement];
   expect(motion.agentPointerActivity().listening).toBe(true);
   expect(atRest(codex)).toBe(true);
-  // Below and to the right of all three, inside the sidebar.
   pointerTo(200, 600);
   const seen: ReturnType<typeof lean>[] = [];
   let apart = false;
   for (let i = 0; i < 400 && !(apart && seen.length > 60); i++) {
     await wait(8);
-    // The pointer stirs, so it is never taken for still.
     if (i % 20 === 19) pointerTo(200 + (i % 3), 600);
     const now = [lean(claude), lean(codex), lean(plain)];
     seen.push(...now);
-    // On the way there they are not at the same place: each has its own lag.
     const flying = (y: number) => y > 0.1 && y < 1.3;
     const ys = now.map((at) => at.body.y);
     if (ys.some(flying) && Math.max(...ys) - Math.min(...ys) > 0.005) apart = true;
@@ -278,22 +250,16 @@ test.skipIf(!hasDom)('the pointer in the sidebar: each mark leans toward it with
     expect(Math.abs(at.body.turn)).toBeLessThanOrEqual(turn + 0.001);
     expect(Math.hypot(at.eyes.x, at.eyes.y)).toBeLessThanOrEqual(eyes + 0.001);
   }
-  // Arrived (the pointer stirs, so it is not taken for still): toward it (right and down), by a pixel or so, the body
-  // turned a little that way.
   pointerTo(201, 600);
   await until(() => lean(codex).body.y > 1.2 && lean(claude).body.y > 1.2, 'the marks to arrive');
   const there = lean(codex);
   expect(there.body.x).toBeGreaterThan(0.3);
   expect(there.body.turn).toBeGreaterThan(0.5);
   expect(there.eyes.y).toBeGreaterThan(1);
-  // The star turns anyway: it shifts and does not lean.
   expect(lean(claude).body.turn).toBe(0);
-  // Its own life goes on under the lean: nothing was stopped for it.
   expect(loops(codex).length).toBeGreaterThan(0);
-  // Right over a mark it looks straight ahead, while its neighbour looks up at the pointer.
   pointerTo(17 + 12, 100 + 36 + 12);
   await until(() => lean(plain).body.y < -0.4 && Math.hypot(lean(codex).body.x, lean(codex).body.y) < 0.05, 'codex to look straight, its neighbour up');
-  // Settled, no frame is left running.
   await until(() => !motion.agentPointerActivity().frame, 'the frames to stop');
 });
 
@@ -306,11 +272,9 @@ test.skipIf(!hasDom)('the lean lets go: the pointer out of the sidebar, or still
   expect(atRest(codex) && atRest(pi)).toBe(true);
   pointerTo(200, 600);
   await until(() => lean(codex).body.y > 1 && lean(pi).eyes.y > 1, 'both to lean');
-  // Out over the thread list: not theirs to watch.
   pointerTo(600, 300);
   await until(() => atRest(codex) && atRest(pi), 'both to drift back');
   await until(() => !motion.agentPointerActivity().frame, 'the frames to stop');
-  // Back in, then still (stillMs, at this clock half a second): they let go by themselves.
   pointerTo(120, 500);
   await until(() => lean(codex).body.y > 1, 'codex to lean again');
   await until(() => atRest(codex) && atRest(pi), 'both to let go of a still pointer');
@@ -350,7 +314,6 @@ test.skipIf(!hasDom)('unmount leaves nothing behind: no animation, no frame, no 
   expect(made.filter((an) => an.playState === 'running' || an.playState === 'paused')).toEqual([]);
   expect(motion.agentPointerActivity()).toEqual({ listening: false, frame: false });
   expect(marks.every((el) => el.innerHTML === '')).toBe(true);
-  // A pointer move now reaches no one, and no gesture timer fires later.
   const after = made.length;
   pointerTo(100, 300);
   await wait(120);
@@ -358,7 +321,6 @@ test.skipIf(!hasDom)('unmount leaves nothing behind: no animation, no frame, no 
   expect(motion.agentPointerActivity().frame).toBe(false);
 });
 
-/* ---------- Claude: mostly at rest (the owner, 2026-11-09: it "spins too much") ---------- */
 const turnOf = (an: FakeAnimation) => {
   const deg = (f: Keyframe | undefined) => Number(/rotate\((-?[\d.]+)deg\)/.exec(String(f?.transform ?? ''))?.[1] ?? NaN);
   return deg(an.frames[an.frames.length - 1]) - deg(an.frames[0]);
@@ -367,12 +329,10 @@ const turnOf = (an: FakeAnimation) => {
 test.skipIf(!hasDom)('Claude: nothing runs between gestures, no turn goes on and on, each turn is small, and it still gestures by itself', async () => {
   motion.agentMotionOptions.clock = 400;
   const [star] = handSidebar(['claude']) as [HTMLElement];
-  // Started: no loop at all (no endless turn, no breathing wave).
   expect(made.filter((an) => star.contains(an.target) && an.options.iterations === Infinity)).toEqual([]);
   const spin = star.querySelector('.am-spin')!;
   await until(() => made.filter((an) => an.target === spin).length >= 3, 'three part turns');
   const own = made.filter((an) => star.contains(an.target));
-  // Every animation it ever ran ends; every turn is a part turn within the bound, never a whole one.
   expect(own.every((an) => an.options.iterations === undefined || an.options.iterations === 1)).toBe(true);
   for (const an of own.filter((a) => a.target === spin)) {
     expect(Math.abs(turnOf(an))).toBeGreaterThan(1);
@@ -388,7 +348,6 @@ test.skipIf(!hasDom)('Claude under reduced motion: it holds still, no gesture an
   // At 400 times the clock its first gesture would come within about 20 ms; give it ten times that.
   await wait(250);
   expect(made.filter((an) => star.contains(an.target))).toEqual([]);
-  // The same mark with motion allowed does gesture, so the stillness above is reduced motion's doing.
   reduce = false;
   const [moving] = handSidebar(['claude']) as [HTMLElement];
   await until(() => made.some((an) => moving.contains(an.target)), 'a gesture with motion allowed');
@@ -399,9 +358,7 @@ test.skipIf(!hasDom)('several Claude marks never move in step: each starts its g
   const stars = handSidebar(['claude', 'claude', 'claude']);
   const firsts = () => stars.map((el) => made.find((an) => el.contains(an.target))?.at);
   await until(() => firsts().every((at) => at !== undefined), 'a gesture from each');
-  // Never two at once: one gesture starts at a time across the page.
   expect(new Set(firsts()).size).toBe(3);
-  // The turns chain: each starts at the angle the one before ended on (mod 360), so the star never jumps.
   const spin = stars[0]!.querySelector('.am-spin')!;
   await until(() => made.filter((an) => an.target === spin).length >= 3, 'three turns of one star');
   const turns = made.filter((an) => an.target === spin);
@@ -413,7 +370,6 @@ test.skipIf(!hasDom)('several Claude marks never move in step: each starts its g
   }
 });
 
-/* ---------- our faces move as a whole: the Glass tile is turned, moved and scaled, never stretched or skewed ---------- */
 test.skipIf(!hasDom)('a Glass face keeps its rounded tile while it moves: every frame scales both axes alike and never skews', async () => {
   motion.agentMotionOptions.clock = 300;
   motion.setAgentFaceArt(Object.fromEntries(motion.AGENT_FACES.filter((f) => f !== 'agent').map((f) => [f, `<img class="am-art" data-art="${f}" alt="">`])) as Parameters<typeof motion.setAgentFaceArt>[0]);
@@ -421,7 +377,6 @@ test.skipIf(!hasDom)('a Glass face keeps its rounded tile while it moves: every 
   motion.showAgentFace(el, 'glass-blue', false);
   const face = el.querySelector('.am-f-glass-blue')!;
   const gestures = () => made.filter((an) => face.contains(an.target) && an.options.iterations !== Infinity);
-  // Enough of its gestures to have drawn each kind (a tilt, a hop, a dip, a shake, a nod) more than once.
   await until(() => gestures().length >= 12, 'a dozen gestures of the Glass face');
   const frames = made.filter((an) => face.contains(an.target)).flatMap((an) => an.frames.map((f) => String(f.transform ?? '')));
   expect(frames.length).toBeGreaterThan(50);
@@ -433,6 +388,5 @@ test.skipIf(!hasDom)('a Glass face keeps its rounded tile while it moves: every 
     }
     for (const m of t.matchAll(/skewX\(([-\d.]+)deg\)/g)) expect(Number(m[1])).toBe(0);
   }
-  // It still dips and hops (a uniform scale), so the guard is not passing on a face that never scales.
   expect(squashes).toBeGreaterThan(0);
 });

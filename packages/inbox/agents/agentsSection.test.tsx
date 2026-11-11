@@ -1,17 +1,3 @@
-/**
- * The sidebar's Agents section (approval "inbox-agents-section") and its animated marks (approval
- * "inbox-agent-icon-motion"), on the window's own Sidebar and New message.
- *
- * What this catches: Agents missing where Machines was (or shown on an Inbox with nothing to show), an agent under
- * the wrong machine, a caption that loses its machine filter or its quiet grey, counts or an ended agent creeping back,
- * Add agent opening an empty New message or Add machine going nowhere, a click on an agent opening a thread instead
- * of filtering the list (or a second click not clearing it), a click on a mark opening the row (or its face
- * forgotten on the next draw), and the perf rules: reduced motion still moving, a mark off screen still playing or
- * fidgeting, a hidden face still animating, an unmounted mark leaving animations behind.
- *
- * Web Animations and IntersectionObserver are stood in for (happy-dom has neither to watch). DOM-gated: runs under
- * DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. Fetch is mocked: no server.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -21,7 +7,6 @@ import type { SidebarProps } from '../components/Sidebar';
 
 const hasDom = typeof document !== 'undefined';
 
-/* ---------- stand-ins, before motion.ts reads them at load ---------- */
 let reduce = false;
 interface FakeAnimation {
   target: Element;
@@ -215,16 +200,13 @@ test.skipIf(!hasDom)("Agents takes Machines' place above Projects: each machine 
   expect(headers.indexOf('agents')).toBeLessThan(headers.indexOf('projects'));
   expect(document.querySelector('[data-sidebar-section="agents"]')!.textContent).toBe('Agents');
   const groups = [...surface()!.querySelectorAll<HTMLElement>('[data-agents-machine]')];
-  // Mini has no agent: it shows nothing, no caption and no empty line.
   expect(groups.map((g) => g.querySelector('[data-machine] .ib-name')!.textContent)).toEqual(['Studio', 'MacBook']);
   expect(groups.map((g) => [...g.querySelectorAll('[data-sidebar-agent]')].map((r) => r.getAttribute('data-sidebar-agent')))).toEqual([['ses_s1', 'ses_s2'], ['ses_m1']]);
   expect(names(groups[0]!.querySelector('[data-sidebar-agent]')!)).toEqual(['Fix login redirect']);
-  // Each caption is quiet (the grey of a quiet row) and an asleep machine says so to a screen reader; none counts.
   for (const caption of surface()!.querySelectorAll('[data-machine]')) expect(caption.classList.contains('ib-proj-quiet')).toBe(true);
   expect(surface()!.querySelector(`[data-machine="${MAC}"]`)!.hasAttribute('data-away')).toBe(true);
   expect(surface()!.querySelector(`[data-machine="${MAC}"]`)!.textContent).toContain('MacBook asleep since');
   expect(surface()!.querySelector('.ib-n')).toBeNull();
-  // A caption is still the machine's filter, marked while shown.
   act(() => surface()!.querySelector<HTMLButtonElement>(`[data-machine="${MAC}"]`)!.click());
   expect(picked).toEqual([MAC]);
   mount(<Sidebar {...sidebarProps({ machines: three(), machineId: MAC })} />);
@@ -267,7 +249,6 @@ test.skipIf(!hasDom)('Add agent and Add machine are always-shown buttons with th
   const add = surface()!.querySelector<HTMLButtonElement>('[data-agents-add="agent"]')!;
   const machine = surface()!.querySelector<HTMLButtonElement>('[data-agents-add="machine"]')!;
   expect([add.getAttribute('aria-label'), machine.getAttribute('aria-label')]).toEqual(['Add agent', 'Add machine']);
-  // Never inside the header's own button.
   expect(add.closest('[data-sidebar-section]')).toBeNull();
   act(() => add.click());
   expect(opener === add).toBe(true);
@@ -276,14 +257,11 @@ test.skipIf(!hasDom)('Add agent and Add machine are always-shown buttons with th
   act(() => surface()!.querySelector<HTMLButtonElement>('[data-sidebar-agent="ses_s2"] .ib-proj')!.click());
   expect(calls).toEqual(['add-agent', 'add-machine', 'filter:ses_s1', 'message:ses_s2']);
   expect(names(surface()!.querySelector('[data-sidebar-agent="ses_s1"]')!)).toEqual(['Invoice retries']);
-  // An Inbox that cannot link here: Add agent alone.
   mount(<Sidebar {...sidebarProps({ machines: three(), onAddAgent: noop })} />);
   expect(surface()!.querySelectorAll('[data-agents-add]')).toHaveLength(1);
 });
 
 test.skipIf(!hasDom)("a starred thread that is also an agent's thread shows under Starred and under Agents: the star opens it, the agent filters to it", () => {
-  // The phone sheet's mock listed such a thread under Starred only; the owner did not approve that (approval
-  // "inbox-phone-sidebar-sheet", NOT approved): Agents stays a list of every agent.
   setInboxAgents([group([agent('ses_s1'), agent('ses_s2')])]);
   const starred = { ...threadRow('thr_star', 'ses_s1', 'Starred and running'), project: { id: 'prj_bill', name: 'billing-svc' }, section: 'waiting', unread: false, unseen: 0, read_at: null, resolved_at: null, questions: { open: 2, holds_up: [] } } as unknown as InboxListRow;
   const opened: string[] = [];
@@ -300,7 +278,6 @@ test.skipIf(!hasDom)('a click on an agent filters the list to it and opens no th
   setInboxAgents([group([agent('ses_many'), agent('ses_one'), agent('ses_none')], SELF), group([agent('ses_m1')], MAC)]);
   const rows = [threadRow('thr_a', 'ses_many', 'Invoice retries'), threadRow('thr_b', 'ses_many', 'Refund flow'), threadRow('thr_c', 'ses_many', 'Docs pass'), threadRow('thr_d', 'ses_one', 'Only one'), threadRow('thr_m', 'ses_m1', 'On the MacBook', MAC)];
   const calls: string[] = [];
-  // The window's part: the filter is the route's, and the Sidebar is drawn again with it (App.tsx).
   function Window() {
     const [on, setOn] = useState<string | null>(null);
     return (
@@ -326,16 +303,12 @@ test.skipIf(!hasDom)('a click on an agent filters the list to it and opens no th
   expect(button('ses_many').getAttribute('aria-pressed')).toBe('false');
   act(() => button('ses_many').click());
   expect([calls, pressed(), button('ses_many').classList.contains('ib-on')]).toEqual([['filter:ses_many'], ['ses_many'], true]);
-  // Another agent replaces it; one with a single thread filters too, it does not open that thread.
   act(() => button('ses_one').click());
   expect(pressed()).toEqual(['ses_one']);
-  // The same agent again: everything again.
   act(() => button('ses_one').click());
   expect(pressed()).toEqual([]);
-  // No thread in the window: nothing to filter, so New message to it, as before.
   act(() => button('ses_none').click());
   expect(pressed()).toEqual([]);
-  // A machine's caption is still its machine's filter.
   act(() => surface()!.querySelector<HTMLButtonElement>(`[data-machine="${MAC}"]`)!.click());
   expect(calls).toEqual(['filter:ses_many', 'filter:ses_one', 'filter:null', 'message:ses_none', `machine:${MAC}`]);
   expect(calls.some((c) => c.startsWith('open:'))).toBe(false);
@@ -372,24 +345,18 @@ async function closedAgents() {
   act(() => header().click());
   expect(state()).toEqual(shut);
   expect(surface()!.querySelector('[data-sidebar-section="agents"] .ib-agents-mk')).not.toBeNull();
-  // The thread of a listed agent opens (the person is replying in it): still the heading alone.
   mount(<Sidebar {...props({ openThreadId: 'thr_1' })} />);
   expect(state()).toEqual(shut);
-  // That machine's list is shown: no machine name either.
   mount(<Sidebar {...props({ openThreadId: 'thr_1', machineId: MAC })} />);
   expect(state()).toEqual(shut);
-  // An agent starts, and an agent's state changes (it now waits on the person): closed stays closed.
   act(() => setInboxAgents([...both('waiting'), group([agent('ses_n1')], MINI)]));
   expect(state()).toEqual(shut);
-  // Every agent gone: no empty line under a closed heading.
   act(() => setInboxAgents([group([], SELF)]));
   expect(state()).toEqual(shut);
-  // A new draw (a reload's) is still closed.
   act(() => setInboxAgents(both()));
   unmountAll();
   mount(<Sidebar {...props({ openThreadId: 'thr_1' })} />);
   expect(state()).toEqual(shut);
-  // The person presses the heading: everything is back; an open thread marks no agent, the agent filtered to does.
   act(() => header().click());
   expect(state()).toEqual({ open: 'true', buttons: ['agent', 'machine'], rows: ['ses_s1', 'ses_s2', 'ses_m1'], captions: 2, under: 2 });
   expect(surface()!.querySelector('[data-sidebar-agent="ses_s1"] .ib-proj')!.getAttribute('aria-pressed')).toBe('false');
@@ -405,23 +372,17 @@ test.skipIf(!hasDom)("a machine's name shows only while agents show from more th
     act(() => setInboxAgents(groups));
     mount(<Sidebar {...sidebarProps({ machines: three(), machineId })} />);
   };
-  // One machine has agents, the two others none: no caption at all, the agents alone and flush.
   draw([group([agent('ses_s1'), agent('ses_s2')], SELF), group([], MAC), group([], MINI)]);
   expect([captions(), rows(), flush()]).toEqual([[], ['ses_s1', 'ses_s2'], true]);
   expect(surface()!.querySelectorAll('[data-agents-machine]')).toHaveLength(1);
-  // The agents all on another machine than this one: still one machine, still no caption.
   draw([group([], SELF), group([agent('ses_m1')], MAC)]);
   expect([captions(), rows(), flush()]).toEqual([[], ['ses_m1'], true]);
-  // Not even for the machine the list is filtered to.
   draw([group([], SELF), group([agent('ses_m1')], MAC)], MAC);
   expect(captions()).toEqual([]);
-  // Two machines with agents: both named, their agents a step in; the third, empty, is not there.
   draw([group([agent('ses_s1')], SELF), group([agent('ses_m1')], MAC), group([], MINI)]);
   expect([captions(), rows(), flush()]).toEqual([['Studio', 'MacBook'], ['ses_s1', 'ses_m1'], false]);
-  // An ended agent is not an agent on show: its machine counts as empty.
   draw([group([agent('ses_s1')], SELF), group([agent('ses_m2', { state: 'ended', live: false })], MAC)]);
   expect([captions(), rows()]).toEqual([[], ['ses_s1']]);
-  // Every machine empty: the one empty line, once, and no caption.
   draw([group([], SELF), group([], MAC), group([], MINI)]);
   expect(captions()).toEqual([]);
   expect(surface()!.querySelectorAll('.ib-agents-empty')).toHaveLength(1);
@@ -457,7 +418,6 @@ test.skipIf(!hasDom)('Add agent opens New message with "New … session" chosen:
   expect(inDialog('[data-compose-to]')!.textContent).toContain('New Pi session');
   expect(document.activeElement).toBe(inDialog('textarea'));
   unmountAll();
-  // Nothing started yet, no project looked at: the first agent in the most recently active project.
   open(null, null);
   await until(() => inDialog('[data-compose-folder="prj_web"]') !== null, 'the first project in To');
   expect(inDialog('[data-compose-to]')!.textContent).toContain('New Claude Code session');
@@ -479,7 +439,6 @@ test.skipIf(!hasDom)('a click on a mark shows the next face (agent, Glass, Yello
     seen.push(mark('ses_s1').dataset.face!);
   }
   expect(opened).toEqual([]);
-  // Kept: a new draw (a reload's) shows the same face, with no click.
   unmountAll();
   faces.resetAgentFaces();
   mount(<Sidebar {...props} />);
@@ -503,10 +462,8 @@ test.skipIf(!hasDom)('reduced motion: every mark holds still (no loop, no spin, 
   mount(<Sidebar {...sidebarProps({ machines: three() })} />);
   await wait(60);
   expect(document.querySelectorAll('[data-agent-mark]')).toHaveLength(4);
-  // Held poses are set once as styles: nothing animates at all.
   expect(made).toEqual([]);
   expect(mark('ses_c').querySelector<HTMLElement>('.am-p')!.style.transform).not.toBe('');
-  // Many fidget gaps at this clock, and no fidget drew anything.
   const before = made.length;
   await wait(120);
   expect(made.length).toBe(before);
@@ -520,14 +477,12 @@ test.skipIf(!hasDom)('reduced motion: every mark holds still (no loop, no spin, 
 test.skipIf(!hasDom)('perf: off screen a mark pauses everything and starts no fidget; back on screen it plays; a hidden face stops; unmount cancels all', async () => {
   motion.setAgentFaceArt(ART);
   motion.agentMotionOptions.clock = 200;
-  // Codex: a mark with loops of its own (Claude is still between its rare gestures).
   setInboxAgents([group([agent('ses_c', { host: 'codex', state: 'working' })], SELF)]);
   mount(<Sidebar {...sidebarProps({ machines: three() })} />);
   await wait(20);
   const el = mark('ses_c');
   const own = () => made.filter((an) => el.contains(an.target));
   expect(motion.agentMarkActivity(el)!.playing).toBeGreaterThan(0);
-  // One observer for the page, watching every mark.
   const marks = watchers.filter((w) => [...w.seen].some((seen) => seen instanceof HTMLElement && seen.hasAttribute('data-agent-mark')));
   expect(marks).toHaveLength(1);
   const watcher = marks[0]!;
@@ -540,7 +495,6 @@ test.skipIf(!hasDom)('perf: off screen a mark pauses everything and starts no fi
   expect(own().filter((an) => an.playState === 'running')).toEqual([]);
   observe(true);
   expect(motion.agentMarkActivity(el)!.playing).toBeGreaterThan(0);
-  // To Glass: once the swap is done, the agent's face runs nothing.
   motion.agentMotionOptions.clock = 1;
   act(() => el.click());
   await wait(60);
