@@ -47,6 +47,8 @@ import {
   subscribeInboxEvents,
   tailnetGuest,
   inboxAskOn,
+  REF_CARD_READ_MS,
+  signalWithin,
   type AgentToolHost,
   type InboxEvent,
   type ListModel,
@@ -232,6 +234,7 @@ import { openThemeSettings, useThemeChooser } from './themeChooser';
 import { CardChip } from './board/CardChip';
 import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, liveInitiatives, newCardProject, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
+import { useComposerOpener } from './compose/openComposer';
 import { COMPOSE_CLONE_EVENT, composeActions, composeTargets, hostLabel, lastLaunchAgent, launchHistory, projectCanStart, projectPlusOn, SCRATCH_PICK, type ComposeAction, type ComposeCloneRequest } from './compose/model';
 import { machineLaunchesKept } from './compose/useMachineLaunches';
 import { reviewBoxPulls } from './compose/reviewBox';
@@ -300,7 +303,11 @@ configurePlannotatorUI({
   // with thumb-sized buttons (utils/touchToolbarPlacement).
   touchSelectionToolbar: true,
   // Hover cards for issue, PR and MR links: the server fetches with this computer's gh or glab (ref-cards.ts).
-  refCardTransport: inboxRefTransport((href, signal) => fetch(inboxUrl(`/ref?url=${encodeURIComponent(href)}`), { signal, headers: { accept: 'application/json' } })),
+  // Given up after REF_CARD_READ_MS (the card then shows what the Inbox knows), so no read holds a connection for good.
+  refCardTransport: inboxRefTransport((href, signal) => {
+    const within = signalWithin(REF_CARD_READ_MS, signal);
+    return fetch(inboxUrl(`/ref?url=${encodeURIComponent(href)}`), { signal: within.signal, headers: { accept: 'application/json' } }).finally(within.done);
+  }),
   // Images in a message load from the Inbox's per-message route (#1813).
   imageSrcResolver: inboxImageSrcResolver,
   // A long thread can hold hundreds of code fences: each is highlighted when it comes near the screen (before it
@@ -2413,6 +2420,10 @@ function Inbox() {
         onSnoozes: () => {
           if (snoozesTimer) clearTimeout(snoozesTimer);
           snoozesTimer = setTimeout(() => void refreshSnoozes(), 60);
+        },
+        // A thread's PRs read behind the window's answer changed their checks or review: the cards showing them read again.
+        onThreadPulls: (threadIds) => {
+          for (const id of threadIds) threadPullsBus.emit(id);
         },
         // How the rows look was saved (here, another window, a phone): every list takes it at once.
         // One at or below the last event's count (the count gone back, or a late copy): the settings read decides.
@@ -6463,6 +6474,7 @@ function Inbox() {
   // Remote launch: where the person last started an agent on each machine, from the merged list's launched rows.
   // The rows the window has: where the sidebar's Agents section finds each agent's thread, and the last agent started.
   const composeLastAgent = useMemo(() => lastLaunchAgent(windowRows), [windowRows]);
+  useComposerOpener(openCompose, composeLastAgent);
   // "+" on project rows (F1-F7): on while launch is on and this is no guest's page. This computer's launch block says
   // which rows can start anything (agents, the folder still there): read when "+" comes on, when the tab is shown, and
   // when the projects change; never on a timer.

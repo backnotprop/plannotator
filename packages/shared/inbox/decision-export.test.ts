@@ -83,14 +83,14 @@ describe("which question goes where", () => {
       [3, "How should a failed upload retry?", "decided"],
     ]);
     expect(doc.others.map((d) => [d.n, d.prompt, d.state])).toEqual([
-      [4, "Nobody touched this?", "open"],
-      [5, "Unsent pick here?", "picked_unsent"],
+      [4, "Unsent pick here?", "picked_unsent"],
+      [5, "Nobody touched this?", "open"],
       [6, "Rename Sync?", "skipped"],
       [7, "Old retry question?", "replaced"],
     ]);
-    // The owner's choice: an unsent pick is shown, marked as not sent.
-    expect(doc.others[1]!.answer).toMatchObject({ selected: ["A"], sent: false, note: "UNSENT-NOTE-do-not-export" });
-    expect(doc.others[0]!.answer).toBeNull();
+    // The owner's choice: an unsent pick is shown, marked as a draft not sent; drafts come right after the decisions.
+    expect(doc.others[0]!.answer).toMatchObject({ selected: ["A"], sent: false, note: "UNSENT-NOTE-do-not-export" });
+    expect(doc.others[1]!.answer).toBeNull();
     expect(doc.others[3]!.replaced_by).toEqual({ id: expect.stringContaining("/q-"), prompt: "How should a failed upload retry?" });
     expect(doc.decisions[2]!.replaces!.map((r) => r.prompt)).toEqual(["Old retry question?"]);
     expect(doc.decisions.every((d) => d.answer?.sent === true)).toBe(true);
