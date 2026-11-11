@@ -1,8 +1,3 @@
-/**
- * Images in a message (#1813), proved against a real Inbox on
- * loopback under a temp data dir, a temp git project, the MCP SDK client for
- * the agent and real `fetch` for the window.
- */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -34,7 +29,6 @@ afterEach(async () => {
   else process.env.HOME = previousHome;
 });
 
-/** A PNG's signature and IHDR (2 x 3 px): enough for the sniffer and the dimension read. */
 function png(): Uint8Array {
   const bytes = new Uint8Array(33);
   bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 2, 0, 0, 0, 3, 8, 6, 0, 0, 0]);
@@ -53,17 +47,13 @@ function world() {
   mkdirSync(join(project, "packages", "web", "shots"), { recursive: true });
   Bun.spawnSync(["git", "init", "-q"], { cwd: project, env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } });
   writeFileSync(join(project, ".walkthrough", "shots", "after.png"), png());
-  // A GIF named .png: the type comes from the bytes.
   writeFileSync(join(project, ".walkthrough", "shots", "really-a-gif.png"), gif());
   writeFileSync(join(project, ".walkthrough", "shots", "fake.png"), "not an image at all");
   writeFileSync(join(project, ".walkthrough", "notes.txt"), "plain text");
   writeFileSync(join(project, "packages", "web", "shots", "home.png"), png());
-  // Outside the project: shown, as an attachment from anywhere would be.
   writeFileSync(join(root, "secret.png"), png());
   symlinkSync(join(root, "secret.png"), join(project, ".walkthrough", "shots", "escape.png"));
-  // The temp root is the home folder (a scratch HOME, never the real one).
   process.env.HOME = root;
-  // In a hidden folder of the home folder (as ~/.ssh): never shown, by path or through a symlink.
   mkdirSync(join(root, ".secrets"), { recursive: true });
   writeFileSync(join(root, ".secrets", "key.png"), png());
   symlinkSync(join(root, ".secrets", "key.png"), join(project, ".walkthrough", "shots", "to-hidden.png"));
@@ -127,12 +117,10 @@ test("an image the message shows serves from its project, typed by its bytes, wi
   expectGuardHeaders(ok);
   expect(new Uint8Array(await ok.arrayBuffer())).toEqual(png());
 
-  // The content type is sniffed, never taken from the name.
   const sniffed = await image(server, sent.message_id, ".walkthrough/shots/really-a-gif.png");
   expect(sniffed.status).toBe(200);
   expect(sniffed.headers.get("content-type")).toBe("image/gif");
 
-  // An <img> in raw HTML, with a query string, as the browser reads its src.
   const html = await image(server, sent.message_id, "./.walkthrough/shots/after.png?v=2");
   expect(html.status).toBe(200);
   expect(html.headers.get("content-type")).toBe("image/png");
@@ -144,13 +132,11 @@ test("images outside the project serve; the home folder's hidden folders, non-im
   const sent = await send(await agent(server), { project_path: project, body: BODY });
   const id = sent.message_id as string;
 
-  // Outside the project, by `../` and through a symlink: shown (no project boundary).
   const up = await image(server, id, "../secret.png");
   expect(up.status).toBe(200);
   expectGuardHeaders(up);
   expect((await image(server, id, ".walkthrough/shots/escape.png")).status).toBe(200);
 
-  // A hidden folder of the home folder: refused as named, and through a symlink by its realpath.
   const hidden = await image(server, id, "../.secrets/key.png");
   expect(hidden.status).toBe(403);
   expect(((await hidden.json()) as { code: string }).code).toBe("image_hidden");
@@ -159,11 +145,9 @@ test("images outside the project serve; the home folder's hidden folders, non-im
   expect(toHidden.status).toBe(403);
   expect(((await toHidden.json()) as { code: string }).code).toBe("image_hidden");
 
-  // A non-image: by its name before anything is read, and by its bytes.
   expect((await image(server, id, ".walkthrough/notes.txt")).status).toBe(415);
   expect((await image(server, id, ".walkthrough/shots/fake.png")).status).toBe(415);
 
-  // A file in the project the body does not show cannot be probed.
   const unreferenced = await image(server, id, "packages/web/shots/home.png");
   expect(unreferenced.status).toBe(403);
   expect(((await unreferenced.json()) as { code: string }).code).toBe("image_not_referenced");
@@ -174,10 +158,8 @@ test("images outside the project serve; the home folder's hidden folders, non-im
   expect(unknown.status).toBe(404);
   expect(((await unknown.json()) as { code: string }).code).toBe("message_not_found");
 
-  // Another site, or another port on this machine, gets nothing.
   expect((await image(server, id, ".walkthrough/shots/after.png", { "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
   expect((await image(server, id, ".walkthrough/shots/after.png", { "Sec-Fetch-Site": "same-site" })).status).toBe(403);
-  // A foreign Host never reaches the route (the Inbox's allowlist).
   const rebound = await fetch(`http://127.0.0.1:${server.port}/api/inbox/messages/${id}/image?path=${encodeURIComponent(".walkthrough/shots/after.png")}`, {
     headers: { Host: "evil.example" },
   });
@@ -193,7 +175,6 @@ test("relative paths start at the folder the agent sent from", async () => {
   expect((await image(server, sent.message_id, "shots/home.png")).status).toBe(200);
   expect((await image(server, sent.message_id, "../../.walkthrough/shots/after.png")).status).toBe(200);
   expect((await image(server, sent.message_id, "../../../secret.png")).status).toBe(200);
-  // An absolute path inside the project works when the body names it.
   const absolute = join(project, ".walkthrough", "shots", "after.png");
   const second = await send(client, { project_path: project, body: `![abs](${absolute})` });
   expect((await image(server, second.message_id, absolute)).status).toBe(200);
@@ -210,7 +191,6 @@ test("the body's image references are read as the window renders them", () => {
   expect([...refs].sort()).toEqual(["four.png", "one.png", "two&three.png"]);
 });
 
-/** A PNG header claiming `width` x `height` pixels. */
 function pngSized(width: number, height: number): Uint8Array {
   const bytes = png();
   const view = new DataView(bytes.buffer);
@@ -230,7 +210,6 @@ test("a FIFO in the project is refused at once, never read (the Inbox does not h
   expect(answer.status).toBe(404);
   expect(((await answer.json()) as { code: string }).code).toBe("image_missing");
   expect(Date.now() - started).toBeLessThan(5000);
-  // The server still answers afterwards.
   expect((await fetch(`http://127.0.0.1:${server.port}/api/inbox/health`)).status).toBe(200);
 });
 
@@ -248,7 +227,6 @@ test("an absolute path through a symlinked prefix is judged by where it leads", 
   expect((await image(server, sent.message_id, spelled)).status).toBe(200);
   expect((await image(server, sent.message_id, escape)).status).toBe(200);
   expect((await image(server, sent.message_id, outside)).status).toBe(200);
-  // The hidden folder it really leads to is refused, whatever spelling named it.
   expect((await image(server, sent.message_id, toHidden)).status).toBe(403);
 });
 
@@ -280,7 +258,6 @@ test("a dotenv-family name is refused even inside the project", async () => {
 
 test("an image in a hidden folder beside the project shows inline, as the same folder's attachment does; a .env file there and the home folder's hidden folders do not", async () => {
   const { root, dataDir } = world();
-  // As reported: the project is ~/work/plannotator, the pictures sit in ~/work/.ops (not the home folder's own hidden folder).
   const project = join(root, "work", "plannotator");
   const ops = join(root, "work", ".ops", "multi-machine");
   mkdirSync(project, { recursive: true });
@@ -297,13 +274,11 @@ test("an image in a hidden folder beside the project shows inline, as the same f
     body: `![One Inbox, every machine](${light})\n\n![e](${dotenv}) ![k](${homeHidden})`,
     attachments: [dark],
   });
-  // Only the .env file and the home folder's hidden folder are named as not shown.
   expect(structured.images_not_shown).toEqual([
     { ref: dotenv, reason: "a .env file, or in a hidden folder of the home folder such as ~/.ssh" },
     { ref: homeHidden, reason: "a .env file, or in a hidden folder of the home folder such as ~/.ssh" },
   ]);
   expect(text).not.toContain(light);
-  // The inline picture shows, and was captured at send, as the attachment beside it was taken.
   const shown = await image(server, structured.message_id, light);
   expect(shown.status).toBe(200);
   expect(new Uint8Array(await shown.arrayBuffer())).toEqual(png());
@@ -319,7 +294,6 @@ test("an image in a hidden folder beside the project shows inline, as the same f
 
 test("with HOME pointed elsewhere, a real home folder's hidden folders are still refused; a hidden folder deeper in it still shows", async () => {
   const { root } = world();
-  // A scratch HOME (world sets it): the real home, other users' and root's are judged by their shape.
   expect(process.env.HOME).toBe(root);
   for (const path of ["/Users/someone/.ssh/k.png", "/home/someone/.config/app/x.png", "/root/.cache/t.png", "/var/root/.ssh/k.png", "/private/var/root/.x/k.png", "C:\\Users\\someone\\.ssh\\k.png", "/.hidden/x.png", join(root, ".secrets", "key.png")]) {
     expect(inboxHomeDotFolder(path)).not.toBeNull();
@@ -327,12 +301,10 @@ test("with HOME pointed elsewhere, a real home folder's hidden folders are still
   for (const path of ["/Users/someone/work/.ops/e.png", "/home/someone/src/app/.walkthrough/a.png", "C:\\Users\\someone\\work\\.ops\\e.png", join(root, "work", ".ops", "e.png")]) {
     expect(inboxHomeDotFolder(path)).toBeNull();
   }
-  // A relative HOME names no home at all: the shape still guards.
   process.env.HOME = "relative/home";
   expect(inboxHomeDotFolder("/Users/someone/.aws/x.png")).toBe("/Users/someone/.aws");
 });
 
-/** send_message's whole result: its text line and structured content. */
 async function sendResult(client: Client, args: Record<string, unknown>): Promise<{ text: string; structured: Record<string, any> }> {
   const result = (await client.callTool({ name: "send_message", arguments: args })) as { isError?: boolean; content: { text: string }[]; structuredContent: Record<string, any> };
   if (result.isError) throw new Error(result.content[0]!.text);
@@ -363,7 +335,6 @@ test("send_message says which images will not show, and still sends the message"
     { ref: "//cdn.example.com/x.png", reason: "remote images never load in the Inbox" },
   ]);
   expect(structured.images_not_shown_more).toBeUndefined();
-  // What never shows and what is not written yet are told apart.
   expect(text).toContain("4 images will not show");
   expect(text).toContain("This image does not exist yet: .walkthrough/shots/missing.png");
   expect(text).toContain("//cdn.example.com/x.png (remote images never load in the Inbox)");
@@ -371,12 +342,10 @@ test("send_message says which images will not show, and still sends the message"
   expect(text).not.toContain("missing-too.png");
   expect(text).not.toContain("nope.png");
 
-  // The route never reads a protocol-relative source as a local path.
   const relativeRemote = await image(server, structured.message_id, "//cdn.example.com/x.png");
   expect(relativeRemote.status).toBe(403);
   expect(((await relativeRemote.json()) as { code: string }).code).toBe("image_not_referenced");
 
-  // Every image shows (and a fenced block that mentions one): no warning at all.
   const clean = await sendResult(client, { project_path: project, body: "![ok](.walkthrough/shots/after.png)\n\n```\n![x](missing.png)\n```" });
   expect(clean.structured.images_not_shown).toBeUndefined();
   expect(clean.text).not.toContain("will not show");
@@ -396,7 +365,6 @@ test("the warning names at most ten images and counts the rest", async () => {
 });
 
 test("a file Plannotator may not read is reported unreadable, not missing", async () => {
-  // Root reads any file, so the refusal cannot be made there.
   if (process.getuid?.() === 0) return;
   const { project, dataDir } = world();
   const locked = join(project, ".walkthrough", "shots", "locked.png");
@@ -437,9 +405,7 @@ test("a person's own reply keeps the project boundary; an agent's message does n
   const { root, project, dataDir } = world();
   const server = await start(dataDir);
   const sent = await send(await agent(server), { project_path: project, body: `![far](${join(root, "secret.png")})` });
-  // The agent's image outside the project shows.
   expect((await image(server, sent.message_id, join(root, "secret.png"))).status).toBe(200);
-  // The person's reply naming the same file (any client can post one: the window, a phone, a tailnet login) does not.
   const replied = await fetch(`http://127.0.0.1:${server.port}/api/inbox/messages/${sent.message_id}/reply`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -450,13 +416,10 @@ test("a person's own reply keeps the project boundary; an agent's message does n
   const outside = await image(server, replyId, join(root, "secret.png"));
   expect(outside.status).toBe(403);
   expect(((await outside.json()) as { code: string }).code).toBe("outside_project");
-  // Through a symlink in the project that leads out: judged by where it leads.
   const escaped = await image(server, replyId, ".walkthrough/shots/escape.png");
   expect(escaped.status).toBe(403);
   expect(((await escaped.json()) as { code: string }).code).toBe("outside_project");
-  // An image of the project still shows.
   expect((await image(server, replyId, ".walkthrough/shots/after.png")).status).toBe(200);
-  // Nor does the background capture copy it into the Inbox.
   await fetch(`http://127.0.0.1:${server.port}/api/inbox/threads/${sent.thread_id}`);
   await server.imageCapture.idle();
   const captured = server.store.message(replyId)?.inline_images ?? [];
@@ -465,7 +428,6 @@ test("a person's own reply keeps the project boundary; an agent's message does n
 
 test("a project at the home folder, or above it, does not open its hidden folders", async () => {
   const { root, dataDir } = world();
-  // A scratch home: never the real one.
   const home = join(root, "home");
   mkdirSync(join(home, ".ssh"), { recursive: true });
   mkdirSync(join(home, "shots"), { recursive: true });
@@ -482,7 +444,6 @@ test("a project at the home folder, or above it, does not open its hidden folder
     expect(key.status).toBe(403);
     expect(((await key.json()) as { code: string }).code).toBe("image_hidden");
     expect((await image(server, atHome.message_id, "shots/ok.png")).status).toBe(200);
-    // A project above the home folder exempts nothing below it either.
     const above = await send(client, { project_path: root, body: "![k](home/.ssh/id.png)" });
     expect(above.project.root).toBe(root);
     expect((await image(server, above.message_id, "home/.ssh/id.png")).status).toBe(403);
@@ -502,7 +463,6 @@ test("a link kept in a hidden folder is refused by where it is kept, even when i
   const link = await image(server, sent.message_id, "../.cfg/link.png");
   expect(link.status).toBe(403);
   expect(((await link.json()) as { code: string }).code).toBe("image_hidden");
-  // The file it leads to, named plainly, shows.
   expect((await image(server, sent.message_id, "../pub.png")).status).toBe(200);
 });
 
@@ -558,7 +518,6 @@ test("a base_path gone by serve time falls back to the project root", async () =
   expect(server.store.message(sent.message_id)?.base_path).toBe(sub);
   rmSync(sub, { recursive: true, force: true });
   expect((await image(server, sent.message_id, ".walkthrough/shots/after.png")).status).toBe(200);
-  // The same rule read directly: a base that is gone starts at the root.
   const result = readInboxMessageImage({ body: "![a](.walkthrough/shots/after.png)", root: project, base: sub, path: ".walkthrough/shots/after.png" });
   expect(result.ok).toBe(true);
 });
@@ -589,7 +548,6 @@ test("a cache validator: the ETag is the SHA-256 of the bytes served, If-None-Ma
   expect(stale.status).toBe(200);
   expect(new Uint8Array(await stale.arrayBuffer())).toEqual(png());
 
-  // The agent rewrites the screenshot (same name, new bytes: a GIF now).
   writeFileSync(join(project, ".walkthrough", "shots", "after.png"), gif());
   const changed = await image(server, id, path, { "If-None-Match": etag! });
   expect(changed.status).toBe(200);

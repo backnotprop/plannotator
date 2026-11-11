@@ -1,12 +1,3 @@
-/**
- * A PR's details beside its diff. What regresses:
- *  - a reviewer shown standing where the forge does not: a later comment taking back an approval, a dismissed review
- *    still counting, someone asked again still "approved", a GitLab approver turned into "waiting", the author listed;
- *  - a check reading as passed while it runs or after it failed, an address that is not https becoming a link;
- *  - a comment lost (a review's words, a line comment), or out of time order; a deleted account named "ghost";
- *  - the avatar route's allow-list losing the people the details named at the next list, or keeping them after the PR
- *    left the list; a read for a PR the list did not name; a failed read kept; asking the forge twice for one read.
- */
 import { describe, expect, test } from "bun:test";
 import { createInboxPulls, InboxPullsError } from "./inbox-pulls";
 import { pullDetailsOf } from "./inbox-pull-details";
@@ -59,9 +50,7 @@ describe("checks", () => {
 
   test("running until done; a failure in any of its words; skipped says so", () => {
     expect(states([check("a", "IN_PROGRESS", null), check("b", "COMPLETED", "SUCCESS")]).map((c) => c.state)).toEqual(["pending", "pass"]);
-    // As gh answers them: a check not done has an empty conclusion, not null.
     expect(states([check("a", "QUEUED", ""), check("b", "IN_PROGRESS", "")]).map((c) => c.state)).toEqual(["pending", "pending"]);
-    // Each failure says how, in the forge's own word.
     const how = { FAILURE: "Failed", TIMED_OUT: "Timed out", CANCELLED: "Cancelled", ACTION_REQUIRED: "Action required", STARTUP_FAILURE: "Startup failure", ERROR: "Error" };
     for (const [word, note] of Object.entries(how)) {
       const [one] = states([check("a", "COMPLETED", word)]);
@@ -72,7 +61,6 @@ describe("checks", () => {
 
   test("a stale check, overtaken by a newer run, is done and quiet: never running forever", () => {
     expect(states([check("a", "COMPLETED", "STALE")])[0]).toEqual({ name: "a", state: "pass", note: "Stale" });
-    // Some answers leave a stale check's status where it was.
     expect(states([check("a", "IN_PROGRESS", "STALE")])[0]).toEqual({ name: "a", state: "pass", note: "Stale" });
   });
 
@@ -202,7 +190,6 @@ describe("reading them through the list", () => {
     expect(refused.code).toBe("pull_unknown");
   });
 
-  /** The forge, with some of its answers changed: `change` returns the answer to give instead, or nothing. */
   const changed = (f: ReturnType<typeof forge>, change: (args: string[], stdout: string) => unknown) => (async (cli: string, args: string[]) => {
     const answer = await (f.run as unknown as (cli: string, args: string[]) => Promise<{ stdout: string; stderr: string; exitCode: number }>)(cli, args);
     const instead = change(args, answer.stdout);
@@ -216,7 +203,6 @@ describe("reading them through the list", () => {
 
   test("a queued check and a skipped one, as gh answered them on a real PR: running, skipped not passed, and stale done", async () => {
     const f = forge();
-    // Two rows of #2671's statusCheckRollup, as captured.
     const rollup = [
       { __typename: "CheckRun", completedAt: "0001-01-01T00:00:00Z", conclusion: "", detailsUrl: "https://github.com/backnotprop/plannotator/actions/runs/42096823925/job/127488930196", name: "Gitleaks", startedAt: "2026-11-05T19:44:54Z", status: "QUEUED", workflowName: "Security Scanning" },
       { __typename: "CheckRun", completedAt: "2026-11-05T19:44:53Z", conclusion: "SKIPPED", detailsUrl: "https://github.com/backnotprop/plannotator/actions/runs/42096823940/job/127488933395", name: "Inbox Claude Code connection (the mod against the compiled binary)", startedAt: "2026-11-05T19:44:54Z", status: "COMPLETED", workflowName: "Inbox Claude Code connection" },
@@ -270,7 +256,6 @@ describe("reading them through the list", () => {
           { ...thread("t1", { nodes: [noted("t1-1"), { ...noted("t1-2"), author: { __typename: "Bot", login: "lint[bot]" }, isMinimized: true, minimizedReason: "OFF_TOPIC" }] }), line: 9, startLine: 7, diffSide: "LEFT", isResolved: true },
           { ...thread("t2", { nodes: [noted("t2-1")] }), line: null, startLine: null, isOutdated: true },
           { ...thread("empty", { nodes: [] }) },
-          // From a removed line to an added one: the two numbers are from two files, so only its end line is kept.
           { ...thread("t3", { nodes: [noted("t3-1")] }), line: 9, startLine: 3, startDiffSide: "LEFT", diffSide: "RIGHT" },
         ]);
       }),
@@ -296,7 +281,6 @@ describe("reading them through the list", () => {
         comments: [{ id: "t3-1", author: "kim", at: "2026-11-01T00:00:00Z", body: "t3-1", url: "u", file: "src/a.ts", line: 9 }],
       },
     ]);
-    // The flat list keeps them too, with the hidden mark.
     expect(answer.comments.find((c) => c.id === "t1-2")?.hidden).toBe("off-topic");
   });
 
@@ -314,7 +298,6 @@ describe("reading them through the list", () => {
     const partial = await pulls.details(KEY);
     expect(partial.threads_incomplete).toBe(true);
     expect(partial.comments.some((c) => c.body === "t1-1")).toBe(true);
-    // The faces it named stay allowed: the commenter's picture is not refused for the part that failed.
     expect(pulls.avatarUrls("github.com").kim).toBe("https://a/kim");
     failing = false;
     const whole = await pulls.details(KEY);
@@ -337,7 +320,6 @@ describe("reading them through the list", () => {
     await pulls.list(repos);
     await expect(pulls.details(KEY)).rejects.toMatchObject({ code: "pull_details_failed" });
     const views = f.state.views;
-    // Held: its own code, and when it lifts, so the window can say until when.
     await expect(pulls.details(KEY)).rejects.toMatchObject({ code: "pull_details_held", message: "github.com asked to slow down.", retryAt: 1_000_000 + 60_000 });
     expect(f.state.views).toBe(views);
 
@@ -347,7 +329,6 @@ describe("reading them through the list", () => {
       run: changed(g, (args, stdout) => (args.includes("graphql") && stdout.includes('"authored"') ? { data: { ...JSON.parse(stdout).data, rateLimit: { cost: 1, remaining: 3, resetAt: reset } } } : undefined)),
     });
     await spent.list(repos);
-    // GitHub's budget spent: held until it fills, close to an hour here, not a minute.
     await expect(spent.details(KEY)).rejects.toMatchObject({ code: "pull_details_held", retryAt: Date.parse(reset) });
     expect(g.state.views).toBe(0);
   });

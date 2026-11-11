@@ -1,20 +1,3 @@
-/**
- * Phones stay hidden until the iPhone app ships: PLANNOTATOR_INBOX_PHONES (or
- * config.json `inboxPhones`) turns the whole phone surface on, and it is off
- * by default. Proved on `plannotator inbox --background` (the CLI from source,
- * or the compiled binary when PLANNOTATOR_INBOX_TEST_BINARY names one) under
- * a temp data dir, with a fake relay on loopback and `openssl` / `tailscale`
- * stand-ins on PATH that record every call:
- *
- *  1. On: pairing works as before, and the paired Inbox holds a socket to the relay.
- *  2. Off, over the state that run left (relay.json, a paired phone) plus the
- *     Wi-Fi and tailnet switches seeded on: every phone route answers the
- *     unknown-route 404, the settings payload says `phones: false`, nothing
- *     reaches the relay, openssl and tailscale never run, and no listener
- *     opens beyond the window's port.
- *  3. On again over the same state: the relay socket, openssl and tailscale
- *     all come back, so step 2's silence is the switch's doing.
- */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -36,7 +19,6 @@ describe("resolveInboxPhones", () => {
   });
 });
 
-/** Every route the phone surface adds, as the window or a phone would call it (no Origin). */
 const PHONE_ROUTES: [method: string, path: string][] = [
   ["GET", "/api/inbox/device"],
   ["GET", "/api/inbox/device/health"],
@@ -66,7 +48,6 @@ describe("the phone switch, on the binary", () => {
   const base = () => `http://127.0.0.1:${registry(w).port}`;
   const calls = () => (existsSync(marker) ? readFileSync(marker, "utf8") : "");
 
-  /** `plannotator inbox --background` with the switch as given, pointed at the fake relay. */
   const start = (phones: "0" | "1" | null) => {
     const env: Record<string, string> = { ...(process.env as Record<string, string>), ...worldEnv(w), PLANNOTATOR_RELAY_URL: `http://127.0.0.1:${relay.port}` };
     if (phones === null) delete env.PLANNOTATOR_INBOX_PHONES;
@@ -95,7 +76,6 @@ describe("the phone switch, on the binary", () => {
     stubs = stubBuiltHtml();
     w = createInboxWorld("plannotator-inbox-phones-gate-", "phones-gate", "phones-gate");
     marker = join(w.root, "calls.txt");
-    // Stand-ins that record a call and fail: openssl makes the Wi-Fi certificate, tailscale publishes the tailnet path.
     for (const name of ["openssl", "tailscale"]) {
       writeFileSync(join(w.bin, name), `#!/bin/sh\necho "${name} $*" >> '${marker}'\nexit 1\n`);
       chmodSync(join(w.bin, name), 0o755);
@@ -139,7 +119,6 @@ describe("the phone switch, on the binary", () => {
   }, 60_000);
 
   test("off (the default): the phone routes are the unknown-route 404, and nothing listens, connects, spawns or makes a certificate", async () => {
-    // What a phones run leaves, plus both reach switches on, as an iPhone developer's data dir would hold.
     const previous = readInboxRegistry(w.dataDir)!;
     const probe = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });
     const lanPort = probe.port as number;
@@ -158,11 +137,9 @@ describe("the phone switch, on the binary", () => {
       const response = await call(method, path, { serverSession: "x", on: true, code: "000000", name: "x", platform: "ios" });
       expect({ route: `${method} ${path}`, status: response.status, body: await response.json() }).toEqual({ route: `${method} ${path}`, status: 404, body: notFound });
     }
-    // The paired phone's own token is just as unknown.
     expect((await fetch(`${base()}/api/inbox/device/health`, { headers: { Authorization: `Bearer ${token}` } })).status).toBe(404);
     expect(((await (await call("GET", "/api/inbox/settings")).json()) as Json).phones).toBe(false);
 
-    // Past the relay's first reconnect delay (1 s): nothing reached it.
     await Bun.sleep(2500);
     expect(relayRequests).toEqual([]);
     expect(relaySockets).toBe(0);
@@ -173,7 +150,6 @@ describe("the phone switch, on the binary", () => {
     if (Bun.which("lsof")) {
       const out = Bun.spawnSync(["lsof", "-nP", "-a", "-p", String(pid), "-i"]).stdout.toString();
       const sockets = out.split("\n").slice(1).filter(Boolean);
-      // Only the window's port: its listener and the test's own connections to it, no other local address.
       expect(sockets.filter((line) => line.includes("(LISTEN)")).length).toBe(1);
       for (const line of sockets) expect(line).toContain(`127.0.0.1:${port}`);
       for (const line of sockets) expect(line).not.toContain(`:${relay.port}`);

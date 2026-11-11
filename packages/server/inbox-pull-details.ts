@@ -1,15 +1,8 @@
-/**
- * What a PR's details page shows, from the forge's own answer (`fetchPRContextWithReviewers`, GitHub and GitLab in one
- * shape): who stands where, how the checks stand, and every comment in time order. Nothing is cut: a long list is the
- * page's to lay out.
- */
-
 import type { InboxPullCheck, InboxPullCheckState, InboxPullDetailComment, InboxPullDetailsAnswer, InboxPullReviewer, InboxPullReviewState, InboxPullThread } from "@plannotator/core/inbox-types";
 import type { PRCheck, PRContext, PRThreadComment } from "@plannotator/shared/pr-types";
 
 export interface PullDetailsRead {
   answer: InboxPullDetailsAnswer;
-  /** The avatar URLs the forge gave for the people named: login to URL, for the avatar route's allow-list. */
   avatars: Record<string, string>;
 }
 
@@ -19,13 +12,8 @@ const REVIEW_STATE: Readonly<Record<string, InboxPullReviewState>> = {
   COMMENTED: "commented",
 };
 
-/** A login the forge answers for an account that is gone (GitHub drops the author, GitLab's and GitHub's "ghost"). */
 const goneLogin = (login: string): string => (login.toLowerCase() === "ghost" ? "" : login);
 
-/**
- * Each person's last review that counts, as the forge's own page reads it: a comment never takes back an approval or a
- * request for changes, a dismissed review or a draft says nothing, and being asked again means waiting.
- */
 function reviewersOf(context: PRContext, author: string | null, avatars: Record<string, string>): InboxPullReviewer[] {
   const standing = new Map<string, InboxPullReviewer>();
   const dated = context.reviews
@@ -49,7 +37,6 @@ function reviewersOf(context: PRContext, author: string | null, avatars: Record<
     const login = goneLogin(asked.login);
     if (!login) continue;
     if (asked.avatarUrl) avatars[login] ??= asked.avatarUrl;
-    // GitLab keeps an approver among its reviewers: the approval stands. GitHub takes one off when they are asked again.
     if (standing.get(login)?.state === "approved" && context.reviews.some((r) => r.author === login && r.state === "APPROVED" && !r.submittedAt)) continue;
     standing.set(login, { login, state: "waiting", ...(asked.isBot ? { bot: true } : {}), ...(asked.isTeam ? { team: true } : {}) });
   }
@@ -58,9 +45,7 @@ function reviewersOf(context: PRContext, author: string | null, avatars: Record<
 }
 
 const FAILED = new Set(["FAILURE", "TIMED_OUT", "CANCELLED", "CANCELED", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"]);
-/** A check that passed by not running, or was overtaken by a newer run: quiet, counted on the line. */
 const QUIET_NOTE: Readonly<Record<string, string>> = { SKIPPED: "Skipped", NEUTRAL: "Neutral", STALE: "Stale" };
-/** How a check failed, in the forge's own words. */
 const FAILED_NOTE: Readonly<Record<string, string>> = {
   FAILURE: "Failed", FAILED: "Failed", TIMED_OUT: "Timed out", CANCELLED: "Cancelled", CANCELED: "Cancelled",
   ACTION_REQUIRED: "Action required", STARTUP_FAILURE: "Startup failure", ERROR: "Error",
@@ -68,7 +53,6 @@ const FAILED_NOTE: Readonly<Record<string, string>> = {
 
 function checkOf(check: PRCheck): InboxPullCheck | null {
   if (!check.name) return null;
-  // gh answers a queued or running check with an empty conclusion, not null.
   const conclusion = check.conclusion?.toUpperCase() ?? "";
   // A stale check was overtaken and will never finish: it counts as done, quietly, never as running forever.
   const done = (check.status === "COMPLETED" && !!conclusion) || conclusion === "STALE";
@@ -83,7 +67,6 @@ function checkOf(check: PRCheck): InboxPullCheck | null {
   return { name: check.name, ...(check.workflowName ? { workflow: check.workflowName } : {}), state, ...(note ? { note } : {}), ...(url ? { url } : {}) };
 }
 
-/** A comment of a thread on the code: where it is, and whether the forge hides it. */
 function threadComment(file: string, line: number | null, c: PRThreadComment, person: (login: string, avatarUrl?: string) => string): InboxPullDetailComment {
   return {
     id: c.id,
@@ -98,10 +81,6 @@ function threadComment(file: string, line: number | null, c: PRThreadComment, pe
   };
 }
 
-/**
- * The discussions on the code, each whole and in the forge's order, for the page to draw on their lines. A thread with
- * no comment (every one deleted) or no file says nothing and is left out.
- */
 function threadsOf(context: PRContext): InboxPullThread[] {
   const person = (login: string) => goneLogin(login);
   return context.reviewThreads.flatMap((thread): InboxPullThread[] => {
@@ -110,7 +89,6 @@ function threadsOf(context: PRContext): InboxPullThread[] {
       id: thread.id,
       file: thread.path,
       line: thread.line,
-      // A range across the two sides has numbers from two files: its end line alone says where it is.
       start_line: thread.startLine !== null && thread.line !== null && thread.startLine < thread.line && (!thread.startDiffSide || thread.startDiffSide === thread.diffSide) ? thread.startLine : null,
       side: thread.diffSide === "LEFT" ? "old" : "new",
       resolved: thread.isResolved,
@@ -130,7 +108,6 @@ function commentsOf(context: PRContext, avatars: Record<string, string>): InboxP
   for (const c of context.comments) {
     out.push({ id: c.id, author: person(c.author, c.avatarUrl), ...(c.isBot ? { bot: true } : {}), at: c.createdAt, body: c.body, url: c.url });
   }
-  // A review's own words; a review with none is on the reviewers' list and nowhere here.
   for (const r of context.reviews) {
     if (!r.body.trim()) continue;
     out.push({ id: r.id, author: person(r.author, r.avatarUrl), ...(r.isBot ? { bot: true } : {}), at: r.submittedAt, body: r.body, url: r.url ?? "" });

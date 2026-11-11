@@ -1,9 +1,3 @@
-/**
- * PR risk ranking (inbox-pull-risk.ts). What regresses: the verdict's parse going soft (a guess, or a diff's own
- * "verdict" being believed); work or cost repeating (per head, across restarts, after a failure); running when it must
- * not (off, no rules, an agent the person didn't choose); a run allowed to act; a part of a big diff not reaching the agent; a refused or failed run reading as Low;
- * a diff the forge held back not read whole from a clone on this computer, or that read changing the clone's refs or worktree.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,7 +14,6 @@ import { INBOX_PULL_GIT_DIFF_MAX_BYTES, INBOX_PULL_WHOLE_DIFF_TIMEOUT_MS, create
 
 const AGENTS = [{ id: "pi-sdk", label: "Pi" }];
 const HIGH = '{"risk":"high","why":"It changes the billing webhook."}';
-/** Providers' own words for a prompt past the model's context. */
 const CODEX_TOO_LONG = "Codex ran out of room in the model's context window. Start a new thread or clear earlier history before retrying.";
 const GEMINI_TOO_LONG = "The input token count (1048577) exceeds the maximum number of tokens allowed (1048576).";
 const REQUEST_TOO_LARGE = '413 {"type":"error","error":{"type":"request_too_large","message":"Request exceeds the maximum allowed number of bytes."}}';
@@ -44,7 +37,6 @@ const settled = async () => {
   for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 0));
 };
 
-/** An engine with a scripted agent and a scripted diff read; every run is kept in `runs`. */
 function engine(options: { answer?: RiskRunner; agents?: { id: string; label: string }[]; on?: () => boolean; now?: () => number; head?: (key: string) => string | null; patch?: string; diffFails?: boolean | string; diffGate?: Promise<void>; read?: { per_file?: true; partial?: boolean; held_back?: string } } = {}) {
   const runs: RiskRun[] = [];
   const reads: string[] = [];
@@ -128,7 +120,6 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
   };
   type Answer = { stdout?: string; stderr?: string; exitCode?: number };
   const answered = (a: Answer) => ({ stdout: a.stdout ?? "", stderr: a.stderr ?? "", exitCode: a.exitCode ?? 0 });
-  /** The real reader and queue. `whole` answers the one-document read, `paged` the per-file read; the rest of the forge just works. */
   async function reading(platform: "github" | "gitlab", script: { whole: Answer; paged?: Answer }, options: { now?: () => number; answer?: string; respond?: (run: RiskRun, n: number) => RiskRunResult; files?: number; head?: string; base?: string; clones?: string[]; gitEnv?: Record<string, string> } = {}) {
     const github = platform === "github";
     const node = { ...ghNode, headRefOid: options.head ?? ghNode.headRefOid };
@@ -293,14 +284,12 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
   describe("a clone of the PR's repository on this computer", () => {
     const LOW = '{"risk":"low","why":"Only the README wording changes."}';
     const refused = { stderr: "gh: (HTTP 406)", exitCode: 1 };
-    // The forge sends src/pay.ts and holds vendor/huge.bin back.
     const heldBack = { stdout: JSON.stringify([{ filename: "src/pay.ts", status: "modified", patch: "@@ -1 +1 @@\n-old\n+charge twice\n" }, { filename: "vendor/huge.bin", status: "modified" }]) };
     let scratch: string;
     let gitEnv: Record<string, string>;
     beforeEach(() => {
       scratch = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-pull-risk-clone-")));
       mkdirSync(join(scratch, "home"));
-      // git never reads the person's own config, here or in the Inbox's reads.
       gitEnv = { HOME: join(scratch, "home"), XDG_CONFIG_HOME: join(scratch, "home"), GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.com", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.com" };
     });
     afterEach(() => rmSync(scratch, { recursive: true, force: true }));
@@ -309,10 +298,6 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
       if (done.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${done.stderr.toString()}`);
       return done.stdout.toString().trim();
     };
-    /**
-     * The forge's repository, and the person's clone of it made before the PR: the PR's head is only at
-     * refs/pull/880/head, and main moved on after the clone, so both have to be fetched.
-     */
     const repositories = () => {
       const upstream = join(scratch, "upstream");
       mkdirSync(upstream);
@@ -334,10 +319,8 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
       git(upstream, "update-ref", "refs/pull/880/head", head);
       git(upstream, "checkout", "-q", "main");
       git(upstream, "branch", "-q", "-D", "topic");
-      // main moves on after the PR left it: none of this is the PR's.
       writeFileSync(join(upstream, "README.md"), "the\n");
       git(upstream, "commit", "-q", "-am", "main moves on");
-      // The person's own work in the clone: a branch, a change in the worktree, one staged, one stashed.
       git(clone, "checkout", "-q", "-b", "mine");
       writeFileSync(join(clone, "README.md"), "stashed\n");
       git(clone, "stash", "-q");
@@ -362,12 +345,10 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
       await judge();
       expect(runs).toHaveLength(1);
       const { prompt } = runs[0]!;
-      // The held-back file's own lines, and the rest of the PR, from where it left main.
       expect(prompt).toContain("+v2 sends the card number home");
       expect(prompt).toContain("+charge twice");
       expect(prompt).not.toContain("README");
       expect(risk.answer().judgments[key]?.level).toBe("low");
-      // Objects only: every ref, the branch, the worktree, the index and the stash as they were, and no FETCH_HEAD.
       expect(stateOf(clone)).toEqual(before);
     }, 30_000);
 
@@ -413,7 +394,6 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
       const stop = new AbortController();
       const started = Date.now();
       const running = runner(scratch, ["ls-remote", "ssh://git@example.invalid/n/b.git"], { timeoutMs: how ? 20_000 : 1_000, signal: stop.signal });
-      // The ssh is up: git is waiting on it.
       for (let i = 0; i < 200 && !existsSync(pidFile); i++) await Bun.sleep(25);
       const pid = Number(readFileSync(pidFile, "utf8").trim());
       expect(pid).toBeGreaterThan(0);
@@ -436,7 +416,6 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
     test("a whole diff past any model's context: git stops reading, and the forge's read stands", async () => {
       setRules();
       const { upstream, clone } = repositories();
-      // The PR also regenerates a 9 MB artefact.
       git(upstream, "checkout", "-q", "refs/pull/880/head");
       writeFileSync(join(upstream, "vendor", "dump.json"), `${"{\"row\": 1}\n".repeat(800_000)}`);
       git(upstream, "add", ".");
@@ -464,7 +443,6 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
     }, 30_000);
 
     describe.skipIf(process.platform === "win32")("an origin over ssh", () => {
-      /** An ssh that only says it ran: no network git may reach it, whatever the clone lacks. */
       const sshWatch = () => {
         const ran = join(scratch, "ssh.ran");
         const ssh = join(scratch, "fake-ssh");
@@ -477,7 +455,6 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
         setRules();
         const { upstream, clone, head } = repositories();
         const base = git(upstream, "rev-parse", "main");
-        // The person already has the PR's head and today's main (they pushed it, they pulled).
         git(clone, "fetch", "-q", "origin", "refs/pull/880/head:refs/heads/topic", "main:refs/remotes/origin/main");
         git(clone, "remote", "set-url", "origin", "git@github.com:n/b.git");
         const { ran, env } = sshWatch();
@@ -508,7 +485,6 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
       setRules();
       const { clone } = repositories();
       for (const clones of [[], [clone]]) {
-        // A head the forge's repository doesn't have: the fetch brings nothing.
         const { risk, judge, key } = await reading("github", { whole: refused, paged: heldBack }, { answer: LOW, head: "c".repeat(40), clones, gitEnv });
         await judge();
         expect(risk.answer().judgments[key]?.level).toBe("medium");
@@ -693,7 +669,6 @@ describe("when it runs", () => {
     await settled();
     expect(unchosen.runs).toEqual([]);
 
-    // Claude Code is here, but the person chose Pi: a diff never goes to another provider.
     setRules("Billing.", "pi-sdk");
     const gone = engine({ agents: [{ id: "claude-agent-sdk", label: "Claude Code" }] });
     gone.risk.assess([pull(1)]);
@@ -738,7 +713,6 @@ describe("when it runs", () => {
     await settled();
     expect(risk.answer().pending).toBe(8);
     expect(most).toBe(RISK_CONCURRENCY);
-    // A second list read while they run starts nothing twice.
     risk.assess(pulls);
     while (runs.length < 8 || release.length) {
       release.shift()?.();
@@ -851,7 +825,6 @@ describe("no cost repeats", () => {
     await settled();
     expect(runs).toHaveLength(RISK_CONCURRENCY);
 
-    // After the pause, the next few, not the same ones.
     now += 1;
     risk.assess(many);
     await settled();
@@ -921,7 +894,6 @@ describe("no cost repeats", () => {
     await settled();
     expect(runs).toHaveLength(2);
     expect(risk.answer().judgments["github.com/n/b#1"]?.level).toBe("high");
-    // And that judgment stands across a restart, for that base.
     const restarted = engine();
     restarted.risk.assess([pull(1, { base: "release" })]);
     await settled();
@@ -1005,7 +977,6 @@ describe("no cost repeats", () => {
       await settled();
       expect(risk.answer().failed[key]).toBe("Too big.");
 
-      // Listed at a new head that hasn't run: that reason isn't this head's.
       risk.assess([pull(1, { head_sha: "another" })]);
       await settled();
       expect(risk.answer().failed).toEqual({});
@@ -1034,7 +1005,6 @@ describe("no cost repeats", () => {
     });
   });
 
-  /** The first runs hold the line, so the rest wait in the queue; `release` lets them go. */
   const held = (on: () => boolean = () => true) => {
     let release = () => {};
     const gate = new Promise<void>((resolve) => (release = resolve));
@@ -1278,7 +1248,6 @@ describe("one run on a provider", () => {
 });
 
 describe("a very large diff through the real providers, with fake CLIs", () => {
-  // Codex's provider reads $CODEX_HOME/config.toml: a scratch one, never the person's.
   const savedCodexHome = process.env.CODEX_HOME;
   beforeEach(() => {
     process.env.CODEX_HOME = join(dataDir, "codex-home");
@@ -1288,11 +1257,9 @@ describe("a very large diff through the real providers, with fake CLIs", () => {
     else process.env.CODEX_HOME = savedCodexHome;
   });
 
-  // Past Linux's 128 KB for one argument and macOS's 1 MB for all of them, and past the reader's own 8 MB.
   const diff = "+a changed line of a file\n".repeat(360_000);
   const key = "github.com/n/b#1";
 
-  /** A CLI in Bun's own runner: it keeps its argv in `<log>.argv`, and `script` answers each line of its stdin. */
   const fakeCli = (name: string, script: string) => {
     const log = join(dataDir, `${name}.log`);
     const path = join(dataDir, name);
@@ -1310,7 +1277,6 @@ require("readline").createInterface({input:process.stdin}).on("line",(l)=>{const
     chmodSync(path, 0o755);
     return { path, argv: () => readFileSync(`${log}.argv`, "utf8"), arrived: () => readFileSync(log, "utf8") };
   };
-  /** The whole path a refusal takes: this provider, one run, and what the window is told. */
   const refusedBy = async (provider: AIProvider, model: string) => {
     setRules("Billing.", "pi-sdk", model);
     const risk = createPullRisk({
@@ -1385,7 +1351,6 @@ describe("the model it starts on", () => {
   const ids = (...list: string[]) => list.map((id) => ({ id, label: id }));
   test("Claude: Sonnet", () => {
     expect(startingRiskModel("claude-agent-sdk", [{ ...ids("opus")[0]!, default: true }, ...ids("sonnet", "haiku")])).toBe("sonnet");
-    // A list with no alias still lands on its Sonnet family, or the list's own default.
     expect(startingRiskModel("claude-agent-sdk", [{ ...ids("opus")[0]!, default: true }])).toBe("opus");
   });
   test("Codex: the newest Luna, whatever the order", () => {
@@ -1493,12 +1458,10 @@ describe("a high judgment's places (context notes)", () => {
 
   test("a judgment made from a diff the PR page can't draw keeps no places, so no count promises places it can't show", async () => {
     setRules(RULES);
-    // The forge would not serve one document (its per-file read, or a clone, gave the diff): the PR's diff shows none of it.
     const perFile = engine({ patch: PATCH, read: { per_file: true }, answer: async () => ({ text: answer("high", [place]) }) });
     perFile.risk.assess([pull(7)]);
     await settled();
     expect(perFile.risk.answer().judgments["github.com/n/b#7"]).toEqual({ level: "high", why: "It changes billing." });
-    // Known to be less than the whole (held-back files): High stays High, without places.
     const partial = engine({ patch: PATCH, read: { partial: true }, answer: async () => ({ text: answer("high", [place]) }) });
     partial.risk.assess([pull(8)]);
     await settled();

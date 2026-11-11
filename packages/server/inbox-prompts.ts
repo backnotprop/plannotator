@@ -1,16 +1,3 @@
-/**
- * Settings → Prompts (approval "inbox-prompts-page", #2194): the Inbox
- * reminder the person may replace (config.json `prompts.inbox`), the Guided
- * Review standing instructions (`guide-instructions.md`, the one file the
- * review UI and VS Code edit too), and the plan, review and annotate prompts
- * shown read-only.
- *
- * The page reads config.json fresh and writes only `prompts.inbox`: one key
- * at a time, a string sets it, null deletes it, so every other key in the
- * file stays as it is. Whether a reminder is sent at all stays
- * `inboxReminder` (Settings → Agents).
- */
-
 import { INBOX_PROMPT_HOSTS, type InboxPromptHost, type InboxPromptItem, type InboxPromptsChange, type InboxPromptsSettings } from "@plannotator/core/inbox-types";
 import { loadConfig, saveConfig, type PlannotatorConfig, type PromptConfig } from "@plannotator/shared/config";
 import {
@@ -39,7 +26,6 @@ import { readGuideInstructions, writeGuideInstructions } from "@plannotator/shar
 
 type Group = InboxPromptItem["group"];
 
-/** The 12 prompts of `prompts.plan`, `prompts.review` and `prompts.annotate`, in the order the page lists them. */
 export const INBOX_OTHER_PROMPTS: readonly { group: Group; groupLabel: string; name: string; label: string; fallback: string; note?: string }[] = [
   { group: "plan", groupLabel: "Plan", name: "approved", label: "Approved", fallback: DEFAULT_PLAN_APPROVED_PROMPT, note: "OpenCode has a shorter default." },
   { group: "plan", groupLabel: "Plan", name: "approvedWithNotes", label: "Approved with notes", fallback: DEFAULT_PLAN_APPROVED_WITH_NOTES_PROMPT, note: "OpenCode has a shorter default." },
@@ -63,10 +49,8 @@ function usablePrompt(value: unknown): string | null {
   return typeof value === "string" && value.trim() !== "" ? value : null;
 }
 
-/** The reminder text set in config.json for the shared slot (`host` null) or one agent, as the hosts read it. */
 function reminderSlot(config: PlannotatorConfig, host: InboxPromptHost | null): string | null {
   if (host === null) {
-    // The shared text alone: read it as an agent with no own entry would.
     const inbox = record(record(config.prompts)?.inbox);
     return inboxReminderCustomText({ prompts: { inbox: { reminder: inbox?.reminder } } }, "-");
   }
@@ -74,17 +58,10 @@ function reminderSlot(config: PlannotatorConfig, host: InboxPromptHost | null): 
   return inboxReminderCustomText({ prompts: { inbox: { runtimes: { [host]: { reminder: own } } } } }, host);
 }
 
-/** The length of text config.json holds in a reminder slot that is over the cap (and so ignored), else null. */
 function overCap(value: unknown): number | null {
   return typeof value === "string" && value.trim() !== "" && value.length > INBOX_REMINDER_MAX_CHARS ? value.length : null;
 }
 
-/**
- * What Settings → Prompts reads. `on`: whether each agent gets a reminder at
- * all; `editable`: this page may change it; `wakes`: false for an agent whose
- * reply does not come back by itself (OpenCode 1), whose default is the
- * no-wake line.
- */
 export function inboxPromptsModel(
   config: PlannotatorConfig,
   on: Record<InboxPromptHost, boolean>,
@@ -133,11 +110,6 @@ export function inboxPromptsModel(
   };
 }
 
-/**
- * Check `{ inbox?: { reminder?, runtimes?: { <agent>: { reminder? } } }, guide? }`,
- * at least one: each value a string or null, a blank string read as null, a
- * string over its cap refused (422). Nothing else is accepted.
- */
 export function parseInboxPromptsChange(input: unknown): InboxPromptsChange {
   const fail = (message: string, field: string): never => {
     throw new InboxError("validation_error", message, { field });
@@ -180,12 +152,10 @@ export function parseInboxPromptsChange(input: unknown): InboxPromptsChange {
   return change;
 }
 
-/** Write a checked change: the guide file, and config.json (`prompts.inbox` only), read back. */
 export function saveInboxPromptsChange(change: InboxPromptsChange): void {
   if ("guide" in change) writeGuideInstructions(change.guide ?? "");
   if (!change.inbox) return;
   const inbox: NonNullable<PromptConfig["inbox"]> & Record<string, unknown> = {};
-  // `undefined` deletes the key (saveConfig's prompts merge drops it, and an emptied entry with it).
   if ("reminder" in change.inbox) inbox.reminder = change.inbox.reminder ?? undefined;
   if (change.inbox.runtimes) {
     inbox.runtimes = {};

@@ -1,31 +1,9 @@
-/**
- * Which list rows changed since a version the window holds (#2593; the
- * window's side and the wire are `packages/core/inbox-list-delta.ts`).
- *
- * The list is still computed whole on every read, exactly as before; only
- * the answer gets smaller. Per kind of list read (its query: the window always
- * asks the same one) the server keeps, for every row it last answered, a hash
- * of the row and the version at which it last changed, appeared or came back.
- * A read naming a version from this run and kind gets the rows changed after
- * it; every row it does not get is, by construction, the row the window
- * already holds. Anything else (no version, another run's, another kind's, a
- * version from before the kind was last reset, too many changes, one thread
- * with two different rows) gets the whole list, as before, plus a version.
- *
- * Only a read that asks (`since`, the window) is touched: the phone, a linked
- * machine and an older window ask without it and get the very same answer as
- * before. Memory: one small entry per row per kind, at most `MAX_KINDS` kinds.
- */
-
 import { randomBytes } from "node:crypto";
 import { inboxListDeltaShape, inboxListRowsById, type InboxListDelta, type InboxListDeltaModel } from "@plannotator/core/inbox-list-delta";
 
-/** Kinds of list read remembered at once (the window asks one; the rest is a bound). */
 const MAX_KINDS = 8;
 
-/** Past this share of the rows changed, the whole list is sent instead (it would be about as big). */
 const MAX_CHANGED_SHARE = 0.5;
-/** ...but a short list always gets its changes. */
 const MIN_CHANGED_FOR_FULL = 16;
 
 interface Kind {
@@ -48,7 +26,6 @@ export function createInboxListVersions(options: { hash?: (text: string) => numb
   const kindOf = (key: string): Kind => {
     let kind = kinds.get(key);
     if (kind) {
-      // Most recently used last.
       kinds.delete(key);
       kinds.set(key, kind);
       return kind;
@@ -59,7 +36,6 @@ export function createInboxListVersions(options: { hash?: (text: string) => numb
     return kind;
   };
 
-  /** `run.kind.version` → the version, when it is this run's and this kind's. */
   const versionOf = (since: string | null, kind: Kind): number | null => {
     const match = since ? /^([0-9a-f]+)\.(\d+)\.(\d+)$/.exec(since) : null;
     if (!match || match[1] !== run || Number(match[2]) !== kind.id) return null;
@@ -67,16 +43,10 @@ export function createInboxListVersions(options: { hash?: (text: string) => numb
     return at >= kind.from && at <= version ? at : null;
   };
 
-  /**
-   * The answer to a list read of kind `key` (its query) whose whole model is
-   * `model`: the model, or only what changed since `since`. Every answer
-   * carries `list_version`, the version to name next time.
-   */
   const answer = <M extends InboxListDeltaModel>(key: string, model: M, since: string | null): InboxListAnswer<M> => {
     const kind = kindOf(key);
     const now = ++version;
     const listVersion = `${run}.${kind.id}.${now}`;
-    // The JSON of each row, as the answer sends it: the same text is the same row.
     const texts = new Map<unknown, string>();
     const textOf = (row: object) => {
       let text = texts.get(row);
@@ -100,7 +70,6 @@ export function createInboxListVersions(options: { hash?: (text: string) => numb
       if (fresh) kind.rows.set(id, { hash: h, at: now });
       if (base !== null && (fresh || held!.at > base)) changed.push(row);
     }
-    // Rows gone since: forgotten, so one that comes back is sent again.
     for (const id of kind.rows.keys()) if (!rows.has(id)) kind.rows.delete(id);
     if (base === null || (changed.length > MIN_CHANGED_FOR_FULL && changed.length > rows.size * MAX_CHANGED_SHARE)) {
       return { ...model, list_version: listVersion };

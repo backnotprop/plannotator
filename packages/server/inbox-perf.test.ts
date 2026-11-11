@@ -1,9 +1,3 @@
-/**
- * The Inbox's server timings (inbox-perf.ts), which run only with the debug log on: then every `/api/inbox/` answer
- * says where its time went, a slow one reaches the debug log with its phases, and a stalled event loop is noticed.
- * Off, an answer carries no Server-Timing and a phase is not timed. The wrapper is tested around a plain handler,
- * the switch against a real Inbox server in a temp data dir.
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,7 +14,6 @@ const busy = (ms: number) => {
 const route = (pathname: string) => pathname.replace(/msg_[A-Z0-9]+/, "*");
 
 describe("withServerTiming", () => {
-  // As a server with the debug log on does: phases are timed while one is retained.
   let release: () => void = () => {};
   beforeAll(() => {
     release = retainPerfPhases();
@@ -86,7 +79,6 @@ describe("withServerTiming", () => {
       expect(response.headers.get("Server-Timing")).toContain("app;dur=");
     }
     expect(heard).toEqual([]);
-    // Only the long-poll waits: another bridge route that is slow is a slow request.
     await served(new Request("http://127.0.0.1/api/inbox/eventsx"), "local");
     await served(new Request("http://127.0.0.1/api/inbox/bridge/event"), "local");
     expect(heard.map((slow) => slow.route)).toEqual(["/api/inbox/eventsx", "/api/inbox/bridge/event"]);
@@ -214,14 +206,9 @@ test("watchLoopStalls hears a blocked event loop, and stops", async () => {
   expect(stalls.length).toBe(seen);
 });
 
-/**
- * A block counts from the watch tick it delays, so it can start up to one tick before that tick is due: only a block
- * longer than a tick plus the threshold is sure to be a stall, wherever it falls between ticks. A 300 ms block was
- * only 50 ms late when it started just after a tick, which made this test flaky.
- */
+/** A block counts from the tick it delays: only one longer than a tick plus the threshold is sure to be a stall (a 300 ms block was flaky). */
 const STALL_BUSY_MS = INBOX_LOOP_TICK_MS + INBOX_LOOP_STALL_MS + 150;
 
-/** The first stall heard, waiting for the watch's late tick instead of a fixed sleep (a loaded runner can be slow). */
 async function firstStall<T extends { ms: number }>(stalls: T[], timeoutMs = 5_000): Promise<T | undefined> {
   const deadline = performance.now() + timeoutMs;
   for (;;) {
@@ -237,7 +224,6 @@ test("a stall names what held the loop: the slowest section since the last tick,
   const release = retainPerfPhases();
   try {
     await Bun.sleep(300);
-    // Outside any request: a timer's body.
     stalls.length = 0;
     syncSection("timer:quick", () => busy(5));
     syncSection("timer:slow", () => busy(STALL_BUSY_MS));
@@ -245,7 +231,6 @@ test("a stall names what held the loop: the slowest section since the last tick,
     expect(timer?.cause).toMatchObject({ in: "timer:slow", route: null });
     expect(timer!.cause.in_ms!).toBeGreaterThanOrEqual(250);
 
-    // Inside a request: a phase, with the request's route, and the handler's own synchronous part.
     const served = withServerTiming(
       async () => {
         perfPhase("rows", () => busy(STALL_BUSY_MS));
@@ -260,7 +245,6 @@ test("a stall names what held the loop: the slowest section since the last tick,
     expect(request?.cause).toMatchObject({ in: "rows", route: "/api/inbox/threads", handler_route: "/api/inbox/threads" });
     expect(request!.cause.handler_ms!).toBeGreaterThanOrEqual(250);
 
-    // Nothing measured ran: the line still names the section entered last.
     stalls.length = 0;
     busy(STALL_BUSY_MS);
     expect((await firstStall(stalls))?.cause).toMatchObject({ in: null, last: "rows" });

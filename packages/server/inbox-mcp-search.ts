@@ -1,13 +1,3 @@
-/**
- * The agents' read-only search (approval "inbox-agent-search", 2026-10-19):
- * the person's ⌘K index (packages/shared/inbox/search.ts), over messages, in
- * the caller's project unless it asks for every project. It answers compact
- * rows (thread id, message id, author, time, snippet) and writes nothing: no
- * recent-searches entry, no read mark, no new storage (the index is the
- * window's own, in memory). Why it exists: an agent hunting a reply it may
- * have missed read eight whole threads (~400 KB) where one search settles it.
- */
-
 import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import { inboxSearchTerms, INBOX_SEARCH_LIMIT_MAX, INBOX_SEARCH_QUERY_MAX, type InboxSearchMessageRow } from "@plannotator/core/inbox-search";
@@ -16,9 +6,7 @@ import { clip, shortTime } from "./inbox-mcp-read";
 import { guarded, okComplete, PROJECT_PATH_DESCRIPTION } from "./inbox-mcp-result";
 import type { InboxMcpContext } from "./inbox-mcp";
 
-/** Results the search answers by default. */
 export const INBOX_AGENT_SEARCH_LIMIT = 10;
-/** How long a search waits for the index's first build before it says to try again. */
 export const INBOX_AGENT_SEARCH_BUILD_WAIT_MS = 10_000;
 
 export const SEARCH_DESCRIPTION =
@@ -27,13 +15,10 @@ export const SEARCH_DESCRIPTION =
 export interface InboxAgentSearchRow {
   thread_id: string;
   message_id: string;
-  /** "person", or the agent's name as the person sees it. */
   author: string;
   at: string;
-  /** The thread's subject. */
   subject: string;
   snippet: string;
-  /** The match is in this question (its prompt, choices or answer). */
   question?: string;
   project?: string;
 }
@@ -88,7 +73,6 @@ export function registerInboxSearchTool(server: McpServer, context: InboxMcpCont
           if (!input.project_path) throw new InboxError("validation_error", "project_path: required unless all_projects (the connection fills it).");
           // Looked up, never made: a search writes nothing, and a folder the Inbox has never seen has no messages.
           const found = context.findProjects ? await context.findProjects(input.project_path) : { projects: [], unresolved: false };
-          // One search per group: a search of one folder of a combined project covers them all.
           projectIds = [...new Set(found.projects.map((project) => context.store.canonicalProjectId(project.id)))];
           scope = found.projects[0]?.name ?? input.project_path;
           if (found.unresolved) note = " Git did not answer in time, so the project of this folder is not known yet: nothing was searched. Try again, or pass all_projects.";
@@ -104,7 +88,6 @@ export function registerInboxSearchTool(server: McpServer, context: InboxMcpCont
         const limit = Math.min(input.limit ?? INBOX_AGENT_SEARCH_LIMIT, INBOX_SEARCH_LIMIT_MAX);
         let total = 0;
         const rows: InboxSearchMessageRow[] = [];
-        // The caller's project (and the one an older Inbox kept for its worktree, threadReadScope), or every project.
         for (const project of projectIds ?? [null]) {
           const answer = index.search({ q, project, group: "messages", offset: 0, limit });
           total += answer.totals?.messages ?? 0;

@@ -1,24 +1,3 @@
-/**
- * Pull request authors' profile pictures for the Pull requests list (the owner, on #2608: the row's top-left spot is
- * always the author's picture). The window's CSP stays `img-src 'self' data: blob:`: it never loads a remote image
- * itself. The Inbox fetches the picture and serves it from its own origin.
- *
- * What is fetched: only the avatar URL the forge's own answer gave for an author of a PR in the current list, or for
- * a reviewer or commenter the details of such a PR named (`allow`), never a URL or login the page names. A login none
- * of those returned is refused before anything runs.
- * - https only; at most 3 redirects, each https. The URL's host must be public (as the favicons check it) unless it
- *   is the forge host itself (a GitHub Enterprise or self-managed GitLab on a private network serves its own), on
- *   the forge's own port (the avatar URL's when the forge returned one on its name, else 443).
- * - One deadline for the whole fetch (4 s); at most 256 KB a picture.
- * - Only an image: `image/*` declared, and bytes that sniff as PNG, JPEG, GIF or WebP; never SVG.
- * - Under the test sandbox (`PLANNOTATOR_TEST_SANDBOX`) only, an `http://127.0.0.1:<port>/` or
- *   `http://localhost:<port>/` URL is fetched too: the break-ui harness and the e2e serve fake pictures there.
- * Cached on disk under `<inbox dir>/pull-avatars/`: a picture is fresh for a day, then fetched again (the old one is
- * served if that fails); at most 8 MB in all, the oldest dropped first (the size is kept as pictures are written; the
- * folder is read, off the request's path, only to learn it and once a write goes past the cap). A miss is remembered
- * for an hour, in memory, and dropped after it.
- */
-
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { readdir, readFile, rm, stat } from "node:fs/promises";
@@ -31,18 +10,15 @@ export type PullAvatarMiss = "unknown" | "not_https" | "not_public" | "redirect"
 export type PullAvatarResult = { ok: true; type: string; body: Uint8Array<ArrayBuffer> } | { ok: false; miss: PullAvatarMiss };
 
 export interface PullAvatarOptions {
-  /** Where the pictures are kept (the Inbox's own data dir, `inbox/pull-avatars`). */
   dir: string;
   fetch?: (url: string, init: RequestInit) => Promise<Response>;
   lookup?: (hostname: string) => Promise<string[]>;
   now?: () => number;
   timeoutMs?: number;
   maxBytes?: number;
-  /** All pictures together, on disk. */
   capBytes?: number;
   freshMs?: number;
   missMs?: number;
-  /** Where `PLANNOTATOR_TEST_SANDBOX` is read (default `process.env`). */
   env?: Readonly<Record<string, string | undefined>>;
 }
 
@@ -55,30 +31,17 @@ const MAX_REDIRECTS = 3;
 const SERVED = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
 export interface PullAvatars {
-  /** The logins the list returned, per forge host, with the avatar URL the forge gave (replaces the host's set). */
   allow(host: string, avatars: Readonly<Record<string, string>>): void;
-  /**
-   * The last list, every host it listed: each host's set replaced, and a host it did not list (its project removed,
-   * its CLI signed out) keeps no login at all.
-   */
   allowOnly(lists: readonly { host: string; avatars: Readonly<Record<string, string>> }[]): void;
-  /** Whether a login is one the list returned on that host. */
   known(host: string, login: string): boolean;
-  /** How many misses memory holds (each kept an hour, then dropped): the map's bound, read by its test. */
   missesHeld(): number;
   get(host: string, login: string): Promise<PullAvatarResult>;
 }
 
 const LOOPBACK = new Set(["127.0.0.1", "localhost"]);
-/** The largest a face is drawn, at twice the pixels. */
 const PICTURE_PX = 96;
 
-/**
- * GitHub's avatar URLs answer the whole upload unless they name a size, and an upload can run past the size cap (a real
- * one was 527 KB), which left a face as its initial; GraphQL's `avatarUrl(size: 48)` is soft on a 2x screen. So
- * github.com's picture host and an Enterprise server's `/avatars/` are always asked at `s=96`, whatever size the URL
- * named; anything else is left as the forge gave it.
- */
+/** GitHub avatar URLs answer the whole upload (can exceed the size cap) unless a size is named, so github.com's picture host and an Enterprise `/avatars/` are always asked at `s=96`. */
 function sizeForAFace(url: URL): void {
   const github = url.hostname === "avatars.githubusercontent.com" || url.hostname.startsWith("avatars.") || url.pathname.startsWith("/avatars/");
   if (!github) return;
@@ -88,7 +51,6 @@ function sizeForAFace(url: URL): void {
 
 const keyOf = (host: string, login: string) => `${host.toLowerCase()}\n${login.toLowerCase()}`;
 
-/** The forge host as an https origin's name and port ("" for 443, as URL has it); null when it is not a host. */
 function forgeOrigin(host: string): { hostname: string; port: string } | null {
   if (!host || /[/?#@\\\s]/.test(host)) return null;
   try {
@@ -112,7 +74,6 @@ export function createPullAvatars(options: PullAvatarOptions): PullAvatars {
   const misses = new Map<string, { at: number; miss: PullAvatarMiss }>();
   const inFlight = new Map<string, Promise<PullAvatarResult>>();
   const sandbox = !!(options.env ?? process.env).PLANNOTATOR_TEST_SANDBOX;
-  /** https, or (the test sandbox only) http on this computer's loopback; never credentials in the URL. */
   const fetchable = (url: URL) => !url.username && !url.password && (url.protocol === "https:" || (sandbox && url.protocol === "http:" && LOOPBACK.has(url.hostname)));
 
   const fileOf = (key: string) => join(options.dir, createHash("sha256").update(key).digest("hex").slice(0, 32));
@@ -128,16 +89,10 @@ export function createPullAvatars(options: PullAvatarOptions): PullAvatars {
     }
   }
 
-  /**
-   * The pictures' bytes on disk, kept as they are written (null until the folder was read once). The folder is read
-   * only to learn it (the first write) and when a write takes it past the cap: never a stat of every file per write.
-   */
   let used: number | null = null;
-  /** Bytes written while a trim reads the folder: added to what it finds. */
   let writtenDuringTrim = 0;
   let trimming: Promise<void> | null = null;
 
-  /** Reads the folder off the request's path and, past the cap, drops the least recently fetched pictures. */
   function trim(): Promise<void> {
     if (trimming) return trimming;
     writtenDuringTrim = 0;
@@ -151,7 +106,6 @@ export function createPullAvatars(options: PullAvatarOptions): PullAvatars {
             const size = await stat(`${base}.img`).then((s) => s.size, () => 0);
             const at = await readFile(`${base}.json`, "utf8").then(
               (text) => (JSON.parse(text) as { at?: number }).at ?? 0,
-              // No meta: the first to go.
               () => 0,
             );
             return { base, size, at };
@@ -174,7 +128,6 @@ export function createPullAvatars(options: PullAvatarOptions): PullAvatars {
       used = total + writtenDuringTrim;
     })().finally(() => {
       trimming = null;
-      // Pictures written while it read may have taken the folder past the cap again: read it once more.
       if (writtenDuringTrim > 0 && used !== null && used > capBytes) void trim();
     });
     return trimming;
@@ -184,7 +137,6 @@ export function createPullAvatars(options: PullAvatarOptions): PullAvatars {
     let replaced = 0;
     try {
       mkdirSync(options.dir, { recursive: true });
-      // The picture this one replaces, as it is on disk now (a trim may have dropped it since it was read): one stat.
       try {
         replaced = statSync(`${fileOf(key)}.img`).size;
       } catch {
@@ -193,7 +145,6 @@ export function createPullAvatars(options: PullAvatarOptions): PullAvatars {
       writeFileSync(`${fileOf(key)}.img`, body);
       writeFileSync(`${fileOf(key)}.json`, JSON.stringify({ type, at: now(), url }));
     } catch {
-      // A full or read-only disk: served this once, fetched again next time.
       return;
     }
     const delta = body.byteLength - replaced;
@@ -202,7 +153,6 @@ export function createPullAvatars(options: PullAvatarOptions): PullAvatars {
     if (used === null || used > capBytes) void trim();
   }
 
-  /** Misses past their hour are dropped: the map holds only the ones still remembered. */
   function rememberMiss(key: string, miss: PullAvatarMiss): void {
     const at = now();
     for (const [k, m] of misses) if (at - m.at >= missMs) misses.delete(k);
@@ -218,8 +168,6 @@ export function createPullAvatars(options: PullAvatarOptions): PullAvatars {
     }
     if (!fetchable(url)) return { ok: false, miss: "not_https" };
     sizeForAFace(url);
-    // The forge's own origin: its name (the list's host, which carries no port) on the port of the avatar URL the forge
-    // itself returned when that URL is on its name (a self-managed forge on :8443 serves its avatars there), else 443.
     const named = forgeOrigin(host);
     const forge = named ? { hostname: named.hostname, port: url.hostname === named.hostname ? url.port : named.port } : null;
     const controller = new AbortController();
@@ -227,8 +175,7 @@ export function createPullAvatars(options: PullAvatarOptions): PullAvatars {
     const aborted = new Promise<never>((_resolve, reject) => controller.signal.addEventListener("abort", () => reject(new Error("timeout")), { once: true }));
     aborted.catch(() => {});
     const deadline = <T,>(work: Promise<T>): Promise<T> => Promise.race([work, aborted]);
-    // The forge's own host may be private (an enterprise forge on its network); any other host must be public. The
-    // forge is matched by name and port: a redirect to another port on its name is not the forge.
+    // Only the forge's own host (matched by name and port) may be private; any other host must be public.
     const allowed = async (target: URL) =>
       (target.protocol === "http:" && sandbox && LOOPBACK.has(target.hostname)) ||
       (!!forge && target.protocol === "https:" && target.hostname === forge.hostname && target.port === forge.port) ||
@@ -300,7 +247,6 @@ export function createPullAvatars(options: PullAvatarOptions): PullAvatars {
       const url = urls.get(key);
       if (!url) return { ok: false, miss: "unknown" };
       const disk = readDisk(key);
-      // The same picture, read within the day: no fetch.
       if (disk && disk.url === url && now() - disk.at < freshMs) return { ok: true, type: disk.type, body: disk.body };
       const missed = misses.get(key);
       if (missed && now() - missed.at < missMs) return disk ? { ok: true, type: disk.type, body: disk.body } : { ok: false, miss: missed.miss };
@@ -314,7 +260,6 @@ export function createPullAvatars(options: PullAvatarOptions): PullAvatars {
             return result;
           }
           rememberMiss(key, result.miss);
-          // A failed refetch serves the picture already kept.
           return disk ? { ok: true, type: disk.type, body: disk.body } : result;
         })
         .finally(() => inFlight.delete(key));

@@ -1,30 +1,3 @@
-/**
- * Pull requests in the Inbox (approval "inbox-code-review-direction", items 4
- * and 5), through a running Inbox's real doors with a scripted gh / glab
- * (`refRunner`): no real CLI or forge.
- *
- * What regresses:
- *  - anything run (gh, glab, git) while Code review is off, or the routes
- *    answering then;
- *  - a host asked that no CLI here is signed in to, or a query without
- *    `--hostname`;
- *  - PRs of repositories that are not Inbox projects in the list;
- *  - a second forge read inside the fresh window, or none after a refresh;
- *    a rate limit not holding the host, or the last answer lost on a failure;
- *  - an Others search run unscoped, past GitHub's length limit or past its
- *    few searches (the most active repositories first); Others failing or
- *    timing out taking the person's own lists with it, or read more often
- *    than every 5 min while its view is closed; a GraphQL error read as a
- *    whole answer; Others' PRs marked as the person's or asked of them; an
- *    assigned PR losing its mark; the GraphQL budget's hold blocking diffs;
- *  - a PR not tied to the thread the person handed it to, or to its agent's
- *    own thread through its URL; one tied by anything else (a branch, a
- *    Board card, another project's thread); a Board card shown while the
- *    Board is off;
- *  - a layer review opening another diff than the layer's own, or the whole
- *    stack not running from the stack's base to that layer's head; a diff
- *    asked for a PR the list never named reaching the CLI.
- */
 import { afterEach, describe, expect, setSystemTime, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -108,7 +81,6 @@ const GH_ANSWER = {
       nodes: [
         ghPull(412, { headRefName: "retry/schedule" }),
         ghPull(413, { headRefName: "retry/backoff", baseRefName: "retry/schedule" }),
-        // Another repository the person has no Inbox project for: never listed.
         ghPull(9, { repository: { nameWithOwner: "elsewhere/thing" }, url: "https://github.com/elsewhere/thing/pull/9" }),
       ],
     },
@@ -116,25 +88,17 @@ const GH_ANSWER = {
   },
 };
 
-/**
- * `gh api --jq` as a person's shell may have it: the program picks what it names, and under CLICOLOR_FORCE an object
- * answer comes out coloured (real gh 2.99, whatever NO_COLOR says) while a string comes out raw.
- */
 function ghJq(args: string[], pull: { sha: string; body: string | null }): { stdout: string; stderr: string; exitCode: number } {
   const program = args[args.indexOf("--jq") + 1] ?? "";
-  // The head alone (readHeadNow: the whole diff a risk judgment reads): a string answer, printed raw.
   if (program === ".head.sha") return { stdout: `${pull.sha}\n`, stderr: "", exitCode: 0 };
   const picked = { ...(/\bsha: \.head\.sha\b/.test(program) ? { sha: pull.sha } : {}), ...(/\bbody: \.body\b/.test(program) ? { body: pull.body } : {}) };
   const json = JSON.stringify(picked);
   return { stdout: `${/\| *tojson *$/.test(program) ? json : `\u001b[1;38m${json}\u001b[m`}\n`, stderr: "", exitCode: 0 };
 }
 
-/** A call of the Others read (its own query), apart from the person's own lists. */
 const othersCall = (args: readonly string[]) => args.some((a) => a.startsWith("query=query InboxPullsOthers"));
 
-/** The background reads finish (the fakes answer at once): what the next list sees. */
 const settle = () => new Promise((done) => setTimeout(done, 0));
-/** One list, its background Others read let finish, then the next list: what the window gets on its next read. */
 async function listSettled(pulls: InboxPulls, repos: Parameters<InboxPulls["list"]>[0], options?: Parameters<InboxPulls["list"]>[1]) {
   await pulls.list(repos, options);
   await settle();
@@ -144,25 +108,17 @@ async function listSettled(pulls: InboxPulls, repos: Parameters<InboxPulls["list
 interface Forge {
   run: RefRunner;
   calls: { cli: string; args: string[] }[];
-  /** The person's own list reads. */
   graphql: () => { cli: string; args: string[] }[];
-  /** The Others reads. */
   others: () => { cli: string; args: string[] }[];
   fail: string | null;
-  /** What an Others read answers (default: nothing open); `othersFail` fails it (stderr). */
   othersAnswer: unknown;
   othersFail: string | null;
-  /** How long a GitHub Others read takes, in ms (default: at once). */
   othersDelayMs?: number;
-  /** The head commit `gh api … pulls/N --jq …` answers (default: the list's `headRefOid`); a list: one per read. */
   heads: string[] | null;
-  /** The description that read answers, by PR number. */
   bodies: Record<string, string | null>;
-  /** The commits GitHub says the PR has; null, that read fails. */
   prCommits?: string[] | null;
 }
 
-/** gh signed in to github.com only; glab signed in nowhere. */
 function forge(answer: unknown = GH_ANSWER): Forge {
   const f: Forge = {
     calls: [],
@@ -198,7 +154,6 @@ function forge(answer: unknown = GH_ANSWER): Forge {
   return f;
 }
 
-/** The `gh` / `glab` a posted review runs through: each call kept (its stdin parsed), answered by `answer`. */
 interface PostForge {
   runtime: PRRuntime;
   calls: { cmd: string; args: string[]; input?: unknown }[];
@@ -235,7 +190,6 @@ async function world(options: { codeReview?: boolean; answer?: unknown; tailscal
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
   const f = options.gitlab ? gitlabForge() : forge(options.answer);
   const post = postForge();
-  // The project's origin as git reads it; `setRepo` changes it (read again at the project's next message).
   let repo: { display: string; host: string } | null = options.gitlab ? { display: "northwind/data/ledger", host: "gitlab.com" } : { display: "northwind/billing-svc", host: "github.com" };
   const setRepo = (next: typeof repo) => {
     repo = next;
@@ -299,7 +253,6 @@ const GL_MR = (iid: number, fields: Record<string, unknown> = {}) => ({
   ...fields,
 });
 
-/** glab signed in to gitlab.com only; gh signed in nowhere. One MR, !61, by jun, asking dana for a review. */
 function gitlabForge(): Forge {
   const f: Forge = {
     calls: [],
@@ -372,7 +325,6 @@ describe("risk ranking", () => {
     expect(runs).toEqual([]);
 
     expect((await save(w.base, settings)).status).toBe(200);
-    // Saving alone starts nothing: the window reads the list next.
     expect(runs).toEqual([]);
     await w.pulls();
     const started = Date.now();
@@ -404,7 +356,6 @@ describe("risk ranking", () => {
   test("the models of an installed agent; any other agent is refused", async () => {
     const w = await riskWorld(async () => null);
     const list = (await (await fetch(`${w.base}/api/inbox/pulls/risk/models?provider=pi-sdk`)).json()) as InboxPullRiskModels;
-    // Pi starts on the person's own default, as the guided review does.
     expect(list.default_model).toBeNull();
     expect(list.models.map((m) => m.id)).toEqual(["a/claude-sonnet-5", "a/opus"]);
     expect((await fetch(`${w.base}/api/inbox/pulls/risk/models?provider=codex-sdk`)).status).toBe(422);
@@ -415,7 +366,6 @@ describe("risk ranking", () => {
 describe("off", () => {
   test("Code review off (unset): the routes refuse and nothing runs: no gh, no glab", async () => {
     const w = await world();
-    // A message carrying a PR link, so linking would have work to do.
     await w.send("Opened https://github.com/northwind/billing-svc/pull/412", "retries");
     const before = w.forge.calls.length;
     const list = await w.pulls();
@@ -475,7 +425,6 @@ describe("merge (the Pull requests page)", () => {
     const w = await world({ codeReview: true });
     await w.send("Working.", "retries");
     expect((await w.pulls()).status).toBe(200);
-    // This fake answers the merge check with a patch, not GitHub's PR: no verdict, so no merge.
     const res = await merge(w.base, { key: KEY, head_sha: SHA, confirmed: true });
     expect(res.status).toBe(409);
     expect(((await res.json()) as { code: string }).code).toBe("pull_merge_unknown");
@@ -493,19 +442,15 @@ describe("on", () => {
     expect(queries).toHaveLength(1);
     expect(queries[0]!.cli).toBe("gh");
     expect(queries[0]!.args.slice(0, 4)).toEqual(["api", "graphql", "--hostname", "github.com"]);
-    // No project is on GitLab, so glab is not even asked whether it is signed in.
     expect(w.forge.calls.filter((c) => c.cli === "glab")).toEqual([]);
     expect(answer.pulls.map((p) => p.number).sort()).toEqual([412, 413, 880]);
-    // Others is read in the background, never waited for: the answer says it is on its way.
     expect(answer.hosts).toEqual([{ cli: "gh", host: "github.com", login: "dana", others_pending: true }]);
     expect(answer.links["github.com/northwind/billing-svc#413"]?.thread_id).toBe(thread);
     expect(answer.links["github.com/northwind/billing-svc#413"]?.via).toBe("url");
     expect(answer.links["github.com/northwind/billing-svc#413"]?.agent?.host).toBe("claude-code");
-    // Nothing else ties a PR: no thread for the others.
     expect(answer.links["github.com/northwind/billing-svc#412"]).toBeUndefined();
     expect(answer.links["github.com/northwind/billing-svc#880"]).toBeUndefined();
 
-    // Asked again at once: the cache answers, no second query.
     await w.pulls();
     expect(w.forge.graphql()).toHaveLength(1);
   });
@@ -520,7 +465,6 @@ describe("on", () => {
     const answer = (await (await w.pulls()).json()) as InboxPullsAnswer;
     for (const key of keys) expect(answer.links[key]).toMatchObject({ via: "owner", thread_id: handed });
     expect(opened).not.toBe(handed);
-    // Kept on disk, so a new Inbox on the same folder still knows it.
     const saved = JSON.parse(await Bun.file(join(w.dataDir, "inbox", "pull-links.json")).text()) as { links: Record<string, { thread_id: string }> };
     expect(saved.links[keys[0]!]?.thread_id).toBe(handed);
   });
@@ -545,7 +489,6 @@ describe("on", () => {
     expect((await w.own(["github.com/northwind/billing-svc#412"], own)).status).toBe(200);
     expect((await thread(theirs)).pull_theirs).toBe(true);
     expect((await thread(own)).pull_theirs).toBeUndefined();
-    // The person hands one of their own PRs to the same thread: it is theirs to give a verdict in again.
     expect((await w.own(["github.com/northwind/billing-svc#413"], theirs)).status).toBe(200);
     expect((await thread(theirs)).pull_theirs).toBeUndefined();
   });
@@ -563,7 +506,6 @@ describe("on", () => {
   test("after a restart, before the window read the list again: the owner route reads it and keeps the owner", async () => {
     const w = await world({ codeReview: true });
     const handed = await w.send("Ready.", "handed");
-    // A new Inbox has not read the forge yet: the key is unknown to it until the route reads the list once.
     expect(w.forge.graphql()).toHaveLength(0);
     expect((await w.own(["github.com/northwind/billing-svc#412"], handed)).status).toBe(200);
     expect(w.forge.graphql()).toHaveLength(1);
@@ -574,10 +516,8 @@ describe("on", () => {
     const handed = await w.send("Look at Mei's.", "handed");
     w.forge.othersAnswer = { data: { viewer: { login: "dana" }, others0: { issueCount: 1, nodes: [ghPull(900, { author: { login: "mei" } })] } } };
     w.forge.othersDelayMs = 150;
-    // The list answers before Others lands (it never waits); the route waits for that read instead of a 404.
     expect((await w.own(["github.com/northwind/billing-svc#900"], handed)).status).toBe(200);
     expect(w.forge.others()).toHaveLength(1);
-    // A key no read names is still unknown, with no new Others read.
     const unknown = await w.own(["github.com/northwind/billing-svc#999"], handed);
     expect(unknown.status).toBe(404);
     expect(((await unknown.json()) as { code: string }).code).toBe("pull_unknown");
@@ -590,7 +530,6 @@ describe("on", () => {
     w.forge.othersAnswer = { data: { viewer: { login: "dana" }, others0: { issueCount: 1, nodes: [ghPull(900, { author: { login: "mei" } })] } } };
     w.forge.othersDelayMs = 150;
     const res = await w.review({ key: "github.com/northwind/billing-svc#900", action: "comment", body: "Looks fine.", head_sha: "nope" });
-    // Found (and open), so the answer is about the commit, never pull_unknown.
     expect(((await res.json()) as { code: string }).code).toBe("pull_moved");
   });
 
@@ -636,7 +575,6 @@ describe("on", () => {
     expect(layer.status).toBe(200);
     const layerAnswer = (await layer.json()) as { patch: string; base: string; head: string; head_sha: string | null };
     expect(layerAnswer.patch).toBe("diff of repos/northwind/billing-svc/pulls/413\n");
-    // The layer's head, read before and after its patch.
     expect(layerAnswer.head_sha).toBe("413".padStart(40, "a"));
     const stack = await fetch(`${w.base}/api/inbox/pulls/diff?key=${encodeURIComponent("github.com/northwind/billing-svc#413")}&scope=stack`);
     const stackAnswer = (await stack.json()) as { patch: string; base: string; head: string };
@@ -647,7 +585,6 @@ describe("on", () => {
 
     const unknown = await fetch(`${w.base}/api/inbox/pulls/diff?key=${encodeURIComponent("github.com/elsewhere/thing#9")}&scope=layer`);
     expect(unknown.status).toBe(404);
-    // Each: its head, its patch, its head again.
     expect(w.forge.calls.length).toBe(before + 6);
   });
 });
@@ -673,7 +610,6 @@ describe("the reader", () => {
     expect(limited.pulls).toHaveLength(3);
     expect(limited.hosts[0]!.error).toBe("rate_limited");
     expect(f.graphql()).toHaveLength(3);
-    // Held: asked again only after the hold, even on a refresh.
     now += 31_000;
     f.fail = null;
     await pulls.list(repos, { refresh: true });
@@ -759,9 +695,6 @@ describe("parsing", () => {
   });
 });
 
-// --- the review's findings (#2590): links stay in their project and repository, forks, stacks, guests ---
-
-/** Several projects: `billing-svc` and its second clone `billing-svc-2` (one origin), and `web-app` (another). */
 async function projects(answer: unknown) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-pulls-many-")));
   roots.push(root);
@@ -821,7 +754,6 @@ describe("links (findings D, E and two clones)", () => {
     const docs = await w.send("billing-svc", "Working on the docs on main, and feat-9.", "docs");
     const links = (await w.list()).links;
     expect(Object.keys(links)).toEqual([]);
-    // Handed over by the person, the fork's PR is that thread's.
     expect((await w.own(["github.com/northwind/billing-svc#9"], docs)).status).toBe(200);
     expect((await w.list()).links["github.com/northwind/billing-svc#9"]).toMatchObject({ via: "owner", thread_id: docs });
   });
@@ -876,7 +808,6 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
     expect((await pulls.diff("github.com/northwind/billing-svc#22", "stack")).head_sha).toBe(pushed);
     f.heads = [pushed, "c".repeat(40)];
     expect((await pulls.diff("github.com/northwind/billing-svc#21", "stack")).head_sha).toBeNull();
-    // The commit the person read, so a whole stack's review can be pinned to it.
     expect(pulls.readHead("github.com/northwind/billing-svc#22")).toBe(pushed);
   });
 
@@ -893,7 +824,6 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
     const old = "c".repeat(40);
     f.heads = [old, old];
     expect((await pulls.diff(key, "stack")).head_sha).toBe(old);
-    // This scope's cached answer named another head than the last one read: asked again.
     f.heads = [newer, newer];
     expect((await pulls.diff(key, "layer")).head_sha).toBe(newer);
     expect(f.heads).toEqual([]);
@@ -983,7 +913,6 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
       const answer = await pulls.diff(KEY, "layer");
       expect(answer.description).toBe("## Why\n\nThe schedule table.");
       expect(answer.head_sha).toBe("412".padStart(40, "a"));
-      // Its head, its patch, its head again.
       expect(f.calls.length).toBe(before + 3);
     });
 
@@ -1109,15 +1038,12 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
   });
 });
 
-// --- the worst-case stress test (break-ui on #2590): what the list must say when it can't read everything ---
-
 describe("the worst case (break-ui on #2590)", () => {
   const repos = [{ host: "github.com", repo: "northwind/billing-svc", project_id: "prj_1" }];
 
   test("a host that times out on the first read: marked unavailable with no last read (its PRs aren't shown); after one answer, a failure says when that answer was read", async () => {
     let now = 1_000_000;
     const f = forge();
-    // gh stopped at the list's time limit: nothing it said names a cause.
     f.fail = "context deadline exceeded";
     const pulls = createInboxPulls({ run: f.run, now: () => now });
     const first = await pulls.list(repos);
@@ -1151,16 +1077,13 @@ describe("the worst case (break-ui on #2590)", () => {
     const answer = { data: { viewer: { login: "dana" }, requested: { issueCount: 61, nodes: many(2000, 50) }, authored: { issueCount: 72, nodes: many(1000, 50) }, merged: { nodes: [] } } };
     const f = forge(answer);
     const listed = await createInboxPulls({ run: f.run }).list(repos);
-    // The searches were limited to the project's repository (`repo:`): every PR they found is the project's.
     expect(f.graphql()[0]!.args.some((a) => a.startsWith("authored=") && a.includes(" repo:northwind/billing-svc"))).toBe(true);
     expect(listed.hosts[0]!.capped).toEqual({ shown: 100, total: 133 });
-    // Nothing left out: no count said.
     expect(parseGithubPulls(JSON.stringify(GH_ANSWER), "github.com")!.capped).toBeUndefined();
     expect((await createInboxPulls({ run: forge().run }).list(repos)).hosts[0]!.capped).toBeUndefined();
   });
 
   test("the count says what the list shows: searches not limited to the projects (GitLab) give no total", async () => {
-    // jun's MRs: two found in the project, the rest of the 60 anywhere on gitlab.com.
     const answer = {
       data: {
         currentUser: {
@@ -1175,22 +1098,16 @@ describe("the worst case (break-ui on #2590)", () => {
     expect(parsed.capped).toEqual({ shown: 3, total: 60 });
     const run: RefRunner = async (cli, args) => {
       if (cli === "glab" && args[0] === "auth") return { stdout: "gitlab.com\n  ✓ Logged in to gitlab.com as dana (keyring)\n", stderr: "", exitCode: 0 };
-      // Others has no answer (it failed): only the person's own searches' count is known.
       if (cli === "glab" && othersCall(args)) return { stdout: "", stderr: "boom", exitCode: 1 };
       if (cli === "glab" && args.includes("graphql")) return { stdout: JSON.stringify(answer), stderr: "", exitCode: 0 };
       return { stdout: "", stderr: "not logged in", exitCode: 1 };
     };
     const listed = await createInboxPulls({ run }).list([{ host: "gitlab.com", repo: "northwind/data/ledger", project_id: "prj_1" }]);
     expect(listed.pulls.map((p) => p.number).sort()).toEqual([1, 3]);
-    // Two shown, not "3 of 60": how many of the other 57 are the project's is not known.
     expect(listed.hosts[0]!.capped).toEqual({ shown: 2, total: null });
   });
 
   test("two lists at once each keep their own CLI states: a second list never wipes what the first found", async () => {
-    // gh is not installed. glab is signed in to gitlab.com, and its graphql answers only when let go. The first list
-    // covers github.com (gh missing) and gitlab.com; while glab's graphql is held, a second list for gitlab.com starts.
-    // Were the CLI states shared, the second would reset them and the first would say nothing of gh (which the window
-    // reads as "gh isn't signed in").
     let letGo: () => void = () => {};
     const held = new Promise<void>((done) => (letGo = done));
     let graphqlAsked = false;
@@ -1243,14 +1160,12 @@ describe("the worst case (break-ui on #2590)", () => {
     );
     const pulls = createInboxPulls({ run: forge(answer).run });
     const listed = await pulls.list(repos);
-    // The answer itself carries no URL: the window asks the Inbox.
     expect(JSON.stringify(listed)).not.toContain("avatars.githubusercontent.com");
     expect(pulls.avatarUrls("github.com")).toEqual({ dana: "https://avatars.githubusercontent.com/u/1", tomas: "https://avatars.githubusercontent.com/u/2" });
     expect(pulls.avatarUrls("gitlab.com")).toEqual({});
   });
 
   test("reviewers' and approvers' pictures come in the same read; only the people a listed PR names may be asked for", async () => {
-    // GitLab: who approved and who was asked, each with a picture; a reviewer the forge gave no picture is left out.
     const gl = parseGitlabPulls(
       JSON.stringify({
         data: {
@@ -1265,7 +1180,6 @@ describe("the worst case (break-ui on #2590)", () => {
       "gitlab.example.org",
     )!;
     expect(gl.avatars).toEqual({ "lena-v": "https://gitlab.example.org/uploads/-/system/user/avatar/3/l.png", "nina-k": "https://gitlab.example.org/n.png" });
-    // GitHub: a requested user and an approver have pictures; a team has none to ask for.
     const reviewed = ghPull(3, {
       author: { login: "tomas", avatarUrl: "https://avatars.githubusercontent.com/u/2" },
       reviewRequests: { nodes: [{ requestedReviewer: { __typename: "User", login: "nina-k", avatarUrl: "https://avatars.githubusercontent.com/u/5" } }, { requestedReviewer: { __typename: "Team", slug: "platform" } }] },
@@ -1390,7 +1304,6 @@ describe("the searches (scoped to the projects' repositories)", () => {
       expect(q).not.toContain("@me");
       named.push(...q.split(" ").filter((t) => t.startsWith("repo:")));
     }
-    // The first repositories (the most active, as the reader orders them), each once; the rest not read.
     expect(named.sort()).toEqual(covered.map((r) => `repo:${r}`).sort());
     expect(covered).toEqual(many.slice(0, covered.length));
     expect(covered.length).toBeLessThan(many.length);
@@ -1471,7 +1384,6 @@ describe("Mine, To review and Others (the list's filters)", () => {
     const parsed = parseGithubPulls(JSON.stringify(others), "github.com", "others")!;
     expect(parsed.open_total).toBe(4);
     expect(parsed.pulls.every((p) => !p.requested && !p.assigned)).toBe(true);
-    // The person's own answer read as Others: nothing of theirs is taken from it.
     expect(parseGithubPulls(JSON.stringify(own), "github.com", "others")!.pulls).toEqual([]);
     const f = forge(own);
     f.othersAnswer = others;
@@ -1492,7 +1404,6 @@ describe("Mine, To review and Others (the list's filters)", () => {
     const parsed = parseGitlabPulls([JSON.stringify(first), JSON.stringify(more)], "gitlab.com", "others")!;
     expect(parsed.pulls.map((p) => p.number).sort((a, b) => a - b)).toEqual([7, 58, 64]);
     expect(parsed.open_total).toBe(5);
-    // One query's answer not one: the whole Others read is not.
     expect(parseGitlabPulls([JSON.stringify(first), "not json"], "gitlab.com", "others")).toBeNull();
     expect(parseGitlabPulls(JSON.stringify(user), "gitlab.com")!.pulls[0]).toMatchObject({ assigned: true, mine: false });
   });
@@ -1523,7 +1434,6 @@ describe("Mine, To review and Others (the list's filters)", () => {
     const first = await listSettled(pulls, repos);
     expect(first.pulls.map((p) => p.number).sort()).toEqual([412, 413, 880, 900]);
 
-    // Others answers a GraphQL error: the own lists are read and shown; Others' last answer is kept and said.
     f.othersAnswer = { ...othersOf(1, []), errors: [{ type: "RESOURCE_LIMITS_EXCEEDED", message: "Resource limits exceeded" }] };
     now += INBOX_PULLS_OTHERS_FRESH_MS;
     const second = await listSettled(pulls, repos);
@@ -1533,7 +1443,6 @@ describe("Mine, To review and Others (the list's filters)", () => {
     expect(second.hosts[0]!).toMatchObject({ others_error: "unavailable", others_last_read: new Date(1_000_000).toISOString() });
     expect(second.pulls.map((p) => p.number).sort()).toEqual([412, 413, 880, 900]);
 
-    // Others never answered at all: the own lists stand alone, and the host says Others is missing (no last read).
     const fresh = forge();
     fresh.othersFail = "HTTP 502: Bad Gateway";
     const alone = await listSettled(createInboxPulls({ run: fresh.run }), repos);
@@ -1563,7 +1472,6 @@ describe("Mine, To review and Others (the list's filters)", () => {
       const listed = await pulls.list(repos, { refresh: true, others: true });
       expect(performance.now() - started).toBeLessThan(1_000);
       expect(f.graphql()).toHaveLength(2);
-      // The own lists, and Others' last answer (#900), while the new Others read hangs.
       expect(listed.pulls.map((p) => p.number).sort()).toEqual([412, 413, 880, 900]);
       expect(listed.hosts[0]).toMatchObject({ others_pending: true });
       expect(listed.hosts[0]!.error).toBeUndefined();
@@ -1580,13 +1488,11 @@ describe("Mine, To review and Others (the list's filters)", () => {
     const run: RefRunner = async (cli, args, env) => {
       if (othersCall(args)) {
         asked += 1;
-        // Hangs past the deadline.
         await hung;
       }
       return f.run(cli, args, env);
     };
     const realSetTimeout = globalThis.setTimeout;
-    // The deadline's timer fires at once; every other timer as asked.
     globalThis.setTimeout = ((fn: () => void, ms?: number) => realSetTimeout(fn, ms === INBOX_PULLS_OTHERS_DEADLINE_MS ? 1 : ms)) as unknown as typeof setTimeout;
     try {
       const pulls = createInboxPulls({ run });
@@ -1616,13 +1522,11 @@ describe("Mine, To review and Others (the list's filters)", () => {
     await pulls.list(repos, { refresh: true });
     expect(f.graphql()).toHaveLength(2);
     expect(f.others()).toHaveLength(1);
-    // The Others view is open: Others is read as the list is.
     now += INBOX_PULLS_FRESH_MS;
     await pulls.list(repos, { others: true });
     expect(f.others()).toHaveLength(2);
     await pulls.list(repos, { others: true });
     expect(f.others()).toHaveLength(2);
-    // The view closed: the 5 minutes again.
     now += INBOX_PULLS_FRESH_MS;
     await pulls.list(repos);
     expect(f.others()).toHaveLength(2);
@@ -1635,7 +1539,6 @@ describe("Mine, To review and Others (the list's filters)", () => {
 
   test("a big Others read is bounded: 500 repositories, one request of at most 3 searches, the most active repositories first", async () => {
     const many = Array.from({ length: 500 }, (_, i) => ({ host: "github.com", repo: `northwind/service-number-${i}`, project_id: "prj_1" }));
-    // The person's own PR is in the last repository by name: the most active, so it is searched first.
     const hot = many.at(-1)!.repo;
     const f = forge({ data: { viewer: { login: "dana" }, requested: { nodes: [] }, authored: { nodes: [ghPull(412, { repository: { nameWithOwner: hot }, url: `https://github.com/${hot}/pull/412` })] }, assigned: { nodes: [] }, merged: { nodes: [] } } });
     const listed = await listSettled(createInboxPulls({ run: f.run }), many);
@@ -1644,8 +1547,6 @@ describe("Mine, To review and Others (the list's filters)", () => {
     const searches = others[0]!.args.filter((a) => /^others\d+=/.test(a));
     expect(searches.length).toBeLessThanOrEqual(INBOX_PULLS_OTHERS_CALLS_MAX);
     expect(searches[0]).toContain(`repo:${hot} `);
-    // Not every repository was read: how many open PRs there are is not known.
-    // Only Others left PRs out: the person's own lists are whole (`of: "others"`).
     expect(listed.hosts[0]!.capped).toEqual({ shown: 1, total: null, of: "others" });
   });
 
@@ -1687,7 +1588,6 @@ describe("Mine, To review and Others (the list's filters)", () => {
     expect(f.others()).toHaveLength(othersBefore);
     expect(held.hosts[0]!.error).toBe("rate_limited");
     expect(held.pulls).toHaveLength(3);
-    // Diffs are REST, not the GraphQL budget: still read.
     const diff = await pulls.diff("github.com/northwind/billing-svc#412", "layer");
     expect(diff.patch).toContain("diff of");
     now = Date.parse(reset) + 1;
@@ -1767,8 +1667,6 @@ describe("Post to GitHub/GitLab (the owner's answer C: the person chooses at the
     w.forge.heads = ["b".repeat(40), "c".repeat(40)];
     const diff = (await (await fetch(`${w.base}/api/inbox/pulls/diff?key=${encodeURIComponent(PR412)}&scope=layer`)).json()) as { head_sha: string | null };
     expect(diff.head_sha).toBeNull();
-    // Neither read is kept as a head the person read: the page sends neither (it posts nothing at a null head), and
-    // one the PR does not have is refused with nothing run.
     w.forge.prCommits = [SHA412];
     for (const sha of ["b".repeat(40), "c".repeat(40)]) {
       const res = await w.review({ key: PR412, head_sha: sha, action: "approve", body: "" });
@@ -2010,7 +1908,6 @@ describe("who may read it", () => {
       const guest = await through(GUEST);
       expect(guest.status).toBe(403);
       expect(((await guest.json()) as { code: string }).code).toBe("local_only");
-      // Nor may a guest read the risk rules, change them, or ask for an agent's models.
       for (const [path, init] of [
         ["/api/inbox/pulls/risk", {}],
         ["/api/inbox/pulls/risk/models?provider=pi-sdk", {}],
@@ -2019,18 +1916,15 @@ describe("who may read it", () => {
         const answer = await fetch(`http://127.0.0.1:${listener}${path}`, { ...init, headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": GUEST, "Content-Type": "application/json" } });
         expect(((await answer.json()) as { code: string }).code).toBe("local_only");
       }
-      // Nor read a project's files through a guide's expand arrows.
       const guestFile = await fetch(`http://127.0.0.1:${listener}/api/inbox/messages/msg_any/guide/file?path=a.ts`, { headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": GUEST } });
       expect(guestFile.status).toBe(403);
       expect(((await guestFile.json()) as { code: string }).code).toBe("local_only");
-      // Nor may a guest hand a PR to an agent.
       const handGuest = await fetch(`http://127.0.0.1:${listener}/api/inbox/pulls/owner`, {
         method: "POST",
         headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": GUEST, "Content-Type": "application/json" },
         body: JSON.stringify({ keys: ["github.com/northwind/billing-svc#412"], thread_id: "msg_01M4H6G73M9H3Z32T859E72NOP" }),
       });
       expect(handGuest.status).toBe(403);
-      // Nor post a review with the owner's gh account: the Inbox's one forge write is the owner's alone.
       const postGuest = await fetch(`http://127.0.0.1:${listener}/api/inbox/pulls/review`, {
         method: "POST",
         headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": GUEST, "Content-Type": "application/json" },
@@ -2041,7 +1935,6 @@ describe("who may read it", () => {
       expect(f.calls).toEqual([]);
       expect(post.calls).toEqual([]);
       expect((await through(OWNER)).status).toBe(200);
-      // The owner over the tailnet may hand a PR over: past the guards, the route answers on the request itself.
       const handOwner = await fetch(`http://127.0.0.1:${listener}/api/inbox/pulls/owner`, {
         method: "POST",
         headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": OWNER, "Content-Type": "application/json" },
@@ -2049,7 +1942,6 @@ describe("who may read it", () => {
       });
       expect(handOwner.status).toBe(422);
       expect(((await handOwner.json()) as { field?: string; code?: string }).code).not.toBe("local_only");
-      // The owner over the tailnet is never blocked: past the guards (this Inbox has no project for the PR, so 404).
       const postOwner = await fetch(`http://127.0.0.1:${listener}/api/inbox/pulls/review`, {
         method: "POST",
         headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": OWNER, "Content-Type": "application/json" },
@@ -2063,8 +1955,6 @@ describe("who may read it", () => {
     }
   });
 });
-
-// --- the authors' pictures (the owner on #2608: the row's top-left spot is the author's picture) ---
 
 describe("GET /api/inbox/pulls/avatar", () => {
   const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
@@ -2095,10 +1985,8 @@ describe("GET /api/inbox/pulls/avatar", () => {
     expect(res.headers.get("content-security-policy")).toBe("sandbox; default-src 'none'");
     expect(res.headers.get("cross-origin-resource-policy")).toBe("same-origin");
     expect(new Uint8Array(await res.arrayBuffer())).toEqual(PNG);
-    // The person's own picture too; the second ask of a picture is the cache's.
     expect((await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=dana`)).status).toBe(200);
     expect((await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=tomas`)).status).toBe(200);
-    // Asked at s=96 (inbox-pull-avatars.ts sizeForAFace).
     expect(s.fetched).toEqual(["https://avatars.githubusercontent.com/u/2?v=4&s=96", "https://avatars.githubusercontent.com/u/1?v=4&s=96"]);
   });
 
@@ -2106,7 +1994,6 @@ describe("GET /api/inbox/pulls/avatar", () => {
     const s = scripted();
     const w = await world({ codeReview: true, answer: pictured, avatars: s.options });
     await w.send("Working in billing-svc.", "avatars");
-    // Before any list: no one is known.
     expect(((await (await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=tomas`)).json()) as { code: string }).code).toBe("avatar_unknown");
     await w.pulls();
     const unknown = await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=mallory`);
@@ -2123,8 +2010,6 @@ describe("GET /api/inbox/pulls/avatar", () => {
     await w.send("Working in billing-svc.", "avatars");
     await w.pulls();
     expect((await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=tomas`)).status).toBe(200);
-    // The project's origin goes (removed, or no longer on github.com): once the Inbox reads the origin again (its
-    // cache past its age), the next list names no host at all.
     w.setRepo(null);
     setSystemTime(new Date(Date.now() + INBOX_REPO_TTL_MS + 60_000));
     try {

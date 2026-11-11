@@ -1,11 +1,3 @@
-/**
- * The PR page's All files: the PR's repository at the head this Inbox read, answered as the review app's
- * `/api/repo-files` and `/api/repo-file` so its tree and file view read it unchanged. What regresses:
- *  - a listing at a commit the Inbox never read for that PR (any sha a page names), or for a PR the list did not name;
- *  - a file read that is not in the listing (`..`, an unlisted path), or the forge asked twice for one listing;
- *  - a failed listing kept (it never comes back), or a rate-limited forge asked again before its hold ends.
- * Through a fake gh (no Inbox, no real CLI).
- */
 import { describe, expect, test } from "bun:test";
 import { createInboxPulls } from "./inbox-pulls";
 
@@ -45,7 +37,6 @@ function forge() {
     if (tree) {
       state.trees.push(tree);
       if (state.tree.exitCode) return { stdout: "", stderr: state.tree.stderr, exitCode: state.tree.exitCode };
-      // gh's `--jq` has already shaped it.
       return ok({ truncated: false, paths: ["src/b.ts", "README.md", "src/a.ts"] });
     }
     const contents = args.find((a) => a.includes("/contents/"));

@@ -1,11 +1,3 @@
-/**
- * Launch PR 2: who can answer a launched session's permission prompt, through
- * the real Inbox server. Guards: a bare local call (an agent's curl: no page
- * Origin) is refused and writes nothing; a Re-ask never sends a permission
- * question's picks; the window answers; and the person's paired phone answers
- * through the device door (its token checked there), which sends no Origin.
- * Every test uses its own temp data dir.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -27,7 +19,6 @@ afterEach(() => {
 const SESSION = "0d6c2f1e-5b7a-4c8e-9f00-bbbbbbbbbbbb";
 const CARD = ["```", "bun run build", "```", "", "in `~/billing`", "", ":::question", "Claude Code wants to run a command", "", "- [ ] Allow once", "- [ ] Deny", ":::"].join("\n");
 
-/** Two open permission questions, written as the permission route writes them, then the server on the same data dir. */
 async function setup() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-perm-answers-")));
   roots.push(root);
@@ -39,7 +30,6 @@ async function setup() {
   const author = { kind: "agent" as const, host: "claude-code", session: `perm:${SESSION}`, name: "Claude Code" };
   const first = store.sendMessage({ project_id: project.id, author, permission: true, body: CARD, idempotency_key: "perm-req-00000001" }).message;
   const second = store.sendMessage({ project_id: project.id, author, permission: true, body: CARD, reply_to: first.id, idempotency_key: "perm-req-00000002" }).message;
-  // Pairing never reaches the real relay: a port nothing listens on (restored after each test).
   relayBefore = process.env.PLANNOTATOR_RELAY_URL;
   process.env.PLANNOTATOR_RELAY_URL = "http://127.0.0.1:9";
   const server = await startInboxServer({ dataDir, binaryPath: null, phones: true });
@@ -83,7 +73,6 @@ describe("answering a permission question", () => {
     const { server, thread, first, second } = await setup();
     const origin = { Origin: base(server) };
     const q = await questionOf(server, first, thread);
-    // The person picked Allow once on the first and did not send it.
     const picked = await post(server, `/api/inbox/messages/${first}/picks`, { serverSession: server.serverSession, questions: replyBody(server, q, "x").questions }, origin);
     expect(picked.status).toBe(200);
     const reask = await post(server, `/api/inbox/messages/${second}/reask`, { serverSession: server.serverSession, idempotency_key: "00000000-0000-4000-8000-000000000102" }, origin);

@@ -1,17 +1,3 @@
-/**
- * The window's list read sends only what changed (#2593): `GET
- * /api/inbox/threads?since=<list_version>` and the window's own reader
- * (packages/inbox/listRead.ts, core's applyInboxListDelta), against a real
- * Inbox in a temp data dir.
- *
- * What this catches: a list put together from changes that differs in any
- * way from a full read (a row's state, sort order, counts, unread, questions,
- * snooze, archive, pins, projects, drafts, a linked machine's rows), for a
- * window that reads after every change and for one that fell several changes
- * behind; a version the server cannot answer as a change (another run's, a
- * forged one) answered as one; and a read without `since` (the phone, a
- * linked machine, an older window) answered any differently than before.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,7 +10,6 @@ import { startInboxServer, type InboxServer } from "./inbox";
 type Json = Record<string, any>;
 type Model = Json & { sections: Json[]; snoozed?: Json[]; pins?: Json[]; list_version?: string };
 
-/** The window's query (packages/inbox/api.ts `list`). */
 const WINDOW_LIST = "/api/inbox/threads?archived=exclude&snoozed=exclude&machines=1";
 
 const roots: string[] = [];
@@ -41,7 +26,6 @@ function scratch(): string {
   return join(root, "data");
 }
 
-/** No tailnet: every `tailscale` call fails. */
 const noTailscale: TailscaleRunner = () => ({ status: 1, stdout: "", stderr: "not here" });
 
 async function start(dataDir: string): Promise<InboxServer> {
@@ -56,7 +40,6 @@ async function getJson(server: InboxServer, path: string): Promise<Model> {
   return (await response.json()) as Model;
 }
 
-/** The window's reader against this Inbox; `answers` records what each read was answered with. */
 function windowReader(server: () => InboxServer) {
   const answers: ("delta" | "whole")[] = [];
   const reader = createListReader<Model>(async (since) => {
@@ -69,7 +52,6 @@ function windowReader(server: () => InboxServer) {
 
 const withoutVersion = ({ list_version: _version, ...model }: Model) => model;
 
-/** The reader's list equals a full read of the same store, field for field. */
 async function expectSameAsFull(server: InboxServer, merged: Model, step: string) {
   const full = await getJson(server, WINDOW_LIST);
   expect({ step, model: withoutVersion(merged) }).toEqual({ step, model: full });
@@ -148,11 +130,9 @@ describe("the window's list read, only what changed", () => {
     for (const [step, act] of steps) {
       await act();
       await expectSameAsFull(inbox, await eager.reader.read(), step);
-      // The other window reads every third step: several changes at once, rows that came and went meanwhile.
       if (++index % 3 === 0) await expectSameAsFull(inbox, await behind.reader.read(), `${step} (several steps behind)`);
     }
     await expectSameAsFull(inbox, await behind.reader.read(), "the window behind catches up");
-    // Every read after the first was answered with the changes only: the point of it.
     expect(eager.answers[0]).toBe("whole");
     expect(eager.answers.slice(1).every((answer) => answer === "delta")).toBe(true);
     expect(behind.answers.slice(1).every((answer) => answer === "delta")).toBe(true);
@@ -193,20 +173,17 @@ describe("the window's list read, only what changed", () => {
     const window = windowReader(() => inbox);
     await window.reader.read();
     const held = (await getJson(inbox, `${WINDOW_LIST}&since=`)).list_version!;
-    // A forged version (this run, a number past any it gave) and another query's version.
     const [run, kind] = held.split(".");
     expect("delta" in (await getJson(inbox, `${WINDOW_LIST}&since=${run}.${kind}.99999`))).toBe(false);
     expect("delta" in (await getJson(inbox, `${WINDOW_LIST}&since=garbage`))).toBe(false);
     const other = (await getJson(inbox, `/api/inbox/threads?since=`)).list_version!;
     expect("delta" in (await getJson(inbox, `${WINDOW_LIST}&since=${other}`))).toBe(false);
-    // The Inbox restarts (an update): the window's version is from the run before.
     inbox.stop();
     servers.splice(servers.indexOf(inbox), 1);
     inbox = await start(dataDir);
     inbox.store.sendMessage({ project_id: api, author: agent("ses_after"), body: "After the restart." });
     await expectSameAsFull(inbox, await window.reader.read(), "after a restart");
     expect(window.answers).toEqual(["whole", "whole"]);
-    // And changes again from there.
     inbox.store.sendMessage({ project_id: api, author: agent("ses_after"), body: "Again." });
     await expectSameAsFull(inbox, await window.reader.read(), "the next read");
     expect(window.answers.at(-1)).toBe("delta");
@@ -231,7 +208,6 @@ describe("a linked machine's rows in the window's list", () => {
 
   test("rows another machine adds, changes and drops are put together exactly as a full read has them", async () => {
     const dataDir = scratch();
-    // The other machine: its list is what this test says, and its stream sends a record whenever the test changes it.
     const row = (id: string, fields: Json = {}) => ({
       thread_id: id,
       subject: `Far ${id.slice(-2)}`,
@@ -273,7 +249,6 @@ describe("a linked machine's rows in the window's list", () => {
         return Response.json({ ok: true });
       },
     });
-    /** The other machine changes: a record on its stream, so this Inbox reads its list again. */
     const farChange = (rows: Json[]) => {
       farRows = rows;
       farCursor += 1;
@@ -285,7 +260,6 @@ describe("a linked machine's rows in the window's list", () => {
     const inbox = await start(dataDir);
     try {
       seed(inbox.store);
-      /** This Inbox holds the far list at this cursor. */
       const farListed = async (cursor: number) => {
         for (let waited = 0; waited < 10_000; waited += 50) {
           const machines = (await getJson(inbox, "/api/inbox/machines")).machines as Json[];
@@ -300,7 +274,6 @@ describe("a linked machine's rows in the window's list", () => {
       expect(first.sections.flatMap((s: Json) => s.threads).filter((r: Json) => r.machine === OTHER)).toHaveLength(2);
       await expectSameAsFull(inbox, first, "the far rows merged");
 
-      // Each step makes the far rows from the rows before it.
       const steps: [string, (rows: Json[]) => Json[]][] = [
         ["a far row changes (a look, it sinks to quiet)", (rows) => [rows[0]!, { ...rows[1]!, section: "quiet", unread: false, unseen: 0 }]],
         ["a far row is added", (rows) => [...rows, row("msg_01KFAR00000000000000000003", { section: "stopped", last_at: "2026-11-01T11:00:00.000Z" })]],
@@ -313,7 +286,6 @@ describe("a linked machine's rows in the window's list", () => {
         await farListed(farCursor);
         await expectSameAsFull(inbox, await window.reader.read(), step);
       }
-      // And this Inbox's own rows still change beside them.
       inbox.store.sendMessage({ project_id: inbox.store.listProjects()[0]!.id, author: agent("ses_local"), body: "Local news." });
       await expectSameAsFull(inbox, await window.reader.read(), "a local message beside the far rows");
       expect(window.answers.slice(1).every((answer) => answer === "delta")).toBe(true);

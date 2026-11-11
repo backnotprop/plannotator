@@ -1,17 +1,3 @@
-/**
- * Notifications that never fail silently, the server's half:
- * - one origin: a browser navigation to 127.0.0.1:<port> (or [::1]) goes to
- *   http://localhost:<port>/, the address the Inbox opens and advertises,
- *   because notification permission is per origin. Nothing else redirects:
- *   APIs, the device door, MCP, the tailnet, a client without fetch metadata,
- *   another name (the fixed-address prototype's inbox.plannotator.localhost);
- * - which windows are open and whether any may notify (`notify_reach` on
- *   health, settings and the event stream's `reach` frames);
- * - an EventSource reconnect resumes from its Last-Event-ID, so a tab that
- *   slept catches up from where it was.
- * A running Inbox on loopback under a temp data dir; raw HTTP so the Host and
- * fetch-metadata headers are exactly what a browser would send.
- */
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { request } from "node:http";
@@ -75,29 +61,21 @@ test("nothing else redirects: no fetch metadata, a frame, APIs, the door, MCP, H
   const { server } = await inbox();
   const port = server.port;
   const host = { Host: `127.0.0.1:${port}` };
-  // curl and the tests' own fetches (no fetch metadata) get the page.
   expect((await raw(port, "/", host)).status).toBe(200);
-  // Not a top-level document.
   expect((await raw(port, "/", { ...host, ...NAVIGATE, "Sec-Fetch-Dest": "iframe" })).status).toBe(200);
   expect((await raw(port, "/", { ...host, ...NAVIGATE, "Sec-Fetch-Mode": "cors" })).status).toBe(200);
   expect((await raw(port, "/", { ...host, ...NAVIGATE }, "HEAD")).status).toBe(200);
-  // APIs answer where they were asked, navigation headers or not.
   const health = await raw(port, "/api/inbox/health", { ...host, ...NAVIGATE });
   expect(health.status).toBe(200);
   expect(JSON.parse(health.text).app).toBe("plannotator-inbox");
   const list = await raw(port, "/api/inbox/threads", { ...host, ...NAVIGATE });
   expect(list.status).toBe(200);
-  // The device door (phones off: its unknown-route 404, never a redirect).
   expect((await raw(port, "/api/inbox/device/health", { ...host, ...NAVIGATE })).status).toBe(404);
-  // MCP keeps its own refusal for a browser.
   expect((await raw(port, "/mcp", { ...host, ...NAVIGATE }, "POST", "{}")).status).not.toBe(307);
-  // Another loopback name (the fixed-address prototype's) is not a spelling of this port.
   expect((await raw(port, "/", { Host: "inbox.plannotator.localhost", ...NAVIGATE })).status).toBe(200);
-  // Another port's spelling is not this server's.
   expect((await raw(port, "/", { Host: `127.0.0.1:${port + 1}`, ...NAVIGATE })).status).toBe(200);
 });
 
-/** Run with PLANNOTATOR_URL_HOST set, restoring it after. */
 async function withUrlHost<T>(value: string, run: () => Promise<T>): Promise<T> {
   const before = process.env.PLANNOTATOR_URL_HOST;
   process.env.PLANNOTATOR_URL_HOST = value;
@@ -122,9 +100,7 @@ test("with a localhost subdomain configured (#2184), the Inbox opens there and l
     const canonical = await raw(port, "/", { Host: `plannotator.localhost:${port}`, ...NAVIGATE });
     expect(canonical.status).toBe(200);
     expect(canonical.text).toContain("<title>Inbox</title>");
-    // Another subdomain is not this Inbox's name: answered where it asked, never redirected.
     expect((await raw(port, "/", { Host: `other.localhost:${port}`, ...NAVIGATE })).status).toBe(200);
-    // MCP and the connection routes still answer only the plain loopback names.
     const mcp = await raw(port, "/mcp", { Host: `plannotator.localhost:${port}`, "Content-Type": "application/json" }, "POST", "{}");
     expect(mcp.status).toBe(403);
     expect(JSON.parse(mcp.text).code).toBe("forbidden_host");
@@ -140,7 +116,6 @@ test("a url host that is not a localhost subdomain (a tailnet name) leaves the I
 
 test("the redirect follows the start-time address, not the config now", () => {
   const req = new Request("http://localhost:5555/", { headers: { Host: "localhost:5555", ...NAVIGATE } });
-  // Unset at start: localhost is the address, whatever the config says later.
   expect(inboxCanonicalRedirect(req, new URL(req.url), "http://localhost:5555/", "local")).toBeNull();
   expect(inboxCanonicalRedirect(req, new URL(req.url), "http://plannotator.localhost:5555/", "local")?.headers.get("location")).toBe(
     "http://plannotator.localhost:5555/",
@@ -153,7 +128,6 @@ test("the tailnet listener is never redirected", () => {
   expect(inboxCanonicalRedirect(req, new URL(req.url), "http://localhost:5555/", "local")?.status).toBe(307);
 });
 
-/** Read an event stream until `until` matches, then stop. */
 async function readStream(response: Response, until: (text: string) => boolean, controller: AbortController): Promise<string> {
   const reader = response.body!.getReader();
   let text = "";
@@ -190,13 +164,11 @@ test("windows report what they may do: open streams are counted, a report change
   expect(reachFrames(first).at(-1)).toEqual({ enabled: true, windows: 1, allowed: 1, allowed_origins: ["http://localhost:1234"] });
   expect(await health(server)).toMatchObject({ windows: 1, allowed: 1 });
 
-  // A second tab at the old spelling, without permission: open, not allowed.
   const other = new AbortController();
   const otherStream = await fetch(`${base}/api/inbox/events?cursor=0&window=w-tab-two-000&permission=default&origin=${encodeURIComponent("http://127.0.0.1:1234")}`, { signal: other.signal });
   await Bun.sleep(20);
   expect(await health(server)).toEqual({ enabled: true, windows: 2, allowed: 1, allowed_origins: ["http://localhost:1234"] });
 
-  // The first tab's permission is revoked in site settings: it reports, and the count follows.
   const report = await fetch(`${base}/api/inbox/window`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -205,7 +177,6 @@ test("windows report what they may do: open streams are counted, a report change
   expect(report.status).toBe(200);
   expect(((await report.json()) as { notify_reach: InboxNotifyReach }).notify_reach).toMatchObject({ windows: 2, allowed: 0 });
 
-  // Notifications off in Settings: reach says so, whatever the windows.
   await fetch(`${base}/api/inbox/settings`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -213,14 +184,11 @@ test("windows report what they may do: open streams are counted, a report change
   });
   expect((await health(server)).enabled).toBe(false);
 
-  // Both responses stay referenced until here: Bun 1.4 closes the connection
-  // of a streamed response that is garbage-collected unread, and the tab
-  // would leave early.
+  // Both responses stay referenced: Bun 1.4 closes the connection of a streamed response that is garbage-collected unread.
   controller.abort();
   other.abort();
   await Promise.all([stream, otherStream].map((res) => res.body?.cancel().catch(() => {})));
   await Bun.sleep(30);
-  // Within the grace the records are kept but no longer open.
   expect((await health(server)).windows).toBe(0);
   await Bun.sleep(150);
   expect(await health(server)).toEqual({ enabled: false, windows: 0, allowed: 0, allowed_origins: [] });
@@ -234,7 +202,6 @@ test("a report is validated and stale-tab guarded", async () => {
   expect((await post({ window: "w-tab-one-000", permission: "yes" })).status).toBe(422);
   expect((await post({ serverSession: "someone-else", window: "w-tab-one-000", permission: "granted" })).status).toBe(409);
   expect((await post({ window: "w-tab-one-000", permission: "granted", origin: "javascript:alert(1)" })).status).toBe(200);
-  // Another site's page cannot report.
   const cross = await fetch(`http://127.0.0.1:${server.port}/api/inbox/window`, {
     method: "POST",
     headers: { "Content-Type": "text/plain", Origin: "https://evil.example" },
@@ -267,7 +234,6 @@ test("a reconnect resumes from Last-Event-ID, not the cursor its URL was opened 
   expect(text).toContain(missed);
   expect(text).not.toContain(`"id":"${early}"`);
 
-  // An unusable Last-Event-ID (empty, not a number) falls back to the URL's cursor: neither a full replay nor none.
   for (const header of ["", "abc", "-1", "1.5"]) {
     const ctl = new AbortController();
     const again = await fetch(`http://127.0.0.1:${server.port}/api/inbox/events?cursor=${seenUpTo}`, {
@@ -303,7 +269,6 @@ test("reach frames go to Inbox windows only, never to a stream without a window 
   const windowStream = await fetch(`${base}/api/inbox/events?cursor=0&window=w-tab-one-000&permission=granted`, { signal: windowCtl.signal });
   const windowText = await readStream(windowStream, (t) => t.includes("event: reach"), windowCtl);
   expect(windowText).toContain("event: reach");
-  // A second window opening changes the counts: the window streams hear it, the plain one never does.
   const second = new AbortController();
   const secondStream = await fetch(`${base}/api/inbox/events?cursor=0&window=w-tab-two-000&permission=default`, { signal: second.signal });
   expect(await readStream(secondStream, (t) => t.includes("event: reach"), second)).toContain('"windows":2');
@@ -325,7 +290,6 @@ test("a reconnect past the grace comes back with its URL's stale permission; the
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ window: "w-tab-one-000", permission, origin: "http://localhost:1" }),
     });
-  // Opened before the person allowed notifications, allowed since.
   const url = `${base}/api/inbox/events?cursor=0&window=w-tab-one-000&permission=default&origin=${encodeURIComponent("http://localhost:1")}`;
   const first = new AbortController();
   await readStream(await fetch(url, { signal: first.signal }), (t) => t.includes("event: reach"), first);
@@ -333,11 +297,9 @@ test("a reconnect past the grace comes back with its URL's stale permission; the
   expect(await health(server)).toMatchObject({ windows: 1, allowed: 1 });
   first.abort();
   await Bun.sleep(120);
-  // EventSource reconnects with the same URL, past the grace (or after a restart): the record is new and stale.
   const again = new AbortController();
   await readStream(await fetch(url, { signal: again.signal }), (t) => t.includes("event: reach"), again);
   expect(await health(server)).toMatchObject({ windows: 1, allowed: 0 });
-  // What the page does on the stream's hello (notify.ts reportWindow): the count is right again.
   await report("granted");
   expect(await health(server)).toMatchObject({ windows: 1, allowed: 1 });
   again.abort();
@@ -348,10 +310,8 @@ test("createInboxWindows: a report that lands before its stream is kept; a recon
   windows.report("w-early-000", { permission: "granted", origin: "http://localhost:1", via: "local" });
   expect(windows.reach(true)).toMatchObject({ windows: 0, allowed: 0 });
   const leave = windows.connect("w-early-000", { permission: "default", origin: null, via: "local" });
-  // The URL's older permission does not undo the report.
   expect(windows.reach(true)).toMatchObject({ windows: 1, allowed: 1 });
   leave();
-  // EventSource reconnects with the URL it was opened with.
   const again = windows.connect("w-early-000", { permission: "default", origin: null, via: "local" });
   expect(windows.reach(true)).toMatchObject({ windows: 1, allowed: 1 });
   again();

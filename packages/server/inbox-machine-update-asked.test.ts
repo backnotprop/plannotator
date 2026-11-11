@@ -1,10 +1,3 @@
-/**
- * "Ask an agent on <machine> to update it" (the owner's call, 2026-11-08): an older machine's door takes no `update`,
- * so the window sends an agent there a New message through the forward, then tells this Inbox with
- * `POST /api/inbox/machines/:id/update/asked`. Guarded here: who may say it, what of it is kept, and that the row says
- * it. A loopback door stands in for the older machine (PLANNOTATOR_TEST_SANDBOX lets the transport take it); nothing
- * else runs.
- */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -34,7 +27,6 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-/** An Inbox from before machines could update each other: its health names no `machine_update`. */
 function olderDoor() {
   const server = Bun.serve({
     hostname: "127.0.0.1",

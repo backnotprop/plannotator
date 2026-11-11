@@ -1,12 +1,3 @@
-/**
- * The edges of the filesystem (audit items D4, D5): `/` and a home folder that
- * is itself a git work tree (dotfiles) never become a repository's project.
- * Real git repositories in temp folders; the home folder is a temp folder
- * passed to the code under test (`home`, `projectRootHome`), never HOME.
- * What can regress: every plain folder under a dotfiles home filed under the
- * home folder, a desktop app's shim at `/` making project "/", and a git that
- * runs past its time limit filing a folder into a home project for good.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -79,7 +70,6 @@ function repository(folder: string): string {
   return folder;
 }
 
-/** A home folder that is a git work tree (dotfiles), with plain folders and a real repository under it, and a dotfiles worktree beside it. */
 function dotfilesHome() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-home-")));
   scratch.push(root);
@@ -99,18 +89,13 @@ describe("a home folder that is a git work tree (dotfiles)", () => {
     const roots = createInboxProjectRoots({ home: w.home });
     expect((await roots.resolve(w.notes)).root).toBe(w.notes);
     expect((await roots.resolve(join(w.home, "notes"))).root).toBe(join(w.home, "notes"));
-    // A session started at home files under home, the plain folder, as for a home with no git.
     expect((await roots.resolve(w.home)).root).toBe(w.home);
     expect((await roots.resolve(join(w.proj, "src"))).root).toBe(w.proj);
-    // A linked worktree of the dotfiles repository does not fold into home: its own folder.
     expect((await resolveInboxProjectRoot(w.dotWorktree, { home: w.home })).root).toBe(w.dotWorktree);
-    // The same layout when that folder is not the home folder: a repository, which holds its subfolders.
     expect((await resolveInboxProjectRoot(w.notes, { home: null })).root).toBe(w.home);
   });
 });
 
-// #2526 delta review, D5: the dotfiles check answers "not a work tree", so rule 4 (a folder holding one
-// repository's checkouts) and the startup fold still run for a person whose home folder is a git repository.
 describe("a dotfiles home and rule 4", () => {
   function appnotesUnder(home: string) {
     const folder = join(home, "workspaces", "appnotes");
@@ -125,7 +110,6 @@ describe("a dotfiles home and rule 4", () => {
     expect((await resolveInboxProjectRoot(folder, { home: w.home })).root).toBe(main);
     expect((await resolveInboxProjectRoot(join(folder, "notes"), { home: w.home })).root).toBe(main);
     expect(await resolveCheckoutsFolder(folder, { home: w.home })).toEqual({ root: main, settled: true });
-    // An Inbox from before made a folder project for it beside the repository's: folded at startup.
     const before = InboxStore.open(w.dataDir);
     const repo = before.ensureProject({ name: "main", root: main });
     const old = before.ensureProject({ name: "appnotes", root: folder });
@@ -147,7 +131,6 @@ describe("a dotfiles home and rule 4", () => {
     const atHome = before.ensureProject({ name: "me", root: home });
     const server = await startInboxServer({ dataDir, phones: false, projectRootHome: home });
     servers.push(server);
-    // The pass ran (its marker) and left the home project alone.
     await until(() => existsSync(join(server.store.dir, INBOX_CHECKOUT_FOLDS_FILE)));
     expect(server.store.project(atHome.id)?.merged_into).toBeUndefined();
   });
@@ -156,13 +139,9 @@ describe("a dotfiles home and rule 4", () => {
     expect(isHomeOrRootFolder("/home/dev", null, { shape: false })).toBe(false);
     expect(isHomeOrRootFolder("/home/dev", "/home/dev", { shape: false })).toBe(true);
     expect(isHomeOrRootFolder("/", null, { shape: false })).toBe(true);
-    // Rule 4's walk and Tidy's plain folders keep the shape.
     expect(isHomeOrRootFolder("/home/dev", null)).toBe(true);
   });
 
-  // A home-shaped folder that exists on the runner (the account's home: `/Users/<x>`, `/home/<x>` or `/root`),
-  // only read (realpath, stat), and passed as NOT the home (`home: null`): only its shape could stop it. A
-  // stand-in git names it, so nothing runs there.
   const shapedFolder = (() => {
     try {
       const real = realpathSync(accountHome()!);
@@ -188,7 +167,6 @@ describe("a dotfiles home and rule 4", () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-home-")));
     scratch.push(root);
     const shaped = shapedFolder!;
-    // The linked worktree and its repository's common dir, on disk; the main checkout git keeps on record for it (`core.worktree`) is the shaped folder.
     const worktree = join(root, "wt");
     const common = join(root, "repo.git");
     mkdirSync(worktree);
@@ -202,7 +180,6 @@ describe("a dotfiles home and rule 4", () => {
       return { exitCode: 128, stdout: "" };
     };
     expect(await resolveInboxProjectRoot(worktree, { git, home: null })).toMatchObject({ root: shaped, worktree });
-    // The exact home is another matter: the worktree keeps its own toplevel.
     expect(await resolveInboxProjectRoot(worktree, { git, home: shaped })).toMatchObject({ root: worktree, worktree: null });
   });
 
@@ -249,7 +226,6 @@ describe("the Inbox at the edges", () => {
     const fromNotes = await send({ project_path: w.notes, body: "Meeting notes.", agent_session: "ses_notes" });
     expect(fromNotes.structuredContent.project.root).toBe(w.notes);
 
-    // git past its time limit for a new folder under home: refused, never filed under the home project (a repository on disk).
     slow = true;
     const later = join(w.home, "scratch");
     mkdirSync(later);

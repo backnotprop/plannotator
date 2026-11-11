@@ -1,13 +1,3 @@
-/**
- * Pinned threads (approval "inbox-pinned-threads", .product/approved/
- * inbox-pinned-threads/) through the Inbox's real doors on a running Inbox
- * (temp data dir, loopback): pin, unpin, the order (Move up and down, Unpin's
- * Undo), kept in `inbox/pins.json` outside the event log, across a restart,
- * gone with a deleted thread or project, `event: pins` to windows only, an
- * archived thread stays pinned, no limit, the window's guards, the owner over
- * the tailnet, a phone reading `pins` with the list, and agents never seeing
- * any of it.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -91,7 +81,6 @@ describe("pinned threads", () => {
 
     for (const t of [a, b, c]) expect((await pin(server, t.thread_id, true)).status).toBe(200);
     expect(await pinIds(server)).toEqual([a.thread_id, b.thread_id, c.thread_id]);
-    // Pinning again changes nothing (no move to the bottom).
     const again = (await (await pin(server, a.thread_id, true)).json()) as { pins: { thread_id: string }[] };
     expect(again.pins.map((p) => p.thread_id)).toEqual([a.thread_id, b.thread_id, c.thread_id]);
 
@@ -100,7 +89,6 @@ describe("pinned threads", () => {
     expect(typeof row.pinned_at).toBe("string");
     expect(model.pins![1]!.subject).toBe(row.subject);
 
-    // Move down (b below c), then the Undo of an Unpin puts a back where it was, pinned when it first was.
     expect((await post(server, "/api/inbox/pins", { order: [a.thread_id, c.thread_id, b.thread_id] })).status).toBe(200);
     expect(await pinIds(server)).toEqual([a.thread_id, c.thread_id, b.thread_id]);
     const firstPinnedAt = (await list(server)).pins![0]!.pinned_at!;
@@ -108,7 +96,6 @@ describe("pinned threads", () => {
     expect(await pinIds(server)).toEqual([c.thread_id, b.thread_id]);
     const unpinnedRow = (await list(server)).sections.flatMap((s) => s.threads).find((r) => r.thread_id === a.thread_id)!;
     expect(unpinnedRow.pinned_at ?? null).toBeNull();
-    // An order alone never pins it again.
     expect((await post(server, "/api/inbox/pins", { order: [a.thread_id, c.thread_id, b.thread_id] })).status).toBe(200);
     expect(await pinIds(server)).toEqual([c.thread_id, b.thread_id]);
     await new Promise((resolve) => setTimeout(resolve, 5));
@@ -116,7 +103,6 @@ describe("pinned threads", () => {
     expect(await pinIds(server)).toEqual([a.thread_id, c.thread_id, b.thread_id]);
     expect((await list(server)).pins![0]!.pinned_at).toBe(firstPinnedAt);
 
-    // An order from a window that has not seen a newer pin keeps it (after the ones it names); an order never unpins.
     const d = await send("Release notes draft", "ses_d");
     await pin(server, d.thread_id, true);
     expect((await post(server, "/api/inbox/pins", { order: [c.thread_id, a.thread_id] })).status).toBe(200);
@@ -134,10 +120,8 @@ describe("pinned threads", () => {
     const after = await list(server);
     const strip = (sections: InboxListSection[]) => sections.map((s) => ({ ...s, threads: s.threads.map(({ pinned_at: _p, ...rest }) => rest) }));
     expect(strip(after.sections)).toEqual(strip(before.sections));
-    // The agent's reply still lands in its thread.
     const next = await send("And the totals?", "ses_a", project, a.message_id);
     expect(next.thread_id).toBe(a.thread_id);
-    // Nothing an agent reads names a pin.
     const read = await client.callTool({ name: "read_thread", arguments: { thread_id: a.thread_id, agent_session: "ses_a" } });
     const listed = await client.callTool({ name: "read_thread", arguments: { agent_session: "ses_a", asked_by: "anyone" } });
     const searched = await client.callTool({ name: "search", arguments: { query: "search index", agent_session: "ses_a" } });
@@ -195,11 +179,9 @@ describe("pinned threads", () => {
     expect(model.sections.flatMap((s) => s.threads).some((r) => r.thread_id === a.thread_id)).toBe(false);
     expect(model.pins!.map((r) => r.thread_id)).toEqual([a.thread_id, c.thread_id]);
     expect(model.pins![0]!.resolved_at).not.toBeNull();
-    // The project filter leaves Pinned alone.
     const filtered = (await (await fetch(url(server, `/api/inbox/threads?archived=exclude&project=${projectOf(c.thread_id)}`))).json()) as ListModel;
     expect(filtered.pins!.map((r) => r.thread_id)).toEqual([a.thread_id, c.thread_id]);
 
-    // Thirty more: every one pinned.
     const more: string[] = [];
     for (let i = 0; i < 30; i++) more.push((await send(`Thread ${i}`, `ses_m${i}`)).thread_id);
     for (const id of more) expect((await pin(server, id, true)).status).toBe(200);
@@ -217,7 +199,6 @@ describe("pinned threads", () => {
     expect(stale.status).toBe(409);
     expect(((await stale.json()) as Json).code).toBe("session_mismatch");
     expect((await pin(server, "msg_01K70000000000000000000099", true)).status).toBe(404);
-    // A message that is not a thread's root is not a thread.
     const reply = await send("A second message", "ses_a", project, a.message_id);
     expect(reply.thread_id).toBe(a.thread_id);
     expect((await pin(server, reply.message_id, true)).status).toBe(404);
@@ -227,10 +208,8 @@ describe("pinned threads", () => {
     expect((await post(server, "/api/inbox/pins", { order: ["not-an-id"] })).status).toBe(422);
     expect((await fetch(url(server, path))).status).toBe(405);
     expect(await pinIds(server)).toEqual([]);
-    // An order naming a thread that no longer exists, or one not pinned, skips it.
     expect((await post(server, "/api/inbox/pins", { order: ["msg_01K70000000000000000000099", a.thread_id] })).status).toBe(200);
     expect(await pinIds(server)).toEqual([]);
-    // A restore: both or neither of order and restore, or a bad restore, is 422; a gone thread is 404.
     const restore = { thread_id: a.thread_id, index: 0, pinned_at: "2026-10-24T00:00:00.000Z" };
     expect((await post(server, "/api/inbox/pins", {})).status).toBe(422);
     expect((await post(server, "/api/inbox/pins", { order: [a.thread_id], restore })).status).toBe(422);
@@ -245,17 +224,14 @@ describe("pinned threads", () => {
     const { server, send } = await setup();
     const [a, b, c] = [await send("One", "ses_a"), await send("Two", "ses_b"), await send("Three", "ses_c")];
     for (const t of [a, b, c]) await pin(server, t.thread_id, true);
-    // Both windows read [a, b, c].
     const tab1 = (await list(server)).pins!.map((r) => r.thread_id);
     const tab2 = (await list(server)).pins!.map((r) => r.thread_id);
     expect(tab1).toEqual(tab2);
-    // Window 2 unpins b; window 1, still on its stale read, moves c up (its order still names b).
     expect((await pin(server, b.thread_id, false)).status).toBe(200);
     const stale = [tab1[2]!, tab1[0]!, tab1[1]!];
     expect(stale).toEqual([c.thread_id, a.thread_id, b.thread_id]);
     expect((await post(server, "/api/inbox/pins", { order: stale })).status).toBe(200);
     expect(await pinIds(server)).toEqual([c.thread_id, a.thread_id]);
-    // Window 1's Undo of an earlier Unpin of its own restores only its thread, never window 2's.
     const cPinnedAt = (await list(server)).pins![0]!.pinned_at!;
     await pin(server, c.thread_id, false);
     expect((await post(server, "/api/inbox/pins", { restore: { thread_id: c.thread_id, index: 0, pinned_at: cPinnedAt } })).status).toBe(200);
@@ -284,7 +260,6 @@ describe("pinned threads", () => {
     };
     expect(await read("&window=window-pins-1&permission=granted", () => pin(server, a.thread_id, true))).toContain("event: pins\ndata: {}");
     expect(await read("", () => pin(server, a.thread_id, false))).not.toContain("event: pins");
-    // A deletion that drops a pin tells the windows too.
     await pin(server, a.thread_id, true);
     expect(await read("&window=window-pins-2&permission=granted", () => post(server, `/api/inbox/threads/${a.thread_id}/delete`, {}))).toContain("event: pins");
   });
@@ -311,17 +286,14 @@ describe("pinned threads", () => {
     const doorPins = async () => ((await (await door("threads")).json()) as ListModel).pins!.map((r) => r.thread_id);
     expect(await doorPins()).toEqual([a.thread_id]);
 
-    // Star: the phone's write lands in the computer's pins (the window's own route, so its windows are told).
     expect((await door(`threads/${b.thread_id}/pin`, { method: "POST", body: { pinned: true, idempotency_key: "k1" } })).status).toBe(200);
     expect(await pinIds(server)).toEqual([a.thread_id, b.thread_id]);
     expect(await doorPins()).toEqual([a.thread_id, b.thread_id]);
 
-    // Order (Move left, Move right).
     const ordered = await door("pins", { method: "POST", body: { order: [b.thread_id, a.thread_id], idempotency_key: "k2" } });
     expect(ordered.status).toBe(200);
     expect(((await ordered.json()) as Json).pins.map((p: Json) => p.thread_id)).toEqual([b.thread_id, a.thread_id]);
 
-    // Unstar, then its Undo: back at its old place with the time it was first starred.
     const pinnedAt = (await list(server)).pins![0]!.pinned_at!;
     expect((await door(`threads/${b.thread_id}/pin`, { method: "POST", body: { pinned: false, idempotency_key: "k3" } })).status).toBe(200);
     expect(await pinIds(server)).toEqual([a.thread_id]);
@@ -329,12 +301,10 @@ describe("pinned threads", () => {
     expect(await pinIds(server)).toEqual([b.thread_id, a.thread_id]);
     expect((await list(server)).pins![0]!.pinned_at).toBe(pinnedAt);
 
-    // A command the phone sends twice (a retry) is answered from the door's log and writes nothing again.
     const replay = await door(`threads/${b.thread_id}/pin`, { method: "POST", body: { pinned: false, idempotency_key: "k3" } });
     expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
     expect(await pinIds(server)).toEqual([b.thread_id, a.thread_id]);
 
-    // The door's own rules hold: a key is required, and the window's checks answer as they answer the window.
     const noKey = await door(`threads/${a.thread_id}/pin`, { method: "POST", body: { pinned: false } });
     expect([noKey.status, ((await noKey.json()) as Json).code]).toEqual([422, "validation_error"]);
     const bad = await door(`threads/${a.thread_id}/pin`, { method: "POST", body: { idempotency_key: "k5" } });

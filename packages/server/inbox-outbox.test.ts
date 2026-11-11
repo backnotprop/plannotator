@@ -1,8 +1,3 @@
-/**
- * The outbox's rules (PLAN.md section 12), each against the module alone:
- * a temp data dir, a scripted owner standing in for the other machine's door.
- * The end-to-end runs with real Inboxes are in inbox-machines.test.ts.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -26,7 +21,6 @@ function dataDir(): string {
 const reply = (key: string, words = "yes") => ({ idempotency_key: key, words });
 const ok: OutboxAnswer = { status: 200, body: { reply: { id: "msg_x" } } };
 
-/** A scripted owner: answers in turn, and records what it was sent. */
 function owner(...answers: OutboxAnswer[]) {
   const sent: string[] = [];
   return {
@@ -109,7 +103,6 @@ describe("an unlink keeps what was not sent", () => {
     outbox.submit(B, "messages/m1/reply", reply("k2", "And the notes"));
     expect(await outbox.drain(B, owner({ status: 401, body: { code: "device_revoked" } }).send)).toBe("revoked");
     expect(outbox.notices().map((entry) => entry.machine_name ?? null)).toEqual([null, null]);
-    // The link is forgotten with its name (inbox-machines.ts `forget`).
     outbox.dropMachine(B, "MacBook");
     expect(outbox.notices().map(outboxView).map((view) => [view.words, view.machine_name])).toEqual([
       ["Ship it Thursday", "MacBook"],
@@ -147,7 +140,6 @@ describe("Cancel: a write still waiting that never left (a launch held for a mac
     expect(again.get("k1")!.state).toBe("cancelled");
     expect(again.list(B, "pending")).toHaveLength(0);
     expect(again.notices()).toHaveLength(0);
-    // A retried Send under the same key answers the cancelled entry: nothing is queued again.
     expect(again.submit(B, "messages", launch("k1")).entry.state).toBe("cancelled");
   });
 
@@ -216,7 +208,6 @@ describe("rule 2: one queue per machine, one request at a time", () => {
   test("an online Send goes through the same queue: it never overtakes a held one (F2)", async () => {
     const outbox = InboxOutbox.open(dataDir());
     outbox.submit(B, "messages/m1/reply", reply("held"));
-    // The machine wakes: the first try is in flight when the person sends again.
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
     const order: string[] = [];
@@ -416,7 +407,6 @@ describe("rule 11: late words are refused by what the person saw", () => {
 });
 
 describe("rule 8: every door write is classified, and only small JSON is held", () => {
-  /** The door's POST routes in words, each `(a|b|c)` of plain words split into one name per word. */
   const doorWrites = () =>
     doorRouteNames()
       .filter((name) => name.startsWith("POST "))
@@ -451,10 +441,8 @@ describe("rule 8: every door write is classified, and only small JSON is held", 
     expect(doorWriteKind("messages/msg_1/reply/extra")).toBeNull();
     expect(doorWriteKind("messages/msg_1/actions/not-an-action")).toBeNull();
     expect(doorWriteKind("settings")).toBeNull();
-    // On the door for a phone, in the table, and still never forwarded: a held one would answer no upload id.
     expect(DOOR_WRITES["POST uploads/reuse"]).toBe("local");
     expect(doorWriteKind("uploads/reuse")).toBeNull();
-    // A star is on the door for a phone and stays on the computer that holds it: never forwarded to a linked machine.
     expect(doorWriteKind("threads/msg_1/pin")).toBeNull();
     expect(doorWriteKind("pins")).toBeNull();
   });

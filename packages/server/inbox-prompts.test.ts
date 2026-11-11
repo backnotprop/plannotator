@@ -1,10 +1,3 @@
-/**
- * Settings → Prompts on a running Inbox (#2194): `GET /api/inbox/settings`
- * carries `prompts`, and `POST { prompts: { inbox } }` writes only
- * config.json `prompts.inbox` (a string sets a key, null deletes it, every
- * other key kept), refuses text over the cap with 422, and answers to the
- * window's usual guards.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -26,7 +19,6 @@ afterEach(() => {
   else process.env.PLANNOTATOR_DATA_DIR = previousDataDir;
 });
 
-/** A scratch data dir with this config.json (none for undefined); loadConfig reads it through the env. */
 async function world(config?: unknown): Promise<{ server: InboxServer; dataDir: string; onDisk: () => any }> {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-prompts-")));
   roots.push(root);
@@ -119,7 +111,6 @@ describe("Settings → Prompts", () => {
         inbox: { reminder: "Shared line.", runtimes: { pi: { reminder: "Pi line." } } },
       },
     });
-    // Reset to default (null) and Use shared (a blank string reads as null) delete their keys, and the emptied entries go.
     await ok(await post(server, { serverSession: server.serverSession, prompts: { inbox: { reminder: null } } }));
     expect(onDisk().prompts.inbox).toEqual({ runtimes: { pi: { reminder: "Pi line." } } });
     await ok(await post(server, { serverSession: server.serverSession, prompts: { inbox: { runtimes: { pi: { reminder: "   " } } } } }));
@@ -133,14 +124,12 @@ describe("Settings → Prompts", () => {
     const over = await post(server, { serverSession: server.serverSession, prompts: { inbox: { reminder: `${atCap}y` } } });
     expect(over.status).toBe(422);
     expect(((await over.json()) as { field: string }).field).toBe("prompts.inbox.reminder");
-    // A refused part saves nothing, the valid parts beside it included.
     const mixed = await post(server, { serverSession: server.serverSession, text_size: 13, prompts: { inbox: { runtimes: { pi: { reminder: `${atCap}y` } } } } });
     expect(mixed.status).toBe(422);
     expect(onDisk()).toEqual({ theme: { mode: "dark" } });
     const saved = await post(server, { serverSession: server.serverSession, prompts: { inbox: { reminder: atCap } } });
     expect(saved.status).toBe(200);
     expect(onDisk().prompts.inbox.reminder).toBe(atCap);
-    // Text over the cap put in config.json by hand is ignored on read: the page shows the default.
     writeFileSync(join(dataDir, "config.json"), JSON.stringify({ prompts: { inbox: { reminder: `${atCap}y` } } }));
     expect((await read(server)).reminder.shared).toBeNull();
   });
@@ -151,7 +140,6 @@ describe("Settings → Prompts", () => {
     const reminder = (await read(server)).reminder;
     expect([reminder.shared, reminder.runtimes.pi, reminder.runtimes.opencode]).toEqual([null, null, "OC."]);
     expect(reminder.over).toEqual({ shared: INBOX_REMINDER_MAX_CHARS + 72, runtimes: { "claude-code": null, pi: INBOX_REMINDER_MAX_CHARS + 72, opencode: null } });
-    // Reset to default deletes it like any other text.
     const reset = await post(server, { serverSession: server.serverSession, prompts: { inbox: { reminder: null, runtimes: { pi: { reminder: null } } } } });
     expect(((await reset.json()) as { prompts: InboxPromptsSettings }).prompts.reminder.over).toEqual({ shared: null, runtimes: { "claude-code": null, pi: null, opencode: null } });
   });
@@ -186,7 +174,6 @@ describe("Settings → Prompts", () => {
     expect(saved.status).toBe(200);
     expect(((await saved.json()) as { prompts: InboxPromptsSettings }).prompts.guide?.text).toBe("Start with the riskiest change.");
     expect(readFileSync(file, "utf8")).toBe("Start with the riskiest change.\n");
-    // Written by the review UI's route, read here.
     writeFileSync(file, "Call the tenant a workspace.\n");
     expect((await read(server)).guide?.text).toBe("Call the tenant a workspace.");
     const over = await post(server, { serverSession: server.serverSession, prompts: { guide: "x".repeat(2001) } });

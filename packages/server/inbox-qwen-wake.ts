@@ -1,60 +1,3 @@
-/**
- * The Qwen Code wake: the person's reply, message or tag for a running Qwen
- * session goes into that session as its next message, through Qwen's
- * cross-session messaging (Qwen Code 0.24 or later, macOS and Linux).
- *
- * Qwen has no Plannotator plugin to poll the Inbox, so the Inbox delivers
- * itself, as it does for Codex (inbox-codex-wake.ts). A Qwen session is
- * learned from its MCP calls: the stdio shim sends as `agent_host: "qwen"`,
- * `agent_session: <its session id>` (read from Qwen's session registry on
- * every call, so `/clear` and `/resume` are followed). Its message is marked
- * `wakes` when all of these hold:
- *
- *  - Plannotator holds a trusted-sender token for this Qwen home
- *    (inbox-qwen-trust.ts; without one Qwen would hold the message for review);
- *  - the session has a live record in `$QWEN_HOME/sessions/` with an inbox
- *    socket, from a terminal session (`kind: "tui"`, one session per process:
- *    a headless run ends after its turn, and sessions driven over ACP or by
- *    `qwen serve` refuse messages);
- *  - the call is not a daemon's (`_meta["qwen-code/invocation"]`);
- *  - no Qwen settings scope (system defaults, the person's, the project's,
- *    system) turns messaging off (`agents.crossSessionMessaging` anything but
- *    true) or holds or refuses what comes in (`agents.crossSessionInbound`
- *    "hold", "refuse", or a value Qwen does not know), merged as Qwen merges
- *    them (a project can only tighten); a settings file Qwen cannot read
- *    counts as holding.
- *
- * Then each item waiting for that session (`InboxStore.pendingRepliesFor`) is
- * sent once: one connection to the session's socket, the auth line with the
- * token and one `user` frame naming the session (`toSessionId`), in one write
- * (Qwen's cross-session protocol, frame version 1). Each item is claimed on
- * disk first (`inbox/qwen-wake/<item id>.<session id>/`, made with mkdir), so
- * it is never sent twice, across restarts too. The frame says where Qwen's
- * receipts go: a socket of the Inbox's own (0600 in a 0700 folder), and
- * receipts are believed only with the reply token the frame carried.
- *
- *  - `delivered`: in the session's input queue, so "Queued for Qwen Code; it
- *    gets this as its next turn." The item is Delivered when the session next
- *    calls an Inbox tool after that receipt, or reads the thread.
- *  - `held`, `denied`, `refused`, or no receipt within a while (a token Qwen
- *    no longer accepts is dropped without a word): it may not have gone, so it
- *    is never sent again and the window says it is saved for the session's
- *    next read. `refused` also stops waking that session. No receipt also
- *    asks Qwen once whether the grant is still listed (inbox-qwen-trust.ts
- *    `checkQwenTrust`): one revoked in Qwen drops the token, so nothing more
- *    is said to arrive by itself.
- *  - `misaddressed` (the socket now serves another session): the session has
- *    ended; the reply waits for the next agent.
- *  - `expired`: the session closed with it unread (it is sent again if the
- *    session comes back), or a held message ran out (never sent again).
- *  - `dropped` (Qwen's rate limit or a full queue), or a socket nothing
- *    answers: tried again later, 30 s doubling to 10 min, with a new id.
- *
- * A session whose record is gone has ended ("dead"); it is alive again when
- * its record comes back (`qwen --resume`), which a slow poll (a minute) looks
- * for while a reply waits for it. Windows is not woken.
- */
-
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, chmodSync } from "node:fs";
 import { createConnection, createServer, type Server, type Socket } from "node:net";
@@ -70,14 +13,10 @@ import { codexQueueMessage } from "./inbox-codex-wake";
 import type { AgentEnvironment } from "./inbox-agents";
 import { checkQwenTrust, qwenTrustHome, qwenWakeToken } from "./inbox-qwen-trust";
 
-/** One send (connect, write, the peer's close) may take this long. */
 export const INBOX_QWEN_SEND_TIMEOUT_MS = 5_000;
-/** A send with no receipt after this long may not have gone. */
 export const INBOX_QWEN_RECEIPT_TIMEOUT_MS = 30_000;
-/** How often to look for a session coming back while a reply waits for it. */
 export const INBOX_QWEN_COMEBACK_MS = 60_000;
 
-/** How the frame names the sender to the session (Qwen shows the grant's label as its authority). */
 const FROM_NAME = "Plannotator Inbox";
 const CLAIM_DIR = "qwen-wake";
 const RETRY_FIRST_MS = 30_000;
@@ -89,9 +28,7 @@ const LINE_DEADLINE_MS = 30_000;
 const MAX_RECEIPT_CONNECTIONS = 64;
 /** A unix socket path may not pass this many bytes (Qwen's own limit, the smallest of macOS and Linux). */
 const SOCKET_PATH_MAX = 103;
-/** The receipts socket's folder: `<prefix><this pid>-XXXXXX`, so a later Inbox can clear one a crash left. */
 const SOCKET_FOLDER_PREFIX = "plannotator-qwen-";
-/** Asking Qwen whether the grant is still listed (after a send it never confirmed): at most this often. */
 const TRUST_CHECK_EVERY_MS = 5 * 60_000;
 
 type ClaimState = "sent" | "delivered" | "held" | "denied" | "refused" | "uncertain";
@@ -102,40 +39,25 @@ interface Claim {
   msgId: string | null;
   at: number;
   state: ClaimState;
-  /** When the delivered receipt came (ms). */
   deliveredAt?: number;
-  /** The record's pid when it was sent: an `expired` while it is alive is a held message that ran out. */
   pid?: number;
 }
 
 export interface InboxQwenWake {
-  /** Whether this Inbox can wake Qwen sessions at all now: not Windows, and a trusted-sender token for this Qwen home. */
   canWake(): boolean;
-  /** Whether a message from this host and session, sent by a tool call with this `_meta`, wakes it (see the file comment). */
   wakes(host: unknown, session: unknown, meta: unknown): Promise<boolean>;
-  /**
-   * How a session stands for the presence rules: `alive` (a Qwen session the
-   * Inbox wakes, running now), `dead` (its record is gone, or its socket
-   * serves another session), null (not a Qwen session the Inbox wakes now:
-   * the MCP presence rules apply).
-   */
   status(session: string): "alive" | "dead" | null;
-  /** The session called an Inbox tool: it is there, and what Qwen said it queued before now has reached it. */
   noteToolCall(session: string): void;
-  /** Whether an item may not have reached this session (held, refused, no receipt): saved for its next read. */
   uncertain(session: string, itemId: string): boolean;
   uncertainItems(session: string): string[];
-  /** Look for items to send now. */
   sweep(): Promise<void>;
   stop(): void;
 }
 
-/** Whether a socket path is one this Inbox would dial: absolute, local, no NUL. */
 function dialable(path: string | null): path is string {
   return typeof path === "string" && path.startsWith("/") && !path.startsWith("//") && !path.includes("\u0000");
 }
 
-/** Linux's guards against a reused pid and a record from another machine or namespace (Qwen's protocol §1). */
 function linuxIdentity(): { bootId: string | null; pidNs: number | null } {
   let bootId: string | null = null;
   let pidNs: number | null = null;
@@ -153,7 +75,6 @@ function linuxIdentity(): { bootId: string | null; pidNs: number | null } {
   return { bootId, pidNs };
 }
 
-/** Field 22 of /proc/<pid>/stat (the start time in ticks), or null. */
 function startTicks(pid: number): string | null {
   try {
     const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
@@ -164,7 +85,6 @@ function startTicks(pid: number): string | null {
   }
 }
 
-/** A record is live as Qwen's readers decide it: same namespace and boot, the pid alive with the same start. */
 export function qwenRecordLive(record: InboxQwenSessionRecord, identity: { bootId: string | null; pidNs: number | null } = linuxIdentity()): boolean {
   if (record.pidNs !== null && identity.pidNs !== null && record.pidNs !== identity.pidNs) return false;
   if (record.pidNs === null && identity.pidNs !== null && process.platform === "linux") return false;
@@ -178,7 +98,6 @@ export function qwenRecordLive(record: InboxQwenSessionRecord, identity: { bootI
   return isPidAlive(record.pid);
 }
 
-/** One Qwen settings file's say on messages from other programs: missing, unreadable, or its two values. */
 export type QwenAgentsSettings = { kind: "missing" } | { kind: "unreadable" } | { kind: "file"; messaging: unknown; inbound: unknown };
 
 export function readQwenAgentsSettings(path: string): QwenAgentsSettings {
@@ -200,19 +119,9 @@ export function readQwenAgentsSettings(path: string): QwenAgentsSettings {
   }
 }
 
-/** How strict a value is, as Qwen ranks it (`WORKSPACE_TIGHTEN_ONLY_SETTINGS`): messaging unset or true is open; inbound accept < unset < hold (and any unknown value) < refuse. */
 const messagingStrictness = (value: unknown): number => (value === true || value === undefined ? 0 : 1);
 const inboundStrictness = (value: unknown): number => (value === "accept" ? 0 : value === undefined ? 1 : value === "refuse" ? 3 : 2);
 
-/**
- * Whether Qwen's merged settings keep a message from a trusted sender out of
- * a session (held for review, refused, or messaging off), as Qwen merges
- * them: system defaults, then the person's, then the project's (which may
- * only tighten), then system settings over all. A file that is there and
- * cannot be read counts as holding (Qwen's gate holds then). The project's
- * file counts even in a folder Qwen does not trust: it can only tighten, so
- * at worst a reply is said to wait that would have arrived.
- */
 export function qwenSettingsKeepOut(scopes: { systemDefaults: QwenAgentsSettings; user: QwenAgentsSettings; workspace: QwenAgentsSettings; system: QwenAgentsSettings }): boolean {
   const all = [scopes.systemDefaults, scopes.user, scopes.workspace, scopes.system];
   if (all.some((scope) => scope.kind === "unreadable")) return true;
@@ -228,7 +137,6 @@ export function qwenSettingsKeepOut(scopes: { systemDefaults: QwenAgentsSettings
   return messagingStrictness(merged("messaging", messagingStrictness)) >= 1 || inboundStrictness(merged("inbound", inboundStrictness)) >= 2;
 }
 
-/** Qwen's system settings file and its system defaults (`QWEN_CODE_SYSTEM_SETTINGS_PATH`, `QWEN_CODE_SYSTEM_DEFAULTS_PATH`). */
 function qwenSystemSettingsPaths(e: Pick<AgentEnvironment, "env" | "platform">): { system: string; systemDefaults: string } {
   const system =
     e.env.QWEN_CODE_SYSTEM_SETTINGS_PATH ||
@@ -236,11 +144,7 @@ function qwenSystemSettingsPaths(e: Pick<AgentEnvironment, "env" | "platform">):
   return { system, systemDefaults: e.env.QWEN_CODE_SYSTEM_DEFAULTS_PATH || join(dirname(system), "system-defaults.json") };
 }
 
-/**
- * Remove receipts-socket folders an Inbox left when it crashed: this
- * prefix, a pid that is not running, owned by this user. Never another
- * running Inbox's.
- */
+/** Remove receipts-socket folders a crashed Inbox left: this prefix, a dead pid, owned by this user. Never another running Inbox's. */
 function clearLeftFolders(base: string): void {
   let names: string[];
   try {
@@ -267,19 +171,14 @@ function clearLeftFolders(base: string): void {
 export function createInboxQwenWake(options: {
   store: InboxStore;
   environment: AgentEnvironment;
-  /** The Plannotator data dir (the trusted-sender token is under it). */
   dataDir: string;
-  /** The wake command for an item and the session it goes to (the bridge's `replyCommand`). */
   commandOf: (item: InboxMessage, session: string) => InboxReplyCommand;
-  /** An item not to hand at all (a steps-only Tidy wake once steps are off: the server withdraws it). */
   skip?: (item: InboxMessage, session: string) => boolean;
   now?: () => number;
   sendTimeoutMs?: number;
   receiptTimeoutMs?: number;
   comebackMs?: number;
-  /** Where the receipts socket's folder goes (default: the OS temp dir, or /tmp when that path is too long). */
   socketParent?: string;
-  /** Whether Qwen still lists Plannotator's grant (default: inbox-qwen-trust.ts `checkQwenTrust`, which drops a revoked token). */
   checkTrust?: () => Promise<"listed" | "gone" | "unknown">;
   log?: (line: string) => void;
 }): InboxQwenWake {
@@ -301,7 +200,6 @@ export function createInboxQwenWake(options: {
     return tokenRead.token;
   };
 
-  // ── The registry, read at most every two seconds ──
   let registry: { at: number; records: InboxQwenSessionRecord[] } | null = null;
   const records = (): InboxQwenSessionRecord[] => {
     if (registry && Date.now() - registry.at < REGISTRY_TTL_MS) return registry.records;
@@ -309,7 +207,6 @@ export function createInboxQwenWake(options: {
     registry = { at: Date.now(), records: live };
     return live;
   };
-  /** What a settings file says, read at most every two seconds (presence reads it often). */
   const settingsRead = new Map<string, { at: number; settings: QwenAgentsSettings }>();
   const settingsOf = (path: string): QwenAgentsSettings => {
     const cached = settingsRead.get(path);
@@ -320,9 +217,7 @@ export function createInboxQwenWake(options: {
     return settings;
   };
   const systemPaths = qwenSystemSettingsPaths(environment);
-  /** Whether Qwen's settings for a session in `cwd` keep a trusted sender's message out (`qwenSettingsKeepOut`). */
   const keptOut = (cwd: string | null): boolean => {
-    // A session in the home folder has no project settings (Qwen skips that scope there).
     const project = cwd !== null && resolve(cwd) !== resolve(environment.homeDir) ? join(cwd, ".qwen", "settings.json") : null;
     return qwenSettingsKeepOut({
       systemDefaults: settingsOf(systemPaths.systemDefaults),
@@ -336,23 +231,19 @@ export function createInboxQwenWake(options: {
     tokenRead = null;
     settingsRead.clear();
   };
-  /** The session's newest live record, or null when it has none. */
   const recordOf = (session: string): InboxQwenSessionRecord | null => {
     let best: InboxQwenSessionRecord | null = null;
     for (const record of records()) if (record.sessionId === session && (!best || record.startedAt > best.startedAt)) best = record;
     return best;
   };
-  /** Whether a live record can be messaged: a terminal session alone in its process, with an inbox socket and token, and settings that let it in. */
   const reachable = (record: InboxQwenSessionRecord): boolean => {
     if (record.shared || record.kind !== "tui" || !dialable(record.ipcPath) || !record.ipcToken) return false;
     return !keptOut(record.cwd);
   };
 
-  // ── The grant, asked about when Qwen stops confirming ──
   const checkTrust = options.checkTrust ?? (() => checkQwenTrust(options.dataDir, environment));
   let trustCheckedAt = -Infinity;
   let trustChecking = false;
-  /** A send Qwen never confirmed: is Plannotator's grant still there? A revoked one drops the token (asked at most every five minutes). */
   const askTrust = () => {
     if (trustChecking || stopped || Date.now() - trustCheckedAt < TRUST_CHECK_EVERY_MS) return;
     trustChecking = true;
@@ -371,15 +262,11 @@ export function createInboxQwenWake(options: {
       });
   };
 
-  // ── The sessions it wakes ──
   let known: Set<string> | null = null;
   const knownSessions = (): Set<string> => (known ??= new Set([...store.wakingSessionsOfHost(INBOX_QWEN_HOST)].filter(isQwenSessionId)));
-  /** Sessions whose socket served another session (`misaddressed`): ended until they call again. */
   const ended = new Set<string>();
-  /** Sessions that refused a message: never woken again by this Inbox run. */
   const refused = new Set<string>();
 
-  // ── Claims ──
   const claims = new Map<string, Claim>();
   const byMsgId = new Map<string, string>();
   const keyOf = (itemId: string, session: string) => `${itemId}.${session}`;
@@ -402,7 +289,6 @@ export function createInboxQwenWake(options: {
       try {
         const saved = JSON.parse(readFileSync(join(dir, name, "state.json"), "utf8")) as { at?: unknown; state?: unknown; deliveredAt?: unknown };
         const at = typeof saved.at === "number" ? saved.at : 0;
-        // Only a delivered receipt survives a restart as queued; a send still waiting for its receipt may not have gone.
         if (saved.state === "delivered") claim = { itemId, session, msgId: null, at, state: "delivered", deliveredAt: typeof saved.deliveredAt === "number" ? saved.deliveredAt : at };
         else claim = { itemId, session, msgId: null, at, state: saved.state === "refused" ? "refused" : "uncertain" };
       } catch {
@@ -431,7 +317,6 @@ export function createInboxQwenWake(options: {
   };
   const isUncertain = (claim: Claim) => claim.state !== "delivered" && claim.state !== "sent";
 
-  /** Whether the item goes to `session` through a wake: its owner's message woke, it is addressed to it, or a waking tag. */
   const wakesItem = (item: InboxMessage, session: string): boolean => {
     if (!store.isOwner(item, session)) return item.tags?.some((tag) => tag.session === session && tag.host === INBOX_QWEN_HOST && tag.wakes) ?? false;
     if (item.to) return item.to.host === INBOX_QWEN_HOST;
@@ -439,7 +324,6 @@ export function createInboxQwenWake(options: {
     return asked?.author.kind === "agent" && asked.author.host === INBOX_QWEN_HOST && asked.wakes === true;
   };
 
-  // ── Timers: retries, receipts that never came, a session coming back ──
   const retryAt = new Map<string, { at: number; wait: number }>();
   const receiptTimers = new Map<string, ReturnType<typeof setTimeout>>();
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -474,7 +358,6 @@ export function createInboxQwenWake(options: {
     retryAt.set(key, { at: now() + wait, wait });
   };
 
-  // ── The receipts socket ──
   const replyToken = randomBytes(32).toString("hex");
   let receipts: { server: Server; path: string; folder: string } | null = null;
   let binding: Promise<string | null> | null = null;
@@ -540,7 +423,6 @@ export function createInboxQwenWake(options: {
         return;
       case "expired": {
         settle();
-        // A held message that ran out while the session runs: not sent again. One the session closed on: sent again if it comes back.
         if (claim.state === "held" && claim.pid !== undefined && isPidAlive(claim.pid)) {
           claim.state = "uncertain";
           persist(claim);
@@ -548,7 +430,6 @@ export function createInboxQwenWake(options: {
         }
         forgetRegistry();
         dropClaim(key);
-        // Not at once: a session shutting down still has its record for a moment.
         retryLater(key);
         scheduleRetry();
         return;
@@ -561,7 +442,6 @@ export function createInboxQwenWake(options: {
         scheduleRetry();
         return;
       default:
-        // A status this Inbox does not know yet: no change (Qwen's protocol §7).
         return;
     }
   };
@@ -663,7 +543,6 @@ export function createInboxQwenWake(options: {
     return binding;
   };
 
-  /** One frame to one socket: resolves how it went. `written`: the session read it (or may have, on a timeout). */
   const sendFrame = (path: string, payload: string): Promise<"sent" | "timeout" | "unreachable" | "failed"> =>
     new Promise((resolveSend) => {
       let settled = false;
@@ -679,7 +558,6 @@ export function createInboxQwenWake(options: {
       const deadline = setTimeout(() => finish(connected ? "timeout" : "unreachable"), options.sendTimeoutMs ?? INBOX_QWEN_SEND_TIMEOUT_MS);
       socket.on("connect", () => {
         connected = true;
-        // The auth line rides in the same write as the frame, then half-close (Qwen's protocol §2).
         socket.end(payload);
       });
       socket.on("error", (error: NodeJS.ErrnoException) => finish(!connected && (error.code === "ENOENT" || error.code === "ECONNREFUSED") ? "unreachable" : connected ? "timeout" : "failed"));
@@ -697,7 +575,6 @@ export function createInboxQwenWake(options: {
       mkdirSync(dir, { recursive: true });
       mkdirSync(claimPath(key));
     } catch {
-      // Claimed already (another sweep, or before a restart).
       return;
     }
     const msgId = randomUUID();
@@ -736,7 +613,6 @@ export function createInboxQwenWake(options: {
       }
       return;
     }
-    // Written: what became of it comes as a receipt; none in time, and it may not have gone.
     if (claim.state === "sent") {
       const timer = setTimeout(() => {
         receiptTimers.delete(key);
@@ -744,7 +620,6 @@ export function createInboxQwenWake(options: {
         claim.state = "uncertain";
         persist(claim);
         log(`Qwen Code did not confirm a reply to session ${session}; it is not sent again, and the session sees it when it reads the thread.`);
-        // Qwen drops a frame without a word when the grant is gone: ask whether it still is.
         askTrust();
       }, options.receiptTimeoutMs ?? INBOX_QWEN_RECEIPT_TIMEOUT_MS);
       unref(timer);
@@ -755,7 +630,6 @@ export function createInboxQwenWake(options: {
   let sweeping: Promise<void> | null = null;
   let again = false;
   const sweepOnce = async (): Promise<void> => {
-    // Every look reads Qwen's registry and settings afresh.
     forgetRegistry();
     const sessions = knownSessions();
     if (sessions.size === 0 && claims.size === 0) return;
@@ -778,7 +652,6 @@ export function createInboxQwenWake(options: {
         work.push({ item, session, record });
       }
     }
-    // A claim whose item no longer waits (delivered, read, deleted) is done with.
     for (const key of [...claims.keys()]) {
       if (pendingKeys.has(key) || receiptTimers.has(key)) continue;
       dropClaim(key);

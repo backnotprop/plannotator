@@ -1,20 +1,3 @@
-/**
- * A question's prototypes at send (approval "inbox-question-tradeoffs"): the
- * pages a `Prototype:` line names, under an option or for the whole question.
- *
- * - A path is an HTML file the message attaches: it must be one of the
- *   send's `attachments` (matched as a link to an attachment is, from the
- *   folder the agent sent from or the project root, or by its bare name), so
- *   the window shows it exactly as it was sent.
- * - An address (`http://localhost:3000/…`) is an app running on this
- *   computer: checked and probed through the live engine
- *   (`inbox-live.ts` `checkPrototypeApps`), and kept as one of the message's
- *   `live_sites`.
- *
- * Any prototype that does not hold refuses the whole send, naming the
- * question and the option, before anything is written. Bun-only, like the
- * rest of the Inbox.
- */
 import { realpathSync } from "node:fs";
 import { basename, isAbsolute, resolve } from "node:path";
 import { prototypeTargets, type PrototypeAppTarget, type PrototypeTarget } from "@plannotator/core/inbox-questions";
@@ -22,7 +5,6 @@ import type { InboxAttachment, InboxLiveSiteRef } from "@plannotator/core/inbox-
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { prototypePlace } from "./inbox-live";
 
-/** A path's realpath when it exists, else the path as resolved. */
 function real(path: string): string {
   try {
     return realpathSync(path);
@@ -31,13 +13,6 @@ function real(path: string): string {
   }
 }
 
-/**
- * The attachment a prototype's path names, or null: the path (without `?` or
- * `#`) from each base (the folder the agent sent from, then the project
- * root), or as an absolute path, against each attachment's realpath and the
- * path the agent named; else a bare file name the one attachment of that
- * name has.
- */
 export function prototypeFileAttachment(target: string, attachments: readonly InboxAttachment[], bases: readonly string[]): InboxAttachment | null {
   const path = target.trim().replace(/[?#].*$/s, "");
   if (!path || attachments.length === 0) return null;
@@ -64,16 +39,9 @@ export function prototypeFileAttachment(target: string, attachments: readonly In
 }
 
 export interface CheckedPrototypes {
-  /** The running apps, checked and probed (the message's `live_sites`). */
   liveSites: Omit<InboxLiveSiteRef, "opened_at">[];
 }
 
-/**
- * Check a body's prototypes before the send writes anything: each file is an
- * attached HTML file, each app passes the live engine's checks and probe.
- * `checkApps` absent: this Inbox takes no app (the send is refused when the
- * body names one). `probing: false` on a replay of a message already sent.
- */
 export async function checkSendPrototypes(
   body: string,
   options: {

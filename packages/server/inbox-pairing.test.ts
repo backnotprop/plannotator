@@ -1,20 +1,3 @@
-/**
- * Pair a phone, step by step (design of record
- * `.product/approved/inbox-settings-tabs/`, sections 4.1 and 4.2): the two
- * read routes the window's flow uses, against a real Inbox in process.
- *
- *  - `GET /api/inbox/pairing/checks`: what this computer can tell about the
- *    Wi-Fi and Tailscale ways, read through the probe and runner seams (no
- *    test runs the real `tailscale`, `openssl` or system tools). It turns
- *    nothing on, makes no certificate and publishes nothing.
- *  - `GET /api/inbox/pairing`: the last offer's state and what reached the
- *    door while it showed (wrong digits, digits over the Wi-Fi, an older
- *    code, a phone after expiry, the pairing itself), never its secret or
- *    code.
- *
- * Both answer only this computer's own page: through the tailnet they are
- * `local_only`, and another site's read is `cross_origin`.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -51,7 +34,6 @@ function setEnv(name: string, value: string | undefined): void {
   });
 }
 
-/** A temp data dir that loadConfig() reads too. */
 function world(config: Json = {}): string {
   const dataDir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-pairing-")));
   roots.push(dataDir);
@@ -61,7 +43,6 @@ function world(config: Json = {}): string {
   return dataDir;
 }
 
-/** The probes as a computer on "Ramos Home" with everything in place; a test overrides what it needs. */
 function probes(overrides: Partial<PairingProbes> = {}): Partial<PairingProbes> & { calls: string[] } {
   const calls: string[] = [];
   return {
@@ -74,7 +55,6 @@ function probes(overrides: Partial<PairingProbes> = {}): Partial<PairingProbes> 
   };
 }
 
-/** Tailscale as a scripted CLI: its backend state, who owns this machine, HTTPS certificates, and serve's mappings. */
 function fakeTailscale(state: { backend?: string; missing?: boolean; certs?: boolean; stderr?: string; timeout?: boolean } = {}) {
   const serve = new Map<number, string>();
   const calls: string[][] = [];
@@ -169,8 +149,6 @@ describe("GET /api/inbox/pairing/checks", () => {
     });
     expect(body.lan).toMatchObject({ on: false, address: null });
     expect(body.tailnet).toEqual({ on: false, address: null, error: null });
-    // Read only: no serve on or off ran, no certificate was made, no listener opened.
-    // `--peers=false`: the tailnet's other devices are never read.
     expect(ts.calls.map((args) => args.join(" ")).sort()).toEqual(["serve status --json", "status --json --peers=false"]);
     expect(existsSync(join(dataDir, "inbox", "tls"))).toBe(false);
     expect(p.calls).toContain(`network:192.168.1.42`);
@@ -185,7 +163,6 @@ describe("GET /api/inbox/pairing/checks", () => {
     const read = async () => (await get(inbox, "/api/inbox/pairing/checks?fresh=1")).body.checks;
     const missing = await read();
     expect(missing.wifi).toEqual({ address: null, network: null, openssl: false, certificate: false, bonjour: false, firewall: "block_all" });
-    // No `tailscale` command on PATH (the Mac App Store app has none until its CLI is turned on): not "not installed".
     expect(missing.tailscale).toEqual({ state: "cli_missing", login: null, https_certs: null, port_free: null, https_port: null, error: null });
 
     ts.state.missing = false;
@@ -201,10 +178,8 @@ describe("GET /api/inbox/pairing/checks", () => {
     ts.state.certs = false;
     expect((await read()).tailscale).toMatchObject({ state: "running", https_certs: false, port_free: true });
     ts.state.certs = true;
-    // 8443 held by someone else: the door would take the next free port.
     ts.serve.set(8443, "http://127.0.0.1:9999");
     expect((await read()).tailscale).toMatchObject({ port_free: true, https_port: 8444 });
-    // Every port the door may take is held: that fails.
     for (let port = 8444; port <= 8450; port++) ts.serve.set(port, "http://127.0.0.1:9999");
     expect((await read()).tailscale).toMatchObject({ port_free: false, https_port: null });
   });
@@ -215,13 +190,11 @@ describe("GET /api/inbox/pairing/checks", () => {
     let release = () => {};
     const gate = new Promise<void>((done) => (release = done));
     let statusRuns = 0;
-    // An asynchronous runner that answers only when released: what a slow `tailscale` looks like to the Inbox.
     const slow = async (args: string[], timeout: number) => {
       if (args[0] === "status") statusRuns += 1;
       await gate;
       return ts.run(args, timeout);
     };
-    // An Inbox in this process: its health answering while the checks wait shows the event loop is free.
     const inbox = await start(dataDir, ts.run, { pairingProbes: probes() });
     const devices = createInboxDevices({
       dataDir,
@@ -237,7 +210,6 @@ describe("GET /api/inbox/pairing/checks", () => {
     const route = (path: string) => devices.windowRoute(new Request(`http://127.0.0.1:1${path}`), new URL(`http://127.0.0.1:1${path}`));
     const first = route("/api/inbox/pairing/checks");
     const second = route("/api/inbox/pairing/checks?fresh=1");
-    // While both wait on tailscale, the Inbox still answers.
     const started = performance.now();
     expect((await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/health`)).status).toBe(200);
     expect(performance.now() - started).toBeLessThan(1000);
@@ -246,7 +218,6 @@ describe("GET /api/inbox/pairing/checks", () => {
     expect((await a!.json()).checks.tailscale.state).toBe("running");
     expect((await b!.json()).checks.tailscale.state).toBe("running");
     expect(statusRuns).toBe(1);
-    // Kept: a plain read inside the window runs nothing; fresh reads again.
     await route("/api/inbox/pairing/checks");
     expect(statusRuns).toBe(1);
     await route("/api/inbox/pairing/checks?fresh=1");
@@ -318,7 +289,6 @@ describe("GET /api/inbox/pairing/checks", () => {
     expect(performance.now() - started).toBeLessThan(2000);
     expect(answer.tailscale.state).toBe("no_answer");
     expect(answer.wifi.network).toBeNull();
-    // Check again starts a new read: the one that never answered is not joined.
     const again = (await (await route("/api/inbox/pairing/checks?fresh=1"))!.json()).checks;
     expect(again.tailscale.state).toBe("no_answer");
     expect(statusRuns).toBe(2);
@@ -352,7 +322,6 @@ describe("GET /api/inbox/pairing: what reached the door while the code showed", 
     expect(made.body.addresses.tailnet).toBe(`${MAGIC}:8443`);
     const view = (await get(inbox, "/api/inbox/pairing")).body.offer;
     expect(view).toEqual({ expires_at: made.body.offer.expires_at, state: "open", tries_left: 5, attempts: [] });
-    // Never the secret or the code.
     expect(JSON.stringify(view)).not.toContain(made.body.offer.code);
   });
 

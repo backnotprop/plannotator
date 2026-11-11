@@ -1,12 +1,3 @@
-/**
- * Snooze for agents: the `snooze_thread` tool (the `plannotator_inbox` action of
- * that name, and `plannotator inbox call snooze_thread`). An agent the person
- * asked can snooze a thread, on this machine or a linked one, and end the
- * snooze. It is the person's Snooze, by the same rules: `InboxStore.setSnooze`
- * here, the forward and the outbox for another machine's thread. It writes no
- * message and reads as nothing in `read_thread` (approval "inbox-snooze").
- */
-
 import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -18,23 +9,17 @@ export const INBOX_SNOOZE_DESCRIPTION = "Only when the person asks: snooze a thr
 
 export interface InboxSnoozeMcpContext {
   store: InboxStore;
-  /** A thread only a linked machine holds, through the forward and the outbox. Null: no linked machine lists it. Absent: no machines here. */
   snoozeOnMachine?: (threadId: string, until: string | null) => Promise<MachineSnoozeAnswer | null>;
-  /** A snooze went through (the one-time announcement never shows, as for the person's own). */
   snoozeMade?: () => void;
 }
 
 const line = (threadId: string, until: string | null, where = "") => (until === null ? `Thread ${threadId}${where} is not snoozed.` : `Thread ${threadId}${where} is snoozed until ${until}.`);
 
-/** A snooze was running and `until: null` took it off. Taking off nothing, or a time that did not apply, stays `line`'s "is not snoozed". */
 const ended = (threadId: string, where = "") => `Thread ${threadId}${where}: snooze ended.`;
 
 const ISO_WITH_ZONE = /^(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/;
 
-/**
- * An agent's `until` is an ISO 8601 time with its zone: `Date.parse` alone takes a time with no zone (read in this
- * Inbox's zone, not the person's) and guesses at "12/25/2026" or "Nov 12". The person's own window always sends one.
- */
+/** An agent's `until` must be an ISO 8601 time with a zone: `Date.parse` alone reads a zone-less time in this Inbox's zone and guesses at formats like "12/25/2026". */
 function refuseAgentUntil(until: string): void {
   const match = ISO_WITH_ZONE.exec(until);
   const day = match ? new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))) : null;
@@ -76,7 +61,6 @@ export function registerInboxSnoozeTool(server: McpServer, context: InboxSnoozeM
         const far = await context.snoozeOnMachine?.(input.thread_id, input.until);
         if (!far) throw new InboxError("thread_not_found", `No thread ${input.thread_id}.`);
         if (input.until !== null) context.snoozeMade?.();
-        // The sentences ride the structured result too: an MCP client may show the agent only that.
         if (far.held) return okComplete(far.held, { thread_id: input.thread_id, machine: far.machine, held: far.held });
         if (far.ended) {
           const words = ended(input.thread_id, ` on ${far.name}`);

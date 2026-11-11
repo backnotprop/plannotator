@@ -71,7 +71,6 @@ async function refused(client: Client, name: string, args: Record<string, unknow
 const bytes = (text: string) => Buffer.byteLength(text, "utf8");
 const ids = (messages: { id: string }[]) => messages.map((m) => m.id);
 
-/** The text a connection that predates the mark hands the model: always the text, then the JSON (step 1's rendering). */
 function olderConnectionText(result: Result): string {
   const text = result.content.map((part) => part.text).join("\n");
   return `${text}\n\n${JSON.stringify(result.structuredContent)}`.trim();
@@ -89,53 +88,45 @@ describe("read_thread reads a window", () => {
       const read = await call(w.client, "read_thread", { thread_id: seeded.threadId, agent_session: `ses_${rounds}` });
       expect(read._meta?.[INBOX_TEXT_COMPLETE_META_KEY]).toBe(true);
       const text = inboxToolResultText(read).text;
-      // The connection hands the model the transcript alone: no JSON after it.
       expect(text).toBe(read.content[0]!.text);
       expect(text).not.toContain('"thread_id"');
       expect(read.structuredContent.thread.message_count).toBe(rounds * 2);
       sizes.push(bytes(text));
     }
     const [forty, sixty] = sizes as [number, number];
-    // Measured: about 18.8 KB for 60 messages (35 KB of o200k tokens before: ~100 KB as JSON).
     expect(sixty).toBeLessThan(24 * 1024);
-    // Twenty more messages (ten agent lines, ten short replies) add under 500 bytes each.
     expect((sixty - forty) / 20).toBeLessThan(500);
   });
 
   test("the window: the newest limit messages in full, the person's earlier messages in full, every other earlier message as one line", async () => {
     const w = await world();
     const seeded = await seedLongThread({ client: w.client, port: w.server.port, project: w.project, rounds: 10 });
-    const all = seeded.messageIds; // 19 messages, oldest first: agent, person, agent, …, agent
+    const all = seeded.messageIds;
     const read = await call(w.client, "read_thread", { thread_id: seeded.threadId, agent_session: "ses_long" });
     const { thread, window } = read.structuredContent;
     expect(ids(thread.messages).slice(-INBOX_THREAD_WINDOW)).toEqual(all.slice(-INBOX_THREAD_WINDOW));
-    // Before the window: the person's replies in full (they fit in 12 KB), the agent's messages one line each.
     const before = all.slice(0, -INBOX_THREAD_WINDOW);
     const persons = before.filter((_, i) => i % 2 === 1);
     const agents = before.filter((_, i) => i % 2 === 0);
     expect(ids(thread.messages)).toEqual([...persons, ...all.slice(-INBOX_THREAD_WINDOW)].sort((a, b) => all.indexOf(a) - all.indexOf(b)));
     expect(ids(thread.earlier)).toEqual(agents);
     expect(window).toMatchObject({ limit: INBOX_THREAD_WINDOW, full: persons.length + INBOX_THREAD_WINDOW, lines: agents.length, left_out: 0 });
-    // A one-line message: id, author, time, first words, size, and its questions with their states and answers.
     const line = thread.earlier[0];
     expect(line).toMatchObject({ id: all[0], author: { kind: "agent", name: "Claude Code" }, words: expect.stringMatching(/^Step 1:/), bytes: expect.any(Number) });
     expect(line.questions.map((q: any) => [q.q, q.state, q.answer.selected])).toEqual([
       [1, "sent", [LONG_THREAD_FIRST_CHOICE]],
       [2, "sent", ["Yes"]],
     ]);
-    // An earlier reply leaves its answers section out (the answers are on the questions); one in the window keeps it.
     const earlierReply = thread.messages.find((m: any) => m.id === persons[0]);
     expect(earlierReply.body).toContain("Round 1: go ahead.");
     expect(earlierReply.body).not.toContain("### Q1.");
     const windowReply = thread.messages.find((m: any) => m.id === all.at(-2));
     expect(windowReply.body).toContain("## Answers to your questions");
-    // The bookkeeping is gone; the fields readers use keep their names.
     const newest = thread.messages.at(-1);
     expect(Object.keys(newest).sort()).toEqual(["author", "body", "created_at", "id", "questions", "reply_to"]);
     expect(Object.keys(newest.questions[0]).sort()).toEqual(["key", "kind", "prompt", "q", "state"]);
     const withFile = thread.messages.find((m: any) => m.attachments);
     expect(withFile.attachments[0]).toEqual({ name: "notes.md", kind: "markdown", size: expect.any(Number), path: join(w.project, "notes.md") });
-    // The header: the open questions, every participant.
     expect(thread.open_questions.map((q: any) => [q.message_id, q.state, q.choices])).toEqual([
       [seeded.lastAgentMessageId, "open", [LONG_THREAD_FIRST_CHOICE, "Fixed 5 s"]],
       [seeded.lastAgentMessageId, "open", ["Yes", "No"]],
@@ -144,7 +135,6 @@ describe("read_thread reads a window", () => {
       { kind: "agent", name: "Claude Code", messages: 10 },
       { kind: "person", name: "the person", messages: 9 },
     ]);
-    // The transcript: the summary line first, the open questions, every message once, oldest first.
     const text = read.content[0]!.text;
     expect(text.split("\n")[0]).toBe(`Thread ${seeded.threadId} (Round 1: which backoff should the worker use?): 19 messages, 9 from the person.`);
     expect(text).toContain(`- ${seeded.lastAgentMessageId}/${thread.open_questions[0].key} (Q1) open: Round 10: which backoff should the worker use? Choices: ${LONG_THREAD_FIRST_CHOICE} | Fixed 5 s`);
@@ -154,7 +144,6 @@ describe("read_thread reads a window", () => {
       expect(next).toBeGreaterThan(at);
       at = next;
     }
-    // A one-line message's question names its prompt, so the answer says what it answers.
     expect(text).toContain(`Q1 ${line.questions[0].key} ("Round 1: which backoff should the worker use?") sent: "${LONG_THREAD_FIRST_CHOICE}"`);
     expect(text).toContain(`Cursor ${read.structuredContent.cursor}: read_thread after: ${read.structuredContent.cursor}`);
   });
@@ -172,7 +161,6 @@ describe("read_thread reads a window", () => {
     const expanded = (await call(w.client, "read_thread", { thread_id: seeded.threadId, expand: [first, all[1]] })).structuredContent;
     expect(ids(expanded.thread.messages)[0]).toBe(first);
     expect(ids(expanded.thread.earlier)).not.toContain(first);
-    // Expanded means exactly as sent: an earlier reply keeps its answers section then.
     expect(expanded.thread.messages.find((m: any) => m.id === all[1]).body).toBe(w.server.store.message(all[1]!)!.body);
 
     const byMessage = await call(w.client, "read_thread", { message_id: all[2] });
@@ -195,7 +183,6 @@ describe("read_thread reads a window", () => {
     expect(ids(back.thread.messages).slice(-INBOX_THREAD_WINDOW)).toEqual(all.slice(10 - INBOX_THREAD_WINDOW, 10));
     expect([...ids(back.thread.messages), ...ids(back.thread.earlier)].sort()).toEqual(all.slice(0, 10).sort());
     expect(back.window.left_out).toBe(all.length - 10);
-    // The questions of the messages left out are still there, with their states.
     const leftOutKeys = all.slice(10).flatMap((id) => (w.server.store.questionsOf(id) ?? []).map((q) => `${id}/${q.key}`));
     const listed = new Set([
       ...back.thread.questions.map((q: any) => `${q.message_id}/${q.key}`),
@@ -212,7 +199,6 @@ describe("read_thread reads a window", () => {
     const fresh = await call(w.client, "read_thread", { thread_id: seeded.threadId, after: read.cursor });
     expect(ids(fresh.structuredContent.thread.messages)).toEqual([replyId]);
     expect(fresh.structuredContent.thread.open_questions).toEqual([]);
-    // The cursor may come back as digits in a string, and a message id works as the bound too.
     expect(ids((await call(w.client, "read_thread", { thread_id: seeded.threadId, after: String(read.cursor) })).structuredContent.thread.messages)).toEqual([replyId]);
     expect(ids((await call(w.client, "read_thread", { thread_id: seeded.threadId, after: seeded.lastAgentMessageId })).structuredContent.thread.messages)).toEqual([replyId]);
     expect(fresh.content[0]!.text).toContain("Range: after");
@@ -238,7 +224,7 @@ describe("read_thread reads a window", () => {
     const w = await world();
     const seeded = await seedLongThread({ client: w.client, port: w.server.port, project: w.project, rounds: 2 });
     let last = seeded.lastAgentMessageId;
-    const words = "This is what I think about the retry worker, at some length. ".repeat(40); // ~2.4 KB a reply
+    const words = "This is what I think about the retry worker, at some length. ".repeat(40);
     const replies: string[] = [];
     for (let i = 0; i < 9; i++) {
       const reply = await w.post(`/api/inbox/messages/${last}/reply`, { idempotency_key: `r${i}`, words: `${i}: ${words}` });
@@ -249,7 +235,6 @@ describe("read_thread reads a window", () => {
     const inFull = replies.filter((id) => ids(thread.messages).includes(id));
     const asLines = replies.filter((id) => ids(thread.earlier).includes(id));
     expect(inFull.length + asLines.length).toBe(replies.length);
-    // Contiguous: the oldest ones are the lines.
     expect(asLines).toEqual(replies.slice(0, asLines.length));
     expect(asLines.length).toBeGreaterThan(0);
     const earlierFullBytes = inFull.filter((id) => !replies.slice(-3).includes(id)).reduce((sum, id) => sum + bytes(w.server.store.message(id)!.body), 0);
@@ -264,13 +249,11 @@ describe("read_thread reads a window", () => {
     expect(ids(full.structuredContent.thread.messages)).toEqual(seeded.messageIds);
     const withFile = (full.structuredContent.thread.messages as Record<string, any>[]).find((m) => (m.attachments ?? []).length > 0)!;
     expect(withFile.attachments[0].sent_sha256).toEqual(expect.any(String));
-    // Not marked complete: every connection appends its JSON.
     expect(inboxToolResultText(full).text).toContain('"sent_sha256"');
   });
 });
 
 describe("no question's state is ever lost from a windowed read", () => {
-  /** A thread whose questions are in every state: sent, skipped by a reply, picked, replaced, withdrawn, open, and closed by Mark read. */
   async function richThreads(w: Awaited<ReturnType<typeof world>>) {
     const send = async (args: Record<string, unknown>) => (await call(w.client, "send_message", { project_path: w.project, agent_session: "ses_rich", agent_name: "Claude Code", ...args })).structuredContent;
     const block = (prompt: string) => `:::question\n${prompt}\n\n- [ ] Yes\n- [ ] No\n:::`;
@@ -278,22 +261,17 @@ describe("no question's state is ever lost from a windowed read", () => {
     const one = await send({ body: `Round one.\n\n${block("Ship A?")}\n\n${block("Ship B?")}`, thread: "rich" });
     await w.post(`/api/inbox/messages/${one.message_id}/reply`, { idempotency_key: "one", words: "Go.", questions: one.questions.map((q: any) => ({ key: q.key, revision: 0, answer: answer(q, "Yes") })) });
     const two = await send({ body: `Round two.\n\n${block("Ship C?")}\n\n${block("Ship D?")}\n\n${block("Ship E?")}`, reply_to: one.message_id });
-    // C answered, the rest skipped by the reply ("Skip them").
     await w.post(`/api/inbox/messages/${two.message_id}/reply`, { idempotency_key: "two", words: "Only C.", skip: [two.questions[1].key, two.questions[2].key], questions: [{ key: two.questions[0].key, revision: 0, answer: answer(two.questions[0], "No") }] });
     const three = await send({ body: `Round three.\n\n${block("Ship F?")}\n\n${block("Ship G?")}\n\n${block("Ship H?")}`, reply_to: two.message_id });
-    // F picked, not sent.
     await w.post(`/api/inbox/messages/${three.message_id}/picks`, { questions: [{ key: three.questions[0].key, revision: 0, answer: answer(three.questions[0], "Yes") }] });
-    // G replaced by a new question, H withdrawn with nothing in its place (a later message).
     const four = await send({ body: `Round four.\n\n${block("Ship G, revised?")}`, reply_to: three.message_id, supersedes: [`${three.message_id}/${three.questions[1].key}`] });
     await send({ body: "Never mind H.", reply_to: four.message_id, supersedes: [`${three.message_id}/${three.questions[2].key}`] });
     for (let i = 0; i < 8; i++) await send({ body: `Progress ${i}.`, reply_to: four.message_id });
-    // A second thread, its open questions closed by the person's Mark read.
     const closed = await send({ body: `Elsewhere.\n\n${block("Ship I?")}`, thread: "closed" });
     await w.post(`/api/inbox/threads/${closed.thread_id}/read`, {});
     return [one.thread_id as string, closed.thread_id as string];
   }
 
-  /** A small deterministic generator (mulberry32), so a failure replays. */
   function random(seed: number) {
     let a = seed >>> 0;
     return () => {
@@ -335,8 +313,6 @@ describe("no question's state is ever lost from a windowed read", () => {
       for (const m of messages) {
         for (const q of m.questions ?? []) {
           const context = `${JSON.stringify(input)} ${m.id}/${q.key}`;
-          // A read of what is new may leave out a question of an older message only
-          // when nothing changed it since the cursor: the reader already has its state.
           const unchangedSinceCursor =
             after !== null &&
             store.messageCursor(m.id)! <= after &&
@@ -363,7 +339,6 @@ describe("connections render a complete transcript as text alone; an older one s
     for (const result of [read, list]) {
       expect(result._meta?.[INBOX_TEXT_COMPLETE_META_KEY]).toBe(true);
       expect(inboxToolResultText(result).text).toBe(result.content[0]!.text);
-      // An older connection: the same text, then the JSON (trimmed: no sha256s, no idempotency keys).
       const older = olderConnectionText(result);
       expect(older.startsWith(result.content[0]!.text)).toBe(true);
       const json = JSON.parse(older.slice(result.content[0]!.text.length).trim());
@@ -371,10 +346,8 @@ describe("connections render a complete transcript as text alone; an older one s
       expect(older).not.toContain("sent_sha256");
       expect(older).not.toContain("idempotency_key");
     }
-    // The list's text names every row's facts.
     const row = list.structuredContent.threads[0];
     expect(list.content[0]!.text).toContain(`- ${row.thread_id} · ${JSON.stringify(row.subject)} · ${row.section} · ${row.message_count} messages`);
-    // send_message's questions[].key stays.
     const sent = await call(w.client, "send_message", { reply_to: replyId, body: "Thanks.\n\n:::question\nAnything else?\n\n- [ ] No\n:::", agent_session: "ses_long" });
     expect(sent._meta?.[INBOX_TEXT_COMPLETE_META_KEY]).toBeUndefined();
     expect(sent.structuredContent.questions[0].key).toEqual(expect.any(String));
@@ -435,7 +408,6 @@ describe("search: the agents' read-only search over the Inbox's messages", () =>
 });
 
 describe("a windowed read marks read only what it showed", () => {
-  /** An agent asks, the person replies, `count` times; the agent reads; then it asks once more and the person answers. */
   async function rounds(w: Awaited<ReturnType<typeof world>>, count: number) {
     const all: string[] = [];
     let last = "";
@@ -463,7 +435,6 @@ describe("a windowed read marks read only what it showed", () => {
     expect(pending(w)).toEqual([reply]);
     const list = (await call(w.client, "read_thread", { project_path: w.project, agent_session: "ses_m" })).structuredContent;
     expect(list.threads[0].unread).toBe(true);
-    // A read that shows it marks it read.
     await call(w.client, "read_thread", { thread_id: threadId, agent_session: "ses_m" });
     expect(pending(w)).toEqual([]);
   });
@@ -485,7 +456,6 @@ describe("a windowed read marks read only what it showed", () => {
     const after = await call(w.client, "read_thread", { thread_id: sent.thread_id, after: first.structuredContent.cursor, agent_session: "ses_m" });
     expect(after.content[0]!.text).not.toContain("👍");
     expect(w.server.store.message(sent.message_id)!.ack?.seen_at ?? null).toBeNull();
-    // A read that shows it marks it seen.
     expect((await call(w.client, "read_thread", { thread_id: sent.thread_id, agent_session: "ses_m" })).content[0]!.text).toContain("👍");
     expect(w.server.store.message(sent.message_id)!.ack?.seen_at).toEqual(expect.any(String));
   });
@@ -507,7 +477,6 @@ describe("the review's fixes: answers whole, the answers section cut exactly, th
   ].join("\n");
   const FEEDBACK = ["# Feedback on the attached files", "", "## notes.md", "", "### 1. Feedback on:", "> The worker drains the queue", "Say how it drains."].join("\n");
 
-  /** A question answered by a reply that carries `feedback` after its answers section, through the real reply route. */
   async function answered(w: Awaited<ReturnType<typeof world>>, feedback: string, text = "In order") {
     const sent = (await call(w.client, "send_message", { project_path: w.project, body: ":::question-text\nHow does the worker drain?\n:::", agent_session: "ses_r" })).structuredContent;
     const q = sent.questions[0];
@@ -530,7 +499,6 @@ describe("the review's fixes: answers whole, the answers section cut exactly, th
       expect(cut).toBe(`Answered 1 question.\n\nHere you go.\n\n${marker}${feedback ? `\n\n${feedback}` : ""}`);
       if (feedback.includes("**Skills referenced**")) expect(splitInboxSkillsBlock(cut)?.skills.map((skill) => skill.name)).toEqual(["release-notes"]);
     }
-    // Text that does not follow the section's grammar exactly is never cut.
     const odd = { ...w.server.store.messageWire((await answered(w, "")).replyId)!, body: "My words.\n\n## Answers to your questions\n\nI wrote this heading myself." } as InboxMessageWire;
     expect(withoutAnswersSection(odd)).toBe(odd.body);
   });
@@ -587,7 +555,6 @@ describe("the review's fixes: answers whole, the answers section cut exactly, th
     expect(newest.body).toBe(w.server.store.message(replies[4]!)!.body);
     expect(newest.body_bytes).toBeUndefined();
     const inFull = thread.messages.map((m: any) => m.id);
-    // The 13 KB reply does not fit the 12 KB budget; the short ones before and after it still do.
     expect(inFull).toEqual(expect.arrayContaining([replies[0], replies[1], replies[3]]));
     expect(thread.earlier.map((l: any) => l.id)).toContain(replies[2]);
     expect(window).toMatchObject({ newest: 2, expanded: 0 });
@@ -619,7 +586,6 @@ describe("the review's fixes: answers whole, the answers section cut exactly, th
     const cursor = (await call(w.client, "read_thread", { thread_id: sent.thread_id })).structuredContent.cursor;
     const quiet = (await call(w.client, "read_thread", { thread_id: sent.thread_id, after: cursor })).structuredContent;
     expect(quiet.thread.questions).toBeUndefined();
-    // The thread is archived: both questions close, with no question line, after the cursor.
     await call(w.client, "resolve_message", { message_id: sent.thread_id });
     const after = (await call(w.client, "read_thread", { thread_id: sent.thread_id, after: cursor })).structuredContent;
     expect(after.thread.questions.map((q: any) => [q.key, q.state])).toEqual(sent.questions.map((q: any) => [q.key, "closed"]));
