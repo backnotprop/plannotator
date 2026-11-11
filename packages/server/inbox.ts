@@ -238,6 +238,7 @@ import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
 import { createInboxAgentFaces } from "./inbox-agent-faces";
 import { createAgentIcons, createInboxAgentIcons, INBOX_AGENT_ICONS_DIR } from "./inbox-agent-icons";
+import { createInboxIconAnimate } from "./inbox-icon-animate";
 import { createBuiltInIconSets, createInboxIconSets } from "./inbox-icon-sets";
 import { createIconSetFetcher, iconSetsPointer, INBOX_ICON_SETS_DIR } from "./inbox-icon-set-fetch";
 import { createInboxAgentFacesFile } from "@plannotator/shared/inbox/agent-faces";
@@ -4367,6 +4368,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // Pinned artifacts and the Artifacts wall (packages/server/inbox-artifact-pins.ts).
   const artifactPins = createInboxArtifactPins({ store, serverSession, readBody: (req) => readBody(req), json });
   // Agent icons' faces (packages/server/inbox-agent-faces.ts).
+  // "Animate it": an agent hands an animated picture back for the one icon it was asked about (inbox-icon-animate.ts).
+  const iconAnimate = createInboxIconAnimate({
+    inboxDir: inboxDir(dataDir),
+    icons: agentIconFiles,
+    faces: agentFacesFile,
+    serverSession,
+    localOnly: () => localOnly(),
+    readBody: (req) => readBody(req),
+    json,
+    touch: () => void agentFacesFile.touch(),
+  });
   const agentIcons = createInboxAgentIcons({
     icons: agentIconFiles,
     faces: agentFacesFile,
@@ -4374,6 +4386,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     localOnly: () => localOnly(),
     readBody: (req) => readBody(req),
     json,
+    kept: () => iconAnimate.kept(),
   });
   const agentFaces = createInboxAgentFaces({ file: agentFacesFile, serverSession, readBody: (req) => readBody(req), json, icons: () => agentIconFiles.list() });
   // Icon sets for agents' icons ("Sets": built in, or fetched into the data folder on one click; inbox-icon-sets.ts).
@@ -5828,6 +5841,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The pictures uploaded for agents' icons ("Your own…"): this computer's windows and the owner's.
       const iconed = await agentIcons.route(req, url, ownerOrLocal(req, via));
       if (iconed) return iconed;
+      const animated = await iconAnimate.route(req, url, ownerOrLocal(req, via));
+      if (animated) return animated;
       // Icon sets for agents' icons ("Sets"): built-in ones to any window, fetched ones and downloads to the owner's.
       const setIconed = await iconSets.route(req, url, ownerOrLocal(req, via));
       if (setIconed) return setIconed;

@@ -35,8 +35,10 @@ export const INBOX_AGENT_ICONS_PATH = "/api/inbox/agent-icons";
 export const INBOX_AGENT_ICONS_DIR = "agent-icons";
 /** The same cap as Set picture…, and its words. */
 export const AGENT_ICON_MAX_BYTES = PROJECT_PICTURE_MAX_BYTES;
-const TOO_BIG = "Picture: at most 512 KB.";
-const NOT_IMAGE = "Picture: a PNG, JPEG, GIF, WebP or SVG image.";
+export const AGENT_ICON_TOO_BIG = "Picture: at most 512 KB.";
+export const AGENT_ICON_NOT_IMAGE = "Picture: a PNG, JPEG, GIF, WebP or SVG image.";
+const TOO_BIG = AGENT_ICON_TOO_BIG;
+const NOT_IMAGE = AGENT_ICON_NOT_IMAGE;
 
 /** The five Set picture… takes, and each one's file ending. */
 const EXT: Readonly<Record<string, string>> = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp", "image/svg+xml": "svg" };
@@ -172,6 +174,8 @@ export function createInboxAgentIcons(options: {
   localOnly: () => Response;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   json: (body: unknown, status?: number) => Response;
+  /** Pictures kept past the cap besides the ones agents show ("Animate it"'s originals and results). */
+  kept?: () => ReadonlySet<string>;
 }) {
   const { icons, faces, serverSession, json } = options;
   const withIcons = (wire: InboxAgentFacesWire): InboxAgentFacesWire => ({ ...wire, icons: icons.list() });
@@ -208,7 +212,7 @@ export function createInboxAgentIcons(options: {
       if (saved.reason === "not_saved") throw new InboxError("config_not_saved", "The picture did not change.");
       throw new InboxError("validation_error", saved.reason === "too_big" ? TOO_BIG : NOT_IMAGE, { field: "picture" });
     }
-    icons.prune(faces.shown());
+    icons.prune(new Set([...faces.shown(), ...(options.kept?.() ?? [])]));
     return json({ icon: saved.icon, ...withIcons(faces.touch()) });
   };
   return { route, withIcons };

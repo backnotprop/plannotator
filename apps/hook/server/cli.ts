@@ -562,6 +562,7 @@ export const INBOX_COMMAND_USAGE = [
   "  plannotator inbox projects combine <project id> --into <project id> [--json]",
   "  plannotator inbox projects undo <project id> [--json]",
   INBOX_ROWS_USAGE_LINE,
+  "  plannotator inbox icon set <file> --request <id> [--json]",
   "  plannotator inbox call [--session <id>] <action> [<json> | -]",
   "  plannotator inbox pulls ls|add|rm [--session <id>] <thread> [<ref>... | --all]",
   "  plannotator inbox export-decisions --thread <id> [--format md|html] [--out <file>] [--pr <ref>]",
@@ -600,6 +601,8 @@ export const INBOX_COMMAND_USAGE = [
   "                                  --tailscale is published again.",
   "  plannotator inbox projects      List the projects, combine one into another, undo a",
   "                                  combine: when the person asks to clean them up.",
+  "  plannotator inbox icon set      Hand back an animated agent icon, only when an Inbox",
+  "                                  message asked you to (its request id starts ia_).",
   "  plannotator inbox call          Run one Inbox action from a script: JSON in, one JSON",
   "                                  result on stdout. See 'Scripting the Inbox'.",
   "  plannotator inbox pulls         A thread's PRs: list them, add or remove some",
@@ -875,7 +878,7 @@ export function isSubcommandHelpInvocation(args: string[]): string | null {
   const canonical = SUBCOMMAND_HELP_ALIASES[sub] ?? sub;
   if (!(canonical in SUBCOMMAND_HELP)) return null;
   // `inbox projects --help` is that command's own usage, not the whole guide.
-  if (canonical === "inbox" && (args[1] === "projects" || args[1] === "rows")) return null;
+  if (canonical === "inbox" && (args[1] === "projects" || args[1] === "rows" || args[1] === "icon")) return null;
   return hasHelpFlag(args.slice(1)) ? canonical : null;
 }
 
