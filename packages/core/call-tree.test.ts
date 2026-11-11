@@ -1,0 +1,213 @@
+/**
+ * The Call tree document: re-rooting at the function around a hunk, and the
+ * rows the view draws.
+ *
+ * Regressions guarded:
+ *  - a hunk opening the tree at the wrong function (a same-file neighbour, a
+ *    deeper copy of the call, the wrong side for a removed call);
+ *  - the "every row green" look the owner rejected (2026-10-30): only the top
+ *    row of a wholly new subtree is banded;
+ *  - a repeated call expanded again instead of marked "↑ above";
+ *  - Changes only dropping the root or keeping unchanged branches;
+ *  - fold defaults hiding a changed path, or a folded row losing its count;
+ *  - a deep or large tree overflowing the stack or taking seconds.
+ */
+import { describe, expect, test } from "bun:test";
+import {
+  buildCallTreeRows,
+  calleeName,
+  callTreeAt,
+  callTreeFromEntry,
+  findCallTreeRoot,
+  type CallTreeNode,
+  type CallTreeSourceTree,
+} from "./call-tree";
+
+function n(
+  key: string,
+  label: string,
+  file: string | undefined,
+  line: number | undefined,
+  children: CallTreeNode[] = [],
+  status: CallTreeNode["status"] = "same",
+): CallTreeNode {
+  return { key, label, status, ...(file ? { file } : {}), ...(line ? { line } : {}), children };
+}
+
+// onBeforeCreate (note.ts:520) -> getNoteSizeAdjustments (written :582)
+//   -> getLabelSize (written :600, body 610-640 in note.ts)
+//        -> measure (written :612) -> elm.getBoundingClientRect (removed, text.ts old :263), parley.layout (added, text.ts :263)
+//   -> helper (written :590, body 700-720) -> log (written :705)
+const label = n("getLabelSize", "this.getLabelSize(shape)", "note.ts", 600, [
+  n("measure", "textMeasure.measureHtml(html)", "note.ts", 612, [
+    n("rect", "elm.getBoundingClientRect()", "text.ts", 263, [], "removed"),
+    n("parley", "parley.layout(html, opts)", "text.ts", 263, [], "added"),
+  ]),
+]);
+const entry: CallTreeSourceTree = {
+  entry: "onBeforeCreate",
+  tree: n("root", "onBeforeCreate(next)", "note.ts", 520, [
+    n("adjust", "getNoteSizeAdjustments(shape)", "note.ts", 582, [
+      label,
+      n("helper", "helper()", "note.ts", 590, [n("log", "log()", "note.ts", 705)]),
+    ]),
+  ]),
+};
+
+describe("findCallTreeRoot", () => {
+  const hunk = { file: "note.ts", newStart: 608, newEnd: 618, oldStart: 608, oldEnd: 618 };
+
+  test("roots at the call to the sem function around the hunk, with the caller trail", () => {
+    const location = findCallTreeRoot([entry], hunk, { name: "getLabelSize", newStart: 605, newEnd: 640 });
+    expect(location).not.toBeNull();
+    const doc = callTreeAt([entry], location!);
+    expect(doc.root).toBe(label);
+    expect(doc.title).toBe("getLabelSize");
+    expect(doc.trail).toEqual(["onBeforeCreate", "getNoteSizeAdjustments"]);
+    // Same path format as the Call flow tab's rows, so comments carry comparable targets.
+    expect(doc.rootPath).toBe("onBeforeCreate:0/adjust:0/getLabelSize:0");
+  });
+
+  test("never picks a same-file neighbour whose name does not match", () => {
+    // The range covers helper's body (705) too, but helper is not getLabelSize.
+    const location = findCallTreeRoot([entry], hunk, { name: "getLabelSize", newStart: 605, newEnd: 720 });
+    expect(callTreeAt([entry], location!).root).toBe(label);
+  });
+
+  test("without sem, calls written inside the hunk decide", () => {
+    const location = findCallTreeRoot([entry], { file: "note.ts", newStart: 700, newEnd: 710, oldStart: 690, oldEnd: 700 });
+    expect(callTreeAt([entry], location!).title).toBe("helper");
+  });
+
+  test("a removed call is matched on the old side of the hunk", () => {
+    const tree: CallTreeSourceTree = {
+      entry: "run",
+      tree: n("run", "run()", "a.ts", 1, [n("f", "f()", "a.ts", 3, [n("gone", "gone()", "b.ts", 40, [], "removed")])]),
+    };
+    const newSideOnly = findCallTreeRoot([tree], { file: "b.ts", newStart: 10, newEnd: 20, oldStart: 90, oldEnd: 99 });
+    expect(newSideOnly).toBeNull();
+    const oldSide = findCallTreeRoot([tree], { file: "b.ts", newStart: 10, newEnd: 20, oldStart: 35, oldEnd: 45 });
+    expect(callTreeAt([tree], oldSide!).title).toBe("f");
+  });
+
+  test("an entry written in the function roots at the entry with no trail", () => {
+    const location = findCallTreeRoot([entry], { file: "note.ts", newStart: 518, newEnd: 530, oldStart: 518, oldEnd: 530 }, {
+      name: "onBeforeCreate", newStart: 518, newEnd: 600,
+    });
+    const doc = callTreeAt([entry], location!);
+    expect(doc.root).toBe(entry.tree);
+    expect(doc.trail).toEqual([]);
+  });
+
+  test("the shallowest copy of a call wins across entries", () => {
+    const deep: CallTreeSourceTree = { entry: "a", tree: n("a", "a()", "x.ts", 1, [n("b", "b()", "x.ts", 2, [n("g", "g()", "x.ts", 3, [n("h", "h()", "x.ts", 51)])])]) };
+    const shallow: CallTreeSourceTree = { entry: "c", tree: n("c", "c()", "y.ts", 1, [n("g2", "g()", "y.ts", 9, [n("h2", "h()", "x.ts", 51)])]) };
+    const location = findCallTreeRoot([deep, shallow], { file: "x.ts", newStart: 48, newEnd: 55, oldStart: 48, oldEnd: 55 }, {
+      name: "g", newStart: 45, newEnd: 60,
+    });
+    expect(location?.treeIndex).toBe(1);
+    expect(callTreeAt([deep, shallow], location!).trail).toEqual(["c"]);
+  });
+
+  test("a hunk with no calls in it finds no tree", () => {
+    expect(findCallTreeRoot([entry], { file: "other.ts", newStart: 1, newEnd: 30, oldStart: 1, oldEnd: 30 })).toBeNull();
+  });
+});
+
+describe("buildCallTreeRows", () => {
+  test("bands only a call whose own line changed; a wholly new subtree bands its top row only", () => {
+    const tree: CallTreeSourceTree = {
+      entry: "e",
+      tree: n("e", "e()", "a.ts", 1, [
+        n("new", "brandNew()", "a.ts", 2, [
+          n("inner", "inner()", "b.ts", 5, [n("deeper", "deeper()", "b.ts", 9, [], "added")], "added"),
+        ], "added"),
+        n("old", "gone()", "a.ts", 3, [], "removed"),
+      ]),
+    };
+    const rows = buildCallTreeRows(callTreeFromEntry(tree, 0));
+    const byKey = new Map(rows.map((row) => [row.node.key, row]));
+    expect(byKey.get("new")?.band).toBe("added");
+    expect(byKey.get("inner")?.band).toBeNull();
+    expect(byKey.get("inner")?.dot).toBe("added");
+    expect(byKey.get("deeper")?.band).toBeNull();
+    expect(byKey.get("old")?.band).toBe("removed");
+    expect(byKey.get("e")?.band).toBeNull();
+  });
+
+  test("a repeated call is marked and not expanded again", () => {
+    const body = () => [n("x", "x()", "s.ts", 11), n("y", "y()", "s.ts", 12)];
+    const tree: CallTreeSourceTree = {
+      entry: "e",
+      tree: n("e", "e()", "a.ts", 1, [
+        n("s1", "util.shared()", "a.ts", 2, body(), "same"),
+        n("chg", "changed()", "a.ts", 3, [], "added"),
+        n("s2", "util.shared()", "a.ts", 4, body(), "same"),
+      ]),
+    };
+    const folds = new Map([["e:0/s1:0", false], ["e:0/s2:2", false]]);
+    const rows = buildCallTreeRows(callTreeFromEntry(tree, 0), { folds });
+    const shared = rows.filter((row) => row.node.label === "util.shared()");
+    expect(shared.map((row) => row.repeat)).toEqual([false, true]);
+    // The first copy shows its two calls; the repeat shows none.
+    expect(rows.filter((row) => row.parentId === shared[0]!.id)).toHaveLength(2);
+    expect(rows.filter((row) => row.parentId === shared[1]!.id)).toHaveLength(0);
+  });
+
+  test("unchanged branches fold by default with their count; changed paths stay open; a fold override wins", () => {
+    const doc = callTreeFromEntry(entry, 0);
+    const rows = buildCallTreeRows(doc);
+    const helper = rows.find((row) => row.node.key === "helper")!;
+    expect(helper.folded).toBe(true);
+    expect(helper.childCount).toBe(1);
+    expect(rows.some((row) => row.node.key === "parley")).toBe(true);
+    expect(rows.some((row) => row.node.key === "log")).toBe(false);
+
+    const unfolded = buildCallTreeRows(doc, { folds: new Map([[helper.id, false]]) });
+    expect(unfolded.some((row) => row.node.key === "log")).toBe(true);
+    const measure = rows.find((row) => row.node.key === "measure")!;
+    const folded = buildCallTreeRows(doc, { folds: new Map([[measure.id, true]]) });
+    expect(folded.some((row) => row.node.key === "parley")).toBe(false);
+  });
+
+  test("Changes only keeps the root and the paths to changes, nothing else", () => {
+    const rows = buildCallTreeRows(callTreeFromEntry(entry, 0), { changesOnly: true });
+    expect(rows.map((row) => row.node.key)).toEqual(["root", "adjust", "getLabelSize", "measure", "rect", "parley"]);
+  });
+
+  test("tree lines: the last child gets the elbow and closes its column", () => {
+    const rows = buildCallTreeRows(callTreeFromEntry(entry, 0), { folds: new Map([["onBeforeCreate:0/adjust:0/helper:1", false]]) });
+    const byKey = new Map(rows.map((row) => [row.node.key, row]));
+    expect(byKey.get("root")?.branch).toBeNull();
+    expect(byKey.get("adjust")).toMatchObject({ branch: "elbow", guides: [] });
+    expect(byKey.get("getLabelSize")).toMatchObject({ branch: "tee", guides: ["blank"] });
+    expect(byKey.get("measure")).toMatchObject({ branch: "elbow", guides: ["blank", "pipe"] });
+    expect(byKey.get("helper")).toMatchObject({ branch: "elbow", guides: ["blank"] });
+    expect(byKey.get("log")).toMatchObject({ branch: "elbow", guides: ["blank", "blank"] });
+    // The caller's file decides whether the location shows only ":line".
+    expect(byKey.get("measure")?.callerFile).toBe("note.ts");
+    expect(byKey.get("rect")?.callerFile).toBe("note.ts");
+  });
+
+  test("a deep tree and a few thousand rows build without recursion limits, quickly", () => {
+    let deep: CallTreeNode = n("leaf", "leaf()", "d.ts", 1, [], "added");
+    for (let depth = 0; depth < 4000; depth++) deep = n(`d${depth}`, `f${depth}()`, "d.ts", depth + 2, [deep]);
+    expect(buildCallTreeRows(callTreeFromEntry({ entry: "deep", tree: deep }, 0))).toHaveLength(4001);
+
+    const wide = n("w", "w()", "w.ts", 1, Array.from({ length: 60 }, (_, i) => (
+      n(`c${i}`, `c${i}()`, "w.ts", i + 2, Array.from({ length: 80 }, (_, j) => n(`g${i}-${j}`, `g${i}_${j}()`, "w.ts", 1000 + i * 100 + j, [], j === 0 ? "added" : "same")))
+    )));
+    const started = performance.now();
+    const rows = buildCallTreeRows(callTreeFromEntry({ entry: "wide", tree: wide }, 0));
+    expect(rows).toHaveLength(1 + 60 + 60 * 80);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+});
+
+describe("calleeName", () => {
+  test("is the called name without receiver, arguments or new", () => {
+    expect(calleeName("textMeasure.measureHtml(html, { a })")).toBe("measureHtml");
+    expect(calleeName("new Foo.Bar(x)")).toBe("Bar");
+    expect(calleeName("if (x)")).toBe("if");
+  });
+});
