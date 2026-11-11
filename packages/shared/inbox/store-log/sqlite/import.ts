@@ -18,24 +18,22 @@
  *    a crash midway is finished by the next start (step 1).
  */
 import { Database } from "bun:sqlite";
-import { chmodSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, renameSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, renameSync, statfsSync, statSync, writeFileSync } from "node:fs";
+import { open } from "node:fs/promises";
 import { join } from "node:path";
-import { inboxDir as inboxDirOf, INBOX_PROJECTS_DIR, INITIATIVES_FILE, SEQ_FLOOR_FILE } from "../../schema";
-import { InboxStore } from "../../store";
+import { inboxDir as inboxDirOf } from "../../schema";
 import { jsonlInboxLog } from "../jsonl-log";
 import type { InboxLog, InboxLogContents } from "../log";
-import { inboxStoreDigest } from "./digest";
+import { checkDigests } from "./check";
 import { loadImportRows } from "./import-load";
 import { ImportRows } from "./import-rows";
+import { INBOX_IMPORT_SLOW_MS } from "./move-words";
+import { bytesUnder, freeBackupName, fsyncPath, INBOX_DB_IMPORTING, JSONL_ENTRIES, moveIntoBackup, readMeta, removeDb, removeSidecars } from "./move-files";
 import { INBOX_DB_FILE, keepSeqFloor, openInboxDb, sqliteInboxLog } from "./sqlite-log";
 
-export const INBOX_DB_IMPORTING = `${INBOX_DB_FILE}.importing`;
+export { INBOX_DB_IMPORTING };
 
-/** The entries of today's record files under `inbox/`: what the import reads and then moves into the backup. */
-const JSONL_ENTRIES = [INBOX_PROJECTS_DIR, INITIATIVES_FILE, SEQ_FLOOR_FILE];
 
-/** How long a move runs before the person is told the Inbox is upgrading (the owner's "over 2 s"). */
-export const INBOX_IMPORT_SLOW_MS = 2_000;
 
 export type InboxImportOutcome =
   /** `inbox.db` was already the record (the backup's move finished if a crash had stopped it). */
@@ -51,6 +49,7 @@ export interface InboxImportPhases {
   read: number;
   rows: number;
   load: number;
+  integrity: number;
   checkFiles: number;
   checkDb: number;
   finish: number;
@@ -67,18 +66,19 @@ export interface InboxImportOptions {
   beforeLoad?: (db: Database) => void;
   /** Test-only: change the new database after it is written and before it is checked. */
   afterWrite?: (db: Database) => void;
-  /** Test-only: between the rename and the move into the backup. */
-  afterRename?: () => void;
+  /** Test-only: at each step boundary (the crash test kills the process there). */
+  step?: (name: InboxImportStep) => void;
 }
 
 /** Move the Inbox under `dataDir` from its JSONL files into `inbox.db`, or say why the files keep serving. */
-export function importJsonlInbox(dataDir: string, options: InboxImportOptions = {}): InboxImportOutcome {
+export async function importJsonlInbox(dataDir: string, options: InboxImportOptions = {}): Promise<InboxImportOutcome> {
   const now = options.now ?? (() => new Date());
+  const step = options.step ?? (() => {});
   const inboxDir = inboxDirOf(dataDir);
   const target = join(inboxDir, INBOX_DB_FILE);
   if (existsSync(target)) {
     const backup = readMeta(target, "import_backup");
-    if (backup) moveIntoBackup(inboxDir, backup);
+    if (backup) moveIntoBackup(inboxDir, backup, () => step("backup-entry"));
     return { status: "already" };
   }
   removeDb(join(inboxDir, INBOX_DB_IMPORTING));
@@ -98,7 +98,7 @@ export function importJsonlInbox(dataDir: string, options: InboxImportOptions = 
     options.onSlow();
   };
   const importing = join(inboxDir, INBOX_DB_IMPORTING);
-  const phases: InboxImportPhases = { read: 0, rows: 0, load: 0, checkFiles: 0, checkDb: 0, finish: 0 };
+  const phases: InboxImportPhases = { read: 0, rows: 0, load: 0, integrity: 0, checkFiles: 0, checkDb: 0, finish: 0 };
   let mark = started;
   const lap = (phase: keyof InboxImportPhases) => {
     const at = performance.now();
@@ -106,6 +106,7 @@ export function importJsonlInbox(dataDir: string, options: InboxImportOptions = 
     mark = at;
     tick();
   };
+  let flushed: Promise<void> | null = null;
   try {
     // Today's exact rules: the JSONL log's own reader, then the store's order (seq; equal seqs in read order).
     const sources = filesFingerprint(inboxDir);
@@ -113,6 +114,7 @@ export function importJsonlInbox(dataDir: string, options: InboxImportOptions = 
     const lines = contents.lines!;
     lines.sort((a, b) => a.seq - b.seq);
     lap("read");
+    step("read");
     // Every table's final rows, worked out once in memory, then written in one pass.
     const rows = new ImportRows();
     for (let i = 0; i < lines.length; i++) {
@@ -120,6 +122,7 @@ export function importJsonlInbox(dataDir: string, options: InboxImportOptions = 
       if ((i & 4095) === 4095) tick();
     }
     lap("rows");
+    step("rows");
     const { sqlite, db } = openInboxDb(inboxDir, INBOX_DB_IMPORTING);
     try {
       options.beforeLoad?.(sqlite);
@@ -130,64 +133,81 @@ export function importJsonlInbox(dataDir: string, options: InboxImportOptions = 
       sqlite.close();
     }
     lap("load");
+    step("load");
+    // The file goes to disk on another thread while this one checks it: the two longest waits overlap.
+    flushed = flushFile(importing);
+
+    const integrity = new Database(importing, { readwrite: true, create: false, strict: true });
+    try {
+      const result = integrity.query<{ integrity_check: string }, []>("PRAGMA integrity_check").get();
+      if (result?.integrity_check !== "ok") throw new Error(`integrity_check: ${result?.integrity_check}`);
+    } finally {
+      integrity.close();
+    }
+    lap("integrity");
+    step("integrity");
 
     // The check: everything as the app serves it, from the files (the lines just read, replayed by the store)
     // and from the new database (read back from its tables).
-    const fromFiles = inboxStoreDigest(InboxStore.open(dataDir, { now, log: (dir) => readOnce(jsonlInboxLog(dir), contents) }));
-    lap("checkFiles");
-    const opened: { close(): void }[] = [];
-    let fromDb;
-    try {
-      fromDb = inboxStoreDigest(
-        InboxStore.open(dataDir, {
-          now,
-          log: (dir) => {
-            const log = sqliteInboxLog(dir, INBOX_DB_IMPORTING);
-            opened.push(log);
-            return log;
-          },
-        }),
-      );
-    } finally {
-      // Closed before the file is renamed: no connection may write beside the old name afterwards.
-      for (const log of opened) log.close();
-    }
+    const check = checkDigests(
+      dataDir,
+      now,
+      { log: (dir) => readOnce(jsonlInboxLog(dir), contents) },
+      { log: (dir) => sqliteInboxLog(dir, INBOX_DB_IMPORTING) },
+      () => lap("checkFiles"),
+    );
     lap("checkDb");
-    if (fromFiles.sha256 !== fromDb.sha256) {
+    step("checked");
+    await flushed;
+    if (!check.same) {
       removeDb(importing);
-      writeReport(inboxDir, now(), { files: fromFiles.counts, database: fromDb.counts });
+      writeReport(inboxDir, now(), { files: check.a.counts, database: check.b.counts });
       return { status: "kept_files", reason: "mismatch", detail: "the new database reads differently from the files" };
     }
 
-    const backup = `backup-${now().toISOString().slice(0, 10)}-jsonl`;
-    const check = new Database(importing, { strict: true });
+    const backup = freeBackupName(inboxDir, now(), "jsonl");
+    const finish = new Database(importing, { readwrite: true, create: false, strict: true });
     try {
-      check.run("PRAGMA synchronous = FULL");
-      const integrity = check.query<{ integrity_check: string }, []>("PRAGMA integrity_check").get();
-      if (integrity?.integrity_check !== "ok") throw new Error(`integrity_check: ${integrity?.integrity_check}`);
-      check.run("INSERT INTO meta (key, value) VALUES ('import_backup', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value", [backup]);
-      check.run("INSERT INTO meta (key, value) VALUES ('import_complete', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value", [now().toISOString()]);
-      check.run("PRAGMA wal_checkpoint(TRUNCATE)");
+      finish.run("PRAGMA synchronous = FULL");
+      finish.run("INSERT INTO meta (key, value) VALUES ('import_backup', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value", [backup]);
+      finish.run("INSERT INTO meta (key, value) VALUES ('import_complete', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value", [now().toISOString()]);
+      finish.run("PRAGMA wal_checkpoint(TRUNCATE)");
     } finally {
-      check.close();
+      finish.close();
     }
+    step("marked");
     // Something wrote to the files while they were moved (a second Inbox): the files keep serving, nothing is lost.
     if (filesFingerprint(inboxDir) !== sources) {
       removeDb(importing);
       return { status: "kept_files", reason: "mismatch", detail: "the files changed while they were moved" };
     }
     removeSidecars(importing);
-    // On disk for good before it takes the real name: the rename is the switch.
+    // On disk for good before it takes the real name (the pages above were flushed already): the rename is the switch.
     fsyncPath(importing);
     renameSync(importing, target);
     fsyncPath(inboxDir);
-    options.afterRename?.();
-    moveIntoBackup(inboxDir, backup);
+    step("renamed");
+    moveIntoBackup(inboxDir, backup, () => step("backup-entry"));
     lap("finish");
     return { status: "imported", lines: lines.length, ms: Math.round(performance.now() - started), backup, phases };
   } catch (error) {
+    // A flush still running holds the file open: let it end before the file goes.
+    await flushed?.catch(() => {});
     removeDb(importing);
     return { status: "kept_files", reason: "failed", detail: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** The import's step boundaries (the crash test stops it at each one). */
+export type InboxImportStep = "read" | "rows" | "load" | "integrity" | "checked" | "marked" | "renamed" | "backup-entry";
+
+/** Flush a file to disk on the I/O thread pool, so the caller can work meanwhile. */
+async function flushFile(path: string): Promise<void> {
+  const handle = await open(path, "r");
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
   }
 }
 
@@ -216,66 +236,9 @@ function filesFingerprint(inboxDir: string): string {
   return parts.join("\n");
 }
 
-/** Flush a file or folder to disk; best effort for a folder (not every system opens one). */
-function fsyncPath(path: string): void {
-  let fd: number | null = null;
-  try {
-    fd = openSync(path, "r");
-    fsyncSync(fd);
-  } catch (error) {
-    if (!statSync(path).isDirectory()) throw error;
-  } finally {
-    if (fd !== null) closeSync(fd);
-  }
-}
-
-/** Move what is still in place into the backup folder, read-only; each entry one rename, so it can run again. */
-function moveIntoBackup(inboxDir: string, name: string): void {
-  const backup = join(inboxDir, name);
-  mkdirSync(backup, { recursive: true, mode: 0o700 });
-  for (const entry of JSONL_ENTRIES) {
-    const from = join(inboxDir, entry);
-    if (!existsSync(from)) continue;
-    renameSync(from, join(backup, entry));
-    readOnly(join(backup, entry));
-  }
-}
-
-/** Each file read-only; folders stay the owner's, so Settings → Storage's Remove can delete the backup. */
-function readOnly(path: string): void {
-  if (!statSync(path).isDirectory()) return chmodSync(path, 0o400);
-  for (const child of readdirSync(path)) readOnly(join(path, child));
-}
-
-function bytesUnder(path: string): number {
-  const stat = statSync(path);
-  if (!stat.isDirectory()) return stat.size;
-  return readdirSync(path).reduce((sum, child) => sum + bytesUnder(join(path, child)), 0);
-}
-
 function freeBytesAt(dir: string): number {
   const stat = statfsSync(dir);
   return Number(stat.bavail) * Number(stat.bsize);
-}
-
-function readMeta(file: string, key: string): string | null {
-  const db = new Database(file, { readonly: true, strict: true });
-  try {
-    return db.query<{ value: string }, [string]>("SELECT value FROM meta WHERE key = ?").get(key)?.value ?? null;
-  } catch {
-    return null;
-  } finally {
-    db.close();
-  }
-}
-
-function removeSidecars(file: string): void {
-  for (const suffix of ["-wal", "-shm", "-journal"]) rmSync(`${file}${suffix}`, { force: true });
-}
-
-function removeDb(file: string): void {
-  rmSync(file, { force: true });
-  removeSidecars(file);
 }
 
 /** Why an import kept the files: per-kind and per-thread counts from each side, no words. */

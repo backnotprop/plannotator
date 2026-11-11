@@ -7,8 +7,8 @@
  * - One transaction; every row through a statement prepared once, many rows per statement.
  * - Indexes dropped before the load and built after it from the schema's own SQL (one sorted build each, and
  *   the unique ones check their rows as they are built).
- * - Then back to the live settings (WAL), and `synchronous = FULL` for what the import writes after the load.
- *   `import.ts` checks, runs `integrity_check` and syncs the file to disk before the rename.
+ * - Then back to the live journal (WAL), still unsynced: `import.ts` flushes the whole file once, on another thread
+ *   while it checks it, and runs `integrity_check`, all before the rename.
  */
 import type { Database } from "bun:sqlite";
 import type { ImportRow, ImportRows } from "./import-rows";
@@ -45,8 +45,8 @@ export function loadImportRows(sqlite: Database, rows: ImportRows): void {
     insertAll(sqlite, "message_tags", rows.messageTags);
     for (const { sql } of indexes) sqlite.run(sql);
   })();
+  // The live journal from here on; still no syncing: the import flushes the whole file once, beside its checks.
   sqlite.run("PRAGMA journal_mode = WAL");
-  sqlite.run("PRAGMA synchronous = FULL");
 }
 
 /** The change log's rows with the ids a live write would give them: in write order, a removed typing row's id left unused. */

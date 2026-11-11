@@ -11,19 +11,27 @@
  * edit; Drizzle does not write it), so a wrong type is refused rather than stored.
  */
 import { Database } from "bun:sqlite";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
-import type { InboxCard, InboxLine, InboxProject } from "@plannotator/core/inbox-types";
+import { isInboxInitiativeRecord, isInboxStepsRecord, isInboxThreadPullRecord, type InboxCard, type InboxLine, type InboxProject } from "@plannotator/core/inbox-types";
 import type { InboxThreadPullEvent } from "../../store";
-import type { InboxLog, InboxLogContents, InboxLogState, InboxLogUsage } from "../log";
+import type { InboxLog, InboxLogContents, InboxLogState, InboxLogUsage, InboxStoreBackup } from "../log";
+import { listInboxBackups, removeInboxBackup } from "./backups";
 import { lineBytes, lineOfRow } from "./line-row";
 import { migrateInboxDb } from "./migrations";
 import * as t from "./schema";
 import { type InboxDb, writeLine } from "./write-line";
 
 export const INBOX_DB_FILE = "inbox.db";
+
+/** The kinds whose records the store checks as it places them: a failing one leaves the record before it. */
+const KEPT_CHECKS: Partial<Record<InboxLine["kind"], (record: unknown) => boolean>> = {
+  steps: isInboxStepsRecord,
+  thread_pull: isInboxThreadPullRecord,
+  initiative: isInboxInitiativeRecord,
+};
 
 /** Kinds whose rows belong to a thread (Settings → Storage counts them per thread). */
 const THREAD_KINDS = ["message", "question", "annotation", "steps", "thread_pull"];
@@ -53,8 +61,13 @@ export function openInboxDb(dir: string, file: string = INBOX_DB_FILE): { sqlite
 class SqliteInboxLog implements InboxLog {
   private readonly db: InboxDb;
   private readonly sqlite: Database;
+  private readonly file: string;
 
-  constructor(dir: string, file: string) {
+  constructor(
+    private readonly dir: string,
+    file: string,
+  ) {
+    this.file = join(dir, file);
     ({ db: this.db, sqlite: this.sqlite } = openInboxDb(dir, file));
   }
 
@@ -72,8 +85,9 @@ class SqliteInboxLog implements InboxLog {
    * streamed row by row, where Drizzle's row objects would only cost memory.
    */
   private state(): InboxLogState {
+    // The line that wrote the row: the last one at its seq (a line written twice, a retried append, is two rows).
     const latest = (kind: string, table: string, where = "") =>
-      `SELECT '${kind}' AS kind, r.id AS subject_id, r.record AS data, r.first_seq AS first_seq, e.seq AS seq, e.at AS at, e.v AS v FROM ${table} r JOIN events e ON e.kind = '${kind}' AND e.subject_id = r.id AND e.seq = r.seq ${where}`;
+      `SELECT '${kind}' AS kind, r.id AS subject_id, r.record AS data, r.first_seq AS first_seq, e.seq AS seq, e.at AS at, e.v AS v FROM ${table} r JOIN events e ON e.id = (SELECT max(x.id) FROM events x WHERE x.kind = '${kind}' AND x.subject_id = r.id AND x.seq = r.seq) ${where}`;
     const sql = [
       latest("project", "projects", "WHERE r.deleted_at IS NULL"),
       latest("message", "messages"),
@@ -111,7 +125,30 @@ class SqliteInboxLog implements InboxLog {
       if (events) events.push(event);
       else pullEvents.set(row.thread_id, [event]);
     }
-    return { records, archiveSeq, readdressed, names, tags, cards, pullEvents };
+    return { records, archiveSeq, readdressed, names, tags, cards, pullEvents, kept: this.keptRecords(records) };
+  }
+
+  /**
+   * For each steps list, PR and initiative whose latest line fails its check, the last line before it that passes
+   * (`apply` keeps that one): read from the change log, only for those few records.
+   */
+  private keptRecords(records: InboxLogState["records"]): Map<string, unknown> {
+    const kept = new Map<string, unknown>();
+    const history = this.sqlite.query<{ seq: number; at: string; v: number; kind: string; subject_id: string; data: string }, [string, string]>(
+      "SELECT seq, at, v, kind, subject_id, data FROM events WHERE kind = ? AND subject_id = ? ORDER BY seq DESC, id DESC",
+    );
+    for (const { line } of records) {
+      const check = KEPT_CHECKS[line.kind];
+      if (!check || check(line.record)) continue;
+      for (const row of history.iterate(line.kind, line.id)) {
+        const earlier = lineOfRow(row);
+        if (earlier && check(earlier.record)) {
+          kept.set(`${line.kind}:${line.id}`, earlier.record);
+          break;
+        }
+      }
+    }
+    return kept;
   }
 
   append(line: InboxLine, _project: InboxProject | null): void {
@@ -190,6 +227,22 @@ class SqliteInboxLog implements InboxLog {
       if (THREAD_KINDS.includes(line.kind)) lines.push({ line, bytes: size });
     }
     return { bytes, lines };
+  }
+
+  stored(): { bytes: number; backups: InboxStoreBackup[] } {
+    let bytes = 0;
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try {
+        bytes += statSync(`${this.file}${suffix}`).size;
+      } catch {
+        // No side file.
+      }
+    }
+    return { bytes, backups: listInboxBackups(this.dir) };
+  }
+
+  removeBackup(name: string): boolean {
+    return removeInboxBackup(this.dir, name);
   }
 
   private seqFloor(): number {
