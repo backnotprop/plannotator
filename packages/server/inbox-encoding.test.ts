@@ -28,6 +28,7 @@ afterEach(() => {
 });
 
 const ENTRY = `export const sentinel = "entry";\n${"// the window's entry script\n".repeat(20000)}`;
+const LAZY = `export const lazy = "diagram engine";\n${"// a lazy part, compressed only once someone asks\n".repeat(20000)}`;
 const PAGE = `<!doctype html><title>Inbox</title><script type="module" crossorigin src="/assets/entry-a.js"></script>${"<p>the window</p>\n".repeat(20000)}`;
 const AUTHOR = { kind: "agent", host: "claude-code", session: "s1", name: "Claude Code" } as const;
 
@@ -42,7 +43,10 @@ async function world() {
     dataDir: join(root, "data"),
     binaryPath: null,
     phones: false,
-    htmlContent: packApp(PAGE, { "/assets/entry-a.js": { type: "text/javascript; charset=utf-8", text: ENTRY } }),
+    htmlContent: packApp(PAGE, {
+      "/assets/entry-a.js": { type: "text/javascript; charset=utf-8", text: ENTRY },
+      "/assets/lazy-b.js": { type: "text/javascript; charset=utf-8", text: LAZY },
+    }),
   });
   servers.push(server);
   const project = server.store.ensureProject({ name: "shop", root });
@@ -65,10 +69,21 @@ const base = (server: InboxServer) => `http://127.0.0.1:${server.port}`;
 const raw = (url: string, headers: Record<string, string> = {}, method = "GET") => fetch(url, { method, headers, decompress: false } as RequestInit);
 const bytes = async (res: Response) => Buffer.from(await res.arrayBuffer());
 
+/** The answer once its compressed body is made (made at start; a browser on this computer gets it plain until then). */
+async function settled(url: string, headers: Record<string, string>): Promise<Response> {
+  for (let i = 0; i < 100; i++) {
+    const res = await raw(url, headers);
+    if (res.headers.get("content-encoding")) return res;
+    await res.arrayBuffer();
+    await Bun.sleep(20);
+  }
+  throw new Error(`never compressed: ${url}`);
+}
+
 test("the window's port sends the page compressed with a weak ETag and a 304 on reload, its security headers intact", async () => {
   // Regression caught: loopback (and so any proxy or tunnel to it) back to a 2 MB uncompressed, no-store page.
   const { server } = await world();
-  const br = await raw(`${base(server)}/`, { "Accept-Encoding": "gzip, deflate, br" });
+  const br = await settled(`${base(server)}/`, { "Accept-Encoding": "gzip, deflate, br" });
   expect(br.status).toBe(200);
   expect(br.headers.get("content-encoding")).toBe("br");
   expect(br.headers.get("vary")).toBe("Accept-Encoding");
@@ -82,7 +97,7 @@ test("the window's port sends the page compressed with a weak ETag and a 304 on 
   expect(etag).toMatch(/^W\/"/);
 
   // Safari and plain-http addresses take gzip only; a client that names nothing gets the page as it is.
-  const gz = await raw(`${base(server)}/`, { "Accept-Encoding": "gzip, deflate" });
+  const gz = await settled(`${base(server)}/`, { "Accept-Encoding": "gzip, deflate" });
   expect(gz.headers.get("content-encoding")).toBe("gzip");
   expect(gunzipSync(await bytes(gz)).toString("utf8")).toBe(PAGE);
   const plain = await raw(`${base(server)}/`);
@@ -95,7 +110,7 @@ test("the window's port sends the page compressed with a weak ETag and a 304 on 
   expect(again.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
 
   // The scripts: compressed, cached for good (their names carry the content hash).
-  const script = await raw(`${base(server)}/assets/entry-a.js`, { "Accept-Encoding": "gzip, deflate, br" });
+  const script = await settled(`${base(server)}/assets/entry-a.js`, { "Accept-Encoding": "gzip, deflate, br" });
   expect(script.headers.get("content-encoding")).toBe("br");
   expect(script.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
   expect(script.headers.get("vary")).toBe("Accept-Encoding");
@@ -204,4 +219,25 @@ test("byte ranges and attached files keep their own bytes: a video's 206, and a 
   expect(download.status).toBe(200);
   expect(download.headers.get("content-encoding")).toBeNull();
   expect((await bytes(download)).toString("utf8")).toBe(data);
+});
+
+test("a browser on this computer never waits on a one-time compression; a proxy, a tunnel or the tailnet always gets it compressed", async () => {
+  // Regression caught: the window opening at Inbox start (or a first diagram) waiting on a brotli pass over a free link,
+  // or a proxied first load sent uncompressed.
+  const { server } = await world();
+  const lazy = `${base(server)}/assets/lazy-b.js`;
+  const asks = { "Accept-Encoding": "gzip, deflate, br" };
+  // Nobody asked for it yet: on this computer it goes out plain at once, and is compressed in the background.
+  const first = await raw(lazy, asks);
+  expect(first.status).toBe(200);
+  expect(first.headers.get("content-encoding")).toBeNull();
+  expect(first.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+  expect((await bytes(first)).toString("utf8")).toBe(LAZY);
+  // Once made, the same browser gets it compressed.
+  expect(brotliDecompressSync(await bytes(await settled(lazy, asks))).toString("utf8")).toBe(LAZY);
+
+  // Through a proxy (loopback X-Forwarded-For), the first ask of a body not yet made waits for it.
+  const gzipOnly = await raw(lazy, { "Accept-Encoding": "gzip", "X-Forwarded-For": "127.0.0.1" });
+  expect(gzipOnly.headers.get("content-encoding")).toBe("gzip");
+  expect(gunzipSync(await bytes(gzipOnly)).toString("utf8")).toBe(LAZY);
 });

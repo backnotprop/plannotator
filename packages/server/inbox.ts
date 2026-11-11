@@ -136,7 +136,7 @@ import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { normalizeStableVersion, readUpdateState } from "@plannotator/shared/update-check";
 import { scheduleDailyPing } from "@plannotator/shared/daily-ping";
 import { isLoopbackHostHeader, isLoopbackForwardedFor } from "@plannotator/shared/loopback-host";
-import { prepareAppHtml, prewarmAppHtml } from "@plannotator/shared/app-html";
+import { encodeAppHtml, negotiateAppHtmlEncoding, prepareAppHtml } from "@plannotator/shared/app-html";
 import { openPackedApp, packedAppResponse, PACKED_ASSET_ROUTE_PREFIX, PACKED_ASSETS_MARKER } from "@plannotator/shared/packed-app";
 import { encodeInboxResponse } from "./inbox-encoding";
 import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/shared/inbox/search";
@@ -923,8 +923,9 @@ function etagMatches(header: string | null, etag: string): boolean {
  * plain reverse proxy or ssh tunnel in front of it too, and the tailnet
  * listener, #2032): the page compressed through the shared
  * `packages/shared/app-html.ts` helper (brotli or gzip on `Accept-Encoding`,
- * `Vary: Accept-Encoding`), prewarmed in brotli when the Inbox starts so the
- * first load does not wait on the one-time pass. Loopback once got the page
+ * `Vary: Accept-Encoding`), made in brotli when the Inbox starts. `compress`
+ * is false only for a browser on this computer while that body is still being
+ * made (`compressWindowAsset`): it gets the plain page at once. Loopback once got the page
  * uncompressed and `no-store`, which left a proxy or tunnel to that port with
  * the whole 2 MB page on every load.
  *
@@ -937,13 +938,13 @@ function etagMatches(header: string | null, etag: string): boolean {
  * A listener's own checks (on the tailnet: owner login, served Host,
  * Sec-Fetch-Site) ran before this.
  */
-async function windowPage(req: Request, page: string): Promise<Response> {
+async function windowPage(req: Request, page: string, compress: boolean): Promise<Response> {
   const etag = windowPageEtag(page);
   const cacheHeaders = { "Cache-Control": "private, no-cache", ETag: etag, Vary: "Accept-Encoding" };
   if (etagMatches(req.headers.get("if-none-match"), etag)) {
     return new Response(null, { status: 304, headers: { ...WINDOW_PAGE_HEADERS, ...cacheHeaders } });
   }
-  const prepared = await prepareAppHtml(page, req.headers.get("accept-encoding"), true);
+  const prepared = await prepareAppHtml(page, req.headers.get("accept-encoding"), compress);
   const headers = { ...prepared.headers, ...WINDOW_PAGE_HEADERS, ...cacheHeaders, "Content-Type": "text/html; charset=utf-8" };
   // A Buffer is a valid fetch body; the lib types lag.
   return new Response(req.method === "HEAD" ? null : (prepared.body as BodyInit), { headers });
@@ -4626,19 +4627,45 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    */
   const windowApp = openPackedApp(options.htmlContent ?? NOT_BUILT_PAGE);
   const windowEntryScripts = [...windowApp.html.matchAll(/<script type="module"[^>]*\ssrc="(\/assets\/[^"]+)"/g)].map((m) => m[1]!);
-  // Every listener sends the page and its scripts compressed: compress the page, and the entry script it asks
-  // for next, now, off the event loop, so the first load never waits on that one-time pass. Brotli: what
-  // Chromium asks of localhost and of an HTTPS address; gzip (a plain-http address, Safari) is made on first ask.
-  prewarmAppHtml(windowApp.html, "br");
-  for (const entry of windowEntryScripts) windowApp.answer(entry, "GET", "br", true).catch(() => {});
+  // Every listener sends the page and its scripts compressed. Each compressed body is made once per Inbox run,
+  // off the event loop, and kept: the page and the entry script it asks for next now, in brotli (what Chromium
+  // asks of localhost and of an HTTPS address); gzip (a plain-http address, Safari) on first ask.
+  const compressedReady = new Set<string>();
+  const warmCompressed = (path: string, encoding: "br" | "gzip"): Promise<void> => {
+    const key = `${encoding} ${path}`;
+    if (compressedReady.has(key)) return Promise.resolve();
+    const made: Promise<boolean> =
+      path === "/" ? encodeAppHtml(windowApp.html, encoding).then(() => true) : windowApp.answer(path, "GET", encoding, true).then((answer) => answer.status === 200);
+    return made.then(
+      (ok) => {
+        if (ok) compressedReady.add(key);
+      },
+      () => {},
+    );
+  };
+  /**
+   * Whether this answer of the page or a script goes out compressed. Always, except to a browser on this
+   * computer (the window's port, no proxy in between) while that body is still being made: the transfer is
+   * free there, so it gets the plain body at once rather than wait on the one-time pass (the window opens the
+   * moment the Inbox starts). A proxy, a tunnel or the tailnet always waits for the compressed body.
+   */
+  const compressWindowAsset = (req: Request, via: RequestVia, path: string): boolean => {
+    if (via !== "local" || req.headers.has("x-forwarded-for")) return true;
+    const encoding = negotiateAppHtmlEncoding(req.headers.get("accept-encoding"));
+    if (encoding === "identity" || compressedReady.has(`${encoding} ${path}`)) return true;
+    void warmCompressed(path, encoding);
+    return false;
+  };
+  void warmCompressed("/", "br");
+  for (const entry of windowEntryScripts) void warmCompressed(entry, "br");
   // The window's other text scripts (Mermaid, Graphviz, each code grammar…) are compressed one by one a while
-  // after start, so the first diagram or code block never waits on its one-time pass either (the largest takes
-  // ~0.1-0.3 s). One at a time, off the event loop; a stop ends it.
+  // after start, so the first diagram or code block over a slow link never waits on its one-time pass either
+  // (the largest takes ~0.1-0.3 s). One at a time, off the event loop; a stop ends it.
   const lazyAssetWarm = setTimeout(() => {
     void (async () => {
       for (const path of packedTextAssetPaths(options.htmlContent ?? "")) {
         if (stopped) return;
-        await windowApp.answer(path, "GET", "br", true).catch(() => {});
+        await warmCompressed(path, "br");
       }
     })();
   }, LAZY_ASSET_WARM_DELAY_MS);
@@ -6497,10 +6524,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // A page load (or a refresh) asks for a new release when the answer is
         // over a minute old: fire-and-forget, the button follows on the event stream.
         if (req.method === "GET") updates.nudge();
-        return windowPage(req, page);
+        return windowPage(req, page, compressWindowAsset(req, via, "/"));
       }
       // The window's scripts, by exact name from the pack (404 for any other), compressed on every listener as the page is.
-      if (path.startsWith(PACKED_ASSET_ROUTE_PREFIX)) return packedAppResponse(windowApp, req, path, true);
+      if (path.startsWith(PACKED_ASSET_ROUTE_PREFIX)) return packedAppResponse(windowApp, req, path, compressWindowAsset(req, via, path));
       if ((path === "/favicon.png" || path === "/favicon.ico") && req.method === "GET") return handleFavicon(path);
 
       // A running local site in a thread (inbox-live.ts): local only, since the proxy relays the
