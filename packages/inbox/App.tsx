@@ -80,7 +80,7 @@ import { flatRows, readListView, useListView, type ListSort } from './listView';
 import { useShowLight, type ListEdge } from './showLight';
 import { appliedFilter, filterListSections, localDay, pickCount, useListFilter } from './listFilter';
 import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
-import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNews as heldNewsOf, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, showLandsIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
+import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNews as heldNewsOf, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, goneRows, hasRows, withoutRows, settleOwn, settlesOnBack, settleThread, showBroughtIn, showLandsIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
 import { deliveriesReadList } from './rowDelivery';
 import { inboxAgentsWatched, setInboxAgents } from './agentsList';
@@ -864,11 +864,6 @@ function listIntroHeldBack(): boolean {
   return document.querySelector('[role="dialog"][aria-modal="true"], [data-image-lightbox], [data-ref-card-pinned]') !== null;
 }
 
-/** Rows the person reads in place: the folded Snoozed band alone holds nothing still, so a read is adopted whole. */
-function hasRows(sections: readonly InboxListSection[] | null): boolean {
-  return !!sections && sections.some((s) => s.id !== 'snoozed' && s.threads.length > 0);
-}
-
 function Inbox() {
   const [route, setRoute] = useState<Route>(() => {
     settleTourEntry();
@@ -1640,6 +1635,9 @@ function Inbox() {
       // A held thread the list no longer has (deleted, archived elsewhere) is never drawn from its copy.
       const listedIds = new Set(groups.flatMap((group) => group.threads.map((row) => row.thread_id)));
       pruneThreads(queryClient, (id) => listedIds.has(id));
+      // Archived or deleted elsewhere: the row leaves at once, with the settle's slide (held.ts `goneRows`).
+      const gone = adopt ? new Set<string>() : goneRows(shownRef.current, groups, routeRef.current.thread);
+      if (gone.size > 0) armSlide();
       setShown((current) =>
         current === null || !hasRows(current)
           ? groups
@@ -1647,7 +1645,7 @@ function Inbox() {
             ? keep
               ? adoptKeepingOpen(current, groups, keep)
               : groups
-            : refreshHeldRows(current, groups, heldOpen()),
+            : withoutRows(refreshHeldRows(current, groups, heldOpen()), gone),
       );
       if (adopt) sortedWhole(keep);
       setLoadError(null);
