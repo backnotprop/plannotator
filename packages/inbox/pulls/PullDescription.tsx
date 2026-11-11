@@ -8,7 +8,7 @@
  */
 
 import { useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
-import { ImageResolverContext } from '@plannotator/ui/components/ImageResolverContext';
+import { ImageResolverContext, InlineImageTagsContext } from '@plannotator/ui/components/ImageResolverContext';
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import type { InboxPull } from '@plannotator/core/inbox-types';
 import { ContextMarkdown } from '../components/ContextMarkdown';
@@ -64,7 +64,9 @@ export function ForgeMarkdown({ markdown, layer, headSha }: { markdown: string; 
     <ForgeMedia layer={layer}>
       <div onClickCapture={keepInPage} onAuxClickCapture={keepInPage}>
         <ImageResolverContext.Provider value={resolveImage}>
-          <ContextMarkdown markdown={forgeBody(markdown)} className="ib-body" refRepo={{ display: layer.repo, host: layer.host }} resolveLocalLink={resolveLink} />
+          <InlineImageTagsContext.Provider value={true}>
+            <ContextMarkdown markdown={forgeBody(markdown)} className="ib-body" refRepo={{ display: layer.repo, host: layer.host }} resolveLocalLink={resolveLink} />
+          </InlineImageTagsContext.Provider>
         </ImageResolverContext.Provider>
       </div>
     </ForgeMedia>
