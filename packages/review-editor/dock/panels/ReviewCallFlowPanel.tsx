@@ -238,7 +238,8 @@ export function ReviewCallFlowPanel() {
   const state = useReviewState();
   const loadNodeSource = useCallFlowNodeSource(state);
   const analysis = state.callFlowAnalysis;
-  const [view, setView] = useState<'paths' | 'tree' | 'raw'>('paths');
+  // The tab opens on the Call tree (owner, 2026-11-10, once the tree had search); Paths and Raw stay one click away.
+  const [view, setView] = useState<'paths' | 'tree' | 'raw'>('tree');
   const callTreeRequest = state.callTreeRequest ?? null;
   // A hunk's "Call tree" entry shows its tree here.
   useEffect(() => {
@@ -354,8 +355,8 @@ export function ReviewCallFlowPanel() {
           </div>
           <div className="call-flow-header-actions">
             <div className="call-flow-view-switch" aria-label="Call flow view">
-              <button type="button" aria-pressed={view === 'paths'} onClick={() => setView('paths')}>Paths</button>
               <button type="button" aria-pressed={view === 'tree'} onClick={() => setView('tree')}>Call tree</button>
+              <button type="button" aria-pressed={view === 'paths'} onClick={() => setView('paths')}>Paths</button>
               <button type="button" aria-pressed={view === 'raw'} onClick={() => setView('raw')}>Raw</button>
             </div>
             {state.callFlowAdvert.languages && (

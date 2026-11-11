@@ -86,7 +86,6 @@ describe('ReviewCallFlowPanel Call tree view', () => {
   test.skipIf(!hasDom)('the tab opens on the Call tree; Paths and Raw are one click away; rows open through the review', async () => {
     const opened: string[] = [];
     await render(state({ openCallTreeNode: (node) => opened.push(node.key) }));
-    await act(async () => viewButton('Call tree').click());
     expect(viewButton('Call tree').getAttribute('aria-pressed')).toBe('true');
     expect(host!.querySelector('[role="tree"]')).not.toBeNull();
     const layout = [...host!.querySelectorAll<HTMLElement>('[role="treeitem"]')].find((r) => r.textContent?.includes('parley.layout'))!;
@@ -112,7 +111,6 @@ describe('ReviewCallFlowPanel Call tree view', () => {
     await render(state({
       callFlowAnalysis: { status: 'ready', data: { ...(base.callFlowAnalysis as { data: object }).data, trees: twoTrees } } as never,
     }));
-    await act(async () => viewButton('Call tree').click());
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', metaKey: true }));
     });
