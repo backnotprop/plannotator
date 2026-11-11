@@ -8773,7 +8773,7 @@ dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: aut
 .ib-lk-roomy .ib-lbody > .ib-group > .ib-rw { contain-intrinsic-size: auto none auto 60px; }
 .ib-lk-roomy .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 88px; }
 .ib-lk-roomy .ib-lbody > .ib-group > .ib-mrow { contain-intrinsic-size: auto none auto 70px; }
-/* The same for Subject preview "2 lines" (a second preview line: 18 px beside a thread, 19 px on a phone, each at
+/* The same for "Grey line under the name" 2 lines (a second preview line: 18 px beside a thread, 19 px on a phone, each at
    line-height 1.35) and First line "Thread name" (2 px more beside a thread; a phone's row keeps its height; compact
    rows keep theirs). Each density with each. */
 .ib-lk-pv2 .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 102px; }
@@ -8794,7 +8794,7 @@ dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: aut
 .ib-lk-roomy.ib-lk-dot .ib-nrow.ib-u::after { top: 21px; }
 .ib-lk-dot .ib-row.ib-u::after { top: calc(50% - 3px); }
 .ib-lk-dot .ib-mrow.ib-u::after { left: 6px; top: 20px; }
-/* Subject preview "2 lines": the preview wraps to two lines, then "…" (three-line and phone rows). */
+/* "Grey line under the name" 2 lines: the preview wraps to two lines, then "…" (three-line and phone rows). */
 .ib-lk-pv2 :is(.ib-nrow .ib-l3, .ib-m3) > .ib-pv { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; }
 /* With the preview on two lines, the open counts, pin, badge and book sit on its first line, as on a one-line
    preview, not halfway between its lines (the line centres its parts): each is a line of the preview's height,
@@ -8871,7 +8871,7 @@ dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: aut
 .ib-lk-tbelow.ib-lk-tfirst.ib-lk-noagents.ib-noproj.ib-lk-pv2:not(.ib-lk-compact) .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 104px; }
 /* Show → Bold thread names (.ib-lk-bold): every row's name in bold, read or not; Sent and Quiet keep their colour. */
 .ib-lk-bold :is(.ib-row, .ib-nrow) .ib-title, .ib-lk-bold .ib-mrow .ib-m2 { font-weight: 600; }
-/* With Subject preview off too, the row is two lines (InboxList's `twoLines`): line 3's guided review mark, pin,
+/* With the grey line None too, the row is two lines (InboxList's `twoLines`): line 3's guided review mark, pin,
    badge, snooze return and count sit at line 2's right end (`.ib-lend`), after the agents and the project. They are
    never cut: the project gives way with "…" first. */
 :is(.ib-nrow .ib-l2-lead, .ib-m1-lead):has(> .ib-lend) { gap: 8px; }
