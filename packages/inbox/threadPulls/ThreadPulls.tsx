@@ -211,7 +211,21 @@ function PullsPopover({ anchor, sheet, label, onClose, cardHover, children }: { 
     place();
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
     if (ref.current) observer?.observe(ref.current);
-    return () => observer?.disconnect();
+    // The card stays with its row when the list moves it (a banner or a line drawn above): checked each frame while open.
+    let last = `${anchor.getBoundingClientRect().top},${anchor.getBoundingClientRect().right}`;
+    let frame = requestAnimationFrame(function follow() {
+      const r = anchor.getBoundingClientRect();
+      const now = `${r.top},${r.right}`;
+      if (now !== last) {
+        last = now;
+        place();
+      }
+      frame = requestAnimationFrame(follow);
+    });
+    return () => {
+      observer?.disconnect();
+      cancelAnimationFrame(frame);
+    };
   }, [anchor, sheet]);
   // Escape closes (focus back on the anchor), and so do a press outside, a scroll outside and a resize.
   useEffect(() => {
