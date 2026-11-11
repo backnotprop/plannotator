@@ -77,7 +77,7 @@ import { handleRepoFileRequest, handleRepoFilesRequest, type HandlerResult, type
 import { readRepoWorkingTreeFile } from "@plannotator/shared/repo-files-node";
 import { childEnv } from "@plannotator/shared/child-env";
 import { killGitTree, runtime as gitRuntime, trackIsolatedGitGroup } from "./git";
-import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, type RefCli, type RefCommandResult, type RefRunner } from "./ref-cards";
+import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, refRunnerKill, type RefCli, type RefCommandResult, type RefRunner } from "./ref-cards";
 
 /** A host's answer is fresh this long. */
 export const INBOX_PULLS_FRESH_MS = 60_000;
@@ -940,6 +940,9 @@ const glMayBeHeldBack = (d: GitLabDiffEntry): boolean =>
  * `maxBytes`, so a huge diff is never held whole in memory.
  */
 export const pullDiffCliRunner: PullDiffRunner = async (cli, args, maxBytes, reading) => {
+  // Its own process group (POSIX), so the deadline ends everything the CLI started too (refRunnerKill: TERM, then
+  // KILL): a CLI that catches TERM, or a child holding the pipes, can never keep this read open.
+  const group = process.platform !== "win32";
   let proc: ReturnType<typeof Bun.spawn>;
   try {
     proc = Bun.spawn([cli, ...args], {
@@ -947,26 +950,31 @@ export const pullDiffCliRunner: PullDiffRunner = async (cli, args, maxBytes, rea
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",
-      signal: reading?.signal,
+      detached: group,
     });
   } catch {
     return { stdout: "", stderr: `${cli}: not found`, exitCode: 127 };
   }
-  const timer = setTimeout(() => proc.kill(), reading?.timeoutMs ?? INBOX_PULL_DIFF_TIMEOUT_MS);
+  const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
+  const end = () => {
+    refRunnerKill((signal) => (group ? process.kill(-proc.pid, signal) : proc.kill(signal)));
+    void reader.cancel().catch(() => {});
+  };
+  if (reading?.signal?.aborted) end();
+  reading?.signal?.addEventListener("abort", end, { once: true });
+  const timer = setTimeout(end, reading?.timeoutMs ?? INBOX_PULL_DIFF_TIMEOUT_MS);
   try {
     const chunks: Uint8Array[] = [];
     let bytes = 0;
     let tooLarge = false;
-    const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
     const stderr = new Response(proc.stderr as ReadableStream).text();
     for (;;) {
-      const { done, value } = await reader.read();
+      const { done, value } = await reader.read().catch(() => ({ done: true as const, value: undefined }));
       if (done) break;
       bytes += value.byteLength;
       if (bytes > maxBytes) {
         tooLarge = true;
-        proc.kill();
-        await reader.cancel().catch(() => {});
+        end();
         break;
       }
       chunks.push(value);
@@ -976,6 +984,7 @@ export const pullDiffCliRunner: PullDiffRunner = async (cli, args, maxBytes, rea
     return { stdout: Buffer.concat(chunks).toString("utf8"), stderr: await stderr, exitCode };
   } finally {
     clearTimeout(timer);
+    reading?.signal?.removeEventListener("abort", end);
   }
 };
 
