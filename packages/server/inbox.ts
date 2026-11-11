@@ -237,6 +237,7 @@ import { createInboxAsk } from "./inbox-ask";
 import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
 import { createInboxAgentFaces } from "./inbox-agent-faces";
+import { createAgentIcons, createInboxAgentIcons, INBOX_AGENT_ICONS_DIR } from "./inbox-agent-icons";
 import { createInboxAgentFacesFile } from "@plannotator/shared/inbox/agent-faces";
 import type { InboxAgentFacesWire } from "@plannotator/core/inbox-types";
 import { createInboxArtifactPins } from "./inbox-artifact-pins";
@@ -1153,8 +1154,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const sidebarListeners = new Set<(sidebar: InboxSidebarLayout, rev: number) => void>();
   /** An agent icon's face was saved (inbox/agent-faces.json): the windows' streams say `event: agent-faces`. */
   const agentFaceListeners = new Set<(wire: InboxAgentFacesWire) => void>();
+  // The pictures uploaded for agents' icons ("Your own…", inbox-agent-icons.ts): every faces wire carries them.
+  const agentIconFiles = createAgentIcons({ dir: join(inboxDir(dataDir), INBOX_AGENT_ICONS_DIR) });
   const agentFacesFile = createInboxAgentFacesFile(inboxDir(dataDir), (wire) => {
-    for (const listener of agentFaceListeners) listener(wire);
+    const withIcons = { ...wire, icons: agentIconFiles.list() };
+    for (const listener of agentFaceListeners) listener(withIcons);
   });
   /** The reaction tray's saved emoji changed (config.json `inboxReactions`): the windows' streams say `event: reactions`. */
   const reactionsListeners = new Set<(reactions: readonly InboxReaction[], rev: number) => void>();
@@ -4361,7 +4365,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // Pinned artifacts and the Artifacts wall (packages/server/inbox-artifact-pins.ts).
   const artifactPins = createInboxArtifactPins({ store, serverSession, readBody: (req) => readBody(req), json });
   // Agent icons' faces (packages/server/inbox-agent-faces.ts).
-  const agentFaces = createInboxAgentFaces({ file: agentFacesFile, serverSession, readBody: (req) => readBody(req), json });
+  const agentIcons = createInboxAgentIcons({
+    icons: agentIconFiles,
+    faces: agentFacesFile,
+    serverSession,
+    localOnly: () => localOnly(),
+    readBody: (req) => readBody(req),
+    json,
+  });
+  const agentFaces = createInboxAgentFaces({ file: agentFacesFile, serverSession, readBody: (req) => readBody(req), json, icons: () => agentIconFiles.list() });
   // Snoozes: threads out of the list until a time (packages/server/inbox-snooze.ts).
   const snoozes = createInboxSnoozes({
     store,
@@ -5805,6 +5817,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Agent icons' faces: the face each agent shows in every window.
       const faced = await agentFaces.route(req, url);
       if (faced) return faced;
+      // The pictures uploaded for agents' icons ("Your own…"): this computer's windows and the owner's.
+      const iconed = await agentIcons.route(req, url, ownerOrLocal(req, via));
+      if (iconed) return iconed;
       // Snooze and Unsnooze (approval "inbox-snooze").
       const snoozed = await snoozes.route(req, url);
       if (snoozed) return snoozed;
