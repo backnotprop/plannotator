@@ -839,7 +839,7 @@ test.skipIf(!hasDom)('Z never undoes into the Inbox while the tour is up; the to
   await act(async () => {
     window.location.hash = `#thread=${threadId}`;
   });
-  await until(() => $(el, '[data-mark-read]') !== null, 'the thread');
+  await until(() => $(el, 'section.ib-pane [data-thread-more]') !== null, 'the thread');
   await act(async () => document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', bubbles: true })));
   await until(() => document.querySelector('[data-inbox-toast]') !== null, 'the Mark read toast');
   await act(async () => {

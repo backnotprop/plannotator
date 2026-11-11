@@ -18,7 +18,7 @@ import type { InboxListRow, InboxListSection, InboxMessageWire, InboxProject, In
 
 const hasDom = typeof document !== 'undefined';
 const { ArtifactsView } = (hasDom ? await import('./components/ArtifactsView') : {}) as typeof import('./components/ArtifactsView');
-const { ThreadSnooze, MessageMenu } = (hasDom ? await import('./components/CopyMenus') : {}) as typeof import('./components/CopyMenus');
+const { ThreadMore, MessageMenu } = (hasDom ? await import('./components/CopyMenus') : {}) as typeof import('./components/CopyMenus');
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { useShortcutScope } = (hasDom ? await import('@plannotator/ui/shortcuts') : {}) as typeof import('@plannotator/ui/shortcuts');
@@ -143,12 +143,14 @@ test.skipIf(!hasDom)('arrow keys move focus between the Artifacts tiles, and onl
   expect(document.activeElement).toBe(document.body);
 });
 
-test.skipIf(!hasDom)('H’s request opens the header clock’s menu with focus on the first time; nothing is snoozed until one is picked', async () => {
+const snoozeThread = { thread_id: 'msg_a', subject: 'Which index?', messages: [] } as unknown as InboxThread;
+
+test.skipIf(!hasDom)('H’s request opens the header ⋯ menu at Snooze’s times with focus on the first; nothing is snoozed until one is picked', async () => {
   const picked: string[] = [];
   const snooze = { snoozed: false, onPick: (until: string) => picked.push(until), onUnsnooze: () => {} };
-  mount(<ThreadSnooze snooze={snooze} openRequest={0} />);
+  mount(<ThreadMore thread={snoozeThread} linkOf={() => ''} phone={false} snooze={snooze} snoozeRequest={0} />);
   expect(document.querySelector('[data-thread-snooze-menu]')).toBeNull();
-  act(() => root!.render(<ThreadSnooze snooze={snooze} openRequest={1} />));
+  act(() => root!.render(<ThreadMore thread={snoozeThread} linkOf={() => ''} phone={false} snooze={snooze} snoozeRequest={1} />));
   await frames();
   const menu = document.querySelector('[data-thread-snooze-menu]');
   expect(menu).not.toBeNull();
@@ -156,15 +158,15 @@ test.skipIf(!hasDom)('H’s request opens the header clock’s menu with focus o
   expect(picked).toEqual([]);
 });
 
-test.skipIf(!hasDom)('the clock mounting again with an old request (Z after Shift+E, J/K into a thread) keeps its menu shut; a new one opens it', async () => {
+test.skipIf(!hasDom)('the ⋯ menu mounting again with an old request (Z after Shift+E, J/K into a thread) stays shut; a new one opens it at the times', async () => {
   const snooze = { snoozed: false, onPick: () => {}, onUnsnooze: () => {} };
-  mount(<ThreadSnooze snooze={snooze} openRequest={1} />);
+  mount(<ThreadMore thread={snoozeThread} linkOf={() => ''} phone={false} snooze={snooze} snoozeRequest={1} />);
   await frames();
   expect(document.querySelector('[data-thread-snooze-menu]')).toBeNull();
-  act(() => root!.render(<ThreadSnooze snooze={snooze} openRequest={1} />));
+  act(() => root!.render(<ThreadMore thread={snoozeThread} linkOf={() => ''} phone={false} snooze={snooze} snoozeRequest={1} />));
   await frames();
   expect(document.querySelector('[data-thread-snooze-menu]')).toBeNull();
-  act(() => root!.render(<ThreadSnooze snooze={snooze} openRequest={2} />));
+  act(() => root!.render(<ThreadMore thread={snoozeThread} linkOf={() => ''} phone={false} snooze={snooze} snoozeRequest={2} />));
   await frames();
   expect(document.querySelector('[data-thread-snooze-menu]')).not.toBeNull();
 });
