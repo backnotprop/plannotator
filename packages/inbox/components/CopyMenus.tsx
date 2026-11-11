@@ -11,7 +11,10 @@ import { useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { copyAuthor, copyMarkdown, messageMarkdown, threadMarkdown } from '../copyMarkdown';
 import { plural, shortAgentName, whenTime } from '../format';
 import { Icon } from '../icons';
-import { decisionExportUrl, threadHasQuestionCards } from '../decisionExport';
+import { DECISIONS_POST_TO_WORDS, decisionExportUrl, threadHasQuestionCards } from '../decisionExport';
+import { inboxApi, type DecisionsPostTo } from '../api';
+import { RefMarkIcon } from '../board/RefMark';
+import { useThreadPulls } from '../threadPulls/ThreadPulls';
 import { Tip } from './Tip';
 import { useMessageArm } from '../messageArming';
 import type { InboxToastModel } from './Toast';
@@ -263,10 +266,16 @@ export function ThreadMore(
     requestGuide?: () => void;
     /** Add a pull request to the thread (approval "inbox-pr-binding"): opens the PRs card on its Add field. */
     addPull?: () => void;
+    /**
+     * Post decisions (step 2): Export decisions' "Post on a pull request" group, one row per PR on the thread; with
+     * none, its Add a pull request… opens the PRs card and posts on the PR once it is added (`addPullThenPost`).
+     * Absent where the thread's PRs can't be changed (a guest, another machine's thread).
+     */
+    postDecisions?: { post: (ref: string) => void; addPullThenPost: () => void };
     launch?: ThreadMoreLaunch | null;
   },
 ) {
-  const { thread, phone, pin, markRead, moveBack, markUnread, archive, snooze, requestGuide, addPull, launch } = props;
+  const { thread, phone, pin, markRead, moveBack, markUnread, archive, snooze, requestGuide, addPull, postDecisions, launch } = props;
   const copies = useCopies(props);
   const { ref, portal } = usePortal<HTMLButtonElement>();
   const [open, setOpen] = useState(false);
@@ -275,6 +284,25 @@ export function ThreadMore(
   const [exportView, setExportView] = useState(false);
   const exportOffered = threadHasQuestionCards(thread);
   const exportBack = useRef(false);
+  // The thread's PRs for the Post group: read while the menu is open (the PR button keeps them current otherwise).
+  const { answer: pullsAnswer } = useThreadPulls(thread.thread_id, open && exportOffered && !!postDecisions);
+  const linked = pullsAnswer?.pulls ?? [];
+  // Where to post (config.json `inboxDecisionsPostTo`): read when the menu opens, saved on a pick.
+  const [postTo, setPostTo] = useState<DecisionsPostTo | null>(null);
+  const postOffered = open && exportOffered && !!postDecisions;
+  useEffect(() => {
+    if (!postOffered) return;
+    let live = true;
+    inboxApi
+      .decisionsPostTo()
+      .then((value) => live && setPostTo(value))
+      .catch(() => {
+        // An older Inbox (no setting): no "Where to post" group.
+      });
+    return () => {
+      live = false;
+    };
+  }, [postOffered]);
   // Back from the times: focus goes to Snooze again, not to the item now at its old index.
   const backed = useRef(false);
   const popup = useRef<HTMLDivElement>(null);
@@ -291,8 +319,54 @@ export function ThreadMore(
   }, [exportView]);
   // Export decisions (the owner, 2026-11-10): beside Add a pull request…, on every thread with question cards, linked PR
   // or not. Its submenu (and the phone's sub-view) is `downloads`: plain links the server answers as attachments (no
-  // dialog), named by the server. A later "Post on a pull request" group goes after them, in both places; with no PR
-  // linked it will lead to Add a pull request… first. Not built in this version.
+  // dialog), named by the server; then "Post on a pull request", one row per PR on the thread (one click posts, or
+  // updates the comment posted before; the toast says which), or with none Add a pull request…, which posts once added.
+  const postGroup = postDecisions && (
+    <>
+      <Menu.Separator className="ib-pm-sep" />
+      <Menu.Group>
+        <Menu.GroupLabel className="ib-pm-glabel">Post on a pull request</Menu.GroupLabel>
+        {linked.map((pull) => (
+          <Menu.Item key={pull.pull} className="ib-pmi" label={pull.ref} onClick={() => postDecisions.post(pull.ref)} data-decision-post={pull.ref}>
+            <RefMarkIcon kind="pr" state={pull.state} size={15} />
+            {pull.ref}
+          </Menu.Item>
+        ))}
+        {pullsAnswer && linked.length === 0 && (
+          <Menu.Item className="ib-pmi" label="Add a pull request" onClick={postDecisions.addPullThenPost} data-decision-post-add="">
+            <Icon name="link" size={15} />
+            Add a pull request…
+          </Menu.Item>
+        )}
+        {/* Where to post belongs to the PR rows (the owner, 2026-11-10: "should be a part of the PR section"): in the same
+            group, no divider, a quiet indented sub-choice under them. */}
+        {postTo && (
+          <Menu.RadioGroup
+            aria-label="Where to post"
+            className="ib-pm-subchoice"
+            data-decision-post-where=""
+            value={postTo}
+            onValueChange={(next: DecisionsPostTo) => {
+              if (next === postTo) return;
+              const was = postTo;
+              setPostTo(next);
+              inboxApi.saveDecisionsPostTo(next).catch(() => setPostTo(was));
+            }}
+          >
+            <div className="ib-pm-sublabel" aria-hidden="true">
+              Where to post
+            </div>
+            {DECISIONS_POST_TO_WORDS.map(({ value, label }) => (
+              <Menu.RadioItem key={value} value={value} closeOnClick={false} className="ib-pmi ib-pmi-sub" label={label} data-decision-post-to={value}>
+                {postTo === value ? <Icon name="check" size={13} /> : <span className="ib-pmi-slot" aria-hidden="true" />}
+                {label}
+              </Menu.RadioItem>
+            ))}
+          </Menu.RadioGroup>
+        )}
+      </Menu.Group>
+    </>
+  );
   const downloads = (
     <>
       <Menu.Item className="ib-pmi" label="Download as Markdown" render={<a href={decisionExportUrl(thread.thread_id, 'md')} download="" />} data-decision-export="md">
@@ -303,6 +377,7 @@ export function ThreadMore(
         <Icon name="code" size={15} />
         Download as HTML
       </Menu.Item>
+      {postGroup}
     </>
   );
   const exportItem = !exportOffered ? null : phone ? (
