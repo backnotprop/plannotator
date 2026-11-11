@@ -4833,11 +4833,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
       if (path === "/api/inbox/health" && req.method === "GET") return json(health());
       if (path === "/api/inbox/threads" && req.method === "GET") {
+        const x1t = performance.now();
+        const x1 = (r: Response, rowsMs: number) => {
+          const f = process.env.X1_LOG;
+          if (f) require("node:fs").appendFileSync(f, JSON.stringify({ at: Date.now(), kind: "route", ms: Math.round((performance.now() - x1t) * 10) / 10, rowsMs: Math.round(rowsMs * 10) / 10, since: url.searchParams.has("since") }) + "\n");
+          return r;
+        };
         const projectFilter = projectFilterOf(url);
         const archivedMode = archivedModeOf(url);
         const merged = url.searchParams.get("machines") === "1";
         const snoozedMode = snoozedModeOf(url);
+        const x1r = performance.now();
         const rows = perfPhase("rows", () => listModel(projectFilter, archivedMode, merged, snoozedMode));
+        const x1rows = performance.now() - x1r;
         // `session_labels` (additive, issue #2450): each session's label by id, for the rows' agents and a message's
         // author. Display only, never stored; this computer's owner only, so a tailnet guest reads the list as before.
         // `agents`' labels too (inbox-agents-list.ts): the owner's alone.
@@ -4845,8 +4853,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts); the rest of
         // the model, the labels too, goes as it is now. Without it, as before.
         const since = url.searchParams.get("since");
-        if (since === null) return json(model);
-        return json(listVersions.answer(`${projectFilter ?? ""}|${archivedMode}|${merged ? 1 : 0}|${snoozedMode}`, model, since || null));
+        if (since === null) return x1(json(model), x1rows);
+        return x1(json(listVersions.answer(`${projectFilter ?? ""}|${archivedMode}|${merged ? 1 : 0}|${snoozedMode}`, model, since || null)), x1rows);
       }
       // Linked machines (inbox-machines.ts): the forward /api/inbox/m/<machine>/<route>, the machines and the outbox.
       if (path.startsWith("/api/inbox/m/") || path.startsWith("/api/inbox/machines") || path.startsWith("/api/inbox/outbox")) {

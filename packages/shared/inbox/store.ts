@@ -2605,7 +2605,16 @@ export class InboxStore {
    * (`session`: the threads it started, joined or replied in).
    */
   listRows(filter: { projectId?: string | null; session?: string | null } = {}): InboxListRow[] {
-    if (filter.projectId || filter.session) return this.buildRows(filter);
+    const x1t = performance.now();
+    const x1 = (kind: string, n: number) => {
+      const f = process.env.X1_LOG;
+      if (f) require("node:fs").appendFileSync(f, JSON.stringify({ at: Date.now(), kind, ms: Math.round((performance.now() - x1t) * 10) / 10, n }) + "\n");
+    };
+    if (filter.projectId || filter.session) {
+      const r = this.buildRows(filter);
+      x1("filtered", r.length);
+      return r;
+    }
     // Every thread: the last answer while nothing it read changed (`rowsMemo`). A copy of the list, the same rows.
     const memo = this.rowsMemo;
     if (memo && memo.changes === this.changes && memo.presence === this.deliveryPresence) {
@@ -2616,7 +2625,10 @@ export class InboxStore {
           break;
         }
       }
-      if (same) return memo.rows.slice();
+      if (same) {
+        x1("memo", memo.rows.length);
+        return memo.rows.slice();
+      }
     }
     const presence = this.deliveryPresence;
     const calls = new Map<string, { ask: () => unknown; answer: string }>();
@@ -2633,6 +2645,7 @@ export class InboxStore {
       rows = this.buildRows(filter);
     }
     this.rowsMemo = { changes, presence, calls, rows };
+    x1("rebuild", rows.length);
     return rows.slice();
   }
 

@@ -1,0 +1,87 @@
+name: Scratch Inbox stage 3 verifier (wide baseline, X1)
+
+# Scratch, temporary: the live-behaviour verifier at the wide size (baseline, clean build of the parent commit) and
+# spike X1 (where an event's time goes: server row rebuild, transfer, window commit) with a build carrying temporary
+# timing lines (this commit only). Runs only on push to its own branch, which is deleted after the run. No secrets.
+
+on:
+  push:
+    branches:
+      - scratch/inbox-x1-verify
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        job: [baseline, x1-1, x1-2, x1-3]
+    env:
+      OUT: ${{ github.workspace }}/x1-out
+      JOB: ${{ matrix.job }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      - name: Go to the clean parent for the baseline
+        if: matrix.job == 'baseline'
+        run: git checkout --detach HEAD~1
+
+      - name: Install dependencies and Chromium
+        run: |
+          bun install --frozen-lockfile
+          bunx playwright install --with-deps chromium
+
+      - name: Build the binary
+        run: |
+          mkdir -p "$OUT"
+          bun run --cwd apps/review build
+          bun run build:hook
+          bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig --define '__CLI_VERSION__="0.0.0-stage3"' --outfile "$OUT/plannotator"
+          git log -1 --format='%H %s' > "$OUT/$JOB.commit"
+          nproc; free -g; uptime
+
+      - name: Wide baseline
+        if: matrix.job == 'baseline'
+        run: |
+          F="$OUT/wide-baseline"
+          ( while true; do echo "$(date -u +%T) $(cut -d' ' -f1 /proc/loadavg)"; sleep 10; done ) > "$F.loadtrace" &
+          bun scripts/inbox-live-verify.ts run --binary "$OUT/plannotator" --sizes wide --profiles local --runs 5 --out "$F.json" > "$F.log" 2>&1 || echo "verifier exit $?" >> "$F.log"
+          bun scripts/inbox-live-verify.ts table "$F.json" --md "$F-table.md" || true
+
+      - name: X1, 100k then wide
+        if: matrix.job != 'baseline'
+        run: |
+          for SIZE in 100k wide; do
+            F="$OUT/$JOB-$SIZE"
+            mkdir -p "$F-cpu"
+            ( while true; do echo "$(date -u +%T) $(cut -d' ' -f1 /proc/loadavg)"; sleep 10; done ) > "$F.loadtrace" &
+            TR=$!
+            X1_LOG="$F-server.jsonl" LIVE_CPU_PROFILE="$F-cpu" bun scripts/inbox-live-verify.ts run --binary "$OUT/plannotator" --sizes "$SIZE" --profiles local --runs 5 --out "$F.json" > "$F.log" 2>&1 || echo "verifier exit $?" >> "$F.log"
+            kill $TR
+          done
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: inbox-stage3-${{ matrix.job }}
+          path: |
+            x1-out/**/*.json
+            x1-out/**/*.jsonl
+            x1-out/**/*.log
+            x1-out/**/*.md
+            x1-out/**/*.loadtrace
+            x1-out/**/*.commit
+            x1-out/**/*.cpuprofile
+          retention-days: 7

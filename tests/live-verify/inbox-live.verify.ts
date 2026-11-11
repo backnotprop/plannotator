@@ -234,6 +234,7 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
       PLANNOTATOR_INBOX_NOTES: '0',
       PLANNOTATOR_INBOX_PHONES: '0',
       PLANNOTATOR_TEST_SANDBOX: '1',
+      ...(process.env.X1_LOG ? { X1_LOG: process.env.X1_LOG } : {}),
     };
     t = Date.now();
     const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 600_000 });
