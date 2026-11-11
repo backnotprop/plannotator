@@ -22,19 +22,21 @@ import { agentFacts, agentHostName, agentsGroups, type AgentEntry } from './mode
  * While agents show from more than one machine, each machine's name is a small quiet grey caption above its agents
  * (still the machine's filter, as its Machines row was) and the agents sit a small step in; with one machine there is
  * no caption, only the agents. No counts and no state marks; no lines; roomier gaps between machines. A click on an
- * agent opens its thread; its hover card says where and when it started, and its project.
+ * agent filters the list to its threads, as a machine's caption does, and opens none of them; a second click shows
+ * everything again. An agent with no thread in the window has nothing to filter: a click messages it (New message).
+ * Its hover card says where and when it started, and its project.
  *
  * Its data is the list's `agents` (agentsList.ts): drawing the section is what makes the window read the list again
  * on `event: deliveries` with `agents`.
  */
 export interface AgentsSectionProps {
   machines: MachinesModel;
-  /** The rows the window has (every section), where an agent's thread is found. */
+  /** The rows the window has (every section), where an agent's threads are found. */
   rows: readonly InboxListRow[];
   /** The machine the list shows (a caption's filter), or null. */
   machineId: string | null;
-  /** The thread on screen: its agent's row carries the selection fill. */
-  openThreadId: string | null;
+  /** The agent the list shows (its filter): its row carries the selection fill. */
+  agentId: string | null;
   page: string;
   closed: boolean;
   onToggle: () => void;
@@ -44,7 +46,8 @@ export interface AgentsSectionProps {
   header: (icon: ReactNode) => ReactNode;
   onMachine?: (machineId: string) => void;
   onMachineUpdate?: (machineId: string) => void;
-  onOpenThread: (threadId: string) => void;
+  /** Show one agent's threads (`#agent=<id>`); null: everything again. */
+  onAgentFilter: (agentId: string | null) => void;
   /** A live agent with no thread in the window: New message to it. */
   onMessageAgent: (session: string, opener: HTMLElement) => void;
   /** Add agent: New message with a new session chosen. */
@@ -99,8 +102,8 @@ function AgentTip({ entry, machine }: { entry: AgentEntry; machine: MachineView 
   );
 }
 
-/** How a row opens: its thread, New message to its live agent, or nothing (a launch not yet joined, an agent gone quiet). */
-type AgentOpens = 'thread' | 'message' | 'none';
+/** What a press on a row does: filter the list to its threads, New message to its live agent, or nothing (an agent gone quiet with no thread). */
+type AgentOpens = 'filter' | 'message' | 'none';
 
 /**
  * One agent's row. Drawn again only when what it shows changed (its agent as the list read it, its name, its thread,
@@ -115,7 +118,9 @@ const AgentRow = memo(
           <button
             type="button"
             className={`ib-proj${on ? ' ib-on' : ''}${away ? ' ib-proj-quiet' : ''}`}
-            aria-current={on ? 'page' : undefined}
+            // A filter that a second press takes off: pressed while the list shows its threads.
+            aria-pressed={props.opens === 'filter' || on ? on : undefined}
+            aria-haspopup={props.opens === 'message' && !on ? 'dialog' : undefined}
             onClick={(event) => props.onOpen(entry, event.currentTarget)}
             data-agent-open={props.opens}
           >
@@ -153,11 +158,14 @@ export function AgentsSection(props: AgentsSectionProps) {
   const captions = filled.filter((group) => group.machine !== null).length > 1;
   const empty = filled.length === 0;
   const machineOn = (id: string) => props.page === 'inbox' && props.machineId === id;
-  const agentOn = (entry: AgentEntry) => props.page === 'inbox' && !!entry.thread && props.openThreadId === entry.thread.id;
+  const agentOn = (entry: AgentEntry) => props.page === 'inbox' && props.agentId === entry.agent.id;
   // A launch not yet joined by its agent has no session to write to, only its thread.
   const canMessage = (entry: AgentEntry) => entry.agent.live && !entry.agent.session.startsWith('launch:');
+  // Its filter on: the click takes it off. Else it filters the list to its threads, and opens none of them; with no
+  // thread in the window there is nothing to filter, and a live agent gets New message.
   const open = (entry: AgentEntry, opener: HTMLElement) => {
-    if (entry.thread) return props.pick(() => props.onOpenThread(entry.thread!.id))();
+    if (agentOn(entry)) return props.pick(() => props.onAgentFilter(null))();
+    if (entry.thread) return props.pick(() => props.onAgentFilter(entry.agent.id))();
     if (canMessage(entry)) return props.pick(() => props.onMessageAgent(entry.agent.session, opener))();
   };
   // One function for every row, for as long as the section lasts: a row is not drawn again for a new closure.
@@ -217,7 +225,7 @@ export function AgentsSection(props: AgentsSectionProps) {
                 </div>
               )}
               {rows.map((entry) => (
-                <AgentRow key={entry.agent.id} entry={entry} machine={machine} on={agentOn(entry)} away={away} opens={entry.thread ? 'thread' : canMessage(entry) ? 'message' : 'none'} onOpen={onOpen} />
+                <AgentRow key={entry.agent.id} entry={entry} machine={machine} on={agentOn(entry)} away={away} opens={entry.thread ? 'filter' : canMessage(entry) ? 'message' : 'none'} onOpen={onOpen} />
               ))}
             </div>
           );

@@ -11,6 +11,7 @@ import { useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { copyAuthor, copyMarkdown, messageMarkdown, threadMarkdown } from '../copyMarkdown';
 import { plural, shortAgentName, whenTime } from '../format';
 import { Icon } from '../icons';
+import { decisionExportUrl, threadHasQuestionCards } from '../decisionExport';
 import { Tip } from './Tip';
 import { useMessageArm } from '../messageArming';
 import type { InboxToastModel } from './Toast';
@@ -270,14 +271,66 @@ export function ThreadMore(
   const { ref, portal } = usePortal<HTMLButtonElement>();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<SnoozeView | null>(null);
+  // A phone's "‹ Export decisions" sub-view (the sheet swaps in place, as Snooze's times do).
+  const [exportView, setExportView] = useState(false);
+  const exportOffered = threadHasQuestionCards(thread);
+  const exportBack = useRef(false);
   // Back from the times: focus goes to Snooze again, not to the item now at its old index.
   const backed = useRef(false);
   const popup = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    if (view !== null || !backed.current) return;
+    if (view !== null || exportView || !backed.current) return;
     backed.current = false;
-    return focusAfterSwap(() => popup.current?.querySelector<HTMLElement>('[data-thread-snooze-item]'));
-  }, [view]);
+    const item = exportBack.current ? '[data-thread-export-item]' : '[data-thread-snooze-item]';
+    exportBack.current = false;
+    return focusAfterSwap(() => popup.current?.querySelector<HTMLElement>(item));
+  }, [view, exportView]);
+  useLayoutEffect(() => {
+    if (!exportView) return;
+    return focusAfterSwap(() => popup.current?.querySelector<HTMLElement>('[data-decision-export]'));
+  }, [exportView]);
+  // Export decisions (the owner, 2026-11-10): beside Add a pull request…, on every thread with question cards, linked PR
+  // or not. Its submenu (and the phone's sub-view) is `downloads`: plain links the server answers as attachments (no
+  // dialog), named by the server. A later "Post on a pull request" group goes after them, in both places; with no PR
+  // linked it will lead to Add a pull request… first. Not built in this version.
+  const downloads = (
+    <>
+      <Menu.Item className="ib-pmi" label="Download as Markdown" render={<a href={decisionExportUrl(thread.thread_id, 'md')} download="" />} data-decision-export="md">
+        <Icon name="doc" size={15} />
+        Download as Markdown
+      </Menu.Item>
+      <Menu.Item className="ib-pmi" label="Download as HTML" render={<a href={decisionExportUrl(thread.thread_id, 'html')} download="" />} data-decision-export="html">
+        <Icon name="code" size={15} />
+        Download as HTML
+      </Menu.Item>
+    </>
+  );
+  const exportItem = !exportOffered ? null : phone ? (
+    <Menu.Item className="ib-pmi" label="Export decisions" closeOnClick={false} onClick={() => setExportView(true)} data-thread-export-item="">
+      <Icon name="download" size={15} />
+      Export decisions
+      <span className="ib-zsub">
+        <Icon name="chevR" size={13} />
+      </span>
+    </Menu.Item>
+  ) : (
+    <Menu.SubmenuRoot>
+      <Menu.SubmenuTrigger className="ib-pmi" label="Export decisions" data-thread-export-item="">
+        <Icon name="download" size={15} />
+        Export decisions
+        <span className="ib-zsub">
+          <Icon name="chevR" size={13} />
+        </span>
+      </Menu.SubmenuTrigger>
+      <Menu.Portal container={portal ?? undefined}>
+        <Menu.Positioner className="ib-pm-pos" side="left" align="start" sideOffset={2}>
+          <Menu.Popup className="ib-pm" aria-label="Export decisions" data-thread-export-menu="">
+            {downloads}
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.SubmenuRoot>
+  );
   const readItems = (
     <>
       {markRead && (
@@ -351,7 +404,10 @@ export function ThreadMore(
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
-        if (!next) setView(null);
+        if (!next) {
+          setView(null);
+          setExportView(false);
+        }
       }}
     >
       <Tip content="More">
@@ -381,6 +437,27 @@ export function ThreadMore(
                   onPick={snooze.onPick}
                   onClose={() => setOpen(false)}
                 />
+              </>
+            ) : exportView && exportOffered ? (
+              <>
+                <div className="ib-pm-title" dir="auto" aria-hidden="true">
+                  {thread.subject ?? '(no subject)'}
+                </div>
+                <Menu.Item
+                  className="ib-pmi ib-zb"
+                  label="Export decisions"
+                  closeOnClick={false}
+                  onClick={() => {
+                    backed.current = true;
+                    exportBack.current = true;
+                    setExportView(false);
+                  }}
+                  data-decision-export-back=""
+                >
+                  <Icon name="chevL" size={14} />
+                  Export decisions
+                </Menu.Item>
+                {downloads}
               </>
             ) : (
               <>
@@ -425,13 +502,16 @@ export function ThreadMore(
                   <Icon name="hash" size={15} />
                   Copy thread ID
                 </Menu.Item>
-                {addPull && (
+                {(addPull || exportItem) && (
                   <>
                     <Menu.Separator className="ib-pm-sep" />
-                    <Menu.Item className="ib-pmi" label="Add a pull request" onClick={addPull} data-thread-add-pull-item="">
-                      <Icon name="link" size={15} />
-                      Add a pull request…
-                    </Menu.Item>
+                    {addPull && (
+                      <Menu.Item className="ib-pmi" label="Add a pull request" onClick={addPull} data-thread-add-pull-item="">
+                        <Icon name="link" size={15} />
+                        Add a pull request…
+                      </Menu.Item>
+                    )}
+                    {exportItem}
                   </>
                 )}
                 {requestGuide && (
