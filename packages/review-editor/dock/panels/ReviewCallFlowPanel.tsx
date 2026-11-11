@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import type { CallFlowAdvert, CallFlowInstallStage, CallFlowNode } from '@plannotator/shared/call-flow-types';
 import { getCallFlowLanguage, type CallFlowLanguageId } from '@plannotator/shared/call-flow-languages';
 import type { CallFlowInstallController } from '../../hooks/useCallFlowInstall';
 import { Popover } from '@base-ui/react/popover';
-import { Check, Info, Settings2 } from 'lucide-react';
+import { Check, Info, Settings2, X } from 'lucide-react';
 import { Tooltip } from '@plannotator/ui/components/Tooltip';
 import { useReviewState } from '../ReviewStateContext';
 import { useCallFlowNodeSource } from '../../hooks/useCallFlowNodeSource';
@@ -12,6 +12,8 @@ import {
   selectionForCallFlowNode,
 } from '../../components/CallFlowTreeView';
 import { CallFlowRawView } from '../../components/CallFlowRawView';
+import { CallTree } from '../../components/callTree/CallTree';
+import { callTreeFromEntry } from '@plannotator/shared/call-tree';
 import { formatCallFlowInstallSize } from '../../utils/callFlowPresentation';
 
 function errorMessage(error: Exclude<import('@plannotator/shared/call-flow-types').CallFlowResponse, { status: 'ok' }> | Error): string {
@@ -236,13 +238,24 @@ export function ReviewCallFlowPanel() {
   const state = useReviewState();
   const loadNodeSource = useCallFlowNodeSource(state);
   const analysis = state.callFlowAnalysis;
-  const [view, setView] = useState<'paths' | 'raw'>('paths');
+  const [view, setView] = useState<'paths' | 'tree' | 'raw'>('paths');
+  const callTreeRequest = state.callTreeRequest ?? null;
+  // A hunk's "Call tree" entry shows its tree here.
+  useEffect(() => {
+    if (callTreeRequest) setView('tree');
+  }, [callTreeRequest]);
+  const readyData = analysis.status === 'ready' ? analysis.data : null;
+  const entryDocs = useMemo(
+    () => (readyData ? readyData.trees.map((tree, index) => callTreeFromEntry(tree, index, { from: readyData.from, to: readyData.to })) : []),
+    [readyData],
+  );
 
   const openNode = (node: CallFlowNode) => {
     if (!node.file) return;
     state.openDiffFile(node.file);
     state.onLineSelection(selectionForCallFlowNode(node));
   };
+  const openTreeNode = state.openCallTreeNode ?? openNode;
   if (!state.callFlowAdvert.available) {
     // The runtime-missing flavor of unavailable is the setup progress surface.
     // Unsupported views and the disabled state never offer the install.
@@ -341,6 +354,7 @@ export function ReviewCallFlowPanel() {
           <div className="call-flow-header-actions">
             <div className="call-flow-view-switch" aria-label="Call flow view">
               <button type="button" aria-pressed={view === 'paths'} onClick={() => setView('paths')}>Paths</button>
+              <button type="button" aria-pressed={view === 'tree'} onClick={() => setView('tree')}>Call tree</button>
               <button type="button" aria-pressed={view === 'raw'} onClick={() => setView('raw')}>Raw</button>
             </div>
             {state.callFlowAdvert.languages && (
@@ -401,7 +415,50 @@ export function ReviewCallFlowPanel() {
           </div>
         )}
 
-        {view === 'raw' ? (
+        {view === 'tree' && callTreeRequest ? (
+          <div className="call-flow-call-trees">
+            <CallTree
+              key={`${callTreeRequest.doc.rootPath}:${callTreeRequest.token}`}
+              doc={callTreeRequest.doc}
+              onOpen={openTreeNode}
+              loadNodeSource={loadNodeSource}
+              onAnnotateTargets={state.onAddCallFlowAnnotation}
+              onBack={state.returnFromCallTree}
+              autoFocus
+              headerAccessory={state.clearCallTreeRequest && (
+                <button
+                  type="button"
+                  className="call-flow-icon-button"
+                  aria-label="Close"
+                  title="Close"
+                  onClick={state.clearCallTreeRequest}
+                >
+                  <X aria-hidden="true" size={14} />
+                </button>
+              )}
+            />
+          </div>
+        ) : view === 'tree' ? (
+          data.trees.length === 0 ? (
+            <div className="call-flow-empty">
+              <span className="call-flow-empty-kicker">Snapshots match structurally</span>
+              <strong>{data.message ?? 'CallDiff found no changed call paths.'}</strong>
+              <p>This is syntactic call analysis; the ordinary and semantic diffs may still contain changes.</p>
+            </div>
+          ) : (
+            <div className="call-flow-call-trees">
+              {entryDocs.map((doc) => (
+                <CallTree
+                  key={doc.rootPath}
+                  doc={doc}
+                  onOpen={openTreeNode}
+                  loadNodeSource={loadNodeSource}
+                  onAnnotateTargets={state.onAddCallFlowAnnotation}
+                />
+              ))}
+            </div>
+          )
+        ) : view === 'raw' ? (
           <CallFlowRawView
             sections={[{ key: 'complete', raw: data.raw, rawLineStart: 1 }]}
             onAnnotateTargets={state.onAddCallFlowAnnotation}
