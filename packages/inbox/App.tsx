@@ -75,7 +75,8 @@ import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
 import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNews as heldNewsOf, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, showLandsIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
 import { deliveriesReadList } from './rowDelivery';
-import { inboxAgentsWatched, setInboxAgents } from './agentsList';
+import { inboxAgentsWatched, setInboxAgents, useAgentListFilter } from './agentsList';
+import { filterAgentRows } from './agents/model';
 import {
   captureSettle,
   COVERED_LIST_SETTLES,
@@ -459,6 +460,12 @@ interface Route {
    * `project`, never instead of it.
    */
   machine?: string | null;
+  /**
+   * The sidebar's Agents section: the list shows one agent's threads (`#agent=<InboxAgent.id>`), every thread its
+   * session (and the sessions its conversation had before) wrote in, was addressed in or took part in. Picked in
+   * place of a project or a machine, never beside them.
+   */
+  agent?: string | null;
   thread: string | null;
   /**
    * An attachment open beside the thread: `file=att_…`, `v=sent` for the version the agent sent, `at=` an annotation to show,
@@ -559,6 +566,7 @@ function routeOf(fullHash: string): Route {
     reviews: fromReviews ? { project: params.get('project') || null, view: pullFilterOf(params.get('view')) } : null,
     project: fromReviews ? null : params.get('project'),
     machine: params.get('machine'),
+    agent: fromReviews ? null : params.get('agent'),
     thread,
     file: fileId ? { id: fileId, version: params.get('v') === 'sent' ? 'sent' : 'current', focus: params.get('at'), linked: params.get('linked'), view: parseFileView(params.get('view')), set: params.get('set') } : null,
     guide: thread ? params.get('guide') : null,
@@ -611,6 +619,7 @@ function hashOf(route: Route): string {
       if (route.reviews.view !== 'all') params.set('view', route.reviews.view);
     }
     if (route.machine) params.set('machine', route.machine);
+    if (route.agent) params.set('agent', route.agent);
     if (route.project) params.set('project', route.project);
     if (route.thread) params.set('thread', route.thread);
     if (route.thread && route.msg) params.set('msg', route.msg);
@@ -1346,7 +1355,7 @@ function Inbox() {
       const beside = !!(from.file || from.guide || next.file || next.guide);
       if (from.page === 'inbox' && from.thread && from.thread === next.thread && !beside) writeRoute({ ...from, msg: next.msg }, { replace: true });
       // As a row click does (openRow): the list stays the one on screen, unless the link names its own.
-      else if (from.page === 'inbox' && next.page === 'inbox' && next.thread) writeRoute({ ...next, project: next.project ?? from.project, machine: next.machine ?? from.machine });
+      else if (from.page === 'inbox' && next.page === 'inbox' && next.thread) writeRoute({ ...next, project: next.project ?? from.project, machine: next.machine ?? from.machine, agent: next.agent ?? from.agent });
       else writeRoute(next);
       focusAfterOpen();
     };
@@ -2645,16 +2654,16 @@ function Inbox() {
   // slide); where the thread covered the list, COVERED_LIST_SETTLES decides.
   // After a keyboard close, focus that the closed pane took with it goes to
   // the thread's row.
-  const lastRoute = useRef({ page: route.page, project: route.project ?? null, machine: route.machine ?? null, thread: route.thread });
+  const lastRoute = useRef({ page: route.page, project: route.project ?? null, machine: route.machine ?? null, agent: route.agent ?? null, thread: route.thread });
   /** The docked sidebar is held closed beside a file (#1871); the close gives it back, so the settle waits for its spring. */
   const sidebarHeldNow = useRef(false);
   useLayoutEffect(() => {
     const before = lastRoute.current;
-    const now = { page: route.page, project: route.project ?? null, machine: route.machine ?? null, thread: route.thread };
+    const now = { page: route.page, project: route.project ?? null, machine: route.machine ?? null, agent: route.agent ?? null, thread: route.thread };
     lastRoute.current = now;
-    if (before.page === now.page && before.project === now.project && before.machine === now.machine && before.thread === now.thread) return;
-    // Another project or machine (the sidebar's filters) is another list: it shows whole.
-    if (!(before.page === 'inbox' && now.page === 'inbox' && before.project === now.project && before.machine === now.machine)) {
+    if (before.page === now.page && before.project === now.project && before.machine === now.machine && before.agent === now.agent && before.thread === now.thread) return;
+    // Another project, machine or agent (the sidebar's filters) is another list: it shows whole.
+    if (!(before.page === 'inbox' && now.page === 'inbox' && before.project === now.project && before.machine === now.machine && before.agent === now.agent)) {
       settleList('all', false);
       return;
     }
@@ -2707,7 +2716,7 @@ function Inbox() {
     }
     if (prefersReducedMotion()) settleList('own', false);
     else settleTimer.current = setTimeout(() => settleList('own', true), sidebarHeldNow.current ? SETTLE_AFTER_SIDEBAR_MS : SETTLE_BEAT_MS);
-  }, [route.page, route.project, route.machine, route.thread, settleList, cancelSettle]);
+  }, [route.page, route.project, route.machine, route.agent, route.thread, settleList, cancelSettle]);
 
   useEffect(() => {
     if (route.page === 'settings') {
@@ -3233,7 +3242,7 @@ function Inbox() {
     covering.thread = stack.thread;
   }, [stack.thread]);
 
-  const openRow = (row: InboxListRow) => go({ page: 'inbox', project: route.project, machine: route.machine, thread: row.thread_id });
+  const openRow = (row: InboxListRow) => go({ page: 'inbox', project: route.project, machine: route.machine, agent: route.agent, thread: row.thread_id });
 
   const patchQuestions = (messageId: string, questions: InboxQuestion[]) => {
     ownSaves.saved(questions);
@@ -3531,7 +3540,7 @@ function Inbox() {
             onReply: () => {
               void (async () => {
                 await markRead(threadId, false, listAtPress);
-                if (routeRef.current.thread !== threadId) go({ page: 'inbox', project: routeRef.current.project, machine: routeRef.current.machine, thread: threadId });
+                if (routeRef.current.thread !== threadId) go({ page: 'inbox', project: routeRef.current.project, machine: routeRef.current.machine, agent: routeRef.current.agent, thread: threadId });
                 setReplyFor(threadId);
               })();
             },
@@ -4352,7 +4361,7 @@ function Inbox() {
       const from = section(now.thread);
       if (into && from && into !== from) say(into);
       askArrivalFocus(fromList ? null : step.to);
-      writeRoute({ page: 'inbox', reviews: now.reviews, project: now.project, machine: now.machine, thread: step.to }, { replace: true });
+      writeRoute({ page: 'inbox', reviews: now.reviews, project: now.project, machine: now.machine, agent: now.agent, thread: step.to }, { replace: true });
       if (fromList) {
         requestAnimationFrame(() => requestAnimationFrame(() => {
           const list = listBody(rootRef.current);
@@ -4975,16 +4984,20 @@ function Inbox() {
   // Linked machines: the machine the list shows (the sidebar's Machines filter), and a project of another machine
   // named with that machine ("billing-svc · MacBook") wherever the list shows more than one machine.
   const filterMachine = route.page === 'inbox' && route.machine ? (machines.all.find((m) => m.id === route.machine) ?? null) : null;
+  /** Every row the window has (every section, the snoozed too): where an agent's threads are found. */
+  const windowRows = useMemo(() => (latest ? [...latest.sections.flatMap((section) => section.threads), ...(latest.snoozed ?? [])] : []), [latest]);
+  // The Agents section's filter (`#agent=<id>`): one agent's threads, named by its row's name.
+  const filterAgent = useAgentListFilter(route.page === 'inbox' ? (route.agent ?? null) : null, machines, windowRows);
   const projectNames = useMemo(
     () => machineProjectNames({ projects, sidebar: shownProjects(projects, sidebarKeeps), sections: shown ?? [], pins: pinRows }, machines, !filterMachine),
     [projects, sidebarKeeps, shown, pinRows, machines, filterMachine],
   );
   /** The sidebar's Machines counts: rows waiting on the person per machine, as Projects counts them. */
   const sidebarMachineCounts = useMemo(() => machineCounts(latestSections, machines), [latestSections, machines]);
-  /** One project's rows, then one machine's, then without the machines the person hid while away. */
+  /** One project's rows, then one machine's, then one agent's, then without the machines the person hid while away. */
   const filterList = useCallback(
-    (sections: readonly InboxListSection[]) => filterMachineRows(filterSections(sections, route.project), machines, filterMachine?.id ?? null, hideAway),
-    [route.project, machines, filterMachine, hideAway],
+    (sections: readonly InboxListSection[]) => filterAgentRows(filterMachineRows(filterSections(sections, route.project), machines, filterMachine?.id ?? null, hideAway), filterAgent, machines.self),
+    [route.project, machines, filterMachine, filterAgent, hideAway],
   );
   // The list's filter (listFilter.ts): this browser's picks; on a project's page its Project picks step aside. The
   // day is in the keys so Today and the last N days move on at midnight.
@@ -5014,8 +5027,8 @@ function Inbox() {
     listSections !== null &&
     listSections.every((section) => section.id === 'snoozed' || section.threads.length === 0) &&
     listFilterRows.some((row) => !row.snoozed);
-  // The list's name: Inbox, or the project's window name (or the machine's); its back buttons read the same.
-  const listTitle = filterProject ? (projectNames.get(filterProject.id) ?? filterProject.name) : filterMachine ? filterMachine.name : 'Inbox';
+  // The list's name: Inbox, or the project's window name (or the machine's, or the agent's); its back buttons read the same.
+  const listTitle = filterProject ? (projectNames.get(filterProject.id) ?? filterProject.name) : filterMachine ? filterMachine.name : filterAgent ? filterAgent.name : 'Inbox';
   const heldNews = shown && latest ? heldNotice(filterShown(shown), filterShown(latestGroups), openedHere.current, heldOpen(), projectNames) : null;
   // Show opens the groups the rows it brings in land in (held.ts showLandsIn), so they are on screen.
   // `news`: the same threads, for the pill at the list's edge while the line is out of view (ListNewPill.tsx).
@@ -5413,7 +5426,7 @@ function Inbox() {
         phone,
         openThread: now.page === 'inbox' ? (now.thread ?? null) : null,
         left,
-        openLeft: (threadId) => go({ page: 'inbox', project: now.project ?? null, machine: now.machine, thread: threadId }),
+        openLeft: (threadId) => go({ page: 'inbox', project: now.project ?? null, machine: now.machine, agent: now.agent, thread: threadId }),
       });
     }, 0);
   };
@@ -6388,7 +6401,6 @@ function Inbox() {
 
   // Remote launch: where the person last started an agent on each machine, from the merged list's launched rows.
   // The rows the window has: where the sidebar's Agents section finds each agent's thread, and the last agent started.
-  const windowRows = useMemo(() => (latest ? [...latest.sections.flatMap((section) => section.threads), ...(latest.snoozed ?? [])] : []), [latest]);
   const composeLastAgent = useMemo(() => lastLaunchAgent(windowRows), [windowRows]);
   // "+" on project rows (F1-F7): on while launch is on and this is no guest's page. This computer's launch block says
   // which rows can start anything (agents, the folder still there): read when "+" comes on, when the tab is shown, and
@@ -7374,6 +7386,7 @@ function Inbox() {
             page={route.page === 'tour' ? 'inbox' : fromCard ? 'board' : route.reviews ? 'reviews' : route.page}
             projectId={route.project}
             machineId={route.page === 'inbox' ? (filterMachine?.id ?? null) : null}
+            agentFilter={filterAgent ? { id: filterAgent.id, name: filterAgent.name } : null}
             inboxCount={waitingCount(latestSections)}
             // One machine's list: that machine's projects only.
             projects={filterMachine ? projects.filter((p) => (p.machine ?? machines.self) === filterMachine.id) : projects}
@@ -7385,15 +7398,16 @@ function Inbox() {
                 ? void refreshInbox(null, route.thread !== null)
                 : leave({ page: 'inbox', project: null, machine: machineId, thread: null })
             }
-            // The Agents section (approval "inbox-agents-section"): an agent opens its thread as a starred one does;
-            // Add agent is New message with a new session chosen (plain New message where nothing can be started
-            // from here), and Add machine is Settings → Machines, where a machine is linked.
+            // The Agents section (approval "inbox-agents-section"): an agent filters the list to its threads, as a
+            // machine does (a second click shows everything again); Add agent is New message with a new session chosen
+            // (plain New message where nothing can be started from here), and Add machine is Settings → Machines.
             agentRows={windowRows}
-            onOpenAgentThread={(threadId) => {
-              const now = routeRef.current;
-              if (now.page === 'inbox' && now.thread === threadId) return;
-              go({ page: 'inbox', project: now.page === 'inbox' ? now.project : null, thread: threadId });
-            }}
+            // Picked: its list, as a machine's (no thread open). Cleared: everything, the thread on screen kept.
+            onAgentFilter={(agentId) =>
+              agentId
+                ? leave({ page: 'inbox', project: null, machine: null, agent: agentId, thread: null })
+                : leave({ page: 'inbox', project: null, machine: null, agent: null, thread: route.page === 'inbox' ? route.thread : null })
+            }
             onMessageAgent={(session, opener) => openCompose({ session }, opener)}
             onAddAgent={(opener) => openCompose(plusOn ? { launch: { agent: composeLastAgent } } : {}, opener)}
             onAddMachine={machines.self && !guestPage ? () => leave({ page: 'settings', project: null, thread: null, section: 'machines' }) : undefined}
@@ -7432,7 +7446,7 @@ function Inbox() {
             onShape={shapeOn && shapes.rowShown ? () => leave({ page: 'shapes', project: null, thread: null }) : undefined}
             shapeChanged={shapes.changed}
             // On the list it shows, Inbox (or a project) refreshes; with a thread open it closes it as before, and refreshes.
-            onInbox={() => (route.page === 'inbox' && route.project === null && !route.machine ? void refreshInbox(null, route.thread !== null) : leave({ page: 'inbox', project: null, thread: null }))}
+            onInbox={() => (route.page === 'inbox' && route.project === null && !route.machine && !route.agent ? void refreshInbox(null, route.thread !== null) : leave({ page: 'inbox', project: null, thread: null }))}
             onProject={(projectId) =>
               route.page === 'inbox' && route.project === projectId ? void refreshInbox(projectId, route.thread !== null) : leave({ page: 'inbox', project: projectId, machine: filterMachine?.id ?? null, thread: null })
             }
