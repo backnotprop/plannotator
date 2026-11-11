@@ -68,7 +68,7 @@ export function ProblemNotice({ problem, onRetry, retrying = false, touch = fals
         </div>
         {action?.kind === 'copy_command' && (
           <div className="mt-2 flex items-center gap-2 rounded-md border border-border bg-muted/50 py-1 pl-2.5 pr-1">
-            <code className="min-w-0 flex-1 break-all font-mono text-[11.5px] text-foreground" data-problem-command="">
+            <code className="min-w-0 flex-1 break-words font-mono text-[11.5px] text-foreground" data-problem-command="">
               {action.value}
             </code>
             <button
