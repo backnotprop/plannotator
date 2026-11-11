@@ -1,10 +1,3 @@
-/**
- * Replaced questions through the Inbox's real doors: a running Inbox on
- * loopback, the official MCP SDK client for the agent side (send_message's
- * `supersedes` and a `Replaces:` line), and real `fetch` for the window's
- * routes (picks and Send on a superseded question).
- * Every test uses its own temp data dir.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -101,7 +94,6 @@ describe("send_message supersedes earlier questions", () => {
     expect(old.state).toBe("superseded");
     expect(old.superseded_by).toEqual({ message_id: sent.message_id, key: sent.questions[0]!.key });
     expect(thread.messages[0]!.questions![1]!.state).toBe("open");
-    // The subject was the first question's prompt: it follows the replacement.
     expect(thread.subject).toBe("How many times should the jobs queue retry a Stripe 409?");
   });
 
@@ -128,7 +120,6 @@ describe("send_message supersedes earlier questions", () => {
     expect(text).toContain(`${first.message_id}/${q2!.key}`);
     const lines = errorText(await w.call("send_message", { body: QUEUE.replace(":::question\n", ":::question\nReplaces: msg_00000000000000000000000000/q-12345678\n"), reply_to: first.message_id }));
     expect(lines.startsWith("invalid_supersedes:")).toBe(true);
-    // Nothing landed.
     expect((await w.thread(first.thread_id)).messages.length).toBe(1);
   });
 
@@ -164,7 +155,6 @@ describe("the window's routes refuse to answer a superseded question (422 questi
     expect(body.code).toBe("question_superseded");
     expect(body.superseded_by.key).not.toBeNull();
 
-    // The pick stays visible on the card, never sent; nothing was written.
     const after = (await w.thread(first.thread_id)).messages;
     expect(after.length).toBe(2);
     expect(after[0]!.questions![0]!.answer?.selected).toEqual(["Fail the job and send it to the dead-letter queue"]);

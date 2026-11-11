@@ -1,28 +1,3 @@
-/**
- * Reviews in the Inbox (approval "inbox-reviews-page", PR 2 "Server index"),
- * through a running Inbox's real doors: the MCP SDK client for the agent,
- * real `fetch` for the window, a scripted gh / glab (`refRunner`) and a
- * scripted origin read (`readProjectRepo`): no real CLI, git remote or forge.
- *
- * What regresses:
- *  - anything run (gh, glab, the origin read) while Code review is off, or
- *    the route answering then;
- *  - a review sent in an ordinary thread missing from Reviews, listed twice,
- *    or listed as a copy (another id than the thread's own);
- *  - a second review in the thread starting a second row, or moving the
- *    first review message (the page folds what came before it);
- *  - the person's verdict not moving the row (On you → With your agents →
- *    On you on round 2 → Ready to land);
- *  - an approved review of the person's linked PR left On you;
- *  - a listed PR with no review thread shown as reviewed;
- *  - an approval lost once the person writes again ("Thanks!");
- *  - a verdict on an earlier review card taken as answering the newest;
- *  - a review sent after the thread was archived hidden from Reviews;
- *  - a review whose PR merged still listed;
- *  - a deleted thread still listed (the index kept after a re-read);
- *  - an older review (its guide ref without `source`) listed without the
- *    source its snapshot names.
- */
 import { afterEach, describe, expect, setSystemTime, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -79,13 +54,11 @@ const ghPull = (number: number, fields: Record<string, unknown> = {}) => ({
   ...fields,
 });
 
-/** dana's #412 (her agent's), #869 nobody reviewed, and #300 she merged; gh signed in to github.com only, glab nowhere. */
 const GH_ANSWER = {
   data: {
     viewer: { login: "dana" },
     requested: { nodes: [] },
     authored: { nodes: [ghPull(412), ghPull(869)] },
-    // Merged after the review the test sends (a review newer than the merge would be listed again).
     merged: { nodes: [ghPull(300, { state: "MERGED", mergedAt: new Date(Date.now() + 3_600_000).toISOString() })] },
   },
 };
@@ -93,9 +66,7 @@ const MERGED_URL = "https://github.com/northwind/billing-svc/pull/300";
 
 function forge(answer: unknown = GH_ANSWER) {
   const calls: { cli: string; args: string[] }[] = [];
-  /** What `gh api repos/…/pulls/N` answers; null: it fails. */
   const prState: { answer: Record<string, unknown> | null } = { answer: null };
-  /** What `gh api …/pulls/N/commits` lists; null: it fails, and the Inbox can't say a commit is gone. */
   const commits: { shas: string[] | null } = { shas: null };
   const run: RefRunner = async (cli, args) => {
     calls.push({ cli, args });
@@ -117,7 +88,6 @@ async function world(options: { repoDelayMs?: number; answer?: unknown; launchHo
   Bun.spawnSync(["git", "init", "-q"], { cwd: project, env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" } });
   const dataDir = join(root, "data");
   mkdirSync(dataDir, { recursive: true });
-  // The switch is config.json's: this test's own data dir.
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
   if (options.launchHost) writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: true } }));
   const f = forge(options.answer);
@@ -128,7 +98,6 @@ async function world(options: { repoDelayMs?: number; answer?: unknown; launchHo
     phones: false,
     refRunner: f.run,
     ...(options.launchHost ? { binaryPath: null, launchHosts: () => [options.launchHost!] } : {}),
-    // A posted review stops here: nothing reaches a forge.
     prRuntime: {
       runCommand: async (_cmd, args) => (posts.push(args), { stdout: "{}", stderr: "", exitCode: 0 }),
       runCommandWithInput: async (_cmd, args) => (posts.push(args), { stdout: "{}", stderr: "", exitCode: 0 }),
@@ -151,7 +120,6 @@ async function world(options: { repoDelayMs?: number; answer?: unknown; launchHo
   const setCodeReview = (on: boolean) => post("/api/inbox/settings", { code_review: { on } });
   const sendReview = (thread: string, key: string, body?: string, extra: Record<string, unknown> = {}) =>
     call("submit_guide", { ...GUIDE_BRIEF_EXAMPLE, ...(body ? { body } : {}), thread, idempotency_key: key, review: true, ...extra });
-  /** A review of a PR: the guide's source names it. */
   const prGuide = (url: string, number: number) => ({ guide: { ...GUIDE_BRIEF_EXAMPLE.guide, source: { kind: "pr", pr: { url, number, platform: "github" } } } });
   const say = (messageId: string, key: string, words: string) => post(`/api/inbox/messages/${messageId}/reply`, { idempotency_key: key, words });
   const verdict = (reviewId: string, key: string, review_verdict: "approved" | "changes_requested") =>
@@ -161,7 +129,6 @@ async function world(options: { repoDelayMs?: number; answer?: unknown; launchHo
     expect(res.status).toBe(200);
     return (await res.json()) as InboxReviewsAnswer;
   };
-  /** A session's long poll, as an agent's connection makes it: it is live for a while after. */
   const poll = (session: string) =>
     fetch(`${base}${INBOX_BRIDGE_POLL_PATH}`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${server.token}` }, body: JSON.stringify({ session, host: "claude-code", waitMs: 0, project_path: project, started_at: Date.now(), busy: false }) });
   return { client, project, dataDir, base, forge: f, posts, poll, server, originReads: () => originReads, call, post, setCodeReview, sendReview, prGuide, say, verdict, reviews };
@@ -378,7 +345,6 @@ describe("a teammate's PR assigned to the person, reviewed by their agent", () =
 
   test("a post that fails answers nothing", async () => {
     const { w, thread_id } = await handed();
-    // GitHub takes a review at an older commit of the PR: this one is no longer on it.
     w.forge.commits.shas = [String(TEAMMATE).padStart(40, "a")];
     const res = await w.post("/api/inbox/pulls/review", { key: key(TEAMMATE), head_sha: "b".repeat(40), action: "approve", body: "Old commit." });
     expect(res.status).toBe(409);
@@ -392,12 +358,10 @@ describe("the read that follows the store (?cached=1)", () => {
     const w = await world();
     await w.setCodeReview(true);
     await w.sendReview("retries", "r1");
-    // Cold: nothing read since the Inbox started.
     const before = w.forge.calls.length;
     const cold = (await (await fetch(`${w.base}/api/inbox/reviews?cached=1`)).json()) as { cold?: boolean };
     expect(cold.cold).toBe(true);
     expect(w.forge.calls.length).toBe(before);
-    // Warm: a real read has been. A new review names a PR off the list, which the next real read asks the forge about.
     await w.reviews();
     await Bun.sleep(20);
     w.forge.prState.answer = { state: "open", draft: false };
@@ -407,7 +371,6 @@ describe("the read that follows the store (?cached=1)", () => {
     expect(((await res.json()) as InboxReviewsAnswer).rows.length).toBeGreaterThan(0);
     await Bun.sleep(20);
     expect(w.forge.calls.slice(warm)).toEqual([]);
-    // The read is due, so the quiet above is the route's doing.
     await w.reviews();
     await Bun.sleep(20);
     expect(w.forge.calls.slice(warm).some((call) => call.args.includes("repos/northwind/billing-svc/pulls/999"))).toBe(true);
@@ -505,7 +468,6 @@ describe("on", () => {
   test("a review sent in an ordinary thread is one row, the thread itself; its verdicts move it between groups", async () => {
     const w = await world();
     await w.setCodeReview(true);
-    // An ordinary thread: the agent talked first, then sent a review in it.
     const first = await w.call("send_message", { body: "Cleaning up the retry worker.", thread: "retries" });
     const r1 = await w.sendReview("retries", "r1");
     expect(r1.thread_id).toBe(first.thread_id);
@@ -514,7 +476,6 @@ describe("on", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ id: first.thread_id, reviewed: true, move: "on_you", reason: "review_ready" });
     expect(rows[0]!.review).toMatchObject({ first_review_id: r1.message_id, latest_review_id: r1.message_id, round: 1, title: "Token refresh", verdict: null });
-    // The guide's source: the snapshot's kind and the base the agent named.
     expect(rows[0]!.review!.source).toMatchObject({ kind: "local", base: "origin/main", git_ref: "origin/main...HEAD" });
 
     expect((await w.verdict(r1.message_id, "v1", "changes_requested")).status).toBe(200);
@@ -522,7 +483,6 @@ describe("on", () => {
     expect(rows[0]).toMatchObject({ move: "agents", reason: "feedback_sent" });
     expect(rows[0]!.review!.verdict).toMatchObject({ verdict: "changes_requested" });
 
-    // Round 2 in the same thread: still one row, the first review stays the fold point.
     const r2 = await w.sendReview("retries", "r2", "Round two.");
     rows = rowsOf(await w.reviews(), first.thread_id);
     expect(rows).toHaveLength(1);
@@ -537,12 +497,10 @@ describe("on", () => {
   test("an approved review of the person's linked PR leaves On you; a listed PR nobody reviewed is not reviewed", async () => {
     const w = await world();
     await w.setCodeReview(true);
-    // The agent opened #412 in its thread (its own URL link), then sent its review there.
     const opened = await w.call("send_message", { body: `Opened ${PULL_URL}`, thread: "retries" });
     const r1 = await w.sendReview("retries", "r1", undefined, w.prGuide(PULL_URL, 412));
     const key = "github.com/northwind/billing-svc#412";
 
-    // The pulls page alone: linked, checks done, so On you, before and after any verdict.
     const pulls = (await (await fetch(`${w.base}/api/inbox/pulls`)).json()) as { links: Record<string, { thread_id: string }> };
     expect(pulls.links[key]?.thread_id).toBe(opened.thread_id);
 
@@ -550,7 +508,6 @@ describe("on", () => {
     let rows = rowsOf(answer, opened.thread_id);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ reviewed: true, move: "on_you", pull_keys: [key] });
-    // #412 is under its review thread, never a row of its own too.
     expect(answer.rows.filter((row) => row.stacks.some((s) => s.layers.some((l) => l.key === key)))).toHaveLength(1);
     expect(answer.rows.find((row) => row.id === "github.com/northwind/billing-svc#869")).toMatchObject({ reviewed: false, move: "not_reviewed", thread_id: null });
 
@@ -565,7 +522,6 @@ describe("on", () => {
     await w.setCodeReview(true);
     const r1 = await w.sendReview("retries", "r1");
     expect((await w.verdict(r1.message_id, "v1", "approved")).status).toBe(200);
-    // The agent asks something, the person says yes, then thanks it.
     const asked = await w.call("send_message", { body: "Merge it now?", reply_to: r1.message_id });
     expect((await w.say(asked.message_id, "s1", "Yes.")).status).toBe(200);
     expect((await w.say(asked.message_id, "s2", "Thanks!")).status).toBe(200);
@@ -620,12 +576,10 @@ describe("a PR that left the list", () => {
   const answers = (state: string, merged: string | null) => ({
     state,
     merged_at: merged,
-    // Later than the review the test sends: the review is the one the PR left with.
     closed_at: new Date(Date.now() + 3_600_000).toISOString(),
     title: "A dropped idea",
     html_url: CLOSED_URL,
   });
-  /** A reviews read, then the background read's turn, then the read that shows it. */
   const settled = async (w: Awaited<ReturnType<typeof world>>) => {
     await w.reviews();
     await new Promise((done) => setTimeout(done, 30));
@@ -642,7 +596,6 @@ describe("a PR that left the list", () => {
     const r1 = await w.sendReview("closed", "r1", undefined, w.prGuide(CLOSED_URL, 500));
     expect(rowsOf(await settled(w), r1.thread_id)).toHaveLength(0);
     expect(w.forge.calls.filter((c) => c.args.includes("repos/northwind/billing-svc/pulls/500"))).toHaveLength(1);
-    // The record stays: no second read, and a later review comes back with its link.
     const r2 = await w.sendReview("closed", "r2", undefined, w.prGuide(CLOSED_URL, 500));
     const rows = rowsOf(await settled(w), r2.thread_id);
     expect(rows[0]).toMatchObject({ move: "on_you", landed: [{ state: mergedAt ? "merged" : "closed", url: CLOSED_URL, number: 500 }] });
@@ -763,7 +716,6 @@ describe("the record", () => {
     roots.push(dir);
     const landing: InboxReviewLanding = { key: "github.com/o/r#1", thread_id: "t", state: "closed", at: null, url: "https://github.com/o/r/pull/1", number: 1, title: "T", platform: "github", head: null, through_review: "t_r1" };
     createInboxPullLinks(dir).land([landing]);
-    // New review's record sits beside it, and a new read keeps both.
     const begun = { kind: "local", changes: "last", branch: "main", base: "main", ask: "guide", host: "pi", project_id: "prj_1", at: "2026-11-04T10:00:00.000Z" } as const;
     createInboxPullLinks(dir).start("t_new", begun);
     expect(createInboxPullLinks(dir).started().get("t_new")).toEqual(begun);
@@ -848,7 +800,6 @@ describe("a walkthrough", () => {
     writeFileSync(join(w.project, "src/retry.ts"), text);
   };
   const guideOf = (w: Awaited<ReturnType<typeof world>>, id: string) => w.server.store.message(id)!.guide!;
-  /** A refusal comes back as the tool's error text. */
   const refusal = async (w: Awaited<ReturnType<typeof world>>, args: Record<string, unknown>) => {
     const answer = (await w.client.callTool({ name: "submit_guide", arguments: { project_path: w.project, agent_session: "ses_retries", agent_name: "Claude Code", agent_host: "claude-code", ...args } })) as { isError?: boolean; content: { text: string }[] };
     expect(answer.isError).toBe(true);

@@ -1,7 +1,3 @@
-/**
- * GET /api/inbox/search's `sort` (approval "inbox-search-sort"), on the route alone (no Inbox started): `newest`
- * lists by the latest message, no `sort` is best match as before, anything else is refused.
- */
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

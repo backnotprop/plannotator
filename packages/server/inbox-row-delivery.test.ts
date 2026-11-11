@@ -1,12 +1,3 @@
-/**
- * The list row's delivery through the server's real doors (approval
- * "inbox-row-delivery", "Ticks"): an agent's MCP send with the wake meta,
- * the window's reply, the connection's poll and its `state` event, and the
- * list route. A busy or idle turn writes no store line, so the server tells
- * the windows (`event: deliveries`, never the phone's door) when the live
- * sessions moved, and the row read again agrees with the thread's
- * `asker.connection`. Every test uses its own temp data dir.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -56,7 +47,6 @@ async function row(server: InboxServer, threadId: string): Promise<InboxListRow>
   return model.sections.flatMap((section) => section.threads).find((r) => r.thread_id === threadId)!;
 }
 
-/** An event stream's frames as they arrive (`event: <name>` lines). */
 function stream(server: InboxServer, query: string) {
   const abort = new AbortController();
   aborts.push(abort);
@@ -117,22 +107,18 @@ describe("the row's delivery through the server", () => {
     const queued = await row(server, sent.thread_id);
     expect(queued.section).toBe("sent");
     expect(queued.delivery).toMatchObject({ kind: "reply", state: "queued", reason: "working", send_now: true, message_id: reply.id, host: "claude-code", at: null });
-    // The thread's own read of that session's connection says the same.
     const asker = (await (await fetch(`${base(server)}/api/inbox/threads/${sent.thread_id}/sessions?asker=ses-a`)).json()) as {
       asker: { connection: { busy: boolean; send_now: boolean } };
     };
     expect(asker.asker.connection).toMatchObject({ busy: true, send_now: true });
 
-    // The turn ends: no store line, but the window hears `deliveries` and the row reads sending.
     const before = window.events.filter((e) => e === "deliveries").length;
     const state = await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-a", host: "claude-code", type: "state", busy: false });
     expect(state.status).toBeLessThan(300);
     await until(() => window.events.filter((e) => e === "deliveries").length > before);
     expect((await row(server, sent.thread_id)).delivery).toMatchObject({ state: "sending", reason: "idle", send_now: false });
-    // The phone's door (a stream with no window) is never told.
     expect(door.events).not.toContain("deliveries");
 
-    // Delivered: the time the row shows is the delivery's.
     const ack = await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-a", host: "claude-code", type: "delivered", id: reply.id });
     expect(ack.status).toBeLessThan(300);
     const delivered = (await row(server, sent.thread_id)).delivery!;
@@ -150,7 +136,6 @@ describe("the row's delivery through the server", () => {
     const window = stream(server, "cursor=0&window=win-fedcba9876543210&permission=granted&origin=http%3A%2F%2Flocalhost");
     await until(() => window.events.includes("hello"));
     await bridge(server, INBOX_BRIDGE_POLL_PATH, { session: "ses-b", host: "claude-code", project_path: project, waitMs: 0, busy: true, [INBOX_SEND_NOW_POLL_FIELD]: true });
-    // Let the watch see the session as busy, and tell the window about it.
     await until(() => window.events.includes("deliveries"));
     await Bun.sleep(1_500);
     const before = window.events.filter((e) => e === "deliveries").length;
@@ -161,8 +146,6 @@ describe("the row's delivery through the server", () => {
     await until(() => window.events.filter((e) => e === "deliveries").length > before, 3_000);
   }, 20_000);
 
-  // Approval "inbox-stopped-reply": the Claude Code mod says Claude Code refused its reply (the person stopped that
-  // session, #2780). The row and the thread's connection read Stopped until the mod says the hold lifted.
   test("a session whose connection says Claude Code holds its replies reads stopped on the row and the thread, until the hold lifts", async () => {
     const { server, client, project } = await setup();
     const sent = (
@@ -186,20 +169,17 @@ describe("the row's delivery through the server", () => {
       ((await (await fetch(`${base(server)}/api/inbox/threads/${sent.thread_id}/sessions?asker=ses-h`)).json()) as { asker: { connection: { held?: boolean } } }).asker.connection;
     expect((await connection()).held).toBeUndefined();
 
-    // The mod's state event: Claude Code refused the reply. The windows are told, and both reads say stopped.
     let before = window.events.filter((e) => e === "deliveries").length;
     await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-h", host: "claude-code", type: "state", busy: false, [INBOX_SEND_NOW_POLL_FIELD]: true, [INBOX_HELD_POLL_FIELD]: true });
     await until(() => window.events.filter((e) => e === "deliveries").length > before);
     expect((await row(server, sent.thread_id)).delivery).toMatchObject({ state: "queued", reason: "stopped", send_now: false, message_id: reply.id });
     expect((await connection()).held).toBe(true);
-    // Its next poll, still held, keeps it; a poll without the field (the hold lifted, or an older mod) clears it.
     await bridge(server, INBOX_BRIDGE_POLL_PATH, { session: "ses-h", host: "claude-code", project_path: project, waitMs: 0, busy: false, [INBOX_HELD_POLL_FIELD]: true });
     expect((await row(server, sent.thread_id)).delivery).toMatchObject({ reason: "stopped" });
     await bridge(server, INBOX_BRIDGE_POLL_PATH, { session: "ses-h", host: "claude-code", project_path: project, waitMs: 0, busy: false });
     expect((await row(server, sent.thread_id)).delivery).toMatchObject({ state: "sending", reason: "idle" });
     expect((await connection()).held).toBeUndefined();
 
-    // Held again, then the person types: the mod's state event lifts it, and the reply is delivered, not stopped.
     await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-h", host: "claude-code", type: "state", busy: false, [INBOX_HELD_POLL_FIELD]: true });
     expect((await row(server, sent.thread_id)).delivery).toMatchObject({ reason: "stopped" });
     before = window.events.filter((e) => e === "deliveries").length;

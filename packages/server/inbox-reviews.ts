@@ -1,15 +1,3 @@
-/**
- * Reviews in the Inbox (approval "inbox-reviews-page", 2026-11-04; DESIGN r2,
- * PR 2 "Server index"): the per-thread review index, read from the store's
- * own messages. Nothing is stored and no record is rewritten: the index is
- * derived on read and kept until the store changes (its event-log cursor, or
- * a re-read from disk). A review sent before guide refs carried their
- * `source` has it read once from its snapshot blob (a blob never changes, so
- * that read is kept by its hash). No git, gh or glab in the index.
- *
- * The rules (whose move, the rows) are core's (`packages/core/inbox-reviews.ts`).
- */
-
 import { readFileSync } from "node:fs";
 import { parseGuideSnapshotJson } from "@plannotator/core/guide-format";
 import {
@@ -29,7 +17,6 @@ import {
 import { inboxBlobPath } from "@plannotator/shared/inbox/attachments";
 import { refCliRunner, type RefRunner } from "./ref-cards";
 
-/** The parts of the store the index reads. */
 export interface InboxReviewIndexStore {
   readonly dir: string;
   cursor(): number;
@@ -41,11 +28,6 @@ export interface InboxReviewIndexStore {
   canonicalProjectId(projectId: string): string;
 }
 
-/**
- * One thread's reviews, or null when no agent sent a review in it. `sourceOf`
- * gives a review's source when its guide ref does not carry one (an older
- * message).
- */
 export function inboxReviewThreadOf(
   store: Pick<InboxReviewIndexStore, "threadMessageIds" | "message" | "threadSubject" | "canonicalProjectId">,
   threadId: string,
@@ -110,7 +92,6 @@ export function inboxReviewThreadOf(
   };
 }
 
-/** The index: every thread with a review, rebuilt only after the store changed. */
 export interface InboxReviewIndex {
   threads(): InboxReviewThread[];
 }
@@ -171,13 +152,11 @@ export interface InboxPullStateAnswer {
   url: string;
   head: string | null;
   head_sha: string | null;
-  /** The repository the head branch is on, when the forge says. */
   head_repo: string | null;
   base: string | null;
   author: string | null;
 }
 
-/** A PR gone from the forge's list: what one read answered, or null when it could not say. */
 export async function readInboxPullState(run: RefRunner, cli: InboxPullHost["cli"], ref: { host: string; repo: string; number: number }): Promise<InboxPullStateAnswer | null> {
   const endpoint = cli === "gh" ? `repos/${ref.repo}/pulls/${ref.number}` : `projects/${encodeURIComponent(ref.repo)}/merge_requests/${ref.number}`;
   const read = await run(cli, ["api", "--hostname", ref.host, endpoint]).catch(() => null);
@@ -195,7 +174,6 @@ export async function readInboxPullState(run: RefRunner, cli: InboxPullHost["cli
   }
 }
 
-/** Who the CLI is signed in as on a host, when no list has said yet; null when it won't say. */
 async function readInboxForgeLogin(run: RefRunner, cli: InboxPullHost["cli"], host: string): Promise<string | null> {
   const read = await run(cli, ["api", "--hostname", host, "user"]).catch(() => null);
   if (!read || read.exitCode !== 0) return null;
@@ -208,7 +186,6 @@ async function readInboxForgeLogin(run: RefRunner, cli: InboxPullHost["cli"], ho
   }
 }
 
-/** A pull request link's one read, as a PR of the list. Nothing else of its repository is read. */
 export async function readInboxReviewLink(
   run: RefRunner | undefined,
   link: { ref: { key: string; platform: InboxPull["platform"]; host: string; repo: string; number: number } },
@@ -250,19 +227,13 @@ export async function readInboxReviewLink(
   };
 }
 
-/**
- * Reads the state of a review thread's PRs that left the list: the list never carries a closed PR, and a merged one only
- * for a while, so a thread would read as a local review again. In the background (the list never waits for it), and
- * only for hosts that answered this list. One that merged or closed is recorded through `onLand`; a merged one is not
- * read again, and a closed one that reopened off the list is forgotten when it is next checked.
- */
+/** Reads PRs that left the list (it never carries closed PRs, and merged ones only for a while), in the background and only for hosts that answered. A merged PR is not read again. */
 export function createInboxPullStates(options: { run?: RefRunner; now?: () => number; onLand: (record: readonly InboxReviewLanding[], forget?: readonly string[]) => void }) {
   const run = options.run ?? refCliRunner;
   const now = options.now ?? Date.now;
   const lastRead = new Map<string, number>();
   let reading: Promise<void> | null = null;
   return {
-    /** Starts the reads this list leaves to do; resolves when they are done (the tests' wait). */
     look(input: {
       threads: readonly InboxReviewThread[];
       pulls: readonly InboxPull[];

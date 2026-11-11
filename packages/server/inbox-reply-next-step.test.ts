@@ -1,16 +1,4 @@
-/**
- * The send tools' last sentence must match how the caller gets the answer.
- * The failures this guards: a connection whose wake delivers the person's
- * reply as a turn (the Claude Code mod, Pi, OpenCode 2) is told by
- * send_message's result to read the thread, so the model polls instead of
- * ending its turn; a caller without a wake (the stdio shim, a raw MCP client,
- * OpenCode 1) is told to wait for a reply that never comes to it, or to call
- * the removed wait_for_reply, instead of to read the thread later.
- *
- * Proved against a real Inbox on loopback with the real connection code
- * (`InboxAgentConnection`, which Pi and OpenCode use) and the official MCP
- * SDK client. Every test uses its own temp data dir.
- */
+/** A send tool's last sentence must match how the caller gets the answer: a woken connection must not be told to poll, a caller without a wake must be told to read the thread later. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -58,7 +46,6 @@ describe("the send tools' next step follows the caller's wake", () => {
     expect(result.isError).toBe(false);
     expect(result.text).toMatch(ARRIVES);
     expect(result.text).not.toMatch(READ_LATER);
-    // A connection hands a reply until it is delivered: only Codex and Qwen, woken once, are told to look.
     expect(result.text).not.toContain(INBOX_REPLY_LOOK_TEXT);
   });
 
@@ -81,7 +68,6 @@ describe("the send tools' next step follows the caller's wake", () => {
     const result = await client.callTool({ name: "send_message", arguments: { body: "Plain note", project_path: project, agent_session: "ses_shim" } });
     const text = (result.content as { text: string }[])[0]!.text;
     expect(text).toMatch(READ_LATER);
-    // It says plainly that nothing wakes it, not only what to call.
     expect(text).toMatch(/reply won't arrive in this session by itself/);
     expect(text).not.toMatch(ARRIVES);
     expect(text).not.toContain("wait_for_reply");

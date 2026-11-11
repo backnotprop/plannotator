@@ -1,8 +1,3 @@
-/**
- * Bun servers: linked documents' drafts in plan review and in annotate
- * sessions without a file (#1545). The scenarios are shared with the Pi
- * mirror, see linked-document-drafts.scenarios.ts.
- */
 import { defineLinkedDocumentDraftScenarios } from "./linked-document-drafts.scenarios";
 import { startPlannotatorServer } from "./index";
 import { startAnnotateServer } from "./annotate";

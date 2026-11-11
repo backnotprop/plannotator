@@ -1,12 +1,3 @@
-/**
- * `plannotator inbox --open <thread>` (issue #2506): `POST
- * /api/inbox/control/show` moves the Inbox window open on this computer to a
- * thread. The server picks the window the person used last (its report says
- * `used` when it gets focus; a window on another device, over the tailnet, is
- * never picked) and sends `event: show` naming that window on the windows'
- * event streams. With no window open it answers `shown: false`, and the CLI
- * opens one at the thread. Temp data dir, loopback only.
- */
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -56,7 +47,6 @@ const report = (server: InboxServer, window: string, used: boolean) =>
     body: JSON.stringify({ window, permission: "default", origin: "http://localhost:1", used }),
   });
 
-/** A window's event stream, with the `show` frames it heard. */
 function openWindow(server: InboxServer, id: string): { shows: { thread_id: string; window: string }[]; ready: Promise<void> } {
   const controller = new AbortController();
   streams.push(controller);
@@ -100,25 +90,20 @@ test("lastUsed: the window on this computer that reported `used` last; never a t
   expect(windows.lastUsed()).toBeNull();
   const leaveA = windows.connect("w-window-a01", { permission: "default", origin: null, via: "local" });
   const leaveB = windows.connect("w-window-b01", { permission: "default", origin: null, via: "local" });
-  // Neither said it was used: the one opened later.
   expect(windows.lastUsed()).toBe("w-window-b01");
   clock += 10;
   windows.report("w-window-a01", { permission: "default", origin: null, via: "local", used: true });
   expect(windows.lastUsed()).toBe("w-window-a01");
-  // A report without focus changes nothing.
   clock += 10;
   windows.report("w-window-b01", { permission: "default", origin: null, via: "local", used: false });
   expect(windows.lastUsed()).toBe("w-window-a01");
-  // A tab of the same browser (a follower) that gets focus is picked too.
   clock += 10;
   windows.report("w-follow-c01", { permission: "default", origin: null, via: "local", servedBy: "w-window-a01", used: true });
   expect(windows.lastUsed()).toBe("w-follow-c01");
-  // A window on another device, used later still, is never moved from this computer.
   clock += 10;
   const leaveT = windows.connect("w-tailnet-01", { permission: "default", origin: null, via: "tailnet" });
   windows.report("w-tailnet-01", { permission: "default", origin: null, via: "tailnet", used: true });
   expect(windows.lastUsed()).toBe("w-follow-c01");
-  // A closed tab is not picked.
   windows.leave("w-follow-c01");
   expect(windows.lastUsed()).toBe("w-window-a01");
   leaveA();
@@ -140,12 +125,10 @@ test("the window used last hears `show` with the thread; a message id names its 
   const answer = await show(server, bReply.id);
   expect(answer.status).toBe(200);
   expect(await answer.json()).toEqual({ shown: true, thread: b.thread_id });
-  // Every window's stream carries it (tabs share one stream); it names the window that moves.
   await until(() => one.shows.length === 1 && two.shows.length === 1);
   expect(one.shows[0]).toEqual({ thread_id: b.thread_id, window: "w-window-one1" });
   expect(two.shows[0]).toEqual({ thread_id: b.thread_id, window: "w-window-one1" });
 
-  // The person moves to the other window: that one moves next.
   await report(server, "w-window-two1", true);
   await show(server, b.thread_id);
   await until(() => one.shows.length === 2);

@@ -1,17 +1,3 @@
-/**
- * send_message's "not read since" line (the misfiled-thread AAR, 2026-10-27):
- * a session that writes into a thread it has not looked at for hours, or
- * ever, is told the thread's subject; the send itself always goes through.
- * And the connections' peek (the session's thread list after a compaction or
- * on a resume): it makes no project and does not count as a look.
- *
- * The failure each test catches: a session that remembered a wrong thread id
- * after a compaction files messages there with no signal (no line), a session
- * writing into its own fresh thread or answering the person's reply is nagged
- * (a line where none belongs, so agents learn to ignore it), or the
- * connection's own read hides the line for hours. Every test runs its own
- * Inbox under a temp data dir, with a clock the test moves.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -67,7 +53,6 @@ describe("send_message: the line naming a thread the session has not read", () =
     expect(misfiled.structuredContent.thread_id).toBe(root.structuredContent.thread_id);
     expect(text(misfiled)).toContain('You have not read this thread in this session; its subject is "the context layer" (thread name "Landing").');
     expect(misfiled.structuredContent.not_read_since).toBeNull();
-    // Joining it by its name names the thread too.
     const byName = await send(client, project, "ses-c", { body: "Another fix.", thread: "Landing" });
     expect(byName.structuredContent.thread_id).toBe(root.structuredContent.thread_id);
     expect(text(byName)).toMatch(WARNING);
@@ -78,13 +63,10 @@ describe("send_message: the line naming a thread the session has not read", () =
     const root = await send(client, project, "ses-a", { body: "Shipped the retry fix.", subject: "Retry fix" });
     const followUp = await send(client, project, "ses-a", { body: "Also the docs.", reply_to: root.structuredContent.message_id });
     expect(text(followUp)).not.toMatch(WARNING);
-    // No reply_to and no thread: a new thread, so no line either.
     expect(text(await send(client, project, "ses-a", { body: "And the changelog." }))).not.toMatch(WARNING);
     later(INBOX_THREAD_STALE_MS + HOURS);
-    // The same hours later: it names no thread, so no line.
     expect(text(await send(client, project, "ses-a", { body: "Back after lunch." }))).not.toMatch(/its subject is/);
     later(INBOX_THREAD_STALE_MS + HOURS);
-    // Named by reply_to: the line, worded for the thread's starter, never "you have not read".
     const stale = await send(client, project, "ses-a", { body: "A journey fix.", reply_to: root.structuredContent.message_id });
     expect(text(stale)).toMatch(/You last wrote in this thread at \d{4}-\d\d-\d\d \d\d:\d\dZ; its subject is "Retry fix"\./);
     expect(text(stale)).not.toMatch(WARNING);
@@ -98,14 +80,12 @@ describe("send_message: the line naming a thread the session has not read", () =
 
     await call(client, "read_thread", { thread_id: threadId, agent_session: "ses-b" });
     expect(text(await send(client, project, "ses-b", { body: "Columns: todo, doing, done.", reply_to: threadId }))).not.toMatch(WARNING);
-    // A session that only read the thread, hours ago: the line says since when.
     await call(client, "read_thread", { thread_id: threadId, agent_session: "ses-d" });
     later(INBOX_THREAD_STALE_MS + HOURS);
     const stale = await send(client, project, "ses-d", { body: "Another note.", reply_to: threadId });
     expect(text(stale)).toMatch(/You have not read this thread since \d{4}-\d\d-\d\d \d\d:\d\dZ; its subject is "Board columns"\./);
     expect(typeof stale.structuredContent.not_read_since).toBe("string");
 
-    // The list with no id (the check the rules ask for) counts for the rows it showed.
     later(INBOX_THREAD_STALE_MS + HOURS);
     const listed = await call(client, "read_thread", { project_path: project, agent_session: "ses-b", asked_by: "anyone" });
     expect(text(listed)).toContain(threadId);
@@ -121,7 +101,6 @@ describe("send_message: the line naming a thread the session has not read", () =
         body: JSON.stringify(body),
       });
     const poll = () => at(INBOX_BRIDGE_POLL_PATH, { session: "ses-b", host: "claude-code", waitMs: 0, project_path: project, started_at: Date.now(), busy: false });
-    // The session is live (its bridge polls), so the person can write to it.
     expect((await poll()).status).toBe(200);
     const compose = async (key: string) => {
       const response = await at("/api/inbox/messages", { serverSession: server.serverSession, to: { session: "ses-b" }, body: `Please look at ${key}.`, idempotency_key: key }, false);
@@ -160,13 +139,11 @@ describe("the connections' peek (the session's thread list)", () => {
     const root = await send(client, project, "ses-a", { body: "Plan.", subject: "Plan", thread: "Plan" });
     const params = inboxSessionThreadsParams(project, "ses-b");
     const peek = await call(client, "read_thread", params.arguments as Record<string, unknown>, params._meta as Record<string, unknown>);
-    // ses-b sent nothing: its own list is empty.
     expect(inboxSessionThreadsText(peek, "plannotator_inbox")).toBeNull();
     const own = inboxSessionThreadsParams(project, "ses-a");
     const listed = await call(client, "read_thread", own.arguments as Record<string, unknown>, own._meta as Record<string, unknown>);
     const lines = inboxSessionThreadsText(listed, "plannotator_inbox")!;
     expect(lines).toContain(`- ${root.structuredContent.thread_id} · "Plan" · name "Plan"`);
-    // ses-b peeked at the project's list (asked_by anyone, as a connection never does, to prove the mark): still not a read.
     await call(client, "read_thread", { project_path: project, agent_session: "ses-b", asked_by: "anyone" }, params._meta as Record<string, unknown>);
     expect(text(await send(client, project, "ses-b", { body: "Into it.", reply_to: root.structuredContent.message_id }))).toMatch(WARNING);
   });
@@ -180,7 +157,6 @@ describe("the connections' peek (the session's thread list)", () => {
     expect(peek.isError).toBeFalsy();
     expect(inboxSessionThreadsText(peek, "plannotator_inbox")).toBeNull();
     expect(server.store.listProjects()).toHaveLength(0);
-    // The agent's own list (no mark) makes none either: a read is not a write, as search.
     const own = await call(client, "read_thread", params.arguments as Record<string, unknown>);
     expect(own.isError).toBeFalsy();
     expect(server.store.listProjects()).toHaveLength(0);

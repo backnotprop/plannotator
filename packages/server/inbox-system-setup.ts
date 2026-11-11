@@ -1,9 +1,3 @@
-/**
- * System's project setup (approval "system-inbox", item 2): the projects the setup dialog offers and the save
- * of the person's choices to `<data dir>/system/<project key>/setup.json`. The routes (inbox.ts,
- * `/api/inbox/system/setup`) guard and call these; nothing here reads the network.
- */
-
 import { statSync } from "node:fs";
 import type { InboxProject, InboxProjectRepo } from "@plannotator/core/inbox-types";
 import { systemSetupFromInput, type SystemSetup, type SystemSetupProject } from "@plannotator/core/inbox-system-setup";
@@ -14,7 +8,6 @@ import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionM
 
 export interface SystemSetupDeps {
   dataDir: string;
-  /** The project's `origin` (the Inbox's repo cache), null when it has none. */
   repoOf: (root: string) => Promise<InboxProjectRepo | null>;
   isFolder?: (root: string) => boolean;
 }
@@ -27,12 +20,10 @@ const folderExists = (root: string): boolean => {
   }
 };
 
-/** `host/owner/name` for a parsed remote; null without a host. */
 export function systemRepoOf(repo: InboxProjectRepo | null): string | null {
   return repo?.host ? `${repo.host.toLowerCase()}/${repo.display}` : null;
 }
 
-/** Every project whose folder is on this Mac and has a git remote, with what was chosen for it before. */
 export async function systemSetupProjects(projects: readonly InboxProject[], deps: SystemSetupDeps): Promise<SystemSetupProject[]> {
   const isFolder = deps.isFolder ?? folderExists;
   const found = await Promise.all(
@@ -46,7 +37,6 @@ export async function systemSetupProjects(projects: readonly InboxProject[], dep
   return found.filter((project): project is SystemSetupProject => project !== null);
 }
 
-/** Save the person's choices for one project; the drawing's thread, once started, is kept. */
 export async function saveSystemSetup(project: InboxProject, body: Record<string, unknown>, deps: SystemSetupDeps): Promise<SystemSetup> {
   if (!(deps.isFolder ?? folderExists)(project.root)) throw new InboxError("folder_missing", "This project's folder is not on this Mac.");
   const repo = systemRepoOf(await deps.repoOf(project.root));
@@ -57,23 +47,15 @@ export async function saveSystemSetup(project: InboxProject, body: Record<string
   return writeSystemSetup(deps.dataDir, project.key, { v: 1, ...checked.value, thread_message: before?.thread_message ?? null });
 }
 
-/** What `/api/inbox/system/setup` needs from the running Inbox (inbox.ts passes its own). */
 export interface SystemSetupRouteDeps extends SystemSetupDeps {
   store: { listProjects(): InboxProject[]; project(id: string): InboxProject | null; canonicalProjectId(id: string): string };
   serverSession: string;
-  /** The request comes from the person on this computer, or the machine's owner over the tailnet. */
   ownerOrLocal: (req: Request) => boolean;
-  /** System and Code review both on. */
   systemOn: () => boolean;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   json: (body: unknown, status?: number) => Response;
 }
 
-/**
- * `GET /api/inbox/system/setup` (the projects the dialog offers) and `POST` (one project's save). Guards in order:
- * method, owner, same origin, System on, then the window's `serverSession`. An `InboxError` is thrown for the
- * caller's error answer.
- */
 export async function systemSetupRoute(req: Request, deps: SystemSetupRouteDeps): Promise<Response> {
   const { json } = deps;
   if (req.method !== "GET" && req.method !== "POST") return json({ error: "Use GET or POST." }, 405);

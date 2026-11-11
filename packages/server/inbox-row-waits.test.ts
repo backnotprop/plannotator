@@ -1,17 +1,3 @@
-/**
- * The list row's `waits` (approval "inbox-row-badges"): what a Stopped or
- * Holds up badge holds, for the window's hover card. Proved against a real
- * Inbox through its doors (the MCP SDK client for the agent, real fetch for
- * the window and the phone):
- *
- *  - each open question or action item that stops the agent or holds
- *    something up, in thread order, with its message, key, place, prompt,
- *    `Stopped:` line and `Holds up:` entries; a question with neither, a
- *    question picked, and a row with no badge carry nothing;
- *  - capped (at most 8 questions, the words cut);
- *  - never in what agents read (read_thread's list);
- *  - the phone door forwards it unchanged.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -87,7 +73,6 @@ describe("the list row's waits", () => {
       { message_id: sent.message_id, key: expect.stringMatching(/^q-/), position: 1, prompt: "Ship it behind a flag?", stopped: null, holds_up: ["the retry worker", "the admin retry view"] },
       { message_id: later.message_id, key: expect.stringMatching(/^a-/), position: 0, prompt: "Approve the 2FA prompt for the npm org", stopped: null, holds_up: ["the 0.29 publish"] },
     ]);
-    // The keys are the questions' own (the thread names them the same way).
     const thread = (await (await fetch(`http://127.0.0.1:${w.server.port}/api/inbox/threads/${sent.thread_id}`)).json()) as { thread: { messages: { id: string; questions?: { key: string; prompt: string }[] }[] } };
     const keys = thread.thread.messages.flatMap((m) => (m.questions ?? []).map((q) => q.key));
     for (const wait of row!.waits!) expect(keys).toContain(wait.key);
@@ -103,7 +88,6 @@ describe("the list row's waits", () => {
     expect(flag.waits).toHaveLength(1);
     expect(rows.find((r) => r.thread_id === plain.thread_id)!.waits).toBeUndefined();
 
-    // The person picks: the question is no longer open, so the badge goes and so do the waits.
     const thread = (await (await fetch(`http://127.0.0.1:${w.server.port}/api/inbox/threads/${sent.thread_id}`)).json()) as { serverSession: string; thread: { messages: { questions?: { key: string; kind: string; prompt: string; revision: number }[] }[] } };
     const q = thread.thread.messages[0]!.questions![0]!;
     const pick = await fetch(`http://127.0.0.1:${w.server.port}/api/inbox/messages/${sent.message_id}/picks`, {

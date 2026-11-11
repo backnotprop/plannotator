@@ -1,19 +1,4 @@
-/**
- * The Inbox tour's fixture routes (approval "inbox-onboarding-tour", choice 4):
- *
- * - `GET /api/inbox/tour/fixture.json`: the curated threads the tour replays;
- * - `GET /api/inbox/tour/assets/<name>`: one of its pictures (WebP), the
- *   VS Code mockups page Claude Code sent (HTML, opened in a sandboxed frame),
- *   the film clip (MP4, by HTTP Range: Safari plays no video without it) or
- *   EVALUATION.md (Markdown, served as sandboxed plain text).
- *
- * Read only, GET and HEAD, the same for the owner's tailnet page as for this
- * computer. Only names listed in inbox-tour-content.ts are served, so a name
- * never reaches the file system. Every answer carries nosniff and
- * same-origin CORP; pictures are sandboxed like the Inbox's other images; the
- * mock page runs its own scripts at an opaque origin (`sandbox allow-scripts`,
- * no `allow-same-origin`) and can load nothing from anywhere.
- */
+/** Only names listed in inbox-tour-content.ts are served, so a name never reaches the file system. The mock page runs at an opaque origin (`sandbox allow-scripts`, no `allow-same-origin`). */
 import { decideByteRange } from "./inbox-byte-range";
 import { INBOX_TOUR_ASSET_PATHS, INBOX_TOUR_FIXTURE_PATH } from "./inbox-tour-content";
 
@@ -21,14 +6,8 @@ export const INBOX_TOUR_PREFIX = "/api/inbox/tour/";
 export const INBOX_TOUR_FIXTURE_ROUTE = "/api/inbox/tour/fixture.json";
 export const INBOX_TOUR_ASSETS_ROUTE = "/api/inbox/tour/assets/";
 
-/** The pictures' policy: no script, nothing loaded (the Inbox's message-image headers). */
 const IMAGE_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'";
-/**
- * The mock's policy: its own inline scripts and styles run in a sandbox with
- * no `allow-same-origin`, so it reaches nothing of the Inbox, and it may load
- * nothing (no network, no frames, no forms): pictures, video and audio from
- * data: and blob: only.
- */
+/** Sandboxed without `allow-same-origin`, and it may load nothing: pictures, video and audio from data: and blob: only. */
 export const INBOX_TOUR_MOCK_CSP =
   "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
 
@@ -59,11 +38,9 @@ function refusal(status: number, code: string, error: string): Response {
   });
 }
 
-/** Answers a request under /api/inbox/tour/, or null for any other path. */
 export async function handleInboxTourRequest(req: Request, path: string): Promise<Response | null> {
   if (!path.startsWith(INBOX_TOUR_PREFIX)) return null;
   if (req.method !== "GET" && req.method !== "HEAD") return refusal(405, "method_not_allowed", "Use GET.");
-  // Another site's page has no business reading the tour (as the Inbox's other read routes).
   const site = req.headers.get("sec-fetch-site");
   if (site === "cross-site" || site === "same-site") return refusal(403, "cross_origin", "Cross-origin requests are not accepted.");
   let name: string;
@@ -90,7 +67,6 @@ export async function handleInboxTourRequest(req: Request, path: string): Promis
     "Content-Type": type,
     "X-Content-Type-Options": "nosniff",
     "Cross-Origin-Resource-Policy": "same-origin",
-    // The content is history: it changes only with a release, and the ETag says when.
     "Cache-Control": "private, no-cache",
     ETag: etag,
   };
@@ -98,7 +74,7 @@ export async function handleInboxTourRequest(req: Request, path: string): Promis
   if (name.endsWith(".html")) headers["Content-Security-Policy"] = INBOX_TOUR_MOCK_CSP;
   if (name.endsWith(".json") || name.endsWith(".md")) headers["Content-Security-Policy"] = "sandbox; default-src 'none'";
   if (name.endsWith(".mp4")) {
-    // The film: the pictures' policy, and HTTP Range over the bytes already in memory (a 429 KB clip).
+    // HTTP Range over the bytes already in memory (Safari plays no video without it).
     headers["Content-Security-Policy"] = IMAGE_CSP;
     headers["Accept-Ranges"] = "bytes";
     const decided = decideByteRange(req.headers.get("range"), bytes.byteLength, { ifRange: req.headers.get("if-range"), etag });

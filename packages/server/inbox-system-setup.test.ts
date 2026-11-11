@@ -1,12 +1,3 @@
-/**
- * System's setup on disk: the projects the dialog offers and the save of setup.json. No Inbox is started: the
- * route's two calls run against a temp data dir and temp project folders.
- * What regresses: a setup.json in another place or shape than the contract
- * (`<data dir>/system/<key>/setup.json`, `{ v: 1, repos, docs, agent, thread_message }`), a bad entry saved, the
- * drawing's thread lost on a second save, or a project offered that has no folder or no remote.
- * The route (`systemSetupRoute`, as inbox.ts calls it): anything read or written while System or Code review is
- * off, for a tailnet guest, for another site's page, on another method, or for a project the Inbox does not have.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -49,7 +40,6 @@ test('a second save keeps the drawing\'s thread and replaces the rest', async ()
   remotes.set(app.root, { display: 'acme/app', host: 'github.com' });
   mkdirSync(join(dataDir, 'system', app.key), { recursive: true });
   writeFileSync(setupFile(app), JSON.stringify({ v: 1, repos: ['github.com/acme/old'], docs: [], agent: 'claude', model: null, thread_message: 'msg_01ABC' }));
-  // No model named: the recommended one, in OpenCode's provider/model form.
   await saveSystemSetup(app, { repos: [], docs: [], agent: 'opencode' }, deps());
   expect(JSON.parse(readFileSync(setupFile(app), 'utf8'))).toEqual({ v: 1, repos: [], docs: [], agent: 'opencode', model: 'anthropic/claude-opus-5-5', thread_message: 'msg_01ABC' });
 });
@@ -126,9 +116,7 @@ describe('/api/inbox/system/setup', () => {
         },
         store,
         serverSession: 'srv',
-        // As inbox.ts's ownerOrLocal: this computer, or the owner's login over the tailnet.
         ownerOrLocal: (r) => via === 'local' || r.headers.get('tailscale-user-login') === OWNER,
-        // As inbox.ts's systemOn: System counts only while Code review is on.
         systemOn: () => switches.codeReview && switches.system,
         readBody: async (r) => (await r.json()) as Record<string, unknown>,
         json: (body, status = 200) => Response.json(body, { status }),
@@ -161,7 +149,6 @@ describe('/api/inbox/system/setup', () => {
     expect((await call('DELETE')).status).toBe(405);
     expect(repoReads).toEqual([]);
     expect(existsSync(setupFile(app))).toBe(false);
-    // The owner over the tailnet, and the window's own page, are answered.
     expect((await call('GET', { via: 'tailnet', headers: { 'tailscale-user-login': OWNER } })).status).toBe(200);
     expect(await call('POST', { body: save, headers: { origin: `http://${HOST}`, 'sec-fetch-site': 'same-origin' } })).toMatchObject({ status: 200, body: { setup: { repos: ['github.com/acme/docs'] } } });
     expect(existsSync(setupFile(app))).toBe(true);
@@ -175,7 +162,6 @@ describe('/api/inbox/system/setup', () => {
       expect((error as InboxError).details?.field).toBe('project_id');
     }
     expect(existsSync(join(dataDir, 'system'))).toBe(false);
-    // Another window's server session: refused before the save.
     expect((await call('POST', { body: { ...save, serverSession: 'old' } })).status).toBe(409);
     expect(existsSync(setupFile(app))).toBe(false);
   });

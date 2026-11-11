@@ -1,26 +1,9 @@
 /**
- * Lossless edits of a plain-JSON file: add or remove ONE member, touching no
- * other byte of the file (inbox-agents.ts, for `~/.cursor/mcp.json` and
- * friends). Re-serializing the whole file would reshape it (compact turned
- * pretty, big integers rounded, `1.0` turned `1`, escapes decoded, numeric
- * keys reordered, a BOM dropped, a duplicate key's block lost), so the edit
- * is textual: the new member goes in after the last one (or as the only one)
- * in the file's own style, and a removal cuts exactly the member and its
- * comma. Anything the scanner cannot place safely (not strict JSON, a
- * duplicate key on the path, the path not an object) is refused with a
- * reason, and the caller tells the person what to add by hand.
- *
- * `{ comments: true }`: the file is JSON with `//` and block comments (Qwen
- * Code's settings.json, read as Qwen reads it: comments stripped, then plain
- * JSON, so no trailing commas). Every comment stays where it is: a new member
- * goes after a comment that ends the last member's line, and a removal cuts
- * the member and one comma, never a comment beside them.
- *
- * Pure.
+ * Textual edit of ONE member, touching no other byte: re-serializing would reshape the file. Anything the scanner cannot place safely is refused with a reason.
+ * `{ comments: true }`: JSON with comments as Qwen reads it; every comment stays where it is.
  */
 
 export interface JsonEditOptions {
-  /** The text may hold `//` and block comments (JSONC without trailing commas). */
   comments?: boolean;
 }
 
@@ -28,23 +11,19 @@ export type JsonEdit = { ok: true; text: string; changed: boolean } | { ok: fals
 
 interface Member {
   key: string;
-  /** The opening quote of the key. */
   start: number;
   valueStart: number;
-  /** Exclusive. */
   valueEnd: number;
 }
 
 interface ObjectSpan {
   open: number;
-  /** The closing brace. */
   close: number;
   members: Member[];
 }
 
 class ScanError extends Error {}
 
-/** The end of the comment at `i` (exclusive), or `i` when none starts there. */
 function commentEnd(t: string, i: number): number {
   if (t[i] !== "/") return i;
   if (t[i + 1] === "/") {
@@ -61,10 +40,6 @@ function commentEnd(t: string, i: number): number {
   return i;
 }
 
-/**
- * Past whitespace and comments. A strict-JSON text has no comments (it was
- * parsed as plain JSON first), so for it this skips whitespace only.
- */
 function skipWs(t: string, i: number): number {
   for (;;) {
     while (i < t.length && (t[i] === " " || t[i] === "\t" || t[i] === "\n" || t[i] === "\r")) i += 1;
@@ -74,7 +49,6 @@ function skipWs(t: string, i: number): number {
   }
 }
 
-/** Past spaces, tabs and comments that end on this line (a line comment, a block comment with no line break). */
 function skipLineTrailer(t: string, i: number): number {
   for (;;) {
     while (i < t.length && (t[i] === " " || t[i] === "\t")) i += 1;
@@ -84,16 +58,10 @@ function skipLineTrailer(t: string, i: number): number {
   }
 }
 
-/** Only whitespace (no comment). */
 function blank(text: string): boolean {
   return /^\s*$/.test(text);
 }
 
-/**
- * `t` with every comment outside strings turned into spaces (line breaks
- * kept), as Qwen's `strip-json-comments` reads it; throws on an unterminated
- * block comment.
- */
 function stripComments(t: string): string {
   let out = "";
   let i = 0;
@@ -177,7 +145,6 @@ function scanValue(t: string, i: number): number {
   return i + literal[0].length;
 }
 
-/** The objects on `path` from the root: [root, root[path[0]], …]; the last may be missing. */
 function walk(t: string, start: number, path: readonly string[]): { chain: ObjectSpan[]; missingAt: number | null } | { error: string } {
   if (t[start] !== "{") return { error: "it is not a JSON object" };
   const chain = [scanObject(t, start)];
@@ -193,31 +160,26 @@ function walk(t: string, start: number, path: readonly string[]): { chain: Objec
   return { chain, missingAt: null };
 }
 
-/** The whitespace at the start of the line holding `index`. */
 function lineIndent(t: string, index: number): string {
   const lineStart = t.lastIndexOf("\n", index - 1) + 1;
   return /^[ \t]*/.exec(t.slice(lineStart))![0];
 }
 
-/** The file's indent unit: its first indented line, else two spaces. */
 function indentUnit(t: string): string {
   const match = /\n([ \t]+)\S/.exec(t);
   return match ? (match[1]!.includes("\t") ? "\t" : match[1]!) : "  ";
 }
 
-/** `value` as JSON whose lines after the first are indented by `indent` (pretty) or on one line (compact), with `nl` line endings. */
 function render(value: unknown, pretty: boolean, unit: string, indent: string, nl: string): string {
   if (!pretty) return JSON.stringify(value);
   return JSON.stringify(value, null, unit).replace(/\n/g, `${nl}${indent}`);
 }
 
-/** The file's dominant line ending (more CRLF than lone LF: CRLF). */
 function newlineOf(t: string): string {
   const crlf = (t.match(/\r\n/g) ?? []).length;
   return crlf > (t.match(/\n/g) ?? []).length - crlf ? "\r\n" : "\n";
 }
 
-/** Insert `"key": value` into the object `span`, in its own style. */
 function insertMember(t: string, span: ObjectSpan, key: string, value: unknown, unit: string): string {
   const nl = newlineOf(t);
   const keyText = JSON.stringify(key);
@@ -226,7 +188,6 @@ function insertMember(t: string, span: ObjectSpan, key: string, value: unknown, 
     const last = span.members[span.members.length - 1]!;
     const sepText = t.slice(span.open + 1, first.start);
     const colonText = t.slice(scanString(t, first.start), first.valueStart);
-    // A comment beside the first key is not copied: its line break and indent (or one space) are.
     let sep = blank(sepText) ? sepText : sepText.includes("\n") ? `${nl}${lineIndent(t, first.start)}` : " ";
     const colon = /^\s*:\s*$/.test(colonText) ? colonText : ": ";
     // A comment that ends the last member's line stays on it: the comma goes before it, the new member after it.
@@ -239,18 +200,15 @@ function insertMember(t: string, span: ObjectSpan, key: string, value: unknown, 
     if (blank(trailer)) return `${t.slice(0, last.valueEnd)},${sep}${member}${t.slice(last.valueEnd)}`;
     return `${t.slice(0, last.valueEnd)},${trailer}${sep}${member}${t.slice(after)}`;
   }
-  // An empty object: pretty when the file is (it holds a line break), one line otherwise.
   const pretty = t.includes("\n");
   const outer = lineIndent(t, span.open);
   if (!pretty) {
-    // One line: a comment inside the empty object stays, after the new member.
     const interior = t.slice(span.open + 1, span.close);
     return `${t.slice(0, span.open + 1)}${keyText}:${JSON.stringify(value)}${blank(interior) ? "" : interior}${t.slice(span.close)}`;
   }
   const inner = outer + unit;
   const member = `${nl}${inner}${keyText}: ${render(value, true, unit, inner, nl)}`;
   const interior = t.slice(span.open + 1, span.close);
-  // Comments inside the empty object stay, after the new member.
   if (!blank(interior)) {
     const breakFirst = interior.startsWith("\n") || interior.startsWith("\r") ? "" : nl;
     return `${t.slice(0, span.open + 1)}${member}${breakFirst}${interior}${t.slice(span.close)}`;
@@ -285,13 +243,11 @@ function notValid(comments: boolean): string {
   return comments ? "it is not valid JSON" : "it is not plain JSON";
 }
 
-/** Why walking a text failed, in words for a person. */
 function scanFailure(error: unknown, comments: boolean): string {
   if (error instanceof ScanError) return notValid(comments);
   return error instanceof RangeError ? "it is nested too deeply" : String(error);
 }
 
-/** Where a member's cut starts: back over the spaces before it, and the line break before them when the key starts its line. */
 function cutStart(t: string, start: number): number {
   let i = start;
   while (i > 0 && (t[i - 1] === " " || t[i - 1] === "\t")) i -= 1;
@@ -299,14 +255,12 @@ function cutStart(t: string, start: number): number {
   return i;
 }
 
-/** The comma after `i`, past whitespace and comments (it must be there). */
 function commaAfter(t: string, i: number): number {
   const at = skipWs(t, i);
   if (t[at] !== ",") throw new ScanError("expected a comma");
   return at;
 }
 
-/** `(text with path + key = value)` when `key` is absent at `path`; unchanged when present (any value). */
 export function addJsonMember(text: string, path: readonly string[], key: string, value: unknown, options: JsonEditOptions = {}): JsonEdit {
   const comments = options.comments === true;
   if (!text.trim()) {
@@ -356,7 +310,6 @@ export function addJsonMember(text: string, path: readonly string[], key: string
   return { ok: true, text: prep.bom + out, changed: true };
 }
 
-/** `text` with `key` at `path` set to `value`: a member there has only its value replaced, a missing one is added (`addJsonMember`). */
 export function setJsonMember(text: string, path: readonly string[], key: string, value: unknown, options: JsonEditOptions = {}): JsonEdit {
   const added = addJsonMember(text, path, key, value, options);
   if (!added.ok || added.changed) return added;
@@ -376,7 +329,6 @@ export function setJsonMember(text: string, path: readonly string[], key: string
   return { ok: true, text: prep.bom + out, changed: true };
 }
 
-/** `text` without `key` at `path`; unchanged when it is not there. */
 export function removeJsonMember(text: string, path: readonly string[], key: string, options: JsonEditOptions = {}): JsonEdit {
   const comments = options.comments === true;
   if (!text.trim()) return { ok: true, text, changed: false };
@@ -393,7 +345,6 @@ export function removeJsonMember(text: string, path: readonly string[], key: str
     if (target.members.filter((m) => m.key === key).length > 1) return { ok: false, reason: `it has "${key}" twice` };
     const member = target.members[index]!;
     const t = prep.body;
-    // The cut: the member and its comma, with the whitespace between them.
     const [from, to] =
       target.members.length === 1
         ? [target.open + 1, target.close]
@@ -403,7 +354,6 @@ export function removeJsonMember(text: string, path: readonly string[], key: str
     const beside = t.slice(from, member.start) + t.slice(member.valueEnd, Math.max(member.valueEnd, to));
     if (/^[\s,]*$/.test(beside)) out = `${t.slice(0, from)}${t.slice(to)}`;
     else {
-      // A comment beside the member stays: only the member (from its line's start) and one comma go.
       const start = cutStart(t, member.start);
       if (target.members.length === 1) out = `${t.slice(0, start)}${t.slice(member.valueEnd)}`;
       else if (index > 0) {

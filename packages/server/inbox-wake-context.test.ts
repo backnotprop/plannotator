@@ -1,9 +1,3 @@
-/**
- * The context a reply gives an agent (approval "inbox-wake-context"), through
- * the server's real doors: the connections' poll, which Claude Code's mod, Pi,
- * OpenCode 2, DeepSeek Harness share, and the wake Codex, Qwen and T3 Code share.
- * Every test uses its own temp data dir.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -84,7 +78,6 @@ async function setup(options: { setAsideDelayMs?: number } = {}) {
   return { root, dataDir, project, server, client, send, post, reply, poll, delivered };
 }
 
-/** Every line of a wake that reads as the wake's own, in order. */
 const ownLines = (text: string) => text.split("\n").filter((line) => line.startsWith("[") || line.startsWith("Plannotator Inbox:"));
 
 describe("the details line", () => {
@@ -111,7 +104,6 @@ describe("the details line", () => {
     const reply = await w.reply(sent.message_id, "Not yet, thinking.");
     expect(reply.body).toContain("still open. Don't re-ask it");
     const [command] = await w.poll();
-    // What an older connection delivers, and a host with no wake reads, is unchanged.
     expect(command!.body).toBe(reply.body);
     const text = inboxWakeText(command!);
     expect(text).toContain(`[Thread ${sent.thread_id}: 2 messages, 1 question open, don't re-ask it. Your last message was just now]`);
@@ -320,7 +312,6 @@ describe("the other kinds of turn", () => {
     const text = inboxWakeText(command!);
     expect(text).toContain(`\n[Thread ${message.id}]\n\n`);
     expect(text.endsWith(`\n\n${INBOX_WAKE_CLOSING_LINE}`)).toBe(true);
-    // Its second message has something to say: the agent answered, and the person wrote again.
     await w.delivered(command!.id);
     const answer = await w.send("On it.", { reply_to: message.id });
     await w.reply(answer.message_id, "Thanks.");
@@ -378,7 +369,6 @@ describe("the other kinds of turn", () => {
     expect(text).toContain("## Action items you asked for");
     expect(text).toContain("I am not on that team.");
     expect(text).toContain(`[Thread ${sent.thread_id}: 2 messages, 1 question open, don't re-ask it.`);
-    // Every paragraph the older wake had is here, but the sentence the details line says instead.
     for (const paragraph of command!.body.split("\n\n")) if (paragraph !== command!.context!.still_open_line) expect(text).toContain(paragraph);
   });
 

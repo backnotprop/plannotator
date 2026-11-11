@@ -1,14 +1,3 @@
-/**
- * A message sent from a linked git worktree lands in its main repository's
- * project, while everything relative to the worktree keeps working: its
- * `base_path` names the worktree, so relative images and attachments resolve
- * where the agent works; New message counts a session working in the
- * worktree as one of the project's live sessions; and a store written before
- * the fold (a project keyed by the worktree) replays and routes exactly as it
- * did. A real Inbox on loopback under a temp data dir, real git repositories
- * and worktrees in temp folders, the official MCP client for the agent and
- * real `fetch` for the window and the connection.
- */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -56,18 +45,12 @@ function git(cwd: string, ...args: string[]): void {
   if (result.exitCode !== 0) throw new Error(`git ${args.join(" ")} failed: ${result.stderr.toString()}`);
 }
 
-/** A PNG's signature and IHDR (2 x 3 px). */
 function png(): Uint8Array {
   const bytes = new Uint8Array(33);
   bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 2, 0, 0, 0, 3, 8, 6, 0, 0, 0]);
   return bytes;
 }
 
-/**
- * `api` (the main repository) and `api-wt`, a linked worktree BESIDE it,
- * outside its folder: the case where the worktree's files are not under the
- * project's root. Files only the worktree has: a screenshot and a plan.
- */
 function world() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-worktree-")));
   scratch.push(root);
@@ -120,13 +103,10 @@ test("a message from a linked worktree lands in the main repository's project an
   expect(fromWorktree.project).toEqual(fromMain.project);
   expect(fromWorktree.project.root).toBe(main);
   expect(server.store.listProjects().map((p) => p.root)).toEqual([main]);
-  // The agent's own folder is kept, though it lies outside the project's root.
   expect(server.store.message(fromWorktree.message_id)?.base_path).toBe(worktree);
-  // A subfolder of the worktree is kept as it is.
   const deep = await send(client, { project_path: join(worktree, "notes"), body: "From notes.", agent_session: "ses_wt" });
   expect(deep.project.id).toBe(fromMain.project.id);
   expect(server.store.message(deep.message_id)?.base_path).toBe(join(worktree, "notes"));
-  // The main checkout itself has no base.
   expect(server.store.message(fromMain.message_id)?.base_path).toBeUndefined();
 });
 
@@ -162,12 +142,9 @@ test("images relative to the worktree resolve there, and from anywhere else on t
   const after = await image(server, sent.message_id, "shots/after.png");
   expect(after.status).toBe(200);
   expect(new Uint8Array(await after.arrayBuffer())).toEqual(png());
-  // An image in the main repository still serves (the project root).
   expect((await image(server, sent.message_id, join(main, "docs", "main-shot.png"))).status).toBe(200);
-  // `../secret.png` from the worktree leaves both the worktree and the project, and still serves.
   expect((await image(server, sent.message_id, "../secret.png")).status).toBe(200);
 
-  // Once the worktree is removed, its folder is no longer the message's: the image is just gone.
   git(main, "worktree", "remove", "--force", worktree);
   expect((await image(server, sent.message_id, "shots/after.png")).status).toBe(404);
 });
@@ -180,13 +157,11 @@ test("a worktree inside a hidden folder (as Codex and Claude Code keep theirs) s
   git(main, "worktree", "add", "-q", hidden, "-b", "codex-wt");
   mkdirSync(join(hidden, "shots", ".cache"), { recursive: true });
   writeFileSync(join(hidden, "shots", "after.png"), png());
-  // A hidden folder inside the folder sent from is the agent's own, as in its project.
   writeFileSync(join(hidden, "shots", ".cache", "frame.png"), png());
   // The same hidden parent, outside the worktree: not the folder sent from, and (as `~/.codex`) a
   // hidden folder of the home folder, so refused.
   mkdirSync(join(root, ".codex", "other"), { recursive: true });
   writeFileSync(join(root, ".codex", "other", "x.png"), png());
-  // The temp root is a scratch home folder, as Codex keeps its worktrees in ~/.codex.
   const previousHome = process.env.HOME;
   process.env.HOME = root;
   try {
@@ -241,7 +216,6 @@ test("New message counts a session working in a worktree as a live session of th
 
 test("a store from before the fold replays and routes as it did; only new sends from the worktree fold", async () => {
   const { main, worktree, dataDir } = world();
-  // What an older Inbox wrote: a project keyed by the worktree, a named thread in it.
   const before = InboxStore.open(dataDir);
   const old = before.ensureProject({ name: "api-wt", root: worktree });
   const author = { kind: "agent" as const, host: "claude-code", session: "ses_wt", name: "Claude Code" };
@@ -252,15 +226,12 @@ test("a store from before the fold replays and routes as it did; only new sends 
 
   const server = await start(dataDir);
   const client = await agent(server);
-  // The old project and its thread are as they were.
   expect(server.store.project(old.id)?.root).toBe(worktree);
   expect(server.store.message(second.id)?.thread_id).toBe(first.id);
-  // A new send from the worktree folds: the main repository's project, a new thread there, though the name is the same.
   const folded = await send(client, { project_path: worktree, thread, body: "Written after the fold.", agent_session: "ses_wt" });
   expect(folded.project.root).toBe(main);
   expect(folded.project.id).not.toBe(old.id);
   expect(folded.new_thread).toBe(true);
-  // A reply into the old thread stays in the old project.
   const reply = await send(client, { project_path: worktree, reply_to: first.id, body: "A reply to the old thread.", agent_session: "ses_wt" });
   expect(reply.project.id).toBe(old.id);
   expect(reply.thread_id).toBe(first.id);
@@ -268,7 +239,6 @@ test("a store from before the fold replays and routes as it did; only new sends 
   server.stop();
   servers.splice(servers.indexOf(server), 1);
 
-  // Replayed from disk: every thread in the project it was in, and routing keyed by the recorded project.
   const after = InboxStore.open(dataDir);
   expect(new Map(after.listRows().map((row) => [row.thread_id, row.project.id]))).toEqual(during);
   for (const id of [first.id, second.id, reply.message_id, folded.message_id]) {
@@ -281,7 +251,6 @@ test("a store from before the fold replays and routes as it did; only new sends 
 
 test("an agent that asked from a worktree before the fold still gets the reply: read_thread covers the worktree's earlier project", async () => {
   const { main, worktree, dataDir } = world();
-  // An older Inbox: the question in a project keyed by the worktree, and the person's reply to it.
   const before = InboxStore.open(dataDir);
   const old = before.ensureProject({ name: "api-wt", root: worktree });
   const author = { kind: "agent" as const, host: "codex", session: "ses_codex_wt", name: "Codex" };
@@ -294,7 +263,6 @@ test("an agent that asked from a worktree before the fold still gets the reply: 
 
   const server = await start(dataDir);
   const client = await agent(server);
-  // What the stdio shim sends: its working folder as project_path, and the session.
   const listed = (await client.callTool({
     name: "read_thread",
     arguments: { project_path: worktree, agent_session: "ses_codex_wt", include_resolved: true },
@@ -308,7 +276,6 @@ test("an agent that asked from a worktree before the fold still gets the reply: 
   expect(read.isError).toBeFalsy();
   expect(read.structuredContent.thread.messages.at(-1).body).toContain("Use Postgres.");
 
-  // From the main checkout, the worktree's earlier project is not in the read: the scope is that worktree's alone.
   const fromMain = (await client.callTool({
     name: "read_thread",
     arguments: { project_path: main, agent_session: "ses_codex_wt" },
@@ -339,12 +306,10 @@ test("when git does not answer in time, no project is made from a guess: the age
   expect(server.store.listProjects()).toEqual([]);
   expect(server.store.listRows()).toEqual([]);
 
-  // git answers again: the same call lands, in the main repository's project.
   slow = false;
   const sent = await send(client, { project_path: main, body: "Done with the migration.", agent_session: "ses_main", idempotency_key: "k1" });
   expect(sent.project.root).toBe(main);
 
-  // git slow again: a folder inside the known project lands there; the worktree beside it has no project to land in.
   slow = true;
   mkdirSync(join(main, "docs", "deep"), { recursive: true });
   const inside = await send(client, { project_path: join(main, "docs", "deep"), body: "From a subfolder.", agent_session: "ses_sub" });
@@ -359,7 +324,6 @@ test("when git does not answer in time, no project is made from a guess: the age
 });
 
 test("a folder project holding the worktree (a project at ~) never takes a guess: the send is refused, not filed there", async () => {
-  // `root` plays ~: no repository, and both `api` and its worktree `api-wt` live under it.
   const { root, worktree, dataDir } = world();
   const real = inboxGitRunner();
   let slow = false;
@@ -373,7 +337,6 @@ test("a folder project holding the worktree (a project at ~) never takes a guess
   const home = await send(client, { project_path: root, body: "Notes from the home folder.", agent_session: "ses_home" });
   expect(home.project.root).toBe(root);
 
-  // A new worktree, and git past its time limit: ~ holds the folder but is no repository.
   slow = true;
   const refused = (await client.callTool({
     name: "send_message",
@@ -401,7 +364,6 @@ test("read_thread's list from a worktree an older Inbox kept a project for lists
   expect(listed.isError).toBeFalsy();
   expect(listed.structuredContent.project.id).toBe(old.id);
   expect(listed.structuredContent.threads.map((t: { thread_id: string }) => t.thread_id)).toEqual([asked.id]);
-  // A read is not a write: the main repository has no project until something is sent from it.
   expect(server.store.listProjects().map((p) => p.root)).toEqual([worktree]);
 });
 
@@ -436,8 +398,6 @@ test("read_thread's list when git does not answer in time: project_unresolved an
 });
 
 test("a session started in a plain folder holding one repository's checkouts files into that repository's project, and still reads the folder's old threads", async () => {
-  // The owner's layout (2026-11-02): `appnotes` is a folder of notes; `appnotes/worktrees/main` is the
-  // repository's main checkout and `appnotes/worktrees/agent-pr-plan-box` a linked worktree of it.
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-container-")));
   scratch.push(root);
   const folder = join(root, "workspaces", "projects", "appnotes");
@@ -453,7 +413,6 @@ test("a session started in a plain folder holding one repository's checkouts fil
   git(main, "worktree", "add", "-q", branch, "-b", "agent-pr-plan-box");
   const dataDir = join(root, "data");
 
-  // What this Inbox made before: a folder project for `appnotes`, with a question the person answered.
   const before = InboxStore.open(dataDir);
   const old = before.ensureProject({ name: "appnotes", root: folder });
   const author = { kind: "agent" as const, host: "claude-code", session: "ses_folder", name: "Claude Code" };
@@ -464,15 +423,11 @@ test("a session started in a plain folder holding one repository's checkouts fil
   const client = await agent(server);
   const fromBranch = await send(client, { project_path: branch, body: "From a checkout.", agent_session: "ses_branch" });
   expect(fromBranch.project.root).toBe(main);
-  // Agents read the repository's name, as the window shows it, not the checkout's folder ("main"); the old
-  // folder project still stands beside it until the next start folds it, so the checkout is named.
   expect(fromBranch.project.name).toBe("appnotes · main");
   const fromFolder = await send(client, { project_path: folder, body: "![notes](shots/notes.png)", agent_session: "ses_folder_new" });
-  // The same project as the checkouts', not the folder's; the folder stays the base its relative paths start at.
   expect(fromFolder.project.id).toBe(fromBranch.project.id);
   expect(server.store.message(fromFolder.message_id)?.base_path).toBe(folder);
   expect((await image(server, fromFolder.message_id, "shots/notes.png")).status).toBe(200);
-  // Nothing was moved: the folder project keeps its thread (the person can Combine it), and a read from the folder finds it.
   expect(server.store.message(asked.id)?.project_id).toBe(old.id);
   const listed = (await client.callTool({ name: "read_thread", arguments: { project_path: folder, agent_session: "ses_folder", include_resolved: true } })) as {
     isError?: boolean;
@@ -495,7 +450,6 @@ test("a fresh session in a checkouts folder whose checkout's git runs past the t
   git(main, "add", ".");
   git(main, "commit", "-qm", "init");
   const real = inboxGitRunner();
-  // The folder's own git answers (not a work tree); the checkout's gives no answer.
   const slow: InboxGitRunner = async (args, cwd) => (cwd === main ? null : real(args, cwd));
   const server = await start(join(root, "data"), slow);
   const sent = await send(await agent(server), { project_path: folder, body: "From the folder, git slow.", agent_session: "ses_slow" });

@@ -1,7 +1,3 @@
-/**
- * A pull request link's one read: what a forge's answer may claim, and whose PR it is. No Inbox here: the read alone,
- * on a fake CLI.
- */
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

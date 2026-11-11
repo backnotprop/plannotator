@@ -1,13 +1,3 @@
-/**
- * The facts the window folds a thread by (design record "Land", not in this
- * repo), through the server's real doors: a running Inbox on loopback, the
- * MCP SDK client for the agent, real `fetch` for the window. The window's
- * thread (`GET /api/inbox/threads/:id`) carries each message's `seq` and, on
- * a person's reply, how many annotations it carried; what is new since the
- * last look is read from it BEFORE `/seen` is recorded. The MCP tools return
- * the thread unchanged. The window's side is proved in
- * packages/inbox/folding.test.tsx and tests/e2e/inbox-thread-folding.spec.ts.
- */
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -63,7 +53,6 @@ test("the window's thread carries each message's seq: the event-log seq it was s
   const thread = await windowThread(server, first.thread_id);
   expect(thread.messages.map((m) => m.seq)).toEqual([first.cursor, second.cursor]);
   expect(thread.messages[1]!.seq!).toBeGreaterThan(thread.messages[0]!.seq!);
-  // A later write to the root (a look) does not change the root's seq: it is the first line's.
   expect((await post(server, `/api/inbox/threads/${first.thread_id}/seen`, {})).status).toBe(200);
   expect((await windowThread(server, first.thread_id)).messages[0]!.seq).toBe(first.cursor);
 });
@@ -71,7 +60,6 @@ test("the window's thread carries each message's seq: the event-log seq it was s
 test("read before the look, the payload tells which agent messages are new; after /seen, none are", async () => {
   const { project, server, client } = await world();
   const first = await call(client, "send_message", { project_path: project, body: "Two calls before I start.", agent_session: "ses_A" });
-  // The person looks, then replies: everything before the reply is read.
   expect((await post(server, `/api/inbox/threads/${first.thread_id}/seen`, {})).status).toBe(200);
   const reply = await post(server, `/api/inbox/messages/${first.message_id}/reply`, { idempotency_key: "k1", words: "Pagefind is fine." });
   expect(reply.status).toBe(200);

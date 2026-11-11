@@ -79,13 +79,7 @@ describe("jj compare targets", () => {
   });
 });
 
-/**
- * Snapshot materialization asks jj for a whole repository tree, so the runtime
- * has to stop READING at the ceiling. Measuring the output after buffering it
- * bounds nothing: the memory is already spent by the time the check runs.
- *
- * Skipped when `jj` is not installed (CI runners do not ship it).
- */
+/** Snapshot materialization must stop READING at the ceiling: measuring after buffering has already spent the memory. Skipped when jj is not installed. */
 describe("jj runtime output ceiling", () => {
   // Bun.spawnSync throws when the executable is missing entirely (ENOENT),
   // which is exactly the case this gate exists for on CI runners without jj.

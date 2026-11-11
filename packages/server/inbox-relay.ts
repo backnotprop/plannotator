@@ -1,39 +1,3 @@
-/**
- * Plannotator Inbox: the relay, the Inbox's side (adr/implementation/inbox-mobile.md,
- * section 4; mobile plan step R1).
- *
- * The relay (`apps/relay`, a Cloudflare Worker with one Durable Object per
- * mailbox) holds only what it cannot read. This module:
- *
- *  - makes the Inbox's mailbox at the first pairing and keeps it in
- *    `inbox/relay.json` (0600): `{ v: 1, url, mailbox_id, secret }`, the
- *    secret being the Inbox's bearer there, of which the relay keeps only the
- *    SHA-256;
- *  - registers each paired phone by the SHA-256 of its relay secret (derived
- *    from the pairing secret, never sent), and removes it on revoke;
- *  - holds one outbound WebSocket to the mailbox while a phone is paired:
- *    `hello` on connect (each phone's relay switch written into its record,
- *    a revoked phone removed, a phone the relay does not list registered) and
- *    `carriage` when a phone flips its switch;
- *  - carries (R2): down, every store line after each phone's cursor as an
- *    `item` sealed under that phone's key, to phones whose switch is on;
- *    up, each `command` opened with the phone's up key and applied through
- *    the device door in-process (`apply`), answered with a `result` item and
- *    then `applied`, so the relay deletes it. Frames are handled one at a
- *    time in the order they arrive: `hello`, then the held commands;
- *  - posts one push per paired phone whose switch is on when an agent's
- *    message lands with a question or a guided review (where the window's
- *    browser notification fires for a question, packages/inbox/notify.ts),
- *    the summary encrypted under that phone's key.
- *
- * The phone registers its own APNs token at the relay with its relay secret
- * (exchange 7.29); the Inbox never sees it.
- *
- * The relay is `https://relay.plannotator.ai` unless `PLANNOTATOR_RELAY_URL`
- * names another (a `wrangler dev` relay in a proof). A mailbox, once made,
- * stays at the URL relay.json names.
- */
-
 import { createHmac, randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -47,41 +11,22 @@ import type { InboxStore } from "@plannotator/shared/inbox/store";
 export const DEFAULT_RELAY_URL = "https://relay.plannotator.ai";
 export const INBOX_RELAY_FILE = "relay.json";
 
-/** How long one call to the relay may take: a pairing waits on it before answering. */
 const RELAY_REQUEST_MS = 10_000;
-/** Apple's ceiling on a push body (section 4, "Push"). */
 const APNS_BODY_LIMIT = 4096;
-/**
- * Cloudflare's WebSocket message limit (32 MiB), the platform's, not ours: a
- * result whose item frame would pass it is answered with a small 413 result
- * instead, so one oversized answer never stops the relay for every command
- * queued behind it (contract section 4).
- */
+/** Cloudflare's WebSocket message limit (32 MiB). An oversized result is answered with a small 413 so it cannot block the commands queued behind it. */
 const WEBSOCKET_MESSAGE_LIMIT = 32 * 1024 * 1024;
 /** The largest answer body the relay reads: base64 makes it 4/3 larger, so a larger one cannot fit one frame. */
 export const RELAY_BODY_LIMIT = Math.floor((WEBSOCKET_MESSAGE_LIMIT * 3) / 4);
 
-/**
- * One command's result item as it goes up the socket: the answer's bytes as
- * base64 inside the JSON result, sealed under the phone's key (AES-GCM, then
- * base64url). Two base64 layers, so a body of n bytes makes a frame of about
- * 16n/9: a message image at the 10 MB cap (MAX_REVIEW_IMAGE_PREVIEW_BYTES)
- * is a frame of about 17.8 MiB, inside WEBSOCKET_MESSAGE_LIMIT.
- */
+/** A result frame is about 16n/9 bytes for an n-byte body (two base64 layers), so a 10 MB image still fits WEBSOCKET_MESSAGE_LIMIT. */
 export async function sealRelayResult(deviceId: string, id: string, status: number, contentType: string, bytes: Buffer, key: string): Promise<string> {
   const result = { v: 1, type: "result", id, status, content_type: contentType, body_b64: bytes.toString("base64") };
   return JSON.stringify({ type: "item", device_id: deviceId, cursor: null, ciphertext: await encryptWithKey(JSON.stringify(result), key) });
 }
 
-/** Cloudflare's WebSocket message limit, exported for the bounds test. */
 export const RELAY_WEBSOCKET_MESSAGE_LIMIT = WEBSOCKET_MESSAGE_LIMIT;
 
-/**
- * An answer's body, or null when it is larger than `cap`: refused from its
- * Content-Length before anything is read, and otherwise read through a reader
- * that cancels the stream as soon as the count passes the cap, so a body with
- * no length (a streamed download) is never held whole.
- */
+/** Null when the body exceeds `cap`. Refused from Content-Length before reading, and a body without a length is cancelled once past the cap, never held whole. */
 export async function readRelayBody(answer: Response, cap: number): Promise<Buffer | null> {
   const length = Number(answer.headers.get("content-length"));
   if (Number.isFinite(length) && length > cap) {
@@ -105,7 +50,6 @@ export async function readRelayBody(answer: Response, cap: number): Promise<Buff
   return Buffer.concat(chunks, total);
 }
 
-/** Reconnect delays for the socket, doubling from the first to the last. */
 const RECONNECT_FIRST_MS = 1_000;
 const RECONNECT_LAST_MS = 60_000;
 
@@ -116,10 +60,7 @@ export interface InboxRelayFile {
   secret: string;
 }
 
-/**
- * The body the relay sends to APNs around an envelope, byte for byte as
- * apps/relay/src/apns.ts `apnsBody` writes it: the push is sized against it.
- */
+/** Must match apps/relay/src/apns.ts `apnsBody` byte for byte: the push is sized against it. */
 export function apnsBody(envelope: string): string {
   return JSON.stringify({ aps: { alert: { title: "Plannotator", body: "New in your Inbox" }, "mutable-content": 1, sound: "default" }, e: envelope });
 }
@@ -151,7 +92,6 @@ function writeRelayFile(dataDir: string, value: InboxRelayFile): void {
   renameSync(temp, path);
 }
 
-/** The push summary a phone decrypts (section 4, "Push"). */
 interface PushPlaintext {
   v: 1;
   /** Pushes and down items share the device key: the reader checks the type, so a relay cannot pass one off as the other. */
@@ -203,7 +143,6 @@ interface CommandFrame {
   ciphertext: string;
 }
 
-/** A command's plaintext (section 4, "What goes down and up"). */
 interface CommandPlaintext {
   v: 1;
   id: string;
@@ -216,13 +155,10 @@ export interface InboxRelayContext {
   dataDir: string;
   store: InboxStore;
   devices: InboxDevices;
-  /** A store line as the event stream's `record` event writes it (`eventPayload` in inbox.ts). */
   payload: (line: InboxLine) => unknown;
-  /** Apply a command as a device, in-process through the device door (inbox-devices.ts `asDevice`). */
   apply: (deviceId: string, command: { method: string; path: string; body?: unknown }) => Promise<Response>;
-  /** Where a new mailbox is made. Default: `relayUrl()`. */
   url?: string;
-  /** One line per event, ids and status codes only (the Inbox's log). */
+  /** Ids and status codes only. */
   log?: (line: string) => void;
 }
 
@@ -236,9 +172,7 @@ export function createInboxRelay(context: InboxRelayContext) {
   let delay = RECONNECT_FIRST_MS;
   let stopped = false;
   let unsubscribe: (() => void) | null = null;
-  /** Per phone with carriage on, on this socket: the store seq its items have reached. Cleared on each new socket. */
   const sent = new Map<string, number>();
-  /** Phones whose items are being sent now, and those that need another pass when it ends. */
   const pumping = new Set<string>();
   const again = new Set<string>();
   /** Frames are handled one at a time, in arrival order, across reconnects too: a command handed over again waits for the first to finish. */
@@ -252,7 +186,6 @@ export function createInboxRelay(context: InboxRelayContext) {
       signal: AbortSignal.timeout(RELAY_REQUEST_MS),
     });
 
-  /** The mailbox, made on the first call that needs one. Null when the relay cannot be reached. */
   const ensureMailbox = (): Promise<InboxRelayFile | null> => {
     if (mailbox) return Promise.resolve(mailbox);
     making ??= (async () => {
@@ -281,7 +214,6 @@ export function createInboxRelay(context: InboxRelayContext) {
 
   const mailboxPath = (rest: string) => `/v1/mailboxes/${mailbox!.mailbox_id}${rest}`;
 
-  /** Register one phone by the SHA-256 of its relay secret, with the store cursor now. */
   const register = async (device: InboxDevice): Promise<void> => {
     const secret = devices.secret(device.id);
     if (!mailbox || !secret) return;
@@ -326,14 +258,7 @@ export function createInboxRelay(context: InboxRelayContext) {
     return true;
   };
 
-  /**
-   * One store line's item frame, sealed under the phone's key. `after` is the
-   * seq the phone's previous item reached, so a phone that last saw a lower
-   * seq knows an item was delayed or dropped and reads the list again. Past
-   * the WebSocket message limit the line goes down as a placeholder
-   * (`too_large: true`), and the cursor moves past it: one oversized line
-   * must not hold every later line and every command behind a reconnect loop.
-   */
+  /** Past the WebSocket message limit the line goes down as a `too_large` placeholder and the cursor moves past it, so one oversized line cannot hold later lines behind a reconnect loop. */
   const recordFrame = async (deviceId: string, line: InboxLine, after: number, key: string): Promise<string> => {
     const seal = async (plaintext: object) =>
       JSON.stringify({ type: "item", device_id: deviceId, cursor: line.seq, ciphertext: await encryptWithKey(JSON.stringify(plaintext), key) });
@@ -343,11 +268,6 @@ export function createInboxRelay(context: InboxRelayContext) {
     return seal({ v: 1, type: "record", after, seq: line.seq, kind: line.kind, id: line.id, too_large: true });
   };
 
-  /**
-   * Send one phone every store line after the seq it has reached, sealed
-   * under its key, until it has them all. One pass at a time per phone; a
-   * line written meanwhile asks for another pass.
-   */
   const pump = async (deviceId: string): Promise<void> => {
     if (pumping.has(deviceId)) {
       again.add(deviceId);
@@ -369,7 +289,6 @@ export function createInboxRelay(context: InboxRelayContext) {
           for (const line of lines) {
             if (!devices.get(deviceId)?.carriage) return;
             const frame = await recordFrame(deviceId, line, reached, key);
-            // A carriage frame moved the cursor meanwhile: start again from it.
             if (sent.get(deviceId) !== reached) continue pass;
             if (!socket || socket.readyState !== WebSocket.OPEN) return;
             socket.send(frame);
@@ -383,7 +302,6 @@ export function createInboxRelay(context: InboxRelayContext) {
     }
   };
 
-  /** The command a phone sealed under its up key, or null when no key here opens it (a revoked phone, a forged or reflected envelope). */
   const openCommand = async (frame: CommandFrame, upKey: string): Promise<CommandPlaintext | null> => {
     try {
       const opened = JSON.parse(await decryptWithKey(frame.ciphertext, upKey)) as CommandPlaintext;
@@ -393,7 +311,6 @@ export function createInboxRelay(context: InboxRelayContext) {
     }
   };
 
-  /** The result item for a command, sealed under the phone's key; past the WebSocket message limit, a 413 in its place. */
   const resultFrame = async (deviceId: string, id: string, answer: Response, key: string): Promise<string> => {
     const seal = (status: number, contentType: string, bytes: Buffer) => sealRelayResult(deviceId, id, status, contentType, bytes, key);
     // base64 grows a body by 4/3 before the JSON and the seal: anything over
@@ -415,12 +332,7 @@ export function createInboxRelay(context: InboxRelayContext) {
     return seal(413, "application/json; charset=utf-8", Buffer.from(JSON.stringify(refusal)));
   };
 
-  /**
-   * One command: opened with the phone's up key, applied through the door,
-   * answered with a result item under the id sealed inside it, then reported
-   * applied. A sealed id that is not the relay's frame id is refused: the
-   * relay must not be able to file one command's result under another's id.
-   */
+  /** A sealed id that is not the relay's frame id is refused: the relay must not file one command's result under another's id. */
   const onCommand = async (frame: CommandFrame): Promise<void> => {
     const secret = devices.secret(frame.device_id);
     const keys = secret ? await deriveRelayKeys(secret, frame.device_id) : null;
@@ -453,7 +365,6 @@ export function createInboxRelay(context: InboxRelayContext) {
       await onHello(frame);
     } else if (frame?.type === "carriage" && typeof frame.device_id === "string" && typeof frame.on === "boolean") {
       devices.setCarriage(frame.device_id, frame.on, new Date().toISOString());
-      // On: resume after the cursor the phone holds. Off: nothing more goes to it.
       if (frame.on && typeof frame.cursor === "number") {
         sent.set(frame.device_id, frame.cursor);
         void pump(frame.device_id);
@@ -465,7 +376,6 @@ export function createInboxRelay(context: InboxRelayContext) {
     }
   };
 
-  /** The one socket, open while the mailbox has a paired phone; it reconnects when it drops. */
   const connect = () => {
     if (stopped || socket || retry || !mailbox || devices.list().length === 0) return;
     const url = `${mailbox.url.replace(/^http/, "ws")}${mailboxPath("/socket")}`;
@@ -498,13 +408,7 @@ export function createInboxRelay(context: InboxRelayContext) {
     ws?.close(1000, "closed");
   };
 
-  /**
-   * One push per phone whose switch is on, for an agent's message with a
-   * question or a guided review, or one that superseded earlier questions
-   * (replaced questions). Pushes collapse per thread, so a withdrawal that
-   * asks nothing new still pushes (with `question: null`, no answer actions)
-   * to replace the older notification and its lock-screen answers.
-   */
+  /** Pushes collapse per thread, so a withdrawal that asks nothing new still pushes (`question: null`) to replace the older notification. */
   const pushFor = async (messageId: string): Promise<void> => {
     const message = store.message(messageId);
     if (!mailbox || !message) return;
@@ -553,7 +457,6 @@ export function createInboxRelay(context: InboxRelayContext) {
   };
 
   return {
-    /** A phone just paired: the mailbox (made now when there is none), its registration, the socket. Null when the relay cannot be reached. */
     async paired(device: InboxDevice): Promise<{ url: string; mailbox_id: string } | null> {
       const made = await ensureMailbox();
       if (!made) return null;
@@ -562,7 +465,6 @@ export function createInboxRelay(context: InboxRelayContext) {
       connect();
       return { url: made.url, mailbox_id: made.mailbox_id };
     },
-    /** A phone was removed on the computer or by itself: gone from the relay with all it held. */
     revoked(device: InboxDevice): void {
       // One that fails here is removed when the socket next says hello.
       sent.delete(device.id);
@@ -571,7 +473,6 @@ export function createInboxRelay(context: InboxRelayContext) {
     },
     start(): void {
       unsubscribe = store.subscribe((line) => {
-        // Every line goes down to each phone this socket is carrying.
         for (const id of sent.keys()) void pump(id);
         // A message's first line: `at` is its `created_at`. Its questions are written in the same turn, so they are read after it.
         if (line.kind !== "message" || line.record.author.kind !== "agent" || line.at !== line.record.created_at) return;

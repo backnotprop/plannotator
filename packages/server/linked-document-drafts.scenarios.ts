@@ -1,19 +1,3 @@
-/**
- * Comments on linked documents in sessions whose root has no file of its own
- * (#1545): plan review, and annotate sessions on the last message or a URL.
- * Each linked document is saved under its own path (`/api/draft/document`),
- * listed in an index beside the session draft, and offered back by
- * GET /api/draft as `documents`, so a reload restores every document's
- * comments on its own document.
- *
- * Driven over HTTP against real servers. Shared by the Bun suite
- * (linked-document-drafts.test.ts) and the Pi mirror
- * (apps/pi-extension/server/linked-document-drafts.test.ts), so both runtimes
- * answer the same scenarios. Every test runs under a temp
- * PLANNOTATOR_DATA_DIR, in a temp project folder (the servers serve linked
- * documents from the working directory).
- */
-
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,7 +6,6 @@ import { join } from "node:path";
 export interface LinkedDraftServer {
   url: string;
   stop: () => void | Promise<void>;
-  /** The host status's `unsentAnnotations` (what the agent is told on close). */
   unsent: () => number;
 }
 
@@ -30,11 +13,6 @@ export interface LinkedDraftRuntime {
   startPlan: (options: { plan: string; planFilePath?: string }) => Promise<LinkedDraftServer>;
   startLastMessage: (options: { markdown: string }) => Promise<LinkedDraftServer>;
   startUrl: (options: { markdown: string; url: string }) => Promise<LinkedDraftServer>;
-  /**
-   * The plan server serves (and so saves copies for) the documents the plan
-   * file links beside itself (Bun's `isPlanLinkedDocPath`; Pi serves only
-   * project files).
-   */
   planFileDocuments?: boolean;
 }
 
@@ -138,8 +116,6 @@ export function defineLinkedDocumentDraftScenarios(runtime: string, start: Linke
       headers: Record<string, string> = {},
     ) => post(server, "/api/draft/document", { documents }, headers);
 
-    // A reader that keeps the session's roots (#2291): a tab on this machine
-    // may keep copies of documents anywhere, as /api/doc serves it them.
     const FORWARDED = { "X-Forwarded-For": "192.0.2.10" };
 
     const loadDraft = async (server: LinkedDraftServer): Promise<{ status: number; body: LoadedDraft }> => {
@@ -165,8 +141,6 @@ export function defineLinkedDocumentDraftScenarios(runtime: string, start: Linke
       expect(idsOf(body.annotations)).toEqual(["on-plan"]);
       expect(body.documents?.map((d) => [d.path, idsOf(d.annotations)])).toEqual([[design, ["on-design"]]]);
 
-      // The same plan opened again (a new server: the agent re-ran the hook
-      // after a crash) finds them too.
       await close(server);
       const reopened = await openPlan(plan);
       const again = await loadDraft(reopened);
@@ -175,8 +149,6 @@ export function defineLinkedDocumentDraftScenarios(runtime: string, start: Linke
     });
 
     test("the plan's draft going empty never takes a linked document's comments with it", async () => {
-      // The reviewer commented on the plan and on a linked document, then
-      // removed the plan's only comment: the client deletes the plan draft.
       const server = await openPlan(planText());
       await post(server, "/api/draft", draftBody(1, ["on-plan"]));
       await saveDocuments(server, [{ path: design, annotations: [comment("on-design")] }]);
@@ -186,7 +158,6 @@ export function defineLinkedDocumentDraftScenarios(runtime: string, start: Linke
       expect(status).toBe(200);
       expect(body.annotations).toEqual([]);
       expect(body.documents?.map((d) => [d.path, idsOf(d.annotations)])).toEqual([[design, ["on-design"]]]);
-      // The client resumes above the plan draft's tombstone.
       expect(body.draftGeneration).toBe(2);
     });
 
@@ -203,8 +174,6 @@ export function defineLinkedDocumentDraftScenarios(runtime: string, start: Linke
     });
 
     test("a document read back is offered on the next reload", async () => {
-      // A copy saved by an earlier session that this session read when the
-      // reviewer opened the document is part of this session's draft now.
       const first = await openPlan(planText());
       await saveDocuments(first, [{ path: notes, annotations: [comment("earlier")] }]);
       await close(first);
@@ -255,22 +224,18 @@ export function defineLinkedDocumentDraftScenarios(runtime: string, start: Linke
       test(`${name} from a reloaded page clears only that page's copies`, async () => {
         const plan = planText();
         const server = await openPlan(plan);
-        // An earlier page load commented on both documents.
         await post(server, "/api/draft/document?client=page-1", {
           documents: [
             { path: design, annotations: [comment("on-design")] },
             { path: notes, annotations: [comment("on-notes")] },
           ],
         });
-        // The reloaded page is offered both, and restores only the design.
         expect((await loadDraft(server)).body.documents?.map((d) => d.path).sort()).toEqual([design, notes].sort());
         const claim = await fetch(`${server.url}/api/draft/document?path=${encodeURIComponent(design)}&client=page-2`);
         expect(claim.status).toBe(200);
         expect((await post(server, `${decision.path}?client=page-2`, decision.body)).status).toBe(200);
         await close(server);
 
-        // The restored copy was sent and is gone; the unrestored one was not
-        // sent, so it is offered again.
         const reopened = await openPlan(plan);
         expect((await fetch(`${reopened.url}/api/draft/document?path=${encodeURIComponent(design)}`)).status).toBe(404);
         expect((await loadDraft(reopened)).body.documents?.map((d) => [d.path, idsOf(d.annotations)])).toEqual([
@@ -279,12 +244,7 @@ export function defineLinkedDocumentDraftScenarios(runtime: string, start: Linke
       });
     }
 
-    /**
-     * The index key comes from the root's text only, so the same plan (or
-     * message, or page) reviewed in two working folders (worktrees running
-     * one plan) shares an index. A decision in folder B must neither count
-     * nor clear the copies folder A listed and left unsent.
-     */
+    /** The index key comes from the root's text only, so the same plan reviewed in two worktrees shares an index. A decision in folder B must neither count nor clear copies folder A left unsent. */
     const rootlessKinds: {
       kind: string;
       open: (text: string) => Promise<LinkedDraftServer>;
@@ -326,12 +286,10 @@ export function defineLinkedDocumentDraftScenarios(runtime: string, start: Linke
           const designB = join(projectB, "docs", "design.md");
           writeFileSync(designB, "# Design B\n\nBody of the design.\n");
 
-          // Folder A: a comment on A's design, then the session ends undecided.
           const a = await open(text);
           await saveDocuments(a, [{ path: design, annotations: [comment("a-design")] }]);
           await close(a);
 
-          // Folder B: the same text. A's copy is not offered, counted or cleared.
           process.chdir(projectB);
           const b = await open(text);
           expect((await loadDraft(b)).body.documents).toBeUndefined();
@@ -341,7 +299,6 @@ export function defineLinkedDocumentDraftScenarios(runtime: string, start: Linke
           expect((await fetch(`${b.url}/api/draft/document?path=${encodeURIComponent(designB)}`)).status).toBe(404);
           await close(b);
 
-          // Back in folder A: A's comments are still offered on a reload.
           process.chdir(project);
           const again = await open(text);
           expect((await loadDraft(again)).body.documents?.map((d) => [d.path, idsOf(d.annotations)])).toEqual([

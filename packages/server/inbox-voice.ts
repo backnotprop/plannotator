@@ -1,27 +1,7 @@
 /**
- * Voice dictation (approval "inbox-voice", 2026-10-31): the window records a clip, posts a 24 kHz mono WAV here, and
- * gets the words back. This server does the transcribing, so a token or key never reaches a page, and a phone over the
- * tailnet posts to its Inbox like any page. Off by default: off, no route starts a `codex`.
- *
- * Two engines. `codex`: a short-lived `codex app-server`, started the way Ask AI starts one
- * (`CodexAppServerProcess`, `askAiChildEnv`, `codexAskAiConfigArgs`), is asked for the ChatGPT login's token with
- * `getAuthStatus { includeToken: true }`; the clip goes to ChatGPT's private transcription endpoint, and Codex stops.
- * `api`: OpenAI's public `/v1/audio/transcriptions` with the person's key.
- *
- * What must stay true here:
- *  - An honest User-Agent, no browser headers. A 403 or a challenge page is an answer, never something to get around:
- *    no change of headers and no automatic retry. The one automatic retry is one token refresh on a 401. Only a
- *    person's press retries anything else.
- *  - A token, key or clip is never logged, written to disk (the key's own file aside) or returned. Failures are fixed
- *    codes (`InboxVoiceFailure`), never upstream text.
- *  - The key's file is private (0600), set on this computer or by its owner over the tailnet's HTTPS; a page sees the
- *    last 4 at most.
- *  - Audio is held in memory for the length of the request.
- *  - `account/read` gives the sign-in type and plan, never a token: it is what Settings, the dimmed mic and the
- *    announcement's audience read. Its email field is dropped here.
- *
- * Linked machines: the Inbox that serves the window transcribes. These routes are in no door table, so a forward
- * (`/api/inbox/m/<machine>/voice/…`) answers 404 and audio never leaves for another machine.
+ * Never log, write to disk (the key's own 0600 file aside) or return a token, key or clip; failures are fixed codes (`InboxVoiceFailure`), never upstream text.
+ * Honest User-Agent, no browser headers: a 403 or challenge is never worked around, and the only automatic retry is one token refresh on a 401.
+ * These routes are in no door table, so audio never leaves for another machine.
  */
 import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -41,20 +21,15 @@ import { revealLoadId } from "@plannotator/shared/inbox/reveals";
 import { codexHome, type AgentEnvironment } from "./inbox-agents";
 import { codexCliCandidates } from "./inbox-codex-wake";
 
-/** ChatGPT's own transcription endpoint: undocumented. The route the owner chose knowing that. */
+/** ChatGPT's own transcription endpoint: undocumented. */
 export const VOICE_CHATGPT_URL = "https://chatgpt.com/backend-api/transcribe";
-/** OpenAI's public one. */
 export const VOICE_OPENAI_URL = "https://api.openai.com/v1/audio/transcriptions";
 export const VOICE_OPENAI_MODEL = "gpt-transcribe";
 
-/** The private file of a key pasted in Settings, under the data dir. */
 export const VOICE_KEY_FILE = join("inbox", "voice-key");
 
-/** One clip's trip upstream: a 2:00 clip is about 5.8 MB. */
 const UPSTREAM_MS = 120_000;
-/** Codex's start and each of its answers. */
 const CODEX_MS = 10_000;
-/** How long Settings and the mic share one `account/read`. */
 const STATUS_TTL_MS = 30_000;
 /** Voice asks Codex for an account and a token, a few KB each: a longer line is a broken `codex`. */
 const CODEX_LINE_MAX = 1024 * 1024;
@@ -102,34 +77,22 @@ export interface InboxVoiceOptions {
   environment: AgentEnvironment;
   version: string;
   serverSession: string;
-  /** Someone used an Inbox here before: the announcement is due, not marked shown. */
   usedBefore: boolean;
-  /** A release build: only those decide the announcement, as the list intro's rule. */
   decidesIntro: boolean;
-  /** The name a page over the tailnet shows for this computer. */
   computerName: () => string;
-  /**
-   * Another one-time dialog waits to be claimed, or the line of one-time dialogs is not free for this page load
-   * (packages/shared/inbox/reveals.ts): the announcement never goes before it. `load`: the page's load id, or null.
-   */
   otherDialogDue: (load: string | null) => boolean;
-  /** The config to save with the claim at `at`: the line's stamps (`inboxReveals`), or nothing (a dev build). */
   lineStamp?: (at: string, load: string | null) => Record<string, unknown>;
   json: (body: unknown, status?: number) => Response;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
-  /** Tests: fake endpoints and where to look for Codex besides PATH. */
   chatgptUrl?: string;
   openaiUrl?: string;
   extraClis?: readonly string[];
 }
 
 export interface InboxVoice {
-  /** `guest`: a tailnet login other than the owner's, for whom voice is off and the key unsaid. */
   settings(via: "local" | "tailnet", guest?: boolean): InboxVoiceSettings;
-  /** `validateOnly`: check `input` and write nothing. */
   save(input: unknown, validateOnly?: boolean): void;
   route(req: Request, url: URL, via: "local" | "tailnet"): Promise<Response | null>;
-  /** The announcement waits for a page (who only: the line's rules apart), as settings' `intro_due` for the owner. */
   introOpen(): boolean;
   stop(): void;
 }
@@ -153,7 +116,6 @@ function authFromStatus(result: Record<string, unknown>): CodexAuth {
 const isWav = (clip: Clip) =>
   clip.length > 44 && String.fromCharCode(...clip.subarray(0, 4)) === "RIFF" && String.fromCharCode(...clip.subarray(8, 12)) === "WAVE";
 
-/** The request's body, or null past the limit (read no further than that). */
 async function readClip(req: Request): Promise<Clip | null> {
   if (Number(req.headers.get("content-length") ?? 0) > INBOX_VOICE_MAX_CLIP_BYTES) return null;
   const clip = new Uint8Array(new ArrayBuffer(INBOX_VOICE_MAX_CLIP_BYTES));
@@ -178,7 +140,6 @@ export function createInboxVoice(options: InboxVoiceOptions): InboxVoice {
   const codexEnv = { ...environment.env, CODEX_HOME: codexHome(environment) };
   const running = new Set<CodexAppServerProcess>();
 
-  // ── Settings ──
   const saved = () => {
     const value = loadConfig().inboxVoice;
     return value && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -194,7 +155,6 @@ export function createInboxVoice(options: InboxVoiceOptions): InboxVoice {
     }
   };
   const envKey = (): string | null => environment.env.OPENAI_API_KEY?.trim() || null;
-  /** A key pasted here wins: it is what the page offers to replace or remove. */
   const apiKey = () => savedKey() ?? envKey();
   const keyState = (): InboxVoiceKeyState => {
     const key = savedKey();
@@ -209,8 +169,6 @@ export function createInboxVoice(options: InboxVoiceOptions): InboxVoice {
     renameSync(temp, keyPath);
   };
 
-  // ── Codex ──
-  /** One `codex app-server` for one job, always stopped. `signal`: the page gave up, so Codex stops at once. */
   const withCodex = async <T>(job: (codex: CodexAppServerProcess) => Promise<T>, signal?: AbortSignal): Promise<T | "missing"> => {
     const path = codexCliCandidates(environment, options.extraClis)[0];
     if (!path) return "missing";
@@ -254,17 +212,14 @@ export function createInboxVoice(options: InboxVoiceOptions): InboxVoice {
     return statusRead;
   };
 
-  // ── The announcement ──
   if (options.decidesIntro && loadConfig().inboxVoiceIntro === undefined) {
     const at = new Date().toISOString();
     saveConfig({ inboxVoiceIntro: options.usedBefore ? { dueAt: at } : { shownAt: at } });
   }
-  /** The one check of this Inbox start: null until it ran. A computer with no ChatGPT login is settled (`skippedAt`); one whose check failed waits for the next start. */
   let introAudience: boolean | null = null;
   let introCheck: Promise<boolean> | null = null;
   const checkIntroAudience = (): Promise<boolean> => {
     introCheck ??= (async () => {
-      // No `codex`, nothing started.
       if (codexCliCandidates(environment, options.extraClis).length === 0) return false;
       const { state } = await codexStatus(false);
       // A login that is not ChatGPT (signed out, an API key): settled, so later starts do not run `codex app-server` again.
@@ -277,11 +232,7 @@ export function createInboxVoice(options: InboxVoiceOptions): InboxVoice {
     });
     return introCheck;
   };
-  /**
-   * Who may get it, as far as this start knows without asking Codex: not a computer the check settled as no, and not
-   * one with no `codex` CLI at all (looked up once per start). So voice never holds the line of one-time dialogs
-   * (packages/shared/inbox/reveals.ts) for someone who can never see it (approval "inbox-one-time-dialogs").
-   */
+  /** Who may get it as far as this start knows without asking Codex: not a computer the check settled as no, nor one with no `codex` CLI. So voice never holds the line of one-time dialogs for someone who can never see it. */
   let introCliFound: boolean | null = null;
   const introAudienceOpen = (): boolean => {
     if (introAudience === false) return false;
@@ -308,7 +259,6 @@ export function createInboxVoice(options: InboxVoiceOptions): InboxVoice {
     return loadConfig().inboxVoiceIntro?.shownAt === at;
   };
 
-  // ── Transcribing ──
   const post = async (url: string, secret: string, form: FormData, signal: AbortSignal): Promise<Response | Outcome> => {
     try {
       return await fetch(url, {
@@ -341,7 +291,6 @@ export function createInboxVoice(options: InboxVoiceOptions): InboxVoice {
       const first = await auth(false);
       if (!first.token) return { ok: false, code: "voice_not_ready", reason: first.state };
       let sent = await post(chatgptUrl, first.token, clipForm(clip), signal);
-      // The one automatic retry: Codex refreshes the login, and the same clip goes once more.
       if (sent instanceof Response && sent.status === 401 && !sent.headers.has("cf-mitigated")) {
         const second = await auth(true);
         if (second.token) sent = await post(chatgptUrl, second.token, clipForm(clip), signal);
@@ -420,7 +369,6 @@ export function createInboxVoice(options: InboxVoiceOptions): InboxVoice {
         },
       });
       if (!written) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
-      // Turned on (the dialog, or Settings first): nothing left to announce.
       const intro = loadConfig().inboxVoiceIntro;
       if (body.on === true && intro && !intro.shownAt) saveConfig({ inboxVoiceIntro: { ...intro, shownAt: new Date().toISOString() } });
     },

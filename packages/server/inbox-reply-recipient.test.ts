@@ -1,15 +1,3 @@
-/**
- * The reply recipient pill's server items (approval "inbox-reply-recipient",
- * reply-recipient-options.md "Server changes" 1, 3 and 4):
- *
- * 1. A reply draft remembers who it goes to (`recipients`), so the pill comes
- *    back aimed after a reload, in another window or on leaving the thread.
- * 3. An agent that answers from another folder (`reply_to` into another
- *    project's thread) keeps its own project on the message (`from_project`),
- *    so the window still names it "in plannotator" after its session ends.
- * 4. A live session that wrote in the thread is one of its live sessions from
- *    any folder: listed for the pill, and a reply may go to it alone (`to`).
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -72,7 +60,6 @@ async function readDraft(server: InboxServer, threadId: string): Promise<InboxRe
   return ((await (await fetch(`${base(server)}/api/inbox/threads/${threadId}/draft`)).json()) as { draft: InboxReplyDraft | null }).draft;
 }
 
-/** A session's connection polls once: it is live for the next 30 s. */
 async function polls(server: InboxServer, session: string, project: string): Promise<void> {
   const response = await fetch(`${base(server)}${INBOX_BRIDGE_POLL_PATH}`, {
     method: "POST",
@@ -92,7 +79,6 @@ describe("a reply draft remembers who it goes to", () => {
     const saved = ((await first.json()) as { draft: InboxReplyDraft }).draft;
     expect(saved.recipients).toEqual(["ses-b", "ses-a"]);
 
-    // An older page (or a host that does not send them): the words change, the recipients stay.
     const words = ((await (await saveDraft(server, asked.thread_id, { body: "Ship it today", base: saved.updated_at })).json()) as { draft: InboxReplyDraft }).draft;
     expect(words.recipients).toEqual(["ses-b", "ses-a"]);
     expect((await readDraft(server, asked.thread_id))?.recipients).toEqual(["ses-b", "ses-a"]);
@@ -104,7 +90,6 @@ describe("a reply draft remembers who it goes to", () => {
     expect(twice.status).toBe(422);
     const many = await saveDraft(server, asked.thread_id, { body: "x", base: cleared.updated_at, recipients: Array.from({ length: 10 }, (_, i) => `ses-${i}`) });
     expect(many.status).toBe(422);
-    // Only session ids as a tag names them: a path, a space or a line break is refused.
     for (const id of ["../ses-a", "ses a", "ses-a\nx", ""]) {
       const odd = await saveDraft(server, asked.thread_id, { body: "x", base: cleared.updated_at, recipients: [id] });
       expect(odd.status).toBe(422);
@@ -139,7 +124,6 @@ describe("a live writer from another folder is one of the thread's live sessions
     const { server, client, billing, plannotator } = await setup();
     const started = await claudeSends(client, billing, "ses-a", "Should the PDF show the new totals?");
     await claudeSends(client, plannotator, "ses-b", "The docs build picks up the shared renderer.", started.message_id);
-    // ses-b's connection polls from its own folder; ses-c is live in that folder too but never wrote here.
     await polls(server, "ses-b", plannotator);
     await polls(server, "ses-c", plannotator);
 
@@ -148,7 +132,6 @@ describe("a live writer from another folder is one of the thread's live sessions
     expect(listed).toContain("ses-b");
     expect(listed).not.toContain("ses-c");
 
-    // The person sends the answer to ses-a's question to ses-b alone.
     const reply = await fetch(`${base(server)}/api/inbox/messages/${started.message_id}/reply`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -158,7 +141,6 @@ describe("a live writer from another folder is one of the thread's live sessions
     const written = ((await reply.json()) as { reply: { to?: { session: string } } }).reply;
     expect(written.to?.session).toBe("ses-b");
 
-    // A live session from another folder that is not in the thread is still refused.
     const refused = await fetch(`${base(server)}/api/inbox/messages/${started.message_id}/reply`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

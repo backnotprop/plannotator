@@ -1,14 +1,3 @@
-/**
- * Send now (the owner's request, 2026-10-16: the line under a sent reply
- * says it is queued, "and then maybe an option just to send it
- * immediately"), proved through the server's real doors: the agent's MCP
- * send with the wake meta, the window's reply and send-now routes, the
- * connection's poll and acknowledgement, the sessions route's
- * `asker.connection`, and the list row's `sent.wakes`. Then the Pi and
- * OpenCode wake (agent-link) against a running Inbox: a busy session gets a
- * Send now reply through `steer`, an idle one at once through `deliver`.
- * Every test uses its own temp data dir.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -52,7 +41,6 @@ async function setup() {
 
 const base = (server: InboxServer) => `http://127.0.0.1:${server.port}`;
 
-/** An agent's message; `wakes` as a waking connection sends it (the Claude Code mod, Pi, OpenCode 2). */
 async function agentSends(client: Client, project: string, session: string, body: string, options: { wakes?: boolean; host?: string } = {}) {
   const result = await client.callTool({
     name: "send_message",
@@ -115,7 +103,6 @@ describe("Send now through the server", () => {
   test("a reply to a busy waking session reads as queued with Send now offered; Send now marks it, the poll hands it with `now`, once", async () => {
     const { server, client, project } = await setup();
     const asked = await agentSends(client, project, "ses-a", "Shipped the migration. Anything else?");
-    // The session's connection polls: busy, and able to deliver into a running turn.
     await poll(server, "ses-a", project, { busy: true, [INBOX_SEND_NOW_POLL_FIELD]: true });
     const sent = await reply(server, asked.message_id, "Yes: also bump the version.");
 
@@ -124,7 +111,6 @@ describe("Send now through the server", () => {
     expect(known.asker).toMatchObject({ session: "ses-a", live: true, connection: { busy: true, send_now: true } });
     expect(known.sessions.find((s) => s.session === "ses-a")?.send_now).toBe(true);
 
-    // Before Send now: handed out without `now`.
     const before = await poll(server, "ses-a", project, { busy: true, [INBOX_SEND_NOW_POLL_FIELD]: true });
     expect(before).toHaveLength(1);
     expect(before[0]!.now).toBeUndefined();
@@ -135,7 +121,6 @@ describe("Send now through the server", () => {
     expect(typeof marked.deliver_now_at).toBe("string");
     expect((await thread(server, asked.thread_id)).messages.at(-1)).toMatchObject({ id: sent.id, deliver_now_at: marked.deliver_now_at });
 
-    // A second press writes nothing new.
     const again = (await (await sendNow(server, sent.id)).json()) as { message: { deliver_now_at: string } };
     expect(again.message.deliver_now_at).toBe(marked.deliver_now_at);
 
@@ -143,7 +128,6 @@ describe("Send now through the server", () => {
     expect(after).toHaveLength(1);
     expect(after[0]).toMatchObject({ id: sent.id, now: true });
 
-    // Delivered: the poll stops handing it out, and Send now is refused.
     expect((await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-a", host: "claude-code", type: "delivered", id: sent.id })).status).toBe(200);
     expect(await poll(server, "ses-a", project)).toEqual([]);
     const late = await sendNow(server, sent.id);
@@ -157,10 +141,8 @@ describe("Send now through the server", () => {
     await poll(server, "ses-a", project, { busy: true, [INBOX_SEND_NOW_POLL_FIELD]: true });
     const sent = await reply(server, asked.message_id, "Next.");
     expect((await sendNow(server, sent.id)).status).toBe(200);
-    // A poll without the field (the same session from a connection that cannot steer): no `now`.
     const plain = await poll(server, "ses-a", project, { busy: true });
     expect(plain[0]!.now).toBeUndefined();
-    // The engine refused the row: the mark goes, and only that session may say so.
     expect((await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-other", host: "claude-code", type: "send_now_failed", id: sent.id })).status).toBe(422);
     expect((await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-a", host: "claude-code", type: "send_now_failed", id: sent.id })).status).toBe(200);
     expect((await thread(server, asked.thread_id)).messages.at(-1)!.deliver_now_at).toBeNull();
@@ -185,7 +167,6 @@ describe("Send now through the server", () => {
   test("Send now is refused when the session's connection cannot take it mid-turn, or does not poll now; nothing is written", async () => {
     const { server, client, project } = await setup();
     const asked = await agentSends(client, project, "ses-old", "Done.");
-    // A connection that does not say it can (an older one): busy, no send_now.
     await poll(server, "ses-old", project, { busy: true });
     const sent = await reply(server, asked.message_id, "Next, the tests.");
     expect((await asker(server, asked.thread_id, "ses-old")).asker.connection).toMatchObject({ busy: true, send_now: false });
@@ -194,7 +175,6 @@ describe("Send now through the server", () => {
     expect(((await refused.json()) as { code: string }).code).toBe("send_now_unavailable");
     expect((await thread(server, asked.thread_id)).messages.at(-1)!.deliver_now_at).toBeUndefined();
 
-    // A session that never polled: no connection, refused as well.
     const other = await agentSends(client, project, "ses-gone", "Also done.");
     const sentOther = await reply(server, other.message_id, "Good.");
     expect((await asker(server, other.thread_id, "ses-gone")).asker.connection).toBeNull();
@@ -218,7 +198,6 @@ describe("Send now through the server", () => {
     const stale = await sendNow(server, sent.id, { body: { serverSession: "not-this-one" } });
     expect(stale.status).toBe(409);
     expect(((await stale.json()) as { code: string }).code).toBe("session_mismatch");
-    // The agent's own message goes to no session.
     const notAddressed = await sendNow(server, asked.message_id);
     expect(notAddressed.status).toBe(422);
     expect(((await notAddressed.json()) as { code: string }).code).toBe("not_addressed");
@@ -274,7 +253,6 @@ describe("the Pi and OpenCode wake (agent-link) with Send now", () => {
       expect((await asker(server, asked.thread_id, "ses-pi")).asker.connection).toMatchObject({ send_now: true });
       const sent = await reply(server, asked.message_id, "Ship them.");
       await Bun.sleep(400);
-      // Busy, and nobody pressed Send now: it waits.
       expect(steered).toEqual([]);
       expect(delivered).toEqual([]);
       expect((await sendNow(server, sent.id)).status).toBe(200);
