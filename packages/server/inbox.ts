@@ -137,7 +137,7 @@ import { normalizeStableVersion, readUpdateState } from "@plannotator/shared/upd
 import { scheduleDailyPing } from "@plannotator/shared/daily-ping";
 import { isLoopbackHostHeader, isLoopbackForwardedFor } from "@plannotator/shared/loopback-host";
 import { prepareAppHtml, prewarmAppHtml } from "@plannotator/shared/app-html";
-import { openPackedApp, packedAppResponse, PACKED_ASSET_ROUTE_PREFIX } from "@plannotator/shared/packed-app";
+import { openPackedApp, packedAppResponse, PACKED_ASSET_ROUTE_PREFIX, PACKED_ASSETS_MARKER } from "@plannotator/shared/packed-app";
 import { encodeInboxResponse } from "./inbox-encoding";
 import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/shared/inbox/search";
 import { DecisionDataAborted, decisionDataCsv, decisionDataSummary, readDecisionLines } from "@plannotator/shared/inbox/decision-data";
@@ -947,6 +947,24 @@ async function windowPage(req: Request, page: string): Promise<Response> {
   const headers = { ...prepared.headers, ...WINDOW_PAGE_HEADERS, ...cacheHeaders, "Content-Type": "text/html; charset=utf-8" };
   // A Buffer is a valid fetch body; the lib types lag.
   return new Response(req.method === "HEAD" ? null : (prepared.body as BodyInit), { headers });
+}
+
+/** How long after start the window's lazy scripts start being compressed: after the first load's own work. */
+const LAZY_ASSET_WARM_DELAY_MS = 15_000;
+
+/** The text assets packed behind the window page (scripts, styles), by route path; none for an unpacked page. */
+function packedTextAssetPaths(bundle: string): string[] {
+  const markerAt = bundle.indexOf(PACKED_ASSETS_MARKER);
+  if (markerAt < 0) return [];
+  const from = markerAt + PACKED_ASSETS_MARKER.length;
+  try {
+    const index = JSON.parse(bundle.slice(from, bundle.indexOf("\n", from))) as Record<string, { base64?: true }>;
+    return Object.entries(index)
+      .filter(([, entry]) => !entry.base64)
+      .map(([path]) => path);
+  } catch {
+    return [];
+  }
 }
 
 function errorResponse(error: unknown): Response {
@@ -4613,6 +4631,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // Chromium asks of localhost and of an HTTPS address; gzip (a plain-http address, Safari) is made on first ask.
   prewarmAppHtml(windowApp.html, "br");
   for (const entry of windowEntryScripts) windowApp.answer(entry, "GET", "br", true).catch(() => {});
+  // The window's other text scripts (Mermaid, Graphviz, each code grammar…) are compressed one by one a while
+  // after start, so the first diagram or code block never waits on its one-time pass either (the largest takes
+  // ~0.1-0.3 s). One at a time, off the event loop; a stop ends it.
+  const lazyAssetWarm = setTimeout(() => {
+    void (async () => {
+      for (const path of packedTextAssetPaths(options.htmlContent ?? "")) {
+        if (stopped) return;
+        await windowApp.answer(path, "GET", "br", true).catch(() => {});
+      }
+    })();
+  }, LAZY_ASSET_WARM_DELAY_MS);
+  lazyAssetWarm.unref?.();
 
   const handle = async (req: Request, via: RequestVia): Promise<Response> => {
     // The tailnet listener checked its own Host (the served MagicDNS name)
@@ -6745,6 +6775,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const stop = () => {
     if (stopped) return;
     stopped = true;
+    clearTimeout(lazyAssetWarm);
     stopLoopWatch?.();
     releasePerfPhases?.();
     // The debug log's kept lines go in now (it keeps lines in memory for a moment).
