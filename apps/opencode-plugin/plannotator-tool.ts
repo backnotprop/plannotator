@@ -24,6 +24,7 @@
 
 import { randomBytes } from "node:crypto";
 import path from "node:path";
+import { isSshSession } from "@plannotator/server/remote";
 import type { ParsedAnnotateArgs } from "@plannotator/shared/annotate-args";
 import {
   HOST_CLOSE_PATH,
@@ -630,7 +631,7 @@ async function closeLaunch(launch: TrackedLaunch, deps: PlannotatorToolDeps): Pr
         subject,
         closed: false,
         reason: "failed",
-        detail: launch.isRemote
+        detail: launch.isRemote && !isSshSession()
           ? "it runs in remote mode, where Plannotator turns host close off; close it from the tab"
           : "its server has host close turned off (it was started without a host token); close it from the tab",
       };
