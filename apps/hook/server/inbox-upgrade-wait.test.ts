@@ -92,7 +92,12 @@ test(
     const [a, b] = await Promise.all([first, second]);
     watching = false;
     await watch;
-    const named = inboxEntryOf(dataDir);
+    // A starter that gave up leaves the Inbox to come up after it: tracked for the teardown either way.
+    let named = inboxEntryOf(dataDir);
+    for (let waited = 0; !named && waited < 15_000; waited += 100) {
+      await Bun.sleep(100);
+      named = inboxEntryOf(dataDir);
+    }
     if (named) started.push({ entry: named, root });
 
     expect(a.code).toBe(0);
