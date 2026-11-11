@@ -401,6 +401,20 @@ function storedChoices(record: Pick<InboxQuestionRecord, "parsed">): QuestionCho
   });
 }
 
+/**
+ * Whether an answer is exactly what the stored question recommended: the rule the reply's "Answers" section marks
+ * `(recommended)` with, and the decision export's "Took the recommendation".
+ */
+export function inboxAnswerTookRecommendation(record: Pick<InboxQuestionRecord, "parsed">, answer: QuestionAnswer): boolean {
+  const recommended = record.parsed.choices.filter((c) => c.recommended).map((c) => c.label);
+  const suggested = record.parsed.suggested_text ?? undefined;
+  return isQuestionAnswered(answer) && isRecommendedQuestionAnswer(answer, recommended, suggested, {
+    ...(record.parsed.recommendation === null ? {} : { recommendation: record.parsed.recommendation }),
+    choiceLabels: record.parsed.choices.map((c) => c.label),
+    choiceAliases: storedChoices(record).map((c) => c.aliases),
+  });
+}
+
 /** The question as the wire serves it. */
 export function toInboxQuestion(record: InboxQuestionRecord, threadResolved: boolean): InboxQuestion {
   return {
@@ -887,14 +901,8 @@ export function composeInboxReaskBody(input: {
   if (input.answered.length > 0) {
     let section = `## ${QUESTION_ANSWERS_HEADING}\n\n`;
     for (const { record, answer } of input.answered) {
-      const recommended = record.parsed.choices.filter((c) => c.recommended).map((c) => c.label);
-      const suggested = record.parsed.suggested_text ?? undefined;
       section += `### ${record.prompt.replace(/\s+/g, " ").trim()} (${record.id})\n`;
-      section += formatQuestionAnswerLines(answer, { recommended: isQuestionAnswered(answer) && isRecommendedQuestionAnswer(answer, recommended, suggested, {
-        ...(record.parsed.recommendation === null ? {} : { recommendation: record.parsed.recommendation }),
-        choiceLabels: record.parsed.choices.map((c) => c.label),
-        choiceAliases: storedChoices(record).map((c) => c.aliases),
-      }) });
+      section += formatQuestionAnswerLines(answer, { recommended: inboxAnswerTookRecommendation(record, answer) });
       section += "\n";
     }
     lines.push("", section.trimEnd());
