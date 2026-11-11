@@ -62,6 +62,8 @@ export interface InboxWorldOptions {
   log?: InboxLogFactory;
   /** Leave out the steps that rewrite or delete (the size budget only grows a store). */
   growOnly?: boolean;
+  /** Called after every step with the store and the step's number (the every-read test checks the row cache there). */
+  afterStep?: (store: InboxStore, step: number) => void;
 }
 
 export function writeInboxWorld(options: InboxWorldOptions): InboxWorld {
@@ -228,6 +230,8 @@ export function writeInboxWorld(options: InboxWorldOptions): InboxWorld {
     [1, () => store.renameProject(pick(projects).id, chance(0.7) ? `${pick(WORDS)} app` : null)],
   ];
   if (!options.growOnly) {
+    // Discard: the draft goes, nothing else in the thread changes.
+    ops.push([1, () => store.deleteReplyDraft(pick(roots))]);
     ops.push([1, () => store.combineProject(projects[2]!.id, chance(0.6) ? projects[1]!.id : null)]);
     ops.push([1, () => {
       const id = roots.splice(Math.floor(random() * roots.length), 1)[0];
@@ -256,6 +260,7 @@ export function writeInboxWorld(options: InboxWorldOptions): InboxWorld {
     } catch (error) {
       if (!(error instanceof InboxError)) throw error;
     }
+    options.afterStep?.(store, step);
   }
   clock += 60_000;
   return { store, now, projects, agents: AGENTS };

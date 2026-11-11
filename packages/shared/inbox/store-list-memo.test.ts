@@ -1,8 +1,8 @@
 /**
- * `listRows()` keeps its last answer while nothing it reads changed (the store's lines, drafts, annotations, the
- * live sessions' answers), and the latest message of each agent session is kept as messages land: both must answer
- * exactly what reading every thread again would. A store opened fresh from the same folder has no memo, so it is
- * the reference.
+ * The list rows are kept per thread (store-row-cache.ts) while nothing they read changed (the store's lines, drafts,
+ * annotations, the live sessions' answers), a write builds again only the rows of the threads it touched, and the
+ * latest message of each agent session is kept as messages land: all must answer exactly what reading every thread
+ * again would. A store opened fresh from the same folder has no cache, so it is the reference.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -29,16 +29,17 @@ const agent = (session: string) => ({ kind: "agent" as const, host: "claude-code
 const rows = (store: InboxStore) => JSON.stringify(store.listRows());
 const fresh = (dir: string) => JSON.stringify(InboxStore.open(dir).listRows());
 
-/** Counts `listRow` calls on every store until the test ends. */
+/** Counts rows built (the store's private `buildRow`) on every store until the test ends. */
 function countRowBuilds(): { count: number } {
   const counter = { count: 0 };
-  const original = InboxStore.prototype.listRow;
-  InboxStore.prototype.listRow = function (this: InboxStore, threadId: string) {
+  const proto = InboxStore.prototype as unknown as { buildRow: (threadId: string) => unknown };
+  const original = proto.buildRow;
+  proto.buildRow = function (this: InboxStore, threadId: string) {
     counter.count += 1;
     return original.call(this, threadId);
   };
   restores.push(() => {
-    InboxStore.prototype.listRow = original;
+    proto.buildRow = original;
   });
   return counter;
 }
@@ -77,18 +78,36 @@ describe("the list's memo", () => {
     }
   });
 
-  test("reads with nothing changed between them share one build; the next write builds again", () => {
+  test("reads with nothing changed between them build nothing again; a write builds only its thread's row", () => {
     const dir = dataDir();
     const store = InboxStore.open(dir);
     const project = store.ensureProject({ name: "shop", root: join(dir, "shop") });
-    for (let i = 0; i < 5; i += 1) store.sendMessage({ project_id: project.id, author: agent(`ses_${i}`), body: `Note ${i}`, thread: `t${i}` });
+    const roots = Array.from({ length: 5 }, (_, i) => store.sendMessage({ project_id: project.id, author: agent(`ses_${i}`), body: `Note ${i}`, thread: `t${i}` }).message.thread_id);
     const builds = countRowBuilds();
     const answers = [rows(store), rows(store), rows(store)];
     expect(builds.count).toBe(5);
     expect(new Set(answers).size).toBe(1);
-    store.sendMessage({ project_id: project.id, author: agent("ses_0"), body: "One more", thread: "t0" });
-    expect(rows(store)).toBe(fresh(dir));
-    expect(builds.count).toBeGreaterThan(5);
+    // One write to one thread: one row built again, wherever the write moves it in the list.
+    const writes: [string, () => unknown][] = [
+      ["a message", () => store.sendMessage({ project_id: project.id, author: agent("ses_0"), body: "One more", thread: "t0" })],
+      ["a draft", () => store.saveReplyDraft(roots[3]!, { body: "later", base: null })],
+      ["a look", () => store.markSeen(roots[1]!)],
+      ["a comment", () => store.saveMessageAnnotation(roots[2]!, { id: "c-1", type: "COMMENT", originalText: "Note", text: "why" })],
+    ];
+    for (const [name, write] of writes) {
+      builds.count = 0;
+      write();
+      const after = rows(store);
+      // Counted before the reference store below builds its own.
+      expect({ name, built: builds.count }).toEqual({ name, built: 1 });
+      expect({ name, rows: after }).toEqual({ name, rows: fresh(dir) });
+    }
+    // A project's name is every row's label: every row is built again.
+    builds.count = 0;
+    store.renameProject(project.id, "Shop front");
+    const renamed = rows(store);
+    expect(builds.count).toBe(5);
+    expect(renamed).toBe(fresh(dir));
   });
 
   test("a caller that sorts or trims its copy never changes the next answer", () => {
@@ -130,7 +149,7 @@ describe("the list's memo", () => {
     expect(JSON.stringify(rowOf().delivery)).not.toBe(waiting);
   });
 
-  test("filtered reads are never served from the whole list's memo", () => {
+  test("filtered reads give only their project's or session's rows", () => {
     const dir = dataDir();
     const store = InboxStore.open(dir);
     const shop = store.ensureProject({ name: "shop", root: join(dir, "shop") });

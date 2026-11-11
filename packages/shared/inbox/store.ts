@@ -14,6 +14,7 @@
 import { appendFileSync, chmodSync, closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { inboxDecisionExcerpt, orderInboxDecisions, type InboxDecisionCandidate } from "./decisions";
+import { InboxRowCache, inboxRowAnswer, inboxRowOrder, type InboxRowCall } from "./store-row-cache";
 import {
   checkInboxAnswer,
   composeInboxReaskBody,
@@ -884,17 +885,16 @@ export class InboxStore {
   /** How many times the store was read again from disk (a deletion): a reader's derived view is stale once it changes. */
   private reloads = 0;
   /**
-   * Counts every change to what the list rows read (`listRow`): each line applied, a question or annotation put
-   * back, a reply draft saved or dropped, a re-read, the live sessions handed in. `listRows()` keeps its last
-   * answer while this stays the same (`rowsMemo`).
+   * The list rows, kept per thread (store-row-cache.ts): every change to what a row reads names its thread (a line
+   * applied, a question or annotation put back, a reply draft saved or dropped), or every row (a project line, a
+   * start, a re-read, the live sessions handed in), and only those rows are built again.
    */
-  private changes = 0;
-  /**
-   * The last `listRows()` (every thread, no filter), with each answer the live sessions gave while it was built
-   * (`InboxDeliveryPresence`, keyed by the call): it is given again while nothing in the store changed and every
-   * one of those calls still answers the same, so it is exactly what building it again would give.
-   */
-  private rowsMemo: { changes: number; presence: InboxDeliveryPresence | null; calls: Map<string, { ask: () => unknown; answer: string }>; rows: InboxListRow[] } | null = null;
+  private readonly rowCache = new InboxRowCache({
+    threadIds: () => this.listedThreadIds(),
+    isThread: (id) => this.messages.get(id)?.thread_id === id && this.threadMembers.has(id),
+    build: (threadId, calls) => this.buildRowRecorded(threadId, calls),
+    presence: () => this.deliveryPresence,
+  });
   /**
    * Each agent session's latest message id (by its first line's seq), kept as each message is first applied, in
    * the order the sessions first wrote: `latestAgentMessages` and `lastThreadsBySession` read it instead of every
@@ -929,7 +929,7 @@ export class InboxStore {
   // ─────────────────────────── reading ───────────────────────────
 
   private load(): void {
-    this.changes += 1;
+    this.rowCache.changedAll();
     mkdirSync(this.dir, { recursive: true, mode: 0o700 });
     try {
       chmodSync(this.dir, 0o700);
@@ -974,7 +974,7 @@ export class InboxStore {
 
   /** Put a question record back in memory (and in the event log's current view) without writing. */
   private restoreQuestion(record: InboxQuestionRecord): void {
-    this.changes += 1;
+    this.rowChangedForMessage(record.message_id);
     this.questions.set(record.id, record);
     const key = `question:${record.id}`;
     const line = this.latest.get(key);
@@ -987,7 +987,7 @@ export class InboxStore {
    * line's tags) is worked out by `store-log/history.ts`, the same rules the SQLite log keeps in its tables.
    */
   private apply(line: InboxLine): void {
-    this.changes += 1;
+    this.rowChangedForLine(line);
     if (line.seq > this.seq) this.seq = line.seq;
     const id = `${line.kind}:${line.id}`;
     const previous = this.latest.get(id);
@@ -1045,7 +1045,7 @@ export class InboxStore {
    * `apply` over every line would (the every-read test holds it to that), without reading any history.
    */
   private restore(state: InboxLogState): void {
-    this.changes += 1;
+    this.rowCache.changedAll();
     for (const { line: latest, firstSeq } of state.records) {
       if (latest.seq > this.seq) this.seq = latest.seq;
       this.latest.set(`${latest.kind}:${latest.id}`, latest);
@@ -2153,8 +2153,53 @@ export class InboxStore {
     return inboxActivity(sources(), { ...span, inProject: span.projectId === null ? undefined : (projectId) => this.sameProject(projectId, span.projectId!) });
   }
 
-  /** One row of the list: the thread's summary, its project label and its section. */
+  /** One row of the list: the thread's summary, its project label and its section. Kept per thread (`rowCache`). */
   listRow(threadId: string): InboxListRow | null {
+    return this.rowCache.row(threadId);
+  }
+
+  /** Which rows a store line may change: its thread's; a project line, every row (the labels, a combine). */
+  private rowChangedForLine(line: InboxLine): void {
+    switch (line.kind) {
+      case "message":
+        return this.rowCache.changed(line.record.thread_id);
+      case "question":
+        return this.rowChangedForMessage(line.record.message_id);
+      case "project":
+        return this.rowCache.changedAll();
+      default:
+        // An annotation's rows are named by `setAnnotation` (its thread before and after). Steps, PRs, cards and
+        // initiatives are never read by a store row (the server adds a row's steps and PRs per read).
+        return;
+    }
+  }
+
+  /** The row of a message's thread; every row when the message is not known (a line that came before its message). */
+  private rowChangedForMessage(messageId: string): void {
+    const threadId = this.messages.get(messageId)?.thread_id;
+    if (threadId) this.rowCache.changed(threadId);
+    else this.rowCache.changedAll();
+  }
+
+  /** The threads the list holds, in the order their first lines came. */
+  private *listedThreadIds(): Iterable<string> {
+    for (const threadId of this.threadMembers.keys()) if (this.messages.get(threadId)?.thread_id === threadId) yield threadId;
+  }
+
+  /** `buildRow`, with each live-session answer it reads noted in `calls` (the row cache asks them again later). */
+  private buildRowRecorded(threadId: string, calls: Map<string, InboxRowCall> | null): InboxListRow | null {
+    const presence = this.deliveryPresence;
+    if (!presence || !calls) return this.buildRow(threadId);
+    this.deliveryPresence = this.recordingPresence(presence, calls);
+    try {
+      return this.buildRow(threadId);
+    } finally {
+      this.deliveryPresence = presence;
+    }
+  }
+
+  /** One row worked out from the store now (`listRow` reads it through the row cache). */
+  private buildRow(threadId: string): InboxListRow | null {
     const summary = this.threadSummary(threadId);
     if (!summary) return null;
     const root = this.messages.get(threadId)!;
@@ -2361,26 +2406,26 @@ export class InboxStore {
 
   /** The live sessions the rows' delivery reads (the server's); null forgets them. */
   setDeliveryPresence(presence: InboxDeliveryPresence | null): void {
-    this.changes += 1;
+    this.rowCache.changedAll();
     this.deliveryPresence = presence;
   }
 
   /**
-   * The live sessions as `listRows()` builds its memo: each answer is noted with the call that gave it, so the
-   * memo can ask again and know the rows would come out the same (`rowsMemo`).
+   * The live sessions as a row is built for the row cache: each answer is noted with the call that gave it, so the
+   * cache can ask again and know the row would come out the same (store-row-cache.ts).
    */
-  private recordingPresence(presence: InboxDeliveryPresence, calls: Map<string, { ask: () => unknown; answer: string }>): InboxDeliveryPresence {
+  private recordingPresence(presence: InboxDeliveryPresence, calls: Map<string, InboxRowCall>): InboxDeliveryPresence {
     const noted = <A extends unknown[], R>(name: string, fn: ((...args: A) => R) | undefined): ((...args: A) => R) | undefined => {
       if (!fn) return undefined;
       return (...args: A): R => {
         const answer = fn(...args);
         const key = `${name}\0${args.join("\0")}`;
-        if (!calls.has(key)) calls.set(key, { ask: () => fn(...args), answer: JSON.stringify(answer) ?? "undefined" });
+        if (!calls.has(key)) calls.set(key, { ask: () => fn(...args), answer: inboxRowAnswer(answer) });
         return answer;
       };
     };
     const bound = <A extends unknown[], R>(fn: ((...args: A) => R) | undefined) => (fn ? (...args: A) => fn.apply(presence, args) : undefined);
-    calls.set("autoSendAfterMs", { ask: () => presence.autoSendAfterMs, answer: JSON.stringify(presence.autoSendAfterMs) ?? "undefined" });
+    calls.set("autoSendAfterMs", { ask: () => presence.autoSendAfterMs, answer: inboxRowAnswer(presence.autoSendAfterMs) });
     return {
       connection: noted("connection", bound(presence.connection))!,
       askerLive: noted("askerLive", bound(presence.askerLive))!,
@@ -2567,38 +2612,13 @@ export class InboxStore {
    */
   listRows(filter: { projectId?: string | null; session?: string | null } = {}): InboxListRow[] {
     if (filter.projectId || filter.session) return this.buildRows(filter);
-    // Every thread: the last answer while nothing it read changed (`rowsMemo`). A copy of the list, the same rows.
-    const memo = this.rowsMemo;
-    if (memo && memo.changes === this.changes && memo.presence === this.deliveryPresence) {
-      let same = true;
-      for (const { ask, answer } of memo.calls.values()) {
-        if ((JSON.stringify(ask()) ?? "undefined") !== answer) {
-          same = false;
-          break;
-        }
-      }
-      if (same) return memo.rows.slice();
-    }
-    const presence = this.deliveryPresence;
-    const calls = new Map<string, { ask: () => unknown; answer: string }>();
-    const changes = this.changes;
-    let rows: InboxListRow[];
-    if (presence) {
-      this.deliveryPresence = this.recordingPresence(presence, calls);
-      try {
-        rows = this.buildRows(filter);
-      } finally {
-        this.deliveryPresence = presence;
-      }
-    } else {
-      rows = this.buildRows(filter);
-    }
-    this.rowsMemo = { changes, presence, calls, rows };
-    return rows.slice();
+    // Every thread: the rows kept per thread, only the changed ones built again (`rowCache`). A copy of the list.
+    return this.rowCache.rows();
   }
 
-  /** `listRows` built from the store, every row worked out again. */
+  /** `listRows` for a project or a session: the matching threads' rows (from the row cache), sorted. */
   private buildRows(filter: { projectId?: string | null; session?: string | null }): InboxListRow[] {
+    this.rowCache.prepare();
     const out: InboxListRow[] = [];
     for (const [threadId, members] of this.threadMembers) {
       const root = this.messages.get(threadId);
@@ -2612,10 +2632,10 @@ export class InboxStore {
         });
         if (!took) continue;
       }
-      const row = this.listRow(threadId);
+      const row = this.rowCache.rowNow(threadId);
       if (row) out.push(row);
     }
-    return out.sort((a, b) => b.last_at.localeCompare(a.last_at) || b.thread_id.localeCompare(a.thread_id));
+    return out.sort(inboxRowOrder);
   }
 
   /**
@@ -5854,9 +5874,10 @@ export class InboxStore {
 
   /** Every write to `annotations` goes here, so the per-thread unsent count follows it. */
   private setAnnotation(record: InboxAnnotationRecord): void {
-    this.changes += 1;
     const unsent = (r: InboxAnnotationRecord | undefined) => (r && r.sent_reply_id === null && r.removed_at === null ? 1 : 0);
     const before = this.annotations.get(record.id);
+    this.rowCache.changed(record.thread_id);
+    if (before) this.rowCache.changed(before.thread_id);
     this.annotations.set(record.id, record);
     if (before && before.thread_id !== record.thread_id) this.bumpUnsent(before.thread_id, -unsent(before));
     this.bumpUnsent(record.thread_id, unsent(record) - (before && before.thread_id === record.thread_id ? unsent(before) : 0));
@@ -5993,7 +6014,7 @@ export class InboxStore {
     if (aimed.length > 0) draft.recipients = [...aimed];
     writeInboxReplyDraft(this.dir, draft);
     this.replyDrafts.set(threadId, draft);
-    this.changes += 1;
+    this.rowCache.changed(threadId);
     this.noteReplyDraftRemovals(threadId, existing, draft);
     this.replyDraftChanged(threadId);
     return draft;
@@ -6066,7 +6087,7 @@ export class InboxStore {
     // Gone whole: a draft made again later starts with no removals (a save against no draft adds every file it names).
     this.replyDraftRemovals.delete(threadId);
     const had = this.replyDrafts.delete(threadId);
-    this.changes += 1;
+    this.rowCache.changed(threadId);
     const removed = removeInboxReplyDraft(this.dir, threadId) || had;
     if (removed) this.replyDraftChanged(threadId);
     return removed;
@@ -6197,7 +6218,6 @@ export class InboxStore {
    */
   private reload(deletedMarkups: ReadonlySet<string> = new Set()): void {
     this.reloads += 1;
-    this.changes += 1;
     this.latestAgentIds.clear();
     this.threadLines.clear();
     this.latest.clear();
@@ -6245,7 +6265,6 @@ export class InboxStore {
       removeInboxReplyDraft(this.dir, threadId);
       this.replyDrafts.delete(threadId);
       this.replyDraftRemovals.delete(threadId);
-      this.changes += 1;
     }
     // So does its Ask AI conversation.
     pruneInboxAsks(this.dir, (threadId) => this.messages.get(threadId)?.thread_id === threadId);
