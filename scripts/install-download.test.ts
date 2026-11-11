@@ -396,11 +396,17 @@ async function runPs1Download(shell: string, server: ReleaseServer, env: Record<
       `exit 0`,
     ].join("\n"),
   );
+  // The parent's environment (Windows PowerShell 5.1 needs its system
+  // variables); the driver writes only into its own temp folder. Without
+  // PSModulePath for Windows PowerShell 5.1: a CI step runs under pwsh, whose
+  // module path would hide 5.1's own modules (Get-FileHash).
+  const parentEnv: Record<string, string | undefined> = { ...process.env };
+  if (/^powershell(\.exe)?$/i.test(shell.split(/[\\/]/).pop() ?? "")) {
+    for (const key of Object.keys(parentEnv)) if (key.toLowerCase() === "psmodulepath") delete parentEnv[key];
+  }
   const proc = Bun.spawn([shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", driver], {
-    // The parent's environment (Windows PowerShell 5.1 needs its system
-    // variables); the driver writes only into its own temp folder.
     env: {
-      ...process.env,
+      ...parentEnv,
       HOME: root,
       USERPROFILE: root,
       TMPDIR: root,
