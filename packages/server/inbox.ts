@@ -1149,6 +1149,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const pinListeners = new Set<() => void>();
   /** The pinned artifacts changed (inbox-artifact-pins.ts): the windows' streams say `event: artifact-pins`. */
   const artifactPinListeners = new Set<() => void>();
+  /** `plannotator inbox --open <thread>`: the thread, and the window (inbox-windows.ts `lastUsed`) that shows it. */
+  const showListeners = new Set<(threadId: string, windowId: string) => void>();
   /** A snooze changed or ran out (inbox-snooze.ts): the streams of windows and linked machines say `event: snoozes`. */
   const snoozeListeners = new Set<() => void>();
   /**
@@ -3547,6 +3549,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The pinned artifacts changed (any window's, a phone's, or a deletion): the window reads them again. Windows only.
         const onArtifactPins = () => send(`event: artifact-pins\ndata: {}\n\n`);
         if (windowId) artifactPinListeners.add(onArtifactPins);
+        // Show a thread (`plannotator inbox --open <thread>`): every tab hears it, only the window it names moves. This computer's windows only.
+        const onShow = (threadId: string, target: string) => send(`event: show\ndata: ${JSON.stringify({ thread_id: threadId, window: target })}\n\n`);
+        if (windowId && via === "local") showListeners.add(onShow);
         // A snooze changed or ran out: the list is read again. Windows, and a linked machine that asks (`snoozes=1`:
         // a snooze writes no record, so its copy of this machine's rows would not move). The phone's door hears nothing new.
         const onSnoozes = () => send(`event: snoozes\ndata: {}\n\n`);
@@ -3625,6 +3630,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           askListeners.delete(onAsk);
           pinListeners.delete(onPins);
           artifactPinListeners.delete(onArtifactPins);
+          showListeners.delete(onShow);
           snoozeListeners.delete(onSnoozes);
           threadPullLiveListeners.delete(onThreadPullsLive);
           rowsListeners.delete(onRows);
@@ -4784,6 +4790,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         return json({ connect: await connectAgents() });
       }
+      // `plannotator inbox --open <thread>`: the window on this computer the person used last shows the thread,
+      // as a row click would. `shown: false`: no window is open, and the caller opens one at the thread.
+      if (path === "/api/inbox/control/show") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = (await req.json().catch(() => null)) as { thread?: unknown } | null;
+        const ref = typeof body?.thread === "string" ? body.thread.trim() : "";
+        // A thread id, or any message's id (its thread).
+        const threadId = ref ? (store.message(ref)?.thread_id ?? null) : null;
+        if (!threadId || !store.thread(threadId)) return json({ error: `No thread ${ref || "named"} in this Inbox.`, code: "thread_unknown" }, 404);
+        const target = windows.lastUsed();
+        if (target) for (const listener of showListeners) listener(threadId, target);
+        return json({ shown: target !== null, thread: threadId });
+      }
       // `plannotator inbox link`: offer, link, unlink and list linked machines (inbox-machines.ts).
       if (path.startsWith("/api/inbox/control/machines")) {
         try {
@@ -5321,7 +5340,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.served_by !== undefined && body.served_by !== null && !servedBy) {
           throw new InboxError("validation_error", "served_by: 8 to 64 letters, digits, - or _.", { field: "served_by" });
         }
-        windows.report(windowId, { permission, origin: parseWindowOrigin(body.origin), via, servedBy });
+        // `used` (additive): the window got focus, so `plannotator inbox --open <thread>` moves this one.
+        windows.report(windowId, { permission, origin: parseWindowOrigin(body.origin), via, servedBy, used: body.used === true });
         return json({ notify_reach: windows.reach(notificationsState().enabled) });
       }
       if (path === "/api/inbox/restart") {
