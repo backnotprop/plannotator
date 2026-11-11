@@ -600,6 +600,33 @@ test.skipIf(!hasDom)('with an agent, the person chooses: the agent by default, P
   expect(posted.map((p) => p.path)).toEqual([`/api/inbox/messages/${LAST}/reply`]);
 });
 
+// GitLab before 18.9 has no request changes: the review stays a comment there, and the words say what went.
+test.skipIf(!hasDom)('Request changes on GitLab reads as what went: changes requested, or a review posted on an older GitLab', async () => {
+  const theirs = { ...model.pulls.find((p) => p.number === 880)!, head_sha: SHA, platform: 'gitlab' as const, host: 'gitlab.com', key: 'gitlab.com/northwind/web-app#880:pull', url: 'https://gitlab.com/northwind/web-app/-/merge_requests/880' };
+  const answer = { ...model, pulls: [...model.pulls.filter((p) => p.number !== 880), theirs], projects: { ...model.projects, 'gitlab.com/northwind/web-app': ['prj_2'] } };
+  for (const [submission, words] of [[{ status: 'complete' }, 'Changes requested on GitLab'], [{ status: 'complete', postedAs: 'comment' }, 'Review posted on GitLab']] as const) {
+    keepComment(theirs, 'Broken.');
+    reviewAnswer = { status: 200, body: { ok: true, prUrl: theirs.url, submission } };
+    posted = [];
+    mount(<Review stackId={theirs.key} from={theirs.key} answer={answer} />);
+    await settle();
+    await act(async () => el('[data-review-posts] [data-decision-caret]').click());
+    await settle();
+    const choice = [...document.querySelectorAll<HTMLElement>('[data-decision-popover] button, [data-decision-popover] [role="menuitem"]')].find((b) => /Request changes/.test(b.textContent ?? ''));
+    await act(async () => choice!.click());
+    await settle();
+    await act(async () => document.querySelector<HTMLInputElement>('[role="dialog"] input[value="request_changes"]')?.click());
+    await settle();
+    await act(async () => dialogButton('Request Changes').click());
+    await settle();
+    expect(posted.filter((p) => p.path.endsWith('/pulls/review')).map((p) => p.body.action)).toEqual(['request_changes']);
+    expect(el('[data-pull-review-posted]').textContent).toContain(words);
+    act(() => root?.unmount());
+    host?.remove();
+    root = null;
+  }
+});
+
 test.skipIf(!hasDom)('a partial post keeps the dialog open on what did not go, with its retry; a refusal says why', async () => {
   const theirs = { ...model.pulls.find((p) => p.number === 880)!, head_sha: SHA, platform: 'gitlab' as const, host: 'gitlab.com', key: 'gitlab.com/northwind/web-app#880:pull', url: 'https://gitlab.com/northwind/web-app/-/merge_requests/880' };
   const answer = { ...model, pulls: [...model.pulls.filter((p) => p.number !== 880), theirs], projects: { ...model.projects, 'gitlab.com/northwind/web-app': ['prj_2'] } };

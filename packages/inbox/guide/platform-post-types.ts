@@ -44,6 +44,7 @@ export interface PlatformRules {
   mrLabel: string;
   selfAuthored: boolean;
   requestChangesSupported: boolean;
+  selfRequestChangesBlocked: boolean;
   requestChangesUnavailableReason: string | undefined;
 }
 
