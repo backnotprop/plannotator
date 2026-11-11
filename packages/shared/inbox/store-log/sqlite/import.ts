@@ -200,6 +200,7 @@ export async function importJsonlInbox(dataDir: string, options: InboxImportOpti
     const backup = freeBackupName(inboxDir, now(), "jsonl");
     const finish = new Database(importing, { readwrite: true, create: false, strict: true });
     try {
+      finish.run("PRAGMA busy_timeout = 5000");
       finish.run("PRAGMA synchronous = FULL");
       finish.run("INSERT INTO meta (key, value) VALUES ('import_backup', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value", [backup]);
       finish.run("INSERT INTO meta (key, value) VALUES ('import_complete', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value", [now().toISOString()]);

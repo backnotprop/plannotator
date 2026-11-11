@@ -45,12 +45,14 @@ export function sqliteInboxLog(dir: string, file: string = INBOX_DB_FILE): Inbox
 export function openInboxDb(dir: string, file: string = INBOX_DB_FILE): { sqlite: Database; db: InboxDb } {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const sqlite = new Database(join(dir, file), { create: true, strict: true });
+  // First: another connection opening the file at the same moment (the import's check in its second process) holds
+  // it for a moment while it sets up the write-ahead log, and every statement below waits that out instead of failing.
+  sqlite.run("PRAGMA busy_timeout = 5000");
   // 8 KB pages for a new file (an existing one keeps its own): records are a few KB, and the import writes and
   // checks about a third faster than with 4 KB pages.
   sqlite.run("PRAGMA page_size = 8192");
   sqlite.run("PRAGMA journal_mode = WAL");
   sqlite.run("PRAGMA synchronous = NORMAL");
-  sqlite.run("PRAGMA busy_timeout = 5000");
   const db = drizzle({ client: sqlite });
   migrateInboxDb(db);
   // Fold a long write-ahead log back into the file before the start's one big read.

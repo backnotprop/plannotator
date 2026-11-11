@@ -58,6 +58,8 @@ export function digestOf(dataDir: string, now: () => Date, side: InboxCheckSide)
 export function integrityOf(file: string): string {
   const db = new Database(file, { readwrite: true, create: false, strict: true });
   try {
+    // The import reads the same file meanwhile: wait out its moment of setting up the write-ahead log.
+    db.run("PRAGMA busy_timeout = 5000");
     return db.query<{ integrity_check: string }, []>("PRAGMA integrity_check").get()?.integrity_check ?? "no answer";
   } finally {
     db.close();
