@@ -125,8 +125,9 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     thread: 'ledger-migration-dry-run-before-the-q3-close-and-audit',
     body: ['Two calls.', '', ':::question', 'Run the dry run on Friday?', '', '- [ ] Yes', '- [ ] No', ':::', '', ':::question', 'Keep the old ledger?', '', '- [ ] Yes', '- [ ] No', ':::'].join('\n'),
   });
-  // A second agent on the long project's thread: two marks to wrap after the long name.
-  await pi.send({ project_path: northwind, reply_to: long.message_id ?? long.thread_id, body: 'Pi here: the dry run needs the audit sign-off first.' });
+  // A second agent on the long project's thread: two marks to wrap after the long name. Its words are the row's grey
+  // line (the latest unread message: approval "inbox-row-latest-preview"), long enough to be cut on every width here.
+  await pi.send({ project_path: northwind, reply_to: long.message_id ?? long.thread_id, body: "Pi here: the dry run needs the audit sign-off first, and Friday's cutover waits on the ledger reconciliation plan." });
   const named = await claude.send({ project_path: billing, body: DEMO_MESSAGES.named, thread: 'refund-webhooks' });
   // A second agent in that thread: its row shows the pair of marks.
   await pi.send({ project_path: billing, reply_to: named.message_id ?? named.thread_id, body: 'Pi here: the webhook is signed, so trusting it is safe.' });
