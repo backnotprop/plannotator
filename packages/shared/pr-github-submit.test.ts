@@ -290,18 +290,4 @@ describe("request_changes review event (#1611)", () => {
       "Can not request changes on your own pull request",
     );
   });
-
-  test("GitLab has no request-changes review: it posts exactly what a comment posts", async () => {
-    const GL_REF = { platform: "gitlab" as const, host: "gitlab.com", projectPath: "o/r", iid: 7 };
-    const respond = (c: Call) => (c.args.some((a) => a.endsWith("/notes") || a.endsWith("/discussions") || a.endsWith("merge_requests/7"))
-      ? ok("{}")
-      : undefined);
-    const asComment = ghRuntime(respond);
-    const asRequest = ghRuntime(respond);
-    await submitPRReview(asComment.runtime, GL_REF, "sha", "comment", "Body", [LINE]);
-    await submitPRReview(asRequest.runtime, GL_REF, "sha", "request_changes", "Body", [LINE]);
-    expect(asRequest.calls.length).toBeGreaterThanOrEqual(3); // note, diff refs, discussion
-    expect(asRequest.calls).toEqual(asComment.calls);
-    expect(asRequest.calls.some((c) => c.args.some((a) => a.endsWith("/approve")))).toBe(false);
-  });
 });

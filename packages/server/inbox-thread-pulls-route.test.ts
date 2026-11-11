@@ -6,7 +6,9 @@
  * that half-writes; the person's change recorded as an agent's; one gh call
  * per PR instead of one per repository; a merged PR read again on every view;
  * a state that lands on one thread but not on another holding the same PR;
- * and a fixture that is not read in the sandbox.
+ * a fixture that is not read in the sandbox; and a window's read that waits
+ * on the forge (a stuck glab once kept a hover on "Loading" and, with the
+ * browser's few connections held, stopped threads from opening).
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -15,7 +17,12 @@ import { join } from "node:path";
 import { parseInboxThreadPullRefs, type InboxAuthor, type InboxThreadPullsAnswer } from "@plannotator/core/inbox-types";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { InboxStore } from "@plannotator/shared/inbox/store";
-import { createThreadPullStates, createThreadPullsRoute, threadPullsChangedForWake, type ThreadPullFixture } from "./inbox-thread-pulls";
+import { createThreadPullStates, createThreadPullsRoute, THREAD_PULLS_ADD_WAIT_MS, threadPullsChangedForWake, type ThreadPullFixture } from "./inbox-thread-pulls";
+
+/** Let the reads behind an answer land (the stand-in forges answer at once). */
+const settle = async () => {
+  for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+};
 
 const roots: string[] = [];
 afterEach(() => {
@@ -42,7 +49,7 @@ function fakeGh(states: Record<number, { state: string; isDraft?: boolean; base?
   return { run, calls };
 }
 
-function world(options: { fixture?: () => ThreadPullFixture | null; gh?: ReturnType<typeof fakeGh> } = {}) {
+function world(options: { fixture?: () => ThreadPullFixture | null; gh?: { run: unknown; calls: string[][] }; onLiveChange?: (threadIds: readonly string[]) => void } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "plannotator-inbox-pulls-route-"));
   roots.push(dir);
   let now = Date.parse("2026-11-08T10:00:00.000Z");
@@ -50,7 +57,7 @@ function world(options: { fixture?: () => ThreadPullFixture | null; gh?: ReturnT
   const project = store.ensureProject({ name: "billing", root: "/work/billing" });
   const thread = store.sendMessage({ project_id: project.id, author: AGENT, body: "Opened the retry PR.", subject: "Invoice retries" }).message.id;
   const gh = options.gh ?? fakeGh({});
-  const states = createThreadPullStates({ store, run: gh.run as never, now: () => now, fixture: options.fixture ?? null });
+  const states = createThreadPullStates({ store, run: gh.run as never, now: () => now, fixture: options.fixture ?? null, onLiveChange: options.onLiveChange });
   const route = createThreadPullsRoute({
     store,
     states,
@@ -122,6 +129,10 @@ describe("the state reader", () => {
     expect(other).not.toBe(w.thread);
     w.agentAdd(w.thread, "o/r#1", "o/r#2", "o/r#3");
     w.agentAdd(other, "o/r#2");
+    // The read answers what is known at once (nothing read yet), and reads behind it.
+    const first = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
+    expect(first.pulls.map((p) => p.state)).toEqual(["unknown", "unknown", "unknown"]);
+    await settle();
     const answer = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
     expect(gh.calls).toHaveLength(1);
     expect(gh.calls[0]!.slice(0, 3)).toEqual(["gh", "api", "graphql"]);
@@ -142,10 +153,13 @@ describe("the state reader", () => {
     const w = world({ gh });
     w.agentAdd(w.thread, "o/r#1", "o/r#2");
     await w.get(w.thread);
+    await settle();
     await w.get(w.thread);
+    await settle();
     expect(gh.calls).toHaveLength(1);
     w.advance(31_000);
     await w.get(w.thread);
+    await settle();
     expect(gh.calls).toHaveLength(2);
     expect(gh.calls[1]!.join(" ")).toContain("n2: pullRequest");
     expect(gh.calls[1]!.join(" ")).not.toContain("n1: pullRequest");
@@ -170,6 +184,64 @@ describe("the state reader", () => {
       ["o/r#1", "open", "failing"],
       ["acme/api!3", "merged", null],
     ]);
+  });
+});
+
+describe("a forge that never answers", () => {
+  /** A gh that never exits (a stuck CLI the runner has not ended yet): every call stays pending. */
+  const stuckGh = () => {
+    const calls: string[][] = [];
+    return { calls, run: (cli: string, args: string[]) => (calls.push([cli, ...args]), new Promise(() => {})) };
+  };
+  const within = async <T>(work: Promise<T>, ms: number): Promise<T | "late"> =>
+    Promise.race([work, new Promise<"late">((resolve) => setTimeout(() => resolve("late"), ms))]);
+
+  test("the window's read answers at once with what is known, for this thread and every later one", async () => {
+    const gh = stuckGh();
+    const w = world({ gh });
+    w.agentAdd(w.thread, "o/r#1");
+    const others = [1, 2, 3, 4, 5].map((i) => {
+      const id = w.store.sendMessage({ project_id: w.project.id, author: { ...AGENT, session: `ses_${i}` }, body: `Thread ${i}.`, subject: `T${i}` }).message.id;
+      w.agentAdd(id, `o/r${i}#${i}`);
+      return id;
+    });
+    // Hovered again and again, then every other thread opened: each read answers, none waits on the stuck gh.
+    for (const id of [w.thread, w.thread, w.thread, ...others]) {
+      const res = await within(w.get(id)!, 200);
+      expect(res).not.toBe("late");
+      const answer = (await (res as Response).json()) as InboxThreadPullsAnswer;
+      expect(answer.pulls).toHaveLength(1);
+      expect(answer.pulls[0]!.state).toBe("unknown");
+    }
+    // The reads behind them did start (two at once at most, the others queued), so a forge that comes back is read.
+    expect(gh.calls.length).toBeGreaterThan(0);
+  });
+
+  test("the person's Add waits for the new PR's read only briefly", async () => {
+    const w = world({ gh: stuckGh() });
+    const started = Date.now();
+    const res = await within(w.post(w.thread, { add: ["o/r#7"] })!, THREAD_PULLS_ADD_WAIT_MS + 1_000);
+    expect(res).not.toBe("late");
+    expect(Date.now() - started).toBeGreaterThanOrEqual(THREAD_PULLS_ADD_WAIT_MS - 50);
+    const answer = (await (res as Response).json()) as InboxThreadPullsAnswer;
+    expect(answer.pulls.map((p) => [p.ref, p.state])).toEqual([["o/r#7", "unknown"]]);
+  });
+
+  test("checks and the review read behind the answer reach the windows (they write no record)", async () => {
+    const heard: string[][] = [];
+    const gh = fakeGh({ 2: { state: "OPEN", checks: "FAILURE" } });
+    const w = world({ gh, onLiveChange: (ids) => heard.push([...ids]) });
+    w.agentAdd(w.thread, "o/r#2");
+    await w.get(w.thread);
+    await settle();
+    expect(heard).toEqual([[w.thread]]);
+    const answer = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
+    expect(answer.pulls.map((p) => [p.state, p.checks])).toEqual([["open", "failing"]]);
+    // The same answer again (a later read): nothing new to say.
+    w.advance(31_000);
+    await w.get(w.thread);
+    await settle();
+    expect(heard).toHaveLength(1);
   });
 });
 
