@@ -18,8 +18,6 @@ const eventRow = z.object({
   data: z.string(),
 });
 
-const record = z.looseObject({ id: z.string() });
-
 /** One `events` row as the store line it was written from, or null when it does not read. */
 export function lineOfRow(row: unknown): InboxLine | null {
   const checked = eventRow.safeParse(row);
@@ -30,8 +28,8 @@ export function lineOfRow(row: unknown): InboxLine | null {
   } catch {
     return null;
   }
-  const parsed = record.safeParse(value);
-  if (!parsed.success || parsed.data.id !== checked.data.subject_id) return null;
+  // An object whose id is the line's (checked by hand: a Zod object check copies the whole record, at every start).
+  if (!value || typeof value !== "object" || Array.isArray(value) || (value as { id?: unknown }).id !== checked.data.subject_id) return null;
   const { seq, at, v, kind, subject_id } = checked.data;
   // The record as parsed, not Zod's copy: its keys keep the order they were written in.
   return { v, seq, at, kind, id: subject_id, record: value } as InboxLine;
