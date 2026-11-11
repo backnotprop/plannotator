@@ -275,6 +275,48 @@ describe("a fetchable set", () => {
     for (let n = 1; n <= 20; n++) expect(sniffImageContentType(offline.read("blobs", String(n))!.body)).toBe("image/png");
   });
 
+  test("a link that drops for a moment loses nothing; one that stays down stops soon, showing how far it got", async () => {
+    const served = await fake({ count: 30 });
+    let icons = 0;
+    let downUntil = 0;
+    let downForGood = false;
+    const flaky = (async (input: URL | string, init?: RequestInit) => {
+      const isIcon = String(input).includes("/icons/");
+      if (isIcon && (downForGood || Date.now() < downUntil)) throw new TypeError("network down");
+      if (isIcon && ++icons === 10) downUntil = Date.now() + 150;
+      return fetch(input, init);
+    }) as unknown as typeof fetch;
+    const dir = join(scratch("pn-icon-set-flaky-"), "icon-sets");
+    const blip = fetcherAt(dir, served.pointer, { fetch: flaky, retryWaitsMs: [50, 100, 200] });
+    await blip.list(true);
+    await blip.get("blobs");
+    await blip.running("blobs");
+    expect((await blip.list(false))[0]!.get).toEqual({ state: "done", have: 30 });
+
+    rmSync(dir, { recursive: true, force: true });
+    icons = 0;
+    downUntil = 0;
+    const gone = fetcherAt(dir, served.pointer, {
+      fetch: (async (input: URL | string, init?: RequestInit) => {
+        if (String(input).includes("/icons/") && ++icons > 10) downForGood = true;
+        return flaky(input, init);
+      }) as unknown as typeof fetch,
+      retryWaitsMs: [50, 100, 200],
+    });
+    await gone.list(true);
+    const started = Date.now();
+    await gone.get("blobs");
+    await gone.running("blobs");
+    // Stopped once one icon had waited through every try, not after waiting on each of the 20 left.
+    expect(Date.now() - started).toBeLessThan(2_000);
+    const state = (await gone.list(false))[0]!.get!;
+    expect(state.state).toBe("failed");
+    // What it kept stays kept (Get again goes on from there).
+    expect(state.have).toBeGreaterThan(0);
+    expect(state.have).toBe(readdirSync(join(dir, "blobs")).filter((name) => name.endsWith(".png")).length);
+    expect(readdirSync(join(dir, "blobs")).filter((name) => name.includes(".tmp"))).toEqual([]);
+  });
+
   test("a file that is not a picture, or is too big, is refused and never kept; the rest are", async () => {
     const served = await fake({ count: 8, notImage: [3], huge: [5] });
     const dir = join(scratch("pn-icon-set-refuse-"), "icon-sets");

@@ -45,6 +45,8 @@ export const ICON_SET_CAPS = {
   redirects: 3,
   timeoutMs: 20_000,
   together: 10,
+  /** The waits before trying an unreachable icon again: the link back within about half a minute loses nothing. */
+  retryWaitsMs: [2_000, 8_000, 20_000],
 } as const;
 
 /** How long a read pointer is believed (a missing one: a shorter while). */
@@ -111,8 +113,29 @@ export interface FetchPolicy {
   allowPrivate: boolean;
 }
 
-/** GET a URL under the policy: http(s) only, each redirect checked again, the body cut off past `max` bytes. */
-export async function carefulGet(raw: string, max: number, policy: FetchPolicy): Promise<Got> {
+/**
+ * GET a URL under the policy: http(s) only, each redirect checked again, the body cut off past `max` bytes. The whole
+ * GET (connecting, redirects, the body) has one deadline that nothing outlives: on a link that stalls without closing
+ * (hotel WiFi), a read that never ends is given up, never waited on.
+ */
+export async function carefulGet(raw: string, max: number, policy: FetchPolicy, timeoutMs: number = ICON_SET_CAPS.timeoutMs): Promise<Got> {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, fail) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      fail(new Error("timed out"));
+    }, timeoutMs);
+  });
+  late.catch(() => {});
+  try {
+    return await carefulGetBefore(raw, max, policy, controller.signal, late);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function carefulGetBefore(raw: string, max: number, policy: FetchPolicy, signal: AbortSignal, late: Promise<never>): Promise<Got> {
   let url: URL;
   try {
     url = new URL(raw);
@@ -125,7 +148,7 @@ export async function carefulGet(raw: string, max: number, policy: FetchPolicy):
     if (!policy.allowPrivate && (await policy.classify(url.hostname)) === "private") return { ok: false, reason: "private" };
     let res: Response;
     try {
-      res = await policy.fetch(url, { redirect: "manual", signal: AbortSignal.timeout(ICON_SET_CAPS.timeoutMs), headers: { accept: "*/*" } });
+      res = await Promise.race([policy.fetch(url, { redirect: "manual", signal, headers: { accept: "*/*" } }), late]);
     } catch {
       return { ok: false, reason: "network" };
     }
@@ -153,7 +176,10 @@ export async function carefulGet(raw: string, max: number, policy: FetchPolicy):
       const reader = res.body?.getReader();
       if (reader) {
         for (;;) {
-          const { done, value } = await reader.read();
+          const { done, value } = await Promise.race([reader.read(), late]).catch((cause: unknown) => {
+            void reader.cancel().catch(() => {});
+            throw cause;
+          });
           if (done) break;
           total += value.byteLength;
           if (total > max) {
@@ -272,11 +298,14 @@ export function createIconSetFetcher(options: {
   fetch?: typeof fetch;
   classify?: (hostname: string) => Promise<HostKind>;
   now?: () => number;
+  /** Tests: shorter waits before an unreachable icon is tried again. */
+  retryWaitsMs?: readonly number[];
 }): IconSetFetcher {
   const { dir, pointer, builtIn } = options;
   const doFetch = options.fetch ?? fetch;
   const classify = options.classify ?? classifyHost;
   const now = options.now ?? Date.now;
+  const waits = options.retryWaitsMs ?? ICON_SET_CAPS.retryWaitsMs;
   let offered: { sets: PointerEntry[]; at: number; ok: boolean; private: boolean } | null = null;
   let reading: Promise<void> | null = null;
   const runs = new Map<string, Promise<void>>();
@@ -431,29 +460,49 @@ export function createIconSetFetcher(options: {
     let next = 0;
     let complete = true;
     let over = false;
-    const one = async (icon: InboxIconSetIcon) => {
+    /** One icon from its address, then each mirror's: "kept", "refused" (not one to keep), or "unreachable". */
+    const attempt = async (icon: InboxIconSetIcon): Promise<"kept" | "refused" | "unreachable"> => {
+      let unreachable = true;
       for (const pattern of [kept.icon, ...kept.mirrors]) {
         const got = await carefulGet(iconUrl(pattern, icon.n), ICON_SET_CAPS.iconBytes, policy(kept.local === true));
         if (!got.ok) {
           // A refusal of the address itself would be the same on a mirror's; a missing file might not be.
-          if (got.reason === "too_big") break;
+          if (got.reason === "too_big") return "refused";
+          if (got.reason !== "network") unreachable = false;
           continue;
         }
         const type = sniffImageContentType(got.bytes);
-        if (!type || !EXT[type]) break;
+        if (!type || !EXT[type]) return "refused";
         const bytes = kept.trim && type === "image/png" ? (trimPng(got.bytes) ?? got.bytes) : got.bytes;
         if (bytesKept + bytes.byteLength > ICON_SET_CAPS.setBytes || bytes.byteLength > ICON_SET_CAPS.iconBytes) {
           over = true;
-          break;
+          return "refused";
         }
         bytesKept += bytes.byteLength;
         writeAtomic(join(folder, `${icon.n}.${EXT[type]}`), bytes);
-        return;
+        return "kept";
+      }
+      return unreachable ? "unreachable" : "refused";
+    };
+    /** The link stayed down through every wait: the run stops (the set shows how far it got, and Get again). */
+    let down = false;
+    const one = async (icon: InboxIconSetIcon) => {
+      // A link that drops for a moment (hotel WiFi) waits and tries again, rather than running through every icon
+      // left in a second and stopping short.
+      for (let tries = 0; ; tries++) {
+        const result = await attempt(icon);
+        if (result === "kept") return;
+        if (result === "refused") break;
+        if (tries >= waits.length || down) {
+          down = true;
+          break;
+        }
+        await new Promise((done) => setTimeout(done, waits[tries]));
       }
       complete = false;
     };
     const worker = async () => {
-      while (next < todo.length && !over) await one(todo[next++]!);
+      while (next < todo.length && !over && !down) await one(todo[next++]!);
     };
     await Promise.all(Array.from({ length: Math.min(ICON_SET_CAPS.together, todo.length) }, worker));
     if (complete && !over) rmSync(join(folder, ".getting"), { force: true });
