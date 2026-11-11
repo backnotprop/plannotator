@@ -1,7 +1,3 @@
-/**
- * The first arrow click's read. What regresses: a brief forge failure, or an answer of "none", being kept so the arrows
- * never work again in this reader; a file read twice for one patch.
- */
 import { expect, test } from 'bun:test';
 import type { DiffFile } from '@plannotator/core/diff-files';
 import type { InboxFileContents } from '@plannotator/core/inbox-types';
