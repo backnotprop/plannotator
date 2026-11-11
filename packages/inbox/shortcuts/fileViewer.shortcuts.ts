@@ -1,11 +1,5 @@
 import { defineShortcutScope, htmlAnnotateShortcuts } from '@plannotator/ui/shortcuts';
 
-/**
- * The keys of an open file (AttachmentPane): beside the thread and full
- * screen. Wired with `useShortcutScope`; when each one stands down is in
- * `guards.ts`, `stepKeyIntent` (stepping.ts) and the Escape ladder
- * (escapeLadder.ts).
- */
 export const inboxFileViewerShortcuts = defineShortcutScope({
   id: 'inbox-file-viewer',
   title: 'Open file',
@@ -37,7 +31,6 @@ export const inboxFileViewerShortcuts = defineShortcutScope({
     },
     toggleTools: {
       description: 'Hide or show the full-screen toolbar',
-      // The html-annotate chord, from its one definition: the same keys hide the tools in plan review.
       bindings: htmlAnnotateShortcuts.shortcuts.toggleTools.bindings,
       section: 'Files',
       hint: 'An HTML file in full screen. Works from inside the page too.',
@@ -46,7 +39,6 @@ export const inboxFileViewerShortcuts = defineShortcutScope({
     },
     toggleAnnotate: {
       description: 'Annotate or Interact',
-      // The html-annotate chord, as the tooltip says: from anywhere in the open HTML file, not only inside the page.
       bindings: htmlAnnotateShortcuts.shortcuts.toggleAnnotateMode.bindings,
       section: 'Files',
       hint: 'An HTML file: Annotate takes clicks for comments, Interact hands them to the page.',

@@ -1,10 +1,4 @@
-/**
- * Escape closes an open sheet wherever focus is: a click on nothing leaves focus on the page, and WebKit never moves it
- * to a clicked button. Not a new shortcut: the same Escape, read the way App's pages read it. What already used this
- * key (a composer, a card, a menu: they stop or mark it) and a place to type keep it: a second Escape closes the sheet.
- * Not `selectionToolbarShowing`: ui's toolbar is never on the page these sheets belong to, whose selection toolbar is
- * review-editor's own. Unlike App's Settings path it does not skip `[aria-expanded="true"]`: the sheet's own button is one, and a menu marks the key.
- */
+/** Escape closes an open sheet wherever focus is: a click on nothing leaves focus on the page, and WebKit never moves it to a clicked button. */
 
 import { useEffect, useRef } from 'react';
 import { inOverlay, isComposingKey, isEditableTarget, keyTarget, modalOpen } from './guards';
