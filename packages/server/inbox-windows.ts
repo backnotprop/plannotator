@@ -68,6 +68,8 @@ interface WindowRecord {
   permission: InboxWindowPermission;
   origin: string | null;
   via: "local" | "tailnet";
+  /** When the window last reported `used` (it had focus); 0 before that. */
+  usedAt: number;
   drop: ReturnType<typeof setTimeout> | null;
 }
 
@@ -79,7 +81,9 @@ export interface InboxWindows {
    * leader whose stream this follower tab listens to (absent or null for a
    * tab with its own stream). A report also takes back an earlier `gone`.
    */
-  report(id: string, report: { permission: InboxWindowPermission; origin: string | null; via: "local" | "tailnet"; servedBy?: string | null }): void;
+  report(id: string, report: { permission: InboxWindowPermission; origin: string | null; via: "local" | "tailnet"; servedBy?: string | null; used?: boolean }): void;
+  /** The open window on this computer the person used last (`plannotator inbox --open <thread>` moves it), or null. */
+  lastUsed(): string | null;
   /** The tab closed (its pagehide beacon, or the leader saw its lock released): it stops counting now. */
   leave(id: string): void;
   /** What Settings shows: open windows and how many can notify. */
@@ -142,7 +146,7 @@ export function createInboxWindows(options: { graceMs?: number; now?: () => numb
   const recordOf = (id: string, via: "local" | "tailnet"): WindowRecord => {
     let record = windows.get(id);
     if (!record) {
-      record = { streams: 0, streamEndedAt: null, servedBy: null, gone: false, permission: "unknown", origin: null, via, drop: null };
+      record = { streams: 0, streamEndedAt: null, servedBy: null, gone: false, permission: "unknown", origin: null, via, usedAt: 0, drop: null };
       windows.set(id, record);
     }
     return record;
@@ -190,6 +194,7 @@ export function createInboxWindows(options: { graceMs?: number; now?: () => numb
       record.via = report.via;
       record.gone = false;
       record.servedBy = report.servedBy && report.servedBy !== id ? report.servedBy : null;
+      if (report.used) record.usedAt = now();
       // A report before the stream (or after it closed) is kept for the grace only
       // (a follower's, for as long as its leader is known: see scheduleDrop).
       if (record.streams === 0) scheduleDrop(id, record);
@@ -205,6 +210,16 @@ export function createInboxWindows(options: { graceMs?: number; now?: () => numb
     },
     reach(enabled) {
       return { enabled, ...summary() };
+    },
+    lastUsed() {
+      // Only this computer's windows: a window opened over the tailnet is another device's, never moved from here.
+      // A tie goes to the window that opened later.
+      let best: [string, WindowRecord] | null = null;
+      for (const entry of windows) {
+        if (entry[1].via !== "local" || !isOpen(entry[1])) continue;
+        if (!best || entry[1].usedAt >= best[1].usedAt) best = entry;
+      }
+      return best ? best[0] : null;
     },
     subscribe(listener) {
       listeners.add(listener);
