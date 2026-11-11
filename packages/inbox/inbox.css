@@ -4221,6 +4221,14 @@ label.ib-anote-r:hover { background: color-mix(in oklch, var(--muted) 40%, trans
 /* Settings → Agents' "Scratch folders" path, while it is changed. */
 .ib-agrow .ib-agpath { width: 100%; min-width: 0; height: 30px; padding: 0 8px; border-radius: 7px; border: 1px solid var(--border); background: var(--background); color: var(--foreground); font: inherit; font-family: var(--font-mono); font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-agrow .ib-agpath:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; }
+/* Settings → Agents' launch defaults (LaunchDefaults.tsx): one line each, the value, what sits beside it (Effort's
+   menu) and a short muted hint; a long value is cut in the middle (FileName) so the hint keeps its place. On a phone the
+   hint takes the next line when the line has no room. */
+.ib-agrow .ib-aglv { display: flex; align-items: center; gap: 4px 10px; min-width: 0; }
+.ib-agrow .ib-aglv > .ib-agval { display: block; min-width: 0; max-width: 100%; }
+.ib-agrow .ib-aglv > .ib-agpath { flex: 1 1 200px; width: auto; }
+.ib-agrow .ib-aglv > .ib-agselect { flex: none; height: 26px; }
+.ib-agrow .ib-aghint { flex: none; }
 .ib-agrow .ib-agsub { grid-column: 2 / 4; margin-top: -2px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; display: flex; gap: 6px; align-items: flex-start; color: var(--muted-foreground); }
 .ib-agrow .ib-agsub.ib-agwarn { color: color-mix(in oklch, var(--warning) 80%, var(--foreground)); }
 .pn-inbox .ib-agrow .ib-agsub svg.ib-ic { width: 13px; height: 13px; margin-top: 2px; flex: none; }
@@ -4244,6 +4252,7 @@ label.ib-anote-r:hover { background: color-mix(in oklch, var(--muted) 40%, trans
   .ib-agrow .ib-agv { grid-column: 1 / 2; grid-row: 2; }
   .ib-agrow .ib-agr { grid-column: 2; grid-row: 1 / 3; }
   .ib-agrow .ib-agsub { grid-column: 1 / 3; }
+  .ib-agrow .ib-aglv { flex-wrap: wrap; }
   .ib-aghead { padding: 11px 12px 4px; flex-wrap: wrap; }
   .ib-aghead .ib-agvia { flex-basis: 100%; order: 3; margin-left: 40px; margin-top: -4px; }
 }
