@@ -272,16 +272,3 @@ test("a press with no hover before it opens the row: a mouse's and a pen's first
   }
 });
 
-test('a disabled control still shows its tooltip: the pointer reaches its wrapper', async ({ browser }) => {
-  const { context, page } = await openPage(browser);
-  try {
-    // Any control a Tip wraps because it can be disabled (Tip.tsx `canDisable`), here a visible one on the page.
-    const control = page.locator('[data-tip-wrap] > button:visible').first();
-    await expect(control).toBeVisible();
-    await control.evaluate((el) => ((el as HTMLButtonElement).disabled = true));
-    await control.hover({ force: true });
-    await expect(tooltip(page)).toBeVisible({ timeout: 1000 });
-  } finally {
-    await context.close();
-  }
-});

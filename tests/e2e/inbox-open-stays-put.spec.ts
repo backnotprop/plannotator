@@ -585,12 +585,13 @@ test('desktop: a seen update held in New keeps Mark read; it moves the row to Qu
   expect(await sectionOf(page, first)).toBe('new');
   await page.locator(`.ib-lbody [data-row="${first}"]`).hover();
   await shot(page, 'seen-held-01-opened');
+  await expect(page.locator(`.ib-lbody [data-row="${first}"] [data-row-mark-unread]`)).toBeVisible();
+  await expect(page.locator(`.ib-lbody [data-row="${first}"] [data-row-mark-read]`)).toHaveCount(0);
   // Read by opening it: the header's ⋯ offers Mark unread, as the row does.
   await more.click();
   await expect(page.locator('[data-thread-menu] [data-thread-unread-item]')).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(page.locator(`.ib-lbody [data-row="${first}"] [data-row-mark-unread]`)).toBeVisible();
-  await expect(page.locator(`.ib-lbody [data-row="${first}"] [data-row-mark-read]`)).toHaveCount(0);
+  await expect(page.locator('[data-thread-menu]')).toHaveCount(0);
   const moreBox = (await more.boundingBox())!;
 
   // E: the row moves to Quiet now, the toast says so with Undo; nothing in the header moves.
