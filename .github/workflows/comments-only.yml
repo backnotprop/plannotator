@@ -1,0 +1,48 @@
+name: Comments only
+
+on:
+  workflow_call:
+    outputs:
+      verified:
+        value: ${{ jobs.verified.outputs.verified }}
+
+permissions:
+  contents: read
+
+jobs:
+  verified:
+    name: verified
+    if: github.event_name == 'pull_request' && contains(github.head_ref, 'comment-sweep')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      verified: ${{ steps.verdict.outputs.verified }}
+    steps:
+      # The verifier runs from the base branch, never from the pull request, so a
+      # pull request cannot edit it into approving itself.
+      - name: Check out the base branch's verifier
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
+
+      - name: Check out the change as data
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          path: change
+          fetch-depth: 2
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      - name: Install the base branch's dependencies
+        working-directory: base
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Verify the change only touches comments
+        id: verdict
+        working-directory: base
+        run: bun run scripts/ci-comments-only.ts --repo "$GITHUB_WORKSPACE/change" HEAD^1 HEAD

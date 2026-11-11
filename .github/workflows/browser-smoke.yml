@@ -30,8 +30,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  comments-only:
+    name: Comments only
+    uses: ./.github/workflows/comments-only.yml
+
   smoke:
     name: Browser smoke (Inbox core paths against the compiled binary)
+    needs: comments-only
+    if: ${{ !cancelled() && needs.comments-only.outputs.verified != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

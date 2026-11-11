@@ -27,11 +27,17 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  comments-only:
+    name: Comments only
+    uses: ./.github/workflows/comments-only.yml
+
   # Everything that is not a sharded test file: the checks that used to lead
   # the single test job, and the two DOM steps that must run in processes of
   # their own.
   checks:
     name: Checks (types, packages, own-process DOM tests, lane guards)
+    needs: comments-only
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
 
@@ -118,6 +124,10 @@ jobs:
       - name: Guard the DOM test allowlist and the test lanes
         run: bun test scripts/dom-test-allowlist.test.ts scripts/ci-test-lanes.test.ts
 
+      - name: Run the source guards for a comments-only change
+        if: needs.comments-only.outputs.verified == 'true'
+        run: bun run scripts/ci-comments-only.ts guards
+
   # The plain `bun test` sweep, split across jobs (scripts/ci-test-lane.ts).
   # It took 20-23 min as one process; each lane now takes about 4-7 min.
   # Few lanes on purpose: every job of a run asks for a runner at once, and
@@ -127,6 +137,8 @@ jobs:
   # test file always lands in some shard.
   unit:
     name: Unit tests (${{ matrix.lane }})
+    needs: comments-only
+    if: ${{ !cancelled() && needs.comments-only.outputs.verified != 'true' }}
     runs-on: ubuntu-24.04
     # A backstop, not a budget: lanes take about 4-7 min. Some tests run on
     # fake timers, where bun's per-test timeout cannot fire, so a stuck await
@@ -163,6 +175,8 @@ jobs:
   # differently across platforms; without it most of the list fails.
   dom:
     name: DOM tests (${{ matrix.lane }})
+    needs: comments-only
+    if: ${{ !cancelled() && needs.comments-only.outputs.verified != 'true' }}
     runs-on: ubuntu-24.04
     # A backstop, not a budget: lanes take about 3-6 min. Some DOM tests run on
     # fake timers, where bun's per-test timeout cannot fire.
@@ -194,6 +208,8 @@ jobs:
 
   opencode-v2:
     name: OpenCode 2 installed package
+    needs: comments-only
+    if: ${{ !cancelled() && needs.comments-only.outputs.verified != 'true' }}
     runs-on: ubuntu-24.04
     # The smoke's own budgets (health 120s, plugin activation 300s) are the real assertion;
     # this is only a backstop so a genuinely wedged runner cannot idle for hours.
@@ -279,6 +295,8 @@ jobs:
 
   guides-show:
     name: guides.show viewer (budgets + pinned manifest)
+    needs: comments-only
+    if: ${{ !cancelled() && needs.comments-only.outputs.verified != 'true' }}
     runs-on: ubuntu-24.04
 
     steps:
