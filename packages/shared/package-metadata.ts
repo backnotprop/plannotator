@@ -1,19 +1,4 @@
-/**
- * npm metadata for the review's package cards: weekly downloads, license,
- * release date, deprecation. Runtime-agnostic (fetch only).
- *
- * Nothing here runs until the reviewer turned the lookup on, and the names it
- * is given were already filtered by `packageRouting` (see
- * package-changes-service.ts): a name under a private scope, or any name when
- * the default registry is not npm's, never reaches `lookupPackages`.
- *
- * Sources (measured 2026-10-26):
- *  - license, publish time, latest, deprecated: the full packument,
- *    `GET <registry>/<name>` (the only npm document with per-version `time`;
- *    100 KB to 2 MB gzipped for popular packages).
- *  - weekly downloads: `GET <downloads>/downloads/point/last-week/<a,b,c>`
- *    (bulk for unscoped names; npm refuses scoped names in bulk).
- */
+/** npm metadata for package cards. Names are filtered by `packageRouting` first: private-scope names, or any name when the registry is not npm, never reach `lookupPackages`. */
 import type { PackageMetadata } from "@plannotator/core/package-changes";
 
 export const NPM_REGISTRY = "https://registry.npmjs.org";
@@ -25,9 +10,7 @@ const CACHE_MS = 60 * 60 * 1000;
 export interface PackageLookupRequest { name: string; version: string | null }
 
 export interface PackageRouting {
-  /** The default registry is not npm's, or a setting could not be read: nothing may be sent. */
   privateDefault: boolean;
-  /** Scopes (`@acme`) configured for another registry, or configured at all in Yarn or Bun. */
   privateScopes: Set<string>;
 }
 
@@ -51,7 +34,6 @@ function scopeOf(raw: string): string | null {
   return s.startsWith("@") ? s : `@${s}`;
 }
 
-/** Drops a trailing ` # comment` outside quotes. */
 function stripComment(line: string): string {
   let quote = "";
   for (let i = 0; i < line.length; i++) {
@@ -64,10 +46,6 @@ function stripComment(line: string): string {
   return line;
 }
 
-/**
- * The keys of a flow mapping (`{ acme: {...}, "@b": x }` in YAML, `{ acme = "..." }`
- * in TOML), depth one only. Null when the braces never close.
- */
 function flowKeys(text: string, separator: ":" | "="): string[] | null {
   const open = text.indexOf("{");
   if (open < 0) return null;
@@ -109,15 +87,11 @@ function flowKeys(text: string, separator: ":" | "="): string[] | null {
   return null;
 }
 
-/** The registry settings package managers read, as text. */
 export interface PackageRoutingFiles {
   npmrc: readonly string[];
-  /** Yarn Berry, `.yarnrc.yml`. */
   yarnrc: readonly string[];
-  /** Yarn classic, `.yarnrc`. */
   yarnrcClassic?: readonly string[];
   bunfig: readonly string[];
-  /** A settings file existed but could not be read: nothing may be sent. */
   unreadable?: boolean;
 }
 
@@ -143,11 +117,6 @@ function readYarnrcClassic(text: string, routing: PackageRouting): void {
   }
 }
 
-/**
- * `.yarnrc.yml`: `npmRegistryServer` and the keys of `npmScopes`, in block or
- * flow style at any indent. A scope Yarn configures at all counts as private;
- * an `npmScopes` this cannot read withholds everything.
- */
 function readYarnrcYml(text: string, routing: PackageRouting): void {
   const lines = text.split(/\r?\n/).map(stripComment).filter((l) => l.trim() && !l.trim().startsWith("#"));
   if (lines.length === 0) return;
@@ -187,7 +156,6 @@ function readYarnrcYml(text: string, routing: PackageRouting): void {
   }
 }
 
-/** `bunfig.toml`: `[install] registry`, and any scope under `install.scopes` (a table, a sub-table or an inline table). */
 function readBunfig(text: string, routing: PackageRouting): void {
   let table = "";
   for (const raw of text.split(/\r?\n/)) {
@@ -221,11 +189,7 @@ function readBunfig(text: string, routing: PackageRouting): void {
   }
 }
 
-/**
- * Registry settings in the environment. npm reads any `npm_config_*` key
- * case-insensitively; Yarn and Bun have their own. A scoped key withholds its
- * scope; a default one, or one this cannot read, withholds everything.
- */
+/** npm reads `npm_config_*` keys case-insensitively. A scoped key withholds its scope; a default one, or one this cannot read, withholds everything. */
 function readEnv(env: Record<string, string | undefined>, routing: PackageRouting): void {
   for (const [rawKey, value] of Object.entries(env)) {
     if (value === undefined) continue;
@@ -261,7 +225,6 @@ export function packageRouting(files: PackageRoutingFiles, env: Record<string, s
   return routing;
 }
 
-/** True when the name may be sent to npm under this routing. */
 export function isSendable(name: string, routing: PackageRouting): boolean {
   if (routing.privateDefault) return false;
   if (name.startsWith("@")) return !routing.privateScopes.has(name.split("/")[0]);
@@ -292,7 +255,6 @@ function remember<V>(cache: Map<string, { at: number; value: V }>, key: string, 
   while (cache.size > CACHE_ENTRIES) cache.delete(cache.keys().next().value!);
 }
 
-/** Test hook: forget every cached answer. */
 export function clearPackageMetadataCache(): void {
   packumentCache.clear();
   downloadsCache.clear();
@@ -372,7 +334,6 @@ async function weeklyDownloads(fetchImpl: typeof fetch, api: string, names: stri
   for (let i = 0; i < unscoped.length; i += 100) {
     const batch = unscoped.slice(i, i + 100);
     jobs.push(getJson(fetchImpl, `${api}/downloads/point/last-week/${batch.join(",")}`).then((data) => {
-      // A single name answers its own object, several a map of them.
       const map = data === "not-found" ? {} : batch.length === 1 ? { [batch[0]]: data } : (data as Record<string, unknown>);
       for (const n of batch) {
         const d = map[n] as { downloads?: unknown } | null | undefined;
@@ -391,12 +352,10 @@ async function weeklyDownloads(fetchImpl: typeof fetch, api: string, names: stri
 
 export interface PackageLookupResult {
   packages: PackageMetadata[];
-  /** Set when some lookups failed: a word or two (`offline`, `rate limited`). */
   failure?: string;
   offline: boolean;
 }
 
-/** Looks up exactly the given names: the caller has already filtered them. */
 export async function lookupPackages(
   requests: readonly PackageLookupRequest[],
   deps: { fetchImpl?: typeof fetch; env?: Record<string, string | undefined> } = {},

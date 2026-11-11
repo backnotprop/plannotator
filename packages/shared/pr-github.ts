@@ -1,16 +1,9 @@
-/**
- * GitHub-specific PR provider implementation.
- *
- * All functions use the `gh` CLI via the PRRuntime abstraction.
- */
-
 import type { PRRuntime, PRMetadata, PRContext, PRRequestedReviewer, PRReviewThread, PRThreadComment, PRReviewFileComment, PRReviewFileLevelComment, PRReviewAction, PRReviewSubmissionResult, CommandResult, PRStackTree, PRStackNode, PRListItem } from "./pr-types";
 import { decodeBase64Bytes, encodeApiFilePath, isNotFoundCommandFailure, type PRFileBytesResult, type PRTreeResult } from "./pr-types";
 import { parsePaginatedArray } from "./cli-pagination";
 import { listGhAccounts } from "./pr-github-account";
 import { isAccessRefusal, markedCommentText, PRMarkedForbiddenError, PRMarkedRaceError, spliceMarkedSection, startsWithMarker, type PRMarkedCommentInput, type PRMarkedResult, type PRMarkedSectionInput } from "./pr-marked";
 
-// GitHub-specific PRRef shape (used internally)
 interface GhPRRef {
   platform: "github";
   host: string;
@@ -19,7 +12,6 @@ interface GhPRRef {
   number: number;
 }
 
-/** Build the --repo flag value: HOST/OWNER/REPO for GHE, OWNER/REPO for github.com */
 function repoFlag(ref: GhPRRef): string {
   if (ref.host !== "github.com") {
     return `${ref.host}/${ref.owner}/${ref.repo}`;
@@ -27,7 +19,6 @@ function repoFlag(ref: GhPRRef): string {
   return `${ref.owner}/${ref.repo}`;
 }
 
-/** Append --hostname to args for gh api / gh auth on GHE */
 function hostnameArgs(host: string, args: string[]): string[] {
   if (host !== "github.com") {
     return [...args, "--hostname", host];
@@ -35,17 +26,7 @@ function hostnameArgs(host: string, args: string[]): string[] {
   return args;
 }
 
-// --- Auth ---
-
-/**
- * gh is signed in on `host`. Only that decides here: which account the
- * review runs as is `ensureGhPRAccess`'s call (pr-github-account.ts).
- * Plain `gh auth status` exits 1 when ANY account on the host is broken, so
- * a stale second account would block a review the active one can do (#2157):
- * ask about the active account only (`--active`), and when that
- * fails (an older gh, or the active login is broken), go on as long as some
- * account on the host is usable.
- */
+/** gh is signed in on `host`; which account the review runs as is `ensureGhPRAccess`'s call. Plain `gh auth status` exits 1 when ANY account on the host is broken, so ask about the active account (`--active`), and on failure go on if some account on the host is usable. */
 export async function checkGhAuth(runtime: PRRuntime, host: string): Promise<void> {
   const active = await runtime.runCommand("gh", ["auth", "status", "--active", "--hostname", host]);
   if (active.exitCode === 0) return;
@@ -75,9 +56,6 @@ export async function getGhUser(runtime: PRRuntime, host: string): Promise<strin
   }
 }
 
-// --- Fetch PR ---
-
-/** Shape of each entry from the GitHub pulls files API (fields we use) */
 export interface GitHubFileEntry {
   filename: string;
   previous_filename?: string;
@@ -85,10 +63,7 @@ export interface GitHubFileEntry {
   patch?: string;
 }
 
-// Git only C-quotes paths containing quotes, backslashes, or control chars —
-// bare spaces stay raw. Downstream parsers (our diff-paths regex branch,
-// Pierre's filename regexes, code-nav's extractChangedFiles) expect git's
-// exact shape; over-quoting makes them misparse or silently drop files.
+// Git C-quotes only paths with quotes, backslashes or control chars; bare spaces stay raw. Over-quoting makes downstream parsers misparse or drop files.
 function needsGitQuoting(p: string): boolean {
   return /["\\\u0000-\u001F]/.test(p);
 }
@@ -100,16 +75,7 @@ function metadataPathToken(p: string): string {
   return needsGitQuoting(p) ? JSON.stringify(p) : p;
 }
 
-/**
- * Reconstruct a unified patch from GitHub's pulls files API response.
- *
- * Used when `gh pr diff` fails — GitHub refuses to render very large PR diffs
- * as one document (HTTP 406, "diff exceeded the maximum number of lines"), but
- * the files API still serves the same diff file-by-file. Entries without a
- * `patch` field (binary files, or single files whose own diff exceeds the
- * limit) become header-only sections — the UI still lists them and loads full
- * contents through the contents API on demand.
- */
+/** Reconstructs a unified patch from the files API when `gh pr diff` fails (HTTP 406 on very large diffs). Entries without a `patch` become header-only sections. */
 export function reconstructGhPatch(files: GitHubFileEntry[]): string {
   const parts: string[] = [];
 
@@ -121,12 +87,7 @@ export function reconstructGhPatch(files: GitHubFileEntry[]): string {
 
     let header = `diff --git ${headerPathToken("a", oldPath)} ${headerPathToken("b", newPath)}`;
     if (f.status === "renamed" || f.status === "copied") {
-      // Git always prints a similarity score before rename/copy lines, and
-      // diff parsers (e.g. Pierre's) key rename classification off it —
-      // without the line a rename renders as a plain change with no old path.
-      // The files API doesn't expose the score: a patch-less entry is by
-      // definition a 100% match; for patched entries emit a synthetic <100%
-      // value (consumers only branch on 100% vs not).
+      // Diff parsers key rename classification off the similarity line. The files API gives no score: a patch-less entry is a 100% match; patched entries get a synthetic <100% (consumers only branch on 100% or not).
       header += f.patch ? "\nsimilarity index 99%" : "\nsimilarity index 100%";
       header += f.status === "renamed"
         ? `\nrename from ${metadataPathToken(oldPath)}\nrename to ${metadataPathToken(newPath)}`
@@ -174,13 +135,11 @@ export async function fetchGhPR(
 ): Promise<{ metadata: PRMetadata; rawPatch: string; patchIncomplete?: boolean }> {
   const repo = repoFlag(ref);
 
-  // Fetch diff, metadata, and repository defaults in parallel.
   const [diffResult, viewResult, repoResult] = await Promise.all([
     runtime.runCommand("gh", [
       "pr", "diff", String(ref.number),
       "--repo", repo,
-      // `auto` is the default, but CLICOLOR_FORCE / GH_FORCE_TTY in the
-      // user's environment would still color it (#1661).
+      // `auto` is the default, but CLICOLOR_FORCE / GH_FORCE_TTY in the user's environment would still color it.
       "--color=never",
     ]),
     runtime.runCommand("gh", [
@@ -201,10 +160,7 @@ export async function fetchGhPR(
     );
   }
 
-  // Resolve the patch. Primary: `gh pr diff` — one server-rendered document,
-  // perfect fidelity. GitHub refuses to render it for very large PRs (406 /
-  // "diff exceeded the maximum number of lines"); in that case fetch the same
-  // diff file-by-file from the paginated files API and stitch it back together.
+  // Primary: `gh pr diff`. GitHub refuses very large PRs (406), so fall back to stitching the diff from the paginated files API.
   let rawPatch: string;
   let patchIncomplete = false;
   if (diffResult.exitCode === 0) {
@@ -256,9 +212,7 @@ export async function fetchGhPR(
     url: string;
   };
 
-  // Fetch the merge-base SHA — the common ancestor commit GitHub uses to compute the PR diff.
-  // baseSha (baseRefOid) is the tip of the base branch, which may have moved since the branch point.
-  // File contents must be fetched at the merge-base to match the diff hunks.
+  // Merge-base SHA: baseSha is the base branch tip, which may have moved since the branch point; file contents must be fetched at the merge-base to match the diff hunks.
   let mergeBaseSha: string | undefined;
   try {
     const compareResult = await runtime.runCommand("gh", hostnameArgs(ref.host, [
@@ -293,8 +247,6 @@ export async function fetchGhPR(
 
   return { metadata, rawPatch, ...(patchIncomplete && { patchIncomplete }) };
 }
-
-// --- PR Context ---
 
 const GH_CONTEXT_FIELDS = [
   "body", "state", "isDraft", "labels",
@@ -377,10 +329,7 @@ export async function fetchGhPRContext(
   const raw = JSON.parse(result.stdout) as Record<string, unknown>;
   const context = parseGhPRContext(raw);
 
-  // Fetch inline review threads + bot author logins via GraphQL (the only place
-  // GitHub exposes whether an author is a Bot vs a User — `gh pr view --json`
-  // gives the login only). Non-blocking failure: degrade to no threads / no bot
-  // tags rather than failing the whole context.
+  // GraphQL is the only place GitHub exposes whether an author is a Bot. A failure degrades to no threads or bot tags rather than failing the whole context.
   try {
     const { threads, botLogins, avatarByLogin, complete } = await fetchGhThreadsAndBots(runtime, ref);
     context.reviewThreads = threads;
@@ -402,8 +351,6 @@ export async function fetchGhPRContext(
 
   return context;
 }
-
-// --- Review Threads + bot detection (GraphQL) ---
 
 const PR_THREAD_COMMENT_FIELDS = `id
               body
@@ -462,16 +409,10 @@ interface GhConnection {
   nodes?: any[] | null;
 }
 
-/** The cursor of a connection's next page, or null when it has none. */
 const nextCursor = (connection: GhConnection | null | undefined): string | null =>
   connection?.pageInfo?.hasNextPage && connection.pageInfo.endCursor ? connection.pageInfo.endCursor : null;
 
-/**
- * The PR's inline review threads AND the set of author logins that are bots (`__typename === "Bot"`) across comments,
- * reviews, and thread comments, every page of them. GraphQL is the only place GitHub exposes author type — `gh pr view
- * --json` gives the login only. The caller uses the bot set to tag the top-level comments/reviews; thread comments are
- * tagged inline here. A read that fails partway says so (`complete: false`) and keeps what it read.
- */
+/** The PR's inline review threads and the author logins that are bots, every page. A read that fails partway says so (`complete: false`) and keeps what it read. */
 async function fetchGhThreadsAndBots(
   runtime: PRRuntime,
   ref: GhPRRef,
@@ -511,7 +452,6 @@ async function fetchGhThreadsAndBots(
     };
   };
 
-  // Each round asks only for the lists with more to give.
   let page: string[] = [];
   for (;;) {
     const data = await read([
@@ -569,12 +509,7 @@ function threadOf(t: any, comments: PRThreadComment[]): PRReviewThread {
   };
 }
 
-// --- Requested reviewers ---
-
-/**
- * Who is asked to review and has not yet: a read of its own, so a token that cannot read this one (or an older forge)
- * costs only these names, never the PR's context. REST, as `gh pr view --json reviewRequests` needs `read:org` for a team.
- */
+/** Who is asked to review and has not yet: a read of its own, so a token that cannot read it costs only these names. REST, since `gh pr view --json reviewRequests` needs `read:org` for a team. */
 export async function fetchGhRequestedReviewers(runtime: PRRuntime, ref: GhPRRef): Promise<PRRequestedReviewer[]> {
   const result = await runtime.runCommand("gh", hostnameArgs(ref.host, [
     "api", `repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/requested_reviewers`,
@@ -602,8 +537,6 @@ export async function fetchGhRequestedReviewers(runtime: PRRuntime, ref: GhPRRef
   return [...people, ...groups];
 }
 
-// --- File Content ---
-
 export async function fetchGhPRFileContent(
   runtime: PRRuntime,
   ref: GhPRRef,
@@ -621,7 +554,6 @@ export async function fetchGhPRFileContent(
   const base64Content = result.stdout.trim();
   if (!base64Content) return null;
 
-  // GitHub returns base64-encoded content with newlines
   const cleaned = base64Content.replace(/\n/g, "");
   try {
     return Buffer.from(cleaned, "base64").toString("utf-8");
@@ -705,14 +637,7 @@ export async function fetchGhPRFileBytes(
   return { kind: "ok", bytes: decodeBase64Bytes(body.content), ...(etag ? { etag } : {}) };
 }
 
-// --- Viewed Files ---
-
-/**
- * Fetch the per-file "viewed" state for a GitHub PR via GraphQL.
- * Returns a map of { filePath: isViewed } where isViewed is true for
- * VIEWED or DISMISSED states (i.e., the file was reviewed but may need
- * re-review after new commits).
- */
+/** Returns `{ filePath: isViewed }`, true for VIEWED or DISMISSED (reviewed, though possibly needing re-review). */
 export async function fetchGhPRViewedFiles(
   runtime: PRRuntime,
   ref: GhPRRef,
@@ -739,7 +664,6 @@ export async function fetchGhPRViewedFiles(
   const result: Record<string, boolean> = {};
   let cursor: string | null = null;
 
-  // Paginate through all files (GitHub returns max 100 per page)
   do {
     const args = hostnameArgs(ref.host, [
       "api", "graphql",
@@ -792,11 +716,7 @@ export async function fetchGhPRViewedFiles(
   return result;
 }
 
-/**
- * Mark or unmark a set of files as viewed in a GitHub PR via GraphQL mutations.
- * Uses Promise.allSettled so a single file failure doesn't block the rest.
- * Throws only if ALL mutations fail.
- */
+/** Marks or unmarks files via GraphQL mutations with Promise.allSettled; throws only if ALL fail. */
 export async function markGhFilesViewed(
   runtime: PRRuntime,
   ref: GhPRRef,
@@ -836,13 +756,7 @@ export async function markGhFilesViewed(
   }
 }
 
-// --- Submit PR Review ---
-
-/**
- * Append file-level comments to a review body as `**path:** text` paragraphs,
- * the shape every file-scoped comment took before #1599. Used for GitLab and
- * for any GitHub file-level thread that could not be created.
- */
+/** Append file-level comments to a review body as `**path:** text` paragraphs. Used for GitLab and for any GitHub file-level thread that could not be created. */
 export function foldFileLevelComments(
   body: string,
   comments: PRReviewFileLevelComment[],
@@ -902,7 +816,6 @@ export function githubErrorDetail(stdout: string): string | undefined {
   return detail.length > MAX_ERROR_DETAIL ? `${detail.slice(0, MAX_ERROR_DETAIL - 1)}…` : detail;
 }
 
-/** Short, human-readable failure text for a `gh` call; never raw JSON. */
 function commandError(result: CommandResult): string {
   const stderr = result.stderr.trim();
   const stdout = result.stdout.trim();
@@ -912,27 +825,13 @@ function commandError(result: CommandResult): string {
     return `${stderr}: ${detail}`;
   }
   if (stderr) return stderr;
-  // A JSON body without a readable reason is not shown verbatim.
   if (stdout && !stdout.startsWith("{") && !stdout.startsWith("[")) {
     return stdout.length > MAX_ERROR_DETAIL ? `${stdout.slice(0, MAX_ERROR_DETAIL - 1)}…` : stdout;
   }
   return `exit code ${result.exitCode}`;
 }
 
-/**
- * Submit a GitHub review.
- *
- * Without file-level comments this is one atomic create-review call: GitHub
- * either accepts the complete review or this rejects before reporting success.
- *
- * File-level comments (#1599) are not documented on the create-review
- * `comments[]` array, so the review is built from documented calls instead:
- * create it PENDING with the line comments, add each file comment as a
- * GraphQL `addPullRequestReviewThread(subjectType: FILE)` on that review, then
- * submit it with the event and body. A file comment GitHub rejects is folded
- * into the submitted body, so it is never lost. A pending review is visible
- * only to its author, so nothing is public until the submit succeeds.
- */
+/** Submit a GitHub review. Without file-level comments: one atomic create-review call. With them (not documented on `comments[]`): create it PENDING with the line comments, add each file comment as `addPullRequestReviewThread(subjectType: FILE)`, then submit. A rejected file comment is folded into the body. A pending review is visible only to its author. */
 export async function submitGhPRReview(
   runtime: PRRuntime,
   ref: GhPRRef,
@@ -966,9 +865,7 @@ export async function submitGhPRReview(
 
   if (fileLevelComments.length === 0) return submitAtomic(body);
 
-  // 1. Pending review carrying the line comments. Nothing exists if this
-  //    fails, so fall back to the pre-#1599 single call (file comments in the
-  //    body): the new path never fails where the old one would have worked.
+  // Pending review carrying the line comments. If this fails nothing exists, so fall back to the single call with file comments in the body.
   const created = await api(reviewsEndpoint, "POST", { commit_id: headSha, comments: fileComments });
   let reviewId: number | undefined;
   let reviewNodeId: string | undefined;
@@ -989,14 +886,12 @@ export async function submitGhPRReview(
       // second review on top of it.
       throw new Error(`Failed to submit PR review: GitHub's reply to creating the review could not be read. ${PENDING_REVIEW_REMAINS}`);
     }
-    // Throws with the pre-#1599 error when the single call fails too (e.g. an
-    // invalid line comment), so only a successful fallback is logged.
+    // Throws the single call's error when it fails too, so only a successful fallback is logged.
     const result = await submitAtomic(foldFileLevelComments(body, fileLevelComments));
     console.error(`[plannotator] pending review could not be created (${commandError(created)}); file comments were posted in the review body`);
     return result;
   }
 
-  // 2. One file-level thread per comment, attached to the pending review.
   const folded: PRReviewFileLevelComment[] = [];
   for (const comment of fileLevelComments) {
     const result = await run(
@@ -1024,7 +919,7 @@ export async function submitGhPRReview(
     }
   }
 
-  // 3. Submit. On failure discard the pending review so a retry starts clean.
+  // Submit; on failure discard the pending review so a retry starts clean.
   let submitBody = foldFileLevelComments(body, folded);
   if (event !== "APPROVE" && submitBody.trim().length === 0) submitBody = COMMENT_BODY_PLACEHOLDER;
   const submitted = await api(`${reviewsEndpoint}/${reviewId}/events`, "POST", {
@@ -1055,8 +950,6 @@ export async function submitGhPRReview(
   }
   return { status: "complete" };
 }
-
-// --- Stack Tree (GraphQL) ---
 
 type StackPRNode = { number: number; title: string; url: string; baseRefName: string; headRefName: string; state: string };
 
@@ -1093,13 +986,7 @@ async function queryPRsByRef(
   return Array.isArray(prs) ? prs : [];
 }
 
-/**
- * Walk up and down the PR stack from the current PR, resolving
- * PR numbers/titles for every node in the chain.
- *
- * Up: walk from currentPR.baseBranch → defaultBranch (ancestors)
- * Down: walk from currentPR.headBranch → leaf PRs (descendants)
- */
+/** Walks up (base branch to default branch) and down (head branch to leaf PRs) from the current PR. */
 export async function fetchGhPRStack(
   runtime: PRRuntime,
   ref: GhPRRef,
@@ -1118,7 +1005,6 @@ export async function fetchGhPRStack(
     isDefaultBranch: false,
   };
 
-  // Walk up: find the PR whose headRefName === baseBranch, repeat
   const ancestors: PRStackNode[] = [];
   let nextHead = metadata.baseBranch;
   const maxDepth = 10;
@@ -1145,7 +1031,6 @@ export async function fetchGhPRStack(
     nextHead = pr.baseRefName;
   }
 
-  // Walk down: find PRs whose baseRefName === current headBranch, repeat
   const descendants: PRStackNode[] = [];
   let nextBase = metadata.headBranch;
 
@@ -1166,7 +1051,6 @@ export async function fetchGhPRStack(
     nextBase = pr.headRefName;
   }
 
-  // Build tree: defaultBranch → ancestors (reversed) → current → descendants
   const nodes: PRStackNode[] = [
     { branch: defaultBranch, isCurrent: false, isDefaultBranch: true },
     ...ancestors.reverse(),
@@ -1176,8 +1060,6 @@ export async function fetchGhPRStack(
 
   return { nodes };
 }
-
-// --- PR List ---
 
 export async function fetchGhPRList(
   runtime: PRRuntime,
@@ -1213,12 +1095,7 @@ export async function fetchGhPRList(
   }));
 }
 
-// --- Marked text: a comment or a description section found again by its marker (pr-marked.ts) ---
-
-/**
- * GitHub's limit on an issue or PR comment's body, and on a PR's description: 65,536 characters (the API refuses
- * more with "body is too long"; not in GitHub's REST reference, which documents no limit).
- */
+/** GitHub's limit on a comment body or PR description: 65,536 characters (the API refuses more; not in the REST reference). */
 export const GH_BODY_MAX = 65_536;
 
 interface GhIssueComment {
@@ -1264,11 +1141,8 @@ export async function upsertGhMarkedComment(runtime: PRRuntime, ref: GhPRRef, in
 }
 
 /**
- * The PR description's section between `input.start` and `input.end`, put in place (or at the end), the rest of the
- * description kept byte for byte. GitHub takes no precondition on this write, so the description is read, spliced,
- * read again just before the write, and the write is refused (PRMarkedRaceError) when another edit landed in between.
- * An edit in the moment between that second read and the write is not caught. A write refused for access (the person
- * can read the PR, is not its author and has no write access) is PRMarkedForbiddenError, for the caller to fall back.
+ * The PR description's section between `input.start` and `input.end`, put in place (or at the end), the rest kept byte for byte. GitHub takes no precondition on this write, so it is read, spliced, read again just before the write, and refused (PRMarkedRaceError) if another edit landed in between; an edit after that second read is not caught.
+ * A write refused for access is PRMarkedForbiddenError, for the caller to fall back.
  */
 export async function upsertGhDescriptionSection(runtime: PRRuntime, ref: GhPRRef, input: PRMarkedSectionInput): Promise<PRMarkedResult> {
   if (!runtime.runCommandWithInput) throw new Error("Runtime does not support stdin input; cannot edit a description");

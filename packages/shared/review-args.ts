@@ -3,14 +3,7 @@ import type { DiffType } from "./review-core";
 import { statSync } from "node:fs";
 import { resolveUserPath, stripWrappingQuotes } from "./resolve-file";
 
-/**
- * The flat git diff ids `review --diff-type` accepts — exactly GIT_DIFF_TYPES
- * in vcs-core, pinned by test (a git diff type added to one list and not the
- * other would make a valid mode unreachable from the CLI). Kept as a literal
- * list here (type-only imports elsewhere) so review-args stays light for
- * plugin hosts. Session-navigation states (`commit:<sha>`, `worktree:*`,
- * `gitbutler:*`, jj/p4 modes) are deliberately not open states.
- */
+/** The flat git diff ids `review --diff-type` accepts: exactly GIT_DIFF_TYPES in vcs-core (pinned by test), kept as a literal list so review-args stays light for plugin hosts. Session-navigation states are deliberately not open states. */
 export const REVIEW_OPEN_DIFF_TYPES = [
   "since-base",
   "local-vs-remote",
@@ -27,42 +20,18 @@ export type ReviewOpenDiffType = (typeof REVIEW_OPEN_DIFF_TYPES)[number];
 
 export interface ParsedReviewArgs {
   prUrl?: string;
-  /**
-   * Non-URL positional words, in order. Hosts turn them into a review
-   * directory with `resolveReviewTarget` (which needs the filesystem and the
-   * invoking cwd); words that name no directory are tolerated as prose.
-   */
+  /** Non-URL positional words, in order; words that name no directory are tolerated as prose. */
   words?: string[];
   patchFile?: string;
   vcsType?: VcsSelection;
   useLocal: boolean;
-  /** Compare target the session opens against (`--base <ref>`). */
   base?: string;
-  /** Diff mode the session opens in (`--diff-type <id>`). */
   diffType?: DiffType;
-  /**
-   * `false` when the invocation carried `--no-git-remote-check` (issue #1553):
-   * this session must make no `git ls-remote` call at all. Undefined means
-   * the flag was absent, leaving PLANNOTATOR_GIT_REMOTE_CHECK / config.gitRemoteCheck
-   * to decide. Hosts forward it to the review server, which resolves the
-   * precedence in one place.
-   */
+  /** `false` when `--no-git-remote-check` was passed: this session must make no `git ls-remote` call. Undefined leaves PLANNOTATOR_GIT_REMOTE_CHECK / config.gitRemoteCheck to decide. */
   gitRemoteCheck?: boolean;
-  /**
-   * `true` when the invocation carried `--gate` (#1907): the caller waits for
-   * the reviewer's sign-off, so a bare Approve must reach it. The review page
-   * always has Approve and the CLI always prints the approval, so the flag
-   * changes nothing here; it marks the intent for a host that otherwise only
-   * logs a bare Approve (the Claude Code mod takes the command over as the
-   * `plannotator` tool's gated review).
-   */
+  /** `true` when `--gate` was passed: marks the intent for a host that otherwise only logs a bare Approve. The flag changes nothing in this parser. */
   gate?: boolean;
-  /**
-   * Argument-shape problems the host must surface before starting a session.
-   * Always present; empty means the invocation parsed cleanly. Hosts differ in
-   * how they surface these (CLI exits 1, Pi/OpenCode notify), which is why the
-   * parser reports rather than throws.
-   */
+  /** Argument-shape problems the host must surface before starting a session; empty means the invocation parsed cleanly. The parser reports rather than throws because hosts surface them differently. */
   errors: string[];
 }
 
@@ -81,14 +50,10 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
   const positional: string[] = [];
 
   let patchFile: string | undefined;
-  // --local / --no-local conflict with --patch-file only when the user typed
-  // one: useLocal defaults to true, so check the flag's presence, not the
-  // value. Both spellings are PR-review selectors, so both are usage errors.
+  // `--local` / `--no-local` conflict with --patch-file only when typed: useLocal defaults to true, so check presence, not value.
   let localFlagSeen = false;
 
-  // Index-based so value-taking flags consume their value token before the
-  // positional collector sees it — otherwise `--base main <PR_URL>` would put
-  // "main" in positional[0] and lose the URL.
+  // Index-based so value-taking flags consume their value token before the positional collector sees it.
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i]!;
     switch (token) {
@@ -169,10 +134,7 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
       }
       default:
         if (token.startsWith("-")) {
-          // Unknown dash-prefixed tokens error loudly, matching the annotate
-          // contract ("a typo'd flag errors the way it always did"). Silently
-          // dropping them meant a mistyped flag vanished on every host — and a
-          // dashed token in positional[0] could even shadow a PR URL.
+          // Unknown dash-prefixed tokens error loudly, like annotate: silently dropping them hides a mistyped flag, and a dashed token in positional[0] could shadow a PR URL.
           errors.push(`Unknown review option: ${token}`);
         } else {
           positional.push(token);
@@ -215,33 +177,16 @@ export function parseReviewArgs(input: string | string[]): ParsedReviewArgs {
 }
 
 export interface ReviewTarget {
-  /** Absolute directory the review opens in; undefined means the invoking cwd. */
   directory?: string;
-  /** Words that named no target and were ignored as prose (#1483 tolerance). */
+  /** Words that named no target and were ignored as prose. */
   ignored: string[];
 }
 
-/** Path-shaped words are directory candidates even inside prose. */
 function looksLikePath(word: string): boolean {
   return /[\\/]/.test(word) || word.startsWith(".") || word.startsWith("~");
 }
 
-/**
- * Turn the parser's positional words into a review directory, before any VCS
- * discovery. Slash-command hosts forward raw user words verbatim, so prose
- * stays tolerated (the annotate tolerant-args precedent, annotate-target.ts):
- *
- * - A sole word is the target: an existing directory opens there, and a file,
- *   or a path-shaped word that does not exist, throws (a typo'd target must
- *   never review the caller's repo). A sole bare word naming nothing is prose.
- * - Among several words only path-shaped ones are candidates (in prose, a bare
- *   word that happens to match a directory never hijacks). A candidate that is
- *   an existing directory is the target; one that is missing or a file is
- *   prose ("the frontend/backend split", "look at ./notes.txt") and ignored.
- * - Every other word is returned in `ignored`, and the review opens in the
- *   invoking cwd exactly as before directory targets existed.
- * - Two targets (two directories, or a directory and a PR/MR URL) throw.
- */
+/** Turn the parser's positional words into a review directory, before any VCS discovery. A sole word is the target: an existing directory opens there, a file or a non-existent path-shaped word throws, and a bare word naming nothing is prose. Among several words only path-shaped ones are candidates; missing ones or files are prose and ignored. Two targets throw. */
 export function resolveReviewTarget(
   parsed: Pick<ParsedReviewArgs, "prUrl" | "words" | "patchFile">,
   cwd: string,
@@ -284,7 +229,6 @@ export function resolveReviewTarget(
   return { ...(directories[0] === undefined ? {} : { directory: directories[0] }), ignored };
 }
 
-/** One-line notice for words `resolveReviewTarget` ignored, or undefined. */
 export function formatIgnoredReviewWords(target: ReviewTarget): string | undefined {
   return target.ignored.length > 0
     ? `Ignoring words that name no directory or PR/MR URL: ${target.ignored.join(" ")}`

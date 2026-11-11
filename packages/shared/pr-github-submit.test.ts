@@ -15,7 +15,6 @@ type Handler = (call: Call) => CommandResult | undefined;
 const ok = (stdout = ""): CommandResult => ({ stdout, stderr: "", exitCode: 0 });
 const fail = (stderr: string): CommandResult => ({ stdout: "", stderr, exitCode: 1 });
 
-/** Fake gh runtime: records every call and answers through `handle`. */
 function ghRuntime(handle: Handler): { runtime: PRRuntime; calls: Call[] } {
   const calls: Call[] = [];
   const answer = (call: Call) => {
@@ -254,8 +253,7 @@ describe("submitPRReview on GitLab", () => {
   });
 });
 
-// #1611: every non-approve review used to post as COMMENT, so "Request
-// changes" in the UI never requested changes.
+// A review requesting changes must post as REQUEST_CHANGES, not COMMENT.
 describe("request_changes review event (#1611)", () => {
   test("single call: posts event REQUEST_CHANGES", async () => {
     const { runtime, calls } = ghRuntime((c) => (isCreate(c) ? ok("{}") : undefined));

@@ -1,9 +1,3 @@
-/**
- * readFileCapped / readRepoFile (repo-file.ts): the cap is checked before
- * reading, and a directory is refused as not a file. FIFOs are covered in a
- * child process by packages/server/repo-file-endpoints.test.ts, so a
- * regression there cannot block this process.
- */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

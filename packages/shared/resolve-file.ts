@@ -1,13 +1,4 @@
-/**
- * Smart markdown file resolution.
- *
- * Resolves a user-provided path to an absolute file path using three strategies:
- * 1. Exact path (absolute or relative to cwd)
- * 2. Case-insensitive relative path search within project root
- * 3. Case-insensitive bare filename search within project root
- *
- * Used by both the CLI (`plannotator annotate`) and the `/api/doc` endpoint.
- */
+/** Resolves a user-provided path to an absolute file: exact path, then case-insensitive relative path, then bare filename within the project root. Used by the CLI and `/api/doc`. */
 
 import { homedir } from "os";
 import { isAbsolute, join, resolve, win32 } from "path";
@@ -19,13 +10,7 @@ import { getExtraMarkdownExtensions } from "./markdown-extensions";
 import { CODE_FILE_REGEX as CODE_FILE_BASENAME_REGEX } from "./code-file";
 export { CODE_FILE_REGEX, isCodeFilePath } from "./code-file";
 export { MAX_ANNOTATABLE_FILE_BYTES } from "./annotatable";
-/**
- * Extension predicates re-exported here are the CONFIG-AWARE ones (#1307):
- * they honor the user's `markdownExtensions` on top of the built-in set. The
- * pure built-in constants stay in @plannotator/core/annotatable for browser
- * code; server code must go through these so a configured `.livemd` is
- * accepted everywhere `.md` is.
- */
+/** Extension predicates re-exported here are the CONFIG-AWARE ones (they honor `markdownExtensions`): server code must use these, not the pure constants in @plannotator/core/annotatable. */
 export {
 	getAnnotatableTextRegex,
 	getAnnotatableDocRegex,
@@ -64,11 +49,6 @@ const CODE_IGNORED_DIRS = [
 
 const DEFAULT_FILE_BROWSER_MAX_FILES = 5_000;
 
-/**
- * Return the shared file-traversal budget used by resolution, cache warming,
- * and file-browser discovery. Invalid or non-positive overrides fall back to
- * the default.
- */
 export function getFileBrowserMaxFiles(): number {
 	const value = Number.parseInt(
 		process.env.PLANNOTATOR_FILE_BROWSER_MAX_FILES ?? "",
@@ -210,18 +190,11 @@ function resolveAbsolutePath(
 		: resolve(input);
 }
 
-/**
- * The set of files single-file annotate resolution accepts. Wider than
- * markdown proper (#1029): any unambiguously plain-text format renders the
- * way .txt does, plus the user's configured extra markdown extensions
- * (#1307). HTML is excluded — it has its own resolution branch at the call
- * sites.
- */
+/** The files single-file annotate resolution accepts: any unambiguously plain-text format plus the configured extra markdown extensions. HTML is excluded (it has its own branch at the call sites). */
 function isSearchableMarkdownPath(input: string, extra: readonly string[]): boolean {
 	return buildAnnotatableTextRegex(extra).test(input.trim());
 }
 
-/** Check if a path looks like a Windows absolute path (e.g. C:\ or C:/) */
 function hasWindowsDriveLetter(input: string): boolean {
 	return /^[a-zA-Z]:[/\\]/.test(input);
 }
@@ -240,7 +213,6 @@ type FileWalkState = {
 	readonly limit: number;
 };
 
-/** Recursively walk a directory collecting files matching `fileMatcher`, skipping ignored dirs. */
 function walkFiles(
 	dir: string,
 	root: string,
@@ -301,8 +273,6 @@ function walkMarkdownFiles(
 	}
 }
 
-// --- Code-file resolution (async, cached) ---
-
 const FILE_LIST_CACHE_TTL_MS = 30_000;
 const fileListCache = new Map<
 	string,
@@ -355,13 +325,7 @@ async function startCodeWalk(projectRoot: string): Promise<string[] | null> {
 	}
 }
 
-/**
- * Trigger (or return the in-flight) walk of `projectRoot` for code files.
- * Cached for `FILE_LIST_CACHE_TTL_MS`. Storing a Promise (not a value) makes
- * concurrent callers piggyback on the same walk — first arrival wins.
- *
- * Returns `null` (wrapped in Promise) when the walk fails (perms, etc).
- */
+/** Trigger (or return the in-flight) walk of `projectRoot` for code files, cached for `FILE_LIST_CACHE_TTL_MS`. Caching the Promise lets concurrent callers share one walk. Null when the walk fails. */
 export function warmFileListCache(
 	projectRoot: string,
 	kind: "code",
@@ -377,23 +341,8 @@ export function warmFileListCache(
 }
 
 /**
- * Resolve a code-file path within a project root.
- *
- * Strategies:
- *   1. Absolute path → use as-is.
- *   2. Exact relative from project root.
- *   3. If `baseDir` provided, literal `<baseDir>/<input>` existence check —
- *      lets out-of-tree linked docs resolve their own relative references
- *      (e.g. `../script.ts` in `~/notes/foo.md` finds `~/script.ts`).
- *   4. Case-insensitive suffix match against the cached file list:
- *      - bare basename input → match any file with that basename;
- *      - input with `/` → match files whose path equals or ends with `/<input>`
- *        on a segment boundary (so `editor/App.tsx` matches `packages/editor/App.tsx`
- *        but not `myeditor/App.tsx`).
- *
- * `..` segments in the input are honored: only `./` is stripped before suffix
- * matching. `../foo.ts` without a `baseDir` correctly falls through to
- * not_found rather than fabricating a match against `foo.ts` somewhere in cwd.
+ * Resolve a code-file path within a project root: absolute as-is; exact relative; literal `<baseDir>/<input>` (lets out-of-tree linked docs resolve their own relative references); then a case-insensitive suffix match on a segment boundary against the cached file list.
+ * `..` segments are honored: `../foo.ts` without a `baseDir` falls through to not_found rather than matching a `foo.ts` somewhere in cwd.
  */
 export async function resolveCodeFile(
 	input: string,
@@ -434,11 +383,7 @@ export async function resolveCodeFile(
 		return { kind: "unavailable", input: originalInput };
 	}
 
-	// Strip leading `./` so suffix matching works on inputs like
-	// `./editor/App.tsx` — file list entries never carry that segment.
-	// `../` is intentionally NOT stripped: `..` is meaningful (escape parent),
-	// not noise. If we can't honor it via baseDir, the input has no
-	// suffix-match equivalent in the in-tree file list.
+	// Strip leading `./` only: list entries never carry it. `..` is meaningful (escape parent) and is not stripped.
 	const cleanedInput = searchInput.replace(/^(?:\.\/)+/, "");
 	if (!cleanedInput || cleanedInput.startsWith("../")) {
 		return { kind: "not_found", input: originalInput };
@@ -468,12 +413,6 @@ export async function resolveCodeFile(
 	return { kind: "not_found", input: originalInput };
 }
 
-/**
- * Resolve a markdown file path within a project root.
- *
- * @param input - User-provided path (absolute, relative, or bare filename)
- * @param projectRoot - Project root directory to search within
- */
 function resolveMarkdownFileCore(
 	input: string,
 	projectRoot: string,
@@ -484,13 +423,10 @@ function resolveMarkdownFileCore(
 	const isBareFilename = !searchInput.includes("/");
 	const targetLookupKey = getLookupKey(searchInput, isBareFilename);
 
-	// Restrict to annotatable plain-text files (markdown + config formats)
 	if (!isSearchableMarkdownPath(normalizedInput, extra)) {
 		return { kind: "not_found", input };
 	}
 
-	// 1. Absolute path — use as-is (no project root restriction;
-	//    the user explicitly typed the full path)
 	if (isAbsoluteNormalizedUserPath(normalizedInput)) {
 		const absolutePath = resolveAbsolutePath(normalizedInput);
 		if (fileExists(absolutePath)) {
@@ -499,11 +435,7 @@ function resolveMarkdownFileCore(
 		return { kind: "not_found", input };
 	}
 
-	// 2. Exact relative path from project root. An explicit path the user
-	//    typed (one containing a separator, including `../` that escapes the
-	//    root) is honored when it exists — the same trust already extended to
-	//    absolute paths above. Bare filenames stay restricted to the fuzzy
-	//    in-root search below so a stray `notes.md` can't resolve to a parent.
+	// An explicit path the user typed (with a separator, including `../` that escapes the root) is honored when it exists, like absolute paths. Bare filenames stay restricted to the in-root search so a stray `notes.md` can't resolve to a parent.
 	const fromRoot = resolve(projectRoot, searchInput);
 	if (
 		fileExists(fromRoot) &&
@@ -512,7 +444,6 @@ function resolveMarkdownFileCore(
 		return { kind: "found", path: fromRoot };
 	}
 
-	// 3. Case-insensitive search (only scan markdown files)
 	const allFiles: string[] = [];
 	walkMarkdownFiles(projectRoot, projectRoot, allFiles, IGNORED_DIRS, extra);
 	const matches: string[] = [];
@@ -543,15 +474,7 @@ function resolveMarkdownFileCore(
 	return { kind: "not_found", input };
 }
 
-/**
- * Resolve a markdown file path within a project root.
- *
- * @param input - User-provided path (absolute, relative, or bare filename)
- * @param projectRoot - Project root directory to search within
- * @param options.extraMarkdownExtensions - Configured extra markdown
- *   extensions (#1307). Defaults to the process-wide set resolved from
- *   `config.json`; pass an explicit list to resolve against a specific one.
- */
+/** Resolve a markdown file path within a project root. `extraMarkdownExtensions` defaults to the process-wide set resolved from `config.json`. */
 export function resolveMarkdownFile(
 	input: string,
 	projectRoot: string,
@@ -589,14 +512,7 @@ export function resolveMarkdownFile(
 	return { kind: "not_found", input: originalInput };
 }
 
-/**
- * Check if a directory contains at least one file matching the given extensions.
- * Used to validate folder annotation targets.
- *
- * @param dirPath - Directory to search
- * @param excludedDirs - Directory names to skip (with trailing slash, e.g. "node_modules/")
- * @param extensions - Regex to match file extensions (default: markdown only)
- */
+/** True when a directory contains at least one file matching the extensions (default markdown only); validates folder annotation targets. */
 export function hasMarkdownFiles(
 	dirPath: string,
 	excludedDirs: string[] = IGNORED_DIRS,

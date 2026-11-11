@@ -1,66 +1,6 @@
 /**
- * The `plannotator` agent tool: the one contract every host that can deliver
- * a reviewer's decision LATER registers, so an agent asked to "open this in
- * plannotator" calls a tool that returns at once instead of running the CLI
- * and blocking on it.
- *
- * Hosts: the Claude Code mod (`apps/hook/hooks/mod/tool.ts` keeps a copy,
- * because a hooks module may import only its own folder; `tool.test.ts` there
- * fails when the two differ). Pi registers it with `pi.registerTool`
- * (apps/pi-extension/index.ts, vendored as generated/plannotator-tool.ts).
- * The OpenCode 2 plugin registers it with `tools.add`
- * (`apps/opencode-plugin/plannotator-tool.ts`, which imports this file).
- *
- * Agent-run CLI commands: `plannotatorCommandToToolInput` turns a shell
- * command (`plannotator annotate x.md --gate --json`) into the tool input that
- * opens the same thing, so a host that can answer a shell call (the Claude
- * Code mod's Bash `tool.call`) gives an agent that reached for the CLI the
- * tool's experience.
- *
- * A host validates the call with `parsePlannotatorToolInput`, turns it into
- * the words its slash command would carry with `plannotatorToolArgs`, launches
- * the session the way that slash command does, and answers with
- * `plannotatorToolOpenedText` (or the startup error). Plan review is not part
- * of the tool: it stays on each host's plan-exit hook or tool.
- *
- * Contract v2 (agent sessions, 0.29): every review a host opens has a session
- * id (`pn-` + 6 hex, a short alias of the host's launch id) that the opened
- * text and the first line of its decision message name
- * (`plannotatorDecisionHeading`). `list` reports the reviews the agent's own
- * session opened and `close` closes them (`plannotatorToolListText`,
- * `plannotatorToolCloseText`); a host resolves an id only among its own
- * session's reviews. `target` takes a list of files for annotate: one review,
- * in that order (a bundle; `plannotatorToolArgs` passes the paths as the
- * CLI's arguments, which open a bundle when every one is an existing file).
- * A host whose CLI predates bundles recognizes its refusal
- * (`isOlderCliBundleRefusal`) and answers
- * `PLANNOTATOR_TOOL_BUNDLE_UNAVAILABLE_TEXT`. Replying to a single comment is
- * not part of the contract yet: it comes back with the comment loop.
- *
- * Gate: `gate: true` means the agent waits for the reviewer's sign-off, so a
- * host delivers a bare Approve as a message too (annotate adds an Approve
- * button; review always has one, and its gate is never passed to the CLI).
- * Without it a host may only log a bare Approve (the Claude Code mod does).
- *
- * Tailnet (#2166): `tailscale: true` on annotate, review and last serves the
- * page over the user's tailnet (the CLI's `--tailscale`), with "Ask this
- * session" kept for the Tailscale login that owns the machine. Only a host
- * that can publish it accepts the field: it registers
- * `PLANNOTATOR_TOOL_TAILSCALE_INPUT_SCHEMA` / `_DESCRIPTION` and parses with
- * `{ tailscale: true }` (the Claude Code mod). Every other host keeps the
- * plain schema and description, byte for byte, and its parser refuses the
- * field as unknown, exactly as before. A host whose CLI is too old answers
- * `PLANNOTATOR_TOOL_TAILSCALE_UNAVAILABLE_TEXT`.
- *
- * Targets: every decision heading and opened text also names the review's
- * FULL target (`plannotatorTargetLines`: the absolute path, URL, bundle files,
- * reviewed directory or PR URL) as the server that shows the review resolved
- * it, and hosts tell same-named open reviews apart with
- * `plannotatorDistinctSubjects`. A subject alone (`QUESTIONS.md`) can name two
- * different files.
- *
- * Pure and dependency-free: everything below the CONTRACT marker is copied
- * byte for byte into the Claude Code mod.
+ * The `plannotator` agent tool contract: the one tool every host that can deliver a reviewer's decision later registers, so an agent returns at once instead of blocking on the CLI.
+ * Everything below the CONTRACT marker is copied byte for byte into apps/hook/hooks/mod/tool.ts: keep it pure and dependency-free.
  */
 
 // --- CONTRACT (copied verbatim into apps/hook/hooks/mod/tool.ts) ---
@@ -69,26 +9,15 @@ export const PLANNOTATOR_TOOL_NAME = 'plannotator'
 
 export type PlannotatorToolAction = 'annotate' | 'review' | 'last' | 'list' | 'close'
 
-/** The actions that open a review page. */
 export type PlannotatorToolOpenAction = 'annotate' | 'review' | 'last'
 
 export interface PlannotatorToolInput {
   action: PlannotatorToolAction
-  /**
-   * annotate: one file, folder or URL, or (contract v2) several files as a
-   * list, in the order they should be read. A one-item list is returned as a
-   * plain string and exact duplicates are dropped, so a list here always has
-   * two or more entries. review: a directory or PR URL (string only).
-   */
+  /** annotate: one file, folder or URL, or several files as a list in read order (a one-item list is returned as a string, duplicates dropped). review: a directory or PR URL (string only). */
   target?: string | string[]
   gate?: boolean
   options?: { base?: string; markdown?: boolean }
-  /**
-   * annotate, review, last: serve the page over the user's tailnet (the CLI's
-   * `--tailscale`). Only from a host that parses with `{ tailscale: true }`.
-   */
   tailscale?: boolean
-  /** close: a session id (`pn-` + 6 hex, as the results name it) or "all". */
   session?: string
 }
 
@@ -138,21 +67,15 @@ export const PLANNOTATOR_TOOL_INPUT_SCHEMA = {
   additionalProperties: false,
 } as const
 
-/** The description line a host that publishes over the tailnet adds (see `PLANNOTATOR_TOOL_TAILSCALE_DESCRIPTION`). */
 export const PLANNOTATOR_TOOL_TAILSCALE_LINE =
   '- `tailscale: true` (annotate, review, last): serve the page over the user\'s tailnet (HTTPS, never public) for their phone or another device; "Ask this session" works there for this computer\'s owner. Only when the user asks for that.'
 
-/**
- * The description for a host that accepts `tailscale` (the Claude Code mod):
- * the plain description with the tailscale line after the action lines.
- */
 export const PLANNOTATOR_TOOL_TAILSCALE_DESCRIPTION = (() => {
   const lines = PLANNOTATOR_TOOL_DESCRIPTION.split('\n')
   const lastAction = lines.findIndex((line) => line.startsWith('- action "close"'))
   return [...lines.slice(0, lastAction + 1), PLANNOTATOR_TOOL_TAILSCALE_LINE, ...lines.slice(lastAction + 1)].join('\n')
 })()
 
-/** The input schema for a host that accepts `tailscale`: the plain schema plus that one property. */
 export const PLANNOTATOR_TOOL_TAILSCALE_INPUT_SCHEMA = {
   ...PLANNOTATOR_TOOL_INPUT_SCHEMA,
   properties: {
@@ -164,28 +87,15 @@ export const PLANNOTATOR_TOOL_TAILSCALE_INPUT_SCHEMA = {
   },
 } as const
 
-/** What a host's parser accepts beyond the plain contract. */
 export interface PlannotatorToolParseOptions {
-  /** Accept `tailscale` (the host can publish over the tailnet). Default false: the field is unknown. */
   tailscale?: boolean
 }
 
-/**
- * What a host answers a `tailscale` call with when its Plannotator CLI cannot
- * serve it: a CLI without `--tailscale`, or one from before "Ask this session"
- * was kept over the tailnet (its ready line carries no `tailnet` field). The
- * review is not left open.
- */
+/** What a host answers a `tailscale` call with when its CLI cannot serve it. */
 export const PLANNOTATOR_TOOL_TAILSCALE_UNAVAILABLE_TEXT =
   'Plannotator did not open: the installed Plannotator is too old to open a review over the tailnet from this tool. Ask the user to update Plannotator (`plannotator update`), or open it without `tailscale` for now.'
 
-/**
- * Whether a CLI's startup error for a `tailscale` call is an OLDER CLI's
- * refusal of the flag itself (it read `--tailscale` as a file, an unknown
- * option, or a flag for another subcommand), never a current CLI's publish
- * failure: those all start with `--tailscale:` (Tailscale not running, signed
- * out, the port already routed) and are the reason to show as it is.
- */
+/** True for an OLDER CLI's refusal of the `--tailscale` flag itself; a current CLI's publish failure starts with `--tailscale:` and is shown as is. */
 export function isOlderCliTailscaleRefusal(errorText: string): boolean {
   if (errorText.includes('--tailscale:')) return false
   return (
@@ -195,25 +105,18 @@ export function isOlderCliTailscaleRefusal(errorText: string): boolean {
   )
 }
 
-/** Longest target or base accepted; a real path or URL is far shorter. */
 export const PLANNOTATOR_TOOL_MAX_TEXT = 4096
 
-/**
- * A session id as every host names it: `pn-` and six lowercase hex digits, a
- * short alias of the host's own launch id. Hosts resolve an id only among the
- * reviews their own agent session opened.
- */
+/** `pn-` and six lowercase hex digits; hosts resolve an id only among the reviews their own agent session opened. */
 export const PLANNOTATOR_SESSION_ID_PREFIX = 'pn-'
 
 const SESSION_ID = /^(?:pn-)?([0-9a-f]{6})$/i
 
-/** `pn-3f2a9c` from an id the agent typed (`pn-3F2A9C`, `3f2a9c`), or null when it is not one. */
 export function normalizePlannotatorSessionId(value: string): string | null {
   const match = SESSION_ID.exec(value.trim())
   return match ? `${PLANNOTATOR_SESSION_ID_PREFIX}${(match[1] as string).toLowerCase()}` : null
 }
 
-/** The session id for six hex digits a host drew for its launch. */
 export function plannotatorSessionId(hex6: string): string {
   return `${PLANNOTATOR_SESSION_ID_PREFIX}${hex6.toLowerCase()}`
 }
@@ -228,7 +131,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/** A string the CLI can take as one argument: no control characters, never read as a flag. */
 function checkWord(name: string, value: unknown): string | null {
   if (typeof value !== 'string') return `${name} must be a string`
   if (value.trim() === '') return `${name} must not be empty`
@@ -238,26 +140,17 @@ function checkWord(name: string, value: unknown): string | null {
   return null
 }
 
-/** Whether the action opens a page (and so takes target, gate, options). */
 export function isPlannotatorToolOpenAction(action: PlannotatorToolAction): action is PlannotatorToolOpenAction {
   return action === 'annotate' || action === 'review' || action === 'last'
 }
 
-/**
- * An optional field a model sent empty: `null`, `""`, `[]` or `{}`. A
- * provider that makes every property required (GitHub Copilot's Responses
- * models with a strict schema, #2292) fills each field it means to omit this
- * way, so the parser reads it as absent. A required field stays required:
- * `annotate` with `target: ""` still needs a target, `close` with
- * `session: ""` still needs a session.
- */
+/** An optional field a model sent empty (`null`, `""`, `[]`, `{}`) is read as absent: providers with strict schemas (GitHub Copilot's Responses models) fill every property. A required field stays required. */
 function isEmptyOptional(value: unknown): boolean {
   if (value === null || value === '') return true
   if (Array.isArray(value)) return value.length === 0
   return isRecord(value) && Object.keys(value).length === 0
 }
 
-/** The record without its empty optional members (see `isEmptyOptional`). */
 function withoutEmptyOptionals(value: Record<string, unknown>): Record<string, unknown> {
   const kept: Record<string, unknown> = {}
   for (const [key, member] of Object.entries(value)) {
@@ -266,13 +159,7 @@ function withoutEmptyOptionals(value: Record<string, unknown>): Record<string, u
   return kept
 }
 
-/**
- * Validates a tool call strictly: unknown keys, wrong types, and a field the
- * action does not take are errors. A `false` the action ignores is allowed,
- * since models often fill defaults, and an empty optional field (`null`, `""`,
- * `[]`, `{}`, also inside `options`) is read as absent. The error text is for
- * the model.
- */
+/** Validates strictly: unknown keys, wrong types and fields the action does not take are errors; a `false` the action ignores is allowed. The error text is for the model. */
 export function parsePlannotatorToolInput(value: unknown, parseOptions: PlannotatorToolParseOptions = {}): PlannotatorToolParse {
   const fail = (error: string): PlannotatorToolParse => ({ ok: false, error: `Invalid plannotator call: ${error}.` })
   if (!isRecord(value)) return fail('the input must be an object')
@@ -364,26 +251,17 @@ export function parsePlannotatorToolInput(value: unknown, parseOptions: Plannota
   return { ok: true, input }
 }
 
-/** The files of an annotate call, in order (one or several). */
 export function plannotatorToolTargets(input: PlannotatorToolInput): string[] {
   if (input.target === undefined) return []
   return Array.isArray(input.target) ? [...input.target] : [input.target]
 }
 
-/**
- * The arguments the matching slash command would carry (`/plannotator-annotate
- * <these>`), one argument per element, never re-split. A list of annotate
- * targets passes a bare word as `./word`, so the CLI reads every entry as a
- * path. `last` has none but `--tailscale`, and the actions that open nothing
- * (list, close) have none. `tailscale` becomes `--tailscale`.
- */
+/** The arguments the matching slash command would carry, one per element, never re-split. A list of annotate targets passes a bare word as `./word`. */
 export function plannotatorToolArgs(input: PlannotatorToolInput): string[] {
   switch (input.action) {
     case 'annotate':
       return [
-        // A list is files named by their paths, so every entry is passed as
-        // one: a bare word becomes `./word`. The CLI then refuses a list with a
-        // missing file instead of reading the bare word as prose.
+        // A list is files named by paths: a bare word becomes `./word`, so the CLI refuses a missing file instead of reading it as prose.
         ...(Array.isArray(input.target)
           ? input.target.map((target) => (looksLikeFilePath(target) || /^https?:\/\//i.test(target) ? target : `./${target}`))
           : plannotatorToolTargets(input)),
@@ -392,9 +270,7 @@ export function plannotatorToolArgs(input: PlannotatorToolInput): string[] {
         ...(input.tailscale ? ['--tailscale'] : []),
       ]
     case 'review':
-      // A review's `gate` is the host's alone (deliver a bare approval as a
-      // message), never passed on: the review page always has Approve, and a
-      // CLI older than `review --gate` refuses the flag.
+      // A review's `gate` is the host's alone, never passed on: the page always has Approve, and a CLI older than `review --gate` refuses the flag.
       return [
         ...(input.options?.base ? ['--base', input.options.base] : []),
         ...(input.tailscale ? ['--tailscale'] : []),
@@ -408,21 +284,10 @@ export function plannotatorToolArgs(input: PlannotatorToolInput): string[] {
   }
 }
 
-/**
- * What a review is OF, in full: the absolute file or folder path, the URL, the
- * files of a bundle (in review order), the reviewed directory or the PR URL.
- * Taken from the server that shows (and later submits) the review, never
- * guessed from the words the agent typed: two files can share a name.
- */
+/** What a review is OF, in full, taken from the server that shows it and never guessed from the agent's words: two files can share a name. */
 export type PlannotatorTarget = string | readonly string[]
 
-/**
- * The line(s) naming a review's full target: `Target: /abs/path/notes.md`, or
- * for several files `Targets:` and one `- path` line each. Empty for no target
- * (the last-message surface has none). Every decision message and the tool's
- * opened text carry it, so an agent never has to guess which of two
- * same-named files a decision is about.
- */
+/** The line(s) naming a review's full target (`Target:`, or `Targets:` with a `- path` line each); empty for no target. */
 export function plannotatorTargetLines(target: PlannotatorTarget | undefined): string {
   if (target === undefined) return ''
   if (typeof target === 'string') return target.trim() ? `Target: ${target}` : ''
@@ -432,27 +297,18 @@ export function plannotatorTargetLines(target: PlannotatorTarget | undefined): s
   return ['Targets:', ...paths.map((path) => `- ${path}`)].join('\n')
 }
 
-/**
- * How a session served over the tailnet answers Ask AI: `ask` true when
- * "Ask this session" answers there for the machine owner's Tailscale login.
- */
+/** How a tailnet session answers Ask AI: `ask` is true when it answers for the machine owner's Tailscale login. */
 export interface PlannotatorTailnetOpen {
   ask: boolean
 }
 
-/** The line the opened text adds for a session served over the tailnet. */
 export function plannotatorTailnetOpenedLine(tailnet: PlannotatorTailnetOpen): string {
   return tailnet.ask
     ? 'It is served over the user\'s tailnet (HTTPS, never public): they open the URL on their phone or another device. "Ask this session" answers there only for the Tailscale login that owns this computer.'
     : 'It is served over the user\'s tailnet (HTTPS, never public): they open the URL on their phone or another device. "Ask this session" is not available on the other device for this review.'
 }
 
-/**
- * The tool's result once the session is open (`url`) or still starting (no
- * url). `sessionId` leads it when given; `target` (the full path or URL the
- * server opened, when known) follows it. `tailnet` adds the line for a page
- * served over the user's tailnet.
- */
+/** The tool's result once the session is open (`url`) or still starting (no url). */
 export function plannotatorToolOpenedText(
   subject: string,
   url: string | undefined,
@@ -477,20 +333,10 @@ export function plannotatorToolOpenedText(
   ].join('\n')
 }
 
-/**
- * The outcome a decision heading names for a code review the reviewer posted
- * straight to the PR platform (GitHub, GitLab, Bitbucket): the same words on
- * every host that delivers it as a message.
- */
+/** The outcome named for a code review posted straight to the PR platform. */
 export const PLANNOTATOR_OUTCOME_REVIEW_POSTED = 'Review posted'
 
-/**
- * The first line of every decision message a host delivers: what was
- * reviewed, its session id, and the outcome (`Feedback · 3 comments`). With a
- * `target` (the full path, URL or files the SUBMITTING server reviewed) the
- * heading is followed by its `Target:` line(s), so even a bare approval names
- * exactly which file it approves.
- */
+/** First line of every decision message: what was reviewed, its session id and the outcome, followed by the `Target:` line(s) when a `target` is given. */
 export function plannotatorDecisionHeading(
   subject: string,
   sessionId: string | undefined,
@@ -504,7 +350,6 @@ export function plannotatorDecisionHeading(
 
 const PR_URL_PATTERN = /^https?:\/\/[^\s/]+\/.+\/(?:pull|pull-requests|merge_requests)\/(\d+)\b/i
 
-/** How a pull request URL is named (`PR #12`, `MR !12`), or null when the target is not one. */
 export function plannotatorPrSubject(target: PlannotatorTarget | undefined): string | null {
   if (typeof target !== 'string') return null
   const match = PR_URL_PATTERN.exec(target)
@@ -512,11 +357,7 @@ export function plannotatorPrSubject(target: PlannotatorTarget | undefined): str
   return /merge_requests/i.test(target) ? `MR !${match[1]}` : `PR #${match[1]}`
 }
 
-/**
- * The subject a decision is headed with: the launch's own, unless the
- * decision is about a DIFFERENT pull request than the launch opened (the
- * reviewer switched PRs in place), which is then named itself.
- */
+/** The launch's subject, unless the decision is about a different PR than the launch opened (the reviewer switched PRs). */
 export function plannotatorDecisionSubject(
   subject: string,
   launchTarget: PlannotatorTarget | undefined,
@@ -526,12 +367,10 @@ export function plannotatorDecisionSubject(
   return plannotatorPrSubject(decisionTarget) ?? subject
 }
 
-/** A target as a list of trimmed entries, trailing separators dropped. */
 function targetEntries(target: PlannotatorTarget): string[] {
   return (typeof target === 'string' ? [target] : [...target]).map((value) => value.trim().replace(/[\\/]+$/, ''))
 }
 
-/** Whether two targets name the same thing (a list compares entry by entry, in order). */
 export function plannotatorSameTarget(a: PlannotatorTarget | undefined, b: PlannotatorTarget | undefined): boolean {
   if (a === undefined || b === undefined) return a === b
   const left = targetEntries(a)
@@ -543,14 +382,7 @@ function pathSegments(path: string): string[] {
   return path.split(/[\\/]+/).filter((segment) => segment !== '')
 }
 
-/**
- * Subjects that tell open reviews apart. Reviews whose subjects are equal and
- * whose targets are different paths (two `QUESTIONS.md` in different folders)
- * are each named by the shortest trailing part of their path, two segments at
- * least, that none of the others shares (`releases-2026-10-04/QUESTIONS.md`).
- * A subject that ends in the path's last segment keeps its other words
- * (`changes in app/web`). Every other subject is returned as is, in order.
- */
+/** Subjects that tell open reviews apart: equal subjects with different paths get the shortest trailing path part (two segments at least) that none of the others shares. Other subjects are returned as is. */
 export function plannotatorDistinctSubjects(
   reviews: readonly { subject: string; target?: PlannotatorTarget }[],
 ): string[] {
@@ -584,56 +416,31 @@ export function plannotatorDistinctSubjects(
   return subjects
 }
 
-/** What a host answers a list of several files with when its Plannotator CLI is too old to open them as one review. */
 export const PLANNOTATOR_TOOL_BUNDLE_UNAVAILABLE_TEXT =
   'Plannotator did not open: the installed Plannotator is too old to open several files at once. Ask the user to update Plannotator to open several files at once, or open them one at a time for now.'
 
-/**
- * The line a CLI that opens bundles adds to its "Ambiguous annotate
- * arguments" error (`ANNOTATE_BUNDLE_HINT` in annotate-target.ts; copied here
- * because this section must stay dependency-free).
- */
+/** The line a bundle-capable CLI adds to its "Ambiguous annotate arguments" error (`ANNOTATE_BUNDLE_HINT` in annotate-target.ts; copied because this section must stay dependency-free). */
 export const PLANNOTATOR_BUNDLE_HINT_LINE =
   'To review several files together, pass only their paths: plannotator annotate a.md b.html'
 
-/**
- * Whether a CLI's startup error for several file paths is an OLDER CLI's
- * refusal: its ambiguity error without the bundle hint a current CLI adds. A
- * host that sent a list of paths answers `PLANNOTATOR_TOOL_BUNDLE_UNAVAILABLE_TEXT`
- * then, instead of showing an error that tells the agent to pick one file.
- */
+/** True for an OLDER CLI's refusal of several file paths: its ambiguity error without the bundle hint. */
 export function isOlderCliBundleRefusal(errorText: string): boolean {
   return errorText.includes('Ambiguous annotate arguments:') && !errorText.includes(PLANNOTATOR_BUNDLE_HINT_LINE)
 }
 
-/** The file name of a path, for subjects (either separator). */
 function fileNameOf(path: string): string {
   const trimmed = path.replace(/[\\/]+$/, '')
   return trimmed.slice(Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\')) + 1) || trimmed
 }
 
-/**
- * What a review of several files is called wherever one line names it: the
- * tool's result, the decision heading, the session list. Up to three file
- * names, then a count of the rest: "3 files: spec.md, mock.html, notes.md",
- * "5 files: a.md, b.md, c.md +2 more".
- */
+/** Name of a multi-file review: up to three file names, then a count of the rest ("5 files: a.md, b.md, c.md +2 more"). */
 export function plannotatorBundleSubject(paths: readonly string[]): string {
   const names = paths.map(fileNameOf)
   const rest = names.length - 3
   return `${names.length} files: ${names.slice(0, 3).join(', ')}${rest > 0 ? ` +${rest} more` : ''}`
 }
 
-/**
- * A subject from the target the CLI reports it opened (the ready line, the
- * result record), for the kinds whose subject names what was opened:
- * annotate (the file name, a URL's host, or a bundle's file names) and
- * review (`PR #12` / `MR !12`, or `changes in <directory>`). Null when the
- * target names nothing usable; the host then keeps the subject it built from
- * the typed words, as it must for an older CLI that reports no target. Typed
- * words are not trusted for this when a target is known: the CLI ignores a
- * stray `.` or prose words beside a file, so `annotate . a.md` opens a.md.
- */
+/** A subject from the target the CLI reports it opened, or null when it names nothing usable. Typed words are not trusted when a target is known: the CLI ignores a stray `.` or prose beside a file. */
 export function plannotatorTargetSubject(kind: 'annotate' | 'review', target: PlannotatorTarget | undefined): string | null {
   if (target === undefined) return null
   const entries = (typeof target === 'string' ? [target] : [...target]).filter((entry) => entry.trim() !== '')
@@ -658,22 +465,16 @@ export function plannotatorTargetSubject(kind: 'annotate' | 'review', target: Pl
   return fileNameOf(only) || null
 }
 
-/**
- * Whether a shell word reads as a file path rather than prose: it has a path
- * separator, starts with `~`, `.` or `@`, or ends in a file extension. A URL
- * is not a path. Pure: nothing is looked up on disk.
- */
+/** Whether a shell word reads as a file path rather than prose (a separator, a leading `~`, `.` or `@`, or an extension; a URL is not). Nothing is looked up on disk. */
 export function looksLikeFilePath(word: string): boolean {
   if (/^https?:\/\//i.test(word)) return false
   if (/[\\/]/.test(word) || /^[~.@]/.test(word)) return true
   return /\.[A-Za-z0-9]{1,12}$/.test(word)
 }
 
-/** One open review, as `list` reports it. */
 export interface PlannotatorSessionSummary {
   id: string
   kind: 'plan' | 'annotate' | 'review' | 'last'
-  /** What it shows: the file(s), folder, URL, PR, or "local changes". */
   subject: string
   url?: string
   ageMs: number
@@ -692,7 +493,6 @@ function ageText(ms: number): string {
   return `${Math.floor(hours / 24)} days`
 }
 
-/** `list`'s result: one line per open review, or a sentence when there is none. */
 export function plannotatorToolListText(sessions: readonly PlannotatorSessionSummary[]): string {
   if (sessions.length === 0) return 'No open Plannotator reviews from this conversation.'
   const lines = sessions.map((session) =>
@@ -716,7 +516,6 @@ export function plannotatorToolListText(sessions: readonly PlannotatorSessionSum
   ].join('\n')
 }
 
-/** How one `close` went, for `plannotatorToolCloseText`. */
 export type PlannotatorCloseOutcome =
   | { id: string; subject: string; closed: true; unsent: number | null }
   | { id: string; subject: string; closed: false; reason: 'plan' | 'decided' | 'failed'; detail?: string }
@@ -745,26 +544,13 @@ export function plannotatorToolCloseText(outcomes: readonly PlannotatorCloseOutc
   return closedAny ? [...lines, 'Nothing more arrives for a review you closed.'].join('\n') : lines.join('\n')
 }
 
-/** `close` naming a session this conversation did not open (or that already ended). */
 export function plannotatorUnknownSessionText(id: string): string {
   return `No open Plannotator review ${id} from this conversation. Call the plannotator tool with action "list" to see yours.`
 }
 
 /**
- * The words of `command` when it is ONE simple command a shell would run
- * without interpreting anything; null otherwise.
- *
- * Quoting follows the slash commands' splitter (`splitShellWords`): whitespace
- * separates, single quotes are literal, double quotes group (a backslash
- * escapes `"`, `\`, `$` and a backtick inside them), a backslash outside quotes
- * escapes the next character. Where that splitter tolerates, this refuses:
- * anything the shell would expand or treat as syntax makes the result null, so
- * a word here is exactly the argument the program would have received. That
- * is: an unquoted operator or redirect (`; & | < > ( )`), a line break, `$`
- * or a backtick outside single quotes, an unquoted glob or brace (`* ? [ { }`),
- * a `#` that starts a word (a comment), a `~` that starts a word other than
- * `~` or `~/...` (the CLIs expand those two themselves), and an unterminated
- * quote.
+ * The words of `command` when it is ONE simple command a shell would run without interpreting anything; null otherwise.
+ * Quoting follows `splitShellWords`, but where that splitter tolerates, this refuses (operators, expansions, globs, comments, unterminated quotes).
  */
 export function simpleShellCommandWords(command: string): string[] | null {
   const input = command.trim()
@@ -838,23 +624,13 @@ export function simpleShellCommandWords(command: string): string[] | null {
   return words
 }
 
-/**
- * Annotate flags for a script that reads the CLI's own channels: the exit
- * code and stdout record of a strict gate (`--require-approval`,
- * `--result-file`) or the hook-shaped stdout (`--hook`). A host that starts
- * the CLI detached and delivers the decision later as a message has no caller
- * reading any of them, so the reviewer's decision would be lost. Such a host
- * refuses annotate words carrying one (`scriptOnlyAnnotateFlag`), and the
- * shell take-over below leaves a command carrying one to run as written.
- */
+/** Annotate flags for a script that reads the CLI's own channels (exit code, stdout record, hook output). A detached host has no such reader, so it refuses them and leaves a command carrying one to run as written. */
 export const SCRIPT_ONLY_ANNOTATE_FLAGS: readonly string[] = ['--require-approval', '--result-file', '--hook']
 
-/** The first script-only annotate flag among the words, or null. */
 export function scriptOnlyAnnotateFlag(words: readonly string[]): string | null {
   return words.find((word) => SCRIPT_ONLY_ANNOTATE_FLAGS.includes(word)) ?? null
 }
 
-/** What a detached host answers when the user's annotate words carry a script-only flag. */
 export function scriptOnlyAnnotateFlagText(flag: string): string {
   return (
     `Plannotator did not open: ${flag} is for scripts that read the CLI's exit code or result file, ` +
@@ -872,35 +648,8 @@ const COMMAND_ACTIONS: Record<string, PlannotatorToolAction> = {
 }
 
 /**
- * An agent's shell command (a Bash tool call) as the `plannotator` tool call
- * that opens the same thing, or null when the command is not one to take over.
- *
- * A host that can deliver decisions later answers such a command itself,
- * through the same launch as the tool, instead of running the blocking CLI:
- * the agent gets the tool's experience (the page opens, the turn ends, the
- * decision arrives as a message, Ask AI asks this session) even when it reached
- * for the CLI.
- *
- * Taken over: one simple command (see `simpleShellCommandWords`) whose first
- * word is exactly `plannotator` (the installed binary on PATH; a path such as
- * `./plannotator` is a dev build and runs for real), with subcommand
- * `annotate`, `review`, `annotate-last` or `last`, carrying only what the tool
- * represents: annotate `<target>` (or several targets that all read as file
- * paths, `looksLikeFilePath`, which become `target: [...]`, a review of
- * several files) plus `--gate` and `--markdown`; review `[target]` plus
- * `--base <ref>` and `--gate`; last with no arguments. `--json` is accepted
- * and dropped (the decision arrives as a message, not on stdout). With
- * `{ tailscale: true }` (a host that publishes over the tailnet) `--tailscale`
- * on annotate, review and last becomes `tailscale: true`. The result passes
- * `parsePlannotatorToolInput` with the same options.
- *
- * Everything else is null and runs as written: other subcommands, any other
- * flag (`--require-approval`, `--result-file`, `--hook`, `--tailscale` for a
- * host without that option, `--static`, `--app`, `--no-jina`, `--help`, ...),
- * a repeated flag, several
- * targets that are not all file paths (or for review), an environment prefix,
- * and any shell syntax (`cd x && ...`,
- * pipes, redirects, substitutions), so scripted strict gates keep the CLI.
+ * An agent's shell command as the `plannotator` tool call that opens the same thing, or null when it is not one to take over.
+ * Taken over only when it is one simple command whose first word is exactly `plannotator` (a path such as `./plannotator` is a dev build) and carries only what the tool represents. Everything else runs as written, so scripted strict gates keep the CLI.
  */
 export function plannotatorCommandToToolInput(
   command: string,

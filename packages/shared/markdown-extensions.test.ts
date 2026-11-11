@@ -49,9 +49,7 @@ describe("normalizeMarkdownExtensions", () => {
 		expect(normalizeMarkdownExtensions({ 0: ".livemd" })).toEqual([]);
 	});
 
-	// SECURITY: annotate copies file contents into the data dir, so `.env` is a
-	// deliberate exclusion from the built-in set. Config must not be a way back
-	// in, in any casing or with surrounding whitespace.
+	// SECURITY: `.env` is deliberately excluded (annotate copies file contents into the data dir), in any casing.
 	test(".env can never be registered through config", () => {
 		expect(normalizeMarkdownExtensions([".env"])).toEqual([]);
 		expect(normalizeMarkdownExtensions([" .ENV "])).toEqual([]);
@@ -59,14 +57,12 @@ describe("normalizeMarkdownExtensions", () => {
 		expect(isAnnotatableTextPath("app/.env", [".livemd"])).toBe(false);
 	});
 
-	// The rationale covers the whole dotenv family, not just the exact name:
-	// `db.prod.env` and `.env.local` hold secrets exactly like `.env` does.
+	// The exclusion covers the whole dotenv family (`db.prod.env`, `.env.local`).
 	test("the dotenv family is denied as a family", () => {
 		expect(normalizeMarkdownExtensions([".prod.env"])).toEqual([]);
 		expect(normalizeMarkdownExtensions([".local.env"])).toEqual([]);
 		expect(normalizeMarkdownExtensions([".env.local"])).toEqual([]);
 		expect(normalizeMarkdownExtensions([".ENV.LOCAL", " .Prod.Env "])).toEqual([]);
-		// Non-dotenv names that merely contain "env" stay registerable.
 		expect(normalizeMarkdownExtensions([".envrc", ".environment"])).toEqual([
 			".envrc",
 			".environment",
@@ -113,8 +109,7 @@ describe("configured extensions in the annotatable predicates", () => {
 		expect(isAnnotatableTextPath("app.ts", extra)).toBe(false);
 	});
 
-	// Extras are markdown, so frontmatter is stripped for them — unlike the
-	// built-in plain-text formats, where `---` is real content.
+	// Extras are markdown, so frontmatter is stripped, unlike built-in plain-text formats.
 	test("configured extensions strip frontmatter like .md does", () => {
 		expect(shouldStripFrontmatter("notes.livemd", extra)).toBe(true);
 		expect(shouldStripFrontmatter("notes.livemd")).toBe(true);
@@ -127,10 +122,7 @@ describe("configured extensions in the annotatable predicates", () => {
 	});
 });
 
-// The config.json -> memo -> predicate seam, end to end. This is the one
-// integration the explicit-list tests above cannot regress-guard: a break in
-// loadConfig plumbing or the memo would leave every configured extension
-// silently ignored at runtime.
+// The config.json -> memo -> predicate seam, end to end.
 describe("config-file integration (sandboxed data dir)", () => {
 	test("memoized config read feeds the predicates, once per process", () => {
 		const prevDataDir = process.env.PLANNOTATOR_DATA_DIR;
@@ -145,8 +137,7 @@ describe("config-file integration (sandboxed data dir)", () => {
 			expect(getExtraMarkdownExtensions()).toEqual([".livemd"]);
 			expect(getAnnotatableTextRegex().test("notebooks/tour.livemd")).toBe(true);
 
-			// Memoized: a mid-session config edit must not change the accepted
-			// set until the next process (or an explicit reset).
+			// Memoized: a mid-session config edit must not change the accepted set.
 			writeFileSync(
 				join(dataDir, "config.json"),
 				JSON.stringify({ markdownExtensions: [".qmd"] }),

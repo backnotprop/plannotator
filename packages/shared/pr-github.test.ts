@@ -17,10 +17,6 @@ const VIEW_JSON = JSON.stringify({
   url: "https://github.com/o/r/pull/123",
 });
 
-/**
- * Mock gh runtime. Routes by subcommand; records every invocation so tests can
- * assert on exactly which commands ran (and which didn't).
- */
 function githubRuntime(opts: {
   prDiff: { stdout?: string; stderr?: string; exitCode: number };
   files?: { stdout?: string; stderr?: string; exitCode: number };
@@ -70,7 +66,6 @@ describe("fetchGhPR", () => {
   });
 
   test("falls back to the paginated files API when gh pr diff fails (oversized PR)", async () => {
-    // Two concatenated pages — the actual shape `gh api --paginate` emits.
     const page1 = JSON.stringify([
       { filename: "src/a.ts", status: "modified", patch: "@@ -1 +1 @@\n-old\n+new" },
     ]);
@@ -89,9 +84,7 @@ describe("fetchGhPR", () => {
     expect(result.rawPatch).toContain("+new");
     expect(result.rawPatch).toContain("diff --git a/src/b.ts b/src/b.ts");
     expect(result.rawPatch).toContain("new file mode 100644");
-    // Every entry carried a patch — nothing is missing, no upgrade needed.
     expect(result.patchIncomplete).toBeFalsy();
-    // Metadata path is unaffected by the fallback.
     expect(result.metadata).toMatchObject({ number: 123, mergeBaseSha: "c".repeat(40) });
   });
 
@@ -338,8 +331,7 @@ describe("reconstructGhPatch", () => {
   });
 
   test("pure rename with a space in the new name still yields parseable paths (file must not vanish)", () => {
-    // Regression: GitHub omits `patch` for 100%-similarity renames; if the
-    // header is unparseable the UI's file splitter drops the file silently.
+    // GitHub omits `patch` for 100%-similarity renames; the header must still parse or the file splitter drops the file.
     const patch = reconstructGhPatch([
       { filename: "docs/road map.md", previous_filename: "docs/roadmap.md", status: "renamed" },
     ]);

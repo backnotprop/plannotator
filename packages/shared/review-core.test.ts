@@ -147,13 +147,7 @@ function makeRuntime(baseCwd: string): ReviewGitRuntime {
   };
 }
 
-/**
- * Like `makeRuntime`, but routes every command through `prepareGitCommand`
- * and forwards the prepared environment to git — the way the production Bun
- * and Pi runtimes do — so per-command `config` (GIT_CONFIG_*) actually
- * reaches the spawned process. `intercept` lets a test sabotage individual
- * commands (e.g. force the cat-file size probe to fail).
- */
+/** Like `makeRuntime`, but routes commands through `prepareGitCommand` and forwards the prepared env to git, as the production runtimes do. `intercept` lets a test sabotage individual commands. */
 function makeConfigForwardingRuntime(
   baseCwd: string,
   intercept?: (args: string[]) => GitCommandResult | null,
@@ -413,7 +407,6 @@ describe("review-core", () => {
     const repoDir = initRepo();
     const runtime = makeRuntime(repoDir);
     writeFileSync(join(repoDir, "notes.txt"), "hello\n", "utf-8");
-    // NUL bytes, well under the cap: git calls it binary on its own merits.
     writeFileSync(join(repoDir, "logo.png"), Buffer.from([0, 1, 2, 0, 3]));
 
     const result = await runGitDiff(runtime, "uncommitted", "main");
@@ -454,9 +447,7 @@ describe("review-core", () => {
   test("large tracked text files render as binary in staged and working-tree diffs (#1120)", async () => {
     const repoDir = initRepo();
     const runtime = makeRuntime(repoDir);
-    // Pure text (no NUL bytes), so WITHOUT the size guard git would emit the
-    // whole multi-megabyte text patch — the memory blowup #1120 reports once a
-    // large file is staged into (or modified in) the tracked diff.
+    // Pure text (no NUL bytes): without the size guard git would emit the whole multi-megabyte patch.
     const bigText = "a".repeat(MAX_REVIEW_FILE_CONTENT_BYTES + 100);
     writeFileSync(join(repoDir, "artifact.js"), bigText, "utf-8");
     git(repoDir, ["add", "artifact.js"]);
@@ -465,12 +456,9 @@ describe("review-core", () => {
     expect(staged.patch).toContain("diff --git a/artifact.js b/artifact.js");
     expect(staged.patch).toContain("Binary files /dev/null and b/artifact.js differ");
     expect(isBinaryPatchFile(staged.patch, "artifact.js")).toBe(true);
-    // The oversized contents never entered the buffered patch.
     expect(staged.patch).not.toContain("aaaaaaaaaa");
     expect(staged.patch.length).toBeLessThan(1024);
 
-    // The same file, seen through the working-tree views (git diff HEAD /
-    // merge-base), is bounded the same way.
     const uncommitted = await runGitDiff(runtime, "uncommitted", "main");
     expect(isBinaryPatchFile(uncommitted.patch, "artifact.js")).toBe(true);
     expect(uncommitted.patch).not.toContain("aaaaaaaaaa");
@@ -851,7 +839,6 @@ describe("review-core", () => {
 
     const result = await runGitDiff(runtime, "staged", "main", "/repo");
 
-    // The review shows the real diff — not one binary stub per file.
     expect(result.patch).toContain("+new");
     expect(result.patch).not.toContain("Binary files");
     expect(
@@ -878,10 +865,7 @@ describe("review-core", () => {
   });
 
   test("a probed-oversized object excludes only its path, and a missing one none", async () => {
-    // Per-object evidence stays per-object: one oversized blob costs one path,
-    // never the whole review. An object the probe cannot SIZE is a different
-    // answer from one it sizes above the cap: `missing` is unknown, so that
-    // path keeps rendering under git's own core.bigFileThreshold bound.
+    // One oversized blob costs one path, never the whole review. An object the probe cannot SIZE (`missing`) differs from one above the cap: that path keeps rendering under git's own core.bigFileThreshold.
     const smallOld = "1".repeat(40);
     const smallNew = "2".repeat(40);
     const missingOld = "3".repeat(40);
@@ -962,9 +946,7 @@ describe("review-core", () => {
 
     const result = await runGitDiff(runtime, "staged", "main");
 
-    // The small file's real diff survives — the review is not blanked.
     expect(result.patch).toContain("+after");
-    // git's own core.bigFileThreshold stubs the oversized staged blob.
     expect(result.patch).toContain("Binary files");
     expect(result.patch).not.toContain("aaaaaaaaaa");
     expect(result.patch.length).toBeLessThan(4_000);
@@ -1069,10 +1051,7 @@ describe("review-core", () => {
   }, 20_000);
 
   test("renders a renamed file whose edited worktree blob the probe cannot find", async () => {
-    // Rename/copy detection makes git hash the WORKING-TREE content and print
-    // that hash in --raw output, but the blob is never written to the object
-    // database. The size probe answers `missing` for it. Treating that as
-    // "oversized" dropped the whole renamed file out of the review (#1167).
+    // Rename/copy detection makes git hash the WORKING-TREE content and print it in --raw output, but the blob is never written to the object database; the probe answers `missing` for it, which must not count as oversized.
     const repoDir = initRepo();
     mkdirSync(join(repoDir, "src"));
     const original = Array.from({ length: 40 }, (_, index) => `line ${index + 1}`).join("\n");
@@ -1378,7 +1357,6 @@ describe("review-core", () => {
     mkdirSync(subDir, { recursive: true });
     const context = await getGitContext(makeRuntime(subDir), subDir);
 
-    // Patch paths are relative to the top level, not to where the review began.
     expect(context.cwd).toBe(subDir);
     expect(realpathSync(context.root!)).toBe(realpathSync(repoDir));
   });
@@ -1444,10 +1422,8 @@ describe("review-core", () => {
     const runtime = makeRuntime(subCwd);
 
     for (const diffType of ["since-base", "uncommitted", "unstaged"] as const) {
-      // A file inside the subdir (would double-prefix: pkg/pkg/mod.ts)…
       const sub = await getFileContentsForDiff(runtime, diffType, "main", "pkg/mod.ts", undefined, subCwd);
       expect(sub.newContent).toBe("after\n");
-      // …and a root-level file (invisible from the subdir entirely).
       const root = await getFileContentsForDiff(runtime, diffType, "main", "tracked.txt", undefined, subCwd);
       expect(root.newContent).toBe("root after\n");
     }
@@ -1672,14 +1648,9 @@ describe("review-core", () => {
   });
 
   test("getDefaultBranch falls back to local when origin/HEAD points at an unfetched ref", () => {
-    // Simulates a narrow / partial clone where origin/HEAD is configured but
-    // the target ref was never fetched. Before the verify step, the server
-    // would return "origin/phantom" and every branch/merge-base diff would
-    // fail with "unknown revision". With the verify step we fall back to
-    // local main.
+    // Narrow/partial clone: origin/HEAD is configured but the target ref was never fetched. Without the verify step every branch/merge-base diff fails with "unknown revision"; with it we fall back to local main.
     const repoDir = initRepo();
 
-    // Manually set origin/HEAD → origin/phantom without ever fetching it.
     git(repoDir, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/phantom"]);
 
     const runtime = makeRuntime(repoDir);
@@ -1689,11 +1660,7 @@ describe("review-core", () => {
   });
 
   test("getDefaultBranch finds origin/main on feature-only clones (no origin/HEAD, no local main)", async () => {
-    // CI checkouts / `clone --branch feature` / extra worktrees: only the
-    // feature branch exists locally, main lives solely as the fetched
-    // remote-tracking ref. The old chain (origin/HEAD -> local main ->
-    // blind "master") skipped right past it, "master" didn't resolve, and
-    // since-base was suppressed for the whole session.
+    // CI checkouts, `clone --branch feature`, extra worktrees: main exists only as the fetched remote-tracking ref, which a chain of origin/HEAD, local main and a blind "master" skipped past.
     const repoDir = initRepo();
     const sha = git(repoDir, ["rev-parse", "HEAD"]);
     git(repoDir, ["checkout", "-b", "feature"]);
@@ -1744,10 +1711,7 @@ describe("review-core", () => {
   });
 
   test("parseWorktreeDiffType recognises every DiffType suffix, including merge-base", () => {
-    // Regression guard: every local diff type must round-trip through the
-    // worktree-prefixed form. Missing `merge-base` here previously routed
-    // "worktree:/path:merge-base" to { path: "/path:merge-base", subType: "uncommitted" }
-    // which pointed git at a non-existent cwd and silently collapsed the diff mode.
+    // Every local diff type must round-trip through the worktree-prefixed form: a missing `merge-base` once parsed "worktree:/path:merge-base" as a path with subType "uncommitted".
     const subTypes = [
       "since-base",
       "local-vs-remote",
@@ -1771,7 +1735,6 @@ describe("review-core", () => {
       path: "/tmp/my-worktree",
       subType: "commit:abc1234",
     });
-    // A non-hex suffix is not a commit sub-type — falls back to the path.
     expect(parseWorktreeDiffType("worktree:/tmp/my-worktree:commit:not-hex")).toEqual({
       path: "/tmp/my-worktree:commit:not-hex",
       subType: "uncommitted",
@@ -1814,7 +1777,6 @@ describe("jj-commit family", () => {
     expect(commitFamilyId("jj-commit:abc1234")).toBe("abc1234");
     expect(commitFamilyId("worktree:/tmp/wt:commit:abc1234")).toBe("abc1234");
     expect(commitFamilyId("jj-current")).toBeNull();
-    // The rail's hot path skips the jj context recompute too.
     expect(isSameCwdCommitSwitch("jj-current", "jj-commit:abc1234")).toBe(true);
   });
 });
@@ -1922,14 +1884,7 @@ describe("commit diff mode", () => {
   });
 });
 
-/**
- * Failure backoff for the remote-default probe (#1553). The regression this
- * guards is the one the issue reported: a remote that never answers being
- * retried on the same 60s cadence for the life of the session, which on a
- * smartcard-backed SSH setup is one physical touch prompt per minute. The
- * reset leg matters just as much — a network that comes back must return to
- * the normal cadence rather than stay parked at the cap.
- */
+/** Failure backoff for the remote-default probe: a remote that never answers must not be retried on the same 60s cadence forever (on a smartcard-backed SSH setup that is a touch prompt per minute), and a network that comes back must return to the normal cadence. */
 describe("nextRemoteBaseCheckInterval", () => {
   test("doubles on failure, from the base interval up to the cap", () => {
     const seen: number[] = [];

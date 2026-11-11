@@ -151,17 +151,7 @@ export async function runPRFullStackDiff(
 
 const FULL_SHA_RE = /^[0-9a-f]{40,64}$/i;
 
-/**
- * Recompute the PR's LAYER diff locally — the same merge-base..head diff the
- * platform renders, but with no API size limits. Used to upgrade a truncated
- * files-API reconstruction (platforms withhold per-file patches on very large
- * PRs) once a local checkout exists.
- *
- * Prefers the platform-reported merge-base SHA (the exact commit the platform
- * diffed against); falls back to discovering the merge base locally via a
- * three-dot diff against baseSha. Diffs explicit SHAs, not HEAD — agent jobs
- * may move HEAD in the checkout.
- */
+/** Recompute the PR's LAYER diff locally (merge-base..head, no API size limits) to upgrade a truncated files-API reconstruction. Prefers the platform's merge-base SHA, else a three-dot diff against baseSha. Diffs explicit SHAs, not HEAD: agent jobs may move HEAD. */
 export async function runPRLayerLocalDiff(
   runtime: ReviewGitRuntime,
   metadata: PRMetadata,
@@ -177,8 +167,7 @@ export async function runPRLayerLocalDiff(
     return unavailable(`Invalid PR head SHA: ${metadata.headSha}`);
   }
 
-  // Shallow warmup clones may lack an object; both GitHub and GitLab allow
-  // fetching reachable commits by SHA (the warmup already relies on this).
+  // Shallow warmup clones may lack an object; GitHub and GitLab allow fetching reachable commits by SHA.
   const ensureObject = (sha: string): Promise<boolean> =>
     ensureObjectAvailable(runtime, sha, { cwd });
 
@@ -189,10 +178,7 @@ export async function runPRLayerLocalDiff(
   const diffArgsFor = (range: string[]): string[] => [
     "diff",
     "--no-ext-diff",
-    // Lift diff.renameLimit: on the multi-thousand-file PRs this path exists
-    // for, the default limit (~1000) silently downgrades rename detection and
-    // renamed+edited files would render as delete+add pairs. A large literal
-    // instead of -l0 because "0 = unlimited" only holds on git >= 2.29.
+    // Lift diff.renameLimit: the default (~1000) silently degrades rename detection on huge PRs. A large literal rather than -l0, since "0 = unlimited" only holds on git >= 2.29.
     "--find-renames",
     "-l100000",
     "--src-prefix=a/",
@@ -225,16 +211,7 @@ export async function runPRLayerLocalDiff(
   return { patch, label: "PR diff (recomputed locally)" };
 }
 
-/**
- * Staleness fingerprint for the full-stack diff above. The diff is three-dot
- * (`baseRef...HEAD` = merge-base(baseRef, HEAD)..HEAD), so its content changes
- * exactly when HEAD or the MERGE-BASE moves — and NOT when the base branch
- * merely advances past an unchanged fork point. Fingerprinting (merge-base,
- * HEAD) therefore detects the real stale cases (commits on HEAD, a lower
- * stacked PR merging, a rebase/force-push shifting the fork point) without
- * crying stale on every ordinary `origin/<default>` fetch. `null` = cannot
- * fingerprint (treated as always-fresh).
- */
+/** Staleness fingerprint for the full-stack diff. The three-dot diff changes only when HEAD or the MERGE-BASE moves, not when the base branch advances past an unchanged fork point. `null`: cannot fingerprint (treated as always-fresh). */
 export async function getPRFullStackFingerprint(
   runtime: ReviewGitRuntime,
   metadata: PRMetadata,
@@ -257,10 +234,6 @@ export async function getPRFullStackFingerprint(
   return `pr-full-stack:${mergeBase.stdout.trim()}:${head.stdout.trim()}`;
 }
 
-/**
- * Fetch and checkout a PR/MR head in a local worktree.
- * Returns true if the checkout succeeded, false otherwise.
- */
 export async function checkoutPRHead(
   runtime: ReviewGitRuntime,
   metadata: PRMetadata,
@@ -280,10 +253,7 @@ export async function checkoutPRHead(
   return checkout.exitCode === 0;
 }
 
-/**
- * Build a minimal stack tree from existing metadata (no API calls).
- * Used as a fallback when the full stack tree hasn't loaded yet.
- */
+/** Minimal stack tree from existing metadata (no API calls), until the full tree loads. */
 export function buildMinimalStackTree(
   metadata: PRMetadata,
   stackInfo: PRStackInfo,

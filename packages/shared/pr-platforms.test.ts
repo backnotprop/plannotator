@@ -1,8 +1,4 @@
-/**
- * The PR provider seam (#1583): URL detection, capabilities and the pure
- * helpers every platform shares. GitHub/GitLab behavior is pinned so adding a
- * third platform cannot change it.
- */
+/** URL detection, capabilities and the pure helpers every platform shares; GitHub/GitLab behavior is pinned so adding a platform cannot change it. */
 import { describe, expect, test } from "bun:test";
 import {
   getCliName,
@@ -120,7 +116,6 @@ describe("prDraftTargetKey", () => {
   test("GitHub and GitLab keys are pinned: a changed key would orphan every saved PR draft", () => {
     const gh = { platform: "github", host: "github.com", owner: "Acme", repo: "Widgets", number: 42 } as PRMetadata;
     const gl = { platform: "gitlab", host: "gitlab.example.com", projectPath: "Group/Sub/Project", iid: 7 } as PRMetadata;
-    // Values computed with the pre-Bitbucket implementation on main.
     expect(prDraftTargetKey(gh, "layer")).toBe("pr-89a0481ca8626ebf");
     expect(prDraftTargetKey(gh, "full-stack")).toBe("pr-5bafee1d6456631b");
     expect(prDraftTargetKey(gl, "layer")).toBe("pr-a2c74c0e94f2901e");

@@ -55,7 +55,6 @@ const gitlabMetadata: GitlabMRMetadata = {
   url: 'https://gitlab.example.com/acme/widgets/-/merge_requests/7',
 };
 
-/** GitLab mints upload secrets as 32 lowercase hex characters; the rewrite requires that shape. */
 const uploadSecret = '0123456789abcdef0123456789abcdef';
 
 describe('isPRArtifactDocumentUrlAllowed', () => {
@@ -139,10 +138,7 @@ describe('isPRArtifactDocumentUrlAllowed', () => {
     )).toBe(true);
   });
 
-  // #2328: the browser asks for the attachment by the URL the browser
-  // normalized, while the PR text may write the host in another case or with
-  // the default port. Failure caught: a referenced private image refused.
-  // (A host other than the PR's own: there the full URL is the only needle.)
+  // The browser asks by the URL it normalized, while the PR text may write the host in another case or with the default port: a referenced private image must not be refused.
   test('a reference with another host case or the default port still names the requested URL', () => {
     const attachment = 'https://private-user-images.githubusercontent.com/1/shot.png?jwt=abc';
     for (const written of [
@@ -176,10 +172,7 @@ describe('isPRArtifactDocumentUrlAllowed', () => {
     expect(isPRArtifactDocumentUrlAllowed(attachment, enterprise, body)).toBe(false);
   });
 
-  // Failure caught: "referenced" meaning "resolves to". A comment holding
-  // `…/main/docs/../secret.txt` must not authorize `…/main/secret.txt`, a URL
-  // the text never names. (The written paths keep the target's path out of
-  // the text: the same-origin path needle matches it literally anywhere.)
+  // "Referenced" must not mean "resolves to": `…/main/docs/../secret.txt` must not authorize `…/main/secret.txt`.
   test('a reference with dot segments or a backslash does not authorize the URL it resolves to', () => {
     const target = 'https://github.com/acme/widgets/blob/main/secret.txt';
     for (const written of [
@@ -380,7 +373,6 @@ describe('fetchPRArtifactDocument', () => {
       return new Response('# Review', { headers: { 'content-type': 'text/markdown' } });
     };
     const crafted = [
-      // Secrets GitLab could never have minted: too short, and not lowercase hex.
       'https://gitlab.example.com/uploads/hash/review.md',
       `https://gitlab.example.com/uploads/${uploadSecret.toUpperCase()}/review.md`,
       // A multi-segment remainder would otherwise append an attacker-chosen path
@@ -396,7 +388,6 @@ describe('fetchPRArtifactDocument', () => {
           rawUrl,
         );
       }
-      // Left alone: fetched verbatim as the ordinary web route, never rewritten.
       expect(requestedUrls).toEqual(crafted);
     } finally {
       globalThis.fetch = originalFetch;
@@ -533,7 +524,6 @@ describe('fetchPRArtifactDocument', () => {
           { ...context, body: `[review](/uploads/${uploadSecret}/review.md)` },
           `https://gitlab.example.com/uploads/${uploadSecret}/review.md`,
         );
-        // The actionable outcome: the reader is told to log in, not that HTTP 401 happened.
         await expect(promise).rejects.toMatchObject({ status: 401 });
         await expect(promise).rejects.toThrow(/glab auth login --hostname gitlab\.example\.com/);
       }
@@ -564,9 +554,7 @@ describe('fetchPRArtifactDocument', () => {
   });
 
   test('does not forward the GitLab token to a cross-origin redirect after the upload rewrite', async () => {
-    // The module-global auth cache is keyed by platform and host with a 5 minute TTL, so
-    // this deliberately resolves the same `test-token` every other gitlab test in this file
-    // does: whether the cache is cold or warm, request one carries that exact token.
+    // The auth cache is module-global, keyed by platform and host: this resolves the same `test-token` as every other gitlab test here.
     const runtime: PRRuntime = {
       async runCommand() {
         return { stdout: 'test-token\n', stderr: '', exitCode: 0 };
@@ -579,7 +567,6 @@ describe('fetchPRArtifactDocument', () => {
     globalThis.fetch = async (input, init) => {
       requestedUrls.push(String(input));
       tokens.push(new Headers(init?.headers).get('private-token') ?? '');
-      // Object storage hands an upload off to a signed URL on an unrelated host.
       return requestedUrls.length === 1
         ? new Response(null, { status: 302, headers: { location: signedUrl } })
         : new Response('# Review', { headers: { 'content-type': 'text/markdown' } });
@@ -774,10 +761,7 @@ describe('fetchPRArtifactContent', () => {
     },
   };
 
-  // #2328: a private attachment loads through github.com (token), which
-  // redirects to private-user-images (token) and then to a storage host
-  // (no token). Failure caught: the token missing where GitHub needs it, or
-  // sent to a host outside the provider.
+  // A private attachment loads through github.com (token), redirects to private-user-images (token), then to a storage host (no token).
   test('sends the token to github.com and private-user-images only, across the attachment redirects', async () => {
     const attachment = 'https://github.com/user-attachments/assets/0f1e2d3c';
     const hops = [

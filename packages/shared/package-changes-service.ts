@@ -1,22 +1,4 @@
-/**
- * The review server's package changes: `GET /api/package-changes` and
- * `POST /api/package-changes/lookup`, shared by the Bun server and the Pi
- * mirror (each passes a `PackageChangesHost` built from its own diff state).
- *
- * The server works out everything a card shows and everything a lookup
- * sends. The page names a card by path; it never supplies package names.
- * The lookup answers 403 unless the reviewer turned it on (config.json
- * `packageChanges.lookup`, PLANNOTATOR_PACKAGE_LOOKUP=0 wins), and sends only
- * the names `analysis` listed for that card under `lookup.names`. The page's
- * consent button counts `lookup.total`: every name any card would send.
- *
- * Privacy: a name leaves the machine only when every registry setting that
- * could route it elsewhere was read and none does. Settings come from where
- * the package manager reads them: the working tree in a local review (so a
- * gitignored `.npmrc` counts), the PR head in a PR review, the user's own
- * files and the environment. A setting that exists but cannot be read, or a
- * platform call that fails, withholds every name.
- */
+/** Package changes for the review server, shared by Bun and Pi. Privacy: a name leaves the machine only when every registry setting that could route it elsewhere was read and none does; an unreadable setting or a failed platform call withholds every name. */
 import { readFileSync, statSync } from "node:fs";
 import { dirname, join, parse as parsePath } from "node:path";
 import type { DiffFileStatus } from "@plannotator/core/diff-files";
@@ -39,13 +21,11 @@ import {
 } from "./package-metadata";
 import { readDiffSideBytes, type FileBytesRead, type ReviewGitRuntime } from "./review-core";
 
-/** One side of one file, as the host read it. */
 export type PackageSideRead =
   | { kind: "ok"; text: string }
   | { kind: "missing" }
   | { kind: "unreadable"; reason: string };
 
-/** Where the review's package-manager settings live. */
 export type PackageSettingsSource =
   /** A working tree on this machine: `dirOf` maps a diff path to the absolute directory that holds it (null: unknown). */
   | { kind: "local"; dirOf(path: string): Promise<string | null> }
@@ -65,14 +45,11 @@ export type PackageSettingsSource =
   | { kind: "none" };
 
 export interface PackageChangesHost {
-  /** The opaque id of the diff the server serves now. */
   snapshotId(): string;
-  /** The files in the current diff. */
   diffFiles(): { path: string; oldPath?: string; status: DiffFileStatus }[];
   /** One side of a path at the current diff. A throw counts as unreadable. */
   readSide(side: "old" | "new", path: string, oldPath: string | undefined, base: string | undefined): Promise<PackageSideRead>;
   settings(): PackageSettingsSource | Promise<PackageSettingsSource>;
-  /** The user's home directory, or null. */
   homeDir(): string | null;
   /**
    * Called before each analysis, to settle where reads go (a PR review waits
@@ -82,9 +59,7 @@ export interface PackageChangesHost {
    * `budget` side reads per `key` (the PR's base and head commits).
    */
   prepare?(): Promise<PackageReadPlan>;
-  /** Reads a settings file on this machine (tests stub it). */
   readLocalFile?(absolutePath: string): PackageSideRead;
-  /** Whether the reviewer allowed npm lookups (config and env resolved). */
   lookupEnabled(): boolean;
   env: Record<string, string | undefined>;
   fetchImpl?: typeof fetch;
@@ -95,7 +70,6 @@ export interface PackageReadPlan {
   remote?: { key: string; budget: number };
 }
 
-/** What a card's lookup would send. */
 export interface PackageCardLookup {
   names: string[];
   /** Registry names kept here (a private scope or host, or every name when a setting says so or could not be read). */
@@ -107,32 +81,19 @@ export type PackageChangesCardResponse = PackageChangeCard & { lookup: PackageCa
 export interface PackageChangesResponse {
   snapshot: string;
   cards: PackageChangesCardResponse[];
-  /** Every name a lookup across all cards would send: the consent button's count. */
   lookup: { total: number };
 }
 
-/** The largest manifest or lockfile side read (the core refuses more anyway). */
 export const MAX_PACKAGE_FILE_BYTES = 32 * 1024 * 1024;
 export const SETTINGS_MAX_BYTES = 1024 * 1024;
-/**
- * Platform API calls a PR without a checkout may spend on settings, per head
- * commit: a root package (4 files) or a few nested ones. A monorepo PR needs
- * more and withholds every name instead (GitHub's hourly quota is shared with
- * everything else the reviewer runs).
- */
+/** Platform API calls a PR without a checkout may spend on settings, per head commit; a monorepo PR needs more and withholds every name (GitHub's hourly quota is shared). */
 export const REMOTE_SETTINGS_READS = 16;
-/**
- * Platform API calls a PR without a checkout may spend on package files
- * (manifests and lockfiles, one per side), per base and head commit. Cards
- * past it are not drawn, and nothing is offered for lookup: the total a click
- * would send is not knowable.
- */
+/** Platform API calls a PR without a checkout may spend on package files, per base and head commit. Cards past it are not drawn and nothing is offered for lookup, since the total is not knowable. */
 export const REMOTE_PACKAGE_READS = 20;
 const READ_CONCURRENCY = 4;
 
 type SettingsKind = keyof Omit<PackageRoutingFiles, "unreadable">;
 
-/** Files read in every directory a package manager would look in, by kind. */
 function settingsNames(env: Record<string, string | undefined>): [string, SettingsKind][] {
   const names: [string, SettingsKind][] = [
     [".npmrc", "npmrc"],
@@ -145,14 +106,12 @@ function settingsNames(env: Record<string, string | undefined>): [string, Settin
   return names;
 }
 
-/** An environment value by name, case-insensitively (npm reads its keys that way). */
 function envValue(env: Record<string, string | undefined>, name: string): string | undefined {
   const lower = name.toLowerCase();
   for (const [k, v] of Object.entries(env)) if (k.toLowerCase() === lower && v) return v;
   return undefined;
 }
 
-/** The settings files outside the project: user, global, and the Yarn and Bun equivalents. */
 function userSettingsFiles(env: Record<string, string | undefined>, home: string | null): [string, SettingsKind][] {
   const out: [string, SettingsKind][] = [];
   const userconfig = envValue(env, "npm_config_userconfig");
@@ -162,9 +121,7 @@ function userSettingsFiles(env: Record<string, string | undefined>, home: string
   const globalconfig = envValue(env, "npm_config_globalconfig");
   if (globalconfig) out.push([globalconfig, "npmrc"]);
   else {
-    // npm's global file is `$PREFIX/etc/npmrc`; the prefix follows the node
-    // install (`<prefix>/bin/node`, or `<prefix>/node.exe` on Windows). Every
-    // likely prefix is read: one too many only withholds more.
+    // npm's global file is `$PREFIX/etc/npmrc`, the prefix following the node install. Every likely prefix is read: one too many only withholds more.
     const prefixes = new Set<string>(["/", "/usr", "/usr/local", "/opt/homebrew"]);
     const prefix = envValue(env, "npm_config_prefix");
     if (prefix) prefixes.add(prefix);
@@ -215,7 +172,6 @@ const COMMIT_SHA = /^[0-9a-f]{7,64}$/i;
 /** How long a PR review's card waits for its checkout before reading through the platform API instead (that result is not kept). */
 export const PACKAGE_CHECKOUT_WAIT_MS = 18_000;
 
-/** `promise`, or `timedOut` after `ms`. */
 export async function waitAtMost<T>(promise: Promise<T>, ms: number): Promise<{ timedOut: true } | { timedOut: false; value: T }> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<{ timedOut: true }>((resolve) => { timer = setTimeout(() => resolve({ timedOut: true }), ms); });
@@ -226,15 +182,9 @@ export async function waitAtMost<T>(promise: Promise<T>, ms: number): Promise<{ 
   }
 }
 
-/**
- * Where a PR review reads registry settings: the local checkout at the head
- * commit when it holds that commit (no platform calls; one `git ls-tree`, then
- * only the files that exist), else the platform API, capped by the service.
- * Shared by both servers.
- */
+/** Reads a PR's registry settings from the local checkout when it holds the head commit, else through the platform API. */
 export async function prSettingsSource(options: {
   git: ReviewGitRuntime;
-  /** The PR's local checkout, when there is one. */
   checkout: string | undefined;
   headSha: string;
   fetchBytes(sha: string, path: string, maxBytes: number): Promise<FileBytesRead>;
@@ -314,7 +264,6 @@ function cardRequests(card: PackageChangesCardResponse): PackageLookupRequest[] 
   return out;
 }
 
-/** A name a lookup may ask about at all: a registry spec, from npm's registry. */
 function lookupCandidate(change: PackageChange): string | null {
   if (!change.registryName || (change.source !== "registry" && change.source !== "alias")) return null;
   return change.registryName;
@@ -359,8 +308,6 @@ export function createPackageChangesService(host: PackageChangesHost) {
    * that comes back missing is unreadable, never absent: a 6 MB lockfile
    * must not read as every package removed.
    */
-  // Package files read through a platform API, per base and head commit:
-  // each side is read once, and the reads spent count against the budget.
   const remotePackageReads = new Map<string, { spent: number; reads: Map<string, Promise<PackageSideRead>> }>();
 
   const readPackageFiles = async (base: string | undefined, plan: PackageReadPlan): Promise<{ files: PackageSourceFile[]; overBudget: boolean }> => {
@@ -395,7 +342,6 @@ export function createPackageChangesService(host: PackageChangesHost) {
       return hit;
     };
 
-    // Which sides each file needs; over the budget, the files that do not fit are left out.
     type Job = { path: string; inDiff: boolean; sides: ["old" | "new", string | undefined][] };
     const jobs: Job[] = [];
     let overBudget = false;
@@ -434,7 +380,6 @@ export function createPackageChangesService(host: PackageChangesHost) {
     return { files, overBudget };
   };
 
-  /** Every registry setting that applies to these cards. Fails closed. */
   const readRouting = async (cards: PackageChangeCard[]): Promise<PackageRouting> => {
     const files: { npmrc: string[]; yarnrc: string[]; yarnrcClassic: string[]; bunfig: string[]; unreadable: boolean } = {
       npmrc: [], yarnrc: [], yarnrcClassic: [], bunfig: [], unreadable: false,
@@ -467,12 +412,10 @@ export function createPackageChangesService(host: PackageChangesHost) {
       }
       for (const dir of dirs) for (const [name, kind] of names) take(readLocal(join(dir, name)), kind);
     } else {
-      // Repository-relative: every directory from the package up to the root.
       const dirs = new Set<string>();
       for (const anchor of anchors) for (const d of repoAncestors(anchor)) dirs.add(d);
       let paths = [...dirs].flatMap((dir) => names.map(([name, kind]) => [dir ? `${dir}/${name}` : name, kind] as const));
       if (source.kind === "commit") {
-        // One listing of the commit, then only the files that exist.
         const memo = memoFor(source.key);
         const settingsNamesSet = new Set(names.map(([name]) => name));
         memo.list ??= source.list()
@@ -500,9 +443,7 @@ export function createPackageChangesService(host: PackageChangesHost) {
     const { files, overBudget } = await readPackageFiles(base, plan);
     const cards = analyzePackageChanges(files);
 
-    // Settings are read only while a lookup can happen at all, and only for
-    // cards that have a name to send. Past the package-file budget nothing is
-    // offered: the names of the cards left out are not known.
+    // Settings are read only while a lookup can happen, and only for cards with a name to send.
     const candidates = cards.filter((c) => c.changes.some((ch) => lookupCandidate(ch)));
     const routing = !overBudget && candidates.length > 0 && parsePackageLookupEnv(host.env) !== false
       ? await readRouting(candidates)
@@ -540,16 +481,13 @@ export function createPackageChangesService(host: PackageChangesHost) {
       const run = compute(base);
       hit = run.then((r) => r.response);
       cache.set(key, hit);
-      // A result read the temporary way (the checkout was not ready) is not kept.
       run.then((r) => { if (!r.final && cache.get(key) === hit) cache.delete(key); }, () => cache.delete(key));
-      // A handful of views per session: keep the last few.
       while (cache.size > 4) cache.delete(cache.keys().next().value!);
     }
     return hit;
   };
 
   return {
-    /** `GET /api/package-changes?snapshot=&base=` */
     async get(params: { snapshot: string | null; base: string | undefined }): Promise<{ status: number; body: unknown }> {
       if (params.snapshot && params.snapshot !== host.snapshotId()) {
         return { status: 409, body: { error: "Diff snapshot is stale" } };
@@ -557,7 +495,6 @@ export function createPackageChangesService(host: PackageChangesHost) {
       return { status: 200, body: await analysis(params.base) };
     },
 
-    /** `POST /api/package-changes/lookup { snapshot, base, path }` */
     async lookup(body: unknown): Promise<{ status: number; body: unknown }> {
       if (!host.lookupEnabled()) return { status: 403, body: { error: "lookup_off" } };
       const b = (body ?? {}) as { snapshot?: unknown; base?: unknown; path?: unknown };

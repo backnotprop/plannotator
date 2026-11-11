@@ -36,8 +36,6 @@ import {
 } from "./prompts";
 import { planDenyFeedback } from "./feedback-templates";
 
-// ─── A1. Template engine ─────────────────────────────────────────────────────
-
 describe("resolveTemplate", () => {
   test("replaces known variables", () => {
     expect(resolveTemplate("Hello {{name}}", { name: "world" }))
@@ -69,8 +67,6 @@ describe("resolveTemplate", () => {
       .toBe("XY and X");
   });
 });
-
-// ─── A2. Plan denied ─────────────────────────────────────────────────────────
 
 // What regresses: an answers-only deny reads "YOUR PLAN WAS NOT APPROVED",
 // or an ordinary deny stops being byte-identical to the denied prompt.
@@ -217,8 +213,6 @@ describe("getPlanDeniedPrompt", () => {
   });
 });
 
-// ─── A3. Plan approved ───────────────────────────────────────────────────────
-
 describe("getPlanApprovedPrompt", () => {
   test("falls back to runtime built-in default (pi vs opencode differ)", () => {
     const pi = getPlanApprovedPrompt("pi", {}, { planFilePath: "plan.md", doneMsg: "" });
@@ -276,7 +270,6 @@ describe("getPlanApprovedWithNotesPrompt", () => {
     expect(result).toContain("Saved to: /tmp/plan.md");
     expect(result).not.toContain("full tool access");
     expect(result).not.toContain("Execute the plan in");
-    // doneMsg is on its own line after the header (matching old behavior)
     expect(result).toContain("notes!\nSaved to:");
   });
 
@@ -299,8 +292,6 @@ describe("getPlanAutoApprovedPrompt", () => {
     })).toBe("Auto OK");
   });
 });
-
-// ─── A4. Annotation feedback ─────────────────────────────────────────────────
 
 describe("getAnnotateFileFeedbackPrompt", () => {
   test("includes file header and path in default", () => {
@@ -354,9 +345,7 @@ describe("getAnnotateMessageFeedbackPrompt", () => {
   });
 });
 
-// Unsubstituted template getters — shipped to the browser via the annotate
-// /api/plan payload so clipboard Copy can reproduce the Send Feedback wrap
-// (including config overrides) client-side (#1107).
+// Unsubstituted template getters ship to the browser in the annotate /api/plan payload so clipboard Copy reproduces the wrap client-side.
 describe("getAnnotateFileFeedbackTemplate / getAnnotateMessageFeedbackTemplate", () => {
   test("returns the default templates with placeholders intact", () => {
     expect(getAnnotateFileFeedbackTemplate("claude-code", {})).toBe(
@@ -494,8 +483,6 @@ describe("getAnnotateApprovedWithNotesPrompt", () => {
   });
 });
 
-// ─── A4b. Review denied suffix ───────────────────────────────────────────────
-
 describe("getReviewDeniedSuffix", () => {
   test("every runtime gets the same verification-only default", () => {
     const runtimes = ["claude-code", "opencode", "pi", "amp", "droid", "codex", "copilot-cli", "gemini-cli", "kiro-cli"] as const;
@@ -554,8 +541,6 @@ describe("getReviewDeniedSuffix", () => {
   });
 });
 
-// ─── A5. Backward compatibility ──────────────────────────────────────────────
-
 describe("backward compatibility", () => {
   test("planDenyFeedback() produces same output via pipeline as before", () => {
     const feedback = "## Fix auth\n> Remove the old token.";
@@ -578,8 +563,6 @@ describe("backward compatibility", () => {
     })).toBe(direct);
   });
 });
-
-// ─── A6. Config merge (expanded) ─────────────────────────────────────────────
 
 describe("mergePromptConfig (expanded)", () => {
   test("merges plan section alongside existing review section", () => {
@@ -611,23 +594,15 @@ describe("mergePromptConfig (expanded)", () => {
   });
 });
 
-// ─── Approve-with-notes composition (PR5, spec §6.4) ─────────────────────────
-
 describe("composeReviewApprovedMessage", () => {
-  // The one shared composer the four agent-facing review consumers (§6.3)
-  // emit approvals through. Bare approvals must stay byte-identical to the
-  // pre-notes output — every consumer's approved branch depends on it.
+  // The one shared composer: bare approvals must stay byte-identical to the notes-less output.
   test("bare approvals emit the approved prompt alone", () => {
     expect(composeReviewApprovedMessage("opencode", undefined, {})).toBe(DEFAULT_REVIEW_APPROVED_PROMPT);
     expect(composeReviewApprovedMessage("opencode", "", {})).toBe(DEFAULT_REVIEW_APPROVED_PROMPT);
     expect(composeReviewApprovedMessage("opencode", "  \n ", {})).toBe(DEFAULT_REVIEW_APPROVED_PROMPT);
   });
 
-  // Stage-review M0: the bare prompt says "no changes requested" and the
-  // feedback export opens with its own change-request-shaped heading, so
-  // naive concatenation reads as a contradiction — the agent starts fixing
-  // post-approval or discards the guidance. Notes must land inside the
-  // approved-WITH-NOTES template, which frames them as non-blocking.
+  // The bare prompt says "no changes requested" and the feedback export opens with a change-request-shaped heading, so naive concatenation contradicts itself. Notes must land inside the approved-WITH-NOTES template, which frames them as non-blocking.
   test("approve-time feedback is delivered in the with-notes framing, not appended to the bare prompt", () => {
     const note = "Rename the flag before merging.";
     const message = composeReviewApprovedMessage("opencode", note, {});
@@ -647,17 +622,13 @@ describe("composeReviewApprovedMessage", () => {
     ).toBe("APPROVED. Notes: the note");
   });
 
-  // Compatibility (new consumer / old built client): the pre-PR5 client sent
-  // this exact placeholder on every approval; framing it as reviewer guidance
-  // would add filler the reviewer never wrote to every mixed-build approval.
+  // An older client sent this exact placeholder on every approval; framing it as reviewer guidance would add filler the reviewer never wrote.
   test("the legacy LGTM placeholder is filtered, never framed as guidance", () => {
     expect(
       composeReviewApprovedMessage("opencode", LEGACY_REVIEW_APPROVAL_PLACEHOLDER, {}),
     ).toBe(DEFAULT_REVIEW_APPROVED_PROMPT);
   });
 });
-
-// ─── Existing review prompt tests (preserved from PR #561) ───────────────────
 
 describe("prompts", () => {
   test("falls back to built-in default when no config is present", () => {
@@ -747,8 +718,6 @@ describe("prompts", () => {
   });
 });
 
-// ─── Helper tests ────────────────────────────────────────────────────────────
-
 describe("getPlanToolName", () => {
   test("returns correct tool name per runtime", () => {
     expect(getPlanToolName("claude-code")).toBe("ExitPlanMode");
@@ -756,8 +725,7 @@ describe("getPlanToolName", () => {
     expect(getPlanToolName("copilot-cli")).toBe("exit_plan_mode");
     expect(getPlanToolName("pi")).toBe("plannotator_submit_plan");
     expect(getPlanToolName("gemini-cli")).toBe("exit_plan_mode");
-    // oh-my-pi has no planning integration yet; this entry only keeps the
-    // Claude Code convention as its fallback until one lands.
+    // oh-my-pi has no planning integration yet; its entry only falls back to the Claude Code convention.
     expect(getPlanToolName("oh-my-pi")).toBe("ExitPlanMode");
   });
 

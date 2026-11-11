@@ -41,7 +41,6 @@ describe("isLoopbackHostHeader", () => {
 	test("the configured localhost subdomain counts, and only it", () => {
 		expect(isLoopbackHostHeader("plannotator.localhost:5000", 5000, "plannotator.localhost")).toBe(true);
 		expect(isLoopbackHostHeader("Plannotator.Localhost:5000", 5000, "plannotator.localhost")).toBe(true);
-		// The plain loopback names still count beside it.
 		expect(isLoopbackHostHeader("localhost:5000", 5000, "plannotator.localhost")).toBe(true);
 		expect(isLoopbackHostHeader("127.0.0.1:5000", 5000, "plannotator.localhost")).toBe(true);
 		for (const host of ["evil.localhost:5000", "x.plannotator.localhost:5000", "plannotator.localhost:5001", "plannotator.localhost"]) {
@@ -70,7 +69,6 @@ describe("isLoopbackHostHeader", () => {
 		expect(isLoopbackForwardedFor("[::1]:52817")).toBe(true);
 		expect(isLoopbackForwardedFor("127.0.0.1:8080, [::1]")).toBe(true);
 
-		// Non-loopback
 		expect(isLoopbackForwardedFor("100.64.0.9")).toBe(false);
 		expect(isLoopbackForwardedFor("127.0.0.1, 100.64.0.9")).toBe(false);
 		expect(isLoopbackForwardedFor("192.168.1.50")).toBe(false);

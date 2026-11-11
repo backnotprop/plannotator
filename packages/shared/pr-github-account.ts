@@ -1,28 +1,11 @@
 /**
- * Which signed-in `gh` account a GitHub PR review runs as (#2157).
- *
- * `gh` can hold several accounts per host (a personal and a work one) and
- * uses the ACTIVE one for every command. When that account cannot see the
- * PR, the review used to open anyway and only the checkout failed. Before a
- * review starts, `ensureGhPRAccess` checks the active account can read the
- * PR; when it cannot it tries every other account signed in on that host
- * (`gh auth status`), and the first that can is used for THIS review only:
- * its token (`gh auth token --user`) is handed to the review's `gh` children
- * as GH_TOKEN (GH_ENTERPRISE_TOKEN on a GitHub Enterprise Server host). It
- * never runs `gh auth switch` and never changes the person's gh settings.
- * When no account can see it, the review does not open and the error says
- * which account was tried and how to switch.
- *
- * A token is never logged, printed or put in an error message: it lives in
- * the in-memory override map (keyed by host/owner/repo, so an in-process
- * host such as Pi can review a work PR and a personal one side by side) and
- * in the env of the `gh` children it is meant for.
+ * Which signed-in `gh` account a GitHub PR review runs as: when the active account cannot see the PR, the first other account that can is used for THIS review only, through its token in the env of the review's `gh` children. Never `gh auth switch`.
+ * A token is never logged, printed or put in an error message.
  */
 
 import type { CommandOptions, CommandResult, PRRuntime } from "./pr-types";
 import { parsePRUrl } from "./pr-types";
 
-/** The parts of a GitHub ref this module reads (a PRRef or PR metadata). */
 export interface GhRepoRef {
   host: string;
   owner: string;
@@ -33,23 +16,17 @@ export interface GhPRAccessRef extends GhRepoRef {
   number: number;
 }
 
-/** One account `gh auth status` reports for a host. */
 export interface GhAccount {
   login: string;
   active: boolean;
-  /** `success` when gh could use it; anything else is a broken login. */
   state: string;
-  /** keyring, oauth_token, GH_TOKEN, GITHUB_TOKEN, … */
   tokenSource: string;
 }
 
 /** What a review startup learned; `childEnv` holds the token, so never print it. */
 export interface GhPRAccess {
-  /** The account the review runs as, when known. */
   login?: string;
-  /** One line for stderr / the host's log when another account is used. */
   notice?: string;
-  /** Env for the review's own children (`gh repo clone`, git with gh's credential helper, agent jobs). */
   childEnv?: Record<string, string>;
 }
 
@@ -71,37 +48,26 @@ export function ghTokenEnvVar(host: string): "GH_TOKEN" | "GH_ENTERPRISE_TOKEN" 
   return h === "github.com" || h.endsWith(".ghe.com") ? "GH_TOKEN" : "GH_ENTERPRISE_TOKEN";
 }
 
-/** The env a `gh` command for this repo runs with, when another account was chosen for it. */
 export function ghAccountEnvFor(ref: GhRepoRef): Record<string, string> | undefined {
   const o = overrides.get(repoKey(ref));
   return o ? { [o.envVar]: o.token } : undefined;
 }
 
-/**
- * The env an agent job launched for this PR runs with (`prUrl` is the job's
- * launch PR): the chosen account's token for a GitHub PR whose repo has one,
- * else nothing. A job for another repo's PR never gets it.
- */
+/** Env for an agent job launched for this PR: the chosen account's token for a GitHub PR whose repo has one, else nothing. A job for another repo's PR never gets it. */
 export function ghAccountEnvForPRUrl(prUrl: string | undefined): Record<string, string> {
   if (!prUrl) return {};
   const ref = parsePRUrl(prUrl);
   return ref?.platform === "github" ? ghAccountEnvFor(ref) ?? {} : {};
 }
 
-/** The token chosen for this repo (artifact downloads send it as a header), else undefined. */
 export function ghAccountTokenFor(ref: GhRepoRef): string | undefined {
   return overrides.get(repoKey(ref))?.token;
 }
 
-/** Forget every chosen account (tests). */
 export function clearGhAccountOverrides(): void {
   overrides.clear();
 }
 
-/**
- * A runtime that runs `gh` for this repo as the account chosen for it, or
- * the runtime itself when none was chosen (the active account).
- */
 export function ghScopedRuntime(runtime: PRRuntime, ref: GhRepoRef): PRRuntime {
   const env = ghAccountEnvFor(ref);
   if (!env) return runtime;
@@ -123,9 +89,6 @@ function hostnameArgs(host: string, args: string[]): string[] {
   return host !== "github.com" ? [...args, "--hostname", host] : args;
 }
 
-// --- gh auth status ---
-
-// CSI and OSC escape sequences (colors, hyperlinks).
 const ANSI_PATTERN = /\u001b\[[0-9;?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)/g;
 
 const ENV_TOKEN_SOURCES = new Set(["GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"]);
@@ -134,7 +97,7 @@ function str(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
 
-/** `gh auth status --json hosts` (gh v2.81.0+). Null when the output is not that JSON. */
+/** `gh auth status --json hosts` (gh v2.81.0+). */
 export function parseGhAuthStatusJson(stdout: string, host: string): GhAccount[] | null {
   let parsed: unknown;
   try {
@@ -159,19 +122,7 @@ export function parseGhAuthStatusJson(stdout: string, host: string): GhAccount[]
     .filter((a) => a.login !== "" || ENV_TOKEN_SOURCES.has(a.tokenSource));
 }
 
-/**
- * The text `gh auth status` prints, for a gh without `--json`:
- *
- *   github.com
- *     ✓ Logged in to github.com account octocat (keyring)
- *     - Active account: true
- *     X Failed to log in to github.com account work (keyring)
- *
- * and the single-account form before multi-account gh (v2.40.0): `Logged in to github.com as
- * octocat (oauth_token)`. A token from the environment that GitHub refused has no account:
- * `X Failed to log in to github.com using token (GH_TOKEN)`, read as an entry with no login.
- * Color codes, should gh print any, are stripped first.
- */
+/** The text `gh auth status` prints for a gh without `--json`, including the single-account form before multi-account gh. A token from the environment that GitHub refused has no account: it reads as an entry with no login. Color codes are stripped first. */
 export function parseGhAuthStatusText(text: string, host: string): GhAccount[] {
   text = text.replace(ANSI_PATTERN, "");
   const accounts: GhAccount[] = [];
@@ -207,7 +158,6 @@ export function parseGhAuthStatusText(text: string, host: string): GhAccount[] {
   return accounts;
 }
 
-/** Every account signed in to `host`, from `gh auth status` (JSON, else text). */
 export async function listGhAccounts(runtime: PRRuntime, host: string): Promise<GhAccount[]> {
   try {
     const json = await runtime.runCommand("gh", ["auth", "status", "--hostname", host, "--json", "hosts"]);
@@ -223,8 +173,6 @@ export async function listGhAccounts(runtime: PRRuntime, host: string): Promise<
     return [];
   }
 }
-
-// --- Can this account see the PR? ---
 
 /** `yes`, `no` (GitHub refused: 404/401/403), or `unknown` (network, rate limit, gh broken). */
 export type GhSeesPR = "yes" | "no" | "unknown";
@@ -277,12 +225,7 @@ async function ghTokenOf(runtime: PRRuntime, host: string, login: string): Promi
   }
 }
 
-/**
- * Check that the gh account in use can see the PR; when it cannot, pick
- * another signed-in account that can for this review, or throw a clear error.
- * Answers `{}` (nothing to say) when it could not tell, so the fetch that
- * follows reports its own error as before.
- */
+/** Check the gh account in use can see the PR; else pick another signed-in account that can, or throw. Answers `{}` when it cannot tell, so the fetch that follows reports its own error. */
 export async function ensureGhPRAccess(runtime: PRRuntime, ref: GhPRAccessRef): Promise<GhPRAccess> {
   const key = repoKey(ref);
   overrides.delete(key);
@@ -295,14 +238,10 @@ export async function ensureGhPRAccess(runtime: PRRuntime, ref: GhPRAccessRef): 
 
   const accounts = await listGhAccounts(runtime, ref.host);
   const active = accounts.find((a) => a.active);
-  // An entry with no login (a rejected env token) is not an account to try.
   const others = accounts.filter((a) => !a.active && a.login !== "" && a.login !== active?.login);
   const repo = `${ref.owner}/${ref.repo}`;
   const envVar = ghTokenEnvVar(ref.host);
 
-  // What each other account answered: it can't read the repo, it reads the
-  // repo but not the PR, or there was no verdict (a broken login, no token
-  // from gh, the network, a rate limit).
   const cantSee: string[] = [];
   const repoOnly: string[] = [];
   const unchecked: string[] = [];

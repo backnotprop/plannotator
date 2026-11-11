@@ -1,9 +1,3 @@
-/**
- * Tests for the PFM reminder constant and improve-context composer.
- *
- * Run: bun test packages/shared/pfm-reminder.test.ts
- */
-
 import { describe, expect, test } from "bun:test";
 import { PFM_REMINDER, composeImproveContext } from "./pfm-reminder";
 import { parseQuestionBlock } from "./question-block";
@@ -14,8 +8,6 @@ describe("PFM_REMINDER", () => {
   });
 
   test("covers the headline PFM features the renderer actually supports", () => {
-    // If any of these features moves out of the renderer, update both the
-    // reminder and this test together.
     expect(PFM_REMINDER).toContain("Code-file links");
     expect(PFM_REMINDER).toContain("> [!NOTE]");
     expect(PFM_REMINDER).toContain("> [!TIP]");
@@ -42,7 +34,6 @@ describe("PFM_REMINDER", () => {
     expect(parsed?.kind).toBe("single");
     expect(parsed?.choices.length).toBe(2);
     expect(parsed?.choices.filter((c) => c.recommended).map((c) => c.label)).toEqual(["Redis"]);
-    // The example models the rule it states: no bare question.
     expect(parsed?.context.trim()).not.toBe("");
     expect(PFM_REMINDER).toContain("Never send a bare question");
     expect(PFM_REMINDER).toContain("- [x]");
@@ -109,8 +100,6 @@ describe("composeImproveContext", () => {
     expect(pfmIdx).toBeGreaterThanOrEqual(0);
     expect(improveIdx).toBeGreaterThan(pfmIdx);
 
-    // A horizontal rule separates the two sections so the agent reads them
-    // as distinct payloads.
     const between = ctx.slice(pfmIdx, improveIdx);
     expect(between).toContain("\n---\n");
   });

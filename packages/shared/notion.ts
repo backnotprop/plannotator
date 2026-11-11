@@ -1,10 +1,4 @@
-/**
- * Save to Notion: a plan becomes a child page of a page the user picks.
- *
- * The server holds the token (NOTION_TOKEN in its environment); the browser
- * never sends or receives it. Bun (packages/server) and Pi (vendored into
- * apps/pi-extension/generated) both call this one copy.
- */
+/** Save to Notion: a plan becomes a child page. The token stays on the server (NOTION_TOKEN); the browser never sees it. */
 
 import {
 	stripH1,
@@ -21,11 +15,7 @@ function notionToken(): string | undefined {
 	return process.env.NOTION_TOKEN?.trim() || undefined;
 }
 
-/**
- * Notion is offered when NOTION_TOKEN is set and the session is only on this
- * computer. A remote or `--tailscale` session (`exposed`) never gets it: the
- * token would act for whoever opens the page.
- */
+/** Offered only for a local session: on a remote or `--tailscale` (`exposed`) session the token would act for whoever opens the page. */
 export function isNotionAvailable(exposed: boolean): boolean {
 	return !exposed && notionToken() !== undefined;
 }
@@ -36,7 +26,6 @@ export function notionPageTitle(plan: string): string {
 	return h1 ? h1.slice(0, 2000) : "Plan";
 }
 
-/** Create a child page under `parentPageId` with the plan as Markdown. */
 export async function saveToNotion(config: NotionConfig): Promise<IntegrationResult> {
 	const token = notionToken();
 	if (!token) {
@@ -60,7 +49,6 @@ export async function saveToNotion(config: NotionConfig): Promise<IntegrationRes
 				properties: {
 					title: { title: [{ text: { content: notionPageTitle(config.plan) } }] },
 				},
-				// The H1 is the page title above; keep it out of the body.
 				markdown: stripH1(config.plan),
 			}),
 			signal: AbortSignal.timeout(NOTION_TIMEOUT_MS),

@@ -1,8 +1,4 @@
-/**
- * Which signed-in gh account a GitHub PR review runs as (#2157), against a
- * fake `gh` (tests/helpers/fake-gh.ts) run as a real process. The real gh,
- * its config and the network are never touched.
- */
+/** Which gh account a PR review runs as, against a fake gh (tests/helpers/fake-gh.ts) run as a real process. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { makeFakeGh, type FakeGh, type FakeGhScenario } from "../../tests/helpers/fake-gh";
@@ -30,7 +26,6 @@ afterEach(() => {
   clearGhAccountOverrides();
 });
 
-/** A runtime that spawns the fake gh by absolute path with its scratch env. */
 function fakeRuntime(scenario: FakeGhScenario): PRRuntime {
   fake = makeFakeGh(scenario);
   const gh = join(fake.binDir, "gh");
@@ -84,7 +79,6 @@ describe("ensureGhPRAccess", () => {
     expect(ghAccountEnvFor(REF)).toEqual({ GH_TOKEN: WORK.token });
     expect(ghAccountEnvFor({ host: "github.com", owner: "acme", repo: "other" })).toBeUndefined();
     expect(calls().some((c) => c.args[0] === "auth" && c.args[1] === "switch")).toBe(false);
-    // The probe that found it ran as the work account.
     expect(calls().at(-1)).toEqual({ args: ["api", "repos/acme/widgets/pulls/7", "--jq", ".number"], as: "tobey-work" });
   });
 

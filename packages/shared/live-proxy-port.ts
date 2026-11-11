@@ -1,6 +1,5 @@
 import { parsePortSelection, type ParsedPortSelection } from "./port-range";
 
-/** Live proxies never inherit the editor's remote-mode port or bind address. */
 export function getLiveProxyPortSelection(): ParsedPortSelection {
   const value = process.env.PLANNOTATOR_LIVE_PORT;
   if (value) {
@@ -11,7 +10,6 @@ export function getLiveProxyPortSelection(): ParsedPortSelection {
   return { kind: "fixed", ports: [0] };
 }
 
-/** The error code a failed listen carries (`EADDRINUSE`, `EACCES`, ...), if any. */
 export function listenErrorCode(error: unknown): string | null {
   if (!(error instanceof Error)) return null;
   const code = (error as { code?: unknown }).code;
@@ -20,11 +18,7 @@ export function listenErrorCode(error: unknown): string | null {
   return null;
 }
 
-/**
- * Codes a range moves past, trying the next port: the port is taken
- * (EADDRINUSE) or this user may not bind it (EACCES, a port below 1024 when
- * not root). Any other code ends the attempt with a clear error.
- */
+/** Codes a range moves past: EADDRINUSE, or EACCES (a port below 1024 when not root). */
 const SKIPPABLE_CODES = new Set(["EADDRINUSE", "EACCES"]);
 
 const CODE_HINTS: Record<string, string> = {
@@ -38,11 +32,6 @@ function codeText(code: string): string {
   return hint ? `${code}: ${hint}` : code;
 }
 
-/**
- * A live app proxy that could not bind any port PLANNOTATOR_LIVE_PORT allows.
- * The message is one line, written for the person who set the variable. The
- * CLI prints it as a startup failure without a stack trace.
- */
 export class LiveProxyPortError extends Error {
   constructor(message: string) {
     super(message);
@@ -50,7 +39,6 @@ export class LiveProxyPortError extends Error {
   }
 }
 
-/** Every port the selection allows is taken. */
 export class LiveProxyPortInUseError extends LiveProxyPortError {
   constructor(selection: ParsedPortSelection) {
     const detail = selection.kind === "range"
@@ -75,13 +63,7 @@ function onePortFailure(port: number, code: string, next: string): string {
   return `Plannotator: live app proxy ${subject} (${codeText(code)}). ${next}`;
 }
 
-/**
- * The port loop both transports share. Call `failed(port, error)` for each
- * port that would not bind: it returns when the loop should try the next
- * port, and throws when it should stop (an unexpected code ends it with one
- * clear line; an error without a code is rethrown as it is, since that is a
- * bug, not a port problem). When the loop runs out, throw `exhausted()`.
- */
+/** Call `failed(port, error)` per port that would not bind: it returns to try the next port or throws to stop. An error without a code is rethrown as is (a bug, not a port problem). */
 export function createLiveProxyPortAttempts(selection: ParsedPortSelection) {
   const failures: Array<{ port: number; code: string }> = [];
   return {

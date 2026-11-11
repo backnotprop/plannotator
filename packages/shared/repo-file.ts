@@ -1,24 +1,6 @@
 /**
- * Reading one working-tree file for the review UI, the way an editor does.
- *
- * Both review servers (Bun and Pi, which gets a copy through
- * `apps/pi-extension/vendor.sh`) read the code-navigation preview
- * (`/api/code-nav/file`), the hover card's definition and the working-tree
- * side of `/api/file-content` through {@link readFileCapped}.
- *
- * Like VS Code, links are followed wherever they point (owner's ruling on
- * #2261): the review shows what the editor would show. Two things are
- * guarded, because they hurt the server:
- *
- * - Size: the cap (5 MB, the diff-expansion cap) is checked on the open file
- *   before any byte is read, so a huge file is never pulled into memory.
- * - Hangs: the file is opened with O_NONBLOCK and checked with fstat, so a
- *   FIFO (or device, or directory) is refused at once instead of blocking the
- *   read forever. Pi's server shares its host's event loop, so a blocked read
- *   there froze the whole process.
- *
- * Request paths still get the cheap string checks the endpoints had: no
- * absolute path, no `..`, no NUL ({@link readRepoFile}).
+ * Reads one working-tree file for the review UI the way an editor does: links are followed wherever they point.
+ * Guarded: size (the cap is checked on the open file before any byte is read) and hangs (O_NONBLOCK plus fstat refuses a FIFO, device or directory; Pi's server shares its host's event loop). Request paths still get cheap string checks.
  */
 
 import { constants as fsConstants } from "node:fs";
@@ -36,7 +18,6 @@ export type RepoFileResult =
 		ok: false;
 		reason: RepoFileFailureReason;
 		message: string;
-		/** On "too-large": the file's size and the cap applied. */
 		size?: number;
 		maxBytes?: number;
 	};
@@ -58,7 +39,6 @@ export interface RepoFileReadOptions {
 	decode?: RepoFileDecoder;
 }
 
-/** HTTP status for each failure, so both servers answer alike. */
 export const REPO_FILE_ERROR_STATUS: Record<RepoFileFailureReason, number> = {
 	"invalid-path": 400,
 	"not-found": 404,
@@ -66,7 +46,6 @@ export const REPO_FILE_ERROR_STATUS: Record<RepoFileFailureReason, number> = {
 	"too-large": 413,
 };
 
-/** The JSON error body both servers send for a failed read. */
 export function repoFileErrorBody(failure: RepoFileFailure) {
 	return {
 		error: failure.message,
@@ -83,10 +62,6 @@ function fail(reason: RepoFileFailureReason, message: string): RepoFileFailure {
 // Not on Windows, where opening a FIFO does not block anyway.
 const OPEN_FLAGS = fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0);
 
-/**
- * Read `path` (links followed) if it is a regular file of at most
- * `maxBytes`. Never blocks on a FIFO or device and never reads past the cap.
- */
 export async function readFileCapped(path: string, options: RepoFileReadOptions = {}): Promise<RepoFileResult> {
 	const maxBytes = options.maxBytes ?? MAX_REPO_FILE_BYTES;
 	let handle: Awaited<ReturnType<typeof open>>;
@@ -133,11 +108,7 @@ export async function readFileCapped(path: string, options: RepoFileReadOptions 
 	}
 }
 
-/**
- * {@link readFileCapped} for a request path relative to `root`, after the
- * string checks the endpoints already made (no absolute path, no `..`, no
- * NUL). Links inside the repository are followed wherever they point.
- */
+/** {@link readFileCapped} for a request path relative to `root`, after the endpoints' string checks. */
 export async function readRepoFile(
 	root: string,
 	rawPath: string | null | undefined,

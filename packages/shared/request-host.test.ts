@@ -75,7 +75,6 @@ describe("isAllowedRequestHost", () => {
     expect(isAllowedRequestHost("devbox.tailnet.ts.net:19432", policy)).toBe(true);
     expect(isAllowedRequestHost("DEVBOX:19432", policy)).toBe(true);
     expect(isAllowedRequestHost("x.devbox.tailnet.ts.net:19432", policy)).toBe(false);
-    // A local --tailscale session: only loopback plus the served name.
     expect(isAllowedRequestHost("devbox.tailnet.ts.net:4443", { remote: false, extraHosts: ["devbox.tailnet.ts.net"] })).toBe(true);
   });
 
@@ -112,7 +111,6 @@ describe("isAllowedRequestHost", () => {
       expect([host, isAllowedRequestHost(host, policy)]).toEqual([host, false]);
     }
     expect(isAllowedRequestHost("8080.code.example.com", { remote: false, portHostPatterns: forwardedPortHostPatterns("https://{{port}}.code.example.com") })).toBe(true);
-    // No template in the hostname (path-based proxy), no domain, or not a URL: nothing.
     expect(forwardedPortHostPatterns("./proxy/{{port}}/")).toEqual([]);
     expect(forwardedPortHostPatterns("https://code.example.com/proxy/{{port}}/")).toEqual([]);
     expect(forwardedPortHostPatterns("https://{{port}}/")).toEqual([]);

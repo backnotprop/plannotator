@@ -1,11 +1,6 @@
 /**
- * Text Plannotator keeps on a pull or merge request and finds again by a hidden marker (the Inbox's "Post decisions",
- * design brief "export-decisions" step 2): one comment of the person's own whose body starts with a marker line, or one
- * section of the PR's description between a start and an end marker. A later post edits that same text in place; it
- * never adds a second one and never touches anything outside it.
- *
- * Pure (no runtime APIs): the providers (pr-github.ts, pr-gitlab.ts) run the forge calls; the splicing and the room
- * left under a forge's length limit are decided here, once, for both.
+ * Text Plannotator keeps on a PR/MR and finds again by a hidden marker: one comment whose body starts with a marker line, or one description section between a start and an end marker. A later post edits it in place and never touches anything outside it.
+ * Pure (no runtime APIs): the providers run the forge calls; splicing and the room under a forge's length limit are decided here.
  */
 
 /** Where the text goes. `both`: the full text as a comment, and a short section in the description that links to it. */
@@ -26,7 +21,6 @@ export interface PRMarkedSectionInput {
 
 export interface PRMarkedResult {
   action: "created" | "updated";
-  /** The comment's own link, or the PR's for a description. */
   url: string;
 }
 
@@ -81,7 +75,6 @@ function sectionBounds(text: string, start: string, end: string): [number, numbe
   return [from, to + end.length];
 }
 
-/** The section as written: the markers on their own lines around the body. */
 function sectionText(input: Pick<PRMarkedSectionInput, "start" | "end">, body: string): string {
   return `${input.start}\n${body.trim()}\n${input.end}`;
 }
@@ -104,7 +97,6 @@ export function spliceMarkedSection(description: string, input: PRMarkedSectionI
   return { text: `${before}${gap}${sectionText(input, body)}${after}`, replaced: bounds !== null };
 }
 
-/** A comment's whole text: `body(limit)`, refused past the limit. */
 export function markedCommentText(input: PRMarkedCommentInput, limit: number): string {
   const body = input.body(limit);
   if (body.length > limit) throw new PRMarkedTooLongError(limit);

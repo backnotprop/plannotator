@@ -1,37 +1,4 @@
-/**
- * Loopback reverse proxy for live local app annotation — Node transport.
- *
- * The node:http mirror of packages/server/live-proxy.ts, run by the Pi
- * extension (vendored to apps/pi-extension/generated/). Every DECISION —
- * Host/Origin validation, the streaming injector state machine, the
- * CSP/X-Frame-Options policy, the redirect rewrite, the WS origin gate — is
- * imported from ./live-proxy-core and therefore byte-identical to the Bun
- * transport; this file is only the node:http plumbing around them.
- *
- * Transport notes:
- * - Request/response bodies are PIPED, never buffered: the upstream response
- *   streams through a Transform running the shared injector for HTML, and
- *   verbatim otherwise, with backpressure handled by stream.pipeline.
- * - WebSocket passthrough (HMR) rides node's 'upgrade' event: the client's
- *   own handshake (its Sec-WebSocket-Key et al., raw header casing intact)
- *   is replayed upstream over a raw node:net connection, the upstream's 101
- *   is relayed back verbatim, and from then on the two sockets are piped
- *   byte-for-byte — no WS framing library, no pending-message queue (TCP
- *   holds early client bytes until the 101 lands; the 'upgrade' head buffer
- *   is forwarded explicitly). Raw TCP rather than an http.request client on
- *   purpose: 101 handling differs between Node's http client and other
- *   runtimes' node:http shims, while a socket is a socket everywhere. The
- *   upstream connect carries no Origin header, which is exactly why the
- *   Origin gate refuses foreign browser origins BEFORE any upstream contact
- *   (Vite CVE-2025-24010 class).
- *
- * Security posture (identical to the Bun transport; binding is the
- * contract): binds 127.0.0.1 UNCONDITIONALLY — never the shared
- * env-dependent hostname helper — validates Host before any URL parsing or
- * upstream contact (a Host-less HTTP/1.0 request answers the plain 403,
- * never a runtime error), and PLANNOTATOR_URL_HOST is never applied to the
- * proxy origin.
- */
+/** node:http live-app proxy; decisions come from ./live-proxy-core. Binds 127.0.0.1 unconditionally and validates Host before any upstream contact. */
 
 import { createLiveProxyPortAttempts, getLiveProxyPortSelection } from "./live-proxy-port";
 import { createServer, request as httpRequest } from "node:http";
@@ -60,10 +27,9 @@ import {
   type LiveAppProxyOptions,
 } from "./live-proxy-core";
 
-// The literal loopback address is the security contract (see header).
+// The literal loopback address is the security contract.
 const LOOPBACK_HOST = "127.0.0.1";
 
-/** Read adapter over node's lowercased incoming header object. */
 function nodeHeaderReader(headers: IncomingHttpHeaders): HeaderReader {
   return {
     get(name: string): string | null {
@@ -79,14 +45,13 @@ function firstHeaderValue(value: string | string[] | undefined): string | null {
   return Array.isArray(value) ? value[0] ?? null : value;
 }
 
-/** Outgoing header map (lowercased names; set-cookie may repeat). */
 type HeaderRecord = Record<string, string | string[]>;
 
 function copyWithoutHopByHop(headers: IncomingHttpHeaders): HeaderRecord {
   const out: HeaderRecord = {};
   for (const [name, value] of Object.entries(headers)) {
     if (value === undefined) continue;
-    if (HOP_BY_HOP_HEADERS.includes(name)) continue; // node keys are lowercased
+    if (HOP_BY_HOP_HEADERS.includes(name)) continue;
     out[name] = value;
   }
   return out;
@@ -94,8 +59,7 @@ function copyWithoutHopByHop(headers: IncomingHttpHeaders): HeaderRecord {
 
 function writeRawResponse(socket: Socket, statusLine: string, body: string): void {
   try {
-    // end(), not write()+destroy(): destroy discards buffered bytes, and the
-    // refusal must actually reach the client before the FIN.
+    // end(), not write()+destroy(): destroy discards buffered bytes before the refusal reaches the client.
     socket.end(
       `HTTP/1.1 ${statusLine}\r\n`
       + "Content-Type: text/plain\r\n"
@@ -104,7 +68,6 @@ function writeRawResponse(socket: Socket, statusLine: string, body: string): voi
       + body,
     );
   } catch {
-    // Socket already gone: nothing to refuse.
     socket.destroy();
   }
 }
@@ -114,42 +77,29 @@ function sendForbidden(res: ServerResponse): void {
   res.end("Forbidden");
 }
 
-/**
- * Start the loopback reverse proxy for one live annotate session on
- * node:http. The caller owns its lifecycle: stop() destroys tracked upgrade
- * sockets and closes the listener (plus its remaining keep-alive
- * connections).
- */
 export async function startLiveAppProxyNode(opts: LiveAppProxyOptions): Promise<LiveAppProxy> {
   const target = new URL(opts.targetUrl);
   if (target.protocol !== "http:") {
     throw new Error("Live app proxy supports http upstreams only.");
   }
-  // Never front the editor's own server (see live-proxy-core).
   assertLiveTargetNotEditor(opts.targetUrl, opts.editorOrigins);
   const targetHost = target.host;
   const targetHostname = target.hostname;
   const targetPort = Number(target.port || "80");
   const frameAncestors = buildFrameAncestorsPolicy(opts.editorOrigins);
-  /** Client+upstream sockets of live WS upgrades, destroyed on stop(). */
   const upgradeSockets = new Set<Socket>();
   let warnedEncodedHtml = false;
   let port = 0;
 
   const server = createServer((req, res) => {
-    // Host validation FIRST, before any URL construction: the invariant is
-    // "Host validation runs before any upstream contact" for ALL inputs,
-    // well-formed or not — a Host-less HTTP/1.0 request answers the plain
-    // 403, never a runtime error page.
+    // Host validation runs before any URL parsing or upstream contact, so a Host-less HTTP/1.0 request gets the plain 403.
     const hostHeader = firstHeaderValue(req.headers.host);
     if (!isAllowedProxyHost(hostHeader, port)) {
       sendForbidden(res);
       return;
     }
 
-    // A Host that passed the check should always yield a parseable URL, but
-    // parsing must not be the thing that decides: an unparseable request
-    // takes the same refusal path rather than any error page.
+    // An unparseable request takes the same refusal path.
     let url: URL;
     try {
       url = new URL(req.url ?? "", `http://${hostHeader}`);
@@ -158,12 +108,9 @@ export async function startLiveAppProxyNode(opts: LiveAppProxyOptions): Promise<
       return;
     }
 
-    // Reserved namespace: never forwarded upstream.
     if (url.pathname.startsWith(LIVE_PROXY_RESERVED_PREFIX)) {
       if (url.pathname === LIVE_PROXY_BRIDGE_PATH && (req.method === "GET" || req.method === "HEAD")) {
-        // The bridge body embeds the per-session token; only same-origin
-        // includes and direct navigation may fetch it (see
-        // isAllowedBridgeFetchSite in live-proxy-core).
+        // The bridge body embeds the per-session token: only same-origin includes and direct navigation may fetch it.
         if (!isAllowedBridgeFetchSite(firstHeaderValue(req.headers["sec-fetch-site"]))) {
           sendForbidden(res);
           return;
@@ -180,14 +127,13 @@ export async function startLiveAppProxyNode(opts: LiveAppProxyOptions): Promise<
       return;
     }
 
-    // Whole-origin forward, streaming both directions.
     const upstreamHeaders = copyWithoutHopByHop(req.headers);
     upstreamHeaders["host"] = targetHost;
     upstreamHeaders["x-forwarded-host"] = hostHeader ?? "";
     upstreamHeaders["x-forwarded-proto"] = "http";
     upstreamHeaders[PLANNOTATOR_LIVE_PROXY_HEADER] = "1";
     if (isDocumentIntentRequest(nodeHeaderReader(req.headers))) {
-      // HTML must arrive decodable for injection; assets keep encoding.
+      // HTML must arrive decodable for injection.
       upstreamHeaders["accept-encoding"] = "identity";
     }
 
@@ -200,8 +146,7 @@ export async function startLiveAppProxyNode(opts: LiveAppProxyOptions): Promise<
         headers: upstreamHeaders,
       },
       (upstreamRes) => {
-        // A Plannotator server is never relayed, whatever answers on the
-        // target port now (see isPlannotatorUpstreamResponse in live-proxy-core).
+        // Never relay a Plannotator server's response.
         if (isPlannotatorUpstreamResponse(nodeHeaderReader(upstreamRes.headers))) {
           upstreamRes.resume();
           res.writeHead(502, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
@@ -222,9 +167,7 @@ export async function startLiveAppProxyNode(opts: LiveAppProxyOptions): Promise<
 
         const isHtml = isHtmlContentType(firstHeaderValue(upstreamRes.headers["content-type"]));
         if (isHtml) {
-          // Decided posture: drop any app CSP on HTML and replace it with our
-          // frame-ancestors policy; non-HTML responses keep their CSP and
-          // X-Frame-Options (see applyHtmlFramingHeaders in live-proxy-core).
+          // Drop the app's CSP on HTML and replace it with our frame-ancestors policy.
           applyHtmlFramingHeaders(
             {
               delete: (name) => {
@@ -241,8 +184,7 @@ export async function startLiveAppProxyNode(opts: LiveAppProxyOptions): Promise<
         const hasEncoding = !!responseHeaders["content-encoding"];
         if (!isHtml || hasEncoding) {
           if (isHtml && hasEncoding && !warnedEncodedHtml) {
-            // Fail open on rendering, closed on injection: the page renders,
-            // annotation does not attach on it.
+            // Fail open on rendering, closed on injection.
             warnedEncodedHtml = true;
             console.error(
               "[plannotator] Live app proxy: upstream returned content-encoded HTML despite the Accept-Encoding strip; the annotation bridge was not injected.",
@@ -253,7 +195,6 @@ export async function startLiveAppProxyNode(opts: LiveAppProxyOptions): Promise<
           return;
         }
 
-        // Streaming injection of the bridge script tag.
         delete responseHeaders["content-length"];
         const injector = createHtmlInjector(
           `<script src="${LIVE_PROXY_BRIDGE_PATH}"></script>`,
@@ -286,7 +227,6 @@ export async function startLiveAppProxyNode(opts: LiveAppProxyOptions): Promise<
       res.end(`Live app upstream unreachable: ${err instanceof Error ? err.message : String(err)}`);
     });
 
-    // Stream the request body upstream; GET/HEAD have none by contract.
     if (req.method === "GET" || req.method === "HEAD") {
       upstreamReq.end();
       req.resume();
@@ -295,9 +235,7 @@ export async function startLiveAppProxyNode(opts: LiveAppProxyOptions): Promise<
     }
   });
 
-  // WebSocket passthrough (HMR): raw duplex piping after the same gate
-  // sequence as plain requests — Host first, then the Origin gate, both
-  // before any upstream contact.
+  // WebSocket passthrough: Host first, then the Origin gate, before any upstream contact.
   server.on("upgrade", (req: IncomingMessage, socket: Socket, head: Buffer) => {
     const hostHeader = firstHeaderValue(req.headers.host);
     if (!isAllowedProxyHost(hostHeader, port)) {
@@ -312,7 +250,6 @@ export async function startLiveAppProxyNode(opts: LiveAppProxyOptions): Promise<
       return;
     }
     if (url.pathname.startsWith(LIVE_PROXY_RESERVED_PREFIX)) {
-      // Reserved namespace is never forwarded upstream, upgrades included.
       writeRawResponse(socket, "404 Not Found", "Not found");
       return;
     }
@@ -321,11 +258,7 @@ export async function startLiveAppProxyNode(opts: LiveAppProxyOptions): Promise<
       return;
     }
 
-    // Replay the client's own handshake upstream over raw TCP so the
-    // upstream's Sec-WebSocket-Accept matches the client's key. rawHeaders
-    // keeps original casing and repeats; Host is rewritten to the target and
-    // Origin is dropped to match the Bun transport's origin-less upstream
-    // connect (safe because the gate above already ran).
+    // Replay the client's handshake over raw TCP so Sec-WebSocket-Accept matches; Host is rewritten and Origin dropped (the gate already ran).
     let handshake = `GET ${url.pathname + url.search} HTTP/1.1\r\n`;
     for (let i = 0; i + 1 < req.rawHeaders.length; i += 2) {
       const name = req.rawHeaders[i]!;
@@ -356,10 +289,7 @@ export async function startLiveAppProxyNode(opts: LiveAppProxyOptions): Promise<
       upstreamSocket.write(handshake + "\r\n");
     });
 
-    // Accumulate the upstream's response head; once complete, relay it
-    // verbatim and decide by status line: 101 pipes both ways, anything else
-    // is a refusal relayed to the client before closing. Capped so a
-    // malformed upstream cannot buffer unboundedly.
+    // Accumulate the upstream's response head, capped so a malformed upstream cannot buffer unboundedly.
     const MAX_UPGRADE_HEAD_BYTES = 64 * 1024;
     let received = Buffer.alloc(0);
     let established = false;
@@ -375,7 +305,6 @@ export async function startLiveAppProxyNode(opts: LiveAppProxyOptions): Promise<
       const is101 = /^HTTP\/1\.1 101 /i.test(statusLine);
       socket.write(received);
       if (!is101) {
-        // Refusal relayed; nothing further to pipe.
         teardown();
         return;
       }
@@ -401,8 +330,7 @@ export async function startLiveAppProxyNode(opts: LiveAppProxyOptions): Promise<
     socket.on("error", teardown);
   });
 
-  // Long-lived streams (SSE) must not be killed by a server-side timer;
-  // mirrors the Bun transport's idleTimeout: 0.
+  // Long-lived streams (SSE) must not be killed by a server-side timer.
   server.requestTimeout = 0;
 
   const selection = getLiveProxyPortSelection();
@@ -421,7 +349,6 @@ export async function startLiveAppProxyNode(opts: LiveAppProxyOptions): Promise<
         };
         server.once("error", onError);
         server.once("listening", onListening);
-        // The literal loopback address is the security contract (see header).
         server.listen(candidate, LOOPBACK_HOST);
       });
       listening = true;
@@ -440,17 +367,13 @@ export async function startLiveAppProxyNode(opts: LiveAppProxyOptions): Promise<
   port = address.port;
   return {
     port,
-    // Always the literal loopback origin: PLANNOTATOR_URL_HOST and
-    // buildAdvertisedUrl are never applied here.
+    // Always the literal loopback origin.
     origin: `http://${LOOPBACK_HOST}:${port}`,
     stop() {
       for (const s of upgradeSockets) s.destroy();
       upgradeSockets.clear();
       server.close();
-      // close() only stops the listener; drain keep-alive connections so
-      // a stopped session's sockets die immediately (parity with Bun's
-      // server.stop(true)). Guarded: jiti can run under hosts whose
-      // node:http lacks closeAllConnections.
+      // close() only stops the listener; drain keep-alive connections. Guarded: some hosts' node:http lacks closeAllConnections.
       (server as { closeAllConnections?: () => void }).closeAllConnections?.();
     },
   };

@@ -3,8 +3,7 @@ import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { openPackedApp, packApp, PACKED_ASSETS_MARKER } from "./packed-app";
 
 const PAGE = '<!doctype html><script type="module" src="/assets/app.js"></script>';
-// Non-ASCII, newlines and the marker itself inside asset data: the index
-// addresses data by offset, so none of these may shift or split an asset.
+// Non-ASCII, newlines and the marker inside asset data must not shift or split an asset.
 const SCRIPT = `export const s = "é 🙂";\n// ${PACKED_ASSETS_MARKER}\n`;
 const STYLE = "body { color: red }";
 const FONT = new Uint8Array([0x77, 0x4f, 0x46, 0x32, 0x00, 0xff]);
@@ -37,7 +36,6 @@ describe("packed app", () => {
       "Cache-Control": "public, max-age=31536000, immutable",
       "Content-Length": String(Buffer.byteLength(SCRIPT)),
     });
-    // A local session never compresses (#1617's rule for the page).
     expect(script.headers["Content-Encoding"]).toBeUndefined();
 
     expect(text((await app.answer("/assets/style.css", "HEAD", null, false)).body)).toBe(STYLE);

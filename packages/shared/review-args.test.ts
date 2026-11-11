@@ -57,8 +57,7 @@ describe("parseReviewArgs", () => {
     });
   });
 
-  // #1907: `plannotator review --gate` (an agent waiting for the sign-off) must
-  // not be refused as an unknown option on hosts that run the CLI as written.
+  // `plannotator review --gate` (an agent waiting for the sign-off) must not be refused as an unknown option on hosts that run the CLI as written.
   test("--gate is accepted, marked, and absent otherwise", () => {
     expect(parseReviewArgs("--gate")).toMatchObject({ gate: true, errors: [] });
     expect(parseReviewArgs(["--gate", "../wt"])).toMatchObject({ gate: true, words: ["../wt"], errors: [] });
@@ -66,10 +65,7 @@ describe("parseReviewArgs", () => {
   });
 
   test("--no-git-remote-check sets the opt-out bit and is absent otherwise", () => {
-    // #1553: every host (CLI, OpenCode, Pi) forwards this bit to the review
-    // server. It must be absent — not `true` — when the flag is not typed, or
-    // it would outrank PLANNOTATOR_GIT_REMOTE_CHECK and config.gitRemoteCheck and
-    // make the env/config opt-out unreachable.
+    // Hosts forward this bit to the review server. It must be absent, not `true`, when the flag is not typed, or it would outrank PLANNOTATOR_GIT_REMOTE_CHECK and config.gitRemoteCheck.
     expect(parseReviewArgs("--no-git-remote-check").gitRemoteCheck).toBe(false);
     expect(parseReviewArgs(["--no-git-remote-check"]).gitRemoteCheck).toBe(false);
     expect(parseReviewArgs("--no-git-remote-check").errors).toEqual([]);
@@ -120,9 +116,7 @@ describe("parseReviewArgs", () => {
   });
 
   test("reports unknown dash-prefixed tokens instead of silently dropping them", () => {
-    // The pre-existing silent-swallow bug: `--bse main` used to land in
-    // `positional`, be ignored, and the session opened as if nothing happened —
-    // on every host. A typo'd flag must fail loudly, exactly as on annotate.
+    // A typo'd flag must fail loudly, exactly as on annotate (`--bse main` used to be ignored silently).
     const parsed = parseReviewArgs("--bse main");
     expect(parsed.errors).toEqual(["Unknown review option: --bse"]);
     // The stray value is a directory candidate, but the option error prevents launch.
@@ -140,8 +134,7 @@ describe("parseReviewArgs", () => {
   });
 
   test("parses --base and --diff-type values into the struct", () => {
-    // Failure caught: the value never reaching the struct at all (the
-    // pre-PR silent swallow, or a broken value-consuming loop).
+    // Failure caught: the value never reaching the struct.
     const parsed = parseReviewArgs("--base feature/part-1 --diff-type merge-base");
     expect(parsed.base).toBe("feature/part-1");
     expect(parsed.diffType).toBe("merge-base");
@@ -200,29 +193,23 @@ describe("parseReviewArgs", () => {
   });
 
   test("an unknown dashed token cannot shadow a PR URL", () => {
-    // Before the errors[] contract, `--bse` landed in positional[0] and the
-    // real PR URL in positional[1] was never inspected — the PR silently
-    // became a local review. Now the invocation refuses instead.
+    // A typo'd `--bse` must refuse the invocation rather than silently turn a PR review into a local one.
     const parsed = parseReviewArgs("--bse https://github.com/acme/repo/pull/12");
     expect(parsed.errors).toEqual(["Unknown review option: --bse"]);
     expect(parsed.prUrl).toBe("https://github.com/acme/repo/pull/12");
   });
 
   test("parses one external patch file", () => {
-    // given
     const input = ["--patch-file", "reading.diff"];
 
-    // when
     const result = parseReviewArgs(input);
 
-    // then
     expect(result.patchFile).toBe("reading.diff");
     expect(result.prUrl).toBeUndefined();
     expect(result.errors).toEqual([]);
   });
 
   test("rejects patch file combined with VCS/PR selectors", () => {
-    // given
     const withPrUrl = ["https://github.com/acme/repo/pull/12", "--patch-file", "reading.diff"];
     const withBase = ["--patch-file", "reading.diff", "--base", "main"];
     const withDiffType = ["--patch-file", "reading.diff", "--diff-type", "staged"];
@@ -232,7 +219,6 @@ describe("parseReviewArgs", () => {
     // defaults to true — so presence, not value, decides the conflict.
     const withNoLocal = ["--patch-file", "reading.diff", "--no-local"];
 
-    // when / then
     expect(parseReviewArgs(withPrUrl).errors).toContain("--patch-file cannot be combined with a PR/MR URL");
     expect(parseReviewArgs(withBase).errors).toContain("--patch-file cannot be combined with --base");
     expect(parseReviewArgs(withDiffType).errors).toContain("--patch-file cannot be combined with --diff-type");
@@ -242,20 +228,16 @@ describe("parseReviewArgs", () => {
   });
 
   test("leaves --no-local alone without a patch file", () => {
-    // given / when
     const result = parseReviewArgs(["https://github.com/acme/repo/pull/12", "--no-local"]);
 
-    // then
     expect(result.errors).toEqual([]);
     expect(result.useLocal).toBe(false);
   });
 
   test("rejects a missing or duplicate patch file", () => {
-    // given
     const missingPath = ["--patch-file"];
     const duplicatePath = ["--patch-file", "one.diff", "--patch-file", "two.diff"];
 
-    // when / then
     expect(parseReviewArgs(missingPath).errors).toEqual(["--patch-file requires a path or -"]);
     expect(parseReviewArgs(duplicatePath).errors).toEqual(["--patch-file may only be specified once"]);
   });

@@ -39,9 +39,7 @@ describe('plannotator tool: arguments', () => {
     expect(args({ action: 'last' })).toEqual([])
   })
 
-  // #1907: a review's gate is the host's (deliver a bare Approve as a
-  // message); passing --gate on would make a CLI older than `review --gate`
-  // refuse the launch.
+  // A review's gate is the host's; passing --gate on would make a CLI older than `review --gate` refuse the launch.
   test('a gated review is accepted and its gate is never passed to the CLI', () => {
     const parsed = parsePlannotatorToolInput({ action: 'review', gate: true, options: { base: 'main' } })
     expect(parsed).toEqual({ ok: true, input: { action: 'review', gate: true, options: { base: 'main' } } })
@@ -80,12 +78,8 @@ describe('plannotator tool: strict validation', () => {
   })
 })
 
-// #2292: GitHub Copilot's Responses models treat the function as strict, so
-// every property is required and the model fills each one it means to omit
-// with an empty value. The failure: every call is refused ("takes no target")
-// and the model repeats it, so the tool cannot be used on that route at all.
+// GitHub Copilot's Responses models treat the function as strict: every property is required and omitted ones are filled with empty values, which must not be refused.
 describe('plannotator tool: empty optional fields from a strict-schema model', () => {
-  // The exact call from the report, sent 17 times in a row.
   const copilotList = { action: 'list', target: '', gate: false, options: { base: '', markdown: false }, session: '' }
 
   test('the reported Copilot list call is the plain list call', () => {
@@ -210,9 +204,7 @@ describe('plannotator tool v2: list, close, reply', () => {
     expect(one.ok && one.input.session).toBe('pn-3f2a9c')
   })
 
-  // `reply` was reserved for live comments and always errored; it is out of
-  // the contract until the comment loop delivers single comments. A model
-  // that still sends it gets a validation error, not a host-specific refusal.
+  // `reply` is out of the contract: a model that sends it gets a validation error.
   test('reply and its fields are not part of the contract', () => {
     expect(error({ action: 'reply', session: 'pn-3f2a9c', comment: 'c3', text: 'Done.' })).toContain('unknown field "comment"')
     expect(error({ action: 'reply', session: 'pn-3f2a9c' })).toContain('action must be')
@@ -252,14 +244,12 @@ describe('targets: every heading and opened text can name the full path', () => 
         { subject: 'PR #3', target: 'https://github.com/o/r/pull/3' },
       ]),
     ).toEqual(['releases-2026-10-04/QUESTIONS.md', 'releases-2026-09-20/QUESTIONS.md', 'notes.md', 'PR #3'])
-    // Parents with the same name: go up until the paths differ.
     expect(
       plannotatorDistinctSubjects([
         { subject: 'changes in web', target: '/a/app/web' },
         { subject: 'changes in web', target: '/b/app/web' },
       ]),
     ).toEqual(['changes in a/app/web', 'changes in b/app/web'])
-    // The same file twice, or no target: nothing to tell apart.
     expect(
       plannotatorDistinctSubjects([
         { subject: 'QUESTIONS.md', target: '/w/QUESTIONS.md' },

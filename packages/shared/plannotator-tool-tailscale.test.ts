@@ -12,15 +12,10 @@ import {
   PLANNOTATOR_TOOL_TAILSCALE_LINE,
 } from './plannotator-tool'
 
-// #2166: `tailscale` is an opt-in of the contract for a host that can publish
-// over the tailnet (the Claude Code mod). The failures guarded: a host that
-// did not opt in (Pi, OpenCode 2, T3) starts sending a different tool
-// definition or accepting the field; or the opt-in maps to the wrong CLI words.
+// `tailscale` is opt-in for hosts that can publish over the tailnet. Guards: a host that did not opt in changing its tool definition or accepting the field; the opt-in mapping to the wrong CLI words.
 
 describe('the plain contract is unchanged for every other host', () => {
-  // Deliberately frozen: the sha256 of the plain tool definition (name,
-  // description, schema) as it was before #2166. Pi and OpenCode send this
-  // definition with every request, so a change here changes their prompt.
+  // Deliberately frozen: sha256 of the plain tool definition. Pi and OpenCode send it with every request, so a change alters their prompt.
   test('the plain name, description and schema are byte for byte the ones before #2166', () => {
     const definition = JSON.stringify({ d: PLANNOTATOR_TOOL_DESCRIPTION, s: PLANNOTATOR_TOOL_INPUT_SCHEMA, name: PLANNOTATOR_TOOL_NAME })
     const sha = new Bun.CryptoHasher('sha256').update(definition).digest('hex')
@@ -84,7 +79,6 @@ describe('the tailscale opt-in', () => {
     expect(plannotatorCommandToToolInput('plannotator review --tailscale', opts)).toEqual({ action: 'review', tailscale: true })
     expect(plannotatorCommandToToolInput('plannotator annotate-last --tailscale', opts)).toEqual({ action: 'last', tailscale: true })
     expect(plannotatorCommandToToolInput('plannotator annotate notes.md --tailscale --tailscale', opts)).toBeNull()
-    // Script-only flags still run as written.
     expect(plannotatorCommandToToolInput('plannotator annotate notes.md --tailscale --gate --json --require-approval', opts)).toBeNull()
   })
 

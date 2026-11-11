@@ -1,18 +1,4 @@
-/**
- * Who may list and read what through the Files sidebar and Obsidian routes,
- * shared by the Bun and node:http servers.
- *
- * Another site's page is refused on all of them (the servers check
- * `isReferenceReadPath` with `isSameOriginRequest` first). A page on this
- * machine (`isThisMachineReader`, this-machine-reader.ts) lists any folder and
- * any vault the person adds in Settings, as before. Every other reader
- * (remote mode, tailnet peers, proxies) lists only folders inside the
- * session's roots and only the vaults Obsidian itself lists on this machine
- * (`detectObsidianVaults`): `referenceReadRefusal`. For every reader, a vault
- * document must be inside the vault as written, be a regular Markdown file by
- * its real path, and fit the 2MB cap; a reader off this machine must also stay
- * inside the vault after symlink resolution: `vaultDocRefusal`.
- */
+/** Who may list and read what through the Files sidebar and Obsidian routes, shared by the Bun and node:http servers. A page on this machine lists any folder or vault; every other reader is limited to the session's roots and Obsidian's own vaults (`referenceReadRefusal`), and a vault document must stay inside the vault (`vaultDocRefusal`). */
 
 import { realpathSync, statSync } from "fs";
 import { DOC_TOO_LARGE, isPathAllowed } from "./doc-resolve";
@@ -27,15 +13,12 @@ const REFERENCE_READ_PATHS = new Set([
 	"/api/reference/obsidian/doc",
 ]);
 
-/** A route that lists or reads the person's folders and vaults. */
 export function isReferenceReadPath(pathname: string): boolean {
 	return REFERENCE_READ_PATHS.has(pathname);
 }
 
 export interface ReferenceReader {
-	/** `isThisMachineReader` for the request. */
 	thisMachine: boolean;
-	/** The session's roots, which every other reader keeps. */
 	roots: string[];
 }
 

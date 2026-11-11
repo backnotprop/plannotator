@@ -79,7 +79,6 @@ describe("resolveCodeFile", () => {
 	});
 
 	test("returns found for a single-segment input that uniquely exists", async () => {
-		// `index.ts` is bare basename; only one in tree.
 		const r = await resolveCodeFile("index.ts", root);
 		expect(r.kind).toBe("found");
 		if (r.kind === "found") {
@@ -88,8 +87,6 @@ describe("resolveCodeFile", () => {
 	});
 
 	test("strips leading ./ before suffix matching", async () => {
-		// Earlier this fell through to step 3 with target='./editor/app.tsx'
-		// and never matched any real file. The cleanup makes it work.
 		const r = await resolveCodeFile("./editor/App.tsx", root);
 		expect(r.kind).toBe("found");
 		if (r.kind === "found") {
@@ -106,7 +103,6 @@ describe("resolveCodeFile", () => {
 	});
 
 	test("resolves via baseDir when input is relative to active doc", async () => {
-		// Linked doc at `<root>/packages/review-editor/...` references `../editor/App.tsx`
 		const baseDir = join(root, "packages/review-editor");
 		const r = await resolveCodeFile("../editor/App.tsx", root, baseDir);
 		expect(r.kind).toBe("found");
@@ -116,7 +112,6 @@ describe("resolveCodeFile", () => {
 	});
 
 	test("baseDir miss falls through to suffix walk", async () => {
-		// baseDir doesn't have the file, but cwd tree does — walk catches it.
 		const baseDir = join(root, "packages/review-editor");
 		const r = await resolveCodeFile("ui/components/Button.tsx", root, baseDir);
 		expect(r.kind).toBe("found");
@@ -397,9 +392,7 @@ describe("annotatable plain-text files (#1029)", () => {
 		}
 	});
 
-	// #1307: `markdownExtensions` in config.json must make an extension
-	// resolvable everywhere .md is. The list is threaded in explicitly here so
-	// the test never touches the user's real config.json.
+	// `markdownExtensions` must make an extension resolvable everywhere .md is; the list is threaded in explicitly so the test never touches the real config.json.
 	test("configured extra extensions resolve like markdown, and only when configured", () => {
 		const cwd = mkdtempSync(join(tmpdir(), "plannotator-livemd-"));
 		try {
@@ -407,7 +400,6 @@ describe("annotatable plain-text files (#1029)", () => {
 			writeFileSync(join(cwd, "notebooks/tour.livemd"), "# Tour\n");
 			const configured = { extraMarkdownExtensions: [".livemd"] };
 
-			// Exact relative path, and the fuzzy bare-filename walk.
 			expect(resolveMarkdownFile("notebooks/tour.livemd", cwd, configured)).toEqual({
 				kind: "found",
 				path: join(cwd, "notebooks/tour.livemd"),
@@ -417,7 +409,6 @@ describe("annotatable plain-text files (#1029)", () => {
 				path: join(cwd, "notebooks/tour.livemd"),
 			});
 
-			// Default (no configuration): unchanged "unsupported type" behavior.
 			expect(
 				resolveMarkdownFile("notebooks/tour.livemd", cwd, { extraMarkdownExtensions: [] }),
 			).toEqual({ kind: "not_found", input: "notebooks/tour.livemd" });

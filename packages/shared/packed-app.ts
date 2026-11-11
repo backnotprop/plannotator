@@ -1,35 +1,11 @@
 import { compressAppText, negotiateAppHtmlEncoding, prepareAppHtml } from "./app-html";
 
-/**
- * The built apps ship as ONE file per app, which every host embeds or copies
- * as-is (the compiled CLI, the Pi and OpenCode packages). The browser, though,
- * should only download what it runs: the lazy chunks (Shiki grammars, Mermaid,
- * Graphviz, KaTeX, fonts) are most of the bytes, and a phone on a tailnet or an
- * SSH tunnel waits for every one of them before the first paint.
- *
- * So the build (`build/pack-app.ts`) keeps Vite's code-split output and packs
- * it behind a marker after the page: the page references its chunks by URL,
- * and the servers answer those URLs from the pack (`answer`), by exact name,
- * from memory only. Remote and `--tailscale` sessions get text chunks
- * compressed by the page's own rule (./app-html); binary ones are already
- * compressed.
- *
- * Layout after the marker: one line of JSON indexing every asset by URL path
- * into the raw asset data that follows it, so neither building nor serving
- * escapes or parses the ~25MB of code.
- */
-//
-// The marker opens a hidden <plaintext>, which has no end tag: a server
-// older than the pack (a Pi session that read the file after an in-place
-// update) serves the whole file as the page, and the browser then takes
-// everything after the marker as hidden text instead of rendering the index
-// and the chunks. The page itself says what happened (build/pack-app.ts).
+/** Built apps ship as one file: the page, a marker, then a JSON index of packed assets by URL path over the raw data. The browser downloads only the chunks it runs. */
+// The marker opens a hidden <plaintext> with no end tag: an older server serving the whole file as the page makes the browser treat everything after it as hidden text.
 export const PACKED_ASSETS_MARKER = "<plaintext hidden><!--plannotator:packed-assets-->";
 
-/** Every packed asset lives here (Vite's `assetsDir`); the build refuses any other path. */
 export const PACKED_ASSET_ROUTE_PREFIX = "/assets/";
 
-/** A packed asset: text is served as-is or compressed, binary rides as base64. */
 export type PackedAsset =
   | { type: string; text: string }
   | { type: string; base64: string };
@@ -48,14 +24,7 @@ export interface PackedAppAnswer {
 }
 
 export interface PackedApp {
-  /** The page to serve, without the pack. */
   html: string;
-  /**
-   * The answer to a request no other route claimed: under `/assets/` the
-   * packed file of exactly that name (404 when there is none, 405 for anything
-   * but GET and HEAD), else the page (SPA). `compress` is the page's own rule
-   * (remote and `--tailscale` sessions).
-   */
   answer(
     pathname: string,
     method: string | undefined,
@@ -80,14 +49,11 @@ export function packApp(html: string, assets: Record<string, PackedAsset>): stri
   return `${html}${PACKED_ASSETS_MARKER}${JSON.stringify(index)}\n${data.join("")}`;
 }
 
-/** Split a built app into its page and assets. An unpacked page serves as-is. */
 export function openPackedApp(bundle: string): PackedApp {
   const markerAt = bundle.indexOf(PACKED_ASSETS_MARKER);
   const html = markerAt < 0 ? bundle : bundle.slice(0, markerAt);
   const indexAt = markerAt + PACKED_ASSETS_MARKER.length;
   const dataAt = markerAt < 0 ? -1 : bundle.indexOf("\n", indexAt) + 1;
-  // Parsed on the first asset request, so a CLI run that never serves the
-  // page (or a host that never opens it) pays nothing.
   let index: Map<string, PackedEntry> | undefined;
   const lookup = (pathname: string): PackedEntry | undefined => {
     if (markerAt < 0) return undefined;
@@ -151,7 +117,6 @@ export function openPackedApp(bundle: string): PackedApp {
   };
 }
 
-/** Fetch-API flavor for the Bun servers. */
 export async function packedAppResponse(app: PackedApp, req: Request, pathname: string, compress: boolean): Promise<Response> {
   const answer = await app.answer(pathname, req.method, req.headers.get("accept-encoding"), compress);
   // A Buffer is a valid fetch body in both runtimes; the lib types lag.

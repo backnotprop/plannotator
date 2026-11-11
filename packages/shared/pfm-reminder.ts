@@ -1,21 +1,6 @@
-/**
- * Plannotator Flavored Markdown reminder.
- *
- * Static prose injected into the EnterPlanMode PreToolUse hook when the user
- * has opted in via `pfmReminder: true` in ~/.plannotator/config.json. It tells
- * the planning agent which markdown extensions Plannotator's viewer renders so
- * plans can be enriched with code-file links, callouts, tables, diagrams, etc.
- *
- * Keep this short. The agent reads it on every EnterPlanMode call.
- */
+/** PFM reminder: static prose injected into the EnterPlanMode hook when `pfmReminder` is on. Keep it short; the agent reads it on every call. */
 
-/**
- * Compose the additionalContext string for the improve-context PreToolUse handler.
- * Returns null when no sources are enabled (handler should exit silently).
- *
- * Order: PFM reminder first (capabilities) then improvement hook (corrective
- * rules). Both appear separated by a horizontal rule.
- */
+/** Compose additionalContext for the improve-context hook; null when no sources are enabled. The PFM reminder comes first, then the improvement hook, separated by a horizontal rule. */
 export function composeImproveContext(input: {
   pfmEnabled: boolean;
   improvementHookContent: string | null;

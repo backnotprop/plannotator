@@ -9,14 +9,8 @@ const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const AUTH_CACHE_MS = 5 * 60 * 1000;
 const PRIVATE_IPV4_RE = /^(?:127\.|10\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.)/;
 const PRIVATE_IPV6_RE = /^\[(?:::1|::ffff:|fe80:|fc|fd)/i;
-/**
- * A GitLab upload secret is 32 lowercase hex characters and the filename is a single path
- * segment. Matching a looser shape would let a link in an attacker-authored MR body steer
- * the rewritten, credentialed GET at an arbitrary `/api/v4/...` path, leaving the safety of
- * that request to GitLab's router rather than to this allowlist.
- */
+/** A GitLab upload secret is 32 lowercase hex characters and the filename one path segment: a looser shape would let a link in an MR body steer the credentialed GET at an arbitrary `/api/v4/...` path. */
 const GITLAB_UPLOAD_RE = /^\/uploads\/([0-9a-f]{32})\/([^/]+)$/;
-/** Provider sign-in entry points. Landing here means our credentials were not accepted. */
 const SIGN_IN_PATH_RE = /^\/(?:users\/(?:sign_in|auth)|login|session|oauth\/authorize)(?:\/|$)/;
 
 interface ProviderAuthCacheEntry {
@@ -41,7 +35,6 @@ export interface PRArtifactDocument {
   readonly contentType: string;
 }
 
-/** Bounded provider content suitable for a same-origin media response. */
 export interface PRArtifactContent {
   readonly content: Uint8Array;
   readonly contentType: string;
@@ -51,9 +44,7 @@ export interface PRArtifactContent {
 }
 
 export interface PRArtifactContentOptions {
-  /** Context-referenced document from which a relative resource was derived. */
   readonly sourceUrl?: string;
-  /** Valid single-range header forwarded for video seeking. */
   readonly range?: string;
 }
 
@@ -107,13 +98,7 @@ function isReferencedByContext(url: URL, metadata: PRMetadata, context: PRContex
 /** A dot segment (`.`/`..`, percent-encoded too) or a backslash, which URL parsing rewrites. */
 const PATH_REWRITTEN_BY_PARSING_RE = /(?:^|\/)(?:\.|%2e){1,2}(?:\/|$)|\\/i;
 
-/**
- * Whether an absolute URL written in the PR text names `url` once only its
- * scheme, host case and default port are normalized. The path is compared as
- * written: a reference whose path URL parsing would rewrite (dot segments, a
- * backslash) never matches, so `…/assets/../../o/r/blob/main/x` does not
- * authorize `o/r/blob/main/x`, a URL the text never names.
- */
+/** Whether an absolute URL in the PR text names `url` once only scheme, host case and default port are normalized. The path is compared as written, so `…/assets/../../o/r/blob/main/x` does not authorize `o/r/blob/main/x`. */
 function referenceNamesUrl(reference: string, url: URL): boolean {
   const writtenPath = /^https?:\/\/[^/?#]*([^?#]*)/i.exec(reference)?.[1] ?? '';
   if (PATH_REWRITTEN_BY_PARSING_RE.test(writtenPath)) return false;
@@ -183,12 +168,7 @@ function gitlabProjectPath(metadata: Extract<PRMetadata, { platform: 'gitlab' }>
   return metadata.projectPath.replace(/^\/+|\/+$/g, '');
 }
 
-/**
- * GitLab serves `/uploads/<secret>/<file>` from a Rails web route that only honors
- * session cookies — a `PRIVATE-TOKEN` request is redirected to the sign-in page, so the
- * link is unreadable from a CLI. The uploads REST API serves the same bytes for a token,
- * so route upload links through it.
- */
+/** GitLab's web route `/uploads/<secret>/<file>` honors only session cookies (a token request is redirected to sign-in), so upload links go through the uploads REST API. */
 function gitlabUploadApiUrl(
   url: URL,
   metadata: Extract<PRMetadata, { platform: 'gitlab' }>,
@@ -250,7 +230,6 @@ function providerContentUrl(url: URL, metadata: PRMetadata): URL {
   return url;
 }
 
-/** True only for context-referenced attachment/file URLs on the active provider. */
 export function isPRArtifactDocumentUrlAllowed(
   rawUrl: string,
   metadata: PRMetadata,
@@ -304,7 +283,7 @@ function mayFollowProviderRedirect(currentUrl: URL, nextUrl: URL): boolean {
 }
 
 async function providerAuthHeaders(runtime: PRRuntime, metadata: PRMetadata): Promise<Record<string, string>> {
-  // The review runs as another signed-in gh account (#2157): send its token, not the active one's.
+  // The review runs as another signed-in gh account: send its token, not the active one's.
   if (metadata.platform === 'github') {
     const chosen = ghAccountTokenFor(metadata);
     if (chosen) return { Authorization: `Bearer ${chosen}` };
@@ -347,10 +326,7 @@ function shouldSendProviderAuth(url: URL, metadata: PRMetadata): boolean {
     || origin === 'https://private-user-images.githubusercontent.com';
 }
 
-/**
- * Our credentials were not accepted. Name the command that fixes it: the alternative is a
- * bare transport status, which reads as a broken artifact rather than a missing login.
- */
+/** Our credentials were not accepted: name the command that fixes it, since a bare status reads as a broken artifact. */
 function providerAuthRequiredError(metadata: PRMetadata): PRArtifactDocumentError {
   const loginHint = metadata.platform === 'github'
     ? `gh auth login --hostname ${metadata.host}`
@@ -363,12 +339,7 @@ function providerAuthRequiredError(metadata: PRMetadata): PRArtifactDocumentErro
   );
 }
 
-/**
- * A direct refusal carries the same diagnosis as a sign-in redirect: GitLab's `/api/v4`
- * routes answer 401/403 as JSON instead of redirecting to a login page. GitHub's 403 is
- * excluded because it also covers rate limiting and SSO enforcement, where a login hint
- * would point at the wrong problem.
- */
+/** A direct refusal gets the same diagnosis as a sign-in redirect (GitLab's `/api/v4` answers 401/403 as JSON). GitHub's 403 is excluded: it also covers rate limiting and SSO enforcement. */
 function isProviderAuthRefusal(status: number, metadata: PRMetadata): boolean {
   return status === 401 || (status === 403 && metadata.platform === 'gitlab');
 }
@@ -422,12 +393,8 @@ async function readBytesWithLimit(response: Response, maxBytes: number): Promise
 }
 
 /**
- * The GitLab uploads API answers every file with `application/octet-stream`. Responses are
- * served with `nosniff`, so an unrefined type would stop images and video from rendering.
- *
- * Deliberately no `html` or `js`: naming an active type here buys nothing, because an HTML
- * artifact is read through the document route, which always serves `text/plain`. Leaving
- * them in would make the safety of the media route depend on its CSP header forever.
+ * The GitLab uploads API answers every file as `application/octet-stream`, and `nosniff` would stop images and video rendering.
+ * No `html` or `js` on purpose: an HTML artifact is read through the document route (always text/plain), so the media route's safety must not rest on its CSP.
  */
 const EXTENSION_CONTENT_TYPES: Readonly<Record<string, string>> = {
   avif: 'image/avif',
@@ -551,10 +518,7 @@ async function fetchArtifactContent(
       }
       if (!response.ok) {
         await response.body?.cancel();
-        // `GET /projects/:id/uploads/:secret/:filename` landed in GitLab 17.4. An older
-        // self-hosted instance has no such route, while the original web route still reads
-        // a public project anonymously, so retry that route once before giving up. The
-        // retry is same-origin, so it carries credentials on the usual terms.
+        // The uploads API route landed in GitLab 17.4; an older instance has none while the web route still reads a public project anonymously, so retry that route once (same-origin, so credentials travel on the usual terms).
         if (response.status === 404 && uploadApiUrl !== null && currentUrl.href === uploadApiUrl.href) {
           currentUrl = requestedUrl;
           continue;
@@ -601,7 +565,6 @@ async function fetchArtifactContent(
   }
 }
 
-/** Fetch bounded media or a derived document resource with provider authentication. */
 export function fetchPRArtifactContent(
   runtime: PRRuntime,
   metadata: PRMetadata,
@@ -619,7 +582,6 @@ export function fetchPRArtifactContent(
   );
 }
 
-/** Fetch one active PR/MR text document without exposing provider credentials to the browser. */
 export async function fetchPRArtifactDocument(
   runtime: PRRuntime,
   metadata: PRMetadata,

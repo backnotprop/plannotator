@@ -93,8 +93,6 @@ describe("fetchGlMR", () => {
   });
 });
 
-// --- raw_diffs → JSON /diffs fallback (older self-hosted GitLab + oversized MRs) ---
-
 const REF = { platform: "gitlab" as const, host: "gitlab.com", projectPath: "g/p", iid: 1 };
 
 const DIFF_ENTRIES_JSON = JSON.stringify([
@@ -742,8 +740,7 @@ describe("submitGlMRReview", () => {
     });
   });
 
-  // Like Bitbucket: a decision that fails before anything else landed changed
-  // nothing, so it is an error the review stays open on, with no retry locked to it.
+  // A decision that fails before anything else landed changed nothing: an error the review stays open on, with no retry locked to it.
   test("throws an approval-only spawn failure, unchanged on retry", async () => {
     const { runtime } = makeSubmissionRuntime(new Set(), { approvalReject: true });
 
@@ -869,7 +866,6 @@ describe("submitGlMRReview", () => {
     await expect(
       submitGlMRReview(runtime, REF, "head", "request_changes", "Please fix", comments),
     ).resolves.toEqual({ status: "complete", postedAs: "comment" });
-    // Every comment went once, and the decision was asked once: nothing to retry.
     expect(postedBodies).toEqual(["Please fix", "First finding", "Second finding"]);
     expect(graphqlInputs).toHaveLength(1);
   });

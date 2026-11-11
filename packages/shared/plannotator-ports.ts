@@ -1,16 +1,4 @@
-/**
- * The loopback ports Plannotator servers on this machine hold, read from the
- * data dir's registries: the Inbox's (`inbox/inbox.json`: its window port and
- * the loopback listeners it publishes over Tailscale), the Shapes server's
- * (`shapes/server.json`) and every live session
- * (`sessions/*.json`). Annotate's live app probe refuses these targets before
- * contacting them (packages/shared/live-probe.ts), which also covers a
- * Plannotator binary older than the Plannotator server header.
- *
- * Read-only: nothing is created, cleaned up or deleted. Entries whose process
- * is gone are skipped (their port may belong to a dev server now). Vendored to
- * the Pi extension.
- */
+/** Loopback ports of Plannotator servers on this machine, read from the data dir's registries (Inbox, Shapes server, live sessions). Read-only; entries whose process is gone are skipped. */
 
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
@@ -40,7 +28,6 @@ function readJson(path: string): Record<string, unknown> | null {
   }
 }
 
-/** Ports of the running Inbox and the live Plannotator sessions. */
 export function listPlannotatorServerPorts(dataDir: string = getPlannotatorDataDir()): number[] {
   const ports = new Set<number>();
 
@@ -53,7 +40,6 @@ export function listPlannotatorServerPorts(dataDir: string = getPlannotatorDataD
     if (tailscale && isPort(tailscale.proxy_port)) ports.add(tailscale.proxy_port);
   }
 
-  // The Shapes server (`plannotator shape open`, packages/server/shape.ts).
   const shapes = readJson(join(dataDir, "shapes", "server.json"));
   if (shapes && isPort(shapes.port) && isAlive(shapes.pid)) ports.add(shapes.port);
 
