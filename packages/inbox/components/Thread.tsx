@@ -1784,8 +1784,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             launched.session_ref && (runLine === null || runLine.state === 'working' || runLine.state === 'waiting_terminal' || runLine.state === 'starting')
               ? () => void launchAct(() => inboxApi.launchStop(launched.id, machine?.id ?? null))
               : null,
-          // Not on a phone (PLAN: the phone shows Copy and Stop only): deleting a session is for the computer it runs on.
-          remove: phone ? null : () => setConfirmDelete(true),
+          // On a phone too (owner ruling 2026-11-11: one person, the same app on every device).
+          remove: () => setConfirmDelete(true),
         }
       : null;
   // Archived (resolved). What an agent wrote after the archive line behaves as
