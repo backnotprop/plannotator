@@ -47,6 +47,8 @@ import {
   subscribeInboxEvents,
   tailnetGuest,
   inboxAskOn,
+  REF_CARD_READ_MS,
+  signalWithin,
   type AgentToolHost,
   type InboxEvent,
   type ListModel,
@@ -301,7 +303,11 @@ configurePlannotatorUI({
   // with thumb-sized buttons (utils/touchToolbarPlacement).
   touchSelectionToolbar: true,
   // Hover cards for issue, PR and MR links: the server fetches with this computer's gh or glab (ref-cards.ts).
-  refCardTransport: inboxRefTransport((href, signal) => fetch(inboxUrl(`/ref?url=${encodeURIComponent(href)}`), { signal, headers: { accept: 'application/json' } })),
+  // Given up after REF_CARD_READ_MS (the card then shows what the Inbox knows), so no read holds a connection for good.
+  refCardTransport: inboxRefTransport((href, signal) => {
+    const within = signalWithin(REF_CARD_READ_MS, signal);
+    return fetch(inboxUrl(`/ref?url=${encodeURIComponent(href)}`), { signal: within.signal, headers: { accept: 'application/json' } }).finally(within.done);
+  }),
   // Images in a message load from the Inbox's per-message route (#1813).
   imageSrcResolver: inboxImageSrcResolver,
   // A long thread can hold hundreds of code fences: each is highlighted when it comes near the screen (before it
@@ -2414,6 +2420,10 @@ function Inbox() {
         onSnoozes: () => {
           if (snoozesTimer) clearTimeout(snoozesTimer);
           snoozesTimer = setTimeout(() => void refreshSnoozes(), 60);
+        },
+        // A thread's PRs read behind the window's answer changed their checks or review: the cards showing them read again.
+        onThreadPulls: (threadIds) => {
+          for (const id of threadIds) threadPullsBus.emit(id);
         },
         // How the rows look was saved (here, another window, a phone): every list takes it at once.
         // One at or below the last event's count (the count gone back, or a late copy): the settings read decides.
