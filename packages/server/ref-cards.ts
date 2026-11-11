@@ -71,18 +71,18 @@ export function createBunRefCliRunner(timeoutMs: number = REF_TIMEOUT_MS): RefRu
     return new Promise((resolve) => {
       let settled = false;
       let drainTimer: ReturnType<typeof setTimeout> | null = null;
-      const finish = (exitCode: number, stderr?: string) => {
+      const finish = (exitCode: number, stderr?: string, timedOut = false) => {
         if (settled) return;
         settled = true;
         clearTimeout(deadline);
         if (drainTimer) clearTimeout(drainTimer);
         out.stop();
         err.stop();
-        resolve({ stdout: out.text(), stderr: stderr ?? err.text(), exitCode });
+        resolve({ stdout: out.text(), stderr: stderr ?? err.text(), exitCode, ...(timedOut ? { timedOut } : {}) });
       };
       const deadline = setTimeout(() => {
         end();
-        finish(1, `${cli}: timed out`);
+        finish(1, `${cli}: timed out`, true);
       }, timeoutMs);
       void proc.exited.then((code) => {
         void Promise.all([out.done, err.done]).then(() => finish(code));

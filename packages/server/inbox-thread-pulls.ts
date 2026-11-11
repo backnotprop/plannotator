@@ -29,7 +29,11 @@
  *   a change to them tells the windows (`onLiveChange`, `event: thread-pulls`).
  * - No gh or glab, signed out, a failure or a timeout: nothing is written, the
  *   PR keeps its last state (`unknown` until a first answer), the failure is
- *   kept for 1 min, and nothing nags.
+ *   kept for 1 min, and nothing nags. Why it failed is kept as a problem
+ *   (inbox-thread-pull-problem.ts: one of six tool states in the one table's
+ *   words) that the window's card shows under what is known; a new or
+ *   cleared problem tells the windows like checks do. The person's Try again
+ *   (`GET …/pulls?retry=1`) reads a held failure again at once.
  * - The window's read never waits on a forge: it answers what is known at
  *   once and reads behind it (a hover once said "Loading" for as long as a
  *   stuck glab ran). Every CLI has a hard deadline (the runner) and no slot is
@@ -53,6 +57,9 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { CARD_MARK_FAILURE_MS, CARD_MARK_FRESH_MS, CARD_MARK_REFRESH_MS, CARD_MARKS_BATCH, CARD_MARKS_MAX_CONCURRENT } from "./inbox-card-marks";
 import { sessionLastSawThread } from "./inbox-session-reads";
+import type { ProblemDiag } from "@plannotator/core/problem";
+import { createToolStatus, type ToolStatus } from "@plannotator/shared/tool-state";
+import { githubPullFailure, gitlabPullFailure, type ThreadPullFailure } from "./inbox-thread-pull-problem";
 import { createRefSlots, REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, type RefCards, type RefRunner } from "./ref-cards";
 
 /** What the reader learns about one PR. */
@@ -118,25 +125,32 @@ export type ThreadPullFixture = Readonly<Record<string, Partial<ThreadPullRead>>
 
 export interface ThreadPullStates {
   /** What the reader knows now about a PR beyond the stored state (checks, review), or undefined. */
-  live(key: string): { checks: InboxThreadPullChecks | null; review: InboxThreadPullReview | null } | undefined;
+  live(key: string): { checks: InboxThreadPullChecks | null; review: InboxThreadPullReview | null; problem?: ThreadPullFailure["problem"] } | undefined;
+  /** The private detail of a PR's last failed read (the tool's last line, exit, time), never sent; undefined when none. */
+  diag(key: string): ProblemDiag | null | undefined;
   /**
    * Read the PRs still in play among `pulls` whose answer is not fresh, and
    * write each change on every thread that holds that PR. `refresh`: a read
-   * older than 30 s counts as stale (a thread opened, the window's focus).
+   * older than 30 s counts as stale (a thread opened, the window's focus);
+   * `retry`: the person's Try again, so a held failure is read again too.
    * Never throws.
    */
-  refresh(pulls: readonly InboxThreadPull[], options?: { refresh?: boolean }): Promise<void>;
+  refresh(pulls: readonly InboxThreadPull[], options?: { refresh?: boolean; retry?: boolean }): Promise<void>;
 }
 
 interface Cached {
   read: ThreadPullRead | null;
   at: number;
+  /** Why the last read failed (read null), when known. */
+  failure?: ThreadPullFailure;
 }
 
 export function createThreadPullStates(options: {
   store: InboxStore;
   run?: RefRunner;
   refCards?: RefCards;
+  /** The gh / glab status check (default: the hover cards', else one of its own). */
+  tools?: ToolStatus;
   now?: () => number;
   fixture?: (() => ThreadPullFixture | null) | null;
   /**
@@ -152,6 +166,7 @@ export function createThreadPullStates(options: {
   const cache = new Map<string, Cached>();
   const pending = new Map<string, Promise<void>>();
   const holdUntil = new Map<string, number>();
+  const tools = options.tools ?? options.refCards?.tools ?? createToolStatus({ run, now });
   let hosts: { at: number; ttl: number; set: Promise<Set<string>> } | null = null;
   // At most CARD_MARKS_MAX_CONCURRENT reads; never stuck (createRefSlots): a stalled queue fails its reads, kept as failures.
   const slots = createRefSlots(CARD_MARKS_MAX_CONCURRENT);
@@ -168,22 +183,32 @@ export function createThreadPullStates(options: {
     return set;
   };
 
-  const fresh = (hit: Cached | undefined, refresh: boolean): boolean => {
+  const fresh = (hit: Cached | undefined, refresh: boolean, retry = false): boolean => {
     if (!hit) return false;
     const age = now() - hit.at;
-    if (!hit.read) return age < CARD_MARK_FAILURE_MS;
+    if (!hit.read) return !retry && age < CARD_MARK_FAILURE_MS;
     return age < (refresh ? CARD_MARK_REFRESH_MS : CARD_MARK_FRESH_MS);
   };
 
-  /** One answer kept, and written on every live coupling of that PR. */
-  const land = (key: string, read: ThreadPullRead | null) => {
-    const before = cache.get(key)?.read;
-    cache.set(key, { read, at: now() });
-    if (!read) return;
-    if (options.onLiveChange && ((before?.checks ?? null) !== read.checks || (before?.review ?? null) !== read.review)) {
-      const threads = [...new Set(store.allThreadPulls().filter((pull) => pull.pull === key).map((pull) => pull.thread_id))];
-      if (threads.length > 0) options.onLiveChange(threads);
+  const tellWindows = (key: string) => {
+    if (!options.onLiveChange) return;
+    const threads = [...new Set(store.allThreadPulls().filter((pull) => pull.pull === key).map((pull) => pull.thread_id))];
+    if (threads.length > 0) options.onLiveChange(threads);
+  };
+
+  /** One answer kept, and written on every live coupling of that PR. A failure keeps why (`failure`), when known. */
+  const land = (key: string, read: ThreadPullRead | null, failure?: ThreadPullFailure) => {
+    const prev = cache.get(key);
+    const before = prev?.read;
+    const problemBefore = prev?.failure?.problem.code ?? null;
+    cache.set(key, { read, at: now(), ...(failure ? { failure } : {}) });
+    // A problem that appeared, changed or cleared reaches the windows (the card shows it under what is known).
+    const problemNow = read ? null : (failure?.problem.code ?? null);
+    if (!read) {
+      if (problemNow !== problemBefore) tellWindows(key);
+      return;
     }
+    if ((before?.checks ?? null) !== read.checks || (before?.review ?? null) !== read.review || problemBefore !== null) tellWindows(key);
     for (const pull of store.allThreadPulls()) {
       if (pull.pull !== key) continue;
       try {
@@ -194,17 +219,23 @@ export function createThreadPullStates(options: {
     }
   };
 
-  const readGithub = (host: string, owner: string, repo: string, items: readonly { key: string; number: number }[]): Promise<void> => {
+  const readGithub = (host: string, owner: string, repo: string, items: readonly { key: string; number: number; url: string }[]): Promise<void> => {
     const batchKey = `${host}/${owner}/${repo}`.toLowerCase() + "#" + items.map((i) => i.number).sort((a, b) => a - b).join(",");
     const inFlight = pending.get(batchKey);
     if (inFlight) return inFlight;
     const failAll = () => {
       for (const item of items) land(item.key, null);
     };
-    const job = slot(async () => {
-      if (now() < (holdUntil.get(host) ?? 0)) return failAll();
-      if (host !== "github.com" && !(await signedIn()).has(host)) return failAll();
+    /** Every PR of the batch failed: why, per PR (its own page for "Open on GitHub"), outside the slot. */
+    const failWhy = async (run: Parameters<typeof githubPullFailure>[0]["run"], rateLimited = false) => {
+      const why = await Promise.all(items.map((item) => githubPullFailure({ tools, host, url: item.url, at: now, run, rateLimited }).catch(() => undefined)));
+      items.forEach((item, i) => land(item.key, null, why[i]));
+    };
+    const job = slot(async (): Promise<(() => Promise<void>) | void> => {
+      if (now() < (holdUntil.get(host) ?? 0)) return () => failWhy(null, true);
+      if (host !== "github.com" && !(await signedIn()).has(host)) return () => failWhy(null);
       const numbers = [...new Set(items.map((i) => i.number))];
+      const startedAt = now();
       const result = await run("gh", ["api", "graphql", "--hostname", host, "-f", `query=${githubThreadPullsQuery(numbers)}`, "-f", `owner=${owner}`, "-f", `repo=${repo}`]);
       let repository: Json | null = null;
       try {
@@ -214,21 +245,28 @@ export function createThreadPullStates(options: {
         repository = null;
       }
       if (!repository) {
-        if (refErrorOf("gh", { ...result, exitCode: result.exitCode || 1 }) === "rate_limited") holdUntil.set(host, now() + REF_RATE_LIMIT_MS);
-        return failAll();
+        const failed = { ...result, exitCode: result.exitCode || 1 };
+        if (refErrorOf("gh", failed) === "rate_limited") holdUntil.set(host, now() + REF_RATE_LIMIT_MS);
+        // Why, outside the slot: the status check it may wait on never holds another read.
+        const ms = now() - startedAt;
+        return () => failWhy({ result: failed, ms });
       }
       // A partial answer (one number not a PR) still carries the others.
       for (const item of items) land(item.key, githubThreadPullRead(repository[`n${item.number}`]));
     })
+      .then((why) => (why ? why() : undefined))
       .catch(failAll)
       .finally(() => pending.delete(batchKey));
     pending.set(batchKey, job);
     return job;
   };
 
-  const readGitlab = async (key: string, url: string): Promise<void> => {
-    const result = options.refCards ? await options.refCards.get(url).catch(() => null) : null;
-    land(key, result?.ok ? cardDataThreadPullRead(result.data) : null);
+  const readGitlab = async (key: string, url: string, host: string, retry: boolean): Promise<void> => {
+    const result = options.refCards ? await options.refCards.get(url, retry ? { retry } : undefined).catch(() => null) : null;
+    const read = result?.ok ? cardDataThreadPullRead(result.data) : null;
+    if (read || result?.ok) return land(key, read);
+    const why = await gitlabPullFailure({ tools, refCards: options.refCards ?? null, host, url, at: now, result }).catch(() => undefined);
+    land(key, null, why);
   };
 
   const readFixture = (fixture: ThreadPullFixture, pull: InboxThreadPull): void => {
@@ -244,18 +282,22 @@ export function createThreadPullStates(options: {
 
   return {
     live(key) {
-      const read = cache.get(key)?.read;
-      return read ? { checks: read.checks, review: read.review } : undefined;
+      const hit = cache.get(key);
+      if (hit?.read) return { checks: hit.read.checks, review: hit.read.review };
+      return hit?.failure ? { checks: null, review: null, problem: hit.failure.problem } : undefined;
     },
-    async refresh(pulls, { refresh = false } = {}) {
-      const githubBatches = new Map<string, { host: string; owner: string; repo: string; items: { key: string; number: number }[] }>();
+    diag(key) {
+      return cache.get(key)?.failure?.diag;
+    },
+    async refresh(pulls, { refresh = false, retry = false } = {}) {
+      const githubBatches = new Map<string, { host: string; owner: string; repo: string; items: { key: string; number: number; url: string }[] }>();
       const jobs: Promise<void>[] = [];
       const seen = new Set<string>();
       const fixture = options.fixture?.() ?? null;
       for (const pull of pulls) {
         // Merged and closed are final: never read again.
         if (pull.state === "merged" || pull.state === "closed") continue;
-        if (seen.has(pull.pull) || fresh(cache.get(pull.pull), refresh)) continue;
+        if (seen.has(pull.pull) || fresh(cache.get(pull.pull), refresh, retry)) continue;
         seen.add(pull.pull);
         if (fixture) {
           readFixture(fixture, pull);
@@ -267,10 +309,10 @@ export function createThreadPullStates(options: {
         } else if (ref.platform === "github") {
           const repoKey = `${ref.host}/${ref.owner}/${ref.repo}`.toLowerCase();
           const batch = githubBatches.get(repoKey) ?? { host: ref.host, owner: ref.owner, repo: ref.repo, items: [] };
-          batch.items.push({ key: pull.pull, number: ref.number });
+          batch.items.push({ key: pull.pull, number: ref.number, url: pull.url });
           githubBatches.set(repoKey, batch);
         } else {
-          jobs.push(readGitlab(pull.pull, pull.url));
+          jobs.push(readGitlab(pull.pull, pull.url, ref.host, retry));
         }
       }
       for (const batch of githubBatches.values()) {
@@ -283,6 +325,12 @@ export function createThreadPullStates(options: {
 
 /** How long the person's Add waits for the new PR's first read before answering with what is known. */
 export const THREAD_PULLS_ADD_WAIT_MS = 1_500;
+
+/**
+ * How long the person's Try again waits for the read before answering with what is known: under the window's own
+ * read limit (10 s), so the button never ends on a cancelled read; a slower tool answers later, over the stream.
+ */
+export const THREAD_PULLS_RETRY_WAIT_MS = 6_000;
 
 /** Wait for `work`, but no longer than `ms`; never throws (the work goes on behind). */
 function settledWithin(work: Promise<unknown>, ms: number): Promise<void> {
@@ -352,6 +400,9 @@ export function createThreadPullsRoute(options: {
         // A PR just added is read at once, so the popover shows its state; a forge slower than
         // THREAD_PULLS_ADD_WAIT_MS answers later, over the stream (a `thread_pull` record, `event: thread-pulls`).
         if (change.added.length > 0) await settledWithin(states.refresh(change.added), THREAD_PULLS_ADD_WAIT_MS);
+      } else if (owner && new URL(req.url).searchParams.get("retry") === "1") {
+        // The person's Try again on the card: a held failure is read again now, and the answer waits a little for it.
+        await settledWithin(states.refresh(store.threadPulls(threadId), { refresh: true, retry: true }), THREAD_PULLS_RETRY_WAIT_MS);
       } else if (owner) {
         // The thread was opened, a row's mark hovered, or the window got its focus back: the answer is what is known
         // now, at once, and its PRs still in play are read behind it if older than 30 s. Never waits on gh or glab:

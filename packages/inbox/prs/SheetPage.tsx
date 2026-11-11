@@ -15,6 +15,7 @@ import { SidebarTrigger } from '../shell/sidebar';
 import { inboxApi } from '../api';
 import { forgeName, hostName } from '../pulls/labels';
 import { pullsEmptyWords, pullsNotices } from '../pulls/notices';
+import { NoticeAsk } from '../problems/AskAgentToLook';
 import { usePullRisk } from '../pulls/usePullRisk';
 import { Named, Person } from '../pulls/Face';
 import { facesOnce } from '../pulls/words';
@@ -302,6 +303,11 @@ export function SheetPage(props: SheetPageProps) {
             <p key={line}>{line}</p>
           ),
         )}
+        {empty.kind !== 'nothing' && notices.find((n) => n.tool) && (
+          <p>
+            <NoticeAsk notice={notices.find((n) => n.tool)!} lead="" />
+          </p>
+        )}
       </div>
     );
   } else {
@@ -425,6 +431,7 @@ export function SheetPage(props: SheetPageProps) {
                     </a>
                   </>
                 )}
+                <NoticeAsk notice={n} lead=" " />
               </p>
             ))}
           </div>

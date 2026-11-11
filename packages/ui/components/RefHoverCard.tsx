@@ -34,12 +34,13 @@ import {
   forgeRefLabel,
   type ForgeRef,
   type ForgeRefCardData,
-  type ForgeRefCardError,
   type ForgeRefCardResult,
   type ForgeRefChecks,
   type ForgeRefPerson,
 } from '@plannotator/core/forge-ref-card';
-import { loadRefCard, refCardTarget } from '../utils/refCard';
+import { cardProblem, refUnsupportedLine } from '@plannotator/core/problem-words';
+import { getRefCardProblemExtra, loadRefCard, refCardTarget } from '../utils/refCard';
+import { ProblemNotice } from './ProblemNotice';
 import { RenderedMarkdown } from './RenderedMarkdown';
 import { tooltipContainerOf } from './HostTitle';
 
@@ -79,15 +80,6 @@ const forgeName = (p: ForgeRef['platform']) => (p === 'gitlab' ? 'GitLab' : 'Git
 export function refKindName(ref: Pick<ForgeRef, 'platform' | 'kind'>): string {
   return ref.kind === 'issue' ? 'Issue' : ref.platform === 'gitlab' ? 'Merge request' : 'Pull request';
 }
-
-const FAILURE_TEXT: Record<ForgeRefCardError, (forge: string, cli: string) => string> = {
-  unsupported: (_forge, cli) => `Details show for hosts your ${cli} is signed in to. This one isn't, so nothing was fetched.`,
-  cli_missing: (forge, cli) => `Install the ${forge} CLI (${cli}) on this computer to see details here.`,
-  signed_out: (_forge, cli) => `Sign in with ${cli} auth login to see details here.`,
-  not_found: (forge) => `None of your signed-in ${forge} accounts can see this one, or it doesn't exist.`,
-  rate_limited: (forge) => `${forge} asked for a short break. Details come back in a minute.`,
-  unavailable: () => "Details couldn't load right now.",
-};
 
 type Tone = 'open' | 'merged' | 'closed' | 'neutral';
 
@@ -406,17 +398,26 @@ export function RefCardView({ target, href, result, pinned, onClose, sheet, tigh
 
   if (!result || !result.ok) {
     const error = result && 'error' in result ? result.error : 'unavailable';
+    // The tool's state in the one table's words (problem-words.ts): the same lines the Inbox's PR card and Pull
+    // requests page say. No answer at all reads as the tool having failed.
+    const problem = cardProblem(result ?? { ok: false, error: 'unavailable', fetchedAt: 0 }, target);
     return (
       <div>
-        <div className="px-3.5 pb-3 pt-3">
+        <div className="px-3.5 pt-3">
           <div className="text-[11.5px] text-muted-foreground">{repoName}</div>
           <div className="mt-1 text-[13.5px] font-semibold text-foreground">
             {refKindName(target)} {forgeRefLabel(target)}
           </div>
-          <p className="mt-1.5 text-[12px] leading-relaxed text-muted-foreground" data-ref-card-error={error}>
-            {FAILURE_TEXT[error](forge, target.platform === 'gitlab' ? 'glab' : 'gh')}
-          </p>
         </div>
+        {problem ? (
+          <div className="-mt-1" data-ref-card-error={error}>
+            <ProblemNotice problem={problem} touch={sheet} linked={href} extra={getRefCardProblemExtra()?.(problem, target, href)} />
+          </div>
+        ) : (
+          <p className="px-3.5 pb-3 pt-1.5 text-[12px] leading-relaxed text-muted-foreground" data-ref-card-error={error}>
+            {refUnsupportedLine(target.platform === 'gitlab' ? 'glab' : 'gh')}
+          </p>
+        )}
         {footer()}
       </div>
     );

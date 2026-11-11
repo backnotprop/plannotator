@@ -3,6 +3,8 @@
  * says by cause. Never "Nothing open" while a host failed, a read was cut short, or a CLI could not ask.
  */
 import type { InboxPullsAnswer } from '@plannotator/core/inbox-types';
+import type { Problem } from '@plannotator/core/problem';
+import { TOOL_WORDS, type ToolState } from '@plannotator/core/problem-words';
 import { hostName } from './labels';
 import type { PullFilter } from './model';
 
@@ -24,6 +26,15 @@ export interface PullsNotice {
   line: string;
   /** "Open on GitHub": the forge's own list, when only part of it is shown. */
   link?: { href: string; label: string };
+  /** A tool's state behind the line (not a capped list): it offers "Ask your agent to look" about those CLIs and hosts. */
+  tool?: { state: ToolState; clis: Cli[]; hosts: string[] };
+}
+
+/** A notice's tool state as a problem, in the words the person saw (its bold part and the rest of its line). */
+export function noticeProblem(notice: PullsNotice, at: Date = new Date()): Problem | null {
+  if (!notice.tool) return null;
+  const rest = notice.line.startsWith(notice.head) ? notice.line.slice(notice.head.length).replace(/^[;,]\s*/, '').trim() : notice.line;
+  return { code: `tool.${notice.tool.state}`, kind: 'tool', title: notice.head, detail: rest ? rest.replace(/^./, (c) => c.toUpperCase()) : '', at: at.toISOString() };
 }
 
 /**
@@ -54,7 +65,8 @@ export function pullsNotices(model: Pick<InboxPullsAnswer, 'hosts' | 'clis' | 'u
       const many = hosts.length > 1;
       const head = error === 'unavailable' ? `${names} didn't answer` : `${names} asked to slow down`;
       const tail = shown ? `showing ${many ? 'their' : 'its'} last read.` : `${many ? 'their' : 'its'} pull requests aren't shown.`;
-      out.push({ key: `${error}:${shown}`, head, line: `${head}; ${tail}${error === 'rate_limited' && !shown ? ' Try again in a minute.' : ''}` });
+      const tool = { state: error === 'unavailable' ? ('failed' as const) : ('rate_limited' as const), clis: [...new Set(hosts.map((h) => h.cli))], hosts: [...new Set(hosts.map((h) => h.host))] };
+      out.push({ key: `${error}:${shown}`, head, line: `${head}; ${tail}${error === 'rate_limited' && !shown ? ' Try again in a minute.' : ''}`, tool });
     }
   }
   // Others (every open PR of the projects' repositories) is a read of its own: it failed while the person's own lists
@@ -66,7 +78,8 @@ export function pullsNotices(model: Pick<InboxPullsAnswer, 'hosts' | 'clis' | 'u
       const names = joinAnd([...new Set(hosts.map((h) => hostName(h.host)))]);
       const head = error === 'unavailable' ? `${names} didn't answer` : `${names} asked to slow down`;
       const tail = shown ? `showing ${hosts.length > 1 ? 'their' : 'its'} last read.` : "pull requests by others aren't shown.";
-      out.push({ key: `${error}:others:${shown}`, head, line: `${head}; ${tail}${error === 'rate_limited' && !shown ? ' Try again in a minute.' : ''}` });
+      const tool = { state: error === 'unavailable' ? ('failed' as const) : ('rate_limited' as const), clis: [...new Set(hosts.map((h) => h.cli))], hosts: [...new Set(hosts.map((h) => h.host))] };
+      out.push({ key: `${error}:others:${shown}`, head, line: `${head}; ${tail}${error === 'rate_limited' && !shown ? ' Try again in a minute.' : ''}`, tool });
     }
   }
   for (const h of model.hosts) {
@@ -101,13 +114,15 @@ export function pullsNotices(model: Pick<InboxPullsAnswer, 'hosts' | 'clis' | 'u
   for (const [key, { missing, clis, hosts }] of groups) {
     const names = joinAnd(clis);
     const where = joinAnd(hosts);
-    const head = missing
-      ? `${names} ${clis.length > 1 ? "aren't" : "isn't"} installed`
-      : clis.length > 1
-        ? `Neither ${clis.join(' nor ')} is signed in to ${where}`
-        : `${names} isn't signed in to ${where}`;
-    const line = missing ? `${head} here, so pull requests on ${where} aren't shown.` : `${head}, so ${hosts.length > 1 ? 'their' : 'its'} pull requests aren't shown.`;
-    out.push({ key, head, line });
+    // One CLI: the bold line the PR card and the hover cards say for the same state (problem-words.ts).
+    const head =
+      clis.length === 1
+        ? TOOL_WORDS[missing ? 'missing' : 'signed_out']({ cli: clis[0]!, host: where }).title
+        : missing
+          ? `${names} aren't installed`
+          : `Neither ${clis.join(' nor ')} is signed in to ${where}`;
+    const line = missing ? `${head}${clis.length === 1 ? '' : ' here'}, so pull requests on ${where} aren't shown.` : `${head}, so ${hosts.length > 1 ? 'their' : 'its'} pull requests aren't shown.`;
+    out.push({ key, head, line, tool: { state: missing ? 'missing' : 'signed_out', clis, hosts } });
   }
   return out;
 }
@@ -135,7 +150,8 @@ export function pullsEmptyWords(
   if (unsigned.length > 0 && model.hosts.length === 0) {
     if (unsigned.every((n) => n.key.startsWith('unsigned:missing:'))) {
       const clis = [...new Set(unsigned.flatMap((n) => n.key.slice('unsigned:missing:'.length).split('+')))];
-      return { kind: 'missing', head: `${joinAnd(clis)} ${clis.length > 1 ? "aren't" : "isn't"} installed`, lines: [...unsigned.map((n) => n.line), SIGN_IN_LINE] };
+      const head = clis.length === 1 ? TOOL_WORDS.missing({ cli: clis[0] as Cli, host: '' }).title : `${joinAnd(clis)} aren't installed`;
+      return { kind: 'missing', head, lines: [...unsigned.map((n) => n.line), SIGN_IN_LINE] };
     }
     return { kind: 'signed-out', head: 'No signed-in GitHub or GitLab here', lines: [...unsigned.map((n) => n.line), SIGN_IN_LINE] };
   }

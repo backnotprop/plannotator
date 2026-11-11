@@ -23,6 +23,7 @@
   "inbox-agents.spec.ts": 62,
   "inbox-archived.spec.ts": 15,
   "inbox-artifacts.spec.ts": 43,
+  "inbox-ask-agent.spec.ts": 5,
   "inbox-ask-window.spec.ts": 9,
   "inbox-attachment-hover.spec.ts": 22,
   "inbox-attachment-stepping.spec.ts": 19,

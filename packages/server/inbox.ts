@@ -277,6 +277,7 @@ import { claimInboxStar, inboxStarAction } from "./inbox-star-ask";
 import { createInboxEmbeds } from "./inbox-embeds";
 import { createInboxPages } from "./inbox-pages";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
+import { createProblemFacts, createToolLog, INBOX_PROBLEM_FACTS_PATH, recordingRunner } from "./inbox-problem-facts";
 import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
 import { createCardFavicons, type CardFaviconOptions } from "./inbox-card-favicons";
 import { DEFAULT_FAVICON_STYLE, isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
@@ -1211,19 +1212,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   // Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for.
   // github.com, gitlab.com and the hosts this computer's own gh / glab is signed in to; nothing else.
-  const refCards = createRefCards(options.refRunner ? { run: options.refRunner } : {});
+  // Every forge read below goes through one runner that keeps each failed run in memory (inbox-problem-facts.ts), so
+  // "Ask your agent to look" can say what the Inbox tried. Redacted as it is kept; never written anywhere.
+  const toolLog = createToolLog();
+  const toolRun = recordingRunner(options.refRunner ?? refCliRunner, toolLog);
+  const refCards = createRefCards({ run: toolRun });
   // The Board's links, one resolver per source (inbox-card-refs.ts): GitHub and GitLab through the hover cards' lookup.
   const cardRefResolvers = [forgeCardRefResolver(refCards)];
   const cardFavicons = createCardFavicons(options.cardFavicons ?? {});
   // The Board's lane marks (inbox-card-marks.ts): GitHub batched per repository, GitLab through the hover cards.
-  const cardMarks = createCardMarks({ refCards, ...(options.refRunner ? { run: options.refRunner } : {}) });
+  const cardMarks = createCardMarks({ refCards, run: toolRun });
   // A thread's PRs (approval "inbox-pr-binding", inbox-thread-pulls.ts): their state, read only on view, GitHub batched
   // per repository and GitLab through the hover cards. A sandboxed test Inbox may name a file of stand-in states
   // (PLANNOTATOR_TEST_FORGE_STATES), so pictures and tests never run gh or glab.
   const threadPullStates = createThreadPullStates({
     store,
     refCards,
-    ...(options.refRunner ? { run: options.refRunner } : {}),
+    run: toolRun,
     fixture: options.threadPullFixture ?? threadPullFixtureFromEnv(),
     onLiveChange: (threadIds) => {
       for (const listener of threadPullLiveListeners) listener(threadIds);
@@ -1233,7 +1238,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // The project roots whose origin the Pull requests list has waited for once.
   const pullRepoRead = new Set<string>();
   const pullRepoReading = new Map<string, Promise<InboxProjectRepo | null>>();
-  const pulls = createInboxPulls(options.refRunner ? { run: options.refRunner } : {});
+  const pulls = createInboxPulls({ run: toolRun });
   // The PR authors' pictures (inbox-pull-avatars.ts): only for logins the last list showed, served from this origin.
   const pullAvatars = createPullAvatars({ ...options.pullAvatars, dir: options.pullAvatars?.dir ?? join(inboxDir(dataDir), "pull-avatars") });
   // The projects' letter-mark pictures (inbox-project-pictures.ts; Settings → Rows, all off by default).
@@ -4425,6 +4430,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // The sidebar's Feedback dialog: forwards what the person typed to the feedback Worker (inbox-feedback.ts),
   // with the names of the agents that wrote here (names only, read at each Send).
   const feedback = createInboxFeedback({ version, json, store, ...(options.feedbackUrl ? { url: () => options.feedbackUrl! } : {}) });
+  // "Ask your agent to look": versions, the tool's recent failed runs (redacted) and the thread's agent (inbox-problem-facts.ts).
+  const problemFacts = createProblemFacts({ version, run: options.refRunner ?? refCliRunner, log: toolLog, store, json, baseUrl: () => baseUrl });
   const stopPinEvents = store.onPinsChange(() => {
     for (const listener of pinListeners) listener();
   });
@@ -5875,6 +5882,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
       const fed = await feedback.route(req, path);
       if (fed) return fed;
+      // A read that names the thread's agent and the tool's lines: another site's read is refused.
+      if (path === INBOX_PROBLEM_FACTS_PATH) {
+        const refused = crossSiteCardRead(req);
+        if (refused) return refused;
+      }
+      const facts = await problemFacts.route(req, url);
+      if (facts) return facts;
 
       // The Board's cards (approval "inbox-board", step 1): the person's read and moves.
       if (path === "/api/inbox/cards") {

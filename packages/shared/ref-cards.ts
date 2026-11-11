@@ -40,6 +40,7 @@
 import {
   FORGE_REF_BODY_MAX,
   FORGE_REF_COMMENT_MAX,
+  forgePullUrl,
   forgeRefKey,
   parseForgeRefUrl,
   type ForgeRef,
@@ -50,8 +51,11 @@ import {
   type ForgeRefLinked,
   type ForgeRefPerson,
 } from "@plannotator/core/forge-ref-card";
+import type { ProblemDiag } from "@plannotator/core/problem";
+import { cardErrorOfToolState, toolProblem, type ToolState } from "@plannotator/core/problem-words";
 import { ghTokenEnvVar, parseGhAuthStatusJson, parseGhAuthStatusText } from "./pr-github-account";
 import { isSameOriginOrNoOrigin } from "./request-origin";
+import { createToolStatus, tokenEnvFor, toolDiagOf, toolStateOfRun, type ToolStatus } from "./tool-state";
 
 export const REF_FRESH_MS = 60_000;
 export const REF_FAILURE_MS = 30_000;
@@ -111,6 +115,8 @@ export interface RefCommandResult {
   stdout: string;
   stderr: string;
   exitCode: number;
+  /** The runner's deadline ended it (both runners set it; a fake or older runner may not: stderr says so too). */
+  timedOut?: boolean;
 }
 /**
  * Run `cli args…` (env added to the live env). Exit 127 when the CLI is not installed. Always settles by
@@ -452,6 +458,12 @@ export function parseGitlabRefAnswer(stdout: string, host: string, kind: ForgeRe
   };
 }
 
+/** The page of an issue, pull or merge request on its forge. */
+function refPageUrl(ref: ForgeRef): string {
+  if (ref.kind === "pull") return forgePullUrl(ref);
+  return `https://${ref.host}/${ref.owner}/${ref.repo}/${ref.platform === "gitlab" ? "-/" : ""}issues/${ref.number}`;
+}
+
 /** What a failed CLI answer means; `refused` is GitHub saying no (another account may see it). */
 export function refErrorOf(cli: RefCli, result: RefCommandResult): ForgeRefCardError | "refused" {
   const err = `${result.stderr}\n${result.stdout}`;
@@ -516,8 +528,15 @@ export async function fetchAvatarDataUri(url: string, fetchImpl: typeof fetch = 
 // --- the cache and the fetch ---
 
 export interface RefCards {
-  /** The card for a link, or null when the link is not an issue / pull / merge request link. */
-  get(href: string): Promise<ForgeRefCardResult | null>;
+  /**
+   * The card for a link, or null when the link is not an issue / pull / merge request link. `retry`: the person
+   * asked again (Try again), so a failure still being held is asked again now.
+   */
+  get(href: string, options?: { retry?: boolean }): Promise<ForgeRefCardResult | null>;
+  /** The gh / glab status check these cards share (tool-state.ts), for readers that refine a failure. */
+  tools?: ToolStatus;
+  /** What the tool printed for a failed card (never sent): its last line, exit, how long it ran. */
+  diagOf?(result: ForgeRefCardResult): ProblemDiag | undefined;
 }
 
 /** How much `createRefCards` holds now (tests and diagnostics). */
@@ -628,24 +647,47 @@ export function createRefCards(options: {
   };
 
   const fail = (error: ForgeRefCardError): ForgeRefCardResult => ({ ok: false, error, fetchedAt: now() });
+  const tools = createToolStatus({ run, now });
+  const diags = new WeakMap<ForgeRefCardResult, ProblemDiag>();
+  /**
+   * A failed run as a card: the older error code (what every window reads) and the problem in the one table's words.
+   * The status check's cached answer refines it (no login for that host, not installed) without waiting; a check not
+   * cached yet starts behind, for the next read.
+   */
+  const failRun = (error: ForgeRefCardError, ref: ForgeRef, result: RefCommandResult, startedAt: number, forced?: ToolState): ForgeRefCardResult => {
+    const cli = ref.platform === "github" ? "gh" : "glab";
+    let state = forced ?? toolStateOfRun(cli, result);
+    if (state === "refused" || state === "timed_out" || state === "failed") {
+      const auth = tools.peek(cli, ref.host);
+      if (auth === undefined) void tools.check(cli, ref.host);
+      else if (auth === "missing" || auth === "signed_out") state = auth;
+    }
+    const problem = toolProblem(state, { cli, host: ref.host, kind: ref.kind, url: refPageUrl(ref), envToken: state === "signed_out" ? tokenEnvFor(cli, ref.host) : null, seconds: Math.round(REF_TIMEOUT_MS / 1000) }, new Date(now()));
+    // Older windows read `error` only: a sign-in found later (a refused token) says so there too.
+    const card: ForgeRefCardResult = { ok: false, error: state === "signed_out" || state === "missing" ? cardErrorOfToolState(state) : error, problem, fetchedAt: now() };
+    diags.set(card, toolDiagOf(result, now() - startedAt));
+    return card;
+  };
 
   const fetchOnce = async (ref: ForgeRef): Promise<ForgeRefCardResult> => {
-    if (now() < (rateLimitedUntil.get(ref.host) ?? 0)) return fail("rate_limited");
+    if (now() < (rateLimitedUntil.get(ref.host) ?? 0)) return failRun("rate_limited", ref, { stdout: "", stderr: "", exitCode: 1 }, now(), "rate_limited");
     const { cli, args } = queryArgs(ref);
+    const startedAt = now();
     const repoKey = `${ref.host}/${ref.owner}/${ref.repo}`.toLowerCase();
     const known = accountFor.get(repoKey);
     if (known) touch(accountFor, repoKey, known);
     const tries: (Record<string, string> | undefined)[] = [known];
+    let last: RefCommandResult = { stdout: "", stderr: "", exitCode: 1 };
     for (let i = 0; i < tries.length; i++) {
       const result = await run(cli, args, tries[i]);
       if (result.exitCode === 0) {
         const data = ref.platform === "github" ? parseGithubRefAnswer(result.stdout) : parseGitlabRefAnswer(result.stdout, ref.host, ref.kind);
-        if (data === "not_found") return fail("not_found");
+        if (data === "not_found") return failRun("not_found", ref, result, startedAt, "refused");
         if (!data) {
           // GraphQL errors come back with exit 0 from some CLIs: read them like stderr.
           const error = refErrorOf(cli, { ...result, exitCode: 1 });
           if (error === "rate_limited") rateLimitedUntil.set(ref.host, now() + REF_RATE_LIMIT_MS);
-          return fail(error === "refused" ? "not_found" : error);
+          return failRun(error === "refused" ? "not_found" : error, ref, { ...result, exitCode: 1 }, startedAt);
         }
         if (tries[i]) remember(accountFor, repoKey, tries[i]!, REF_REPO_ACCOUNTS_MAX);
         await inlineAvatars(data);
@@ -653,8 +695,9 @@ export function createRefCards(options: {
       }
       const error = refErrorOf(cli, result);
       if (error === "rate_limited") rateLimitedUntil.set(ref.host, now() + REF_RATE_LIMIT_MS);
-      if (error !== "refused") return fail(error);
-      if (ref.platform !== "github") return fail("not_found");
+      last = result;
+      if (error !== "refused") return failRun(error, ref, result, startedAt);
+      if (ref.platform !== "github") return failRun("not_found", ref, result, startedAt);
       // The first refusal: try each other signed-in account once.
       if (i === 0) {
         accountFor.delete(repoKey);
@@ -662,7 +705,7 @@ export function createRefCards(options: {
         tries.push(...(await otherGithubAccounts(ref.host)));
       }
     }
-    return fail("not_found");
+    return failRun("not_found", ref, last, startedAt);
   };
 
   /**
@@ -708,12 +751,19 @@ export function createRefCards(options: {
   };
 
   return {
-    async get(href) {
+    tools,
+    diagOf: (result) => diags.get(result),
+    async get(href, { retry = false } = {}) {
       const ref = parseForgeRefUrl(href);
       if (!ref) return null;
       if (!(await fetchesFrom(ref))) return fail("unsupported");
       const key = forgeRefKey(ref);
       const hit = cache.get(key);
+      // Try again: a failure still being held is asked again now (one person's click; hovers never pass it).
+      if (hit && retry && !hit.ok) {
+        cache.delete(key);
+        return refresh(key, ref);
+      }
       if (hit) {
         touch(cache, key, hit);
         const age = now() - hit.fetchedAt;

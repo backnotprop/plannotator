@@ -134,6 +134,7 @@
     "./loopback-host": "./loopback-host.ts",
     "./request-origin": "./request-origin.ts",
     "./ref-cards": "./ref-cards.ts",
+    "./tool-state": "./tool-state.ts",
     "./ref-cards-node": "./ref-cards-node.ts",
     "./inbox-pull-merge": "./inbox-pull-merge.ts",
     "./request-host": "./request-host.ts",

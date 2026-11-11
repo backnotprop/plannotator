@@ -9879,6 +9879,12 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-pr-notice > .ib-ic { flex: none; margin-top: 2px; }
 .ib-pr-notice a { color: var(--primary); font-weight: 550; text-decoration: none; white-space: nowrap; }
 .ib-pr-notice a:hover { text-decoration: underline; }
+/* "Ask your agent to look" inside a Pull requests line (problems/AskAgentToLook.tsx): quieter than the line's own link. */
+.ib-ask-look-inline { display: inline; padding: 0; border: 0; background: none; font: inherit; font-weight: 550; color: var(--muted-foreground); text-decoration: underline; text-decoration-color: color-mix(in oklch, currentColor 40%, transparent); text-underline-offset: 2px; white-space: nowrap; cursor: pointer; }
+.ib-ask-look-inline:hover, .ib-ask-look-inline:focus-visible { color: var(--foreground); text-decoration-color: currentColor; }
+.ib-ask-look-inline:disabled { opacity: 0.6; cursor: default; }
+/* A thumb-sized target on touch, without moving the line: the padding is taken back by the margin. */
+@media (pointer: coarse) { .ib-ask-look-inline { display: inline-block; padding: 12px 4px; margin: -12px -4px; } }
 
 /* PR risk ranking (pulls/RiskMark.tsx, RiskFilter.tsx, RiskRulesDialog.tsx): high stands out, medium is quiet, low is quietest. */
 .ib-risk { flex: none; display: inline-flex; align-items: center; font-size: var(--ib-fs-12, 12px); font-weight: 500; line-height: 17px; white-space: nowrap; color: var(--muted-foreground); }
@@ -11816,7 +11822,8 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-prpop-tbtn { flex: none; height: 28px; padding: 0 10px; border-radius: 6px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; color: var(--foreground); background: var(--muted); }
 .ib-prpop-tbtn:hover:not(:disabled) { background: color-mix(in oklch, var(--muted) 70%, var(--foreground) 8%); }
 .ib-prpop-tbtn:disabled { opacity: 0.5; }
-.ib-prpop-rm1 { align-self: flex-start; background: none; color: var(--muted-foreground); padding: 0 4px; }
+/* Remove <PR>: wraps inside the card or the phone's sheet, however long the project's path. */
+.ib-prpop-rm1 { align-self: flex-start; background: none; color: var(--muted-foreground); padding: 4px; height: auto; min-height: 28px; max-width: 100%; text-align: start; white-space: normal; overflow-wrap: anywhere; }
 /* Post decisions (export-decisions step 2): a quiet button on each PR's row, and above the edit for one PR. */
 .ib-prpop-post { margin: 7px 2px 0 0; font-weight: 500; color: var(--muted-foreground); }
 .ib-prpop-post:hover:not(:disabled) { color: var(--foreground); }
@@ -11833,7 +11840,7 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-prpop-undo { display: flex; align-items: center; gap: 8px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .ib-prpop-err { font-size: var(--ib-fs-12, 12px); line-height: 1.4; color: var(--ib-ref-closed); }
 .ib-prpop-close { min-height: 44px; padding: 0 12px; border-radius: 6px; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); align-self: flex-end; }
-@media (pointer: coarse) { .ib-prpop-input, .ib-prpop-tbtn { height: 44px; font-size: var(--ib-fs-16-in, 16px); } }
+@media (pointer: coarse) { .ib-prpop-input, .ib-prpop-tbtn { height: 44px; font-size: var(--ib-fs-16-in, 16px); } .ib-prpop-rm1 { height: auto; min-height: 44px; } }
 
 /* ── A phone's sidebar sheet, once open (approval "inbox-phone-sidebar-sheet", "Sheet 1 · Same sections, fixed") ──
    Every rule here is under `.ib-sb-sheet-in`, which exists only while the navigation is a phone's sheet
