@@ -2,9 +2,8 @@
  * A PR's own description at the head of its diff, in the Inbox's read-only Markdown. A long one starts folded and opens
  * into a box of its own height, so the diff is never far. No description draws nothing.
  *
- * A body is someone else's words. The window's CSP is `img-src 'self' data: blob:`: a picture GitHub keeps for the PR
- * loads through the Inbox's own route (ForgeMedia.tsx), any other remote picture is its alt text in ui's quiet chip (a
- * diagram can still name one: the CSP stops it, so nothing leaves, and it is a broken picture and a CSP report). A path opens on the forge, never as an address of this window, and only the
+ * A body is someone else's words. The window's CSP is `img-src 'self' data: blob:`: only GitHub's uploads load, through
+ * the Inbox. A path opens on the forge, never as an address of this window, and only the
  * web's links stay links. Folded, only its start is parsed, so a hostile one costs its reader nothing until they open it.
  */
 
@@ -50,10 +49,7 @@ function keepInPage(event: MouseEvent) {
   }
 }
 
-/**
- * Words a stranger wrote on the forge, in the page: a picture GitHub keeps for the PR shows through the Inbox and opens
- * in the viewer (ForgeMedia.tsx), any other picture is its words, a link never replaces the window.
- */
+/** Words a stranger wrote on the forge, in the page: a link never replaces the window. */
 export function ForgeMarkdown({ markdown, layer, headSha }: { markdown: string; layer: InboxPull; headSha?: string | null }) {
   const resolveImage = useMemo(() => forgeImageResolver(layer), [layer]);
   const resolveLink = useMemo<LocalLinkResolver>(() => {

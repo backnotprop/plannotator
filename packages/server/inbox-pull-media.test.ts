@@ -1,14 +1,4 @@
-/**
- * The Inbox's PR media route (inbox-pull-media.ts): a pull request's own pictures and videos, fetched by the Inbox so
- * the window loads nothing from the web. A scripted fetch and a fake `gh`: never the network, never the real CLI.
- *
- * What regresses:
- *  - the route fetching a URL outside GitHub's own upload hosts (a look-alike host, another site): an open proxy;
- *  - an upload the PR's text never names being fetched with the person's sign-in;
- *  - a redirect leading off GitHub's upload hosts and bucket being followed, or the person's token reaching the bucket;
- *  - something not a picture or video served from the Inbox's origin;
- *  - the normal path (a 302 to GitHub's bucket, then the picture) failing, or a video's seek losing its 206.
- */
+/** The PR media route must not become an open proxy or leak the token. Scripted fetch and a fake `gh`: no network, no real CLI. */
 import { afterEach, describe, expect, test } from "bun:test";
 import type { PRContext, PRRuntime } from "@plannotator/shared/pr-types";
 import type { InboxPull } from "@plannotator/core/inbox-pulls";

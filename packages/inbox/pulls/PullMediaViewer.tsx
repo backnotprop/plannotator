@@ -1,9 +1,3 @@
-/**
- * One of a pull request's own pictures or videos, full screen in the attachment viewer (the one a thread's files open
- * in: zoom, seeking, the player's own full screen). Read only: nothing is kept or sent from here, so the comment row
- * is not offered. Drawn into the window's root, over the page or the Details panel that opened it; × or Escape closes
- * it and focus goes back to what opened it.
- */
 import { useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { AttachmentPane } from '../components/AttachmentPane';
@@ -21,7 +15,7 @@ export function PullMediaViewer({ pullKey, item, onClose }: { pullKey: string; i
   const attachments = useMemo(() => [attachment], [attachment]);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
-  // Escape closes the viewer first: ahead of the Details panel's and App's own Escape, which see it used.
+  // Capture phase, so the Details panel's and App's Escape see it used.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || isComposingKey(event)) return;

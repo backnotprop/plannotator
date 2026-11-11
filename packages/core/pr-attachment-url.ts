@@ -1,10 +1,4 @@
-/**
- * The one rule for which pictures and videos in a pull request's text are
- * GitHub's own uploads: what the review app's picture proxy rewrites, and the
- * only URLs the Inbox's PR media route fetches. `github.com/user-attachments/`
- * (assets and files), and the older `user-images` / `private-user-images`
- * hosts. https only, no port, no user or password in the URL.
- */
+/** GitHub's own PR uploads: the review app's picture proxy and the Inbox's PR media route both use this one rule. */
 export function isGitHubAttachmentUrl(raw: string | URL): boolean {
   let url: URL;
   try {
@@ -18,12 +12,7 @@ export function isGitHubAttachmentUrl(raw: string | URL): boolean {
     || url.hostname === 'private-user-images.githubusercontent.com';
 }
 
-/**
- * Where GitHub sends an attachment's bytes: `github.com/user-attachments/assets/<id>`
- * answers 302 to its upload bucket on S3 (signed for a few minutes), or to
- * `private-user-images` for a private repository. A fetch that follows a
- * redirect may land only on these or on another attachment URL.
- */
+/** `user-attachments` answers 302 to GitHub's S3 upload bucket, so a redirect may land there too. */
 export function isGitHubAttachmentRedirect(url: URL): boolean {
   if (isGitHubAttachmentUrl(url)) return true;
   return url.protocol === 'https:'

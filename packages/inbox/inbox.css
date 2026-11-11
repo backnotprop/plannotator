@@ -9817,7 +9817,7 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
    it starts folded and opens into a box of its own height, so the diff stays near. */
 .ib-prr-desc { padding: 12px 16px; border-bottom: 1px solid color-mix(in oklch, var(--border) 50%, transparent); }
 .ib-prr-desc-body { --ib-desc-fold: 112px; overflow-x: auto; }
-/* A PR's own picture (ForgeMedia.tsx): the width and height GitHub's paste writes hold its place while it loads; a picture opens the viewer. */
+/* GitHub's paste writes width and height: with height auto they hold the picture's place while it loads. */
 .ib-body img[src*="/pulls/media?"] { height: auto; }
 .ib-body img[data-pull-media] { cursor: zoom-in; }
 .ib-body a[data-pull-media] { cursor: zoom-in; }

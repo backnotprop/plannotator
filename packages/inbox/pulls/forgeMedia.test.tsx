@@ -1,15 +1,4 @@
-/**
- * A PR's own pictures and videos in the Inbox (owner, 2026-11-11: "Yes, inline"; ForgeMedia.tsx).
- *
- * What regresses if this fails:
- *  - a GitHub upload in a PR's text is a chip again, or loads from the web instead of the Inbox's route;
- *  - a picture from any other host loads (the window must load nothing from the web) instead of staying a chip;
- *  - a picture cannot be opened, by click or keyboard, in the attachment viewer, or Escape leaves the viewer up;
- *  - GitHub's pasted video (a bare link) never plays in the viewer, or a link that is not a video stops being a link;
- *  - a GitLab MR starts asking the route.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. fetch is scripted and restored.
- */
+/** DOM-gated (DOM_TESTS=1, tests/dom-test-list.txt). fetch is scripted and restored. */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -77,12 +66,11 @@ test.if(hasDom)('a GitHub upload loads through the Inbox (a failed one is the ch
   expect(host.querySelector(`img[src="${ELSEWHERE}"]`)).toBeNull();
   expect(host.textContent).toContain('elsewhere');
 
-  // happy-dom cannot load it: the failure is ui's chip, never a broken picture, and not a button.
+  // happy-dom cannot load it.
   expect(shot.hidden).toBe(true);
   expect(host.querySelector('[title="Image could not be loaded"]')?.textContent).toBe('shot');
   expect(shot.hasAttribute('role')).toBe(false);
 
-  // As a browser shows it once it loads.
   await act(async () => {
     shot.removeAttribute('hidden');
     shot.removeAttribute('data-image-failed');

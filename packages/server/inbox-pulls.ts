@@ -735,11 +735,7 @@ export interface InboxPulls {
   diff(key: string, scope: InboxPullDiffScope): Promise<InboxPullDiffAnswer>;
   /** What the forge has beside the diff: reviewers, checks, labels, comments. Only for a PR the last list named. */
   details(key: string): Promise<InboxPullDetailsAnswer>;
-  /**
-   * The PR's own text as the details read answered it (description, comments, reviews, threads), the PR, and the
-   * person's CLI for its host: what the PR media route checks a URL against and fetches with. Reads the details when
-   * none is kept. Throws InboxPullsError as `details` does.
-   */
+  /** The PR's own text as the details read answered it, for the PR media route. Throws InboxPullsError. */
   text(key: string): Promise<{ pull: InboxPull; context: PRContext; runtime: PRRuntime }>;
   /**
    * One layer's diff for an agent to read: no limit of ours on its size, and when the forge won't serve it as one
@@ -1615,7 +1611,6 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         at: now(),
         updated: pull.updated_at,
         read: fetchPRContextWithReviewers(runtime, ref).then((context) => {
-          // Kept for the PR media route: the only text whose pictures it fetches.
           entry.context = context;
           return pullDetailsOf(key, context, pull.author);
         }),
@@ -1636,7 +1631,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       }
     },
     async text(key) {
-      // The text kept from the last details read serves every picture while the PR has not moved: no read per picture.
+      // No forge read per picture while the PR has not moved.
       const known = findKnown(key);
       const kept = detailReads.get(key);
       if (!known || !kept?.context || kept.updated !== known.updated_at) await this.details(key);

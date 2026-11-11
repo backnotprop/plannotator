@@ -4963,8 +4963,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
         // A PR author's picture (the list's top-left spot): only a login the last list showed on that host, fetched by
         // the Inbox from the URL the forge gave (inbox-pull-avatars.ts); the window's CSP never loads a remote image.
-        // A picture or video the PR's own text names, on GitHub's own upload hosts only (inbox-pull-media.ts): the
-        // Inbox fetches it with the person's gh sign-in, so the window still loads nothing from the web.
         if (path === "/api/inbox/pulls/media") {
           return pullMediaResponse(pulls, url.searchParams.get("key") ?? "", url.searchParams.get("url") ?? "", req.headers.get("range"));
         }

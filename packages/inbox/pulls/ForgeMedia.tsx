@@ -1,13 +1,4 @@
-/**
- * A PR's text with its own pictures and videos (pullMedia.ts): pictures on GitHub's upload hosts load through the
- * Inbox's route instead of being chips, and a picture, or a link GitHub saved a video as, opens in the attachment
- * viewer. Pictures become buttons for the keyboard (Enter or Space, as a button; no new shortcut). A link to a video
- * opens the viewer on a plain click; Cmd, Ctrl or a middle click still opens GitHub. A picture that fails to load is
- * ui's quiet dashed chip, as before, never a broken picture; a link the route does not answer as a video stays a link.
- *
- * The rendered text is not this component's: it marks the elements after they render (attributes only, never moving
- * a node).
- */
+// Marks rendered elements with attributes only (never moves a node): the text belongs to the renderer and highlighter.
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
 import type { InboxPull } from '@plannotator/core/inbox-types';
@@ -18,7 +9,6 @@ import { PullMediaViewer } from './PullMediaViewer';
 
 const CHIP_TITLE = 'Images in a description open on the forge';
 
-/** What a picture in a PR's text loads: a GitHub upload through the Inbox, a `data:` picture as written, else a chip. */
 export function forgeImageResolver(layer: InboxPull): ImageResolver {
   const serves = servesPullMedia(layer);
   return (src) => {
