@@ -1571,21 +1571,21 @@ describe("install shared behavior", () => {
 
     // install.sh: resolution before curl -o
     const shResolve = sh.indexOf("verify_attestation=0");
-    const shDownload = sh.indexOf('download_release_file "$binary_url" "$tmp_file"');
+    const shDownload = sh.indexOf('download_release_binary "$binary_url" "$tmp_file"');
     expect(shResolve).toBeGreaterThan(-1);
     expect(shDownload).toBeGreaterThan(-1);
     expect(shResolve).toBeLessThan(shDownload);
 
-    // install.ps1: resolution before Invoke-WebRequest -OutFile $tmpFile
+    // install.ps1: resolution before the binary download
     const psResolve = ps.indexOf("$verifyAttestationResolved = $false");
-    const psDownload = ps.indexOf("Invoke-ReleaseDownload -Uri $binaryUrl -OutFile $tmpFile");
+    const psDownload = ps.indexOf("Invoke-ResumableDownload -Uri $binaryUrl -OutFile $tmpFile");
     expect(psResolve).toBeGreaterThan(-1);
     expect(psDownload).toBeGreaterThan(-1);
     expect(psResolve).toBeLessThan(psDownload);
 
-    // install.cmd: resolution before curl -o "!TEMP_FILE!"
+    // install.cmd: resolution before the binary download
     const cmdResolve = cmdScript.indexOf('set "VERIFY_ATTESTATION=0"');
-    const cmdDownload = cmdScript.indexOf('curl -fsSL !CURL_RETRY! !CURL_LIMITS! "!BINARY_URL!" -o "!TEMP_FILE!"');
+    const cmdDownload = cmdScript.indexOf("\ncall :DownloadBinary\n");
     expect(cmdResolve).toBeGreaterThan(-1);
     expect(cmdDownload).toBeGreaterThan(-1);
     expect(cmdResolve).toBeLessThan(cmdDownload);
@@ -1964,24 +1964,32 @@ describe("install shared behavior", () => {
     // install.sh: binary download and checksum download must NOT carry the
     // auth header array. Token vars cleared right after the api call so
     // they don't linger for the download phase.
-    // Both go through download_release_file, so its body must not carry it.
-    const shDownloader = sh.match(/^download_release_file\(\) \{\n[\s\S]*?\n\}\n/m);
-    expect(shDownloader).not.toBeNull();
-    expect(shDownloader![0]).not.toContain("GH_AUTH_HEADER");
-    expect(sh).toContain('download_release_file "$binary_url" "$tmp_file"');
+    // They go through download_release_binary / download_release_file, so
+    // neither body may carry it.
+    for (const fn of ["download_release_binary", "download_release_file"]) {
+      const shDownloader = sh.match(new RegExp(`^${fn}\\(\\) \\{\\n[\\s\\S]*?\\n\\}\\n`, "m"));
+      expect(shDownloader).not.toBeNull();
+      expect(shDownloader![0]).not.toContain("GH_AUTH_HEADER");
+    }
+    expect(sh).toContain('download_release_binary "$binary_url" "$tmp_file"');
     expect(sh).toContain('download_release_file "$checksum_url" "$checksum_file"');
     expect(sh).toContain("unset _gh_token GH_AUTH_HEADER _api_url");
 
     // install.ps1: binary download must NOT carry $ghHeaders, which is nulled.
     expect(ps).not.toContain('Invoke-WebRequest -Uri $binaryUrl -OutFile $tmpFile -Headers $ghHeaders');
-    const psDownloader = ps.match(/^function Invoke-ReleaseDownload \{\n[\s\S]*?\n\}\n/m);
-    expect(psDownloader).not.toBeNull();
-    expect(psDownloader![0]).not.toContain("ghHeaders");
+    for (const fn of ["Invoke-ReleaseDownload", "Invoke-ResumableDownload"]) {
+      const psDownloader = ps.match(new RegExp(`^function ${fn} \\{\\n[\\s\\S]*?\\n\\}\\n`, "m"));
+      expect(psDownloader).not.toBeNull();
+      expect(psDownloader![0]).not.toContain("ghHeaders");
+    }
     expect(ps).toContain('$ghToken = $null; $ghHeaders = $null; $apiUrl = $null');
 
     // install.cmd: binary download must NOT carry !GH_AUTH_HEADER!. Token
     // vars cleared after the api call.
     expect(cmdScript).not.toContain('curl -fsSL !GH_AUTH_HEADER! "!BINARY_URL!"');
+    const cmdDownloader = cmdScript.slice(cmdScript.indexOf("\n:DownloadBinary\n"), cmdScript.indexOf("\n:DownloadBinaryEnd\n"));
+    expect(cmdDownloader).toContain("curl -fsSL");
+    expect(cmdDownloader).not.toContain("GH_AUTH_HEADER");
     expect(cmdScript).toContain('set "GH_TOKEN_VAL="');
     expect(cmdScript).toContain('set "GH_AUTH_HEADER="');
   });
@@ -2533,62 +2541,73 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
       mkdirSync(join(sandbox.home, ".local", "bin"), { recursive: true });
       writeFileSync(installed, OLD, { mode: 0o755 });
       const log = join(sandbox.home, "curl.log");
-      const result = runInstallSh(sandbox, args, { STUB_CURL_LOG: log, ...env });
+      // No pause between attempts: the bounds are counts, not time.
+      const result = runInstallSh(sandbox, args, { STUB_CURL_LOG: log, PLANNOTATOR_DOWNLOAD_RETRY_DELAY: "0", ...env });
       const calls = existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [];
       const downloads = calls.filter((c) => c.includes("/releases/download/") && !c.endsWith(".sha256"));
       return { ...result, downloads, installed: readFileSync(installed, "utf8"), tmp: join(sandbox.home, "tmp") };
     }
 
-    test("an HTTP/2 error (curl 92) is retried over HTTP/1.1 and the install completes", () => {
+    test("an HTTP/2 error (curl 92) moves the next attempt to HTTP/1.1, which continues the file, and the install completes", () => {
       const r = run({ STUB_DOWNLOAD_FAIL: "92" });
       expect(r.code).toBe(0);
       expect(r.out).toContain("trying again over HTTP/1.1");
       expect(r.installed).toBe(binary);
       expect(r.downloads).toHaveLength(2);
       expect(r.downloads[0]).not.toContain("--http1.1");
+      expect(r.downloads[0]).not.toContain("-C -");
       expect(r.downloads[1]).toContain("--http1.1");
-      // Both runs hand curl its own retries and a time bound, so a reset is
-      // retried and a trickling connection cannot hold the update for hours.
+      // The stub left a partial file: the second attempt asks for the rest.
+      expect(r.downloads[1]).toContain("-C -");
+      // Each attempt is time-bounded and stops on a stall; curl's own --retry
+      // is not used for the binary, since it throws the partial file away.
       for (const call of r.downloads) {
-        expect(call).toContain("--retry 3");
-        expect(call).toContain("--retry-all-errors");
+        expect(call).not.toContain("--retry");
         expect(call).toMatch(/--max-time \d+/);
         expect(call).toContain("--speed-limit 1 --speed-time 60");
       }
     });
 
-    // A retry starts the ~200 MB binary again from zero, so it never helps a
-    // slow link: one attempt gets 6 h (a 1 h cap failed every update below
-    // about 58 KB/s), while no retry starts after 1 h. The .sha256 keeps 120 s.
-    test("the binary attempt cap (6 h) and its retry window (1 h) are separate; the checksum keeps 120 s", () => {
+    // The binary has 6 h in all, across its attempts, so a link at about
+    // 10 KB/s still finishes it; the .sha256 keeps 120 s and curl's retries.
+    test("the binary gets 6 h in all; the checksum keeps 120 s", () => {
       const sandbox = setupInstallSandbox({ gh: "pass-all", binary });
       const log = join(sandbox.home, "curl.log");
-      const result = runInstallSh(sandbox, args, { STUB_CURL_LOG: log, STUB_DOWNLOAD_FAIL: "92" });
+      const result = runInstallSh(sandbox, args, { STUB_CURL_LOG: log, STUB_DOWNLOAD_FAIL: "92", PLANNOTATOR_DOWNLOAD_RETRY_DELAY: "0" });
       expect(result.code).toBe(0);
       const calls = readFileSync(log, "utf8").trim().split("\n");
       const binaryCalls = calls.filter((c) => c.includes("/releases/download/") && !c.endsWith(".sha256"));
       const checksumCalls = calls.filter((c) => c.includes("/releases/download/") && c.endsWith(".sha256"));
       expect(binaryCalls).toHaveLength(2);
+      expect(binaryCalls[0]).toContain("--max-time 21600 ");
       for (const call of binaryCalls) {
-        expect(call).toContain("--max-time 21600 --retry-max-time 3600");
+        const left = Number(/--max-time (\d+)/.exec(call)?.[1]);
+        expect(left).toBeGreaterThan(21500);
+        expect(left).toBeLessThanOrEqual(21600);
       }
       expect(checksumCalls.length).toBeGreaterThan(0);
       for (const call of checksumCalls) {
+        expect(call).toContain("--retry 3");
         expect(call).toContain("--max-time 120 --retry-max-time 120");
       }
 
       const cmd = readScript("install.cmd");
-      expect(cmd).toContain('set "CURL_LIMITS=--connect-timeout 30 --max-time 21600 --retry-max-time 3600 ');
+      expect(cmd).toContain("set /a DL_LEFT=21600-DL_SPENT");
       expect(cmd).toContain('set "CURL_SUM_LIMITS=--connect-timeout 30 --max-time 120 --retry-max-time 120"');
     });
 
-    test("a download that keeps failing stops cleanly: old binary kept, no temp file left, no HTTP/1.1 run for other errors", () => {
+    test("a download that keeps failing stops after 4 attempts with no new bytes: old binary kept, no temp file left, no HTTP/1.1 for other errors", () => {
       const r = run({ STUB_DOWNLOAD_FAIL: "56" });
       expect(r.code).toBe(1);
       expect(r.out).toContain("Could not download");
       expect(r.out).toContain("curl exit 56");
+      // curl's error is printed once, when it gives up.
+      expect(r.out.split("stub failure").length - 1).toBe(1);
       expect(r.installed).toBe(OLD);
-      expect(r.downloads).toHaveLength(1);
+      // The stub leaves a 7-byte partial: the first attempt added bytes, the
+      // next four did not.
+      expect(r.downloads).toHaveLength(5);
+      for (const call of r.downloads) expect(call).not.toContain("--http1.1");
       expect(readdirSync(r.tmp)).toEqual([]);
     });
 
@@ -2596,8 +2615,10 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
       const r = run({ STUB_DOWNLOAD_FAIL: "92", STUB_DOWNLOAD_FAIL_HTTP11: "56" });
       expect(r.code).toBe(1);
       expect(r.out).toContain("curl exit 56");
+      expect(r.out.split("trying again over HTTP/1.1").length - 1).toBe(1);
       expect(r.installed).toBe(OLD);
-      expect(r.downloads).toHaveLength(2);
+      expect(r.downloads).toHaveLength(5);
+      expect(r.downloads.slice(1).every((c) => c.includes("--http1.1"))).toBe(true);
     });
 
     test("a .sha256 that is not 64 hex characters stops before the compare: old binary kept, no temp file left", () => {
@@ -2626,12 +2647,17 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
       expect(r.installed).toBe(binary);
     });
 
-    test("a curl older than 7.71 (no --retry-all-errors) still installs, with plain --retry", () => {
-      const r = run({ STUB_CURL_OLD: "1" });
+    test("a curl older than 7.71 (no --retry-all-errors) still installs, with plain --retry for the checksum", () => {
+      const sandbox = setupInstallSandbox({ gh: "pass-all", binary });
+      const log = join(sandbox.home, "curl.log");
+      const r = runInstallSh(sandbox, args, { STUB_CURL_LOG: log, STUB_CURL_OLD: "1" });
       expect(r.code).toBe(0);
-      expect(r.installed).toBe(binary);
-      expect(r.downloads).toHaveLength(1);
-      expect(r.downloads[0]).toContain("--retry 3");
+      expect(readFileSync(join(sandbox.home, ".local", "bin", "plannotator"), "utf8")).toBe(binary);
+      const calls = readFileSync(log, "utf8").trim().split("\n");
+      const checksumCalls = calls.filter((c) => c.includes("/releases/download/") && c.endsWith(".sha256"));
+      expect(checksumCalls).toHaveLength(1);
+      expect(checksumCalls[0]).toContain("--retry 3");
+      expect(checksumCalls[0]).not.toContain("--retry-all-errors");
     });
   },
 );
@@ -4046,9 +4072,11 @@ function claudePluginRegistry(
 // the update runs after the repair). `plugin update` rewrites the registry to
 // FAKE_CLAUDE_NEW_VERSION when that is set, as the real command records the
 // new install. FAKE_CLAUDE_FAIL=<marketplace|plugin> fails that step;
-// FAKE_CLAUDE_HANG=1 never returns.
+// FAKE_CLAUDE_HANG=1 never returns. With FAKE_CLAUDE_ENV_LOG it also notes the
+// CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS each call saw.
 const FAKE_CLAUDE = `#!/bin/bash
 printf '%s\\n' "$*" >> "$FAKE_CLAUDE_LOG"
+if [ -n "$FAKE_CLAUDE_ENV_LOG" ]; then printf '%s\\n' "\${CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS-unset}" >> "$FAKE_CLAUDE_ENV_LOG"; fi
 if [ -n "$CLAUDECODE" ]; then echo "CLAUDECODE was set" >> "$FAKE_CLAUDE_LOG"; fi
 if [ "$FAKE_CLAUDE_HANG" = "1" ]; then exec sleep 30; fi
 step=""
@@ -4269,9 +4297,28 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
       expect(Date.now() - started).toBeLessThan(15_000);
       expect(s.calls()).toEqual([CLAUDE_PLUGIN_COMMANDS[0]]);
       expect(out).toContain(
-        "Claude Code plugin: could not update it (timed out after 1s). Run these, then restart Claude Code:",
+        `Claude Code plugin: could not update it (timed out after 1s). Run these, then restart Claude Code:\n${MANUAL_PLUGIN_COMMANDS}`,
       );
+      // The binary update itself went through.
+      expect(readFileSync(join(s.sandbox.home, ".local", "bin", "plannotator"), "utf8")).toBe(FAKE_BINARY);
     }, 30_000);
+
+    // Claude Code's own git clone of the marketplace stops after 120 s by
+    // default, which failed plugin updates on slow links.
+    test("both claude commands get 10 minutes for Claude Code's git clone; a value the person set is kept", () => {
+      for (const [preset, expected] of [[undefined, "600000"], ["900000", "900000"]] as const) {
+        const s = setupClaudePluginSandbox({});
+        const envLog = join(s.sandbox.home, "claude-env.log");
+        const { code } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, {
+          ...s.env,
+          FAKE_CLAUDE_ENV_LOG: envLog,
+          ...(preset ? { CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS: preset } : {}),
+        });
+        expect(code).toBe(0);
+        expect(s.calls()).toEqual(CLAUDE_PLUGIN_COMMANDS);
+        expect(readFileSync(envLog, "utf8").trim().split("\n")).toEqual([expected, expected]);
+      }
+    });
 
     test("no claude on PATH: nothing runs, the banner keeps the manual commands", () => {
       const s = setupClaudePluginSandbox({ claude: false });
@@ -5198,6 +5245,14 @@ describe.skipIf(!pwshBin || process.platform === "win32")(
         expect(r.out).toContain(
           `Claude Code plugin: could not update it (claude exited 3: Error: failed to reach github.com). Run these, then restart Claude Code:\n${MANUAL_PLUGIN_COMMANDS}`,
         );
+      }, PWSH_SCANNER_TIMEOUT_MS);
+
+      test(`${runner}: both claude commands get 10 minutes for Claude Code's git clone`, () => {
+        const s = setupClaudePluginSandbox({});
+        const envLog = join(s.sandbox.home, "claude-env.log");
+        const r = runWindowsClaudePluginUpdate(runner, s, { env: { FAKE_CLAUDE_ENV_LOG: envLog } });
+        expectState(runner, r, "current");
+        expect(readFileSync(envLog, "utf8").trim().split("\n")).toEqual(["600000", "600000"]);
       }, PWSH_SCANNER_TIMEOUT_MS);
 
       test(`${runner}: a hanging claude is stopped at the time limit`, () => {
