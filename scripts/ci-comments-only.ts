@@ -1,5 +1,8 @@
 import { appendFileSync } from 'node:fs';
-import ts from 'typescript';
+import { createRequire } from 'node:module';
+import type * as TypeScript from 'typescript';
+
+const ts: typeof TypeScript = createRequire(new URL('../packages/core/package.json', import.meta.url))('typescript');
 
 export interface FileProblem {
   path: string;
