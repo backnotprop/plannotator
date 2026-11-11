@@ -45,6 +45,7 @@ type Plan =
   | { kind: "garbage-cut"; bytes: number }
   | { kind: "short-promise" }
   | { kind: "wrong-start" }
+  | { kind: "unsized-cut"; bytes: number }
   | { kind: "status"; code: number };
 
 interface SeenRequest {
@@ -99,6 +100,9 @@ async function startReleaseServer(plans: Plan[]): Promise<ReleaseServer> {
       if (plan.kind === "stall") return send(sock, "200 OK", { "Content-Length": total }, BINARY.subarray(0, plan.bytes), false);
       if (plan.kind === "garbage-cut") return send(sock, "200 OK", { "Content-Length": total }, Buffer.alloc(plan.bytes, 0x7a));
       if (plan.kind === "short-promise") return send(sock, "200 OK", { "Content-Length": total + 1 }, BINARY);
+      // No Content-Length: the body ends where the connection closes, so a
+      // client cannot tell it is short.
+      if (plan.kind === "unsized-cut") return send(sock, "200 OK", {}, BINARY.subarray(0, plan.bytes));
       return send(sock, "200 OK", { "Content-Length": total }, BINARY);
     }
     if (from >= total) return send(sock, "416 Range Not Satisfiable", { "Content-Range": `bytes */${total}`, "Content-Length": 0 });
@@ -354,11 +358,14 @@ const PS_SHELLS = (process.platform === "win32" ? ["pwsh", "powershell"] : ["pws
 // Windows PowerShell 5.1 on a CI runner takes many seconds per start.
 const PS_TIMEOUT_MS = process.platform === "win32" ? 300_000 : 60_000;
 
-/** install.ps1 from the release download functions through the binary download. */
+/**
+ * install.ps1 from the release download functions through the checksum
+ * check, so a short file that a download let through still stops here.
+ */
 function extractPs1DownloadRegion(): string {
   const ps = readScript("install.ps1");
   const start = ps.indexOf("function Invoke-ReleaseDownload {");
-  const end = ps.indexOf("# Verify checksum", start);
+  const end = ps.indexOf("if ($verifyAttestationResolved) {", start);
   if (start < 0 || end < 0) throw new Error("could not locate the binary download in install.ps1");
   return ps.slice(start, end);
 }
@@ -376,6 +383,9 @@ async function runPs1Download(shell: string, server: ReleaseServer, env: Record<
     [
       `$ErrorActionPreference = "Stop"`,
       `$binaryUrl = ${psQuote(`${server.origin}/backnotprop/plannotator/releases/download/v99.9.9/plannotator-windows-x64.exe`)}`,
+      `$checksumUrl = "$binaryUrl.sha256"`,
+      `$binaryName = "plannotator-windows-x64.exe"`,
+      `$latestTag = "v99.9.9"`,
       `$tmpFile = ${psQuote(out)}`,
       `try {`,
       extractPs1DownloadRegion(),
@@ -475,12 +485,33 @@ describe.skipIf(PS_SHELLS.length === 0)("install.ps1 resumes a broken binary dow
       expect(server.attempts()).toHaveLength(5);
     }, PS_TIMEOUT_MS);
 
+    // Windows PowerShell 5.1's Invoke-WebRequest can return without an error
+    // when the connection closes early (CI, run 42961988321). A body without
+    // a Content-Length does the same on every PowerShell.
+    test(`${name}: a fallback download that ends short of the size seen is a failed attempt`, async () => {
+      const cut0 = Array.from({ length: 4 }, () => ({ kind: "cut", bytes: 0 }) as Plan);
+      const retried = await startReleaseServer([...cut0, { kind: "unsized-cut", bytes: 100_000 }]);
+      const ok = await runPs1Download(shell, retried);
+      expect(ok.result).toBe("ok");
+      expect(ok.file?.equals(BINARY)).toBe(true);
+      expect(retried.attempts()).toHaveLength(6);
+      const short = await startReleaseServer([...cut0, ...Array.from({ length: 4 }, () => ({ kind: "unsized-cut", bytes: 100_000 }) as Plan)]);
+      const failed = await runPs1Download(shell, short);
+      expect(failed.result).toStartWith("failed");
+      expect(failed.result).toContain("before the end of the file");
+      expect(short.attempts()).toHaveLength(8);
+      expect(failed.file).toBeNull();
+    }, PS_TIMEOUT_MS);
+
     test(`${name}: when both give up, the error stops the script and the partial file is removed`, async () => {
       const server = await startReleaseServer(Array.from({ length: 20 }, () => ({ kind: "cut", bytes: 0 }) as Plan));
       const r = await runPs1Download(shell, server);
-      expect(r.result).toStartWith("failed");
-      // 4 resumable attempts with no new bytes, then Invoke-WebRequest's 4.
-      expect(server.attempts()).toHaveLength(8);
+      expect({ result: r.result.slice(0, 6), attempts: server.attempts().length, out: r.result }).toMatchObject({
+        result: "failed",
+        // 4 resumable attempts with no new bytes, then Invoke-WebRequest's 4
+        // (each fails, or ends short of the size the first attempts saw).
+        attempts: 8,
+      });
       expect(r.file).toBeNull();
     }, PS_TIMEOUT_MS);
   }

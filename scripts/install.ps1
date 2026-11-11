@@ -587,14 +587,20 @@ $tmpFile = [System.IO.Path]::GetTempFileName()
 # keeps behavior consistent. No progress bar: on Windows PowerShell 5.1,
 # drawing it slows a large Invoke-WebRequest download many times over. The
 # binary uses this only when Invoke-ResumableDownload below fails.
+# -ExpectedLength (when the size is known) makes a short file a failed
+# attempt: Windows PowerShell 5.1's Invoke-WebRequest can return without an
+# error when the connection closes before the end of the file.
 function Invoke-ReleaseDownload {
-    param([string]$Uri, [string]$OutFile)
+    param([string]$Uri, [string]$OutFile, [long]$ExpectedLength = -1)
     $ProgressPreference = 'SilentlyContinue'
     $attempts = 4
     for ($attempt = 1; $attempt -le $attempts; $attempt++) {
         try {
             if ($OutFile) {
                 Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing
+                if ($ExpectedLength -ge 0 -and (Get-Item -LiteralPath $OutFile).Length -ne $ExpectedLength) {
+                    throw "the connection closed before the end of the file"
+                }
                 return
             }
             return Invoke-WebRequest -Uri $Uri -UseBasicParsing
@@ -667,6 +673,8 @@ function Invoke-ResumableDownload {
                 $before = [long]0
                 $total = [long]$response.ContentLength
             }
+            # The size, for the fallback below to check its file against.
+            if ($total -ge 0) { $script:binaryDownloadTotal = $total }
             $file = New-Object System.IO.FileStream -ArgumentList $OutFile, $mode, ([System.IO.FileAccess]::Write), ([System.IO.FileShare]::Read)
             $body = $response.GetResponseStream()
             $buffer = New-Object byte[] 65536
@@ -700,6 +708,7 @@ function Invoke-ResumableDownload {
     }
 }
 
+$binaryDownloadTotal = [long]-1
 try {
     Invoke-ResumableDownload -Uri $binaryUrl -OutFile $tmpFile
 } catch {
@@ -707,7 +716,7 @@ try {
     # case something in the one above does not work on this machine.
     Write-Host "Download failed ($($_.Exception.Message)); trying again..."
     try {
-        Invoke-ReleaseDownload -Uri $binaryUrl -OutFile $tmpFile
+        Invoke-ReleaseDownload -Uri $binaryUrl -OutFile $tmpFile -ExpectedLength $binaryDownloadTotal
     } catch {
         Remove-Item -Force -LiteralPath $tmpFile -ErrorAction SilentlyContinue
         throw
