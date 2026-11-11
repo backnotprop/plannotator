@@ -1,11 +1,3 @@
-/**
- * The server's read of the questions inside attached Markdown files (issue
- * #2828): from each file's SENT bytes, as its viewer reads them.
- *
- * What regresses if this fails: a file's questions are read from the file as
- * it is now (not as sent), keyed unlike the card the window draws, or a file
- * that is not Markdown asks questions.
- */
 import { afterEach, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -36,12 +28,10 @@ test("each Markdown file's questions, from its sent bytes, keyed as its card com
   const plan = sent(dir, "plan.md", "markdown", PLAN);
   const notes = sent(dir, "notes.txt", "text", PLAN);
   const empty = sent(dir, "readme.md", "markdown", "# Nothing asked\n");
-  // The file on disk (`path`) does not exist: only the blob is read.
   const read = await readInboxAttachmentQuestions(dir, [notes, plan, empty]);
   expect(read.map((r) => r.attachment_id)).toEqual([plan.id]);
   const [q] = read[0]!.questions;
   expect(q!.prompt).toBe("Which database?");
-  // The window's viewer strips a .md file's frontmatter and finds the same key.
   expect(q!.key).toBe(findQuestionBlocks(PLAN)[0]!.key);
   expect(q!.parsed.line).toBe(7);
 });

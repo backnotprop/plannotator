@@ -1,7 +1,3 @@
-/**
- * Decision data's numbers, over a real store in a temp folder: what counts as what, the trend rule, the slices that
- * give the server back, and the lines kept when a thread or project is deleted.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -76,10 +72,8 @@ describe("what counts as what", () => {
     const summary = await w.summary();
     expect(summary.history.asked).toBe(9);
     expect(summary.counts).toEqual({ answered: 3, skipped: 1, set_aside: 1, replaced: 1 });
-    // The plain reply, the picked-but-unsent one and the untouched one still wait on the person.
     expect(summary.waiting).toBe(3);
     void open;
-    // Took is exact, and only over answers to a question that named a recommendation.
     expect(summary.recommendation).toEqual({ offered: 2, taken: 1 });
     expect(summary.settled_in_words).toBe(1);
     expect(summary.agents[0]).toMatchObject({ label: "Claude Code", host: "claude-code", answered: 3, skipped: 1, set_aside: 1, replaced: 1 });
@@ -130,7 +124,6 @@ describe("what counts as what", () => {
   test("who asks most comes first, by the decisions the table shows, whatever was skipped", async () => {
     const w = world();
     const others = w.store.ensureProject({ name: "bay", root: join(w.dir, "bay") });
-    // The first project has more questions in all, but fewer answers.
     w.answer(w.ask().id, "A");
     for (let i = 0; i < 3; i++) {
       const skipped = w.ask();
@@ -150,14 +143,12 @@ describe("what counts as what", () => {
     expect(pressed.days.map((d) => d.own_words)).toEqual([]);
     expect(pressed.settled_in_words).toBe(0);
 
-    // The agent replaces the question, as the note asks: still no words of the person's.
     w.store.sendMessage({ project_id: w.project.id, author: w.claude, body: "No longer needed.", reply_to: reasked.id, supersedes: [reasked.id], idempotency_key: w.key() });
     const replaced = await w.summary();
     expect(replaced.counts.replaced).toBe(1);
     expect(replaced.settled_in_words).toBe(0);
     expect(replaced.days.map((d) => d.own_words)).toEqual([]);
 
-    // A reply the person typed still is both.
     const typed = w.ask();
     w.store.sendReply(typed.id, { words: "Go with the simpler one.", idempotency_key: w.key() });
     const after = await w.summary();
@@ -175,7 +166,6 @@ describe("what counts as what", () => {
     await agrees(1);
     w.store.sendReask(asked.id, { idempotency_key: w.key() });
     await agrees(0);
-    // The agent wrote without asking again: the note no longer waits, so the question is the person's again.
     w.store.sendMessage({ project_id: w.project.id, author: w.claude, body: "Still looking.", reply_to: asked.id, idempotency_key: w.key() });
     await agrees(1);
   });
@@ -190,7 +180,6 @@ describe("what counts as what", () => {
     expect((await w.summary()).waiting).toBe(1);
     expect(w.store.openDecisions().length).toBe(1);
 
-    // One the note lists, picked since, waits for its Send.
     const [first] = w.store.questionsOf(asked.id);
     w.store.savePicks(asked.id, [{ key: first!.key, revision: first!.revision, answer: { v: 1, key: first!.key, kind: "single", prompt: first!.prompt, selected: ["A"] } }]);
     expect((await w.summary()).waiting).toBe(2);
@@ -211,7 +200,6 @@ describe("what counts as what", () => {
     const fates = (await w.csv()).trim().split("\n").slice(1).map((line) => line.split(",")[5]);
     expect(fates.sort()).toEqual(["archived", "open"]);
 
-    // Its pick waits too, until it is sent.
     w.pick(again.id, "A");
     expect((await w.summary()).waiting).toBe(1);
     w.send(again.id);
@@ -232,7 +220,6 @@ describe("what counts as what", () => {
     expect(summary.counts.answered).toBe(1);
     expect(summary.history.answered).toBe(1);
     expect(summary.recommendation).toEqual({ offered: 1, taken: 1 });
-    // The pick nobody sent is closed by the archive, so it waits on no one.
     expect(summary.waiting).toBe(0);
     const fates = (await w.csv()).trim().split("\n").slice(1).map((line) => line.split(",")[5]);
     expect(fates.sort()).toEqual(["answered", "archived"]);
@@ -266,7 +253,6 @@ const row = (at: number, over: Partial<DecisionRow> = {}): DecisionRow => ({
   ...over,
 });
 
-/** `n` answers in a period, `hit` of them marked, spread inside it. */
 function period(which: "recent" | "before", n: number, make: (index: number, at: number) => Partial<DecisionRow>): DecisionRow[] {
   const from = which === "recent" ? NOW - 29 * DAY : NOW - 59 * DAY;
   return Array.from({ length: n }, (_, index) => {
@@ -317,7 +303,6 @@ describe("trends", () => {
     expect(trendsOf(rows, NOW, HISTORY)).toEqual([{ key: "skips", direction: "up", now: 0.3, was: 0.05 }]);
   });
 
-  /** Waits around `minutes`, so a period has a spread, as a real one does. */
   const waited = (minutes: number) => (index: number, at: number) => ({ stopped: true, asked_at: at - (minutes + index) * 60_000, sent_at: at });
 
   test("stopped agents' middle wait is a line when it moves a quarter or more, by when the agent asked", () => {
@@ -331,10 +316,8 @@ describe("trends", () => {
 
   test("still-open stopped questions count as the longest wait, so a recent period cannot claim waits fell just because its slow half is unanswered", () => {
     const before = period("before", 40, waited(600));
-    // 25 recent questions were answered quickly; the slower 30 have not been answered at all.
     const recent = period("recent", 55, (index, at) => (index < 25 ? waited(30)(index, at) : { stopped: true, asked_at: at, answered_at: null, sent_at: null, fate: "open" as const }));
     expect(trendsOf([...before, ...recent], NOW, HISTORY)).toEqual([]);
-    // Dropping them would have claimed the fall.
     expect(trendsOf([...before, ...recent.filter((r) => r.fate !== "open")], NOW, HISTORY)[0]).toMatchObject({ key: "waits", direction: "down" });
   });
 
@@ -345,11 +328,9 @@ describe("trends", () => {
   });
 
   describe("whole days", () => {
-    /** A UTC midnight, and a line that sits near the threshold: five taken answers on the day the periods meet decide it. */
     const MIDNIGHT = Date.parse("2026-11-05T00:00:00Z");
     const onEdge = () => {
       const spread = (from: number, n: number, hits: number) => Array.from({ length: n }, (_, index) => row(from + (index + 1) * 3 * 3_600_000, { id: `r${from}-${index}`, offered: true, took: index < hits }));
-      // Five answers at 12:30 UTC on the day that is the recent period's first when the clock reads "now minus 30 days".
       const edge = Array.from({ length: 5 }, (_, index) => row(MIDNIGHT - 30 * DAY + 12.5 * 3_600_000 + index, { id: `edge-${index}`, offered: true, took: true }));
       return [...spread(MIDNIGHT - 58 * DAY, 60, 30), ...spread(MIDNIGHT - 20 * DAY, 55, 40), ...edge];
     };
@@ -370,13 +351,10 @@ describe("trends", () => {
       const shares = (extra: DecisionRow[]) => trendsOf([...rows, ...extra], NOW, HISTORY)[0] as { now: number; was: number };
       const base = shares([]);
       const miss = (at: number) => [row(at, { id: `m${at}`, offered: true, took: false })];
-      // Today so far is in the recent period; the first moment of tomorrow is in neither.
       expect(shares(miss(NOW)).now).toBeLessThan(base.now);
       expect(shares(miss(end))).toEqual(base);
-      // The cut's own moment is recent; just before it is the period before.
       expect(shares(miss(cut)).now).toBeLessThan(base.now);
       expect(shares(miss(cut - 1)).was).toBeLessThan(base.was);
-      // The start's own moment is in; just before it is in neither.
       expect(shares(miss(start)).was).toBeLessThan(base.was);
       expect(shares(miss(start - 1))).toEqual(base);
     });
@@ -384,7 +362,7 @@ describe("trends", () => {
 
   test("the summary's trends read the whole history, whatever range is showing", async () => {
     const w = world();
-    w.tick(-70 * DAY + 10 * DAY); // back to 70 days before NOW
+    w.tick(-70 * DAY + 10 * DAY);
     for (let i = 0; i < 25; i++) w.answer(w.ask({ prompt: `Old ${i}?` }).id, "B");
     w.tick(35 * DAY);
     for (let i = 0; i < 25; i++) w.answer(w.ask({ prompt: `Before ${i}?` }).id, "B");
@@ -396,7 +374,6 @@ describe("trends", () => {
 });
 
 describe("the slices", () => {
-  /** Holds the thread about a millisecond per step, as a big store would. */
   function* busy(steps: number, ran: { steps: number }): Generator<void, string> {
     for (let i = 0; i < steps; i++) {
       const until = performance.now() + 1;
@@ -492,7 +469,6 @@ describe("numbers kept when a thread is deleted", () => {
     expect(lines.trim().split("\n").length).toBe(1);
     expect(lines).not.toContain(SECRET);
     expect(lines).not.toContain("Pick one");
-    // The export reads the same, line for line.
     const sorted = (text: string) => text.trim().split("\n").sort();
     expect(sorted(await w.csv())).toEqual(sorted(csvBefore));
   });
@@ -666,7 +642,6 @@ describe("numbers kept when a thread is deleted", () => {
   });
 
   describe("a record that can't be read", () => {
-    /** Change one question's stored line by hand, as a bug or a hand edit would, and read the store again. */
     function damage(w: ReturnType<typeof world>, projectId: string, messageId: string, change: (record: Record<string, unknown>) => void): InboxStore {
       const folder = readdirSync(join(w.store.dir, "projects"))
         .map((name) => join(w.store.dir, "projects", name))
@@ -792,7 +767,6 @@ describe("the CSV", () => {
     expect(text).toContain(recentClosed.thread_id);
     expect(text).not.toContain(oldClosed.thread_id);
     expect(text).not.toContain(decidedLongAgo.thread_id);
-    // Line for line, the numbers the page shows for this range.
     const fates = text.trim().split("\n").slice(1).map((line) => line.split(",")[5]);
     const page = await w.summary({ since });
     expect(fates.filter((fate) => fate === "answered").length).toBe(page.counts.answered);

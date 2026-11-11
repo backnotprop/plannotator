@@ -1,8 +1,3 @@
-/**
- * The Pull requests page's Merge guard (inbox-pull-merge.ts): the forge's answer, asked at the moment of the merge,
- * decides; a PR that moved, closed, went back to draft or that the forge won't merge is never merged; the merge pins
- * the head the person saw and uses the repository's own method. A scripted runner stands in for gh / glab.
- */
 import { describe, expect, test } from "bun:test";
 import { githubMergeMethodOf, githubMergeStateOf, gitlabMergeStateOf, mergePull, pullMergeVerdict, type PullMergeTarget } from "./inbox-pull-merge";
 import type { RefCli, RefRunner } from "./ref-cards";
@@ -15,7 +10,6 @@ const GL: PullMergeTarget = { platform: "gitlab", host: "gitlab.com", repo: "nor
 const ghPull = (over: Record<string, unknown> = {}) => JSON.stringify({ state: "open", draft: false, merged_at: null, mergeable: true, mergeable_state: "clean", head: { sha: HEAD }, ...over });
 const glMr = (over: Record<string, unknown> = {}) => JSON.stringify({ state: "opened", draft: false, detailed_merge_status: "mergeable", sha: HEAD, ...over });
 
-/** A runner that answers by endpoint and keeps every call. */
 function forge(answers: Record<string, { stdout?: string; stderr?: string; exitCode?: number }>) {
   const calls: { cli: RefCli; args: string[] }[] = [];
   const run: RefRunner = async (cli, args) => {
@@ -38,7 +32,6 @@ describe("pullMergeVerdict", () => {
       expect(verdict.ok).toBe(false);
       if (!verdict.ok) expect(verdict.code).toBe("pull_not_mergeable");
     }
-    // Still being worked out (`mergeable: null`) is not a yes.
     const unknown = pullMergeVerdict("github", githubMergeStateOf(ghPull({ mergeable: null, mergeable_state: "unknown" })), HEAD);
     expect(unknown.ok).toBe(false);
   });

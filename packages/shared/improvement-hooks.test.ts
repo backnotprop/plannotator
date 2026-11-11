@@ -1,16 +1,8 @@
-/**
- * Tests for improvement hook reader.
- *
- * Run: bun test packages/shared/improvement-hooks.test.ts
- */
-
 import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 
-// Imported statically and BEFORE any PLANNOTATOR_DATA_DIR is set: the module's
-// import-time side effects used to freeze the data directory, so a later env
-// change was silently ignored and every read kept hitting the old location.
+// Imported before PLANNOTATOR_DATA_DIR is set: the module must not freeze the data dir at import.
 import { getImprovementHookExpectedPath, readImprovementHook } from "./improvement-hooks";
 
 import { createTestEnvironment } from "../../tests/helpers/environment";

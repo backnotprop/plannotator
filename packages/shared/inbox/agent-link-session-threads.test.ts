@@ -1,10 +1,4 @@
-/**
- * `InboxAgentConnection.sessionThreads` (Pi's thread list after a compaction)
- * against an Inbox from before the peek mark. The failure this catches: the
- * connection reads the list from an Inbox that ignores the mark, which then
- * makes a project for every folder that compacts. A stand-in Inbox on a
- * loopback port answers health; the data dir is a temp folder.
- */
+/** An Inbox older than the peek mark must not be asked for the thread list: it would make a project for every folder that compacts. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,7 +12,6 @@ afterEach(() => {
 
 const THREAD = "msg_01M5WQ58NAVGBFZS4QKFBE1TCC";
 
-/** A stand-in Inbox whose health has `peek` or not; records the /mcp calls. */
 function standIn(peek: boolean) {
   const mcp: unknown[] = [];
   const server = Bun.serve({

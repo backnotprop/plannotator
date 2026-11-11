@@ -1,9 +1,3 @@
-/**
- * recordInboxAttachments on real files in a temp folder: the kind each file
- * gets from its name and its bytes, files from anywhere on disk, and the
- * refusals (the dotenv family by name or target, folders, FIFOs) refusing the
- * whole send before any blob is written.
- */
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -48,7 +42,6 @@ function blobs(w: ReturnType<typeof world>): string[] {
   return existsSync(inboxBlobsDir(w.inbox)) ? readdirSync(inboxBlobsDir(w.inbox)) : [];
 }
 
-/** A PNG's signature and IHDR at the given size: enough for the sniffer and the dimension read. */
 function png(width: number, height: number): Uint8Array {
   const bytes = new Uint8Array(33);
   bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
@@ -80,15 +73,11 @@ test("the kind comes from the bytes: images, PDFs, other text as code, anything 
   const svg = '<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"/>';
   writeFileSync(join(w.project, "shot.png"), png(1280, 800));
   writeFileSync(join(w.project, "states.svg"), svg);
-  // An image under no image name, and a PDF under none: the bytes decide.
   writeFileSync(join(w.project, "capture"), png(2, 3));
   writeFileSync(join(w.project, "spec.pdf"), "%PDF-1.7\n%âã\n1 0 obj\n");
   writeFileSync(join(w.project, "report.bin"), "%PDF-1.4\n");
-  // A file named as an image whose bytes are not one: a file to download (its bytes are not text either).
   writeFileSync(join(w.project, "fake.png"), new Uint8Array([0x00, 0x01, 0x02]));
-  // An HTML page named .svg is text, never an image.
   writeFileSync(join(w.project, "page.svg"), "<!doctype html><html><body>hi</body></html>");
-  // Text under an unknown name is code; binary is a file; a document whose bytes are not text is a file.
   writeFileSync(join(w.project, "notes.unknownext"), "plain words\n");
   writeFileSync(join(w.project, "fixtures.zip"), new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00, 0xff]));
   writeFileSync(join(w.project, "broken.md"), new Uint8Array([0x23, 0x20, 0x00, 0xff]));
@@ -116,7 +105,6 @@ test("documents keep their viewer by extension while their bytes are text", asyn
   expect(decideInboxAttachmentKind("/r/page.html", new Uint8Array(), true).kind).toBe("html");
   expect(decideInboxAttachmentKind("/r/flow.mmd", new Uint8Array(), true).kind).toBe("mermaid");
   expect(decideInboxAttachmentKind("/r/ci.yaml", new Uint8Array(), true).kind).toBe("text");
-  // A .txt that holds a PNG stays a document by its name only while it is text.
   expect(decideInboxAttachmentKind("/r/shot.txt", png(1, 1), false).kind).toBe("file");
 });
 
@@ -196,7 +184,6 @@ test("a listing reads the file as it is at each read (the check off the event lo
   const states: { label: string; code: string | null; current: string | null }[] = [];
   const read = async (label: string) => {
     const state = await inboxAttachmentState(attachment!, "msg_x", { hash: "small" });
-    // The check off the loop answers exactly what the one at once does.
     const sync = checkCurrent(attachment!);
     const async = await checkCurrentAsync(attachment!);
     expect({ label, ok: async.ok, unavailable: async.ok ? null : async.unavailable }).toEqual({ label, ok: sync.ok, unavailable: sync.ok ? null : sync.unavailable });
@@ -250,7 +237,6 @@ test("a text or code file over the view limit is attached as a file (a download)
   expect(decideInboxAttachmentKind("/r/app.log", text, true, INBOX_VIEW_MAX_BYTES).kind).toBe("text");
   expect(decideInboxAttachmentKind("/r/app.log", text, true, INBOX_VIEW_MAX_BYTES + 1).kind).toBe("file");
   expect(decideInboxAttachmentKind("/r/bundle.js", text, true, INBOX_VIEW_MAX_BYTES + 1).kind).toBe("file");
-  // Images and PDFs are never read whole as text, so size does not change them.
   expect(decideInboxAttachmentKind("/r/huge.png", png(9000, 9000), false, INBOX_VIEW_MAX_BYTES * 4).kind).toBe("image");
 });
 
@@ -265,7 +251,6 @@ test("a text file that grew past the view limit after it was sent answers too la
   expect(grown).toMatchObject({ ok: false, code: "attachment_too_large" });
   const sent = await readInboxAttachmentText(w.inbox, attachment!, "sent");
   expect(sent.ok && sent.bytes.toString("utf8")).toBe("started\n");
-  // Listing judges the large changed file by its stat, without hashing it.
   const listed = await inboxAttachmentState(attachment!, "msg_x", { hash: "small" });
   expect(listed.changed_since_sent).toBe(true);
   expect(listed.current?.sha256.startsWith("stat:")).toBe(true);

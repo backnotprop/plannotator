@@ -1,20 +1,4 @@
-/**
- * Merge from the Inbox's Pull requests page (approval "inbox-pr-dashboard", the owner's answer on q-f71fc8d1): the tile
- * popover's Merge, offered only when the forge says the pull request can merge, and sent only after a second click.
- *
- * The rules here are the guard the server runs before it merges, asked of the forge at that moment (never the list's
- * minute-old answer):
- * - the PR is still open, not a draft, and its head is the commit the person saw (a push since is refused);
- * - GitHub: `mergeable` is true and `mergeable_state` is `clean`, `unstable` (a check that isn't required failed) or
- *   `has_hooks`; anything else (`blocked`, `behind`, `dirty`, `draft`, `unknown`) is the forge saying not now;
- * - GitLab: `detailed_merge_status` is `mergeable`.
- *
- * The merge itself uses the repository's own method: GitHub has no default, so the first the repository allows in the
- * order GitHub's own button offers them (merge commit, squash, rebase); GitLab's merge request merges as its project
- * says. The head commit is pinned (`sha`), so the forge refuses if it moved between the check and the merge.
- *
- * No Bun or Node API: a `RefRunner` runs the person's own `gh` / `glab`. Inbox-only (the Pi server has no Inbox).
- */
+/** Merge guard for the Inbox's Pull requests page: asks the forge at merge time, refuses a PR that is closed, draft, moved off the head the person saw, or not mergeable, and merges with the head pinned. Runs gh/glab through a RefRunner. */
 
 import type { RefCli, RefCommandResult, RefRunner } from "./ref-cards";
 
@@ -22,24 +6,19 @@ type Json = Record<string, unknown>;
 const obj = (v: unknown): Json => (v && typeof v === "object" && !Array.isArray(v) ? (v as Json) : {});
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 
-/** What a merge needs to know of the pull request, as the list read it. */
 export interface PullMergeTarget {
   platform: "github" | "gitlab";
   host: string;
-  /** `owner/repo` (GitLab: the project's full path). */
   repo: string;
   number: number;
 }
 
-/** The forge's answer, now, about whether the PR can merge. */
 export interface PullMergeState {
   open: boolean;
   draft: boolean;
-  /** The head commit the forge names now; null when it did not say. */
   head_sha: string | null;
   /** GitHub: `mergeable` (null while GitHub is still working it out); GitLab: `detailed_merge_status === "mergeable"`. */
   mergeable: boolean | null;
-  /** GitHub's `mergeable_state` or GitLab's `detailed_merge_status`, as the forge wrote it. */
   detail: string;
 }
 
@@ -59,7 +38,6 @@ export type PullMergeResult = { ok: true; method: PullMergeMethod | null; sha: s
 const SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i;
 const shaOf = (v: unknown): string | null => (typeof v === "string" && SHA.test(v) ? v.toLowerCase() : null);
 
-/** GitHub's `GET repos/{o}/{r}/pulls/{n}` as the state a merge is judged on. */
 export function githubMergeStateOf(stdout: string): PullMergeState | null {
   let raw: Json;
   try {
@@ -77,7 +55,6 @@ export function githubMergeStateOf(stdout: string): PullMergeState | null {
   };
 }
 
-/** GitLab's `GET projects/{id}/merge_requests/{iid}` as the state a merge is judged on. */
 export function gitlabMergeStateOf(stdout: string): PullMergeState | null {
   let raw: Json;
   try {
@@ -96,10 +73,8 @@ export function gitlabMergeStateOf(stdout: string): PullMergeState | null {
   };
 }
 
-/** GitHub's `mergeable_state` values its own Merge button takes. */
 const GITHUB_MERGEABLE = new Set(["clean", "unstable", "has_hooks"]);
 
-/** Plain words for why the forge won't merge it now. */
 function notNowWords(platform: PullMergeTarget["platform"], detail: string): string {
   const forge = platform === "gitlab" ? "GitLab" : "GitHub";
   const why: Record<string, string> = {
@@ -124,10 +99,6 @@ function notNowWords(platform: PullMergeTarget["platform"], detail: string): str
   return `${forge} won't merge it now: ${why[detail] ?? (detail ? detail.replace(/_/g, " ") : "it didn't say why")}.`;
 }
 
-/**
- * The merge guard: may this PR merge now, at the head the person saw? The forge's answer (`state`) decides; null when
- * the forge could not be read. Pure: the one rule the route and its tests share.
- */
 export function pullMergeVerdict(platform: PullMergeTarget["platform"], state: PullMergeState | null, seenHead: string): { ok: true } | { ok: false; code: PullMergeRefusal; message: string } {
   if (!state) return { ok: false, code: "pull_merge_unknown", message: `Couldn't ask ${platform === "gitlab" ? "GitLab" : "GitHub"} whether it can merge. Try again.` };
   if (!state.open) return { ok: false, code: "pull_closed", message: "That pull request is no longer open." };
@@ -138,7 +109,6 @@ export function pullMergeVerdict(platform: PullMergeTarget["platform"], state: P
   return { ok: true };
 }
 
-/** GitHub's `GET repos/{o}/{r}`: the first merge method the repository allows, in the order of GitHub's own button. */
 export function githubMergeMethodOf(stdout: string): PullMergeMethod | null {
   let raw: Json;
   try {
@@ -149,7 +119,6 @@ export function githubMergeMethodOf(stdout: string): PullMergeMethod | null {
   if (raw.allow_merge_commit === true) return "merge";
   if (raw.allow_squash_merge === true) return "squash";
   if (raw.allow_rebase_merge === true) return "rebase";
-  // An answer that names none (a token that can't read the settings): GitHub's own default.
   if (raw.allow_merge_commit === undefined && raw.allow_squash_merge === undefined && raw.allow_rebase_merge === undefined && raw.full_name) return "merge";
   return null;
 }
@@ -173,7 +142,6 @@ function forgeMessage(result: RefCommandResult): string {
   return line ? line.slice(0, 300) : "The forge refused the merge.";
 }
 
-/** Read the forge's answer now. Null when it could not be read. */
 export async function readPullMergeState(run: RefRunner, pull: PullMergeTarget): Promise<PullMergeState | null> {
   const cli: RefCli = pull.platform === "gitlab" ? "glab" : "gh";
   if (pull.platform === "github") {
@@ -186,10 +154,6 @@ export async function readPullMergeState(run: RefRunner, pull: PullMergeTarget):
   return read && read.exitCode === 0 ? gitlabMergeStateOf(read.stdout) : null;
 }
 
-/**
- * Merge a pull request the person confirmed, at the head they saw: the guard first (`pullMergeVerdict`, asked of the
- * forge now), then the merge with that head pinned. Never throws.
- */
 export async function mergePull(run: RefRunner, pull: PullMergeTarget, seenHead: string): Promise<PullMergeResult> {
   const state = await readPullMergeState(run, pull);
   const verdict = pullMergeVerdict(pull.platform, state, seenHead);

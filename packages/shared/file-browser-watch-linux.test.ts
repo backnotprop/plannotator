@@ -1,8 +1,3 @@
-/**
- * The per-directory watcher on a real Linux filesystem with real inotify
- * (#1439). The same paths run everywhere over a fake filesystem in
- * file-browser-watch-directories.test.ts; this file proves the real thing.
- */
 import { describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -96,7 +91,6 @@ describe.skipIf(!onLinux)("per-directory watcher on real Linux inotify", () => {
 			}
 			world.subscribe();
 			await world.settled();
-			// 1 root + 30 packages + 600 source folders.
 			expect(world.registry.diagnostics().directoryWatches).toBe(631);
 			expect(world.logs).toEqual([]);
 			writeFileSync(join(world.root, "pkg29", "src19", "deep.md"), "x");
@@ -149,10 +143,7 @@ describe.skipIf(!onLinux)("per-directory watcher on real Linux inotify", () => {
 			mkdirSync(join(world.root, "notes"));
 			world.subscribe();
 			await world.settled();
-			// Another process writes the files, so the lag measured here is the
-			// watcher's own work. Before the fix every file queued a scan and each
-			// queueing walked the whole queue: quadratic, about a 2 s stall at 20k
-			// files and a minute at 100k.
+			// Another process writes the files so the lag measured is the watcher's own work (queueing used to walk the whole queue per file: quadratic).
 			let maxLagMs = 0;
 			let last = performance.now();
 			const ticker = setInterval(() => {
@@ -219,8 +210,7 @@ describe.skipIf(!onLinux)("per-directory watcher on real Linux inotify", () => {
 			for (const [i, folder] of top.entries()) mkdirSync(join(folder, `inner${i}`), { recursive: true });
 			world.subscribe();
 			await world.settled();
-			// Which top folder the cap skips follows readdir order, which real
-			// filesystems do not sort (ext4 lists by name hash).
+			// Which top folder the cap skips follows readdir order, which real filesystems do not sort.
 			const watched = world.registry.diagnostics().watchedDirectories;
 			expect(watched).toHaveLength(3);
 			expect(watched).toContain(world.root);
@@ -228,7 +218,6 @@ describe.skipIf(!onLinux)("per-directory watcher on real Linux inotify", () => {
 			expect(skipped).toHaveLength(1);
 			const [freed, kept] = top.filter((folder) => watched.includes(folder));
 			const keptInner = join(kept!, `inner${top.indexOf(kept!)}`);
-			// The skipped folder goes away, then another frees a watch.
 			rmSync(skipped[0]!, { recursive: true });
 			await world.settled();
 			rmSync(freed!, { recursive: true });

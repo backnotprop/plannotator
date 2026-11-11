@@ -1,14 +1,4 @@
-/**
- * Plannotator Inbox: the face each agent's icon shows (core `inbox-types.ts` ("Agent faces")), saved for every window.
- *
- *   inbox/agent-faces.json   { v: 1, rev, faces: { [agent id]: { face, sessions } } }, the latest choice last,
- *                            0600, written whole (temp, then rename)
- *
- * A file outside the store's JSONL, as pins are: a face is window furniture and never enters the event log, which
- * agents' cursors, the phone relay and search read. At most INBOX_AGENT_FACES_KEPT agents (the oldest choice goes),
- * so the file stays a few kilobytes however many sessions come and go; an ended agent keeps its face, so its old
- * threads still show it. The agent's own mark is never stored.
- */
+/** Per-agent face choices saved for every window in inbox/agent-faces.json (0600, written whole via temp + rename). Kept outside the store's JSONL: faces never enter the event log. */
 
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -27,7 +17,6 @@ import { InboxError } from "./schema";
 
 export const INBOX_AGENT_FACES_FILE = "agent-faces.json";
 
-/** The faces on disk. A file that does not parse reads as none (and is moved aside on the next write). */
 export function readInboxAgentFacesFile(inboxDirPath: string): InboxAgentFacesWire & { state: "missing" | "ok" | "bad" | "newer" } {
   let raw: string;
   try {
@@ -60,7 +49,6 @@ function writeFile(inboxDirPath: string, faces: Record<string, InboxAgentFaceEnt
   renameSync(temp, file);
 }
 
-/** The latest `INBOX_AGENT_FACES_KEPT` entries (insertion order is choice order). */
 function capped(faces: Record<string, InboxAgentFaceEntry>): Record<string, InboxAgentFaceEntry> {
   const keys = Object.keys(faces);
   if (keys.length <= INBOX_AGENT_FACES_KEPT) return faces;
@@ -69,7 +57,6 @@ function capped(faces: Record<string, InboxAgentFaceEntry>): Record<string, Inbo
   return out;
 }
 
-/** The checks on a change (`POST /api/inbox/agent-faces`). */
 export function checkInboxAgentFaceChange(body: Record<string, unknown>): InboxAgentFaceChange {
   if (body.adopt !== undefined) {
     const adopt = body.adopt;
@@ -88,13 +75,8 @@ export function checkInboxAgentFaceChange(body: Record<string, unknown>): InboxA
   return { agent: body.agent, face: body.face, sessions: cleanInboxFaceSessions(body.sessions, body.agent) };
 }
 
-/**
- * The faces, read once and kept in memory (every write goes through here), with what changes them. `onChange` hears
- * each save (the windows' `event: agent-faces`).
- */
 export function createInboxAgentFacesFile(inboxDirPath: string, onChange: (wire: InboxAgentFacesWire) => void) {
   let cached: ReturnType<typeof readInboxAgentFacesFile> | null = null;
-  /** Every id an entry names (key or session) → its key: a poll's link check is one lookup. */
   let index: Map<string, string> | null = null;
   const now = () => (cached ??= readInboxAgentFacesFile(inboxDirPath));
   const indexNow = () => {
@@ -124,11 +106,9 @@ export function createInboxAgentFacesFile(inboxDirPath: string, onChange: (wire:
       const { faces, rev } = now();
       return { faces, rev };
     },
-    /** One agent's face: kept as its latest choice (moved last), or forgotten for its own mark. */
     change(change: InboxAgentFaceChange): InboxAgentFacesWire {
       const faces = copy();
       if ("adopt" in change) {
-        // This browser's faces from before the Inbox kept them: an agent another window already chose for keeps its face.
         let added = false;
         for (const [key, face] of Object.entries(change.adopt)) {
           if (face === "agent" || faces[key] || indexNow().has(key)) continue;
@@ -142,16 +122,10 @@ export function createInboxAgentFacesFile(inboxDirPath: string, onChange: (wire:
       if (change.face !== "agent") {
         faces[change.agent] = { face: change.face, sessions: cleanInboxFaceSessions([...(before?.sessions ?? []), ...(change.sessions ?? [])], change.agent) };
       }
-      // Another entry kept for one of these sessions (a session's own entry, from before it was continued) is this agent now.
       for (const session of change.sessions ?? []) if (session !== change.agent && faces[session]) delete faces[session];
       if (!before && change.face === "agent" && Object.keys(faces).length === Object.keys(now().faces).length) return this.wire();
       return save(faces);
     },
-    /**
-     * A session the Inbox heard (a poll) that is the same agent as `related()` (the sessions its conversation continues,
-     * its launch's id; asked only when there is something to link): linked to the entry that names one of them, so its threads show that face after it ended too.
-     * One map lookup when nothing is to link; a write only the first time.
-     */
     link(session: string, related: () => readonly string[]): void {
       if (!isInboxAgentFaceId(session)) return;
       const map = indexNow();
@@ -169,14 +143,9 @@ export function createInboxAgentFacesFile(inboxDirPath: string, onChange: (wire:
         // Not saved (a newer file, a full disk): the window still finds it through the agents' list while it is live.
       }
     },
-    /**
-     * The uploaded pictures changed (one added or removed, packages/server/inbox-agent-icons.ts): a save with the same
-     * faces, so the count moves and every window hears it (the wire carries the pictures).
-     */
     touch(): InboxAgentFacesWire {
       return save(copy());
     },
-    /** A removed picture: every agent that showed it goes back to its own mark, in one save (none when no agent did). */
     dropFace(face: string): InboxAgentFacesWire {
       const faces = copy();
       let dropped = false;
@@ -187,11 +156,9 @@ export function createInboxAgentFacesFile(inboxDirPath: string, onChange: (wire:
       }
       return dropped ? save(faces) : this.wire();
     },
-    /** The faces agents show now (an uploaded picture in use is never the one the cap removes). */
     shown(): Set<string> {
       return new Set(Object.values(now().faces).map((entry) => entry.face));
     },
-    /** Tests: forget what was read. */
     forget(): void {
       cached = null;
       index = null;

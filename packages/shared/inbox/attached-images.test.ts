@@ -1,11 +1,3 @@
-/**
- * send_message's advice about pictures sent only as attachments (the owner,
- * 2026-11-02: the pictures of a message's options sat at the bottom as
- * attachments, away from the words about them). The failures this guards:
- * the advice goes missing for an attached picture the body never shows, or
- * nags an agent that did show the picture in place, or that attached a file
- * that is not a picture.
- */
 import { describe, expect, test } from "bun:test";
 import { attachedImagesNotInBody, attachedImagesNotInBodyText } from "./attached-images";
 
@@ -17,7 +9,6 @@ describe("attachedImagesNotInBody", () => {
       "/tmp/shots/b.JPG",
       "shots/c.webp",
     ]);
-    // The advice counts them and names the syntax that shows a picture in place.
     expect(attachedImagesNotInBodyText(3)).toStartWith(" 3 images are attached");
     expect(attachedImagesNotInBodyText(3)).toContain("`![alt](path)`");
   });
@@ -33,7 +24,6 @@ describe("attachedImagesNotInBody", () => {
       ":::",
     ].join("\n");
     expect(attachedImagesNotInBody(body, ["/work/shots/menu.png", "/tmp/shots/a.png", "shots/b.png"], "/work")).toEqual([]);
-    // A relative path resolves from either base: the attachments' folder and the body's may differ.
     expect(attachedImagesNotInBody("![menu](shots/menu.png)", ["shots/menu.png"], "/work/sub", "/work")).toEqual([]);
     expect(attachedImagesNotInBodyText(0)).toBe("");
   });

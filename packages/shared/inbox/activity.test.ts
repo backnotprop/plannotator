@@ -1,10 +1,3 @@
-/**
- * Settings → Activity's read (`InboxStore.activity`, ./activity.ts): each thread's
- * messages by hour over a span. What regresses: messages counted in the wrong
- * hour (or hours not starting where `from` says), another project's threads
- * shown (or a combined project's left out), threads quiet in the span listed,
- * messages outside the span counted, or the rows out of start order.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -47,7 +40,6 @@ describe("inboxActivity", () => {
       { fromMs: T0, toMs: T0 + 10 * H, projectId: null },
     );
     expect(model.threads.map((t) => t.thread_id)).toEqual(["spans"]);
-    // Its whole life still shows in the tooltip's facts.
     expect(model.threads[0]).toMatchObject({ hours: [2, 1], total: 3, started_at: new Date(T0 - H).toISOString(), last_at: new Date(T0 + 10 * H).toISOString() });
   });
 
@@ -83,7 +75,6 @@ describe("InboxStore.activity", () => {
     store.sendMessage({ project_id: docs.id, author: agent("ses_c"), body: "Docs.", thread: "Landing copy" });
 
     const span = { fromMs: T0, toMs: T0 + 24 * H };
-    // Before the combine: billing alone.
     expect(store.activity({ ...span, projectId: billing.id }).threads.map((t) => [t.name, t.hours])).toEqual([["Retry queue", [9, 2, 11, 1]]]);
 
     store.combineProject(billingWt.id, billing.id);

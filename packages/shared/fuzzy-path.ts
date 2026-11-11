@@ -1,20 +1,8 @@
-/**
- * Fuzzy path matching for Go to File (⌘P / Ctrl+P) in code review.
- *
- * Plannotator's own matcher. A path matches a query when every term's
- * characters appear in the path in order. Each candidate alignment is built
- * greedily from a few starting points (word starts first) and scored; the
- * best one wins. Scores reward characters at word starts (after `/ . _ -`, a
- * space, or a lower-to-upper case change), runs of consecutive characters,
- * matches in the file name, and how much of the file name the query covers;
- * gaps and long paths cost a little. Linear in the path's length per
- * starting point, so a few hundred thousand paths fit a keystroke.
- */
+/** Fuzzy path matcher for Go to File. Every query term's characters must appear in the path in order; the best-scoring alignment wins. */
 
 export interface FuzzyPathMatch {
   path: string;
   score: number;
-  /** Where each query character landed in the path (string indices), in order. */
   positions: number[];
 }
 
@@ -28,15 +16,10 @@ const NAME_IS_TERM = 50;
 const NAME_STARTS_WITH_TERM = 25;
 const NAME_COVERAGE = 30;
 const LENGTH_COST = 0.03;
-/** Added to a preferred path's score: enough to win a tie, never a real gap. */
+/** Enough to win a tie, never a real gap. */
 const PREFERRED = 0.5;
-/** Starting points tried per term (word starts, then the first occurrence). */
 const MAX_STARTS = 4;
 
-/**
- * The query's terms: runs of non-space characters, lowercased (Go to File
- * matches without case). "  Foo  bar" gives ["foo", "bar"].
- */
 export function prepareFuzzyQuery(query: string): string[] {
   const terms: string[] = [];
   let current = '';
@@ -60,7 +43,6 @@ function isWordStart(path: string, at: number): boolean {
   return current >= 'A' && current <= 'Z' && before >= 'a' && before <= 'z';
 }
 
-/** Whether `term` from `from` appears in `lower` from `at` onward, in order. */
 function fits(lower: string, term: string, from: number, at: number): boolean {
   let cursor = at;
   for (let i = from; i < term.length; i++) {
@@ -71,11 +53,6 @@ function fits(lower: string, term: string, from: number, at: number): boolean {
   return true;
 }
 
-/**
- * One alignment from a first position: each next character is the very next
- * one when it matches (a run), else its next word-start occurrence when the
- * rest still fits after it, else its next occurrence.
- */
 function align(path: string, lower: string, term: string, first: number): number[] | null {
   const positions = [first];
   let at = first + 1;
@@ -117,8 +94,6 @@ function scoreAlignment(path: string, positions: readonly number[], nameStart: n
 function scoreTerm(path: string, lower: string, term: string): { score: number; positions: number[] } | null {
   if (!fits(lower, term, 0, 0)) return null;
   const nameStart = path.lastIndexOf('/') + 1;
-  // Starting points: word starts of the first character (file name first),
-  // then its first occurrence in the file name and in the path.
   const starts: number[] = [];
   const add = (at: number) => {
     if (at !== -1 && !starts.includes(at) && starts.length < MAX_STARTS) starts.push(at);
@@ -145,7 +120,6 @@ function scoreTerm(path: string, lower: string, term: string): { score: number; 
   return best;
 }
 
-/** Scores a path against prepared terms (every term must match), or null. */
 export function scoreFuzzyPath(path: string, terms: readonly string[], lowerPath = path.toLowerCase()): FuzzyPathMatch | null {
   const nameStart = path.lastIndexOf('/') + 1;
   let positions: number[] = [];
@@ -169,28 +143,20 @@ export function scoreFuzzyPath(path: string, terms: readonly string[], lowerPath
 
 export interface FuzzyPathSearchOptions {
   limit?: number;
-  /** Paths that win ties (code review: the files the diff changes). */
   preferred?: ReadonlySet<string>;
-  /** `paths` lowercased, when the caller keeps them (a large list searched per keystroke). */
   lowerPaths?: readonly string[];
 }
 
 interface Ranked {
   match: FuzzyPathMatch;
-  /** Position in the input: on equal scores the earlier path ranks first. */
   order: number;
 }
 
-/** True when `a` ranks below `b` (a lower score, or an equal one later in the input). */
 function ranksBelow(a: Ranked, b: Ranked): boolean {
   return a.match.score < b.match.score || (a.match.score === b.match.score && a.order > b.order);
 }
 
-/**
- * The `limit` best entries seen so far, kept as a min-heap on rank: the
- * root is the weakest kept entry, so a new candidate either replaces it or
- * is dropped, in O(log limit).
- */
+/** Min-heap on rank: the root is the weakest kept entry. */
 class TopRanked {
   private readonly heap: Ranked[] = [];
   constructor(private readonly limit: number) {}
@@ -206,12 +172,10 @@ class TopRanked {
     }
   }
 
-  /** The weakest score a candidate must beat once full (else -Infinity). */
   get bar(): number {
     return this.heap.length < this.limit ? -Infinity : this.heap[0].match.score;
   }
 
-  /** Best first. */
   drain(): FuzzyPathMatch[] {
     return [...this.heap].sort((a, b) => (ranksBelow(a, b) ? 1 : ranksBelow(b, a) ? -1 : 0)).map((entry) => entry.match);
   }
@@ -241,14 +205,12 @@ class TopRanked {
   }
 }
 
-/** The best `limit` matches for `query` among `paths`, highest score first. */
 export function fuzzySearchPaths(paths: readonly string[], query: string, options: FuzzyPathSearchOptions = {}): FuzzyPathMatch[] {
   const terms = prepareFuzzyQuery(query);
   const limit = options.limit ?? 50;
   if (limit <= 0 || terms.length === 0) return [];
   const top = new TopRanked(limit);
   paths.forEach((path, order) => {
-    // Folder entries (a trailing slash) are never opened.
     if (path.charCodeAt(path.length - 1) === 47) return;
     const match = scoreFuzzyPath(path, terms, options.lowerPaths?.[order]);
     if (match === null) return;

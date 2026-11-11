@@ -1,15 +1,4 @@
-/**
- * Plannotator Inbox: artifacts the person pinned (approval
- * "inbox-artifact-stars"; the word is Pin). Not the sidebar's thread pins
- * (pins.ts, "Starred" threads): another file, other routes.
- *
- *   inbox/artifact-pins.json   { v: 1, pins: [{ key, thread_id, pinned_at }] }, in pin order, 0600, written whole (temp, then rename)
- *
- * A file outside the store's JSONL, as thread pins are: a pin is the person's
- * own mark and never enters the event log, which agents' cursors, the phone
- * relay and search read. It writes no line and takes no seq. Kept on the
- * server, so every window and phone of the person sees the same pins.
- */
+/** Pinned artifacts saved in inbox/artifact-pins.json (0600, written whole via temp + rename). Outside the store's JSONL: a pin never enters the event log. */
 
 import { chmodSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -19,7 +8,6 @@ import { InboxError } from "./schema";
 
 export const INBOX_ARTIFACT_PINS_FILE = "artifact-pins.json";
 
-/** An artifact's key: an attachment id, or `guide:<message id>`. */
 export function isInboxArtifactKey(value: unknown): value is string {
   if (typeof value !== "string") return false;
   if (value.startsWith("guide:")) return isInboxId("msg", value.slice("guide:".length));
@@ -30,7 +18,6 @@ function fileOf(inboxDirPath: string): string {
   return join(inboxDirPath, INBOX_ARTIFACT_PINS_FILE);
 }
 
-/** The pins on disk, in pin order. A file that does not parse reads as none; a bad or repeated entry is skipped. */
 export function readInboxArtifactPins(inboxDirPath: string): InboxArtifactPin[] {
   let value: unknown;
   try {
@@ -52,7 +39,6 @@ export function readInboxArtifactPins(inboxDirPath: string): InboxArtifactPin[] 
   return out;
 }
 
-/** What the file holds before a write: nothing, a v1 file, one this Plannotator cannot read, or a newer version's. */
 function fileState(inboxDirPath: string): "missing" | "ok" | "bad" | "newer" {
   let raw: string;
   try {
@@ -72,11 +58,7 @@ function fileState(inboxDirPath: string): "missing" | "ok" | "bad" | "newer" {
   return file.v === 1 && Array.isArray(file.pins) ? "ok" : "bad";
 }
 
-/**
- * Write the pins whole (owner-only). No pins removes the file. A file a newer
- * Plannotator wrote is never written over (refused); one that cannot be read
- * is moved aside first (`artifact-pins.json.unreadable-<time>`), as pins.json is.
- */
+/** A file a newer Plannotator wrote is never written over; an unreadable one is moved aside first. */
 export function writeInboxArtifactPins(inboxDirPath: string, pins: readonly InboxArtifactPin[]): void {
   const file = fileOf(inboxDirPath);
   const state = fileState(inboxDirPath);

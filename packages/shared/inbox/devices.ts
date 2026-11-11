@@ -1,19 +1,4 @@
-/**
- * Plannotator Inbox: the phones paired with this Inbox
- * (adr/implementation/inbox-mobile.md, section 2).
- *
- *   inbox/devices.jsonl              one line per device change
- *   inbox/device-secrets/<dev id>    the pairing secret, for the relay keys
- *   inbox/device-commands.jsonl      the door's answers by idempotency key
- *
- * The files follow the store's line rules: append only, each line a full
- * snapshot, the last line per id is current, a torn last line is skipped on
- * read and a newline goes before the next write, fields are only added.
- * Devices are not store records: no `seq`, never in the event log.
- *
- * The token is never stored, only its SHA-256, so a revoked record still
- * tells a removed phone (`device_revoked`) from a token nobody issued.
- */
+/** Phones paired with this Inbox, in append-only JSONL with the store's line rules (devices.jsonl, device-commands.jsonl) plus pairing secrets in device-secrets/. The token is never stored, only its SHA-256, so a revoked record can tell a removed phone from an unknown token. */
 
 import { createHash } from "node:crypto";
 import { appendFileSync, chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -25,30 +10,18 @@ export const INBOX_DEVICE_SECRETS_DIR = "device-secrets";
 export const INBOX_DEVICE_COMMANDS_FILE = "device-commands.jsonl";
 
 export interface InboxDevice {
-  /** `dev_<ULID>`. */
   id: string;
-  /** As the phone sent it, checked like a thread name. */
   name: string;
-  /** "ios". */
   platform: string;
-  /** Hex SHA-256 of the whole token string. */
   token_sha256: string;
   created_at: string;
-  /** Kept in memory on every request; a line is written when its UTC day changes. */
   last_seen_at: string;
   revoked_at: string | null;
-  /** The relay carries this phone's items and pushes (section 4); true at pairing. */
   carriage: boolean;
-  /**
-   * A linked machine unlinked here while it could not be told
-   * (docs/agent-guides/inbox-machines.md): until this time, or until its
-   * revoked token has been refused once, the tailnet door stays published so
-   * its next contact hears `device_revoked`. Absent otherwise.
-   */
+  /** Set when a linked machine was unlinked while unreachable: until this time, or until its revoked token is refused once, the tailnet door stays published so it hears `device_revoked`. */
   refusal_owed_until?: string;
 }
 
-/** A device as the routes answer it: everything but the token's hash. */
 export type InboxDevicePublic = Omit<InboxDevice, "token_sha256">;
 
 export function publicDevice(device: InboxDevice): InboxDevicePublic {
@@ -60,15 +33,10 @@ export function sha256Hex(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-/**
- * Append-only JSON lines with the store's torn-line rule: a file whose last
- * line was cut short gets a newline before the next write.
- */
 export class JsonLines<T> {
   private torn = false;
   constructor(readonly path: string) {}
 
-  /** Every line that parses, in file order. */
   read(): T[] {
     let text: string;
     try {
@@ -123,7 +91,6 @@ function isDevice(value: unknown): value is InboxDevice {
   );
 }
 
-/** The paired devices: read once at start, then kept in memory by the one writer, the server. */
 export class InboxDevices {
   private readonly devices = new Map<string, InboxDevice>();
   private readonly byHash = new Map<string, string>();
@@ -156,7 +123,6 @@ export class InboxDevices {
     return device;
   }
 
-  /** Every device not revoked, newest first. */
   list(): InboxDevice[] {
     return [...this.devices.values()].filter((d) => d.revoked_at === null).sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id));
   }
@@ -165,13 +131,11 @@ export class InboxDevices {
     return this.devices.get(id) ?? null;
   }
 
-  /** The device a token was issued to, revoked or not. */
   byToken(token: string): InboxDevice | null {
     const id = this.byHash.get(sha256Hex(token));
     return id ? (this.devices.get(id) ?? null) : null;
   }
 
-  /** A new paired device, with its pairing secret kept beside it (0600 in a 0700 folder). */
   add(input: { id: string; name: string; platform: string; token: string; secret: string; at: string }): InboxDevice {
     mkdirSync(this.secretsDir, { recursive: true, mode: 0o700 });
     try {
@@ -195,7 +159,6 @@ export class InboxDevices {
     );
   }
 
-  /** Revoke a device and delete its secret. Revoking twice changes nothing. */
   revoke(id: string, at: string): InboxDevice | null {
     const device = this.devices.get(id);
     if (!device) return null;
@@ -204,10 +167,6 @@ export class InboxDevices {
     return this.write({ ...device, revoked_at: at }, at);
   }
 
-  /**
-   * Keep (an ISO time) or settle (null) the refusal a revoked machine is
-   * owed (`refusal_owed_until`). Setting what is already there writes nothing.
-   */
   oweRefusal(id: string, until: string | null, at: string): InboxDevice | null {
     const device = this.devices.get(id);
     if (!device) return null;
@@ -216,14 +175,12 @@ export class InboxDevices {
     return this.write(until ? { ...rest, refusal_owed_until: until } : rest, at);
   }
 
-  /** Revoked devices still owed their refusal at `nowMs`, the soonest limit first. */
   owedRefusals(nowMs: number): InboxDevice[] {
     return [...this.devices.values()]
       .filter((d) => d.revoked_at !== null && typeof d.refusal_owed_until === "string" && Date.parse(d.refusal_owed_until) > nowMs)
       .sort((a, b) => Date.parse(a.refusal_owed_until!) - Date.parse(b.refusal_owed_until!));
   }
 
-  /** The device's pairing secret (base64url), for its relay keys; null once revoked. */
   secret(id: string): string | null {
     try {
       return readFileSync(join(this.secretsDir, id), "utf8").trim() || null;
@@ -232,13 +189,11 @@ export class InboxDevices {
     }
   }
 
-  /** The phone's relay switch, as the relay reports it (contract section 4). A line only when it changes. */
   setCarriage(id: string, on: boolean, at: string): void {
     const device = this.devices.get(id);
     if (device && device.carriage !== on) this.write({ ...device, carriage: on }, at);
   }
 
-  /** A request from this device: in memory always, on disk when the UTC day changed. */
   touch(id: string, at: string): void {
     const device = this.devices.get(id);
     if (!device) return;

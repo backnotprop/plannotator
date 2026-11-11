@@ -1,13 +1,3 @@
-/**
- * The customizable Inbox reminder (#2194): `prompts.inbox` in config.json.
- *
- * The owner's condition: a config.json without `prompts.inbox` must give
- * every host byte for byte the reminder it gave before. These tests pin that
- * against the built-in lines (copied here as literals too, so a resolver that
- * started building the default some other way would fail), then the rules of
- * the custom text: per-agent wins, blank or over the cap is unset, the tool
- * name is renamed, and saving one key keeps every other.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,12 +13,10 @@ import {
   inboxReminderText,
 } from "./inbox/connection";
 
-/** The built-in lines (the constants: what they say is pinned by what they must carry, below). */
 const MAIN_WAKE = INBOX_REMINDER_TEXT;
 const MAIN_NO_WAKE = INBOX_REMINDER_TEXT_NO_WAKE;
 const MOD_TOOL = "mcp__plugin_plannotator_plannotator__plannotator_inbox";
 
-/** Every config.json that sets no usable `prompts.inbox`. */
 const UNSET: PlannotatorConfig[] = [
   {},
   { inboxReminder: true },
@@ -48,11 +36,10 @@ describe("no prompts.inbox: every host gets the built-in line, byte for byte", (
     for (const line of [INBOX_REMINDER_TEXT, INBOX_REMINDER_TEXT_NO_WAKE]) {
       expect(line).toContain(`${INBOX_TOOL_NAME} send_message`);
       expect(line).toContain("plannotator inbox --help");
-      // The chat-or-Inbox rule (the owner, 2026-10-27): never a blocking chat question for an Inbox decision.
+      // Never a blocking chat question for an Inbox decision.
       expect(line).toContain("never also ask it in the chat with a blocking question tool");
       expect(line).not.toContain("isn't here");
     }
-    // Only the line for a host without the wake sends the agent to read_thread.
     expect(INBOX_REMINDER_TEXT).not.toContain("read_thread");
     expect(INBOX_REMINDER_TEXT_NO_WAKE).toContain("read_thread");
     expect(INBOX_REMINDER_TEXT_NO_WAKE).not.toContain("wait_for_reply");
@@ -61,7 +48,6 @@ describe("no prompts.inbox: every host gets the built-in line, byte for byte", (
   for (const [index, config] of UNSET.entries()) {
     test(`unset config #${index}`, () => {
       for (const host of ["claude-code", "pi", "opencode"] as const) {
-        // Pi and OpenCode 2 with the wake; OpenCode 1 and OpenCode 2 without session.prompt; the Claude Code mod with its full tool name.
         expect(resolveInboxReminderText(config, host)).toBe(inboxReminderText(INBOX_TOOL_NAME));
         expect(resolveInboxReminderText(config, host)).toBe(MAIN_WAKE);
         expect(resolveInboxReminderText(config, host, { wakes: true })).toBe(MAIN_WAKE);
@@ -87,7 +73,6 @@ describe("custom reminder text", () => {
     expect(resolveInboxReminderText(config, "pi")).toBe("Pi's own.");
     expect(resolveInboxReminderText(config, "opencode")).toBe("Shared.");
     expect(resolveInboxReminderText(config, "claude-code")).toBe("Shared.");
-    // An agent's own entry alone: the others keep the default.
     const only: PlannotatorConfig = { prompts: { inbox: { runtimes: { opencode: { reminder: "OpenCode's own." } } } } };
     expect(resolveInboxReminderText(only, "opencode", { wakes: false })).toBe("OpenCode's own.");
     expect(resolveInboxReminderText(only, "pi")).toBe(MAIN_WAKE);
@@ -160,7 +145,6 @@ describe("saveConfig with prompts.inbox", () => {
     expect(saveConfig({ prompts: { inbox: { reminder: "Shared." } } })).toBe(true);
     const after = JSON.parse(readFileSync(join(root, "config.json"), "utf8"));
     expect(after).toEqual({ ...before, prompts: { ...before.prompts, inbox: { reminder: "Shared." } } });
-    // Key order of the sections this write did not name is kept.
     expect(JSON.stringify(after.prompts.plan)).toBe(JSON.stringify(before.prompts.plan));
     expect(saveConfig({ prompts: { inbox: { reminder: undefined } } })).toBe(true);
     expect(JSON.parse(readFileSync(join(root, "config.json"), "utf8"))).toEqual(before);

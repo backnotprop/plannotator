@@ -1,24 +1,4 @@
-/**
- * Guide Store
- *
- * Persists successful Guided Reviews to disk so they survive server restarts
- * (issue #1112). Files live at:
- *
- *   ${PLANNOTATOR_DATA_DIR}/guides/{repo-key}/{id}.json      (envelope)
- *   ${PLANNOTATOR_DATA_DIR}/guides/{repo-key}/{id}.patch     (the diff the guide describes; portable export)
- *
- * repo-key is a sanitized `host__owner__repo` derived from the repository's
- * origin remote (or the PR url in PR mode), so a PR review and a local review
- * of the same repository share the same shelf while same-named branches in
- * different repositories never collide. When no parseable remote exists, the
- * key falls back to `{dir-name}-{hash8-of-resolved-path}` — the same pattern
- * annotate mode uses for its per-file history slugs.
- *
- * Runtime-agnostic (node:fs / node:path / node:crypto only), following the
- * storage.ts / draft.ts patterns. Vendored to Pi via vendor.sh. Corrupt or
- * unreadable files load as "no saved guide" (the review-skill-loader
- * skip-and-log discipline); writes are atomic (tmp + rename).
- */
+/** Persists successful Guided Reviews as `guides/{repo-key}/{id}.json` plus `{id}.patch` under the data dir. Corrupt or unreadable files load as "no saved guide"; writes are atomic (tmp + rename). */
 
 import { join, resolve, basename } from "path";
 import { mkdirSync, writeFileSync, readFileSync, readdirSync, renameSync, unlinkSync, existsSync } from "fs";
@@ -36,63 +16,33 @@ import {
 
 export type { SavedGuideListEntry };
 
-/** Client-facing pseudo job-id prefix for persisted guides ("saved:{id}"). */
 export const SAVED_GUIDE_ID_PREFIX = "saved:";
 
-/** On-disk envelope for one persisted guide. */
 export interface SavedGuideEnvelope {
   version: 1;
-  /** Epoch ms when the guide was first persisted. */
   savedAt: number;
-  /** Review-target label shown in the list — "PR #1082" or the branch name. */
   label: string;
-  /** The guide's own title (envelope-level copy for listing without re-parse). */
   title: string;
-  /** Engine that generated the guide (e.g. "claude", "codex"). */
   engine?: string;
-  /** Model used, when known. */
   model?: string;
-  /** Repo HEAD (or PR head) sha at generation time — drives the `moved` flag. */
   headSha?: string;
-  /** PR/MR url when the guide was generated in PR mode. */
   prUrl?: string;
-  /** Epoch ms when generation finished (export provenance). */
   generatedAt?: number;
-  /** Reviewer-supplied instructions that shaped the guide (export provenance). */
   customInstructions?: string;
-  /**
-   * The review the guide was generated against — everything a portable export
-   * needs besides the guide itself. The patch bytes live in the sibling
-   * `{id}.patch` file (they can be large); this block carries the labels.
-   * Absent on envelopes written before portable exports existed, in which
-   * case the guide is not exportable ("diff not retained").
-   */
+  /** Absent on envelopes written before portable exports existed; such guides are not exportable. */
   review?: SavedGuideReview;
-  /**
-   * The share link this guide currently has on the guide host (guide share
-   * hosting contract, §7), so a saved guide remembers its link across
-   * sessions and can remove it later. Absent when never shared or after the
-   * link was removed.
-   */
   share?: SavedGuideShare;
   guide: CodeGuideOutput;
   reviewed: boolean[];
 }
 
 export interface SavedGuideShare {
-  /** The host's guide id (base64url, the last path segment of `url`). */
   id: string;
-  /** Full share URL, including the `#key=…` fragment for encrypted shares. */
   url: string;
-  /** ISO timestamp of when the link was created. */
   createdAt: string;
-  /** Bearer token that deletes the link on the host. Returned once by the host; only this file remembers it. */
+  /** Bearer token that deletes the link on the host; returned once, only this file remembers it. */
   deleteToken: string;
-  /**
-   * The guide host the link was created on (`https://guides.show` or your own
-   * deployment), so removal goes to the host that holds the upload even when
-   * the configured share URL has changed since.
-   */
+  /** The host the link was created on; removal goes there even if the configured share URL has since changed. */
   serviceUrl: string;
 }
 
@@ -101,13 +51,8 @@ export interface SavedGuideReview {
   diffType?: string;
   base?: string;
   source: GuideSnapshotSource;
-  /** Sibling file name holding the raw patch, e.g. "{id}.patch". */
   patchFile: string;
 }
-
-// ---------------------------------------------------------------------------
-// Repo-key derivation
-// ---------------------------------------------------------------------------
 
 function sanitizeKeySegment(segment: string): string {
   const cleaned = segment.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^[.\-]+|[.\-]+$/g, "");
@@ -118,12 +63,6 @@ function hash8(content: string): string {
   return createHash("sha256").update(content).digest("hex").slice(0, 8);
 }
 
-/**
- * Derive a repo key from a git remote URL (SSH, HTTPS, ssh://…), e.g.
- * `git@github.com:owner/repo.git` → `github.com__owner__repo`.
- * Subgroup paths keep every segment (`gitlab.com__group__sub__proj`).
- * Returns null when the URL doesn't parse as a known remote form.
- */
 export function deriveGuideRepoKeyFromRemote(remoteUrl: string): string | null {
   const host = parseRemoteHost(remoteUrl);
   const path = parseRemoteUrl(remoteUrl);
@@ -133,11 +72,7 @@ export function deriveGuideRepoKeyFromRemote(remoteUrl: string): string | null {
   return [host, ...segments].map(sanitizeKeySegment).join("__");
 }
 
-/**
- * Derive a repo key from a PR/MR URL — lands on the same key as
- * deriveGuideRepoKeyFromRemote for the matching origin remote, so PR-mode and
- * branch-mode sessions of one repository share a shelf.
- */
+/** Lands on the same key as deriveGuideRepoKeyFromRemote so PR-mode and branch-mode share a shelf. */
 export function deriveGuideRepoKeyFromPRUrl(prUrl: string): string | null {
   const ref = parsePRUrl(prUrl);
   if (!ref) return null;
@@ -145,23 +80,12 @@ export function deriveGuideRepoKeyFromPRUrl(prUrl: string): string | null {
   return [ref.host, ...path.split("/").filter(Boolean)].map(sanitizeKeySegment).join("__");
 }
 
-/**
- * No-remote fallback: repo-root (or cwd) directory name + hash8 of the
- * resolved path — mirrors annotate mode's `annotate-{basename}-{hash8}` slug.
- */
 export function deriveGuideRepoKeyFallback(dirPath: string): string {
   const resolved = resolve(dirPath);
   const name = sanitizeKeySegment(basename(resolved) || "repo");
   return `${name}-${hash8(resolved)}`;
 }
 
-/**
- * The shelf a review keys its guides under: the PR url when it parses, else
- * the origin remote of `gitCwd`, else that repository's top-level directory,
- * else `fallbackDir`. The one resolution both the review session and
- * `plannotator guide import` use, so an imported guide lands where the next
- * review looks.
- */
 export async function resolveGuideRepoKey(opts: {
   prUrl?: string;
   gitCwd?: string;
@@ -184,19 +108,13 @@ export async function resolveGuideRepoKey(opts: {
   return deriveGuideRepoKeyFallback(opts.fallbackDir);
 }
 
-// ---------------------------------------------------------------------------
-// Ids
-// ---------------------------------------------------------------------------
-
 const GUIDE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
-/** Guard against path traversal — ids arrive from the client on the
- *  `saved:{id}` endpoints, so only a conservative charset is accepted. */
+/** Guards against path traversal: ids arrive from the client, so only a conservative charset is accepted. */
 export function isValidGuideId(id: string): boolean {
   return id.length > 0 && id.length <= 160 && GUIDE_ID_RE.test(id);
 }
 
-/** `{timestamp}-{slug-of-title}` — sortable-by-name ≙ sortable-by-time. */
 export function makeGuideId(title: string, now: number = Date.now()): string {
   const slug = title
     .toLowerCase()
@@ -206,10 +124,6 @@ export function makeGuideId(title: string, now: number = Date.now()): string {
     .replace(/-+$/g, "");
   return `${now}-${slug || "guide"}`;
 }
-
-// ---------------------------------------------------------------------------
-// Disk primitives
-// ---------------------------------------------------------------------------
 
 function guidesDir(repoKey: string): string {
   return join(getPlannotatorDataDir(), "guides", repoKey);
@@ -231,20 +145,12 @@ function coerceReviewed(value: unknown, sectionCount: number): boolean[] {
   return out;
 }
 
-/** Top-level envelope keys this version reads. Anything else is carried through untouched (see `parseEnvelope`). */
 const KNOWN_ENVELOPE_KEYS = new Set<string>([
   "version", "savedAt", "label", "title", "engine", "model", "headSha", "prUrl", "generatedAt",
   "customInstructions", "review", "share", "guide", "reviewed",
 ]);
 
-/**
- * Minimal shape check — anything that fails loads as "no saved guide".
- * Top-level keys this version does not know are passed through rather than
- * dropped: every write rebuilds the file from the parsed envelope, so a
- * binary that skews behind the one that wrote the file must not destroy
- * data it cannot read — the `share` record is the only copy of a link's
- * delete token, and losing it strands a published diff.
- */
+/** Unknown top-level keys pass through: every write rebuilds the file, and an older binary must not destroy data it cannot read (the `share` record holds the only copy of a delete token). */
 function parseEnvelope(raw: string): SavedGuideEnvelope | null {
   let parsed: unknown;
   try {
@@ -293,7 +199,6 @@ function parseSavedReview(value: unknown): SavedGuideReview | null {
   const source = r.source as Record<string, unknown> | undefined;
   if (typeof r.gitRef !== "string" || typeof r.patchFile !== "string") return null;
   if (!source || typeof source !== "object" || typeof source.kind !== "string" || !SOURCE_KINDS.has(source.kind)) return null;
-  // Guard the sibling file reference: a plain file name in this directory, nothing else.
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]*\.patch$/.test(r.patchFile) || r.patchFile.includes("..")) return null;
   return {
     gitRef: r.gitRef,
@@ -320,17 +225,13 @@ function parseSavedShare(value: unknown): SavedGuideShare | null {
   };
 }
 
-/**
- * Atomically write a guide envelope. Returns false (never throws) on invalid
- * id or write failure — persistence must never break the review session.
- */
+/** Returns false, never throws: persistence must not break the review session. */
 export function saveGuide(repoKey: string, id: string, envelope: SavedGuideEnvelope): boolean {
   const written = writeGuideEnvelope(repoKey, id, envelope);
   if (!written.ok) console.error(`[guide-store] Failed to save guide ${id}: ${written.error}`);
   return written.ok;
 }
 
-/** saveGuide without the log: the failure comes back for a caller that reports it itself. */
 function writeGuideEnvelope(repoKey: string, id: string, envelope: SavedGuideEnvelope): { ok: true } | { ok: false; error: string } {
   if (!isValidGuideId(id)) return { ok: false, error: `invalid guide id ${JSON.stringify(id)}` };
   try {
@@ -345,11 +246,7 @@ function writeGuideEnvelope(repoKey: string, id: string, envelope: SavedGuideEnv
   }
 }
 
-/**
- * Atomically write the patch a guide describes beside its envelope. Returns
- * false (never throws) on failure. Callers write the patch BEFORE the envelope
- * that references it, so an envelope never points at a missing file.
- */
+/** Callers write the patch BEFORE the envelope that references it, so an envelope never points at a missing file. */
 export function saveGuidePatch(repoKey: string, id: string, rawPatch: string): boolean {
   if (!isValidGuideId(id)) return false;
   try {
@@ -365,7 +262,6 @@ export function saveGuidePatch(repoKey: string, id: string, rawPatch: string): b
   }
 }
 
-/** Read the patch referenced by an envelope. Missing → null. */
 export function loadGuidePatch(repoKey: string, envelope: SavedGuideEnvelope): string | null {
   if (!envelope.review) return null;
   try {
@@ -377,10 +273,6 @@ export function loadGuidePatch(repoKey: string, envelope: SavedGuideEnvelope): s
   }
 }
 
-/**
- * Turn a saved guide (+ its patch) into a portable snapshot. Null when the
- * guide predates portable exports (no review block / no patch on disk).
- */
 export function buildSavedGuideSnapshot(repoKey: string, envelope: SavedGuideEnvelope): GuideSnapshot | null {
   const rawPatch = loadGuidePatch(repoKey, envelope);
   if (rawPatch === null || !envelope.review) return null;
@@ -403,18 +295,7 @@ export function buildSavedGuideSnapshot(repoKey: string, envelope: SavedGuideEnv
   });
 }
 
-/**
- * Put a guide written outside a review session (`plannotator guide import`)
- * on a repo shelf, so the next review of that repository lists it under
- * Guides like one it generated. The inverse of buildSavedGuideSnapshot: the
- * snapshot's patch becomes the sibling `.patch` (written first, as everywhere
- * else), its provenance the envelope's.
- *
- * Never replaces a saved guide: the id is claimed by creating its `.patch`
- * exclusively, and a taken id (same title in the same millisecond, or a
- * leftover patch) moves on to the next millisecond. A failed write leaves no
- * file behind.
- */
+/** Never replaces a saved guide: the id is claimed by creating its `.patch` exclusively, and a taken id moves on to the next millisecond. */
 export function saveImportedGuide(
   repoKey: string,
   snapshot: GuideSnapshot,
@@ -422,7 +303,7 @@ export function saveImportedGuide(
     label: string;
     prUrl?: string;
     now?: number;
-    /** Store no head sha (so a review never flags the guide as moved): the snapshot's head is not the shelf PR's head. */
+    /** No head sha is stored, so a review never flags the guide as moved: the snapshot's head is not the shelf PR's head. */
     omitHeadSha?: boolean;
   },
 ): { ok: true; id: string } | { ok: false; error: string } {
@@ -444,12 +325,11 @@ export function saveImportedGuide(
     if (existsSync(guidePath(repoKey, candidate))) continue;
     const patchPath = guidePatchPath(repoKey, candidate);
     try {
-      // Patch first, then the envelope that references it. `wx` fails on an existing file.
+      // Patch first, then the envelope that references it.
       writeFileSync(patchPath, snapshot.review.rawPatch, { encoding: "utf-8", flag: "wx" });
       id = candidate;
     } catch (e) {
       if ((e as NodeJS.ErrnoException)?.code === "EEXIST") continue;
-      // The path was free a moment ago, so whatever is there now is our partial write.
       removeQuietly(patchPath);
       return { ok: false, error: `Could not write ${patchPath}: ${message(e)}` };
     }
@@ -487,11 +367,6 @@ export function saveImportedGuide(
   return { ok: false, error: `Could not write ${guidePath(repoKey, id)}: ${written.error}` };
 }
 
-/**
- * Locate a saved guide by id across every repo shelf — for the CLI, which has
- * no session and therefore no repo key. Ids embed a timestamp + slug, so
- * collisions across shelves are practically impossible; the first match wins.
- */
 export function findSavedGuideById(id: string): { repoKey: string; envelope: SavedGuideEnvelope } | null {
   if (!isValidGuideId(id)) return null;
   let repoKeys: string[];
@@ -507,7 +382,6 @@ export function findSavedGuideById(id: string): { repoKey: string; envelope: Sav
   return null;
 }
 
-/** Every saved guide across every repo shelf, newest first — for the CLI list. */
 export function listAllSavedGuides(): Array<{ repoKey: string; id: string; envelope: SavedGuideEnvelope }> {
   let repoKeys: string[];
   try {
@@ -523,7 +397,6 @@ export function listAllSavedGuides(): Array<{ repoKey: string; id: string; envel
   return out;
 }
 
-/** Load one saved guide. Missing/corrupt/invalid → null. */
 export function loadGuide(repoKey: string, id: string): SavedGuideEnvelope | null {
   if (!isValidGuideId(id)) return null;
   try {
@@ -535,7 +408,6 @@ export function loadGuide(repoKey: string, id: string): SavedGuideEnvelope | nul
   }
 }
 
-/** Update the reviewed array of a saved guide in place (atomic rewrite). */
 export function updateGuideReviewed(repoKey: string, id: string, reviewed: boolean[]): boolean {
   const envelope = loadGuide(repoKey, id);
   if (!envelope) return false;
@@ -545,11 +417,6 @@ export function updateGuideReviewed(repoKey: string, id: string, reviewed: boole
   });
 }
 
-/**
- * Record (or, with null, forget) the share link of a saved guide. Atomic
- * rewrite of the whole envelope; false when the guide does not exist or the
- * write failed.
- */
 export function updateGuideShare(repoKey: string, id: string, share: SavedGuideShare | null): boolean {
   const envelope = loadGuide(repoKey, id);
   if (!envelope) return false;
@@ -557,7 +424,6 @@ export function updateGuideShare(repoKey: string, id: string, share: SavedGuideS
   return saveGuide(repoKey, id, share ? { ...rest, share } : rest);
 }
 
-/** List all saved guides for a repo, newest first. Corrupt files are skipped. */
 export function listGuides(repoKey: string): Array<{ id: string; envelope: SavedGuideEnvelope }> {
   let names: string[];
   try {
@@ -577,14 +443,12 @@ export function listGuides(repoKey: string): Array<{ id: string; envelope: Saved
   return out;
 }
 
-/** Delete a saved guide. Returns true when a file was actually removed. */
 export function deleteGuide(repoKey: string, id: string): boolean {
   if (!isValidGuideId(id)) return false;
   try {
     const filePath = guidePath(repoKey, id);
     if (!existsSync(filePath)) return false;
     unlinkSync(filePath);
-    // Best-effort: the patch is worthless without its envelope.
     try { const patchPath = guidePatchPath(repoKey, id); if (existsSync(patchPath)) unlinkSync(patchPath); } catch {}
     return true;
   } catch {
@@ -592,38 +456,16 @@ export function deleteGuide(repoKey: string, id: string): boolean {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Session glue — shared by the Bun review server and the Pi mirror so the
-// repo-key/headSha/label resolution and the jobId→savedId mapping are written
-// exactly once. All getters are late-bound because prMetadata / gitContext /
-// config can change mid-session (pr-switch, config edits).
-// ---------------------------------------------------------------------------
-
 export interface GuideStoreSessionOptions {
-  /** Run `git <args>` in `cwd`, returning stdout on exit 0, else null.
-   *  Omit when the session has no local git access. */
   runGit?: (args: string[], cwd?: string) => Promise<string | null>;
-  /** Cwd for git commands (branch mode). Undefined disables git lookups. */
   getGitCwd: () => string | undefined;
-  /** Current PR identity, or null outside PR mode. */
   getPRInfo: () => { url: string; headSha: string; label: string } | null;
-  /** Branch label for non-PR sessions (gitContext.currentBranch). */
   getBranchLabel: () => string | undefined;
-  /** Directory for the no-remote fallback key (workspace root / agent cwd). */
   getFallbackDir: () => string;
-  /** Autosave gate — resolveGuideHistory(loadConfig()), evaluated per write. */
   writesEnabled: () => boolean;
 }
 
-/**
- * Review-target snapshot taken when a guide job LAUNCHES. Guide jobs run for
- * minutes while the session supports mid-generation PR switching
- * (/api/pr-switch) and diff switches — reading the live getters at completion
- * would permanently label the envelope with the WRONG context (launched on PR
- * A, switched to B, completed: A's content stamped with B's label/url/head).
- * Captured via captureLaunchContext() at build time and carried on the job
- * itself (AgentJobInfo.guideContext), same discipline as changedFilesSnapshot.
- */
+/** Review-target snapshot taken when a guide job launches: jobs run for minutes while the live PR or diff can switch, so reading live getters at completion would label the envelope with the wrong context. */
 export interface GuideLaunchContext {
   pr?: { url: string; headSha: string; label: string } | null;
   branchLabel?: string;
@@ -631,53 +473,30 @@ export interface GuideLaunchContext {
 }
 
 export interface GuideStoreSession {
-  /** Snapshot the CURRENT review-target context for a job being launched now.
-   *  The caller stamps the result onto the job; saveForJob prefers it over
-   *  the live getters at completion time. */
   captureLaunchContext(): Promise<GuideLaunchContext>;
-  /** Persist a successfully validated guide for a completed job. Prefers the
-   *  job's launch-time context snapshot; falls back to the live getters only
-   *  when no snapshot exists (defensive). Never throws. */
   saveForJob(
     job: { id: string; engine?: string; model?: string; generatedAt?: number },
     data: CodeGuideOutput & { reviewed?: boolean[] },
     launchContext?: GuideLaunchContext,
-    /** The review the guide describes, captured at launch (decision record D6). Stored beside the envelope; enables export. */
     launchReview?: GuideLaunchReview,
   ): Promise<void>;
-  /** True when this live job id has already been autosaved this session. */
   isJobSaved(jobId: string): boolean;
-  /** Write a live job's reviewed-state change through to its saved file. */
   writeThroughReviewed(jobId: string, reviewed: boolean[]): Promise<void>;
-  /** Serve a saved guide as guide data (guide + reviewed + saved/moved flags). */
   getSavedGuideData(
     id: string,
   ): Promise<(CodeGuideOutput & { reviewed: boolean[]; saved: true; moved: boolean }) | null>;
-  /** Persist reviewed state for a saved guide (`saved:{id}` PUT). */
   updateSavedReviewed(id: string, reviewed: boolean[]): Promise<boolean>;
-  /** GET /api/guides rows, newest first. */
   listSaved(): Promise<SavedGuideListEntry[]>;
-  /** DELETE /api/guides/:id. */
   deleteSaved(id: string): Promise<boolean>;
-  /** Portable snapshot for a saved guide, or null when its diff was not retained. */
   getSavedGuideSnapshot(id: string): Promise<GuideSnapshot | null>;
-  /** Portable snapshot for a live job that was autosaved this session, else null. */
   getJobGuideSnapshot(jobId: string): Promise<GuideSnapshot | null>;
-  /**
-   * Where the envelope behind an endpoint guide id lives on disk: `saved:{id}`
-   * → this repo's shelf; a live job → its autosave (when one happened). Null
-   * when nothing is persisted. Backs the share-link bookkeeping
-   * (`updateGuideShare`) so a saved guide remembers its link.
-   */
   locateEnvelope(jobId: string): Promise<{ repoKey: string; id: string; envelope: SavedGuideEnvelope } | null>;
 }
 
 export function createGuideStoreSession(options: GuideStoreSessionOptions): GuideStoreSession {
   const { runGit, getGitCwd, getPRInfo, getBranchLabel, getFallbackDir, writesEnabled } = options;
 
-  /** jobId → saved location, for reviewed write-through and the `saved` flag.
-   *  Carries the repo key the save actually landed under (launch-time PR key
-   *  when one was captured), so write-through never chases the session key. */
+  /** Carries the repo key the save landed under (the launch-time PR key when captured), so write-through never chases the session key. */
   const savedIdByJob = new Map<string, { repoKey: string; id: string }>();
 
   let repoKeyPromise: Promise<string> | null = null;
@@ -694,8 +513,6 @@ export function createGuideStoreSession(options: GuideStoreSessionOptions): Guid
     return repoKeyPromise;
   };
 
-  /** The head the CURRENT session is looking at — PR head in PR mode, else
-   *  local HEAD. Compared against each envelope's stored headSha for `moved`. */
   const currentHeadSha = async (): Promise<string | undefined> => {
     const pr = getPRInfo();
     if (pr && pr.headSha) return pr.headSha;
@@ -726,24 +543,17 @@ export function createGuideStoreSession(options: GuideStoreSessionOptions): Guid
         if (!writesEnabled()) return;
         const { reviewed, ...guide } = data;
         const existingId = savedIdByJob.get(job.id);
-        // Launch-time snapshot wins over the live getters: the envelope must
-        // describe the changeset the guide was GENERATED against, not the
-        // PR/diff the reviewer switched to while the job ran. Live getters are
-        // the defensive fallback for jobs launched without a snapshot.
+        // The launch-time snapshot wins over the live getters: the envelope must describe what the guide was generated against.
         const pr = launchContext ? launchContext.pr ?? null : getPRInfo();
         const headSha = launchContext ? launchContext.headSha : await currentHeadSha();
         const branchLabel = launchContext ? launchContext.branchLabel : getBranchLabel();
-        // Anchor the shelf to the launch-time PR too — a cross-project
-        // pr-switch must not file PR A's guide under B's repository.
+        // Shelf anchored to the launch-time PR too, so a PR switch cannot file the guide under another repository.
         const repoKey = existingId?.repoKey
           ?? (pr?.url ? deriveGuideRepoKeyFromPRUrl(pr.url) : null)
           ?? (await resolveRepoKey());
         const id = existingId?.id ?? makeGuideId(guide.title);
-        // A re-save rewrites the whole file: carry the stored share link (the
-        // only copy of its delete token) and, absent a fresh launch review,
-        // the stored review over.
+        // A re-save rewrites the whole file: carry over the stored share link (the only copy of its delete token) and, absent a fresh review, the stored review.
         const previous = existingId ? loadGuide(existingId.repoKey, existingId.id) : null;
-        // Patch first, then the envelope that references it — never the reverse.
         const patchFile = `${id}.patch`;
         const patchSaved = launchReview ? saveGuidePatch(repoKey, id, launchReview.rawPatch) : false;
         const envelope: SavedGuideEnvelope = {
@@ -774,7 +584,6 @@ export function createGuideStoreSession(options: GuideStoreSessionOptions): Guid
         };
         if (saveGuide(repoKey, id, envelope)) savedIdByJob.set(job.id, { repoKey, id });
       } catch (e) {
-        // Persistence must never break job completion.
         console.error(`[guide-store] Autosave failed for job ${job.id}: ${e}`);
       }
     },

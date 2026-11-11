@@ -1,10 +1,3 @@
-/**
- * Recordings from their bytes (audio.ts) and the kind a send gives them
- * (decideInboxAttachmentKind): MP3, AAC, M4A, WAV, Ogg, FLAC and WebM audio
- * are `audio` with their media type and, where the header holds it, their
- * length; a film, an Ogg holding video and plain binaries are not. The
- * containers are built in the test (tests/helpers/audio-fixtures.ts).
- */
 import { describe, expect, test } from "bun:test";
 import { adts, flac, id3, mp3, ogg, wav, webm } from "../../../tests/helpers/audio-fixtures";
 import { ebml, mp4 } from "../../../tests/helpers/video-fixtures";
@@ -32,13 +25,10 @@ describe("sniffInboxAudio", () => {
   });
 
   test("a film, an Ogg holding video, a lone frame sync and other binaries are not recordings", () => {
-    // A film's brands are the video sniffer's; an audio-only MP4 is decided by its tracks (below).
     expect(sniffInboxAudio(mp4())).toBeNull();
     expect(sniffInboxAudio(webm(["video", "audio"]))).toBeNull();
-    // A WebM whose tracks the head does not reach stays a video.
     expect(sniffInboxAudio(ebml("webm"))).toBeNull();
     expect(sniffInboxAudio(ogg("theora"))).toBeNull();
-    // One MPEG frame header followed by bytes that are not the next frame: not an MP3.
     const lone = Buffer.concat([Buffer.from([0xff, 0xfb, 0x90, 0x00]), Buffer.alloc(413, 0), Buffer.from("PK\x03\x04"), Buffer.alloc(200)]);
     expect(sniffInboxAudio(lone)).toBeNull();
     expect(sniffInboxAudio(Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 0, 0, 0]))).toBeNull();

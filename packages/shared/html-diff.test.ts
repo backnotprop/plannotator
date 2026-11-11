@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { htmlDiff } from "./html-diff";
 
-/** Count non-overlapping occurrences of a substring. */
 function count(haystack: string, needle: string): number {
   let n = 0;
   let i = 0;
@@ -12,24 +11,18 @@ function count(haystack: string, needle: string): number {
   return n;
 }
 
-// Diff-generated wrappers carry this class so viewers can style them without
-// touching author-written <ins>/<del> markup.
 const INS = '<ins class="plannotator-diff">';
 const DEL = '<del class="plannotator-diff">';
 
 describe("htmlDiff", () => {
   test("pure text addition inside a <p> wraps the added word in <ins>", () => {
     const out = htmlDiff("<p>hello world</p>", "<p>hello brave world</p>");
-    // The added word is wrapped in a class-tagged <ins>.
     expect(out).toContain(INS);
     expect(out).toContain("brave");
     expect(out.indexOf("brave")).toBeGreaterThan(out.indexOf(INS));
-    // Structure intact: exactly one opening <p and one closing </p>.
     expect(count(out, "<p")).toBe(1);
     expect(count(out, "</p>")).toBe(1);
-    // No <del> for a pure addition.
     expect(out).not.toContain("<del");
-    // <ins>/</ins> are balanced.
     expect(count(out, INS)).toBe(count(out, "</ins>"));
   });
 
@@ -44,7 +37,6 @@ describe("htmlDiff", () => {
     expect(out).toContain("Scheduled");
     expect(out).toContain(INS);
     expect(out).toContain("</ins>");
-    // Both ins and del sit inside the <li>...</li>.
     const liOpen = out.indexOf("<li>");
     const liClose = out.indexOf("</li>");
     expect(liOpen).toBeGreaterThanOrEqual(0);
@@ -53,7 +45,6 @@ describe("htmlDiff", () => {
     expect(out.indexOf("</del>")).toBeLessThan(liClose);
     expect(out.indexOf(INS)).toBeGreaterThan(liOpen);
     expect(out.indexOf("</ins>")).toBeLessThan(liClose);
-    // "Manual" appears only inside the del; "Scheduled" only inside the ins.
     expect(out).toContain(`${DEL}Manual</del>`);
     expect(out).toContain(`${INS}Scheduled</ins>`);
   });
@@ -62,10 +53,8 @@ describe("htmlDiff", () => {
     const oldHtml = "<ul><li>One</li></ul>";
     const newHtml = "<ul><li>One</li><li>Audit log</li></ul>";
     const out = htmlDiff(oldHtml, newHtml);
-    // New <li> structure present.
     expect(count(out, "<li>")).toBe(2);
     expect(count(out, "</li>")).toBe(2);
-    // The added text is wrapped in <ins> but the <li> tags are NOT inside it.
     expect(out).toContain(INS);
     expect(out).toContain("Audit log");
     expect(out).not.toContain(`${INS}<li>`);
@@ -77,7 +66,6 @@ describe("htmlDiff", () => {
     const oldHtml = "<div><script>var a = 1;</script><p>hi</p></div>";
     const newHtml = "<div><script>var a = 2;</script><p>hi</p></div>";
     const out = htmlDiff(oldHtml, newHtml);
-    // The new script content is present verbatim, opaque (no ins/del inside it).
     expect(out).toContain("<script>var a = 2;</script>");
     expect(out).not.toContain("<ins");
     expect(out).not.toContain("<del");
@@ -122,24 +110,20 @@ describe("htmlDiff", () => {
     const newHtml =
       "<body><p>First updated paragraph</p><p>Second paragraph</p><p>Third paragraph</p></body>";
     const out = htmlDiff(oldHtml, newHtml);
-    // Count of <p in output matches the new doc (3).
     expect(count(out, "<p")).toBe(count(newHtml, "<p"));
     expect(count(out, "</p>")).toBe(count(newHtml, "</p>"));
     expect(count(out, "<body>")).toBe(1);
     expect(count(out, "</body>")).toBe(1);
-    // ins/del balanced.
     expect(count(out, INS)).toBe(count(out, "</ins>"));
     expect(count(out, DEL)).toBe(count(out, "</del>"));
   });
 
   test("tags with > inside quoted attributes are tokenized whole (attr-only change)", () => {
-    // Regression: the old tokenizer stopped at the first > even inside a quoted
-    // attribute, splitting the tag and corrupting the output.
+    // Regression: the tokenizer must not stop at a `>` inside a quoted attribute.
     const out = htmlDiff(
       '<td title="x > y">cell</td>',
       '<td title="x > z">cell</td>',
     );
-    // Attribute-only change: new tag emitted intact, unchanged text untouched.
     expect(out).toBe('<td title="x > z">cell</td>');
   });
 
@@ -164,13 +148,10 @@ describe("htmlDiff", () => {
     const oldHtml = "<ul><li>One</li><li>Two</li></ul>";
     const newHtml = "<ul><li>One</li></ul>";
     const out = htmlDiff(oldHtml, newHtml);
-    // New structure: exactly one <li>.
     expect(count(out, "<li>")).toBe(1);
     expect(count(out, "</li>")).toBe(1);
-    // Removed text "Two" appears inside a <del>.
     expect(out).toContain(DEL);
     expect(out).toContain("Two");
-    // Never wrap a tag in del.
     expect(out).not.toContain(`${DEL}<li>`);
     expect(out).not.toContain("</li></del>");
     expect(count(out, DEL)).toBe(count(out, "</del>"));

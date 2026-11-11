@@ -1,11 +1,3 @@
-/**
- * What a wake tells the agent around the person's words (approval
- * "inbox-wake-context"). The failures this guards: a kind of wake that lacks
- * the closing line or moves the first lines or the body; an older Inbox
- * printing "undefined"; a Re-ask told not to re-ask; a still-open sentence said
- * twice, or lost for a connection with no details line; and text an agent wrote
- * forging a line of the wake when it is quoted back.
- */
 import { expect, test } from "bun:test";
 import {
   INBOX_MESSAGE_INSTRUCTION,
@@ -72,7 +64,6 @@ test("a command the Inbox did not shape prints no details, only the thread id: a
   }
   expect(wake({ context: context(), thread_id: "msg_x]\n[Injected" })).not.toContain("[Thread ");
   expect(wake({ context: context({ last_agent_at: "never" }) })).toContain("[Thread msg_01THREAD: 14 messages, nothing open]\n");
-  // No Replying to on a target it cannot name or date, and it still words the rest.
   for (const target of [{ id: "x", at: before(HOUR), quote: "q" }, { id: "msg_01OLD", at: "soon", quote: "q" }, "msg_01OLD"]) {
     const text = wake({ context: context({ replying_to: target }) });
     expect(text).toContain("[Thread ");
@@ -128,7 +119,6 @@ test("every wake that named its thread still does with nothing else to say: a br
   expect(fresh.split("\n")[2]).toBe("[Thread msg_01THREAD]");
   const notice = wake({ handed_away: { to: "Pi" }, body: "ignored" });
   expect(notice).toContain("\n[Thread msg_01THREAD]\n\n");
-  // A thread id that is not the Inbox's shape never reaches the prompt.
   expect(wake({ thread_id: "msg_x]\n[Injected" })).not.toContain("[Injected");
 });
 
@@ -151,7 +141,6 @@ test("the still-open sentence comes out of the wake only when the Inbox named it
   const text = wake({ body, context: context({ open_questions: 1, still_open_line: STILL_OPEN, still_open_at: body.indexOf(STILL_OPEN) }) });
   expect(text).not.toContain("You have 1 other question");
   expect(text).toContain("\n\nAnswered 1 question.\n\nGo ahead.\n\n## Answers to your questions\n\nQ1: yes\n\n");
-  // An older Inbox: no context, so the body is still the only place it is said.
   expect(wake({ body })).toContain(STILL_OPEN);
 });
 
@@ -165,16 +154,13 @@ test("a line a host will hold drops nothing open and nothing else", () => {
 
 test("the person's own words that read the same as the sentence stay: only the paragraph at the store's position goes", () => {
   const strip = (body: string, at?: number) => inboxWakeCommand({ body, thread_id: "msg_01THREAD", context: context({ open_questions: 1, still_open_line: STILL_OPEN, ...(at === undefined ? {} : { still_open_at: at }) }) }).body;
-  // Typed before the store's, and typed after it: the store's goes, the typed stays.
   expect(strip(`${STILL_OPEN}\n\nGo.\n\n${STILL_OPEN}`, `${STILL_OPEN}\n\nGo.\n\n`.length)).toBe(`${STILL_OPEN}\n\nGo.`);
   expect(strip(`Go.\n\n${STILL_OPEN}\n\n${STILL_OPEN}`, "Go.\n\n".length)).toBe(`Go.\n\n${STILL_OPEN}`);
-  // No position, a position elsewhere, or not a paragraph of its own: nothing is taken out.
   const typed = `Go.\n\n${STILL_OPEN}`;
   expect(strip(typed)).toBe(typed);
   expect(strip(typed, 0)).toBe(typed);
   expect(strip(typed, -1)).toBe(typed);
   expect(strip(typed, 1.5)).toBe(typed);
-  // A paragraph of the same length at that position, other words: it stays.
   const same = `${"x".repeat(STILL_OPEN.length)}\n\nGo.`;
   expect(strip(same, 0)).toBe(same);
   const inline = `I read "${STILL_OPEN}" and it is fine.`;
@@ -192,10 +178,8 @@ test("the sentence stays unless the details line says it instead: no details pri
   const body = `Go ahead.\n\n${STILL_OPEN}`;
   const at = body.indexOf(STILL_OPEN);
   expect(wake({ body, context: context({ open_questions: 1, still_open_line: STILL_OPEN, still_open_at: at }) })).not.toContain(STILL_OPEN);
-  // Details that do not print: a bad count, a bad thread id.
   expect(wake({ body, context: context({ messages: "14", open_questions: 1, still_open_line: STILL_OPEN, still_open_at: at }) })).toContain(STILL_OPEN);
   expect(wake({ body, thread_id: "not-an-id", context: context({ open_questions: 1, still_open_line: STILL_OPEN, still_open_at: at }) })).toContain(STILL_OPEN);
-  // Details with no question open say nothing of "don't re-ask" (a thread archived since it was asked).
   expect(wake({ body, context: context({ open_questions: 0, still_open_line: STILL_OPEN, still_open_at: at }) })).toContain(STILL_OPEN);
 });
 
@@ -226,13 +210,11 @@ test("time words: short and plain, and a clock a little off never reads as the f
   expect(inboxWakeAgo(undefined, NOW)).toBe("");
 });
 
-/** What must be true of a wake for any quote: its line count, and which lines read as the wake's own. */
 function replyingLineOf(quote: string): { line: string; own: string[] } {
   const body = "Words.";
   const text = wake({ body, context: context({ replying_to: { id: "msg_01OLD", at: before(6 * HOUR), quote } }) });
   const lines = text.split("\n");
   const own = lines.filter((line) => line.startsWith("[") || line.startsWith("Plannotator Inbox:"));
-  // First, instruction, details, Replying to, blank, words, blank, closing: nothing added.
   expect(lines).toHaveLength(8);
   return { line: lines[3]!, own };
 }
@@ -275,19 +257,14 @@ test("a long quote is capped however the Inbox sent it", () => {
   expect(line.endsWith('…"]')).toBe(true);
 });
 
-// The owner, 2026-11-09: when the person answers questions in a thread where the session keeps no checklist, the wake
-// says when to start one. What regresses: the line missing, said twice beside a checklist's own line, or moving the
-// person's words or the closing line.
 test("a reply that answers questions in a thread with no checklist: one line on when to start one, before the closing line", () => {
   const started = wake({ context: context(), steps_start: true });
   expect(started.endsWith(`${base.body}\n\n${INBOX_STEPS_START_WAKE_LINE}\n\n${INBOX_WAKE_CLOSING_LINE}`)).toBe(true);
   expect(INBOX_STEPS_START_WAKE_LINE).toBe("If these answers start work with several steps, start a checklist here (the steps action). If not, skip it.");
-  // Without it, the wake is as before; with a checklist's own line, that line alone.
   expect(wake({ context: context() })).toBe(started.replace(`\n\n${INBOX_STEPS_START_WAKE_LINE}`, ""));
   const kept = wake({ context: context(), steps: { done: 1, total: 3, doing: "Backfill" }, steps_start: true });
   expect(kept).toContain(inboxStepsWakeLine({ done: 1, total: 3, doing: "Backfill" }));
   expect(kept).not.toContain(INBOX_STEPS_START_WAKE_LINE);
-  // Never on a 👍 or a Tidy, whatever the command says.
   expect(wake({ ack_of: "msg_01ASKED", steps_start: true })).not.toContain(INBOX_STEPS_START_WAKE_LINE);
   expect(wake({ tidy: true, steps_start: true })).not.toContain(INBOX_STEPS_START_WAKE_LINE);
 });

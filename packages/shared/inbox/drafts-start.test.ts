@@ -1,8 +1,3 @@
-/**
- * A draft keeps a folder pick that is no project yet (approval "launch-create-clone", D8): `start` is checked when it
- * is saved, so a draft can never carry a path that isn't a full one (`~/…` or `/…`) or steps out with `..`, another kind of machine id, or a made-up flag that a
- * reopened compose would act on; and it comes back as it was saved.
- */
 import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,7 +19,6 @@ test("a Create pick is kept and read back as saved", () => {
   const start = { agent: "claude-code", machine: "ibx_01ARZ3NDEKTSV4RRFFQ69G5FAW", folder: "~/code/pricing-page", name: "pricing-page", create: true };
   saveInboxDraft(dir, ID, { body: "Add a pricing page.", start }, AT);
   expect(readInboxDraft(dir, ID)?.start).toEqual(start);
-  // No pick: no field.
   saveInboxDraft(dir, ID, { body: "x", base: readInboxDraft(dir, ID)!.updated_at }, AT);
   expect(readInboxDraft(dir, ID)).not.toHaveProperty("start");
 });

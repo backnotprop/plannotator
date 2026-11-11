@@ -131,10 +131,7 @@ describe("save / load / list / delete", () => {
   });
 
   test("top-level keys this version does not know survive a rewrite", () => {
-    // Forward compatibility across version skew: a newer binary may add a
-    // top-level record this one cannot read (the way `share` was added, whose
-    // only copy of the delete token would otherwise be destroyed by any
-    // reviewed-state write from an older binary).
+    // A newer binary may add top-level records this one cannot read (e.g. `share`); a rewrite must keep them.
     saveGuide(REPO_KEY, "1000-test", { ...envelope(), futureRecord: { token: "keep-me" } } as never);
     expect(updateGuideReviewed(REPO_KEY, "1000-test", [true, false])).toBe(true);
     const raw = JSON.parse(readFileSync(join(dataDir, "guides", REPO_KEY, "1000-test.json"), "utf-8"));
@@ -153,10 +150,8 @@ describe("save / load / list / delete", () => {
     expect(updateGuideReviewed(REPO_KEY, "1000-test", [true, false])).toBe(true);
     const loaded = loadGuide(REPO_KEY, "1000-test");
     expect(loaded!.reviewed).toEqual([true, false]);
-    // Untouched fields survive the rewrite.
     expect(loaded!.headSha).toBe("abc1234");
     expect(loaded!.label).toBe("feature/locales");
-    // Still exactly one file on disk — no stray tmp artifacts.
     expect(readdirSync(join(dataDir, "guides", REPO_KEY))).toEqual(["1000-test.json"]);
   });
 
@@ -186,7 +181,7 @@ describe("save / load / list / delete", () => {
     expect(listGuides(REPO_KEY).map((g) => g.id)).toEqual(["2-new", "1-old"]);
 
     expect(deleteGuide(REPO_KEY, "2-new")).toBe(true);
-    expect(deleteGuide(REPO_KEY, "2-new")).toBe(false); // already gone
+    expect(deleteGuide(REPO_KEY, "2-new")).toBe(false);
     expect(listGuides(REPO_KEY).map((g) => g.id)).toEqual(["1-old"]);
   });
 
@@ -234,7 +229,7 @@ describe("createGuideStoreSession", () => {
     const listed = await session.listSaved();
     expect(listed.length).toBe(1);
     expect(listed[0].progress).toEqual({ reviewed: 0, total: 2 });
-    expect(listed[0].moved).toBe(false); // head still matches
+    expect(listed[0].moved).toBe(false);
   });
 
   test("moved flags a guide whose stored head differs from the current head", async () => {
@@ -274,7 +269,6 @@ describe("createGuideStoreSession", () => {
     const rows = await session.listSaved();
     expect(rows[0].progress).toEqual({ reviewed: 1, total: 2 });
 
-    // A fresh session (server restart) still sees the persisted state.
     const restarted = branchSession();
     const restartedRows = await restarted.listSaved();
     expect(restartedRows[0].progress).toEqual({ reviewed: 1, total: 2 });
@@ -290,7 +284,6 @@ describe("createGuideStoreSession", () => {
   });
 
   test("opt-out blocks autosave writes while reads keep working", async () => {
-    // Seed a guide while enabled.
     const enabled = branchSession();
     await enabled.saveForJob({ id: "job-1" }, { ...GUIDE });
 
@@ -299,7 +292,7 @@ describe("createGuideStoreSession", () => {
 
     expect(disabled.isJobSaved("job-2")).toBe(false);
     const rows = await disabled.listSaved();
-    expect(rows.length).toBe(1); // only the pre-existing guide
+    expect(rows.length).toBe(1);
     expect(rows[0].title).toBe(GUIDE.title);
     expect((await disabled.getSavedGuideData(rows[0].id))!.title).toBe(GUIDE.title);
   });
@@ -314,7 +307,6 @@ describe("createGuideStoreSession", () => {
     });
     await session.saveForJob({ id: "job-1", engine: "codex" }, { ...GUIDE });
 
-    // Same shelf as the branch-mode key for the matching origin remote.
     const entries = listGuides(REPO_KEY);
     expect(entries.length).toBe(1);
     expect(entries[0].envelope.prUrl).toBe("https://github.com/acme/widgets/pull/7");
@@ -335,15 +327,11 @@ describe("createGuideStoreSession", () => {
 
     const key = deriveGuideRepoKeyFallback("/some/where");
     expect(listGuides(key).length).toBe(1);
-    // Label falls back to "local" when no branch is known.
     expect(listGuides(key)[0].envelope.label).toBe("local");
   });
 
   test("a job launched under PR A completing after a switch to PR B keeps A's label, url, headSha, and shelf", async () => {
-    // Mutable live state: what the session getters return at any moment —
-    // exactly what the servers wire in. The launch snapshot is captured while
-    // PR A is active; the "user" then switches to PR B before the multi-minute
-    // job completes and saveForJob runs against the live-getters-say-B state.
+    // The launch snapshot is taken while PR A is active; the live getters then switch to PR B before saveForJob runs.
     let livePR: { url: string; headSha: string; label: string } | null = {
       url: "https://github.com/acme/widgets/pull/1",
       headSha: "aaaaaaa1",
@@ -360,14 +348,11 @@ describe("createGuideStoreSession", () => {
     const launchContext = await session.captureLaunchContext();
     expect(launchContext.pr?.url).toBe("https://github.com/acme/widgets/pull/1");
 
-    // Simulate /api/pr-switch to a DIFFERENT PR (different repo, even) while
-    // the job runs.
     livePR = { url: "https://github.com/other/gadgets/pull/9", headSha: "bbbbbbb2", label: "PR #9" };
 
     await session.saveForJob({ id: "job-1", engine: "claude" }, { ...GUIDE }, launchContext);
 
-    // The envelope is labeled with PR A — the context the guide was GENERATED
-    // against — and filed under A's repository shelf, not B's.
+    // The envelope is labeled with the PR the guide was generated against and filed on its shelf, not the live one.
     const entries = listGuides(REPO_KEY);
     expect(entries.length).toBe(1);
     expect(entries[0].envelope.label).toBe("PR #1");
@@ -375,8 +360,6 @@ describe("createGuideStoreSession", () => {
     expect(entries[0].envelope.headSha).toBe("aaaaaaa1");
     expect(listGuides("github.com__other__gadgets")).toEqual([]);
 
-    // Reviewed write-through follows the launch-time shelf too, even though
-    // the live session is still pointed at PR B.
     await session.writeThroughReviewed("job-1", [true, false]);
     expect(listGuides(REPO_KEY)[0].envelope.reviewed).toEqual([true, false]);
   });
@@ -401,8 +384,6 @@ describe("createGuideStoreSession", () => {
     const [entry] = listGuides(REPO_KEY);
     expect(entry.envelope.label).toBe("feature/locales");
     expect(entry.envelope.headSha).toBe("abc1234");
-    // The moved flag now reflects that the branch has advanced past the
-    // launch-time head the guide was generated on.
     expect((await session.listSaved())[0].moved).toBe(true);
   });
 
@@ -461,12 +442,10 @@ describe("portable export: the launch review persisted beside the guide", () => 
     expect(readdirSync(join(dataDir, "guides", REPO_KEY)).sort()).toEqual([`${entry.id}.json`, `${entry.id}.patch`]);
     expect(loadGuidePatch(REPO_KEY, entry.envelope)).toBe(PATCH);
 
-    // Snapshot for export: guide + retained diff + provenance, reviewed state included.
     const snapshot = await s.getSavedGuideSnapshot(entry.id);
     expect(snapshot?.review.rawPatch).toBe(PATCH);
     expect(snapshot?.guide.reviewed).toEqual([true, false]);
     expect(snapshot?.generator).toEqual({ engine: "claude", model: "sonnet", generatedAt: new Date(5000).toISOString(), customInstructions: "Keep it short." });
-    // `exportedAt` is stamped per build, so compare with it normalized.
     expect({ ...(await s.getJobGuideSnapshot("job-1"))!, exportedAt: snapshot!.exportedAt }).toEqual(snapshot!);
     expect(await s.getJobGuideSnapshot("job-unknown")).toBeNull();
   });
@@ -539,7 +518,6 @@ describe("share record: a saved guide remembers its link", () => {
   test("a malformed share record loads as no link instead of a half record", () => {
     saveGuide(REPO_KEY, "1000-x", envelope({ share: { id: "x", url: "https://guides.show/g/x" } as unknown as SavedGuideEnvelope["share"] }));
     expect(loadGuide(REPO_KEY, "1000-x")!.share).toBeUndefined();
-    // Removal goes to the host the link was created on, so a record without one is not a usable link.
     const { serviceUrl: _omitted, ...noHost } = SHARE;
     saveGuide(REPO_KEY, "1000-y", envelope({ share: noHost as unknown as SavedGuideEnvelope["share"] }));
     expect(loadGuide(REPO_KEY, "1000-y")!.share).toBeUndefined();
@@ -562,7 +540,6 @@ describe("share record: a saved guide remembers its link", () => {
     const located = await s.locateEnvelope("job-1");
     expect(located?.repoKey).toBe(REPO_KEY);
     expect(loadGuide(REPO_KEY, located!.id)).not.toBeNull();
-    // A job's autosave that was deleted from disk no longer locates.
     deleteGuide(REPO_KEY, located!.id);
     expect(await s.locateEnvelope("job-1")).toBeNull();
   });

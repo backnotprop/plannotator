@@ -1,9 +1,3 @@
-/**
- * The Launch tip's rule on the Inbox (approval "launch-tip"; launch-tip.ts), with no Inbox. What regresses: a guest
- * shown it or stamping it; it shown to someone who already started an agent here, also once that thread was deleted
- * (`launchedAt`); a second window or the phone shown it after the stamp; the claiming page's retry after a lost answer
- * losing it, or writing again; a claim dropping the launched mark.
- */
 import { describe, expect, test } from "bun:test";
 import { launchTipClaim, launchTipDue, launchTipLaunched, type LaunchTipState } from "./launch-tip";
 
@@ -19,7 +13,6 @@ describe("launchTipDue", () => {
     expect(launchTipDue({ ...fresh, launched: true })).toBe(false);
     expect(launchTipDue({ ...fresh, saved: { launchedAt: AT } })).toBe(false);
     expect(launchTipDue({ ...fresh, saved: { shownAt: AT } })).toBe(false);
-    // A key alone (no stamp) is not a show.
     expect(launchTipDue({ ...fresh, saved: { key: "page-key-1" } })).toBe(true);
   });
 });

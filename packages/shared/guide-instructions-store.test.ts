@@ -1,13 +1,3 @@
-/**
- * Server-side persistence for Guided Review standing instructions (#1265).
- *
- * Contract: read/write round-trip through `${dataDir}/guide-instructions.md`
- * (trimmed, bounded at GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS); blank input
- * deletes the file rather than persisting whitespace; and launch resolution
- * prefers explicit launch-body text over the stored value, yielding
- * undefined when neither has text so instruction-less launches stay
- * byte-identical to pre-feature prompts.
- */
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

@@ -1,19 +1,10 @@
-/**
- * Settings -> Decision data's Insights (approval `.product/approved/decision-data/`, 2026-11-05): numbers over what the
- * Inbox already stores. It never bottlenecks the server: one calculation, a generator that offers to give way every few
- * hundred records, which `runInSlices` runs at most about 4 ms at a time, handing the event loop back in between and
- * stopping when the reader has gone. It runs only when a request asks: no Worker, cache, timer or stored totals.
- *
- * The one thing it adds to the store is a line per question when a thread or project is deleted (`DECISION_LINES_FILE`):
- * ids, times and what became of it, no words. Plan and code review decisions are not here; they never touch the Inbox.
- */
+/** Insights numbers computed over what the Inbox already stores, in slices (`runInSlices`, about 4 ms at a time) so the server's event loop is never held. Deletions keep one line per question (`DECISION_LINES_FILE`): ids, times and outcome, no words. */
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { INBOX_HOST_NAMES, isInboxActionReport, isInboxNote, type DecisionDataSummary, type DecisionGroup, type DecisionTrend, type InboxMessage, type InboxQuestionRecord } from "@plannotator/core/inbox-types";
 
 export type DecisionFate = "answered" | "skipped" | "set_aside" | "replaced" | "archived" | "open" | "picked_unsent";
 
-/** One question an agent asked; action items are not decisions. */
 export interface DecisionRow {
   id: string;
   thread_id: string;
@@ -21,11 +12,9 @@ export interface DecisionRow {
   agent: string;
   kind: string;
   asked_at: number;
-  /** The last pick's moment, or the Send's when the Send carried the answer. */
   answered_at: number | null;
   sent_at: number | null;
   fate: DecisionFate;
-  /** Whether the answer took the recommendation: null unless the question named one and was answered. */
   took: boolean | null;
   offered: boolean;
   stopped: boolean;
@@ -35,26 +24,19 @@ export interface DecisionRow {
 }
 
 export interface DecisionDataInput {
-  /** A project's id -> the head of its combined group (a project no longer stored: itself). */
   headOf: (projectId: string) => string;
-  /** A project's id -> the name the person sees, or null for a project no longer stored. */
   labelOf: (projectId: string) => string | null;
   messages: readonly InboxMessage[];
-  /** The store's own map, read only, so a calculation adds no copy of it. */
   byId: ReadonlyMap<string, InboxMessage>;
-  /** The Inbox's own rule: the archive closed this message's questions. One an agent sent after the archive line stays live. */
   closedByArchive: (message: InboxMessage) => boolean;
-  /** The Inbox's own rule: the questions (`<message id>/<key>`) of a thread that a still-waiting Re-ask note lists, about to be asked again. */
   reaskListedIds: (threadId: string) => ReadonlySet<string>;
   questions: readonly InboxQuestionRecord[];
-  /** `DECISION_LINES_FILE`'s text, read before the calculation. */
   deleted?: string;
 }
 
 export interface DecisionQuery {
   since: number | null;
   until: number;
-  /** Minutes east of UTC at the reader. */
   tz_offset_min: number;
   now: number;
 }
@@ -65,7 +47,6 @@ const ms = (iso: string | null | undefined): number | null => {
   return Number.isFinite(at) ? at : null;
 };
 
-/** An agent as the person sees it: its host's name ("Claude Code"), never a session or machine. */
 export function agentLabel(author: { host?: string | null; name?: string | null }): string {
   if (author.host) return INBOX_HOST_NAMES[author.host] ?? author.host;
   if (author.name) return author.name;
@@ -82,7 +63,6 @@ function tookRecommendation(question: InboxQuestionRecord): { offered: boolean; 
   return { offered: true, took: picked.size === recommended.length && recommended.every((label) => picked.has(label)) };
 }
 
-/** The row of one stored question, or null when it is not a question an agent asked. */
 export function decisionRowOf(question: InboxQuestionRecord, byId: ReadonlyMap<string, InboxMessage>, headOf: (projectId: string) => string, closedByArchive: (message: InboxMessage) => boolean): DecisionRow | null {
   if (question.kind === "action") return null;
   const message = byId.get(question.message_id);
@@ -123,7 +103,6 @@ const readableTime = (at: unknown): at is number => typeof at === "number" && Nu
 const readableTimeOrNull = (at: unknown): at is number | null => at === null || readableTime(at);
 const FATES: ReadonlySet<unknown> = new Set<DecisionFate>(["answered", "skipped", "set_aside", "replaced", "archived", "open", "picked_unsent"]);
 
-/** Every field the count and the CSV use, of the type they use it as. */
 function isReadableRow(row: Partial<Record<keyof DecisionRow, unknown>> | null | undefined): row is DecisionRow {
   return (
     typeof row === "object" &&
@@ -147,7 +126,6 @@ function isReadableRow(row: Partial<Record<keyof DecisionRow, unknown>> | null |
   );
 }
 
-/** A stored record's row, or null for one that can't be read: it costs its own number, never the count, the CSV or a delete. */
 function readableRowOf(question: InboxQuestionRecord, byId: ReadonlyMap<string, InboxMessage>, headOf: (projectId: string) => string, closedByArchive: (message: InboxMessage) => boolean): DecisionRow | null {
   try {
     const row = decisionRowOf(question, byId, headOf, closedByArchive);
@@ -157,15 +135,9 @@ function readableRowOf(question: InboxQuestionRecord, byId: ReadonlyMap<string, 
   }
 }
 
-// ── Numbers kept when a thread is deleted (round 2) ──
-
-/** One line per question of a deleted thread or project, in the store's folder, so `uninstall --purge` removes it with the store. */
 export const DECISION_LINES_FILE = "decision-lines.jsonl";
 
-/**
- * The lines a deletion keeps: no prompt, choice, answer or note. A question nobody answered no longer waits on anyone
- * once its thread is gone, so it stays in the totals as closed, not as waiting forever.
- */
+/** Kept lines hold no prompt, choice, answer or note. A question nobody answered stays in the totals as closed once its thread is gone. */
 export function decisionLinesOf(questions: Iterable<InboxQuestionRecord>, byId: ReadonlyMap<string, InboxMessage>, labelOf: (projectId: string) => string | null, closedByArchive: (message: InboxMessage) => boolean): string {
   let out = "";
   for (const question of questions) {
@@ -177,7 +149,6 @@ export function decisionLinesOf(questions: Iterable<InboxQuestionRecord>, byId: 
   return out;
 }
 
-/** The kept lines' text, or empty when nothing was ever deleted. Async: the read holds nothing up. */
 export async function readDecisionLines(storeDir: string): Promise<string> {
   try {
     return await readFile(join(storeDir, DECISION_LINES_FILE), "utf8");
@@ -192,18 +163,15 @@ function rowOfLine(raw: string): (DecisionRow & { project_name: string | null })
   try {
     line = JSON.parse(raw);
   } catch {
-    return null; // A line torn by a crash mid-write.
+    return null;
   }
   const row = line as (DecisionRow & { project_name?: unknown }) | null;
-  // A hand edit or a later format: what can't be read is skipped, as a torn line is.
   if (!isReadableRow(row)) return null;
   return { ...row, project_name: typeof row.project_name === "string" ? row.project_name : null };
 }
 
-/** How often a loop offers to give way. The driver reads the clock only here. */
 const EVERY = 256;
 
-/** Every row: the stored questions, then the kept lines of deleted ones (a line whose question is still stored counts once). */
 function* rowsSteps(input: DecisionDataInput): Generator<void, { rows: DecisionRow[]; labelOf: (projectId: string) => string }> {
   const rows: DecisionRow[] = [];
   const stored = new Set<string>();
@@ -230,13 +198,10 @@ function* rowsSteps(input: DecisionDataInput): Generator<void, { rows: DecisionR
   return { rows, labelOf: (id) => input.labelOf(id) ?? names.get(id) ?? id };
 }
 
-// ── The driver ──
-
 export const SLICE_MS = 4;
 
 export class DecisionDataAborted extends Error {}
 
-/** Run a calculation at most about `SLICE_MS` at a time, giving the event loop back between slices. Stops when the reader has gone. */
 export async function runInSlices<T>(steps: Generator<void, T>, signal?: AbortSignal): Promise<T> {
   let begun = performance.now();
   for (;;) {
@@ -250,20 +215,12 @@ export async function runInSlices<T>(steps: Generator<void, T>, signal?: AbortSi
   }
 }
 
-/**
- * When the person wrote this message in their own words, or null when it is not such a message: an agent's, a note the
- * Inbox wrote, a Re-ask press (the Inbox writes its words, the person typed none), or a reply that carried answers
- * (`carried`: the questions' `sent_reply_id`s). Decision data's "settled in words" and the decision export's
- * "Answered in words" both read it.
- */
 export function ownWordsTime(message: InboxMessage, carried: ReadonlySet<string>): number | null {
   if (message.author.kind !== "person" || isInboxNote(message) || (message.reask?.length ?? 0) > 0) return null;
   const at = ms(message.created_at);
   if (!readableTime(at) || carried.has(message.id)) return null;
   return at;
 }
-
-// ── Trends: the last 30 days against the 30 before. Two periods, no series, nothing stored. ──
 
 export const TREND_DAYS = 30;
 /** A rate is not shown under this many answers; each trend period needs this many behind it. */
@@ -282,20 +239,13 @@ const median = (values: readonly number[]): number | null => {
   return sorted[Math.floor(sorted.length / 2)]!;
 };
 
-/** Two shares: is the gap bigger than chance? A plain two-proportion check. */
 function clearOfChance(a: number, n: number, b: number, m: number): boolean {
   const pooled = (a + b) / (n + m);
   const spread = Math.sqrt(pooled * (1 - pooled) * (1 / n + 1 / m));
   return spread > 0 && Math.abs(a / n - b / m) / spread >= TREND_Z;
 }
 
-/**
- * At most three lines, and none unless the history covers both full periods, each has enough behind it, and the change
- * is big enough to notice and too big for chance. Anything else shows nothing.
- *
- * The periods are whole UTC days and today counts in the recent one, so on unchanged data a line can change only when
- * the UTC date turns over. UTC because the reader's offset moves on a daylight-saving day, and two windows should agree.
- */
+/** Periods are whole UTC days (the reader's offset moves on daylight-saving days and windows should agree); today counts in the recent period. */
 export function trendsOf(rows: readonly DecisionRow[], now: number, earliest: number | null): DecisionTrend[] {
   const end = (Math.floor(now / DAY_MS) + 1) * DAY_MS;
   const cut = end - TREND_DAYS * DAY_MS;
@@ -338,7 +288,6 @@ export function trendsOf(rows: readonly DecisionRow[], now: number, earliest: nu
   if (recent.length >= RATE_MIN && before.length >= RATE_MIN) {
     const [recentMiddle, beforeMiddle] = [median(recent)!, median(before)!];
     if (Number.isFinite(recentMiddle) && Number.isFinite(beforeMiddle) && beforeMiddle > 0 && Math.abs(recentMiddle - beforeMiddle) / beforeMiddle >= TREND_WAIT_SHARE) {
-      // Medians: compare how many in each period ran longer than the middle of both.
       const middle = median([...recent, ...before])!;
       const over = (list: number[]) => list.reduce((count, wait) => count + (wait > middle ? 1 : 0), 0);
       if (clearOfChance(over(recent), recent.length, over(before), before.length)) {
@@ -349,8 +298,6 @@ export function trendsOf(rows: readonly DecisionRow[], now: number, earliest: nu
   rate("skips", skipped, decided);
   return out;
 }
-
-// ── The summary ──
 
 /** Answers with under this between them are one sitting. */
 const SITTING_GAP_MS = 5 * 60_000;
@@ -363,10 +310,8 @@ function* summarySteps(input: DecisionDataInput, query: DecisionQuery): Generato
   const inRange = (at: number | null): boolean => at !== null && (query.since === null || at >= query.since) && at <= query.until;
   const counts = { answered: 0, skipped: 0, set_aside: 0, replaced: 0 };
   const done: DecisionRow[] = [];
-  // The whole history, whatever range is showing: enough to say "too early" and "nothing yet" with one request.
   const history = { asked: 0, answered: 0, earliest: null as number | null };
   let waiting = 0;
-  // Read once per thread, and only for a thread with an open question.
   const reaskedByThread = new Map<string, ReadonlySet<string>>();
   const reasked = (row: DecisionRow): boolean => {
     let listed = reaskedByThread.get(row.thread_id);
@@ -374,7 +319,7 @@ function* summarySteps(input: DecisionDataInput, query: DecisionQuery): Generato
       try {
         listed = input.reaskListedIds(row.thread_id);
       } catch {
-        listed = new Set(); // A record that can't be read costs its own number.
+        listed = new Set();
       }
       reaskedByThread.set(row.thread_id, listed);
     }
@@ -385,7 +330,6 @@ function* summarySteps(input: DecisionDataInput, query: DecisionQuery): Generato
     history.asked++;
     if (row.fate === "answered") history.answered++;
     if ((row.fate === "answered" || row.fate === "skipped") && row.answered_at !== null && (history.earliest === null || row.answered_at < history.earliest)) history.earliest = row.answered_at;
-    // As the Inbox reads it: one a waiting Re-ask lists is the agent's to ask again; one picked since still waits for its Send.
     if (row.fate === "picked_unsent" || (row.fate === "open" && !reasked(row))) waiting++;
     if (inRange(row.asked_at) && (row.fate === "set_aside" || row.fate === "replaced")) counts[row.fate]++;
     if ((row.fate === "answered" || row.fate === "skipped") && inRange(row.answered_at)) {
@@ -397,7 +341,6 @@ function* summarySteps(input: DecisionDataInput, query: DecisionQuery): Generato
   done.sort((a, b) => a.answered_at! - b.answered_at!);
   yield;
 
-  // Days, in the reader's zone.
   const dayOf = (at: number) => new Date(at + query.tz_offset_min * 60_000).toISOString().slice(0, 10);
   const dayMap = new Map<string, { day: string; answered: number; skipped: number; own_words: number }>();
   const dayEntry = (day: string) => {
@@ -410,13 +353,11 @@ function* summarySteps(input: DecisionDataInput, query: DecisionQuery): Generato
     dayEntry(dayOf(row.answered_at!))[row.fate === "answered" ? "answered" : "skipped"]++;
   }
 
-  // The person's plain replies. One says something; what it settles is not stored.
   const carried = new Set<string>();
   for (const question of input.questions) {
     if (++tick % EVERY === 0) yield;
     if (question.sent_reply_id) carried.add(question.sent_reply_id);
   }
-  // The person's own words by thread, as times: agent messages are not needed below, so they are not held.
   const ownWordsAt = new Map<string, number[]>();
   for (const message of input.messages) {
     if (++tick % EVERY === 0) yield;
@@ -439,7 +380,6 @@ function* summarySteps(input: DecisionDataInput, query: DecisionQuery): Generato
     if (ownWordsAt.get(row.thread_id)?.some((at) => at > row.asked_at)) settledInWords++;
   }
 
-  // Pace: sittings of 3 or more answers with under five minutes between them.
   const fast = { offered: 0, taken: 0 };
   const slow = { offered: 0, taken: 0 };
   let run: DecisionRow[] = [];
@@ -539,24 +479,17 @@ function* summarySteps(input: DecisionDataInput, query: DecisionQuery): Generato
   };
 }
 
-/** The route's way in: the calculation, a slice at a time. */
 export const decisionDataSummary = (input: DecisionDataInput, query: DecisionQuery, signal?: AbortSignal): Promise<DecisionDataSummary> => runInSlices(summarySteps(input, query), signal);
-
-// ── The export: one line per question, times and ids, no words ──
 
 const iso = (at: number | null) => (at === null ? "" : new Date(at).toISOString());
 
-/**
- * A CSV cell. An agent or project name can start like a spreadsheet formula: the apostrophe keeps it text. Spaces
- * before the sign and the full-width signs count too, since a spreadsheet may read past or fold them.
- */
+/** An agent or project name can start like a spreadsheet formula: the apostrophe keeps it text, including after leading spaces and full-width signs. */
 function cell(value: string | number | boolean | null): string {
   const text = value === null ? "" : String(value);
   const safe = typeof value === "string" && /^\s*[=+\-@\uFF1D\uFF0B\uFF0D\uFF20]|^[\t\r]/.test(text) ? `'${text}` : text;
   return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
 
-/** The range as the page cuts it: what waits stays whatever its age, a decision goes by when it was made, anything else by when it was asked. */
 function csvInRange(row: DecisionRow, since: number): boolean {
   if (row.fate === "open" || row.fate === "picked_unsent") return true;
   const at = row.fate === "answered" || row.fate === "skipped" ? (row.answered_at ?? row.asked_at) : row.asked_at;

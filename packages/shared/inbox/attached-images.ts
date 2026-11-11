@@ -1,36 +1,14 @@
-/**
- * Plannotator Inbox: pictures sent only as attachments (the owner,
- * 2026-11-02). An attached image shows as a tile at the bottom of the
- * message, away from the words about it, so the person scrolls down to find
- * what an option or a finding looks like. send_message's result then adds
- * one line of advice for the agent's next message. Advice only: the send
- * succeeds as it is, the person sees nothing different, and nothing more is
- * sent.
- */
+/** Advice only: pictures attached but not shown in the body get one line in send_message's result; the send itself is unchanged. */
 
 import { basename, isAbsolute, resolve } from "node:path";
 import { isReviewImagePath } from "../diff-paths";
 import { inboxMessageImageRefsInOrder, pathCandidates } from "./message-images";
 
-/** The bases a relative path may resolve from, without the missing ones and without repeats. */
 function basesOf(...bases: (string | null)[]): string[] {
   return [...new Set(bases.filter((base): base is string => !!base))];
 }
 
-/**
- * The attachments (as the agent wrote them) that are pictures (an image the
- * window shows: png, jpg, gif, webp, svg, avif, bmp, ico, apng) the body does
- * not also show with `![alt](path)` or `<img src>`.
- *
- * A body image counts as the attachment when it names the same file in any
- * form the window tries (`pathCandidates`: as written, without a `?query` or
- * `#fragment`, percent-decoded), compared without case where the file system
- * ignores it (macOS, Windows). A relative path resolves from either base
- * (`attachmentBase`, where relative attachments start, and `bodyBase`, where
- * relative body images start), since the two may differ for one file. Only
- * when a side has no base to resolve from is the bare file name compared:
- * two attachments with one name in different folders stay apart.
- */
+/** A body image matches an attachment when it names the same file in any form the window tries, compared without case where the file system ignores it. Relative paths resolve from either base. */
 export function attachedImagesNotInBody(
   body: string,
   attachments: readonly string[] | undefined,
@@ -43,7 +21,6 @@ export function attachedImagesNotInBody(
   if (pictures.length === 0) return [];
   const fold = platform === "darwin" || platform === "win32" ? (path: string) => path.toLowerCase() : (path: string) => path;
   const bases = basesOf(attachmentBase, bodyBase);
-  /** Every absolute path a src may mean, or null when it is relative and nothing resolves it. */
   const fullPaths = (src: string): string[] | null => {
     if (isAbsolute(src)) return [fold(resolve(src))];
     return bases.length > 0 ? bases.map((base) => fold(resolve(base, src))) : null;

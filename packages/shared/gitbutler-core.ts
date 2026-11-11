@@ -1,11 +1,3 @@
-/**
- * Runtime-neutral GitButler code-review support.
- *
- * GitButler integration was originally proposed by Dan Susman in PR #566.
- * This implementation keeps that user flow while using the modern VCS seam
- * and authoritative Git object-to-object diffs.
- */
-
 import { lstat, readlink } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 
@@ -32,10 +24,8 @@ import {
   validateFilePath,
 } from "./review-core";
 
-/** Oldest GitButler CLI release whose status contract this integration supports. */
 export const GITBUTLER_MIN_VERSION = "0.21.0";
 
-/** Diff id for all applied GitButler workspace changes. */
 export const GITBUTLER_WORKSPACE_DIFF = "gitbutler:workspace" as const;
 
 const GITBUTLER_STACK_PREFIX = "gitbutler:stack:";
@@ -49,18 +39,9 @@ const VERSION_TIMEOUT_MS = 5_000;
 const OBJECT_ID_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i;
 const STATUS_CACHE_MS = 1_000;
 
-/**
- * GitButler has shipped two spellings of the global JSON output flag:
- * 0.21.x accepts only `--format json` (gitbutlerapp/gitbutler#14061) while
- * 0.22.0+ accepts only `--json` (gitbutlerapp/gitbutler#15026), and each
- * release rejects the other spelling as an unknown argument. The primary
- * spelling matches GITBUTLER_MIN_VERSION; when a status call fails with
- * clap's unexpected-argument rejection for the exact flag we passed, the
- * other spelling is tried once. Any other failure propagates unchanged.
- */
+/** GitButler 0.21.x accepts only `--format json` and 0.22.0+ only `--json`, rejecting the other as an unknown argument. On that rejection the other spelling is tried once; any other failure propagates. */
 interface GitButlerStatusSyntax {
   args: readonly string[];
-  /** The flag clap names in its unexpected-argument rejection. */
   flag: string;
   label: string;
 }
@@ -70,49 +51,39 @@ const GITBUTLER_STATUS_SYNTAXES: readonly [GitButlerStatusSyntax, GitButlerStatu
   { args: ["--json", "status"], flag: "--json", label: "but --json status" },
 ];
 
-/** Narrow sniff for clap rejecting exactly the JSON flag this syntax passed. */
 function isUnexpectedArgumentRejection(result: GitCommandResult, flag: string): boolean {
   return result.exitCode !== 0 && result.stderr.includes(`unexpected argument '${flag}'`);
 }
 
-/** Runtime operations needed by the shared GitButler provider. */
 export interface ReviewGitButlerRuntime extends ReviewGitRuntime {
   runBut(args: string[], options?: GitCommandOptions): Promise<GitCommandResult>;
 }
 
-/** Validated subset of one GitButler status commit. */
 export interface GitButlerCommit {
   commitId: string;
-  /** GitButler synthetic conflict commits contain internal resolution trees. */
+  /** Synthetic conflict commits contain internal resolution trees. */
   conflicted?: boolean;
 }
 
-/** Validated subset of one GitButler virtual branch. */
 export interface GitButlerBranch {
   name: string;
-  /** Newest commit first, matching the GitButler status contract. */
   commits: GitButlerCommit[];
 }
 
-/** Validated subset of one GitButler stack. */
 export interface GitButlerStack {
-  /** Top-most branch first, matching the GitButler status contract. */
   branches: GitButlerBranch[];
 }
 
-/** Validated subset of `but --format json status` (0.21.x) / `but --json status` (0.22.0+). */
 export interface GitButlerStatus {
   mergeBase: GitButlerCommit;
   stacks: GitButlerStack[];
 }
 
-/** A parsed Plannotator GitButler diff id. */
 export type ParsedGitButlerDiffType =
   | { kind: "workspace" }
   | { kind: "stack"; branchName: string }
   | { kind: "branch"; branchName: string };
 
-/** Explicit boundary error for unsupported CLI versions or invalid CLI data. */
 export class GitButlerContractError extends Error {
   readonly _tag = "GitButlerContractError";
 
@@ -164,15 +135,11 @@ function parseBranch(value: unknown, path: string): GitButlerBranch {
   if (typeof record.name !== "string") {
     throw new GitButlerContractError(`GitButler status field ${path}.name must be a string.`);
   }
-  // Current GitButler can emit an empty name for a deleted, advanced, or
-  // otherwise ambiguous stack segment. Workspace remains authoritative; such
-  // a segment simply cannot back a stable named selector.
+  // GitButler can emit an empty name for a deleted, advanced, or ambiguous stack segment; it cannot back a stable named selector.
   const name = record.name;
   const commits = requireArray(record.commits, `${path}.commits`)
     .map((commit, index) => parseCommit(commit, `${path}.commits[${index}]`));
-  // Validate this current-schema field even though committed-only views do not
-  // consume it. Its presence distinguishes the supported status contract from
-  // older, incompatible output.
+  // Validated because its presence distinguishes the supported status contract from older output.
   requireArray(record.upstreamCommits, `${path}.upstreamCommits`);
   return { name, commits };
 }
@@ -185,7 +152,6 @@ function parseStack(value: unknown, path: string): GitButlerStack {
   return { branches };
 }
 
-/** Parse and validate the status fields Plannotator relies on. Unknown fields are allowed. */
 export function parseGitButlerStatus(
   output: string,
   commandLabel = GITBUTLER_STATUS_SYNTAXES[0].label,
@@ -238,7 +204,6 @@ function versionAtLeast(actual: ParsedVersion, minimum: ParsedVersion): boolean 
 }
 
 const versionChecks = new WeakMap<ReviewGitButlerRuntime, Promise<void>>();
-/** Index into GITBUTLER_STATUS_SYNTAXES of the spelling this runtime's CLI last accepted. */
 const statusSyntaxPreferences = new WeakMap<ReviewGitButlerRuntime, 0 | 1>();
 const statusCaches = new WeakMap<
   ReviewGitButlerRuntime,
@@ -301,10 +266,7 @@ async function loadStatus(runtime: ReviewGitButlerRuntime, cwd: string): Promise
       timeoutMs: STATUS_TIMEOUT_MS,
     });
     if (isUnexpectedArgumentRejection(result, syntax.flag)) {
-      // This CLI does not know this spelling of the JSON flag; try the other
-      // spelling exactly once. Only clap's unexpected-argument rejection for
-      // the flag we passed triggers the retry — a real status failure must
-      // keep failing loudly below.
+      // Only clap's unexpected-argument rejection for the flag we passed triggers the retry; a real status failure must keep failing.
       syntaxIndex = preferredIndex === 0 ? 1 : 0;
       const fallback = GITBUTLER_STATUS_SYNTAXES[syntaxIndex];
       const retried = await runtime.runBut([...fallback.args], {
@@ -364,7 +326,6 @@ async function getActiveWorkspaceRoot(
   return root.exitCode === 0 ? root.stdout.trim() || null : null;
 }
 
-/** Detect an actively checked-out GitButler workspace and return its repository root. */
 export function detectGitButlerWorkspace(
   runtime: ReviewGitButlerRuntime,
   cwd?: string,
@@ -388,7 +349,6 @@ function decodeTarget(diffType: string, prefix: string): string | null {
   }
 }
 
-/** Parse one namespaced GitButler diff id. */
 export function parseGitButlerDiffType(diffType: string): ParsedGitButlerDiffType | null {
   if (diffType === GITBUTLER_WORKSPACE_DIFF) return { kind: "workspace" };
   const stackBranch = decodeTarget(diffType, GITBUTLER_STACK_PREFIX);
@@ -477,7 +437,6 @@ function buildGitButlerContext(root: string, status: GitButlerStatus): GitContex
   };
 }
 
-/** Build review context for the active GitButler workspace. */
 export async function getGitButlerContext(
   runtime: ReviewGitButlerRuntime,
   cwd?: string,
@@ -488,7 +447,6 @@ export async function getGitButlerContext(
   return buildGitButlerContext(root, status);
 }
 
-/** Stable revision for the picker topology carried beside a diff snapshot. */
 export function getGitButlerContextRevision(context?: GitContext): string | null {
   if (context?.vcsType !== "gitbutler") return null;
   return hashFingerprintPart(JSON.stringify([
@@ -498,11 +456,6 @@ export function getGitButlerContextRevision(context?: GitContext): string | null
   ]));
 }
 
-/**
- * Fingerprint a patch and the exact GitButler topology snapshot that produced
- * it. The server can compute the startup baseline without asking the mutable
- * workspace for a second status revision.
- */
 export function getGitButlerPatchFingerprint(
   diffType: DiffType,
   patch: string,
@@ -695,7 +648,6 @@ function snapshotResult(
   };
 }
 
-/** Produce an authoritative patch for one GitButler workspace, stack, or branch view. */
 export async function runGitButlerDiff(
   runtime: ReviewGitButlerRuntime,
   diffType: DiffType,
@@ -781,10 +733,6 @@ async function readWorkingTreeFile(
   return runtime.readTextFile(fullPath);
 }
 
-/**
- * Which object each side of a changed file is for a GitButler view: the one
- * table behind both hunk expansion (text) and the image preview (bytes).
- */
 async function resolveGitButlerSideSources(
   runtime: ReviewGitButlerRuntime,
   diffType: DiffType,
@@ -838,7 +786,6 @@ async function readGitButlerSideText(
     : readWorkingTreeFile(runtime, root, source.path);
 }
 
-/** Resolve full old/new file content for expandable GitButler diffs. */
 export async function getGitButlerFileContentsForDiff(
   runtime: ReviewGitButlerRuntime,
   diffType: DiffType,
@@ -854,7 +801,6 @@ export async function getGitButlerFileContentsForDiff(
   };
 }
 
-/** One side of a GitButler view as raw bytes for the image preview. */
 export async function getGitButlerFileBytesForDiff(
   runtime: ReviewGitButlerRuntime,
   diffType: DiffType,
@@ -871,16 +817,11 @@ export async function getGitButlerFileBytesForDiff(
   return readDiffSideBytes(runtime, source, maxBytes, sources.cwd);
 }
 
-/**
- * The repository at a GitButler view's new side (All files): the working tree
- * for the Workspace view, the stack or branch tip for committed views.
- */
 export async function listGitButlerFilesForDiff(
   runtime: ReviewGitButlerRuntime,
   diffType: DiffType,
   cwd?: string,
 ): Promise<RepoFileListing | null> {
-  // Which revision a side reads does not depend on the path; any valid one will do.
   const sources = await resolveGitButlerSideSources(runtime, diffType, "README", undefined, cwd);
   const side = sources?.new;
   if (!side || !sources.cwd) return null;
@@ -890,7 +831,6 @@ export async function listGitButlerFilesForDiff(
   );
 }
 
-/** Fingerprint the exact visible GitButler patch for the freshness endpoint. */
 export async function getGitButlerDiffFingerprint(
   runtime: ReviewGitButlerRuntime,
   diffType: DiffType,
