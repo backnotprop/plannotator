@@ -153,7 +153,7 @@ describe("Inbox over your tailnet", () => {
     expect((await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/threads`, { headers: { Host: `${MAGIC}:${inbox.port}` } })).status).toBe(403);
   });
 
-  test("the window page (#2032): compressed through the tailnet (br and gzip, Vary, a weak ETag and 304, private no-cache), unchanged on loopback, and the listener's checks still run first", async () => {
+  test("the window page (#2032): compressed through the tailnet (br and gzip, Vary, a weak ETag and 304, private no-cache), the same on loopback, and the listener's checks still run first", async () => {
     const dataDir = world({ inboxTailscale: true });
     const ts = fakeTailscale();
     const page = `<!doctype html><title>Inbox</title>${"<p>the window, a large single-file page</p>\n".repeat(20000)}`;
@@ -212,19 +212,26 @@ describe("Inbox over your tailnet", () => {
     expect((await raw("/", { "Accept-Encoding": "br", "If-None-Match": etag }, "GET", null)).status).toBe(403);
     expect((await raw("/", { "Accept-Encoding": "br", "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty" })).status).toBe(403);
 
-    // The data routes stay no-store and uncompressed.
+    // The data routes stay no-store, and a JSON read takes the same encoding path as on loopback (inbox-encoding.ts).
+    const project = inbox.store.ensureProject({ name: "shop", root: dataDir });
+    for (let i = 0; i < 8; i++) {
+      inbox.store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: "s1", name: "Claude Code" }, subject: `Thread ${i}`, body: "Words for the list. ".repeat(40) });
+    }
     const threads = await raw("/api/inbox/threads", { "Accept-Encoding": "br" });
     expect(threads.headers.get("cache-control")).toBe("no-store");
-    expect(threads.headers.get("content-encoding")).toBeNull();
+    expect(threads.headers.get("content-encoding")).toBe("br");
+    expect(threads.headers.get("vary")).toBe("Accept-Encoding");
+    expect(threads.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(JSON.parse(brotliDecompressSync(Buffer.from(await threads.arrayBuffer())).toString("utf8"))).toBeTruthy();
 
-    // The window's own loopback port: exactly as before.
+    // The window's own loopback port answers the same page the same way: one tag, compressed, revalidated.
     const local = await fetch(`http://127.0.0.1:${inbox.port}/`, { headers: { "Accept-Encoding": "gzip, deflate, br" }, decompress: false } as RequestInit);
     expect(local.status).toBe(200);
-    expect(local.headers.get("content-encoding")).toBeNull();
-    expect(local.headers.get("vary")).toBeNull();
-    expect(local.headers.get("etag")).toBeNull();
-    expect(local.headers.get("cache-control")).toBe("no-store");
-    expect(await local.text()).toBe(page);
+    expect(local.headers.get("content-encoding")).toBe("br");
+    expect(local.headers.get("vary")).toBe("Accept-Encoding");
+    expect(local.headers.get("etag")).toBe(etag);
+    expect(local.headers.get("cache-control")).toBe("private, no-cache");
+    expect(brotliDecompressSync(Buffer.from(await local.arrayBuffer())).toString("utf8")).toBe(page);
   });
 
   test("the window's packed scripts (#2593) pass the same listener checks as the page and go out compressed, as the page does", async () => {
@@ -250,10 +257,10 @@ describe("Inbox over your tailnet", () => {
     expect((await raw("/assets/entry-a.js", {}, "someone@example.com")).status).toBe(403);
     expect((await raw("/assets/entry-a.js", { Host: `127.0.0.1:${inbox.port}` })).status).toBe(403);
     expect((await raw("/assets/entry-a.js", { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "script" })).status).toBe(403);
-    // On loopback, uncompressed.
+    // On loopback, compressed the same way.
     const local = await fetch(`http://127.0.0.1:${inbox.port}/assets/entry-a.js`, { headers: { "Accept-Encoding": "gzip, deflate, br" }, decompress: false } as RequestInit);
-    expect(local.headers.get("content-encoding")).toBeNull();
-    expect(await local.text()).toBe(entry);
+    expect(local.headers.get("content-encoding")).toBe("br");
+    expect(brotliDecompressSync(Buffer.from(await local.arrayBuffer())).toString("utf8")).toBe(entry);
   });
 
   test("through the tailnet the connection surface is unreachable, even with the token and a loopback Host claim, and the window's guards still apply", async () => {
