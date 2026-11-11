@@ -5750,7 +5750,44 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 .ib-tg-stack .ib-mk > svg, .ib-tg-stack .ib-mk > img { width: var(--ib-mark-20-g); height: var(--ib-mark-20-g); }
 .ib-tg-stack .ib-mk + .ib-mk { margin-left: -5px; }
 .ib-tg-plus { display: inline-flex; align-items: center; height: 16px; margin-left: 3px; padding: 0 5px; border-radius: 999px; font-size: var(--ib-fs-10-5, 10.5px); font-weight: 600; color: var(--muted-foreground); background: var(--muted); }
-.ib-tg-hwho { display: inline-flex; align-items: center; gap: 6px; color: var(--foreground); font-weight: 500; min-width: 0; }
+
+/* Who is in a thread with two or more sessions (ThreadSessions.tsx, issue #3108): the sessions' marks and "N sessions"
+   on the header's line, the count and time at its right. Opened, each session's name and state on a band laid over the
+   line from its left (nothing under it moves; it wraps down over the first message when the names need more room). */
+.ib-tmeta[data-sessions] { position: relative; margin-top: 2px; gap: 6px 12px; }
+.ib-tmeta[data-sessions] > .ib-tmeta-rest { margin-left: auto; gap: 2px 8px; }
+.ib-ss { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; white-space: normal; }
+.ib-ss-tog { display: inline-flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px 0 4px; border: 0; border-radius: 15px; background: none; color: inherit; font: inherit; cursor: pointer; }
+@media (hover: hover) { .ib-ss-tog:hover { background: var(--muted); } }
+.ib-ss-pile { display: inline-flex; align-items: center; flex: none; }
+.ib-ss .ib-mk { width: var(--ib-mark-20); height: var(--ib-mark-20); border-radius: var(--ib-mark-20-r); background: var(--muted); }
+.ib-ss .ib-mk > svg, .ib-ss .ib-mk > img { width: var(--ib-mark-20-g); height: var(--ib-mark-20-g); }
+.ib-ss .ib-mk.ib-face > img { width: var(--ib-mark-20); height: var(--ib-mark-20); }
+.ib-ss-pile .ib-mk { box-shadow: 0 0 0 2px var(--card); }
+.ib-ss-pile .ib-mk + .ib-mk { margin-left: -6px; }
+.ib-ss-n { font-size: var(--ib-fs-13, 13px); font-weight: 500; color: var(--muted-foreground); }
+.ib-ss-band { position: absolute; z-index: 3; left: 0; top: 0; max-width: 100%; box-sizing: border-box; padding: 5px 14px 5px 4px; border-radius: 15px; background: var(--muted); cursor: pointer; }
+.ib-ss-list { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin: 0; padding: 0; list-style: none; }
+.ib-ss-item { display: inline-flex; align-items: center; gap: 7px; min-width: 0; max-width: 100%; margin: 0; padding: 0; }
+.ib-ss-item::before, .ib-ss-item::marker { content: none; }
+.ib-ss-none { display: none; }
+.ib-ss-txt { display: inline-flex; align-items: baseline; gap: 7px; min-width: 0; font-size: var(--ib-fs-13, 13px); }
+.ib-ss-nm { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--foreground); font-weight: 500; }
+.ib-ss-st { white-space: nowrap; color: var(--muted-foreground); }
+.ib-ss-item[data-state="waiting"] .ib-ss-st { color: var(--primary); font-weight: 500; }
+.ib-ss-item[data-state="ended"] .ib-ss-nm { color: var(--muted-foreground); font-weight: 450; }
+.pn-inbox .ib-ss-tog:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+/* A phone: the count and time on their own line; opened, the band goes below the marks, one session per line, each
+   run's mark in the first column. */
+.ib-tmeta[data-sessions]:has(> .ib-ss[data-phone]) > .ib-tmeta-rest { margin-left: 0; flex-basis: 100%; }
+.ib-ss[data-phone] { flex-wrap: wrap; }
+.ib-ss[data-phone] .ib-ss-tog { min-height: 44px; }
+.ib-ss[data-phone][data-open] .ib-ss-tog { background: var(--muted); }
+.ib-ss[data-phone] .ib-ss-band { position: static; flex-basis: 100%; margin-top: 4px; padding: 10px 14px 10px 10px; border-radius: 14px; cursor: default; }
+.ib-ss[data-phone] .ib-ss-list { display: grid; grid-template-columns: var(--ib-mark-20) minmax(0, 1fr); gap: 10px 10px; }
+.ib-ss[data-phone] .ib-ss-item { display: contents; }
+.ib-ss[data-phone] .ib-ss-none { display: block; }
+.ib-ss[data-phone] .ib-ss-nm { max-width: none; }
 
 .pn-inbox .ib-tg-opt:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 

@@ -5071,6 +5071,8 @@ function Inbox() {
   const filterMachine = route.page === 'inbox' && route.machine ? (machines.all.find((m) => m.id === route.machine) ?? null) : null;
   /** Every row the window has (every section, the snoozed too): where an agent's threads are found. */
   const windowRows = useMemo(() => (latest ? [...latest.sections.flatMap((section) => section.threads), ...(latest.snoozed ?? [])] : []), [latest]);
+  // A thread with several sessions names them as the sidebar's Agents section does (issue #3108).
+  const threadAgentContext = useMemo(() => ({ rows: windowRows, machines }), [windowRows, machines]);
   // The Agents section's filter (`#agent=<id>`): one agent's threads, named by its row's name.
   const filterAgent = useAgentListFilter(route.page === 'inbox' ? (route.agent ?? null) : null, machines, windowRows);
   const projectNames = useMemo(
@@ -7230,6 +7232,7 @@ function Inbox() {
               return blocked ? { name: blocked.name, onPress: () => setMachineUpdateOpen({ id: blocked.id, snooze: true }) } : undefined;
             })()}
             machine={machines.linked.find((m) => m.id === machineOf(thread.thread_id)) ?? null}
+            agentContext={threadAgentContext}
             // A Delete refused by a machine too old to take one: the error line's Update opens that machine's update dialog.
             onMachineUpdate={pageOffersUpdates(settings) ? (id) => setMachineUpdateOpen({ id, snooze: false }) : undefined}
             outbox={threadOutbox(outbox, thread)}

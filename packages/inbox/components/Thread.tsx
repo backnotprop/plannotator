@@ -31,7 +31,10 @@ import { INBOX_AUTO_SEND_ACK_NOTES, inboxAskingMessage, inboxPersonAnsweredSince
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { NOT_ATTACHED_TITLE, attachmentDeepLink, attachmentDisplayPath, attachmentForLink, openAttachmentTitle, projectFileOfLink, useRefRepo } from '../links';
 import { InboxApiError, InboxHeldError, inboxApi, type AttachmentsModel, type MachineView, type OutboxView, type TagMode } from '../api';
-import { awayLine, outboxLine } from '../machines';
+import { awayLine, outboxLine, type MachinesModel } from '../machines';
+import { threadSessions, type ThreadSession } from '../agents/model';
+import { useInboxAgentsWho } from '../agentsList';
+import { ThreadSessions } from './ThreadSessions';
 import { snoozeBackAbove } from '../snoozeBack';
 import { HeldWrites } from './HeldWrites';
 import type { HtmlEmbedHost } from '@plannotator/ui/components/html-embed/HtmlEmbedBlock';
@@ -138,14 +141,13 @@ import { fileGroupName, sentAnswersOf, sentReplyParts, type SentAnswerGroup } fr
 import { SkillsLine } from './SkillsLine';
 import { paintSkillReferences } from '../skillHighlight';
 import { paintTagReferences, type TagMarkPlace } from '../tagHighlight';
-import { TagModeNote, TagNotes, TagStack, useTagConnections, useTaggable } from './TagPicker';
+import { TagModeNote, TagNotes, useTagConnections, useTaggable } from './TagPicker';
 import {
   activeHandoff,
   effectiveTagMode,
   handoffName,
   messageTags,
   namesList,
-  participantsWords,
   sendTagsByTarget,
   tagDeliveryLine,
   tagName,
@@ -1299,6 +1301,11 @@ export interface ThreadPaneProps {
   /** When this thread came back from its snooze, while the person stays in it (snoozeBack.ts); else null. */
   snoozeBack?: string | null;
   /**
+   * The window's rows and machines (issue #3108): a thread with two or more sessions names each one as the sidebar's
+   * Agents section does (agents/model.ts `threadSessions`). Absent: a session is named by its label, else its agent.
+   */
+  agentContext?: { rows: readonly InboxListRow[]; machines: MachinesModel } | null;
+  /**
    * Seen on sight (design record "inbox-new-in-open-thread", approved
    * 2026-10-12): the seq the window's looks this visit covered (the look
    * recorded when the thread opened, raised as arrivals are seen). An agent
@@ -1698,6 +1705,10 @@ async function replyLanded(threadId: string, key: string): Promise<'yes' | 'no' 
 
 const THREAD_GONE_TEXT = 'This thread was deleted, so nothing was sent.';
 
+const NO_MACHINES: MachinesModel = { self: null, all: [], linked: [], names: new Map(), away: new Set() };
+const NO_ROWS: readonly InboxListRow[] = [];
+const NO_SESSIONS: readonly ThreadSession[] = [];
+
 /**
  * A named session's message author (issue #2450): the agent's name as ever, then " · " and the session's label in
  * the secondary colour, a little smaller and never bold, cut in the middle past ROW_LABEL_MAX and with "…" where the
@@ -1721,7 +1732,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null }: ThreadPaneProps) {
   /**
    * The questions this pane's own saves brought back (by `<message id>/<key>`), and how many saves landed. The thread
    * drawn is the one read, its questions never older than these: a read that left before the last keys were saved
@@ -2592,6 +2603,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const taggable = useTaggable(thread.thread_id, (box.open || !!file || multiAgent) && !resolved);
   // Each session's label (issue #2450): an agent message's author reads it, as the list read it.
   const sessionLabels = useSessionLabels();
+  // Two or more sessions (issue #3108): each one named as the sidebar names it, for the header's line.
+  const severalSessions = participants.length > 1;
+  const agentsWho = useInboxAgentsWho(severalSessions);
+  const sessions = useMemo(
+    () => (severalSessions ? threadSessions(participants, agentsWho, agentContext?.machines ?? NO_MACHINES, agentContext?.rows ?? NO_ROWS, machine?.id ?? null, sessionLabels) : NO_SESSIONS),
+    [severalSessions, participants, agentsWho, agentContext, machine, sessionLabels],
+  );
   const tagOwner = wordsAsking?.session ?? taggable?.owner?.session ?? null;
   const tagOpts: TagOption[] = useMemo(() => tagOptions(taggable, tagOwner, thread.project.id, whenTime), [taggable, tagOwner, thread.project.id]);
   // Until the list is read (or from an older Inbox) `@` is plain text.
@@ -6506,17 +6524,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         {/* The count and time; a one-message thread has none. No name chip: the top bar shows the name whenever the
             chip would (the owner, 2026-11-02: never the same words twice). */}
         {!one && !reviewView && (
-          <div className="ib-tmeta" data-thread-meta="">
+          <div className="ib-tmeta" data-thread-meta="" data-sessions={sessions.length > 1 ? '' : undefined}>
+            {/* Two or more sessions (approval "inbox-thread-session-names"): who, at the start; the count and time at the end. */}
+            {sessions.length > 1 && <ThreadSessions sessions={sessions} phone={phone} />}
             <span className="ib-tmeta-rest" data-thread-meta-rest="">
-                {participants.length > 1 && (
-                  <>
-                    <span className="ib-tg-hwho" data-thread-participants="">
-                      <TagStack participants={participants} />
-                      <span>{participantsWords(participants)}</span>
-                    </span>
-                    <span className="ib-tdot" aria-hidden="true" />
-                  </>
-                )}
                 <span>{plural(thread.messages.length, 'message')}</span>
                 <span className="ib-tdot" aria-hidden="true" />
                 <span>{spanWords(root.created_at, thread.messages[thread.messages.length - 1]!.created_at)}</span>
