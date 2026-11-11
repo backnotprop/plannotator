@@ -1,19 +1,9 @@
-// Ported from the Workspaces app's CollapsibleEdge and ResizeHandle components
-// for the Inbox sidebar (the owner, 2026-10-09: the same component and
-// motion). Port: Base UI's Tooltip directly (Workspaces wraps it in its ui
-// kit), Tailwind classes became `ib-` classes in inbox.css, and only the left
-// side is kept.
-
 import { Tooltip } from "@base-ui/react/tooltip";
 import type { KeyboardEvent, ReactNode, RefObject } from "react";
 
 import type { ResizeHandleProps } from "./useResizablePanel";
 
-/** Keyboard resize contract for an edge: arrow keys in 10px steps, Home/End
- * to the range ends, clamped to the viable range; the pointer-only dismissal
- * threshold never applies to keyboard resizing. */
 export interface EdgeKeyboardResize {
-	/** Current committed width (px): becomes aria-valuenow. */
 	value: number;
 	min: number;
 	max: number;
@@ -22,18 +12,6 @@ export interface EdgeKeyboardResize {
 
 const KEYBOARD_STEP = 10;
 
-/**
- * The edge's interaction chrome: hovering never pops the track in; a quiet
- * cursor-following tooltip teaches "Click to collapse, drag to resize", a
- * single click anywhere on the handle collapses (the resize hook's
- * threshold-gated `onClick`), and the handle is a real keyboard target:
- * Enter/Space collapse, ArrowLeft/Right resize in 10px steps, Home/End to the
- * range ends, announced as a separator.
- *
- * Inbox addition: without `onCollapse` (the list column beside an open
- * thread, which has nothing to collapse to) the edge only resizes: Enter and
- * Space do nothing and the tooltip says "Drag to resize".
- */
 export function CollapsibleEdge({
 	onCollapse,
 	collapseTip = "Click to collapse, drag to resize",
@@ -45,16 +23,11 @@ export function CollapsibleEdge({
 	children,
 }: {
 	onCollapse?: () => void;
-	/** The tooltip while `onCollapse` is set (the list column says what it hides). */
 	collapseTip?: string;
-	/** Accessible name for the focusable edge. */
 	label: string;
-	/** The id of the panel the edge resizes (aria-controls). */
 	controls?: string;
-	/** Mid-drag the tooltip is suppressed (the hint is for the idle edge). */
 	isDragging: boolean;
 	resize: EdgeKeyboardResize;
-	/** Inbox addition: closes the tooltip from outside (the list's edge stays drawn, hidden, after its click hides the list). */
 	tipActions?: RefObject<Tooltip.Root.Actions | null>;
 	children: ReactNode;
 }) {
@@ -110,11 +83,6 @@ export function CollapsibleEdge({
 	);
 }
 
-/**
- * The sidebar's drag handle: a zero-width boundary with a 16px invisible hit
- * area centered on it. The track stays invisible until keyboard focus
- * (`.ib-edge:focus-visible [data-resize-track]` in inbox.css).
- */
 export function ResizeHandle({ onPointerDown, style }: ResizeHandleProps) {
 	return (
 		<div className="ib-handle">
