@@ -213,7 +213,7 @@ describe("the documents", () => {
     const doc = hostileDoc();
     const md = renderDecisionExportMarkdown(doc);
     expect(md.split("\n")[0]).toBe(`<!-- plannotator-decisions v1 thread=${doc.thread.id} -->`);
-    expect(md.match(/<!-- plannotator-decisions/g)!.length).toBe(1);
+    expect(md.split("<!-- plannotator-decisions").length - 1).toBe(1);
     const tokens = marked.lexer(md);
     const table = tokens.find((t): t is Tokens.Table => t.type === "table")!;
     expect(table.rows.length).toBe(doc.decisions.length);
