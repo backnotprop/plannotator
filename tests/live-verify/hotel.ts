@@ -45,6 +45,9 @@ export interface HotelDeps {
   rowSel: (id: string) => string;
 }
 
+/** Requests held in a loss stall (Playwright reports a routed request only once it goes on): they count as out. */
+const stallTimes: { start: number; end: number | null }[] = [];
+
 /** Jitter on the latency, and the stalls loss makes, on page `p`; returns a stop. */
 export async function hotelLink(p: Page, deps: Pick<HotelDeps, 'setLatency'>, seed = 7): Promise<() => Promise<void>> {
   const next = rng(seed);
@@ -58,7 +61,10 @@ export async function hotelLink(p: Page, deps: Pick<HotelDeps, 'setLatency'>, se
   const stall = async (route: Route) => {
     if (!route.request().url().includes('/api/inbox/events') && next() < HOTEL.loss) {
       const [lo, hi] = HOTEL.stallMs;
+      stallTimes.push({ start: Date.now(), end: null });
+      const mine = stallTimes[stallTimes.length - 1]!;
       await new Promise((d) => setTimeout(d, lo + next() * (hi - lo)));
+      mine.end = Date.now();
     }
     await route.continue().catch(() => {});
   };
@@ -82,7 +88,7 @@ function trackRequests(p: Page) {
   p.on('requestfinished', done);
   p.on('requestfailed', done);
   /** Whether a request was out at `t`, or ended within the deadline before it. */
-  return (t: number) => [...out.values()].some((x) => x.start <= t && (x.end === null || x.end + LOADING_DEADLINE_MS >= t));
+  return (t: number) => [...out.values(), ...stallTimes].some((x) => x.start <= t && (x.end === null || x.end + LOADING_DEADLINE_MS >= t));
 }
 
 /** In the page: each frame, which loading marks are on screen (by what they are), with the time. */
