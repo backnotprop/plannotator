@@ -1,10 +1,3 @@
-/**
- * Where a Side's words came from (sideSource.ts): the line the agent gets
- * ahead of the question. Failures to catch: a message's line losing its
- * sender, id or heading; a file's line losing its path, version, line or
- * heading; a comment the person has on those words left out, or one on other
- * words put in; the selected block taken for its own heading.
- */
 import { describe, expect, test } from 'bun:test';
 import type { Annotation, Block } from '@plannotator/ui/types';
 import { askSourceFor } from './askWords';

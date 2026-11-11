@@ -1,7 +1,3 @@
-/**
- * The dropdown's rows and the transcript the window draws. Pure: the same rows
- * in the real window are proved by askWindow.test.tsx.
- */
 import { describe, expect, test } from 'bun:test';
 import type { InboxAskChat, InboxAskConversationWire } from '../api';
 import { ASK_RECENT_MAX, askChatGroups, askChatTime, askMessages, askRowState, askStopped, askUnanswered, askUnseen } from './askModel';
