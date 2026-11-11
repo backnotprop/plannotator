@@ -52,6 +52,8 @@ interface GuideEmptyStateProps {
   /** Open a persisted guide from the previous-guides list — receives the
    *  `saved:{id}` pseudo job id understood by the guide endpoints (#1112). */
   onOpenSavedGuide?: (jobId: string) => void;
+  /** AI features are off: only the saved guides, no launch (they are still served and readable). */
+  launchOff?: boolean;
 }
 
 /**
@@ -61,7 +63,7 @@ interface GuideEmptyStateProps {
  * (the same persisted guide settings AgentsTab's launch panel edits), and a
  * primary Generate button.
  */
-export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, launchJob, onBack, failure, onOpenFixedGuide, onOpenSavedGuide }) => {
+export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, launchJob, onBack, failure, onOpenFixedGuide, onOpenSavedGuide, launchOff = false }) => {
   // Engine/model resolution + launch-param shapes are shared with GuideView's
   // "Regenerate" hint via useGuideLaunch — this component keeps only the
   // picker UI on top of it.
@@ -299,6 +301,64 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
     }
   };
 
+  // The previous guides (#1112): under the launch controls, or alone while AI features are off.
+  const savedSection = savedGuides && savedGuides.length > 0 ? (
+    <div className="mt-10 max-w-[820px]">
+      <div className="mb-2.5 font-mono text-[10px] uppercase tracking-widest text-muted-foreground/60">
+        Previous guides
+      </div>
+      <div className="divide-y divide-border/30 overflow-hidden rounded-lg border border-border/50 bg-card/50">
+        {savedGuides.map((entry) => (
+          <div key={entry.id} className="group flex items-center gap-3 px-3.5 py-2.5">
+            <button
+              type="button"
+              onClick={() => onOpenSavedGuide?.(`saved:${entry.id}`)}
+              className="flex min-w-0 flex-1 items-center gap-3 text-left"
+            >
+              <span className="shrink-0 rounded border border-border/50 bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                {entry.label}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-[12.5px] text-foreground transition-colors group-hover:text-primary">
+                {entry.title}
+              </span>
+              <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground/60">
+                {formatSavedAge(entry.savedAt)}
+              </span>
+              <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground/60">
+                {entry.progress.reviewed}/{entry.progress.total}
+              </span>
+              {entry.moved && (
+                <span className="shrink-0 font-mono text-[10px] text-amber-600/80 dark:text-amber-500/70" title="The diff has changed since this guide was generated">
+                  diff changed
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleDeleteSaved(entry.id)}
+              aria-label={`Delete saved guide "${entry.title}"`}
+              className="shrink-0 rounded px-1 text-sm leading-none text-muted-foreground/40 transition-colors hover:text-destructive"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  ) : null;
+
+  if (launchOff) {
+    return (
+      <div className="w-full px-10 py-8">
+        <h1 className="text-[22px] font-semibold tracking-tight text-foreground">Saved guides</h1>
+        <p className="mt-2 max-w-[72ch] text-[13px] leading-relaxed text-muted-foreground">
+          AI features are off, so a new guide can't be started here. Your saved guides still open.
+        </p>
+        {savedSection}
+      </div>
+    );
+  }
+
   return (
     // Full-width page: this content sits in the header zone (where the guide
     // title lands once generated) rather than a centered island.
@@ -462,50 +522,7 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
         </>
       )}
 
-      {savedGuides && savedGuides.length > 0 && (
-        <div className="mt-10 max-w-[820px]">
-          <div className="mb-2.5 font-mono text-[10px] uppercase tracking-widest text-muted-foreground/60">
-            Previous guides
-          </div>
-          <div className="divide-y divide-border/30 overflow-hidden rounded-lg border border-border/50 bg-card/50">
-            {savedGuides.map((entry) => (
-              <div key={entry.id} className="group flex items-center gap-3 px-3.5 py-2.5">
-                <button
-                  type="button"
-                  onClick={() => onOpenSavedGuide?.(`saved:${entry.id}`)}
-                  className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                >
-                  <span className="shrink-0 rounded border border-border/50 bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-                    {entry.label}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-[12.5px] text-foreground transition-colors group-hover:text-primary">
-                    {entry.title}
-                  </span>
-                  <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground/60">
-                    {formatSavedAge(entry.savedAt)}
-                  </span>
-                  <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground/60">
-                    {entry.progress.reviewed}/{entry.progress.total}
-                  </span>
-                  {entry.moved && (
-                    <span className="shrink-0 font-mono text-[10px] text-amber-600/80 dark:text-amber-500/70" title="The diff has changed since this guide was generated">
-                      diff changed
-                    </span>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDeleteSaved(entry.id)}
-                  aria-label={`Delete saved guide "${entry.title}"`}
-                  className="shrink-0 rounded px-1 text-sm leading-none text-muted-foreground/40 transition-colors hover:text-destructive"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {savedSection}
     </div>
   );
 };
