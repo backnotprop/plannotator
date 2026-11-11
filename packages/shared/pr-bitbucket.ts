@@ -76,9 +76,14 @@ interface BbContext {
 export const BITBUCKET_TOKEN_COMMAND_TTL_MS = 5 * 60_000;
 /** A token command that has not answered by then (a prompt nobody saw) counts as failed. */
 export const BITBUCKET_TOKEN_COMMAND_TIMEOUT_MS = 60_000;
+let tokenCommandTimeoutMs = BITBUCKET_TOKEN_COMMAND_TIMEOUT_MS;
+/** Tests only: a shorter limit for the token command (null puts the real one back). Restore it in afterEach. */
+export function setBitbucketTokenCommandTimeoutForTests(ms: number | null): void {
+  tokenCommandTimeoutMs = ms ?? BITBUCKET_TOKEN_COMMAND_TIMEOUT_MS;
+}
 /**
  * A failed command is not run again before this, so a Keychain item that prompts or is missing asks at most once a
- * minute while the Inbox reads PR after PR. A timed-out command keeps running: the runtimes have no way to stop it.
+ * minute while the Inbox reads PR after PR. A timed-out command is ended with what it started (`CommandOptions.signal`).
  */
 export const BITBUCKET_TOKEN_COMMAND_FAILURE_MS = 60_000;
 
@@ -108,13 +113,16 @@ async function commandCredentials(runtime: PRRuntime, command: BitbucketTokenCom
   if (!entry) {
     const [cmd, ...args] = command.argv as [string, ...string[]];
     let timer: ReturnType<typeof setTimeout> | undefined;
+    // Given up on: the command and what it started are ended (the runtime kills on abort), never left running.
+    const giveUp = new AbortController();
     const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(
-        () => reject(new BitbucketApiError(`The Bitbucket token command (${cmd}) did not answer within ${BITBUCKET_TOKEN_COMMAND_TIMEOUT_MS / 1000}s.`, 401)),
-        BITBUCKET_TOKEN_COMMAND_TIMEOUT_MS,
-      );
+      timer = setTimeout(() => {
+        // The timeout settles first, so the killed command's own exit never stands in for it.
+        reject(new BitbucketApiError(`The Bitbucket token command (${cmd}) did not answer within ${Math.ceil(tokenCommandTimeoutMs / 1000)}s.`, 401));
+        giveUp.abort();
+      }, tokenCommandTimeoutMs);
     });
-    const token = Promise.race([runtime.runCommand(cmd, args), timeout])
+    const token = Promise.race([runtime.runCommand(cmd, args, { signal: giveUp.signal }), timeout])
       .then((result) => {
         const value = result.exitCode === 0 ? result.stdout.trim() : "";
         if (result.exitCode !== 0) {
@@ -968,10 +976,13 @@ export async function fetchBbPRList(runtime: PRRuntime, ref: BitbucketPRRef): Pr
 /**
  * One pull request as a hover card shows it (`ref-cards.ts`), in three reads:
  * the PR, its head's build statuses and its diffstat (the last two best effort).
- * Throws `BitbucketApiError` (404: no such PR, or the token can't see it).
+ * Throws `BitbucketApiError` (404: no such PR, or the token can't see it). `signal` aborts its requests.
  */
-export async function fetchBbPRCard(runtime: PRRuntime, ref: BitbucketPRRef): Promise<ForgeRefCardData> {
-  const ctx = await context(runtime);
+export async function fetchBbPRCard(runtime: PRRuntime, ref: BitbucketPRRef, signal?: AbortSignal): Promise<ForgeRefCardData> {
+  const base = await context(runtime);
+  signal?.throwIfAborted();
+  // Given up on (the hover cards' time limit): every request of this card stops with it.
+  const ctx: BbContext = signal ? { ...base, fetch: ((input, init) => base.fetch(input, { ...init, signal })) as typeof fetch } : base;
   const prPath = `${refRepoPath(ref)}/pullrequests/${ref.number}`;
   const [pr, statuses, diffstat] = await Promise.all([
     bbJson<BbPullRequest>(ctx, prPath, "fetch the pull request"),

@@ -103,7 +103,7 @@ export function createBunRefCliRunner(timeoutMs: number = REF_TIMEOUT_MS): RefRu
 export const refCliRunner: RefRunner = createBunRefCliRunner();
 
 /** Bitbucket Cloud pull requests through the review app's provider and credentials (the Inbox passes it). */
-export const bitbucketRefReader: BitbucketRefReader = (ref) => fetchBbPRCard(prCommandRuntime, { platform: "bitbucket", host: "bitbucket.org", ...ref });
+export const bitbucketRefReader: BitbucketRefReader = (ref, signal) => fetchBbPRCard(prCommandRuntime, { platform: "bitbucket", host: "bitbucket.org", ...ref }, signal);
 
 /** `createRefCards` with the Bun runner by default (tests pass their own). */
 export function createRefCards(options: Partial<Parameters<typeof createSharedRefCards>[0]> = {}): ReturnType<typeof createSharedRefCards> {

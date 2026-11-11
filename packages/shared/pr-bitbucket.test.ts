@@ -23,6 +23,7 @@ import {
   fetchBbPRList,
   forgetBitbucketCommandTokens,
   getBbUser,
+  setBitbucketTokenCommandTimeoutForTests,
   submitBbPRReview,
 } from "./pr-bitbucket";
 import { resolveBitbucketApiUrl, resolveBitbucketCredentials, resolveBitbucketTokenCommand } from "./config";
@@ -58,6 +59,7 @@ beforeEach(() => {
 
 afterEach(() => {
   forgetBitbucketCommandTokens();
+  setBitbucketTokenCommandTimeoutForTests(null);
   fake?.stop();
   fake = undefined;
   for (const k of ENV_KEYS) {
@@ -416,6 +418,41 @@ describe("token command", () => {
     }
   });
 
+  test("a command that never answers is given up on at its limit and ended (its signal aborts), and the error carries no token text", async () => {
+    useCommandConfig({ bitbucketTokenCommand: COMMAND, bitbucketEmail: EMAIL });
+    setBitbucketTokenCommandTimeoutForTests(100);
+    const signals: (AbortSignal | undefined)[] = [];
+    const hung: PRRuntime = {
+      runCommand(_cmd, _args, options) {
+        signals.push(options?.signal);
+        // Prints part of a token, then hangs (a Keychain prompt nobody answers) until it is ended.
+        return new Promise((resolve) =>
+          options?.signal?.addEventListener("abort", () => resolve({ stdout: "partial-secret", stderr: "", exitCode: 143 }), { once: true }),
+        );
+      },
+    };
+    const error = (await checkBbAuth(hung).catch((e: Error) => e)) as Error;
+    expect(error.message).toContain("did not answer within");
+    expect(error.message).not.toContain("partial-secret");
+    expect(signals).toHaveLength(1);
+    expect(signals[0]?.aborted).toBe(true);
+  });
+
+  test("a command that answers in time is never aborted", async () => {
+    useCommandConfig({ bitbucketTokenCommand: COMMAND, bitbucketEmail: EMAIL });
+    setBitbucketTokenCommandTimeoutForTests(100);
+    const signals: (AbortSignal | undefined)[] = [];
+    const quick: PRRuntime = {
+      async runCommand(_cmd, _args, options) {
+        signals.push(options?.signal);
+        return { stdout: `${TOKEN}\n`, stderr: "", exitCode: 0 };
+      },
+    };
+    await checkBbAuth(quick);
+    await new Promise((r) => setTimeout(r, 150));
+    expect(signals[0]?.aborted).toBe(false);
+  });
+
   test("a token Bitbucket rejects is forgotten: the next request runs the command again", async () => {
     useCommandConfig({ bitbucketTokenCommand: COMMAND, bitbucketEmail: EMAIL });
     const stale = commandRuntime({ stdout: "stale-token" });
@@ -466,6 +503,25 @@ describe("fetchBbPRCard", () => {
     const card = await fetchBbPRCard(unknownStatuses, REF);
     expect(card.title).toBe("Add mul and greet");
     expect(card.pull?.checks).toBeNull();
+  });
+
+  test("a card given up on aborts every request it made (the hover cards' time limit)", async () => {
+    useFake();
+    const signals: (AbortSignal | null | undefined)[] = [];
+    const hanging: PRRuntime = {
+      ...runtime,
+      fetch: ((_input: string | URL | Request, init?: RequestInit) => {
+        signals.push(init?.signal);
+        return new Promise<Response>((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true }));
+      }) as typeof fetch,
+    };
+    const giveUp = new AbortController();
+    const card = fetchBbPRCard(hanging, REF, giveUp.signal).catch((e: unknown) => e);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(signals.length).toBeGreaterThan(0);
+    giveUp.abort();
+    expect(await card).toBeInstanceOf(Error);
+    expect(signals.every((signal) => signal?.aborted === true)).toBe(true);
   });
 
   test("an unknown PR throws a 404", async () => {

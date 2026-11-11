@@ -536,8 +536,11 @@ export interface RefCardsSizes {
 }
 
 
-/** Reads one Bitbucket Cloud pull request's card; a thrown error's numeric `status` is the HTTP status. */
-export type BitbucketRefReader = (ref: { workspace: string; repo: string; number: number }) => Promise<ForgeRefCardData>;
+/**
+ * Reads one Bitbucket Cloud pull request's card; a thrown error's numeric `status` is the HTTP status. `signal` aborts
+ * when the read is given up on (`bitbucketTimeoutMs`): its requests stop with it.
+ */
+export type BitbucketRefReader = (ref: { workspace: string; repo: string; number: number }, signal?: AbortSignal) => Promise<ForgeRefCardData>;
 
 /** A Bitbucket reader's failure as a card error. */
 export function bitbucketRefErrorOf(error: unknown): ForgeRefCardError {
@@ -553,6 +556,11 @@ export function createRefCards(options: {
   run: RefRunner;
   /** Bitbucket Cloud pull requests (absent: they answer `unsupported`). */
   bitbucket?: BitbucketRefReader;
+  /**
+   * A Bitbucket read is given up on after this (default `REF_TIMEOUT_MS`, a CLI's limit): its requests are aborted, its
+   * slot is given back and the card says it couldn't load. Tests pass a short one.
+   */
+  bitbucketTimeoutMs?: number;
   now?: () => number;
   /** Avatar URL → data URI (default: `fetchAvatarDataUri`). */
   avatar?: (url: string) => Promise<string | null>;
@@ -651,9 +659,20 @@ export function createRefCards(options: {
 
   const fail = (error: ForgeRefCardError): ForgeRefCardResult => ({ ok: false, error, fetchedAt: now() });
 
+  const bitbucketTimeoutMs = options.bitbucketTimeoutMs ?? REF_TIMEOUT_MS;
   const fetchBitbucket = async (ref: ForgeRef, read: BitbucketRefReader): Promise<ForgeRefCardResult> => {
+    // The same limit as a CLI's: past it the requests are aborted and the slot is free again. The race also covers a
+    // wait the signal cannot stop (a token command still running answers its later reads from its own cache).
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error("Bitbucket did not answer in time"));
+        controller.abort();
+      }, bitbucketTimeoutMs);
+    });
     try {
-      const data = await read({ workspace: ref.owner, repo: ref.repo, number: ref.number });
+      const data = await Promise.race([read({ workspace: ref.owner, repo: ref.repo, number: ref.number }, controller.signal), late]).finally(() => clearTimeout(timer));
       await inlineAvatars(data);
       return { ok: true, data, fetchedAt: now() };
     } catch (error) {

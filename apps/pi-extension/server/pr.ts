@@ -4,6 +4,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { refRunnerKill } from "../generated/ref-cards.ts";
 
 import {
 	type PRMetadata,
@@ -36,12 +37,24 @@ import {
 
 const nodeCommandRuntime: PRRuntime = {
 	async runCommand(cmd, args, options) {
+		const signal = options?.signal;
+		// With a signal, its own process group (POSIX), so an abort also ends what the command started.
+		const group = !!signal && process.platform !== "win32";
 		return new Promise((resolve, reject) => {
 			// options.env is added to (never replacing) the environment: another gh account's token (#2157).
 			const proc = spawn(cmd, args, {
 				stdio: ["ignore", "pipe", "pipe"],
 				...(options?.env ? { env: { ...process.env, ...options.env } } : {}),
+				...(group ? { detached: true } : {}),
 			});
+			const stop = () =>
+				refRunnerKill((sig) => {
+					if (group && proc.pid) process.kill(-proc.pid, sig);
+					else proc.kill(sig);
+				});
+			if (signal?.aborted) stop();
+			else signal?.addEventListener("abort", stop, { once: true });
+			const done = () => signal?.removeEventListener("abort", stop);
 			let stdout = "";
 			let stderr = "";
 			proc.stdout?.on("data", (chunk: Buffer) => {
@@ -50,8 +63,12 @@ const nodeCommandRuntime: PRRuntime = {
 			proc.stderr?.on("data", (chunk: Buffer) => {
 				stderr += chunk.toString();
 			});
-			proc.on("error", reject);
+			proc.on("error", (error) => {
+				done();
+				reject(error);
+			});
 			proc.on("close", (exitCode) => {
+				done();
 				resolve({ stdout, stderr, exitCode: exitCode ?? 1 });
 			});
 		});
