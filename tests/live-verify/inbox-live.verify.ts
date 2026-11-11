@@ -128,7 +128,11 @@ class Traffic {
   }
   between(t0: number, t1: number, pages?: string[]) {
     const list = this.reqs.filter((r) => r.t >= t0 && r.t <= t1 && (!pages || pages.includes(r.page)));
-    return { count: list.length, bytes: list.reduce((n, r) => n + r.bytes, 0), urls: [...new Set(list.map((r) => r.url.replace(/\?.*$/, '').replace(/msg_[A-Z0-9]+/g, ':id')))] };
+    const path = (url: string) => url.replace(/\?.*$/, '').replace(/msg_[A-Z0-9]+/g, ':id');
+    // Which window made which request, and how many of each (`A /api/inbox/threads: 2`): where an event's cost goes.
+    const byPage: Record<string, number> = {};
+    for (const r of list) byPage[`${r.page} ${path(r.url)}`] = (byPage[`${r.page} ${path(r.url)}`] ?? 0) + 1;
+    return { count: list.length, bytes: list.reduce((n, r) => n + r.bytes, 0), urls: [...new Set(list.map((r) => path(r.url)))], byPage };
   }
 }
 
@@ -505,7 +509,7 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
 
       await check('LV-06', 'Words typed in "Other" in one tab reach the other tab and never go backwards there', async () => {
         const id = T.pick0!;
-        const sel = `${paneSel(id)} [data-lv-card="1"] input[aria-label^="Other answer"]`;
+        const sel = `${paneSel(id)} [data-lv-card="1"] [aria-label^="Other answer"]`;
         await openThread(A, id);
         await openThread(B, id);
         await markCards(A, id);
@@ -880,7 +884,7 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
             await pause(150);
           }
           const pick = picks.includes(-1) ? -1 : [...picks].sort((x, y) => x - y)[1]!;
-          const sel = `${paneSel(id)} [data-lv-card="1"] input[aria-label^="Other answer"]`;
+          const sel = `${paneSel(id)} [data-lv-card="1"] [aria-label^="Other answer"]`;
           let key = -1;
           if (await A.$(sel)) {
             await A.click(sel);
