@@ -8,7 +8,7 @@
  *
  * World: `plannotator` has four Claude Code sessions (A named by the person, B named, C with a generated title only,
  * D with only Claude Code's default name), a Codex session (no name) and a Pi session (named); `workspaces` has one.
- *  - The one critical flow, on a poor link (300 ms, 1 Mbit/s, one window dropped for 8 s). The failures
+ *  - The one critical flow, on a poor link (300 ms, 1 Mbit/s, 3% loss, one window dropped for 8 s). The failures
  *    it catches: rows in a busy project that still read alike, or need a reload; a row that changes height when its
  *    slot names the session (wide, three-line beside a thread, phone); a rename that reaches one window and not
  *    another, or a window that lost its link and never catches up; rows that flip back to the project the moment the
@@ -251,16 +251,17 @@ const EXPECTED: Record<string, string | RegExp> = {
 };
 
 /**
- * A poor link, as on hotel Wi-Fi: 300 ms, about 1 Mbit/s (Chromium's own throttling, which the page's requests and
- * its event stream go through). `offline` drops the connection.
+ * A poor link, as on hotel Wi-Fi: 300 ms, about 1 Mbit/s, 3% loss (Chromium's own throttling, which the page's
+ * requests and its event stream go through). `offline` drops the connection.
  */
 async function poorLink(page: Page, offline = false) {
   const cdp = await page.context().newCDPSession(page);
   const conditions = { offline, latency: 300, downloadThroughput: 125_000, uploadThroughput: 125_000 };
   await cdp.send('Network.enable');
-  // No emulated packet loss: with Chromium's `packetLoss` one run in four left a window unnamed for 30 s, and that
-  // emulation may drop a live-stream frame outright, which TCP would resend. The dropped connection below stands in.
-  await cdp.send('Network.emulateNetworkConditions', conditions);
+  // With loss. A run with it once left a window unnamed for 30 s: not the loss itself but the latency, which widened
+  // the gap between the page's first list read and its stream's `hello`, where a `deliveries` frame (no record, so
+  // never replayed) was lost. Every connect now reads the list once (App.tsx `onConnect`).
+  await cdp.send('Network.emulateNetworkConditions', { ...conditions, packetLoss: 3 } as never);
   return cdp;
 }
 

@@ -2154,7 +2154,6 @@ function Inbox() {
       }, delay);
     };
     let snoozesTimer: ReturnType<typeof setTimeout> | null = null;
-    let streamConnected = false;
     let cardsTimer: ReturnType<typeof setTimeout> | null = null;
     let machinesTimer: ReturnType<typeof setTimeout> | null = null;
     let machineThreadTimer: ReturnType<typeof setTimeout> | null = null;
@@ -2444,9 +2443,9 @@ function Inbox() {
         onConnect: (hello) => {
           // The Inbox restarted under this page: when it is provably the same one, writes go on without a reload.
           if (hello) void adoptAfterRestart(hello);
-          // A reconnect may have missed `event: deliveries` (a rename, a session that came or went): the list is read again.
-          if (streamConnected) listAfterEvents(80);
-          streamConnected = true;
+          // `event: deliveries` (a rename, a session that came or went) carries no record, so the stream's cursor never
+          // replays one sent before it connected: after the page's first list read, or while it was away. Read again.
+          listAfterEvents(80);
           // A reconnect may have missed `event: shapes`: the boards are read again.
           for (const listener of shapeFrameListeners) listener([]);
           reportWindow();
