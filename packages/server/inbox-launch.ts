@@ -258,7 +258,9 @@ export function createInboxLaunch(options: {
       ? json({ error: "Hidden folders aren't listed.", code: "folder_hidden" }, 422)
       : refused === "system"
         ? json({ error: "System folders aren't listed.", code: "folder_system" }, 422)
-        : json({ error: "That isn't a full path.", code: "folder_bad_path" }, 422);
+        : refused === "home_only"
+          ? json({ error: "Only folders inside the home folder.", code: "folder_outside_home" }, 422)
+          : json({ error: "That isn't a full path.", code: "folder_bad_path" }, 422);
   const slowAnswer = (name: string): Response => json({ error: `${name} isn't responding.`, code: "folder_slow", drive: name }, 504);
 
   /**
