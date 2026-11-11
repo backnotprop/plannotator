@@ -3,11 +3,7 @@ import type { InboxFileContents } from '@plannotator/core/inbox-types';
 
 export type KeptWholeFiles = Map<string, { patch: string; contents: InboxFileContents }>;
 
-/**
- * Asks a host for a changed file's whole text, for the viewer's arrows. A viewer mounted again asks again, so what this
- * patch already has is kept in `kept`; "there is none" and a failure are not, so a later click reads again. A failure
- * throws, so the viewer keeps its arrows for that click.
- */
+/** What this patch already has is kept in `kept`; "there is none" and a failure are not, so a later click reads again. A failure throws, so the viewer keeps its arrows. */
 export function wholeFileReader(read: (path: string, signal: AbortSignal, patch: string) => Promise<InboxFileContents>, kept: KeptWholeFiles) {
   return async (file: DiffFile, signal: AbortSignal): Promise<InboxFileContents | null> => {
     // Only a file with both sides has anything to open: an added or deleted one is already whole.

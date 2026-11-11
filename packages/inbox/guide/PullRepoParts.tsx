@@ -1,10 +1,3 @@
-/**
- * The PR page's All files, drawn by the review app's own parts: its tree (`RepoFileTree`, fed by `useRepoFiles`, its
- * "Listing the repository…" and failure words through `RepoListingPlaceholder`) and its whole-file view
- * (`RepoFileView`, read-only here). Their reads go to the Inbox's routes for this PR (`pullRepoFetch`). In the reader's
- * chunk (re-exported by GuideReader.tsx), so the window's first load carries none of it; checked by
- * tsconfig.guide.json.
- */
 import { useCallback, useMemo, useRef, useState } from 'react';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import type { DiffFile } from '@plannotator/core/diff-files';
@@ -20,7 +13,6 @@ const NO_COMMENTS: CodeAnnotation[] = [];
 const noop = () => {};
 
 export function PullAllFiles({ pullKey, sha, files, viewed, comments, activePath, openPath, head, onSelect, onOpen, onToggleViewed }: PullAllFilesProps) {
-  // The rail's list scrolls in this box, as Changes does; the tree draws the rows in view of it.
   const scroller = useRef<HTMLDivElement>(null);
   const getScrollElement = useCallback(() => scroller.current, []);
   const fetchImpl = useMemo(() => pullRepoFetch(pullKey), [pullKey]);
@@ -67,7 +59,6 @@ export function PullAllFiles({ pullKey, sha, files, viewed, comments, activePath
   );
 }
 
-/** A file of the repository the PR does not change, whole and read-only, in place of the diff. */
 export function PullRepoFile({ pullKey, sha, path }: PullRepoFileProps) {
   const fetchImpl = useMemo(() => pullRepoFetch(pullKey), [pullKey]);
   return (

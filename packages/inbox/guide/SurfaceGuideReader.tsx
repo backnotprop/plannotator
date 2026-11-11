@@ -1,17 +1,3 @@
-/**
- * The guided review on a phone (the surface's 6.1 and 6.2): the guide's
- * title, intent and counts with its sections as a list, each with its
- * reviewed tick, and Continue; then one section per screen, drawn by
- * Plannotator's own `GuideSectionCard` over the read-only diff renderer the
- * Inbox window uses (unified and wrapped: the surface sets those settings),
- * with Previous, Reviewed and Next at the thumb.
- *
- * Mounted only through SurfaceGuide's dynamic import (`#surface-guide-reader`,
- * tests/entry-assets.test.ts). Its own classes are `sf-` rules in
- * surface.css; nothing is added to the guide chain, so the guides.show viewer
- * and its pinned manifest are unchanged.
- */
-
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { GuideSection } from '@plannotator/core/guide';
 import { GuideHostProvider, GuideSectionCard, GuideViewportProvider, renderInlineMarkdown, resolveGuideSectionFiles, type DiffFile } from '@plannotator/guide-viewer';
@@ -20,14 +6,12 @@ import { GuideDiff } from './GuideReader';
 import type { SurfaceGuideReaderProps } from './types';
 import type ReaderShape from './surface-reader-module';
 
-// A phone's diff header: the review app's compact touch layout (the whole path, 44 pt targets).
 const phoneRendererProps = () => ({ compactTouchLayout: true });
 const two = (n: number) => String(n + 1).padStart(2, '0');
 
 interface Page {
   section: GuideSection;
   files: DiffFile[];
-  /** The "Everything else" page carries no tick. */
   reviewable: boolean;
 }
 
@@ -77,7 +61,6 @@ export default function SurfaceGuideReader({ snapshot, reviewed, onReviewedChang
   const [focusedFile, setFocusedFile] = useState<string | null>(null);
 
   const page = section === null ? null : pages[section] ?? null;
-  // A new screen starts at its top.
   useEffect(() => {
     window.scrollTo(0, 0);
     document.scrollingElement?.scrollTo(0, 0);
