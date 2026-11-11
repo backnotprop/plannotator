@@ -20,7 +20,7 @@ import { INBOX_HOST_NAMES } from '@plannotator/core/inbox-types';
 import { LIST_LOOK_DEFAULT, LIST_LOOK_KEYS, isDefaultListLook, listLookClasses, lookWithChange, onAgentRowsChange, useListLook, type ListLook } from '../listLook';
 import { RowsAsk } from './RowsAsk';
 import { ROWS_MAIN_CONTROLS, ROWS_MORE_CONTROLS, ROWS_PRESETS, lookWithChoice, rowsChangeWords, rowsChangedControls, rowsPreset, type RowsControl, type RowsControlId } from '../rowsControls';
-import { ListRow } from './InboxList';
+import { ListRow, previewOf } from './InboxList';
 import { HostMark, Icon } from '../icons';
 
 export { ROWS_PRESETS, rowsPreset, type RowsPreset } from '../rowsControls';
@@ -75,6 +75,7 @@ function exampleRows(): RowsPreviewRow[] {
       project: { id: 'prj_billing', name: 'billing-svc' },
       thread_name: 'Staging database upgrade',
       subject: 'The staging password expired: can you rotate it?',
+      latest_preview: 'Asked: The staging password expired: can you rotate it?',
       author: { kind: 'agent', host: 'codex', session: 'ses_b', name: null },
       section: 'stopped',
       unread: true,
@@ -85,6 +86,7 @@ function exampleRows(): RowsPreviewRow[] {
       thread_id: 'rows-sample-named',
       thread_name: 'Cart page refresh',
       subject: 'Which cart layout should ship first?',
+      latest_preview: 'Asked: Which cart layout should ship first?',
       participants: [
         { host: 'claude-code', session: 'ses_a' },
         { host: 'codex', session: 'ses_c' },
@@ -118,6 +120,8 @@ function exampleRows(): RowsPreviewRow[] {
     sample({
       thread_id: 'rows-sample-plain',
       subject: 'Tests pass on main after the retry fix',
+      // The grey line is the latest message (approval "inbox-row-latest-preview"): here the person's reply.
+      latest_preview: 'You: Merge it once CI is green.',
       author: { kind: 'agent', host: 'pi', session: 'ses_p', name: null },
       section: 'quiet',
       waiting_on_person: false,
@@ -137,7 +141,7 @@ function rowShows(control: RowsControlId, row: InboxListRow): boolean {
     case 'pulls':
       return !!row.pulls;
     case 'preview':
-      return row.thread_name !== null;
+      return previewOf(row) !== null;
     case 'needs':
       return row.questions.open > 0 || row.section === 'quiet';
     case 'newer':
