@@ -98,7 +98,7 @@ export class ImportRows {
   readonly threadNames: ImportRow[] = [];
   readonly messageTags: ImportRow[] = [];
 
-  /** Each record's latest line written over its row: the record, parsed (the live writer reads it back from `record`). */
+  /** Each record's latest line written over its row: the record, parsed (the live writer reads it back from `events`). */
   private readonly latest = new Map<string, unknown>();
   /** Where each `events` row of a question line sits, by `<id>\0<seq>`: a typing line removes the one before it. */
   private readonly questionEvents = new Map<string, number[]>();
@@ -179,31 +179,31 @@ export class ImportRows {
     switch (line.kind) {
       case "project": {
         const r = line.record;
-        const row = { key: r.key, root: r.root, name: r.name, record: data, seq, deleted_at: null };
+        const row = { key: r.key, root: r.root, name: r.name, seq, deleted_at: null };
         this.projects.upsert(r.id, { id: r.id, first_seq: seq, ...row }, row);
         return;
       }
       case "message":
-        this.message(line.record, prev as InboxMessage | undefined, data, seq, line.at, actor!);
+        this.message(line.record, prev as InboxMessage | undefined, seq, line.at, actor!);
         return;
       case "question":
-        this.question(line.record, data, seq, line.at, actor);
+        this.question(line.record, seq, line.at, actor);
         return;
       case "annotation": {
         const r = line.record;
-        const row = { thread_id: r.thread_id, project_id: r.project_id, seq, record: data };
+        const row = { thread_id: r.thread_id, project_id: r.project_id, seq };
         this.annotations.upsert(r.id, { id: r.id, first_seq: seq, ...row }, row);
         return;
       }
       case "card": {
         const before = current ? { card: current.card as string, heard_seq: current.heard_seq as number } : undefined;
         const { card, heard } = cardAfter(before ? (JSON.parse(before.card) as InboxCard) : undefined, line.record);
-        const row = { project_id: line.record.project_id, seq, record: data, card: JSON.stringify(card), heard_seq: heard || !before ? seq : before.heard_seq };
+        const row = { project_id: line.record.project_id, seq, card: JSON.stringify(card), heard_seq: heard || !before ? seq : before.heard_seq };
         this.cards.upsert(line.record.id, { id: line.record.id, first_seq: seq, ...row }, row);
         return;
       }
       case "steps": {
-        const row = { thread_id: field(line.record, "thread_id"), project_id: field(line.record, "project_id"), seq, record: data };
+        const row = { thread_id: field(line.record, "thread_id"), project_id: field(line.record, "project_id"), seq };
         this.steps.upsert(line.id, { id: line.id, first_seq: seq, ...row }, row);
         return;
       }
@@ -213,12 +213,12 @@ export class ImportRows {
           const event = pullEventOf(isInboxThreadPullRecord(prev) ? (prev as InboxThreadPull) : undefined, r, seq);
           if (event) this.threadPullEvents.push({ id: this.threadPullEvents.length + 1, seq, thread_id: r.thread_id, project_id: r.project_id, event: JSON.stringify(event) });
         }
-        const row = { thread_id: field(r, "thread_id"), project_id: field(r, "project_id"), seq, record: data };
+        const row = { thread_id: field(r, "thread_id"), project_id: field(r, "project_id"), seq };
         this.threadPulls.upsert(line.id, { id: line.id, first_seq: seq, ...row }, row);
         return;
       }
       case "initiative": {
-        const row = { seq, record: data };
+        const row = { seq };
         this.initiatives.upsert(line.record.id, { id: line.record.id, first_seq: seq, ...row }, row);
         return;
       }
@@ -233,8 +233,8 @@ export class ImportRows {
     this.threadNames.push(row);
   }
 
-  private message(m: InboxMessage, prev: InboxMessage | undefined, data: string, seq: number, at: string, authorId: string): void {
-    const row = { thread_id: m.thread_id, project_id: m.project_id, reply_to: m.reply_to, author_id: authorId, created_at: m.created_at, seq, subject: m.subject, body: m.body, record: data };
+  private message(m: InboxMessage, prev: InboxMessage | undefined, seq: number, at: string, authorId: string): void {
+    const row = { thread_id: m.thread_id, project_id: m.project_id, reply_to: m.reply_to, author_id: authorId, created_at: m.created_at, seq, subject: m.subject, body: m.body };
     this.messages.upsert(m.id, { id: m.id, first_seq: seq, ...row }, row);
     const root = m.id === m.thread_id;
     if (!prev) {
@@ -277,12 +277,11 @@ export class ImportRows {
         target_actor_id: this.actorOf({ kind: "agent", host: tag.host, session: tag.session, name: tag.name ?? null }, at),
         label: tag.label ?? null,
         wakes: bool(tag.wakes) ?? null,
-        record: JSON.stringify(tag),
       })),
     );
   }
 
-  private question(q: InboxQuestionRecord, data: string, seq: number, at: string, personId: string | null): void {
+  private question(q: InboxQuestionRecord, seq: number, at: string, personId: string | null): void {
     const thread = this.messages.get(q.message_id);
     const existing = this.answers.get(q.id);
     let answerId = (existing?.id as string | undefined) ?? null;
@@ -307,7 +306,6 @@ export class ImportRows {
       sent_reply_id: q.sent_reply_id,
       asked_by_actor_id: null,
       seq,
-      record: data,
     };
     this.questions.upsert(q.id, { id: q.id, first_seq: seq, ...row }, row);
   }

@@ -8,7 +8,7 @@
  * A line older than its record's current row (an import of out-of-order files) is kept in `events` only, as the
  * store's replay ignores it.
  */
-import { and, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
 import {
   isInboxThreadPullRecord,
@@ -91,7 +91,9 @@ const field = (record: unknown, key: string): string | null => {
 export function writeLine(db: InboxDbWriter, line: InboxLine): void {
   const data = JSON.stringify(line.record);
   const table = tableOf(line.kind);
-  const current = db.select({ seq: table.seq, record: table.record }).from(table).where(eq(table.id, line.id)).get();
+  const row = db.select({ seq: table.seq }).from(table).where(eq(table.id, line.id)).get();
+  // The record's latest line lives once, in `events`; its current row only points at it by seq.
+  const current = row ? { seq: row.seq, record: latestData(db, line.kind, line.id, row.seq) } : undefined;
   const actor = line.kind === "message" ? actorOf(db, line.record.author, line.at) : line.kind === "question" && line.record.picked_by ? actorOf(db, { kind: "person" }, line.at) : null;
   // Typing goes over the row before it: history keeps each change of choice, never each key. Removed before this
   // line's row goes in, so a repeated line (the same seq twice) keeps one row, not none.
@@ -118,31 +120,31 @@ export function writeLine(db: InboxDbWriter, line: InboxLine): void {
   switch (line.kind) {
     case "project": {
       const r = line.record;
-      const row = { key: r.key, root: r.root, name: r.name, record: data, seq, deleted_at: null };
+      const row = { key: r.key, root: r.root, name: r.name, seq, deleted_at: null };
       db.insert(t.projects).values({ id: r.id, ...first, ...row }).onConflictDoUpdate({ target: t.projects.id, set: row }).run();
       return;
     }
     case "message":
-      writeMessage(db, line.record, current ? (JSON.parse(current.record) as InboxMessage) : undefined, data, seq, line.at, actor!);
+      writeMessage(db, line.record, current ? (JSON.parse(current.record) as InboxMessage) : undefined, seq, line.at, actor!);
       return;
     case "question":
-      writeQuestion(db, line.record, data, seq, line.at, actor);
+      writeQuestion(db, line.record, seq, line.at, actor);
       return;
     case "annotation": {
       const r = line.record;
-      const row = { thread_id: r.thread_id, project_id: r.project_id, seq, record: data };
+      const row = { thread_id: r.thread_id, project_id: r.project_id, seq };
       db.insert(t.annotations).values({ id: r.id, ...first, ...row }).onConflictDoUpdate({ target: t.annotations.id, set: row }).run();
       return;
     }
     case "card": {
       const before = current ? db.select({ card: t.cards.card, heard_seq: t.cards.heard_seq }).from(t.cards).where(eq(t.cards.id, line.id)).get() : undefined;
       const { card, heard } = cardAfter(before ? (JSON.parse(before.card) as InboxCard) : undefined, line.record);
-      const row = { project_id: line.record.project_id, seq, record: data, card: JSON.stringify(card), heard_seq: heard || !before ? seq : before.heard_seq };
+      const row = { project_id: line.record.project_id, seq, card: JSON.stringify(card), heard_seq: heard || !before ? seq : before.heard_seq };
       db.insert(t.cards).values({ id: line.record.id, ...first, ...row }).onConflictDoUpdate({ target: t.cards.id, set: row }).run();
       return;
     }
     case "steps": {
-      const row = { thread_id: field(line.record, "thread_id"), project_id: field(line.record, "project_id"), seq, record: data };
+      const row = { thread_id: field(line.record, "thread_id"), project_id: field(line.record, "project_id"), seq };
       db.insert(t.steps).values({ id: line.id, ...first, ...row }).onConflictDoUpdate({ target: t.steps.id, set: row }).run();
       return;
     }
@@ -153,20 +155,32 @@ export function writeLine(db: InboxDbWriter, line: InboxLine): void {
         const event = pullEventOf(isInboxThreadPullRecord(prev) ? (prev as InboxThreadPull) : undefined, r, seq);
         if (event) db.insert(t.threadPullEvents).values({ seq, thread_id: r.thread_id, project_id: r.project_id, event: JSON.stringify(event) }).run();
       }
-      const row = { thread_id: field(r, "thread_id"), project_id: field(r, "project_id"), seq, record: data };
+      const row = { thread_id: field(r, "thread_id"), project_id: field(r, "project_id"), seq };
       db.insert(t.threadPulls).values({ id: line.id, ...first, ...row }).onConflictDoUpdate({ target: t.threadPulls.id, set: row }).run();
       return;
     }
     case "initiative": {
-      const row = { seq, record: data };
+      const row = { seq };
       db.insert(t.initiatives).values({ id: line.record.id, ...first, ...row }).onConflictDoUpdate({ target: t.initiatives.id, set: row }).run();
       return;
     }
   }
 }
 
-function writeMessage(db: InboxDbWriter, m: InboxMessage, prev: InboxMessage | undefined, data: string, seq: number, at: string, authorId: string): void {
-  const row = { thread_id: m.thread_id, project_id: m.project_id, reply_to: m.reply_to, author_id: authorId, created_at: m.created_at, seq, subject: m.subject, body: m.body, record: data };
+/** The record a current row points at: the last `events` row of that record at its seq (a repeated line is two rows). */
+function latestData(db: InboxDbWriter, kind: InboxLine["kind"], id: string, seq: number): string {
+  const found = db
+    .select({ data: t.events.data })
+    .from(t.events)
+    .where(and(eq(t.events.kind, kind), eq(t.events.subject_id, id), eq(t.events.seq, seq)))
+    .orderBy(desc(t.events.id))
+    .get();
+  if (!found) throw new Error(`events: no ${kind} line for ${id} at seq ${seq}`);
+  return found.data;
+}
+
+function writeMessage(db: InboxDbWriter, m: InboxMessage, prev: InboxMessage | undefined, seq: number, at: string, authorId: string): void {
+  const row = { thread_id: m.thread_id, project_id: m.project_id, reply_to: m.reply_to, author_id: authorId, created_at: m.created_at, seq, subject: m.subject, body: m.body };
   db.insert(t.messages)
     .values({ id: m.id, first_seq: seq, ...row })
     .onConflictDoUpdate({ target: t.messages.id, set: row })
@@ -214,12 +228,12 @@ function writeMessage(db: InboxDbWriter, m: InboxMessage, prev: InboxMessage | u
   (m.tags ?? []).forEach((tag, position) => {
     const target = actorOf(db, { kind: "agent", host: tag.host, session: tag.session, name: tag.name ?? null }, at);
     db.insert(t.mentions)
-      .values({ message_id: m.id, position, target_actor_id: target, label: tag.label ?? null, wakes: tag.wakes, record: JSON.stringify(tag) })
+      .values({ message_id: m.id, position, target_actor_id: target, label: tag.label ?? null, wakes: tag.wakes })
       .run();
   });
 }
 
-function writeQuestion(db: InboxDbWriter, q: InboxQuestionRecord, data: string, seq: number, at: string, personId: string | null): void {
+function writeQuestion(db: InboxDbWriter, q: InboxQuestionRecord, seq: number, at: string, personId: string | null): void {
   const thread = db.select({ thread_id: t.messages.thread_id }).from(t.messages).where(eq(t.messages.id, q.message_id)).get();
   const existing = db.select({ id: t.answers.id }).from(t.answers).where(eq(t.answers.question_id, q.id)).get();
   let answerId: string | null = existing?.id ?? null;
@@ -247,7 +261,6 @@ function writeQuestion(db: InboxDbWriter, q: InboxQuestionRecord, data: string, 
     sent_reply_id: q.sent_reply_id,
     asked_by_actor_id: null,
     seq,
-    record: data,
   };
   db.insert(t.questions).values({ id: q.id, first_seq: seq, ...row }).onConflictDoUpdate({ target: t.questions.id, set: row }).run();
 }

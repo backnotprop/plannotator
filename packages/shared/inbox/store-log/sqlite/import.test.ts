@@ -124,7 +124,8 @@ describe("moving an Inbox from its files into inbox.db", () => {
       // One message's words changed after the write: the check sees it.
       const changed = await importJsonlInbox(dataDir, {
         now,
-        afterWrite: (db) => db.run("UPDATE messages SET record = json_set(record, '$.body', 'changed') WHERE rowid = (SELECT min(rowid) FROM messages)"),
+        afterWrite: (db) =>
+          db.run("UPDATE events SET data = json_set(data, '$.body', 'changed') WHERE id = (SELECT max(e.id) FROM events e JOIN messages m ON e.kind = 'message' AND e.subject_id = m.id AND e.seq = m.seq WHERE m.rowid = (SELECT min(rowid) FROM messages))"),
       });
       expect(changed).toMatchObject({ status: "kept_files", reason: "mismatch" });
       expect(readdirSync(inbox).some((name) => name.startsWith("import-check-"))).toBe(true);

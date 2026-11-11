@@ -87,7 +87,7 @@ class SqliteInboxLog implements InboxLog {
   private state(): InboxLogState {
     // The line that wrote the row: the last one at its seq (a line written twice, a retried append, is two rows).
     const latest = (kind: string, table: string, where = "") =>
-      `SELECT '${kind}' AS kind, r.id AS subject_id, r.record AS data, r.first_seq AS first_seq, e.seq AS seq, e.at AS at, e.v AS v FROM ${table} r JOIN events e ON e.id = (SELECT max(x.id) FROM events x WHERE x.kind = '${kind}' AND x.subject_id = r.id AND x.seq = r.seq) ${where}`;
+      `SELECT '${kind}' AS kind, r.id AS subject_id, e.data AS data, r.first_seq AS first_seq, e.seq AS seq, e.at AS at, e.v AS v FROM ${table} r JOIN events e ON e.id = (SELECT max(x.id) FROM events x WHERE x.kind = '${kind}' AND x.subject_id = r.id AND x.seq = r.seq) ${where}`;
     const sql = [
       latest("project", "projects", "WHERE r.deleted_at IS NULL"),
       latest("message", "messages"),
@@ -99,10 +99,12 @@ class SqliteInboxLog implements InboxLog {
       latest("initiative", "initiatives"),
     ].join(" UNION ALL ");
     const records: InboxLogState["records"] = [];
-    for (const row of this.sqlite.query<{ first_seq: number }, []>(`${sql} ORDER BY first_seq`).iterate()) {
+    for (const row of this.sqlite.query<{ first_seq: number }, []>(sql).iterate()) {
       const line = lineOfRow(row);
       if (line) records.push({ line, firstSeq: row.first_seq });
     }
+    // Sorted here, not by SQLite: an ORDER BY would carry every record's text through its sorter.
+    records.sort((a, b) => a.firstSeq - b.firstSeq);
     const archiveSeq = new Map<string, number>();
     const readdressed = new Set<string>();
     for (const row of this.sqlite.query<{ id: string; resolved_seq: number | null; readdressed: number }, []>("SELECT id, resolved_seq, readdressed FROM threads WHERE deleted_at IS NULL AND (resolved_seq IS NOT NULL OR readdressed = 1)").iterate()) {
@@ -204,7 +206,7 @@ class SqliteInboxLog implements InboxLog {
       tx.delete(t.messages).where(eq(t.messages.project_id, project.id)).run();
       for (const table of [t.annotations, t.cards, t.steps, t.threadPulls, t.threadPullEvents, t.threadNames, t.messageTags]) tx.delete(table).where(eq(table.project_id, project.id)).run();
       tx.update(t.threads).set({ thread_name: null, resolved_seq: null, readdressed: false, deleted_at: at }).where(eq(t.threads.project_id, project.id)).run();
-      tx.update(t.projects).set({ deleted_at: at, record: "{}" }).where(eq(t.projects.id, project.id)).run();
+      tx.update(t.projects).set({ deleted_at: at }).where(eq(t.projects.id, project.id)).run();
     });
   }
 
