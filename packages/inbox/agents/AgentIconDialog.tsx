@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { HostMark, Icon } from '../icons';
 import { Modal } from '../components/Updates';
 import type { AgentFaceRef } from './agentFaces';
@@ -8,6 +8,33 @@ import { OwnIconsBody } from './OwnIconsBody';
 import { SetsBody } from './SetsBody';
 
 export type AgentIconPlace = 'own' | 'sets';
+
+/** Where the dialog is a sheet from the bottom (iconDialog.css): its place is the sheet's, never pinned. */
+const SHEET = '(max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse)';
+/** The dialog's full height (Sets), as iconDialog.css draws it, and the room it keeps from the window's edges. */
+const FULL = 640;
+const EDGE = 24;
+
+/**
+ * The top edge chosen once, as the dialog opens: centred for the place it opens on, raised only as far as Sets' full
+ * height needs to fit below it. Switching between "Your own…" and Sets then moves only its bottom edge. A resize
+ * chooses again. Not on a phone, where it is a sheet.
+ */
+function usePinnedTop(dialog: () => HTMLDialogElement | null | undefined): void {
+  useEffect(() => {
+    const el = dialog();
+    if (!el || typeof matchMedia !== 'function') return;
+    const pin = () => {
+      el.style.removeProperty('--agi-top');
+      if (matchMedia(SHEET).matches) return;
+      const full = Math.min(FULL, innerHeight - 2 * EDGE);
+      el.style.setProperty('--agi-top', `${Math.max(EDGE, Math.min(el.offsetTop, innerHeight - EDGE - full))}px`);
+    };
+    pin();
+    addEventListener('resize', pin);
+    return () => removeEventListener('resize', pin);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+}
 
 /**
  * The agent icon dialog: "Your own…" or "Sets", chosen in the face picker (FaceFan.tsx), opened in the middle of the
@@ -26,10 +53,12 @@ export function AgentIconDialog({ place, agent, host, name, face, onClose }: { p
   ];
   // On a touch screen the search is not focused as the dialog opens: its keyboard would come up over the icons.
   const [touch] = useState(() => typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches);
+  const head = useRef<HTMLDivElement>(null);
+  usePinnedTop(() => head.current?.closest('dialog'));
   const initialFocus = touch ? '.ib-agi-body' : on === 'sets' ? '.am-sets-q' : '.ib-agi-drop';
   return (
     <Modal labelledBy={`${uid}-t`} testId="agent-icon" onClose={onClose} ownKeys initialFocus={initialFocus} className="ib-agi">
-      <div className="ib-dlg-head ib-agi-head">
+      <div ref={head} className="ib-dlg-head ib-agi-head">
         <span className="ib-agi-mark" data-agent-icon-now={agentId}>
           <HostMark host={host} agent={agentId} big />
         </span>

@@ -1,7 +1,8 @@
 /* ---------- The agent icon dialog: "Your own…" and "Sets" (AgentIconDialog.tsx, OwnIconsBody.tsx, SetsBody.tsx) ----------
    The Inbox's own dialog (`.ib-dlg`, a native modal in the middle of the window), made a fixed size so the grid scrolls
    inside it; a full-height sheet on a phone. */
-.pn-inbox dialog.ib-dlg.ib-agi, dialog.ib-dlg.ib-agi { width: min(720px, calc(100vw - 32px)); height: min(640px, calc(100vh - 48px)); overflow: hidden; }
+/* Its top edge stays where it opened (`--agi-top`, AgentIconDialog.tsx): switching places moves only the bottom edge. */
+.pn-inbox dialog.ib-dlg.ib-agi, dialog.ib-dlg.ib-agi { width: min(720px, calc(100vw - 32px)); height: min(640px, calc(100vh - 48px)); overflow: hidden; margin: var(--agi-top, auto) auto auto; }
 dialog.ib-dlg.ib-agi[open] { display: flex; flex-direction: column; }
 /* "Your own…" is only as tall as its pictures need (the grid of a set keeps the full height). */
 .pn-inbox dialog.ib-dlg.ib-agi:has(.ib-agi-own), dialog.ib-dlg.ib-agi:has(.ib-agi-own) { height: fit-content; max-height: min(640px, calc(100vh - 48px)); }
