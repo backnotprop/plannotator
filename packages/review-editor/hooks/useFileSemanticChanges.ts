@@ -120,3 +120,25 @@ export function useFileSemanticChanges(
 
   return state;
 }
+
+const NO_CHANGES: readonly SemanticDiffChange[] = [];
+
+/** Every named semantic change of the review (shares the one cached fetch), or none when disabled/unavailable. */
+export function useSemanticDiffChanges(rawPatch: string, enabled: boolean): readonly SemanticDiffChange[] {
+  const [changes, setChanges] = useState<readonly SemanticDiffChange[]>(NO_CHANGES);
+  useEffect(() => {
+    if (!enabled) {
+      setChanges(NO_CHANGES);
+      return;
+    }
+    let cancelled = false;
+    loadSemanticDiff(rawPatch).then((data) => {
+      if (cancelled) return;
+      setChanges(data.status === 'ok' ? data.changes.filter((change) => !isOrphanChange(change)) : NO_CHANGES);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [rawPatch, enabled]);
+  return changes;
+}
