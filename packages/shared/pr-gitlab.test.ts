@@ -519,14 +519,21 @@ describe("submitGlMRReview", () => {
     options: {
       diffRefsReject?: boolean;
       approvalReject?: boolean;
+      graphql?: CommandResult;
+      noUser?: boolean;
     } = {},
-  ): { runtime: PRRuntime; postedBodies: string[] } {
+  ): { runtime: PRRuntime; postedBodies: string[]; graphqlInputs: unknown[] } {
     const postedBodies: string[] = [];
+    const graphqlInputs: unknown[] = [];
     return {
       postedBodies,
+      graphqlInputs,
       runtime: {
         async runCommand(_command, args) {
           const endpoint = args[1] ?? "";
+          if (endpoint === "/user" && !options.noUser) {
+            return { stdout: JSON.stringify({ username: "dana" }), stderr: "", exitCode: 0 };
+          }
           if (endpoint === "projects/g%2Fp/merge_requests/1") {
             if (options.diffRefsReject) {
               throw new Error("spawn glab ENOENT");
@@ -556,6 +563,10 @@ describe("submitGlMRReview", () => {
             return discussionFailures.has(payload.body ?? "")
               ? { stdout: "", stderr: `rejected ${payload.body}`, exitCode: 1 }
               : { stdout: "{}", stderr: "", exitCode: 0 };
+          }
+          if (endpoint === "graphql" && options.graphql) {
+            graphqlInputs.push(payload);
+            return options.graphql;
           }
           if (endpoint.endsWith("/approve") && options.approvalReject) {
             throw new Error("spawn glab ENOENT");
@@ -760,6 +771,157 @@ describe("submitGlMRReview", () => {
     };
     expect(first).toEqual(expected);
     expect(retry).toEqual(expected);
+  });
+
+  const graphqlOk = (data: unknown): CommandResult => ({ stdout: JSON.stringify({ data }), stderr: "", exitCode: 0 });
+
+  test("request_changes posts the comments, adds the user as a reviewer, then requests changes", async () => {
+    const { runtime, postedBodies, graphqlInputs } = makeSubmissionRuntime(new Set(), {
+      graphql: graphqlOk({ mergeRequestSetReviewers: { errors: [] }, mergeRequestRequestChanges: { errors: [] } }),
+    });
+
+    await expect(
+      submitGlMRReview(runtime, REF, "head", "request_changes", "Please fix", comments),
+    ).resolves.toEqual({ status: "complete" });
+    expect(postedBodies).toEqual(["Please fix", "First finding", "Second finding"]);
+    expect(graphqlInputs).toEqual([
+      { query: expect.any(String), variables: { projectPath: "g/p", iid: "1", username: "dana" } },
+    ]);
+    const { query } = graphqlInputs[0] as { query: string };
+    expect(query).toContain("operationMode: APPEND");
+    expect(query.indexOf("mergeRequestSetReviewers")).toBeLessThan(query.indexOf("mergeRequestRequestChanges"));
+  });
+
+  test("request_changes reports an unreadable current user as partial without calling GraphQL", async () => {
+    const { runtime, graphqlInputs } = makeSubmissionRuntime(new Set(), { graphql: graphqlOk({}), noUser: true });
+
+    await expect(
+      submitGlMRReview(runtime, REF, "head", "request_changes", "", comments),
+    ).resolves.toMatchObject({
+      status: "partial",
+      approval: "failed",
+      approvalError: "Failed to request changes on MR: could not read the current GitLab user",
+      retry: { action: "request_changes", fileComments: [] },
+    });
+    expect(graphqlInputs).toEqual([]);
+  });
+
+  test.each<{ name: string; graphql: CommandResult; error: string }>([
+    {
+      name: "a reviewer append error",
+      graphql: graphqlOk({ mergeRequestSetReviewers: { errors: ["Cannot assign reviewers"] }, mergeRequestRequestChanges: null }),
+      error: "Failed to request changes on MR: Cannot assign reviewers",
+    },
+    {
+      name: "a request-changes error",
+      graphql: graphqlOk({ mergeRequestSetReviewers: { errors: [] }, mergeRequestRequestChanges: { errors: ["Invalid permissions"] } }),
+      error: "Failed to request changes on MR: Invalid permissions",
+    },
+    {
+      name: "a top-level GraphQL error",
+      graphql: { stdout: JSON.stringify({ data: null, errors: [{ message: "Field doesn't exist" }] }), stderr: "", exitCode: 0 },
+      error: "Failed to request changes on MR: Field doesn't exist",
+    },
+    {
+      name: "a glab failure",
+      graphql: { stdout: "", stderr: "401 Unauthorized", exitCode: 1 },
+      error: "Failed to request changes on MR: 401 Unauthorized",
+    },
+  ])("request_changes reports $name as partial with a request_changes-only retry", async ({ graphql, error }) => {
+    const { runtime } = makeSubmissionRuntime(new Set(), { graphql });
+
+    await expect(
+      submitGlMRReview(runtime, REF, "head", "request_changes", "", comments),
+    ).resolves.toEqual({
+      status: "partial",
+      postedFileCommentCount: 2,
+      failedFileComments: [],
+      reviewBodyPosted: false,
+      approval: "failed",
+      approvalError: error,
+      retry: { action: "request_changes", fileComments: [] },
+    });
+  });
+
+  // What GitLab before 18.9 answers (the shape gitlab.com gives for an unknown mutation field): HTTP 200 with no
+  // `data`, so nothing ran; glab exits 1, prints the body on stdout and the message on stderr.
+  const missingMutation = (extensions = true): CommandResult => ({
+    stdout: JSON.stringify({
+      errors: [{
+        message: "Field 'mergeRequestRequestChanges' doesn't exist on type 'Mutation'",
+        locations: [{ line: 3, column: 3 }],
+        path: ["mutation", "mergeRequestRequestChanges"],
+        ...(extensions ? { extensions: { code: "undefinedField", typeName: "Mutation", fieldName: "mergeRequestRequestChanges" } } : {}),
+      }],
+    }),
+    stderr: "glab: Field 'mergeRequestRequestChanges' doesn't exist on type 'Mutation'",
+    exitCode: 1,
+  });
+
+  test.each([true, false])("request_changes on a GitLab without the mutation finishes as a plain comment (extensions: %p)", async (extensions) => {
+    const { runtime, postedBodies, graphqlInputs } = makeSubmissionRuntime(new Set(), { graphql: missingMutation(extensions) });
+
+    await expect(
+      submitGlMRReview(runtime, REF, "head", "request_changes", "Please fix", comments),
+    ).resolves.toEqual({ status: "complete", postedAs: "comment" });
+    // Every comment went once, and the decision was asked once: nothing to retry.
+    expect(postedBodies).toEqual(["Please fix", "First finding", "Second finding"]);
+    expect(graphqlInputs).toHaveLength(1);
+  });
+
+  test("request_changes on a GitLab without the mutation keeps a partial post's retry to its comments", async () => {
+    await withFailedCommentDataDir(async () => {
+      const { runtime } = makeSubmissionRuntime(new Set(["Second finding"]), { graphql: missingMutation() });
+
+      await expect(
+        submitGlMRReview(runtime, REF, "head", "request_changes", "", comments),
+      ).resolves.toMatchObject({
+        status: "partial",
+        approval: "not-requested",
+        postedAs: "comment",
+        retry: { action: "comment", fileComments: [comments[1]] },
+      });
+    });
+  });
+
+  test.each<{ name: string; graphql: CommandResult; error: string }>([
+    {
+      name: "a permission error glab exits 1 on",
+      graphql: {
+        stdout: JSON.stringify({
+          errors: [{ message: "The resource that you are attempting to access does not exist or you don't have permission to perform this action" }],
+          data: { mergeRequestSetReviewers: null, mergeRequestRequestChanges: null },
+        }),
+        stderr: "glab: The resource that you are attempting to access does not exist or you don't have permission to perform this action",
+        exitCode: 1,
+      },
+      error: "Failed to request changes on MR: glab: The resource that you are attempting to access does not exist or you don't have permission to perform this action",
+    },
+    {
+      name: "another unknown field",
+      graphql: {
+        stdout: JSON.stringify({
+          errors: [{
+            message: "Field 'mergeRequestSetReviewers' doesn't exist on type 'Mutation'",
+            extensions: { code: "undefinedField", typeName: "Mutation", fieldName: "mergeRequestSetReviewers" },
+          }],
+        }),
+        stderr: "glab: Field 'mergeRequestSetReviewers' doesn't exist on type 'Mutation'",
+        exitCode: 1,
+      },
+      error: "Failed to request changes on MR: glab: Field 'mergeRequestSetReviewers' doesn't exist on type 'Mutation'",
+    },
+    {
+      name: "an unreachable server",
+      graphql: { stdout: "", stderr: "dial tcp: lookup gitlab.example: no such host", exitCode: 1 },
+      error: "Failed to request changes on MR: dial tcp: lookup gitlab.example: no such host",
+    },
+  ])("request_changes still reports $name as a failure, never as a comment", async ({ graphql, error }) => {
+    const { runtime } = makeSubmissionRuntime(new Set(), { graphql });
+
+    const result = await submitGlMRReview(runtime, REF, "head", "request_changes", "", comments);
+    expect(result).toMatchObject({ status: "partial", approval: "failed", approvalError: error, retry: { action: "request_changes" } });
+    expect(result).not.toHaveProperty("postedAs");
   });
 });
 

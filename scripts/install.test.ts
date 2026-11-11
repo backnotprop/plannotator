@@ -1571,21 +1571,21 @@ describe("install shared behavior", () => {
 
     // install.sh: resolution before curl -o
     const shResolve = sh.indexOf("verify_attestation=0");
-    const shDownload = sh.indexOf('download_release_file "$binary_url" "$tmp_file"');
+    const shDownload = sh.indexOf('download_release_binary "$binary_url" "$tmp_file"');
     expect(shResolve).toBeGreaterThan(-1);
     expect(shDownload).toBeGreaterThan(-1);
     expect(shResolve).toBeLessThan(shDownload);
 
-    // install.ps1: resolution before Invoke-WebRequest -OutFile $tmpFile
+    // install.ps1: resolution before the binary download
     const psResolve = ps.indexOf("$verifyAttestationResolved = $false");
-    const psDownload = ps.indexOf("Invoke-ReleaseDownload -Uri $binaryUrl -OutFile $tmpFile");
+    const psDownload = ps.indexOf("Invoke-ResumableDownload -Uri $binaryUrl -OutFile $tmpFile");
     expect(psResolve).toBeGreaterThan(-1);
     expect(psDownload).toBeGreaterThan(-1);
     expect(psResolve).toBeLessThan(psDownload);
 
-    // install.cmd: resolution before curl -o "!TEMP_FILE!"
+    // install.cmd: resolution before the binary download
     const cmdResolve = cmdScript.indexOf('set "VERIFY_ATTESTATION=0"');
-    const cmdDownload = cmdScript.indexOf('curl -fsSL !CURL_RETRY! !CURL_LIMITS! "!BINARY_URL!" -o "!TEMP_FILE!"');
+    const cmdDownload = cmdScript.indexOf("\ncall :DownloadBinary\n");
     expect(cmdResolve).toBeGreaterThan(-1);
     expect(cmdDownload).toBeGreaterThan(-1);
     expect(cmdResolve).toBeLessThan(cmdDownload);
@@ -1964,24 +1964,32 @@ describe("install shared behavior", () => {
     // install.sh: binary download and checksum download must NOT carry the
     // auth header array. Token vars cleared right after the api call so
     // they don't linger for the download phase.
-    // Both go through download_release_file, so its body must not carry it.
-    const shDownloader = sh.match(/^download_release_file\(\) \{\n[\s\S]*?\n\}\n/m);
-    expect(shDownloader).not.toBeNull();
-    expect(shDownloader![0]).not.toContain("GH_AUTH_HEADER");
-    expect(sh).toContain('download_release_file "$binary_url" "$tmp_file"');
+    // They go through download_release_binary / download_release_file, so
+    // neither body may carry it.
+    for (const fn of ["download_release_binary", "download_release_file"]) {
+      const shDownloader = sh.match(new RegExp(`^${fn}\\(\\) \\{\\n[\\s\\S]*?\\n\\}\\n`, "m"));
+      expect(shDownloader).not.toBeNull();
+      expect(shDownloader![0]).not.toContain("GH_AUTH_HEADER");
+    }
+    expect(sh).toContain('download_release_binary "$binary_url" "$tmp_file"');
     expect(sh).toContain('download_release_file "$checksum_url" "$checksum_file"');
     expect(sh).toContain("unset _gh_token GH_AUTH_HEADER _api_url");
 
     // install.ps1: binary download must NOT carry $ghHeaders, which is nulled.
     expect(ps).not.toContain('Invoke-WebRequest -Uri $binaryUrl -OutFile $tmpFile -Headers $ghHeaders');
-    const psDownloader = ps.match(/^function Invoke-ReleaseDownload \{\n[\s\S]*?\n\}\n/m);
-    expect(psDownloader).not.toBeNull();
-    expect(psDownloader![0]).not.toContain("ghHeaders");
+    for (const fn of ["Invoke-ReleaseDownload", "Invoke-ResumableDownload"]) {
+      const psDownloader = ps.match(new RegExp(`^function ${fn} \\{\\n[\\s\\S]*?\\n\\}\\n`, "m"));
+      expect(psDownloader).not.toBeNull();
+      expect(psDownloader![0]).not.toContain("ghHeaders");
+    }
     expect(ps).toContain('$ghToken = $null; $ghHeaders = $null; $apiUrl = $null');
 
     // install.cmd: binary download must NOT carry !GH_AUTH_HEADER!. Token
     // vars cleared after the api call.
     expect(cmdScript).not.toContain('curl -fsSL !GH_AUTH_HEADER! "!BINARY_URL!"');
+    const cmdDownloader = cmdScript.slice(cmdScript.indexOf("\n:DownloadBinary\n"), cmdScript.indexOf("\n:DownloadBinaryEnd\n"));
+    expect(cmdDownloader).toContain("curl -fsSL");
+    expect(cmdDownloader).not.toContain("GH_AUTH_HEADER");
     expect(cmdScript).toContain('set "GH_TOKEN_VAL="');
     expect(cmdScript).toContain('set "GH_AUTH_HEADER="');
   });
@@ -2426,6 +2434,9 @@ function runInstallSh(
         STUB_ATT_JSON: ATTESTATION_FIXTURE,
         PLANNOTATOR_SKIP_SEM_INSTALL: "1",
         PLANNOTATOR_SKIP_AGENT_TERMINAL_INSTALL: "1",
+        // Tests never show a real notification: the alert tests turn it back
+        // on with a fake notifier first on PATH.
+        PLANNOTATOR_INSTALL_NOTIFY: "0",
         ...extraEnv,
       },
       stdout: "pipe",
@@ -2530,62 +2541,73 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
       mkdirSync(join(sandbox.home, ".local", "bin"), { recursive: true });
       writeFileSync(installed, OLD, { mode: 0o755 });
       const log = join(sandbox.home, "curl.log");
-      const result = runInstallSh(sandbox, args, { STUB_CURL_LOG: log, ...env });
+      // No pause between attempts: the bounds are counts, not time.
+      const result = runInstallSh(sandbox, args, { STUB_CURL_LOG: log, PLANNOTATOR_DOWNLOAD_RETRY_DELAY: "0", ...env });
       const calls = existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [];
       const downloads = calls.filter((c) => c.includes("/releases/download/") && !c.endsWith(".sha256"));
       return { ...result, downloads, installed: readFileSync(installed, "utf8"), tmp: join(sandbox.home, "tmp") };
     }
 
-    test("an HTTP/2 error (curl 92) is retried over HTTP/1.1 and the install completes", () => {
+    test("an HTTP/2 error (curl 92) moves the next attempt to HTTP/1.1, which continues the file, and the install completes", () => {
       const r = run({ STUB_DOWNLOAD_FAIL: "92" });
       expect(r.code).toBe(0);
       expect(r.out).toContain("trying again over HTTP/1.1");
       expect(r.installed).toBe(binary);
       expect(r.downloads).toHaveLength(2);
       expect(r.downloads[0]).not.toContain("--http1.1");
+      expect(r.downloads[0]).not.toContain("-C -");
       expect(r.downloads[1]).toContain("--http1.1");
-      // Both runs hand curl its own retries and a time bound, so a reset is
-      // retried and a trickling connection cannot hold the update for hours.
+      // The stub left a partial file: the second attempt asks for the rest.
+      expect(r.downloads[1]).toContain("-C -");
+      // Each attempt is time-bounded and stops on a stall; curl's own --retry
+      // is not used for the binary, since it throws the partial file away.
       for (const call of r.downloads) {
-        expect(call).toContain("--retry 3");
-        expect(call).toContain("--retry-all-errors");
+        expect(call).not.toContain("--retry");
         expect(call).toMatch(/--max-time \d+/);
         expect(call).toContain("--speed-limit 1 --speed-time 60");
       }
     });
 
-    // A retry starts the ~200 MB binary again from zero, so it never helps a
-    // slow link: one attempt gets 6 h (a 1 h cap failed every update below
-    // about 58 KB/s), while no retry starts after 1 h. The .sha256 keeps 120 s.
-    test("the binary attempt cap (6 h) and its retry window (1 h) are separate; the checksum keeps 120 s", () => {
+    // The binary has 6 h in all, across its attempts, so a link at about
+    // 10 KB/s still finishes it; the .sha256 keeps 120 s and curl's retries.
+    test("the binary gets 6 h in all; the checksum keeps 120 s", () => {
       const sandbox = setupInstallSandbox({ gh: "pass-all", binary });
       const log = join(sandbox.home, "curl.log");
-      const result = runInstallSh(sandbox, args, { STUB_CURL_LOG: log, STUB_DOWNLOAD_FAIL: "92" });
+      const result = runInstallSh(sandbox, args, { STUB_CURL_LOG: log, STUB_DOWNLOAD_FAIL: "92", PLANNOTATOR_DOWNLOAD_RETRY_DELAY: "0" });
       expect(result.code).toBe(0);
       const calls = readFileSync(log, "utf8").trim().split("\n");
       const binaryCalls = calls.filter((c) => c.includes("/releases/download/") && !c.endsWith(".sha256"));
       const checksumCalls = calls.filter((c) => c.includes("/releases/download/") && c.endsWith(".sha256"));
       expect(binaryCalls).toHaveLength(2);
+      expect(binaryCalls[0]).toContain("--max-time 21600 ");
       for (const call of binaryCalls) {
-        expect(call).toContain("--max-time 21600 --retry-max-time 3600");
+        const left = Number(/--max-time (\d+)/.exec(call)?.[1]);
+        expect(left).toBeGreaterThan(21500);
+        expect(left).toBeLessThanOrEqual(21600);
       }
       expect(checksumCalls.length).toBeGreaterThan(0);
       for (const call of checksumCalls) {
+        expect(call).toContain("--retry 3");
         expect(call).toContain("--max-time 120 --retry-max-time 120");
       }
 
       const cmd = readScript("install.cmd");
-      expect(cmd).toContain('set "CURL_LIMITS=--connect-timeout 30 --max-time 21600 --retry-max-time 3600 ');
+      expect(cmd).toContain("set /a DL_LEFT=21600-DL_SPENT");
       expect(cmd).toContain('set "CURL_SUM_LIMITS=--connect-timeout 30 --max-time 120 --retry-max-time 120"');
     });
 
-    test("a download that keeps failing stops cleanly: old binary kept, no temp file left, no HTTP/1.1 run for other errors", () => {
+    test("a download that keeps failing stops after 4 attempts with no new bytes: old binary kept, no temp file left, no HTTP/1.1 for other errors", () => {
       const r = run({ STUB_DOWNLOAD_FAIL: "56" });
       expect(r.code).toBe(1);
       expect(r.out).toContain("Could not download");
       expect(r.out).toContain("curl exit 56");
+      // curl's error is printed once, when it gives up.
+      expect(r.out.split("stub failure").length - 1).toBe(1);
       expect(r.installed).toBe(OLD);
-      expect(r.downloads).toHaveLength(1);
+      // The stub leaves a 7-byte partial: the first attempt added bytes, the
+      // next four did not.
+      expect(r.downloads).toHaveLength(5);
+      for (const call of r.downloads) expect(call).not.toContain("--http1.1");
       expect(readdirSync(r.tmp)).toEqual([]);
     });
 
@@ -2593,8 +2615,10 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
       const r = run({ STUB_DOWNLOAD_FAIL: "92", STUB_DOWNLOAD_FAIL_HTTP11: "56" });
       expect(r.code).toBe(1);
       expect(r.out).toContain("curl exit 56");
+      expect(r.out.split("trying again over HTTP/1.1").length - 1).toBe(1);
       expect(r.installed).toBe(OLD);
-      expect(r.downloads).toHaveLength(2);
+      expect(r.downloads).toHaveLength(5);
+      expect(r.downloads.slice(1).every((c) => c.includes("--http1.1"))).toBe(true);
     });
 
     test("a .sha256 that is not 64 hex characters stops before the compare: old binary kept, no temp file left", () => {
@@ -2623,12 +2647,17 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
       expect(r.installed).toBe(binary);
     });
 
-    test("a curl older than 7.71 (no --retry-all-errors) still installs, with plain --retry", () => {
-      const r = run({ STUB_CURL_OLD: "1" });
+    test("a curl older than 7.71 (no --retry-all-errors) still installs, with plain --retry for the checksum", () => {
+      const sandbox = setupInstallSandbox({ gh: "pass-all", binary });
+      const log = join(sandbox.home, "curl.log");
+      const r = runInstallSh(sandbox, args, { STUB_CURL_LOG: log, STUB_CURL_OLD: "1" });
       expect(r.code).toBe(0);
-      expect(r.installed).toBe(binary);
-      expect(r.downloads).toHaveLength(1);
-      expect(r.downloads[0]).toContain("--retry 3");
+      expect(readFileSync(join(sandbox.home, ".local", "bin", "plannotator"), "utf8")).toBe(binary);
+      const calls = readFileSync(log, "utf8").trim().split("\n");
+      const checksumCalls = calls.filter((c) => c.includes("/releases/download/") && c.endsWith(".sha256"));
+      expect(checksumCalls).toHaveLength(1);
+      expect(checksumCalls[0]).toContain("--retry 3");
+      expect(checksumCalls[0]).not.toContain("--retry-all-errors");
     });
   },
 );
@@ -4043,9 +4072,11 @@ function claudePluginRegistry(
 // the update runs after the repair). `plugin update` rewrites the registry to
 // FAKE_CLAUDE_NEW_VERSION when that is set, as the real command records the
 // new install. FAKE_CLAUDE_FAIL=<marketplace|plugin> fails that step;
-// FAKE_CLAUDE_HANG=1 never returns.
+// FAKE_CLAUDE_HANG=1 never returns. With FAKE_CLAUDE_ENV_LOG it also notes the
+// CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS each call saw.
 const FAKE_CLAUDE = `#!/bin/bash
 printf '%s\\n' "$*" >> "$FAKE_CLAUDE_LOG"
+if [ -n "$FAKE_CLAUDE_ENV_LOG" ]; then printf '%s\\n' "\${CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS-unset}" >> "$FAKE_CLAUDE_ENV_LOG"; fi
 if [ -n "$CLAUDECODE" ]; then echo "CLAUDECODE was set" >> "$FAKE_CLAUDE_LOG"; fi
 if [ "$FAKE_CLAUDE_HANG" = "1" ]; then exec sleep 30; fi
 step=""
@@ -4266,9 +4297,28 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
       expect(Date.now() - started).toBeLessThan(15_000);
       expect(s.calls()).toEqual([CLAUDE_PLUGIN_COMMANDS[0]]);
       expect(out).toContain(
-        "Claude Code plugin: could not update it (timed out after 1s). Run these, then restart Claude Code:",
+        `Claude Code plugin: could not update it (timed out after 1s). Run these, then restart Claude Code:\n${MANUAL_PLUGIN_COMMANDS}`,
       );
+      // The binary update itself went through.
+      expect(readFileSync(join(s.sandbox.home, ".local", "bin", "plannotator"), "utf8")).toBe(FAKE_BINARY);
     }, 30_000);
+
+    // Claude Code's own git clone of the marketplace stops after 120 s by
+    // default, which failed plugin updates on slow links.
+    test("both claude commands get 10 minutes for Claude Code's git clone; a value the person set is kept", () => {
+      for (const [preset, expected] of [[undefined, "600000"], ["900000", "900000"]] as const) {
+        const s = setupClaudePluginSandbox({});
+        const envLog = join(s.sandbox.home, "claude-env.log");
+        const { code } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, {
+          ...s.env,
+          FAKE_CLAUDE_ENV_LOG: envLog,
+          ...(preset ? { CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS: preset } : {}),
+        });
+        expect(code).toBe(0);
+        expect(s.calls()).toEqual(CLAUDE_PLUGIN_COMMANDS);
+        expect(readFileSync(envLog, "utf8").trim().split("\n")).toEqual([expected, expected]);
+      }
+    });
 
     test("no claude on PATH: nothing runs, the banner keeps the manual commands", () => {
       const s = setupClaudePluginSandbox({ claude: false });
@@ -4379,6 +4429,352 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
         `Claude Code plugin: could not update it (no temporary directory). Run these, then restart Claude Code:\n${MANUAL_PLUGIN_COMMANDS}`,
       );
     });
+  },
+);
+
+// ---------------------------------------------------------------------------
+// The operating-system alert and the plugin-update page after a plugin update
+// that open Claude Code sessions cannot load by themselves. Every run puts a
+// FAKE osascript, notify-send, open and xdg-open first on PATH (they log their
+// arguments), so no test ever shows a real notification or opens a browser; a
+// "live session" is this test process's own pid in the sandbox's
+// ~/.claude/sessions.
+// ---------------------------------------------------------------------------
+
+const FAKE_NOTIFIER = `#!/bin/bash
+{ printf '%s' "$(basename "$0")"; printf '\\t%s' "$@"; printf '\\n'; } >> "$FAKE_NOTIFY_LOG"
+[ -z "$FAKE_NOTIFY_FAIL" ] || { echo "notifier failed" >&2; exit 1; }
+exit 0
+`;
+const ALERT_UPDATED = {
+  title: "Plannotator updated its Claude Code plugin",
+  body: "Type /reload-plugins in each open Claude Code session to load it.",
+};
+const ALERT_NOT_UPDATED = {
+  title: "Plannotator could not update its Claude Code plugin",
+  body: "See Settings > Agents in the Plannotator Inbox for the two commands to run.",
+};
+
+function deadPid(): number {
+  return Bun.spawnSync(["true"]).pid;
+}
+
+function setupAlertSandbox(opts: { from?: string; session?: "live" | "dead" | "none"; claude?: boolean } = {}) {
+  const s = setupClaudePluginSandbox({
+    registry: claudePluginRegistry([{ scope: "user", version: opts.from ?? "0.28.7" }]),
+    claude: opts.claude,
+  });
+  for (const name of ["osascript", "notify-send", "open", "xdg-open"]) {
+    writeFileSync(join(s.sandbox.stub, name), FAKE_NOTIFIER, { mode: 0o755 });
+  }
+  const session = opts.session ?? "live";
+  if (session !== "none") {
+    const dir = join(s.sandbox.home, ".claude", "sessions");
+    mkdirSync(dir, { recursive: true });
+    const pid = session === "live" ? process.pid : deadPid();
+    writeFileSync(join(dir, `${pid}.json`), JSON.stringify({ pid, kind: "interactive" }));
+  }
+  const log = join(s.sandbox.home, "notify.log");
+  const env: Record<string, string> = {
+    ...s.env,
+    PLANNOTATOR_INSTALL_NOTIFY: "",
+    FAKE_NOTIFY_LOG: log,
+    // A Linux desktop session (macOS uses osascript and needs neither).
+    DISPLAY: ":0",
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/nonexistent-bus",
+  };
+  const calls = () =>
+    existsSync(log) ? readFileSync(log, "utf-8").split("\n").filter(Boolean).map((line) => line.split("\t")) : [];
+  const alerts = () =>
+    calls()
+      .filter((parts) => parts[0] === "osascript" || parts[0] === "notify-send")
+      .map((parts) => ({ tool: parts[0], title: parts[parts.length - 2], body: parts[parts.length - 1] }));
+  // Every page opened, as "<opener> <url>" (the toast's powershell.exe is not one).
+  const pages = () =>
+    calls()
+      .filter((parts) => !["osascript", "notify-send", "powershell.exe"].includes(parts[0]!))
+      .map((parts) => `${parts[0]} ${parts.slice(1).join(" ")}`);
+  return { ...s, env, alerts, pages, calls, log };
+}
+
+const NOTIFIER = process.platform === "darwin" ? "osascript" : "notify-send";
+const OPENER = process.platform === "darwin" ? "open" : "xdg-open";
+const PAGE = "https://plannotator.ai/plugin-update";
+
+describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
+  "install.sh alerts once when open Claude Code sessions cannot load the updated plugin (fake notifier)",
+  () => {
+    test("updated from a plugin older than 0.28.52, with a session open: one alert with the reload words", () => {
+      const s = setupAlertSandbox({ from: "0.28.7" });
+      const { code } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, { ...s.env, FAKE_CLAUDE_NEW_VERSION: "0.28.61" });
+      expect(code).toBe(0);
+      expect(s.alerts()).toEqual([{ tool: NOTIFIER, ...ALERT_UPDATED }]);
+      expect(s.pages()).toEqual([`${OPENER} ${PAGE}?state=reload&from=0.28.7&to=0.28.61`]);
+    });
+
+    test("updated from 0.28.52 or newer (sessions reload themselves): no alert", () => {
+      const s = setupAlertSandbox({ from: "0.28.52" });
+      // The fake moves the commit (aaaaaaa to bbbbbbb), so this is an update.
+      const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, { ...s.env, FAKE_CLAUDE_NEW_VERSION: "0.28.61" });
+      expect(code).toBe(0);
+      expect(out).toContain("Claude Code plugin: updated to 0.28.52");
+      expect(s.alerts()).toEqual([]);
+      expect(s.pages()).toEqual([]);
+    });
+
+    test("already current: no alert", () => {
+      const s = setupAlertSandbox({ from: "0.28.7" });
+      // Without FAKE_CLAUDE_NEW_VERSION the fake leaves the registry as it is.
+      writeFileSync(join(s.sandbox.stub, "claude"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "$FAKE_CLAUDE_LOG"\nexit 0\n`, { mode: 0o755 });
+      const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, s.env);
+      expect(code).toBe(0);
+      expect(out).toContain("Claude Code plugin: already up to date (0.28.7).");
+      expect(s.alerts()).toEqual([]);
+      expect(s.pages()).toEqual([]);
+    });
+
+    test("fresh install (no plugin installed): no alert", () => {
+      const s = setupAlertSandbox({});
+      rmSync(s.registryPath);
+      const { code } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, s.env);
+      expect(code).toBe(0);
+      expect(s.alerts()).toEqual([]);
+      expect(s.pages()).toEqual([]);
+    });
+
+    const silent: Array<[string, Record<string, string>, Parameters<typeof setupAlertSandbox>[0]]> = [
+      ["PLANNOTATOR_INSTALL_NOTIFY=0", { PLANNOTATOR_INSTALL_NOTIFY: "0" }, {}],
+      ["PLANNOTATOR_INSTALL_NOTIFY=off", { PLANNOTATOR_INSTALL_NOTIFY: "off" }, {}],
+      ["CI", { CI: "true" }, {}],
+      ["an SSH session", { SSH_CONNECTION: "10.0.0.2 52000 10.0.0.1 22" }, {}],
+      ["the test sandbox", { PLANNOTATOR_TEST_SANDBOX: "1" }, {}],
+      ["no Claude Code session open (stale pid file)", {}, { session: "dead" }],
+      ["no Claude Code sessions folder", {}, { session: "none" }],
+    ];
+    for (const [name, env, opts] of silent) {
+      test(`${name}: no alert, the update itself still happens`, () => {
+        const s = setupAlertSandbox(opts);
+        const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, {
+          ...s.env,
+          ...env,
+          FAKE_CLAUDE_NEW_VERSION: "0.28.61",
+        });
+        expect(code).toBe(0);
+        expect(out).toContain("Claude Code plugin: updated to 0.28.61");
+        expect(s.alerts()).toEqual([]);
+        expect(s.pages()).toEqual([]);
+      expect(s.pages()).toEqual([]);
+      });
+    }
+
+    test.skipIf(process.platform !== "linux")("Linux without a display: no alert", () => {
+      const s = setupAlertSandbox({});
+      const { DISPLAY: _d, ...env } = s.env;
+      const { code } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, { ...env, FAKE_CLAUDE_NEW_VERSION: "0.28.61" });
+      expect(code).toBe(0);
+      expect(s.alerts()).toEqual([]);
+      expect(s.pages()).toEqual([]);
+    });
+
+    test("the plugin could not be updated: one alert with the could-not-update words", () => {
+      const s = setupAlertSandbox({ from: "0.28.7" });
+      const { code } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, { ...s.env, FAKE_CLAUDE_FAIL: "marketplace" });
+      expect(code).toBe(0);
+      expect(s.alerts()).toEqual([{ tool: NOTIFIER, ...ALERT_NOT_UPDATED }]);
+      // The stub release is v99.9.9: the version the plugin should be at.
+      expect(s.pages()).toEqual([`${OPENER} ${PAGE}?state=manual&from=0.28.7&to=99.9.9`]);
+    });
+
+    test("no claude CLI found (manual): the could-not-update alert", () => {
+      const s = setupAlertSandbox({ from: "0.28.7", claude: false });
+      const { code } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, s.env);
+      expect(code).toBe(0);
+      expect(s.alerts()).toEqual([{ tool: NOTIFIER, ...ALERT_NOT_UPDATED }]);
+      expect(s.pages()).toEqual([`${OPENER} ${PAGE}?state=manual&from=0.28.7&to=99.9.9`]);
+    });
+
+    test("opted out of the plugin update (skipped): no alert", () => {
+      const s = setupAlertSandbox({ from: "0.28.7" });
+      const { code } = runInstallSh(s.sandbox, [...PLUGIN_INSTALL_ARGS, "--skip-claude-plugin"], s.env);
+      expect(code).toBe(0);
+      expect(s.alerts()).toEqual([]);
+      expect(s.pages()).toEqual([]);
+    });
+
+    test("PLANNOTATOR_BROWSER=none: the notification, no page", () => {
+      const s = setupAlertSandbox({});
+      const { code } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, {
+        ...s.env,
+        // no-browser-guard: sentinel under test (the installer's "none" handling)
+        PLANNOTATOR_BROWSER: "none",
+        FAKE_CLAUDE_NEW_VERSION: "0.28.61",
+      });
+      expect(code).toBe(0);
+      expect(s.alerts()).toHaveLength(1);
+      expect(s.pages()).toEqual([]);
+    });
+
+    test("PLANNOTATOR_BROWSER naming a program: that program gets the page", () => {
+      const s = setupAlertSandbox({});
+      const browser = join(s.sandbox.home, "my-browser");
+      writeFileSync(browser, FAKE_NOTIFIER, { mode: 0o755 });
+      const { code } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, {
+        ...s.env,
+        PLANNOTATOR_BROWSER: browser,
+        FAKE_CLAUDE_NEW_VERSION: "0.28.61",
+      });
+      expect(code).toBe(0);
+      expect(s.pages()).toEqual([`my-browser ${PAGE}?state=reload&from=0.28.7&to=0.28.61`]);
+    });
+
+    test("a failing notifier never fails the install", () => {
+      const s = setupAlertSandbox({ from: "0.28.7" });
+      const { code, out } = runInstallSh(s.sandbox, PLUGIN_INSTALL_ARGS, {
+        ...s.env,
+        FAKE_CLAUDE_NEW_VERSION: "0.28.61",
+        FAKE_NOTIFY_FAIL: "1",
+      });
+      expect(code).toBe(0);
+      expect(s.alerts()).toHaveLength(1);
+      expect(s.pages()).toHaveLength(1);
+      expect(out).not.toContain("notifier failed");
+      expect(JSON.parse(readFileSync(join(s.sandbox.home, ".plannotator", "install-flags.json"), "utf-8"))).toEqual({
+        v: 1,
+        flags: ["skip-skills"],
+      });
+    });
+  },
+);
+
+/** The toast script a Windows installer hands to powershell.exe -EncodedCommand. */
+function decodeToast(line: string): string {
+  const args = line.split("\t");
+  const encoded = args[args.indexOf("-EncodedCommand") + 1] ?? "";
+  return Buffer.from(encoded, "base64").toString("utf16le");
+}
+
+function extractCmdAlertCommand(): string {
+  const cmd = readScript("install.cmd");
+  const sub = cmd.slice(cmd.indexOf("\n:ClaudePluginReloadAlert\n"));
+  const m = /^powershell -NoProfile -ExecutionPolicy Bypass -Command "(.*)" >nul 2>&1$/m.exec(sub);
+  if (!m) throw new Error("could not locate the :ClaudePluginReloadAlert PowerShell in install.cmd");
+  return m[1];
+}
+
+describe("Windows installers' plugin alert (source scan)", () => {
+  test("install.cmd's alert PowerShell carries nothing cmd.exe would reinterpret, and the same words", () => {
+    const line = extractCmdAlertCommand();
+    expect(line).not.toMatch(/["%!&]/);
+    expect(line).toContain("'https://plannotator.ai/plugin-update?state='");
+    for (const words of [ALERT_UPDATED, ALERT_NOT_UPDATED]) {
+      expect(line).toContain(words.title);
+      expect(line).toContain(words.body);
+      expect(readScript("install.ps1")).toContain(words.title);
+      expect(readScript("install.ps1")).toContain(words.body);
+    }
+  });
+});
+
+describe.skipIf(!pwshBin || process.platform === "win32")(
+  "Windows installers' plugin alert (PowerShell, fake powershell.exe)",
+  () => {
+    function runAlert(
+      runner: "install.ps1" | "install.cmd",
+      opts: {
+        state: string;
+        from: string;
+        to?: string;
+        session?: "live" | "dead";
+        env?: Record<string, string>;
+        expectPage?: boolean;
+      },
+    ) {
+      const s = setupAlertSandbox({ from: opts.from, session: opts.session ?? "live" });
+      writeFileSync(join(s.sandbox.stub, "powershell.exe"), FAKE_NOTIFIER, { mode: 0o755 });
+      // Start-Process with a bare URL would reach the real default browser
+      // under pwsh on macOS or Linux: the page always goes to the fake.
+      const root = mkdtempSync(join(tmpdir(), "plannotator-ps-alert-test-"));
+      const driverPath = join(root, "driver.ps1");
+      const body =
+        runner === "install.ps1"
+          ? [
+              extractPs1Function("Get-ClaudePluginReloadAlert"),
+              extractPs1Function("Show-ClaudePluginReloadAlert"),
+              `Show-ClaudePluginReloadAlert (Get-ClaudePluginReloadAlert -State $env:PLN_NT_STATE -From $env:PLN_NT_FROM -To $env:PLN_NT_TO -Tag $env:PLN_NT_TAG)`,
+              `exit 0`,
+            ]
+          : [extractCmdAlertCommand()];
+      writeFileSync(driverPath, body.join("\n"));
+      const r = Bun.spawnSync([pwshBin!, "-NoProfile", "-File", driverPath], {
+        env: {
+          PATH: `${s.sandbox.stub}:/usr/bin:/bin`,
+          HOME: s.sandbox.home,
+          USERPROFILE: s.sandbox.home,
+          CLAUDE_CONFIG_DIR: join(s.sandbox.home, ".claude"),
+          TMPDIR: join(s.sandbox.home, "tmp"),
+          FAKE_NOTIFY_LOG: s.env.FAKE_NOTIFY_LOG!,
+          PLN_NT_STATE: opts.state,
+          PLN_NT_FROM: opts.from,
+          PLN_NT_TAG: "v0.28.61",
+          PLN_NT_TO: opts.to ?? "",
+          PLANNOTATOR_BROWSER: join(s.sandbox.stub, "xdg-open"),
+          ...opts.env,
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      // Start-Process returns before the fake has written: wait for it a little.
+      const deadline = Date.now() + 5000;
+      while (opts.expectPage && s.pages().length === 0 && Date.now() < deadline) Bun.sleepSync(50);
+      const lines = s.calls().filter((p) => p[0] === "powershell.exe").map((p) => p.join("\t"));
+      return { code: r.exitCode, lines, pages: s.pages() };
+    }
+
+    for (const runner of ["install.ps1", "install.cmd"] as const) {
+      test(`${runner}: updated from an old plugin with a session open: one toast with the reload words`, () => {
+        const r = runAlert(runner, { state: "updated", from: "0.28.7", to: "0.28.61", expectPage: true });
+        expect(r.code).toBe(0);
+        expect(r.lines).toHaveLength(1);
+        expect(r.pages).toEqual([`xdg-open ${PAGE}?state=reload&from=0.28.7&to=0.28.61`]);
+        const toast = decodeToast(r.lines[0]!);
+        expect(toast).toContain(ALERT_UPDATED.title);
+        expect(toast).toContain(ALERT_UPDATED.body);
+        expect(toast).toContain("ToastNotificationManager");
+      }, PWSH_SCANNER_TIMEOUT_MS);
+
+      test(`${runner}: not updated: the could-not-update words`, () => {
+        const r = runAlert(runner, { state: "failed", from: "0.28.7", expectPage: true });
+        expect(r.lines).toHaveLength(1);
+        expect(r.pages).toEqual([`xdg-open ${PAGE}?state=manual&from=0.28.7&to=0.28.61`]);
+        expect(decodeToast(r.lines[0]!)).toContain(ALERT_NOT_UPDATED.title);
+      }, PWSH_SCANNER_TIMEOUT_MS);
+
+      const none: Array<[string, Parameters<typeof runAlert>[1]]> = [
+        ["updated from 0.28.52", { state: "updated", from: "0.28.52" }],
+        ["current", { state: "current", from: "0.28.61" }],
+        ["skipped", { state: "skipped", from: "0.28.7" }],
+        ["fresh install", { state: "none", from: "" }],
+        ["no live session", { state: "updated", from: "0.28.7", session: "dead" }],
+        ["the opt-out", { state: "updated", from: "0.28.7", env: { PLANNOTATOR_INSTALL_NOTIFY: "0" } }],
+        ["CI", { state: "updated", from: "0.28.7", env: { CI: "true" } }],
+        ["SSH", { state: "updated", from: "0.28.7", env: { SSH_CONNECTION: "10.0.0.2 52000 10.0.0.1 22" } }],
+        ["the test sandbox", { state: "updated", from: "0.28.7", env: { PLANNOTATOR_TEST_SANDBOX: "1" } }],
+      ];
+      for (const [name, opts] of none) {
+        test(`${runner}: ${name}: no toast`, () => {
+          const r = runAlert(runner, opts);
+          expect(r.code).toBe(0);
+          expect(r.lines).toEqual([]);
+          expect(r.pages).toEqual([]);
+        }, PWSH_SCANNER_TIMEOUT_MS);
+      }
+
+      test(`${runner}: a failing powershell.exe never fails the run`, () => {
+        const r = runAlert(runner, { state: "updated", from: "0.28.7", env: { FAKE_NOTIFY_FAIL: "1" } });
+        expect(r.code).toBe(0);
+        expect(r.lines).toHaveLength(1);
+      }, PWSH_SCANNER_TIMEOUT_MS);
+    }
   },
 );
 
@@ -4849,6 +5245,14 @@ describe.skipIf(!pwshBin || process.platform === "win32")(
         expect(r.out).toContain(
           `Claude Code plugin: could not update it (claude exited 3: Error: failed to reach github.com). Run these, then restart Claude Code:\n${MANUAL_PLUGIN_COMMANDS}`,
         );
+      }, PWSH_SCANNER_TIMEOUT_MS);
+
+      test(`${runner}: both claude commands get 10 minutes for Claude Code's git clone`, () => {
+        const s = setupClaudePluginSandbox({});
+        const envLog = join(s.sandbox.home, "claude-env.log");
+        const r = runWindowsClaudePluginUpdate(runner, s, { env: { FAKE_CLAUDE_ENV_LOG: envLog } });
+        expectState(runner, r, "current");
+        expect(readFileSync(envLog, "utf8").trim().split("\n")).toEqual(["600000", "600000"]);
       }, PWSH_SCANNER_TIMEOUT_MS);
 
       test(`${runner}: a hanging claude is stopped at the time limit`, () => {

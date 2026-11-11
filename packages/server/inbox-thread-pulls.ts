@@ -26,9 +26,15 @@
  *   a time, and a rate-limit answer holds that host.
  * - A changed state, title or branch is written on the coupling (the store's
  *   `setThreadPullState`), so rows paint without a forge call and phones and
- *   the device door see it. Checks and the review verdict are kept here only.
- * - No gh or glab, no Bitbucket token, signed out, or a failure: nothing is written, the PR keeps
- *   its last state (`unknown` until a first answer), and nothing nags.
+ *   the device door see it. Checks and the review verdict are kept here only;
+ *   a change to them tells the windows (`onLiveChange`, `event: thread-pulls`).
+ * - No gh or glab, no Bitbucket token, signed out, a failure or a timeout: nothing is written, the
+ *   PR keeps its last state (`unknown` until a first answer), the failure is
+ *   kept for 1 min, and nothing nags.
+ * - The window's read never waits on a forge: it answers what is known at
+ *   once and reads behind it (a hover once said "Loading" for as long as a
+ *   stuck glab ran). Every CLI has a hard deadline (the runner) and no slot is
+ *   held forever (`createRefSlots`).
  */
 
 import { forgeRefKey, forgeRefLabel, parseForgeRefUrl, type ForgeRefCardData } from "@plannotator/core/forge-ref-card";
@@ -48,7 +54,7 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { CARD_MARK_FAILURE_MS, CARD_MARK_FRESH_MS, CARD_MARK_REFRESH_MS, CARD_MARKS_BATCH, CARD_MARKS_MAX_CONCURRENT } from "./inbox-card-marks";
 import { sessionLastSawThread } from "./inbox-session-reads";
-import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, type RefCards, type RefRunner } from "./ref-cards";
+import { createRefSlots, REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, type RefCards, type RefRunner } from "./ref-cards";
 
 /** What the reader learns about one PR. */
 export interface ThreadPullRead {
@@ -128,7 +134,19 @@ interface Cached {
   at: number;
 }
 
-export function createThreadPullStates(options: { store: InboxStore; run?: RefRunner; refCards?: RefCards; now?: () => number; fixture?: (() => ThreadPullFixture | null) | null }): ThreadPullStates {
+export function createThreadPullStates(options: {
+  store: InboxStore;
+  run?: RefRunner;
+  refCards?: RefCards;
+  now?: () => number;
+  fixture?: (() => ThreadPullFixture | null) | null;
+  /**
+   * A read changed what only this reader keeps (checks, the review verdict) for these threads' PRs: the windows'
+   * streams say so (`event: thread-pulls`), since no record is written for it. A changed state, title or branch is
+   * a `thread_pull` record already.
+   */
+  onLiveChange?: (threadIds: readonly string[]) => void;
+}): ThreadPullStates {
   const { store } = options;
   const run = options.run ?? refCliRunner;
   const now = options.now ?? Date.now;
@@ -136,20 +154,9 @@ export function createThreadPullStates(options: { store: InboxStore; run?: RefRu
   const pending = new Map<string, Promise<void>>();
   const holdUntil = new Map<string, number>();
   let hosts: { at: number; ttl: number; set: Promise<Set<string>> } | null = null;
-  let running = 0;
-  const waiting: (() => void)[] = [];
-
-  const slot = async <T>(job: () => Promise<T>): Promise<T> => {
-    if (running >= CARD_MARKS_MAX_CONCURRENT) await new Promise<void>((resolve) => waiting.push(resolve));
-    else running++;
-    try {
-      return await job();
-    } finally {
-      const next = waiting.shift();
-      if (next) next();
-      else running--;
-    }
-  };
+  // At most CARD_MARKS_MAX_CONCURRENT reads; never stuck (createRefSlots): a stalled queue fails its reads, kept as failures.
+  const slots = createRefSlots(CARD_MARKS_MAX_CONCURRENT);
+  const slot = <T>(job: () => Promise<T>): Promise<T> => slots.run(job);
 
   const signedIn = (): Promise<Set<string>> => {
     if (hosts && now() - hosts.at < hosts.ttl) return hosts.set;
@@ -171,8 +178,13 @@ export function createThreadPullStates(options: { store: InboxStore; run?: RefRu
 
   /** One answer kept, and written on every live coupling of that PR. */
   const land = (key: string, read: ThreadPullRead | null) => {
+    const before = cache.get(key)?.read;
     cache.set(key, { read, at: now() });
     if (!read) return;
+    if (options.onLiveChange && ((before?.checks ?? null) !== read.checks || (before?.review ?? null) !== read.review)) {
+      const threads = [...new Set(store.allThreadPulls().filter((pull) => pull.pull === key).map((pull) => pull.thread_id))];
+      if (threads.length > 0) options.onLiveChange(threads);
+    }
     for (const pull of store.allThreadPulls()) {
       if (pull.pull !== key) continue;
       try {
@@ -270,6 +282,23 @@ export function createThreadPullStates(options: { store: InboxStore; run?: RefRu
   };
 }
 
+/** How long the person's Add waits for the new PR's first read before answering with what is known. */
+export const THREAD_PULLS_ADD_WAIT_MS = 1_500;
+
+/** Wait for `work`, but no longer than `ms`; never throws (the work goes on behind). */
+function settledWithin(work: Promise<unknown>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    work.then(
+      () => undefined,
+      () => undefined,
+    ),
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
 /** A thread's PRs as the window reads them: the live list with stack groups, and what was removed in the last 7 days. */
 export function threadPullsAnswer(store: InboxStore, states: Pick<ThreadPullStates, "live">, threadId: string, now: number = Date.now()): InboxThreadPullsAnswer {
   const live = store.threadPulls(threadId);
@@ -321,11 +350,14 @@ export function createThreadPullsRoute(options: {
         const remove = all || body.remove === undefined ? { refs: [] } : parseInboxThreadPullRefs(body.remove, "remove");
         if ("error" in remove) throw new InboxError("validation_error", remove.error, { field: remove.field });
         const change = store.changeThreadPulls({ thread_id: threadId, add: add.refs, remove: all ? "all" : remove.refs, by: { kind: "person" } });
-        // A PR just added is read at once, so the popover shows its state.
-        if (change.added.length > 0) await states.refresh(change.added);
+        // A PR just added is read at once, so the popover shows its state; a forge slower than
+        // THREAD_PULLS_ADD_WAIT_MS answers later, over the stream (a `thread_pull` record, `event: thread-pulls`).
+        if (change.added.length > 0) await settledWithin(states.refresh(change.added), THREAD_PULLS_ADD_WAIT_MS);
       } else if (owner) {
-        // The thread was opened (or the window got its focus back): its PRs still in play are read if older than 30 s.
-        await states.refresh(store.threadPulls(threadId), { refresh: true });
+        // The thread was opened, a row's mark hovered, or the window got its focus back: the answer is what is known
+        // now, at once, and its PRs still in play are read behind it if older than 30 s. Never waits on gh or glab:
+        // what the read changes reaches the window over the stream (a `thread_pull` record, `event: thread-pulls`).
+        void states.refresh(store.threadPulls(threadId), { refresh: true });
       }
       return json({ serverSession: options.serverSession, ...threadPullsAnswer(store, states, threadId, now()) });
     },

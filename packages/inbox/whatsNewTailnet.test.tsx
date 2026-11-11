@@ -150,7 +150,13 @@ function renderApp() {
   return host;
 }
 
-const buttonsNamed = (el: HTMLElement, pattern: RegExp) => [...el.querySelectorAll('button')].filter((b) => pattern.test(b.textContent ?? '') || pattern.test(b.getAttribute('aria-label') ?? ''));
+// The window's controls by name, as their names (a failed check prints words, never a DOM tree). A list row is a
+// button too, and its grey line is a message's own words (the fixture's "Update: the admin index builds now."):
+// rows are not controls here.
+const buttonsNamed = (el: HTMLElement, pattern: RegExp) =>
+  [...el.querySelectorAll('button:not([data-thread-id])')]
+    .filter((b) => pattern.test(b.textContent ?? '') || pattern.test(b.getAttribute('aria-label') ?? ''))
+    .map((b) => b.getAttribute('aria-label') ?? b.textContent ?? '');
 
 test.skipIf(!hasDom)("the owner over the tailnet: the sidebar link and Settings → About open What's new", async () => {
   guest = false;

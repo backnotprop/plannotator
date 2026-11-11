@@ -98,6 +98,8 @@ export interface SettingsPageProps {
   onToggleBro?: (next: boolean) => void;
   /** Settings → Capabilities → Experimental → "Float reply drafts" (approval "inbox-reply-floaters", off by default). Absent (or an Inbox without it): no row. */
   onToggleFloatDrafts?: (next: boolean) => void;
+  /** Settings → General → When an agent asks you → the Mark read warning (the owner's ask, 2026-11-10). Absent (or an Inbox without it): no row. */
+  onToggleMarkReadWarning?: (next: boolean) => void;
   /** Over your tailnet: the switch, and whether a change is in flight. */
   onToggleTailscale: (next: boolean, replaceExposed?: boolean) => void;
   tailscaleBusy: boolean;
@@ -301,8 +303,11 @@ function GeneralSection({
   onToggleCookieHost,
   onTakeTour,
   updateRow,
+  onToggleMarkReadWarning,
 }: {
   onToggleCookieHost?: (next: boolean) => void;
+  /** The Mark read warning's switch (absent for a tailnet guest, or from an Inbox without it: no row). */
+  onToggleMarkReadWarning?: (next: boolean) => void;
   onTakeTour?: () => void;
   updateRow?: ReactNode;
   settings: SettingsModel;
@@ -519,6 +524,21 @@ function GeneralSection({
             </div>
           )}
           {sound && <SoundRow sound={sound} />}
+          {settings.mark_read_warning && onToggleMarkReadWarning && (
+            // The warning before a Mark read that sets questions aside (components/MarkReadWarning.tsx): its "Don't
+            // show this again" turns this off, and this turns it back on.
+            <div className="ib-prow" data-settings-mark-read-warning="">
+              <span className="ib-txt">
+                <span className="ib-l" id="ib-mark-read-warning-label">
+                  Warn before Mark read sets questions aside
+                </span>
+                <span className="ib-desc">Asks first when marking read would close open questions and tell the agent not to wait on them.</span>
+              </span>
+              <span className="ib-ctl">
+                <Switch on={settings.mark_read_warning.on} labelledBy="ib-mark-read-warning-label" onClick={() => onToggleMarkReadWarning(!settings.mark_read_warning!.on)} />
+              </span>
+            </div>
+          )}
         </div>
         <div className="ib-note">
           <Icon name="info" />
@@ -1194,6 +1214,7 @@ export function SettingsPage(props: SettingsPageProps) {
             onToggleCookieHost={props.onToggleCookieHost}
             onTakeTour={props.onTakeTour}
             updateRow={props.updateRow}
+            onToggleMarkReadWarning={settings.guest ? undefined : props.onToggleMarkReadWarning}
           />
         );
         break;

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="132" viewBox="0 0 1200 132" role="img" aria-label="Decisions, from Plannotator">
+<text x="0" y="58" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Inter, sans-serif" font-size="62" font-weight="600" letter-spacing="-1.6" fill="#f0f6fc">Decisions</text>
+<text x="3" y="116" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace" font-size="40" font-weight="500" letter-spacing="-0.5" fill="#9198a1">from Plannotator</text>
+<text x="840" y="23" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace" font-size="14" fill="#6e7681">D1</text>
+<path d="M874 17l4 4 8 -9" fill="none" stroke="#a294ff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="900" y="15" width="196" height="6" rx="3" fill="#3d444d"/>
+<rect x="1106" y="15" width="74" height="6" rx="3" fill="#30363d"/>
+<text x="840" y="47" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace" font-size="14" fill="#6e7681">D2</text>
+<path d="M874 41l4 4 8 -9" fill="none" stroke="#a294ff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="900" y="39" width="152" height="6" rx="3" fill="#3d444d"/>
+<rect x="1062" y="39" width="57" height="6" rx="3" fill="#30363d"/>
+<text x="840" y="71" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace" font-size="14" fill="#6e7681">D3</text>
+<path d="M874 65l4 4 8 -9" fill="none" stroke="#a294ff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="900" y="63" width="204" height="6" rx="3" fill="#3d444d"/>
+<rect x="1114" y="63" width="77" height="6" rx="3" fill="#30363d"/>
+<text x="840" y="95" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace" font-size="14" fill="#6e7681">D4</text>
+<path d="M874 89l4 4 8 -9" fill="none" stroke="#a294ff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+<rect x="900" y="87" width="128" height="6" rx="3" fill="#3d444d"/>
+<rect x="1038" y="87" width="48" height="6" rx="3" fill="#30363d"/>
+<text x="840" y="119" font-family="ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace" font-size="14" fill="#6e7681">D5</text>
+<circle cx="880" cy="114" r="3.6" fill="none" stroke="#6e7681" stroke-width="1.5"/>
+<rect x="900" y="111" width="172" height="6" rx="3" fill="#30363d"/>
+<rect x="1082" y="111" width="65" height="6" rx="3" fill="#30363d"/>
+</svg>
