@@ -138,7 +138,8 @@ export const FloatingQuickLabelPicker: React.FC<FloatingQuickLabelPickerProps> =
         }
       `}</style>
 
-      <div className="bg-popover border border-border/60 rounded-lg shadow-xl overflow-hidden">
+      {/* Any number of labels: a long list scrolls inside the picker instead of running off the screen. */}
+      <div className="bg-popover border border-border/60 rounded-lg shadow-xl overflow-x-hidden overflow-y-auto overscroll-contain max-h-[min(70vh,480px)]">
         <QuickLabelDropdown labels={quickLabels} onSelect={onSelect} animate />
       </div>
     </div>,

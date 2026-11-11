@@ -298,7 +298,7 @@ You can replace the line with your own, in **Settings → Prompts** or in `~/.pl
 
 - `prompts.inbox.reminder` is for every agent. `prompts.inbox.runtimes.<agent>.reminder` (`claude-code`, `pi` or `opencode`) is for one agent and wins over the shared text.
 - Your text replaces the whole line, on every host, OpenCode 1 included. Each `plannotator_inbox` in it becomes the tool's name in that agent (on Claude Code, its full `mcp__…` name).
-- Empty or blank text counts as unset. At most 4,128 characters; longer text is refused when you save it, and ignored if written by hand (Settings → Prompts says so, with Reset to default).
+- Empty or blank text counts as unset. At most 9,000 characters (Claude Code puts at most 10,000 characters of hook text in context, and a compaction adds your open threads); longer text is refused when you save it, and ignored if written by hand (Settings → Prompts says so, with Reset to default).
 - With no `prompts.inbox` set, every agent gets the line above, exactly as before.
 - Like the switch, it is read when a session starts: a change applies to each agent's next session.
 - After a compaction on Claude Code, the plugin adds your line again, exactly as you wrote it.

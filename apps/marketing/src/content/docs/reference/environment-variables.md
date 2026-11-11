@@ -141,7 +141,7 @@ These environment variables are still detected for backwards compatibility:
 | `SSH_TTY` | Set by SSH when a TTY is allocated |
 | `SSH_CONNECTION` | Set by SSH with connection details |
 
-If either is present, Plannotator enables remote mode automatically when `PLANNOTATOR_REMOTE` is unset. Set `PLANNOTATOR_REMOTE=1` / `true` to force remote mode or `0` / `false` to force local mode.
+If either is present, Plannotator enables remote mode automatically when `PLANNOTATOR_REMOTE` is unset. When remote mode is on only because of SSH (`PLANNOTATOR_REMOTE` unset), the server listens and advertises exactly as above, and a request that reaches it over loopback (your own `ssh -L` tunnel or editor port forward, or a browser on that machine) gets what a local session gives: Ask this session, link hover cards, the annotate agent terminal, and documents outside the project. A request from any other address gets what remote mode gives. Open in, opening a browser and live app annotation stay off over SSH. `PLANNOTATOR_REMOTE=1` keeps remote mode whole for every request. Set `PLANNOTATOR_REMOTE=1` / `true` to force remote mode or `0` / `false` to force local mode.
 
 ## Port resolution order
 
