@@ -348,6 +348,7 @@ packages/review-editor/components/AllFilesCodeView.generated.test.tsx
 packages/review-editor/components/AllFilesCodeView.autoViewed.test.tsx
 packages/review-editor/components/AllFilesCodeView.imagePreview.test.tsx
 packages/review-editor/components/AllFilesCodeView.markdownPreview.test.tsx
+packages/inbox/rowLongPress.test.tsx
 packages/review-editor/components/AllFilesCodeView.changeNavigation.test.tsx
 packages/review-editor/components/MarkdownFilePreview.test.tsx
 packages/review-editor/components/guide/overviewDiagram.test.tsx

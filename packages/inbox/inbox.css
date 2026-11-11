@@ -1355,6 +1355,10 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-rw[data-menu] :is(.ib-row, .ib-nrow)::before { background: var(--ib-hover) !important; }
 .ib-rw[data-menu] :is(.ib-row, .ib-nrow).ib-sel::before { background: var(--ib-sel-hover) !important; }
 .ib-mrow[data-menu] { background: var(--ib-hover-s, color-mix(in oklch, var(--muted) 50%, transparent)); }
+/* A finger held on a row opens its menu (RowMenu.tsx, `longPress`): no iOS callout and no text selection under it.
+   Touch only: a touch screen, or iOS and iPadOS WebKit (a trackpad iPad's primary pointer is fine). */
+@media (pointer: coarse) { .ib-lbody :is(.ib-mrow, .ib-rw) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; } }
+@supports (-webkit-touch-callout: none) { .ib-lbody :is(.ib-mrow, .ib-rw) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; } }
 /* Rows that wait on nobody (Sent, Quiet): the title steps back. Off, a wide row's title takes its row's colour and
    a three-line row's is quiet text. */
 .ib-row[data-section="quiet"] .ib-title { color: var(--ib-quiet-dim, currentcolor); }
