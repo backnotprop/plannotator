@@ -423,4 +423,27 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
     expect(popover()).toBeNull();
     expect(document.activeElement).toBe(button);
   });
+
+  // The sheet follows the phone layout (phone.ts's PHONE_QUERY), as the ⋯ menus' sheets do: a tablet's touch screen
+  // gets the card under the button, and a phone the sheet with its scrim.
+  for (const [what, matches, sheet] of [
+    ['a phone', (query: string) => query.includes('max-width: 767px') || query.includes('pointer: coarse'), true],
+    ['a tablet (a touch screen, not the phone layout)', (query: string) => query === '(pointer: coarse)', false],
+  ] as const) {
+    test(`${what}: the button opens ${sheet ? 'the bottom sheet over a scrim' : 'the card, no sheet'}`, async () => {
+      const saved = window.matchMedia;
+      window.matchMedia = ((query: string) => ({ matches: matches(query), media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false })) as typeof window.matchMedia;
+      try {
+        answer = answerOf([pull('o/r#1', 'open', 'main', 'a'), pull('o/r#2', 'merged', 'main', 'b')]);
+        render(<ThreadPullsButton threadId={THREAD} summary={undefined} />);
+        await settle();
+        await click(host!.querySelector('[data-pr-button]'));
+        expect(popover()?.hasAttribute('data-sheet')).toBe(sheet);
+        expect(popover()?.classList.contains('ib-prpop-sheet')).toBe(sheet);
+        expect(document.querySelector('[data-pr-scrim]') !== null).toBe(sheet);
+      } finally {
+        window.matchMedia = saved;
+      }
+    });
+  }
 });
