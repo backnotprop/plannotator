@@ -62,7 +62,7 @@ export function annotationTargetForCallFlowNode(
 }
 
 /** Case-insensitive, non-overlapping `[start, end)` ranges of `query` in `text`. */
-function searchRanges(text: string, query: string): Array<readonly [number, number]> {
+export function searchRanges(text: string, query: string): Array<readonly [number, number]> {
   const normalizedQuery = query.trim().toLocaleLowerCase();
   if (!normalizedQuery) return [];
   const lowerText = text.toLocaleLowerCase();
@@ -76,7 +76,7 @@ function searchRanges(text: string, query: string): Array<readonly [number, numb
 }
 
 /** `text.slice(start, end)` with the parts inside `ranges` marked as search matches. */
-function highlightSlice(
+export function highlightSlice(
   text: string,
   ranges: ReadonlyArray<readonly [number, number]>,
   start: number,

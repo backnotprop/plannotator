@@ -851,6 +851,10 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-opt small { display: block; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); }
 .ib-acts-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; flex-wrap: wrap; }
 .ib-acts-row .ib-left { margin-right: auto; }
+/* The warning before a Mark read that sets questions aside (components/MarkReadWarning.tsx): a short dialog, narrower. */
+.pn-inbox dialog.ib-dlg.ib-readwarn, dialog.ib-dlg.ib-readwarn { width: min(440px, calc(100vw - 24px)); }
+.ib-readwarn .ib-sum { margin-top: 8px; }
+.ib-readwarn .ib-readwarn-never { margin: 12px -8px 0; }
 
 /* What's new: the release notes in the main pane, read-only (design of record
    .product/approved/inbox-whats-new-tldr/, round 2; the bar from inbox-whats-new-header, variant Toolbar):
@@ -3674,6 +3678,9 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   :is(.ib-body, .ib-docscroll) [data-question-option] > input { width: 20px; height: 20px; margin-top: 0; }
   :is(.ib-body, .ib-docscroll) [data-question-part="choice"] { font-size: var(--ib-fs-15, 15px); }
   :is(.ib-body, .ib-docscroll) [data-question-key] input[type="text"] { min-height: 40px; }
+  /* The Other field (a textarea that grows with its lines): one line is 40 px with its words in the middle, as the
+     one-line field drew them; each further line adds a line. */
+  :is(.ib-body, .ib-docscroll) [data-question-key] textarea[data-question-other] { min-height: 40px; padding-top: calc((39px - 1lh) / 2); padding-bottom: calc((39px - 1lh) / 2); }
   :is(.ib-body, .ib-docscroll) [data-question-key] > [data-pinpoint-ignore]:last-child > button, :is(.ib-body, .ib-docscroll) [data-question-key] > [data-pinpoint-ignore]:last-child > div > button { min-height: 44px; padding-left: 10px; padding-right: 10px; font-size: var(--ib-fs-14, 14px); }
   /* The footer on a touch phone: the buttons and the status never fit one row, so the status leads on its own
      line and the buttons follow it in reading order (one that does not fit goes to the next line, below). A

@@ -66,9 +66,10 @@ export function launchOff(dataDir: string): void {
  * The config.json keys every e2e world starts with (`launchOff`): spread it into a config a spec writes whole. Besides
  * launch off, the one-time "themes" dialog is settled (as for someone on another theme): on a release build it is due
  * from day one for the default theme and opens 15 s into the page, over whatever a spec is doing. The spec about that
- * dialog takes the key out.
+ * dialog takes the key out. The warning before a Mark read that sets questions aside is off too (as for someone who
+ * ticked "Don't show this again"), so a spec about Mark read itself is not stopped by it.
  */
-export const E2E_LAUNCH_OFF = { inboxLaunch: { enabled: false }, inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' } } as const;
+export const E2E_LAUNCH_OFF = { inboxLaunch: { enabled: false }, inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' }, inboxMarkReadWarning: false } as const;
 
 /**
  * What every Plannotator process a spec starts under `root` needs: a scratch

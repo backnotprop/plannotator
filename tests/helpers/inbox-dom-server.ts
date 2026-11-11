@@ -354,12 +354,18 @@ const leakedIds =
       )
     : [];
 // The one-time "themes" dialog is settled in every world (as for someone on another theme): on a release version it is
-// due from day one and would be the line's next dialog, ahead of the one a test is about.
+// due from day one and would be the line's next dialog, ahead of the one a test is about. The warning before a Mark
+// read that sets questions aside is off too (as for someone who ticked "Don't show this again"), so a test about Mark
+// read itself is not stopped by it; the warning's own test turns it on (POST /api/inbox/settings `mark_read_warning`).
 {
   mkdirSync(dataDir, { recursive: true });
   const file = join(dataDir, "config.json");
   const config = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>) : {};
-  if (config.inboxThemeChooser === undefined) writeFileSync(file, JSON.stringify({ ...config, inboxThemeChooser: { notNeededAt: "2026-10-01T10:00:00.000Z" } }));
+  const settled = {
+    ...(config.inboxThemeChooser === undefined ? { inboxThemeChooser: { notNeededAt: "2026-10-01T10:00:00.000Z" } } : {}),
+    ...(config.inboxMarkReadWarning === undefined ? { inboxMarkReadWarning: false } : {}),
+  };
+  if (Object.keys(settled).length > 0) writeFileSync(file, JSON.stringify({ ...config, ...settled }));
 }
 const server = await startInboxServer({
   dataDir,
