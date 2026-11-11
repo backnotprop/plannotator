@@ -4,8 +4,8 @@
  * has three states, and an explicit one always wins:
  *
  * - Unset (the default): new installs only. An Inbox with `inbox.db` stays on it; one with record files stays on
- *   them; one with neither (nothing was ever written: a new install, an older version's empty folder, a folder the
- *   person deleted) starts on SQLite. Nothing moves either way, so there is no backup. The choice is remembered by
+ *   them; one with neither (nothing was ever written: a new install, an Inbox that never received a message, a folder
+ *   the person deleted) starts on SQLite. Nothing moves either way, so there is no backup. The choice is remembered by
  *   what it leaves on disk: the database, or the files.
  * - Off: today's JSONL store. With no `inbox.db`, exactly as before (two `existsSync`; a half file a crashed move
  *   left is removed). With one (the switch was on, or the Inbox started on SQLite): everything goes back into the
@@ -14,16 +14,12 @@
  * - On: the files move into `inbox.db` (`import.ts`) when there is no database yet, then the database serves. A
  *   move that cannot finish (too little disk, a check that differs, a failure) leaves the files serving.
  *
- * While the database serves, a note named `projects` stands where the files were (`files-marker.ts`), so an older
- * Plannotator stops at it instead of starting an empty Inbox.
- *
  * Runs before the server listens, as today's load does.
  */
 import { existsSync, readdirSync, rmdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { INBOX_PROJECTS_DIR, inboxDir } from "../../schema";
 import { InboxStore } from "../../store";
-import { removeSqliteMarker, writeSqliteMarker } from "./files-marker";
 import { importJsonlInbox, type InboxImportOutcome, type InboxImportStep } from "./import";
 import { INBOX_DB_IMPORTING, jsonlEntriesPresent, readMeta, removeDb } from "./move-files";
 import { returnToJsonl, type InboxReturnOutcome } from "./return-to-files";
@@ -109,14 +105,6 @@ export function inboxImportDelayFromEnv(env: Record<string, string | undefined>)
 }
 
 export async function openInboxStore(dataDir: string, options: OpenInboxStoreOptions): Promise<OpenedInboxStore> {
-  const opened = await openChosen(dataDir, options);
-  // The note an older Plannotator stops at stands exactly while the database serves (`files-marker.ts`).
-  if (opened.log === "sqlite") writeSqliteMarker(inboxDir(dataDir));
-  else removeSqliteMarker(inboxDir(dataDir));
-  return opened;
-}
-
-async function openChosen(dataDir: string, options: OpenInboxStoreOptions): Promise<OpenedInboxStore> {
   const { now } = options;
   const dir = inboxDir(dataDir);
   const db = join(dir, INBOX_DB_FILE);

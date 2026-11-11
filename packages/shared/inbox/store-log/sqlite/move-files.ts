@@ -9,7 +9,6 @@ import { Database } from "bun:sqlite";
 import { chmodSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { INBOX_PROJECTS_DIR, INITIATIVES_FILE, SEQ_FLOOR_FILE } from "../../schema";
-import { isSqliteMarker } from "./files-marker";
 
 /** The database while the import writes it: renamed to `inbox.db` once checked; a leftover is a crash's, removed. */
 export const INBOX_DB_IMPORTING = "inbox.db.importing";
@@ -17,9 +16,9 @@ export const INBOX_DB_IMPORTING = "inbox.db.importing";
 /** The entries of today's record files under `inbox/`: what the import reads and then moves into the backup. */
 export const JSONL_ENTRIES = [INBOX_PROJECTS_DIR, INITIATIVES_FILE, SEQ_FLOOR_FILE];
 
-/** The record entries in place under `inboxDir`; the note an Inbox on SQLite leaves as `projects` is not one (`files-marker.ts`). */
+/** The record entries in place under `inboxDir`. */
 export function jsonlEntriesPresent(inboxDir: string): string[] {
-  return JSONL_ENTRIES.filter((entry) => existsSync(join(inboxDir, entry)) && !(entry === INBOX_PROJECTS_DIR && isSqliteMarker(inboxDir)));
+  return JSONL_ENTRIES.filter((entry) => existsSync(join(inboxDir, entry)));
 }
 
 /** A backup folder's name: `backup-<date>-<what>`, then `-2`, `-3` when one of that day is already there. */
@@ -31,14 +30,18 @@ export function freeBackupName(inboxDir: string, at: Date, what: "jsonl" | "sqli
   }
 }
 
-/** Flush a file or folder to disk; best effort for a folder (not every system opens one). */
+/**
+ * Flush a file or folder to disk; best effort for a folder (not every system opens one). A file is opened for
+ * writing: Windows flushes only through a handle that may write (a read-only one fails with EPERM).
+ */
 export function fsyncPath(path: string): void {
   let fd: number | null = null;
+  const folder = statSync(path).isDirectory();
   try {
-    fd = openSync(path, "r");
+    fd = openSync(path, folder ? "r" : "r+");
     fsyncSync(fd);
   } catch (error) {
-    if (!statSync(path).isDirectory()) throw error;
+    if (!folder) throw error;
   } finally {
     if (fd !== null) closeSync(fd);
   }
@@ -81,12 +84,18 @@ export function readMeta(file: string, key: string): string | null {
   }
 }
 
+/**
+ * Windows refuses to remove a file another process still holds open (EBUSY, EPERM), for instance the move's second
+ * process in the moment after a crash ended the Inbox, before it notices: retried for up to about 3 s.
+ */
+const RETRY = { force: true, maxRetries: 15, retryDelay: 200 } as const;
+
 export function removeSidecars(file: string): void {
-  for (const suffix of ["-wal", "-shm", "-journal"]) rmSync(`${file}${suffix}`, { force: true });
+  for (const suffix of ["-wal", "-shm", "-journal"]) rmSync(`${file}${suffix}`, RETRY);
 }
 
 export function removeDb(file: string): void {
-  rmSync(file, { force: true });
+  rmSync(file, RETRY);
   removeSidecars(file);
 }
 

@@ -7,8 +7,7 @@
  *
  * Phases (each in its own scratch HOME and data dir; never the person's):
  *   new-install  the switch unset on an empty data dir: SQLite, no backup, Storage counts inbox.db, write and read
- *                back through the server (MCP and HTTP), export, restart; then, when OLD_PLANNOTATOR_BINARY names a
- *                released binary from before SQLite, that it refuses to start over the database and changes nothing
+ *                back through the server (MCP and HTTP), export, restart
  *   import       a generated JSONL Inbox moved with the switch on (the check run apart, in the binary's second
  *                process), byte-for-byte backup, export equal to the files, then off: everything back into the files
  *   moves        the move again and again, each one checked apart (the second process's lock race, run 4)
@@ -31,7 +30,6 @@ const args = process.argv.slice(2);
 const binary = resolve(args[0] ?? "");
 check(args[0] && existsSync(binary), `usage: run.ts <binary>; no binary at ${binary}`);
 const only = args.includes("--only") ? new Set(args[args.indexOf("--only") + 1]!.split(",")) : null;
-const oldBinary = process.env.OLD_PLANNOTATOR_BINARY ? resolve(process.env.OLD_PLANNOTATOR_BINARY) : null;
 const rows: string[] = [];
 const scratch: string[] = [];
 
@@ -60,7 +58,6 @@ async function started(s: Sandbox, extra: Record<string, string> = {}, what = "s
 }
 
 const last = (s: Sandbox, ev: string) => notes(s, ev).at(-1) ?? {};
-const isFile = (path: string) => existsSync(path) && statSync(path).isFile();
 const backups = (s: Sandbox) => readdirSync(s.inbox).filter((name) => name.startsWith("backup-"));
 const ON = { PLANNOTATOR_INBOX_SQLITE: "1" };
 const OFF = { PLANNOTATOR_INBOX_SQLITE: "0" };
@@ -70,7 +67,7 @@ async function newInstall(): Promise<void> {
   const first = await started(s, {}, "a new install");
   check(last(s, "store_load").log === "sqlite" && last(s, "store_load").why === "new_install", `store_load: ${JSON.stringify(last(s, "store_load"))}`);
   check(existsSync(join(s.inbox, "inbox.db")), "no inbox.db on a new install");
-  check(isFile(join(s.inbox, "projects")), "no note named projects beside inbox.db");
+  check(!existsSync(join(s.inbox, "projects")), "record files on a new install");
   check(backups(s).length === 0, "a backup on a new install");
   proof("new-install", "starts on SQLite, nothing moved", `${Math.round(first.ms)} ms to answer`);
 
@@ -106,24 +103,6 @@ async function newInstall(): Promise<void> {
   check(databaseDigest(s.dataDir) === served, "a restart changed what the database serves");
   proof("new-install", "restart serves the same, from the database", `${Math.round(again.ms)} ms to answer`);
 
-  if (!oldBinary) return proof("new-install", "older version", "skipped: OLD_PLANNOTATOR_BINARY not set");
-  const db = readFileSync(join(s.inbox, "inbox.db"));
-  const note = readFileSync(join(s.inbox, "projects"), "utf8");
-  const old = await serve(oldBinary, s, {}, 60_000);
-  if (old.ok) {
-    hardKill(old.proc);
-    check(false, "an older Plannotator started an Inbox over the database");
-  }
-  check(/ENOTDIR|not a directory/i.test(old.stderr), `the older version's error does not name the note: ${old.stderr.slice(-600)}`);
-  check(readFileSync(join(s.inbox, "inbox.db")).equals(db) && readFileSync(join(s.inbox, "projects"), "utf8") === note, "the older version changed the database or the note");
-  check(!existsSync(join(s.inbox, "seq.json")) && !existsSync(join(s.inbox, "initiatives.jsonl")), "the older version wrote record files");
-  proof("new-install", "an older Plannotator refuses to start over it and changes nothing", old.stderr.trim().split("\n").find((l) => /ENOTDIR|not a directory/i.test(l))?.trim().slice(0, 120) ?? "");
-  const back = await started(s, {}, "the start after the older version");
-  const agent3 = await agentOn(back, s);
-  check(JSON.stringify(await agent3.thread(a.thread_id)) === JSON.stringify(read), "after the older version, a thread reads differently");
-  await agent3.close();
-  await stop(binary, s, back);
-  proof("new-install", "this version again serves everything after the older one refused");
 }
 
 /**
@@ -151,9 +130,9 @@ async function importAndBack(): Promise<void> {
 
   const on = await started(s, ON, "the move");
   const move = last(s, "store_move");
-  check(move.status === "imported" && move.apart === true, `store_move: ${JSON.stringify(move)}`);
+  check(move.status === "imported" && move.apart === true, `store_move: ${JSON.stringify(move)}\n${on.stderr()}`);
   check(sameFiles(recordFiles(s.inbox), originals), "a record file changed or went missing in the move");
-  check(isFile(join(s.inbox, "projects")) && backups(s).length === 1, `after the move: ${readdirSync(s.inbox).join(", ")}`);
+  check(!existsSync(join(s.inbox, "projects")) && backups(s).length === 1, `after the move: ${readdirSync(s.inbox).join(", ")}`);
   const storage = await getJson<{ database?: number; backups?: { kind: string }[] }>(on, "/api/inbox/settings/storage");
   check((storage.database ?? 0) > 0 && storage.backups?.length === 1 && storage.backups[0]!.kind === "jsonl", `Storage after the move: ${JSON.stringify(storage.backups)}`);
   proof("import", "moved, checked in the second process; files kept byte for byte in the backup", `${move.lines} lines in ${move.ms} ms`);
@@ -171,7 +150,7 @@ async function importAndBack(): Promise<void> {
 
   const onSqlite = databaseDigest(s.dataDir);
   const off = await started(s, OFF, "the way back");
-  check(last(s, "store_move").status === "returned", `way back: ${JSON.stringify(last(s, "store_move"))}`);
+  check(last(s, "store_move").status === "returned", `way back: ${JSON.stringify(last(s, "store_move"))}\n${off.stderr()}`);
   await stop(binary, s, off);
   check(statSync(join(s.inbox, "projects")).isDirectory() && !existsSync(join(s.inbox, "inbox.db")), "after the way back the files are not in place");
   check(filesDigest(s.dataDir) === onSqlite, "the way back lost or changed something written on SQLite");
@@ -187,7 +166,7 @@ async function moves(count: number): Promise<void> {
     copyInbox(pristine.dataDir, s.dataDir);
     const run = await started(s, ON, `move ${i + 1}`);
     const move = last(s, "store_move");
-    check(move.status === "imported" && move.apart === true, `move ${i + 1}: ${JSON.stringify(move)}`);
+    check(move.status === "imported" && move.apart === true, `move ${i + 1}: ${JSON.stringify(move)}\n${run.stderr()}`);
     times.push(Number(move.ms));
     await stop(binary, s, run);
     rmSync(s.root, { recursive: true, force: true });
@@ -257,10 +236,10 @@ async function kills(randomKills: number): Promise<void> {
     check(filesDigest(off.dataDir) === before && !existsSync(join(off.inbox, "inbox.db")), `${what}: off after the crash serves differently`);
     const onRun = await started(s, ON, `${what}, restart on`);
     const move = last(s, "store_move");
-    check(move.status === "imported" || move.status === "already", `${what}: restart on: ${JSON.stringify(move)}`);
+    check(move.status === "imported" || move.status === "already", `${what}: restart on: ${JSON.stringify(move)}\n${onRun.stderr()}`);
     await stop(binary, s, onRun);
     check(databaseDigest(s.dataDir) === before, `${what}: on after the crash serves differently`);
-    check(sameFiles(recordFiles(s.inbox), originals) && isFile(join(s.inbox, "projects")), `${what}: after the restart the files are not all in the backup`);
+    check(sameFiles(recordFiles(s.inbox), originals) && !existsSync(join(s.inbox, "projects")), `${what}: after the restart the files are not all in the backup`);
     check(!readdirSync(s.inbox).some((name) => name.startsWith("inbox.db.importing")), `${what}: a half file was left`);
     rmSync(s.root, { recursive: true, force: true });
     rmSync(off.root, { recursive: true, force: true });
@@ -306,7 +285,7 @@ async function bigMove(): Promise<void> {
   const made = Math.round(performance.now() - at);
   const run = await started(s, ON, "the 100k move");
   const move = last(s, "store_move");
-  check(move.status === "imported" && move.apart === true, `100k: ${JSON.stringify(move)}`);
+  check(move.status === "imported" && move.apart === true, `100k: ${JSON.stringify(move)}\n${run.stderr()}`);
   await stop(binary, s, run);
   const again = await started(s, {}, "the 100k restart");
   await stop(binary, s, again);

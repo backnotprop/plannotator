@@ -1,12 +1,10 @@
 /**
  * The switch unset (the default): a new install starts on SQLite, every other Inbox stays as it is (`open-store.ts`
- * `chooseInboxLog`), and while the database serves, the note named `projects` keeps an older Plannotator from
- * starting an empty Inbox beside it (`files-marker.ts`).
+ * `chooseInboxLog`).
  *
  * The failures this guards: an existing Inbox moving (or changing one byte) without the switch; a new install
  * starting on the files, or showing a "Backup" in Settings → Storage when nothing moved; a database left behind by
- * the switch going quiet; an older Plannotator's reader (today's JSONL reader, which every release up to 0.28.61
- * shares) starting empty over a database; two Inboxes starting at the same moment ending on different logs.
+ * the switch going quiet; two Inboxes starting at the same moment failing or ending on different logs.
  */
 import { afterAll, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -16,7 +14,6 @@ import { SEQ_FLOOR_FILE } from "../../schema";
 import { InboxStore } from "../../store";
 import { everyRead } from "../reads";
 import { writeInboxWorld } from "../world";
-import { INBOX_SQLITE_MARKER_TEXT } from "./files-marker";
 import { openInboxStore } from "./open-store";
 import { INBOX_DB_FILE } from "./sqlite-log";
 
@@ -60,8 +57,8 @@ test("unset, a new install starts on SQLite: nothing moves, no backup, Storage c
   const first = await openInboxStore(dataDir, { sqlite: null, now });
   expect(first).toMatchObject({ log: "sqlite", why: "new_install", moved: { status: "empty" } });
   expect(existsSync(join(inbox, INBOX_DB_FILE))).toBe(true);
-  // The note stands where the files would be; nothing was moved, so there is no backup.
-  expect(readFileSync(join(inbox, "projects"), "utf8")).toBe(INBOX_SQLITE_MARKER_TEXT);
+  // Nothing was moved, so there are no files and no backup.
+  expect(existsSync(join(inbox, "projects"))).toBe(false);
   expect(backups(inbox)).toEqual([]);
   sendSome(first.store);
   const usage = first.store.diskUsage();
@@ -77,16 +74,6 @@ test("unset, a new install starts on SQLite: nothing moves, no backup, Storage c
   expect(backups(inbox)).toEqual([]);
 });
 
-test("an older Plannotator's reader stops at the note over a database: it never starts empty, and changes nothing", async () => {
-  const { dataDir, inbox } = scratch();
-  const opened = await openInboxStore(dataDir, { sqlite: null, now });
-  sendSome(opened.store);
-  const before = tree(inbox);
-  // Today's JSONL reader is the one every release up to 0.28.61 ships: it lists `projects` first.
-  expect(() => InboxStore.open(dataDir, { now })).toThrow(/not a directory|ENOTDIR/i);
-  expect(tree(inbox)).toEqual(before);
-});
-
 test("unset with record files: today's store, not one byte changes; with only settings, drafts and pins: a new install", async () => {
   const withFiles = scratch();
   writeInboxWorld({ dataDir: withFiles.dataDir, seed: 61, steps: 60 });
@@ -96,8 +83,7 @@ test("unset with record files: today's store, not one byte changes; with only se
   expect(files.moved).toBeUndefined();
   expect(tree(withFiles.inbox)).toEqual(before);
 
-  // Everything an Inbox writes besides records (registry, pins, drafts), and an empty `projects` an older version
-  // could leave: nothing to move, so it starts on SQLite, the empty folder goes, and no backup appears.
+  // Everything an Inbox writes besides records (registry, pins, drafts), and an empty `projects` folder: nothing to move, so it starts on SQLite, the empty folder goes, and no backup appears.
   const bare = scratch();
   mkdirSync(join(bare.inbox, "projects"), { recursive: true });
   mkdirSync(join(bare.inbox, "drafts"), { recursive: true });
@@ -105,7 +91,7 @@ test("unset with record files: today's store, not one byte changes; with only se
   writeFileSync(join(bare.inbox, "inbox.json"), "{}\n");
   const fresh = await openInboxStore(bare.dataDir, { sqlite: null, now });
   expect(fresh).toMatchObject({ log: "sqlite", why: "new_install", moved: { status: "empty" } });
-  expect(statSync(join(bare.inbox, "projects")).isFile()).toBe(true);
+  expect(existsSync(join(bare.inbox, "projects"))).toBe(false);
   expect(backups(bare.inbox)).toEqual([]);
 
   // Every project deleted leaves the seq floor: an Inbox that was used stays on its files.
@@ -115,7 +101,7 @@ test("unset with record files: today's store, not one byte changes; with only se
   expect(await openInboxStore(emptied.dataDir, { sqlite: null, now })).toMatchObject({ log: "jsonl", why: "files" });
 });
 
-test("the switch wins both ways: off moves a new install back into files (the note goes), and unset then stays on them", async () => {
+test("the switch wins both ways: off moves a new install back into files, and unset then stays on them", async () => {
   const { dataDir, inbox } = scratch();
   const fresh = await openInboxStore(dataDir, { sqlite: null, now });
   sendSome(fresh.store);
@@ -136,7 +122,7 @@ test("the switch wins both ways: off moves a new install back into files (the no
   expect(await openInboxStore(dataDir, { sqlite: null, now })).toMatchObject({ log: "sqlite", why: "new_install" });
 }, 60_000);
 
-test("a database deleted by hand leaves only the note: the next start is a new install, not a broken files store", async () => {
+test("a database deleted by hand: the next start is a new install", async () => {
   const { dataDir, inbox } = scratch();
   const fresh = await openInboxStore(dataDir, { sqlite: null, now });
   sendSome(fresh.store);
@@ -153,10 +139,7 @@ test("two Inboxes starting on the same empty folder at the same moment both end 
     const { dataDir } = scratch();
     const runs = [0, 1, 2].map(() => Bun.spawn([process.execPath, child, dataDir, now().toISOString(), "open"], { stdout: "pipe", stderr: "pipe" }));
     const outs = await Promise.all(runs.map(async (run) => ({ code: await run.exited, out: await new Response(run.stdout).text(), err: await new Response(run.stderr).text() })));
-    for (const { code, out, err } of outs) {
-      expect(err).toBe("");
-      expect(code).toBe(0);
-      expect(out).toMatch(/^done sqlite (new_install|database) 0\n$/);
-    }
+    // One object, so a failure shows all of what the process said.
+    for (const run of outs) expect({ ...run, ok: /^done sqlite (new_install|database) 0\n$/.test(run.out) }).toMatchObject({ code: 0, err: "", ok: true });
   }
 }, 60_000);

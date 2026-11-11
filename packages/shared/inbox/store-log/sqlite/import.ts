@@ -250,7 +250,8 @@ export type InboxImportStep = "read" | "rows" | "load" | "integrity" | "checked"
  * free, which is after the checks it is meant to run beside.
  */
 function flushFile(path: string): Promise<void> {
-  const fd = openSync(path, "r");
+  // For writing: Windows flushes only through a handle that may write.
+  const fd = openSync(path, "r+");
   return new Promise((resolve, reject) => {
     fsync(fd, (error) => {
       closeSync(fd);

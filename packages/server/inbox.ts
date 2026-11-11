@@ -1061,6 +1061,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     checkFilesCommand: options.selfCommand?.length ? options.selfCommand : undefined,
   });
   const store = opened.store;
+  // A move that did not finish leaves the Inbox as it was; why goes to the terminal and inbox.log (never the debug
+  // log, whose values are words from a list: the reason names paths).
+  if (opened.moved && (opened.moved.status === "kept_files" || opened.moved.status === "kept_db")) {
+    const kept = opened.moved.status === "kept_files" ? "into SQLite did not finish; the Inbox stays on its files" : "back to the files did not finish; the Inbox stays on its database";
+    process.stderr.write(`Inbox: the move ${kept} (${opened.moved.reason}: ${opened.moved.detail}).\n`);
+  }
   // Read every project's log and replayed it (store.ts load): the debug log notes how long that took.
   const storeLoadMs = performance.now() - storeLoadStarted;
   // A send a crash interrupted leaves a temp blob; the next start removes it once it is stale.

@@ -4,7 +4,7 @@
  * whole, and one SHA-256 of everything a store serves (the move's own check, `store-log/sqlite/check.ts`).
  */
 import { Database } from "bun:sqlite";
-import { cpSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { cpSync, existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { InboxLine, InboxProject } from "../../packages/core/inbox-types";
 import { jsonlInboxLog } from "../../packages/shared/inbox/store-log/jsonl-log";
@@ -109,6 +109,19 @@ export function folderDigest(dataDir: string, folder: string): string {
   return digestOf(dataDir, DIGEST_NOW, { log: () => jsonlInboxLog(folder) }).sha256;
 }
 
+/**
+ * Copy a data dir. Right after a hard kill the move's second process may still be ending (it notices on its own
+ * that the Inbox is gone), removing its side files as the copy reads: copied again until it holds still.
+ */
 export function copyInbox(from: string, to: string): void {
-  cpSync(from, to, { recursive: true });
+  for (let attempt = 0; ; attempt++) {
+    try {
+      cpSync(from, to, { recursive: true });
+      return;
+    } catch (error) {
+      if (attempt >= 20) throw error;
+      rmSync(to, { recursive: true, force: true });
+      Bun.sleepSync(250);
+    }
+  }
 }

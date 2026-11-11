@@ -5,8 +5,7 @@ name: Inbox on SQLite (compiled binary)
 # a new install starting on SQLite, the move of a JSONL Inbox and the way back,
 # the move's second process (the binary running itself) again and again, two
 # starters through a long move, hard kills at every step of the move and at
-# random moments, the last release from before SQLite refusing to start over a
-# database, and (Linux only) one 100,000-message move for the timing.
+# random moments, and (Linux only) one 100,000-message move for the timing.
 #
 # The binaries are compiled once on Linux exactly as release.yml compiles them
 # (cross-compiled, release define on), then each OS runs its own. windows.yml
@@ -99,24 +98,14 @@ jobs:
           name: inbox-sqlite-binaries
           path: .local/bin
 
-      # The last release before SQLite: what a person who goes back to an older version runs.
-      - name: Get the last release from before SQLite (v0.28.61)
+      - name: Make the binary runnable
         env:
-          GH_TOKEN: ${{ github.token }}
           ASSET: ${{ matrix.binary }}
-        run: |
-          mkdir -p .local/old
-          base=https://github.com/backnotprop/plannotator/releases/download/v0.28.61
-          bash scripts/ci-fetch-release-asset.sh "$base/$ASSET" ".local/old/$ASSET"
-          bash scripts/ci-fetch-release-asset.sh "$base/$ASSET.sha256" ".local/old/$ASSET.sha256"
-          cd .local/old
-          if command -v sha256sum >/dev/null; then sha256sum -c "$ASSET.sha256"; else shasum -a 256 -c "$ASSET.sha256"; fi
-          chmod +x "$ASSET" ../bin/*
+        run: chmod +x ".local/bin/$ASSET"
 
       - name: Prove the Inbox on SQLite with the compiled binary
         env:
           BINARY: .local/bin/${{ matrix.binary }}
-          OLD_PLANNOTATOR_BINARY: .local/old/${{ matrix.binary }}
           BIG: ${{ matrix.big }}
           PROOF_KEEP_DIR: ${{ runner.temp }}/inbox-sqlite-proof
         run: bun scripts/inbox-sqlite-proof/run.ts "$BINARY" $BIG
@@ -128,7 +117,9 @@ jobs:
           KEEP: ${{ runner.temp }}/inbox-sqlite-proof
         run: |
           [ -f "$KEEP/scratch.txt" ] || exit 0
-          while read -r dir; do [ -d "$dir" ] && tar -czf "$KEEP/$(basename "$dir").tgz" -C "$(dirname "$dir")" "$(basename "$dir")" || true; done < "$KEEP/scratch.txt"
+          cd "$KEEP"
+          # A relative archive name: GNU tar on Windows reads "D:" in a path as a remote host.
+          while read -r dir; do [ -d "$dir" ] && tar -czf "$(basename "$dir").tgz" -C "$(dirname "$dir")" "$(basename "$dir")" || true; done < scratch.txt
 
       - name: Upload the scratch Inboxes of a failed proof
         if: failure()
