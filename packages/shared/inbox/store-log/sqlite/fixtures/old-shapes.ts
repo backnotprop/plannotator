@@ -1,22 +1,4 @@
-/**
- * Test-only: an Inbox on JSONL files holding the old record shapes today's reader still accepts, made the way the
- * store's own tests make them: a generated Inbox written through today's write paths (`../../world.ts`), then lines
- * patched back into what an older release wrote, each patch naming the test that holds that shape; plus the lines
- * the reader skips or only counts, a repeated line, a line with an older seq written late, and a torn last line.
- *
- * Shapes covered (release first written, and where today's reader maps them):
- * - Cards: step 1 (0.28.26, old column ids, `prs` and no `refs`, no `cols`/`moved_by`/`notes`/`sent`), the next
- *   format (0.28.32, `asked` renamed `backlog`, refs without `via`), v2 before Done's rename (`shipped`), lines
- *   without `done_prs` and without `initiative` (kept from the line before): `readInboxCard`, `cardAfter`.
- * - Questions: the decision fields of 0.28.8–0.28.23, choices from before picture choices (no image, pros, cons),
- *   records without `superseded_by`, `set_aside`, `action` or `attachment`, and a Send whose reply never landed
- *   (reads as picked again: `repairUnsentAnswers`).
- * - Messages: the step-1 record (0.28.7, none of the later fields), a person-started root from before `named_by`
- *   (0.28.21), a settled 👍 without `note_id` (before 0.28.23).
- * - Annotations without `guide`, `message` or `live`; a steps list that fails its check (`steps: [null]`); a
- *   project from before display names and combining, and one whose `merged_into` is not a project.
- * - An old `decisions.jsonl` (only its seqs count), a `kind: "decision"` line, lines `parseInboxLine` skips.
- */
+/** Test-only: an Inbox on JSONL files holding old record shapes the reader still accepts, plus lines it skips, a repeated line, a late older seq and a torn last line. */
 import { appendFileSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -36,11 +18,11 @@ const readLines = (file: string): Line[] => {
 };
 const writeLines = (file: string, lines: Line[]) => writeFileSync(file, lines.length ? `${lines.map((l) => JSON.stringify(l)).join("\n")}\n` : "");
 
-/** Today's card columns as the two formats before v2 named them (`store-cards.test.ts`, "cards written before v2"). */
+/** Today's card columns as the two formats before v2 named them. */
 const STEP1_COLUMN: Record<string, string> = { backlog: "icebox", todo: "asked", in_progress: "building", in_review: "your_review", done: "shipped", dropped: "dropped" };
 const V1_COLUMN: Record<string, string> = { backlog: "backlog", todo: "backlog", in_progress: "designing", in_review: "your_look", done: "shipped", dropped: "dropped" };
 
-/** Fields a message gained after the step-1 record (0.28.7, `store.ts` at 56d0a03f7): the old record has none of them. */
+/** Fields a message gained after its first record shape. */
 const LATER_MESSAGE_FIELDS = [
   "thread_name", "person_seen_seq", "agent_checked_seq", "agent_checked_at", "attachments", "delivery", "to", "guide", "base_path",
   "supersedes", "subject_question", "person_read_seq", "person_read_at", "set_aside", "wakes", "started_by_person", "inline_images",
@@ -58,7 +40,6 @@ export function writeOldShapeInbox(dataDir: string): { now: () => Date } {
   projects.forEach((key, p) => {
     const folder = join(inbox, INBOX_PROJECTS_DIR, key);
 
-    // Cards: one era per card, by its order in the file.
     const cards = readLines(join(folder, CARDS_FILE));
     const era = new Map<string, number>();
     for (const line of cards) if (!era.has(line.id)) era.set(line.id, era.size % 5);
@@ -85,7 +66,7 @@ export function writeOldShapeInbox(dataDir: string): { now: () => Date } {
           break;
       }
     }
-    // An older Inbox wrote over a card that had an initiative (`store-initiatives.test.ts`): the field is absent.
+    // An older Inbox wrote over a card that had an initiative: the field is absent.
     const withInitiative = cards.filter((l) => l.record.initiative);
     const last = withInitiative.at(-1);
     if (last) {
@@ -94,26 +75,22 @@ export function writeOldShapeInbox(dataDir: string): { now: () => Date } {
     }
     writeLines(join(folder, CARDS_FILE), cards);
 
-    // Questions.
     const questions = readLines(join(folder, QUESTIONS_FILE));
     questions.forEach((line, i) => {
       const r = line.record;
       if (i % 4 === 0) Object.assign(r, { decision_on_answer: true, decision_id: null, decision_recording: false, decision_draft: null }); // store-legacy-decisions.test.ts
       if (i % 4 === 1 && r.parsed) {
-        // Before picture choices (`store-question-contract.test.ts`, records frozen at e36db4209).
         for (const k of ["stakes", "shows", "why", "reversible", "prototype"]) delete r.parsed[k];
         for (const choice of r.parsed.choices ?? []) for (const k of ["image", "pros", "cons", "prototype"]) delete choice[k];
       }
       if (i % 4 === 2) for (const k of ["superseded_by", "set_aside", "action", "action_result", "attachment"]) if (!r[k]) delete r[k];
     });
-    // A Send whose reply never landed (`repairUnsentAnswers`): the question's sent line names a reply that is not there.
+    // A Send whose reply never landed: the sent line names a reply that is not there.
     const picked = questions.filter((l) => l.record.answer && l.record.sent_reply_id === null).at(-1);
     if (picked) questions.push({ ...picked, seq: ++top, at, record: { ...picked.record, sent_revision: picked.record.revision, sent_reply_id: "msg_01NEVERLANDED0000000000000" } });
-    // A retried append: the same line twice.
     if (questions[1]) questions.push(questions[1]);
     writeLines(join(folder, QUESTIONS_FILE), questions);
 
-    // Messages.
     const messages = readLines(join(folder, MESSAGES_FILE));
     const roots = [...new Set(messages.filter((l) => l.record.id === l.record.thread_id).map((l) => l.id))];
     const step1 = new Set(roots.filter((_, i) => i % 6 === 0));
@@ -123,11 +100,9 @@ export function writeOldShapeInbox(dataDir: string): { now: () => Date } {
       if (r.started_by_person) delete r.named_by; // 0.28.21: before named_by
       if (r.ack) delete r.ack.note_id; // `store-ack-delivery.test.ts`: a settled 👍 with no note
     }
-    // A retried append, and an older seq written late (a lower-seq line the replay ignores).
     if (messages[2]) messages.push(messages[2]);
     if (messages[3]) messages.push({ ...messages[3], record: { ...messages[3].record, body: "A late line with an older seq." }, seq: messages[3].seq - 1 > 0 ? messages[3].seq - 1 : 1 });
     writeLines(join(folder, MESSAGES_FILE), messages);
-    // Lines the reader skips: an old decision line, a seq of 0, a record whose id is not the line's, not JSON.
     appendFileSync(
       join(folder, MESSAGES_FILE),
       [
@@ -139,23 +114,21 @@ export function writeOldShapeInbox(dataDir: string): { now: () => Date } {
       ].join("\n"),
     );
 
-    // Annotations from before guides, message comments and live sites.
     const annotations = readLines(join(folder, ANNOTATIONS_FILE));
     for (const line of annotations) for (const k of ["guide", "message", "live"]) delete line.record[k];
     writeLines(join(folder, ANNOTATIONS_FILE), annotations);
 
-    // A malformed steps list (`store-steps.test.ts`): ignored, the list before it stays.
+    // A malformed steps list is ignored; the list before it stays.
     const steps = readLines(join(folder, STEPS_FILE));
     if (steps[0]) appendFileSync(join(folder, STEPS_FILE), `${JSON.stringify({ ...steps[0], seq: ++top, at, record: { ...steps[0].record, steps: [null] } })}\n`);
 
-    // Projects: from before display names and combining; one with a `merged_into` that is not a project
-    // (`store-project-combine.test.ts`).
+    // Projects from before display names, and one whose `merged_into` is not a project.
     const project = readLines(join(folder, PROJECT_FILE));
     for (const line of project) for (const k of ["display_name", "separated_from"]) delete line.record[k];
     if (p === 0 && project[0]) project.push({ ...project[0], seq: ++top, at, record: { ...project.at(-1)!.record, merged_into: 42 } });
     writeLines(join(folder, PROJECT_FILE), project);
 
-    // An old decisions file (`store-legacy-decisions.test.ts`): never applied, its seqs still count.
+    // An old decisions file is never applied, but its seqs still count.
     if (p === 0) {
       const decision = { id: "dec_01", project_id: project[0]!.id, text: "Postgres.", reason: null, source: { kind: "answer", question_id: "q", message_id: "m", thread_id: "m", agent: null }, state: "current", version: 1, replaces_id: null, replacement_id: null, created_at: at, changed_at: null, idempotency_key: null };
       writeFileSync(join(folder, "decisions.jsonl"), `${JSON.stringify({ v: 1, seq: top + 50, at, kind: "decision", id: "dec_01", record: decision })}\n`);
@@ -163,12 +136,11 @@ export function writeOldShapeInbox(dataDir: string): { now: () => Date } {
   });
   top += 50;
 
-  // A torn last line, as a crash leaves it.
   appendFileSync(join(inbox, INBOX_PROJECTS_DIR, projects[0]!, MESSAGES_FILE), `{"v":1,"seq":${top + 1},"at":"${at}","kind":"message","id":"msg_torn","rec`);
   return { now: world.now };
 }
 
-/** The old-shape Inbox's lines as today's reader reads them (for the writers' own comparison). */
+/** The old-shape Inbox's lines as the reader reads them. */
 export function oldShapeLines(): InboxLine[] {
   const dataDir = mkdtempSync(join(tmpdir(), "plannotator-old-shapes-"));
   try {

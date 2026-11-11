@@ -1,9 +1,4 @@
-/**
- * The Inbox's start lock (`acquireInboxStartLock`): one starter at a time, and a start that crashed (a force quit,
- * a kill during a long move into SQLite) does not hold the next one back. The failure this guards: after such a
- * crash, every start for the next 30 s waits 20 s and gives up with "try again"; or, the other way, a live starter's
- * lock taken as stale, so two Inboxes write one store.
- */
+/** `acquireInboxStartLock`: a crashed starter's lock does not block the next start; a live starter's lock is never taken as stale. */
 import { afterAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -34,7 +29,6 @@ test("a live holder keeps the lock; one whose holders are all gone is taken at o
   expect(acquireInboxStartLock(dir)).toBeNull();
   release();
 
-  // A start that crashed: its lock is fresh, but nobody it names runs.
   const crashed = dataDir();
   mkdirSync(join(crashed, "inbox", INBOX_START_LOCK), { recursive: true });
   writeFileSync(join(crashed, "inbox", INBOX_START_LOCK, "holders"), `${deadPid()}\n`);
@@ -47,7 +41,6 @@ test("a live holder keeps the lock; one whose holders are all gone is taken at o
   joinInboxStartLock(handedOver);
   expect(acquireInboxStartLock(handedOver)).toBeNull();
 
-  // An older Plannotator's lock names nobody: fresh is held, as before.
   const older = dataDir();
   mkdirSync(join(older, "inbox", INBOX_START_LOCK), { recursive: true });
   expect(acquireInboxStartLock(older)).toBeNull();

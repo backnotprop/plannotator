@@ -1,14 +1,4 @@
-/**
- * The SQLite tables hold what the store holds, so the later stages can read them by query instead of
- * replaying the change log: each message's and question's current row points at the store's record, each thread's
- * message count and archive time match, the person's answer is one row in the state the question says
- * (picked, sent, withdrawn), a deleted thread is a tombstone with no words left, and the seq floor survives it.
- * The change log keeps each question's history of choices and Sends, with a run of typing kept as one row.
- *
- * The failures this guards: a row that drifts from the record it mirrors (a later query would serve stale
- * words or a wrong count), an answer that loses its state, a deletion that leaves a message behind, and a
- * decision history that drops a change of choice or a Send (or keeps every key typed).
- */
+/** The SQLite tables mirror the store's records: current rows, thread counts and archive times, answer state, tombstones with no words left, the seq floor, and a change log of each question's history with typing as one row. */
 import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,7 +11,6 @@ import { teeLog } from "../tee-log";
 import { writeInboxWorld } from "../world";
 import { INBOX_DB_FILE, sqliteInboxLog } from "./sqlite-log";
 
-/** A current row's record: the change-log line it points at (its kind, id and seq; the last such row). */
 const CURRENT = (kind: string, r: string) => `(SELECT e.data FROM events e WHERE e.kind = '${kind}' AND e.subject_id = ${r}.id AND e.seq = ${r}.seq ORDER BY e.id DESC LIMIT 1) AS record`;
 
 const roots: string[] = [];
@@ -65,7 +54,6 @@ test("every message, question, answer and thread row matches the store's record;
       }
     }
     expect(answered).toBeGreaterThan(3);
-    // The world deleted threads: each is a tombstone, with no message, question or change-log row left.
     const gone = db.query("SELECT id FROM threads WHERE deleted_at IS NOT NULL").all() as { id: string }[];
     expect(gone.length).toBeGreaterThan(0);
     for (const { id } of gone) {
@@ -73,8 +61,7 @@ test("every message, question, answer and thread row matches the store's record;
       expect(db.query("SELECT count(*) AS n FROM messages WHERE thread_id = ?").get(id)).toEqual({ n: 0 });
       expect(db.query("SELECT count(*) AS n FROM events WHERE thread_id = ?").get(id)).toEqual({ n: 0 });
     }
-    // Decision history: per question, the choices and Sends in order read the same from the change log as from
-    // every line today's JSONL kept; typing (the world types notes a few keys at a time) left fewer rows.
+    // The change log gives each question's choices and Sends in order, as the JSONL lines do; typing leaves fewer rows.
     const steps = (records: InboxQuestionRecord[]) =>
       records
         .map((q) => JSON.stringify([q.answer?.selected ?? null, q.answer?.skipped ?? false, q.sent_reply_id !== null && q.sent_revision === q.revision, q.superseded_by ?? null, q.set_aside ?? null]))

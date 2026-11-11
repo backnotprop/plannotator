@@ -728,9 +728,7 @@ jobs:
             ipconfig /flushdns | Out-Null
           }
 
-  # The Inbox on SQLite, proven on the compiled binary on Windows, Linux and
-  # macOS (inbox-sqlite-binary.yml says what). Here, so the release's run of
-  # this workflow on main requires it green before a tag.
+  # The Inbox on SQLite on the compiled binary; here so the release's run of this workflow requires it green before a tag.
   inbox-sqlite-binary:
     name: Inbox on SQLite
     if: github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'ci:full') && (github.event.action != 'labeled' || github.event.label.name == 'ci:full'))

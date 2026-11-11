@@ -1,12 +1,4 @@
-/**
- * The import's fast writer (`import-rows.ts` + `import-load.ts`) leaves exactly the tables the live writer
- * (`write-line.ts`) leaves after writing the same lines one by one: every row of every table, and the schema with
- * its indexes rebuilt. Ids the writers make up (actors' and answers') are compared by what they stand for.
- *
- * The failure this guards: the two writers drifting apart, so that an imported Inbox holds rows a live one never
- * would (and the next live write, which reads them back, goes wrong), even while the store happens to read the
- * same today. The import's own check guards what the store serves; this guards the rows under it.
- */
+/** The import's fast writer leaves exactly the rows the live writer leaves for the same lines; ids the writers make up are compared by what they stand for. */
 import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -32,7 +24,6 @@ const temp = () => {
   return dir;
 };
 
-/** The same lines through each writer; both databases' tables. */
 function bothWays(lines: InboxLine[]) {
   const dir = temp();
   const sorted = [...lines].sort((a, b) => a.seq - b.seq);
@@ -54,7 +45,6 @@ test(
       const dataDir = temp();
       writeInboxWorld({ dataDir, seed, steps: 260 });
       const lines = jsonlInboxLog(join(dataDir, "inbox")).read().lines!;
-      // Each line twice over (a retried append), and the seeds' typing merged both ways.
       const { live, bulk } = bothWays([...lines, ...lines.filter((_, i) => i % 7 === 0)]);
       expect(bulk).toEqual(live);
     }

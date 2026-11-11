@@ -1,8 +1,4 @@
-/**
- * What the SQLite proof (`run.ts`) reads straight off disk, from source, never through the binary: generated JSONL
- * Inboxes, every record file byte for byte wherever it sits (in place or in a dated backup), whether a database is
- * whole, and one SHA-256 of everything a store serves (the move's own check, `store-log/sqlite/check.ts`).
- */
+/** What the SQLite proof reads straight off disk, from source, never through the binary: generated Inboxes, record files, database wholeness, and a SHA-256 of what a store serves. */
 import { Database } from "bun:sqlite";
 import { cpSync, existsSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -17,13 +13,11 @@ import { check } from "./harness";
 /** The clock every digest reads at (snoozes and waits depend on it): fixed, so two sides agree. */
 export const DIGEST_NOW = () => new Date("2026-11-11T12:00:00.000Z");
 
-/** A JSONL Inbox of about `messages` messages under `dataDir` (the store's own generated world; copies past 4,000). */
 export function writeJsonlInbox(dataDir: string, messages: number, seed = 11): void {
   if (messages <= 4_000) {
     writeInboxWorld({ dataDir, seed, steps: Number.POSITIVE_INFINITY, messages, growOnly: true });
     return;
   }
-  // Large: one generated world, its lines copied with fresh ids and seqs (the store's size-budget method).
   const seedDir = `${dataDir}.seed`;
   writeInboxWorld({ dataDir: seedDir, seed, steps: Number.POSITIVE_INFINITY, messages: 4_000, growOnly: true });
   const seedLines = jsonlInboxLog(join(seedDir, "inbox")).read().lines ?? [];
@@ -58,7 +52,6 @@ function copiedLines(lines: InboxLine[], copies: number): InboxLine[] {
   return out.sort((a, b) => a.seq - b.seq);
 }
 
-/** Every record file, by its path under its entry, wherever it is (in place or in a JSONL backup). Fails on a file found twice. */
 export function recordFiles(inbox: string): Record<string, string> {
   const out: Record<string, string> = {};
   const walk = (path: string, name: string) => {
@@ -78,7 +71,6 @@ export function sameFiles(a: Record<string, string>, b: Record<string, string>):
   return keys.join("\n") === Object.keys(b).sort().join("\n") && keys.every((key) => a[key] === b[key]);
 }
 
-/** An `inbox.db` is there only complete and whole. */
 export function noHalfDatabase(inbox: string): void {
   const file = join(inbox, INBOX_DB_FILE);
   if (!existsSync(file)) return;
@@ -94,17 +86,14 @@ export function noHalfDatabase(inbox: string): void {
   }
 }
 
-/** What the files in place serve, as one SHA-256. */
 export function filesDigest(dataDir: string): string {
   return digestOf(dataDir, DIGEST_NOW, { log: jsonlInboxLog }).sha256;
 }
 
-/** What `inbox.db` serves, as one SHA-256. */
 export function databaseDigest(dataDir: string): string {
   return digestOf(dataDir, DIGEST_NOW, { log: (dir) => sqliteInboxLog(dir) }).sha256;
 }
 
-/** What a folder in the layout of `inbox/` (an export) serves. */
 export function folderDigest(dataDir: string, folder: string): string {
   return digestOf(dataDir, DIGEST_NOW, { log: () => jsonlInboxLog(folder) }).sha256;
 }

@@ -1,12 +1,4 @@
-/**
- * The SQLite switch at start (`open-store.ts`). Off with no database: today's store, and nothing on disk changes.
- * On: the files move and the database serves; Settings → Storage counts the database and lists the backup, whose
- * Remove takes it for good. Off again: everything, messages written on SQLite included, goes back into the files,
- * and a way back that would read differently never happens (the database keeps serving).
- *
- * The failures this guards: the switch off touching anyone's files; turning it off losing or hiding the messages
- * written while it was on; a removed backup coming back; Storage not counting the database.
- */
+/** The SQLite switch at start: off leaves files alone, on moves them, off again returns everything including messages written on SQLite; a way back that would read differently never happens. */
 import { afterAll, expect, test } from "bun:test";
 import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -36,7 +28,6 @@ function world(seed: number) {
 
 const reads = (store: InboxStore) => everyRead(store, { sessions: SESSIONS, bytes: false });
 
-/** Every file under the inbox folder with its bytes (a scratch check folder aside). */
 function tree(dir: string): Record<string, string> {
   const out: Record<string, string> = {};
   const walk = (path: string, name: string) => {
@@ -79,14 +70,11 @@ test(
     const { dataDir, inbox, now } = world(52);
     const files = reads(InboxStore.open(dataDir, { now }));
 
-    // On: the files move, the database serves the same.
     const on = await openInboxStore(dataDir, { sqlite: true, now });
     expect(on.log).toBe("sqlite");
     expect(on.moved).toMatchObject({ status: "imported" });
     expect(reads(on.store)).toEqual(files);
-    // Storage: the database file counts, once, and the backup with it.
     const usage = on.store.diskUsage();
-    // What it holds: at most the file and its log on disk, and more than nothing.
     const onDisk = ["", "-wal"].reduce((sum, suffix) => sum + (existsSync(join(inbox, `${INBOX_DB_FILE}${suffix}`)) ? statSync(join(inbox, `${INBOX_DB_FILE}${suffix}`)).size : 0), 0);
     expect(usage.database).toBeGreaterThan(0);
     expect(usage.database).toBeLessThanOrEqual(onDisk);
@@ -95,20 +83,17 @@ test(
     expect(usage.backups![0]!.bytes).toBeGreaterThan(0);
     expect(usage.bytes).toBeGreaterThanOrEqual(usage.database! + usage.backups![0]!.bytes);
 
-    // Messages written while it runs on SQLite.
     const project = on.store.listProjects()[0]!;
     on.store.sendMessage({ project_id: project.id, author: AGENT, body: "Written on SQLite." });
     const thread = on.store.sendMessage({ project_id: project.id, author: AGENT, body: "Another, on SQLite." }).message;
     on.store.resolveThread(thread.thread_id, true, "person");
     const onSqlite = reads(on.store);
 
-    // Remove takes the backup; a later start does not make it again.
     expect(on.store.removeBackup(usage.backups![0]!.name)).toBe(true);
     expect(on.store.removeBackup(usage.backups![0]!.name)).toBe(false);
     expect(on.store.removeBackup("../inbox.db")).toBe(false);
     expect(on.store.diskUsage().backups).toEqual([]);
 
-    // Off: everything goes back into the files, the messages written on SQLite included.
     const off = await openInboxStore(dataDir, { sqlite: false, now });
     expect(off.log).toBe("jsonl");
     expect(off.moved).toMatchObject({ status: "returned" });
@@ -118,11 +103,9 @@ test(
     for (const entry of JSONL_ENTRIES.slice(0, 1)) expect(existsSync(join(inbox, entry))).toBe(true);
     const sqliteBackup = readdirSync(inbox).find((name) => /^backup-.*-sqlite$/.test(name))!;
     expect(existsSync(join(inbox, sqliteBackup, INBOX_DB_FILE))).toBe(true);
-    // Written on the files now, as today.
     off.store.sendMessage({ project_id: project.id, author: AGENT, body: "Written on the files again." });
     const onFiles = reads(off.store);
 
-    // On again: a second move, the same reads, and a backup of its own.
     const again = await openInboxStore(dataDir, { sqlite: true, now });
     expect(again.moved).toMatchObject({ status: "imported" });
     expect(reads(again.store)).toEqual(onFiles);

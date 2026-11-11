@@ -1,16 +1,8 @@
 name: Inbox on SQLite (compiled binary)
 
-# The Plannotator Inbox's SQLite storage, proven on the compiled binary of each
-# OS rather than `bun test` against sources (scripts/inbox-sqlite-proof/run.ts):
-# a new install starting on SQLite, the move of a JSONL Inbox and the way back,
-# the move's second process (the binary running itself) again and again, two
-# starters through a long move, hard kills at every step of the move and at
-# random moments, and (Linux only) one 100,000-message move for the timing.
-#
-# The binaries are compiled once on Linux for release.yml's targets
-# (cross-compiled), without the release mark: a CI binary never pings. Then
-# each OS runs its own. windows.yml calls this workflow, so it is part of the full tier the release dispatches on
-# main and requires green before a tag (.agents/skills/release/SKILL.md).
+# The Inbox's SQLite storage proven on the compiled binary of each OS (scripts/inbox-sqlite-proof/run.ts).
+# Binaries are compiled once on Linux for release.yml's targets, without the release mark, so a CI binary never pings.
+# windows.yml calls this workflow, so a release requires it green before a tag.
 
 on:
   workflow_call:

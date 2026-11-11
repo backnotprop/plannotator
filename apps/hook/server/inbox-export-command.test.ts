@@ -1,10 +1,4 @@
-/**
- * `plannotator inbox export --jsonl <folder>` (inbox-export-command.ts) on a generated Inbox in a scratch data dir
- * (never the person's): the folder it writes reads, through today's JSONL store, exactly as the Inbox reads, whether
- * the Inbox still keeps its files or has moved into SQLite, and while a store holds the database open.
- * What this catches: an export that leaves out a record file or a line, a relative folder taken from somewhere
- * other than where the person runs it, an export into a folder that already holds files (two Inboxes mixed in one), and the command missing from `plannotator inbox`'s usage.
- */
+/** `plannotator inbox export --jsonl <folder>` on a generated Inbox in a scratch data dir: the written folder reads through the JSONL store exactly as the Inbox reads, on files or SQLite, even while a store holds the database open. */
 import { afterAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -42,13 +36,10 @@ test(
     const cwd = join(root, "here");
     mkdirSync(cwd, { recursive: true });
     const { now } = writeInboxWorld({ dataDir, seed: 21, steps: 220 });
-    // Every kind of record file is there to be copied (initiatives cross projects, the seq floor outlives deletions).
     expect(readdirSync(join(dataDir, "inbox")).sort()).toEqual(expect.arrayContaining(["initiatives.jsonl", "projects", "seq.json"]));
     const fromFiles = reads(InboxStore.open(dataDir, { now }));
-    // The seq floor: never handed out again after the export is read back, though no line may show it.
     const floor = readFileSync(join(dataDir, "inbox", "seq.json"), "utf8");
 
-    // On files: a relative folder, taken from where it runs.
     const first = await run(["--jsonl", "copy"], dataDir, cwd);
     expect(first).toMatchObject({ code: 0, stderr: "" });
     expect(first.stdout).toContain(`from the Inbox files to ${join(cwd, "copy")}`);
@@ -65,7 +56,6 @@ test(
     expect(reads(live)).toEqual(fromFiles);
     expect(JSON.parse(readFileSync(join(root, "from-db", "seq.json"), "utf8"))).toEqual(JSON.parse(floor));
 
-    // A folder that already holds something: refused, and left as it was.
     const taken = join(root, "taken");
     mkdirSync(taken);
     writeFileSync(join(taken, "notes.txt"), "mine");

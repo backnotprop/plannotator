@@ -1,12 +1,4 @@
-/**
- * A start that outlasts the starter's wait because the Inbox is moving into SQLite (the switch, off for everyone):
- * real processes in a scratch HOME and data dir (never the person's Inbox), the move held 8 s by the sandbox-only
- * `PLANNOTATOR_INBOX_IMPORT_DELAY_MS` against a starter's wait cut to 3 s (`PLANNOTATOR_INBOX_START_TIMEOUT_MS`).
- *
- * What this catches: a starter (`--background`, an agent's start) that gives up on an Inbox that is only busy moving
- * and reports it as failed; the upgrading line missing from the starter's terminal; and a second starter that takes
- * the start lock as stale while the move runs, starting a second Inbox whose move throws the first one's away.
- */
+/** A start that outlasts the starter's wait because the Inbox is moving into SQLite: real processes in a scratch HOME and data dir, the move held by the sandbox-only `PLANNOTATOR_INBOX_IMPORT_DELAY_MS`. */
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -69,7 +61,6 @@ test(
       PLANNOTATOR_INBOX_IMPORT_DELAY_MS: "8000",
     };
 
-    // Every process that ran the move, as the marker names them while it runs.
     const movers = new Set<string>();
     let watching = true;
     const watch = (async () => {
@@ -84,7 +75,7 @@ test(
     })();
 
     const first = start(root, env);
-    // Once the move runs, the start lock reads as old as a dead starter's (past its 30 s), and a second starter comes.
+    // Once the move runs, the start lock looks as old as a dead starter's, and a second starter comes.
     while (!existsSync(join(inbox, INBOX_UPGRADE_MARKER))) await Bun.sleep(50);
     const old = new Date(Date.now() - 120_000);
     utimesSync(join(inbox, INBOX_START_LOCK), old, old);
@@ -92,7 +83,6 @@ test(
     const [a, b] = await Promise.all([first, second]);
     watching = false;
     await watch;
-    // A starter that gave up leaves the Inbox to come up after it: tracked for the teardown either way.
     let named = inboxEntryOf(dataDir);
     for (let waited = 0; !named && waited < 15_000; waited += 100) {
       await Bun.sleep(100);
@@ -106,7 +96,6 @@ test(
     expect(b.code).toBe(0);
     expect(b.stdout).toBe(a.stdout);
     expect(a.stdout.trim()).toBe(readInboxRegistry(dataDir)!.url);
-    // One move, by the one Inbox that serves now, finished: on the database, nothing of the move left over.
     expect([...movers]).toEqual([String(named!.pid)]);
     expect(existsSync(join(inbox, "inbox.db"))).toBe(true);
     expect(existsSync(join(inbox, INBOX_UPGRADE_MARKER))).toBe(false);

@@ -1,11 +1,4 @@
-/**
- * The switch unset (the default): a new install starts on SQLite, every other Inbox stays as it is (`open-store.ts`
- * `chooseInboxLog`).
- *
- * The failures this guards: an existing Inbox moving (or changing one byte) without the switch; a new install
- * starting on the files, or showing a "Backup" in Settings → Storage when nothing moved; a database left behind by
- * the switch going quiet; two Inboxes starting at the same moment failing or ending on different logs.
- */
+/** With the switch unset a new install starts on SQLite and every other Inbox stays on its files, untouched. */
 import { afterAll, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -34,7 +27,6 @@ function scratch(): { dataDir: string; inbox: string } {
 const reads = (store: InboxStore) => everyRead(store, { sessions: SESSIONS, bytes: false });
 const backups = (inbox: string) => readdirSync(inbox).filter((name) => name.startsWith("backup-"));
 
-/** Every file under `dir` with its bytes. */
 function tree(dir: string): Record<string, string> {
   const out: Record<string, string> = {};
   const walk = (path: string, name: string) => {
@@ -57,7 +49,6 @@ test("unset, a new install starts on SQLite: nothing moves, no backup, Storage c
   const first = await openInboxStore(dataDir, { sqlite: null, now });
   expect(first).toMatchObject({ log: "sqlite", why: "new_install", moved: { status: "empty" } });
   expect(existsSync(join(inbox, INBOX_DB_FILE))).toBe(true);
-  // Nothing was moved, so there are no files and no backup.
   expect(existsSync(join(inbox, "projects"))).toBe(false);
   expect(backups(inbox)).toEqual([]);
   sendSome(first.store);
@@ -73,7 +64,6 @@ test("unset, a new install starts on SQLite: nothing moves, no backup, Storage c
   expect(first.store.diskUsage().bytes).toBeLessThan(withIt);
   const served = reads(first.store);
 
-  // The next start remembers it from the database alone.
   const again = await openInboxStore(dataDir, { sqlite: null, now });
   expect(again).toMatchObject({ log: "sqlite", why: "database", moved: { status: "already" } });
   expect(reads(again.store)).toEqual(served);
@@ -89,7 +79,7 @@ test("unset with record files: today's store, not one byte changes; with only se
   expect(files.moved).toBeUndefined();
   expect(tree(withFiles.inbox)).toEqual(before);
 
-  // Everything an Inbox writes besides records (registry, pins, drafts), and an empty `projects` folder: nothing to move, so it starts on SQLite, the empty folder goes, and no backup appears.
+  // Non-record files and an empty `projects` folder are nothing to move: starts on SQLite, no backup.
   const bare = scratch();
   mkdirSync(join(bare.inbox, "projects"), { recursive: true });
   mkdirSync(join(bare.inbox, "drafts"), { recursive: true });
@@ -123,7 +113,6 @@ test("the switch wins both ways: off moves a new install back into files, and un
   expect(unset).toMatchObject({ log: "jsonl", why: "files" });
   expect(reads(unset.store)).toEqual(served);
 
-  // Deleting the Inbox folder makes it new again.
   rmSync(inbox, { recursive: true, force: true });
   expect(await openInboxStore(dataDir, { sqlite: null, now })).toMatchObject({ log: "sqlite", why: "new_install" });
 }, 60_000);
@@ -145,7 +134,6 @@ test("two Inboxes starting on the same empty folder at the same moment both end 
     const { dataDir } = scratch();
     const runs = [0, 1, 2].map(() => Bun.spawn([process.execPath, child, dataDir, now().toISOString(), "open"], { stdout: "pipe", stderr: "pipe" }));
     const outs = await Promise.all(runs.map(async (run) => ({ code: await run.exited, out: await new Response(run.stdout).text(), err: await new Response(run.stderr).text() })));
-    // One object, so a failure shows all of what the process said.
     for (const run of outs) expect({ ...run, ok: /^done sqlite (new_install|database) 0\n$/.test(run.out) }).toMatchObject({ code: 0, err: "", ok: true });
   }
 }, 60_000);

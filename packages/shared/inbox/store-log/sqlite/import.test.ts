@@ -1,12 +1,4 @@
-/**
- * Moving an Inbox from its JSONL files into `inbox.db` (`import.ts`) loses nothing and never risks the files:
- * every read the server makes is the same after the move, the files end in a dated read-only backup, a crash at
- * any point is finished or undone by the next start, and a database that reads differently (or a write that
- * fails, or too little disk) leaves the files serving, untouched, with no database beside them.
- *
- * The failures this guards: an upgrade that drops or changes a record, a seq, a name, a PR event or a card's
- * unread mark; a crash that leaves two records of the Inbox or none; a failed check that still switches over.
- */
+/** Moving an Inbox into `inbox.db` loses nothing and never risks the files; a failed check, failed write or full disk leaves the files serving with no database beside them. */
 import { afterAll, describe, expect, test } from "bun:test";
 import { appendFileSync, cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,7 +22,6 @@ afterAll(() => {
 const SESSIONS = ["ses_world_a", "ses_world_b", "ses_world_c"];
 const ENTRIES = [INBOX_PROJECTS_DIR, INITIATIVES_FILE, SEQ_FLOOR_FILE];
 
-/** A generated Inbox on today's files, with a repeated line and a torn last line as a crash leaves them. */
 function filesWorld(seed: number) {
   const dataDir = mkdtempSync(join(tmpdir(), "plannotator-import-"));
   roots.push(dataDir);
@@ -45,7 +36,6 @@ function filesWorld(seed: number) {
 
 const reads = (dataDir: string, now: () => Date, log = jsonlInboxLog) => everyRead(InboxStore.open(dataDir, { now, log }), { sessions: SESSIONS, bytes: false });
 
-/** Every file under the record entries, with its bytes. */
 function snapshot(dir: string): Record<string, string> {
   const out: Record<string, string> = {};
   const walk = (path: string, name: string) => {
@@ -70,7 +60,6 @@ describe("moving an Inbox from its files into inbox.db", () => {
       const backup = join(inbox, (outcome as { backup: string }).backup);
       expect((outcome as { backup: string }).backup).toBe(`backup-${now().toISOString().slice(0, 10)}-jsonl`);
       expect(reads(dataDir, now, sqliteInboxLog)).toEqual(before);
-      // The files, byte for byte, now only in the backup, and read-only.
       for (const entry of ENTRIES) expect(existsSync(join(inbox, entry))).toBe(false);
       expect(snapshot(backup)).toEqual(files);
       expect(statSync(join(backup, SEQ_FLOOR_FILE)).mode & 0o222).toBe(0);
@@ -86,7 +75,6 @@ describe("moving an Inbox from its files into inbox.db", () => {
     async () => {
       const { dataDir, inbox, now } = filesWorld(22);
       const before = reads(dataDir, now);
-      // Killed while writing: a half file under the importing name.
       writeFileSync(join(inbox, INBOX_DB_IMPORTING), "half a database");
       writeFileSync(join(inbox, `${INBOX_DB_IMPORTING}-wal`), "half a log");
       const outcome = await importJsonlInbox(dataDir, { now });
@@ -95,7 +83,6 @@ describe("moving an Inbox from its files into inbox.db", () => {
       expect(existsSync(join(inbox, `${INBOX_DB_IMPORTING}-wal`))).toBe(false);
       expect(reads(dataDir, now, sqliteInboxLog)).toEqual(before);
 
-      // Killed after the rename, before the files moved: they are back in place beside a complete database.
       const backup = join(inbox, (outcome as { backup: string }).backup);
       for (const entry of ENTRIES) renameSync(join(backup, entry), join(inbox, entry));
       expect(await importJsonlInbox(dataDir, { now })).toEqual({ status: "already" });
@@ -121,7 +108,6 @@ describe("moving an Inbox from its files into inbox.db", () => {
         expect(reads(dataDir, now)).toEqual(before);
       };
 
-      // One message's words changed after the write: the check sees it.
       const changed = await importJsonlInbox(dataDir, {
         now,
         afterWrite: (db) =>
@@ -130,7 +116,6 @@ describe("moving an Inbox from its files into inbox.db", () => {
       expect(changed).toMatchObject({ status: "kept_files", reason: "mismatch" });
       expect(readdirSync(inbox).some((name) => name.startsWith("import-check-"))).toBe(true);
       untouched();
-      // The same, with the files' side checked in a second process, as the Inbox runs it.
       const changedThere = await importJsonlInbox(dataDir, {
         now,
         checkFilesCommand: [process.execPath, join(import.meta.dir, "fixtures", "import-child.ts")],
@@ -193,14 +178,12 @@ describe("old record shapes, and back out to files", () => {
       expect((await importJsonlInbox(dataDir, { now })).status).toBe("imported");
       expect(reads(dataDir, now, sqliteInboxLog)).toEqual(before);
 
-      // Back to files: the JSONL store over the export serves what the database served.
       const out = mkdtempSync(join(tmpdir(), "plannotator-export-"));
       roots.push(out);
       exportInboxDb(join(inbox, INBOX_DB_FILE), out);
       expect(reads(dataDir, now, () => jsonlInboxLog(out))).toEqual(before);
 
-      // And moved again, the same database: every row (the change log too), but when the person's actor and an
-      // answer were first seen, which can move to a later line once typing written over is gone from the files.
+      // Moved again: every row matches, except when the actor and an answer were first seen, which can move to a later line once typing is gone from the files.
       const again = mkdtempSync(join(tmpdir(), "plannotator-reimport-"));
       roots.push(again);
       cpSync(out, join(again, "inbox"), { recursive: true });

@@ -1,11 +1,4 @@
-/**
- * The compiled binary's Inbox in a scratch HOME and data dir, for the SQLite proof (`run.ts`): start it in the
- * foreground (`plannotator inbox --no-open`, so this script holds the process and can kill it), wait until it
- * answers, talk to it as an agent does (MCP `send_message` / `read_thread`) and as the window does (HTTP), stop it.
- *
- * Never the person's Inbox: every data dir and HOME is a new temp folder, the env names it, and the only process
- * ever signalled is one this script spawned (the `proc` it holds).
- */
+/** The compiled binary's Inbox in a scratch HOME and data dir, for the SQLite proof: start, wait for health, talk to it over MCP and HTTP, stop it. Never the person's Inbox: only a process this script spawned is ever signalled. */
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -60,7 +53,6 @@ export function envOf(s: Sandbox, extra: Record<string, string> = {}): Record<st
 export interface Running {
   proc: Bun.Subprocess<"ignore", "pipe", "pipe">;
   base: string;
-  /** Everything the Inbox wrote to stderr so far. */
   stderr: () => string;
   ms: number;
 }
@@ -119,7 +111,6 @@ export function hardKill(proc: Bun.Subprocess): void {
   else proc.kill("SIGKILL"); // inbox-guard: own child
 }
 
-/** `plannotator inbox stop` (asked, as the person would), then the process must be gone. */
 export async function stop(binary: string, s: Sandbox, running: Running): Promise<void> {
   const run = Bun.spawnSync([binary, "inbox", "stop"], { cwd: s.root, env: envOf(s), stdout: "pipe", stderr: "pipe" });
   const ended = await Promise.race([running.proc.exited.then(() => true), Bun.sleep(30_000).then(() => false)]);
@@ -135,7 +126,6 @@ export interface Agent {
   close(): Promise<void>;
 }
 
-/** An agent session on the running Inbox, through its MCP door, as every agent host talks to it. */
 export async function agentOn(running: Running, s: Sandbox, session = "ses_sqlite_proof"): Promise<Agent> {
   const client = new Client({ name: "inbox-sqlite-proof", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`${running.base}/mcp`)));
@@ -163,7 +153,6 @@ export async function getJson<T = Record<string, unknown>>(running: Running, pat
   return (await response.json()) as T;
 }
 
-/** The debug log's server notes of one kind, oldest first. */
 export function notes(s: Sandbox, ev: string): Record<string, unknown>[] {
   let text = "";
   try {
@@ -183,7 +172,6 @@ export function notes(s: Sandbox, ev: string): Record<string, unknown>[] {
   return out;
 }
 
-/** The CLI, run to the end. */
 export function cli(binary: string, s: Sandbox, args: string[], extra: Record<string, string> = {}): { code: number; out: string; err: string; ms: number } {
   const at = performance.now();
   const run = Bun.spawnSync([binary, ...args], { cwd: s.root, env: envOf(s, extra), stdout: "pipe", stderr: "pipe" });

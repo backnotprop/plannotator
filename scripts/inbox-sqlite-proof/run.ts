@@ -1,7 +1,6 @@
 /**
- * The Plannotator Inbox on SQLite, proven on the COMPILED binary of this OS (CI: `.github/workflows/inbox-sqlite-binary.yml`,
- * on Windows, Linux and macOS). Not `bun test`: every Inbox here is the binary, started and stopped as a person or an
- * agent does; this script only generates Inboxes and reads what is on disk afterwards (from source).
+ * The Inbox on SQLite proven on the COMPILED binary of this OS (.github/workflows/inbox-sqlite-binary.yml); every Inbox
+ * is the binary, this script only generates Inboxes and reads the disk.
  *
  *   bun scripts/inbox-sqlite-proof/run.ts <binary> [--big] [--only <phase>,…]
  *
@@ -10,7 +9,7 @@
  *                back through the server (MCP and HTTP), export, restart
  *   import       a generated JSONL Inbox moved with the switch on (the check run apart, in the binary's second
  *                process), byte-for-byte backup, export equal to the files, then off: everything back into the files
- *   moves        the move again and again, each one checked apart (the second process's lock race, run 4)
+ *   moves        the move again and again, each one checked apart
  *   starters     two starters while a move outlasts their wait, the start lock aged past stale: one Inbox, one move
  *   kills        the binary killed hard at every step of the move, and at random moments: every record file is
  *                still there exactly once, no half database, and the next start (on, or off) serves the same
@@ -225,7 +224,6 @@ async function kills(randomKills: number): Promise<void> {
   const before = filesDigest(pristine.dataDir);
   let n = 0;
 
-  /** After a crash: the files whole, no half database, and the next start, off or on, serves the same. */
   const afterCrash = async (s: Sandbox, what: string) => {
     check(sameFiles(recordFiles(s.inbox), originals), `${what}: a record file changed or went missing`);
     noHalfDatabase(s.inbox);

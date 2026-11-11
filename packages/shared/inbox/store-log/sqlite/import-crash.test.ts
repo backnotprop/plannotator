@@ -1,16 +1,4 @@
-/**
- * The move into SQLite (and the way back to the files) killed with SIGKILL at every step boundary and at random
- * points while it writes the database, in a child process (`fixtures/import-child.ts`), on an Inbox holding the old
- * record shapes, a repeated line and a torn last line (`fixtures/old-shapes.ts`). After each kill:
- *
- * - every original record file still exists exactly once, byte for byte, in place or in the dated backup;
- * - no half database serves: an `inbox.db` there is marked complete and passes `integrity_check`;
- * - the next start serves exactly what the Inbox served before, with the switch on (the move finishes) and with it
- *   off (everything is back in the files), and leaves no `inbox.db.importing` behind.
- *
- * The failure this guards: a crash during the upgrade that loses, doubles or hides a message, or leaves the Inbox
- * starting on a half-written database.
- */
+/** SIGKILL the move into SQLite (and back) at every step and at random points; after each kill no record file is lost or doubled, no half `inbox.db` serves, and the next start serves what the Inbox served before, with the switch on and off. */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
@@ -37,7 +25,7 @@ const temp = (name: string) => {
   return dir;
 };
 
-/** Every record file of the Inbox, by its path under its entry, wherever it is (in place or in a JSONL backup). Fails on a file found twice. */
+/** Every record file by path, in place or in a JSONL backup; fails on a file found twice. */
 function recordFiles(inbox: string): Record<string, string> {
   const out: Record<string, string> = {};
   const walk = (path: string, name: string) => {
@@ -52,7 +40,6 @@ function recordFiles(inbox: string): Record<string, string> {
   return out;
 }
 
-/** An `inbox.db` is there only complete and whole. */
 function noHalfDatabase(inbox: string): void {
   const file = join(inbox, INBOX_DB_FILE);
   if (!existsSync(file)) return;
@@ -67,7 +54,6 @@ function noHalfDatabase(inbox: string): void {
 
 const readsOf = (store: InboxStore) => everyRead(store, { sessions: SESSIONS, bytes: false });
 
-/** The next start with the switch `on`: what it serves, and that it left no half file. */
 async function restart(dataDir: string, now: () => Date, on: boolean) {
   const opened = await openInboxStore(dataDir, { sqlite: on, now });
   expect(opened.log).toBe(on ? "sqlite" : "jsonl");
@@ -112,7 +98,6 @@ describe("a crash while moving into SQLite", () => {
     before = readsOf(InboxStore.open(pristine, { now }));
   }, 120_000);
 
-  /** One crash: a copy of the Inbox, the child killed as `mode` says, then every check, with the switch on and off. */
   async function crash(mode: string, killAfterLoadingMs?: number) {
     const dataDir = temp("run");
     cpSync(pristine, dataDir, { recursive: true });
@@ -120,11 +105,9 @@ describe("a crash while moving into SQLite", () => {
     const inbox = join(dataDir, "inbox");
     expect(recordFiles(inbox)).toEqual(originals);
     noHalfDatabase(inbox);
-    // The switch turned off right after the crash: the files serve all of it.
     const off = temp("off");
     cpSync(dataDir, off, { recursive: true });
     expect(await restart(off, now, false)).toEqual(before);
-    // The next start with the switch on: the move finishes (or runs again), and serves the same.
     expect(await restart(dataDir, now, true)).toEqual(before);
     expect(recordFiles(inbox)).toEqual(originals);
     expect(jsonlEntriesPresent(inbox)).toEqual([]);
@@ -140,7 +123,7 @@ describe("a crash while moving into SQLite", () => {
   }
 
   test("killed at random points while it works out and writes the database, and while it checks it", async () => {
-    // A bigger Inbox, so the bulk write takes long enough to be hit: how long, from "loading" to "loaded" and to the end.
+    // A bigger Inbox, so the bulk write is long enough to be hit.
     pristine = temp("big");
     ({ now } = writeInboxWorld({ dataDir: pristine, seed: 12, steps: Number.POSITIVE_INFINITY, messages: 1_000, growOnly: true }));
     nowIso = now().toISOString();
@@ -156,7 +139,6 @@ describe("a crash while moving into SQLite", () => {
     let inLoad = 0;
     let killed = 0;
     for (let i = 0; i < 9; i++) {
-      // Two in three aimed at the bulk write, the rest anywhere up to the end.
       const end = i % 3 === 2 ? span : at("loaded") - at("loading");
       const run = await crash("import", Math.floor(random() * end));
       if (run.killed) killed++;
@@ -178,7 +160,6 @@ describe("a crash while going back to the files", () => {
     ({ now } = writeOldShapeInbox(base));
     nowIso = now().toISOString();
     expect((await importJsonlInbox(base, { now })).status).toBe("imported");
-    // Messages written while the Inbox ran on SQLite: the way back must keep them.
     const log = sqliteInboxLog(join(base, "inbox"));
     try {
       const store = InboxStore.open(base, { now, log: () => log });
@@ -197,10 +178,8 @@ describe("a crash while going back to the files", () => {
       expect((await runChild(dataDir, nowIso, `return:${point}`)).killed).toBe(true);
       const on = temp("back-on");
       cpSync(dataDir, on, { recursive: true });
-      // Off: it finishes going back, and the files serve everything, the messages written on SQLite included.
       expect(await restart(dataDir, now, false)).toEqual(before);
       expect(existsSync(join(dataDir, "inbox", INBOX_DB_FILE))).toBe(false);
-      // On again instead: the same, from SQLite.
       expect(await restart(on, now, true)).toEqual(before);
     }, 120_000);
   }
