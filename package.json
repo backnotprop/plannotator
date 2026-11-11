@@ -50,6 +50,7 @@
     "build:ui-css": "bun run --cwd packages/ui build:css",
     "test:e2e:inbox": "playwright test -c tests/e2e/playwright.config.ts",
     "test:e2e:quarantine": "bun run scripts/e2e-quarantine.ts",
+    "verify:inbox-live": "bun scripts/inbox-live-verify.ts",
     "test:parity:inbox-thread": "bun scripts/inbox-thread-parity.ts"
   },
   "dependencies": {
