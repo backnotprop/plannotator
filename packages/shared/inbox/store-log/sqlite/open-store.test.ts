@@ -86,7 +86,10 @@ test(
     expect(reads(on.store)).toEqual(files);
     // Storage: the database file counts, once, and the backup with it.
     const usage = on.store.diskUsage();
-    expect(usage.database).toBe(statSync(join(inbox, INBOX_DB_FILE)).size + (existsSync(join(inbox, `${INBOX_DB_FILE}-wal`)) ? statSync(join(inbox, `${INBOX_DB_FILE}-wal`)).size : 0) + (existsSync(join(inbox, `${INBOX_DB_FILE}-shm`)) ? statSync(join(inbox, `${INBOX_DB_FILE}-shm`)).size : 0));
+    // What it holds: at most the file and its log on disk, and more than nothing.
+    const onDisk = ["", "-wal"].reduce((sum, suffix) => sum + (existsSync(join(inbox, `${INBOX_DB_FILE}${suffix}`)) ? statSync(join(inbox, `${INBOX_DB_FILE}${suffix}`)).size : 0), 0);
+    expect(usage.database).toBeGreaterThan(0);
+    expect(usage.database).toBeLessThanOrEqual(onDisk);
     expect(usage.backups).toHaveLength(1);
     expect(usage.backups![0]).toMatchObject({ kind: "jsonl", date: now().toISOString().slice(0, 10) });
     expect(usage.backups![0]!.bytes).toBeGreaterThan(0);

@@ -206,9 +206,10 @@ function threadWritten(dataDir, launchId) {
       const p = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         if (entry.name !== "launch" && depth > 0 && seen(p, depth - 1)) return true;
-      } else if (/\.(jsonl|json)$/.test(entry.name)) {
+      } else if (/\.(jsonl|json|db|db-wal)$/.test(entry.name)) {
+        // The records: JSONL files, or an Inbox on SQLite's database and its log (text is stored as written).
         try {
-          if (fs.readFileSync(p, "utf8").includes(launchId)) return true;
+          if (fs.readFileSync(p, "latin1").includes(launchId)) return true;
         } catch {}
       }
     }

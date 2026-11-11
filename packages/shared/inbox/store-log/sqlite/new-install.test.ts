@@ -65,6 +65,12 @@ test("unset, a new install starts on SQLite: nothing moves, no backup, Storage c
   expect(usage.backups).toEqual([]);
   expect(usage.database).toBeGreaterThan(0);
   expect(usage.bytes).toBeGreaterThanOrEqual(usage.database!);
+
+  // A Delete makes the total fall, as on the files (not rise with the log the delete writes).
+  const scratchThread = first.store.sendMessage({ project_id: first.store.listProjects()[0]!.id, author: AGENT, body: "x".repeat(200_000) }).message.thread_id;
+  const withIt = first.store.diskUsage().bytes;
+  first.store.deleteThread(scratchThread);
+  expect(first.store.diskUsage().bytes).toBeLessThan(withIt);
   const served = reads(first.store);
 
   // The next start remembers it from the database alone.

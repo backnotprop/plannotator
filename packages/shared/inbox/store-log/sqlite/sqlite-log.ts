@@ -11,7 +11,7 @@
  * edit; Drizzle does not write it), so a wrong type is refused rather than stored.
  */
 import { Database } from "bun:sqlite";
-import { mkdirSync, statSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
@@ -51,13 +51,30 @@ export function openInboxDb(dir: string, file: string = INBOX_DB_FILE): { sqlite
   // 8 KB pages for a new file (an existing one keeps its own): records are a few KB, and the import writes and
   // checks about a third faster than with 4 KB pages.
   sqlite.run("PRAGMA page_size = 8192");
-  sqlite.run("PRAGMA journal_mode = WAL");
+  walMode(sqlite);
   sqlite.run("PRAGMA synchronous = NORMAL");
   const db = drizzle({ client: sqlite });
   migrateInboxDb(db);
   // Fold a long write-ahead log back into the file before the start's one big read.
   sqlite.run("PRAGMA wal_checkpoint(TRUNCATE)");
   return { sqlite, db };
+}
+
+/**
+ * Into WAL. Switching a new file's journal needs it to itself, and SQLite answers "database is locked" at once
+ * instead of waiting on the busy timeout when another process is opening the same new file (two Inboxes starting
+ * together on a new install): tried again for up to about 5 s.
+ */
+function walMode(sqlite: Database): void {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      sqlite.run("PRAGMA journal_mode = WAL");
+      return;
+    } catch (error) {
+      if (attempt >= 100 || (error as { code?: string }).code !== "SQLITE_BUSY") throw error;
+      Bun.sleepSync(50);
+    }
+  }
 }
 
 class SqliteInboxLog implements InboxLog {
@@ -233,15 +250,14 @@ class SqliteInboxLog implements InboxLog {
     return { bytes, lines };
   }
 
+  /**
+   * Settings → Storage: what the database holds, its pages in use (writes still in the write-ahead log included,
+   * pages a delete freed not), rather than the files' sizes. A Delete then makes the total fall, as on the JSONL
+   * files, instead of rising with the log it writes; and the total does not jump as the log fills and is folded back.
+   */
   stored(): { bytes: number; backups: InboxStoreBackup[] } {
-    let bytes = 0;
-    for (const suffix of ["", "-wal", "-shm"]) {
-      try {
-        bytes += statSync(`${this.file}${suffix}`).size;
-      } catch {
-        // No side file.
-      }
-    }
+    const pragma = (name: string) => Number(Object.values(this.sqlite.query(`PRAGMA ${name}`).get() as Record<string, unknown>)[0] ?? 0);
+    const bytes = pragma("page_size") * Math.max(0, pragma("page_count") - pragma("freelist_count"));
     return { bytes, backups: listInboxBackups(this.dir) };
   }
 
