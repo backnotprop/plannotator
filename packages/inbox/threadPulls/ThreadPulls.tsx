@@ -23,7 +23,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { InboxThreadPullsAnswer, InboxThreadPullsSummary, InboxThreadPullWire } from '@plannotator/core/inbox-types';
-import { parseForgeRefUrl, type ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
+import { forgePullRefShort, parseForgeRefUrl, type ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 import { REF_CARD_CLOSE_MS, REF_CARD_DELAY_MS, RefCardView } from '@plannotator/ui/components/RefHoverCard';
 import { forgetRefCard, loadRefCard } from '@plannotator/ui/utils/refCard';
 import { cardProblem } from '@plannotator/core/problem-words';
@@ -320,6 +320,13 @@ function OnePull({ pull, sheet, onClose, onRetry, retrying }: { pull: InboxThrea
   );
 }
 
+/** How the card names a PR whose title is not known yet, and in Remove: short, never the URL (`forgePullRefShort`). */
+function shortOf(pull: InboxThreadPullWire): string {
+  const at = pull.repo.lastIndexOf('/');
+  if (!pull.host || at <= 0 || !pull.number) return pull.ref;
+  return forgePullRefShort({ platform: pull.platform, host: pull.host, owner: pull.repo.slice(0, at), repo: pull.repo.slice(at + 1), number: pull.number });
+}
+
 function PullRow({ pull, oneRepo, onRemove }: { pull: InboxThreadPullWire; oneRepo: boolean; onRemove?: (pull: InboxThreadPullWire) => void }) {
   const extras = pullExtras(pull);
   return (
@@ -330,7 +337,7 @@ function PullRow({ pull, oneRepo, onRemove }: { pull: InboxThreadPullWire; oneRe
         </span>
         <span className="ib-prpop-main">
           <span className="ib-prpop-t">
-            <span className="ib-prpop-title">{pull.title ?? pull.ref}</span> <span className="ib-prpop-num">{pull.label}</span>
+            <span className="ib-prpop-title">{pull.title ?? shortOf(pull)}</span> <span className="ib-prpop-num">{pull.label}</span>
           </span>
           <span className="ib-prpop-sub">
             <span className={`ib-prpop-st ib-prpop-st-${pull.state}`}>{pullStateWord(pull.state)}</span>
@@ -345,7 +352,7 @@ function PullRow({ pull, oneRepo, onRemove }: { pull: InboxThreadPullWire; oneRe
         </span>
       </a>
       {onRemove && (
-        <button type="button" className="ib-prpop-rm" aria-label={`Remove ${pull.ref} from this thread`} data-pr-remove={pull.ref} onClick={() => onRemove(pull)}>
+        <button type="button" className="ib-prpop-rm" aria-label={`Remove ${shortOf(pull)} from this thread`} data-pr-remove={pull.ref} onClick={() => onRemove(pull)}>
           <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
             <path d="M4 4l8 8M12 4l-8 8" />
           </svg>
@@ -469,7 +476,7 @@ export function PullsCard({
       <div className="ib-prpop-edit" data-pr-edit="">
         {removed && (
           <div className="ib-prpop-undo" role="status" data-pr-removed={removed.ref}>
-            <span className="min-w-0 flex-1 truncate">Removed {removed.ref}</span>
+            <span className="min-w-0 flex-1 truncate">Removed {shortOf(removed)}</span>
             <button
               type="button"
               className="ib-prpop-tbtn"
@@ -519,7 +526,7 @@ export function PullsCard({
         )}
         {pulls.length === 1 && (
           <button type="button" className="ib-prpop-tbtn ib-prpop-rm1" disabled={busy} onClick={() => void remove(pulls[0]!)} data-pr-remove={pulls[0]!.ref}>
-            Remove {pulls[0]!.ref} from this thread
+            Remove {shortOf(pulls[0]!)} from this thread
           </button>
         )}
         {sheet && (

@@ -358,7 +358,7 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
 
   test("a PR the Inbox could not read: why shows under what is known, Copy copies the exact command, Try again asks again", async () => {
     const problem = toolProblem('signed_out', { cli: 'glab', host: 'gitlab.example.dev', kind: 'pull' });
-    answer = answerOf([pull('https://gitlab.example.dev/acme/api/-/merge_requests/45', 'open', 'main', 'a', { problem })]);
+    answer = answerOf([pull('https://gitlab.example.dev/acme/api/-/merge_requests/45', 'open', 'main', 'a', { problem, title: null })]);
     const copied: string[] = [];
     const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text: string) => void copied.push(text) } });
@@ -367,8 +367,9 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
       await settle();
       await click(host!.querySelector('[data-pr-button]'));
       const card = popover()!;
-      // What is known (the row) stays above why.
-      expect(card.querySelector('[data-pr-row]')).not.toBeNull();
+      // What is known (the row) stays above why; a self-hosted MR with no title yet is named short, never by its URL.
+      expect(card.querySelector('[data-pr-row] .ib-prpop-title')!.textContent).toBe('gitlab.example.dev/acme/api!45');
+      expect(card.querySelector('.ib-prpop-rm1')!.textContent).toBe('Remove gitlab.example.dev/acme/api!45 from this thread');
       expect(card.querySelector('[data-problem="tool.signed_out"] [data-problem-title]')!.textContent).toBe(problem.title);
       await click(card.querySelector('[data-problem-copy]'));
       expect(copied).toEqual(['glab auth login --hostname gitlab.example.dev']);

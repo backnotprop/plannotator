@@ -234,3 +234,13 @@ export function forgePullRefText(ref: Pick<ForgeRef, "platform" | "host" | "owne
   if (ref.platform === "gitlab" && ref.host === "gitlab.com") return `${ref.owner}/${ref.repo}!${ref.number}`;
   return forgePullUrl(ref);
 }
+
+/**
+ * A PR as a person reads it on screen: `owner/repo#12`, `group/project!45`, with the host in front only off
+ * github.com and gitlab.com (`gitlab.example.dev/group/project!45`). Never the URL: that is `forgePullRefText`'s, for
+ * what an agent writes back.
+ */
+export function forgePullRefShort(ref: Pick<ForgeRef, "platform" | "host" | "owner" | "repo" | "number">): string {
+  const text = `${ref.owner}/${ref.repo}${ref.platform === "gitlab" ? "!" : "#"}${ref.number}`;
+  return ref.host === (ref.platform === "gitlab" ? "gitlab.com" : "github.com") ? text : `${ref.host}/${text}`;
+}
