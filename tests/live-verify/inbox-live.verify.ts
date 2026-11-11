@@ -27,6 +27,7 @@ import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from '../e2e/inbox-scratch';
 import { HOTEL, runHotel } from './hotel';
+import { LinkProxy } from './linkProxy';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -185,6 +186,7 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
   const dataDir = join(root, 'data');
   let browser: Browser | null = null;
   let agent: SimAgent | null = null;
+  let linkProxy: LinkProxy | null = null;
   try {
     let t = Date.now();
     seedInboxSearchWorld(dataDir, SIZES[SIZE]);
@@ -212,6 +214,9 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
     const pid: number = reg.pid;
     out.setup.startMs = Date.now() - t;
     const base = `http://127.0.0.1:${port}`;
+    // The page whose link drops (C on a good link, A in hotel WiFi) reaches the Inbox through a proxy that can cut it.
+    linkProxy = await new LinkProxy(port).start();
+    const proxied = `http://127.0.0.1:${linkProxy.port}`;
     const post = async (path: string, body: unknown) => {
       const r = await fetch(`${base}/api/inbox${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       return { status: r.status, text: await r.text() };
@@ -269,6 +274,7 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
     const C = await other.newPage();
     const P = await phone.newPage();
     const pages = { A, B, C, P };
+    const dropping = PROFILE === 'hotel' ? A : C;
     const traffic = new Traffic();
     const errors: string[] = [];
     for (const [n, p] of Object.entries(pages)) {
@@ -297,6 +303,10 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
     /** The page's link down or up: through its throttle when it has one (the throttle's own `offline: false` wins over the context's). */
     const setLink = async (p: Page, offline: boolean) => {
       offlineNow.set(p, offline);
+      if (p === dropping) {
+        if (offline) linkProxy!.down();
+        else linkProxy!.up();
+      }
       const cdp = cdps.get(p);
       if (cdp) await cdp.send('Network.emulateNetworkConditions', conditions(offline, latencyNow.get(p)));
       else await p.context().setOffline(offline);
@@ -307,7 +317,7 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
     };
     for (const p of Object.values(pages)) await throttle(p);
     const go = async (p: Page) => {
-      await p.goto(`${base}/${QUERY}`, { waitUntil: 'commit', timeout: 300_000 });
+      await p.goto(`${p === dropping ? proxied : base}/${QUERY}`, { waitUntil: 'commit', timeout: 300_000 });
       await p.waitForSelector('.ib-lbody [data-thread-id]', { timeout: 300_000 });
     };
     const openThread = async (p: Page, id: string) => {
@@ -881,6 +891,7 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
     mkdirSync(dirname(OUT), { recursive: true });
     writeFileSync(OUT, JSON.stringify(out, null, 2));
     await agent?.close().catch(() => {});
+    await linkProxy?.stop().catch(() => {});
     await browser?.close().catch(() => {});
     await removeInboxScratch();
   }
