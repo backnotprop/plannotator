@@ -63,4 +63,11 @@ describe("inbox link --offer with no tailnet address", () => {
     expect(code).toBe(0);
     expect(err).toContain("run this again with --tailscale");
   });
+
+  test("it also names this Inbox's own loopback port, the one a forward carries to another computer", async () => {
+    const { code, err } = await run(["link", "--offer"], offerWithoutAddress(null));
+    expect(code).toBe(0);
+    expect(err).toMatch(/127\.0\.0\.1:\d+/);
+    expect(err).toContain("--one-way");
+  });
 });

@@ -13,6 +13,7 @@ import { INBOX_AGENTS_LISTED_MAX } from "@plannotator/core/inbox-types";
 import { PeerLink, readCapped, type PeerRecord } from "./inbox-peer-link";
 import { openTransport } from "./inbox-transport";
 import { checkTailnetAddress } from "./inbox-transport-tailnet";
+import { checkTunnelAddress } from "./inbox-transport-tunnel";
 
 const B = "ibx_01K00000000000000000000000";
 const TOKEN = "tok_test";
@@ -434,6 +435,19 @@ describe("the outbox goes when the machine is there (rule 15)", () => {
     expect(outbox.get("k1")!.notice!.kind).toBe("may_have_been_delivered");
     expect(outbox.get("k2")!.notice!.kind).toBe("not_delivered");
   });
+
+  test("the tunnel transport runs the line too: online, and an outbox entry reaches the door at its loopback port", async () => {
+    const d = door({});
+    const { peer, outbox } = link(d.url, {
+      link: { id: B, name: "Mini", token: TOKEN, transport: { kind: "tunnel", url: d.url }, device_id: null, linked_at: "2026-10-30T00:00:00Z" },
+      transport: openTransport({ kind: "tunnel", url: d.url }),
+    });
+    outbox.submit(B, "messages/msg_x/reply", { idempotency_key: "t1", words: "yes", seen_through_seq: 1 });
+    peer.start();
+    await until("online", () => peer.state === "online");
+    await until("delivered", () => outbox.get("t1")!.state === "delivered");
+    expect(d.stats.posts).toContain("messages/msg_x/reply");
+  });
 });
 
 describe("the tailnet transport's address", () => {
@@ -459,6 +473,27 @@ describe("the tailnet transport's address", () => {
     // Two Inboxes on one computer stand in for two machines only inside a test sandbox.
     expect(checkTailnetAddress("http://127.0.0.1:4100", { PLANNOTATOR_TEST_SANDBOX: "/tmp/x" })).toBe("http://127.0.0.1:4100");
     expect(checkTailnetAddress("http://192.168.1.4:4100", { PLANNOTATOR_TEST_SANDBOX: "/tmp/x" })).toBeNull();
+  });
+});
+
+describe("the tunnel transport's address", () => {
+  test("only http to a loopback host with its port: a code, --address or link-back can never send a secret or token off this machine", () => {
+    expect(checkTunnelAddress("localhost:14433")).toBe("http://localhost:14433");
+    expect(checkTunnelAddress("http://127.0.0.1:14433/")).toBe("http://127.0.0.1:14433");
+    expect(checkTunnelAddress("http://[::1]:14433")).toBe("http://[::1]:14433");
+    for (const elsewhere of [
+      "https://localhost:14433",
+      "http://192.168.1.4:14433",
+      "http://localhost",
+      "http://localhost:80",
+      "http://localhost:14433/api",
+      "http://localhost:14433?x=1",
+      "http://user:pw@localhost:14433",
+      "http://mini.tail1234.ts.net:8443",
+      "",
+    ]) {
+      expect(checkTunnelAddress(elsewhere)).toBeNull();
+    }
   });
 });
 

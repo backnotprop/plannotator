@@ -15,11 +15,11 @@ import { UnlinkLink } from './Devices';
 export function linkErrorText(error: unknown): string {
   if (!(error instanceof InboxApiError)) return error instanceof Error ? error.message : 'The link did not go through.';
   if (error.code === 'validation_error') {
-    if (error.message.startsWith('address:')) return "Type the other machine's address on your tailnet, like mini.tail1234.ts.net:8443.";
+    if (error.message.startsWith('address:')) return "Type the other machine's address on your tailnet, like mini.tail1234.ts.net:8443, or a port you forward to it, like localhost:14433.";
     if (error.message.startsWith('link:')) return 'That is not a link code. A link code starts with plannotator://link.';
     return "Paste the other machine's link code, or type its address and six digits.";
   }
-  if (error.code === 'no_way_back') return 'The other machine needs a way back to this one, and Tailscale could not publish this machine. Check Tailscale here, then link again.';
+  if (error.code === 'no_way_back') return 'The other machine needs a way back to this one, and Tailscale could not publish this machine. Check Tailscale here, then link again — or link from the terminal with --one-way.';
   if (error.code === 'local_only') return "Linking works only on this computer's own screen.";
   return error.message;
 }
@@ -352,7 +352,7 @@ function LinkForm({ onCancel, onLinked }: { onCancel: () => void; onLinked: (nam
           <input
             type="text"
             className="ib-fbk-contact"
-            placeholder="Its address, like mini.tail1234.ts.net:8443"
+            placeholder="Its address, like mini.tail1234.ts.net:8443 or localhost:14433"
             spellCheck={false}
             autoComplete="off"
             value={address}

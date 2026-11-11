@@ -36,8 +36,7 @@ import { buildLinkOffer, InboxLinks, parseLinkOffer, type InboxLinkRecord } from
 import { doorWriteKind, InboxOutbox, MACHINE_WINDOW_HEADER, type OutboxEntry } from "./inbox-outbox";
 import { farVersion, MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerLinkTimings, type PeerRecord } from "./inbox-peer-link";
 import { installCommandFor, isNewerStableVersion, normalizeStableVersion } from "@plannotator/shared/update-check";
-import { openTransport, type InboxTransportSpec } from "./inbox-transport";
-import { checkTailnetAddress } from "./inbox-transport-tailnet";
+import { openTransport, specForAddress, type InboxTransportSpec } from "./inbox-transport";
 
 /** How long a write to a machine that is online waits for its answer before the window is told "Sending…" (rule 12). */
 export const MACHINE_WRITE_WAIT_MS = 4_000;
@@ -582,7 +581,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
         signal: AbortSignal.timeout(PAIR_MS),
       });
     } catch (error) {
-      throw new InboxError("machine_unreachable", `Could not reach ${transport.describe()}: ${error instanceof Error ? error.message : String(error)}. Is its Inbox running, and is this computer on the same tailnet?`);
+      throw new InboxError("machine_unreachable", `Could not reach ${transport.describe()}: ${error instanceof Error ? error.message : String(error)}. Is its Inbox running, and can this computer reach it — over your tailnet, or through the port you forwarded to it?`);
     }
     // With Phones off, a door with no machine offer open is the unknown route: the code was used, expired or replaced.
     if (paired.status === 404) throw new InboxError("offer_expired", "This link code is no longer open. Make a new one on the other machine.");
@@ -644,14 +643,14 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (parsed?.id === links.selfId) throw new InboxError("link_to_self", "That is this Inbox's own link code: open the code on the other machine.");
     const rawAddress = typeof input.address === "string" && input.address.trim() ? input.address : parsed?.tailnet;
     if (!rawAddress) {
-      throw new InboxError("validation_error", "address: the other machine's tailnet address. Make its code with --tailscale, or give --address <name>.ts.net:8443.", { field: "address" });
+      throw new InboxError("validation_error", "address: the other machine's address. Make its code with --tailscale, or give --address <name>.ts.net:8443, or localhost:<port> when you forward its port here.", { field: "address" });
     }
-    const url = checkTailnetAddress(rawAddress);
-    if (!url) throw new InboxError("validation_error", "address: an https address on your tailnet, like mini.tail1234.ts.net:8443.", { field: "address" });
+    const spec = specForAddress(rawAddress);
+    if (!spec) throw new InboxError("validation_error", "address: an https address on your tailnet, like mini.tail1234.ts.net:8443, or a loopback port you forward to it, like localhost:14433.", { field: "address" });
     const oneWay = input.one_way === true;
     const givenBack = typeof input.back === "string" && input.back.trim() ? input.back : null;
-    if (givenBack && !checkTailnetAddress(givenBack)) {
-      throw new InboxError("validation_error", "back: this machine's address on your tailnet, like laptop.tail1234.ts.net:8443.", { field: "back" });
+    if (givenBack && !specForAddress(givenBack)) {
+      throw new InboxError("validation_error", "back: this machine's address on your tailnet, like laptop.tail1234.ts.net:8443, or a loopback port it forwards here, like localhost:14433.", { field: "back" });
     }
     let backRaw = oneWay ? null : (givenBack ?? context.door.tailnetAddress());
     if (!backRaw && !oneWay) {
@@ -666,9 +665,9 @@ export function createInboxMachines(context: InboxMachinesContext) {
       }
       backRaw = published.address;
     }
-    const back = backRaw ? checkTailnetAddress(backRaw) : null;
+    const back = backRaw ? specForAddress(backRaw)?.url ?? null : null;
     try {
-      const target = await redeem({ kind: "tailnet", url }, { id: parsed?.id ?? null, secret, code });
+      const target = await redeem(spec, { id: parsed?.id ?? null, secret, code });
       let deviceId: string | null = null;
       if (back) {
         const backOffer = context.door.openMachineOffer();
@@ -692,7 +691,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
         }
         deviceId = context.door.offerDevice(backOffer.secret);
       }
-      const record: InboxLinkRecord = { id: target.id, name: target.name, token: target.token, transport: { kind: "tailnet", url }, device_id: deviceId, linked_at: new Date().toISOString() };
+      const record: InboxLinkRecord = { id: target.id, name: target.name, token: target.token, transport: spec, device_id: deviceId, linked_at: new Date().toISOString() };
       save(record);
       return { machine: machinesView().find((m) => m.id === record.id)! };
     } catch (error) {
@@ -746,11 +745,11 @@ export function createInboxMachines(context: InboxMachinesContext) {
   const linkBack = async (deviceId: string, body: Record<string, unknown>): Promise<Response> => {
     const parsed = typeof body.link === "string" ? parseLinkOffer(body.link) : null;
     if (!parsed?.secret || !parsed.tailnet || !parsed.id) return json({ error: "link: a plannotator://link code with an address.", code: "validation_error" }, 422);
-    const url = checkTailnetAddress(parsed.tailnet);
-    if (!url) return json({ error: "link: its address is not usable.", code: "validation_error" }, 422);
+    const spec = specForAddress(parsed.tailnet);
+    if (!spec) return json({ error: "link: its address is not usable.", code: "validation_error" }, 422);
     try {
-      const target = await redeem({ kind: "tailnet", url }, parsed);
-      const record: InboxLinkRecord = { id: target.id, name: target.name, token: target.token, transport: { kind: "tailnet", url }, device_id: deviceId, linked_at: new Date().toISOString() };
+      const target = await redeem(spec, parsed);
+      const record: InboxLinkRecord = { id: target.id, name: target.name, token: target.token, transport: spec, device_id: deviceId, linked_at: new Date().toISOString() };
       save(record);
       return json({ machine: { id: links.selfId, name: context.computerName() } }, 201);
     } catch (error) {

@@ -8,7 +8,10 @@
  * tailnet one (HTTP to the other Inbox's device door); on one computer its
  * address is the other Inbox's loopback port, given with `--address` and
  * `--back`. A `tailscale` stand-in on each PATH records any call and fails,
- * and the test asserts nothing ever ran it.
+ * and the test asserts nothing ever ran it. A second suite starts its two
+ * Inboxes without the test sandbox env, so a loopback address is what it is
+ * on a real machine: a port the person forwards to the other Inbox, the
+ * tunnel transport (inbox-transport-tunnel.ts).
  *
  *  1. B offers, A links both ways; each sees the other online.
  *  2. An agent on B asks; A's merged list and event stream show it; the
@@ -70,9 +73,20 @@ function cli(m: Machine, ...args: string[]): { code: number; out: string; err: s
   return { code: run.exitCode ?? -1, out: run.stdout.toString(), err: run.stderr.toString() };
 }
 
-function start(m: Machine): void {
-  const run = cli(m, "--background");
-  if (run.code !== 0) throw new Error(`inbox --background failed: ${run.err}`);
+/**
+ * Start a machine's Inbox in the background. `withoutSandbox`: the tunnel
+ * suite starts without the test sandbox env, so its Inboxes classify a
+ * loopback address as a tunnel as a real machine does, not as the tailnet's
+ * test stand-in; their temp HOME and data dir (worldEnv) still hold
+ * everything they read or write under a home, and later `cli` calls still
+ * carry the sandbox env (classification runs in the already-running Inbox,
+ * not the CLI).
+ */
+function start(m: Machine, withoutSandbox = false): void {
+  const spawnEnv = { ...env(m) };
+  if (withoutSandbox) delete spawnEnv.PLANNOTATOR_TEST_SANDBOX;
+  const run = Bun.spawnSync([join(m.w.bin, "plannotator"), "inbox", "--background"], { env: spawnEnv, cwd: m.w.root });
+  if (run.exitCode !== 0) throw new Error(`inbox --background failed: ${run.stderr.toString()}`);
 }
 
 async function getJson(m: Machine, path: string): Promise<Json> {
@@ -611,6 +625,90 @@ function scriptedTailscale() {
   const doorCalls = () => calls.filter((args) => args.includes("--https=8443")).map((args) => (args.includes("off") ? "off" : "on"));
   return { serve, run, doorCalls, calls };
 }
+
+describe("a link over the person's own forwarded port (the tunnel transport)", () => {
+  let stubs: string[] = [];
+  const machines: Machine[] = [];
+  let A: Machine;
+  let B: Machine;
+
+  beforeAll(async () => {
+    stubs = stubBuiltHtml();
+    for (const name of ["laptop", "box"]) {
+      const w = createInboxWorld(`plannotator-tunnel-${name}-`, `tunnel-${name}`, "machines");
+      const calls = join(w.root, "tailscale-calls.txt");
+      // Never the real tailscale: a stand-in that records a call and fails.
+      writeFileSync(join(w.bin, "tailscale"), `#!/bin/sh\necho "tailscale $*" >> '${calls}'\nexit 1\n`);
+      chmodSync(join(w.bin, "tailscale"), 0o755);
+      const m: Machine = { w, name, id: "", calls };
+      start(m, true);
+      machines.push(m);
+    }
+    [A, B] = machines as [Machine, Machine];
+    for (const m of machines) m.id = (await getJson(m, "/api/inbox/health")).inbox_id as string;
+  }, 60_000);
+
+  afterAll(async () => {
+    for (const m of machines) {
+      // Rule: nothing here may change the system's Tailscale.
+      expect(existsSync(m.calls)).toBe(false);
+      await destroyInboxWorld(m.w);
+    }
+    removeStubbedHtml(stubs);
+  });
+
+  test("1. a code links one way over a forwarded port: the record keeps kind tunnel, the far side keeps none, and a thread and its reply flow", async () => {
+    const offered = cli(B, "link", "--offer");
+    expect(offered.code).toBe(0);
+    // The offer names the port a forward carries to another computer.
+    expect(offered.err).toContain(`127.0.0.1:${registry(B.w).port}`);
+    expect(offered.err).toContain("--one-way");
+    const linked = cli(A, "link", offered.out.trim(), "--address", base(B), "--one-way");
+    expect(linked.code).toBe(0);
+    expect(linked.out).toContain("one way");
+    expect(linksFile(A).links).toHaveLength(1);
+    const record = linksFile(A).links[0] as Json;
+    expect(record.id).toBe(B.id);
+    expect(record.transport).toEqual({ kind: "tunnel", url: base(B) });
+    expect(record.device_id).toBeNull();
+    // No way back was attempted: the box's own file (its offer kept its id) holds no link.
+    expect(linksFile(B).links).toEqual([]);
+    expect((await machinesOf(B)).filter((x) => !x.self)).toHaveLength(0);
+    await waitFor("A sees B online", async () => (await stateOf(A, B)) === "online");
+    const agent = await agentOn(B);
+    try {
+      const sent = await agent.send(QUESTION(1), { thread: "tunnel-1" });
+      const row = await waitFor("B's thread in A's merged list", async () => (await mergedRows(A)).find((r) => r.thread_id === sent.thread_id));
+      expect(row.machine).toBe(B.id);
+      const opened = await getJson(A, `/api/inbox/m/${B.id}/threads/${sent.thread_id}`);
+      const answered = await windowPost(A, `/api/inbox/m/${B.id}/messages/${sent.message_id}/reply`, {
+        idempotency_key: "tunnel-answer-1",
+        words: "Tunnel answer.",
+        seen_through_seq: opened.cursor,
+      });
+      expect(answered.status).toBe(200);
+      expect(answered.headers.get("x-plannotator-outbox")).toBe("delivered");
+      expect((await agent.lastReply(sent.thread_id))!.body).toContain("Tunnel answer.");
+    } finally {
+      await agent.client.close().catch(() => {});
+    }
+    // The CLI lists the loopback address it reaches the box on.
+    expect(cli(A, "link", "--list").out).toContain(`127.0.0.1:${registry(B.w).port}`);
+  }, 120_000);
+
+  test("2. a --back of the same shape links both ways over forwarded ports; both records keep kind tunnel", async () => {
+    const offered = cli(B, "link", "--offer");
+    expect(offered.code).toBe(0);
+    const linked = cli(A, "link", offered.out.trim(), "--address", base(B), "--back", base(A));
+    expect(linked.code).toBe(0);
+    expect(linked.out).toContain("both ways");
+    expect(linksFile(A).links.map((l: Json) => l.transport)).toEqual([{ kind: "tunnel", url: base(B) }]);
+    expect(linksFile(B).links.map((l: Json) => l.transport)).toEqual([{ kind: "tunnel", url: base(A) }]);
+    await waitFor("A sees B online", async () => (await stateOf(A, B)) === "online");
+    await waitFor("B sees A online", async () => (await stateOf(B, A)) === "online");
+    expect((await machinesOf(A)).find((x) => x.id === B.id)!.both_ways).toBe(true);
+  }, 120_000);
+});
 
 describe("the tailnet door with Phones off, in process", () => {
   const roots: string[] = [];
