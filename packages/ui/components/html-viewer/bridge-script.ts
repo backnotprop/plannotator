@@ -1155,7 +1155,7 @@ ${SANDBOX_SHIM_SCRIPT}
   // CSS anchor for later restoration, and element-only pins (SVG, icon
   // buttons) get a numbered badge. The semantic target graph below survives
   // as the vim-navigation vocabulary only; the pointer path never builds it.
-  var PINPOINT_SKIP_SELECTOR = 'script,style,noscript,[data-plannotator-vim-ui]';
+  var PINPOINT_SKIP_SELECTOR = 'script,style,noscript,[data-pinpoint-ignore],[data-plannotator-vim-ui]';
 
   // Identity set of every overlay node the viewer creates inside the page
   // (pin badges, pinpoint box/label, vim UI). Hit-testing excludes overlay
@@ -1262,7 +1262,10 @@ ${SANDBOX_SHIM_SCRIPT}
     if (!node || node.nodeType !== 1) return null;
     if (node === document.documentElement || node === document.body) return null;
     if (isViewerOverlayNode(node)) return null;
-    if (node.closest && node.closest('script,style,noscript')) return null;
+    // Same opt-out the markdown surface uses: an element marked
+    // data-pinpoint-ignore, and everything under it, is viewer chrome, not
+    // document content. Scripts/styles are never annotatable either.
+    if (node.closest && node.closest(PINPOINT_SKIP_SELECTOR)) return null;
     // SVG shape primitives promote to their nearest group: a <g> is the
     // authored unit of an SVG diagram, and its <path> fragments are not
     // individually meaningful annotation targets.
