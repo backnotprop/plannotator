@@ -21,6 +21,7 @@ import {
 	getServerPorts,
 	isNoOpBrowserSentinel,
 	isPosixBrowserTarget,
+	isRemoteOrSsh,
 	isRemoteSession,
 	listenOnPort,
 	openBrowser,
@@ -107,10 +108,12 @@ describe("pi remote detection", () => {
 		expect(isRemoteSession()).toBe(false);
 	});
 
-	test("true when SSH_TTY is set and env var is unset", () => {
+	test("SSH alone is not remote mode: loopback and every feature on, but the fixed port and no browser here", () => {
 		clearEnv();
 		process.env.SSH_TTY = "/dev/pts/0";
-		expect(isRemoteSession()).toBe(true);
+		expect(isRemoteSession()).toBe(false);
+		expect(getServerHostname()).toBe("127.0.0.1");
+		expect(isRemoteOrSsh()).toBe(true);
 	});
 });
 

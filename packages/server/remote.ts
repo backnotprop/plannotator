@@ -3,9 +3,13 @@
  *
  * Environment variables:
  *   PLANNOTATOR_REMOTE - Set to "1"/"true" to force remote, "0"/"false" to force local
- *   PLANNOTATOR_PORT   - Fixed port or inclusive range (default: random locally, 19432 for remote)
+ *   PLANNOTATOR_PORT   - Fixed port or inclusive range (default: random locally, 19432 for remote or SSH)
  *
- * Legacy (still supported): SSH_TTY, SSH_CONNECTION
+ * SSH (SSH_TTY, SSH_CONNECTION) with PLANNOTATOR_REMOTE unset is no longer
+ * remote mode: the server binds loopback, so only the person's own forwarded
+ * connection reaches it, and every feature stays on. It keeps what an SSH
+ * session needs: the fixed port to forward, no browser launched on this
+ * computer, and no Open in (it would open an app on this computer's screen).
  */
 
 import { parsePortSelection } from "@plannotator/shared/port-range";
@@ -36,7 +40,7 @@ export class PortInUseError extends Error {
     readonly port: number,
     /** The configured range, when PLANNOTATOR_PORT names one. */
     readonly range: readonly [number, number] | null,
-    /** True when the port came from PLANNOTATOR_PORT, false for the remote-mode default. */
+    /** True when the port came from PLANNOTATOR_PORT, false for the remote or SSH default. */
     readonly fromEnv: boolean,
   ) {
     super(message);
@@ -50,7 +54,7 @@ export class PortInUseError extends Error {
     const what = this.fromEnv
       ? `port ${this.port} (PLANNOTATOR_PORT)`
       : `port ${this.port}`;
-    const why = this.fromEnv ? "" : " (remote mode uses a fixed port so it can be forwarded)";
+    const why = this.fromEnv ? "" : " (a remote or SSH session uses a fixed port so it can be forwarded)";
     return `Plannotator: ${what} is already in use, most likely by another Plannotator session${why}. Finish or close that session, or set PLANNOTATOR_PORT to a different port.`;
   }
 }
@@ -73,20 +77,28 @@ function getRemoteOverride(): boolean | null {
 }
 
 /**
- * Check if running in a remote session (SSH, devcontainer, etc.)
+ * Remote mode: PLANNOTATOR_REMOTE=1. The server binds every interface, so
+ * anyone who can reach the URL can use the page, and the features that would
+ * let them drive this computer stay off. SSH alone does not turn it on
+ * (see isSshSession).
  */
 export function isRemoteSession(): boolean {
-  const remoteOverride = getRemoteOverride();
-  if (remoteOverride !== null) {
-    return remoteOverride;
-  }
+  return getRemoteOverride() === true;
+}
 
-  // Legacy: SSH_TTY/SSH_CONNECTION (deprecated, silent)
-  if (process.env.SSH_TTY || process.env.SSH_CONNECTION) {
-    return true;
-  }
+/**
+ * Over SSH with PLANNOTATOR_REMOTE unset. The person is not at this
+ * computer's screen, but the server binds loopback, so the page reaches it
+ * only through their own forwarded connection: every feature works, only the
+ * screen-bound ones (opening a browser here, Open in) do not.
+ */
+export function isSshSession(): boolean {
+  return getRemoteOverride() === null && Boolean(process.env.SSH_TTY || process.env.SSH_CONNECTION);
+}
 
-  return false;
+/** Remote mode or SSH: no browser on this computer's screen, and a fixed port to forward. */
+export function isRemoteOrSsh(): boolean {
+  return isRemoteSession() || isSshSession();
 }
 
 /**
@@ -111,9 +123,9 @@ function getServerPortConfiguration(): {
     );
   }
 
-  // Remote sessions use fixed port for port forwarding; local uses random
+  // Remote and SSH sessions use a fixed port for port forwarding; local uses random
   return {
-    ports: [isRemoteSession() ? DEFAULT_REMOTE_PORT : 0],
+    ports: [isRemoteOrSsh() ? DEFAULT_REMOTE_PORT : 0],
     isRange: false,
   };
 }
@@ -156,7 +168,7 @@ export async function startBunServerOnAvailablePort<TServer>(
       }
 
       if (!isRange) {
-        const hint = isRemoteSession()
+        const hint = isRemoteOrSsh()
           ? " (set PLANNOTATOR_PORT to use different port)"
           : "";
         throw new PortInUseError(
@@ -169,7 +181,7 @@ export async function startBunServerOnAvailablePort<TServer>(
 
       const first = configuredPorts[0] as number;
       const last = configuredPorts.at(-1) as number;
-      const hint = isRemoteSession()
+      const hint = isRemoteOrSsh()
         ? " (set PLANNOTATOR_PORT to use a different port or range)"
         : "";
       throw new PortInUseError(

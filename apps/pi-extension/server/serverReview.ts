@@ -164,7 +164,7 @@ import { captureReviewProgress, handleReviewProgress } from "../generated/review
 import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.ts";
 import type { SessionBridge } from "../generated/ai/session-bridge.ts";
 
-import { buildAdvertisedUrl, isRemoteSession, listenOnPort } from "./network.ts";
+import { buildAdvertisedUrl, isRemoteOrSsh, isRemoteSession, listenOnPort } from "./network.ts";
 import { getAvailableOpenInApps, handleOpenInRequest } from "./open-in-apps.ts";
 import {
 	fetchPR,
@@ -451,7 +451,9 @@ export async function startReviewServer(options: {
 	const hasLocalAccess = !!options.gitContext;
 	const sessionVcsType = options.gitContext?.vcsType;
 	let clientGitContext = options.gitContext;
-	const isRemote = isRemoteSession();
+	// Remote mode or SSH: no browser here and no Open in (it would open on this
+	// computer's screen). Every other feature follows remote mode alone.
+	const isRemote = isRemoteOrSsh();
 	const wslFlag = detectWSL();
 	let prRef = prMeta ? prRefFromMetadata(prMeta) : null;
 	const platformUser = prRef ? await getPRUser(prRef) : null;
@@ -4162,7 +4164,7 @@ export async function startReviewServer(options: {
 				url.pathname,
 				req.method,
 				req.headers["accept-encoding"],
-				isRemoteSession(),
+				isRemoteOrSsh(),
 			);
 			res.writeHead(answer.status, answer.headers);
 			res.end(answer.body);
@@ -4302,7 +4304,7 @@ export async function startReviewServer(options: {
 		} else if (url.pathname.startsWith("/api/")) {
 			handleApiNotFound(res, url.pathname);
 		} else {
-			await serveApp(app, req, res, url.pathname, isRemoteSession());
+			await serveApp(app, req, res, url.pathname, isRemoteOrSsh());
 		}
 	});
 
@@ -4311,7 +4313,7 @@ export async function startReviewServer(options: {
 	boundPort = port;
 	// Remote sessions serve the app page compressed (#1617); start gzip (what
 	// browsers ask for over plain http) now so the first load does not wait.
-	if (isRemoteSession()) prewarmAppHtml(app.html, likelyAppHtmlEncoding(false));
+	if (isRemoteOrSsh()) prewarmAppHtml(app.html, likelyAppHtmlEncoding(false));
 	serverUrl = buildAdvertisedUrl(port);
 	agentApiUrl = `http://127.0.0.1:${port}`;
 	const exitHandler = () => agentJobs.killAll();

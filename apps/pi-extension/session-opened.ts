@@ -10,14 +10,14 @@
  */
 import { browserNoneReason, resolveBrowserIntent } from "./generated/browser-intent.ts";
 import { isLocalOnlyAdvertisedUrl } from "./generated/advertised-url.ts";
-import { isRemoteSession } from "./server/network.ts";
+import { isRemoteOrSsh } from "./server/network.ts";
 
 export function sessionOpenedMessage(label: string, url: string): string {
 	const intent = resolveBrowserIntent(process.env);
 	const tail = intent.kind === "none"
 		? ` ${browserNoneReason(intent)} You can keep chatting while it runs.`
 		: " You can keep chatting while it runs.";
-	if (!isRemoteSession()) return `${label} at ${url}.${tail}`;
+	if (!isRemoteOrSsh()) return `${label} at ${url}.${tail}`;
 	// A non-local advertised URL (a tailnet host, a reverse-proxy origin) is
 	// directly reachable, so the port-forwarding advice would be wrong.
 	return !isLocalOnlyAdvertisedUrl(url)

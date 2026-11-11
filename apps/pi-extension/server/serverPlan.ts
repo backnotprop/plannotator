@@ -57,7 +57,7 @@ import {
 	saveToNotion,
 	isNotionAvailable,
 } from "./integrations.ts";
-import { buildAdvertisedUrl, isRemoteSession, listenOnPort } from "./network.ts";
+import { buildAdvertisedUrl, isRemoteOrSsh, isRemoteSession, listenOnPort } from "./network.ts";
 
 import { agentSwitchConfigToSave, agentToolSaveFailed, cookieHostConfigWrite, loadConfig, saveConfig, detectGitUser, getServerConfig, resolveAIEnabled, resolveFeedbackHistory, resolveSharingEnabled } from "../generated/config.ts";
 import { currentPiHost } from "../pi-host.ts";
@@ -802,7 +802,7 @@ export async function startPlanReviewServer(options: {
 		} else if (url.pathname.startsWith("/api/")) {
 			handleApiNotFound(res, url.pathname);
 		} else {
-			await serveApp(app, req, res, url.pathname, isRemoteSession());
+			await serveApp(app, req, res, url.pathname, isRemoteOrSsh());
 		}
 	});
 
@@ -811,7 +811,7 @@ export async function startPlanReviewServer(options: {
 	boundPort = port;
 	// Remote sessions serve the app page compressed (#1617); start gzip (what
 	// browsers ask for over plain http) now so the first load does not wait.
-	if (isRemoteSession()) prewarmAppHtml(app.html, likelyAppHtmlEncoding(false));
+	if (isRemoteOrSsh()) prewarmAppHtml(app.html, likelyAppHtmlEncoding(false));
 
 	// Mirror the Bun server: bind first, then warm through the async shared walk.
 	void warmFileListCache(process.cwd(), "code");

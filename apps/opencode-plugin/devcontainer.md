@@ -49,9 +49,9 @@ If you added the sample, make sure port 9999 (or your chosen port) is forwarded 
 }
 ```
 
-## Legacy Support
+## SSH Sessions
 
-If your environment already has `SSH_TTY` or `SSH_CONNECTION` set (common in SSH sessions), Plannotator will detect remote mode automatically when `PLANNOTATOR_REMOTE` is unset. You can also force local mode with `PLANNOTATOR_REMOTE=false` or `0`.
+If your environment has `SSH_TTY` or `SSH_CONNECTION` set and `PLANNOTATOR_REMOTE` is unset, Plannotator stays local (loopback only, every feature on) but uses port `19432` and opens no browser, so forward that port. Set `PLANNOTATOR_REMOTE=1` to reach it without a tunnel, or `PLANNOTATOR_REMOTE=false` / `0` for plain local mode.
 
 ## Troubleshooting
 

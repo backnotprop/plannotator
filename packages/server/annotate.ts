@@ -14,7 +14,7 @@
 import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { likelyAppHtmlEncoding, prewarmAppHtml } from "@plannotator/shared/app-html";
 import { openPackedApp, packedAppResponse } from "@plannotator/shared/packed-app";
-import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl, getLocalUrlHostname } from "./remote";
+import { isRemoteSession, isRemoteOrSsh, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl, getLocalUrlHostname } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
 import { withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { isSameOriginRequest, refuseCrossOriginWrite } from "./request-origin-guard";
@@ -98,7 +98,7 @@ import {
 import { readFileSync } from "fs";
 
 // Re-export utilities
-export { isRemoteSession, getServerPort } from "./remote";
+export { isRemoteSession, isRemoteOrSsh, getServerPort } from "./remote";
 export { openBrowser } from "./browser";
 export { handleServerReady as handleAnnotateServerReady } from "./shared-handlers";
 
@@ -214,7 +214,7 @@ export interface AnnotateServerOptions {
   refRunner?: RefRunner;
   /** Project name for keying per-file version history (powers the annotate version diff). */
   project?: string;
-  /** Called when server starts with the URL, remote status, and port */
+  /** Called when server starts with the URL, whether it is remote mode or SSH (no browser here), and port */
   onReady?: (url: string, isRemote: boolean, port: number) => void | Promise<void>;
 }
 
@@ -225,7 +225,7 @@ export interface AnnotateServerResult {
   liveProxyPort?: number;
   /** The full URL to access the server */
   url: string;
-  /** Whether running in remote mode */
+  /** Remote mode or SSH: the person is not at this screen (no browser opens here) */
   isRemote: boolean;
   /** Wait for user feedback submission */
   waitForDecision: () => Promise<{
@@ -356,6 +356,9 @@ export async function startAnnotateServer(
   }
 
   const isRemote = isRemoteSession();
+  // Remote mode or SSH: no browser on this screen, the fixed port, compressed
+  // pages. Only remote mode (isRemote) turns features off.
+  const remoteOrSsh = isRemoteOrSsh();
   // The localhost subdomain this session is advertised at (#2184), read once:
   // the one extra name the loopback Host checks accept. A live app session
   // stays on localhost (see serverUrl below), so it accepts none.
@@ -366,7 +369,7 @@ export async function startAnnotateServer(
   const refCards = createRefCards(options.refRunner ? { run: options.refRunner } : {});
   // The app page is served compressed only to sessions reachable from another
   // device: remote mode or --tailscale (#1617). Local sessions are unchanged.
-  const compressAppHtml = isRemote || options.tailnetPublished === true;
+  const compressAppHtml = remoteOrSsh || options.tailnetPublished === true;
   const app = openPackedApp(htmlContent);
   // Save to Notion uses the server's NOTION_TOKEN: never for a session another device can open.
   const notionAvailable = isNotionAvailable(isRemote || options.tailnetPublished === true);
@@ -1768,7 +1771,7 @@ export async function startAnnotateServer(
   // loopback server keeps listening and the session hangs forever.
   if (onReady) {
     try {
-      await onReady(serverUrl, isRemote, port);
+      await onReady(serverUrl, remoteOrSsh, port);
     } catch (error) {
       stop();
       throw error;
@@ -1779,7 +1782,7 @@ export async function startAnnotateServer(
     port,
     liveProxyPort: liveProxy?.port,
     url: serverUrl,
-    isRemote,
+    isRemote: remoteOrSsh,
     waitForDecision: () => decisionPromise,
     stop,
     hostControl,

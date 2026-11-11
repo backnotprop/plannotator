@@ -28,7 +28,7 @@ import { BROWSER_SESSION_STOPPED } from "./browser-session-error.ts";
 import type { SessionBridge } from "./generated/ai/session-bridge.ts";
 import type { HostControl } from "./generated/host-control.ts";
 import type { AnnotateBundleFile } from "./generated/annotate-bundle.ts";
-import { openBrowser, isRemoteSession } from "./server/network.ts";
+import { openBrowser, isRemoteOrSsh, isRemoteSession } from "./server/network.ts";
 import { detectProjectName } from "./server/project.ts";
 import { parsePRUrl, checkPRAuth, fetchPR } from "./server/pr.ts";
 import { reviewRuntimeWithEnv } from "./server/vcs.ts";
@@ -275,7 +275,7 @@ async function openBrowserForServer(serverUrl: string, ctx: ExtensionContext, an
 	// PLANNOTATOR_BROWSER=none is a choice, not a failure: the in-turn message
 	// already said so, and a caller without one says it here.
 	const notOpening = browserResult.notOpening;
-	const failedLocally = !notOpening && !isRemoteSession() && !browserResult.opened;
+	const failedLocally = !notOpening && !isRemoteOrSsh() && !browserResult.opened;
 	if (!announcedInTurn) {
 		const suffix = notOpening
 			? ` — ${notOpening}`

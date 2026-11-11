@@ -70,7 +70,7 @@ import { handleApiNotFound, serveApp, json, parseBody, requestUrl } from "./help
 import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.ts";
 import type { SessionBridge } from "../generated/ai/session-bridge.ts";
 
-import { buildAdvertisedUrl, isRemoteSession, listenOnPort } from "./network.ts";
+import { buildAdvertisedUrl, isRemoteOrSsh, isRemoteSession, listenOnPort } from "./network.ts";
 import { isNotionAvailable } from "./integrations.ts";
 import { getAvailableOpenInApps, handleOpenInRequest } from "./open-in-apps.ts";
 
@@ -1232,13 +1232,13 @@ export async function startAnnotateServer(options: {
 			// URL annotations have no local file to reveal — report unavailable so
 			// the UI hides the control entirely.
 			const urlSource = /^https?:\/\//i.test(options.filePath);
-			if (isRemoteSession() || urlSource) {
+			if (isRemoteOrSsh() || urlSource) {
 				json(res, { available: false, apps: [] });
 				return;
 			}
 			json(res, { available: true, apps: getAvailableOpenInApps() });
 		} else if (url.pathname === "/api/open-in" && req.method === "POST") {
-			if (isRemoteSession() || /^https?:\/\//i.test(options.filePath)) {
+			if (isRemoteOrSsh() || /^https?:\/\//i.test(options.filePath)) {
 				json(res, { ok: false, error: "Open in app is unavailable for this source" }, 400);
 				return;
 			}
@@ -1525,7 +1525,7 @@ export async function startAnnotateServer(options: {
 			res.writeHead(404, htmlAssetDocumentHeaders(HTML_ASSET_ERROR_CSP));
 			res.end(buildHtmlAssetErrorDocument(404, "Not found", name));
 		} else {
-			await serveApp(app, req, res, url.pathname, isRemoteSession());
+			await serveApp(app, req, res, url.pathname, isRemoteOrSsh());
 		}
 	});
 	// Startup failures must not leave anything behind in the long-lived Pi
@@ -1582,7 +1582,7 @@ export async function startAnnotateServer(options: {
 	agentTerminalCapability = agentTerminal.capability;
 	// Remote sessions serve the app page compressed (#1617); start gzip (what
 	// browsers ask for over plain http) now so the first load does not wait.
-	if (isRemoteSession()) prewarmAppHtml(app.html, likelyAppHtmlEncoding(false));
+	if (isRemoteOrSsh()) prewarmAppHtml(app.html, likelyAppHtmlEncoding(false));
 
 	if (options.liveApp) {
 		// Compose the proxy-served bridge body via the shared assembly (config

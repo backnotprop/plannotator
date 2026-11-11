@@ -19,7 +19,7 @@ import { openPackedApp, packedAppResponse } from "@plannotator/shared/packed-app
 import type { Origin } from "@plannotator/shared/agents";
 import { isAbsolute, resolve } from "path";
 import { statSync } from "node:fs";
-import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl, getLocalUrlHostname } from "./remote";
+import { isRemoteSession, isRemoteOrSsh, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl, getLocalUrlHostname } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
 import { withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { isSameOriginRequest, refuseCrossOriginWrite } from "./request-origin-guard";
@@ -81,7 +81,7 @@ import { createDocumentDraftStore, documentDraftIndexKey, loadSessionDraftWithDo
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "@plannotator/shared/server-session";
 
 // Re-export utilities
-export { isRemoteSession, getServerPort } from "./remote";
+export { isRemoteSession, isRemoteOrSsh, getServerPort } from "./remote";
 export { openBrowser } from "./browser";
 export * from "./integrations";
 export * from "./storage";
@@ -120,7 +120,7 @@ export interface ServerOptions {
   shareBaseUrl?: string;
   /** Base URL of the paste service API for short URL sharing */
   pasteApiUrl?: string;
-  /** Called when server starts with the URL, remote status, and port */
+  /** Called when server starts with the URL, whether it is remote mode or SSH (no browser here), and port */
   onReady?: (url: string, isRemote: boolean, port: number) => void | Promise<void>;
   /** Tests: run the hover cards' `gh` / `glab` through this instead of the real ones (ref-cards.ts). */
   refRunner?: RefRunner;
@@ -180,7 +180,7 @@ export interface ServerResult {
   port: number;
   /** The full URL to access the server */
   url: string;
-  /** Whether running in remote mode */
+  /** Remote mode or SSH: the person is not at this screen (no browser opens here) */
   isRemote: boolean;
   /** Wait for user decision (approve/deny) */
   waitForDecision: () => Promise<{
@@ -275,6 +275,9 @@ export async function startPlannotatorServer(
   };
 
   const isRemote = isRemoteSession();
+  // Remote mode or SSH: no browser on this screen, the fixed port, compressed
+  // pages. Only remote mode (isRemote) turns features off.
+  const remoteOrSsh = isRemoteOrSsh();
   const app = openPackedApp(htmlContent);
   // The localhost subdomain this session is advertised at (#2184), read once:
   // the one extra name the loopback Host checks accept.
@@ -962,7 +965,7 @@ export async function startPlannotatorServer(
           }
 
           // Serve the app for all other routes (SPA): the page or a packed asset
-          return packedAppResponse(app, req, url.pathname, isRemote);
+          return packedAppResponse(app, req, url.pathname, remoteOrSsh);
         },
 
         error(err) {
@@ -993,7 +996,7 @@ export async function startPlannotatorServer(
 
   // Remote sessions serve the app page compressed (#1617); start the likely
   // encoding (gzip over plain http) now so the first load does not wait.
-  if (isRemote) prewarmAppHtml(app.html, likelyAppHtmlEncoding(false));
+  if (remoteOrSsh) prewarmAppHtml(app.html, likelyAppHtmlEncoding(false));
 
   // The cache warm must never gate the listening socket. Its async filesystem
   // walk yields between directories while requests remain serviceable.
@@ -1002,7 +1005,7 @@ export async function startPlannotatorServer(
   // Notify caller that server is ready
   if (onReady) {
     try {
-      await onReady(serverUrl, isRemote, port);
+      await onReady(serverUrl, remoteOrSsh, port);
     } catch (error) {
       await stop();
       throw error;
@@ -1012,7 +1015,7 @@ export async function startPlannotatorServer(
   return {
     port,
     url: serverUrl,
-    isRemote,
+    isRemote: remoteOrSsh,
     waitForDecision: () => decisionPromise,
     ...(donePromise && { waitForDone: () => donePromise }),
     updatePlan: (next) => {

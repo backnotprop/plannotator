@@ -17,7 +17,7 @@ import {
   type GoalSetupQuestionAnswer,
   type GoalSetupResult,
 } from "@plannotator/shared/goal-setup";
-import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
+import { isRemoteOrSsh, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
 import { withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { refuseCrossOriginWrite } from "./request-origin-guard";
@@ -83,7 +83,8 @@ export async function startGoalSetupServer(
   options: GoalSetupServerOptions
 ): Promise<GoalSetupServerResult> {
   const { bundle, htmlContent, origin = "claude-code", onReady } = options;
-  const isRemote = isRemoteSession();
+  // Remote mode or SSH: no browser on this screen, the fixed port, compressed pages.
+  const remoteOrSsh = isRemoteOrSsh();
   const app = openPackedApp(htmlContent);
   const wslFlag = await isWSL();
   const repoInfo = await getRepoInfo();
@@ -212,7 +213,7 @@ export async function startGoalSetupServer(
 
           if (url.pathname === "/favicon.png" || url.pathname === "/favicon.ico") return handleFavicon(url.pathname);
 
-          return packedAppResponse(app, req, url.pathname, isRemote);
+          return packedAppResponse(app, req, url.pathname, remoteOrSsh);
         },
 
         error(err) {
@@ -229,13 +230,13 @@ export async function startGoalSetupServer(
   const serverUrl = buildAdvertisedUrl(port);
   // Remote sessions serve the app page compressed (#1617); start the likely
   // encoding (gzip over plain http) now so the first load does not wait.
-  if (isRemote) prewarmAppHtml(app.html, likelyAppHtmlEncoding(false));
-  onReady?.(serverUrl, isRemote, port);
+  if (remoteOrSsh) prewarmAppHtml(app.html, likelyAppHtmlEncoding(false));
+  onReady?.(serverUrl, remoteOrSsh, port);
 
   return {
     port,
     url: serverUrl,
-    isRemote,
+    isRemote: remoteOrSsh,
     waitForDecision: () => decisionPromise,
     stop: () => server.stop(),
   };

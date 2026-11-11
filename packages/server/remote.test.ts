@@ -13,6 +13,7 @@ import { closeServer, occupyConsecutivePorts } from "../../tests/helpers/ports";
 import {
   isAddressInUseError,
   isRemoteSession,
+  isRemoteOrSsh,
   getServerHostname,
   getServerPort,
   getServerPorts,
@@ -109,16 +110,15 @@ describe("isRemoteSession", () => {
     expect(isRemoteSession()).toBe(false);
   });
 
-  test("true when SSH_TTY is set (legacy)", () => {
-    clearEnv();
-    process.env.SSH_TTY = "/dev/pts/0";
-    expect(isRemoteSession()).toBe(true);
-  });
-
-  test("true when SSH_CONNECTION is set (legacy)", () => {
-    clearEnv();
-    process.env.SSH_CONNECTION = "192.168.1.1 12345 192.168.1.2 22";
-    expect(isRemoteSession()).toBe(true);
+  test("SSH alone is not remote mode: loopback, every feature on, but the fixed port and no browser here", () => {
+    for (const [key, value] of [["SSH_TTY", "/dev/pts/0"], ["SSH_CONNECTION", "192.168.1.1 12345 192.168.1.2 22"]] as const) {
+      clearEnv();
+      process.env[key] = value;
+      expect(isRemoteSession()).toBe(false);
+      expect(getServerHostname()).toBe("127.0.0.1");
+      expect(getServerPort()).toBe(19432);
+      expect(isRemoteOrSsh()).toBe(true);
+    }
   });
 });
 
@@ -303,7 +303,7 @@ describe("PortInUseError", () => {
   test("the remote-mode default port names why it is fixed and how to move off it", () => {
     const message = new PortInUseError("Port 19432 in use after 5 retries", 19432, null, false).cliMessage;
     expect(message).toContain("port 19432 is already in use");
-    expect(message).toContain("remote mode uses a fixed port");
+    expect(message).toContain("a remote or SSH session uses a fixed port");
     expect(message).toContain("PLANNOTATOR_PORT");
   });
 

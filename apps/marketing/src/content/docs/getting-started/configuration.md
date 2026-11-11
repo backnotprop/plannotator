@@ -12,7 +12,7 @@ Plannotator is configured through environment variables, hook/plugin configurati
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PLANNOTATOR_REMOTE` | auto-detect | Set to `1` or `true` to force remote mode, `0` or `false` to force local mode, or leave unset to auto-detect via `SSH_TTY` / `SSH_CONNECTION`. Uses a fixed port in remote mode; browser-opening behavior depends on the environment. |
+| `PLANNOTATOR_REMOTE` | local | Set to `1` or `true` for remote mode, `0` or `false` for local mode. Unset is local mode; over SSH (`SSH_TTY` / `SSH_CONNECTION`) it also uses the fixed port `19432` and opens no browser on the remote machine, with every feature on, since only your SSH tunnel reaches it. Uses a fixed port in remote mode; browser-opening behavior depends on the environment. |
 | `PLANNOTATOR_PORT` | random (local) / `19432` (remote) | Fixed server port or inclusive range. A range selects the first available port. Useful for forwarding or concurrent remote sessions. |
 | `PLANNOTATOR_PUBLIC_URL` | unset | Full HTTP(S) origin advertised in remote mode behind a reverse proxy. The local runtime port is not appended. For a port range, this origin applies only to the first port; later ports use `PLANNOTATOR_URL_HOST` or `localhost`. On the port it fronts, it wins over `PLANNOTATOR_URL_HOST`. Binding is unaffected and local sessions ignore the override. Can also be set via `~/.plannotator/config.json` (`{ "publicUrl": "https://plannotator.example.com" }`). |
 | `PLANNOTATOR_URL_HOST` | unset (`localhost`) | Hostname for advertised session URLs. Local sessions accept `localhost` and `*.localhost`, e.g. `plannotator.localhost` to isolate preference cookies. Other hosts (e.g. a Tailscale MagicDNS name) require remote mode, and remote mode ignores `*.localhost` names. Used when `PLANNOTATOR_PUBLIC_URL` is unset or does not apply. The runtime-chosen port is always appended; binding is unaffected. Can also be set via `~/.plannotator/config.json` (`{ "urlHost": "host" }`). |
@@ -169,7 +169,7 @@ You can customize the messages Plannotator sends to the agent when you approve, 
 
 ## Remote mode
 
-Over SSH, remote mode turns on by itself, so you only need to forward port `19432` (or your `PLANNOTATOR_PORT` if you set one). Devcontainers and Docker are not detected, so set `PLANNOTATOR_REMOTE=1` (or `true`) and `PLANNOTATOR_PORT` to a port you'll forward; in a VS Code devcontainer you need this only if the browser does not open by itself. Set `PLANNOTATOR_REMOTE=0` / `false` if you need to force local behavior even when SSH env vars are present. See the [remote & devcontainers guide](/docs/guides/remote-and-devcontainers/) for setup instructions.
+Over SSH, you only need to forward port `19432` (or your `PLANNOTATOR_PORT` if you set one); the server listens on the remote machine's loopback, so every feature works through the tunnel. Devcontainers and Docker are not detected, so set `PLANNOTATOR_REMOTE=1` (or `true`) and `PLANNOTATOR_PORT` to a port you'll forward; in a VS Code devcontainer you need this only if the browser does not open by itself. To open an SSH session's page from another computer without a tunnel, set `PLANNOTATOR_REMOTE=1`. See the [remote & devcontainers guide](/docs/guides/remote-and-devcontainers/) for setup instructions.
 
 ## Custom browser
 

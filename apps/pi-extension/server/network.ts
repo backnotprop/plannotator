@@ -65,10 +65,7 @@ export function isPosixBrowserTarget(value: string): boolean {
 	return false;
 }
 
-/**
- * Check if running in a remote session (SSH, devcontainer, etc.)
- * Honors PLANNOTATOR_REMOTE as a tri-state override, or detects SSH_TTY/SSH_CONNECTION.
- */
+/** PLANNOTATOR_REMOTE as a tri-state: true, false, or unset (null). */
 function getRemoteOverride(): boolean | null {
 	const remote = process.env.PLANNOTATOR_REMOTE;
 	if (remote === undefined) {
@@ -86,22 +83,33 @@ function getRemoteOverride(): boolean | null {
 	return null;
 }
 
+/**
+ * Remote mode: PLANNOTATOR_REMOTE=1 (mirrors packages/server/remote.ts). The
+ * server binds every interface and the features that would let anyone who
+ * reaches the URL drive this computer stay off. SSH alone does not turn it on.
+ */
 export function isRemoteSession(): boolean {
-	const remoteOverride = getRemoteOverride();
-	if (remoteOverride !== null) {
-		return remoteOverride;
-	}
-	// Legacy SSH detection
-	if (process.env.SSH_TTY || process.env.SSH_CONNECTION) {
-		return true;
-	}
-	return false;
+	return getRemoteOverride() === true;
+}
+
+/**
+ * Over SSH with PLANNOTATOR_REMOTE unset: the server binds loopback, so only
+ * the person's own forwarded connection reaches it and every feature works;
+ * only the screen-bound ones (opening a browser here, Open in) do not.
+ */
+export function isSshSession(): boolean {
+	return getRemoteOverride() === null && Boolean(process.env.SSH_TTY || process.env.SSH_CONNECTION);
+}
+
+/** Remote mode or SSH: no browser on this computer's screen, and a fixed port to forward. */
+export function isRemoteOrSsh(): boolean {
+	return isRemoteSession() || isSshSession();
 }
 
 /**
  * Get the server ports to try, in order.
  * - PLANNOTATOR_PORT accepts a fixed port or inclusive range
- * - Remote sessions default to 19432 (for port forwarding)
+ * - Remote and SSH sessions default to 19432 (for port forwarding)
  * - Local sessions use a random port
  */
 export function getServerPorts(): {
@@ -132,7 +140,7 @@ function getServerPortConfiguration(): {
 		}
 		// Invalid port - fall back silently, caller can check env var themselves
 	}
-	if (isRemoteSession()) {
+	if (isRemoteOrSsh()) {
 		return {
 			ports: [DEFAULT_REMOTE_PORT],
 			portSource: "remote-default",
@@ -215,14 +223,14 @@ export async function listenOnPort(
 			}
 			if (isAddressInUse) {
 				if (!isRange) {
-					const hint = isRemoteSession()
+					const hint = isRemoteOrSsh()
 						? " (set PLANNOTATOR_PORT to use a different port)"
 						: "";
 					throw new Error(`Port ${port} in use after ${MAX_RETRIES} retries${hint}`);
 				}
 
 				const configured = `${ports[0]}-${ports.at(-1)}`;
-				const hint = isRemoteSession()
+				const hint = isRemoteOrSsh()
 					? " (set PLANNOTATOR_PORT to use a different port or range)"
 					: "";
 				throw new Error(`Port selection ${configured} exhausted${hint}`);
@@ -328,7 +336,7 @@ export async function openBrowser(url: string): Promise<{
 	const plannotatorBrowser =
 		intent.kind === "explicit" && intent.source === "PLANNOTATOR_BROWSER" ? intent.browser : undefined;
 	const browser = intent.kind === "explicit" ? intent.browser : undefined;
-	if (isRemoteSession() && !browser) {
+	if (isRemoteOrSsh() && !browser) {
 		return { opened: false, isRemote: true, url };
 	}
 

@@ -34,7 +34,7 @@ import {
 import { resolveOpenInTarget } from "@plannotator/shared/html-assets-node";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { checkServerSession, serverSessionMismatchBody } from "@plannotator/shared/server-session";
-import { isRemoteSession } from "./remote";
+import { isRemoteOrSsh } from "./remote";
 
 export type OpenInLaunchResult = { ok: true } | { ok: false; error: string };
 
@@ -389,10 +389,11 @@ export function getAvailableOpenInApps(): AvailableOpenInApp[] {
  * published over the tailnet (`--tailscale`), which other devices reach. A
  * launch opens an app on THIS machine for whoever sent it, so it is offered
  * only to a session only this computer reaches (the update route's
- * `update_exposed` rule).
+ * `update_exposed` rule). Over SSH it is off too: the app would open on this
+ * computer's screen, which the person is not at.
  */
 function openInExposed(exposed: boolean | undefined): boolean {
-  return isRemoteSession() || exposed === true;
+  return isRemoteOrSsh() || exposed === true;
 }
 
 /**

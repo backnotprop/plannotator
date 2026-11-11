@@ -103,6 +103,7 @@ import {
   startAnnotateServer as startAnnotateServerUnguarded,
   handleAnnotateServerReady,
   isRemoteSession,
+  isRemoteOrSsh,
 } from "@plannotator/server/annotate";
 import {
   startGoalSetupServer as startGoalSetupServerUnguarded,
@@ -392,7 +393,7 @@ if (isReviewDrawCommand(rawArgs, () => {
     process.exit(
       await runShapeOpen(args.slice(2), {
         dataDir: getPlannotatorDataDir(),
-        openUrl: (url) => openBrowserDetached(url, { isRemote: isRemoteSession() }),
+        openUrl: (url) => openBrowserDetached(url, { isRemote: isRemoteOrSsh() }),
         // Bare: the page already open, if there is one; `shape open` always opens a tab.
         reuseOpenPage: args.length === 1,
       }),
@@ -625,7 +626,7 @@ if (tailscaleFlag) {
   }
   if (isRemoteSession()) {
     process.stderr.write(
-      "[plannotator] --tailscale keeps the server loopback-bound behind `tailscale serve`; ignoring remote mode (PLANNOTATOR_REMOTE/SSH detection) for this session.\n",
+      "[plannotator] --tailscale keeps the server loopback-bound behind `tailscale serve`; ignoring remote mode (PLANNOTATOR_REMOTE) for this session.\n",
     );
   }
   process.env.PLANNOTATOR_REMOTE = "0";
