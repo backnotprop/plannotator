@@ -5717,6 +5717,8 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 .ib-tg-mode { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; margin: 0; padding: 2px 12px 8px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); min-width: 0; }
 .ib-tg-mode > svg { flex: none; }
 .ib-tg-mode > span { min-width: 0; overflow-wrap: anywhere; }
+/* Long words (many tags, long names) wrap beside the icon instead of leaving it on a line of its own. */
+.ib-tg-mode > span[data-tag-mode-words] { max-width: calc(100% - 20px); }
 .ib-tg-mode b { font-weight: 550; color: var(--foreground); }
 .ib-tg-mode-opt { display: inline-flex; align-items: center; gap: 6px; }
 .pn-inbox .ib-tg-mode-link { padding: 0; border: 0; background: none; font: inherit; font-weight: 550; color: var(--primary); cursor: pointer; border-radius: 4px; }

@@ -283,13 +283,12 @@ describe("Inbox over your tailnet", () => {
     // A link that opens the Inbox still works.
     expect((await throughServe(inbox, "/", { headers: { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate" } })).status).toBe(200);
 
-    // The tailnet cannot widen the exposure: the switch cannot be turned on from there, nor a phone paired.
+    // The owner over the tailnet has the switch as on the computer (owner ruling 2026-11-11); the page still says where it is.
     const settings = (await (await throughServe(inbox, "/api/inbox/settings")).json()) as Json;
     expect(settings.via).toBe("tailnet");
     expect(settings.tailscale.url).toBe(`https://${MAGIC}:${inbox.port}/`);
     const on = await throughServe(inbox, "/api/inbox/settings", { method: "POST", headers: own, body: JSON.stringify({ tailscale: { on: true } }) });
-    expect(await codeOf(on)).toEqual([403, "local_only"]);
-    expect(await codeOf(await throughServe(inbox, "/api/inbox/pairing", { method: "POST", headers: own, body: "{}" }))).toEqual([403, "local_only"]);
+    expect(on.status).toBe(200);
     expect(((await (await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/settings`)).json()) as Json).via).toBe("local");
 
   });
@@ -874,7 +873,7 @@ describe("running-app prototypes on the owner's phone, through the prototype rel
 
 // Who may use the update control, the agents and the other owner settings is inbox-tailnet-owner.test.ts.
 describe("what the owner reads through the tailnet, and what a page there never claims", () => {
-  test("What's new and its images answer the owner over the tailnet, read only; another allowed login is refused, there and at the update control", async () => {
+  test("What's new and its images answer the owner over the tailnet and another allowed login, read only; the update control stays the owner's", async () => {
     const GUEST = "guest@example.com";
     const dataDir = world({ inboxTailscale: true, inboxTailscaleAllow: [GUEST] });
     let githubRequests = 0;
@@ -930,9 +929,9 @@ describe("what the owner reads through the tailnet, and what a page there never 
       expect((await throughServe(inbox, page, { method: "POST", headers: own, body: "{}" })).status).toBe(405);
       expect((await throughServe(inbox, image, { method: "POST", headers: own, body: "{}" })).status).toBe(405);
 
-      // Another allowed login is refused, for both routes.
-      expect(await codeOf(await throughServe(inbox, page, { login: GUEST, headers: own }))).toEqual([403, "owner_only"]);
-      expect(await codeOf(await throughServe(inbox, image, { login: GUEST, headers: own }))).toEqual([403, "owner_only"]);
+      // Another allowed login reads them too: public release notes (owner ruling 2026-11-11).
+      expect((await throughServe(inbox, page, { login: GUEST, headers: own })).status).toBe(200);
+      expect((await throughServe(inbox, image, { login: GUEST, headers: own })).status).toBe(200);
 
       // The window is told who is a guest.
       const settings = async (login: string | null) =>
@@ -953,7 +952,7 @@ describe("what the owner reads through the tailnet, and what a page there never 
     }
   });
 
-  test("the one-time sound dialog is never claimed through the tailnet; it waits for a page on this computer", async () => {
+  test("the one-time sound dialog is claimed by the owner's page over the tailnet as on this computer, once", async () => {
     const dataDir = world({ inboxTailscale: true });
     writeFileSync(join(dataDir, "update-state.json"), JSON.stringify({ inboxVersion: "0.28.9" }));
     const ts = fakeTailscale();
@@ -964,13 +963,13 @@ describe("what the owner reads through the tailnet, and what a page there never 
     const own = { Origin: `https://${MAGIC}:${inbox.port}`, "Content-Type": "application/json" };
     const remote = await throughServe(inbox, "/api/inbox/sound/dialog", { method: "POST", headers: own, body: JSON.stringify({ serverSession: inbox.serverSession }) });
     expect(remote.status).toBe(200);
-    expect(((await remote.json()) as Json).show).toBe(false);
-    expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxSound).toEqual({ dialogDueFor: "0.28.10" });
+    expect(((await remote.json()) as Json).show).toBe(true);
+    expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxSound).toMatchObject({ dialogShownFor: "0.28.10" });
     const local = await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/sound/dialog`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ serverSession: inbox.serverSession }),
     });
-    expect(((await local.json()) as Json).show).toBe(true);
+    expect(((await local.json()) as Json).show).toBe(false);
   });
 });

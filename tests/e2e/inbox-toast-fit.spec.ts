@@ -237,11 +237,10 @@ for (const vp of VIEWPORTS) {
       await expect(toast.locator('.ib-tdetail')).toHaveText(vp.phone ? `Stopped · ${AGENT_SHORT}` : `${AGENT_SHORT} was stopped`);
       await expectFits(page, toast, 'stopped Mark read');
       if (vp.phone) expect(await newsShows(toast.locator('.ib-tdetail'), 'Stopped'), 'stopped Mark read: the news').toBe('shows');
-      // The Inbox stored the name cut at 40 (the server's cap): the thread shows that, and the live region says the
-      // whole sentence, whatever the toast's line cuts.
-      await expect(page.locator('[data-inbox-live]')).toContainText(`Marked read. ${AGENT_SHORT} was stopped.`);
-      await expect(pane(page)).toContainText(AGENT_SHORT);
-      await expect(pane(page)).not.toContainText(AGENT);
+      // The Inbox stores the name whole: the thread shows it, the toast shortens it, and the live region says the
+      // whole sentence with the whole name, whatever the toast's line cuts.
+      await expect(page.locator('[data-inbox-live]')).toContainText(`Marked read. ${AGENT} was stopped.`);
+      await expect(pane(page)).toContainText(AGENT);
       await page.screenshot({ path: join(proofDir, `${vp.name}-stopped-mark-read.png`) });
       if (vp.phone) {
         // Clear of the thread's foot (Reply).
@@ -274,7 +273,7 @@ for (const vp of VIEWPORTS) {
       const ack = pane(page).locator('[data-ack]');
       await ack.click();
       await expect(ack).toHaveAttribute('aria-pressed', 'true');
-      await expect(page.locator('[data-inbox-live]')).toContainText(`Goes to ${AGENT_SHORT} in 10 seconds and moves to Quiet.`);
+      await expect(page.locator('[data-inbox-live]')).toContainText(`Goes to ${AGENT} in 10 seconds and moves to Quiet.`);
       await expect(toast).toHaveCount(0);
       await ack.click();
       await expect(ack).toHaveAttribute('aria-pressed', 'false');
