@@ -263,7 +263,11 @@ async function kills(randomKills: number): Promise<void> {
   let random = 7;
   const next = () => ((random = (random * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
   let killedMidway = 0;
-  for (let i = 0; i < randomKills; i++) {
+  // At least `randomKills` kills, and on until half that many landed before the move ended (a runner whose start
+  // outlasts its move would otherwise test mostly finished moves), up to three times as many.
+  const wanted = Math.ceil(randomKills / 2);
+  let i = 0;
+  for (; i < randomKills || (killedMidway < wanted && i < randomKills * 3); i++) {
     const s = box(`kills-${++n}`);
     copyInbox(pristine.dataDir, s.dataDir);
     const proc = Bun.spawn([binary, "inbox", "--no-open"], { cwd: s.root, env: envOf(s, ON), stdin: "ignore", stdout: "ignore", stderr: "ignore" });
@@ -274,8 +278,8 @@ async function kills(randomKills: number): Promise<void> {
     if (!done) killedMidway++;
     await afterCrash(s, `random kill ${i + 1}`);
   }
-  check(killedMidway >= Math.ceil(randomKills / 2), `only ${killedMidway} of ${randomKills} random kills landed before the move ended`);
-  proof("kills", `${randomKills} hard kills at random moments (${killedMidway} before the move ended): the same checks`, isWindows ? "taskkill /F on the Inbox alone" : "SIGKILL on the Inbox alone");
+  check(killedMidway >= wanted, `only ${killedMidway} of ${i} random kills landed before the move ended`);
+  proof("kills", `${i} hard kills at random moments (${killedMidway} before the move ended): the same checks`, isWindows ? "taskkill /F on the Inbox alone" : "SIGKILL on the Inbox alone");
 }
 
 async function bigMove(): Promise<void> {
