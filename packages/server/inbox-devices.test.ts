@@ -360,7 +360,7 @@ describe("the device door, on the binary", () => {
     expect(list.session_labels).toEqual(expect.any(Object));
     expect(Array.isArray(list.session_labels)).toBe(false);
     // So are `session_titles` (option A, 2026-11-10): the phone's rows name a session as this computer's do. A linked
-    // machine reading this list keeps neither (inbox-peer-link.ts `acceptList`: rows, projects, snoozes, agents).
+    // machine reading this list keeps both, so its merged view names this machine's rows as here (inbox-session-names.ts).
     expect(list.session_titles).toEqual(expect.any(Object));
     expect(list.sections.map((s: Json) => s.id)).toEqual(["stopped", "holding", "waiting", "new", "sent", "quiet"]);
     const row = list.sections.flatMap((s: Json) => s.threads).find((t: Json) => t.thread_id === threadId);

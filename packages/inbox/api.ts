@@ -328,8 +328,9 @@ export interface ListModel {
   /** The version of this list, named by the next read so only what changed comes back (listRead.ts). Absent from an older Inbox. */
   list_version?: string;
   /**
-   * Each session's label by id (issue #2450; sessionLabels.ts): the rows' agents and a message's author. Absent from
-   * an older Inbox and for a tailnet guest, which then read every session as before.
+   * Each session's label by id (issue #2450; sessionLabels.ts): the rows' agents and a message's author. A linked
+   * machine's sessions too on the merged view; a tailnet guest's only those of the sessions it is shown. Absent from
+   * an older Inbox, which then reads every session as before.
    */
   session_labels?: Record<string, string>;
   /** A name for a session with none, list rows only (sessionTitles.ts, option A). Absent as `session_labels` is. */

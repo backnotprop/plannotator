@@ -3,7 +3,7 @@
  * `session_titles`, the host's generated title (Claude Code's `ai-title`) else Claude Code's own name for the session
  * (`claude agents --json`). Kept apart from `session_labels` (sessionLabels.ts), the name the person gave, which every
  * other place reads: whether those places show a generated name too is the owner's to decide. Same rules as the
- * labels: display only, this computer's owner only, no prototype, own keys only.
+ * labels: display only, to whoever sees the row, no prototype, own keys only.
  */
 import { useSyncExternalStore } from 'react';
 import type { SessionLabels } from './sessionLabels';

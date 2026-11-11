@@ -5,7 +5,7 @@
  * name only from 0.28.50 on, so a machine with an older plugin had no name at all; this asks Claude Code itself.
  *
  * Display only, as a label is: the list rows read it after the plugin's name and generated title (`session_titles`
- * in `GET /api/inbox/threads`, this computer's owner only). Nothing routes on it and nothing stores it. Bun only (the
+ * in `GET /api/inbox/threads`, inbox-session-names.ts says who reads it). Nothing routes on it and nothing stores it. Bun only (the
  * Inbox). A name a session had stays after the session leaves the listing, as a label does, until the Inbox restarts.
  *
  * An outside CLI must never hold the Inbox (#3082's lesson: a forge CLI that never answered hung it):
@@ -57,6 +57,8 @@ export function claudeAgentNames(stdout: string): Map<string, string> | null {
 export interface InboxClaudeNames {
   /** Every name known, by session id (no prototype). */
   all(): Record<string, string>;
+  /** One session's name; null when none is known. */
+  of(session: string): string | null;
   /** Ask Claude Code now, if wanted and due. Resolves when done; never rejects. */
   refresh(): Promise<void>;
   stop(): void;
@@ -121,6 +123,7 @@ export function createInboxClaudeNames(options: {
       for (const [session, name] of names) out[session] = name;
       return out;
     },
+    of: (session) => names.get(session) ?? null,
     refresh,
     stop: () => clearInterval(timer),
   };

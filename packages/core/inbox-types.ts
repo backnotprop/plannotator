@@ -3259,7 +3259,7 @@ export interface InboxAgent {
   launch?: { id: string; thread_id: string };
   /** `claude-code`, `codex`, `pi`, ... (`InboxAuthor.host`); null when nothing said. */
   host: string | null;
-  /** Its title as its connection last said it (the To picker's name). Only for this computer's owner; absent when none. */
+  /** Its title as its connection last said it (the To picker's name). Absent when none. */
   label?: string;
   /** The project it works in (`id` null for a folder the Inbox has no project for); null when it never said where. */
   project: { id: string | null; name: string } | null;

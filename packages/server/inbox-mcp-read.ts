@@ -154,6 +154,8 @@ export interface AgentMessage {
 export interface AgentTagged {
   agent: string;
   session: string;
+  /** The session's name as the person's window shows it (their rename, else its generated title); absent when it has none. */
+  name?: string;
   you: boolean;
 }
 
@@ -161,7 +163,20 @@ export interface AgentTagged {
 export interface AgentAddressee {
   host: string;
   session: string;
+  /** The session's name as the person's window shows it; absent when it has none. */
+  name?: string;
   you: boolean;
+}
+
+/** A session's name by id (the person's rename, else its generated title, inbox-session-names.ts); null when it has none. */
+export type SessionNameOf = (session: string) => string | null;
+
+/**
+ * Another session as an agent reads it: `Pi (pi-0193)`, and with the name the person's window shows for it,
+ * `"docs sweep" (Pi pi-0193)`. The name is quoted: it is display text, never an id.
+ */
+export function sessionWho(agent: string, session: string, name: string | null | undefined): string {
+  return name ? `${JSON.stringify(name)} (${agent} ${session})` : `${agent} (${session})`;
 }
 
 export interface AgentMessageLine {
@@ -193,6 +208,8 @@ export interface ThreadReadInput {
   message_id?: string;
   /** The reader's session: a message addressed to it says `you`. */
   caller?: string | null;
+  /** The other sessions' names, for `to` and `tagged`. */
+  names?: SessionNameOf;
 }
 
 export interface ThreadWindowResult {
@@ -277,26 +294,30 @@ function authorName(author: AgentAuthor): string {
 /** `to you`, or `to another session (Claude Code ses_…)`: a person's message meant for one session. */
 function addresseeWords(to: AgentAddressee | undefined): string | null {
   if (!to) return null;
-  return to.you ? "to you" : `to another session (${INBOX_HOST_NAMES[to.host] ?? to.host} ${to.session})`;
+  if (to.you) return "to you";
+  const agent = INBOX_HOST_NAMES[to.host] ?? to.host;
+  return to.name ? `to another session ${sessionWho(agent, to.session, to.name)}` : `to another session (${agent} ${to.session})`;
 }
 
 /** `tagged you, Pi (pi-0193)`: the sessions a person's reply tags, the reader first as `you`. */
 function taggedWords(tagged: readonly AgentTagged[] | undefined): string | null {
   if (!tagged?.length) return null;
   const you = tagged.filter((t) => t.you);
-  const others = tagged.filter((t) => !t.you).map((t) => `${t.agent} (${t.session})`);
+  const others = tagged.filter((t) => !t.you).map((t) => sessionWho(t.agent, t.session, t.name));
   return `tagged ${[...(you.length > 0 ? ["you"] : []), ...others].join(", ")}`;
 }
 
 /** The tags a wire message carries as `store.agentThread` writes them (`tagged`), with the reader marked. */
-function taggedOf(message: InboxMessageWire, caller: string | null): AgentTagged[] | undefined {
+function taggedOf(message: InboxMessageWire, caller: string | null, names?: SessionNameOf): AgentTagged[] | undefined {
   const tagged = (message as { tagged?: unknown }).tagged;
   if (!Array.isArray(tagged) || tagged.length === 0) return undefined;
-  return tagged.flatMap((t) =>
-    t && typeof t === "object" && typeof (t as { session?: unknown }).session === "string"
-      ? [{ agent: String((t as { agent?: unknown }).agent ?? "An agent"), session: (t as { session: string }).session, you: !!caller && (t as { session: string }).session === caller }]
-      : [],
-  );
+  return tagged.flatMap((t) => {
+    if (!t || typeof t !== "object" || typeof (t as { session?: unknown }).session !== "string") return [];
+    const session = (t as { session: string }).session;
+    const you = !!caller && session === caller;
+    const name = you ? null : (names?.(session) ?? null);
+    return [{ agent: String((t as { agent?: unknown }).agent ?? "An agent"), session, ...(name ? { name } : {}), you }];
+  });
 }
 
 export function agentAnswer(answer: QuestionAnswer | null | undefined): AgentAnswer | undefined {
@@ -420,11 +441,14 @@ export type AgentMessageForm = "window" | "earlier" | "whole";
 
 /** A message in full, as read_thread shows it. */
 /** Who a person's message is addressed to, if anyone. */
-function addressee(message: InboxMessageWire, caller: string | null): AgentAddressee | undefined {
-  return message.to ? { host: message.to.host, session: message.to.session, you: !!caller && message.to.session === caller } : undefined;
+function addressee(message: InboxMessageWire, caller: string | null, names?: SessionNameOf): AgentAddressee | undefined {
+  if (!message.to) return undefined;
+  const you = !!caller && message.to.session === caller;
+  const name = you ? null : (names?.(message.to.session) ?? null);
+  return { host: message.to.host, session: message.to.session, ...(name ? { name } : {}), you };
 }
 
-export function agentMessage(message: InboxMessageWire, form: AgentMessageForm = "window", caller: string | null = null): AgentMessage {
+export function agentMessage(message: InboxMessageWire, form: AgentMessageForm = "window", caller: string | null = null, names?: SessionNameOf): AgentMessage {
   const source = form === "earlier" ? withoutAnswersSection(message) : message.body;
   const total = byteLength(message.body);
   const over = form !== "whole" && byteLength(source) > INBOX_BODY_CUT_BYTES;
@@ -443,8 +467,8 @@ export function agentMessage(message: InboxMessageWire, form: AgentMessageForm =
     ...(message.attachments?.length ? { attachments: message.attachments.map((a) => ({ name: a.name, kind: a.kind, size: a.size, path: a.path })) } : {}),
     ...(ack ? { ack: { label: ack.label, at: ack.at, reaction: agentReaction(ack.reaction) } } : {}),
     ...(message.guide ? { guide: { title: message.guide.title } } : {}),
-    ...(message.to ? { to: addressee(message, caller) } : {}),
-    ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller) } : {}),
+    ...(message.to ? { to: addressee(message, caller, names) } : {}),
+    ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller, names) } : {}),
     ...(message.board_request === true ? { board_request: true as const } : {}),
     ...(message.decision_ask === true ? { decision_ask: true as const } : {}),
     ...(message.rows_ask === true ? { rows_ask: true as const } : {}),
@@ -461,7 +485,7 @@ function firstWords(message: InboxMessageWire): string {
   return clip(text, INBOX_LINE_WORDS);
 }
 
-export function agentMessageLine(message: InboxMessageWire, caller: string | null = null): AgentMessageLine {
+export function agentMessageLine(message: InboxMessageWire, caller: string | null = null, names?: SessionNameOf): AgentMessageLine {
   const n = numbering(message.questions ?? []);
   return {
     id: message.id,
@@ -475,8 +499,8 @@ export function agentMessageLine(message: InboxMessageWire, caller: string | nul
     ...(message.guide ? { guide: message.guide.title } : {}),
     ...(message.ack ? { ack: true as const } : {}),
     ...(message.ack ? { reaction: inboxAckReaction(message.ack.reaction).emoji } : {}),
-    ...(message.to ? { to: addressee(message, caller) } : {}),
-    ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller) } : {}),
+    ...(message.to ? { to: addressee(message, caller, names) } : {}),
+    ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller, names) } : {}),
     ...(message.board_request === true ? { board_request: true as const } : {}),
     ...(inboxViewingLine(message) ? { viewing: inboxViewingLine(message) } : {}),
   };
@@ -573,9 +597,9 @@ export function windowedThread(
       .map((card) => ({ id: card.id, title: card.title }));
   const messages = all
     .filter((m) => full.has(m.id))
-    .map((m) => agentMessage(m, formOf(m.id), caller))
+    .map((m) => agentMessage(m, formOf(m.id), caller, input.names))
     .map((m) => (m.board_request ? { ...m, board_cards: linkedCards() } : m));
-  const earlier = inRange.filter((m) => !full.has(m.id)).map((m) => agentMessageLine(m, caller));
+  const earlier = inRange.filter((m) => !full.has(m.id)).map((m) => agentMessageLine(m, caller, input.names));
   const leftOut = all.filter((m) => !shown.has(m.id));
   // The questions of messages left out, without repeating what the reader has:
   // open and picked ones are in the header; for a message older than `after`

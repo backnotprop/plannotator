@@ -39,7 +39,7 @@ import {
 } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore, InboxThreadPullsChange } from "@plannotator/shared/inbox/store";
-import { shortTime } from "./inbox-mcp-read";
+import { sessionWho, shortTime, type SessionNameOf } from "./inbox-mcp-read";
 import { guarded, okComplete } from "./inbox-mcp-result";
 import { noteSessionRead } from "./inbox-session-reads";
 
@@ -60,6 +60,8 @@ export interface InboxPullsMcpContext {
   /** The state reader (packages/server/inbox-thread-pulls.ts). Absent: states as stored, no read. */
   pulls?: InboxPullsMcpLive;
   now?: () => number;
+  /** Another session's name, as the person's window shows it (inbox-mcp-read.ts `sessionWho`). */
+  sessionName?: SessionNameOf;
 }
 
 /** The agent a call's filled fields name. */
@@ -79,10 +81,10 @@ export function checkPullRefs(values: unknown, field: string): InboxThreadPullRe
   return parsed.refs;
 }
 
-function who(actor: InboxThreadPullActor, reader: string | null, at: string, withTime: boolean): string {
+function who(actor: InboxThreadPullActor, reader: string | null, at: string, withTime: boolean, names?: SessionNameOf): string {
   if (actor.kind === "person") return `the person ${shortTime(at)}`;
   if (actor.session === reader) return "you";
-  return `${inboxAgentName({ kind: "agent", host: actor.host, name: actor.name })} (${actor.session})${withTime ? ` ${shortTime(at)}` : ""}`;
+  return `${sessionWho(inboxAgentName({ kind: "agent", host: actor.host, name: actor.name }), actor.session, names?.(actor.session))}${withTime ? ` ${shortTime(at)}` : ""}`;
 }
 
 function stateWords(pull: InboxThreadPull, live: InboxPullsMcpContext["pulls"]): string {
@@ -104,8 +106,8 @@ export function threadPullsText(context: InboxPullsMcpContext, threadId: string,
   const removed = store.threadPullsRemoved(threadId, new Date(now - INBOX_THREAD_PULLS_REMOVED_MS).toISOString());
   if (live.length === 0 && removed.length === 0) return [];
   const out = [live.length > 0 ? `PRs (${live.length}):` : "PRs: none on this thread now."];
-  for (const pull of live) out.push(`- ${inboxThreadPullText(pull)} ${stateWords(pull, context.pulls)} · added by ${who(pull.added_by, reader, pull.added_at, false)}`);
-  for (const pull of removed) out.push(`Removed by ${who(pull.removed_by!, reader, pull.removed_at!, false)}: ${inboxThreadPullText(pull)}`);
+  for (const pull of live) out.push(`- ${inboxThreadPullText(pull)} ${stateWords(pull, context.pulls)} · added by ${who(pull.added_by, reader, pull.added_at, false, context.sessionName)}`);
+  for (const pull of removed) out.push(`Removed by ${who(pull.removed_by!, reader, pull.removed_at!, false, context.sessionName)}: ${inboxThreadPullText(pull)}`);
   return out;
 }
 
