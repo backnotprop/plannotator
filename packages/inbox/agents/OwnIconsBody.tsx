@@ -71,7 +71,7 @@ export function OwnIconsBody({ agent, face, onDone }: { agent: AgentFaceRef; fac
   return (
     <div className="ib-agi-own" data-over={over ? '' : undefined} data-busy={busy ? '' : undefined}>
       <button type="button" className="ib-agi-drop am-own-up" aria-label="Upload…" onClick={pick} disabled={busy}>
-        <span className="am-own-add" aria-hidden="true" />
+        {busy ? <span className="ib-spin" aria-hidden="true" /> : <span className="am-own-add" aria-hidden="true" />}
         <span className="ib-agi-drop-l">Drop or paste an image</span>
         <span className="ib-agi-drop-b">Upload…</span>
       </button>

@@ -24,7 +24,10 @@ dialog.ib-dlg.ib-agi[open] { display: flex; flex-direction: column; }
 .ib-agi-drop .am-own-add { width: 28px; height: 28px; border-radius: 8px; }
 .ib-agi-drop-l { font-size: var(--ib-fs-13-5, 13.5px); color: var(--foreground); }
 .ib-agi-drop-b { font-size: var(--ib-fs-12-5, 12.5px); color: var(--primary); font-weight: 550; }
-.ib-agi-own[data-busy] .ib-agi-drop { cursor: progress; opacity: 0.6; }
+/* Uploading (seconds on a slow link): a spinner in the "+"'s place, the words dimmed. */
+.ib-agi-own[data-busy] .ib-agi-drop { cursor: progress; }
+.ib-agi-own[data-busy] .ib-agi-drop > :not(.ib-spin) { opacity: 0.55; }
+.ib-agi-drop > .ib-spin { width: 22px; height: 22px; margin: 3px; color: var(--primary); }
 .ib-agi-status { min-height: 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ib-agi-status:empty { display: none; }
 .ib-agi .am-own-g { display: grid; grid-template-columns: repeat(auto-fill, 52px); gap: 8px; }
