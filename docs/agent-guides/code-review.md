@@ -119,8 +119,13 @@ exists in every state; composer rows open `DecisionNoteDialog`. Platform (PR) mo
 same ghost-X + `DecisionControl` shape from `buildDecisionSpec`'s platform arm, with **no
 composer items ever**: every menu action opens the existing `ReviewSubmissionDialog` (per-target
 state, retry, "leave PR open" toggle — whose general-comment textarea is the only note field on
-that side), and the self-approval mute is preserved — muted primary/items with the "You can't
-approve your own {PR/MR}" reason.
+that side), and the self-approval mute is preserved on GitHub only (`selfReviewBlocked`) — muted
+primary/items with the "You can't approve your own PR" reason. GitLab and Bitbucket leave Approve
+live on your own PR/MR and let the forge decide: GitLab accepts an author's approval unless the
+project forbids it, and then answers 401; `submitGlMRReview` turns that into "GitLab refused the
+approval (<GitLab's message>) …". A refused decision with nothing else posted is thrown (like
+Bitbucket), so the dialog shows it as a plain failure and the review stays open with no retry
+locked to Approve; after comments landed it is a `partial` whose retry is the decision alone.
 
 **Request changes is a real review event (#1611).** `PRReviewAction` (`packages/shared/pr-types.ts`)
 is `'approve' | 'comment' | 'request_changes'`, carried end to end: `resolvePlatformDecisionAction`
