@@ -33,8 +33,6 @@ const MAGIC = "macbook-pro.tail0000.ts.net";
 const OWNER = "ramos@example.com";
 const GUEST = "guest@example.com";
 const KEY = "sk-phone-0123456789abcd";
-/** A 1 × 1 PNG: an image a reply's Markdown can show. */
-const PNG_1PX = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
 type Caller = "local" | "owner" | "guest";
 
@@ -372,7 +370,7 @@ describe("starting an agent is the owner's (a guest's Send never runs code on th
   });
 });
 
-describe("stopping or deleting an agent is the owner's (a guest never ends the owner's session)", () => {
+describe("stopping, deleting and waking a launched agent: every window's, a guest's included", () => {
   /** A launched thread whose session started: Stop and Delete have a session to act on. */
   async function launchedWorld(dataDir?: string) {
     const w = await world({ config: { inboxLaunch: { enabled: true } }, ...(dataDir ? { dataDir } : {}) });
@@ -399,29 +397,16 @@ describe("stopping or deleting an agent is the owner's (a guest never ends the o
     return { ...w, project, launched, stopped };
   }
 
-  test("Stop: a guest is refused and nothing is stopped; the owner over the tailnet and this computer stop it", async () => {
+  test("Stop and Delete: a guest, the owner over the tailnet and this computer each do it (owner ruling 2026-11-11)", async () => {
     const w = await launchedWorld();
-    const a = w.launched("a");
-    expect(await answerOf(await call(w, "guest", { path: `/api/inbox/launch/${a.id}/stop`, body: {} }))).toEqual([403, "owner_only"]);
-    // A stop is logged in the launch's folder: a refused one leaves none.
-    expect(existsSync(a.stopLog)).toBe(false);
-    expect((await call(w, "owner", { path: `/api/inbox/launch/${a.id}/stop`, body: {} })).status).toBe(200);
-    expect(readFileSync(a.stopLog, "utf8")).toContain(`stop sa:`);
-    const b = w.launched("b");
-    expect((await call(w, "local", { path: `/api/inbox/launch/${b.id}/stop`, body: {} })).status).toBe(200);
-    expect(readFileSync(b.stopLog, "utf8")).toContain(`stop sb:`);
-  });
-
-  test("Delete: a guest is refused and the launch is kept; the owner over the tailnet and this computer delete it", async () => {
-    const w = await launchedWorld();
-    const a = w.launched("a");
-    expect(await answerOf(await call(w, "guest", { path: `/api/inbox/launch/${a.id}/delete`, body: {} }))).toEqual([403, "owner_only"]);
-    expect(w.inbox.store.message(a.messageId)!.launch!.deleted_at).toBeUndefined();
-    expect((await call(w, "owner", { path: `/api/inbox/launch/${a.id}/delete`, body: {} })).status).toBe(200);
-    expect(w.inbox.store.message(a.messageId)!.launch!.deleted_at).toBeString();
-    const b = w.launched("b");
-    expect((await call(w, "local", { path: `/api/inbox/launch/${b.id}/delete`, body: {} })).status).toBe(200);
-    expect(w.inbox.store.message(b.messageId)!.launch!.deleted_at).toBeString();
+    for (const caller of CALLERS) {
+      const a = w.launched(`s-${caller}`);
+      expect([caller, (await call(w, caller, { path: `/api/inbox/launch/${a.id}/stop`, body: {} })).status]).toEqual([caller, 200]);
+      expect(readFileSync(a.stopLog, "utf8")).toContain(`stop ss-${caller}:`);
+      const b = w.launched(`d-${caller}`);
+      expect([caller, (await call(w, caller, { path: `/api/inbox/launch/${b.id}/delete`, body: {} })).status]).toEqual([caller, 200]);
+      expect(w.inbox.store.message(b.messageId)!.launch!.deleted_at).toBeString();
+    }
   });
 
   type Launched = { id: string; messageId: string; stopLog: string };
@@ -435,117 +420,14 @@ describe("stopping or deleting an agent is the owner's (a guest never ends the o
   }
   const reply = (w: World, caller: Caller, messageId: string, key: string, extra: Json = {}) =>
     call(w, caller, { path: `/api/inbox/messages/${messageId}/reply`, body: { idempotency_key: key, words: "One more thing.", ...extra } });
-  const replyId = async (response: Response) => ((await response.json()) as { reply: { id: string } }).reply.id;
 
-  test("a guest's reply to a stopped session is kept for it but never starts it again; the owner's reply does", async () => {
+  test("a guest's reply to a stopped session starts it again, as the owner's does", async () => {
     const w = await launchedWorld();
     const a = w.stopped("a");
     const b = w.stopped("b");
-    const guests = await reply(w, "guest", a.messageId, "r-guest");
-    expect(guests.status).toBe(200);
+    expect((await reply(w, "guest", a.messageId, "r-guest")).status).toBe(200);
     expect((await reply(w, "owner", b.messageId, "r-owner")).status).toBe(200);
-    // The owner's reply starts its session again.
-    expect(await waitFor(() => respawned(b))).toBe(true);
-    // The guest's, written at the same moment, did not; it waits for the session like any reply, marked as the guest's.
-    expect(respawned(a)).toBe(false);
-    expect(w.inbox.store.pendingReplies("sess-a").map((m) => [m.body, m.by_guest])).toEqual([["One more thing.", true]]);
-    expect(w.inbox.store.pendingReplies("sess-b").map((m) => m.by_guest)).toEqual([undefined]);
-    expect(w.inbox.store.message(await replyId(guests))!.by_guest).toBe(true);
-  });
-
-  test("a guest's reply in another thread the session started never starts it again; the owner's does", async () => {
-    const w = await launchedWorld();
-    const a = w.stopped("a");
-    const b = w.stopped("b");
-    // Each session asked something in a thread of its own, beside the launched one.
-    const side = (key: string) =>
-      w.inbox.store.sendMessage({ project_id: w.project.id, author: { kind: "agent", host: "claude-code", session: `sess-${key}`, name: "Claude Code" }, body: "Which port?", thread: "Side question" }).message.id;
-    expect((await reply(w, "guest", side("a"), "r-guest")).status).toBe(200);
-    expect((await reply(w, "owner", side("b"), "r-owner")).status).toBe(200);
-    // Only the sweep sees a reply outside the launched thread: the owner's starts b.
-    expect(await waitFor(() => respawned(b))).toBe(true);
-    expect(respawned(a)).toBe(false);
-    expect(w.inbox.store.pendingReplies("sess-a").map((m) => m.by_guest)).toEqual([true]);
-  });
-
-  test("a guest's tag of a stopped session never starts it again; the owner's tag does", async () => {
-    const w = await launchedWorld();
-    const a = w.stopped("a");
-    const b = w.stopped("b");
-    // Each session wrote through MCP once (no wake), so a tag can name it while it is stopped.
-    for (const key of ["a", "b"]) {
-      w.inbox.store.sendMessage({ project_id: w.project.id, author: { kind: "agent", host: "claude-code", session: `sess-${key}`, name: "Claude Code" }, body: "Done with the build.", thread: `Note ${key}` });
-    }
-    // Another agent's thread, where the person tags them.
-    const other = (n: number) =>
-      w.inbox.store.sendMessage({ project_id: w.project.id, author: { kind: "agent", host: "codex", session: "ses-other", name: "Codex" }, body: `Ready for review ${n}.`, thread: `Review ${n}` }).message.id;
-    const tag = (key: string) => ({ words: `@Claude look at this ${key}.`, tags: [{ host: "claude-code", session: `sess-${key}` }] });
-    expect((await reply(w, "guest", other(1), "r-guest", tag("a"))).status).toBe(200);
-    expect((await reply(w, "owner", other(2), "r-owner", tag("b"))).status).toBe(200);
-    expect(await waitFor(() => respawned(b))).toBe(true);
-    expect(respawned(a)).toBe(false);
-    expect(w.inbox.store.pendingReplies("sess-a", { tags: true }).map((m) => m.by_guest)).toEqual([true]);
-  });
-
-  test("the owner's reply that a guest's request writes again (its images captured on the guest's read) still starts the session", async () => {
-    const w = await launchedWorld();
-    // In its start grace for 2 more seconds: the owner's reply waits for the sweep after it.
-    const a = w.stopped("a", { startedAt: new Date(Date.now() - 58_000) });
-    writeFileSync(join(w.project.root, "shot.png"), Buffer.from(PNG_1PX, "base64"));
-    const owners = await reply(w, "local", a.messageId, "r-owner", { words: "This one: ![shot](shot.png)" });
-    expect(owners.status).toBe(200);
-    const id = await replyId(owners);
-    expect(w.inbox.store.message(id)!.inline_images ?? []).toHaveLength(0);
-    // A guest opens the thread: the image is captured then, and the owner's reply's line is written again.
-    expect((await call(w, "guest", { path: `/api/inbox/threads/${a.messageId}` })).status).toBe(200);
-    expect(await waitFor(() => (w.inbox.store.message(id)!.inline_images ?? []).length > 0, 3000)).toBe(true);
-    expect(respawned(a)).toBe(false);
-    // Still the owner's: once the grace is over, the sweep starts the session for it.
-    expect(w.inbox.store.message(id)!.by_guest).toBeUndefined();
-    expect(await waitFor(() => respawned(a))).toBe(true);
-  });
-
-  test("a guest's reply stays the guest's across an Inbox restart: the sweep after it never starts the session for it", async () => {
-    const before = await launchedWorld();
-    const a = before.stopped("a");
-    // b has not read its first message yet, so nothing starts it before the restart.
-    const b = before.stopped("b", { read: false });
-    const id = await replyId(await reply(before, "guest", a.messageId, "r-guest"));
-    expect((await reply(before, "local", b.messageId, "r-owner")).status).toBe(200);
-    before.inbox.stop();
-    servers.splice(servers.indexOf(before.inbox), 1);
-    const after = await launchedWorld(before.dataDir);
-    expect(after.inbox.store.message(id)!.by_guest).toBe(true);
-    // b reads its first message: the next sweep starts it for the owner's reply, and passes over a.
-    after.inbox.store.recordDelivery(b.messageId, { host: "claude-code", session: "sess-b" });
-    expect(await waitFor(() => respawned(b))).toBe(true);
-    expect(respawned(a)).toBe(false);
-  });
-
-  test("a guest's New message to a session just stopped is marked the guest's and never starts it again; the owner's does", async () => {
-    const w = await launchedWorld();
-    // New message goes only to a live session: each polled once, and after Stop its last polls still list it for a while.
-    const stoppedJustNow = async (key: string) => {
-      const a = w.stopped(key);
-      const poll = await fetch(`http://127.0.0.1:${w.inbox.port}/api/inbox/bridge/poll`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${w.inbox.token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ session: `sess-${key}`, host: "claude-code", project_path: w.project.root, waitMs: 0, busy: false, started_at: new Date().toISOString() }),
-      });
-      expect(poll.status).toBe(200);
-      expect((await call(w, "local", { path: `/api/inbox/launch/${a.id}/stop`, body: {} })).status).toBe(200);
-      return a;
-    };
-    const a = await stoppedJustNow("a");
-    const b = await stoppedJustNow("b");
-    const message = (caller: Caller, launch: Launched, session: string) =>
-      call(w, caller, { path: `/api/inbox/threads/${launch.messageId}/message`, body: { idempotency_key: `m-${session}`, body: "One more thing.", session } });
-    const guests = await message("guest", a, "sess-a");
-    expect(guests.status).toBe(200);
-    expect((await message("owner", b, "sess-b")).status).toBe(200);
-    expect(await waitFor(() => respawned(b))).toBe(true);
-    expect(respawned(a)).toBe(false);
-    expect(w.inbox.store.message(((await guests.json()) as { message: { id: string } }).message.id)!.by_guest).toBe(true);
+    expect(await waitFor(() => respawned(a) && respawned(b))).toBe(true);
   });
 
   test("a guest's reply to a deleted launch writes nothing in the launch's folder", async () => {
