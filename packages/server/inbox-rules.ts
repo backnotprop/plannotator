@@ -71,10 +71,10 @@ export function inboxRulesFitError(change: InboxPromptsChange, config: Plannotat
     typeof value === "string" && value.trim().length > max
       ? { field, message: `${field}: at most ${max.toLocaleString("en-US")} characters with the reminder it follows (this one has ${value.trim().length.toLocaleString("en-US")}).` }
       : null;
-  const shared = check(change.inbox.rules, rules.room.shared, "prompts.inbox.rules");
+  const shared = check(change.inbox?.rules, rules.room.shared, "prompts.inbox.rules");
   if (shared) return shared;
   for (const host of INBOX_PROMPT_HOSTS) {
-    const own = check(change.inbox.runtimes?.[host]?.rules, rules.room.runtimes[host], `prompts.inbox.runtimes.${host}.rules`);
+    const own = check(change.inbox?.runtimes?.[host]?.rules, rules.room.runtimes[host], `prompts.inbox.runtimes.${host}.rules`);
     if (own) return own;
   }
   return null;

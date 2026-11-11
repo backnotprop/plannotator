@@ -244,7 +244,7 @@ import type { CardsModel, DraftView, InboxStorageModel, UpdateCheckFailing } fro
 import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
 import type { InboxComposeLaunch, InboxReaction, InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { reactionSpeech } from './components/ReactionTray';
-import { inboxTabCount, useTabCount } from './tabCount';
+import { inboxTabCount, setAppBadge, useTabCount } from './tabCount';
 import { pageOffersUpdates, pageOffersWhatsNew, sidebarUpdateNotice, updateForPage } from './updateNotice';
 import { actedSince, inputMark, lastInput } from './lastInput';
 import { backFocusTargets, focusKept, focusLost } from './backFocus';
@@ -1002,7 +1002,12 @@ function Inbox() {
   const faviconHref = useInboxFaviconHref();
   const faviconBadgeHref = useInboxFaviconBadgeHref();
   const faviconInUse = useInboxFavicon();
-  useTabCount(useMemo(() => (latest ? inboxTabCount(latest.sections) : 0), [latest]), faviconHref, faviconBadgeHref);
+  const tabCount = useMemo(() => (latest ? inboxTabCount(latest.sections) : 0), [latest]);
+  useTabCount(tabCount, faviconHref, faviconBadgeHref);
+  // The installed app's badge is shared by every window: only a window that has read a list writes it.
+  useEffect(() => {
+    if (latest) setAppBadge(tabCount);
+  }, [latest, tabCount]);
   /** The list on screen: held until the person acts (the "N new" notice). */
   const [shown, setShown] = useState<InboxListSection[] | null>(null);
   const shownRef = useRef(shown);

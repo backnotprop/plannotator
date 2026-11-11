@@ -3468,6 +3468,12 @@ export interface InboxPromptsSettings {
   /** The plan, review and annotate prompts, in the order the page lists them. */
   others: InboxPromptItem[];
   /**
+   * Guided Review standing instructions (`${dataDir}/guide-instructions.md`, the file the review UI's
+   * guide launch and VS Code edit too): added after the built-in method in every guide's brief.
+   * `text` null: none (Default). Absent from an older Inbox.
+   */
+  guide?: { text: string | null; max: number };
+  /**
    * The person's own rules for how agents use the Inbox ("Rules for your agents"), ADDED after the reminder.
    * Absent from an older Inbox.
    */
@@ -3483,14 +3489,18 @@ export interface InboxPromptsSettings {
   };
 }
 
-/** `POST /api/inbox/settings` `{ prompts: { inbox: … } }`: a string sets the text (the reminder or the rules), null (or blank) deletes the key. */
+/**
+ * `POST /api/inbox/settings` `{ prompts: { inbox?: …, guide? } }`, at least one: a string sets the
+ * text (the reminder, the rules or the guide instructions), null (or blank) deletes the key (`guide`: the file).
+ */
 export interface InboxPromptsChange {
-  inbox: {
+  inbox?: {
     reminder?: string | null;
     /** The rules for every agent ("Rules for your agents"). */
     rules?: string | null;
     runtimes?: Partial<Record<InboxPromptHost, { reminder?: string | null; rules?: string | null }>>;
   };
+  guide?: string | null;
 }
 
 /** Who turns a voice clip into text: Codex's ChatGPT login, or an OpenAI API key. */

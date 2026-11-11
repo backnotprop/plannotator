@@ -6,7 +6,7 @@
  * window's usual guards.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxPromptsSettings } from "@plannotator/core/inbox-types";
@@ -178,12 +178,33 @@ describe("Settings → Prompts", () => {
     expect((await read(server)).reminder.wakes).toEqual({ "claude-code": true, pi: true, opencode: true });
   });
 
+  test("Guided reviews: the one guide-instructions.md file the review UI edits; set, read back, capped, deleted, config.json untouched", async () => {
+    const { server, dataDir, onDisk } = await world({ displayName: "Ann" });
+    const file = join(dataDir, "guide-instructions.md");
+    expect((await read(server)).guide).toEqual({ text: null, max: 12_000 });
+    const saved = await post(server, { serverSession: server.serverSession, prompts: { guide: "Start with the riskiest change." } });
+    expect(saved.status).toBe(200);
+    expect(((await saved.json()) as { prompts: InboxPromptsSettings }).prompts.guide?.text).toBe("Start with the riskiest change.");
+    expect(readFileSync(file, "utf8")).toBe("Start with the riskiest change.\n");
+    // Written by the review UI's route, read here.
+    writeFileSync(file, "Call the tenant a workspace.\n");
+    expect((await read(server)).guide?.text).toBe("Call the tenant a workspace.");
+    const over = await post(server, { serverSession: server.serverSession, prompts: { guide: "x".repeat(12_001) } });
+    expect([over.status, ((await over.json()) as { field: string }).field]).toEqual([422, "prompts.guide"]);
+    expect(readFileSync(file, "utf8")).toBe("Call the tenant a workspace.\n");
+    expect((await post(server, { serverSession: server.serverSession, prompts: { guide: null } })).status).toBe(200);
+    expect(existsSync(file)).toBe(false);
+    expect(onDisk()).toEqual({ displayName: "Ann" });
+  });
+
   test("a malformed change is refused before anything is written", async () => {
     const { server, onDisk } = await world({ displayName: "Ann" });
     const bodies: unknown[] = [
       null,
       "text",
       { review: { denied: "no" } },
+      {},
+      { guide: 5 },
       { inbox: {} },
       { inbox: { reminder: 5 } },
       { inbox: { other: "x" } },
