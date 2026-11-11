@@ -1,10 +1,3 @@
-/**
- * VersionBrowser — Version list for plan diff
- *
- * Shows all versions of the current plan and allows selecting
- * which version to diff against.
- */
-
 import React, { useEffect } from "react";
 import type { VersionInfo, VersionEntry } from "../../hooks/usePlanDiff";
 
@@ -48,7 +41,6 @@ export const VersionBrowser: React.FC<VersionBrowserProps> = ({
   fetchingVersion,
   onFetchVersions,
 }) => {
-  // Fetch version list once versionInfo is available
   useEffect(() => {
     if (versionInfo && versions.length === 0) {
       onFetchVersions();
@@ -68,7 +60,6 @@ export const VersionBrowser: React.FC<VersionBrowserProps> = ({
 
   return (
     <div className="p-3">
-      {/* Current version info */}
       <div className="mb-3">
         <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-1">
           Current Plan
@@ -78,7 +69,6 @@ export const VersionBrowser: React.FC<VersionBrowserProps> = ({
         </div>
       </div>
 
-      {/* Show Diff button if not active */}
       {hasPreviousVersion && !isPlanDiffActive && (
         <button
           onClick={onActivatePlanDiff}
@@ -88,7 +78,6 @@ export const VersionBrowser: React.FC<VersionBrowserProps> = ({
         </button>
       )}
 
-      {/* Version list */}
       {totalVersions > 1 && (
         <div className="mb-3">
           <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider mb-2">

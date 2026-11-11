@@ -6,20 +6,6 @@ import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import type { DiagramSourceDraft } from './useDiagramSourceDraft';
 
-/**
- * The Source pane beside the canvas (owner ruling: source and diagram are
- * one view; the pane opens beside the canvas and never replaces it). It
- * opens on the LEFT of the canvas on the desktop row and stacks UNDER it on
- * the phone; the caller (DiagramViewer) owns that placement through this
- * component's `className`. A plain-text CodeMirror buffer, read-only
- * without edit access and never hidden. Save, Discard, "Draft · unsaved"
- * and the Reload strip live here; the canvas is the live preview. The
- * selected comment's source line shows as a line mark.
- *
- * Not the package MarkdownEditor (markdown extensions, continuous save):
- * the draft is local until Save.
- */
-
 const LINE_MARK_CLASS = 'cm-diagram-comment-line';
 
 const paneTheme = EditorView.theme({
@@ -92,7 +78,6 @@ export function DiagramSourcePane({
 }: {
   draft: DiagramSourceDraft;
   editable: boolean;
-  /** The selected comment's source line range, marked in the gutter. */
   markedLines: readonly [number, number] | null;
   className?: string;
 }) {
@@ -103,7 +88,6 @@ export function DiagramSourcePane({
   const draftRef = useRef(draft);
   draftRef.current = draft;
 
-  // One view for the pane's life; props reconfigure compartments.
   useEffect(() => {
     const host = hostRef.current;
     if (host === null) return;
@@ -182,10 +166,7 @@ export function DiagramSourcePane({
       data-diagram-source-pane=""
       aria-label="Diagram source"
       className={cn('flex min-h-0 flex-col bg-card', className)}
-      // Escape LEAVES the buffer; it never reaches whatever is behind
-      // the pane. In a popout that outer handler closes it, and one
-      // keystroke mid-draft would take the pane, the preview and the
-      // person's place with it.
+      // Escape LEAVES the buffer; it never reaches whatever is behind the pane.
       onKeyDown={(event) => {
         if (event.key !== 'Escape' || event.defaultPrevented) return;
         event.preventDefault();

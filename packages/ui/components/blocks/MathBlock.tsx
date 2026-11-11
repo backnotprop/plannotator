@@ -3,7 +3,6 @@ import type { Block } from '../../types';
 import { normalizeMathTex, renderMathToHtml } from '../../utils/math';
 import { useMathRenderer } from '../../hooks/useMathRenderer';
 
-// Kept as re-exports: InlineMarkdown and older consumers import them from here.
 export { normalizeMathTex, renderMathToHtml };
 
 type MathBlockProps = {
@@ -15,10 +14,9 @@ export const MathBlock: React.FC<MathBlockProps> = ({ block }) => {
   const renderer = useMathRenderer();
   const html = useMemo(() => renderMathToHtml(tex, true, renderer), [tex, renderer]);
 
-  // The wrapper (class names, data-* anchors, aria-label) is identical in both
-  // branches: block targeting and math-annotation restore key on these
-  // attributes, so a placeholder must be addressable exactly like the typeset
-  // block. The placeholder's child is a React text node, never markup.
+  // The wrapper (class names, data-* anchors, aria-label) is identical in both branches: block
+  // targeting and math-annotation restore key on these attributes, so a placeholder must be
+  // addressable exactly like the typeset block.
   if (html === null) {
     return (
       <div

@@ -2,14 +2,7 @@ import type * as React from "react";
 
 import { cn } from "../../lib/utils";
 
-/**
- * Card — surface container primitive (shadcn-style).
- *
- * Composition: Card > CardHeader (CardTitle + CardDescription) / CardContent / CardFooter.
- * Uses the shared token surface (`bg-card`/`text-card-foreground`) so it adapts to every
- * theme. Pair with `shadow-[var(--card-shadow)]` (instead of `shadow-sm`) when you want
- * the themed elevation used across the app shell.
- */
+/** Composition: Card > CardHeader (CardTitle + CardDescription) / CardContent / CardFooter. */
 function Card({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div

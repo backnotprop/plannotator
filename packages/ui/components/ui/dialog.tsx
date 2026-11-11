@@ -29,9 +29,7 @@ DialogOverlay.displayName = "DialogOverlay";
 const DialogContent = React.forwardRef<
   React.ComponentRef<typeof DialogPrimitive.Popup>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Popup> & {
-    /** Optional visual override for the backdrop rendered with this content. */
     backdropClassName?: string;
-    /** Removes the default top-right close control. */
     hideClose?: boolean;
   }
 >(({ backdropClassName, className, children, hideClose, ...props }, ref) => (

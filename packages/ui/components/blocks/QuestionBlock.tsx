@@ -26,84 +26,30 @@ import {
 } from './questionPictureLayout';
 
 /**
- * A `:::question` block rendered as an answer card (the approved "Card"
- * variant): an eyebrow with "Question N of M" and a status tag, the prompt,
- * its context, then the choices (native radios / checkboxes plus an always
- * present "Other…"), or a text box for a free-text question, and a footer
- * with Add note · Skip · Accept recommended.
- *
- * The prompt, context and choice text stay ordinary document prose, so a
- * reviewer can select and annotate any of it; only the chrome (eyebrow, tags,
- * footer) is `annotation-exclude`. A click on a choice row picks it only when
- * the pointer barely moved and no text is selected, so a drag across option
- * text makes an annotation, never a pick.
- *
- * State is derived: `answer` comes from the host (Plannotator: the document's
- * annotation carrying `questionAnswer` for this key). Two ways to write:
- * - live (`onAnswer`): every change calls it with the next answer, or null
- *   when it became empty; the host upserts or removes the annotation.
- * - explicit save (`onSaveAnswer`): changes stay a local draft; the footer
- *   shows Save answer and Cancel (and no Skip), Save calls `onSaveAnswer`
- *   once, Cancel returns to the host's answer.
- * With neither the block is read-only.
- *
- * A host can add its own actions at the right of the footer
- * (`renderFooter`), and a question carrying `Decision: when answered` or a
- * `Decision: [statement](url)` link shows that beside the prompt. A host can
- * also let the reviewer switch a question's decision recording off and on
- * (`decisionRecording` + `onToggleDecisionRecording`; with
- * `decisionScope: 'any'`, any question without a recorded decision once the
- * host supplies a state), open its own decision
- * card from the tag's words (`onOpenDecision`), and hide the card's own
- * status tag to draw its own (`statusTag: 'none'`).
- *
- * The optional contract lines (approval "inbox-decision-mode"): `Stakes:` is
- * a short emphasised line under the prompt, `Shows:` a chip that opens the
- * picture (through `onImageClick`) or the file (an ordinary link), `Why:` a
- * line under the choices ("Why <recommended>: …"), and `Reversible: no` a
- * "Can't be undone" tag in the eyebrow. The card adds no confirm step.
- *
- * Picture choices (`choice.image`) draw as a grid of tiles: the picture and
- * the label pick (a real radio or checkbox in each tile), a separate zoom
- * button opens the picture (`onImageClick`), the label and description sit
- * under it. When no picture can be shown (the host's image resolver says
- * `unavailable`, every picture failed to load, or `pictureChoices={false}`)
- * the choices are the ordinary text rows. The recommended answer that is
- * none of the choices, and Other, stay text rows.
+ * The prompt, context and choice text stay ordinary document prose, so a reviewer can select and
+ * annotate any of it; only the chrome (eyebrow, tags, footer) is `annotation-exclude`.
  */
 
-/** Pointer travel (px) above which a press on a choice row is a drag. */
 const DRAG_THRESHOLD_MOUSE = 4;
 const DRAG_THRESHOLD_TOUCH = 10;
-/** A second click on the same choice within this window is a double-click:
- *  it selects a word, so the pick its first click made is taken back. */
 const DOUBLE_CLICK_REVERT_MS = 800;
 /**
- * The choice row the last click on any card landed on. The browser counts a
- * click as the second of a double-click by time and place alone, and a touch
- * tap counts within about 100px: on a phone, a quick tap on the next card's
- * answer arrives with `detail` 2. Only a second click on this same row is a
- * double-click.
+ * The browser counts a click as the second of a double-click by time and place alone, and a
+ * touch tap counts within about 100px: on a phone, a quick tap on the next card's answer arrives
+ * with `detail` 2.
  */
 let lastRowClick: EventTarget | null = null;
 
 const now = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
-/** The double-click guard's name for the recommended row (never a label: it
- *  holds a character no choice label can). */
+/**
+ * The double-click guard's name for the recommended row (never a label: it holds a character no
+ * choice label can).
+ */
 const SUGGESTION_ROW = '\u0000suggestion';
 
 const cx = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(' ');
 
-/** The box every pill in the eyebrow shares (the status tags, the decision
- *  tags, the toggle and the split tag): one height, one line-height, and a
- *  1px border on all of them (transparent unless the tone draws it), so the
- *  dashed "Open" tag is no taller than the rest. The pill group itself is a
- *  flex row centred on its axis, so no pill rides its own baseline (the split
- *  tag's baseline came from its icon-only switch, which lifted it).
- *  `align-[1px]` does nothing inside that flex row; it stays because it is
- *  the only use of the class, and dropping it would change the stylesheet
- *  the guides.show viewer pins (a deploy for no visible change). */
 const PILL = 'annotation-exclude select-none inline-flex h-[18px] items-center gap-1 whitespace-nowrap rounded border px-1.5 align-[1px] text-[10.5px] font-semibold leading-4 tracking-[0.03em]';
 
 const Tag: React.FC<{ tone: 'rec' | 'ok' | 'skip' | 'open' | 'warn'; children: React.ReactNode; className?: string; style?: React.CSSProperties }> = ({ tone, children, className, style }) => (
@@ -157,15 +103,6 @@ const PictureGlyph = () => (
   </svg>
 );
 
-/** Draws a decision tag in its "off" state: the same words with a dotted
- *  outline instead of the tinted fill, faded. The theme's muted-foreground
- *  alone is exactly the "Open" tag's color beside it, so the off tag read as
- *  barely dimmer than an on one. Text, icon and outline (all `currentColor`)
- *  are muted-foreground mixed 55% with transparent: the look of
- *  `opacity: 0.55` on the tag, without `opacity`, which would also fade the
- *  keyboard focus ring (a `ring-primary` box-shadow on the tag's buttons)
- *  that must stay at full strength. Inline so it adds no utility classes to
- *  the shared stylesheet and wins over the tag's `text-primary`. */
 const DECISION_OFF_STYLE: React.CSSProperties = {
   background: 'transparent',
   color: 'color-mix(in oklab, var(--muted-foreground) 55%, transparent)',
@@ -174,36 +111,15 @@ const DECISION_OFF_STYLE: React.CSSProperties = {
 };
 
 /**
- * The footer in a narrow column. The card is a size container
- * (`@container/qcard`: the card's own width, never the viewport's, because
- * the card sits in columns of every width), and the footer row wraps whole
- * buttons:
- * - No button's words ever wrap inside it (`whitespace-nowrap`): the row
- *   wraps between buttons instead, and only when they do not fit on one
- *   row, so Add note and Skip stay together and Accept recommended moves
- *   down whole, still at the row's end (`ml-auto`).
- * - Under 10rem inside the card (a card under about 190 px), where a button
- *   may be wider than the card, Accept recommended and the save bar take a
- *   row of their own and their words end in an ellipsis rather than leave
- *   the card (`FOOT_FIT`; the name stays whole). The words stay one text
- *   node: a split one moved the glyphs of a wide card by a fraction of a
- *   pixel.
- * - On a touch screen each button's hit area is at least 44 x 44 px: an
- *   invisible `before:` box centred on it, as the header's decision tag
- *   does, so the drawn button does not change. (An ellipsised button clips
- *   that box to itself.) A box reaches up to 11 px past its button, so a
- *   wrapped footer's rows sit 20 px apart on a touch screen
- *   (`pointer-coarse:gap-y-5`, the footer row): with the 4 px of `gap-1`,
- *   Accept recommended's box, later in the page, covered the bottom of Skip
- *   and Add note above it, and a tap on Skip answered the question. One row
- *   has no row gap, so a footer that fits is unchanged.
- * A footer that fits on one row draws exactly as before, on any pointer.
+ * The words stay one text node: a split one moved the glyphs of a wide card by a fraction of a
+ * pixel. - On a touch screen each button's hit area is at least 44 x 44 px: an invisible
+ * `before:` box centred on it, as the header's decision tag does, so the drawn button does not
+ * change.
  */
 const FOOT_BUTTON = "whitespace-nowrap pointer-coarse:relative pointer-coarse:before:absolute pointer-coarse:before:left-1/2 pointer-coarse:before:top-1/2 pointer-coarse:before:h-11 pointer-coarse:before:w-full pointer-coarse:before:min-w-11 pointer-coarse:before:-translate-x-1/2 pointer-coarse:before:-translate-y-1/2 pointer-coarse:before:content-['']";
 const FOOT_FIT = '@max-[10rem]/qcard:max-w-full @max-[10rem]/qcard:overflow-hidden @max-[10rem]/qcard:text-ellipsis';
 const FOOT_OWN_ROW = '@max-[10rem]/qcard:basis-full';
 
-/** Two answers say the same thing (identity and line ignored). */
 const sameAnswer = (a: QuestionAnswer | null | undefined, b: QuestionAnswer | null | undefined): boolean => {
   const norm = (x: QuestionAnswer | null | undefined) =>
     !x || isQuestionAnswerEmpty(x)
@@ -212,77 +128,36 @@ const sameAnswer = (a: QuestionAnswer | null | undefined, b: QuestionAnswer | nu
   return norm(a) === norm(b);
 };
 
-/** What `onSaveAnswer` may return: nothing (the save is done), or a promise
- *  the card waits on (rejecting keeps the draft so the reviewer can retry). */
+/**
+ * What `onSaveAnswer` may return: nothing (the save is done), or a promise the card waits on
+ * (rejecting keeps the draft so the reviewer can retry).
+ */
 export type QuestionSaveResult = void | Promise<unknown>;
 
 export interface QuestionBlockProps {
   blockId: string;
   indexed: IndexedQuestion;
-  /** How many question blocks the document has (for "Question N of M"). */
   total: number;
   answer?: QuestionAnswer;
   onAnswer?: (blockId: string, answer: QuestionAnswer | null, key: string) => void;
-  /** Explicit save mode (takes precedence over `onAnswer`): edits stay a
-   *  draft in the card until Save, which calls this with the question's key
-   *  and the answer (null when the draft is empty). The host stores it and
-   *  passes it back as `answer`. */
   onSaveAnswer?: (key: string, answer: QuestionAnswer | null) => QuestionSaveResult;
-  /** Label of the explicit-save-mode Save button (default "Save answer"),
-   *  or a function of the question that returns it. */
   saveLabel?: string | ((question: ParsedQuestion) => string);
-  /** Host actions at the right end of the footer, given the question and its
-   *  saved answer (never the unsaved draft). Rendered in read-only cards too;
-   *  return null for nothing. */
   renderFooter?: (question: IndexedQuestion, answer: QuestionAnswer | undefined) => React.ReactNode;
-  /** Whether answering this question records a decision. On a question
-   *  carrying `Decision: when answered` it defaults to true; false draws the
-   *  "Records a decision" tag dimmed with a dotted outline and hides the
-   *  "Answering this records a decision" row. On a question WITHOUT a
-   *  decision line it is ignored unless `decisionScope` is `'any'` (ui
-   *  0.52.1); then a defined value adds the tag in that state (false: off;
-   *  true: on, with the row), so a host can let any answer become a
-   *  decision, and undefined leaves the question with no tag. Has no effect
-   *  on a question whose decision is already recorded
-   *  (`Decision: [statement](url)`). */
   decisionRecording?: boolean;
-  /** Which questions can carry the "Records a decision" tag (ui 0.52.1).
-   *  `'when-answered'` (default, the 0.52.0 behaviour): only a question that
-   *  carries `Decision: when answered`. `'any'`: also a question with no
-   *  decision line, once the host passes a `decisionRecording` for it. */
   decisionScope?: 'when-answered' | 'any';
-  /** Makes the "Records a decision" tag a toggle button (`aria-pressed`):
-   *  a click calls this with the question's key and the next state. The host
-   *  stores it and passes it back as `decisionRecording`. Not offered in a
-   *  read-only card (no answer handler), which draws the tag as it stands. */
+  /**
+   * Makes the "Records a decision" tag a toggle button (`aria-pressed`): a click calls this with
+   * the question's key and the next state.
+   */
   onToggleDecisionRecording?: (key: string, next: boolean) => void;
-  /** Opens the host's decision card (ui 0.52.1). Given, the tag splits into
-   *  two targets inside one visual tag: the diamond is the switch
-   *  (`onToggleDecisionRecording`, labelled "Record as a decision") and the
-   *  words "Records a decision" are a button (`aria-haspopup="dialog"`) that
-   *  calls this with the question's key and the words' own element, to
-   *  anchor a popover. Offered whether recording is on or off (the host
-   *  decides what an off question's card does). Not offered in a read-only
-   *  card. */
+  /**
+   * Given, the tag splits into two targets inside one visual tag: the diamond is the switch
+   * (`onToggleDecisionRecording`.
+   */
   onOpenDecision?: (key: string, anchor: HTMLElement) => void;
-  /** `'none'` hides the card's own status tag (Open / Answered / Settled /
-   *  Skipped) so the host can draw its own; the decision tags stay. Default
-   *  `'card'`. */
   statusTag?: 'card' | 'none';
-  /** The host's own words for the card's status tag, per question (ui seam;
-   *  the Plannotator Inbox says "Not sent" for a pick it has saved but not
-   *  sent, where the card would say "Answered"). Return undefined for the
-   *  card's own tag. Absent: today's tags. Ignored with `statusTag: 'none'`. */
   statusLabel?: (question: IndexedQuestion, status: QuestionStatus) => QuestionStatusLabel | undefined;
-  /** Host content drawn right under the prompt (a host note such as "Replaces
-   *  <an earlier question>"), given the question. Return null for none.
-   *  Absent: nothing is drawn there (today's card). */
   renderBelowPrompt?: (question: IndexedQuestion) => React.ReactNode;
-  /** Host content right after the choices (and Other), before Why (the
-   *  Plannotator Inbox's "Try prototype" tab). When it draws something, the
-   *  choices sit in a box marked `data-question-tray` with the host's content
-   *  right after it, so a host's CSS can draw them as one shape. Return null
-   *  for nothing. Absent: today's card. Not drawn on a text question. */
   renderAfterChoices?: (question: IndexedQuestion) => React.ReactNode;
   onOpenLinkedDoc?: (path: string) => void;
   onOpenCodeFile?: (path: string) => void;
@@ -291,28 +166,12 @@ export interface QuestionBlockProps {
   githubRepo?: string;
   repoHost?: string;
   onNavigateAnchor?: (hash: string) => void;
-  /** Draw picture choices (`choice.image`) as picture tiles (default true).
-   *  False: every choice is a text row, as on a host that shows no images. */
   pictureChoices?: boolean;
-  /** A small label over a picture tile's picture, top left ("Mockup · VS
-   *  Code"), from the host; null or absent: none. Display only: never the
-   *  answer, never read by the parser. Default absent, so every card draws as
-   *  before (the Plannotator Inbox's onboarding tour labels its pictures). */
   pictureBadge?: (choice: { label: string; image: { alt: string; src: string } }) => string | null;
-  /** The zoom button on a picture tile, told which question and which choice
-   *  (its index in the question's choices) as well as the picture: a host can
-   *  open a gallery of that question's choices (the Plannotator Inbox's option
-   *  sets). Absent: the zoom calls `onImageClick(url, alt)` as before. */
   onZoomChoice?: (key: string, index: number, url: string, alt: string) => void;
-  /** A picture choice's size in pixels, given the URL its picture loads from,
-   *  when the host knows it before the picture loads (the Plannotator Inbox
-   *  records it when the message is sent); null or absent: unknown. The tiles
-   *  carry it for the host's CSS (see `QuestionPictureTiles`); nothing is drawn
-   *  differently without host CSS. */
   pictureSize?: (url: string) => QuestionPictureSize | null;
 }
 
-/** The picture tile's label (`pictureBadge`): a small dark chip over the picture's top-left corner. */
 const PICTURE_BADGE_STYLE: React.CSSProperties = {
   position: 'absolute',
   left: 6,
@@ -335,7 +194,6 @@ export interface QuestionStatusLabel {
   tone?: 'ok' | 'open' | 'skip';
 }
 
-/** The choices as they are, or (a host's `renderAfterChoices` drew something) in a tray box with that content right after it. */
 const TrayIf: React.FC<{ on: boolean; after: React.ReactNode; children: React.ReactNode }> = ({ on, after, children }) =>
   on ? (
     <div className="mt-2.5" data-question-tray-host="">
@@ -346,16 +204,10 @@ const TrayIf: React.FC<{ on: boolean; after: React.ReactNode; children: React.Re
     <>{children}</>
   );
 
-/**
- * Fits the Other field to its lines: one at least (`rows={1}`: its height, padding, border and any min-height
- * as a one-line field), its CSS max-height at most, scrolling past that. Returns where the "+" mark goes
- * beside a field of several lines (centred on the first line, where a one-line field centres it), else null.
- */
 function fitOtherField(field: HTMLTextAreaElement): number | null {
   field.style.height = '';
   field.style.overflowY = '';
   const one = field.offsetHeight;
-  // Its border (no scrollbar while it is one line or growing: its overflow is hidden).
   const full = field.scrollHeight + (field.offsetHeight - field.clientHeight);
   if (full <= one + 1) return null;
   field.style.height = `${full}px`;
@@ -394,19 +246,12 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
 }) => {
   const { question, number } = indexed;
   const resolveImage = useImageResolver();
-  // The URL a picture loads from, exactly as an inline markdown image of the
-  // same src would (the host's resolver first), or null when the host says
-  // it cannot be shown.
   const pictureSrc = (src: string): string | null => {
     const resolved = resolveImage ? resolveImage(src) : null;
     if (resolved?.kind === 'unavailable') return null;
     if (resolved?.kind === 'src') return resolved.src;
     return /^(https?:\/\/|data:|blob:)/i.test(src) ? src : getImageSrc(src, imageBaseDir);
   };
-  // The host's reason a picture is not shown (its resolver's `unavailable`
-  // title), drawn on the placeholder exactly as an inline image's, so a host
-  // that holds remote images counts and loads these too (code review's PR
-  // Markdown preview: "N remote images held · Load remote images").
   const pictureHeldTitle = (src: string): string | null => {
     const resolved = resolveImage ? resolveImage(src) : null;
     return resolved?.kind === 'unavailable' ? resolved.title : null;
@@ -417,30 +262,20 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
       <span className={UNAVAILABLE_IMAGE_CLASS} title={title} data-image-unavailable="">{alt || 'Image'}</span>
     );
   };
-  // Pictures that failed to load (by the URL tried): a tile shows its alt
-  // text instead, and with none left the choices are text rows.
   const [failedPictures, setFailedPictures] = useState<ReadonlySet<string>>(() => new Set());
   const markPictureFailed = (url: string) => setFailedPictures((prev) => (prev.has(url) ? prev : new Set([...prev, url])));
-  // An answer saved under an older label of a choice (0.28.1 read a wrapped
-  // plain bullet's first line as its label) shows that choice picked; the
-  // next edit stores the current label.
   const savedAnswer = useMemo(
     () => (storedAnswer ? canonicalQuestionAnswer(question, storedAnswer) : storedAnswer),
     [question, storedAnswer],
   );
   const saveMode = !!onSaveAnswer;
-  // Save mode: the unsaved draft (null = the reviewer emptied it). Absent
-  // means the card shows the host's answer.
   const [draft, setDraft] = useState<{ answer: QuestionAnswer | null } | null>(null);
-  // The Trade-offs table (option lines' Pros and Cons): closed until the person opens it.
   const [tradeoffsOpen, setTradeoffsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const answer: QuestionAnswer | undefined = saveMode && draft ? draft.answer ?? undefined : savedAnswer;
   const dirty = saveMode && !!draft && !sameAnswer(draft.answer, savedAnswer);
-  // Every edit goes through here: straight to the host in live mode, into the
-  // draft in save mode.
-  // A draft edited back to the saved answer is dropped, so a later host
-  // update to `answer` shows instead of a stale copy.
+  // A draft edited back to the saved answer is dropped, so a later host update to `answer` shows
+  // instead of a stale copy.
   const onAnswer = onSaveAnswer
     ? (_blockId: string, next: QuestionAnswer | null) =>
         setDraft(sameAnswer(next, savedAnswer) ? null : { answer: next })
@@ -457,10 +292,8 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
       (result as Promise<unknown>).then(
         () => {
           setSaving(false);
-          // An edit made while the save was in flight stays a draft.
           setDraft((current) => (current === submitted ? null : current));
         },
-        // A failed save keeps the draft; the host reports the error.
         () => setSaving(false),
       );
     } else {
@@ -483,7 +316,6 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   const stakesId = `q-stakes-${uid}`;
   const suggestId = `q-suggest-${uid}`;
   const noteLabelId = `q-note-${uid}`;
-  // null = follow the answer (open while a note exists); a click pins it.
   const [notePinned, setNotePinned] = useState<boolean | null>(null);
   const noteOpen = notePinned ?? !!answer?.note?.trim();
   const pressRef = useRef<{ x: number; y: number; touch: boolean } | null>(null);
@@ -493,16 +325,10 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   // the click filled in, never to the page.
   const focusAfterAcceptRef = useRef(false);
   const lastPickRef = useRef<{ label: string; before: QuestionAnswer | undefined; at: number } | null>(null);
-  // Who set the "Other…" answer while this card was open: the recommended
-  // row (its pick, or Accept recommended) or the Other field. null: neither
-  // (an answer the host stored): an Other answer that is exactly the agent's
-  // text then reads as the row, unless the Other field has focus. Typing
-  // never turns into the row, so "Yes, but slower" stays in the field when
-  // the recommendation is "Yes".
+  // Typing never turns into the row, so "Yes, but slower" stays in the field when the
+  // recommendation is "Yes".
   const [otherBy, setOtherBy] = useState<'row' | 'field' | null>(null);
   const [otherFocused, setOtherFocused] = useState(false);
-  // Pick any: the reviewer's own Other text the recommended row replaced when
-  // ticked, put back when it is unticked (the answer has one Other field).
   const replacedOtherRef = useRef<string | null>(null);
 
   const inline = (text: string) => (
@@ -518,8 +344,6 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     />
   );
 
-  // A note alone does not change a settled choice: the [x] stays drawn (and
-  // the status stays Settled) until the reviewer picks, fills Other or skips.
   const status = questionStatus(question, answer);
   const hostStatus = statusTag === 'none' ? undefined : statusLabel?.(indexed, status);
   const answered = status === 'answered';
@@ -527,13 +351,9 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   const settled = status === 'settled';
   const settledLabels = question.choices.filter((c) => c.settled).map((c) => c.label);
   const hasRecommendation = question.choices.some((c) => c.recommended) || !!question.suggestedText;
-  // "Accept recommended" stays offered on a pick-any question whose
-  // recommendation names choices until the answer is exactly those choices:
-  // ticking one box must not take away the one click that ticks the rest. A
-  // pick-one or text question answered any way, a question with a settled
-  // choice, and a pick-any question recommending only its own answer (the
-  // recommended row after the choices: Accept would clear the ticks for it,
-  // and the row is one click anyway) offer it no more.
+  // "Accept recommended" stays offered on a pick-any question whose recommendation names choices
+  // until the answer is exactly those choices: ticking one box must not take away the one click
+  // that ticks the rest.
   const offerAccept = !readOnly && hasRecommendation && !settled && (
     !answered
     || (question.kind === 'multi'
@@ -560,7 +380,6 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
       const nextSelected = checked
         ? [...selected.filter((l) => l !== label), label]
         : selected.filter((l) => l !== label);
-      // Keep document order, not click order.
       const order = question.choices.map((c) => c.label);
       nextSelected.sort((a, b) => order.indexOf(a) - order.indexOf(b));
       commit({ ...rest, selected: nextSelected });
@@ -570,11 +389,6 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     }
   };
 
-  // The agent's recommended answer that is none of its choices
-  // (`suggestedText` on a pick question): one more answer row, after the
-  // choices and before "Other…". Picking it stores exactly what Accept
-  // recommended stores, the text as the "Other…" answer, so no label,
-  // index, key or host check of picked labels changes.
   const pickSuggestion = (checked: boolean) => {
     const text = question.suggestedText;
     if (!text) return;
@@ -635,15 +449,11 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     focusAfterAcceptRef.current = true;
     commit(next);
   };
-  // Runs after the render that drew the accepted answer (and once more at
-  // most, should the host not redraw it): the first checked choice, else the
-  // field holding the suggestion.
   useEffect(() => {
     if (!focusAfterAcceptRef.current) return;
     focusAfterAcceptRef.current = false;
     const card = cardRef.current;
     if (!card) return;
-    // Focus still on something in the card (the button was not removed): leave it.
     const active = document.activeElement;
     if (active && active !== document.body && card.contains(active)) return;
     const target = card.querySelector<HTMLElement>('input:checked:not(:disabled)')
@@ -657,9 +467,6 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     if (opening) requestAnimationFrame(() => noteRef.current?.focus());
   };
 
-  // Drag-vs-pick guard. A native <label> forwards its click to the input, so
-  // cancelling the click is what keeps a text drag from also picking. It runs
-  // in the capture phase so the cancel lands before any label activation.
   const onRowPointerDown = (event: React.PointerEvent) => {
     pressRef.current = { x: event.clientX, y: event.clientY, touch: event.pointerType === 'touch' };
   };
@@ -670,9 +477,8 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     const row = event.currentTarget;
     const again = lastRowClick === row;
     lastRowClick = row;
-    // A double-click selects a word to annotate, never picks: the second
-    // click is cancelled, and the pick the first click made (if any, on this
-    // choice, just now) is taken back.
+    // A double-click selects a word to annotate, never picks: the second click is cancelled, and
+    // the pick the first click made (if any, on this choice, just now) is taken back.
     if (event.detail >= 2 && again) {
       event.preventDefault();
       const last = lastPickRef.current;
@@ -696,8 +502,6 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   const groupName = `question-${uid}`;
   const inputType = question.kind === 'multi' ? 'checkbox' : 'radio';
   const storedOther = answer?.other ?? '';
-  // The recommended row holds the "Other…" answer when it is the agent's
-  // text; the Other field is then empty (typing there replaces it).
   const suggestionRow = question.kind !== 'text' && !!question.suggestedText;
   const suggestionPicked = suggestionRow
     && storedOther.trim() !== ''
@@ -705,9 +509,6 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     && (otherBy === 'row' || (otherBy === null && !otherFocused));
   const other = suggestionPicked ? '' : storedOther;
   const otherOn = other.trim() !== '';
-  // The Other field holds as many lines as its words take (typed or wrapped),
-  // from one (its height when it was a one-line field) up to its cap: fitted
-  // on each change, and again when its width changes (its words re-wrap).
   const otherRef = useRef<HTMLTextAreaElement>(null);
   const [otherGlyphTop, setOtherGlyphTop] = useState<number | null>(null);
   const otherWidthRef = useRef(-1);
@@ -726,12 +527,10 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(fitOther);
     };
-    // Only a new width re-wraps; the heights this fit sets come back here too.
     const watch = new ResizeObserver(() => {
       if (field.clientWidth !== otherWidthRef.current) refit();
     });
     watch.observe(field);
-    // A web font that arrives late re-wraps the words at the same width.
     let live = true;
     document.fonts?.ready.then(() => live && refit(), () => {});
     return () => {
@@ -742,20 +541,15 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     // fitOther reads only refs; the field is new when these change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readOnly, otherOn]);
-  // Picture choices: each choice's picture URL (null: none, or not shown).
   const pictures = question.choices.map((c) => (c.image ? pictureSrc(c.image.src) : null));
   const showTiles = pictureChoices
     && question.kind !== 'text'
     && pictures.some((url) => url !== null && !failedPictures.has(url));
   const recommendedLabels = question.choices.filter((c) => c.recommended).map((c) => c.label);
   const showsUrl = question.shows?.kind === 'image' ? pictureSrc(question.shows.src) : null;
-  // A `Shows:` picture that failed to load is its label, as a picture tile's is.
   const showsSrc = showsUrl !== null && !failedPictures.has(showsUrl) ? showsUrl : null;
 
-  // A `Decision: when answered` question the host may switch off, or (with
-  // `decisionScope: 'any'`) any other question once the host supplies a
-  // recording state for it. A recorded decision (`question.decision`) is
-  // never affected.
+  // A recorded decision (`question.decision`) is never affected.
   const decisionCapable = !question.decision
     && (!!question.decisionOnAnswer || (decisionScope === 'any' && decisionRecording !== undefined));
   const recordingOn = decisionRecording ?? true;
@@ -771,9 +565,6 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     .filter(Boolean)
     .join(' ') || undefined;
 
-  // A text question's recommended answer: shown above the field with the
-  // same Recommended tag a choice carries; the footer's Accept recommended
-  // fills it in. (A pick question's is a row of its own, below.)
   const suggestedLine = question.kind === 'text' && question.suggestedText && !answered && (
     <div id={suggestId} className="mt-2 text-[12.5px] text-muted-foreground" data-question-suggested="">
       <Tag tone="rec">Recommended</Tag> {inline(question.suggestedText)}
@@ -785,11 +576,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
       ref={cardRef}
       className={cx(
         'question-block my-5 min-w-0 rounded-[10px] border px-3.5 pb-2.5 pt-3',
-        // A size container: the card's own width lays out its footer (FOOT_BUTTON).
         '@container/qcard',
-        // Native radios/checkboxes follow the theme's mode. ThemeProvider marks
-        // light mode with `.light` on the root; a host without theme classes
-        // keeps the page's own color-scheme.
         '[:root[class*=theme-]:not(.light)_&]:[color-scheme:dark]',
         'bg-[color-mix(in_oklab,var(--background)_35%,var(--card))]',
         answered ? 'border-primary/45' : 'border-border/85',
@@ -810,15 +597,8 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
         <span className="ml-auto inline-flex items-center gap-1">
           {question.decision && <><Tag tone="rec"><DiamondGlyph />Decision</Tag>{' '}</>}
           {decisionCapable && (decisionOpenable ? (
-            // Two targets in one tag: the diamond switches recording, the
-            // words open the host's decision card. Siblings, never nested.
-            // Target size (WCAG 2.5.8) without changing the drawn tag: the
-            // diamond's invisible `before:` box reaches 6 px past it on every
-            // side (24 px wide, about 30 px tall), and the words, positioned
-            // and later in the tree, paint over its right-hand part, so a
-            // click on the words is always the words. The words (110 px wide)
-            // meet the spacing exception: nothing else to click within 12 px
-            // of their centre line.
+            // Two targets in one tag: the diamond switches recording, the words open the host's
+            // decision card. Siblings, never nested.
             <><span
               className="annotation-exclude select-none inline-flex h-[18px] items-stretch whitespace-nowrap rounded border border-transparent text-[10.5px] font-semibold leading-4 tracking-[0.03em] bg-primary/15 text-primary"
               style={recordingOn ? undefined : DECISION_OFF_STYLE}
@@ -843,8 +623,6 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
               data-question-decision-open=""
             >Records a decision</button></span>{' '}</>
           ) : decisionToggleable ? (
-            // Focus shows as a ring, not an outline: the dotted outline is
-            // what draws the off state.
             <><button
               type="button"
               aria-pressed={recordingOn}
@@ -936,7 +714,6 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                 rel="noopener noreferrer"
                 className="text-primary underline underline-offset-2 hover:text-primary/80"
               >
-                {/* Plain text: inline markdown here could nest an autolink in the link. */}
                 {question.decision.statement}
               </a>
             </span>
@@ -1006,7 +783,6 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                 renderText={inline}
                 labelProps={(label) => ({ onPointerDown: onRowPointerDown, onClickCapture: (event) => onRowClick(event, label) })}
                 pictureBadge={pictureBadge}
-                // Asked by the picture's own URL, loaded or not: a picture that fails keeps the set's layout.
                 pictureSize={pictureSize ? (index) => (pictures[index] ? pictureSize(pictures[index]!) : null) : undefined}
               />
             ) : (
@@ -1046,9 +822,6 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
               })
             )}
             {suggestionRow && (
-              // The agent's recommended answer that is none of its choices:
-              // drawn exactly as a choice (the same control, row and tag), so
-              // the card reads as one list of answers.
               <label
                 className={cx(
                   'flex items-start gap-2.5 rounded-[7px] px-[9px] py-1.5 transition-colors',
@@ -1075,7 +848,6 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                 </span>
               </label>
             )}
-            {/* A read-only card with no Other answer has nothing to show there (it drew a bare "+"). */}
             {(!readOnly || otherOn) && (
               <div className="flex items-center gap-2.5 rounded-[7px] px-[9px] py-[5px]">
                 <span
@@ -1086,21 +858,16 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                     question.kind === 'multi' ? 'rounded-[3px]' : 'rounded-full',
                     otherOn ? 'border-solid border-primary bg-primary text-primary-foreground' : 'border-dashed border-border text-muted-foreground',
                   )}
-                  // Several lines: the mark stays beside the first, where one line centres it.
                   style={otherGlyphTop === null ? undefined : { alignSelf: 'flex-start', marginTop: otherGlyphTop }}
                 >
                   {otherOn ? <CheckGlyph /> : '+'}
                 </span>
-                {/* One line tall, as the one-line field it replaced; it grows with its lines (wrapped or typed:
-                    Enter makes a new line, as in the note) up to a cap, then scrolls. A read-only card shows it whole. */}
                 <textarea
                   ref={otherRef}
                   rows={1}
                   value={other}
                   onChange={(e) => setOther(e.target.value)}
                   onFocus={() => {
-                    // A stored answer that reads as the row stays the row
-                    // while the reviewer types here (typing replaces it).
                     if (otherBy === null && suggestionPicked) setOtherBy('row');
                     setOtherFocused(true);
                   }}
@@ -1130,10 +897,6 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
         </p>
       )}
 
-      {/* Trade-offs (option lines, approval "inbox-question-tradeoffs"): one quiet line under Why that opens into a
-          table, one row per option with its Pros and Cons side by side (stacked in a narrow card). No Recommended
-          tag here: the option above carries it. Drawn only when a choice has Pros or Cons, which only a host that
-          reads option lines (`questionOptionLines`) parses: every other card is unchanged. */}
       {question.kind !== 'text' && question.choices.some((c) => c.pros?.length || c.cons?.length) && (
         <div className="annotation-exclude" data-pinpoint-ignore="" data-question-part="tradeoffs">
           <button
@@ -1237,8 +1000,6 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
               {skipped ? 'Unskip' : 'Skip'}
             </button>
           )}
-          {/* Plannotator's own footer (no host actions, no save bar) keeps the
-              Accept button as the one right-aligned item. */}
           {!hasHostFooter && !dirty ? (
             offerAccept && (
               <button
@@ -1290,7 +1051,6 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   );
 };
 
-/** One choice a picture tile draws (a parsed question's choice, or the Inbox wire's). */
 export interface QuestionPictureTileChoice {
   label: string;
   description?: string | null;
@@ -1300,42 +1060,26 @@ export interface QuestionPictureTileChoice {
 
 export interface QuestionPictureTilesProps {
   choices: readonly QuestionPictureTileChoice[];
-  /** The URL each choice's picture loads from, in choice order; null (no picture shown) draws its alt text. */
   urls: readonly (string | null)[];
   selected: readonly string[];
   inputType: 'radio' | 'checkbox';
-  /** The radio group's name. */
   name: string;
   readOnly?: boolean;
-  /** The tile's radio or checkbox changed (the picture and the label pick through it). */
   onPick: (label: string, checked: boolean) => void;
-  /** The separate zoom button (absent: no zoom button). Never picks. `index`: the choice's place in `choices`. */
   onZoom?: (url: string, alt: string, index: number) => void;
   onPictureError?: (url: string) => void;
-  /** The host's reason a picture is held (its image resolver's `unavailable` title). */
   heldTitle?: (src: string) => string | null;
-  /** How a label or description is drawn (the card's inline markdown). */
   renderText: (text: string) => React.ReactNode;
-  /** A host's own props on each tile's label (the card's drag guard). */
   labelProps?: (label: string) => React.LabelHTMLAttributes<HTMLLabelElement>;
-  /** A host's own props on each tile's input (decision mode answers on a click, or Enter). */
   inputProps?: (label: string) => React.InputHTMLAttributes<HTMLInputElement>;
-  /** What sits under a choice's words (default: its Recommended tag). */
   renderBadges?: (choice: QuestionPictureTileChoice, index: number) => React.ReactNode;
-  /** A small label over a tile's picture, top left (the card's `pictureBadge`); null or absent draws none. */
   pictureBadge?: (choice: { label: string; image: { alt: string; src: string } }) => string | null;
-  /** Each choice's picture size in pixels by its place in `choices`, when the host knows it before the picture loads
-   *  (the card's `pictureSize`). Asked whether or not the picture loaded, so one that fails leaves the layout as it was. */
   pictureSize?: (index: number) => QuestionPictureSize | null;
 }
 
 /**
- * Picture choices as tiles (approval "inbox-decision-mode", agent contract
- * lines): each tile is a native `<label>` holding the picture and a real radio
- * or checkbox, so the picture, the label and the keyboard pick; a separate
- * zoom button, outside the label, opens the picture and never picks. The
- * question card draws these, and so does the Inbox's decision mode (its own
- * size through `[data-question-tile*]` hooks), so the two never drift.
+ * The question card draws these, and so does the Inbox's decision mode (its own size through
+ * `[data-question-tile*]` hooks), so the two never drift.
  */
 export const QuestionPictureTiles: React.FC<QuestionPictureTilesProps> = ({
   choices,
@@ -1356,8 +1100,6 @@ export const QuestionPictureTiles: React.FC<QuestionPictureTilesProps> = ({
   pictureSize,
 }) => {
   // Known before any picture loads, so a host's layout (inbox.css) never moves once they do.
-  // A picture that fails to load keeps its recorded size and shape (the failed box draws none of it), so the set's
-  // shape, and with it the layout, stays as it was.
   const sizes = choices.map((choice, index) => (choice.image ? readQuestionPictureSize(pictureSize?.(index)) : null));
   const shapes: (QuestionPictureShape | null)[] = sizes.map((size) => (size ? questionPictureShape(size) : null));
   const pictured = choices.flatMap((choice, index) => (choice.image ? [shapes[index] ?? null] : []));
@@ -1374,7 +1116,6 @@ export const QuestionPictureTiles: React.FC<QuestionPictureTilesProps> = ({
         const checked = selected.includes(choice.label);
         const shown = urls[index] ?? null;
         const size = sizes[index];
-        // The alt text names the picture; one that only repeats the label is decorative.
         const alt = choice.image ? (choice.image.alt || choice.label) : '';
         const decorative = !!choice.image && alt.trim() === choice.label.trim();
         const host = labelProps?.(choice.label);
@@ -1402,8 +1143,6 @@ export const QuestionPictureTiles: React.FC<QuestionPictureTilesProps> = ({
               {choice.image && (
                 <span
                   className="annotation-exclude select-none block aspect-[4/3] w-full overflow-hidden border-b border-border/60 bg-muted/35"
-                  // Inline, not a utility class: the badge's position needs it, and no new class reaches the guides.show viewer's CSS.
-                  // The size rides custom properties, which draw nothing unless a host's CSS reads them.
                   style={
                     size
                       ? ({ position: 'relative', '--question-picture-ratio': `${size.width} / ${size.height}`, '--question-picture-width': `${size.width}px` } as React.CSSProperties)
@@ -1437,7 +1176,6 @@ export const QuestionPictureTiles: React.FC<QuestionPictureTilesProps> = ({
                       className="grid h-full place-items-center px-2 text-center text-xs text-muted-foreground"
                       title={held ?? undefined}
                       data-image-unavailable=""
-                      // Not held by the host: the picture failed to load.
                       data-question-picture-failed={held ? undefined : ''}
                     >
                       {alt}

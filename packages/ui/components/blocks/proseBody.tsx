@@ -1,14 +1,6 @@
 import React from 'react';
 import { InlineMarkdown } from '../InlineMarkdown';
 
-// Shared block-level renderer for alert and directive bodies. Handles
-// paragraphs, unordered lists, and ordered lists — the shapes GitHub alerts
-// and Docusaurus / VitePress directives commonly carry. More exotic content
-// (headings, tables, code fences, nested alerts) falls back to inline text;
-// add cases here when a real use case turns up.
-//
-// Paragraph lines are joined with '\n' (not ' ') so InlineMarkdown's hard
-// line-break handling still fires for `  \n` inside a callout body.
 export function renderProseBody(args: {
   body: string;
   paragraphClassName?: string;

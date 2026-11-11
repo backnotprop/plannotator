@@ -3,18 +3,8 @@ import { sliceText } from '@plannotator/core/inbox-questions';
 import { Tip } from './Tip';
 
 /**
- * A file name that is cut in the middle when it runs short, never at its
- * end: the end is what tells two files apart (the date, the version, the
- * extension), so "SPIKE-claude-code-mobile-annotations-20261012.md" reads
- * "SPIKE-claude-…-20261012.md" in a tile, not "SPIKE-claude-code-mob…".
- * The same two-part pattern code review's file rows use: the start shrinks
- * with an ellipsis, the end keeps its width. The full name is the hover
- * text, and the direction follows the name (`dir="auto"`), so an Arabic name
- * reads right to left and is cut at its own end.
- *
- * `wrap` draws the whole name, broken where it must, for places with room
- * (the download card). A cut name gets its whole name in a tooltip (Tip)
- * only while it is cut.
+ * The full name is the hover text, and the direction follows the name (`dir="auto"`), so an
+ * Arabic name reads right to left and is cut at its own end.
  */
 export function FileName({ name, className, wrap = false }: { name: string; className?: string; wrap?: boolean }) {
   useEffect(keepNamesWholeOnCopy, []);
@@ -36,10 +26,9 @@ export function FileName({ name, className, wrap = false }: { name: string; clas
       </Tip>
     );
   }
-  // The two parts are flex items, which a screen reader would read apart
-  // ("refund -policy.pdf"): they are hidden from it, and it hears the whole
-  // name from `data-name` (inbox.css draws it as a visually hidden ::after).
-  // The text content stays the name.
+  // The two parts are flex items, which a screen reader would read apart ("refund -policy.pdf"):
+  // they are hidden from it, and it hears the whole name from `data-name` (inbox.css draws it as a
+  // visually hidden ::after).
   return (
     <Tip content={name} cut>
       <span className={cls} dir="auto" data-name={name}>
@@ -57,9 +46,8 @@ export function FileName({ name, className, wrap = false }: { name: string; clas
 let copyListeners = 0;
 
 /**
- * The two parts of a cut name are flex items, so a selection's text puts a
- * line break between them: a copy that takes in a cut name gets the name
- * whole instead. Installed once while any FileName is on the page.
+ * The two parts of a cut name are flex items, so a selection's text puts a line break between
+ * them: a copy that takes in a cut name gets the name whole instead.
  */
 function keepNamesWholeOnCopy(): () => void {
   if (copyListeners++ === 0) document.addEventListener('copy', onCopy);
@@ -78,8 +66,6 @@ function onCopy(event: ClipboardEvent): void {
     const head = el.querySelector('.ib-fname-h')?.textContent ?? '';
     const tail = el.querySelector('.ib-fname-t')?.textContent ?? '';
     if (!head || !tail) continue;
-    // A selection across the cut holds the head's last character, the break, then the tail's first, however
-    // much of either part it took.
     whole = whole.split(`${head.slice(-1)}\n${tail.slice(0, 1)}`).join(`${head.slice(-1)}${tail.slice(0, 1)}`);
   }
   if (whole === text) return;
@@ -89,19 +75,15 @@ function onCopy(event: ClipboardEvent): void {
 
 /** Names this short are never cut in the middle: there is nothing to keep apart. */
 const SHORT = 16;
-/** The most of the stem kept with the extension. */
 const TAIL_STEM = 12;
 
 /**
- * The name split where a middle cut goes: `[start, end]`, the end being the
- * extension and the last part of the stem (after its last `-`, `_`, `.` or
- * space when that part is short, else its last few characters), never
- * splitting a character. `end` is empty for a short name.
+ * The name split where a middle cut goes: `[start, end]`, the end being the extension and the
+ * last part of the stem (after its last `-`, `_`.
  */
 export function splitFileName(name: string): [string, string] {
   if (name.length <= SHORT) return [name, ''];
   const dot = name.lastIndexOf('.');
-  // An extension: a dot that is not the first character, 1 to 8 letters or digits after it.
   const ext = dot > 0 && /^\.[\p{L}\p{N}]{1,8}$/u.test(name.slice(dot)) ? name.slice(dot) : '';
   const stem = ext ? name.slice(0, -ext.length) : name;
   const sep = Math.max(stem.lastIndexOf('-'), stem.lastIndexOf('_'), stem.lastIndexOf(' '), stem.lastIndexOf('.'));

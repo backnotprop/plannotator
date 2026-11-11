@@ -3,11 +3,6 @@ import type * as React from "react";
 
 import { cn } from "../../lib/utils";
 
-/**
- * StatePill — semantic status indicator (PR/issue/session state). Rounded-full pill
- * with tone-based color. Uses standard color ramps (green/red/purple) for instantly
- * legible state rather than theme accent tokens.
- */
 const statePillVariants = cva(
   "inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium",
   {

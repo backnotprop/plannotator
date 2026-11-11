@@ -13,32 +13,15 @@ import { LazyBlockBoundary } from '../LazyBlockBoundary';
 import type { DiagramReopenRequest } from './reopen';
 
 /**
- * The one diagram viewer: the canvas with its overlay, the Source pane on
- * its LEFT (stacked under it on the phone) when the host can save, the
- * parse-error strip over a dimmed last-good render. It takes the diagram
- * source and the host's comments on it, and reports a new comment through
- * `onCreateComment`; the comments rail, storage and identity are the
- * host's. Plannotator's fence blocks render through it in the document
- * (`components/DiagramBlock`) and again at full size in the popout; a host
- * with its own document store renders it wherever a diagram lives.
- */
-/**
- * The Source pane is CodeMirror, and a viewer that can never open one (every
- * fence in a Plannotator document today: no host passes `onSave`) must not
- * carry it. It loads on the first open of the pane and never before, so the
- * editor stays out of the document-read closure of a chunked host.
+ * The Source pane is CodeMirror, and a viewer that can never open one (every fence in a
+ * Plannotator document today: no host passes `onSave`) must not carry it.
  */
 const DiagramSourcePane = lazy(async () => ({ default: (await import('./DiagramSourcePane')).DiagramSourcePane }));
 
-/** The pane's box while its chunk loads: same class list, so the split it
- * opens into is already the right size and nothing jumps when it lands.
- * Never `null` here — that would collapse the row back onto the canvas. */
+/** Never `null` here — that would collapse the row back onto the canvas. */
 const PANE_CLASS = 'order-last min-h-0 shrink-0 basis-2/5 border-t border-border md:order-first md:w-80 md:basis-auto md:border-r md:border-t-0';
 
-/** A question typed in the composer, asked about the part instead of saved
- * as a comment. The anchor is the one a comment there would carry (its
- * `sourceLine` already in document lines). Resolve false (or throw) to keep
- * the draft open; anything else closes it. */
+/** A question typed in the composer, asked about the part instead of saved as a comment. */
 export type DiagramAskAI = (
   question: string,
   anchor: DiagramAnchor,
@@ -47,81 +30,45 @@ export type DiagramAskAI = (
 
 /** A part chosen for a comment the host composes (`onHostDraft`). */
 export interface DiagramHostDraft {
-  /** The anchor a comment there carries (its `sourceLine` in document lines). */
   readonly anchor: DiagramAnchor;
-  /** Drop the draft: the part's ring goes. A draft already replaced ignores it. */
   readonly cancel: () => void;
 }
 
 export interface DiagramViewerProps {
   readonly kind: DiagramKind;
-  /** The diagram text. With `onSave` this is the saved baseline the pane's
-   * draft starts from; without it, what the canvas renders. */
   readonly source: string;
   readonly theme: DiagramTheme;
   readonly comments: readonly DiagramComment[];
-  /** A comment composed on a part. Absent: clicks open nothing. */
   readonly onCreateComment?: DiagramCreateComment;
-  /** Opt-in host capability: the composer handed to the host. A click on a
-   * part reports it here (null when the draft closes) and no composer is
-   * drawn; the host saves the comment and passes it back in `comments`.
-   * Absent: unchanged. */
   readonly onHostDraft?: (draft: DiagramHostDraft | null) => void;
-  /** Ask AI from the composer. Absent: the composer offers no Ask AI. */
   readonly onAskAI?: DiagramAskAI;
-  /** Save the pane's text. Absent: there is no Source pane. */
   readonly onSave?: (source: string) => Promise<SaveResult>;
-  /** With `onSave`: show the pane read-only (no edit access). */
   readonly readOnlySource?: boolean;
-  /** Whether the Source pane is open (the host owns the toggle). */
   readonly sourceOpen?: boolean;
   readonly selectedCommentId?: string | null;
   readonly onSelectComment?: (id: string | null) => void;
-  /** The comments whose part is gone from the current render, once per
-   * membership change, after every render. */
   readonly onUnanchoredChange?: (ids: ReadonlySet<string>) => void;
-  /** Every comment's verdict (true: its part is in this render), whenever
-   * a verdict or the comment list changes. */
   readonly onResolutionChange?: (resolution: ReadonlyMap<string, boolean>) => void;
-  /** Escape with no composer open and nothing selected: a popout closes. */
   readonly onDismiss?: () => void;
-  /** A stable prefix for the rendered element ids; two viewers over one
-   * document need two. */
   readonly renderId?: string;
-  /** Lines to add so a comment's `sourceLine` names DOCUMENT lines: 0 when
-   * the document is the diagram, the fence's opening line for a fence. */
   readonly sourceLineOffset?: number;
-  /** Shift-click targets one comment may also cover. Default 0: a comment
-   * covers one part. */
   readonly maxAdditionalTargets?: number;
-  /** Commenting is off, and this is why (shown in place of the composer). */
   readonly commentingDisabledReason?: string;
-  /** Bumped by the host's Retry after a failed engine load. */
   readonly retryToken?: number;
-  /** Every render state change (the host sizes itself, shows its own
-   * pending or error chrome). */
+  /** Every render state change (the host sizes itself, shows its own pending or error chrome). */
   readonly onRenderState?: (state: DiagramRenderState) => void;
-  /** What to show while there is no svg yet (the first render pending, or
-   * the first render failed). Default: a quiet status line. */
   readonly renderFallback?: (state: DiagramRenderState) => ReactNode;
-  /** Take the keyboard on mount (a popout). */
   readonly autoFocus?: boolean;
   readonly className?: string;
-  /** Classes for the canvas host. The canvas lets a finger scroll the page
-   * past it (`touch-action: pan-y`); a viewer that owns the whole screen
-   * passes `touch-none`. */
+  /**
+   * Classes for the canvas host. The canvas lets a finger scroll the page past it
+   * (`touch-action: pan-y`); a viewer that owns the whole screen passes `touch-none`.
+   */
   readonly canvasClassName?: string;
-  /** Opt-in: a comment being written that the host kept, put back (see
-   * `DiagramReopenRequest`): the composer opens at its part once the diagram
-   * is drawn, holding its words. Absent: nothing changes. */
   readonly reopenComment?: DiagramReopenRequest;
-  /** Opt-in: told the part the composer is on as it opens (and as it moves),
-   * null as it closes, so a host can keep the words (read from the box) if
-   * the viewer is taken away. Reads only. Absent: nothing changes. */
   readonly onComposerAnchor?: (anchor: DiagramAnchor | null) => void;
 }
 
-/** A part's identity, as the composer's key names it. */
 const diagramPartKey = (target: DiagramTarget): string => `${target.kind}:${target.id ?? ''}:${target.from ?? ''}:${target.to ?? ''}`;
 
 export function DiagramViewer({
@@ -190,9 +137,6 @@ export function DiagramViewer({
     familyOf,
   });
 
-  // A comment put back by the host: once the render is in, the composer opens
-  // at its part holding its words (each request once), or the host hears the
-  // part is gone.
   const [reopenedText, setReopenedText] = useState<{ part: string; text: string } | null>(null);
   const reopenDoneRef = useRef<DiagramReopenRequest | null>(null);
   const openAt = commentsState.openAt;
@@ -203,7 +147,6 @@ export function DiagramViewer({
     if (openAt(reopenComment.anchor)) setReopenedText({ part: diagramPartKey(reopenComment.anchor), text: reopenComment.text });
     else reopenComment.onMissing?.();
   }, [openAt, reopenComment, render.renderId, svgRoot]);
-  // The words go with the composer they were put back in; a composer opened afterwards starts empty.
   const hadComposerRef = useRef(false);
   useEffect(() => {
     const open = commentsState.composer !== null;
@@ -211,8 +154,6 @@ export function DiagramViewer({
     hadComposerRef.current = open;
   }, [commentsState.composer]);
 
-  // The selected comment's source line for the pane's gutter mark. The
-  // anchor names DOCUMENT lines; the pane shows the diagram text.
   const markedLines = useMemo(() => {
     if (selectedCommentId === null) return null;
     const line = comments.find((entry) => entry.id === selectedCommentId)?.anchor.sourceLine;
@@ -233,21 +174,15 @@ export function DiagramViewer({
     return 'pass';
   }, [commentsState, onDismiss, onSelectComment, selectedCommentId]);
 
-  // Closing the pane only closes an open composer so the layout shift does
-  // not strand it; the draft survives a reopen.
   const cancelComposer = commentsState.cancel;
   useEffect(() => {
     if (!sourceOpen) cancelComposer();
   }, [cancelComposer, sourceOpen]);
 
-  // A host that takes commenting away (no handler, no reason) closes an open
-  // composer: left open it became a Comment form nothing could save.
   useEffect(() => {
     if (!canCreate) cancelComposer();
   }, [cancelComposer, canCreate]);
 
-  // The composer handed to the host: the draft's part goes out, and the
-  // host's cancel closes it only while it is still the open one.
   const onHostDraftRef = useRef(onHostDraft);
   onHostDraftRef.current = onHostDraft;
   const openComposer = commentsState.composer;
@@ -274,9 +209,6 @@ export function DiagramViewer({
     });
   }, [cancelComposer, hostComposes, openComposer]);
 
-  // Ask AI asks about the part the draft is on; the host's handler decides
-  // whether the question was taken, and a taken question closes the draft
-  // exactly as the markdown composer closes.
   const composerDraft = commentsState.composer;
   const askFromComposer = useMemo(() => {
     if (onAskAI === undefined || composerDraft === null || onCreateComment === undefined) return undefined;
@@ -328,10 +260,6 @@ export function DiagramViewer({
     // `annotation-exclude`: the document's text highlighter never enters a
     // diagram, so a text restore can never wrap a <mark> inside the svg.
     <div data-diagram-viewer="" className={cn('annotation-exclude flex h-full min-h-0 w-full flex-col md:flex-row', className)}>
-      {/* The pane comes FIRST in the row (owner ruling: the source sits on
-          the left of the diagram while editing). On the phone the row is a
-          column and the pane stays stacked UNDER the canvas, which
-          `order-last` keeps while `md:order-first` puts it left from `md`. */}
       {hasPane && sourceOpen && (
         <LazyBlockBoundary
           fallback={(notice) => (
@@ -390,9 +318,6 @@ export function DiagramViewer({
                 </div>
               </div>
             )}
-            {/* The chip earns its place only while the pane is closed (the
-                draft survives a close); with the pane open its header carries
-                the one "Draft · unsaved". */}
             {editable && draft.dirty && !sourceOpen && (
               <span
                 data-diagram-preview-state=""

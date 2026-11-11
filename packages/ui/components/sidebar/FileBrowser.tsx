@@ -1,10 +1,3 @@
-/**
- * FileBrowser — markdown/text file tree for the sidebar
- *
- * Displays collapsible trees of markdown/text files from user-configured directories.
- * Clicking a file opens it in the main viewer for annotation.
- */
-
 import React from "react";
 import { Search, X } from "lucide-react";
 import type { VaultNode } from "../../types";
@@ -28,7 +21,6 @@ interface FileBrowserProps {
   annotationCounts?: Map<string, number>;
   highlightedFiles?: Set<string>;
   editStatuses?: Map<string, FileEditStatus>;
-  /** Prevent competing destination changes while a document is activating. */
   selectionPending?: boolean;
 }
 
@@ -46,9 +38,7 @@ interface AggregateWorkspaceChange {
   files: number;
 }
 
-// Display-name stripping only — deliberately narrower than the annotatable
-// set. Config files (config.yaml vs config.json) keep their extensions so
-// same-named siblings stay distinguishable in the tree.
+// Display-name stripping only — deliberately narrower than the annotatable set.
 const FILE_EXTENSION_RE = /\.(mdx?|txt|html?)$/i;
 
 function normalizeFilterText(value: string): string {
@@ -172,7 +162,6 @@ function normalizeWorkspaceStatus(
   };
 }
 
-/** Recursively sum annotation counts for all descendant files of a folder node */
 function getAggregateCount(
   node: VaultNode,
   dirPath: string,
@@ -520,7 +509,6 @@ export const FileBrowser: React.FC<FileBrowserProps> = ({
     );
   }
 
-  // Summary header
   const totalCount = annotationCounts ? Array.from(annotationCounts.values()).reduce((s, c) => s + c, 0) : 0;
   const fileCount = annotationCounts?.size ?? 0;
   const workspaceTotals = dirs.reduce(

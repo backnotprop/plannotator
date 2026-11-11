@@ -1,13 +1,4 @@
-/**
- * The quiet skills line under a person's message (approval
- * "inbox-skills-line", option B, 2026-10-29): the box icon, then the names of
- * the skills the reply used as a comma list. Nothing to open: no label, no
- * size, no Show. The block the window pasted at the end of the message is
- * split off by Thread.tsx's MessageBody; the agent's text is shown whole.
- * The line sits in the message body, above the Delivered line, so it is in
- * the same place whatever the state (sent, queued, answered). A long list
- * wraps between names, never inside one.
- */
+/** A long list wraps between names, never inside one. */
 import type { InboxSkillsSplit } from '@plannotator/core/skill-reference-block';
 
 export function SkillsLine({ split }: { split: InboxSkillsSplit }) {
@@ -28,7 +19,6 @@ export function SkillsLine({ split }: { split: InboxSkillsSplit }) {
   );
 }
 
-/** The cube Plannotator's skill picker shows beside each skill. */
 function SkillCube() {
   return (
     <svg className="ib-skills-i" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

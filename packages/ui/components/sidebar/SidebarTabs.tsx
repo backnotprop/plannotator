@@ -1,10 +1,3 @@
-/**
- * SidebarTabs — Collapsed tab flags
- *
- * When the sidebar is closed, small vertical tabs protrude from the left edge.
- * Clicking a tab opens the sidebar in that mode.
- */
-
 import React from "react";
 import type { SidebarTab } from "../../hooks/useSidebar";
 import { MessagesIcon } from "../icons/MessagesIcon";
@@ -67,7 +60,6 @@ export const SidebarTabs: React.FC<SidebarTabsProps> = ({
         </button>
       )}
 
-      {/* TOC tab */}
       <button
         onClick={() => onToggleTab("toc")}
         className="sidebar-tab-flag group flex items-center justify-center w-7 h-9 rounded-r-md border border-l-0 border-border/50 bg-card/80 backdrop-blur-sm text-muted-foreground hover:text-foreground hover:bg-card transition-colors"
@@ -88,7 +80,6 @@ export const SidebarTabs: React.FC<SidebarTabsProps> = ({
         </svg>
       </button>
 
-      {/* Versions tab — only shown when multiple versions exist */}
       {showVersionsTab && (
         <button
           onClick={() => onToggleTab("versions")}
@@ -108,7 +99,6 @@ export const SidebarTabs: React.FC<SidebarTabsProps> = ({
               d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
             />
           </svg>
-          {/* Availability indicator dot */}
           {hasDiff && (
             <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-primary" />
           )}
@@ -128,7 +118,6 @@ export const SidebarTabs: React.FC<SidebarTabsProps> = ({
         </button>
       )}
 
-      {/* Files tab */}
       {showFilesTab && (
         <button
           onClick={() => onToggleTab("files")}

@@ -3,32 +3,29 @@ import type { ScreenRect } from '../../utils/diagram-projection';
 import { DOUBLE_TAP_ZOOM } from '../imageZoom';
 
 /**
- * The canvas viewport: a translate plus a scale on the wrapper around the
- * rendered svg (zoom, pan and fit are the primary interaction). Every
- * constant below is a design constant with its reason, never a cap on what
- * a person may do with the diagram.
+ * Every constant below is a design constant with its reason, never a cap on what a person may do
+ * with the diagram.
  */
 
-/** Zoom range. Below 0.1 a 1000px diagram is a 100px smudge and the rings
- * collapse onto each other; above 8 a node label is a screenful. The
- * range keeps the render legible and the transform finite. */
 export const ZOOM_MIN = 0.1;
 export const ZOOM_MAX = 8;
-/** One key press or one corner-control click. 1.25 needs four presses to
- * double, which is fine-grained enough to land on a node. */
+/**
+ * One key press or one corner-control click. 1.25 needs four presses to double, which is
+ * fine-grained enough to land on a node.
+ */
 export const ZOOM_STEP = 1.25;
-/** Wheel zoom: factor = exp(-deltaY * sensitivity). One 100px notch is
- * about 1.22x, close to ZOOM_STEP so keys and wheel feel the same. */
 export const WHEEL_ZOOM_SENSITIVITY = 0.002;
-/** The distance a pointer must travel before a press becomes a pan. Under
- * it, releasing is a click on the part beneath (the pinpoint). */
+/** The distance a pointer must travel before a press becomes a pan. */
 export const DRAG_THRESHOLD_PX = 4;
-/** The same threshold for a finger, which wobbles more than a mouse: a tap
- * that drifts a few pixels must still be a tap. */
+/**
+ * The same threshold for a finger, which wobbles more than a mouse: a tap that drifts a few
+ * pixels must still be a tap.
+ */
 export const TOUCH_DRAG_THRESHOLD_PX = 10;
-/** Fit leaves this much air on every side of the host so the outermost
- * node and its ring never touch the edge; the badge (a 20px disc at the
- * node's top-right corner) stays inside it. */
+/**
+ * Fit leaves this much air on every side of the host so the outermost node and its ring never
+ * touch the edge.
+ */
 export const FIT_PADDING_PX = 24;
 
 export interface Viewport {
@@ -62,10 +59,6 @@ export function useDiagramViewport(
   const [viewport, setViewport] = useState<Viewport>(IDENTITY);
   const contentRef = useRef(content);
   contentRef.current = content;
-  // Whether the person zoomed or panned since the last fit. While true, a
-  // new render (the draft preview) or a host resize (the Source pane
-  // opening, the window) keeps their view; a fit (the key, the control, a
-  // first arrival) clears it.
   const adjustedRef = useRef(false);
 
   const fit = useCallback(() => {
@@ -77,7 +70,6 @@ export function useDiagramViewport(
     }
     const rect = host.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) {
-      // No layout (a hidden tab, happy-dom): identity until a size arrives.
       setViewport(IDENTITY);
       return;
     }
@@ -92,10 +84,6 @@ export function useDiagramViewport(
     });
   }, [hostRef]);
 
-  // Fit on arrival and on every new content size (a first render, a
-  // re-render with a different bounding box) and on host resize (the
-  // Source pane opening, the window), unless the person has zoomed or
-  // panned since the last fit: then their view stands until they fit again.
   useEffect(() => {
     if (!adjustedRef.current) fit();
     const host = hostRef.current;
@@ -115,8 +103,6 @@ export function useDiagramViewport(
         const scale = clampScale(current.scale * factor);
         if (scale === current.scale) return current;
         const rect = host?.getBoundingClientRect();
-        // Zoom about the pointer when given, else the host's center, so
-        // the part under the cursor stays under the cursor.
         const px = clientX !== undefined && rect ? clientX - rect.left : (rect?.width ?? 0) / 2;
         const py = clientY !== undefined && rect ? clientY - rect.top : (rect?.height ?? 0) / 2;
         const ratio = scale / current.scale;
@@ -130,8 +116,6 @@ export function useDiagramViewport(
     [hostRef],
   );
 
-  // A double tap: from Fit it zooms in about the finger (the image viewer's
-  // step, twice the Fit scale); from any zoom or pan it goes back to Fit.
   const toggleZoom = useCallback(
     (clientX: number, clientY: number) => {
       if (adjustedRef.current) fit();

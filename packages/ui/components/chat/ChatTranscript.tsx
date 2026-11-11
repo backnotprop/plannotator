@@ -6,12 +6,10 @@ import { cn } from '../../lib/utils';
 import { chatTextRenderer } from './chatMarkdown';
 import { FOCUS_RING } from './chatRecipes';
 
-/** The status of the turn in progress. */
 export type ChatStatus = 'submitted' | 'streaming' | 'ready' | 'error';
 
 export type ChatMessageRole = 'user' | 'assistant' | 'system';
 
-/** Any part of a message. The transcript draws text; `renderPart` draws the rest. */
 export interface ChatMessagePart {
   readonly type: string;
 }
@@ -33,9 +31,8 @@ function isTextPart(part: ChatMessagePart): part is ChatTextPart {
 }
 
 /**
- * Clip a still-streaming text at its last completed sentence or paragraph, so
- * under reduced motion whole sentences append and never single words. Nothing
- * paints before the first boundary; the finished turn renders in full.
+ * Clip a still-streaming text at its last completed sentence or paragraph, so under reduced
+ * motion whole sentences append and never single words.
  */
 export function clipAtSentenceBoundary(text: string): string {
   let cut = 0;
@@ -46,11 +43,8 @@ export function clipAtSentenceBoundary(text: string): string {
 }
 
 /**
- * Has this assistant turn painted anything yet? A `step-start` part draws
- * nothing and a text part is empty until its first delta, so "the message has
- * parts" is not "the person can see an answer". Under reduced motion a text part
- * still streaming paints nothing before its first sentence ends. Any other part
- * counts the moment it exists.
+ * Has this assistant turn painted anything yet? Under reduced motion a text part still streaming
+ * paints nothing before its first sentence ends.
  */
 export function chatTurnHasOutput(message: ChatMessage, reducedMotion = false): boolean {
   return message.parts.some((part) => {
@@ -73,16 +67,14 @@ const BODY_PROSE = cn(
   '[&_h1]:mb-1 [&_h1]:text-base [&_h1]:font-semibold [&_h2]:mb-1 [&_h2]:text-sm [&_h2]:font-semibold',
 );
 
-/** False once the turn around a text has ended. A part's own `state` cannot say
- * so, because a stopped or failed turn can leave it `streaming`, and the person
- * must then see what arrived, in full. */
 const TurnLiveContext = createContext(true);
 
-/** The transcript's `richMarkdown`, so a host's own `ChatMarkdown` in `renderPart`
- * draws what the transcript's would, without saying so a second time. */
+/**
+ * The transcript's `richMarkdown`, so a host's own `ChatMarkdown` in `renderPart` draws what the
+ * transcript's would, without saying so a second time.
+ */
 const RichMarkdownContext = createContext(false);
 
-/** The transcript's `keepUserBlankLines`, for the same reason. */
 const KeepUserBlankLinesContext = createContext(false);
 
 /** One text part as sanitized markdown, memoized on its text. */
@@ -99,30 +91,15 @@ export const ChatMarkdown = memo(function ChatMarkdown({
   rootRef,
 }: {
   text: string;
-  /** Still receiving deltas: under reduced motion the paint holds at the last
-   * completed sentence. */
+  /** Still receiving deltas: under reduced motion the paint holds at the last completed sentence. */
   streaming?: boolean;
-  /** A person's own message: HTML they typed stays literal text. */
   literalHtml?: boolean;
-  /** Draw images, strikethrough, task checkboxes, link titles and list start
-   * numbers. Images load remote addresses from this text, so it is off unless a
-   * host turns it on. Absent: what `ChatTranscript` was told, or off. */
   richMarkdown?: boolean;
-  /** With `literalHtml`: draw the text as typed. Each line break stays a line
-   * break, and a paragraph after 2 or more blank lines keeps them (up to 10).
-   * No effect on an agent's text. Absent: what `ChatTranscript`'s
-   * `keepUserBlankLines` says, or off. */
   keepBlankLines?: boolean;
-  /** Where this text sits, as scalars so `memo` short-circuits. A host reads
-   * them back off the element to anchor a selection. */
   messageId?: string;
   role?: ChatMessageRole;
   partIndex?: number;
-  /** Written as `data-annotatable="true"` or `"false"`, for a host's selection
-   * work. Message text cannot write this attribute itself. */
   annotatable?: boolean;
-  /** The part's root, for a host painting into its DOM. Keep it stable. The
-   * text repaints when it changes, so repaint after that. */
   rootRef?: React.Ref<HTMLDivElement>;
 }) {
   const reducedMotion = usePrefersReducedMotion();
@@ -134,8 +111,6 @@ export const ChatMarkdown = memo(function ChatMarkdown({
   const keep = literalHtml && (keepBlankLines ?? transcriptKeep);
   const render = useMemo(() => chatTextRenderer(literalHtml, rich, keep), [literalHtml, rich, keep]);
   const html = useMemo(() => render(shown, live), [render, shown, live]);
-  // One `{__html}` object per html string: React re-sets innerHTML whenever
-  // that prop's identity changes, which would collapse a live selection.
   const inner = useMemo(() => ({ __html: html }), [html]);
   return (
     <div
@@ -186,7 +161,6 @@ export interface ChatPartContext<Part extends ChatMessagePart = ChatMessagePart>
   readonly index: number;
 }
 
-/** One message: its name row, then its parts. */
 export function ChatMessageView<Part extends ChatMessagePart = ChatMessagePart>({
   message,
   agentName,
@@ -205,24 +179,15 @@ export function ChatMessageView<Part extends ChatMessagePart = ChatMessagePart>(
   message: ChatMessage<Part>;
   agentName: string;
   agentMark?: React.ReactNode;
-  /** After the name on an agent's turn, before the Stopped label. */
   agentBadge?: React.ReactNode;
   userName?: string;
   userMark?: React.ReactNode;
-  /** This turn's run was cancelled: partial text kept, labelled. */
   stopped?: boolean;
   stoppedLabel?: string;
-  /** Indent the parts under the name, past a mark. */
   indentContent?: boolean;
-  /** Draw a part. `undefined` falls through: text as markdown, anything else as
-   * nothing. `null` draws nothing. */
   renderPart?: (part: Part, context: ChatPartContext<Part>) => React.ReactNode | undefined;
-  /** Under the parts. */
   footer?: React.ReactNode;
-  /** See `ChatMarkdown`. Absent: what `ChatTranscript` was told, or off. */
   richMarkdown?: boolean;
-  /** `ChatMarkdown`'s `keepBlankLines` for the person's text parts. Absent:
-   * what `ChatTranscript` was told, or off. */
   keepUserBlankLines?: boolean;
 }) {
   const isUser = message.role === 'user';
@@ -265,65 +230,35 @@ export function ChatMessageView<Part extends ChatMessagePart = ChatMessagePart>(
 }
 
 export interface ChatTranscriptProps<Part extends ChatMessagePart = ChatMessagePart> {
-  /** The conversation, in the order to show it. The host owns its source. */
   readonly messages: readonly ChatMessage<Part>[];
   readonly status: ChatStatus;
-  /** The name on the agent's turns. */
   readonly agentName: string;
-  /** The face on the agent's turns. */
   readonly agentMark?: React.ReactNode;
-  /** After the name on the agent's turns, before the Stopped label. */
   readonly agentBadge?: React.ReactNode;
   readonly userName?: string;
-  /** The face on the person's turns. */
   readonly userMark?: React.ReactNode;
-  /** Shown while there are no messages. */
   readonly empty?: React.ReactNode;
-  /** One quiet status line at the end. */
   readonly statusLine?: string | null;
   /** The pane's accessible name. */
   readonly label?: string;
-  /** With tabs in the header: this pane as the matching tabpanel. */
   readonly panel?: { readonly id: string; readonly labelledBy: string };
-  /** Ids of the turns the person stopped. */
   readonly stopped?: ReadonlySet<string>;
   readonly stoppedLabel?: string;
-  /** Indent parts under the name, past a mark. */
   readonly indentContent?: boolean;
-  /** The line held while the reply has no parts yet. `false` hides it, for a
-   * host that says so in `statusLine`. */
   readonly pending?: React.ReactNode | false;
-  /** Draw a part. `undefined` falls through to the transcript's own drawing;
-   * `null` draws nothing. To paint into a text part, return a `ChatMarkdown` of
-   * your own, with the same props the transcript gives its own. */
   readonly renderPart?: (part: Part, context: ChatPartContext<Part>) => React.ReactNode | undefined;
-  /** Draw a whole row. `undefined` falls through; `null` draws nothing. */
   readonly renderMessage?: (message: ChatMessage<Part>, index: number) => React.ReactNode | undefined;
-  /** Under a message's parts. */
   readonly messageFooter?: (message: ChatMessage<Part>) => React.ReactNode;
-  /** The host's handle on the scroll pane, for its own selection work. */
   readonly scrollRef?: React.RefObject<HTMLDivElement | null>;
-  /** Positioned in the pane's scroll space, so it rides with the text. */
   readonly overlay?: React.ReactNode;
-  /** Draw images, strikethrough, task checkboxes, link titles and list start
-   * numbers in text parts, a host's own `ChatMarkdown` included. Images load
-   * remote addresses from model text, so it is off unless a host turns it on. */
   readonly richMarkdown?: boolean;
-  /** Draw the person's messages as typed, as the Inbox draws a person's reply:
-   * each line break stays a line break, and a paragraph after 2 or more blank
-   * lines keeps them (up to 10) instead of one paragraph gap. A host's own
-   * `ChatMarkdown` with `literalHtml` follows it too. The agent's text is not
-   * affected. Off: the person's text renders as before. */
   readonly keepUserBlankLines?: boolean;
 }
 
 /**
- * Which message can still be arriving, or -1 when no turn runs. It is usually the
- * last, but a person can send while an answer streams, and then that answer sits
- * above their message. A part's `state` alone cannot say so, because a stopped
- * turn can leave it `streaming`, so this goes by what the host knows: `submitted`
- * starts a new turn, `streaming` goes on with the one under way, and `stopped`
- * names a turn that is over.
+ * A part's `state` alone cannot say so, because a stopped turn can leave it `streaming`, so this
+ * goes by what the host knows: `submitted` starts a new turn, `streaming` goes on with the one
+ * under way, and `stopped` names a turn that is over.
  */
 function arrivingIndex<Part extends ChatMessagePart>(
   messages: readonly ChatMessage<Part>[],
@@ -343,8 +278,6 @@ function arrivingIndex<Part extends ChatMessagePart>(
   return unfinished ? answerAt : last;
 }
 
-/** The scroll pane and the message list. The host passes what it reads: the
- * messages and the status. */
 export function ChatTranscript<Part extends ChatMessagePart = ChatMessagePart>({
   messages,
   status,
@@ -369,9 +302,6 @@ export function ChatTranscript<Part extends ChatMessagePart = ChatMessagePart>({
   richMarkdown = false,
   keepUserBlankLines = false,
 }: ChatTranscriptProps<Part>) {
-  // `submitted` is set the moment a message is sent, and a stream's start can
-  // push an assistant message with no parts without changing the status. The
-  // whole blank gap is "a run is active and the answer shows nothing yet".
   const running = status === 'submitted' || status === 'streaming';
   const reducedMotion = usePrefersReducedMotion();
   const arrivingAt = arrivingIndex(messages, status, stopped);
@@ -382,8 +312,6 @@ export function ChatTranscript<Part extends ChatMessagePart = ChatMessagePart>({
     chatTurnHasOutput(arriving, reducedMotion && running);
   const pending = running && !answerStarted && pendingLine !== false;
 
-  // Follow the output: stick to the live edge, released by scrolling away,
-  // re-armed at the edge.
   const ownRef = useRef<HTMLDivElement | null>(null);
   const paneRef = scrollRef ?? ownRef;
   const atBottomRef = useRef(true);
@@ -391,7 +319,6 @@ export function ChatTranscript<Part extends ChatMessagePart = ChatMessagePart>({
     const node = paneRef.current;
     if (node !== null && atBottomRef.current) node.scrollTop = node.scrollHeight;
   }, [messages, statusLine, pending, paneRef]);
-  // The pane also follows when its own box shrinks (a growing composer).
   useEffect(() => {
     const node = paneRef.current;
     if (node === null || typeof ResizeObserver !== 'function') return;
@@ -402,17 +329,13 @@ export function ChatTranscript<Part extends ChatMessagePart = ChatMessagePart>({
     return () => observer.disconnect();
   }, [paneRef]);
 
-  // An image grows the text with no change to `messages`, and the observer above
-  // watches the pane's box, not what is in it. `load` does not bubble, so this
-  // takes it on the way down. Only with `richMarkdown`: otherwise no image in text
-  // can load, and a host's own image must not move the pane.
+  // Only with `richMarkdown`: otherwise no image in text can load, and a host's own image must not
+  // move the pane.
   const followImage = () => {
     const node = paneRef.current;
     if (node !== null && atBottomRef.current) node.scrollTop = node.scrollHeight;
   };
 
-  // An assistant turn that has painted nothing yet would be a bare name row,
-  // so it is dropped and the pending turn stands in its place.
   const drawn = (message: ChatMessage<Part>, live: boolean): boolean =>
     message.role === 'user' ||
     (message.role === 'assistant' && chatTurnHasOutput(message, reducedMotion && live));

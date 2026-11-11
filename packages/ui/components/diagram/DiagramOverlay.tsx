@@ -5,16 +5,8 @@ import { projectElement, type ScreenRect } from '../../utils/diagram-projection'
 import type { DiagramCanvasHandle } from './DiagramCanvas';
 import type { DiagramComposerDraft, DiagramHover, ResolvedDiagramComment } from './useDiagramComments';
 
-/**
- * Rings, numbered badges, the hover chip and the composer's anchor point,
- * projected from each part's `getBBox()` through `getScreenCTM()`. The
- * layer is a sibling of the transformed wrapper, so a ring is the same 2px
- * at every zoom. Reprojection is one requestAnimationFrame pass per change
- * (viewport, host resize, a new render, a new comment list): a design
- * constant, not a limit.
- */
+/** The layer is a sibling of the transformed wrapper, so a ring is the same 2px at every zoom. */
 
-/** Ring inset from the part's box, in overlay pixels. */
 const RING_PAD_PX = 3;
 
 interface Projected {
@@ -55,7 +47,6 @@ export function DiagramOverlay({
   composer: DiagramComposerDraft | null;
   selectedCommentId: string | null;
   onSelectComment: ((id: string | null) => void) | undefined;
-  /** The composer, given the primary ring's rectangle to sit beside. */
   renderComposer: (anchorRect: ScreenRect) => React.ReactNode;
 }) {
   const [projected, setProjected] = useState<readonly Projected[]>([]);
@@ -67,8 +58,6 @@ export function DiagramOverlay({
   const frameRef = useRef<number | null>(null);
   const { viewport, hostRef, panIntoView } = handle;
 
-  // One projection pass per change, after the wrapper's transform has
-  // been written to the DOM (layout effect), on the next frame.
   useLayoutEffect(() => {
     const run = () => {
       frameRef.current = null;
@@ -125,8 +114,6 @@ export function DiagramOverlay({
     };
   }, [composer, hostRef, hover, resolved, viewport]);
 
-  // Selecting a comment in the panel pans its part into view; the ring
-  // pulses through the selected class below.
   const selectedRect = projected.find((entry) => entry.id === selectedCommentId)?.rect;
   const pannedForRef = useRef<string | null>(null);
   useEffect(() => {
@@ -165,8 +152,6 @@ export function DiagramOverlay({
             data-diagram-badge={entry.id}
             className={cn(
               'pointer-events-auto absolute flex size-5 -translate-y-1/2 items-center justify-center rounded-full border font-mono text-[10px] font-medium tabular-nums',
-              // A part's badge rides its top-right corner; the whole
-              // diagram's sits top-left, clear of the parts' badges.
               entry.whole ? '-translate-x-1/2' : 'translate-x-1/2',
               entry.resolved
                 ? 'border-border bg-muted text-muted-foreground'

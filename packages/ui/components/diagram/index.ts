@@ -1,10 +1,6 @@
 /**
- * The diagram engine's host surface (0.41.0): the one viewer over the
- * renderer slot, its canvas, overlay, composer and Source pane, and the
- * hooks and types a host wires them with. The renderer slot itself, the
- * runtime slots and the anchor codecs live under `utils/` (`diagram-render`,
- * `graphviz`, `mermaid`, `diagram-anchor`, `diagram-anchor-graphviz`,
- * `diagram-projection`).
+ * The renderer slot itself, the runtime slots and the anchor codecs live under `utils/`
+ * (`diagram-render`, `graphviz`, `mermaid`, `diagram-anchor`.
  */
 export { DiagramViewer, type DiagramAskAI, type DiagramHostDraft, type DiagramViewerProps } from './DiagramViewer';
 export { DiagramPopout } from './DiagramPopout';

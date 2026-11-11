@@ -4,10 +4,6 @@ import type * as React from "react";
 
 import { cn } from "../../lib/utils";
 
-/**
- * DropdownMenu — Base UI Menu-backed primitive (shadcn-style). Replaces the plan app's
- * hand-rolled Approve dropdown / label picker / header menus. Icons via lucide-react.
- */
 function DropdownMenu({ ...props }: MenuPrimitive.Root.Props) {
   return <MenuPrimitive.Root {...props} />;
 }
