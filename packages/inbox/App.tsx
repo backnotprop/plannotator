@@ -7233,6 +7233,10 @@ function Inbox() {
             })()}
             machine={machines.linked.find((m) => m.id === machineOf(thread.thread_id)) ?? null}
             agentContext={threadAgentContext}
+            // A session's name in the thread's header filters the list to that agent, as the sidebar's agent does,
+            // and keeps this thread on screen (the person is reading it); a second click shows everything again.
+            agentFilter={route.page === 'inbox' ? (route.agent ?? null) : null}
+            onAgentFilter={(agentId) => leave({ page: 'inbox', project: null, machine: null, agent: agentId, thread: route.page === 'inbox' ? route.thread : null })}
             // A Delete refused by a machine too old to take one: the error line's Update opens that machine's update dialog.
             onMachineUpdate={pageOffersUpdates(settings) ? (id) => setMachineUpdateOpen({ id, snooze: false }) : undefined}
             outbox={threadOutbox(outbox, thread)}

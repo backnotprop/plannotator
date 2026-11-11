@@ -5773,6 +5773,12 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 .ib-ss-none { display: none; }
 .ib-ss-txt { display: inline-flex; align-items: baseline; gap: 7px; min-width: 0; font-size: var(--ib-fs-13, 13px); }
 .ib-ss-nm { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--foreground); font-weight: 500; }
+/* A listed session's name filters the list to its agent (as the sidebar's agent): the words alone, underlined on a
+   hover, the accent while its filter is on. */
+.ib-ss-nmb { display: inline-flex; min-width: 0; padding: 0; border: 0; border-radius: 4px; background: none; color: inherit; font: inherit; cursor: pointer; }
+@media (hover: hover) { .ib-ss-nmb:hover .ib-ss-nm { text-decoration: underline; text-decoration-color: color-mix(in oklch, currentColor 35%, transparent); text-underline-offset: 3px; } }
+.ib-ss-nmb[aria-pressed="true"] .ib-ss-nm { color: var(--primary); }
+.pn-inbox .ib-ss-nmb:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .ib-ss-st { white-space: nowrap; color: var(--muted-foreground); }
 .ib-ss-item[data-state="waiting"] .ib-ss-st { color: var(--primary); font-weight: 500; }
 .ib-ss-item[data-state="ended"] .ib-ss-nm { color: var(--muted-foreground); font-weight: 450; }

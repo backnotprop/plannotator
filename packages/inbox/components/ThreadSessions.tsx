@@ -16,7 +16,8 @@ import { Tip } from './Tip';
  * are one Claude mark and "3 sessions", never three identical marks; opened, a mark starts each run of sessions that
  * look alike. Nothing here picks or saves a face.
  *
- * The names come from `threadSessions` (agents/model.ts), the sidebar's names. The states come from the list's agents,
+ * The names come from `threadSessions` (agents/model.ts), the sidebar's names; a click on a listed session's name
+ * filters the list to that agent, as a click on the agent in the sidebar does. The states come from the list's agents,
  * read here so only this line draws again when one changes (reading them is what keeps the list's agents fresh, as
  * the sidebar's Agents section does).
  */
@@ -51,9 +52,16 @@ export interface ThreadSessionsProps {
   sessions: readonly ThreadSession[];
   /** A phone: opened, one session per line. */
   phone?: boolean;
+  /** The list's agent filter now (`#agent=<id>`; null: none). */
+  agentFilter?: string | null;
+  /**
+   * A click on a listed session's name filters the list to that agent, as the sidebar's agent does (a second click
+   * shows everything again); null clears it. Absent: the names are words, never buttons.
+   */
+  onAgentFilter?: (agentId: string | null) => void;
 }
 
-export function ThreadSessions({ sessions, phone = false }: ThreadSessionsProps) {
+export function ThreadSessions({ sessions, phone = false, agentFilter = null, onAgentFilter }: ThreadSessionsProps) {
   const groups = useInboxAgents();
   // The same id on two machines is two agents: each is found under its own machine.
   const live = new Map(inboxAgentsFlat(groups).map((a) => [`${a.machine ?? ''}\n${a.id}`, a.state] as const));
@@ -161,9 +169,26 @@ export function ThreadSessions({ sessions, phone = false }: ThreadSessionsProps)
                     <span className="ib-ss-mk ib-ss-none" aria-hidden="true" />
                   )}
                   <span className="ib-ss-txt">
-                    <Tip content={s.name} cut>
-                      <bdi className="ib-ss-nm">{s.name}</bdi>
-                    </Tip>
+                    {s.agentId && onAgentFilter ? (
+                      <button
+                        type="button"
+                        className="ib-ss-nmb"
+                        aria-pressed={agentFilter === s.agentId}
+                        onClick={(e) => {
+                          // The name's own click: the line stays as it is.
+                          e.stopPropagation();
+                          onAgentFilter(agentFilter === s.agentId ? null : s.agentId);
+                        }}
+                      >
+                        <Tip content={s.name} cut>
+                          <bdi className="ib-ss-nm">{s.name}</bdi>
+                        </Tip>
+                      </button>
+                    ) : (
+                      <Tip content={s.name} cut>
+                        <bdi className="ib-ss-nm">{s.name}</bdi>
+                      </Tip>
+                    )}
                     {state && <span className="ib-ss-st">{SESSION_STATE_WORDS[state]}</span>}
                   </span>
                 </li>

@@ -98,7 +98,7 @@ async function settle(ms = 0) {
   });
 }
 
-async function render(thread: InboxThread, agents: InboxAgent[] | null = THREE) {
+async function render(thread: InboxThread, agents: InboxAgent[] | null = THREE, filter: { agentFilter?: string | null; onAgentFilter?: (id: string | null) => void } = {}) {
   act(() => setInboxAgents(agents ? [{ agents, total: agents.length, ended_today: 0 }] : null));
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -106,7 +106,7 @@ async function render(thread: InboxThread, agents: InboxAgent[] | null = THREE) 
     root = createRoot(host!);
     root.render(
       <div className="pn-inbox">
-        <ThreadPane thread={thread} sent={null} agentContext={CONTEXT} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} />
+        <ThreadPane thread={thread} sent={null} agentContext={CONTEXT} {...filter} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} />
       </div>,
     );
   });
@@ -219,4 +219,27 @@ test.skipIf(!hasDom)('the pile: one mark per look, at most four; a face picked i
   expect(pileSessions(sessionLooks(hosts, hosts.map(() => 'agent')))).toEqual([0, 2, 3, 4]);
   const faces = ['agent', 'glass', 'agent', 'agent', 'agent', 'agent'];
   expect(pileSessions(sessionLooks(hosts.slice(0, 2), faces.slice(0, 2)))).toEqual([0, 1]);
+});
+
+test.skipIf(!hasDom)("a click on a session's name filters the list to that agent, as the sidebar's does; a second click on the filtered one clears it", async () => {
+  const picked: (string | null)[] = [];
+  const el = await render(threadOf(author('ses_a'), author('ses_gone'), author('ses_b')), THREE, { agentFilter: 'ses_b', onAgentFilter: (id) => picked.push(id) });
+  act(() => toggle(el).focus());
+  const buttons = [...el.querySelectorAll<HTMLButtonElement>('.ib-ss-item button')];
+  // An ended session the list no longer names has no filter: its name is words.
+  expect(buttons.map((b) => [b.textContent, b.getAttribute('aria-pressed')])).toEqual([
+    ['Billing refactor', 'false'],
+    ['Retry worker', 'true'],
+  ]);
+  act(() => buttons[0]!.click());
+  act(() => buttons[1]!.click());
+  expect(picked).toEqual(['ses_a', null]);
+  // The line stays open: the name's click is not the line's.
+  expect(opened(el)).toHaveLength(3);
+});
+
+test.skipIf(!hasDom)('with no filter to hand, the names are words', async () => {
+  const el = await render(threadOf(author('ses_a'), author('ses_b')));
+  act(() => toggle(el).focus());
+  expect(el.querySelectorAll('.ib-ss-item button')).toHaveLength(0);
 });

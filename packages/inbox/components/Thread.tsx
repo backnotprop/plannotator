@@ -1305,6 +1305,9 @@ export interface ThreadPaneProps {
    * Agents section does (agents/model.ts `threadSessions`). Absent: a session is named by its label, else its agent.
    */
   agentContext?: { rows: readonly InboxListRow[]; machines: MachinesModel } | null;
+  /** The list's agent filter now (`#agent=<id>`), and what a click on a session's name in the header does with it. */
+  agentFilter?: string | null;
+  onAgentFilter?: (agentId: string | null) => void;
   /**
    * Seen on sight (design record "inbox-new-in-open-thread", approved
    * 2026-10-12): the seq the window's looks this visit covered (the look
@@ -1732,7 +1735,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
   /**
    * The questions this pane's own saves brought back (by `<message id>/<key>`), and how many saves landed. The thread
    * drawn is the one read, its questions never older than these: a read that left before the last keys were saved
@@ -6526,7 +6529,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         {!one && !reviewView && (
           <div className="ib-tmeta" data-thread-meta="" data-sessions={sessions.length > 1 ? '' : undefined}>
             {/* Two or more sessions (approval "inbox-thread-session-names"): who, at the start; the count and time at the end. */}
-            {sessions.length > 1 && <ThreadSessions sessions={sessions} phone={phone} />}
+            {sessions.length > 1 && <ThreadSessions sessions={sessions} phone={phone} agentFilter={agentFilter} onAgentFilter={onAgentFilter} />}
             <span className="ib-tmeta-rest" data-thread-meta-rest="">
                 <span>{plural(thread.messages.length, 'message')}</span>
                 <span className="ib-tdot" aria-hidden="true" />
