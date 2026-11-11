@@ -40,7 +40,10 @@ jobs:
       - name: Install dependencies and Chromium
         run: |
           bun install --frozen-lockfile
-          bunx playwright install --with-deps chromium
+          # The runner's Azure apt mirror stopped resolving (DNS) on the first try: fall back to the main archive, retry.
+          if [ -f /etc/apt/apt-mirrors.txt ]; then echo "http://archive.ubuntu.com/ubuntu/" | sudo tee /etc/apt/apt-mirrors.txt; fi
+          for i in 1 2 3 4 5; do bunx playwright install --with-deps chromium && break; echo "install try $i failed"; sleep 45; done
+          bunx playwright install chromium
 
       - name: Build the binary
         run: |
