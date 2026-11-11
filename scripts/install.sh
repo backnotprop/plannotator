@@ -850,9 +850,10 @@ checksum_url="${binary_url}.sha256"
 
 mkdir -p "$INSTALL_DIR"
 
-# Release downloads retry a dropped connection (#2788): the binary is about
-# 200 MB, and one HTTP/2 reset or timeout used to fail the whole install or
-# update. --retry-all-errors (curl 7.71+) also retries the errors plain
+# Release downloads retry a dropped connection (#2788): one HTTP/2 reset or
+# timeout used to fail the whole install or update. This is for the small
+# .sha256; the binary resumes instead (download_release_binary below).
+# --retry-all-errors (curl 7.71+) also retries the errors plain
 # --retry treats as final, such as an HTTP/2 stream error (curl 92); an older
 # curl rejects the option, so it gets --retry alone. The probe puts the
 # option before --version, which ends curl's option parsing.
@@ -880,15 +881,81 @@ download_release_file() {
     return "$_dl_status"
 }
 
+# download_release_binary <url> <file>: the binary download continues where a
+# dropped or stalled connection stopped, instead of starting the ~200 MB again
+# from zero. Each attempt is one curl run: the first starts at byte 0, each
+# later one asks for the rest with a Range request (curl -C -), always from
+# <url> again (a github.com URL that redirects to a signed one that expires,
+# so the redirected URL is never reused). curl's own --retry is not used here:
+# it throws away the bytes of the attempt it retries. Bounds: at most 30
+# attempts, at most 4 in a row that add no bytes, 2 s apart, and nothing runs
+# past 6 hours from the start, so a link at about 10 KB/s still finishes the
+# binary and a dead or trickling one stops. A stall (below 1 byte/s for 60 s)
+# ends an attempt and the next one continues. A server that ignores the Range
+# (curl exit 33) gets the whole file again, and later attempts start from zero.
+# After an HTTP/2 error (curl 92) the attempts go over HTTP/1.1. curl's error
+# is printed only when it gives up, and the status is its last exit code. The
+# SHA-256 check below still covers the whole file.
+# PLANNOTATOR_DOWNLOAD_STALL_SECONDS and PLANNOTATOR_DOWNLOAD_RETRY_DELAY are
+# internal knobs for the tests.
+download_release_binary() {
+    _db_url="$1"
+    _db_file="$2"
+    _db_stall="${PLANNOTATOR_DOWNLOAD_STALL_SECONDS:-60}"
+    case "$_db_stall" in ''|*[!0-9]*|0) _db_stall=60 ;; esac
+    _db_delay="${PLANNOTATOR_DOWNLOAD_RETRY_DELAY:-2}"
+    case "$_db_delay" in ''|*[!0-9]*) _db_delay=2 ;; esac
+    _db_deadline=$((SECONDS + 21600))
+    _db_attempt=0
+    _db_idle=0
+    _db_range=1
+    _db_http=()
+    while :; do
+        _db_attempt=$((_db_attempt + 1))
+        _db_resume=()
+        _db_have=$(wc -c < "$_db_file" 2>/dev/null | tr -d ' ') || _db_have=0
+        case "$_db_have" in ''|*[!0-9]*) _db_have=0 ;; esac
+        if [ "$_db_have" -gt 0 ]; then
+            if [ "$_db_range" -eq 1 ]; then
+                _db_resume=(-C -)
+            else
+                : > "$_db_file"
+                _db_have=0
+            fi
+        fi
+        _db_left=$((_db_deadline - SECONDS))
+        [ "$_db_left" -ge 1 ] || _db_left=1
+        _db_status=0
+        _db_err=$(curl -fsSL ${_db_http[@]+"${_db_http[@]}"} ${_db_resume[@]+"${_db_resume[@]}"} \
+            --connect-timeout 30 --max-time "$_db_left" --speed-limit 1 --speed-time "$_db_stall" \
+            -o "$_db_file" "$_db_url" 2>&1) || _db_status=$?
+        [ "$_db_status" -ne 0 ] || return 0
+        if [ "$_db_status" -eq 33 ]; then
+            _db_range=0
+        fi
+        if [ "$_db_status" -eq 92 ] && [ "${#_db_http[@]}" -eq 0 ]; then
+            echo "The download hit an HTTP/2 error; trying again over HTTP/1.1..." >&2
+            _db_http=(--http1.1)
+        fi
+        _db_now=$(wc -c < "$_db_file" 2>/dev/null | tr -d ' ') || _db_now=0
+        case "$_db_now" in ''|*[!0-9]*) _db_now=0 ;; esac
+        if [ "$_db_now" -gt "$_db_have" ]; then
+            _db_idle=0
+        else
+            _db_idle=$((_db_idle + 1))
+        fi
+        if [ "$_db_attempt" -ge 30 ] || [ "$_db_idle" -ge 4 ] || [ "$SECONDS" -ge "$_db_deadline" ]; then
+            [ -z "$_db_err" ] || printf '%s\n' "$_db_err" >&2
+            return "$_db_status"
+        fi
+        sleep "$_db_delay"
+    done
+}
+
 tmp_file=$(mktemp)
-# Six hours per attempt, and no retry starts after an hour: a link at about
-# 0.08 Mbit/s (10 KB/s) still finishes the ~200 MB binary (a slow update must
-# still succeed; a retry starts again from zero, so it never helps a slow
-# link), and a connection that only trickles stops instead of holding the
-# update without end. Exit 1, not curl's code: the updater gives some codes a
-# meaning.
+# Exit 1, not curl's code: the updater gives some codes a meaning.
 binary_status=0
-download_release_file "$binary_url" "$tmp_file" 21600 3600 || binary_status=$?
+download_release_binary "$binary_url" "$tmp_file" || binary_status=$?
 if [ "$binary_status" -ne 0 ]; then
     rm -f "$tmp_file"
     echo "Could not download ${binary_name} ${latest_tag} (curl exit ${binary_status}). Nothing was changed; try again later." >&2
@@ -1876,10 +1943,14 @@ update_claude_plugin_if_installed() {
         echo "Claude Code plugin: not updated: pinned to ${latest_tag}; updating would install the newest plugin."
         return 0
     fi
-    # Seconds per command. Internal knob for the tests; the default covers a
-    # slow git fetch of the marketplace clone.
-    _cp_secs="${PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT:-120}"
-    case "$_cp_secs" in ''|*[!0-9]*|0) _cp_secs=120 ;; esac
+    # Seconds per command. Internal knob for the tests. Claude Code stops its
+    # own git clone or fetch of the marketplace after 120 s unless
+    # CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS says otherwise, which failed updates on
+    # slow links: the commands get 10 minutes for git (a value the person set
+    # is kept), and 11 for the whole command.
+    _cp_secs="${PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT:-660}"
+    case "$_cp_secs" in ''|*[!0-9]*|0) _cp_secs=660 ;; esac
+    _cp_git_ms="${CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS:-600000}"
     # One private directory for claude's output and the timeout marker.
     _cp_tmp=$(mktemp -d "${TMPDIR:-/tmp}/plannotator-claude-plugin.XXXXXX" 2>/dev/null) || _cp_tmp=""
     if [ -z "$_cp_tmp" ] || [ ! -d "$_cp_tmp" ]; then
@@ -1898,9 +1969,9 @@ update_claude_plugin_if_installed() {
     for _cp_step in marketplace plugin; do
         _cp_rc=0
         if [ "$_cp_step" = "marketplace" ]; then
-            run_with_time_limit "$_cp_secs" "$_cp_tmp/timed-out" env -u CLAUDECODE "$_cp_claude" plugin marketplace update plannotator >"$_cp_log" 2>&1 || _cp_rc=$?
+            run_with_time_limit "$_cp_secs" "$_cp_tmp/timed-out" env -u CLAUDECODE CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS="$_cp_git_ms" "$_cp_claude" plugin marketplace update plannotator >"$_cp_log" 2>&1 || _cp_rc=$?
         else
-            run_with_time_limit "$_cp_secs" "$_cp_tmp/timed-out" env -u CLAUDECODE "$_cp_claude" plugin update "$CLAUDE_PLUGIN_ID" --scope user >"$_cp_log" 2>&1 || _cp_rc=$?
+            run_with_time_limit "$_cp_secs" "$_cp_tmp/timed-out" env -u CLAUDECODE CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS="$_cp_git_ms" "$_cp_claude" plugin update "$CLAUDE_PLUGIN_ID" --scope user >"$_cp_log" 2>&1 || _cp_rc=$?
         fi
         if [ "$_cp_rc" -eq 124 ]; then
             _cp_failed="timed out after ${_cp_secs}s"
