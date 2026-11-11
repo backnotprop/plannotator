@@ -1,11 +1,3 @@
-// Shape's landing: one grid of same-sized cards, newest first (the approved
-// "shape-landing-grid"). A card is a 16:10 crop of the board's Picture, the
-// title on one line and one quiet line, "project · when" ("drawing now"
-// while the agent draws). A violet dot before the title: changed since you
-// looked. Find filters as you type. The same grid is the Inbox's Shape page
-// and the standalone page; the host draws its own header around it.
-//
-// Host-neutral like ShapeSurface: the items come in as props.
 import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ShapeDrawnView, ShapeRef } from '@plannotator/core/shape';
 import { ShapeDrawn } from './ShapeDrawn';
@@ -13,15 +5,10 @@ import { ShapeDrawn } from './ShapeDrawn';
 export interface ShapeGridItem {
   id: string;
   title: string;
-  /** The project's name. */
   project: string;
-  /** When it last changed (ISO). */
   updated: string;
-  /** The agent is drawing now. */
   drawing: boolean;
-  /** Changed since you looked. */
   changed: boolean;
-  /** The latest Picture, for the preview. Absent: an empty preview. */
   picture?: ShapeDrawnView | null;
   refs?: readonly ShapeRef[];
 }
@@ -62,7 +49,6 @@ export function ShapeThumb({ picture, refs, className, resolveSrc }: { picture?:
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  // A canvas board fills its own canvas, up to the edge: show all of it.
   const zoom = picture?.width ? 1 : ZOOM;
   const k = (w * zoom) / THUMB_W;
   return (
@@ -86,10 +72,8 @@ export function ShapeGrid({
 }: {
   items: readonly ShapeGridItem[];
   onOpen: (id: string) => void;
-  /** The Find box's words (the host owns the box). */
   query?: string;
   now?: number;
-  /** What to show with no boards (or none found). */
   empty?: React.ReactNode;
   /** Where a board's kept pictures load from, so a thumbnail shows them. */
   assetUrl?: (id: string, src: string) => string;

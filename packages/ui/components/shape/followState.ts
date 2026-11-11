@@ -1,8 +1,3 @@
-/**
- * "Follow an example" (approval "trace-it-board" r5): which example is
- * followed and the step on now, and the small readings the card and the
- * picture share. Pure: no DOM.
- */
 import type { ShapeExample, ShapeExampleCheck, ShapeExampleSource } from '@plannotator/core/shape';
 
 /** Closed; or open on example `ex`, at step `step` (null: all steps at once). */
@@ -19,11 +14,6 @@ export type FollowAction =
 /** Which way the step moved: forward one (the hand-off), back one, or a jump. */
 export type FollowDir = 'fwd' | 'back' | 'jump';
 
-/**
- * The next phase. Next and back stop at the ends; from "all steps", next
- * starts at the first step. A step past the example's end is clamped, and an
- * example that no longer exists (a new version) closes it.
- */
 export function followReduce(phase: FollowPhase, action: FollowAction, examples: readonly ShapeExample[]): FollowPhase {
   if (action.type === 'close') return { open: false };
   if (action.type === 'toggle') return phase.open || !examples.length ? { open: false } : { open: true, ex: 0, step: null };
@@ -44,7 +34,6 @@ export function followDir(was: FollowPhase | null, now: FollowPhase): FollowDir 
   return now.step === was.step + 1 ? 'fwd' : now.step === was.step - 1 ? 'back' : 'jump';
 }
 
-/** The function's name, from its signature. */
 export function followFnName(signature: string): string {
   return /^[\w$.]+/.exec(signature)?.[0] ?? signature;
 }
@@ -69,8 +58,8 @@ export function followSource(from: ShapeExampleSource): FollowSource {
 }
 
 /**
- * A signature in the room there is: one line when it fits, then two broken at
- * a parameter, then one parameter a line.
+ * A signature in the room there is: one line when it fits, then two broken at a parameter, then
+ * one parameter a line.
  */
 export function followSignatureFit(sig: string, chars: number): string {
   if (sig.length <= chars) return sig;
@@ -118,23 +107,17 @@ export function followSignature(sig: string, max = 52): string {
 }
 
 /**
- * A file name cut to `room` characters with its ":line", in whole characters
- * (CSS's ellipsis leaves a gap before the line number). The full name stays in
- * the link's title.
+ * A file name cut to `room` characters with its ":line", in whole characters (CSS's ellipsis
+ * leaves a gap before the line number).
  */
 export function followFileFit(file: string, line: number, room: number): string {
   const r = Math.max(4, room - String(line).length - 1);
   return file.length <= r ? file : `${file.slice(0, r - 1)}…`;
 }
 
-/** Below this the card holds its height: an edge that moves on every step costs more than a little air. */
 const FOLLOW_CUT_MIN = 96;
 
-/**
- * How much of the card's held height to leave off under a step. `spare`: what
- * the step leaves empty in the stack. `railSpare`: what the rail can give up
- * (null: no rail).
- */
+/** How much of the card's held height to leave off under a step. */
 export function followCardCut(spare: number, railSpare: number | null): number {
   const cut = railSpare === null ? spare : Math.min(spare, railSpare);
   return cut >= FOLLOW_CUT_MIN ? cut : 0;

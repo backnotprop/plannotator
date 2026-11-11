@@ -1,13 +1,5 @@
-// The scene player: plays a scene the agent drew (`@plannotator/core/shape-scene`).
-// The drawing is the agent's own SVG in the slot, above this player; this
-// player adds the caption, the code line, a colour key and the controls under
-// it, and moves the drawing's `data-part` pieces through `SceneDom`.
-// Play, drag through time, ½× 1× 2×, Back and Next between beats. Under
-// reduced motion nothing moves by itself or between beats: it opens at the
-// first beat, and Play and Next show one beat at a time, each drawn in place.
-// No other controls (no swimlanes, bars or step-through views: a ready-made
-// view would bias the drawing), no Tailwind classes, and no keyboard shortcut
-// (the slider's arrow keys are the browser's own).
+// Under reduced motion nothing moves by itself or between beats: it opens at the first beat, and
+// Play and Next show one beat at a time, each drawn in place.
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ShapeScene } from '@plannotator/core/shape-scene';
 import { SceneDom } from './dom';
@@ -70,7 +62,6 @@ const SPEEDS = [0.5, 1, 2] as const;
 /** Under reduced motion, Play shows a beat this long (at 1×). */
 const BEAT_HOLD_MS = 1800;
 
-/** The element a player sits in: the drawing's slot around the shadow host it was given. */
 function slotOf(root: HTMLElement): HTMLElement | null {
   const host = (root.getRootNode() as ShadowRoot).host as HTMLElement | undefined;
   return host?.parentElement ?? root.parentElement ?? null;
@@ -95,11 +86,8 @@ function codeLine(line: string, lang?: string): React.ReactNode {
 export interface ScenePlayerProps {
   scene: ShapeScene;
   reduce?: boolean;
-  /** Open at this time, paused, scrolled into view (`plannotator shape frame`, tests); no autoplay. */
   at?: number;
-  /** Scale the drawing down so it and the controls fit the visible height (default on). */
   fitView?: boolean;
-  /** 'technical': the drawing and the controls take the technical look (look.ts). Absent: the drawing as drawn. */
   look?: 'technical';
 }
 
@@ -118,7 +106,6 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
   const [u, setU] = useState(1);
   const [missing, setMissing] = useState<string[]>([]);
   const [srLine, setSrLine] = useState('');
-  /** Next is moving to this time (a short tween), or null. */
   const goal = useRef<number | null>(null);
   const beats = scene.beats;
   const bi = beatAt(scene, t);
@@ -131,14 +118,12 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
     domRef.current?.apply(c);
   }, [scene.end]);
 
-  // Find the pieces; measure again when the board resizes, and once the board's own entrance has settled.
   useLayoutEffect(() => {
     const root = rootRef.current;
     const slot = root ? slotOf(root) : null;
     if (!root || !slot) return;
     const dom = look === 'technical' ? new SceneDom(slot, scene, LIT_TECHNICAL, true) : new SceneDom(slot, scene);
     domRef.current = dom;
-    // Fit the drawing and the player into the height the person can see (fit.ts).
     let unfit: (() => void) | null = null;
     let unlook: (() => void) | null = null;
     let lookStyle: HTMLStyleElement | null = null;
@@ -166,7 +151,6 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
       setMissing(dom.missing);
     };
     measure();
-    // A still of one moment: the scene in view, whatever is above it on the board.
     if (at !== undefined) slot.scrollIntoView?.({ block: 'nearest' });
     const later = setTimeout(measure, 1400);
     let ro: ResizeObserver | undefined;
@@ -216,7 +200,6 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
     return () => io.disconnect();
   }, [reduce, at]);
 
-  // Smooth play: time runs at end / playMs per ms, times the speed. Next's short tween runs here too.
   useEffect(() => {
     if (reduce || (!playing && goal.current === null)) return;
     let raf = 0, last = performance.now();
@@ -226,7 +209,6 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
       last = now;
       const g = goal.current;
       if (g !== null) {
-        // Next: get to the next beat in about half a second whatever the gap.
         const step = Math.max(rate * dt * speed, (Math.abs(g - tRef.current) + 1e-6) * Math.min(1, dt / 160));
         const v = tRef.current + Math.sign(g - tRef.current) * Math.min(step, Math.abs(g - tRef.current));
         show(v);
@@ -261,7 +243,6 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
     return () => clearTimeout(id);
   }, [reduce, playing, t, speed, scene, show]);
 
-  // Keep the lit code line in view, inside the code pane only.
   useEffect(() => {
     const pane = codeRef.current;
     const li = pane?.querySelector<HTMLElement>('li[aria-current=step]');
@@ -290,7 +271,6 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
     setPlaying(false);
     show(beats[n]!.at);
   };
-  // Back: the start of this beat if we are past it, else the beat before.
   const back = () => toBeat(t > beat.at + 1e-6 ? bi : bi - 1, false);
   const nextIdx = beats.findIndex((b) => b.at > t + 1e-9);
   const atStart = t <= beats[0]!.at + 1e-9 && bi === 0;
@@ -313,7 +293,6 @@ export default function ScenePlayer({ scene, reduce = false, at, fitView = true,
   return (
     <div className={`ssc${reduce ? ' reduce' : ''}${look === 'technical' ? ' tech' : ''}`} ref={rootRef} style={{ ['--u' as string]: String(u) }} role="group" aria-label={`Animation: ${scene.title}`}>
       <style>{CSS}</style>
-      {/* One count on screen: the beat number lives by the time slider (beatCount), not here too. */}
       <p className="ssc-cap" aria-hidden="true">
         {beat.say}
       </p>

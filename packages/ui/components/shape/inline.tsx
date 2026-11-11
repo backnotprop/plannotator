@@ -1,6 +1,4 @@
-// The board's short text (the claim, the Code view's source): links,
-// `code`, **bold**, and `[^n]` for reference bubble n. Nothing else, so an
-// agent's text cannot carry markup.
+// Nothing else, so an agent's text cannot carry markup.
 import React from 'react';
 import { CodeSpan } from '../LocalLinkContext';
 import { Bubble } from './refs';
@@ -24,7 +22,6 @@ export function ShapeInline({ text }: { text: string }) {
   return <>{out}</>;
 }
 
-/** The text without its markup, for a quote or a label. */
 export function shapePlainText(text: string): string {
   return text
     .replace(/\[\^\d{1,3}\]/g, '')

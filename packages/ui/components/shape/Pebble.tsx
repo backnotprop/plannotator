@@ -1,10 +1,3 @@
-// The Pebble: Shape's mark (the owner's pick: "six uneven lumps; the bottom
-// rests on the table"). Lifted unchanged from the approved Shape prototype,
-// so the outline is the approved one.
-//
-// While Shape mode is on it breathes: the six rim lumps drift and swell in
-// turn, one slow cycle every 7 s, small enough to read as alive, not busy.
-// While the board is being redrawn (`reshaping`) the same cycle runs at 1.6 s.
 // Reduced motion: no morph at all; state shows as fill and colour only.
 import { useEffect, useRef, useState } from 'react';
 
@@ -75,10 +68,6 @@ export function useReducedMotion(): boolean {
   return reduce;
 }
 
-/**
- * The mark. `alive`: Shape mode is on (slow breathing). `reshaping`: the
- * board is being redrawn (faster, fuller). Both off: the resting outline.
- */
 export function Pebble({ alive, reshaping, size = 20, className = '' }: { alive: boolean; reshaping?: boolean; size?: number; className?: string }) {
   const ref = useRef<SVGPathElement>(null);
   const reduce = useReducedMotion();

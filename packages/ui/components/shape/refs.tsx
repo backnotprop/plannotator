@@ -1,6 +1,4 @@
-// A board's numbered references: small bubbles beside the words they source,
-// and the same numbers in the panel's References list. Hovering a bubble
-// lights its row; a row flashes its bubble; Open shows it in the real viewer.
+// Hovering a bubble lights its row; a row flashes its bubble; Open shows it in the real viewer.
 import React, { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { shapeLinkUrl, shapeUrlAllowed, type ShapeRef, type ShapeRefKind } from '@plannotator/core/shape';
 
@@ -10,13 +8,12 @@ export interface RefsState {
   flash: number | null;
   onHover: (n: number | null) => void;
   onOpen: (n: number) => void;
-  /** The bubble's preview: hover or keyboard focus shows it (null hides it), a tap pins it. */
   onPeek?: (n: number | null, el: HTMLElement, how: 'hover' | 'focus' | 'tap') => void;
 }
 
 export const RefsCtx = createContext<RefsState>({ refs: [], hover: null, flash: null, onHover: () => {}, onOpen: () => {} });
 
-/** A bubble in the board's own markup (the header's claim). Drawn views get theirs from ShapeDrawn. */
+/** A bubble in the board's own markup (the header's claim). */
 export function Bubble({ n }: { n: number }) {
   const r = useContext(RefsCtx);
   const ref = r.refs.find((x) => x.n === n);
@@ -39,7 +36,6 @@ export function Bubble({ n }: { n: number }) {
     },
     onBlur: (e: React.FocusEvent<HTMLElement>) => r.onPeek?.(null, e.currentTarget, 'focus'),
   };
-  // A PR or link is a real link, so the host's GitHub hover card (RefHoverCards) opens on it.
   if (ref.kind === 'pr' || ref.kind === 'link') {
     return <a {...common} href={shapeLinkUrl(ref.target) ?? undefined} target="_blank" rel="noreferrer">{n}</a>;
   }
@@ -75,7 +71,6 @@ export const KindIcon = ({ kind }: { kind: ShapeRefKind }) => (
   </svg>
 );
 
-/** The References tab: the board's references, by number. */
 export function RefList({ onShow, canOpen, fileAction }: { onShow: (n: number) => void; canOpen: (ref: ShapeRef) => boolean; fileAction?: (ref: ShapeRef) => React.ReactNode }) {
   const r = useContext(RefsCtx);
   if (!r.refs.length) return <p className="shp-empty-note">This board cites nothing yet.</p>;
@@ -113,9 +108,8 @@ export function shapeRefPicture(ref: ShapeRef): { src: string; alt: string; crop
 const OPEN_WORD: Record<ShapeRefKind, string> = { image: 'View', file: 'Open file', diff: 'Open diff', message: 'Go to message', pr: 'Open', link: 'Open' };
 
 /**
- * A reference's bubble: it pops out beside its number with a small real picture (or, for a file, the
- * lines it points at) and one line. The picture or the title opens the full view, in the same viewers
- * the number and the References list use. Placed by the anchor's rect, inside the board.
+ * A reference's bubble: it pops out beside its number with a small real picture (or, for a file,
+ * the lines it points at) and one line.
  */
 export function RefPeek({
   reference,
@@ -134,18 +128,14 @@ export function RefPeek({
   reference: ShapeRef;
   anchor: DOMRect;
   bounds: DOMRect;
-  /** What the bubble should try not to hide. */
   obstacles?: { rect: DOMRect; number: boolean }[];
   canOpen: boolean;
   resolveSrc: (src: string) => string;
   readFile?: (path: string) => Promise<string | null>;
-  /** The full view: the lightbox for a picture, the file, the diff, or the message. */
   onOpen: () => void;
-  /** A PR's or link's own page, in a new tab. */
   onOpenLink?: () => void;
   onEnter: () => void;
   onLeave: () => void;
-  /** The host's control beside the file this reference names. */
   fileAction?: React.ReactNode;
 }) {
   const box = useRef<HTMLDivElement>(null);
@@ -188,7 +178,6 @@ export function RefPeek({
       { side: 'over', left: midX, top: anchor.top - GAPX - h, origin: 'center bottom' },
       { side: 'under', left: midX, top: anchor.bottom + GAPX, origin: 'center top' },
     ].filter((c) => c.left >= minX && c.left <= Math.max(minX, maxX) && c.top >= minY && c.top <= Math.max(minY, maxY));
-    // The side that hides no other number if it can, then the least of the drawing.
     const cost = (c: { left: number; top: number }) =>
       (obstacles ?? []).reduce((sum, o) => {
         const x = Math.min(c.left + w, o.rect.right) - Math.max(c.left, o.rect.left);
