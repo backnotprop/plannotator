@@ -1,9 +1,4 @@
-/**
- * The Bun PR runtime runs `gh` as another signed-in account for one repo
- * (#2157). The runtime runs in a child process (tests/helpers/
- * gh-account-runtime-probe.ts) whose PATH starts with a fake `gh`, with a
- * scratch HOME and gh config dir: the real gh is never reachable from it.
- */
+/** The Bun PR runtime runs `gh` as another signed-in account for one repo, in a child process with a fake `gh` first on PATH and a scratch HOME, so the real gh is unreachable. */
 import { afterEach, expect, test } from "bun:test";
 import { probeGhAccountRuntime, type FakeGh } from "../../tests/helpers/fake-gh";
 
@@ -22,7 +17,6 @@ test("checkPRAuth picks the work account, and the runtime's later gh calls run a
     hasChildEnv: true,
     user: "tobey-work",
     repo: "widgets",
-    // The in-process override never touches process.env.
     ghTokenInEnv: false,
   });
   const calls = fake.calls();

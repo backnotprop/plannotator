@@ -13,9 +13,7 @@ import { delimiter, join } from "node:path";
 import { resolveOpenInTarget } from "@plannotator/shared/html-assets-node";
 import { openFileInApp } from "./open-in";
 
-// resolveOpenInTarget is the security boundary for POST /api/open-in: it decides
-// which absolute file a launch is allowed to touch. Real temp dirs/files are
-// used so the realpath-based symlink containment (isWithinDirectory) actually runs.
+// resolveOpenInTarget is the security boundary for POST /api/open-in; real temp dirs so realpath symlink containment runs.
 
 const tempDirs: string[] = [];
 function makeDir(): string {
@@ -78,7 +76,6 @@ describe("resolveOpenInTarget — /api/open-in containment", () => {
   test("with no server root, an absolute path resolves against its own dir", () => {
     const root = makeDir();
     writeFileSync(join(root, "file.md"), "x");
-    // Documents the default (review supplies resolveAgentCwd; this is the fallback).
     expect(resolveOpenInTarget(join(root, "file.md"), null, undefined)).not.toBeNull();
   });
 
@@ -86,10 +83,7 @@ describe("resolveOpenInTarget — /api/open-in containment", () => {
     const a = makeDir();
     const b = makeDir();
     writeFileSync(join(b, "doc.md"), "x");
-    // A linked doc living in root B is allowed because B is one of the roots
-    // (mirrors /api/doc serving from cwd + the source-file dir).
     expect(resolveOpenInTarget(join(b, "doc.md"), null, () => [a, b])).not.toBeNull();
-    // Outside every allowed root → still rejected.
     expect(resolveOpenInTarget("/etc/passwd", null, () => [a, b])).toBeNull();
   });
 
@@ -97,21 +91,15 @@ describe("resolveOpenInTarget — /api/open-in containment", () => {
     const a = makeDir();
     const b = makeDir();
     writeFileSync(join(a, "x.md"), "x");
-    // A relative path resolves within a root that contains it.
     expect(resolveOpenInTarget("x.md", null, () => [a, b])).not.toBeNull();
-    // A traversal can't escape one root by landing inside another.
     expect(resolveOpenInTarget("../x.md", null, () => [a, b])).toBeNull();
   });
 });
 
-// Launch semantics for POST /api/open-in: the launcher must be a concurrent
-// side concern of the review session. Each test shims the per-platform
-// launcher command (mac: `open`, linux: the catalog's `code` bin) onto PATH
-// and drives the real openFileInApp. Skipped on Windows (no sh shims).
+// Skipped on Windows (no sh shims).
 const launcherShimName = process.platform === "darwin" ? "open" : "code";
 const launchTest = process.platform === "win32" ? test.skip : test;
 
-/** Write the executable launcher shim into `dir`. */
 function writeShim(dir: string, script: string): void {
   const shim = join(dir, launcherShimName);
   writeFileSync(shim, script);
@@ -198,7 +186,6 @@ describe("openFileInApp launch semantics", () => {
         expect(elapsed).toBeLessThan(8000);
 
         childPid = await waitForPidFile(pidFile);
-        // The launcher is still running after we answered ok...
         expect(() => process.kill(childPid!, 0)).not.toThrow();
         // ...and in its OWN process group, so a signal aimed at this
         // process's group (agent cancelling the session, terminal close)
@@ -235,7 +222,6 @@ describe("openFileInApp launch semantics", () => {
         const result = await openFileInApp(target, "vscode");
         expect(result.ok).toBe(false);
         if (result.ok === false) {
-          // Same failure shape as before the detach: exit code + stderr.
           expect(result.error).toContain("Failed to open");
           expect(result.error).toContain("exit 1");
           expect(result.error).toContain(

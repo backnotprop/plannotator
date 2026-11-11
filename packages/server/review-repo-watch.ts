@@ -15,15 +15,6 @@ import {
 } from "@plannotator/shared/repo-files";
 import { getGitMetadataWatchPaths } from "@plannotator/shared/workspace-status";
 
-// The code-review tree's live All files (`GET /api/repo-files/stream`). In
-// `watch` mode the repository root is watched with the same engine as
-// annotate's file browser (deferred warmup, native recursive fs.watch on
-// macOS and Windows, chokidar on Linux), never descending into what git
-// ignores; in `poll` mode (a very large repository, a multi-repo workspace) a
-// timer looks instead. Either way a page is told `changed` only when the
-// working tree's signature moved (`createRepoChangeGate`), so a build writing
-// gitignored output never lists the tree again. The diff never redraws by itself.
-
 const HEARTBEAT_MS = 30_000;
 /** Live updates are debounced so a burst of writes lists the tree once. */
 const REPO_WATCH_DEBOUNCE_MS = 500;
@@ -31,32 +22,23 @@ const encoder = new TextEncoder();
 
 interface Subscriber {
 	controller: ReadableStreamDefaultController;
-	/** Something moved under the root: check, and tell the page if it was real. */
 	notify: () => void;
-	/** Tell the page when `version` is new to it. */
 	deliver: (version: number) => void;
 }
 
 export interface RepoLiveOptions {
 	mode: RepoLiveMode;
-	/** The working tree's signature (`gitLiveSignature`, or a workspace's listing). */
 	signature: () => Promise<string | null>;
-	/** What git ignores under the root (`gitIgnoredEntries`): never watched. */
 	ignored?: () => Promise<string[]>;
-	/** The listing is stale: called once per real change, and when the last page stops watching. */
 	onChange: () => void;
 	pollMs?: number;
-	/** The request's signal: a page gone before the stream starts attaches nothing. */
 	signal?: AbortSignal;
 }
 
 export interface ReviewRepoWatch {
-	/** The SSE response for one page: `ready` once, then `changed` after each real change. */
 	stream(root: string, options: RepoLiveOptions, disableIdleTimeout?: () => void): Promise<Response>;
 	closeAll(): void;
-	/** Tests only: what is attached right now. */
 	stats(): { lives: number; subscribers: number; heartbeats: number };
-	/** Tests only. */
 	configureForTests: FileBrowserWatchRegistry<Subscriber>["configureForTests"];
 }
 
@@ -67,7 +49,6 @@ function serialize(event: Pick<FileBrowserChangeEvent, "type" | "reason" | "time
 interface Live {
 	gate: RepoChangeGate;
 	subscribers: Set<Subscriber>;
-	/** Each subscriber's release (heartbeat, watcher, poll), for closeAll. */
 	releases: Set<() => void>;
 	poll: ReturnType<typeof setTimeout> | null;
 }

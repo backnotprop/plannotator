@@ -8,8 +8,6 @@ import {
   type ResolvedReviewProfile,
 } from "@plannotator/shared/review-profiles";
 
-// Stand-in for buildAgentReviewUserMessage(...) output. The composer treats it
-// as opaque text, so a literal is enough to pin placement and byte-equality.
 const userMessage = "Review of the current code changes.\n\n```diff\n+const x = 1;\n```";
 
 const security: ResolvedReviewProfile = {
@@ -19,7 +17,6 @@ const security: ResolvedReviewProfile = {
   source: "user",
 };
 
-// The exact prompt today, before this phase, for the default path.
 const claudeDefault = CLAUDE_REVIEW_PROMPT + "\n\n---\n\n" + userMessage;
 const codexDefault = CODEX_REVIEW_SYSTEM_PROMPT + "\n\n---\n\n" + userMessage;
 
@@ -47,8 +44,6 @@ describe("review prompt composition — default is byte-identical", () => {
   });
 
   test("the reserved default id wins even if a profile claims source=user", () => {
-    // A malformed profile that should never exist. The id guard must take
-    // precedence so the reserved default can never be replaced.
     const reserved: ResolvedReviewProfile = {
       id: BUILTIN_DEFAULT_ID,
       label: "Reserved",
@@ -68,8 +63,6 @@ describe("custom review end to end — skill replaces, message is context-only",
       instructions: "Audit only authn and authz boundaries.",
       source: "user",
     };
-    // review.ts wires isCustomReview === true to both the context-only message
-    // and the replacing composer. This locks that combined contract.
     const contextMessage = buildAgentReviewUserMessage(
       "diff --git a/x b/x\n+x\n",
       "last-commit",
@@ -94,12 +87,9 @@ describe("review prompt composition — custom skill replaces the provider promp
 
     expect(prompt).toStartWith("Focus only on security-impacting issues.");
     expect(prompt).toEndWith(userMessage);
-    // Output-contract reminder is appended for custom skills.
     expect(prompt).toContain("## Returning your findings");
-    // The default methodology is gone — no provider prompt, no section wrapper.
     expect(prompt).not.toContain(CLAUDE_REVIEW_PROMPT);
     expect(prompt).not.toContain("## Custom Review Profile");
-    // Order: skill body → reporting reminder → user message.
     expect(prompt.indexOf("## Returning your findings")).toBeGreaterThan(prompt.indexOf("Focus only"));
     expect(prompt.indexOf(userMessage)).toBeGreaterThan(prompt.indexOf("## Returning your findings"));
   });

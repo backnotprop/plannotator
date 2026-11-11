@@ -1,24 +1,4 @@
-/**
- * `plannotator review --patch-file` — server half, dual-runtime (Bun + Pi).
- *
- * A static patch review has no repository, no working tree and no VCS behind
- * it, so the server has to say so and act like it. Three regressions:
- *
- *  1. The client cannot tell patch mode from a repo-less VCS session unless
- *     the server advertises it. Without `sourceKind: "patch"` the browser
- *     falls back to its `uncommitted` default and renders Git Add buttons,
- *     hunk-expansion arrows and "No uncommitted changes" — all lies.
- *  2. `diffType` must ride the payload in patch mode. It used to be withheld
- *     (it is gated on local access), which is what left the client on its
- *     `uncommitted` default in the first place.
- *  3. The endpoints that read a working tree must answer 400 rather than
- *     resolving the patch's paths against whatever cwd the server runs in —
- *     `/api/git-add`, `/api/file-content` and `/api/open-in` would otherwise
- *     stage, read, or OPEN an unrelated same-named file.
- *
- * A VCS session is checked alongside each case: the advert is absent there
- * (absent reads as "vcs"), so nothing about an ordinary review changed.
- */
+/** A static patch review (`--patch-file`) has no repo or working tree: the server advertises `sourceKind: "patch"`, serves `diffType`, and answers 400 on endpoints that read a working tree (/api/git-add, /api/file-content, /api/open-in) instead of resolving against cwd. A VCS session is checked alongside. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -117,8 +97,6 @@ for (const [runtime, startServer] of [
         expect(diff.sourceKind).toBe("patch");
         expect(diff.diffType).toBe("static-patch");
         expect(diff.gitContext).toBeUndefined();
-        // Whatever repo the server process sits in is not the patch's origin:
-        // advertising it would put an unrelated repo and branch in the header.
         expect(diff.repoInfo).toBeUndefined();
         expect(diff.rawPatch).toBe(PATCH);
 
@@ -170,12 +148,8 @@ for (const [runtime, startServer] of [
         const diff = (await fetch(`${server.url}/api/diff`).then((r) => r.json())) as {
           sourceKind?: string;
         };
-        // Absent, not "vcs": the advert is add-only, so an old client that
-        // never reads the field sees a byte-identical payload.
         expect(diff.sourceKind).toBeUndefined();
 
-        // The guards above must be keyed on patch mode, not merely present:
-        // a real repo still resolves file content (README.md is committed).
         const fileContent = await fetch(`${server.url}/api/file-content?path=README.md`);
         expect(fileContent.status).toBe(200);
       } finally {

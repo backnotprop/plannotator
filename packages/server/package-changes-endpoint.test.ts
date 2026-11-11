@@ -1,18 +1,4 @@
-/**
- * Package changes routes, both runtimes (Bun + Pi).
- *
- * Guards the privacy contract of the npm lookup:
- *  1. GET /api/package-changes works the cards out on the server, from the
- *     files behind the diff, and lists per card the names a lookup would send
- *     (private scopes withheld). It sends nothing anywhere.
- *  2. POST /api/package-changes/lookup answers 403 until config.json says
- *     yes, and PLANNOTATOR_PACKAGE_LOOKUP=0 keeps it 403 after.
- *  3. Once allowed, the names that reach the (stubbed) registry are exactly
- *     the card's `lookup.names`: the count the consent button shows.
- *  4. Registry settings come from the working tree, so a gitignored `.npmrc`
- *     withholds its scope even when the diff is of commits (HEAD has no
- *     `.npmrc` at all).
- */
+/** Privacy contract of the npm lookup: GET /api/package-changes sends nothing and lists the names a lookup would send; POST /api/package-changes/lookup is 403 until config.json allows it (PLANNOTATOR_PACKAGE_LOOKUP=0 keeps it 403); names reaching the stubbed registry equal the card's `lookup.names`; registry settings come from the working tree. */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -63,7 +49,6 @@ async function reservePort(): Promise<number> {
   return port;
 }
 
-/** A local stand-in for registry.npmjs.org and api.npmjs.org that records every name asked for. */
 function stubRegistry(): { url: string; names: string[] } {
   const names: string[] = [];
   const server = Bun.serve({
@@ -88,7 +73,6 @@ function stubRegistry(): { url: string; names: string[] } {
 
 const manifest = (deps: Record<string, string>) => JSON.stringify({ name: 'app', version: '1.0.0', dependencies: deps }, null, 2) + '\n';
 
-/** A repo whose working tree changes package.json; `committed` commits the change and keeps `.npmrc` gitignored and untracked. */
 function makeRepo(npmrc: string, committed = false): string {
   const repo = tempDir('plannotator-pkg-repo-');
   git(repo, ['init', '-q']);
@@ -119,7 +103,6 @@ describe('package changes routes', () => {
     async function start(npmrc: string, committed = false) {
       process.env.PLANNOTATOR_DATA_DIR = tempDir('plannotator-pkg-data-');
       process.env.HOME = tempDir('plannotator-pkg-home-');
-      // The machine's own npm settings stay out of the test.
       process.env.npm_config_globalconfig = join(process.env.HOME, 'no-global-npmrc');
       process.env.XDG_CONFIG_HOME = join(process.env.HOME, '.config');
       delete process.env.npm_config_userconfig;

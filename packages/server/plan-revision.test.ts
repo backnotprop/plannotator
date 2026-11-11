@@ -1,12 +1,4 @@
-/**
- * Bun mirror of apps/pi-extension/server/plan-revision.test.ts: revised plans
- * pushed into an open plan review.
- *
- * What regresses if this fails: a host that opts into `planRevisions` pushes
- * a revision the tab never sees, a decision on the replaced text is accepted,
- * or a host that does NOT opt in (Claude Code today) starts advertising
- * `planRevision` and its tab polls for nothing.
- */
+/** Revised plans pushed into an open plan review: hosts that opt into `planRevisions` push, others never advertise `planRevision`. */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -63,7 +55,6 @@ describe("plan server revisions (Bun)", () => {
     const { v1, v2 } = planPair();
     const server = await startPlannotatorServer({ plan: v1, htmlContent: MINIMAL_HTML, origin: "pi", planRevisions: true });
     try {
-      // #1001: the history file holding the plan on screen, so Ask AI names it by path.
       const before = (await (await fetch(`${server.url}/api/plan`)).json()) as Record<string, any>;
       expect(before.planPath.startsWith(process.env.PLANNOTATOR_DATA_DIR!)).toBe(true);
       expect(readFileSync(before.planPath, "utf8")).toBe(v1);
@@ -94,11 +85,9 @@ describe("plan server revisions (Bun)", () => {
     try {
       const first = (await (await fetch(`${server.url}/api/plan`)).json()) as Record<string, any>;
       expect(first.planFilePath).toBe(own);
-      // A revision whose text the file does not hold drops it.
       server.updatePlan(v2);
       const stale = (await (await fetch(`${server.url}/api/plan`)).json()) as Record<string, any>;
       expect("planFilePath" in stale).toBe(false);
-      // The agent rewrote its file with the next revision: advertised again.
       const v3 = `${v2}\n- [ ] Third step.\n`;
       writeFileSync(own, v3);
       server.updatePlan(v3);

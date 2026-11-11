@@ -1,11 +1,4 @@
-/**
- * Terminal QR code for advertised session URLs.
- *
- * A remote or tailnet session URL usually has to make a device hop (phone,
- * tablet, another laptop); the QR removes the hand-transcription step. TTY
- * only: piped stderr (hook transcripts, log capture) keeps just the plain
- * URL line the caller already printed.
- */
+/** Terminal QR code for advertised session URLs; TTY only, so piped stderr keeps just the plain URL line. */
 
 import { renderUnicodeCompact } from "uqr";
 

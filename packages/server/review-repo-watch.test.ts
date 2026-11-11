@@ -1,11 +1,4 @@
-/**
- * The live All files stream, in both runtimes: a page that goes away while
- * the server is still reading what git ignores (before anything is attached)
- * must leave nothing behind, and closeAll must stop every heartbeat.
- *
- * Regression guarded: each aborted stream left a subscriber, a 30 s heartbeat
- * and a watcher forever (measured 20 of 20 on both runtimes).
- */
+/** All files stream: a page that goes away while the server still reads what git ignores must leave nothing behind, and closeAll stops every heartbeat. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";

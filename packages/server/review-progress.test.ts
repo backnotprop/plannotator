@@ -86,7 +86,6 @@ for (const [name, start] of [["Bun", startBun], ["Pi", startPi]] as const) {
     }
 
     test("PLANNOTATOR_REVIEW_PROGRESS=0 neither reads nor writes progress", async () => {
-      // A record from an earlier session must not be served while the opt-out is on.
       const earlier = await snapshot();
       saveReviewProgress(earlier, [{ path: "a.txt", viewed: true, fingerprint: earlier.fingerprints["a.txt"] }]);
       const store = join(root, "data", "review-progress");
@@ -108,7 +107,6 @@ for (const [name, start] of [["Bun", startBun], ["Pi", startPi]] as const) {
       const p = await progress(first.url);
       expect(p.data.available).toBe(true);
       expect((await mark(p, ["a.txt", "b.txt"])).status).toBe(200);
-      // Annotation drafts retain their existing decision-time deletion.
       await fetch(`${first.url}/api/draft`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ codeAnnotations: [{ id: "note" }], ts: Date.now() }) });
       expect((await fetch(`${first.url}/api/feedback`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ feedback: "Please adjust B", annotations: [] }) })).status).toBe(200);
       await first.waitForDecision();
@@ -184,8 +182,6 @@ test("untracked, binary, mode and rename changes have content-sensitive identiti
   expect(reviewFileFingerprints(staged.patch, staged.fileIdentities)["a.txt"]).not.toBe(before.fingerprints["a.txt"]);
   git("mv", "a.txt", "renamed.txt");
   const renamed = await snapshot();
-  // A complete rewrite can render as delete + add instead of a rename; either
-  // way the old mark must not cover the deletion or the destination.
   expect(renamed.fingerprints["a.txt"]).not.toBe(before.fingerprints["a.txt"]);
   expect(renamed.fingerprints["renamed.txt"]).toBeDefined();
 });
@@ -268,10 +264,7 @@ test("an edit between diff rendering and worktree identity capture cannot restor
   expect(result.fileIdentities!["b.txt"]).toBeDefined();
 });
 
-// Guards the batched identity capture (one `hash-object --stdin-paths` per
-// snapshot): unusual paths, symlinks and clean filters must still produce the
-// identity the displayed patch's index line names, and a path the line-based
-// protocol cannot carry must be left out rather than mis-hashed.
+// Batched identity capture (one `hash-object --stdin-paths` per snapshot): unusual paths, symlinks and clean filters still match the patch's index line, and a path the line protocol cannot carry is left out.
 test("worktree identities are hashed in one batch and match the displayed index lines", async () => {
   if (process.platform === "win32") return;
   writeFileSync(join(cwd, ".gitattributes"), "*.crlf text eol=crlf\n");
@@ -291,13 +284,12 @@ test("worktree identities are hashed in one batch and match the displayed index 
   for (const path of ["a.txt", "b.txt", ".gitattributes", "with space.txt", "ünïcode.txt", "tab\there.txt", "line.crlf", "link"]) {
     expect(ids[path]).toBeDefined();
   }
-  // Same identity a plain `git hash-object` (filters applied) gives the file.
   const crlfId = git("hash-object", "line.crlf");
   expect(JSON.parse(ids["line.crlf"])[5]).toBe(crlfId);
   expect(ids["new\nline.txt"]).toBeUndefined();
   expect(result.patch).toContain("new\\nline.txt");
-  expect(calls.filter(args => args.includes("--stdin-paths"))).toHaveLength(2); // tracked + untracked
-  expect(calls.filter(args => args.includes("--stdin"))).toHaveLength(1); // the symlink
+  expect(calls.filter(args => args.includes("--stdin-paths"))).toHaveLength(2);
+  expect(calls.filter(args => args.includes("--stdin"))).toHaveLength(1);
   expect(calls.filter(args => args[0] === "rev-parse" && args.includes("--show-toplevel")).length).toBeLessThanOrEqual(3);
 });
 

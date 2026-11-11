@@ -1,10 +1,4 @@
-/**
- * Bun adapter for the Host-header allowlist (packages/shared/request-host.ts).
- * Every Bun server (plan, review, annotate, goal setup) builds one guard at
- * start and runs it first in `fetch`, before any route, so the app HTML, every
- * API and the WebSocket upgrades are covered alike. The Pi mirror is
- * apps/pi-extension/server/request-host-guard.ts.
- */
+/** Bun adapter for the Host-header allowlist; runs first in `fetch`, before any route. */
 
 import os from "node:os";
 import { loadConfig, resolvePublicUrl, resolveUrlHost } from "@plannotator/shared/config";
@@ -21,13 +15,7 @@ import {
 import { isAutoUrlHost, resolveAutoHostCached } from "@plannotator/shared/tailscale";
 import { isRemoteSession } from "./remote";
 
-/**
- * Hostnames this process publishes sessions under besides loopback: the
- * `tailscale serve` MagicDNS name of a `--tailscale` session, registered by
- * enableTailscaleServe once serve reports its URL. `tailscale serve` forwards
- * the browser's own Host header to the loopback backend, so without this the
- * tailnet URL would be refused.
- */
+/** Hostnames published besides loopback: the `tailscale serve` name registered by enableTailscaleServe. Serve forwards the browser's own Host, so without this the tailnet URL is refused. */
 const servedHostnames = new Set<string>();
 
 export function allowServedHostname(hostname: string): void {
@@ -38,7 +26,6 @@ export function resetServedHostnamesForTests(): void {
   servedHostnames.clear();
 }
 
-/** Remote-mode names: the configured urlHost (auto resolved), the public URL's host and this machine's hostname. */
 function remoteExtraHosts(): string[] {
   const hosts = machineHostnames(os.hostname());
   try {
@@ -56,15 +43,10 @@ function remoteExtraHosts(): string[] {
 }
 
 export interface RequestHostGuard {
-  /** A 403 response when the request's Host is not allowed, else null. */
   check(req: Request): Response | null;
 }
 
-/**
- * Build the guard for one server. Env and config are read once, here.
- * `localOnly` (the Inbox, which always binds loopback and ignores
- * PLANNOTATOR_REMOTE) applies the local-mode rule whatever the environment.
- */
+/** Env and config are read once, here. `localOnly` (the Inbox) applies the local-mode rule whatever the environment. */
 export function createRequestHostGuard(options: { localOnly?: boolean } = {}): RequestHostGuard {
   const remote = options.localOnly ? false : isRemoteSession();
   const allowed = parseAllowedHosts(process.env[ALLOWED_HOSTS_ENV]);

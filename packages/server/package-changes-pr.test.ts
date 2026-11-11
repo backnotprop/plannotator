@@ -1,21 +1,4 @@
-/**
- * Package changes in a PR review, both runtimes (Bun + Pi): how many GitHub
- * API calls the card costs before anyone consents to a lookup.
- *
- * GitHub's hourly quota is shared with everything else the reviewer runs, so:
- *  - with a local checkout that holds the head commit, settings are read
- *    there and the card makes no `contents` call at all;
- *  - the checkout is usually still being prepared on first load: the card
- *    waits for it rather than spending calls;
- *  - without one, package files cost at most REMOTE_PACKAGE_READS calls and
- *    settings at most REMOTE_SETTINGS_READS per head commit; past either,
- *    every name is withheld (and past the first, the cards that do not fit
- *    are left out).
- *
- * The `gh` commands go to a fake runtime (tests/helpers/fake-pr-runtime.ts)
- * that serves the contents API from a local git repository; nothing reaches
- * GitHub. Temp data dir and HOME; the machine's npm settings stay out.
- */
+/** How many GitHub API calls a PR's package card costs before consent to a lookup: none with a local checkout of the head commit, bounded by REMOTE_PACKAGE_READS / REMOTE_SETTINGS_READS without one. `gh` goes to a fake runtime; nothing reaches GitHub. */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -75,7 +58,6 @@ async function reservePort(): Promise<number> {
 
 const manifest = (deps: Record<string, string>) => JSON.stringify({ name: 'app', version: '1.0.0', dependencies: deps }, null, 2) + '\n';
 
-/** A repository whose head commit bumps `n` manifests: one at the root, or `n` under packages/. */
 function makePRRepo(n: number): { repo: string; base: string; head: string; patch: string } {
   const repo = tempDir('plannotator-pkg-pr-repo-');
   git(repo, ['init', '-q']);
@@ -99,7 +81,6 @@ function makePRRepo(n: number): { repo: string; base: string; head: string; patc
   return { repo, base, head, patch: git(repo, ['diff', base, head]) };
 }
 
-/** `gh api repos/acme/widgets/contents/<path>?ref=<sha>` answered from the repository, like GitHub would. */
 function contentsFrom(repo: string) {
   return (command: FakePRCommand): CommandResult | undefined => {
     const target = command.args.find((a) => a.startsWith('repos/acme/widgets/contents/'));
@@ -184,9 +165,7 @@ describe('package changes in a PR review: GitHub API calls before consent', () =
         expect(body.cards).toHaveLength(cards);
         expect(contentsCalls()).toBe(calls);
         expect(contentsCalls()).toBeLessThanOrEqual(REMOTE_PACKAGE_READS + REMOTE_SETTINGS_READS);
-        // Over a cap nothing is offered: every name is withheld.
         expect(body.lookup.total > 0).toBe(sends);
-        // A second look at the same head commit costs nothing.
         await get();
         expect(contentsCalls()).toBe(calls);
       });
@@ -210,7 +189,6 @@ describe('package changes in a PR review: GitHub API calls before consent', () =
   }
 });
 
-/** A pool whose checkout of the PR is still being prepared: it is ready `ms` after the first ensure(). */
 function latePool(url: string, path: string, ms: number): WorktreePool {
   const entry: PoolEntry = { path, prUrl: url, number: 42, ready: false };
   let pending: Promise<PoolEntry> | null = null;

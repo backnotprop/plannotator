@@ -1,14 +1,4 @@
-/**
- * Host-header allowlist (packages/shared/request-host.ts), driven over HTTP
- * against real plan, review and annotate servers. Shared by the Bun suite
- * (request-host.test.ts) and the Pi mirror
- * (apps/pi-extension/server/request-host.test.ts), so both runtimes answer
- * the same scenarios.
- *
- * Requests go through node:http so the Host header is exactly the one under
- * test (fetch sets its own). Every test runs under a temp
- * PLANNOTATOR_DATA_DIR; nothing touches the real ~/.plannotator.
- */
+/** Host-header allowlist against real plan, review and annotate servers; requests go through node:http because fetch sets its own Host. */
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { writeFileSync } from "node:fs";
@@ -34,14 +24,12 @@ export type StartHostScenarioServer = (
 const HTML = "<!doctype html><html><body>host-scenario-app</body></html>";
 const EVIL = "evil.example";
 
-/** The JSON read each kind's page loads first. */
 const FIRST_READ: Record<HostScenarioKind, string> = {
   plan: "/api/plan",
   annotate: "/api/plan",
   review: "/api/diff",
 };
 
-/** The decision endpoint each kind takes. */
 const DECISION: Record<HostScenarioKind, string> = {
   plan: "/api/approve",
   annotate: "/api/feedback",
@@ -121,7 +109,6 @@ export function defineRequestHostScenarios(runtime: string, start: StartHostScen
             expect(body).not.toContain("host-scenario-app");
           }
 
-          // Writes are refused before they reach a handler: no decision, no config write.
           const decision = await rawRequestWithBody(server, DECISION[kind], evil, { feedback: "x", annotations: [] });
           expect(decision.status).toBe(403);
           const config = await rawRequestWithBody(server, "/api/config", evil, { displayName: "rebound" });
@@ -135,7 +122,6 @@ export function defineRequestHostScenarios(runtime: string, start: StartHostScen
           }).then((res) => res.status, () => "closed");
           expect([403, "closed"]).toContain(upgrade);
 
-          // The session is still undecided and answers its own page.
           const after = await get(server, FIRST_READ[kind], `localhost:${port}`);
           expect(after.status).toBe(200);
         } finally {
@@ -245,12 +231,10 @@ function rawRequestWithBody(server: HostScenarioServer, path: string, host: stri
   });
 }
 
-/** Connect over loopback whatever URL the session advertises (urlHost). */
 function loopbackBase(server: HostScenarioServer): string {
   return `http://127.0.0.1:${new URL(server.url).port}`;
 }
 
-/** A GET (or bodiless request) with exactly these headers; fetch would set its own Host. */
 function rawRequest(url: string, options: { headers: Record<string, string> }): Promise<{ status: number; body: Buffer }> {
   return new Promise((resolve, reject) => {
     const req = request(url, { method: "GET", headers: options.headers }, (res) => {

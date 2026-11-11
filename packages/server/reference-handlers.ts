@@ -1,10 +1,3 @@
-/**
- * Reference/document route handlers for the plan server.
- *
- * Handles /api/doc, /api/obsidian/vaults, /api/reference/obsidian/files,
- * /api/reference/obsidian/doc, and /api/reference/files. Extracted from index.ts for modularity.
- */
-
 import { existsSync, statSync } from "fs";
 import { resolve } from "path";
 import { buildFileTree, isFileBrowserExcludedPath } from "@plannotator/shared/reference-common";
@@ -56,23 +49,9 @@ import {
 import type { AnnotateHistoryResult } from "@plannotator/shared/annotate-history";
 import { preloadFile } from "@pierre/diffs/ssr";
 
-/**
- * Subset of AnnotateHistoryResult the folder /api/doc path actually needs.
- * `diffCurrent` is omitted: it always equals the request's own `content` and
- * the client never reads it off this response (the single-file /api/plan
- * payload still returns the full AnnotateHistoryResult, `diffCurrent`
- * included, for legacy shape parity — see annotate.ts).
- */
 export type FolderAnnotateHistory = Omit<AnnotateHistoryResult, "diffCurrent" | "isNew">;
 
-// --- Route handlers ---
-
-// History eligibility for folder /api/doc documents is `isAnnotatableTextPath`
-// (ANNOTATABLE_TEXT_REGEX in @plannotator/core/annotatable) — the exact set the
-// single-file pipeline snapshots (.md/.mdx/.txt plus the plain-text config
-// formats; no HTML, no .env). Reusing the canonical predicate keeps cross-mode
-// slug continuity: a .yaml with single-file history must diff when opened via
-// its folder too.
+// Folder /api/doc history uses `isAnnotatableTextPath`, the same set the single-file pipeline snapshots, so a file diffs the same either way.
 
 export interface HandleDocOptions {
 	rewriteHtml?: (html: string, filepath: string) => string;
@@ -87,30 +66,11 @@ export interface HandleDocOptions {
 	anyPath?: boolean;
 	/** Plan review: the plan file on disk, whose directory serves the documents the plan links. */
 	planFile?: PlanFile | null;
-	/**
-	 * When set, /api/doc runs annotate's per-file version-history pipeline for
-	 * eligible markdown-branch documents (local file under an allowed root,
-	 * any annotatable plain-text extension per `isAnnotatableTextPath`, not
-	 * HTML, not a converted doc, under the annotatable size cap already
-	 * enforced above) and merges `previousPlan`/`versionInfo` into the
-	 * response — the same field names the single-file /api/plan payload uses
-	 * (which additionally returns `diffCurrent`; the folder path omits it
-	 * since it always equals the document's own content and the client never
-	 * reads it). `compute` is expected to memoize per resolved path itself
-	 * (the annotate server keys its cache by path in its own closure); this
-	 * module only decides *whether* to call it.
-	 */
+	/** Runs annotate's per-file version-history pipeline for eligible markdown-branch documents and merges `previousPlan`/`versionInfo`; `compute` should memoize per path. */
 	annotateHistory?: {
 		compute: (resolvedFilePath: string, content: string) => FolderAnnotateHistory | null;
 	};
-	/**
-	 * Single-file rendered-HTML sessions: when /api/doc serves the session's
-	 * ROOT document (`path` equals the resolved root path) as raw HTML, merge
-	 * the version-diff fields `compute` derives from the bytes just read
-	 * (`previousPlan`/`versionInfo`/`diffHtml`, the same names /api/plan
-	 * uses) into the response. This is what lets the in-app Refresh keep the
-	 * version diff. Every other document is untouched.
-	 */
+	/** For the session's root document served as raw HTML, merges the version-diff fields `compute` derives from the bytes just read. */
 	rootHtmlVersionDiff?: {
 		path: string;
 		compute: (currentHtml: string) => Record<string, unknown>;
@@ -122,7 +82,6 @@ interface HandleDocExistsOptions {
 	rootPaths?: string[];
 }
 
-// Re-exported for the annotate version endpoints, which import it from here.
 export { resolveAllowedDocPath, type ResolveAllowedDocPathResult };
 
 function errorResponse(payload: DocErrorPayload): Response {
@@ -141,9 +100,7 @@ function applyDocOptions<T extends Record<string, unknown>>(
 	sourceSnapshot?: SourceFileSnapshot,
 ): DocOptionsResult<T> {
 	const next: Record<string, unknown> = { ...data };
-	// Root-document version diff (see HandleDocOptions.rootHtmlVersionDiff):
-	// computed on the raw bytes, before the asset rewrite below, because the
-	// diff renderer rewrites its own output the same way.
+	// Computed on the raw bytes, before the asset rewrite below, because the diff renderer rewrites its own output the same way.
 	if (
 		options.rootHtmlVersionDiff &&
 		data.renderAs === "html" &&
@@ -159,18 +116,10 @@ function applyDocOptions<T extends Record<string, unknown>>(
 	) {
 		next.rawHtml = options.rewriteHtml(next.rawHtml, next.filepath);
 	}
-	// Annotate version history (folder mode only — see HandleDocOptions.annotateHistory).
-	// Independent of the sourceSave branching below: only markdown-branch
-	// documents (not HTML, not converted) with an annotatable plain-text
-	// extension are eligible — the same set the single-file pipeline
-	// snapshots. The 2MB annotatable-file size cap is already enforced by the
-	// caller before any of these responses are built, so no separate check is
-	// needed here.
+	// Folder-mode annotate history: markdown-branch documents only, independent of the sourceSave branching.
 	if (
 		options.annotateHistory &&
 		typeof data.filepath === "string" &&
-		// Diagram and AsciiDoc sources take the markdown branch's raw text, so
-		// they keep per-file version history exactly like a .txt.
 		(data.renderAs === "markdown" || isDocumentRenderKind(data.renderAs)) &&
 		data.isConverted !== true &&
 		typeof data.markdown === "string" &&
@@ -225,7 +174,6 @@ function docJson(data: Record<string, unknown>, options?: HandleDocOptions, sour
 	return Response.json(applyDocOptions(data, options, sourceSnapshot));
 }
 
-/** The render decision is a pure function of resolved path plus `?convert=1`. */
 async function readDocument(path: string, convert: boolean, options: HandleDocOptions): Promise<Response> {
 	if (Bun.file(path).size > MAX_ANNOTATABLE_FILE_BYTES) {
 		return errorResponse(DOC_TOO_LARGE);
@@ -237,10 +185,6 @@ async function readDocument(path: string, convert: boolean, options: HandleDocOp
 				? docJson({ markdown: htmlToMarkdown(snapshot.text), filepath: path, isConverted: true, renderAs: "markdown" }, options)
 				: docJson({ rawHtml: snapshot.text, renderAs: "html", filepath: path }, options);
 		}
-		// A diagram or AsciiDoc source is served as its raw text with the engine
-		// named in `renderAs`; the editor renders a diagram through the same
-		// DiagramBlock a ```mermaid fence uses, and AsciiDoc through its own
-		// block parser, instead of the markdown pipeline.
 		const renderKind = documentRenderKindForPath(path);
 		return docJson(
 			{ markdown: snapshot.text, filepath: path, renderAs: renderKind ?? "markdown" },
@@ -276,7 +220,6 @@ async function readCodeFile(path: string, input: string, parsed: ParsedCodePath)
 	}
 }
 
-/** Serve a linked markdown document. Resolves absolute, relative, or bare filename paths. */
 export async function handleDoc(req: Request, options: HandleDocOptions = {}): Promise<Response> {
 	const url = new URL(req.url);
 	const requestedPath = url.searchParams.get("path");
@@ -285,31 +228,21 @@ export async function handleDoc(req: Request, options: HandleDocOptions = {}): P
 	}
 
 	const allowedRoots = getAllowedRootPaths(options);
-	// Side-channel: kick off a code-file walk for the project root so that any
-	// /api/doc/exists POST issued by the rendered linked-doc lands on warm cache.
+	// Warms the code-file walk so a following /api/doc/exists lands on a warm cache.
 	for (const root of allowedRoots) {
 		void warmFileListCache(root, "code");
 	}
 
 	const base = url.searchParams.get("base");
-	// A base is only honored when it is itself inside an allowed root. The plan
-	// directory base is for the plan's own links (below): root resolution runs
-	// without it, so a plan stored inside the project keeps the project-root
-	// fallback, HTML links included.
+	// A base is honored only inside an allowed root; the plan-directory base is for the plan's own links below, not root resolution.
 	const anyPath = options.anyPath === true;
 	const resolvedBase = isPlanDirBase(base, options.planFile) ? null : getTrustedBaseDir(base, allowedRoots, anyPath);
-	// HTML renders raw by default; `?convert=1` (set by the frontend when the session's
-	// --markdown preference is on) forces Turndown conversion instead.
+	// `?convert=1` forces Turndown conversion instead of raw HTML.
 	const convert = url.searchParams.get("convert") === "1";
-	// `?doc=1` (set by the file browser) forces annotatable plain-text rendering
-	// for extensions that overlap CODE_FILE_REGEX (.yaml, .json, .toml, .ini,
-	// .xml). Without it, those paths keep the syntax-highlighted code-file
-	// popout response, so code-file links inside documents are unaffected.
+	// `?doc=1` forces annotatable plain-text rendering for extensions that overlap CODE_FILE_REGEX (.yaml, .json, ...); without it they keep the code-file popout.
 	const forceDoc = url.searchParams.get("doc") === "1";
 
-	// The plan's own directory is usually outside every root, so a document it
-	// links is served here rather than through root resolution. A linked file
-	// beside the plan shadows a project document of the same relative name.
+	// The plan's directory is usually outside every root, so documents it links are served here; a file beside the plan shadows a project document of the same name.
 	const planDoc = resolvePlanLinkedDoc(requestedPath, base, options.planFile);
 	if (planDoc) return readDocument(planDoc, convert, options);
 
@@ -333,11 +266,6 @@ export async function handleDoc(req: Request, options: HandleDocOptions = {}): P
 		: readDocument(resolution.path, convert, options);
 }
 
-/**
- * Batch existence check for code-file paths the renderer wants to linkify.
- * POST /api/doc/exists with { paths: string[] } returns { results: { [path]: ValidationEntry } }.
- * Reads from the warm file-list cache populated at plan/annotate load.
- */
 export async function handleDocExists(req: Request, options?: HandleDocExistsOptions): Promise<Response> {
 	let body: unknown;
 	try {
@@ -388,13 +316,11 @@ export async function handleDocExists(req: Request, options?: HandleDocExistsOpt
 	return Response.json({ results });
 }
 
-/** Detect available Obsidian vaults. */
 export function handleObsidianVaults(): Response {
 	const vaults = detectObsidianVaults();
 	return Response.json({ vaults });
 }
 
-/** List Obsidian vault files as a nested tree. */
 export async function handleObsidianFiles(req: Request): Promise<Response> {
 	const url = new URL(req.url);
 	const vaultPath = url.searchParams.get("vaultPath");
@@ -432,10 +358,6 @@ export async function handleObsidianFiles(req: Request): Promise<Response> {
 	}
 }
 
-/**
- * Read an Obsidian vault document. Supports direct path and bare filename search.
- * `thisMachine`: the reader is a page on this machine (`vaultDocRefusal`).
- */
 export async function handleObsidianDoc(req: Request, thisMachine = false): Promise<Response> {
 	const url = new URL(req.url);
 	const vaultPath = url.searchParams.get("vaultPath");
@@ -456,7 +378,6 @@ export async function handleObsidianDoc(req: Request, thisMachine = false): Prom
 	const resolvedVault = resolveUserPath(vaultPath);
 	let resolvedFile = resolve(resolvedVault, filePath);
 
-	// If direct path doesn't exist and it's a bare filename, search the vault
 	if (!existsSync(resolvedFile) && !filePath.includes("/")) {
 		const glob = new Bun.Glob(`**/${filePath}`);
 		const matches: string[] = [];
@@ -502,16 +423,11 @@ export async function handleObsidianDoc(req: Request, thisMachine = false): Prom
 	}
 }
 
-// --- File Browser ---
-
-// Resolved per call, not captured at module load: the accepted set includes
-// the user's configured extra markdown extensions (#1307), which the shared
-// resolver reads from config.json on first use.
+// Resolved per call: the accepted set includes configured extra markdown extensions, which the shared resolver reads from config.json on first use.
 function includeWorkspaceFile(relativePath: string, _change: WorkspaceFileChange): boolean {
 	return getAnnotatableDocRegex().test(relativePath) && !isFileBrowserExcludedPath(relativePath);
 }
 
-/** List markdown files in a directory as a nested tree. */
 export async function handleFileBrowserFiles(req: Request): Promise<Response> {
 	const url = new URL(req.url);
 	const dirPath = url.searchParams.get("dirPath");

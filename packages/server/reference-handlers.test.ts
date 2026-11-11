@@ -290,7 +290,7 @@ describe("annotatable plain-text files (#1029)", () => {
 		expect(res.status).toBe(200);
 		expect(data.codeFile).toBeUndefined();
 		expect(data.markdown).toBe("key: value\n");
-		// Its own text in one code block, never the markdown pipeline (#1099's follow-up).
+		// Its own text in one code block, never the markdown pipeline.
 		expect(data.renderAs).toBe("code");
 	});
 

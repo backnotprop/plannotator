@@ -1,23 +1,4 @@
-/**
- * PR5 approve-with-notes delivery — server half, dual-runtime (Bun + Pi).
- * Decision-control spec §6.4.
- *
- * Guards three regressions:
- *  1. Advert honesty: a server booted WITHOUT `approvalNotesSupported`
- *     advertises `false` on /api/diff — an old caller (a consumer whose
- *     approved branch still discards feedback) must never read as capable,
- *     or the client renders approve-carrying items whose notes are dropped.
- *  2. Advert survival: the advert rides /api/diff/switch too. If a switch
- *     response stopped carrying it, a client that re-derives state from the
- *     payload would silently lose the approve-carrying menu items after a
- *     diff switch — the exact failure the spec names.
- *  3. Delivery + archive: an approval carrying feedback reaches
- *     waitForDecision unmodified and archives as `approved-with-notes`;
- *     a bare approval (`feedback: ''`, no annotations — the post-placeholder
- *     client shape) archives as `lgtm` with NO sidecar. The `lgtm` decision
- *     was unreachable while the client sent the LGTM placeholder (spec §6.2
- *     fact 1); this pins that it stays reachable.
- */
+/** Approve-with-notes server half: `approvalNotesSupported` is advertised false by default and rides /api/diff and /api/diff/switch; approval feedback reaches waitForDecision unmodified and archives as `approved-with-notes`, a bare approval archives as `lgtm` with no sidecar. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -160,7 +141,6 @@ for (const [runtime, startServer] of [
     test("absent option advertises false; passed option advertises true and survives /api/diff/switch", async () => {
       useTempDataDir();
 
-      // Old-caller compatibility: no option = not capable.
       if (runtime === "Pi") await reservePiPort();
       const legacy = await startServer({
         rawPatch: PATCH,
@@ -177,8 +157,6 @@ for (const [runtime, startServer] of [
         legacy.stop();
       }
 
-      // Capable session: true on /api/diff AND on the switch payload, so the
-      // advert cannot silently disappear after a diff switch.
       const repoDir = initRepo();
       const gitContext = await getVcsContext(repoDir, "git");
       if (runtime === "Pi") await reservePiPort();
@@ -280,9 +258,6 @@ for (const [runtime, startServer] of [
           readFileSync(join(dataDir, "feedback", projects[0], "index.jsonl"), "utf-8"),
         );
         expect(records.length).toBe(1);
-        // Reachable at last: the pre-PR5 client's LGTM placeholder made
-        // hasContent always true, so every bare approval archived as
-        // approved-with-notes plus a sidecar file.
         expect(records[0].decision).toBe("lgtm");
         expect(records[0].recordFile).toBeUndefined();
       } finally {

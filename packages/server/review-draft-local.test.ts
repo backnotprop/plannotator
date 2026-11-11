@@ -1,5 +1,4 @@
-/** Local drafts must survive edits without leaking across Git review targets.
- * Exercise both HTTP runtimes and the same anchor check the client uses. */
+/** Local drafts survive edits without leaking across Git review targets. */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -117,7 +116,6 @@ for (const [runtime, start] of [['Bun', startBun], ['Pi', startPi]] as const) {
         ...body(first.view),
         codeAnnotations: [...body(first.view).codeAnnotations, { ...note, id: 'external', source: 'agent' }],
       });
-      // A changed patch still has one human comment, even before accepting restore.
       writeFileSync(join(cwd, 'b.txt'), 'unrelated edit\n');
       const reopened = await open();
       expect(reopened.server.hostControl.status().unsentAnnotations).toBe(1);

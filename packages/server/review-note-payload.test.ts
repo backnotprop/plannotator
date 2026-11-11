@@ -1,20 +1,4 @@
-/**
- * The review-level note ("Send with additional feedback") rides the EXISTING
- * /api/feedback payload: one extra `scope: 'general'` entry in the annotations
- * array plus a `## Global comments` section already inside the feedback markdown. That
- * is the whole reason the feature needs no server change.
- *
- * Regression guarded: a future body validator, field whitelist, or
- * CodeAnnotation schema landing on either runtime's /api/feedback handler and
- * silently dropping (or rewriting) an annotation entry it does not recognise —
- * which would deliver the reviewer's note nowhere while still reporting 200.
- * Also guarded: the archive's hasContent computation demoting a note-carrying
- * submission to a decision-only line.
- *
- * Both runtimes are exercised in one file (precedent: api-404-guard.test.ts).
- * Every server here runs under a temp PLANNOTATOR_DATA_DIR set inside the test
- * body; the archive is opted back in per test and restored afterwards.
- */
+/** The review-level note rides the existing /api/feedback payload as one `scope: 'general'` annotation plus a `## Global comments` section, so no server change is needed. Guards a body validator or whitelist silently dropping that entry, and the archive demoting a note-only submission to decision-only. */
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
@@ -30,7 +14,6 @@ const PATCH = "diff --git a/src/parse.ts b/src/parse.ts\n@@ -1 +1 @@\n-a\n+b\n";
 const NOTE_TEXT = "Rebase on main before merging; the migration should be its own PR.";
 const FEEDBACK = `# Code Review Feedback\n\n## Global comments\n\n${NOTE_TEXT}\n\n## src/parse.ts\n\n- L1: still drops null\n`;
 
-/** Exactly what the client commits for a review-level note. */
 const NOTE = {
   id: "review-note-1",
   type: "comment",
@@ -137,11 +120,9 @@ for (const runtime of runtimes) {
 
         const result = await decision;
         expect(result.approved).toBe(false);
-        // Byte-identical: the ## Global comments section the note lives in is what the
-        // agent actually reads.
+        // Byte-identical: the agent reads the ## Global comments section.
         expect(result.feedback).toBe(FEEDBACK);
         expect(result.annotations.length).toBe(2);
-        // Deep-equal, so a dropped `scope` or a rewritten sentinel path fails.
         expect(result.annotations[1]).toEqual(NOTE);
       } finally {
         server.stop();
@@ -165,15 +146,10 @@ for (const runtime of runtimes) {
         expect(records.length).toBe(1);
         expect(records[0].decision).toBe("feedback");
         expect(records[0].counts.annotations).toBe(2);
-        // Maintainer ruling (open question 2): the archived record must carry
-        // the note's `scope` so a review-level general comment is
-        // distinguishable from a line comment in index.jsonl. Additive field —
-        // the line comment stays scope-free (the pre-scope default).
+        // The archived record carries the note's `scope`, so a general comment is distinguishable from a line comment; the line comment stays scope-free.
         const archived = records[0].annotations ?? [];
         expect(archived.find((a) => a.id === NOTE.id)?.scope).toBe("general");
         expect(archived.find((a) => a.id === LINE_COMMENT.id)?.scope).toBeUndefined();
-        // The sidecar exists and carries the note's text, so a submission whose
-        // only content is a review-level note is recoverable from disk.
         expect(records[0].recordFile).toBeTruthy();
         const sidecar = readFileSync(
           join(dataDir, "feedback", projects[0], records[0].recordFile as string),

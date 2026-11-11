@@ -1,14 +1,6 @@
 /**
- * The Inbox's gh / glab runner (Bun, `createBunRefCliRunner`) and the slots
- * every forge reader shares (`createRefSlots`), against scripted CLIs that are
- * the only thing on PATH: never the real gh or glab.
- *
- * The failure these guard (a reporter on 0.28.60): a `glab api graphql` that
- * never finished outlived its 8 s limit for over an hour, held one of the two
- * slots, and every later read of a thread's PRs waited on it. The runner sent
- * one TERM to its direct child and then waited for the child's pipes to close,
- * so it never settled when the CLI caught TERM (current glab does) or when
- * anything it started (a wrapper's real program, a helper) kept the pipes.
+ * The failure guarded: a `glab api graphql` that never finished held one of two slots for over an hour, because the runner sent one TERM and waited for the child's pipes to close; it never settled when the CLI caught TERM or a child kept the pipes.
+ * Scripted CLIs are the only thing on PATH.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -18,10 +10,8 @@ import { pullDiffCliRunner } from "./inbox-pulls";
 import { createBunRefCliRunner, createRefSlots, REF_KILL_GRACE_MS, REF_SLOT_BUSY } from "./ref-cards";
 
 const posix = process.platform !== "win32";
-/** Above REF_DRAIN_MS, so a CLI that exited is answered before its deadline. */
 const LIMIT_MS = 1_000;
 
-/** Whether a pid is still a live process (a zombie counts as gone: it runs nothing). */
 function alive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -51,7 +41,6 @@ describe.if(posix)("the Inbox's gh / glab runner: a hard deadline", () => {
     root = "";
   });
 
-  /** A PATH holding only `glab`, scripted as `body`; `$PIDS` collects the pids it wants checked. */
   function scripted(body: string): { pids: () => number[] } {
     root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-ref-runner-")));
     const bin = join(root, "bin");
@@ -78,7 +67,6 @@ describe.if(posix)("the Inbox's gh / glab runner: a hard deadline", () => {
       const slots = createRefSlots(1);
       const started = Date.now();
       const first = slots.run(() => run("glab", ["api", "graphql"]));
-      // A second read queued behind it gets its slot once the first is answered.
       const second = slots.run(async () => Date.now());
       const result = await first;
       const took = Date.now() - started;
@@ -87,7 +75,6 @@ describe.if(posix)("the Inbox's gh / glab runner: a hard deadline", () => {
         expect(result.stderr).toBe("glab: timed out");
         expect(took).toBeLessThan(LIMIT_MS + 500);
       } else {
-        // Its answer is kept, not thrown away at the deadline.
         expect(result.exitCode).toBe(0);
         expect(result.stdout.trim()).toBe('{"data":{}}');
         expect(took).toBeLessThan(LIMIT_MS);
@@ -131,7 +118,6 @@ describe("the forge slots: never stuck", () => {
     const waited = slots.run(async () => "ran").catch((e) => e);
     expect(await waited).toBe(REF_SLOT_BUSY);
     expect(slots.waiting()).toBe(0);
-    // The hold gives the stuck slot back; the next read is not starved.
     await Bun.sleep(350);
     expect(await slots.run(async () => "later")).toBe("later");
   });

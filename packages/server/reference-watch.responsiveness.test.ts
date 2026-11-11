@@ -2,9 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-// Namespace import on purpose: this file must also run against the pre-#1313
-// module (which lacks the teardown export) to demonstrate the regression, so
-// cleanup is feature-detected instead of imported by name.
+// Namespace import on purpose: cleanup is feature-detected so this file can also run against a module that lacks the teardown export.
 import * as referenceWatch from "./reference-watch";
 
 const tempDirs: string[] = [];
@@ -17,10 +15,7 @@ afterAll(() => {
 });
 
 function buildLargeTree(root: string): void {
-	// Depth and breadth are both amplifiers and the blowup is nonlinear: this
-	// exact 780-directory shape blocked the pre-#1313 implementation for 77
-	// seconds in measurement, while a flat tree of similar size and a
-	// 340-directory nested variant scanned in under a second.
+	// Depth and breadth both amplify and the blowup is nonlinear: this 780-directory shape blocked the old implementation for 77 seconds, while a flat tree of similar size and a 340-directory nested variant scanned in under a second.
 	const build = (base: string, depth: number): void => {
 		for (let i = 0; i < 5; i++) {
 			const dir = join(base, `d${i}`);
@@ -45,14 +40,7 @@ async function readFirstEvent(
 }
 
 describe("file browser watcher responsiveness (#1313)", () => {
-	// chokidar's directory scan under Bun costs ~40ms per directory and, before
-	// #1313, ran synchronously with request handling: on a repository the size
-	// of this synthetic tree the whole server stopped answering for seconds
-	// (the reported symptom was "document API requests time out" on folder
-	// switches). The native recursive backend that fixes this only exists on
-	// macOS and Windows; Linux keeps the chokidar backend and relies on the
-	// deferred warmup plus reconnect grace, so the tight bound is not asserted
-	// there.
+	// chokidar's directory scan under Bun costs ~40ms per directory and can stall the server for seconds on a tree this size. The native recursive backend exists only on macOS and Windows; Linux keeps chokidar, so the tight bound is not asserted there.
 	test.skipIf(process.platform === "linux")(
 		"the event loop stays responsive while a large tree's watcher warms",
 		async () => {
@@ -69,15 +57,9 @@ describe("file browser watcher responsiveness (#1313)", () => {
 			const reader = response.body?.getReader();
 			if (!reader) throw new Error("Missing response body");
 			try {
-				// The stream must STAY OPEN through the measurement: cancelling the
-				// reader releases the subscription and aborts the warmup, which is
-				// exactly how an earlier version of this test failed to reproduce
-				// the bug.
+				// The stream must stay open through the measurement: cancelling the reader releases the subscription and aborts the warmup.
 				await readFirstEvent(reader, 2_000);
 
-				// Stand-ins for the /api/doc requests a user's file click issues
-				// while the watcher warms: each hop must schedule promptly instead
-				// of queueing behind a directory scan.
 				for (let i = 0; i < 10; i++) {
 					await new Promise((resolve) => setTimeout(resolve, 0));
 				}
@@ -89,12 +71,7 @@ describe("file browser watcher responsiveness (#1313)", () => {
 		},
 	);
 
-	// The platform-agnostic half of the same property: the SSE ready event is
-	// not gated on the watcher scan, on ANY backend. The chokidar backend is
-	// forced through the test hooks so this exercises the Linux code path on
-	// every platform; the scan still saturates the loop once it starts (the
-	// backend is a correctness fallback, not a performance one), so the stream
-	// is torn down immediately after the assertion to abort the scan.
+	// Platform-agnostic half: the SSE ready event is not gated on the watcher scan. chokidar is forced through the test hooks, and the stream is torn down right after the assertion to abort the scan.
 	test("SSE ready is served before the watcher scan starts on the fallback backend", async () => {
 		const hooks = (referenceWatch as {
 			__fileBrowserWatchTestHooks?: {
@@ -107,8 +84,7 @@ describe("file browser watcher responsiveness (#1313)", () => {
 		tempDirs.push(root);
 		buildLargeTree(root);
 
-		// The previous test's entry is still inside its reconnect grace; clear
-		// it so the entry count below is this test's own.
+		// Clear the previous test's entry still in reconnect grace so the entry count is this test's own.
 		(referenceWatch as { closeAllFileBrowserWatchers?: () => void }).closeAllFileBrowserWatchers?.();
 		hooks.configure({ contentWatchBackend: "chokidar" });
 		try {

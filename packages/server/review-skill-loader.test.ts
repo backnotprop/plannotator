@@ -26,13 +26,7 @@ import {
 } from "./review-skill-loader";
 import { checkoutIsScratch, makeOutsideScratch } from "../../tests/helpers/outside-scratch";
 
-// Launch-time resolution used by review.ts / serverReview.ts. Tested directly so
-// both runtimes' resolution stays pinned without standing up a full review server.
 const resolveLaunchProfile = resolveRequestedReviewProfile;
-
-// ---------------------------------------------------------------------------
-// Test 1 — Body extraction (no frontmatter parsing)
-// ---------------------------------------------------------------------------
 
 describe("stripFrontmatter", () => {
   test("removes only the leading --- block and returns the body", () => {
@@ -61,10 +55,6 @@ describe("stripFrontmatter", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Discovery / curation harness
-// ---------------------------------------------------------------------------
-
 let home: string;
 let dataDir: string;
 const savedEnv: Record<string, string | undefined> = {};
@@ -75,7 +65,6 @@ function setEnv(key: string, value: string | undefined) {
   else process.env[key] = value;
 }
 
-/** Create a skill dir `<root>/<name>/SKILL.md` with the given body. */
 function writeSkill(root: string, name: string, body = `# ${name}\n\ninstructions`) {
   const dir = join(root, name);
   mkdirSync(dir, { recursive: true });
@@ -115,10 +104,6 @@ afterEach(() => {
   for (const key of Object.keys(savedEnv)) delete savedEnv[key];
   rmSync(join(home, ".."), { recursive: true, force: true });
 });
-
-// ---------------------------------------------------------------------------
-// Test 2 — Root resolution + env overrides + realpath-dedup + clash
-// ---------------------------------------------------------------------------
 
 describe("discoverSkills — root resolution", () => {
   test("env overrides point discovery at the right dirs (all three roots)", () => {
@@ -204,7 +189,6 @@ describe.skipIf(checkoutIsScratch)("resolveGlobalSkillRoots — test sandbox", (
       expect(resolveGlobalSkillRoots()).toEqual(everyDefaultRoot(outside));
       expect(discoverSkills().map((s) => s.name)).toEqual(["in-claude", "in-codex", "in-agents", "in-config"]);
 
-      // The env overrides, too. Folders that do not exist yet are still listed.
       setEnv("CLAUDE_CONFIG_DIR", join(outside, "c"));
       setEnv("CODEX_HOME", join(outside, "x"));
       setEnv("XDG_CONFIG_HOME", join(outside, "g"));
@@ -217,7 +201,6 @@ describe.skipIf(checkoutIsScratch)("resolveGlobalSkillRoots — test sandbox", (
     });
   }
 
-  // Any non-empty value is on. The preload sets a path (tests/setup/feedback-archive-off.ts), specs mostly "1".
   for (const value of ["1", "0", join(tmpdir(), "plannotator-test-marker")]) {
     test(`sandbox ${value}: a home that is not scratch is not read at all`, () => {
       setEnv("PLANNOTATOR_TEST_SANDBOX", value);
@@ -243,7 +226,6 @@ describe.skipIf(checkoutIsScratch)("resolveGlobalSkillRoots — test sandbox", (
       seedEveryDefaultRoot(outside);
       writeSkill(join(home, ".claude", "skills"), "scratch-skill");
       setEnv("HOME", outside);
-      // CLAUDE_CONFIG_DIR, CODEX_HOME and XDG_CONFIG_HOME stay in the scratch home (beforeEach).
 
       expect(discoverSkills().map((s) => s.name)).toEqual(["scratch-skill"]);
     });
@@ -272,7 +254,6 @@ describe("discoverSkills — symlinked skill directories", () => {
     const found = discoverSkills().find((s) => s.name === "linked-skill");
     expect(found).toBeDefined();
     expect(found!.root).toBe("claude");
-    // And it flows through to the reference catalog / picker.
     expect(listReferenceSkills().map((s) => s.name)).toContain("linked-skill");
   });
 
@@ -309,7 +290,6 @@ describe("discoverSkills — symlinked skill directories", () => {
   test("a symlink cycle neither hangs nor throws (depth-2 walk bounds it)", () => {
     const root = join(home, ".claude", "skills");
     writeSkill(root, "real-skill");
-    // A self-referential loop and a link back to the root itself.
     symlinkSync(join(root, "loop"), join(root, "loop"));
     symlinkSync(root, join(root, "up-link"));
 
@@ -318,10 +298,6 @@ describe("discoverSkills — symlinked skill directories", () => {
     expect(names).not.toContain("loop");
   });
 });
-
-// ---------------------------------------------------------------------------
-// Test 3 — Curation filter (membership; missing name; absent/malformed)
-// ---------------------------------------------------------------------------
 
 describe("loadReviewProfiles — curation filter", () => {
   test("a discovered skill is a review iff its name is in `enabled`", () => {
@@ -376,14 +352,6 @@ describe("loadReviewProfiles — curation filter", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// Test 5 — Trust gating: repo-local .claude/skills is NOT discovered
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Launch-time resolution — reviewProfileId → curated skill body; absent → default
-// ---------------------------------------------------------------------------
-
 describe("launch resolution", () => {
   test("a curated skill id resolves to that skill's live body", () => {
     const root = join(home, ".claude", "skills");
@@ -410,7 +378,6 @@ describe("launch resolution", () => {
   test("an unknown / uncurated id throws instead of silently running default", () => {
     writeSkill(join(home, ".claude", "skills"), "not-curated");
     writeCuration([]);
-    // Renamed/removed skill or stale cookie — fail loud, never quietly downgrade.
     expect(() => resolveLaunchProfile("skill:not-curated")).toThrow(/not available/);
     expect(() => resolveLaunchProfile("skill:does-not-exist")).toThrow(/not available/);
   });
@@ -431,13 +398,11 @@ describe("skill files pointer (point at the real folder, no copy)", () => {
     writeCuration(["with-refs"]);
 
     const profile = resolveLaunchProfile("skill:with-refs");
-    // Points at the skill's REAL directory — no copy is made.
     expect(
       profile.instructions.startsWith(
         `This review skill's files (references, scripts, assets) are at: ${dir}`,
       ),
     ).toBe(true);
-    // The body still follows the pointer line.
     expect(profile.instructions.endsWith("# Body\n\ncheck auth")).toBe(true);
   });
 
@@ -506,7 +471,7 @@ describe("enableReviewSkill — curation write", () => {
     writeSkill(root, "perf-review");
     writeCuration(["security-review"]);
 
-    enableReviewSkill("security-review"); // already enabled → no duplicate
+    enableReviewSkill("security-review");
     const { enabled } = enableReviewSkill("perf-review");
     expect(enabled.sort()).toEqual(["perf-review", "security-review"]);
   });
@@ -515,10 +480,6 @@ describe("enableReviewSkill — curation write", () => {
     expect(() => enableReviewSkill("does-not-exist")).toThrow();
   });
 });
-
-// ---------------------------------------------------------------------------
-// Reference catalog (skill mentions in plan/annotate comments)
-// ---------------------------------------------------------------------------
 
 describe("parseSkillFrontmatterMeta", () => {
   test("plain scalars: description + disable-model-invocation: true", () => {
@@ -617,10 +578,7 @@ describe("parseSkillFrontmatterMeta", () => {
   });
 
   test("unterminated frontmatter in a COMPLETE file also fails CLOSED", () => {
-    // A file under the head-read bound whose frontmatter opens but never
-    // closes: the flag line is sitting in plain sight, so honor it when
-    // present and fail closed when absent — same posture as the truncated
-    // case. (Previously this path returned humanOnly false.)
+    // Frontmatter opens but never closes in a file under the head bound: honor a flag line if present, fail closed otherwise.
     expect(parseSkillFrontmatterMeta("---\nnot frontmatter, a rule").humanOnly).toBe(true);
     expect(
       parseSkillFrontmatterMeta("---\nname: x\ndescription: d").humanOnly,
@@ -631,13 +589,11 @@ describe("parseSkillFrontmatterMeta", () => {
     expect(
       parseSkillFrontmatterMeta("---\ndisable-model-invocation: false\nname: x").humanOnly,
     ).toBe(false);
-    // No leading --- at all: a plain body, never fail-closed.
     expect(parseSkillFrontmatterMeta("just a body\n---\n").humanOnly).toBe(false);
   });
 });
 
 describe("listReferenceSkills — the comment-reference catalog", () => {
-  /** Write a skill with explicit frontmatter fields. */
   function writeMetaSkill(
     root: string,
     name: string,
@@ -687,8 +643,6 @@ describe("listReferenceSkills — the comment-reference catalog", () => {
     }
     const skills = listReferenceSkills();
     expect(skills.length).toBe(MAX_REFERENCE_SKILLS);
-    // Sort happens BEFORE the cap: which 500 survive must not depend on
-    // readdir order.
     expect(skills[0].name).toBe("skill-0000");
     expect(skills[skills.length - 1].name).toBe(
       `skill-${String(MAX_REFERENCE_SKILLS - 1).padStart(4, "0")}`,
@@ -713,9 +667,7 @@ describe("listReferenceSkills — the comment-reference catalog", () => {
     const root = join(home, ".claude", "skills");
     const dir = join(root, "giant-frontmatter");
     mkdirSync(dir, { recursive: true });
-    // The closing --- and the flag both sit past the 64KB head read. The old
-    // behavior read this as humanOnly: false — the unsafe direction. It must
-    // fail closed instead.
+    // The closing --- and the flag both sit past the 64KB head read: must fail closed.
     const padding = `comment-${"y".repeat(70_000)}`;
     writeFileSync(
       join(dir, "SKILL.md"),
@@ -823,10 +775,7 @@ describe("readReferenceSkillContent — human-only skill injection source", () =
   });
 
   test("a discovered directory named with consecutive dots (v1..2) is servable", () => {
-    // The old `name.includes("..")` guard 404'd this legitimately discovered
-    // skill forever while the catalog and menu still listed it. The name is
-    // only ever MATCHED against discovery output — never joined into a path —
-    // so the substring check defended nothing.
+    // The name is only matched against discovery output, never joined into a path, so a `..` substring check defended nothing and 404'd legitimate names.
     writeContentSkill("v1..2", "# Versioned body");
     expect(listReferenceSkills().map((s) => s.name)).toContain("v1..2");
     expect(readReferenceSkillContent("v1..2")).toMatchObject({
@@ -837,10 +786,7 @@ describe("readReferenceSkillContent — human-only skill injection source", () =
 
   test("every discovered skill name is servable — catalog and content endpoint agree", () => {
     if (process.platform === "win32") return; // backslash dirs are separators there
-    // A POSIX directory name containing a backslash is legal; discovery
-    // normalizes it (basename past either separator) and whatever name the
-    // catalog advertises, the content endpoint must serve — the old guard
-    // broke that invariant for dotted and backslashed names.
+    // A POSIX directory name may contain a backslash; whatever name the catalog advertises, the content endpoint must serve.
     writeContentSkill("v1..2", "# A");
     writeContentSkill("odd\\name", "# B");
     const listed = listReferenceSkills();
@@ -851,11 +797,9 @@ describe("readReferenceSkillContent — human-only skill injection source", () =
   });
 
   test("a huge SKILL.md is read boundedly: capped content, flagged truncated", () => {
-    // 8MB of body. The endpoint must not materialize the whole file per
-    // request (the read is head-bounded), and the visible behavior must be
-    // identical to the old read-then-slice: first cap chars, truncated: true.
+    // 8MB body: the read is head-bounded, and the visible result is the first cap chars with truncated: true.
     const line = "y".repeat(99) + "\n";
-    const body = line.repeat(80_000); // 8MB
+    const body = line.repeat(80_000);
     writeContentSkill("mega", body);
     const result = readReferenceSkillContent("mega")!;
     expect(result.truncated).toBe(true);
@@ -864,7 +808,7 @@ describe("readReferenceSkillContent — human-only skill injection source", () =
   });
 
   test("multibyte bodies keep exact char-cap semantics under the byte-bounded read", () => {
-    const body = "é".repeat(MAX_INJECTED_SKILL_CONTENT_LEN + 500); // 2 bytes/char
+    const body = "é".repeat(MAX_INJECTED_SKILL_CONTENT_LEN + 500);
     writeContentSkill("multibyte", body);
     const result = readReferenceSkillContent("multibyte")!;
     expect(result.truncated).toBe(true);
@@ -886,10 +830,7 @@ describe("readReferenceSkillContent — human-only skill injection source", () =
   });
 
   test("a file of exactly the read bound is NOT flagged truncated", () => {
-    // The old `bytes === maxBytes` check flagged an exactly-boundary file as
-    // truncated, producing a false "[Instructions truncated...]" note. A
-    // giant-but-closed frontmatter plus a small body keeps the char cap out
-    // of play so head truncation is the only signal.
+    // An exactly-boundary file must not be flagged truncated; a giant closed frontmatter plus a small body keeps the char cap out of play.
     const root = join(home, ".claude", "skills");
     const dir = join(root, "exact-boundary");
     mkdirSync(dir, { recursive: true });
@@ -917,15 +858,11 @@ describe("readReferenceSkillContent — human-only skill injection source", () =
 
     const result = readReferenceSkillContent("boundary-plus-one")!;
     expect(result).not.toBeNull();
-    // The head read cut the file's last byte: the file continues past the
-    // read, so the truncation notice is honest.
     expect(result.truncated).toBe(true);
     expect(result.content).toBe(bodyText.slice(0, -1));
   });
 
   test("a complete file with genuinely unterminated frontmatter keeps its old behavior", () => {
-    // Under the bound, no closing ---: the whole text is the body, exactly as
-    // the unbounded readFileSync produced before.
     const root = join(home, ".claude", "skills");
     const dir = join(root, "unterminated");
     mkdirSync(dir, { recursive: true });

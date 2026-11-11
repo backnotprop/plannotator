@@ -1,8 +1,3 @@
-/**
- * Bun servers: the Host-header allowlist. Scenarios are shared with the Pi
- * mirror (request-host.scenarios.ts); the goal-setup server and the
- * `--tailscale` served-name registration are Bun-only and tested here.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { normalizeGoalSetupBundle } from "@plannotator/shared/goal-setup";
 import { createTestEnvironment } from "../../tests/helpers/environment";

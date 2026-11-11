@@ -1,9 +1,3 @@
-/**
- * File Resolution Tests
- *
- * Run: bun test packages/server/resolve-file.test.ts
- */
-
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -37,8 +31,6 @@ afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
-
-// --- User path normalization ---
 
 describe("normalizeUserPathInput", () => {
 	test("expands tilde paths before normalization", () => {
@@ -120,10 +112,7 @@ describe("resolveUserPath", () => {
 	});
 });
 
-// --- Core resolution strategies ---
-
 describe("resolveMarkdownFile", () => {
-  // Strategy 1: Absolute paths
 
   test("resolves absolute path to existing file", async () => {
     const root = createTempProject({ "plan.md": "# Plan" });
@@ -146,8 +135,6 @@ describe("resolveMarkdownFile", () => {
     const result = resolveMarkdownFile("/nonexistent/path.md", root);
     expect(result.kind).toBe("not_found");
   });
-
-  // Strategy 2: Exact relative paths
 
   test("resolves exact relative path", async () => {
     const root = createTempProject({ "docs/guide.md": "# Guide" });
@@ -203,8 +190,6 @@ describe("resolveMarkdownFile", () => {
     });
   });
 
-  // Strategy 3: Case-insensitive search
-
   test("finds bare filenames case-insensitively", async () => {
     const root = createTempProject({ "notes/Architecture.MD": "# Architecture\n" });
     const result = resolveMarkdownFile("architecture.md", root);
@@ -248,8 +233,6 @@ describe("resolveMarkdownFile", () => {
     }
   });
 
-  // Ignored directories
-
   test("skips node_modules", async () => {
     const root = createTempProject({
       "node_modules/pkg/README.md": "# Pkg",
@@ -265,8 +248,6 @@ describe("resolveMarkdownFile", () => {
     const result = resolveMarkdownFile("pre-commit.md", root);
     expect(result.kind).toBe("not_found");
   });
-
-  // Extension filtering
 
   test("rejects non-markdown files", async () => {
     const root = createTempProject({ "script.ts": "export {}" });
@@ -291,8 +272,6 @@ describe("resolveMarkdownFile", () => {
       path: resolve(root, "notes.txt"),
     });
   });
-
-  // Edge cases
 
   test("returns not_found for nonexistent file", async () => {
     const root = createTempProject();

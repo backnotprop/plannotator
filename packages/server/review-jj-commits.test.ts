@@ -1,15 +1,4 @@
-/**
- * The Commits panel in a jj session, end to end through both review servers
- * (Bun + Pi): `/api/commits` answers with the jj rail, a `jj-commit:<id>`
- * switch serves that revision's first-parent diff with its description card,
- * and hunk expansion reads the same two revisions.
- *
- * Failure caught: either runtime still gating `/api/commits` to git (the
- * reported "Commits view is gone" on jj), or one runtime drifting from the
- * other in how it answers a jj-commit switch.
- *
- * Skipped when `jj` is not installed (CI runners do not ship it).
- */
+/** Commits panel in a jj session on both review servers: /api/commits answers with the jj rail, a `jj-commit:<id>` switch serves that revision's diff, and hunk expansion reads the same revisions. Skipped when jj is not installed. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -52,7 +41,6 @@ function jj(cwd: string, args: string[]): string {
   return result.stdout.trim();
 }
 
-/** base -> one -> two -> @ (blank), pure jj. */
 function initJjRepo(): { repoDir: string; one: string; two: string } {
   const repoDir = makeTempDir("plannotator-jj-commits-repo-");
   jj(repoDir, ["git", "init", "--no-colocate", "."]);
@@ -130,8 +118,6 @@ describe("Commits panel in a jj review session", () => {
         expect(switched.rawPatch).toContain("+one");
         expect(switched.rawPatch).not.toContain("base.txt");
         expect(switched.commitInfo).toMatchObject({ sha: one, subject: "feature one", body: "The body, in **markdown**." });
-        // Same-cwd commit switch: the context recompute is skipped, so no
-        // gitContext rides the response (the client keeps its own).
         expect("gitContext" in switched).toBe(false);
 
         const expanded = await fetch(`${server.url}/api/file-content?path=one.txt`).then((r) => r.json()) as {
@@ -173,7 +159,6 @@ describe("Commits panel in a jj review session", () => {
         expect(refreshed.diffType).toBe(`jj-commit:${atAfter}`);
         expect(refreshed.rawPatch).toContain("+second");
 
-        // Leaving the detour: a normal jj diff type still switches.
         const back = await fetch(`${server.url}/api/diff/switch`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },

@@ -1,17 +1,4 @@
-/**
- * `GET /api/review-image` (#1598) against a real git repository, on BOTH
- * review servers (Bun and the Pi mirror), so the two cannot drift.
- *
- * Regressions guarded:
- *  - binary bytes corrupted on the way out (UTF-8 decode anywhere in the path);
- *  - the wrong side served (added/deleted/renamed resolve from the chunk);
- *  - anything outside the current diff being readable (text files, unknown
- *    paths, `..`, a directory swapped for a symlink after the diff was taken);
- *  - stale tabs reading a newer snapshot;
- *  - an oversized file or a decode bomb reaching the browser;
- *  - the headers that make an SVG harmless if opened directly;
- *  - static-patch sessions reading anything at all.
- */
+/** `GET /api/review-image` against a real git repository on both review servers. Guards: binary bytes intact, the right side served, nothing outside the diff readable, no stale snapshots, size and decode-bomb limits, SVG-safe headers, no reads in static-patch sessions. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -56,7 +43,6 @@ function git(cwd: string, args: string[]): string {
   return result.stdout;
 }
 
-/** A PNG header (real IHDR) followed by bytes a UTF-8 decode would mangle. */
 function png(width: number, height: number, seed: number, extra = 0): Uint8Array {
   const out = new Uint8Array(33 + 64 + extra);
   out.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
@@ -117,9 +103,7 @@ function buildRepo(): Fixture {
   writeFileSync(join(repo, "sub", "nested.png"), files.nested);
   // 20000 x 20000 = 400 MP in a ~100-byte file: the decode-bomb shape.
   writeFileSync(join(repo, "bomb.png"), png(20_000, 20_000, 7));
-  // Just over the 10 MB cap; the worktree side must be refused by size.
   writeFileSync(join(repo, "big.png"), png(10, 10, 8, 10 * 1024 * 1024));
-  // What the symlink-swap test points the directory at.
   writeFileSync(join(outside, "nested.png"), png(1, 1, 99));
   return { repo, outside, files };
 }
@@ -182,7 +166,6 @@ for (const [runtime, startServer] of [
         expect(after.headers.get("x-image-width")).toBe("8");
         expect(after.headers.get("x-image-height")).toBe("6");
 
-        // Added: only the new side exists. Deleted: only the old side.
         expect(await bodyBytes(await image("added.png", "new"))).toEqual(fixture.files.added);
         expect(await reason(await image("added.png", "old"))).toBe("absent");
         expect(await bodyBytes(await image("gone.png", "old"))).toEqual(fixture.files.gone);

@@ -1,19 +1,4 @@
-/**
- * The PR-platform status post is marked explicitly. After a review is posted
- * to GitHub/GitLab/Bitbucket the editor sends one /api/feedback with the
- * status line and `platform: true`; both review servers carry that onto the
- * decision, and only a real boolean `true`.
- *
- * Regression guarded (0.28.0): hosts used to infer "platform post" from an
- * empty `annotations` array, but PR description, PR comment and editor
- * comments ride only in `feedback`, so a review made only of those was read as
- * the status post and the Claude Code mod sent the agent nothing. A server
- * that drops the flag would turn every real status post into feedback; one
- * that invents it would bring the bug back.
- *
- * Both runtimes in one file (precedent: review-note-payload.test.ts); temp
- * PLANNOTATOR_DATA_DIR per test.
- */
+/** The PR-platform status post is marked with `platform: true` on /api/feedback; both review servers carry only a real boolean `true` onto the decision. Hosts used to infer it from an empty `annotations`, which misread review-only feedback as a status post. */
 
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
