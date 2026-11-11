@@ -13,55 +13,27 @@ import { mentionAnchorOf, type MentionAnchor } from '../components/MentionPicker
 
 export interface MentionMenuState {
   items: readonly MentionPerson[];
-  /** Shown as one non-selectable row when `items` is empty. */
   emptyNotice: string | null;
   heading: string | null;
-  /** Explicitly activated row, or null — the menu opens with NOTHING active. */
   activeIndex: number | null;
-  /** Measured textarea rect the portaled picker is placed from. */
   anchor: MentionAnchor | null;
   query: string;
 }
 
 export interface UseMentionAutocompleteResult {
-  /** Open menu state, or null. Render MentionPicker from this. */
   menu: MentionMenuState | null;
-  /** Call in the textarea's onKeyDown; true means the event was consumed. */
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => boolean;
   /** Call from the textarea's onSelect and onChange (every caret move + input). */
   onSelect: () => void;
-  /** Insert the given menu item at the active trigger. */
   select: (index: number) => void;
-  /** The ids whose readable token still survives in the text. */
   mentionIds: readonly string[];
-  /**
-   * The same survivors as people, for a caller that needs their labels — the
-   * composer paints each surviving token as a chip. Frozen-empty with no
-   * source, the same treatment `mentionIds` gets.
-   */
   mentions: readonly MentionPerson[];
 }
 
 /**
- * `@` mention autocomplete for a comment textarea, driven entirely by a
- * host-supplied `MentionSource`. With no source every path here is inert:
- * no listener is registered, no menu state is ever open, `mentionIds` stays
- * the same frozen empty array, and the composer renders and behaves exactly
- * as it did before the prop existed.
- *
- * NO-PRESELECTION INVARIANT (shared with `useSkillReferenceAutocomplete`):
- * the menu opens with no row active, and while no row is active Enter and
- * Tab behave exactly as if the menu were not open — a body that ends
- * "ping @" plus Enter is still a newline. A row becomes active only through
- * explicit keyboard navigation (ArrowDown from none lands on the FIRST row,
- * ArrowUp from none on the LAST) or a pointer click, which inserts directly.
- *
- * DELIBERATE DIFFERENCE from the `/` and `$` skill trigger: the arrows engage
- * this menu even on a BARE trigger (`@` with no query typed). `$` and `/` are
- * ordinary prose characters, so their menu must yield the arrows back to
- * caret navigation; `@` at a word boundary is an unambiguous tag gesture, and
- * typing `@` then ArrowDown is how the host's own reply box already behaves.
- * Escape closes the menu whenever it is visible, for the same reason.
+ * NO-PRESELECTION INVARIANT (shared with `useSkillReferenceAutocomplete`): the menu opens with
+ * no row active, and while no row is active Enter and Tab behave exactly as if the menu were not
+ * open — a body that ends "ping @" plus Enter is still a newline.
  */
 const NO_IDS: readonly string[] = Object.freeze([]);
 const NO_PEOPLE: readonly MentionPerson[] = Object.freeze([]);
@@ -126,7 +98,6 @@ export function useMentionAutocomplete(options: {
     && trigger.from !== dismissedStart
     && (items.length > 0 || !!emptyNotice);
 
-  // A new trigger start clears the dismissal memory.
   const triggerStart = trigger?.from ?? null;
   const lastTriggerStart = useRef<number | null>(null);
   useEffect(() => {
@@ -136,15 +107,13 @@ export function useMentionAutocomplete(options: {
     }
   }, [triggerStart]);
 
-  // Any trigger change — a new one, or more typing re-filtering the same one —
-  // disarms the active row, so an activation always refers to the exact list
-  // the user was looking at.
+  // Any trigger change — a new one, or more typing re-filtering the same one — disarms the active
+  // row, so an activation always refers to the exact list the user was looking at.
   const triggerQuery = trigger?.query ?? null;
   useEffect(() => {
     setActiveIndex(null);
   }, [triggerStart, triggerQuery]);
 
-  // Measure the composer while the menu is open (and follow scroll/resize).
   useEffect(() => {
     if (!open) {
       setAnchor(null);
@@ -176,7 +145,6 @@ export function useMentionAutocomplete(options: {
       const person = items[index];
       if (!person) return;
       if (person.canOpen === false && source.onPickBlocked) {
-        // Nothing is inserted: the host owns the no-access affordance.
         source.onPickBlocked(person);
         setActiveIndex(null);
         setDismissedStart(trigger.from);
@@ -187,9 +155,9 @@ export function useMentionAutocomplete(options: {
       setCaret(result.caret);
       setTagged((prev) => (prev.some((p) => p.id === person.id) ? prev : [...prev, person]));
       setActiveIndex(null);
-      // Close deterministically: the DOM caret only moves in the timer below,
-      // and React's select plugin can re-read the STALE caret before then,
-      // transiently reopening the menu on the just-replaced query.
+      // Close deterministically: the DOM caret only moves in the timer below, and React's select
+      // plugin can re-read the STALE caret before then, transiently reopening the menu on the
+      // just-replaced query.
       setDismissedStart(trigger.from);
       setTimeout(() => {
         if (!el || !el.isConnected) return;
@@ -224,8 +192,6 @@ export function useMentionAutocomplete(options: {
           return true;
         case 'Enter':
         case 'Tab':
-          // NO row active means these keys were NOT aimed at the menu: Enter
-          // stays a newline, Tab still leaves the field.
           if (boundedActive === null) return false;
           e.preventDefault();
           select(boundedActive);

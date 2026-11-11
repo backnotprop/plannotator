@@ -1,21 +1,8 @@
 import { useEffect, useState } from 'react';
 
 /**
- * "Is this document being rendered for paper right now?"
- *
- * Two signals, because neither one alone covers every path:
- *
- *  - `beforeprint` / `afterprint` — what a real Cmd+P and the browser's print
- *    preview fire. Handlers run BEFORE the print snapshot, so a DOM or class
- *    write made from one is in the printed output; a React state update
- *    scheduled from one is not guaranteed to be.
- *  - `matchMedia('print')` change — what headless print emulation
- *    (`page.emulateMedia({ media: 'print' })`) and some preview
- *    implementations fire instead; there the page keeps living in print media,
- *    so async work (a diagram re-render) does land.
- *
- * Firefox may skip `afterprint` when a preview is dismissed, so a
- * `visibilitychange` back to a visible document also exits print mode.
+ * "Is this document being rendered for paper right now?" Two signals, because neither one alone
+ * covers every path: - `beforeprint` / `afterprint`.
  */
 export function subscribePrintMedia(setPrinting: (printing: boolean) => void): () => void {
   if (typeof window === 'undefined') return () => {};
@@ -43,12 +30,6 @@ export function subscribePrintMedia(setPrinting: (printing: boolean) => void): (
   };
 }
 
-/**
- * React binding over `subscribePrintMedia`. `onEnter` / `onExit` run inside the
- * event handler itself, which is the only place a change is guaranteed to
- * reach a real print snapshot; the returned boolean is the ordinary (async)
- * state for everything that can wait.
- */
 export function usePrintMedia(callbacks?: { onEnter?: () => void; onExit?: () => void }): boolean {
   const [printing, setPrinting] = useState(false);
 

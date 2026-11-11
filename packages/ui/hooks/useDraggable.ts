@@ -8,15 +8,7 @@ interface DragPosition {
   left: number;
 }
 
-/**
- * Makes a fixed-position element draggable by its header/handle.
- * Reads the element's actual rendered position on drag start via getBoundingClientRect,
- * so it works regardless of CSS transforms (flipAbove, translateX, etc.).
- *
- * @param elementRef - Ref to the positioned element (the popover/toolbar container)
- * @param options.keepInside - Opt-in: the whole element stays inside the window (an element larger than the window
- *   keeps its top left corner in). Absent: at least 50 px of it stays on screen, as before.
- */
+/** Makes a fixed-position element draggable by its header/handle. */
 export function useDraggable(elementRef: React.RefObject<HTMLElement | null>, options: { keepInside?: boolean } = {}) {
   const keepInside = options.keepInside ?? false;
   const [dragPosition, setDragPosition] = useState<DragPosition | null>(null);
@@ -33,7 +25,6 @@ export function useDraggable(elementRef: React.RefObject<HTMLElement | null>, op
     setWasDragged(false);
   }, []);
 
-  // Document-level pointermove/pointerup while dragging
   useEffect(() => {
     if (!isDragging) return;
 
@@ -56,7 +47,6 @@ export function useDraggable(elementRef: React.RefObject<HTMLElement | null>, op
         return;
       }
 
-      // Clamp to keep at least VISIBLE_MIN px visible on screen
       const top = Math.max(
         -((elementRef.current?.offsetHeight ?? 0) - VISIBLE_MIN),
         Math.min(startElRef.current.top + dy, window.innerHeight - VISIBLE_MIN),

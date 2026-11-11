@@ -13,18 +13,11 @@ export interface UpdateInfo {
   currentVersion: string;
   latestVersion: string;
   updateAvailable: boolean;
-  /** The Options dot was seen for this version (opening the menu dismisses it). */
   dismissed: boolean;
   releaseUrl: string;
   featureHighlight?: FeatureHighlight;
-  /** What updating means here: `script` (Update now), `copy`, `pi`, `opencode`. */
   action?: UpdateAction;
-  /** The command for this host, with the remembered install flags. */
   command?: string;
-  /**
-   * Checking for updates has failed for hours (no update known): the Options
-   * menu says so with `command`. `updateAvailable` is false then.
-   */
   checkFailing?: { since: string; error: string };
   dismiss: () => void;
 }
@@ -38,13 +31,8 @@ function isDismissedVersion(latestVersion: string): boolean {
 }
 
 /**
- * The Options menu's update state, from the server's advert (`updateAvailable`
- * on /api/plan and /api/diff). The browser never asks GitHub: the machine
- * checks every few minutes (packages/shared/update-check.ts) and the server passes
- * the answer on, or nothing when update checks are off, in a dev build, or on
- * a surface with no server.
- *
- * `?preview-update=0.29.0` still simulates an update, for screenshots.
+ * The Options menu's update state, from the server's advert (`updateAvailable` on /api/plan and
+ * /api/diff).
  */
 export function useUpdateCheck(advert?: UpdateAdvert | null, failing?: UpdateCheckFailingAdvert | null): UpdateInfo | null {
   const preview = useMemo(() => {

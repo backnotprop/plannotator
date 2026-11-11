@@ -82,10 +82,8 @@ function rounded(value: number): number {
 }
 
 /**
- * Converts the visual viewport into application-stage geometry. Pinch zoom is
- * intentionally represented by offsets only: reshaping the app while a user
- * zooms and pans would fight accessibility zoom. At the normal scale, browser
- * chrome and the software keyboard are allowed to reduce the usable stage.
+ * Pinch zoom is intentionally represented by offsets only: reshaping the app while a user zooms
+ * and pans would fight accessibility zoom.
  */
 export function calculateViewportEnvironment({
   layoutWidth,
@@ -135,11 +133,7 @@ export function calculateViewportEnvironment({
   };
 }
 
-/**
- * Converts the observed viewport into usable fixed-position bounds. Padding
- * and safe-area insets are inputs so positioning remains deterministic and
- * testable instead of reading CSS environment variables in every overlay.
- */
+/** Converts the observed viewport into usable fixed-position bounds. */
 export function calculateVisibleViewportBounds(
   environment: ViewportEnvironment,
   edgePadding = 0,
@@ -325,17 +319,16 @@ function subscribeViewportEnvironment(listener: () => void): () => void {
 }
 
 /**
- * Keeps Plannotator's shared viewport CSS properties synchronized without
- * putting high-frequency browser geometry into React state.
+ * Keeps Plannotator's shared viewport CSS properties synchronized without putting high-frequency
+ * browser geometry into React state.
  */
 export function useViewportEnvironment(): void {
   useEffect(() => acquireViewportEnvironment(), []);
 }
 
 /**
- * Reactive bounds for fixed overlays. It shares the root observer and its
- * animation-frame coalescing, so composer consumers do not add parallel
- * Visual Viewport listeners.
+ * Reactive bounds for fixed overlays. It shares the root observer and its animation-frame
+ * coalescing, so composer consumers do not add parallel Visual Viewport listeners.
  */
 export function useVisibleViewportBounds(edgePadding = 0): VisibleViewportBounds {
   const environment = useSyncExternalStore(

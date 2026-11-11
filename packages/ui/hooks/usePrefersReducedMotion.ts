@@ -1,6 +1,3 @@
-// Moved from the Workspaces app's `shell-motion.ts` with its contents rail
-// (MarkdownContentsRail, approved 2026-10-03). Port: none.
-
 import { useEffect, useState } from 'react';
 
 /** Whether the reader asked for reduced motion; follows the setting live. */

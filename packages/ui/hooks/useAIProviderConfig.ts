@@ -8,22 +8,7 @@ import {
   type AIProviderOption,
 } from '../utils/aiProvider';
 
-/**
- * Shared AI provider/model/reasoning-effort selection state for the plan and
- * code-review apps. Previously each App.tsx kept its own copy of this logic,
- * which drifted (e.g. a per-model effort fix landed in one app but not the
- * other). This owns the config logic in one place:
- *
- * - initial selection from saved settings,
- * - auto-resolving provider/model once capabilities load,
- * - per-model reasoning effort (a level set on one model never leaks to another),
- * - persistence of the provider/model choice.
- *
- * It deliberately does NOT reset the AI session: `useAIChat` needs `aiConfig`,
- * and its `resetSession` in turn would depend on this hook — a cycle. So the
- * caller composes the reset (`applyConfigChange(c); resetSession()`), keeping
- * session lifecycle with the app and config logic here.
- */
+/** Shared AI provider/model/reasoning-effort selection state for the plan and code-review apps. */
 export interface AIProviderConfig {
   providerId: string | null;
   model: string | null;
@@ -56,12 +41,11 @@ export function useAIProviderConfig({
     };
   });
 
-  // A provider picked for this page only (`applyConfigChange(..., { persist:
-  // false })`): never written to the cookie, but kept across capability
-  // refreshes so the resolver does not flip back.
+  // A provider picked for this page only (`applyConfigChange(..., { persist: false })`): never
+  // written to the cookie, but kept across capability refreshes so the resolver does not flip
+  // back.
   const sessionPickRef = useRef<string | null>(null);
 
-  // Auto-resolve provider/model once capabilities are known.
   useEffect(() => {
     if (!available || providers.length === 0) return;
     const saved = getAIProviderSettings();
@@ -88,8 +72,6 @@ export function useAIProviderConfig({
     });
   }, [available, providers, defaultProvider, origin]);
 
-  // Update the selection (provider/model/effort). Does NOT reset the session —
-  // the caller composes that (see the cycle note above).
   const applyConfigChange = useCallback(
     (
       config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null },
@@ -106,9 +88,9 @@ export function useAIProviderConfig({
         const model = providerChanged
           ? (config.model !== undefined ? config.model : resolveAIModelForProvider(provider, saved.preferredModels))
           : (config.model !== undefined ? config.model : prev.model);
-        // Per-model reasoning effort: record an explicit change against the
-        // current model, then derive the effective level from the (possibly new)
-        // model — so a provider/model switch never carries a stale level across.
+        // Per-model reasoning effort: record an explicit change against the current model, then
+        // derive the effective level from the (possibly new) model — so a provider/model switch
+        // never carries a stale level across.
         const reasoningEffortByModel = { ...prev.reasoningEffortByModel };
         if (config.reasoningEffort !== undefined && prev.model) {
           if (config.reasoningEffort === null) delete reasoningEffortByModel[prev.model];
@@ -116,10 +98,9 @@ export function useAIProviderConfig({
         }
         const reasoningEffort = model ? (reasoningEffortByModel[model] ?? null) : null;
         const next = { ...prev, providerId, model, reasoningEffort, reasoningEffortByModel };
-        // Only an explicit model pick is persisted. A resolver-derived model
-        // (e.g. the static fallback a lazily-discovered provider advertises
-        // before activation) must never overwrite the user's saved preference
-        // — the session request may fall back, the cookie may not.
+        // A resolver-derived model (e.g. the static fallback a lazily-discovered provider
+        // advertises before activation) must never overwrite the user's saved preference — the
+        // session request may fall back, the cookie may not.
         if (persist) {
           saveAIProviderSelection({
             providerId: next.providerId,

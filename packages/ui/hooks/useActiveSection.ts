@@ -6,7 +6,6 @@ import { addScrollViewportListener, getScrollViewportRect } from './useScrollVie
 export function useActiveSection(
   containerRef: React.RefObject<HTMLElement | null>,
   headingCount: number,
-  /** Optional explicit scroll element, available after OverlayScrollArea mounts. */
   scrollElement?: HTMLElement | null,
 ) {
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -17,8 +16,6 @@ export function useActiveSection(
     if (!contentContainer || !viewport) return;
 
     const refresh = () => {
-      // Read current nodes, not a count-keyed snapshot: another document can
-      // replace every heading while keeping the same count and block ids.
       const headings = contentContainer.querySelectorAll<HTMLElement>(
         '[data-block-type="heading"][data-block-id]',
       );

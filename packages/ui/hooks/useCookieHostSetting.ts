@@ -1,29 +1,18 @@
 import { useCallback, useState } from 'react';
 
 /**
- * "Open Plannotator at plannotator.localhost" (#2184) for Settings → General: on
- * writes `urlHost: "plannotator.localhost"` to config.json, off removes it.
- * The server sends it as `serverConfig.cookieHost` only for a local session
- * (never remote mode or `--tailscale`), and writes it with POST /api/config.
- * Deliberately not a settings-registry entry: the registry is bundled into
- * the portable guides.show viewer, whose pinned build must not change.
+ * The server sends it as `serverConfig.cookieHost` only for a local session (never remote mode
+ * or `--tailscale`), and writes it with POST /api/config.
  */
 export interface CookieHostSetting {
   on: boolean;
-  /** PLANNOTATOR_URL_HOST is set (its value; "" when set empty): the switch is locked. */
   env?: string;
-  /** config.json holds another `urlHost` (a tailnet name, `auto`, an IP): locked, never replaced. */
   urlHost?: string;
-  /** The last save failed: the reason, shown under the switch. */
   error?: string;
   onChange: (next: boolean) => void;
 }
 
-/**
- * The cookie switch's one sub line: what it does, or why the switch is
- * locked. `inbox` adds that the Inbox's notifications need allowing once at
- * the new address.
- */
+/** The cookie switch's one sub line: what it does, or why the switch is locked. */
 export function cookieHostDescription(
   setting: Pick<CookieHostSetting, 'on' | 'env' | 'urlHost'>,
   options: { inbox?: boolean } = {},

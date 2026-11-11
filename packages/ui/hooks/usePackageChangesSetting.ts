@@ -1,23 +1,17 @@
 import { useSyncExternalStore } from 'react';
 
 /**
- * Package changes in code review: the card switch (`card`, default on) and
- * the npm lookup consent (`lookup`, default off), from serverConfig and
- * written back with POST /api/config. The server enforces `lookup`; this
- * store only mirrors it so the card and Settings agree. Deliberately not a
- * settings-registry entry, like useUpdateCheckSetting: the registry is bundled
- * into the portable guides.show viewer.
+ * Deliberately not a settings-registry entry, like useUpdateCheckSetting: the registry is
+ * bundled into the portable guides.show viewer.
  */
 export interface PackageChangesSettingState {
   card: boolean;
   lookup: boolean;
-  /** PLANNOTATOR_PACKAGE_LOOKUP=0: the lookup is off and Settings cannot turn it on. */
   lookupEnv?: false;
 }
 
 export interface PackageChangesSetting extends PackageChangesSettingState {
   setCard: (next: boolean) => void;
-  /** Resolves true once config.json holds the new value. */
   setLookup: (next: boolean) => Promise<boolean>;
 }
 
@@ -40,7 +34,6 @@ export function adoptPackageChangesConfig(serverConfig: Record<string, unknown> 
   publish({ card: raw.card, lookup: raw.lookup, ...(raw.lookupEnv === false && { lookupEnv: false as const }) });
 }
 
-/** Test hook. */
 export function resetPackageChangesSetting(): void {
   publish(undefined);
 }

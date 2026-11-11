@@ -1,12 +1,3 @@
-/**
- * File Browser Hook
- *
- * Manages multiple directory file trees for the sidebar Files tab.
- * Each directory gets its own tree, loading, and error state.
- * Vault directories are supported via the isVault flag — they fetch
- * from the Obsidian vault endpoint instead of the generic files endpoint.
- */
-
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import type { VaultNode } from "../types";
 import { basenameFromPath } from "@plannotator/core/source-save";
@@ -19,14 +10,11 @@ export interface DirState {
   isLoading: boolean;
   error: string | null;
   workspaceStatus?: WorkspaceStatusPayload;
-  /** True after the first successful snapshot; live watching waits for this so watcher setup cannot block initial load. */
   hasLoadedTree?: boolean;
-  /** When true, fetches via /api/reference/obsidian/files and opens docs via /api/reference/obsidian/doc */
   isVault?: boolean;
   /**
-   * The server left supported files out because the folder holds more than
-   * its cap (PLANNOTATOR_FILE_BROWSER_MAX_FILES). `fileLimit` is that cap.
-   * Absent from a backend that does not cap.
+   * The server left supported files out because the folder holds more than its cap
+   * (PLANNOTATOR_FILE_BROWSER_MAX_FILES).
    */
   truncated?: boolean;
   fileLimit?: number;
@@ -90,22 +78,9 @@ function remapWorkspaceStatusForDir(
   };
 }
 
-/**
- * File-tree backend. Defaults to Plannotator's HTTP endpoints (generic files,
- * Obsidian vault, and the SSE live-watch stream) so Plannotator is unchanged. A
- * host (e.g. Workspaces) calls setFileTreeBackend once at startup to source the
- * tree from its own transport instead.
- */
 export interface FileTreeBackend {
-  /** Load a directory tree. Resolves to the same shape the /api/reference/files endpoint returns: a Response whose JSON is { tree, workspaceStatus?, truncated?, fileLimit?, error? }. */
   loadTree(dirPath: string): Promise<Response>;
-  /** Load an Obsidian vault tree. Resolves to a Response whose JSON is { tree, error? }. */
   loadVaultTree(vaultPath: string): Promise<Response>;
-  /**
-   * Begin live-watching the given directory paths. `onChange(path)` is invoked
-   * (already debounced/deduped) whenever a watched tree should be re-fetched.
-   * Returns a cleanup function. Returning undefined means no watcher started.
-   */
   watchTrees(paths: string[], onChange: (path: string) => void): (() => void) | undefined;
 }
 
@@ -171,16 +146,12 @@ const defaultFileTreeBackend: FileTreeBackend = {
   },
 };
 
-// Active backend. Defaults to Plannotator's HTTP endpoints so Plannotator is
-// unchanged. A host calls setFileTreeBackend once at startup to override.
 let fileTreeBackend: FileTreeBackend = defaultFileTreeBackend;
 
-/** Override the file-tree backend. Call once at app startup. */
 export function setFileTreeBackend(b: FileTreeBackend): void {
   fileTreeBackend = b;
 }
 
-/** Reset to the default (HTTP endpoint) backend. Mainly for tests. */
 export function resetFileTreeBackend(): void {
   fileTreeBackend = defaultFileTreeBackend;
 }
@@ -288,16 +259,11 @@ export function useFileBrowser(): UseFileBrowserReturn {
   const fetchAll = useCallback(
     (directories: string[]) => {
       setDirs((prev) => {
-        // Preserve any vault dirs that were already loaded
         const vaultDirs = prev.filter((d) => d.isVault);
         const regularDirs = directories.map((path) => ({
           path,
           name: basenameFromPath(path),
           tree: [],
-          // Keep initial roots loading until their first snapshot resolves. If
-          // the SSE watcher starts before /api/reference/files finishes,
-          // chokidar setup on large repo roots can block the server long enough
-          // that the visible tree sits on "Loading..." for seconds.
           isLoading: true,
           error: null,
           hasLoadedTree: false,
@@ -377,8 +343,7 @@ export function useFileBrowser(): UseFileBrowserReturn {
       if (initialLoadPending) return "";
 
       return regularDirs
-        // Subscribe only after the initial snapshot is visible. Live updates are
-        // for future freshness; they must not compete with first paint.
+        // Live updates are for future freshness; they must not compete with first paint.
         .filter((dir) => !dir.error && dir.hasLoadedTree)
         .map((dir) => dir.path)
         .sort()

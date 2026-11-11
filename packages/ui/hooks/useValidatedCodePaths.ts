@@ -10,21 +10,8 @@ export type ValidationEntry =
 export type ValidatedMap = Map<string, ValidationEntry>;
 
 /**
- * Extracts code-file path candidates from `markdown` and posts them to
- * `/api/doc/exists` once per markdown change. The server has typically
- * pre-warmed the file walk at plan/annotate load, so the response is fast.
- *
- * `validated` is empty until `ready` flips to true, at which point it holds
- * an entry for every candidate (including missing/unavailable ones). The
- * renderer dispatches on status — see InlineMarkdown.
- *
- * Empty candidate set short-circuits — no fetch, ready: true immediately.
- *
- * `baseDir` is the directory the active document lives in (linked-doc parent
- * or the annotate source file's parent). When set, the server tries
- * `<baseDir>/<input>` literal-resolve before its cwd walk so out-of-tree
- * relative references (e.g. `../script.ts` in `~/notes/foo.md`) don't get
- * demoted to plain text.
+ * Extracts code-file path candidates from `markdown` and posts them to `/api/doc/exists` once
+ * per markdown change.
  */
 export function useValidatedCodePaths(
 	markdown: string,
@@ -38,10 +25,8 @@ export function useValidatedCodePaths(
 		setValidated(new Map());
 		setReady(false);
 
-		// Host opt-out (e.g. a backend with no /api/doc/exists). Default undefined
-		// for Plannotator => unchanged. When disabled we never probe and leave
-		// ready=false, so gateCodePath's no-validation fallback renders code links
-		// optimistically (clickable) instead of demoting them to plain text.
+		// When disabled we never probe and leave ready=false, so gateCodePath's no-validation fallback
+		// renders code links optimistically (clickable) instead of demoting them to plain text.
 		if (disabled) {
 			return;
 		}
@@ -87,8 +72,5 @@ export function useValidatedCodePaths(
 		};
 	}, [markdown, baseDir, disabled]);
 
-	// Stable reference: only changes when validated/ready actually change.
-	// Without memoization, the parent provider's value is a fresh object every
-	// render, forcing all context consumers (every InlineMarkdown) to re-render.
 	return useMemo(() => ({ validated, ready }), [validated, ready]);
 }

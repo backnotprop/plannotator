@@ -30,7 +30,6 @@ export interface UseCodeFilePopoutReturn {
     requestedPath?: string;
     line?: number;
     lineEnd?: number;
-    /** Changes on every open, so reopening the same file:line scrolls to it again. */
     revealKey?: number;
   } | null;
 }

@@ -14,15 +14,7 @@ const EDITABLE_FOCUS_SELECTOR = [
 const BLOCKING_OVERLAY_SELECTOR = [
   '[role="dialog"]',
   '[aria-modal="true"]',
-  // Some legacy Plannotator modals predate explicit dialog semantics. Keep
-  // Vim from focusing the obscured document underneath those full-screen
-  // overlays while they are brought onto the shared dialog primitive.
   '.fixed.inset-0',
-  // An open dismissable popover (ActionMenu, ApproveDropdown, DecisionControl)
-  // owns Escape through useDismissablePopover. Without this, the vim handler
-  // runs first (it registered earlier on document), preventDefaults while
-  // reclaiming focus, and the popover's own Escape handler then skips the
-  // defaultPrevented event — the menu never closes.
   '[data-pn-dismissable-popover]',
 ].join(',');
 
@@ -30,7 +22,6 @@ const BLOCKING_OVERLAY_SELECTOR = [
 export interface UseVimDocumentFocusOptions {
   readonly enabled: boolean;
   readonly blocked: boolean;
-  /** Focus the owning document surface and report whether focus moved to it. */
   readonly focusDocument: () => boolean;
 }
 
@@ -53,11 +44,8 @@ export function requestVimDocumentFocus(): void {
 }
 
 /**
- * Give an enabled Vim document initial keyboard ownership and let Escape from
- * neutral app chrome return to it.
- *
- * Editable controls and overlays retain first ownership of Escape. The hook
- * only prevents the event after focus actually moves back to the document.
+ * Give an enabled Vim document initial keyboard ownership and let Escape from neutral app chrome
+ * return to it.
  */
 export function useVimDocumentFocus({
   enabled,
@@ -87,8 +75,6 @@ export function useVimDocumentFocus({
         && !hasBlockingOverlay()
         && focusDocument()
       ) {
-        // One visible document owns each request when a host renders multiple
-        // Viewer instances.
         event.preventDefault();
       }
     };

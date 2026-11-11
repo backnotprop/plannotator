@@ -17,28 +17,17 @@ import {
 export interface UsePinpointOptions {
   containerRef: RefObject<HTMLElement | null>;
   inputMethod: InputMethod;
-  /** Disable when toolbar/popover/diff is active */
   enabled: boolean;
-  /** Submit a text range through the shared annotation pipeline. */
   onSelectRange: (range: Range) => void;
-  /** Handle code block clicks (needs special annotation path) */
   onCodeBlockClick: (blockId: string, element: HTMLElement) => void;
 }
 
-/** Live pointer-owned state returned by `usePinpoint`. */
 export interface UsePinpointReturn {
-  /** Live target from the canonical semantic graph under the pointer. */
   hoverTarget: SemanticTarget | null;
-  /** Release pointer-owned feedback so keyboard navigation can take over. */
   clearHover: () => void;
 }
 
-/**
- * Resolve pointer hover and clicks through the canonical semantic target graph.
- *
- * The hook mutates only its transient hover marker and removes it when disabled
- * or unmounted.
- */
+/** Resolve pointer hover and clicks through the canonical semantic target graph. */
 export function usePinpoint({
   containerRef,
   inputMethod,
@@ -56,7 +45,6 @@ export function usePinpoint({
     setHoverTarget(null);
   }, []);
 
-  // Clear hover when deactivated
   useEffect(() => {
     if (!isActive) {
       clearHover();
@@ -154,18 +142,15 @@ export function usePinpoint({
         e.preventDefault();
       }
 
-      // Prevent link navigation in pinpoint mode
       const link = (target.closest('a') as HTMLAnchorElement | null);
       if (link && container.contains(link)) {
         e.preventDefault();
       }
 
-      // Clear hover state
       resolved.element.removeAttribute('data-pinpoint-hover');
       setHoverTarget(null);
 
       if (resolved.kind === 'code') {
-        // Route to existing code block annotation path
         const codeBlockContainer = container.querySelector(`[data-block-id="${resolved.blockId}"]`) as HTMLElement;
         if (codeBlockContainer) {
           onCodeBlockClick(resolved.blockId, codeBlockContainer);
@@ -181,7 +166,6 @@ export function usePinpoint({
       onSelectRange(range);
     };
 
-    // Use capture phase so we get the click before links navigate
     container.addEventListener('click', handleClick, true);
 
     return () => {

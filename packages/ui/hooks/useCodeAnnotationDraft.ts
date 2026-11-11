@@ -1,20 +1,15 @@
-/**
- * Auto-save code review annotation drafts to the server.
- *
- * Similar to useAnnotationDraft but stores CodeAnnotation[] directly
- * (they're already compact — no tuple conversion needed).
- */
-
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { CodeAnnotation, Annotation, CommentAnnotation } from '../types';
 import { getDraftTransport, type DraftTransport } from './useAnnotationDraft';
 
 const DEBOUNCE_MS = 500;
-/** Bound on one read of a switched-onto target's draft (#1590). */
+/** Bound on one read of a switched-onto target's draft. */
 export const TARGET_LOAD_TIMEOUT_MS = 5000;
 
-/** A target-bound transport refuses to write into a different review. The host
- * must refresh/adopt a target before saving can resume; retrying cannot fix it. */
+/**
+ * A target-bound transport refuses to write into a different review. The host must refresh/adopt
+ * a target before saving can resume; retrying cannot fix it.
+ */
 export class DraftTargetChangedError extends Error {
   constructor() { super('Review draft target changed'); }
 }
@@ -35,22 +30,11 @@ interface DraftData {
   commentAnnotations?: CommentAnnotation[];
   viewedFiles?: string[];
   /**
-   * Files the reviewer manually un-viewed, which auto-mark-viewed must never
-   * re-check (the "come back to this" contract). Additive and optional: a
-   * draft written before this field restores fine, and a draft carrying it is
-   * ignored gracefully by an older build.
-   *
-   * Deliberately absent from `isEmpty` and from the engagement signal — a
-   * session whose only state is suppression is still an empty draft and is
-   * still cleared, keeping #948's clear-everything semantics untouched.
+   * Files the reviewer manually un-viewed, which auto-mark-viewed must never re-check (the "come
+   * back to this" contract).
    */
   autoViewSuppressed?: string[];
   draftGeneration?: number;
-  /**
-   * Set by the review server (never by the client) when a draft is served
-   * through its target key for a patch different from the one it was
-   * saved on (#1590). The host re-checks line comments' anchors on restore.
-   */
   patchChanged?: boolean;
   ts: number;
 }
@@ -71,7 +55,6 @@ function formatTimeAgo(ts: number): string {
 }
 
 interface UseCodeAnnotationDraftOptions {
-  /** Optional target-bound transport; the configured host transport is the default. */
   transport?: DraftTransport;
   annotations: CodeAnnotation[];
   descriptionAnnotations?: Annotation[];
@@ -80,15 +63,8 @@ interface UseCodeAnnotationDraftOptions {
   autoViewSuppressed?: Set<string>;
   isApiMode: boolean;
   submitted: boolean;
-  /** Hosts with independent review-progress storage omit viewed state from drafts. */
   persistViewedFiles?: boolean;
-  /** Receives the unsent items found on a target the session switched onto
-   *  in place (#1590), already filtered to ids the session neither holds nor
-   *  deleted. The host adds them to its state; autosave then saves the merge.
-   *  Called synchronously before autosave resumes. */
   onDraftTargetMerge?: (items: CodeDraftMergeItems) => void;
-  /** Bound on one read of a switched-onto target's draft. Default
-   *  `TARGET_LOAD_TIMEOUT_MS`; exposed for tests. */
   targetLoadTimeoutMs?: number;
 }
 
@@ -97,35 +73,21 @@ export interface CodeDraftMergeItems {
   annotations: CodeAnnotation[];
   descriptionAnnotations: Annotation[];
   commentAnnotations: CommentAnnotation[];
-  /** The server served the draft for a patch other than it was saved on. */
   patchChanged: boolean;
 }
 
-/** Draft state a review server reports after an in-place target switch
- *  (PR switch / PR diff-scope switch, #1590). */
 export interface CodeDraftTargetState {
   found: boolean;
   draftGeneration: number | null;
 }
 
 interface UseCodeAnnotationDraftResult {
-  /** Flush pending edits, then hold autosave until adoptDraftTarget resumes it. */
   flushBeforeSwitch: () => Promise<void>;
-  /** Keep unsaved annotations in memory and offer an in-place refresh. */
   draftTargetChanged: boolean;
   draftBanner: { count: number; viewedCount: number; timeAgo: string } | null;
-  /** `patchChanged` is true when the server served the draft for a patch other
-   *  than the one it was saved on (the host re-checks line anchors). */
   restoreDraft: () => { annotations: CodeAnnotation[]; descriptionAnnotations: Annotation[]; commentAnnotations: CommentAnnotation[]; viewedFiles: string[]; autoViewSuppressed: string[]; patchChanged: boolean };
   getDraftGeneration: () => number;
   dismissDraft: () => void;
-  /** Call with the server's `draftState` after an in-place target switch.
-   *  Raises the generation counter to the new target's floor (so saves are
-   *  not rejected against an old tombstone there) and, when that target holds
-   *  a draft, loads it and hands its new items to `onDraftTargetMerge`. Until
-   *  that one load settles (success, failure, or a newer switch) autosave does
-   *  not write under the new target, so the switch cannot overwrite a draft
-   *  it has not read yet; nothing else ever waits. */
   adoptDraftTarget: (state: CodeDraftTargetState | undefined, transport?: DraftTransport) => void;
 }
 
@@ -157,16 +119,7 @@ export function useCodeAnnotationDraft({
   const draftGenerationRef = useRef(0);
   const persistViewedRef = useRef(persistViewedFiles);
   persistViewedRef.current = persistViewedFiles;
-  // True once the user has actually had annotations this session. Used to decide
-  // whether an empty state is a real "cleared everything" edit (persist it) vs a
-  // fresh/unengaged session (leave the server alone). Keyed on annotations only —
-  // see the autosave effect for why viewedFiles must not count.
   const hasHadAnnotationsRef = useRef(false);
-  // In-place switch bookkeeping (#1590). Every adoptDraftTarget call starts a
-  // new switch id; a load that resolves for an older id is ignored. While the
-  // current switch's draft load is in flight, autosave skips writing (it
-  // would overwrite a draft it has not merged yet) and remembers that it did,
-  // so settling — success, failure, or supersede — always resumes saving.
   const switchSeqRef = useRef(0);
   const reportTargetChanged = (error: unknown, seq: number): boolean => {
     if (!(error instanceof DraftTargetChangedError)) return false;
@@ -178,12 +131,10 @@ export function useCodeAnnotationDraft({
   };
   const awaitingTargetLoadRef = useRef(false);
   const skippedWhileAwaitingRef = useRef(false);
-  // The switched-onto target's draft could not be read (both attempts failed
-  // or timed out). Autosave then does not write under that target — it would
-  // overwrite a draft nobody has seen — and instead retries the read on each
-  // save attempt; a successful read (or the next switch) clears it.
+  // Autosave then does not write under that target — it would overwrite a draft nobody has seen —
+  // and instead retries the read on each save attempt; a successful read (or the next switch)
+  // clears it.
   const targetUnreadableRef = useRef(false);
-  // Kicks a read of the current target's draft; set by adoptDraftTarget.
   const retryTargetLoadRef = useRef<(() => void) | null>(null);
   const [saveNudge, setSaveNudge] = useState(0);
   const loadTimeoutRef = useRef(targetLoadTimeoutMs);
@@ -192,9 +143,8 @@ export function useCodeAnnotationDraft({
   onMergeRef.current = onDraftTargetMerge;
   const latestRef = useRef({ annotations, descriptionAnnotations, commentAnnotations });
   latestRef.current = { annotations, descriptionAnnotations, commentAnnotations };
-  // Ids the reviewer removed during this session, so a later merge offer
-  // (switching back onto a target saved before the removal) never brings a
-  // deleted comment back. Re-adding an id (undo) clears it again.
+  // Ids the reviewer removed during this session, so a later merge offer (switching back onto a
+  // target saved before the removal) never brings a deleted comment back.
   const removedIdsRef = useRef(new Set<string>());
   const seenIdsRef = useRef(new Set<string>());
   {
@@ -208,7 +158,6 @@ export function useCodeAnnotationDraft({
     seenIdsRef.current = nowIds;
   }
 
-  // Load draft on mount
   useEffect(() => {
     if (!isApiMode) return;
     const seq = switchSeqRef.current;
@@ -224,8 +173,6 @@ export function useCodeAnnotationDraft({
       })
       .then((data: DraftData | null) => {
         if (cancelled || seq !== switchSeqRef.current) return;
-        // Keep even a viewed-only draft while independent progress support is
-        // unresolved; a failed/unsupported load may need to offer it later.
         draftDataRef.current = data;
         const generation = readDraftGeneration(data?.draftGeneration);
         if (generation !== null) {
@@ -263,7 +210,6 @@ export function useCodeAnnotationDraft({
     setDraftBanner(count || viewedCount ? { count, viewedCount, timeAgo: formatTimeAgo(data.ts || 0) } : null);
   }, [persistViewedFiles]);
 
-  // Debounced auto-save on annotation/viewed changes
   useEffect(() => {
     if (!isApiMode || submitted) return;
     if (!hasMountedRef.current) return;
@@ -278,9 +224,6 @@ export function useCodeAnnotationDraft({
     if (annotations.some((a) => !a.source) || descriptionAnnotations.length > 0 || commentAnnotations.length > 0) hasHadAnnotationsRef.current = true;
 
     const isEmpty = annotations.length === 0 && descriptionAnnotations.length === 0 && commentAnnotations.length === 0 && (!persistViewedFiles || viewedFiles.size === 0);
-    // Leave the server alone for an empty state until the user has actually had
-    // annotations this session. This preserves an unrestored draft sitting on disk
-    // at mount (the draft-recovery banner can still offer it).
     if (isEmpty && !hasHadAnnotationsRef.current) return;
 
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -288,8 +231,6 @@ export function useCodeAnnotationDraft({
     const seq = switchSeqRef.current;
     const persist = async () => {
       if (targetChangedRef.current) return;
-      // The switched-onto target's draft is still loading: writing now would
-      // overwrite it unread. Settling the load re-runs this effect.
       if (awaitingTargetLoadRef.current) {
         skippedWhileAwaitingRef.current = true;
         return;
@@ -303,10 +244,8 @@ export function useCodeAnnotationDraft({
       draftGenerationRef.current = draftGeneration;
 
       if (isEmpty) {
-        // The user cleared everything (#948). Delete the draft with a generation
-        // tombstone so it can't resurface on refresh and a late save can't revive
-        // it. Mirrors useAnnotationDraft.persistNow — routed through the draft
-        // transport seam so a host backend tombstones its own stored draft too.
+        // Mirrors useAnnotationDraft.persistNow — routed through the draft transport seam so a
+        // host backend tombstones its own stored draft too.
         await transport.remove(draftGeneration, { keepalive: false });
         return;
       }
@@ -361,8 +300,6 @@ export function useCodeAnnotationDraft({
   }, []);
 
   const restoreDraft = useCallback(() => {
-    // Cancel any pending autosave so it can't fire with pre-restore state and
-    // overwrite what we're about to restore.
     if (timerRef.current) clearTimeout(timerRef.current);
     pendingSaveRef.current = null;
     const data = draftDataRef.current;
@@ -401,8 +338,6 @@ export function useCodeAnnotationDraft({
 
   const adoptDraftTarget = useCallback((state: CodeDraftTargetState | undefined, nextTransport?: DraftTransport) => {
     if (!isApiMode) return;
-    // undefined also resumes a FAILED switch, which has not repaired a
-    // target mismatch. Only an applied server response may clear the notice.
     if (state) {
       targetChangedRef.current = false;
       setDraftTargetChanged(false);
@@ -411,19 +346,11 @@ export function useCodeAnnotationDraft({
       switchPausedRef.current = false;
       setSaveNudge(n => n + 1);
     }
-    // A failed/superseded request did not adopt another target. Its current
-    // draft may still be loading (or unreadable); retain that write protection.
     if (!state) return;
-    // An applied switch supersedes the page-load read (its seq guard drops
-    // the result), so it must open autosave itself. A failed/superseded
-    // switch must not: the page-load read may still be in flight, and
-    // saving before it settles could overwrite a draft the banner has not
-    // offered yet.
+    // An applied switch supersedes the page-load read (its seq guard drops the result), so it must
+    // open autosave itself.
     hasMountedRef.current = true;
     const targetTransport = nextTransport ?? transportRef.current;
-    // Every switch starts clean: a previous switch's load (if still in
-    // flight) is superseded, an unreadable-target block is lifted, and any
-    // write either of them held back resumes (under the new target).
     const seq = ++switchSeqRef.current;
     const resumeHeldWrite = () => {
       if (skippedWhileAwaitingRef.current) {
@@ -444,8 +371,6 @@ export function useCodeAnnotationDraft({
       if (!draft) return;
       const loadedGeneration = readDraftGeneration(draft.draftGeneration);
       if (loadedGeneration !== null) draftGenerationRef.current = Math.max(draftGenerationRef.current, loadedGeneration);
-      // Only what the session neither holds nor deleted: the target may
-      // carry this session's own blob from before a switch away and back.
       const current = latestRef.current;
       const skip = new Set<string>([
         ...current.annotations.map((a) => a.id),
@@ -476,8 +401,6 @@ export function useCodeAnnotationDraft({
         withTimeout(targetTransport.load(), loadTimeoutRef.current)
           .then(({ data, generation }) => {
             if (switchSeqRef.current !== seq) return; // a newer switch owns the keys now
-            // A debounced save armed before the read settled captured the
-            // pre-merge state; drop it and save again from the merged render.
             if (timerRef.current) {
               clearTimeout(timerRef.current);
               timerRef.current = null;
@@ -495,9 +418,7 @@ export function useCodeAnnotationDraft({
               return;
             }
             if (remaining > 0) { attempt(remaining - 1); return; }
-            // Still unreadable: never overwrite it blind. Autosave keeps
-            // running for the session and retries this read on its next
-            // save attempt; the next switch lifts the block.
+            // Still unreadable: never overwrite it blind.
             awaitingTargetLoadRef.current = false;
             targetUnreadableRef.current = true;
           });

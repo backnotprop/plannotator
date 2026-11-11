@@ -6,26 +6,17 @@ export const HOVER_PREVIEW_SHOW_DELAY_MS = 150;
 export const HOVER_PREVIEW_HIDE_DELAY_MS = 200;
 
 export interface HoverPreview<T> {
-  /** The loaded preview while it is open, else null. */
   preview: T | null;
-  /** Attach to the anchor element; the preview positions against it. */
   anchorRef: React.MutableRefObject<HTMLElement | null>;
-  /** Pointer or focus arrives on the anchor: load after the show delay. */
   onEnter: () => void;
-  /** Pointer or focus leaves the anchor: close after the hide delay. */
   onLeave: () => void;
-  /** Spread onto the preview so moving into it keeps it open. */
   previewHandlers: { onMouseEnter: () => void; onMouseLeave: () => void };
-  /** Close at once (a click, a scroll). */
   dismiss: () => void;
 }
 
 /**
- * Dwell-then-load hover for a floating preview: the timing shared by the
- * code-file link preview (InlineMarkdown) and Call Flow's source locations.
- * Nothing loads before the pointer rests for `HOVER_PREVIEW_SHOW_DELAY_MS`; a
- * load that resolves after the pointer left is dropped. `load` resolving
- * null means "nothing to show".
+ * Dwell-then-load hover for a floating preview: the timing shared by the code-file link preview
+ * (InlineMarkdown) and Call Flow's source locations.
  */
 export function useHoverPreview<T>(load: () => Promise<T | null>, enabled = true): HoverPreview<T> {
   const [preview, setPreview] = useState<T | null>(null);
