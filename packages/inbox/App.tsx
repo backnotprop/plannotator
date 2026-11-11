@@ -173,7 +173,7 @@ import { StalePageNotice } from './components/StalePageNotice';
 import { InboxToast, type InboxToastModel, toastSpeech } from './components/Toast';
 import { errorToast } from './toastError';
 import { pictureFromFile } from './projectPictures';
-import { canToggleRead, confirmSetAside, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, offersRowMarkRead, seenHeldInNew, setAsideCount, type SetAsideAnswer, type SetAsideCount } from './markRead';
+import { canToggleRead, confirmSetAside, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, offersRowMarkRead, seenHeldInNew, setAsideCount, type SetAsideAnswer, type SetAsideCount, warnsBeforeRead } from './markRead';
 import { MarkReadWarning } from './components/MarkReadWarning';
 import { summarizeInboxQuestions } from '@plannotator/core/inbox-questions';
 import { threadLink, type RowMenuAction } from './rowMenu';
@@ -3631,16 +3631,26 @@ function Inbox() {
     if (!read) await readWrites.current.get(threadId)?.catch(() => {});
     const listAtPress = read ? shownRef.current : null;
     // Mark read is drawn now (rowActions.ts), even while a look on its way is waited for below; Move back waits for
-    // its answer. A press that turns out to write nothing takes the drawn row away again.
+    // its answer. A press that turns out to write nothing takes the drawn row away again. A press the warning will
+    // ask about (open questions, the warning on) is drawn only once the person goes on: never read behind the
+    // question, and Cancel leaves the row and header as they were.
     const drawnRow = read ? shownRowOf(shownRef.current, threadId) : null;
     let finished = () => {};
+    let drawn = false;
     const unpatch = () => {
       setRowPatches((current) => withEntry<RowPatch>(current, threadId, undefined));
       finished();
     };
     const undraw = () => {
       unpatch();
-      if (drawnRow) setShown((current) => (current ? replaceHeldRow(current, drawnRow) : current));
+      if (drawn && drawnRow) setShown((current) => (current ? replaceHeldRow(current, drawnRow) : current));
+    };
+    const draw = () => {
+      if (drawn) return;
+      drawn = true;
+      const patch = readRowPatch(new Date().toISOString());
+      setRowPatches((current) => withEntry(current, threadId, patch));
+      setShown((current) => (current ? patchShownRow(current, threadId, patch) : current));
     };
     if (read) {
       const pending = new Promise<void>((done) => (finished = done));
@@ -3648,9 +3658,9 @@ function Inbox() {
       void pending.then(() => {
         if (readWrites.current.get(threadId) === pending) readWrites.current.delete(threadId);
       });
-      const patch = readRowPatch(new Date().toISOString());
-      setRowPatches((current) => withEntry(current, threadId, patch));
-      setShown((current) => (current ? patchShownRow(current, threadId, patch) : current));
+      const atPress = rowOf(threadId);
+      const willAsk = warnsBeforeRead(atPress ? setAsideCount([atPress]) : openThreadSetAside(threadId), settings?.mark_read_warning?.on === true);
+      if (!willAsk) draw();
     }
     // A look this tab sent and the server has not taken yet: decide on what it gives (a seen update held in New
     // moves locally), whether Mark read came before the look landed or after. Never longer than
@@ -3670,7 +3680,13 @@ function Inbox() {
       }
     }
     // Questions this Mark read would close unanswered (and tell the agent about): the warning asks first.
-    if (read && !(await warnSetAside(before ? setAsideCount([before]) : openThreadSetAside(threadId), false))) return;
+    if (read) {
+      if (!(await warnSetAside(before ? setAsideCount([before]) : openThreadSetAside(threadId), false))) {
+        undraw();
+        return;
+      }
+      draw();
+    }
     // The list holds still, a thread open or not (approval "inbox-list-view", R7): the row stays where it is, not
     // bold, and moves to Quiet when the list next settles.
     const open = routeRef.current.thread;
