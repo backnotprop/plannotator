@@ -94,7 +94,7 @@ test("a pick saved and not sent is posted as a draft: its own mark in the table,
   for (const body of [renderDecisionComment(d, { platform: "github" }), renderDecisionSection(d, { platform: "github" })!]) {
     expect(body).toContain("1 decided, 1 draft, 1 open");
     expect(body).toContain("| D2 | Show who made it? | B · _draft, not sent to the agent_ | |");
-    expect(body).toContain("<details><summary>D2 · <b>Show who made it?</b> B · draft, not sent to the agent</summary>");
+    expect(body).toContain("<details><summary><h3>D2 · Show who made it?</h3><br>B · draft, not sent to the agent</summary>");
     expect(body).toContain("- **B** · _draft, not sent to the agent_");
     expect(body).not.toContain("- ✓ **B**");
     expect(body).toContain("> a draft note");
@@ -165,7 +165,9 @@ test("the banner never sizes an empty block: the comment opens with it after the
 
 test("an opened decision shows its pick, verdict, note and context; the other choices and the reasoning wait in one nested fold", () => {
   const body = renderDecisionComment(doc([item(1)]), { platform: "github" });
-  const fold = body.slice(body.indexOf("<details><summary>D1"), body.lastIndexOf("</details>") + 10);
+  // The question is a mini heading in the fold's summary, the answer on its own line under it.
+  expect(body).toContain("<details><summary><h3>D1 · Question 1?</h3><br>A</summary>");
+  const fold = body.slice(body.indexOf("<details><summary><h3>D1"), body.lastIndexOf("</details>") + 10);
   const nested = fold.indexOf("<details><summary>1 other choice and the reasoning</summary>");
   expect(nested).toBeGreaterThan(0);
   const before = fold.slice(0, nested);

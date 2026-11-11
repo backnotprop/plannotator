@@ -201,7 +201,11 @@ function folded(doc: DecisionExportV1, item: DecisionExportItem, level: Level, w
   const draft = item.state === "picked_unsent";
   const mark = (label: string) => (draft ? `- **${label}** · _${DECISION_POST_DRAFT}_` : `- ✓ **${label}**`);
   const answer = html(clip(answerOf(item), 60));
-  const out = [`<details><summary>D${item.n} · <b>${html(item.prompt)}</b> ${answer}${draft ? `${answer ? " · " : ""}${DECISION_POST_DRAFT}` : ""}</summary>`, ""];
+  // The question is a mini heading (the owner, 2026-11-10: "decisions should be mini headings"): an <h3>, which GitHub
+  // keeps inside <summary> and draws inline on the fold's line (h4 is no bigger than bold text); the answer on its own
+  // line under it.
+  const line = `${answer}${draft ? `${answer ? " · " : ""}${DECISION_POST_DRAFT}` : ""}`;
+  const out = [`<details><summary><h3>D${item.n} · ${html(item.prompt)}</h3>${line ? `<br>${line}` : ""}</summary>`, ""];
   for (const c of item.choices) if (c.chosen) out.push(choiceLine(c, mark, level));
   for (const own of [item.answer?.other, item.answer?.text]) if (own) out.push(`${mark(mdInline(own))} · own answer`);
   out.push("");
