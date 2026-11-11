@@ -503,6 +503,9 @@ export function createInboxLaunch(options: {
     return state.availability.value;
   };
   const refreshAvailable = (host: LaunchHost) => void available(host).then((value) => (stateOf(host).lastAvailable = value));
+  /** Whether it can start in at least one of these folders, by their own settings (never cached: a Send's folder, To's projects). */
+  const availableIn = (host: LaunchHost, folders: readonly string[]): Promise<LaunchAvailability> =>
+    host.available(folders).catch(() => ({ ok: false, missing: false, reason: "could not check" }) as LaunchAvailability);
 
   // ── The host's view: one `sessions` read per host, shared, at most every 10 s, only while something needs it ──
   const refreshHost = (host: LaunchHost): Promise<void> => {
@@ -1630,7 +1633,10 @@ ${result.text}`);
       if (chosen && !isFolder(chosen.root)) {
         throw new InboxError("folder_missing", `${options.displayFolder(chosen.root)} isn't there any more. Pick another project. Nothing was sent.`, { field: "to.launch" });
       }
-      const ok = await available(host, true);
+      // In the folder it will start in, with that folder's own settings (a project can turn Claude Code's plugin on or
+      // off for itself). A scratch folder or one still to be made has none: the machine's own setup.
+      const startsIn = chosen ? chosen.root : toMake ? null : folderTarget;
+      const ok = startsIn ? await availableIn(host, [startsIn]) : await available(host, true);
       stateOf(host).lastAvailable = ok;
       if (!ok.ok) {
         // Sent from another machine: say it with this machine's name, as that machine's start row does.
@@ -1791,7 +1797,13 @@ ${result.text}`);
         hostList.map(async (host) => {
           const state = stateOf(host);
           // Not available last time: look again (the person may have just installed or updated it).
-          const ok = await available(host, state.lastAvailable !== null && !state.lastAvailable.ok);
+          let ok = await available(host, state.lastAvailable !== null && !state.lastAvailable.ok);
+          // Its plugin off for the machine but maybe on in a project's own settings: offered when one of the projects
+          // turns it on (Send checks the folder picked). A project on another drive is never read here.
+          if (!ok.ok && ok.code === "plugin_off") {
+            const local = projects.filter((p) => p.exists && !outsideHome(options.homeDir, p.root)).map((p) => p.root);
+            if (local.length > 0) ok = await availableIn(host, local);
+          }
           state.lastAvailable = ok;
           // `scratch_trusted`: whether it starts in the scratch root without a trust prompt (the trust-once row).
           return ok.ok ? [{ agent: host.agent, name: host.name, scratch_trusted: host.trusts(root), ...(owner ? { untrusted: untrustedOf(host, owner.pick) } : {}) }] : [];

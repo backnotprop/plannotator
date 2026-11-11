@@ -460,6 +460,36 @@ describe("a second agent behind LaunchHost", () => {
   });
 });
 
+describe("a host whose plugin a project's own settings turn on (#3065)", () => {
+  /** Off for the machine; on only in a check that names `project.root`. Records each check's folders. */
+  const onlyInProject = (asked: (readonly string[] | undefined)[], projectRoot: () => string) => (host: LaunchHost) => {
+    host.available = async (folders) => {
+      asked.push(folders);
+      return folders?.includes(projectRoot()) ? { ok: true, version: "1.0.0" } : { ok: false, missing: false, reason: "its plugin is off", code: "plugin_off" };
+    };
+  };
+
+  test("To offers it, Send in that project starts it with the project's folder checked, and a scratch Send is still refused", async () => {
+    const asked: (readonly string[] | undefined)[] = [];
+    let projectRoot = "";
+    // Home is the temp root, so the project is a folder in home (a project on another drive is never read for this).
+    const { project, launch } = setup({ homeDir: (_home, root) => root, adapt: onlyInProject(asked, () => projectRoot) });
+    projectRoot = project.root;
+
+    const block = (await launch.composeBlock())!;
+    expect(block.agents.map((a) => a.agent)).toEqual([FAKE]);
+    expect((block.not_ready ?? []).map((row) => row.agent)).not.toContain(FAKE);
+    expect(asked).toContainEqual([project.root]);
+
+    asked.length = 0;
+    const prepared = await launch.prepare(launch.target({ launch: { agent: FAKE, project_id: project.id } })!, { name: "Tidy", body: "Tidy.", resolveProject: async () => project });
+    expect(prepared.launch.folder).toBe(project.root);
+    expect(asked).toEqual([[project.root]]);
+
+    await expect(launch.prepare(launch.target({ launch: { agent: FAKE, scratch: true } })!, { name: "Scratch", body: "Scratch.", resolveProject: async () => project })).rejects.toMatchObject({ code: "agent_unavailable" });
+  });
+});
+
 describe("an answered permission question, with a host that lists its own prompt", () => {
   const KEY = "k".repeat(64);
   const WAITING = { status: "waiting", state: "running", waitingFor: "permission prompt" };
