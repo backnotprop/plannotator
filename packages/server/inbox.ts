@@ -314,6 +314,7 @@ import { INBOX_WHATS_NEW_IMAGE_PATH, whatsNewImageRoute } from "./inbox-whats-ne
 const INBOX_WHATS_NEW_RELEASES_PATH = "/api/inbox/whats-new/releases";
 import { inboxCanonicalBaseUrl, inboxCanonicalRedirect } from "./inbox-canonical";
 import { createInboxWindows, parseWindowId, parseWindowOrigin, parseWindowPermission } from "./inbox-windows";
+import { inboxAppIconResponse } from "./inbox-app-icons";
 import { handleInboxTourRequest } from "./inbox-tour";
 import { createBunShapeRoutes } from "./shape-routes";
 import { shapeCodeRoot } from "@plannotator/shared/shape/store";
@@ -6601,6 +6602,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The window's scripts, by exact name from the pack (404 for any other), compressed over the tailnet as the page is.
       if (path.startsWith(PACKED_ASSET_ROUTE_PREFIX)) return packedAppResponse(windowApp, req, path, via === "tailnet");
       if ((path === "/favicon.png" || path === "/favicon.ico") && req.method === "GET") return handleFavicon(path);
+      // The installed app's manifest and icons (inbox-app-icons.ts), of the same favicon style.
+      if (req.method === "GET") {
+        const appIcon = inboxAppIconResponse(path, faviconState());
+        if (appIcon) return appIcon;
+      }
 
       // A running local site in a thread (inbox-live.ts): local only, since the proxy relays the
       // person's signed-in dev app; another site's page is refused, reads included.

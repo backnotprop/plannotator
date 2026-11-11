@@ -3484,14 +3484,24 @@ export interface InboxPromptsSettings {
   };
   /** The plan, review and annotate prompts, in the order the page lists them. */
   others: InboxPromptItem[];
+  /**
+   * Guided Review standing instructions (`${dataDir}/guide-instructions.md`, the file the review UI's
+   * guide launch and VS Code edit too): added after the built-in method in every guide's brief.
+   * `text` null: none (Default). Absent from an older Inbox.
+   */
+  guide?: { text: string | null; max: number };
 }
 
-/** `POST /api/inbox/settings` `{ prompts: { inbox: … } }`: a string sets the text, null (or blank) deletes the key. */
+/**
+ * `POST /api/inbox/settings` `{ prompts: { inbox?: …, guide? } }`, at least one: a string sets the
+ * text, null (or blank) deletes the key (`guide`: the file).
+ */
 export interface InboxPromptsChange {
-  inbox: {
+  inbox?: {
     reminder?: string | null;
     runtimes?: Partial<Record<InboxPromptHost, { reminder?: string | null }>>;
   };
+  guide?: string | null;
 }
 
 /** Who turns a voice clip into text: Codex's ChatGPT login, or an OpenAI API key. */

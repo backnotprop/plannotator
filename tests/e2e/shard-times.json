@@ -20,6 +20,7 @@
   "inbox-action-markdown.spec.ts": 6,
   "inbox-actions.spec.ts": 27,
   "inbox-agent-icon-sets.spec.ts": 8,
+  "inbox-agent-icon-tap-webkit.spec.ts": 11,
   "inbox-agents.spec.ts": 62,
   "inbox-archived.spec.ts": 15,
   "inbox-artifacts.spec.ts": 43,
