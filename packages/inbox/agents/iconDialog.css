@@ -11,6 +11,8 @@ dialog.ib-dlg.ib-agi[open] { display: flex; flex-direction: column; }
 .ib-agi-mark { display: inline-grid; place-items: center; flex: none; }
 .ib-agi-x { flex: none; }
 .ib-agi-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+/* Focused as the dialog opens on a touch screen (nothing to type yet): no ring. */
+.ib-agi-body:focus { outline: none; }
 
 /* "Your own…": a large drop area, the pictures beneath. */
 /* Its scroll box clips at its edge: 4 px of room (taken back by the margin) keeps the drop area's focus ring whole. */
