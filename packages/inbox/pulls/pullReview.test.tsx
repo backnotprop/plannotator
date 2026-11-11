@@ -1430,8 +1430,8 @@ test('custom curation: the person\'s words follow /review-curate in step 1, in p
   const theirs = handoffOf(LOCALE_PR({ mine: false, author: 'tomas' }), { kind: 'custom', words: 'only the fallback chain, and its tests' });
   expect(theirs).toContain(`\n${step1}2. After that`);
   expect(theirs).not.toContain('Include what I might ask');
-  // Kept to PULL_HANDOFF_CUSTOM_MAX characters.
-  expect(handoffOf(LOCALE_PR(), { kind: 'custom', words: 'x'.repeat(5000) })).toContain(`/review-curate ${'x'.repeat(1000)} (its instructions`);
+  // Long words arrive whole.
+  expect(handoffOf(LOCALE_PR(), { kind: 'custom', words: 'x'.repeat(5000) })).toContain(`/review-curate ${'x'.repeat(5000)} (its instructions`);
 });
 
 test('an unsafe branch name is left out: the head alone keeps "into <base>"; an unsafe base drops the Branch line', () => {
