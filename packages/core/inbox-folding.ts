@@ -431,3 +431,7 @@ export function isDelivered(message: InboxMessageWire, root: InboxMessageWire): 
   if (message.to) return false;
   return typeof message.seq === 'number' && (root.agent_checked_seq ?? 0) >= message.seq;
 }
+
+// A list row's grey line (inbox-row-preview.ts), through this subpath: core 0.25.22 is published, and a new subpath
+// would need a core release (packages/ui smoke:package), as inbox-rows-words goes through inbox-types.
+export { INBOX_ROW_PREVIEW_MAX, inboxRowPreview, inboxRowPreviewWords, type InboxRowPreviewInput, type InboxRowPreviewQuestion } from './inbox-row-preview';

@@ -52,7 +52,6 @@
     "./inbox-actions": "./inbox-actions.ts",
     "./inbox-search": "./inbox-search.ts",
     "./inbox-folding": "./inbox-folding.ts",
-    "./inbox-row-preview": "./inbox-row-preview.ts",
     "./inbox-delivery-line": "./inbox-delivery-line.ts",
     "./inbox-run-line": "./inbox-run-line.ts",
     "./inbox-launch-ready": "./inbox-launch-ready.ts",

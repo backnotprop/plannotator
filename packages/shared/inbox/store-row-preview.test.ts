@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inboxId, type InboxAuthor, type InboxQuestion } from "@plannotator/core/inbox-types";
 import type { InboxAttachment } from "@plannotator/core/inbox-attachments";
-import { INBOX_ROW_PREVIEW_MAX } from "@plannotator/core/inbox-row-preview";
+import { INBOX_ROW_PREVIEW_MAX } from "@plannotator/core/inbox-folding";
 import { InboxStore } from "./store";
 
 const roots: string[] = [];

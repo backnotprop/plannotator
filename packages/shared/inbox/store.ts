@@ -57,7 +57,7 @@ import {
   type ParsedInboxQuestion,
 } from "@plannotator/core/inbox-questions";
 import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
-import { inboxRowPreview, inboxRowPreviewWords } from "@plannotator/core/inbox-row-preview";
+import { inboxRowPreview, inboxRowPreviewWords } from "@plannotator/core/inbox-folding";
 import {
   checkInboxActionResult,
   composeInboxActionsReply,
