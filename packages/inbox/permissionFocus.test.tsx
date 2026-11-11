@@ -6,7 +6,6 @@
  *   visit): a person who just opened the thread and presses Enter must never allow a prompt.
  * - An answer still goes out where `crypto.randomUUID` does not exist (plain http to an address
  *   other than localhost): its reply's key comes from `newUuid`.
- * - Its header's Stop is on every page, a tailnet guest's included (owner ruling 2026-11-11).
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -140,22 +139,22 @@ async function settle(turns = 4) {
   }
 }
 
-function pane(thread: InboxThread, openedWith: ReadonlySet<string> | null, guest = false) {
+function pane(thread: InboxThread, openedWith: ReadonlySet<string> | null) {
   return (
     <div className="pn-inbox">
-      <ThreadPane thread={thread} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} run={RUN} openedWith={openedWith} guest={guest} />
+      <ThreadPane thread={thread} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} run={RUN} openedWith={openedWith} />
     </div>
   );
 }
 
-async function render(thread: InboxThread, openedWith: ReadonlySet<string> | null, guest = false) {
+async function render(thread: InboxThread, openedWith: ReadonlySet<string> | null) {
   // As after a click on a row or a reload: nothing in the page holds focus.
   (document.activeElement as HTMLElement | null)?.blur?.();
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
-    root.render(pane(thread, openedWith, guest));
+    root.render(pane(thread, openedWith));
   });
   await settle();
   return host;
@@ -226,14 +225,9 @@ test.skipIf(!hasDom)('Allow once is sent where crypto.randomUUID does not exist 
   }
 });
 
-test.skipIf(!hasDom)("the card's header Stop is on a tailnet guest's page too", async () => {
+test.skipIf(!hasDom)("the card's header has Stop", async () => {
   const thread = threadOf(card(CARD_1, 'bun run --cwd apps/inbox build', 1));
   await render(thread, idsOf(thread));
   // Compared as booleans (see `focused`).
-  expect(!!host!.querySelector(`[data-message-id="${CARD_1}"] [data-run-stop]`)).toBe(true);
-  act(() => root!.unmount());
-  host!.remove();
-  await render(thread, idsOf(thread), true);
-  expect(!!once(CARD_1)).toBe(true);
   expect(!!host!.querySelector(`[data-message-id="${CARD_1}"] [data-run-stop]`)).toBe(true);
 });

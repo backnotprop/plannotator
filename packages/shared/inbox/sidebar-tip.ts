@@ -5,7 +5,7 @@
  * (packages/server/inbox.ts) builds the state from config.json, reports `due` to the page (`GET /api/inbox/settings`
  * `reveal.sidebar_tip`) and spends the claim (`POST /api/inbox/reveal` `id: "sidebar_tip"`).
  *
- * Who: the owner's pages (never a tailnet guest's), on an Inbox whose sidebar was never customized (no layout was ever
+ * Who: the person's pages, on an Inbox whose sidebar was never customized (no layout was ever
  * saved: config.json `inboxSidebarRev` counts the saves, so a layout set back to the default still counts), a day or
  * more after the person's first use, until it was shown once. It stands outside the order of the line of one-time
  * dialogs (reveals.ts), but keeps its 40-minute gap both ways (the server: `tipFree`, `RevealState.tipShownAt`): it
@@ -24,8 +24,6 @@ export interface SidebarTipSaved {
 }
 
 export interface SidebarTipState {
-  /** The person at this computer or the owner over the tailnet: never a guest. */
-  owner: boolean;
   /** A sidebar layout was saved at least once (config.json `inboxSidebarRev` above 0, or a saved `inboxSidebar`). */
   customized: boolean;
   /** The person's first use of the Inbox (an ISO time), or null while it is not known (nothing in the store yet). */
@@ -43,7 +41,7 @@ function tenured(state: SidebarTipState, now: number): boolean {
 
 /** The tip may show on this Inbox at `at`: what settings report as `reveal.sidebar_tip`. */
 export function sidebarTipDue(state: SidebarTipState, at: string): boolean {
-  return state.owner && !state.customized && !state.saved?.shownAt && tenured(state, Date.parse(at));
+  return !state.customized && !state.saved?.shownAt && tenured(state, Date.parse(at));
 }
 
 /**
@@ -52,7 +50,7 @@ export function sidebarTipDue(state: SidebarTipState, at: string): boolean {
  * it again without a write, unless the sidebar was customized meanwhile; any other claim once it is stamped gets no.
  */
 export function sidebarTipClaim(state: SidebarTipState, key: string | null, at: string): { show: boolean; save: SidebarTipSaved | null } {
-  if (!state.owner || state.customized) return { show: false, save: null };
+  if (state.customized) return { show: false, save: null };
   if (key && state.saved?.shownAt && state.saved.key === key) return { show: true, save: null };
   if (!sidebarTipDue(state, at)) return { show: false, save: null };
   return { show: true, save: { ...state.saved, shownAt: at, ...(key ? { key } : {}) } };

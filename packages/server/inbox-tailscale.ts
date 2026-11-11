@@ -13,8 +13,11 @@
  * Every request on that listener passes, in order:
  *  1. Host is the served MagicDNS name and port (what a browser sends);
  *  2. `Tailscale-User-Login` (set by serve, never forgeable through it) is the
- *     machine owner's login or one in config.json `inboxTailscaleAllow`; a
- *     tagged peer (no login) and a funnel request are refused;
+ *     login that owns this machine (single player: nobody else; only a tagged
+ *     machine, which has no owner, names its owner in config.json
+ *     `inboxTailscaleAllow`); another account gets the refusal page
+ *     (`@plannotator/shared/inbox/tailnet-refusal`), a tagged peer (no login)
+ *     and a funnel request are refused;
  *  3. no cross-site or same-site `Sec-Fetch-Site` except a top-level
  *     navigation and the attachment asset route (the identity is ambient);
  * then it is handed to the window's handler marked as tailnet, which refuses
@@ -40,8 +43,7 @@
  * phone cannot reach. While published, the owner's first open of one makes a
  * second mapping, `https://<MagicDNS name>:<R>` to a loopback listener on
  * port R, and every request there passes the same Host and owner checks as
- * the window's (only the machine's owner, never a login the allowlist adds)
- * before the relay sees it. It is recorded (`relay_port`) before it is made,
+ * the window's before the relay sees it. It is recorded (`relay_port`) before it is made,
  * taken down with the window's mapping, and a run's leftover is taken down at
  * the next start, as the window's is.
  */
@@ -55,7 +57,8 @@ import {
   type InboxTailscaleSource,
 } from "@plannotator/shared/config";
 import { readInboxRegistry, updateOwnInboxRegistry, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
-import { checkTailnetIdentity, isServedTailnetHost, normalizeTailnetLogin, tailnetFetchSiteAllowed } from "@plannotator/shared/inbox/tailnet";
+import { checkTailnetIdentity, isServedTailnetHost, normalizeTailnetLogin, tailnetFetchSiteAllowed, type TailnetCheck } from "@plannotator/shared/inbox/tailnet";
+import { allowIgnoredLine, tailnetNotOwnerResponse } from "@plannotator/shared/inbox/tailnet-refusal";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import {
   describeTailscaleFailure,
@@ -106,7 +109,7 @@ export interface InboxTailscaleState {
   error: string | null;
   /** The Tailscale login that owns this machine, as of the last publish. */
   owner: string | null;
-  /** Every login let in: the owner, then config.json `inboxTailscaleAllow`. */
+  /** Every login let in: the owner alone, or on a tagged machine (no owner) config.json `inboxTailscaleAllow`. */
   allowed: string[];
   /** Serve routes that point at the window's own port (the manual workaround): each exposes the whole Inbox. */
   exposed: InboxTailnetExposure[];
@@ -154,6 +157,15 @@ function refusal(path: string, status: number, code: string, message: string): R
   return new Response(`${message}\n`, { status, headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
 }
 
+/**
+ * Another Tailscale account (or a tagged device with none): the refusal page for a browser, the same words as JSON
+ * for an API call, the event stream or `/mcp`. A funnel request keeps its own words (the Inbox is never public).
+ */
+function refuseIdentity(path: string, identity: Extract<TailnetCheck, { ok: false }>): Response {
+  if (identity.code === "tailnet_funnel_refused") return refusal(path, identity.status, identity.code, identity.message);
+  return tailnetNotOwnerResponse("Inbox", path, identity.login ?? null, identity.code);
+}
+
 export function createInboxTailscale(context: InboxTailscaleContext) {
   // The same command sequences run two ways (tailscale-serve.ts): at once at the start, the stop and the exit, and
   // without blocking the event loop for the window's switch, `--tailscale` against a running Inbox, and a served
@@ -167,6 +179,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
   let servedHostname: string | null = null;
   let httpsPort: number | null = null;
   let warnedExposure = false;
+  let warnedAllowIgnored = false;
   /** The prototype relay's listener (port R, also its tailnet HTTPS port) and its origin while mapped. */
   let relayListener: ReturnType<typeof Bun.serve> | null = null;
   let relayOrigin: string | null = null;
@@ -262,7 +275,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
       return refusal(path, 403, "forbidden_host", "This address answers only its tailnet name.");
     }
     const identity = checkTailnetIdentity(req.headers, state.allowed);
-    if (!identity.ok) return refusal(path, identity.status, identity.code, identity.message);
+    if (!identity.ok) return refuseIdentity(path, identity);
     if (!tailnetFetchSiteAllowed(req.method, path, req.headers)) {
       return refusal(path, 403, "cross_site", "Requests from other sites are not accepted.");
     }
@@ -374,7 +387,11 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     return `Tailscale could not publish the Inbox. ${detail}`;
   };
 
-  /** Who may use the published Inbox: the owner of this machine plus the allowlist. Throws the reason when nobody may. */
+  /**
+   * Who may use the published Inbox: the Tailscale login that owns this machine, and nobody else (single player).
+   * Only where Tailscale names no owner (a tagged device) does config.json `inboxTailscaleAllow` say who the owner is;
+   * on a machine with an owner it is ignored, said once on stderr. Throws the reason when nobody may.
+   */
   const readAllowed = function* (): TailscaleSteps<{ owner: string | null; allowed: string[] }> {
     const status = yield step(["status", "--json"], TAILSCALE_CLI_TIMEOUT_MS);
     if (status.error || status.status !== 0) throw new Error(describeTailscaleFailure(status));
@@ -382,7 +399,11 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     if (!identity) throw new Error("Could not read `tailscale status --json`.");
     const owner = identity.login ? normalizeTailnetLogin(identity.login) : null;
     const extra = resolveInboxTailscaleAllow(loadConfig());
-    const allowed = owner ? [owner, ...extra.filter((login) => login !== owner)] : extra;
+    if (owner && extra.some((login) => login !== owner) && !warnedAllowIgnored) {
+      warnedAllowIgnored = true;
+      process.stderr.write(`[plannotator] ${allowIgnoredLine(owner)}\n`);
+    }
+    const allowed = owner ? [owner] : extra;
     if (allowed.length === 0) {
       throw new Error(
         identity.tagged
@@ -609,8 +630,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
                 return refusal("/", 403, "forbidden_host", "This address answers only its tailnet name.");
               }
               const identity = checkTailnetIdentity(req.headers, state.allowed);
-              if (!identity.ok) return refusal("/", identity.status, identity.code, identity.message);
-              if (!isOwner(req.headers)) return refusal("/", 403, "owner_only", "A prototype opens only for this computer's owner.");
+              if (!identity.ok) return refuseIdentity("/", identity);
               return handlers.fetch(req, srv);
             },
             websocket: handlers.websocket,
@@ -632,12 +652,6 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
       ),
     );
 
-  const isOwner = (headers: Headers): boolean => {
-    const identity = checkTailnetIdentity(headers, state.allowed);
-    if (!identity.ok) return false;
-    return state.owner === null || normalizeTailnetLogin(identity.login) === state.owner;
-  };
-
   return {
     start,
     stop,
@@ -654,16 +668,6 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     runOnly: () => runFlag && resolve().source === "flag",
     /** The tailnet-only listener's port while published (tests). */
     listenerPort: () => (listener ? (listener.port as number) : null),
-    /**
-     * A request the listener let in came from the machine's owner, not a login
-     * config.json `inboxTailscaleAllow` added: only the owner may send
-     * Feedback (inbox-feedback.ts). A machine Tailscale names no owner for (a
-     * tagged device, or an untagged one whose owner `tailscale status` does
-     * not report) is published only for its allowlist, the person who uses
-     * it: there every allowed login is the owner. "Ask this session" follows
-     * the same rule (`readTailnetOwners` in session-tailnet.ts).
-     */
-    isOwnerRequest: isOwner,
   };
 }
 

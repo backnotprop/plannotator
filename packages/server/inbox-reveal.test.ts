@@ -4,14 +4,14 @@
  *
  * What regresses: the claim turning anything on (reveals are opt-in, the owner 2026-11-04: only the dialog's "Turn it
  * on" writes the switch) or touching a Board the person set, or one 0.28.49's reveal turned on; two tabs both showing it;
- * a guest claiming it, or the owner's own pages (their phone, an allowed login on a tagged machine) being held back; the
+ * the owner's own pages (their phone, an allowed login on a tagged machine) being held back; the
  * claim stamping the Board's first-visit welcome (the owner, #2598 finding 5: the first visit to a Board turned on from
  * the offer, or later in Settings, shows it with Copy prompt; once seen, never again); a lost claim answer losing the
  * offer (the same page's key is shown it again, no other key is); `card` or any other agent word arriving
  * after the claim and Not now, or not after Turn it on; a dev build deciding it; the Snooze announcement losing its one-day
  * spacing or its stamp of the spacing clock; a stuck Snooze holding the Board back. The Checklist reveal (approval
  * "inbox-checklist-reveal", 2026-11-04): its claim writing `inboxSteps` or touching a Checklist the person set; agent
- * text after Not now not byte-equal to a Checklist off, or not the steps text after Turn it on; a guest claiming it; its
+ * text after Not now not byte-equal to a Checklist off, or not the steps text after Turn it on; its
  * 5 days or 5 threads moving; it needing the Board on. Code review's day-0 offer (approval "code-review-offer-card"):
  * not next on day 0 of a fresh install while Code review is undecided; offered without PLANNOTATOR_INBOX_PREVIEW (the
  * 0.29 hold), or to someone who switched Code review off or on; its claim turning anything on or not taking the day.
@@ -31,7 +31,6 @@ const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
 const MAGIC = "macbook-pro.tail0000.ts.net";
 const OWNER = "owner@example.com";
-const GUEST = "guest@example.com";
 const RELEASE = "0.30.0";
 
 const roots: string[] = [];
@@ -86,7 +85,7 @@ interface Options {
   threads?: number;
   /** More of config.json (the Board switch, the Snooze and reveal stamps). By default Snooze was shown 3 days ago. */
   config?: Record<string, unknown>;
-  /** Published over the tailnet: the owner's phone and a guest can reach it; `tagged`: a machine with no owner. */
+  /** Published over the tailnet: the owner's phone can reach it; `tagged`: a machine with no owner. */
   tailnet?: "owner" | "tagged";
   /** An agent was already started from this Inbox: one launched thread root in the store. */
   launched?: boolean;
@@ -118,7 +117,7 @@ async function world(options: Options = {}) {
     inboxThemeChooser: { notNeededAt: "2026-10-01T10:00:00.000Z" },
     ...options.config,
   };
-  if (options.tailnet === "owner") Object.assign(config, { inboxTailscale: true, inboxTailscaleAllow: [GUEST] });
+  if (options.tailnet === "owner") Object.assign(config, { inboxTailscale: true });
   // A tagged machine names no owner: the owner reaches it with a login they allowed.
   if (options.tailnet === "tagged") Object.assign(config, { inboxTailscale: true, inboxTailscaleAllow: [OWNER] });
   writeFileSync(join(dataDir, "config.json"), JSON.stringify(config));
@@ -523,11 +522,8 @@ describe("the Checklist reveal at day 6", () => {
     expect(w.saved().inboxSteps).toBeUndefined();
   });
 
-  test("over the tailnet: a guest is never armed and never claims; the owner's phone claims", async () => {
+  test("over the tailnet: the owner's phone is armed and claims", async () => {
     const w = await day6({}, { tailnet: "owner" });
-    const guestSettings = (await (await w.viaTailnet(GUEST, "/api/inbox/settings?store=0")).json()) as Json;
-    expect(guestSettings.reveal.next).toBeNull();
-    expect(((await (await w.viaTailnet(GUEST, "/api/inbox/reveal", { id: "steps" })).json()) as Json).show).toBe(false);
     expect(w.saved().inboxSteps).toBeUndefined();
     const ownerSettings = (await (await w.viaTailnet(OWNER, "/api/inbox/settings?store=0")).json()) as Json;
     expect(ownerSettings.reveal.next).toBe("steps");
@@ -538,14 +534,8 @@ describe("the Checklist reveal at day 6", () => {
 });
 
 describe("over the tailnet", () => {
-  test("a guest is never armed and never claims; the owner's phone claims", async () => {
+  test("the owner's phone is armed and claims", async () => {
     const w = await world({ tailnet: "owner" });
-    const guestSettings = (await (await w.viaTailnet(GUEST, "/api/inbox/settings?store=0")).json()) as Json;
-    expect(guestSettings.reveal.next).toBeNull();
-    // A guest is never offered anything ahead, nor the agent note.
-    expect(guestSettings.reveal.ahead).toEqual([]);
-    expect(guestSettings.reveal.setup).toBe(false);
-    expect(((await (await w.viaTailnet(GUEST, "/api/inbox/reveal", { id: "board" })).json()) as Json).show).toBe(false);
     expect(w.saved().inboxBoard).toBeUndefined();
     const ownerSettings = (await (await w.viaTailnet(OWNER, "/api/inbox/settings?store=0")).json()) as Json;
     expect(ownerSettings.reveal.next).toBe("board");
@@ -554,11 +544,9 @@ describe("over the tailnet", () => {
     expect(w.saved().inboxBoard).toBeUndefined();
   });
 
-  test("the Board's first-visit dialog: a guest never claims it, the owner's phone does, once", async () => {
+  test("the Board's first-visit dialog: the owner's phone claims it, once", async () => {
     const w = await world({ tailnet: "owner", config: { inboxBoard: true } });
     const intro = async (who: string) => ((await (await w.viaTailnet(who, "/api/inbox/board/intro", {})).json()) as Json).show;
-    expect(await intro(GUEST)).toBe(false);
-    // The guest's ask spent nothing.
     expect(w.saved().inboxBoardIntro).toBeUndefined();
     expect(await intro(OWNER)).toBe(true);
     expect(w.saved().inboxBoardIntro.shownAt).toMatch(/^\d{4}-/);
@@ -721,13 +709,10 @@ describe("the tab icon dialog (\"Which favicon do you prefer?\", an update-day d
     expect((await w.claim("tab_icon", KEY)).show).toBe(false);
   });
 
-  test("a dev build decides nothing; a guest is never armed and never claims; the owner's phone claims", async () => {
+  test("a dev build decides nothing; the owner's phone claims", async () => {
     const dev = await unchosen({ version: "dev" });
     expect(dev.saved().inboxReveals?.tab_icon).toBeUndefined();
     const w = await unchosen({ tailnet: "owner" });
-    const guestSettings = (await (await w.viaTailnet(GUEST, "/api/inbox/settings?store=0")).json()) as Json;
-    expect(guestSettings.reveal.next).toBeNull();
-    expect(((await (await w.viaTailnet(GUEST, "/api/inbox/reveal", { id: "tab_icon" })).json()) as Json).show).toBe(false);
     expect(w.saved().inboxReveals.tab_icon.shownAt).toBeUndefined();
     const ownerSettings = (await (await w.viaTailnet(OWNER, "/api/inbox/settings?store=0")).json()) as Json;
     expect(ownerSettings.reveal.next).toBe("tab_icon");
@@ -836,13 +821,10 @@ describe("the \"themes\" dialog (approval inbox-theme-chooser): after the tab ic
     expect((await w.claim("theme_chooser", KEY)).show).toBe(true);
   });
 
-  test("a dev build decides nothing; a guest is never armed and never claims; the owner's phone claims", async () => {
+  test("a dev build decides nothing; the owner's phone claims", async () => {
     const dev = await onDefault({ version: "dev" });
     expect(dev.saved().inboxThemeChooser).toBeUndefined();
     const w = await onDefault({ tailnet: "owner" });
-    const guestSettings = (await (await w.viaTailnet(GUEST, "/api/inbox/settings?store=0")).json()) as Json;
-    expect(guestSettings.reveal.next).toBeNull();
-    expect(((await (await w.viaTailnet(GUEST, "/api/inbox/reveal", { id: "theme_chooser" })).json()) as Json).show).toBe(false);
     expect(w.saved().inboxReveals?.theme_chooser).toBeUndefined();
     const ownerSettings = (await (await w.viaTailnet(OWNER, "/api/inbox/settings?store=0")).json()) as Json;
     expect(ownerSettings.reveal.next).toBe("theme_chooser");
@@ -933,7 +915,7 @@ describe("the schedule's wiring (approval inbox-one-time-dialogs)", () => {
     expect(after.again_in).toBeLessThanOrEqual(40 * 60_000);
   });
 
-  test("when to ask again (`reveal.again_in`): null when no date can change the line, and never for a guest or a dev build", async () => {
+  test("when to ask again (`reveal.again_in`): null when no date can change the line, and never for a dev build", async () => {
     // Day 6 (every tenure behind), the Board next and waiting for its moment: the next date is the end of its patience.
     const w = await world({ days: 6 });
     expect((await w.settings()).reveal.next).toBe("board");
@@ -1012,7 +994,7 @@ describe("the Launch tip (approval \"launch-tip\"): outside the line, stamped on
     expect(w.saved().inboxReveals.launch_tip.shownAt).toBe(saved.launch_tip.shownAt);
   });
 
-  test("never once an agent was started here, even after its thread is deleted; never for a guest, or as a Not now", async () => {
+  test("never once an agent was started here, even after its thread is deleted; never as a Not now; the owner's phone claims it", async () => {
     // Launch off here: still due (a linked machine may start agents; compose claims only when To can start one).
     const off = await world();
     expect((await off.settings()).reveal.launch_tip).toBe(true);
@@ -1027,7 +1009,6 @@ describe("the Launch tip (approval \"launch-tip\"): outside the line, stamped on
     expect((await launched.claim("launch_tip", KEY)).show).toBe(false);
 
     const tailnet = await world({ config: LAUNCH_ON, tailnet: "owner" });
-    expect(((await (await tailnet.viaTailnet(GUEST, "/api/inbox/reveal", { id: "launch_tip", key: KEY })).json()) as Json).show).toBe(false);
     expect(tailnet.saved().inboxReveals?.launch_tip).toBeUndefined();
     // The owner's phone: shown, and stamped for every window.
     expect(((await (await tailnet.viaTailnet(OWNER, "/api/inbox/reveal", { id: "launch_tip", key: KEY })).json()) as Json).show).toBe(true);
@@ -1111,14 +1092,13 @@ describe("the Sidebar tip: outside the line, stamped once when shown, never for 
     expect(w.saved().inboxReveals?.sidebar_tip).toBeUndefined();
   });
 
-  test("never on the first day; never for a guest, or as a Not now", async () => {
+  test("never on the first day, or as a Not now; the owner's phone claims it", async () => {
     const dayZero = await world({ days: 0 });
     expect((await dayZero.settings()).reveal.sidebar_tip).toBe(false);
     expect((await dayZero.claim("sidebar_tip", KEY)).show).toBe(false);
     expect(dayZero.saved().inboxReveals?.sidebar_tip).toBeUndefined();
 
     const tailnet = await world({ tailnet: "owner" });
-    expect(((await (await tailnet.viaTailnet(GUEST, "/api/inbox/reveal", { id: "sidebar_tip", key: KEY })).json()) as Json).show).toBe(false);
     expect(tailnet.saved().inboxReveals?.sidebar_tip).toBeUndefined();
     expect(((await (await tailnet.viaTailnet(OWNER, "/api/inbox/reveal", { id: "sidebar_tip", key: KEY })).json()) as Json).show).toBe(true);
     expect(tailnet.saved().inboxReveals.sidebar_tip.shownAt).toMatch(/^\d{4}-/);

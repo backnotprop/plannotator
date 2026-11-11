@@ -81,12 +81,11 @@ function setup(options: { homeDir?: (home: string, root: string) => string; adap
   });
   restore.push(() => launch.stop());
   /** From the window. `warning`: what a Trust folder click says the person read; by default the offer's line, as the window sends it. */
-  const post = (id: string, action: string, via = "local", owner?: boolean, warning: string | null | undefined = fake.faults.offer?.read().warning) =>
+  const post = (id: string, action: string, via = "local", warning: string | null | undefined = fake.faults.offer?.read().warning) =>
     launch.route(
       new Request(`http://127.0.0.1/api/inbox/launch/${id}/${action}`, { method: "POST", headers: { Origin: "http://127.0.0.1", Host: "127.0.0.1" }, body: JSON.stringify({ serverSession: "srv", warning }) }),
       `/api/inbox/launch/${id}/${action}`,
       via,
-      owner,
     );
   return { store, clock, project, home, fake, launch, post, logins, context: () => context! };
 }
@@ -589,14 +588,14 @@ describe("Trust folder (`trustOffer`)", () => {
     const read = fake.faults.offer!.read().warning;
     const fresh = "This folder has 2 hooks that will run once you trust it.";
     fake.faults.offer = offerOf(fresh, fake.faults.offer!.accept);
-    const refused1 = await refusal(post(id, "trust", "local", undefined, read));
+    const refused1 = await refusal(post(id, "trust", "local", read));
     expect(refused1).toMatchObject({ code: "trust_warning_changed" });
     expect(refused1!.message).toContain(fresh);
     // A window that sent no line read none.
-    expect(await refusal(post(id, "trust", "local", undefined, null))).toMatchObject({ code: "trust_warning_changed" });
+    expect(await refusal(post(id, "trust", "local", null))).toMatchObject({ code: "trust_warning_changed" });
     expect(accepts.count).toBe(0);
     expect(startsOf(fake.calls)).toBe(1);
-    expect((await post(id, "trust", "local", undefined, fresh))!.status).toBe(200);
+    expect((await post(id, "trust", "local", fresh))!.status).toBe(200);
     expect(accepts.count).toBe(1);
     await until(() => store.message(root.id)!.launch!.session_ref === "f1");
   });
@@ -617,34 +616,27 @@ describe("Trust folder (`trustOffer`)", () => {
     await until(() => store.message(root.id)!.launch!.session_ref === "f1");
   });
 
-  test("the owner alone: a guest's read has no offer and the route refuses it; the owner over the tailnet clicks like the window", async () => {
+  test("an agent's read has no offer; the owner over the tailnet clicks like the window", async () => {
     const { store, post, launch, root, id, accepts } = await refused();
     expect((await launch.runOf(root.id, false))!.trust).toBeUndefined();
-    // Not the home folder: the guest's how-to says to run the agent there.
-    expect((await launch.runOf(root.id, false))!.home_folder).toBeUndefined();
-    expect(await refusal(post(id, "trust", "tailnet", false))).toMatchObject({ code: "owner_only" });
-    // The default for a tailnet request is no owner, too.
-    expect(await refusal(post(id, "trust", "tailnet"))).toMatchObject({ code: "owner_only" });
     expect(accepts.count).toBe(0);
     expect((await launch.runOf(root.id, true))!.trust).toEqual({ warning: "This folder has 1 hook that will run once you trust it." });
-    expect((await post(id, "trust", "tailnet", true))!.status).toBe(200);
+    expect((await post(id, "trust", "tailnet"))!.status).toBe(200);
     await until(() => store.message(root.id)!.launch!.session_ref === "f1");
   });
 
-  test("Open in Terminal is this computer's: over the tailnet the owner and a guest are refused alike", async () => {
+  test("Open in Terminal is this computer's: over the tailnet it is refused", async () => {
     const { post, id } = await refused();
-    for (const owner of [true, false, undefined]) {
-      const answer = (await post(id, "open", "tailnet", owner))!;
-      expect(answer.status).toBe(403);
-      expect(await answer.json()).toMatchObject({ code: "owner_only" });
-    }
+    const answer = (await post(id, "open", "tailnet"))!;
+    expect(answer.status).toBe(403);
+    expect(await answer.json()).toMatchObject({ code: "owner_only" });
   });
 
   test("the owner's window alone: an agent's bare local call, with or without this run's session, saves nothing and starts nothing", async () => {
     const { fake, launch, id, accepts } = await refused();
     const warning = fake.faults.offer!.read().warning;
     const bare = (headers: Record<string, string>, body: Record<string, unknown>) =>
-      launch.route(new Request(`http://127.0.0.1/api/inbox/launch/${id}/trust`, { method: "POST", headers, body: JSON.stringify({ warning, ...body }) }), `/api/inbox/launch/${id}/trust`, "local", true);
+      launch.route(new Request(`http://127.0.0.1/api/inbox/launch/${id}/trust`, { method: "POST", headers, body: JSON.stringify({ warning, ...body }) }), `/api/inbox/launch/${id}/trust`, "local");
     for (const answer of [await bare({}, { serverSession: "srv" }), await bare({}, {}), await bare({ Origin: "http://127.0.0.1", Host: "127.0.0.1" }, {}), await bare({ Origin: "http://other.example", Host: "127.0.0.1" }, { serverSession: "srv" })]) {
       expect(answer!.status).toBe(403);
       expect(((await answer!.json()) as { code: string }).code).toBe("window_only");
@@ -714,7 +706,7 @@ describe("Trust folder (`trustOffer`)", () => {
     const { fake, post, launch, root, id } = await refused({ atHome: true });
     fake.faults.offer = null;
     expect((await launch.runOf(root.id, true))!.trust).toBeUndefined();
-    // The how-to then says the home folder can't be trusted, for the owner and a guest alike.
+    // The how-to then says the home folder can't be trusted, for the window and an agent's read alike.
     expect(await launch.runOf(root.id, true)).toMatchObject({ untrusted: true, home_folder: true });
     expect(await launch.runOf(root.id, false)).toMatchObject({ untrusted: true, home_folder: true });
     expect(await refusal(post(id, "trust"))).toMatchObject({ code: "trust_failed" });
@@ -739,7 +731,7 @@ describe("the trust how-to, from Claude Code's own trust key", () => {
     const root = world.store.startPersonThread({ project_id: project.id, body: "Tidy.", to: { host: "claude-code", session: `launch:${LAUNCH_ID}` }, idempotency_key: "howto", launch: record }).message;
     world.store.settleLaunch(root.id, { error: { code: "untrusted", text: `${folder} isn't a trusted folder yet.`, at } });
     const run = await world.launch.runOf(root.id, true);
-    // A guest reads the same sentence: the how-to is about the folder, not who is reading.
+    // An agent's read has the same sentence: the how-to is about the folder, not who is reading.
     const guest = await world.launch.runOf(root.id, false);
     if (!run?.trust) expect([guest?.trust_covers_home, guest?.home_folder]).toEqual([run?.trust_covers_home, run?.home_folder]);
     return { untrusted: run?.untrusted, trust: run?.trust, covers: run?.trust_covers_home, home: run?.home_folder };

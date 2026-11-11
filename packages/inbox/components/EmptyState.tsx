@@ -178,15 +178,14 @@ const APPLIES: Record<PluginHost, string> = {
 export interface EmptyStateProps {
   /** The CLI's command and address, for the MCP lines and the picker. */
   context: ConnectContext | null;
-  /** GET /api/inbox/agents; null while it loads or where it is refused (a tailnet guest's page). */
+  /** GET /api/inbox/agents; null while it loads or when the read failed. */
   agents: InboxAgentsModel | null;
   /**
-   * The agents could not be read: `tailnet`, a tailnet guest's page
-   * (the agents route refuses it); `failed`, a read on this computer that
+   * The agents could not be read: `failed`, a read on this computer that
    * did not answer. The screen then offers the commands without this
    * computer's state.
    */
-  agentsUnavailable: 'tailnet' | 'failed' | null;
+  agentsUnavailable: 'failed' | null;
   /** Read the agents again (after `failed`). */
   onRetry?: () => void;
   /** The live sessions (GET /api/inbox/sessions), for "running now" and "Message <host>". */
@@ -304,7 +303,6 @@ export function EmptyState({ context, agents, agentsUnavailable, onRetry, sessio
         <div className="ib-cn-blk ib-cn-body">
           <InstallBlock key={firstPick} host={firstPick} />
           {context && <McpFold key={`mcp-${firstPick}`} host={firstPick} context={context} />}
-          {agentsUnavailable === 'tailnet' && <p className="ib-cn-hint">Open the Inbox on the computer to connect agents with one click.</p>}
           {agentsUnavailable === 'failed' && (
             <p className="ib-cn-hint" data-agents-failed="">
               The Inbox could not read the agents on this computer.{' '}

@@ -7,8 +7,7 @@
  * session cleared it, or vanishes from a finished thread the moment the session
  * ends; a label written into a message record, where every reader (an agent's
  * read_thread, a linked machine, an export) would carry it; a window never told
- * a label changed; and, above all, a tailnet guest who now sees what it never
- * saw, or an owner over the tailnet who is shut out.
+ * a label changed; or an owner over the tailnet who is shut out.
  *
  * A real Inbox under a temp data dir; connections are plain HTTP with the
  * registry's token, agents the MCP client, the tailnet a scripted `tailscale`.
@@ -26,7 +25,6 @@ type Json = Record<string, any>;
 
 const MAGIC = "macbook-pro.tail0000.ts.net";
 const OWNER = "ramos@example.com";
-const GUEST = "guest@example.com";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -72,7 +70,7 @@ function fakeTailscale(): TailscaleRunner {
   };
 }
 
-/** A real Inbox on the tailnet (a guest allowed), one project, and the MCP client agents write through. */
+/** A real Inbox on the tailnet, one project, and the MCP client agents write through. */
 async function setup() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-label-surfaces-")));
   roots.push(root);
@@ -82,7 +80,7 @@ async function setup() {
   mkdirSync(dataDir, { recursive: true });
   setEnv("PLANNOTATOR_DATA_DIR", dataDir);
   for (const name of ["PLANNOTATOR_INBOX_TAILSCALE", "PLANNOTATOR_URL_HOST"]) setEnv(name, undefined);
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true, inboxTailscaleAllow: [GUEST], updateCheck: false }));
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true, updateCheck: false }));
   const server = await startInboxServer({ dataDir, binaryPath: null, tailscale: fakeTailscale() });
   servers.push(server);
   const client = new Client({ name: "inbox-label-surfaces-test", version: "1.0.0" });
@@ -91,9 +89,9 @@ async function setup() {
   return { server, client, project };
 }
 
-type Caller = "local" | "owner" | "guest";
+type Caller = "local" | "owner";
 
-/** A read as this computer's window, the owner's phone over the tailnet, or a guest's. */
+/** A read as this computer's window, or the owner's phone over the tailnet. */
 async function read(server: InboxServer, caller: Caller, path: string): Promise<Json> {
   if (caller === "local") {
     const origin = `http://127.0.0.1:${server.port}`;
@@ -109,7 +107,7 @@ async function read(server: InboxServer, caller: Caller, path: string): Promise<
       Origin: `https://${MAGIC}:${server.port}`,
       "Sec-Fetch-Site": "same-origin",
       "X-Forwarded-Proto": "https",
-      "Tailscale-User-Login": caller === "owner" ? OWNER : GUEST,
+      "Tailscale-User-Login": OWNER,
     },
   });
   expect(response.status).toBe(200);
@@ -177,12 +175,6 @@ describe("the routes carry each session's own label", () => {
     const next = await read(server, "local", `${path}${encodeURIComponent(first.list_version as string)}`);
     expect(next.delta.rows).toEqual([]);
     expect(next.session_labels).toMatchObject({ "ses-login": "Login, take two" });
-    // And over the wire a tailnet guest's list never has them, a change of rows or not.
-    const guestFirst = await read(server, "guest", path);
-    expect("session_labels" in guestFirst).toBe(false);
-    const guestNext = await read(server, "guest", `${path}${encodeURIComponent(guestFirst.list_version as string)}`);
-    expect(guestNext.delta).toBeDefined();
-    expect("session_labels" in guestNext).toBe(false);
   });
 
   test("a rename follows on the next poll, an empty label or an older connection clears it, and the label is the cleaned one", async () => {
@@ -224,36 +216,30 @@ describe("the routes carry each session's own label", () => {
 });
 
 describe("who sees them", () => {
-  test("the owner over the tailnet reads what this computer reads; a guest reads every route as before", async () => {
+  test("the owner over the tailnet reads what this computer reads", async () => {
     const { server, threadId } = await threeNamed();
     const routes = ["/api/inbox/threads", `/api/inbox/threads/${threadId}/taggable`, `/api/inbox/threads/${threadId}/sessions`];
     for (const path of routes) {
       const local = await read(server, "local", path);
       const owner = await read(server, "owner", path);
-      const guest = await read(server, "guest", path);
       expect(JSON.stringify(owner)).toContain("Fix login redirect");
       expect(owner.session_labels).toEqual(local.session_labels);
-      expect(JSON.stringify(guest)).not.toMatch(/Fix login redirect|Docs pass|Billing cleanup/);
-      expect(guest.session_labels).toBeUndefined();
-      // The rest of the guest's answer is the owner's, labels aside.
-      const strip = (model: Json) => JSON.parse(JSON.stringify(model, (key, value) => (key === "label" || key === "session_labels" ? undefined : value)));
-      expect(Object.keys(strip(guest)).sort()).toEqual(Object.keys(strip(owner)).sort());
     }
   });
 });
 
 describe("the windows are told", () => {
-  test("a poll that changes a label says `labels` on the deliveries frame, to the owner's window only", async () => {
+  test("a poll that changes a label says `labels` on the deliveries frame, here and on the owner's phone", async () => {
     const { server, project } = await threeNamed();
-    const frames = async (caller: "local" | "guest") => {
+    const frames = async (caller: "local" | "owner") => {
       const controller = new AbortController();
       const origin = `http://127.0.0.1:${server.port}`;
       const listener = server.tailscale.listenerPort()!;
       const response =
         caller === "local"
           ? await fetch(`${origin}/api/inbox/events?window=window-local-1&permission=default&origin=${encodeURIComponent(origin)}`, { headers: { Origin: origin }, signal: controller.signal })
-          : await fetch(`http://127.0.0.1:${listener}/api/inbox/events?window=window-guest-1&permission=default&origin=${encodeURIComponent(`https://${MAGIC}:${server.port}`)}`, {
-              headers: { Host: `${MAGIC}:${server.port}`, Origin: `https://${MAGIC}:${server.port}`, "Sec-Fetch-Site": "same-origin", "X-Forwarded-Proto": "https", "Tailscale-User-Login": GUEST },
+          : await fetch(`http://127.0.0.1:${listener}/api/inbox/events?window=window-owner-1&permission=default&origin=${encodeURIComponent(`https://${MAGIC}:${server.port}`)}`, {
+              headers: { Host: `${MAGIC}:${server.port}`, Origin: `https://${MAGIC}:${server.port}`, "Sec-Fetch-Site": "same-origin", "X-Forwarded-Proto": "https", "Tailscale-User-Login": OWNER },
               signal: controller.signal,
             });
       const reader = response.body!.getReader();
@@ -270,20 +256,17 @@ describe("the windows are told", () => {
       return { until, text: () => text, close: () => controller.abort() };
     };
     const local = await frames("local");
-    const guest = await frames("guest");
+    const phone = await frames("owner");
     expect(await local.until(/event: hello/, 3_000)).toBe(true);
-    expect(await guest.until(/event: hello/, 3_000)).toBe(true);
+    expect(await phone.until(/event: hello/, 3_000)).toBe(true);
     // The first compare after a window opens may say the sessions moved, to every window: let it pass.
     await local.until(/event: deliveries/, 2_500);
-    await guest.until(/event: deliveries/, 500);
-    const guestBefore = guest.text().length;
+    await phone.until(/event: deliveries/, 500);
     await poll(server, "ses-login", project, "Renamed now");
     expect(await local.until(/event: deliveries\ndata: \{"labels":true\}/, 5_000)).toBe(true);
-    // Only a label changed: the guest's window gets no frame at all, not even an empty one.
-    await guest.until(/event: deliveries[\s\S]*event: deliveries/, 2_500);
-    expect(guest.text().slice(guestBefore)).not.toContain("event: deliveries");
+    expect(await phone.until(/event: deliveries\ndata: \{"labels":true\}/, 5_000)).toBe(true);
     local.close();
-    guest.close();
+    phone.close();
   }, 20_000);
 });
 

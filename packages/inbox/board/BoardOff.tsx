@@ -7,10 +7,8 @@ import { SidebarTrigger } from '../shell/sidebar';
  * the Board is something the person turns on). It says so, what turning it on
  * does, and offers the one way: Turn it on (Settings → Capabilities has the
  * same switch, and the page links there). Nothing of the Board shows while it is off; its cards are kept.
- * Turning it on changes what agents on this computer are offered, so a tailnet
- * guest's page (`guest`) says to do it on this computer.
  */
-export function BoardOff({ guest, onTurnOn, error }: { guest: boolean; onTurnOn: () => void; error: string | null }) {
+export function BoardOff({ onTurnOn, error }: { onTurnOn: () => void; error: string | null }) {
   const titleId = useId();
   return (
     <section className="ib-bpage" aria-labelledby={titleId} data-board-page="" data-board-view="off">
@@ -29,18 +27,12 @@ export function BoardOff({ guest, onTurnOn, error }: { guest: boolean; onTurnOn:
           Turn it on for a page of the work in flight: one card per piece of work, in the column of its stage, that your agents keep current. Agents pick it up
           in their next session. Turned off again, every card is kept.
         </p>
-        {guest ? (
-          <p className="ib-boff-note">Turn it on from this computer’s own screen: it changes what agents here are offered.</p>
-        ) : (
-          <>
-            <button type="button" className="ib-btn ib-pri" onClick={onTurnOn} data-board-turn-on="">
-              Turn it on
-            </button>
-            <p className="ib-boff-note" data-board-settings-link="">
-              The same switch is in <a href="#settings/capabilities">Settings → Capabilities</a>.
-            </p>
-          </>
-        )}
+        <button type="button" className="ib-btn ib-pri" onClick={onTurnOn} data-board-turn-on="">
+          Turn it on
+        </button>
+        <p className="ib-boff-note" data-board-settings-link="">
+          The same switch is in <a href="#settings/capabilities">Settings → Capabilities</a>.
+        </p>
         {error && (
           <p className="ib-error" role="alert">
             {error}

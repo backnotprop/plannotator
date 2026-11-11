@@ -72,13 +72,13 @@ function inbox() {
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
   const readBody = async (req: Request) => (await req.json()) as Record<string, unknown>;
   const facesRoute = createInboxAgentFaces({ file, serverSession: 'srv', readBody, json, icons: () => store.list() }).route;
-  const iconsRoute = createInboxAgentIcons({ icons: store, faces: file, serverSession: 'srv', localOnly: () => json({ code: 'local_only' }, 403), readBody, json }).route;
+  const iconsRoute = createInboxAgentIcons({ icons: store, faces: file, serverSession: 'srv', readBody, json }).route;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://localhost');
     asked.push(`${init?.method ?? 'GET'} ${url.pathname}${url.search}`);
     const req = new Request(url, { method: init?.method ?? 'GET', ...(init?.body ? { body: init.body } : {}) });
     try {
-      return (await facesRoute(req, url)) ?? (await iconsRoute(req, url, true)) ?? json({ error: 'not here' }, 404);
+      return (await facesRoute(req, url)) ?? (await iconsRoute(req, url)) ?? json({ error: 'not here' }, 404);
     } catch (cause) {
       // The Inbox's own answer to a refusal (its error handler): the words and the code.
       const error = cause as { message: string; code: string };

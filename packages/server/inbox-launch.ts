@@ -207,8 +207,6 @@ export function createInboxLaunch(options: {
   selfCommand: readonly string[];
   /** More agents beside Claude Code, made with the engine's context (a test's fake host). Each is held by its own `agent`. */
   hosts?: (context: LaunchHostContext) => LaunchHost[];
-  /** A tailnet request from someone other than this computer's owner: never starts, stops or deletes an agent (Try again, Stop, Delete). Absent: nobody is. */
-  isGuest?: (req: Request, via: string) => boolean;
   /** This Inbox was started over SSH (`SSH_CONNECTION` at start): macOS keeps Claude Code's login locked there, so the launch block names that cause. */
   startedOverSsh?: boolean;
   /** This computer's name as linked machines know it: a launch another machine sends is refused in words that name it. */
@@ -1009,7 +1007,7 @@ ${result.text}`);
     const memo = memoOf(launch);
     if (liveOf(host, root, memo)) return;
     if (now() - memo.startedAt < INBOX_RUN_START_GRACE_MS) return;
-    // Anyone's reply starts it again: this computer's, the owner's over the tailnet, or a login the allow list let in.
+    // The person's reply starts it again: from this computer or over the tailnet.
     const newest = store.pendingReplies(root.to.session, { tags: true }).at(-1);
     // Once per reply: one that did not take waits for Try again or the person's next reply.
     if (!newest || memo.respawn?.for === newest.id || memo.heldReply === newest.id) return;
@@ -1045,13 +1043,12 @@ ${result.text}`);
   });
   /**
    * "Another folder on <machine>…": the folder names in one folder (`listHomeFolders`): in home here, outside home off
-   * this process (a drive that doesn't answer in time is `504 folder_slow`, "<drive> isn't responding."). The owner's
-   * window only: a guest gets `owner_only`; an agent's call, MCP and the CLI (no same-origin fetch) and a linked
+   * this process (a drive that doesn't answer in time is `504 folder_slow`, "<drive> isn't responding."). The person's
+   * window only: an agent's call, MCP and the CLI (no same-origin fetch) and a linked
    * machine without the window's mark get `window_only`; a phone's door never reaches it (a machine-only door route).
    */
-  const homeFolders = async (req: Request, via: string, owner: boolean, door: { platform: string; window: boolean } | null): Promise<Response> => {
+  const homeFolders = async (req: Request, via: string, door: { platform: string; window: boolean } | null): Promise<Response> => {
     if (req.method !== "GET") return json({ error: "Use GET." }, 405);
-    if (!owner || options.isGuest?.(req, via)) return json({ error: "Only this computer's owner can list its folders.", code: "owner_only" }, 403);
     const window = door ? door.window : req.headers.get("sec-fetch-site") === "same-origin";
     if (!window) return json({ error: "Folders are listed in the Inbox window only.", code: "window_only" }, 403);
     const query = new URL(req.url).searchParams;
@@ -1069,14 +1066,14 @@ ${result.text}`);
 
   /**
    * "Choose in Finder…" (approval "inbox-launch-any-folder"): macOS's own folder dialog, on this computer, for this
-   * computer's own window only (never over the tailnet, a linked machine's forward, a guest or an agent's call). The
+   * computer's own window only (never over the tailnet, a linked machine's forward or an agent's call). The
    * folder picked comes back as a path; the window then reads it as any typed path, so the same rules apply.
    */
   let choosing: Promise<string | null> | null = null;
-  const chooseFolderRoute = async (req: Request, via: string, owner: boolean, door: { platform: string; window: boolean } | null): Promise<Response> => {
+  const chooseFolderRoute = async (req: Request, via: string, door: { platform: string; window: boolean } | null): Promise<Response> => {
     if (req.method !== "POST") return json({ error: "Use POST." }, 405);
     if (options.platform !== "darwin") return json({ error: "Finder is on macOS only.", code: "unsupported" }, 404);
-    if (door || via !== "local" || !owner || options.isGuest?.(req, via) || req.headers.get("sec-fetch-site") !== "same-origin") {
+    if (door || via !== "local" || req.headers.get("sec-fetch-site") !== "same-origin") {
       return json({ error: "Finder opens from this computer's own Inbox window only.", code: "window_only" }, 403);
     }
     const body = await options.readBody(req);
@@ -1093,9 +1090,8 @@ ${result.text}`);
   };
 
   /** The folder reads' guard (`homeFolders`): the owner's window only, here or through a linked machine's forward. */
-  const windowRead = (req: Request, via: string, owner: boolean, door: { platform: string; window: boolean } | null): Response | null => {
+  const windowRead = (req: Request, via: string, door: { platform: string; window: boolean } | null): Response | null => {
     if (req.method !== "GET") return json({ error: "Use GET." }, 405);
-    if (!owner || options.isGuest?.(req, via)) return json({ error: "Only this computer's owner can read this.", code: "owner_only" }, 403);
     const window = door ? door.window : req.headers.get("sec-fetch-site") === "same-origin";
     if (!window) return json({ error: "Folders are read in the Inbox window only.", code: "window_only" }, 403);
     return null;
@@ -1115,8 +1111,8 @@ ${result.text}`);
    * `into` absent: the default clone folder. Answers `{ into, path, name, state: "clone" | "already", taken, writable }`,
    * each path as `~/…`; a URL that isn't a repo `422 validation_error`, a folder the listing refuses its `422`.
    */
-  const cloneTargetRoute = async (req: Request, via: string, owner: boolean, door: { platform: string; window: boolean } | null): Promise<Response> => {
-    const refused = windowRead(req, via, owner, door);
+  const cloneTargetRoute = async (req: Request, via: string, door: { platform: string; window: boolean } | null): Promise<Response> => {
+    const refused = windowRead(req, via, door);
     if (refused) return refused;
     const query = new URL(req.url).searchParams;
     const repo = parseInboxGitUrl(query.get("url") ?? "");
@@ -1146,8 +1142,8 @@ ${result.text}`);
   };
 
   /** The quiet check after a paste (`GET /api/inbox/launch/clone-check?url=…`): `{ reach: "ok" | "auth" | "not_found" | "network" | "failed" }`, from this machine's git. */
-  const cloneCheck = async (req: Request, via: string, owner: boolean, door: { platform: string; window: boolean } | null): Promise<Response> => {
-    const refused = windowRead(req, via, owner, door);
+  const cloneCheck = async (req: Request, via: string, door: { platform: string; window: boolean } | null): Promise<Response> => {
+    const refused = windowRead(req, via, door);
     if (refused) return refused;
     const repo = parseInboxGitUrl(new URL(req.url).searchParams.get("url") ?? "");
     if (!repo || repo.kind !== "repo") return json({ error: "Not a git repo's URL.", code: "validation_error" }, 422);
@@ -1168,7 +1164,7 @@ ${result.text}`);
   const reachKnown = new Map<string, { at: number; reach: Awaited<ReturnType<typeof checkGitRemote>> }>();
 
   /**
-   * `owner`: the machine's owner, here or over the tailnet (a guest the allow list let in is not). `door`: the request
+   * `door`: the request
    * came through the device door (a linked machine's Stop, Try again, Trust folder or Delete; remote launch). A
    * machine is the owner's, and acts only for a press in a window there (`window`), never for an agent's bare call.
    */
@@ -1176,20 +1172,19 @@ ${result.text}`);
     req: Request,
     path: string,
     via: "local" | "tailnet" | string,
-    owner: boolean = via === "local",
     door: { platform: string; window: boolean } | null = null,
   ): Promise<Response | null> => {
     if (path === "/api/inbox/launch/folders") {
       if (!enabled()) return json({ error: "Launch is off.", code: "launch_off" }, 404);
-      return await homeFolders(req, via, owner, door);
+      return await homeFolders(req, via, door);
     }
     if (path === "/api/inbox/launch/choose-folder") {
       if (!enabled()) return json({ error: "Launch is off.", code: "launch_off" }, 404);
-      return await chooseFolderRoute(req, via, owner, door);
+      return await chooseFolderRoute(req, via, door);
     }
     if (path === "/api/inbox/launch/clone" || path === "/api/inbox/launch/clone-check") {
       if (!enabled()) return json({ error: "Launch is off.", code: "launch_off" }, 404);
-      return path.endsWith("check") ? await cloneCheck(req, via, owner, door) : await cloneTargetRoute(req, via, owner, door);
+      return path.endsWith("check") ? await cloneCheck(req, via, door) : await cloneTargetRoute(req, via, door);
     }
     const match = /^\/api\/inbox\/launch\/(settings|lch_[0-9A-HJKMNP-TV-Z]{26})(?:\/(stop|open|delete|retry|trust))?$/.exec(path);
     if (!match) return null;
@@ -1197,8 +1192,6 @@ ${result.text}`);
     // started keeps Stop, Open, Delete, Try again and Trust folder while it is off, and Settings → Agents' read and switch answer.
     // Settings → Agents, shown: the switch as it stands; never set, the login shell read again when stale.
     if (req.method === "GET" && match[1] === "settings" && !match[2]) {
-      // The owner's, from this computer or over the tailnet (their phone); never a guest's.
-      if (options.isGuest?.(req, via)) return json({ error: "Only this computer's owner can read this.", code: "owner_only" }, 403);
       // Never another site's page: a read here may start the person's login shell.
       if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
       // `ahead=1` (the composer picked "Start Claude Code"): read now, off the Send's path, so a change to the
@@ -1213,8 +1206,6 @@ ${result.text}`);
     const localOnly = () => json({ error: "Only from this computer.", code: "owner_only" }, 403);
     if (match[1] === "settings") {
       if (match[2]) return null;
-      // The owner's, from this computer or over the tailnet (their phone), as main's other settings are; never a guest's.
-      if (options.isGuest?.(req, via)) return json({ error: "Only this computer's owner can change this.", code: "owner_only" }, 403);
       if ("enabled" in body) {
         // Settings → Agents' "Start agents from New message": written either way (an explicit true outlives a change
         // of default), and read live, so New message offers or drops its New session rows without a restart.
@@ -1354,8 +1345,6 @@ ${result.text}`);
         }
       }
       case "retry": {
-        // Try again starts the agent: the owner's, as a Send that starts one is (inbox-compose.ts).
-        if (options.isGuest?.(req, via)) throw new InboxError("owner_only", "Only this computer's owner can start an agent from this Inbox.");
         if (starting.has(launch.id) || respawning.has(launch.id) || trusting.has(launch.id)) throw new InboxError("validation_error", "It is starting already.");
         // A clone that failed or was cancelled (or cut off by a restart): clone again, then start.
         if (launch.clone && (launch.clone.state === "failed" || launch.clone.state === "cancelled" || (launch.clone.state === "cloning" && !clones.has(launch.id)))) {
@@ -1367,7 +1356,6 @@ ${result.text}`);
         return json({ run: runOfRoot(store.message(root.id)!) });
       }
       case "trust": {
-        if (!owner) throw new InboxError("owner_only", "Only this computer's owner can trust a folder.");
         if (!door?.window && !isWindowRequest(req, body, options.serverSession)) return json(INBOX_WINDOW_ONLY_BODY, 403);
         // A click under way (a double click): the same answer, once it is done.
         const under = trusting.get(launch.id);

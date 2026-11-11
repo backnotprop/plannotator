@@ -721,32 +721,6 @@ test("#reviews&new with Code review off: the off page, no box, and the address f
   await expect(page).not.toHaveURL(/&new/);
 });
 
-test('a #reviews link on a tailnet guest\'s page: the Inbox, and Back goes where the person was', async () => {
-  const context = await world.page.context().browser()!.newContext({ viewport: { width: 1440, height: 900 } });
-  const page = await context.newPage();
-  await setCodeReview(true);
-  try {
-    await page.route('**/api/inbox/settings*', async (route) => {
-      if (route.request().method() !== 'GET') return route.continue();
-      const answer = await route.fetch();
-      await route.fulfill({ response: answer, json: { ...(await answer.json()), via: 'tailnet', guest: true } });
-    });
-    const thread = `#thread=${encodeURIComponent(world.threads.stack)}`;
-    await page.goto(`${world.url}${thread}`);
-    await expect(page.locator('[data-inbox-nav]')).toBeVisible();
-    await page.evaluate(() => {
-      location.hash = '#reviews';
-    });
-    await expect.poll(() => page.evaluate(() => location.hash)).toBe('');
-    await expect(page.locator('[data-pulls-list]')).toHaveCount(0);
-    await page.goBack();
-    await expect.poll(() => page.evaluate(() => location.hash)).toBe(thread);
-  } finally {
-    await context.close();
-    await setCodeReview(false);
-  }
-});
-
 test('#reviews&new opens the box over the page once: the address goes back to #reviews, so a reload does not reopen it', async () => {
   const { page } = world;
   await setCodeReview(true);

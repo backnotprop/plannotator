@@ -45,7 +45,6 @@ import {
   pageServerSession,
   setPageSession,
   subscribeInboxEvents,
-  tailnetGuest,
   inboxAskOn,
   REF_CARD_READ_MS,
   signalWithin,
@@ -1138,12 +1137,12 @@ function Inbox() {
   const [settingsLate, setSettingsLate] = useState(false);
   const [update, setUpdate] = useState<InboxHealth['update']>(null);
   const [restarting, setRestarting] = useState(false);
-  // What this page may offer: nothing to a tailnet guest, whom the update routes refuse.
+  // What this page may offer: nothing until the settings are read.
   const pageUpdate = updateForPage(update, settings);
-  // What's new only reads release notes: this computer's pages and the owner's over the tailnet, never a guest's.
+  // What's new only reads release notes.
   const pageWhatsNew = pageOffersWhatsNew(settings);
   // Checking for updates has failed for hours (packages/server/inbox-updates.ts): the sidebar's quiet row,
-  // About's dot and the General row's line. Not on a tailnet guest's page.
+  // About's dot and the General row's line.
   const [checkFailing, setCheckFailing] = useState<UpdateCheckFailing | null>(null);
   const pageCheckFailing = pageOffersUpdates(settings) ? checkFailing : null;
   // The sidebar toggle's dot while the sidebar is closed: an update the Update button offers, or checking failing.
@@ -1190,7 +1189,7 @@ function Inbox() {
   const [listIntro, setListIntro] = useState<'none' | 'claimed' | 'open' | 'shown'>('none');
   const [listIntroDecided, setListIntroDecided] = useState(false);
   const listIntroAsked = useRef(false);
-  const listIntroLatch = useRef<{ owner: boolean; firstRun: boolean; rows: number } | null>(null);
+  const listIntroLatch = useRef<{ firstRun: boolean; rows: number } | null>(null);
   const [listIntroSettled, setListIntroSettled] = useState(false);
   /**
    * A one-time dialog of the line is claimed or open now (a reveal's, voice's, the star ask's, Code review's offer):
@@ -1974,8 +1973,8 @@ function Inbox() {
   const boardEnabled = settings ? (settings.board ? settings.board.on : true) : null;
   boardOnRef.current = boardEnabled === true;
   // Shape (approval "shape-inbox-placement"): only while the person turned it on. Off, nothing is read and nothing shows.
-  // A tailnet guest never: the server refuses it the routes. The owner over the tailnet has it, as at the desk.
-  const shapeOn = settings?.shape?.on === true && settings.guest !== true;
+  // The owner over the tailnet has it, as at the desk.
+  const shapeOn = settings?.shape?.on === true;
   const codeReviewOn = settings?.code_review?.on === true;
   // The boards, and every Shape piece in a review (Show me, the Overview's picture, boards over it), ride Shape's own
   // switch: Code review on brings none of them (approval "code-review-029-shape-off"). With both on, as before.
@@ -2839,7 +2838,7 @@ function Inbox() {
       // press, the full window, then the drawing. The drawing's own Escape (a card, a sheet inside) runs first and marks
       // the key used. A PR's pane open over it owns the screen.
       // While System does not show, a leftover `&system=` is not on the ladder: Escape is today's.
-      const systemBack = event.key === 'Escape' ? systemEscapeTo(routeRef.current, systemShown(settingsRef.current) && !tailnetGuest(settingsRef.current)) : null;
+      const systemBack = event.key === 'Escape' ? systemEscapeTo(routeRef.current, systemShown(settingsRef.current)) : null;
       if (systemBack) {
         const from = keyTarget(event);
         if (event.defaultPrevented || isComposingKey(event) || modalOpen() || (from && (isEditableTarget(from) || inOverlay(from) || from.closest('[role="menu"], [role="listbox"]')))) return;
@@ -2903,7 +2902,7 @@ function Inbox() {
     const now = routeRef.current;
     return openThreadAsks(oneTimeRows.current, now.page === 'inbox' ? (now.thread ?? null) : null);
   };
-  const soundDialogDue = latest !== null && settings?.sound?.dialog_due === true && !tailnetGuest(settings) && lineArms('sound');
+  const soundDialogDue = latest !== null && settings?.sound?.dialog_due === true && lineArms('sound');
   // Not during the tour: one-time dialogs never open over it (they wait for its end).
   const soundDialogBlocked = updateDialog !== null || restarting || route.page === 'tour';
   useEffect(() => {
@@ -2933,10 +2932,9 @@ function Inbox() {
   // Decided once per load, once the agents are read (the run that opened the
   // window has finished connecting) and the list has loaded; after the sound
   // dialog, and never on a load that showed it. On the owner's other devices too
-  // (owner ruling 2026-11-11), never on a tailnet guest's page (like the other one-time
-  // dialogs; Settings → Agents asks the same thing), never while an update
+  // (owner ruling 2026-11-11; Settings → Agents asks the same thing), never while an update
   // dialog is open or a reply is being typed, and it waits while Settings is open.
-  const soundSettled = settings !== null && (!(settings.sound?.dialog_due === true && !tailnetGuest(settings) && lineArms('sound')) || soundClaimed);
+  const soundSettled = settings !== null && (!(settings.sound?.dialog_due === true && lineArms('sound')) || soundClaimed);
   const agentNoteOpen = typeof agentNote === 'object';
   // The notification lines (the ask, "tab slept") wait until this load's
   // one-time dialogs are decided (the sound claim settled, the note dialog
@@ -3197,7 +3195,7 @@ function Inbox() {
   // "New review…" is offered with Code review on (as `pullsShown` below). A dependency, not a ref: the palette's
   // Actions are worked out when its words are answered, and the settings can land after that (⌘K just after a
   // load), so the actions must change with them or "review" never offers New review… until the words change.
-  const paletteReviews = codeReviewOn && !tailnetGuest(settings);
+  const paletteReviews = codeReviewOn;
   const paletteActions = useCallback(
     (q: string): ComposeAction[] => composeActions(q, composeTargets(paletteSessions?.projects ?? []), lastSentRef.current, paletteReviews),
     [paletteSessions, paletteReviews],
@@ -5130,7 +5128,6 @@ function Inbox() {
   if (updateDialog !== null || restarting) updatingThisLoad.current = true;
   if (listIntroLatch.current === null && settings && latest !== null && shown !== null) {
     listIntroLatch.current = {
-      owner: !tailnetGuest(settings),
       firstRun,
       rows: filterList(shown).reduce((n, section) => n + section.threads.length, 0),
     };
@@ -5184,7 +5181,6 @@ function Inbox() {
   const groupingFirst = lineLatch?.listIntroDue === true && lineLatch.ahead.includes('list_view') && readListView() === 'grouped' && listTallerThanScreen(listBody(rootRef.current));
   const listIntroLoad: ListIntroLoad = {
     due: listIntroAtLoad !== null && lineLatch?.listIntroDue === true && !groupingFirst,
-    owner: listIntroAtLoad?.owner ?? false,
     listLoaded: listIntroAtLoad !== null,
     firstRun: listIntroAtLoad?.firstRun ?? false,
     rows: listIntroAtLoad?.rows ?? 0,
@@ -5250,7 +5246,6 @@ function Inbox() {
   const voiceIntro = useVoiceIntro(
     {
       due: lineLatch?.voiceDue === true,
-      owner: listIntroLoad.owner,
       listLoaded: listIntroLoad.listLoaded,
       firstRun: listIntroLoad.firstRun,
       listIntroDue: listIntroLoad.due,
@@ -5564,12 +5559,9 @@ function Inbox() {
   // once an agent is installed or turned on: it reads the agents again when the window comes back
   // into focus (the person ran the install command in a terminal) and every few seconds while shown.
   const { model: firstRunSessions } = useComposeSessions(firstRun);
-  // For a tailnet guest the agents route is local only: nothing to read again.
-  const guestPage = tailnetGuest(settings);
   // Pull requests (approval "inbox-code-review-direction", items 4 and 5): only with Code review on, read while the
-  // page is open, and for the sidebar's count once at start and on focus; never from a tailnet guest's page (it runs
-  // this computer's gh / glab).
-  const pullsShown = codeReviewOn && !guestPage;
+  // page is open, and for the sidebar's count once at start and on focus.
+  const pullsShown = codeReviewOn;
   pagesRef.current = { pulls: pullsShown, drafts: (drafts?.length ?? 0) + replyDrafts.length > 0, composing: compose !== null };
   const onReviews = route.page === 'reviews' || !!route.reviews;
   const pulls = usePulls(onReviews && pullsShown, pullsShown, (route.reviews?.view ?? route.view) === 'others');
@@ -5596,9 +5588,9 @@ function Inbox() {
     return () => clearTimeout(timer);
   }, [shown, thread?.messages.length, pullsShown, pullsReloadRows]);
   // System in Reviews and in Settings (approval "system-inbox"): only while it shows (System on, Code review on).
-  const systemOnHere = systemShown(settings) && !guestPage;
+  const systemOnHere = systemShown(settings);
   const systemProjects = useSystemProjects(systemOnHere && (route.page === 'reviews' || (route.page === 'settings' && route.section === 'capabilities')));
-  // A drawing's address while System does not show (turned off, Code review off, a guest's page): dropped in place,
+  // A drawing's address while System does not show (turned off, Code review off): dropped in place,
   // so Reviews is today's. Not before the settings are read: System may be on.
   useEffect(() => {
     if (settings === null) return;
@@ -5606,19 +5598,12 @@ function Inbox() {
     if (clean) writeRoute(clean, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings === null, systemOnHere, route.page, route.system, route.sheet, route.full]);
-  // A #reviews link on a guest's page (it could not turn Code review on): the Inbox, as if the page were not there.
-  useEffect(() => {
-    // In place: Back from the Inbox must not land on #reviews and be sent back again.
-    if (onReviews && guestPage) writeRoute({ page: 'inbox', project: null, thread: null }, { replace: true });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onReviews, guestPage]);
-  // Pull requests lives under Code review: off (or a guest's page), `#prs` goes where `#reviews` does, in place.
+  // Pull requests lives under Code review: off, `#prs` goes where `#reviews` does, in place.
   useEffect(() => {
     if (route.page !== 'prs' || settings === null) return;
-    if (guestPage) writeRoute({ page: 'inbox', project: null, thread: null }, { replace: true });
-    else if (!codeReviewOn) writeRoute({ page: 'reviews', project: null, thread: null }, { replace: true });
+    if (!codeReviewOn) writeRoute({ page: 'reviews', project: null, thread: null }, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route.page, settings === null, guestPage, codeReviewOn]);
+  }, [route.page, settings === null, codeReviewOn]);
   // Code review turned off (from another window, say): nothing starts a review from here, and the box says why it went.
   // Its words stay in memory for when it's back.
   const reviewBoxOpen = !!compose?.review;
@@ -5639,7 +5624,7 @@ function Inbox() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.page, route.new, pullsShown]);
   useEffect(() => {
-    if (!firstRun || guestPage) return;
+    if (!firstRun) return;
     let last = Date.now();
     const again = () => {
       if (document.visibilityState !== 'visible' || Date.now() - last < FIRST_RUN_AGENTS_MIN_GAP_MS) return;
@@ -5654,7 +5639,7 @@ function Inbox() {
       window.removeEventListener('focus', again);
       document.removeEventListener('visibilitychange', again);
     };
-  }, [firstRun, guestPage, refreshAgents]);
+  }, [firstRun, refreshAgents]);
   // ── The onboarding tour (approval "inbox-onboarding-tour") ──────────────
   // A replay of a real thread from building Plannotator, drawn with the
   // window's own list, thread and question card over the tour's fixture
@@ -5663,7 +5648,7 @@ function Inbox() {
   // first-run screen. The person's Inbox stays loaded underneath
   // and comes back as it was.
   const tourOn = route.page === 'tour';
-  // Ask AI, on in every Inbox but the tour's and a tailnet guest's (off, this reads nothing and draws nothing), and
+  // Ask AI, on in every Inbox but the tour's (off, this reads nothing and draws nothing), and
   // only once the settings say which this page is. A linked machine's thread has no chat here.
   const [askReply, setAskReply] = useState<{ threadId: string; words: string } | null>(null);
   // A board's Add to reply: its words and picture, on their way to the reply of the thread the board hangs off.
@@ -5689,7 +5674,7 @@ function Inbox() {
     rowsRead: drafts !== null,
     threadId: route.page === 'inbox' ? route.thread : null,
     phone,
-    off: tourOn || settings?.guest === true,
+    off: tourOn,
     // Off by default (the owner, 2026-11-08): Settings → Capabilities → Experimental → "Float reply drafts".
     floatDrafts: settings ? settings.float_drafts?.on === true : null,
     ask: ask.corner,
@@ -6105,7 +6090,7 @@ function Inbox() {
     const decide = () => {
       if (cancelled || agentNoteDecided.current || replyInProgress() || openQuestionHere()) return false;
       agentNoteDecided.current = true;
-      const model = tailnetGuest(settings) ? null : agentsRef.current;
+      const model = agentsRef.current;
       const rows = model ? noteQuestionRows(model) : [];
       // Not on this load (the line's gap): decided, so the notification lines need not wait for it.
       if (rows.length === 0 || !model || settingsRef.current?.reveal?.setup === false) {
@@ -6140,15 +6125,15 @@ function Inbox() {
   // The connect line (approval "inbox-agent-note-auto"; ConnectLine): once the agents are read (the run that
   // opened the window has finished connecting and writing notes), the news not said yet shows above the list and
   // on the first-run screen, quiet, never a dialog. Fixed for this load when it shows, and said at once
-  // (`POST /api/inbox/agents/seen`). On this computer and on its owner's other devices; never a tailnet guest's page.
+  // (`POST /api/inbox/agents/seen`). On this computer and on its owner's other devices.
   useEffect(() => {
-    if (connectLine !== null || !agentsSettled || !agents || !settings || tailnetGuest(settings)) return;
+    if (connectLine !== null || !agentsSettled || !agents || !settings) return;
     const news = connectLineNews(agents);
     if (!news) return;
     setConnectLine(news);
     void inboxApi.agentsSeen(news.report?.at ?? null, news.notes).then(setAgents, () => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agents, agentsSettled, settings?.via, settings?.guest, connectLine]);
+  }, [agents, agentsSettled, settings?.via, connectLine]);
   const connectLineEl =
     connectLine && connectLine !== 'gone' ? (
       <ConnectLine
@@ -6474,10 +6459,10 @@ function Inbox() {
   // The rows the window has: where the sidebar's Agents section finds each agent's thread, and the last agent started.
   const composeLastAgent = useMemo(() => lastLaunchAgent(windowRows), [windowRows]);
   useComposerOpener(openCompose, composeLastAgent);
-  // "+" on project rows (F1-F7): on while launch is on and this is no guest's page. This computer's launch block says
+  // "+" on project rows (F1-F7): on while launch is on. This computer's launch block says
   // which rows can start anything (agents, the folder still there): read when "+" comes on, when the tab is shown, and
   // when the projects change; never on a timer.
-  const plusOn = projectPlusOn(settings?.launch?.enabled, guestPage);
+  const plusOn = projectPlusOn(settings?.launch?.enabled);
   const [plusHere, setPlusHere] = useState<InboxComposeLaunch | null>(null);
   const projectCount = projects.length;
   useEffect(() => {
@@ -6506,7 +6491,7 @@ function Inbox() {
   })();
 
   // The last step’s notifications line (choice 6): asked on the click, in the screen's "Try it".
-  const tourAskKind = tourRealStep && !tourAskHidden && !guestPage && notifications.permission !== 'unsupported'
+  const tourAskKind = tourRealStep && !tourAskHidden && notifications.permission !== 'unsupported'
     ? notifications.permission === 'denied'
       ? 'blocked'
       : notifications.permission === 'granted' && settings?.notifications.enabled
@@ -6517,7 +6502,7 @@ function Inbox() {
     <EmptyState
       context={context}
       agents={agents}
-      agentsUnavailable={guestPage ? 'tailnet' : agentsSettled && agents === null ? 'failed' : null}
+      agentsUnavailable={agentsSettled && agents === null ? 'failed' : null}
       onRetry={() => void refreshAgents()}
       sessions={firstRunSessions}
       onAgents={setAgents}
@@ -6548,11 +6533,11 @@ function Inbox() {
               </button>
             </div>
           ) : null
-        ) : // On this computer and on the owner's other devices (owner ruling 2026-11-11); never a tailnet guest's page.
-        connectLineEl || (notifications.firstRunAsk && askLinesFree && !guestPage) ? (
+        ) : // On this computer and on the owner's other devices (owner ruling 2026-11-11).
+        connectLineEl || (notifications.firstRunAsk && askLinesFree) ? (
           <>
             {connectLineEl}
-            {notifications.firstRunAsk && askLinesFree && !guestPage && (
+            {notifications.firstRunAsk && askLinesFree && (
               <NotificationAsk
                 kind={notifications.firstRunAsk}
                 firstRun
@@ -6798,7 +6783,7 @@ function Inbox() {
     );
   } else if (route.page === 'board' && boardEnabled === false) {
     // The Board is off: a #board link says so, with the one way to turn it on (nothing else of it shows).
-    main = <BoardOff guest={guestPage} onTurnOn={() => void toggleBoard(true)} error={settingsError} />;
+    main = <BoardOff onTurnOn={() => void toggleBoard(true)} error={settingsError} />;
   } else if (route.page === 'board' && boardEnabled === null) {
     main = <section className="ib-bpage" aria-busy="true" data-board-page="" />;
   } else if (route.page === 'board') {
@@ -6869,8 +6854,8 @@ function Inbox() {
           go({ page: 'inbox', project: null, thread: threadId, card: card.id, board: route.board ?? 'lanes', boardProject: boardFilter, boardInitiative })
         }
         onCreateThread={(card, session, opener) => openCompose({ session, card: { id: card.id, title: card.title } }, opener)}
-        // The lane marks run this computer's gh / glab: never asked from a tailnet guest's page.
-        marks={settings !== null && !guestPage}
+        // The lane marks run this computer's gh / glab: asked once the settings are read.
+        marks={settings !== null}
       />
     );
   } else if (route.page === 'prs' && pullsShown && route.stack && route.layer) {
@@ -6940,7 +6925,7 @@ function Inbox() {
     );
   } else if (route.page === 'reviews' && pullsShown) {
     main = reviewsList(route.project, route.view ?? 'all', null);
-  } else if ((route.page === 'reviews' || route.reviews) && settings !== null && !guestPage && !codeReviewOn) {
+  } else if ((route.page === 'reviews' || route.reviews) && settings !== null && !codeReviewOn) {
     main = <ReviewsOff phone={phone} onSettings={() => go({ page: 'settings', project: null, thread: null, section: 'capabilities' })} />;
   } else if (route.page === 'reviews') {
     main = <div className="ib-listcol" aria-busy="true" />;
@@ -7001,7 +6986,7 @@ function Inbox() {
   } else if (showTourEntry) {
     main = (
       <TourEntry
-        model={tourEntryModel(agents, guestPage ? 'tailnet' : agentsSettled && agents === null ? 'failed' : null, new Set(firstRunSessions?.projects.flatMap((g) => g.sessions.map((x) => x.host)) ?? []))}
+        model={tourEntryModel(agents, agentsSettled && agents === null ? 'failed' : null, new Set(firstRunSessions?.projects.flatMap((g) => g.sessions.map((x) => x.host)) ?? []))}
         onStart={startTour}
         onConnect={() => {
           saveTour({ skipped: true });
@@ -7329,7 +7314,6 @@ function Inbox() {
             onFull={fromCard ? undefined : (on) => (on ? setThreadFull(true) : leaveFull())}
             fileStacked={stack.file}
             remote={settings ? (settings.via ?? 'local') === 'tailnet' : null}
-            guest={guestPage}
             onToast={(t) => showToast(t)}
             onToastGone={(onUndo) => {
               if (toastNow.current?.onUndo === onUndo) dismissToast();
@@ -7483,7 +7467,7 @@ function Inbox() {
             }
             onMessageAgent={(session, opener) => openCompose({ session }, opener)}
             onAddAgent={(opener) => openCompose(plusOn ? { launch: { agent: composeLastAgent } } : {}, opener)}
-            onAddMachine={machines.self && !guestPage ? () => leave({ page: 'settings', project: null, thread: null, section: 'machines' }) : undefined}
+            onAddMachine={machines.self ? () => leave({ page: 'settings', project: null, thread: null, section: 'machines' }) : undefined}
             projectNames={projectNames}
             projectCounts={projectCounts}
             projectActivity={latestProjectActivity}
@@ -7492,15 +7476,14 @@ function Inbox() {
             onProjectRename={renameProject}
             onProjectPicture={setProjectPicture}
             onProjectCombine={async (pair) => (await combineProjects([pair])) === null}
-            // "+" on a project row (F1-F7): while agents can be started from New message, and not on a guest's page.
+            // "+" on a project row (F1-F7): while agents can be started from New message.
             onProjectNewSession={plusOn ? (projectId, machine) => openCompose({ start: { projectId, machine, agent: composeLastAgent } }) : undefined}
             // Hidden on a row that can't start anything: no agent on that machine, launch off there, or its folder gone.
             projectCanStart={(project, machine, machineLaunch) => projectCanStart(project, machine ? machineLaunchesKept().get(machine)?.launch : plusHere, machineLaunch)}
             announce={say}
-            // Not on a tailnet guest's page: the update routes answer it 403 local_only.
             update={pageUpdate}
             restarting={restarting}
-            // The quiet "What's new in X" link: this computer's pages and the owner's over the tailnet, not a guest's.
+            // The quiet "What's new in X" link.
             updated={pageWhatsNew ? updated : null}
             onSearch={(opener) => openSearch(opener)}
             onCompose={(opener) => openCompose({}, opener)}
@@ -7528,8 +7511,7 @@ function Inbox() {
             onSettings={() => leave({ page: 'settings', project: null, thread: null })}
             onUpdate={pressUpdate}
             onWhatsNew={(version) => (tourRealStep ? endTour('finish', { page: 'whats-new', project: null, thread: null, version }) : openWhatsNew(version))}
-            // Not on a tailnet guest's page: Settings → Agents is closed to it.
-            restartAgents={settings && !guestPage ? restartAgents : NO_RESTART_AGENTS}
+            restartAgents={settings ? restartAgents : NO_RESTART_AGENTS}
             checkFailing={pageCheckFailing}
             onCheckFailing={() => leave({ page: 'settings', project: null, thread: null, section: 'about' })}
             onRestartSessions={() => leave({ page: 'settings', project: null, thread: null, section: 'agents' })}
@@ -8071,7 +8053,6 @@ function Inbox() {
           key={guideMessage.id}
           thread={thread}
           message={guideMessage}
-          guest={tailnetGuest(settings)}
           codeReview={codeReviewOn}
           shape={shapeOn}
           chapterDiagrams={chapterDiagramsOn}

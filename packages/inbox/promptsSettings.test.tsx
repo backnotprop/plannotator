@@ -41,7 +41,6 @@ function model(over: Partial<InboxPromptsSettings['reminder']> = {}): InboxPromp
       defaults: { wake: WAKE, no_wake: 'no wake' },
       max: 9000,
       on: { 'claude-code': true, pi: true, opencode: false },
-      editable: true,
       ...over,
     },
     others: [
@@ -298,9 +297,3 @@ test.skipIf(!hasDom)('config.json is named with the home folder as ~, the full p
   expect(await tooltipOf(outside)).toBeNull();
 });
 
-test.skipIf(!hasDom)('through the tailnet: read-only, no Edit anywhere', () => {
-  const el = mount(model({ editable: false, shared: 'Mine.', runtimes: { 'claude-code': null, pi: 'Pi.', opencode: null } }));
-  expect(el.querySelectorAll('[data-prompt-edit], [data-prompt-reset], [data-prompt-use-shared]')).toHaveLength(0);
-  expect(el.textContent).toContain('Change it on this computer.');
-  expect(q(el, '[data-prompt-text="pi"]')?.textContent).toBe('Pi.');
-});

@@ -101,7 +101,7 @@ packages/inbox/threadFolding.test.tsx
 packages/inbox/threadNameMeta.test.tsx
 packages/inbox/threadHeader.test.tsx
 packages/inbox/snoozeBackLine.test.tsx
-packages/inbox/launchMenuGuest.test.tsx
+packages/inbox/launchMenuTailnet.test.tsx
 packages/inbox/remoteLaunchThread.test.tsx
 packages/inbox/composeLaunchPulls.test.tsx
 packages/inbox/choiceLabels.test.tsx

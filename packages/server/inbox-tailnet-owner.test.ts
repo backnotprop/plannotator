@@ -1,21 +1,23 @@
 /**
- * The owner's phone over the tailnet works like the computer for an approved
- * list (approval "inbox-tailnet-owner"): every rule asks "owner or local", not
- * "did this come over the tailnet?". The tables run each route as each caller
- * against a real Inbox with its real gate: the window's port, the tailnet
- * listener as the owner, and the tailnet listener as a login config.json
- * `inboxTailscaleAllow` added.
+ * Single player over the tailnet: the owner's phone works like the computer
+ * (approval "inbox-tailnet-owner"), and every other Tailscale account gets the
+ * refusal and nothing else. The tables run each route as each caller against a
+ * real Inbox with its real gate: the window's port, the tailnet listener as the
+ * owner, and the tailnet listener as another account, one config.json
+ * `inboxTailscaleAllow` names (ignored on a machine Tailscale names an owner
+ * for; on a tagged machine, which has none, that login is the owner).
  *
- * What regresses: a guest reaching a route the owner opened (above all
- * Settings → Agents, which writes real agent files); anything of the agent
- * surface, the door or the exposure switches opening with them; the login
- * header counting anywhere but the tailnet listener; a linked machine or a
- * phone's door gaining a route; a failed update taking the Inbox with it.
+ * What regresses: another account reaching anything (above all Settings →
+ * Agents, which writes real agent files); the owner losing a route this
+ * computer has; anything of the agent surface, the door or the exposure
+ * switches opening; the login header counting anywhere but the tailnet
+ * listener; a linked machine or a phone's door gaining a route; a failed
+ * update taking the Inbox with it.
  *
  * Scripted `tailscale`, `gh`, agents and installer; the real ones never run.
  * Temp PLANNOTATOR_DATA_DIR and a temp agent home only.
  */
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { inboxId } from "@plannotator/core/inbox-types";
 import { tmpdir } from "node:os";
@@ -31,10 +33,11 @@ type Json = Record<string, any>;
 
 const MAGIC = "macbook-pro.tail0000.ts.net";
 const OWNER = "ramos@example.com";
-const GUEST = "guest@example.com";
+/** Another Tailscale account: config.json `inboxTailscaleAllow` names it, which only a tagged machine heeds. */
+const OTHER = "other@example.com";
 const KEY = "sk-phone-0123456789abcd";
 
-type Caller = "local" | "owner" | "guest";
+type Caller = "local" | "owner" | "other";
 
 const roots: string[] = [];
 const fakes: FakeAgents[] = [];
@@ -105,7 +108,7 @@ async function world(options: WorldOptions = {}) {
   const dataDir = root;
   setEnv("PLANNOTATOR_DATA_DIR", dataDir);
   for (const name of ["PLANNOTATOR_INBOX_TAILSCALE", "PLANNOTATOR_URL_HOST", "PLANNOTATOR_AUTO_UPDATE", "PLANNOTATOR_UPDATE_CHECK"]) setEnv(name, undefined);
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true, inboxTailscaleAllow: [GUEST], updateCheck: false, ...options.config }));
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true, inboxTailscaleAllow: [OTHER], updateCheck: false, ...options.config }));
   writeFileSync(join(dataDir, "update-state.json"), JSON.stringify({ latestRelease: { tag: "0.28.12", fetchedAt: Date.now() } }));
   const ts = fakeTailscale({ tagged: options.tagged });
   const launches: unknown[] = [];
@@ -160,7 +163,7 @@ interface Call {
   headers?: Record<string, string>;
 }
 
-/** What a browser on the owner's or a guest's phone sends through serve, or this computer's window sends its own port. */
+/** What a browser on the owner's or another account's phone sends through serve, or this computer's window sends its own port. */
 function call(w: World, caller: Caller, request: Call, over: Record<string, string> = {}): Promise<Response> {
   const method = request.method ?? (request.body ? "POST" : "GET");
   const init = { method, redirect: "manual" as const, body: request.body ? JSON.stringify({ serverSession: w.inbox.serverSession, ...request.body }) : undefined };
@@ -178,7 +181,7 @@ function call(w: World, caller: Caller, request: Call, over: Record<string, stri
       Origin: `https://${MAGIC}:${w.inbox.port}`,
       "Sec-Fetch-Site": "same-origin",
       "X-Forwarded-Proto": "https",
-      "Tailscale-User-Login": caller === "owner" ? OWNER : GUEST,
+      "Tailscale-User-Login": caller === "owner" ? OWNER : OTHER,
       ...json,
       ...request.headers,
       ...over,
@@ -198,11 +201,12 @@ const answerOf = async (response: Response): Promise<[number, string | undefined
   return [response.status, code];
 };
 
-const CALLERS: readonly Caller[] = ["local", "owner", "guest"];
+const CALLERS: readonly Caller[] = ["local", "owner"];
 const REFUSED: [number, string] = [403, "local_only"];
+const NOT_OWNER: [number, string] = [403, "tailnet_identity_refused"];
 
 /** Every route the approval opened: what it answers each caller, and whether it did its work. */
-const OPENED: { name: string; call: (w: World) => Call; ok?: number; guest?: [number, string]; did?: (w: World) => boolean; world?: WorldOptions }[] = [
+const OPENED: { name: string; call: (w: World) => Call; ok?: number; did?: (w: World) => boolean; world?: WorldOptions }[] = [
   { name: "GET update: the facts", call: () => ({ path: "/api/inbox/update" }) },
   { name: "POST update: Update now", call: () => ({ path: "/api/inbox/update", body: {} }), did: (w) => w.launches.length === 1 },
   { name: "POST update/snooze", call: () => ({ path: "/api/inbox/update/snooze", body: {} }), did: (w) => JSON.parse(readFileSync(join(w.dataDir, "update-state.json"), "utf8")).snooze !== undefined },
@@ -217,7 +221,7 @@ const OPENED: { name: string; call: (w: World) => Call; ok?: number; guest?: [nu
   { name: "settings steps", call: () => ({ path: "/api/inbox/settings", body: { steps: { on: true } } }), did: (w) => w.config().inboxSteps === true },
   { name: "settings prompts: the reminder", call: () => ({ path: "/api/inbox/settings", body: { prompts: { inbox: { reminder: "Mine." } } } }), did: (w) => w.config().prompts?.inbox?.reminder === "Mine." },
   { name: "POST cards/marks", call: (w) => ({ path: "/api/inbox/cards/marks", body: { cards: [w.card.id] } }), did: (w) => w.forgeCalls.some((args) => args[0] === "api"), world: { board: true } },
-  { name: "POST voice/key", call: () => ({ path: "/api/inbox/voice/key", body: { key: KEY } }), guest: [403, "owner_only"], did: (w) => existsSync(join(w.dataDir, "inbox", "voice-key")) },
+  { name: "POST voice/key", call: () => ({ path: "/api/inbox/voice/key", body: { key: KEY } }), did: (w) => existsSync(join(w.dataDir, "inbox", "voice-key")) },
   { name: "settings cookie_host", call: () => ({ path: "/api/inbox/settings", body: { cookie_host: true } }), did: (w) => w.config().urlHost === "plannotator.localhost" },
 ];
 
@@ -237,58 +241,89 @@ const BLOCKED: { name: string; call: (w: World) => Call; local: [number, string?
   { name: "GET open-in/apps", call: () => ({ path: "/api/inbox/open-in/apps" }), local: "answers" },
 ];
 
+describe("another Tailscale account: one refusal, on every route class", () => {
+  test("a page, an API read and write, the event stream and /mcp: 403, a readable page for the browser, JSON for the rest; nothing changes", async () => {
+    const w = await world();
+    const before = readFileSync(join(w.dataDir, "config.json"), "utf8");
+    const page = await call(w, "other", { path: "/" }, { Accept: "text/html" });
+    expect(page.status).toBe(403);
+    expect(page.headers.get("content-type")).toContain("text/html");
+    const words = await page.text();
+    expect(words).toContain("only for the Tailscale account that owns this computer");
+    expect(words).toContain(OTHER);
+    for (const request of [
+      { path: "/api/inbox/threads" },
+      { path: "/api/inbox/settings", body: { text_size: 15 } },
+      { path: "/api/inbox/events?window=other-1" },
+      { path: "/mcp", body: {} },
+    ] as Call[]) {
+      const answer = await call(w, "other", request);
+      expect([request.path, answer.status, answer.headers.get("content-type")]).toEqual([request.path, 403, "application/json; charset=utf-8"]);
+      expect([request.path, ((await answer.json()) as Json).code]).toEqual([request.path, "tailnet_identity_refused"]);
+    }
+    expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(before);
+    // The owner over the tailnet and this computer: the same routes answer.
+    for (const caller of CALLERS) {
+      expect([caller, (await call(w, caller, { path: "/" }, { Accept: "text/html" })).status]).toEqual([caller, 200]);
+      expect([caller, (await call(w, caller, { path: "/api/inbox/threads" })).status]).toEqual([caller, 200]);
+    }
+  });
+
+  test("an allowlist naming another account is ignored on a machine with an owner, said once on stderr", async () => {
+    const lines: string[] = [];
+    const spy = spyOn(process.stderr, "write").mockImplementation(((chunk: string | Uint8Array) => {
+      lines.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write);
+    try {
+      const w = await world();
+      expect(w.inbox.tailscale.state()).toMatchObject({ owner: OWNER, allowed: [OWNER] });
+      // Published again (Settings' switch off and on): the line is not said again.
+      const local = (body: Json) => call(w, "local", { path: "/api/inbox/settings", body });
+      expect((await local({ tailscale: { on: false } })).status).toBe(200);
+      expect((await local({ tailscale: { on: true } })).status).toBe(200);
+      const said = lines.filter((line) => line.includes("inboxTailscaleAllow in config.json is ignored"));
+      expect(said).toEqual([`[plannotator] inboxTailscaleAllow in config.json is ignored: over Tailscale, Plannotator opens only for this computer's owner, ${OWNER}.\n`]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
 describe("what the approval opened, by caller", () => {
   for (const row of OPENED) {
     for (const caller of CALLERS) {
       test(`${row.name}: ${caller}`, async () => {
         const w = await world(row.world);
-        const [status, code] = await answerOf(await call(w, caller, row.call(w)));
-        if (caller === "guest") {
-          expect([status, code]).toEqual(row.guest ?? REFUSED);
-          expect(w.launches).toEqual([]);
-          if (row.did) expect(row.did(w)).toBe(false);
-        } else {
-          expect([status, code]).toEqual([row.ok ?? 200, undefined]);
-          if (row.did) expect(row.did(w)).toBe(true);
-        }
+        expect(await answerOf(await call(w, caller, row.call(w)))).toEqual([row.ok ?? 200, undefined]);
+        if (row.did) expect(row.did(w)).toBe(true);
       });
     }
+    test(`${row.name}: another account is refused and nothing happens`, async () => {
+      const w = await world(row.world);
+      expect(await answerOf(await call(w, "other", row.call(w)))).toEqual(NOT_OWNER);
+      expect(w.launches).toEqual([]);
+      if (row.did) expect(row.did(w)).toBe(false);
+    });
   }
 
-  test("the settings model gives the person's own name to the owner, never to a guest", async () => {
+  test("the settings model gives the owner over the tailnet what this computer gets: the name, Launch, the address switch, Ask AI", async () => {
     const w = await world({ config: { displayName: "Dana" } });
     const read = async (caller: Caller) => (await (await call(w, caller, { path: "/api/inbox/settings" })).json()) as Json;
-    expect((await read("local")).display_name).toBe("Dana");
-    expect((await read("owner")).display_name).toBe("Dana");
-    expect((await read("guest")).display_name).toBeUndefined();
+    const local = await read("local");
+    const owner = await read("owner");
+    expect([local.via, owner.via]).toEqual(["local", "tailnet"]);
+    expect(owner.display_name).toBe("Dana");
+    expect(owner.launch).toEqual(local.launch);
+    expect(owner.cookie_host).toEqual(local.cookie_host);
+    expect(owner.ask_ai).toBe(true);
+    expect(owner.updates).toEqual(local.updates);
+    expect("guest" in owner).toBe(false);
   });
 
   test("the settings model has no name until one is set", async () => {
     const w = await world();
     expect(((await (await call(w, "local", { path: "/api/inbox/settings" })).json()) as Json).display_name).toBeNull();
-  });
-
-  test("the settings model tells the page who it is, and shows a guest nothing of what closed", async () => {
-    const w = await world();
-    const read = async (caller: Caller) => (await (await call(w, caller, { path: "/api/inbox/settings" })).json()) as Json;
-    const local = await read("local");
-    const owner = await read("owner");
-    const guest = await read("guest");
-    expect([local.via, local.guest]).toEqual(["local", false]);
-    expect([owner.via, owner.guest]).toEqual(["tailnet", false]);
-    expect([guest.via, guest.guest]).toEqual(["tailnet", true]);
-    expect(owner.cookie_host).toEqual(local.cookie_host);
-    expect(guest.cookie_host).toBeUndefined();
-    expect(owner.prompts.reminder.editable).toBe(true);
-    expect(guest.prompts.reminder.editable).toBe(false);
-    expect(owner.updates).toEqual(local.updates);
-
-    // Nor in the answer to a save a guest may make.
-    const saves = async (caller: Caller) => (await (await call(w, caller, { path: "/api/inbox/settings", body: { text_size: 14 } })).json()) as Json;
-    expect((await saves("owner")).cookie_host).toBeDefined();
-    expect((await saves("owner")).prompts.reminder.editable).toBe(true);
-    expect((await saves("guest")).cookie_host).toBeUndefined();
-    expect((await saves("guest")).prompts.reminder.editable).toBe(false);
   });
 
   test("auto_update set from the phone is the setting the computer reads", async () => {
@@ -299,32 +334,18 @@ describe("what the approval opened, by caller", () => {
     expect(w.config().autoUpdate).toBe(true);
   });
 
-  test("the rest of a guest's day is as it was: the routes it had still answer it", async () => {
-    const w = await world();
-    expect((await call(w, "guest", { path: "/api/inbox/threads" })).status).toBe(200);
-    expect((await call(w, "guest", { path: "/api/inbox/settings", body: { text_size: 13 } })).status).toBe(200);
-    expect(await answerOf(await call(w, "guest", { path: "/api/inbox/feedback", body: { message: "hi" } }))).toEqual([403, "owner_only"]);
-  });
-
-  test("a mixed save from a guest writes nothing: one closed part refuses all of it", async () => {
-    const w = await world();
-    const answer = await call(w, "guest", { path: "/api/inbox/settings", body: { text_size: 15, auto_update: true } });
-    expect(await answerOf(answer)).toEqual(REFUSED);
-    expect(w.config().inboxTextSize).toBeUndefined();
-    expect(w.config().autoUpdate).toBeUndefined();
-  });
-
   test("a machine Tailscale names no owner for (a tagged device): its allowed login is the owner, and the page says so", async () => {
     const w = await world({ tagged: true });
     expect(w.inbox.tailscale.state().owner).toBeNull();
-    const settings = (await (await call(w, "guest", { path: "/api/inbox/settings" })).json()) as Json;
-    expect([settings.via, settings.guest]).toEqual(["tailnet", false]);
+    const answer = await call(w, "other", { path: "/api/inbox/settings" });
+    expect(answer.status).toBe(200);
+    expect(((await answer.json()) as Json).via).toBe("tailnet");
     // A login it does not allow is still refused at the listener.
-    expect(await answerOf(await call(w, "guest", { path: "/api/inbox/settings" }, { "Tailscale-User-Login": "someone@example.com" }))).toEqual([403, "tailnet_identity_refused"]);
+    expect(await answerOf(await call(w, "other", { path: "/api/inbox/settings" }, { "Tailscale-User-Login": "someone@example.com" }))).toEqual(NOT_OWNER);
   });
 });
 
-describe("starting an agent is the owner's (a guest's Send never runs code on this computer)", () => {
+describe("starting an agent from the owner's phone", () => {
   /** Launch on, and the project's folder there: only the agent check (no `claude` in the sandbox) stands before a start. */
   async function launchWorld() {
     const w = await world({ config: { inboxLaunch: { enabled: true } } });
@@ -334,25 +355,14 @@ describe("starting an agent is the owner's (a guest's Send never runs code on th
   }
   const launchSend = (projectId: string, key: string): Call => ({ path: "/api/inbox/messages", body: { idempotency_key: key, body: "Fix the build.", to: { launch: { agent: "claude-code", project_id: projectId } } } });
 
-  test("New message with to.launch: a guest is refused before the agent check and nothing is written; the owner and this computer reach it", async () => {
+  test("New message with to.launch: the owner and this computer reach the agent check", async () => {
     const w = await launchWorld();
-    expect(await answerOf(await call(w, "guest", launchSend(w.project.id, "k-guest")))).toEqual([403, "owner_only"]);
-    expect(w.inbox.store.launchedRoots()).toEqual([]);
     // The owner, over the tailnet or here, gets past who they are: only the sandbox's missing `claude` stops the start.
     expect(await answerOf(await call(w, "owner", launchSend(w.project.id, "k-owner")))).toEqual([409, "agent_unavailable"]);
     expect(await answerOf(await call(w, "local", launchSend(w.project.id, "k-local")))).toEqual([409, "agent_unavailable"]);
   });
 
-  test("New message to a scratch folder: a guest is refused before the folder is made; the owner reaches the agent check", async () => {
-    const w = await launchWorld();
-    const scratchSend = (key: string): Call => ({ path: "/api/inbox/messages", body: { idempotency_key: key, body: "Try an idea.", thread_name: "idea", to: { launch: { agent: "claude-code", scratch: true } } } });
-    expect(await answerOf(await call(w, "guest", scratchSend("k-guest")))).toEqual([403, "owner_only"]);
-    expect(existsSync(join(w.dataDir, "scratch"))).toBe(false);
-    expect(w.inbox.store.launchedRoots()).toEqual([]);
-    expect(await answerOf(await call(w, "owner", scratchSend("k-owner")))).toEqual([409, "agent_unavailable"]);
-  });
-
-  test("Try again on a failed launch: a guest is refused and no start runs; the owner starts it again", async () => {
+  test("Try again on a failed launch: the owner over the tailnet starts it again", async () => {
     const w = await launchWorld();
     const id = inboxId("lch");
     const started = w.inbox.store.startPersonThread({
@@ -363,15 +373,11 @@ describe("starting an agent is the owner's (a guest's Send never runs code on th
       launch: { id, agent: "claude-code", session_ref: null, folder: w.project.root, scratch: false, started_at: new Date().toISOString() },
     });
     w.inbox.store.settleLaunch(started.message.id, { error: { code: "failed", text: "It stopped.", at: new Date().toISOString() } });
-    const startLog = join(w.inbox.store.dir, "launch", id);
-    expect(await answerOf(await call(w, "guest", { path: `/api/inbox/launch/${id}/retry`, body: {} }))).toEqual([403, "owner_only"]);
-    expect(w.inbox.store.message(started.message.id)!.launch!.error?.text).toBe("It stopped.");
-    expect(existsSync(startLog)).toBe(false);
     expect((await call(w, "owner", { path: `/api/inbox/launch/${id}/retry`, body: {} })).status).toBe(200);
   });
 });
 
-describe("stopping, deleting and waking a launched agent: every window's, a guest's included", () => {
+describe("stopping, deleting and waking a launched agent from the owner's phone", () => {
   /** A launched thread whose session started: Stop and Delete have a session to act on. */
   async function launchedWorld(dataDir?: string) {
     const w = await world({ config: { inboxLaunch: { enabled: true } }, ...(dataDir ? { dataDir } : {}) });
@@ -398,7 +404,7 @@ describe("stopping, deleting and waking a launched agent: every window's, a gues
     return { ...w, project, launched, stopped };
   }
 
-  test("Stop and Delete: a guest, the owner over the tailnet and this computer each do it (owner ruling 2026-11-11)", async () => {
+  test("Stop and Delete: the owner over the tailnet and this computer each do it (owner ruling 2026-11-11)", async () => {
     const w = await launchedWorld();
     for (const caller of CALLERS) {
       const a = w.launched(`s-${caller}`);
@@ -422,21 +428,19 @@ describe("stopping, deleting and waking a launched agent: every window's, a gues
   const reply = (w: World, caller: Caller, messageId: string, key: string, extra: Json = {}) =>
     call(w, caller, { path: `/api/inbox/messages/${messageId}/reply`, body: { idempotency_key: key, words: "One more thing.", ...extra } });
 
-  test("a guest's reply to a stopped session starts it again, as the owner's does", async () => {
+  test("the owner's reply over the tailnet to a stopped session starts it again", async () => {
     const w = await launchedWorld();
-    const a = w.stopped("a");
     const b = w.stopped("b");
-    expect((await reply(w, "guest", a.messageId, "r-guest")).status).toBe(200);
     expect((await reply(w, "owner", b.messageId, "r-owner")).status).toBe(200);
-    expect(await waitFor(() => respawned(a) && respawned(b))).toBe(true);
+    expect(await waitFor(() => respawned(b))).toBe(true);
   });
 
-  test("a guest's reply to a deleted launch writes nothing in the launch's folder", async () => {
+  test("a reply to a deleted launch writes nothing in the launch's folder", async () => {
     const w = await launchedWorld();
     const a = w.stopped("a");
     expect((await call(w, "local", { path: `/api/inbox/launch/${a.id}/delete`, body: {} })).status).toBe(200);
     expect(existsSync(join(w.inbox.store.dir, "launch", a.id))).toBe(false);
-    expect((await reply(w, "guest", a.messageId, "r-guest")).status).toBe(200);
+    expect((await reply(w, "owner", a.messageId, "r-owner")).status).toBe(200);
     await Bun.sleep(1500);
     expect(existsSync(join(w.inbox.store.dir, "launch", a.id))).toBe(false);
   });
@@ -447,7 +451,7 @@ describe("stopping, deleting and waking a launched agent: every window's, a gues
     mkdirSync(project.root, { recursive: true });
     const send: Call = { path: "/api/inbox/messages", body: { idempotency_key: "k-tagged", body: "Fix the build.", to: { launch: { agent: "claude-code", project_id: project.id } } } };
     // Past who they are: only the sandbox's missing `claude` stops the start.
-    expect(await answerOf(await call(w, "guest", send))).toEqual([409, "agent_unavailable"]);
+    expect(await answerOf(await call(w, "other", send))).toEqual([409, "agent_unavailable"]);
     const id = inboxId("lch");
     const started = w.inbox.store.startPersonThread({
       project_id: project.id,
@@ -457,18 +461,17 @@ describe("stopping, deleting and waking a launched agent: every window's, a gues
       launch: { id, agent: "claude-code", session_ref: null, folder: project.root, scratch: false, started_at: new Date().toISOString() },
     });
     w.inbox.store.settleLaunch(started.message.id, { to: { host: "claude-code", session: "sess-t" }, session_ref: "st" });
-    expect((await call(w, "guest", { path: `/api/inbox/launch/${id}/stop`, body: {} })).status).toBe(200);
-    expect((await call(w, "guest", { path: `/api/inbox/launch/${id}/delete`, body: {} })).status).toBe(200);
+    expect((await call(w, "other", { path: `/api/inbox/launch/${id}/stop`, body: {} })).status).toBe(200);
+    expect((await call(w, "other", { path: `/api/inbox/launch/${id}/delete`, body: {} })).status).toBe(200);
     expect(w.inbox.store.message(started.message.id)!.launch!.deleted_at).toBeString();
   });
 });
 
 describe("launch settings are the owner's, on their phone too", () => {
-  test("the full-permissions switch: the owner over the tailnet and this computer change it; a guest is refused and nothing changes", async () => {
+  test("the full-permissions switch: the owner over the tailnet and this computer change it", async () => {
     const w = await world({ config: { inboxLaunch: { enabled: true } } });
     const set = (caller: Caller, on: boolean) => call(w, caller, { path: "/api/inbox/launch/settings", body: { full_permissions: on } });
     const fullPermissions = () => (w.config().inboxLaunch as Json).fullPermissions;
-    expect(await answerOf(await set("guest", true))).toEqual([403, "owner_only"]);
     expect(fullPermissions()).toBeUndefined();
     expect((await set("owner", true)).status).toBe(200);
     expect(fullPermissions()).toBe(true);
@@ -476,12 +479,11 @@ describe("launch settings are the owner's, on their phone too", () => {
     expect(fullPermissions()).toBe(false);
   });
 
-  test("the scratch folder: the owner over the tailnet sets it; a guest is refused and nothing changes", async () => {
+  test("the scratch folder: the owner over the tailnet sets it", async () => {
     const w = await world({ config: { inboxLaunch: { enabled: true } } });
     const folder = join(w.dataDir, "scratch-here");
     const set = (caller: Caller) => call(w, caller, { path: "/api/inbox/launch/settings", body: { scratch_dir: folder } });
     const scratchDir = () => (w.config().inboxLaunch as Json).scratchDir;
-    expect(await answerOf(await set("guest"))).toEqual([403, "owner_only"]);
     expect(scratchDir()).toBeUndefined();
     expect((await set("owner")).status).toBe(200);
     expect(scratchDir()).toBe(folder);
@@ -489,12 +491,12 @@ describe("launch settings are the owner's, on their phone too", () => {
 
   test("a tagged machine (no owner): the login its allowlist names changes it like the owner", async () => {
     const w = await world({ tagged: true, config: { inboxLaunch: { enabled: true } } });
-    expect((await call(w, "guest", { path: "/api/inbox/launch/settings", body: { full_permissions: true } })).status).toBe(200);
+    expect((await call(w, "other", { path: "/api/inbox/launch/settings", body: { full_permissions: true } })).status).toBe(200);
     expect((w.config().inboxLaunch as Json).fullPermissions).toBe(true);
   });
 });
 
-describe("a launched agent's permission prompt over the tailnet: the owner's rule is that a guest can answer it, marked as the guest's", () => {
+describe("a launched agent's permission prompt over the tailnet", () => {
   const PERM_SESSION = "0d6c2f1e-5b7a-4c8e-9f00-cccccccccccc";
   const PERM_CARD = [
     "```",
@@ -533,30 +535,19 @@ describe("a launched agent's permission prompt over the tailnet: the owner's rul
       .map((m) => w.inbox.store.message(m)!)
       .filter((m) => m.author.kind === "person" && m.reply_to === id);
 
-  test("a guest's Allow once, Deny, Auto mode and Full permissions each answer the card (picks and reply), with one by_guest message", async () => {
-    const w = await world({ config: { inboxLaunch: { enabled: true } } });
-    for (const [n, selected] of ["Allow once", "Deny", "Auto mode", "Full permissions"].entries()) {
-      const id = ask(w, `guest-${n}`);
-      expect([selected, (await picks(w, "guest", id, selected)).status]).toEqual([selected, 200]);
-      expect([selected, (await send(w, "guest", id, `00000000-0000-4000-8000-00000000020${n}`, selected)).status]).toEqual([selected, 200]);
-      expect([selected, stateOf(w, id)]).toEqual([selected, "sent"]);
-      expect(repliesOf(w, id).map((m) => m.by_guest)).toEqual([true]);
-    }
-  });
-
   const ANSWERS_AS_THE_OWNER: { who: string; caller: Caller; tagged?: boolean }[] = [
     { who: "this computer's window", caller: "local" },
     { who: "the owner over the tailnet", caller: "owner" },
-    { who: "a tagged machine's allowed login", caller: "guest", tagged: true },
+    { who: "a tagged machine's allowed login", caller: "other", tagged: true },
   ];
   for (const { who, caller, tagged } of ANSWERS_AS_THE_OWNER) {
-    test(`${who} answers the card, not marked a guest's`, async () => {
+    test(`${who} answers the card`, async () => {
       const w = await world({ tagged, config: { inboxLaunch: { enabled: true } } });
       const id = ask(w, "owner");
       expect((await picks(w, caller, id, "Full permissions")).status).toBe(200);
       expect((await send(w, caller, id, "00000000-0000-4000-8000-000000000301", "Full permissions")).status).toBe(200);
       expect(stateOf(w, id)).toBe("sent");
-      expect(repliesOf(w, id).map((m) => m.by_guest)).toEqual([undefined]);
+      expect(repliesOf(w, id)).toHaveLength(1);
     });
   }
 
@@ -586,7 +577,7 @@ describe("a tagged machine: the login its allowlist names has every route the ow
   for (const row of OPENED) {
     test(row.name, async () => {
       const w = await world({ ...row.world, tagged: true });
-      expect(await answerOf(await call(w, "guest", row.call(w)))).toEqual([row.ok ?? 200, undefined]);
+      expect(await answerOf(await call(w, "other", row.call(w)))).toEqual([row.ok ?? 200, undefined]);
       if (row.did) expect(row.did(w)).toBe(true);
     });
   }
@@ -594,50 +585,48 @@ describe("a tagged machine: the login its allowlist names has every route the ow
 
 /**
  * Parity (owner ruling 2026-11-11: "I want to use it the same way on my phone as I can on my computers"): every
- * route the audit found treated the owner over the tailnet differently from this computer, or a tailnet guest
- * differently for no reason, answers the owner exactly as it answers this computer. `guest`: what a login the allow
- * list added gets (`"same"`: the same answer too). Each caller gets a world of its own, so a write by one never
- * changes what the next one is answered. A row that fails here is a limit coming back.
+ * route the audit found treated the owner over the tailnet differently from this computer answers the owner exactly
+ * as it answers this computer. Each caller gets a world of its own, so a write by one never changes what the next one
+ * is answered. A row that fails here is a limit coming back.
  */
 const projectOf = (w: World) => w.inbox.store.ensureProject({ name: "web", root: join(w.dataDir, "web") }).id;
 const UNKNOWN_MACHINE = `ibx_01K${"0".repeat(22)}N`;
-const PARITY: { name: string; call: (w: World) => Call; guest: [number, string] | "same"; world?: WorldOptions; shows?: true }[] = [
-  { name: "Pair a phone: GET pairing", call: () => ({ path: "/api/inbox/pairing" }), guest: REFUSED },
-  { name: "Pair a phone: POST pairing (the code)", call: () => ({ path: "/api/inbox/pairing", body: {} }), guest: REFUSED },
-  { name: "Pair a phone: GET pairing/checks (step 1)", call: () => ({ path: "/api/inbox/pairing/checks" }), guest: REFUSED },
-  { name: "the phone's Tailscale way: POST tailnet", call: () => ({ path: "/api/inbox/tailnet", body: { on: false } }), guest: REFUSED },
-  { name: "the phone's Wi-Fi way: POST lan", call: () => ({ path: "/api/inbox/lan", body: { on: false } }), guest: REFUSED },
-  { name: "Over your tailnet: Keep it on at every start", call: () => ({ path: "/api/inbox/settings", body: { tailscale: { on: true } } }), guest: REFUSED },
-  { name: "Link a machine: POST machines/offer (the code)", call: () => ({ path: "/api/inbox/machines/offer", body: {} }), guest: [403, "owner_only"] },
-  { name: "Link a machine: POST machines/link", call: () => ({ path: "/api/inbox/machines/link", body: { link: "plannotator://link" } }), guest: [403, "owner_only"] },
-  { name: "Unlink: POST machines/:id/unlink", call: () => ({ path: `/api/inbox/machines/${UNKNOWN_MACHINE}/unlink`, body: {} }), guest: [403, "owner_only"] },
-  { name: "the sound dialog's claim", call: () => ({ path: "/api/inbox/sound/dialog", body: {} }), guest: "same", world: { config: { inboxSound: { dialogDueFor: "0.28.10" } } }, shows: true },
-  { name: "the list options dialog's claim", call: () => ({ path: "/api/inbox/list-intro", body: {} }), guest: "same" },
-  { name: "the agent note's claim", call: () => ({ path: "/api/inbox/reveal", body: { id: "agent_note", agents: ["codex"] } }), guest: "same", shows: true },
-  { name: "What's new", call: () => ({ path: "/api/inbox/whats-new?version=0.28.12" }), guest: "same" },
-  { name: "What's new: the releases panel", call: () => ({ path: "/api/inbox/whats-new/releases" }), guest: "same" },
-  { name: "a project's picture: GET", call: (w) => ({ path: `/api/inbox/projects/${projectOf(w)}/picture?logo=1` }), guest: "same" },
-  { name: "a project's picture: Set picture… (take it away)", call: (w) => ({ path: `/api/inbox/projects/${projectOf(w)}/picture`, body: { picture: null } }), guest: "same" },
-  { name: "settings float_drafts", call: () => ({ path: "/api/inbox/settings", body: { float_drafts: { on: true } } }), guest: "same" },
-  { name: "settings mark_read_warning", call: () => ({ path: "/api/inbox/settings", body: { mark_read_warning: { on: false } } }), guest: "same" },
+const PARITY: { name: string; call: (w: World) => Call; world?: WorldOptions; shows?: true }[] = [
+  { name: "Pair a phone: GET pairing", call: () => ({ path: "/api/inbox/pairing" }) },
+  { name: "Pair a phone: POST pairing (the code)", call: () => ({ path: "/api/inbox/pairing", body: {} }) },
+  { name: "Pair a phone: GET pairing/checks (step 1)", call: () => ({ path: "/api/inbox/pairing/checks" }) },
+  { name: "the phone's Tailscale way: POST tailnet", call: () => ({ path: "/api/inbox/tailnet", body: { on: false } }) },
+  { name: "the phone's Wi-Fi way: POST lan", call: () => ({ path: "/api/inbox/lan", body: { on: false } }) },
+  { name: "Over your tailnet: Keep it on at every start", call: () => ({ path: "/api/inbox/settings", body: { tailscale: { on: true } } }) },
+  { name: "Link a machine: POST machines/offer (the code)", call: () => ({ path: "/api/inbox/machines/offer", body: {} }) },
+  { name: "Link a machine: POST machines/link", call: () => ({ path: "/api/inbox/machines/link", body: { link: "plannotator://link" } }) },
+  { name: "Unlink: POST machines/:id/unlink", call: () => ({ path: `/api/inbox/machines/${UNKNOWN_MACHINE}/unlink`, body: {} }) },
+  { name: "the sound dialog's claim", call: () => ({ path: "/api/inbox/sound/dialog", body: {} }), world: { config: { inboxSound: { dialogDueFor: "0.28.10" } } }, shows: true },
+  { name: "the list options dialog's claim", call: () => ({ path: "/api/inbox/list-intro", body: {} }) },
+  { name: "the agent note's claim", call: () => ({ path: "/api/inbox/reveal", body: { id: "agent_note", agents: ["codex"] } }), shows: true },
+  { name: "What's new", call: () => ({ path: "/api/inbox/whats-new?version=0.28.12" }) },
+  { name: "What's new: the releases panel", call: () => ({ path: "/api/inbox/whats-new/releases" }) },
+  { name: "a project's picture: GET", call: (w) => ({ path: `/api/inbox/projects/${projectOf(w)}/picture?logo=1` }) },
+  { name: "a project's picture: Set picture… (take it away)", call: (w) => ({ path: `/api/inbox/projects/${projectOf(w)}/picture`, body: { picture: null } }) },
+  { name: "settings float_drafts", call: () => ({ path: "/api/inbox/settings", body: { float_drafts: { on: true } } }) },
+  { name: "settings mark_read_warning", call: () => ({ path: "/api/inbox/settings", body: { mark_read_warning: { on: false } } }) },
 ];
 
 describe("the owner over the tailnet gets what this computer gets", () => {
   for (const row of PARITY) {
     test(row.name, async () => {
-      const answers: Record<Caller, [number, string | undefined]> = {} as never;
-      const shown: Record<Caller, unknown> = {} as never;
+      const answers: Partial<Record<Caller, [number, string | undefined]>> = {};
+      const shown: Partial<Record<Caller, unknown>> = {};
       for (const caller of CALLERS) {
         const w = await world(row.world);
         const response = await call(w, caller, row.call(w));
         shown[caller] = row.shows ? ((await response.clone().json()) as Json).show : undefined;
         answers[caller] = await answerOf(response);
       }
-      expect(answers.local[0]).toBeLessThan(500);
+      expect(answers.local![0]).toBeLessThan(500);
       expect(answers.owner).toEqual(answers.local);
-      expect(answers.guest).toEqual(row.guest === "same" ? answers.local : row.guest);
-      // A one-time dialog's claim: this computer's page and the owner's other devices get it, a guest's page never.
-      if (row.shows) expect(shown).toEqual({ local: true, owner: true, guest: false });
+      // A one-time dialog's claim: this computer's page and the owner's other devices get it.
+      if (row.shows) expect(shown).toEqual({ local: true, owner: true });
     });
   }
 
@@ -661,7 +650,7 @@ describe("the owner over the tailnet gets what this computer gets", () => {
     const read = async (caller: Caller) => (await (await call(w, caller, { path: "/api/inbox/settings" })).json()) as Json;
     const local = await read("local");
     const owner = await read("owner");
-    expect([owner.via, owner.guest]).toEqual(["tailnet", false]);
+    expect(owner.via).toBe("tailnet");
     // The voice line names the computer for a page that is not on it, and the line's timer counts down between the
     // two reads; nothing else differs.
     const strip = (model: Json) => ({ ...model, via: null, voice: { ...model.voice, computer: null }, reveal: { ...model.reveal, again_in: null } });
@@ -674,7 +663,7 @@ describe("what stays refused for everyone over the tailnet", () => {
     test(row.name, async () => {
       const w = await world();
       const mappings = [...w.ts.serve];
-      for (const caller of ["owner", "guest"] as const) expect([caller, ...(await answerOf(await call(w, caller, row.call(w))))]).toEqual([caller, ...REFUSED]);
+      expect(await answerOf(await call(w, "owner", row.call(w)))).toEqual(REFUSED);
       expect(w.opened).toEqual([]);
       expect([...w.ts.serve]).toEqual(mappings);
       // The Inbox is still running: no stop, no restart.
@@ -740,10 +729,10 @@ describe("another site never rides the owner's login", () => {
         headers: { Host: `${MAGIC}:${w.inbox.port}`, "Content-Type": "application/json", ...(login ? { "Tailscale-User-Login": login } : {}) },
         body: JSON.stringify({ auto_update: true }),
       });
-    // A tagged device (no login), then a login nobody allowed: the listener refuses both.
+    // A tagged device (no login), then other accounts (one the ignored allowlist names): the listener refuses them all.
     expect(await answerOf(await bare(null))).toEqual([403, "tailnet_identity_required"]);
-    expect(await answerOf(await bare("stranger@example.com"))).toEqual([403, "tailnet_identity_refused"]);
-    expect(await answerOf(await bare(GUEST))).toEqual(REFUSED);
+    expect(await answerOf(await bare("stranger@example.com"))).toEqual(NOT_OWNER);
+    expect(await answerOf(await bare(OTHER))).toEqual(NOT_OWNER);
     expect(w.config().autoUpdate).toBeUndefined();
     // The owner's own program: no browser to protect, Tailscale says who it is.
     expect((await bare(OWNER)).status).toBe(200);

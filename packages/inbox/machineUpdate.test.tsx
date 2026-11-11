@@ -255,12 +255,12 @@ test.skipIf(!hasDom)('the word in the sidebar opens the dialog; the press never 
 test.skipIf(!hasDom)('Settings: the row has its button for each state that needs one, and none on a page that offers no updates', async () => {
   const machines = [machine(null, { id: SELF, name: 'Mac', self: true }), machine(view('behind'))];
   let pressed = '';
-  await draw(<MachinesSection machines={machines} guest={false} onChanged={() => {}} onMachineUpdate={(id) => (pressed = id)} />);
+  await draw(<MachinesSection machines={machines} onChanged={() => {}} onMachineUpdate={(id) => (pressed = id)} />);
   await act(async () => document.querySelector<HTMLButtonElement>('[data-machine-update="update"]')!.click());
   expect(pressed).toBe(MAC);
   act(() => root?.unmount());
   host?.remove();
-  await draw(<MachinesSection machines={machines} guest onChanged={() => {}} />);
+  await draw(<MachinesSection machines={machines} onChanged={() => {}} />);
   expect(document.querySelector('[data-machine-update]')).toBeNull();
   act(() => root?.unmount());
   host?.remove();

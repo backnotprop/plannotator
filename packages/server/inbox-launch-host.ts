@@ -43,8 +43,7 @@ export interface LaunchHostResult {
  * launch of this Inbox owns), it could not (`failed`: tried again later, as a failed `codex queue` is), or it may
  * have gone (`uncertain`: sent and never answered; kept claimed and never sent again, as a `codex queue` that ran
  * out of time is). `hold` (the engine's answer, never a host's): not now, and not the wake's own way either; the
- * item waits in the Inbox (a deleted launch's session, a reply the person's Stop held, a guest's reply to a
- * session that is not running).
+ * item waits in the Inbox (a deleted launch's session, a reply the person's Stop held).
  */
 export type LaunchDelivery = "delivered" | "queue" | "hold" | { failed: string } | { uncertain: string };
 

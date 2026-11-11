@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefO
 import { KeyboardSettings } from './KeyboardSettings';
 import { INBOX_SOUND_MAX_VOLUME, INBOX_SOUND_MIN_VOLUME, INBOX_TEXT_SIZES } from '@plannotator/core/inbox-types';
 import type { InboxSound } from '../sound';
-import { tailnetGuest, type AgentToolHost, type InboxCookieHost, type InboxExperimentalSettings, type InboxStorageModel, type MachineView, type SettingsModel } from '../api';
+import { type AgentToolHost, type InboxCookieHost, type InboxExperimentalSettings, type InboxStorageModel, type MachineView, type SettingsModel } from '../api';
 import { cookieHostDescription } from '@plannotator/ui/hooks/useCookieHostSetting';
 import { formatBytes, formatCount, plural, tildePath } from '../format';
 import { HARNESSES, type ConnectContext } from '../harnesses';
@@ -127,8 +127,7 @@ export interface SettingsPageProps {
   aboutDot?: boolean | 'check-failing';
   /**
    * Settings → General's first row: the version and the sidebar's update
-   * action, Check now (components/Updates.tsx GeneralUpdateRow). Absent: none
-   * (a tailnet guest's page).
+   * action, Check now (components/Updates.tsx GeneralUpdateRow). Absent: none.
    */
   updateRow?: ReactNode;
   /** The question sound's row, under the notifications switch (sound.ts). */
@@ -169,7 +168,7 @@ export interface SettingsPageProps {
   machines?: MachineView[];
   /** A link or an Unlink happened: read the machines again. */
   onMachinesChanged?: () => void;
-  /** Open a machine's update dialog. Absent on a page that offers no updates (a tailnet guest's). */
+  /** Open a machine's update dialog. Absent on a page that offers no updates. */
   onMachineUpdate?: (machineId: string) => void;
 }
 
@@ -178,7 +177,7 @@ export interface SettingsPageProps {
  * code review and annotate show in their Settings too: config.json
  * `urlHost: "plannotator.localhost"`. Locked (with the reason) while
  * PLANNOTATOR_URL_HOST is set or config.json holds another `urlHost`, which it
- * never replaces. The server leaves it out for a tailnet guest's page. From the owner's
+ * never replaces. From the owner's
  * phone (`remote`) it is still the computer's browser that the switch changes, so the heading says so.
  */
 function CookieHostGroup({ cookieHost, remote, onToggle }: { cookieHost: InboxCookieHost; remote: boolean; onToggle: (next: boolean) => void }) {
@@ -1059,7 +1058,6 @@ export function SettingsPage(props: SettingsPageProps) {
   const phonesOn = settings?.phones === true;
   const phones = usePhones(phonesOn);
   const via = settings?.via ?? 'local';
-  const guest = tailnetGuest(settings);
   const { mode } = useInboxTheme();
   const palettes = useInboxPalettes();
   const heading = useRef<HTMLHeadingElement>(null);
@@ -1244,7 +1242,6 @@ export function SettingsPage(props: SettingsPageProps) {
             phones={phonesOn ? phones : null}
             tailscale={settings.tailscale}
             via={via}
-            guest={guest}
             tailscaleBusy={tailscaleBusy}
             onToggleTailscale={onToggleTailscale}
             pairing={pairing && phonesOn}
@@ -1253,7 +1250,7 @@ export function SettingsPage(props: SettingsPageProps) {
         );
         break;
       case 'machines':
-        body = <MachinesSection machines={machines} guest={guest} onChanged={() => props.onMachinesChanged?.()} onMachineUpdate={props.onMachineUpdate} />;
+        body = <MachinesSection machines={machines} onChanged={() => props.onMachinesChanged?.()} onMachineUpdate={props.onMachineUpdate} />;
         break;
       case 'archived':
         body = archived ?? (

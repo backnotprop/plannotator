@@ -621,7 +621,7 @@ export const INBOX_COMMAND_USAGE = [
   "",
   "Over the tailnet at every start: the Inbox's Settings, PLANNOTATOR_INBOX_TAILSCALE=1,",
   "or { \"inboxTailscale\": true } in config.json. Agents and MCP stay on this computer;",
-  "another Tailscale login is let in only when config.json inboxTailscaleAllow names it.",
+  "it opens only for the Tailscale account that owns this computer.",
   "",
   "A person's plannotator inbox (not --background) also connects the agents found on",
   "this computer that are not connected yet: a plannotator-inbox MCP server in each",

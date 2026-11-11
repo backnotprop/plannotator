@@ -81,7 +81,6 @@ async function inboxLinkedToOlder() {
     readBody: async (req) => ((await req.json().catch(() => ({}))) ?? {}) as Record<string, unknown>,
     json: (body, status = 200) => Response.json(body, { status }),
     holds: () => false,
-    isGuest: (req) => req.headers.get("x-test-guest") === "1",
     ownVersions: () => ({ current: "0.28.55", latest: null }),
     timings: { silenceMs: 60_000, backoffMinMs: 50, backoffMaxMs: 200, requestMs: 2000, sendMs: 2000 },
   });
@@ -117,9 +116,8 @@ test("a held ask names no thread, and only an id that reads as one and a short p
   expect(mini().update?.asked).toMatchObject({ thread: null, agent: "An agent" });
 });
 
-test("a tailnet guest, a stale tab and a machine that is not linked change nothing", async () => {
+test("a stale tab and a machine that is not linked change nothing", async () => {
   const { mini, ask } = await inboxLinkedToOlder();
-  expect((await ask(OLD, { serverSession: SESSION, agent: "Claude Code" }, { "x-test-guest": "1" }))!.status).toBe(403);
   expect((await ask(OLD, { serverSession: "an_older_tab", agent: "Claude Code" }))!.status).toBe(409);
   expect((await ask(UNLINKED, { serverSession: SESSION, agent: "Claude Code" }))!.status).toBe(404);
   expect(mini().update?.asked).toBeUndefined();

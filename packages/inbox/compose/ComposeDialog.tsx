@@ -534,7 +534,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const [folderMenu, setFolderMenu] = useState(!!request.clone);
   const startAgent = start ? blockOf(start.machine)?.agents.find((a) => a.agent === start.agent) : undefined;
   // Trust and start: the folder To names, when the agent does not trust it and the owner can from here. No entry (a
-  // trusted folder, home, a guest): plain Send. Its facts follow the pick by a read, so a press can come before them.
+  // trusted folder, home): plain Send. Its facts follow the pick by a read, so a press can come before them.
   const trust = (start?.project.exists ? startAgent?.untrusted?.[start.project.id] : undefined) ?? null;
   const trustFacts = trust?.facts ?? [];
   // The question circle's details.
@@ -1777,7 +1777,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
                   folder: tildePath(scratchFolder, home),
                   root: tildePath(launch.scratch.root, home),
                   // Trust is the agent's own: an agent that never asks for it (no `scratch_trusted`) trusts it. Trust and
-                  // start says it at the button, so the row speaks only where a press can't (a guest, a root at home).
+                  // start says it at the button, so the row speaks only where a press can't (a root at home).
                   trusted: startAgent?.scratch_trusted !== false || !!startAgent.untrusted?.[SCRATCH_PICK],
                   agentName: start.name,
                 }

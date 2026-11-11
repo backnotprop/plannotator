@@ -35,8 +35,8 @@ export interface InboxTaggableSession {
   name: string | null;
   /**
    * A live session's label as its latest poll sent it (issue #2450: the To picker's label, from `/rename` or
-   * the transcript's title in Claude Code, and Pi's and OpenCode's session names). For this computer's owner
-   * only; absent when it has none, so an unnamed session reads as before.
+   * the transcript's title in Claude Code, and Pi's and OpenCode's session names). For the person's window
+   * only, never an agent's read; absent when it has none, so an unnamed session reads as before.
    */
   label?: string;
   /** Where it works, or where it last wrote; null when unknown. */
@@ -134,12 +134,12 @@ export function createInboxTagsRoute(options: {
     return { owner, sessions: [...liveRows.map(({ rank: _rank, activity: _activity, ...row }) => row), ...mcpRows] };
   };
 
-  /** The route; null when the path is not it. `owner`: this computer's owner asks, so live sessions carry their labels. */
-  const route = (req: Request, path: string, owner = false): Response | null => {
+  /** The route; null when the path is not it. The person's window asks, so live sessions carry their labels. */
+  const route = (req: Request, path: string): Response | null => {
     const match = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/taggable$/.exec(path);
     if (!match) return null;
     if (req.method !== "GET") return json({ error: "Use GET." }, 405);
-    return json({ serverSession: options.serverSession, ...syncSection("taggable", () => taggable(match[1]!, owner)) });
+    return json({ serverSession: options.serverSession, ...syncSection("taggable", () => taggable(match[1]!, true)) });
   };
 
   return { route, taggable, ownerOf };

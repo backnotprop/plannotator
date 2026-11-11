@@ -442,8 +442,8 @@ describe("only this computer's own page reads them", () => {
     }
   });
 
-  test("through the tailnet the owner reads both as on the computer; another allowed login is local_only", async () => {
-    const dataDir = world({ inboxTailscaleAllow: ["guest@example.com"] });
+  test("through the tailnet the owner reads both as on the computer", async () => {
+    const dataDir = world({});
     const ts = fakeTailscale();
     const inbox = await start(dataDir, ts.run, { pairingProbes: probes(), publishTailnet: true });
     const listener = inbox.tailscale.listenerPort();
@@ -451,8 +451,6 @@ describe("only this computer's own page reads them", () => {
     for (const path of ["/api/inbox/pairing", "/api/inbox/pairing/checks"]) {
       const as = (login: string) => fetch(`http://127.0.0.1:${listener}${path}`, { headers: { Host: `${MAGIC}:${inbox.port}`, "Tailscale-User-Login": login } });
       expect([path, (await as(OWNER)).status]).toEqual([path, 200]);
-      const guest = await as("guest@example.com");
-      expect([path, guest.status, ((await guest.json()) as Json).code]).toEqual([path, 403, "local_only"]);
     }
   });
 });

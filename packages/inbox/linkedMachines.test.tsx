@@ -236,7 +236,7 @@ function sidebarProps(over: Partial<SidebarProps> = {}): SidebarProps {
 const anAgent = (id: string) => ({ id, session: id, host: 'claude-code', project: { id: 'prj_a', name: 'web-app' }, state: 'idle' as const, waiting: 0, live: true, started_at: '2026-11-09T09:14:00.000Z', last_seen_at: '2026-11-09T09:46:00.000Z' });
 const agentsOnBoth = () => act(() => setInboxAgents([{ machine: SELF, agents: [anAgent('ses_s1')], total: 1, ended_today: 0 }, { machine: MAC, agents: [anAgent('ses_m1')], total: 1, ended_today: 0 }]));
 
-test.skipIf(!hasDom)('the word beside a machine that is behind shows only on a page that offers updates: a tailnet guest gets none, in the sidebar or on its Settings row', () => {
+test.skipIf(!hasDom)('the word beside a machine that is behind shows only on a page that offers updates, in the sidebar or on its Settings row', () => {
   const update = { phase: 'behind' as const, target: '0.28.49', from: '0.28.39', can_update: true, self_update: true };
   const list = [machine(SELF, 'Studio', 'online'), machine(MAC, 'MacBook', 'online', { update })];
   const model = machinesModel(list);
@@ -260,10 +260,10 @@ test.skipIf(!hasDom)('the word beside a machine that is behind shows only on a p
   expect(host!.querySelector('.ib-mthing')).toBeNull();
   expect(host!.querySelector('[data-machine-notice]')).toBeNull();
   fresh();
-  mount(<MachinesSection machines={list} guest={false} onChanged={noop} onMachineUpdate={noop} />);
+  mount(<MachinesSection machines={list} onChanged={noop} onMachineUpdate={noop} />);
   expect(host!.textContent).toContain('0.28.49 is out');
   fresh();
-  mount(<MachinesSection machines={list} guest onChanged={noop} />);
+  mount(<MachinesSection machines={list} onChanged={noop} />);
   expect(host!.textContent).toContain('MacBook');
   expect(host!.textContent).not.toContain('0.28.49');
   expect(host!.textContent).not.toContain('is out');
@@ -296,7 +296,6 @@ test.skipIf(!hasDom)('Settings → Machines: each machine with its state and ver
   mount(
     <MachinesSection
       machines={[machine(SELF, 'Studio', 'online'), machine(MAC, 'MacBook', 'offline', { waiting: 1 }), machine(`ibx_01K${'0'.repeat(22)}N`, 'Mini', 'needs_update', { version: '0.28.30' })]}
-      guest={false}
       onChanged={() => changed++}
     />,
   );
@@ -332,7 +331,7 @@ test.skipIf(!hasDom)('Settings → Machines: each machine with its state and ver
 
 test.skipIf(!hasDom)("Settings → Machines says why this machine is not on the tailnet when its door's port is held, as an alert", () => {
   const reason = 'Another tailscale serve mapping now uses port 8444, where linked machines reach this Inbox.';
-  mount(<MachinesSection machines={[machine(SELF, 'Studio', 'online', { reason }), machine(MAC, 'MacBook', 'offline')]} guest={false} onChanged={noop} />);
+  mount(<MachinesSection machines={[machine(SELF, 'Studio', 'online', { reason }), machine(MAC, 'MacBook', 'offline')]} onChanged={noop} />);
   const alert = document.querySelector('[data-machines-door-error]')!;
   expect(alert.getAttribute('role')).toBe('alert');
   expect(alert.textContent).toContain(reason);
@@ -389,7 +388,7 @@ test.skipIf(!hasDom)('Settings → Machines keeps what was not sent to a machine
   });
   // Mini unlinked this computer while two writes waited for it; MacBook is still linked (its notice shows in its thread).
   notices = [dropped('k-mini', MINI, 'Rotate the certs Thursday.', 'Mini'), dropped('k-read', MINI, null, 'Mini'), dropped('k-mac', MAC, 'Keep the order.', null)];
-  mount(<MachinesSection machines={[machine(SELF, 'Studio', 'online'), machine(MAC, 'MacBook', 'online')]} guest={false} onChanged={noop} />);
+  mount(<MachinesSection machines={[machine(SELF, 'Studio', 'online'), machine(MAC, 'MacBook', 'online')]} onChanged={noop} />);
   await settle();
   const rows = [...document.querySelectorAll('[data-machines-unsent] [data-unsent]')];
   expect(rows.map((r) => r.getAttribute('data-unsent'))).toEqual(['k-mini', 'k-read']);
@@ -417,13 +416,13 @@ test.skipIf(!hasDom)("a 404 while a linked machine's list is not in yet says wha
 });
 
 test.skipIf(!hasDom)('"Show link code" says, before the click, that it puts this Inbox on the tailnet', () => {
-  mount(<MachinesSection machines={[machine(SELF, 'Studio', 'online')]} guest={false} onChanged={noop} />);
+  mount(<MachinesSection machines={[machine(SELF, 'Studio', 'online')]} onChanged={noop} />);
   expect(document.querySelector('[data-machine-offer-row] .ib-desc')!.textContent).toContain('puts this Inbox on your tailnet');
 });
 
 test.skipIf(!hasDom)('linking: a pasted link, or an address and six digits; only the Link button sends; a refusal is said', async () => {
   let changed = 0;
-  mount(<MachinesSection machines={[machine(SELF, 'Studio', 'online')]} guest={false} onChanged={() => changed++} />);
+  mount(<MachinesSection machines={[machine(SELF, 'Studio', 'online')]} onChanged={() => changed++} />);
   expect(document.querySelector('[data-machine-start] .ib-l')!.textContent).toBe('No machine linked yet');
   act(() => document.querySelector<HTMLButtonElement>('[data-machine-link]')!.click());
   const form = document.querySelector('[data-machine-link-form]')!;
@@ -461,16 +460,9 @@ test.skipIf(!hasDom)('linking: a pasted link, or an address and six digits; only
   expect(document.querySelector('[data-machine-linked]')!.textContent).toContain('Linked with MacBook');
 });
 
-test.skipIf(!hasDom)("a tailnet guest's page: no Unlink, the buttons are disabled, and it says why; the owner's page links as on the computer", () => {
+test.skipIf(!hasDom)("the owner's page links and unlinks as on the computer", () => {
   const machines = [machine(SELF, 'Studio', 'online'), machine(MAC, 'MacBook', 'online')];
-  mount(<MachinesSection machines={machines} guest onChanged={noop} />);
-  expect(document.querySelector('[data-machines-remote]')).not.toBeNull();
-  expect(document.querySelector('[data-machine-row] .ib-del-l')).toBeNull();
-  expect(document.querySelector<HTMLButtonElement>('[data-machine-link]')!.disabled).toBe(true);
-  expect(document.querySelector<HTMLButtonElement>('[data-machine-offer-start]')!.disabled).toBe(true);
-  // The owner over the tailnet is not a guest: the same section as on the computer.
-  mount(<MachinesSection machines={machines} guest={false} onChanged={noop} />);
-  expect(document.querySelector('[data-machines-remote]')).toBeNull();
+  mount(<MachinesSection machines={machines} onChanged={noop} />);
   expect(document.querySelector('[data-machine-row] .ib-del-l')).not.toBeNull();
   expect(document.querySelector<HTMLButtonElement>('[data-machine-link]')!.disabled).toBe(false);
 });

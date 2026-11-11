@@ -264,10 +264,9 @@ test("a comment on a diagram part keeps its anchor through the door, an edit and
   expect(await pending(again, sent.thread_id)).toHaveLength(0);
 });
 
-test("over the tailnet a comment on a diagram part goes as a comment on words does, the owner's and an allowed guest's; another site's is refused the same", async () => {
+test("over the tailnet the owner's comment on a diagram part goes as a comment on words does; another site's is refused the same", async () => {
   const MAGIC = "macbook-pro.tail0000.ts.net";
   const OWNER = "ramos@example.com";
-  const GUEST = "guest@example.com";
   const serve = new Map<number, string>();
   const fakeTailscale: TailscaleRunner = (args) => {
     const ok = (stdout = "") => ({ status: 0, stdout, stderr: "" });
@@ -284,8 +283,6 @@ test("over the tailnet a comment on a diagram part goes as a comment on words do
   };
   const { project, dataDir } = world();
   mkdirSync(dataDir, { recursive: true });
-  // The tailnet's allowed logins come from config.json in the data dir (loadConfig reads the env's).
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscaleAllow: [GUEST] }));
   const previous = { data: process.env.PLANNOTATOR_DATA_DIR, ts: process.env.PLANNOTATOR_INBOX_TAILSCALE };
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
   delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
@@ -303,16 +300,10 @@ test("over the tailnet a comment on a diagram part goes as a comment on words do
         headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": login, Origin: site, "Sec-Fetch-Site": site === origin ? "same-origin" : "cross-site", "Content-Type": "application/json" },
         body: JSON.stringify({ serverSession: server.serverSession, annotation }),
       });
-    const codes: [string, number][] = [];
-    for (const [login, words, diagram] of [
-      [OWNER, comment({ id: "ann-owner-words" }), diagramComment({ id: "ann-owner-part" })],
-      [GUEST, comment({ id: "ann-guest-words" }), diagramComment({ id: "ann-guest-part" })],
-    ] as const) {
-      codes.push([login, (await through(login, words)).status], [login, (await through(login, diagram)).status]);
-    }
-    expect(codes).toEqual([[OWNER, 200], [OWNER, 200], [GUEST, 200], [GUEST, 200]]);
+    expect((await through(OWNER, comment({ id: "ann-owner-words" }))).status).toBe(200);
+    expect((await through(OWNER, diagramComment({ id: "ann-owner-part" }))).status).toBe(200);
     expect((await through(OWNER, diagramComment({ id: "ann-evil" }), "https://evil.example")).status).toBe((await through(OWNER, comment({ id: "ann-evil-2" }), "https://evil.example")).status);
-    expect((await pending(server, sent.thread_id)).filter((r) => r.annotation.diagramAnchor).map((r) => r.id).sort()).toEqual(["ann-guest-part", "ann-owner-part"]);
+    expect((await pending(server, sent.thread_id)).filter((r) => r.annotation.diagramAnchor).map((r) => r.id).sort()).toEqual(["ann-owner-part"]);
   } finally {
     if (previous.data === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
     else process.env.PLANNOTATOR_DATA_DIR = previous.data;

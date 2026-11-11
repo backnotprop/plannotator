@@ -51,9 +51,9 @@ const ARROW_Y = 26;
 /** The arrow stays this far inside the card's corners. */
 const ARROW_INSET = 16;
 
-/** The Inbox has the tip for this page: the owner's page (never a guest's) on an Inbox that reports it due. */
-export function sidebarTipDue(settings: Pick<SettingsModel, 'guest' | 'reveal'> | null | undefined): boolean {
-  return !!settings && settings.guest !== true && settings.reveal?.sidebar_tip === true;
+/** The Inbox has the tip for this page: an Inbox that reports it due. */
+export function sidebarTipDue(settings: Pick<SettingsModel, 'reveal'> | null | undefined): boolean {
+  return !!settings && settings.reveal?.sidebar_tip === true;
 }
 
 type Box = { left: number; right: number; top: number; bottom: number; width: number; height: number };

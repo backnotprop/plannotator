@@ -329,7 +329,7 @@ export interface ListModel {
   list_version?: string;
   /**
    * Each session's label by id (issue #2450; sessionLabels.ts): the rows' agents and a message's author. Absent from
-   * an older Inbox and for a tailnet guest, which then read every session as before.
+   * an older Inbox, which then read every session as before.
    */
   session_labels?: Record<string, string>;
   /**
@@ -534,8 +534,6 @@ export interface SettingsModel {
   tailscale?: TailscaleSettings;
   /** This page reached the Inbox through the tailnet (the switch cannot be turned on from there). */
   via?: 'local' | 'tailnet';
-  /** A tailnet login other than the owner's (`tailnetGuest` reads it). Absent from an older Inbox. */
-  guest?: boolean;
   version: string;
   port: number;
   url: string;
@@ -570,9 +568,9 @@ export interface SettingsModel {
   updates?: UpdateSwitches;
   /** Whether this Inbox serves phones (PLANNOTATOR_INBOX_PHONES): the Phones block shows only then. */
   phones: boolean;
-  /** Ask AI is on for this reader: always true now (Ask has no switch), kept for older windows. Absent for a tailnet guest and from an older Inbox. */
+  /** Ask AI is on for this reader: always true now (Ask has no switch), kept for older windows. Absent from an older Inbox. */
   ask_ai?: true;
-  /** `cswap` is on this computer: the sidebar's Usage row is there before the first read. False for a tailnet guest. Absent from an older Inbox. */
+  /** `cswap` is on this computer: the sidebar's Usage row is there before the first read. Absent from an older Inbox. */
   cswap?: boolean;
   /**
    * Plannotator's appearance in config.json (`theme`), the value plan review
@@ -601,7 +599,7 @@ export interface SettingsModel {
   sidebar?: unknown;
   /** How many times `sidebar` was saved (config.json `inboxSidebarRev`): a window takes a layout only when it is newer. */
   sidebar_rev?: number;
-  /** The name on this person's comments (config.json `displayName`): null when never set. Absent for a guest and from an older Inbox. */
+  /** The name on this person's comments (config.json `displayName`): null when never set. Absent from an older Inbox. */
   display_name?: string | null;
   /**
    * The diff layout guided reviews draw (config.json `diffOptions.diffStyle`),
@@ -640,8 +638,7 @@ export interface SettingsModel {
   /**
    * Settings → General: "Open Plannotator at plannotator.localhost" (#2184): config.json
    * `urlHost: "plannotator.localhost"`. `env` is PLANNOTATOR_URL_HOST and `url_host`
-   * another config.json `urlHost`; either locks it. Absent for a tailnet guest
-   * and from an older Inbox.
+   * another config.json `urlHost`; either locks it. Absent from an older Inbox.
    */
   cookie_host?: InboxCookieHost;
   /** The onboarding tour (config.json `inboxTour`): started, finished, skipped. Absent from an Inbox that predates it. */
@@ -695,19 +692,11 @@ export interface InboxLaunchSettings {
 }
 
 /**
- * A page from a tailnet login other than the owner's: what is about this computer stays closed to it. Over the
- * tailnet an Inbox that does not say counts as a guest, so a page never offers what its server may refuse.
- */
-export function tailnetGuest(settings: Pick<SettingsModel, 'via' | 'guest'> | null | undefined): boolean {
-  return settings?.via === 'tailnet' && settings.guest !== false;
-}
-
-/**
  * Whether this page offers Ask AI: in every Inbox, with no switch (approval "inbox-ask-ai-flow", addendum
- * 2026-11-07), once the settings say whose page it is; never for a tailnet guest, and never in the tour.
+ * 2026-11-07), once the settings are read; never in the tour.
  */
-export function inboxAskOn(settings: Pick<SettingsModel, 'via' | 'guest'> | null | undefined, tourOn: boolean): boolean {
-  return settings != null && !tailnetGuest(settings) && !tourOn;
+export function inboxAskOn(settings: Pick<SettingsModel, 'via'> | null | undefined, tourOn: boolean): boolean {
+  return settings != null && !tourOn;
 }
 
 /** Settings → Capabilities → Experimental: each feature's switch, and whether the env var decides it. */
@@ -728,7 +717,7 @@ export interface LiveSession {
   wrote_thread: boolean;
   /** Its connection can put a message into a running turn (Send now). Absent from an older Inbox. */
   send_now?: boolean;
-  /** The session's label (issue #2450): Send to another session's rows. Absent when it has none, from an older Inbox, and for a tailnet guest. */
+  /** The session's label (issue #2450): Send to another session's rows. Absent when it has none and from an older Inbox. */
   label?: string;
 }
 
@@ -773,7 +762,7 @@ export interface TaggableSession {
   /** `live`: its connection polls and wakes it; `mcp`: it reads the Inbox only. */
   kind: 'live' | 'mcp';
   name: string | null;
-  /** A live session's label (issue #2450). Absent when it has none, from an older Inbox, and for a tailnet guest. */
+  /** A live session's label (issue #2450). Absent when it has none and from an older Inbox. */
   label?: string;
   project: { id: string | null; name: string; root: string | null } | null;
   started_at: string | null;
@@ -1872,7 +1861,7 @@ export const inboxApi = {
    * /api/inbox/launch/folders?path=~/…` or a full path), one level, no hidden or system ones. `machine`: a linked
    * machine's, through the forward; null: this computer's. A path that isn't there is `exists: false`; a hidden or
    * system one is a 422 (`folder_hidden`, `folder_system`; an older Inbox's `folder_outside_home`), a drive that
-   * doesn't answer a 504 (`folder_slow`; `fresh`: Try again, asked of the drive at once), a guest or a call from
+   * doesn't answer a 504 (`folder_slow`; `fresh`: Try again, asked of the drive at once), a call from
    * outside the window a 403.
    */
   homeFolders: (path: string, machine?: string | null, signal?: AbortSignal, fresh = false) =>

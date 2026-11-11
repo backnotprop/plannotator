@@ -5,8 +5,8 @@
  *
  * What regresses: App not drawing the card, or not arming it when the line says `bro`, at its moment (back on the list
  * from a long agent message); a tab loaded while the line was held (the gap after another dialog) never arming it
- * however long it stays loaded, so only a reload ever shows it; a click outside writing the switch, or not telling the Inbox (the line's Not now gap); a
- * tailnet guest changing what every agent here reads.
+ * however long it stays loaded, so only a reload ever shows it; a click outside writing the switch, or not telling the Inbox (the line's Not now gap); another
+ * Tailscale account changing what every agent here reads.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -228,7 +228,7 @@ test.skipIf(!hasDom)("a click outside is Not now: no switch, the line's gap stam
   expect(settings.reveal.next).not.toBe('bro');
 }, 30_000);
 
-test.skipIf(!hasDom)("a tailnet guest's bro save is refused and writes nothing; the owner's over the tailnet saves", async () => {
+test.skipIf(!hasDom)("another Tailscale account's bro save is refused and writes nothing; the owner's over the tailnet saves", async () => {
   const { listener, host: tailnetHost, login } = server!.tailnet;
   const over = (who: string) =>
     call(listener, '/api/inbox/settings', 'POST', JSON.stringify({ bro: { on: true } }), {
@@ -238,9 +238,9 @@ test.skipIf(!hasDom)("a tailnet guest's bro save is refused and writes nothing; 
       'X-Forwarded-Proto': 'https',
       'Tailscale-User-Login': who,
     });
-  const guest = await over('guest@example.com');
-  expect(guest.status).toBe(403);
-  expect((JSON.parse(guest.text) as { code?: string }).code).toBe('local_only');
+  const other = await over('someone@example.com');
+  expect(other.status).toBe(403);
+  expect((JSON.parse(other.text) as { code?: string }).code).toBe('tailnet_identity_refused');
   expect(config().inboxBro).toBeUndefined();
   expect((await over(login)).status).toBe(200);
   expect(config().inboxBro).toBe(true);

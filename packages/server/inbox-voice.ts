@@ -124,8 +124,7 @@ export interface InboxVoiceOptions {
 }
 
 export interface InboxVoice {
-  /** `guest`: a tailnet login other than the owner's, for whom voice is off and the key unsaid. */
-  settings(via: "local" | "tailnet", guest?: boolean): InboxVoiceSettings;
+  settings(via: "local" | "tailnet"): InboxVoiceSettings;
   /** `validateOnly`: check `input` and write nothing. */
   save(input: unknown, validateOnly?: boolean): void;
   route(req: Request, url: URL, via: "local" | "tailnet"): Promise<Response | null>;
@@ -294,7 +293,6 @@ export function createInboxVoice(options: InboxVoiceOptions): InboxVoice {
   };
   /** Only the first claim ever gets true. No await between the last read and the write, so two tabs cannot both win. */
   const claimIntro = async (via: "local" | "tailnet", load: string | null = null): Promise<boolean> => {
-    // The owner's page on any of their devices (a guest never reaches the voice routes).
     if (!introDue() || options.otherDialogDue(load)) return false;
     if (!(await checkIntroAudience())) return false;
     if (!introDue() || options.otherDialogDue(load)) return false;
@@ -386,16 +384,15 @@ export function createInboxVoice(options: InboxVoiceOptions): InboxVoice {
 
   return {
     introOpen: () => introDue() && introAudienceOpen(),
-    settings: (via, guest = false) => {
+    settings: (via) => {
       const value = saved();
       return {
-        on: !guest && value.on === true,
+        on: value.on === true,
         phones_only: value.phonesOnly === true,
         engine: engine(),
-        key: guest ? { source: null, last4: null } : keyState(),
+        key: keyState(),
         computer: via === "tailnet" ? options.computerName() : null,
-        intro_due: !guest && introDue() && introAudienceOpen(),
-        guest,
+        intro_due: introDue() && introAudienceOpen(),
       };
     },
 

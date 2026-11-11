@@ -89,8 +89,6 @@ export function createInboxCompose(options: {
   json: (body: unknown, status?: number) => Response;
   /** Launch (inbox-launch.ts): `to: { launch: { agent, project_id } }` starts the agent. Absent: that form is refused. */
   launch?: Pick<InboxLaunch, "enabled" | "resumes" | "gone" | "target" | "prepare" | "acceptTrust" | "abandon" | "begin" | "composeBlock">;
-  /** A tailnet request from someone other than this computer's owner: never starts an agent (`to.launch`). Absent: nobody is. */
-  isGuest?: (req: Request, via: "local" | "tailnet") => boolean;
   now?: () => Date;
   /** Whether the person has the Board on: a Send's `board_request` is kept only then. Absent: off. */
   boardOn?: () => boolean;
@@ -156,7 +154,7 @@ export function createInboxCompose(options: {
   const withStatus = (draft: InboxDraft) => ({ ...draft, status: draftStatus(draft) });
 
   /** A new thread the person writes, addressed to one live session (compose's Send). */
-  const startThread = async (body: Record<string, unknown>, guest: boolean, from: InboxLaunchFrom | null = null): Promise<Response> => {
+  const startThread = async (body: Record<string, unknown>, from: InboxLaunchFrom | null = null): Promise<Response> => {
     const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
     // A replayed Send answers the thread it wrote, whatever the session's state now.
@@ -178,9 +176,6 @@ export function createInboxCompose(options: {
       // From a linked machine (remote launch), the words that machine's window shows: say whose switch it is.
       throw new InboxError("launch_off", from ? "Starting agents is off on that computer. Turn it on in its Settings → Agents." : "Starting agents from the Inbox is off. Turn it on in Settings → Agents.");
     }
-    // Starting an agent runs code on this computer: its owner's, never a login the tailnet allow list let in.
-    // Before `prepare`, so a guest's scratch Send makes no folder.
-    if (launchTarget && guest) throw new InboxError("owner_only", "Only this computer's owner can start an agent from this Inbox.");
     // A scratch launch makes its folder here, named from the thread's name (`abandon` removes it if no thread is written).
     const prepared = launchTarget
       ? await options.launch!.prepare(launchTarget, { name: typeof body.thread_name === "string" ? body.thread_name : null, body: body.body, resolveProject: options.resolveProject, from })
@@ -232,7 +227,6 @@ export function createInboxCompose(options: {
         decision_ask: body.decision_ask === true,
         // Settings -> Rows' ask box: the agent also receives how to change the rows (INBOX_ROWS_ASK_BLOCK).
         rows_ask: body.rows_ask === true,
-        ...(guest ? { by_guest: true } : {}),
         ...(prepared ? { launch: prepared.launch } : {}),
       });
     } catch (error) {
@@ -248,7 +242,7 @@ export function createInboxCompose(options: {
     }
     // The thread is written: only now does the agent start (in the background; the answer comes at once).
     else {
-      if (body.review && !guest) options.onReviewStart?.(result.message.thread_id, body.review, { host: target.host, project_id: project.id, at });
+      if (body.review) options.onReviewStart?.(result.message.thread_id, body.review, { host: target.host, project_id: project.id, at });
       if (prepared) options.launch!.begin(result.message);
     }
     // Sent: the uploads are attachments now, and the draft it came from is done.
@@ -297,7 +291,7 @@ export function createInboxCompose(options: {
 
   /**
    * Trust and start writes the person's Claude config, so it is theirs alone: never an agent's or MCP client's bare
-   * call, the device door or a guest (another site's page is refused for every POST before it gets here). Null: it may
+   * call or the device door (another site's page is refused for every POST before it gets here). Null: it may
    * go on. Launch off: the route's own 404.
    */
   const trustRefused = (req: Request, body: Record<string, unknown>, owner: boolean, door: InboxComposeDoor | null): Response | null => {
@@ -309,11 +303,10 @@ export function createInboxCompose(options: {
 
   /**
    * `owner`: this computer's window or the owner's own login over the tailnet, or a linked machine (the owner's other
-   * computer); never a guest, or a phone through the device door. `via`: where the request came in; a guest
-   * (`isGuest`) never starts an agent. `door`: a linked machine asked through the device door (remote launch): it
+   * computer); never a phone through the device door. `door`: a linked machine asked through the device door (remote launch): it
    * starts an agent only for a press in a window there (`window`), and the launch records which machine (`from`).
    */
-  const route = async (req: Request, url: URL, owner: boolean = false, via: "local" | "tailnet" = "local", door: InboxComposeDoor | null = null): Promise<Response | null> => {
+  const route = async (req: Request, url: URL, owner: boolean = false, door: InboxComposeDoor | null = null): Promise<Response | null> => {
     const path = url.pathname;
     if (path === "/api/inbox/sessions") {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
@@ -333,7 +326,7 @@ export function createInboxCompose(options: {
       const body = await options.readBody(req);
       // Another machine starts an agent here only for what the person pressed in a window there: never an agent's call.
       if (door?.machine && !door.window && body.to && typeof body.to === "object" && "launch" in body.to) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
-      return staleTab(body) ?? trustRefused(req, body, owner, door) ?? (await startThread(body, options.isGuest?.(req, via) ?? false, door?.machine ? door.from : null));
+      return staleTab(body) ?? trustRefused(req, body, owner, door) ?? (await startThread(body, door?.machine ? door.from : null));
     }
     const toMatch = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/to$/.exec(path);
     if (toMatch) {

@@ -137,6 +137,7 @@ import { writeRemoteShareLink } from "@plannotator/server/share-url";
 import { announceTailscaleSession, enableTailscaleServe } from "@plannotator/server/tailscale-serve";
 import { takeEnvPullSessionBridgeConfig } from "@plannotator/server/ai-runtime";
 import { readTailnetOwners, setSessionTailnetOwners, setSessionTailnetServedUrl } from "@plannotator/server/session-tailnet";
+import { allowIgnoredLine } from "@plannotator/shared/inbox/tailnet-refusal";
 import { scrubModSessionEnv } from "./mod-session-env";
 import { resolveAnnotateTarget } from "./annotate-resolution";
 import { annotateDecisionTarget, reviewDecisionTarget, takeHostReviewId, targetText } from "./decision-target";
@@ -636,12 +637,11 @@ if (tailscaleFlag) {
   process.env.PLANNOTATOR_URL_HOST = "";
   process.env.PLANNOTATOR_PUBLIC_URL = "";
   // "Ask this session" stays ON (#2166): the host's bridge config is kept
-  // (taken at the top of this file), and the servers answer it only for a tab
-  // on this machine and for the Tailscale login that owns it (or, where
-  // Tailscale names no owner, an inboxTailscaleAllow login;
-  // packages/server/session-tailnet.ts). Everyone else on the tailnet gets
-  // the review and Ask AI through the SDKs, as before. Remote mode is
-  // unchanged: it still turns the bridge off.
+  // (taken at the top of this file). Over the tailnet the session opens only
+  // for the Tailscale login that owns this machine (or, where Tailscale names
+  // no owner, an inboxTailscaleAllow login; packages/server/session-tailnet.ts);
+  // every other account gets the refusal page. Remote mode is unchanged: it
+  // still turns the bridge off.
 }
 
 /**
@@ -665,36 +665,39 @@ if (tailscaleFlag) {
 async function handleTailscaleReady(port: number): Promise<void> {
   // Who counts as the owner over the tailnet (the owner of this machine, or
   // the inboxTailscaleAllow logins when Tailscale names no owner), read before
-  // the address exists. Every --tailscale session needs it: hover cards
-  // (ref-cards.ts) answer the owner's tab with or without a bridge. With a
-  // host's "Ask this session" bridge, the owner may also ask it; say so.
+  // the address exists: the session opens over the tailnet for them alone
+  // (single player), so with nobody to open it for it is not published.
   const owners = readTailnetOwners();
-  setSessionTailnetOwners(owners.logins);
-  const bridged = resolveAIEnabled() && takeEnvPullSessionBridgeConfig() !== undefined;
-  let askOverTailnet = false;
-  if (bridged) {
-    askOverTailnet = owners.logins.length > 0;
-    process.stderr.write(
-      "reason" in owners
-        ? `[plannotator] Ask this session: on this computer only (${owners.reason}); other devices get Ask AI without it.\n`
-        : `[plannotator] Ask this session: on here, and over your tailnet for ${owners.logins.join(", ")} only${owners.source === "allowlist" ? " (inboxTailscaleAllow: Tailscale names no owner for this machine)" : ""}.\n`,
-    );
-  }
-  let url: string;
-  try {
-    ({ url } = enableTailscaleServe(port));
-  } catch (error) {
-    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+  const failStartup = (lines: string[]): never => {
+    for (const line of lines) process.stderr.write(`${line}\n`);
     process.stderr.write(`To keep working on this computer, ${tailscaleOptOut}.\n`);
-    process.exit(
+    return process.exit(
       annotateStartupFailureExitCode({
         requireApproval: requireApprovalFlag,
         resultFile,
       }),
     );
+  };
+  if ("reason" in owners) {
+    failStartup([`Over Tailscale, Plannotator opens only for the Tailscale account that owns this computer, and it cannot tell which account that is: ${owners.reason}.`]);
+    return;
+  }
+  if (owners.ignored && owners.logins[0]) process.stderr.write(`[plannotator] ${allowIgnoredLine(owners.logins[0])}\n`);
+  setSessionTailnetOwners(owners.logins);
+  const bridged = resolveAIEnabled() && takeEnvPullSessionBridgeConfig() !== undefined;
+  if (bridged) {
+    process.stderr.write(
+      `[plannotator] Ask this session: on here, and over your tailnet for ${owners.logins.join(", ")}${owners.source === "allowlist" ? " (inboxTailscaleAllow: Tailscale names no owner for this machine)" : ""}.\n`,
+    );
+  }
+  let url = "";
+  try {
+    ({ url } = enableTailscaleServe(port));
+  } catch (error) {
+    failStartup([error instanceof Error ? error.message : String(error)]);
   }
   setSessionTailnetServedUrl(url);
-  setServerReadyTailnet({ ask: askOverTailnet });
+  setServerReadyTailnet({ ask: bridged });
   await announceTailscaleSession(url, port);
 }
 

@@ -4,7 +4,7 @@
  * (packages/server/inbox.ts) builds the state from config.json and the store, reports `due` to the page
  * (`GET /api/inbox/settings` `reveal.launch_tip`) and spends the claim (`POST /api/inbox/reveal` `id: "launch_tip"`).
  *
- * Who: the owner's pages (never a tailnet guest's), on an Inbox where no agent was ever started (a launched thread root
+ * Who: the person's pages, on an Inbox where no agent was ever started (a launched thread root
  * in the store, or `launchedAt`, kept once one was seen, so deleting that thread never brings the tip back), until it
  * was shown once. Whether To can start an agent (Launch on here, or a linked machine's) is compose's own check
  * (`canStart`): it claims only when To offers a new session. It stands outside the order of the line of one-time dialogs
@@ -23,8 +23,6 @@ export interface LaunchTipSaved {
 }
 
 export interface LaunchTipState {
-  /** The person at this computer or the owner over the tailnet: never a guest. */
-  owner: boolean;
   /** A launched thread root is in the store now (a deleted one is gone from it; `saved.launchedAt` remembers it). */
   launched: boolean;
   saved: LaunchTipSaved | undefined;
@@ -32,7 +30,7 @@ export interface LaunchTipState {
 
 /** The tip may show on this Inbox: what settings report as `reveal.launch_tip`. */
 export function launchTipDue(state: LaunchTipState): boolean {
-  return state.owner && !state.launched && !state.saved?.launchedAt && !state.saved?.shownAt;
+  return !state.launched && !state.saved?.launchedAt && !state.saved?.shownAt;
 }
 
 /**
@@ -41,7 +39,6 @@ export function launchTipDue(state: LaunchTipState): boolean {
  * again without a write; any other claim once it is stamped gets no.
  */
 export function launchTipClaim(state: LaunchTipState, key: string | null, at: string): { show: boolean; save: LaunchTipSaved | null } {
-  if (!state.owner) return { show: false, save: null };
   if (key && state.saved?.shownAt && state.saved.key === key) return { show: true, save: null };
   if (!launchTipDue(state)) return { show: false, save: null };
   return { show: true, save: { ...state.saved, shownAt: at, ...(key ? { key } : {}) } };

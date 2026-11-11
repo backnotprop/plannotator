@@ -3,7 +3,7 @@
  * about this computer (`account/read` through a short-lived Codex: the sign-in type and plan, never a token).
  *
  * A key typed here goes to the Inbox and never comes back: the page holds at most its last 4. The owner sets it on the
- * computer or over the tailnet's HTTPS; a tailnet guest never gets this far (the note in `VoiceSettings`).
+ * computer or over the tailnet's HTTPS.
  */
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import type { InboxVoiceEngine, InboxVoiceStatus } from '@plannotator/core/inbox-types';
@@ -181,13 +181,6 @@ export function VoiceSettings() {
       setError(cause instanceof Error ? cause.message : 'The setting was not saved.');
     }
   };
-  if (voice?.guest) {
-    return (
-      <section className="ib-sgroup ib-sgroup-first" data-settings-voice="guest" aria-label="Voice">
-        <p className="ib-vpage-note">Voice uses the ChatGPT login or API key on {where}, so only its owner can use it from here.</p>
-      </section>
-    );
-  }
   return (
     <>
       <section className="ib-sgroup ib-sgroup-first" data-settings-voice="" aria-label="Voice">

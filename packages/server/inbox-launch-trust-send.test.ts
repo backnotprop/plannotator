@@ -17,7 +17,6 @@ import { startInboxServer, type InboxServer } from "./inbox";
 import { INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 import type { LaunchTrustReading } from "./inbox-launch-host";
 
-const GUEST = "guest@example.com";
 const CLEAN: LaunchTrustReading = { warning: null, facts: [], warns: false };
 const HOOKS: LaunchTrustReading = { warning: "This folder has 2 hooks that will run once you trust it.", facts: ["Runs 2 hooks"], warns: true };
 
@@ -43,7 +42,7 @@ async function setup(config: Record<string, unknown> = { inboxLaunch: { enabled:
   const folder = join(root, "billing");
   mkdirSync(dataDir);
   mkdirSync(folder);
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscaleAllow: [GUEST], ...config }));
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ ...config }));
   setEnv("PLANNOTATOR_DATA_DIR", dataDir);
   setEnv("PLANNOTATOR_TEST_SANDBOX", dataDir);
   setEnv("HOME", join(root, "home"));
@@ -187,13 +186,6 @@ describe("who can press Trust and start", () => {
     });
     const text = await response.text();
     expect(text).toContain("isError");
-    world.nothingHappened();
-  });
-
-  test("a guest on the allow list is refused, with the window's own headers", async () => {
-    const world = await setup();
-    const { url, headers } = world.tailnet(GUEST);
-    expect(await codeOf(await world.press({}, headers, url))).toEqual([403, "owner_only"]);
     world.nothingHappened();
   });
 
@@ -467,9 +459,7 @@ describe("what `GET /api/inbox/sessions` offers", () => {
   test("nobody but the owner's window sees an offer, and asking for a pick reads nothing", async () => {
     const world = await setup();
     const pick = `?trust_agent=${FAKE}&trust_project=${world.project.id}`;
-    const { headers } = world.tailnet(GUEST);
     const listener = `http://127.0.0.1:${world.server.tailscale.listenerPort()!}/api/inbox/sessions`;
-    expect(untrustedOf(await world.sessions(pick, headers, listener))).toBeUndefined();
 
     const token = await pairPhone(world);
     expect(untrustedOf(await world.sessions(pick, { Authorization: `Bearer ${token}` }, `${world.base}/api/inbox/device/sessions`))).toBeUndefined();

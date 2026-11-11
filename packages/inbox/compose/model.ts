@@ -554,9 +554,9 @@ export function newSessionTip(name: string, machineName: string | null, asleep: 
   return `New session in ${name}${machineName ? ` · ${machineName}` : ''}${asleep ? ", starts when it's back" : ''}`;
 }
 
-/** "+" on project rows at all (F1-F7): while agents can be started from New message here, and never on a tailnet guest's page (a guest can't start one). */
-export function projectPlusOn(launchEnabled: boolean | undefined, guestPage: boolean): boolean {
-  return launchEnabled === true && !guestPage;
+/** "+" on project rows at all (F1-F7): while agents can be started from New message here. */
+export function projectPlusOn(launchEnabled: boolean | undefined): boolean {
+  return launchEnabled === true;
 }
 
 /**

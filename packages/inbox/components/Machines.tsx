@@ -22,7 +22,6 @@ export function linkErrorText(error: unknown): string {
     return "Paste the other machine's link code, or type its address and six digits.";
   }
   if (error.code === 'no_way_back') return 'The other machine needs a way back to this one, and Tailscale could not publish this machine. Check Tailscale here, then link again.';
-  if (error.code === 'owner_only' || error.code === 'local_only') return "Only this computer's owner can link machines.";
   return error.message;
 }
 
@@ -42,11 +41,9 @@ function machineLine(machine: MachineView, offersUpdates: boolean): string {
 export interface MachinesSectionProps {
   /** Every machine the merged view knows, this one included. */
   machines: MachineView[];
-  /** A tailnet login other than the owner's (`tailnetGuest`): it sees the machines, and links or unlinks none. */
-  guest: boolean;
   /** After a link or an Unlink: read the machines again. */
   onChanged: () => void;
-  /** Open a machine's update dialog. Absent on a page that offers no updates (a tailnet guest's). */
+  /** Open a machine's update dialog. Absent on a page that offers no updates. */
   onMachineUpdate?: (machineId: string) => void;
 }
 
@@ -55,10 +52,9 @@ export interface MachinesSectionProps {
  * Each one keeps its own Inbox; a link works both ways, over the tailnet.
  * Built like Devices → Phones: one card, a row per machine with Unlink
  * (asked twice), then the row that starts a link. The owner links from this
- * computer or from any of their own devices over the tailnet; a guest does not.
+ * computer or from any of their own devices over the tailnet.
  */
-export function MachinesSection({ machines, guest, onChanged, onMachineUpdate }: MachinesSectionProps) {
-  const remote = guest;
+export function MachinesSection({ machines, onChanged, onMachineUpdate }: MachinesSectionProps) {
   const linked = machines.filter((machine) => !machine.self);
   // Why this Inbox's own door is not on the tailnet (its port held by another mapping): linked machines cannot reach it until that is fixed.
   const doorError = machines.find((machine) => machine.self)?.reason ?? null;
@@ -93,12 +89,6 @@ export function MachinesSection({ machines, guest, onChanged, onMachineUpdate }:
     <section className="ib-sgroup" data-settings-machines="" aria-labelledby="ib-g-machines">
       <h2 id="ib-g-machines">Linked machines</h2>
       <p>A link works both ways, over your tailnet. Unlink removes it on both machines.</p>
-      {remote && (
-        <div className="ib-callout" data-machines-remote="">
-          <Icon name="lock" />
-          <span>Linking and Unlink are for this computer&apos;s owner.</span>
-        </div>
-      )}
       {doorError && (
         <div className="ib-callout ib-warn" role="alert" data-machines-door-error="">
           <Icon name="warn" />
@@ -117,27 +107,25 @@ export function MachinesSection({ machines, guest, onChanged, onMachineUpdate }:
             </span>
             <span className="ib-ctl">
               {onMachineUpdate && <MachineUpdateButton machine={machine} onPress={() => onMachineUpdate(machine.id)} />}
-              {!remote && (
-                <UnlinkLink
-                  name={machine.name}
-                  warning={machine.waiting > 0 ? `${waitingText(machine.waiting)} will be lost.` : undefined}
-                  onRemove={async () => {
-                    setError(null);
-                    setUnlinkedNote(null);
-                    try {
-                      const answer = await inboxApi.unlinkMachine(machine.id);
-                      if (!answer.told) setUnlinkedNote(`Unlinked here. ${machine.name} could not be reached, so it drops the link the next time it is in touch. This computer stays reachable on your tailnet for it for up to 7 days, until it hears.`);
-                    } catch (cause) {
-                      setError(linkErrorText(cause));
-                    }
-                    onChanged();
-                  }}
-                />
-              )}
+              <UnlinkLink
+                name={machine.name}
+                warning={machine.waiting > 0 ? `${waitingText(machine.waiting)} will be lost.` : undefined}
+                onRemove={async () => {
+                  setError(null);
+                  setUnlinkedNote(null);
+                  try {
+                    const answer = await inboxApi.unlinkMachine(machine.id);
+                    if (!answer.told) setUnlinkedNote(`Unlinked here. ${machine.name} could not be reached, so it drops the link the next time it is in touch. This computer stays reachable on your tailnet for it for up to 7 days, until it hears.`);
+                  } catch (cause) {
+                    setError(linkErrorText(cause));
+                  }
+                  onChanged();
+                }}
+              />
             </span>
           </div>
         ))}
-        {linking && !remote ? (
+        {linking ? (
           <LinkForm
             onCancel={() => {
               setLinking(false);
@@ -170,7 +158,6 @@ export function MachinesSection({ machines, guest, onChanged, onMachineUpdate }:
                 ref={linkButton}
                 type="button"
                 className={`ib-btn${linked.length === 0 ? ' ib-pri' : ''}`}
-                disabled={remote}
                 onClick={() => {
                   setJustLinked(null);
                   setUnlinkedNote(null);
@@ -194,12 +181,12 @@ export function MachinesSection({ machines, guest, onChanged, onMachineUpdate }:
             </span>
           </span>
           <span className="ib-ctl">
-            <button type="button" className="ib-btn" disabled={remote || offering} onClick={() => void showOffer()} data-machine-offer-start="">
+            <button type="button" className="ib-btn" disabled={offering} onClick={() => void showOffer()} data-machine-offer-start="">
               {offer ? 'New code' : 'Show link code'}
             </button>
           </span>
         </div>
-        {offer && !remote && (
+        {offer && (
           <div className="ib-mcode" data-machine-offer="">
             {offer.tailnet_error && (
               <div className="ib-callout ib-warn" data-machine-offer-tailnet="">

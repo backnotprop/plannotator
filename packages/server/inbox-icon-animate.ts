@@ -73,7 +73,6 @@ export function createInboxIconAnimate(options: {
   icons: AgentIcons;
   faces: InboxAgentFacesFile;
   serverSession: string;
-  localOnly: () => Response;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   json: (body: unknown, status?: number) => Response;
   /** The pictures kept (or one added): every window hears it, as an upload does. */
@@ -139,10 +138,9 @@ export function createInboxIconAnimate(options: {
     return json({ applied, icon: result, ...(applied ? {} : { note: ICON_ANIMATE_WORDS.notApplied }) });
   };
 
-  const route = async (req: Request, url: URL, owner: boolean): Promise<Response | null> => {
+  const route = async (req: Request, url: URL): Promise<Response | null> => {
     if (url.pathname !== INBOX_ICON_ANIMATE_PATH) return null;
     if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
-    if (!owner) return options.localOnly();
     if (req.method === "GET") return json({ results: list().flatMap((r) => (r.result ? [{ icon: r.icon, result: r.result }] : [])) });
     if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
     const body = await options.readBody(req);

@@ -269,7 +269,7 @@ export function ThreadMore(
     /**
      * Post decisions (step 2): Export decisions' "Post on a pull request" group, one row per PR on the thread; with
      * none, its Add a pull request… opens the PRs card and posts on the PR once it is added (`addPullThenPost`).
-     * Absent where the thread's PRs can't be changed (a guest, another machine's thread).
+     * Absent where the thread's PRs can't be changed (another machine's thread).
      */
     postDecisions?: { post: (ref: string) => void; addPullThenPost: () => void };
     launch?: ThreadMoreLaunch | null;

@@ -104,11 +104,10 @@ test('the tip names the project, its machine when it is another, and that it wai
   expect(lastLaunchAgent([])).toBeNull();
 });
 
-test('"+" shows only while launch is on and never on a tailnet guest\'s page; a row shows it only where it can start something', () => {
-  expect(projectPlusOn(true, false)).toBe(true);
-  expect(projectPlusOn(true, true)).toBe(false);
-  expect(projectPlusOn(false, false)).toBe(false);
-  expect(projectPlusOn(undefined, false)).toBe(false);
+test('"+" shows only while launch is on; a row shows it only where it can start something', () => {
+  expect(projectPlusOn(true)).toBe(true);
+  expect(projectPlusOn(false)).toBe(false);
+  expect(projectPlusOn(undefined)).toBe(false);
   const bill = { id: 'prj_bill', root: '/Users/me/code/billing-svc' };
   // Not read yet, or an asleep machine never read: shown (it starts when that machine is back, F4).
   expect(projectCanStart(bill, null)).toBe(true);

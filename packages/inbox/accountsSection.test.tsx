@@ -649,20 +649,7 @@ test.skipIf(!hasDom)('a read happens when the window opens and when this page op
   expect(fakeCswapCalls(bin)).toEqual(['list --json', 'list --json']);
 });
 
-test.skipIf(!hasDom)('a tailnet guest is told so and offered no Refresh or machine; an Inbox that does not answer says that, and Refresh recovers', async () => {
-  accountsRoute = async () => new Response(JSON.stringify({ error: 'refused', code: 'owner_only' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
-  linked = [{ id: 'ibx_mini', name: 'Mini', answer: () => farList({ alias: 'personal', active: true }) }];
-  const el = await open('owner_only');
-  expect(el.querySelector('[data-accounts-owner-only]')).not.toBeNull();
-  expect(refresh(el)).toBeNull();
-  await until(() => machineReads.length > 0, 'the far read');
-  await act(async () => new Promise((r) => setTimeout(r, 30)));
-  expect(blocks(el)).toEqual([]);
-  expect(el.querySelector('[data-account]')).toBeNull();
-  act(() => root?.unmount());
-  host?.remove();
-
-  linked = [];
+test.skipIf(!hasDom)('an Inbox that does not answer says that, and Refresh recovers', async () => {
   accountsRoute = async () => {
     throw new TypeError('Failed to fetch');
   };
@@ -907,14 +894,6 @@ test.skipIf(!hasDom)('the row and the page show one read: opening the peek reads
   expect(fakeCswapCalls(bin).length).toBe(4);
   // Only Refresh skips the answer the Inbox keeps.
   expect(accountReads).toEqual(['/api/inbox/accounts', '/api/inbox/accounts', '/api/inbox/accounts', '/api/inbox/accounts?fresh=1']);
-});
-
-test.skipIf(!hasDom)('a read that refuses takes the row away, even over a settings answer that said cswap is here', async () => {
-  answer({ stdout: LIST });
-  accountsRoute = async () => new Response(JSON.stringify({ error: 'refused', code: 'owner_only' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
-  const el = await open('owner_only');
-  await until(() => !el.querySelector('.ib-side-foot')?.hasAttribute('data-held'), 'the foot');
-  expect(usageRow(el)).toBeNull();
 });
 
 test.skipIf(!hasDom)('Tab past either end of the peek closes it; Tab between its blocks does not', async () => {
@@ -1421,14 +1400,9 @@ test.skipIf(withSwitching)('a list renumbered since the page read it switches no
   expect(switchRuns()).toEqual([]);
 });
 
-test.skipIf(withSwitching)('a switch the server refuses says Owner only; another login under the same number says so', async () => {
+test.skipIf(withSwitching)('another login under the same number says so', async () => {
   answer({ stdout: LIST });
   const el = await open('accounts');
-  switchRoute = async () => json({ error: 'refused', code: 'owner_only' }, 403);
-  await switchTo(el, 1);
-  await until(() => switchNote(el) !== null, 'the failure line');
-  expect(switchNote(el)!.querySelector('span')?.textContent).toBe("Couldn't switch to personal. Owner only.");
-
   switchRoute = async () => json({ state: 'failed', reason: 'renumbered' });
   await switchTo(el, 3);
   await until(() => switchNote(el)?.getAttribute('data-accounts-switch-failed') === 'renumbered', 'the line');

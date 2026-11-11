@@ -1,15 +1,13 @@
 /**
- * The owner's phone over the tailnet works like the computer for an approved
- * list; a guest's window stays as it was (approval "inbox-tailnet-owner"). The
+ * The owner's phone over the tailnet works like the computer (approval
+ * "inbox-tailnet-owner"; over Tailscale only the owner's account gets in). The
  * whole window over a real Inbox in a temp data dir, its own process
  * (tests/helpers/inbox-dom-server.ts). happy-dom cannot set the Host the
- * tailnet listener answers, so the answers that differ by caller are made
- * here, from what the table in packages/server/inbox-tailnet-owner.test.ts
- * proves of the real gate: `via` and `guest` on the settings model, and a 403
- * local_only for a guest on each route the approval opened.
+ * tailnet listener answers, so `via` on the settings model is set here, as
+ * packages/server/inbox-tailnet-owner.test.ts proves the real gate sets it.
  *
  * What regresses: the owner's page left as a stranger's (no update, no agents,
- * no switch), a guest's page offered a route that refuses it, a one-time dialog
+ * no switch), a one-time dialog
  * showing on the phone now that the agents can be read there, a phone left
  * waiting in silence on a restart that did not come back.
  *
@@ -29,7 +27,7 @@ const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./A
 
 const SERVER_SCRIPT = resolve(import.meta.dir, '../../tests/helpers/inbox-dom-server.ts');
 
-type Page = 'local' | 'owner' | 'guest';
+type Page = 'local' | 'owner';
 type Settings = Record<string, any>;
 
 let child: ReturnType<typeof Bun.spawn> | null = null;
@@ -77,8 +75,6 @@ const UPDATE = { available: true, state: 'available', version: '9.9.9', current:
 const ready = { ...UPDATE, state: 'ready' };
 let update: typeof UPDATE | null = null;
 
-/** The routes the real gate refuses a guest and answers the owner (inbox-tailnet-owner.test.ts). */
-const guestRefused = (path: string) => path.startsWith('/api/inbox/agents') || path.startsWith('/api/inbox/update') || path.startsWith('/api/inbox/cards/marks');
 
 function loopback(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string; type: string }> {
   return new Promise((done, fail) => {
@@ -105,12 +101,6 @@ async function readLine(): Promise<string> {
 
 const asPage = (settings: Settings) => {
   if (page !== 'local') settings.via = 'tailnet';
-  settings.guest = page === 'guest';
-  if (page === 'guest') {
-    delete settings.cookie_host;
-    settings.prompts = { ...settings.prompts, reminder: { ...settings.prompts.reminder, editable: false } };
-    settings.voice = { ...settings.voice, on: false, guest: true };
-  }
   settingsOver(settings);
   return settings;
 };
@@ -146,7 +136,6 @@ beforeEach(async () => {
     const forced = intercept?.(path, method);
     if (forced === 'network') throw new TypeError('Failed to fetch');
     if (forced) return forced;
-    if (page === 'guest' && guestRefused(path)) return Response.json({ error: 'This is only available on the computer.', code: 'local_only' }, { status: 403 });
     if (path.startsWith('/api/inbox/agents')) return Response.json(AGENTS);
     if (path.startsWith('/api/inbox/cards/marks')) return Response.json({ marks: {} });
     const answer = await loopback(path, method, body);
@@ -226,7 +215,7 @@ const leave = () => {
 /** Booleans in the assertions: a failing `expect(element)` prints the whole DOM, gigabytes of it. */
 const has = (el: ParentNode, selector: string) => $(el, selector) !== null;
 
-test.skipIf(!hasDom)('updates: the owner gets the Update button, About’s action and the General row; a guest none of them', async () => {
+test.skipIf(!hasDom)('updates: the owner gets the Update button, About’s action and the General row', async () => {
   update = UPDATE;
   const owner = await open('owner');
   await until(() => has(owner, '.ib-upd[data-update-state="available"]'), 'the sidebar’s Update button');
@@ -234,57 +223,29 @@ test.skipIf(!hasDom)('updates: the owner gets the Update button, About’s actio
   await until(() => has(owner, '[data-general-update]'), 'the General row');
   await go('#settings/about');
   await until(() => has(owner, '[data-about-update]'), 'About’s Update now');
-  leave();
-
-  const guest = await open('guest');
-  await wait(200);
-  expect(has(guest, '.ib-upd')).toBe(false);
-  await go('#settings/general');
-  await until(() => has(guest, '[data-settings-section="general"]'), 'General');
-  expect(has(guest, '[data-general-update]')).toBe(false);
-  await go('#settings/about');
-  await until(() => has(guest, '[data-settings-section="about"]'), 'About');
-  await wait(150);
-  expect(has(guest, '[data-about-update]')).toBe(false);
 }, 30_000);
 
-test.skipIf(!hasDom)('Settings → Agents: the owner reads the agents; a guest sees no row of them', async () => {
+test.skipIf(!hasDom)('Settings → Agents: the owner reads the agents', async () => {
   const owner = await open('owner', '#settings/agents');
   await until(() => has(owner, '[data-agent="codex"]'), 'the agent’s row');
-  leave();
-
-  const guest = await open('guest', '#settings/agents');
-  await until(() => has(guest, '[data-settings-section="agents"]'), 'the section');
-  await wait(200);
-  expect(has(guest, '[data-agent]')).toBe(false);
 }, 30_000);
 
-test.skipIf(!hasDom)('the Board off: the owner can turn it on, a guest gets the note', async () => {
+test.skipIf(!hasDom)('the Board off: the owner can turn it on', async () => {
   settingsOver = (settings) => {
     settings.board = { on: false };
   };
   const owner = await open('owner', '#board');
   await until(() => has(owner, '[data-board-view="off"]'), 'the off page');
   expect(has(owner, '[data-board-turn-on]')).toBe(true);
-  leave();
-
-  const guest = await open('guest', '#board');
-  await until(() => has(guest, '[data-board-view="off"]'), 'the off page');
-  expect(has(guest, '[data-board-turn-on]')).toBe(false);
 }, 30_000);
 
-test.skipIf(!hasDom)('Voice’s key: the owner gets the form, a guest the note and no form', async () => {
+test.skipIf(!hasDom)('Voice’s key: the owner gets the form', async () => {
   settingsOver = (settings) => {
-    if (!settings.guest) settings.voice = { ...settings.voice, on: true, engine: 'api', computer: 'Studio', key: { source: null, last4: null } };
+    settings.voice = { ...settings.voice, on: true, engine: 'api', computer: 'Studio', key: { source: null, last4: null } };
   };
   const owner = await open('owner', '#settings/voice');
   await until(() => has(owner, '[data-voice-key="empty"]'), 'the key form');
   expect(has(owner, 'input[type="password"]')).toBe(true);
-  leave();
-
-  const guest = await open('guest', '#settings/voice');
-  await until(() => has(guest, '[data-settings-voice="guest"]'), 'the guest’s note');
-  expect(has(guest, 'input[type="password"]')).toBe(false);
 }, 30_000);
 
 test.skipIf(!hasDom)('a key saved: the owner can replace or remove it from the phone', async () => {
@@ -297,7 +258,7 @@ test.skipIf(!hasDom)('a key saved: the owner can replace or remove it from the p
   expect(has(owner, '[data-voice-key-remove]')).toBe(true);
 }, 30_000);
 
-test.skipIf(!hasDom)('the browser address: the computer’s own page says this browser, the owner’s phone says whose, a guest has no row', async () => {
+test.skipIf(!hasDom)('the browser address: the computer’s own page says this browser, the owner’s phone says whose', async () => {
   const heading = (el: HTMLElement) => $(el, '[data-settings-cookie-host] h2')?.textContent;
   const local = await open('local', '#settings/general');
   await until(() => heading(local) !== undefined, 'the group');
@@ -307,12 +268,6 @@ test.skipIf(!hasDom)('the browser address: the computer’s own page says this b
   const owner = await open('owner', '#settings/general');
   await until(() => heading(owner) !== undefined, 'the group');
   expect(heading(owner)).toBe('The computer’s browser');
-  leave();
-
-  const guest = await open('guest', '#settings/general');
-  await until(() => has(guest, '[data-settings-section="general"]'), 'General');
-  await wait(150);
-  expect(has(guest, '[data-settings-cookie-host]')).toBe(false);
 }, 30_000);
 
 test.skipIf(!hasDom)('the one-time note dialog stays off over the tailnet, though the owner can read the agents; this computer still gets it', async () => {

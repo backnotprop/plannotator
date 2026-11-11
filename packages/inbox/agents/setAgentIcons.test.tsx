@@ -66,12 +66,12 @@ function inbox(pointer: string | null = null) {
   // Bun's own fetch, as the server's (happy-dom's would apply a page's CORS rules, and its AbortSignal is not Bun's).
   const serverFetch = ((url: URL, init: RequestInit) => Bun.fetch(url, { ...init, signal: undefined })) as unknown as typeof fetch;
   const fetcher = createIconSetFetcher({ dir: join(dir, 'icon-sets'), pointer, builtIn: builtIn.ids, fetch: serverFetch });
-  const setsRoute = createInboxIconSets({ builtIn, fetcher, serverSession: 'srv', localOnly: () => json({ code: 'local_only' }, 403), readBody, json }).route;
+  const setsRoute = createInboxIconSets({ builtIn, fetcher, serverSession: 'srv', readBody, json }).route;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://localhost');
     asked.push(`${init?.method ?? 'GET'} ${url.pathname}${url.search}`);
     const req = new Request(url, { method: init?.method ?? 'GET', ...(init?.body ? { body: init.body } : {}) });
-    return (await facesRoute(req, url)) ?? (await setsRoute(req, url, true)) ?? json({ error: 'not here' }, 404);
+    return (await facesRoute(req, url)) ?? (await setsRoute(req, url)) ?? json({ error: 'not here' }, 404);
   }) as typeof fetch;
   return { file, fetcher };
 }

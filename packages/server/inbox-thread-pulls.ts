@@ -311,8 +311,7 @@ export function threadPullsAnswer(store: InboxStore, states: Pick<ThreadPullStat
 
 /**
  * The window's route (packages/server/inbox.ts runs its guards first: the
- * same origin, and for a change the owner's window only, so a tailnet guest
- * gets 403 and never reaches this). The person's add and remove are written
+ * same origin). The person's add and remove are written
  * `by: person`; an edit alone wakes no one and notifies no one: the thread's
  * owner hears of it on its next wake (inboxPullsWakeLine).
  */
@@ -324,14 +323,12 @@ export function createThreadPullsRoute(options: {
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   /** The serverSession check of a write (`mismatch`: a window from before a restart). */
   sessionMismatch: (body: Record<string, unknown>) => Response | null;
-  localOnly: () => Response;
   now?: () => number;
 }) {
   const { store, states, json } = options;
   const now = options.now ?? Date.now;
   return {
-    /** `owner`: this request may change the PRs and run gh / glab (the owner's window). */
-    async route(req: Request, path: string, owner: boolean): Promise<Response | null> {
+    async route(req: Request, path: string): Promise<Response | null> {
       const match = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/pulls$/.exec(path);
       if (!match) return null;
       if (req.method !== "GET" && req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
@@ -339,7 +336,6 @@ export function createThreadPullsRoute(options: {
       if (!message) return json({ error: `No thread ${match[1]}.`, code: "thread_not_found" }, 404);
       const threadId = message.thread_id;
       if (req.method === "POST") {
-        if (!owner) return options.localOnly();
         const body = await options.readBody(req);
         const mismatch = options.sessionMismatch(body);
         if (mismatch) return mismatch;
@@ -352,7 +348,7 @@ export function createThreadPullsRoute(options: {
         // A PR just added is read at once, so the popover shows its state; a forge slower than
         // THREAD_PULLS_ADD_WAIT_MS answers later, over the stream (a `thread_pull` record, `event: thread-pulls`).
         if (change.added.length > 0) await settledWithin(states.refresh(change.added), THREAD_PULLS_ADD_WAIT_MS);
-      } else if (owner) {
+      } else {
         // The thread was opened, a row's mark hovered, or the window got its focus back: the answer is what is known
         // now, at once, and its PRs still in play are read behind it if older than 30 s. Never waits on gh or glab:
         // what the read changes reaches the window over the stream (a `thread_pull` record, `event: thread-pulls`).

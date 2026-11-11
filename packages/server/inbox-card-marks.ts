@@ -28,7 +28,7 @@
  *
  * The route (`POST /api/inbox/cards/marks`) answers only the owner's window
  * while the Board is on: this computer's, or the owner's over the tailnet;
- * never a tailnet guest's, never on the phone's door.
+ * never on the phone's door.
  */
 
 import { forgeRefKey, parseForgeRefUrl, type ForgeRefCardData } from "@plannotator/core/forge-ref-card";

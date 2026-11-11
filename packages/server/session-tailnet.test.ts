@@ -65,22 +65,22 @@ function askers(stdout: string, allowlist: string[], logins: string[]): Record<s
 
 describe("readTailnetOwners: the allowlist is the owner where Tailscale names none", () => {
   test("a tagged machine: an allowlisted login asks, any other login does not", () => {
-    expect(askers(TAGGED, ["Me@Example.com", "me@work.example"], ["me@example.com", "me@work.example", "guest@example.com"])).toEqual({
+    expect(askers(TAGGED, ["Me@Example.com", "me@work.example"], ["me@example.com", "me@work.example", "other@example.com"])).toEqual({
       "me@example.com": true,
       "me@work.example": true,
-      "guest@example.com": false,
+      "other@example.com": false,
     });
   });
 
   test("an untagged machine whose owner Tailscale does not report: the same rule", () => {
-    expect(askers(UNREAD, ["me@example.com"], ["me@example.com", "guest@example.com"])).toEqual({ "me@example.com": true, "guest@example.com": false });
+    expect(askers(UNREAD, ["me@example.com"], ["me@example.com", "other@example.com"])).toEqual({ "me@example.com": true, "other@example.com": false });
   });
 
   test("an untagged machine with an owner: only the owner asks, an allowlisted login is refused", () => {
-    expect(askers(OWNED, ["friend@example.com"], ["owner@example.com", "friend@example.com", "guest@example.com"])).toEqual({
+    expect(askers(OWNED, ["friend@example.com"], ["owner@example.com", "friend@example.com", "other@example.com"])).toEqual({
       "owner@example.com": true,
       "friend@example.com": false,
-      "guest@example.com": false,
+      "other@example.com": false,
     });
   });
 

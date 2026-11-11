@@ -319,9 +319,8 @@ describe.skipIf(!hasDom)('the Sidebar tip', () => {
 });
 
 describe.skipIf(!hasDom)('sidebarTipDue and sidebarTipPlace', () => {
-  test('due only on the owner\'s page of an Inbox that reports it', () => {
+  test('due only on an Inbox that reports it', () => {
     expect(tip.sidebarTipDue({ reveal: { next: null, sidebar_tip: true } })).toBe(true);
-    expect(tip.sidebarTipDue({ guest: true, reveal: { next: null, sidebar_tip: true } })).toBe(false);
     expect(tip.sidebarTipDue({ reveal: { next: null } })).toBe(false);
     expect(tip.sidebarTipDue(null)).toBe(false);
   });

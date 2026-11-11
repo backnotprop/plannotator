@@ -195,7 +195,7 @@ export function PromptsSection({
       <div className="pm-head">
         <Chip custom={sharedCustom} />
         <span className="pm-sp" />
-        {reminder.editable && !sharedEditing && (
+        {!sharedEditing && (
           <>
             {(sharedCustom || overShared !== null) && (
               <Tip content="Delete prompts.inbox.reminder: every agent gets Plannotator's text again">
@@ -273,7 +273,7 @@ export function PromptsSection({
             </span>
           </span>
           <span className="ib-ctl">
-            {reminder.editable && !isEditing && (
+            {!isEditing && (
               <>
                 {(own !== null || over !== null) && (
                   <Tip content={`Delete ${name}'s own text: it gets the shared text again`}>
@@ -325,7 +325,7 @@ export function PromptsSection({
     <div ref={root} data-prompts-page="">
       <section className="ib-sgroup ib-sgroup-first" aria-labelledby={`${id}-rem`}>
         <h2 id={`${id}-rem`}>Inbox reminder</h2>
-        <p>{reminder.editable ? 'Sent once, when a session starts.' : 'Sent once, when a session starts. Change it on this computer.'}</p>
+        <p>Sent once, when a session starts.</p>
         <div className="ib-card">
           {shared}
           {INBOX_PROMPT_HOSTS.map(agent)}

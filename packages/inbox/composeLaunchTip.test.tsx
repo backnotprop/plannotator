@@ -2,8 +2,8 @@
  * The Launch tip in compose (approval "launch-tip", variant Beside; compose/launchTip.ts). A plain New message whose To
  * can start an agent, on an Inbox that has the tip for this page, claims it once and shows the card in the To row.
  *
- * The failures this catches: the tip shown at + on a project row, a reopened draft, the tour, or with no claim (a guest,
- * or stamped already), or claimed there and so used up; a claim the Inbox refused still drawing it; the first Escape
+ * The failures this catches: the tip shown at + on a project row, a reopened draft, the tour, or with no claim (stamped
+ * already), or claimed there and so used up; a claim the Inbox refused still drawing it; the first Escape
  * closing the box instead of only the tip; the tip taking focus (from To or the message) or Got it leaving focus on a
  * button that is going; the tip staying up once To is opened or Send is pressed; To not described by its words, or
  * no polite announcement; a phone's card staying over the message once it is tapped.
@@ -236,7 +236,7 @@ test.skipIf(!hasDom)('+ on a project row and a reopened draft: never shown, neve
   expect(claims).toBe(0);
 });
 
-test.skipIf(!hasDom)('no claim offered (a guest, stamped already), the tour, or To unable to start an agent: never shown, never claimed', async () => {
+test.skipIf(!hasDom)('no claim offered (stamped already), the tour, or To unable to start an agent: never shown, never claimed', async () => {
   await open({}, { tip: null });
   await settle();
   expect(tip() !== null).toBe(false);

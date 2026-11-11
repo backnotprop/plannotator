@@ -61,7 +61,7 @@ export interface InboxLiveSession {
   wrote_thread: boolean;
   /** Its connection can deliver into a running turn (Send now); false when it does not say. */
   send_now: boolean;
-  /** The session's label (issue #2450), on the window's route for this computer's owner only; absent when it has none. */
+  /** The session's label (issue #2450), on the window's route only; absent when it has none. */
   label?: string;
 }
 
@@ -494,7 +494,7 @@ export function createInboxLiveSessions(options: {
    * Every session's label as its latest poll sent it (issue #2450: the `@` picker, the list rows' agents, a
    * message's author): live sessions and the ones that ended while this Inbox ran, so a finished thread keeps
    * its names until the Inbox restarts. Display only, like the To picker's: nothing routes on it, nothing is
-   * stored, and no MCP read carries it. The routes give it to this computer's owner only (`isOwnerRequest`).
+   * stored, and no MCP read carries it. The routes give it to the person's windows.
    * No prototype, so a session id like "__proto__" or "constructor" is a plain key.
    */
   const labels = (): Record<string, string> => {
@@ -849,7 +849,7 @@ export function createInboxLiveSessions(options: {
   /**
    * What the Agents section reads from the sessions, as one string (`event: deliveries`' `agents`): which are listed,
    * live, busy or idle, and where they work. Never the time they were last heard, which every poll moves, nor a label:
-   * a label's change says `labels` to the owner's windows (which read the list for it), and nothing to a guest's.
+   * a label's change says `labels` to the windows (which read the list for it).
    */
   const agentsSignature = (since: number): string =>
     agentSessions(since)
@@ -1213,26 +1213,20 @@ export function createInboxLiveSessions(options: {
       headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" },
     });
 
-  /**
-   * The window's routes; null when the path is not one of them. `owner`: this computer's owner asks (this
-   * computer, the owner's tailnet login, their phone): only then does a session carry its `label`.
-   * `byGuest`: the request is a tailnet guest's (`isGuest`), so a new message it writes is marked `by_guest`.
-   */
-  const route = async (req: Request, path: string, owner = false, byGuest = false): Promise<Response | null> => {
+  /** The window's routes; null when the path is not one of them. A session carries its `label` here. */
+  const route = async (req: Request, path: string): Promise<Response | null> => {
     const sessionsMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/sessions$/.exec(path);
     if (sessionsMatch) {
       if (req.method !== "GET") return answer({ error: "Use GET." }, 405);
       const found = liveFor(sessionsMatch[1]!);
       // Send to another session's rows (issue #2450): the label, absent when the session has none.
-      const live = owner
-        ? {
-            ...found,
-            sessions: found.sessions.map((session) => {
-              const label = labelOf(session.session);
-              return label ? { ...session, label } : session;
-            }),
-          }
-        : found;
+      const live = {
+        ...found,
+        sessions: found.sessions.map((session) => {
+          const label = labelOf(session.session);
+          return label ? { ...session, label } : session;
+        }),
+      };
       const asker = new URL(req.url).searchParams.get("asker");
       const recipients = (new URL(req.url).searchParams.get("recipients") ?? "")
         .split(",")
@@ -1283,7 +1277,6 @@ export function createInboxLiveSessions(options: {
       body: body.body,
       idempotency_key: body.idempotency_key,
       to: target ? { host: target.host, session: target.session } : null,
-      ...(byGuest ? { by_guest: true } : {}),
     });
     return answer({ message: result.message, replayed: result.replayed });
   };

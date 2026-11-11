@@ -4,9 +4,8 @@
  * What regresses: a project listed that can't be set up and has no drawing (or one dropped that has a drawing), a
  * drawing read from anywhere but `<data dir>/system/<key>/drawing/`, an open PR row for a PR that touches no drawn
  * part (or of another repo, or closed), a PR whose patch fails taking the others down, and anything read while
- * System or Code review is off, for a tailnet guest, for another site’s page, or for a project the Inbox lacks; a
- * PR’s patch read again at the same head; the switch: shown with Code review off, flipped by a tailnet guest, a
- * malformed value saved, or every window not told.
+ * System or Code review is off, for another site’s page, or for a project the Inbox lacks; a
+ * PR’s patch read again at the same head; the switch: shown with Code review off, a malformed value saved, or every window not told.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -167,7 +166,6 @@ describe('the routes', () => {
       canonicalProjectId: (id: string) => id,
     },
     serverSession: 'srv',
-    ownerOrLocal: (req: Request) => req.headers.get('x-guest') !== '1',
     systemOn: () => switches.system,
     listPulls: async () => {
       listed += 1;
@@ -212,7 +210,7 @@ describe('the routes', () => {
     expect(listed).toBe(0);
   });
 
-  test('refused: System off, another method, a tailnet guest, another site, a project the Inbox lacks', async () => {
+  test('refused: System off, another method, another site, a project the Inbox lacks', async () => {
     const a = app();
     remotes.set(a.root, { display: 'acme/app', host: 'github.com' });
     drawIn(a.key);
@@ -222,7 +220,6 @@ describe('the routes', () => {
     }
     switches.system = true;
     expect((await call('/api/inbox/system/projects', [a], { method: 'POST' })).status).toBe(405);
-    expect(await call('/api/inbox/system/projects', [a], { headers: { 'x-guest': '1' } })).toMatchObject({ status: 403, body: { code: 'local_only' } });
     expect(await call('/api/inbox/system/projects', [a], { headers: { origin: 'https://evil.example' } })).toMatchObject({ status: 403, body: { code: 'cross_origin' } });
     expect(await call('/api/inbox/system/drawing', [a], { query: '?project=prj_nope' })).toMatchObject({ status: 422, body: { code: 'validation_error' } });
     expect(listed).toBe(0);
@@ -256,12 +253,11 @@ describe('the switch (Settings → Capabilities → System)', () => {
     expect(sw.wire()).toEqual({ system: { on: false } });
   });
 
-  test('the settings save: a tailnet guest is refused, a malformed value throws, before anything is saved', () => {
+  test('the settings save: a malformed value throws, before anything is saved', () => {
     const { sw, state } = make({ codeReview: true, saved: false });
-    expect(sw.check({ system: { on: true } }, false)).toBe('local_only');
-    expect(sw.check({}, false)).toBeNull();
-    for (const bad of [true, null, [], {}, { on: 'yes' }, { on: true, extra: 1 }]) expect(() => sw.check({ system: bad }, true)).toThrow(InboxError);
-    expect(sw.check({ system: { on: true } }, true)).toBeNull();
+    expect(() => sw.check({})).not.toThrow();
+    for (const bad of [true, null, [], {}, { on: 'yes' }, { on: true, extra: 1 }]) expect(() => sw.check({ system: bad })).toThrow(InboxError);
+    expect(() => sw.check({ system: { on: true } })).not.toThrow();
     expect(state.saved).toBe(false);
   });
 

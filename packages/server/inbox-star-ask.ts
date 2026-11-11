@@ -38,13 +38,13 @@ export interface InboxStarClaimDeps {
 }
 
 /**
- * The page at its calm moment claims the ask: the owner only, a release build, the line free (checked before the
+ * The page at its calm moment claims the ask: a release build, the line free (checked before the
  * already-starred check and again after it: gh may take up to 3 s). `key`: the same page's retry after a lost answer is
  * shown it again while it is still unanswered.
  */
-export async function claimInboxStar(deps: InboxStarClaimDeps, owner: boolean, key: string | null): Promise<StarAskClaim> {
+export async function claimInboxStar(deps: InboxStarClaimDeps, key: string | null): Promise<StarAskClaim> {
   const no: StarAskClaim = { show: false, canStar: false };
-  if (!owner || !deps.release) return no;
+  if (!deps.release) return no;
   const saved = (deps.saved ?? inboxStarSaved)();
   if (key && saved?.key === key) {
     const record = (deps.record ?? (() => readStarAskRecord(loadConfig())))();
@@ -57,13 +57,11 @@ export async function claimInboxStar(deps: InboxStarClaimDeps, owner: boolean, k
 /**
  * `POST /api/inbox/star-ask`: `{ action: "star" }` stars it with the person's gh (their click, on the card the Inbox
  * showed, while its check found gh able to); `{ action: "answer", answer: "not-now" | "opened" }` records the answer.
- * The owner's pages only: a guest gets `{ starred: false }` or `{ ok: false }` and nothing runs.
  */
-export async function inboxStarAction(service: StarAskService, owner: boolean, body: Record<string, unknown>): Promise<{ starred: boolean } | { ok: boolean }> {
-  if (body.action === "star") return owner ? service.star("inbox") : { starred: false };
+export async function inboxStarAction(service: StarAskService, body: Record<string, unknown>): Promise<{ starred: boolean } | { ok: boolean }> {
+  if (body.action === "star") return service.star("inbox");
   if (body.action !== "answer" || (body.answer !== "not-now" && body.answer !== "opened")) {
     throw new InboxError("validation_error", "action: star, or answer with answer: not-now or opened.", { field: "action" });
   }
-  if (!owner) return { ok: false };
   return service.answer(body.answer);
 }

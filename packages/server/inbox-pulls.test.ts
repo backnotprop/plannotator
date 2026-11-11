@@ -1973,19 +1973,18 @@ describe("Post to GitHub/GitLab (the owner's answer C: the person chooses at the
 });
 
 describe("who may read it", () => {
-  test("a tailnet guest is refused and runs nothing; the owner over the tailnet reads", async () => {
+  test("the owner over the tailnet reads", async () => {
     const MAGIC = "macbook-pro.tail0000.ts.net";
     const OWNER = "ramos@example.com";
-    const GUEST = "guest@example.com";
     const savedTailscale = process.env.PLANNOTATOR_INBOX_TAILSCALE;
     delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
     try {
-      const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-pulls-guest-")));
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-pulls-owner-")));
       roots.push(root);
       const dataDir = join(root, "data");
       mkdirSync(dataDir, { recursive: true });
       process.env.PLANNOTATOR_DATA_DIR = dataDir;
-      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true, inboxTailscaleAllow: [GUEST], inboxCodeReview: true }));
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true, inboxCodeReview: true }));
       const f = forge();
       const serve = new Map<number, string>();
       const tailscale: TailscaleRunner = (args) => {
@@ -2007,39 +2006,6 @@ describe("who may read it", () => {
       expect(listener).not.toBeNull();
       const through = (login: string) =>
         fetch(`http://127.0.0.1:${listener}/api/inbox/pulls`, { headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": login } });
-      const guest = await through(GUEST);
-      expect(guest.status).toBe(403);
-      expect(((await guest.json()) as { code: string }).code).toBe("local_only");
-      // Nor may a guest read the risk rules, change them, or ask for an agent's models.
-      for (const [path, init] of [
-        ["/api/inbox/pulls/risk", {}],
-        ["/api/inbox/pulls/risk/models?provider=pi-sdk", {}],
-        ["/api/inbox/pulls/risk", { method: "POST", body: JSON.stringify({ rules: "x", provider: null, model: null }) }],
-      ] as const) {
-        const answer = await fetch(`http://127.0.0.1:${listener}${path}`, { ...init, headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": GUEST, "Content-Type": "application/json" } });
-        expect(((await answer.json()) as { code: string }).code).toBe("local_only");
-      }
-      // Nor read a project's files through a guide's expand arrows.
-      const guestFile = await fetch(`http://127.0.0.1:${listener}/api/inbox/messages/msg_any/guide/file?path=a.ts`, { headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": GUEST } });
-      expect(guestFile.status).toBe(403);
-      expect(((await guestFile.json()) as { code: string }).code).toBe("local_only");
-      // Nor may a guest hand a PR to an agent.
-      const handGuest = await fetch(`http://127.0.0.1:${listener}/api/inbox/pulls/owner`, {
-        method: "POST",
-        headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": GUEST, "Content-Type": "application/json" },
-        body: JSON.stringify({ keys: ["github.com/northwind/billing-svc#412"], thread_id: "msg_01M4H6G73M9H3Z32T859E72NOP" }),
-      });
-      expect(handGuest.status).toBe(403);
-      // Nor post a review with the owner's gh account: the Inbox's one forge write is the owner's alone.
-      const postGuest = await fetch(`http://127.0.0.1:${listener}/api/inbox/pulls/review`, {
-        method: "POST",
-        headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": GUEST, "Content-Type": "application/json" },
-        body: JSON.stringify({ key: "github.com/northwind/billing-svc#412", head_sha: "412".padStart(40, "a"), action: "approve", body: "" }),
-      });
-      expect(postGuest.status).toBe(403);
-      expect(((await postGuest.json()) as { code: string }).code).toBe("local_only");
-      expect(f.calls).toEqual([]);
-      expect(post.calls).toEqual([]);
       expect((await through(OWNER)).status).toBe(200);
       // The owner over the tailnet may hand a PR over: past the guards, the route answers on the request itself.
       const handOwner = await fetch(`http://127.0.0.1:${listener}/api/inbox/pulls/owner`, {

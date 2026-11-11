@@ -195,7 +195,7 @@ import {
 import { agentToolHostForServer, createAIRuntime } from "./ai-runtime";
 import { assertTestHome } from "./test-home-guard";
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control";
-import { sessionTailnetAudience, sessionTailnetGate } from "./session-tailnet";
+import { refuseTailnetPeer, sessionTailnetAudience, sessionTailnetGate } from "./session-tailnet";
 import { countUnsentDraftComments, hostSessionClosedEvent } from "@plannotator/shared/host-control";
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "@plannotator/shared/server-session";
 import { isAIEndpointPath, isLongLivedAIEndpointPath, type AIEndpoints, type SessionBridge } from "@plannotator/ai";
@@ -2344,6 +2344,11 @@ export async function startReviewServer(
           // Host allowlist first, before any route (request-host-guard.ts).
           const hostRefusal = requestHostGuard.check(req);
           if (hostRefusal) return hostRefusal;
+          // Published over the tailnet: only this computer's owner gets past here (single player; session-tailnet.ts).
+          if (options.tailnetPublished === true) {
+            const notOwner = refuseTailnetPeer(req);
+            if (notOwner) return notOwner;
+          }
           // Then no write from another site, before any route (request-origin-guard.ts).
           const originRefusal = refuseCrossOriginWrite(req);
           if (originRefusal) return originRefusal;

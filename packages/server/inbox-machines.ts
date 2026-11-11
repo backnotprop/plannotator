@@ -110,8 +110,6 @@ export interface InboxMachinesContext {
    * whose thread, message, file, comment or project is this machine's: whatever a window believes, it never goes to a peer.
    */
   holds: (kind: HeldKind, id: string) => boolean;
-  /** A tailnet request from someone other than this computer's owner (a login from `inboxTailscaleAllow`). */
-  isGuest: (req: Request, via: "local" | "tailnet") => boolean;
   /** This Inbox's own version and the newest release it knows of: the fallback when a machine knows of no update itself. */
   ownVersions?: () => { current: string; latest: string | null };
   /** Tests: the links' clocks. */
@@ -337,19 +335,6 @@ const SNOOZE_ROUTE = /^threads\/[^/]+\/snooze$/;
 const REPLY_ROUTE = /^messages\/[^/]+\/reply$/;
 /** Another machine's folder names, for "Another folder on <machine>…" (remote launch), and where it would clone a URL. */
 const FOLDERS_ROUTES = new Set(["launch/folders", "launch/clone", "launch/clone-check"]);
-/** A tailnet guest of this Inbox, starting or trusting an agent on another machine, or updating one. */
-const OWNER_ONLY_BODY = { error: "Only this computer's owner can act on another machine from this Inbox.", code: "owner_only" } as const;
-/** Of a forwarded read's query, what a guest never passes on: `sessions`' folder-trust facts. */
-const GUEST_STRIPPED = ["trust_agent", "trust_project"] as const;
-
-/** A forwarded read's query: a guest reads as before, but never another machine's folder-trust facts (Trust and start is the owner's). */
-export function forwardedReadSearch(search: string, guest: boolean): string {
-  if (!guest) return search;
-  const query = new URLSearchParams(search);
-  if (!GUEST_STRIPPED.some((name) => query.has(name))) return search;
-  for (const name of GUEST_STRIPPED) query.delete(name);
-  return query.size > 0 ? `?${query}` : "";
-}
 /** A launched agent's buttons on another machine (remote launch): Stop, Try again, Trust folder, Delete. */
 const LAUNCH_ROUTE = /^launch\/[^/]+\/(stop|retry|trust|delete)$/;
 
@@ -796,11 +781,10 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const offline = () =>
       json({ error: `${links.get(machine)?.name ?? "That machine"} cannot be reached now.`, code: "machine_offline", machine: machinesView().find((m) => m.id === machine) }, 503);
     if (req.method === "GET") {
-      const search = forwardedReadSearch(url.search, context.isGuest(req, via));
+      const search = url.search;
       const headers = pick(req.headers, PASS_REQUEST);
       // Another machine's folder names ("Another folder on <machine>…"): the owner's window only, and said so to it.
       if (FOLDERS_ROUTES.has(route)) {
-        if (context.isGuest(req, via)) return json(OWNER_ONLY_BODY, 403);
         if (req.headers.get("sec-fetch-site") !== "same-origin") return json({ error: "Folders are listed in the Inbox window only.", code: "window_only" }, 403);
         headers[MACHINE_WINDOW_HEADER] = "1";
       }
@@ -837,9 +821,6 @@ export function createInboxMachines(context: InboxMachinesContext) {
     // Every other write is a JSON body, whatever its Content-Type says, and goes through the outbox.
     const body = await context.readBody(req);
     if (checkServerSession(body, context.serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-    // A guest the allow list let onto this Inbox answers the owner's other machines' threads as it answers this one's
-    // (owner ruling 2026-11-11), Stop and Delete included; starting or trusting an agent there stays the owner's, as here.
-    if (context.isGuest(req, via) && startsAgentThere(route, body) && !/\/(stop|delete)$/.test(route)) return json(OWNER_ONLY_BODY, 403);
     // A press in this Inbox's window (its own Origin and this run's page session), said to the other machine with the
     // write: it answers a permission prompt, or starts, stops or trusts an agent there, only for one (remote launch).
     // An agent's or a script's bare call is still the owner's for every other write, as before.
@@ -992,7 +973,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       return json({ waiting: waiting.map(outboxView), notices: outbox.notices().map(outboxView) });
     }
     // Cancel a write still waiting that never left (a launch held for a machine that is asleep): it is never sent.
-    // Any window's, as the write itself was (a guest's too); a held launch only from a window, as the forward took it.
+    // Any window's, as the write itself was; a held launch only from a window, as the forward took it.
     const cancel = /^\/api\/inbox\/outbox\/([^/]+)\/cancel$/.exec(path);
     if (cancel) {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
@@ -1024,7 +1005,6 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const askedMatch = /^\/api\/inbox\/machines\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/update\/asked$/.exec(path);
     if (askedMatch) {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
-      if (context.isGuest(req, via)) return json(OWNER_ONLY_BODY, 403);
       const body = await context.readBody(req);
       const stale = staleTab(body);
       if (stale) return stale;
@@ -1042,7 +1022,6 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (updateMatch) {
       if (req.method !== "GET" && req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
       // Another site's page never gets here: the request guard and the tailnet listener refuse it, reads included.
-      if (context.isGuest(req, via)) return json({ error: "Only this computer's owner can update another machine from this Inbox.", code: "owner_only" }, 403);
       const peer = peers.get(updateMatch[1]!);
       if (!peer) return json({ error: "That machine is not linked.", code: "machine_not_linked" }, 404);
       const name = links.get(peer.id)?.name ?? "That machine";
@@ -1092,8 +1071,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const unlinkMatch = /^\/api\/inbox\/machines\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/unlink$/.exec(path);
     if (path === "/api/inbox/machines/offer" || path === "/api/inbox/machines/link" || unlinkMatch) {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
-      // This computer's, and its owner's from any of their own devices over the tailnet (owner ruling 2026-11-11); never a guest's.
-      if (context.isGuest(req, via)) return json({ error: "Only this computer's owner can link machines.", code: "owner_only" }, 403);
+      // This computer's, and its owner's from any of their own devices over the tailnet (owner ruling 2026-11-11).
       const body = await context.readBody(req);
       const stale = staleTab(body);
       if (stale) return stale;

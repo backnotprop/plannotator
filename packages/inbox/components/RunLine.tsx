@@ -33,9 +33,7 @@ const STOP_TIP = 'Stops the session. Commands it started in the background keep 
 /**
  * `canOpen`: this window can open Terminal on this launch (the thread's rule: on the Inbox's computer, with
  * a session or a folder to trust). `canReaddress`: the waiting message can go to another session (Send to
- * another session is shown under the line). `guest`: a tailnet guest's page
- * (`tailnetGuest`), which gets Stop and Cancel as any page does, and no Try again (starting an agent is the
- * owner's: the server answers it `owner_only`).
+ * another session is shown under the line).
  */
 /**
  * `machine`: another machine's thread (remote launch): Stop, Try again and Trust folder go to that machine;
@@ -51,7 +49,6 @@ export function RunLine({
   run,
   canOpen,
   canReaddress = false,
-  guest = false,
   machine = null,
   machineName = null,
   onChanged,
@@ -60,7 +57,6 @@ export function RunLine({
   run: InboxRun;
   canOpen: boolean;
   canReaddress?: boolean;
-  guest?: boolean;
   machine?: string | null;
   machineName?: string | null;
   onChanged: () => void;
@@ -138,12 +134,11 @@ export function RunLine({
   let icon: 'spin' | 'warn' | 'stop' = 'spin';
   let text: React.ReactNode;
   let actions: React.ReactNode = null;
-  const retry = (words: string) =>
-    !guest && (
-      <button type="button" className="ib-btn ib-sm" disabled={busy !== null} onClick={() => void act('retry')} data-run-retry="">
-        {words}
-      </button>
-    );
+  const retry = (words: string) => (
+    <button type="button" className="ib-btn ib-sm" disabled={busy !== null} onClick={() => void act('retry')} data-run-retry="">
+      {words}
+    </button>
+  );
   const kept = 'Your message is kept.';
   let bar: number | null = null;
   switch (run.state) {
@@ -209,7 +204,7 @@ export function RunLine({
         );
         actions = (
           <>
-            {onChangeUrl && clone && !guest && (
+            {onChangeUrl && clone && (
               <button type="button" className="ib-btn ib-sm" onClick={() => onChangeUrl(clone.url)} data-run-clone-change="">
                 Change the URL
               </button>
@@ -248,8 +243,8 @@ export function RunLine({
     case 'clone_cancelled':
       // E7.
       icon = 'stop';
-      text = guest ? `The clone was cancelled. Nothing was kept on ${where}. Your reply starts it again.` : `You cancelled the clone. Nothing was kept on ${where}. Your reply starts it again.`;
-      actions = guest ? null : (
+      text = `You cancelled the clone. Nothing was kept on ${where}. Your reply starts it again.`;
+      actions = (
         <button type="button" className="ib-run-btn" disabled={busy !== null} onClick={() => void act('retry')} data-run-retry="">
           Clone again
         </button>
@@ -365,11 +360,9 @@ export function RunLine({
             </button>
           )}
           {canOpen && openTerminal}
-          {!guest && (
-            <button type="button" className="ib-btn ib-sm" disabled={busy !== null} onClick={() => void act('retry')} data-run-retry="">
-              Try again
-            </button>
-          )}
+          <button type="button" className="ib-btn ib-sm" disabled={busy !== null} onClick={() => void act('retry')} data-run-retry="">
+            Try again
+          </button>
         </>
       );
       break;

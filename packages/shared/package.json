@@ -192,6 +192,7 @@
     "./inbox/drafts": "./inbox/drafts.ts",
     "./inbox/connection": "./inbox/connection.ts",
     "./inbox/tailnet": "./inbox/tailnet.ts",
+    "./inbox/tailnet-refusal": "./inbox/tailnet-refusal.ts",
     "./inbox/agent-link": "./inbox/agent-link.ts"
   },
   "dependencies": {

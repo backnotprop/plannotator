@@ -20,16 +20,13 @@ export interface TourEntryModel {
 }
 
 /** What the connect card says about the agents on this computer. */
-export function tourEntryModel(agents: InboxAgentsModel | null, unavailable: 'tailnet' | 'failed' | null, live: ReadonlySet<string> = new Set()): TourEntryModel {
+export function tourEntryModel(agents: InboxAgentsModel | null, _unavailable: 'failed' | null, live: ReadonlySet<string> = new Set()): TourEntryModel {
   const plan = agents ? connectPlan(agents, [], live) : null;
   if (!plan || plan.found.length === 0) {
     return {
       marks: PLUGIN_HOSTS.map((id) => ({ id, ready: null })),
       count: null,
-      line:
-        unavailable === 'tailnet'
-          ? 'Connect them from the computer they run on: there each one is a click or a command to copy.'
-          : 'Claude Code, Pi, OpenCode and any MCP client. Most take one click or one command.',
+      line: 'Claude Code, Pi, OpenCode and any MCP client. Most take one click or one command.',
     };
   }
   const done = new Set(plan.done.map((r) => r.id));

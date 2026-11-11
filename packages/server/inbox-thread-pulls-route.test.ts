@@ -1,8 +1,8 @@
 /**
  * The window's route for a thread's PRs and the state reader behind it
  * (approval "inbox-pr-binding", 2026-11-08). The forge is a stand-in runner:
- * no gh runs. The failures these guard: a tailnet guest (or any request the
- * Inbox does not count as the owner's) that changes a thread's PRs; a bad ref
+ * no gh runs. The failures these guard: a stale window that changes a
+ * thread's PRs; a bad ref
  * that half-writes; the person's change recorded as an agent's; one gh call
  * per PR instead of one per repository; a merged PR read again on every view;
  * a state that lands on one thread but not on another holding the same PR;
@@ -65,13 +65,12 @@ function world(options: { fixture?: () => ThreadPullFixture | null; gh?: { run: 
     json: (data, status = 200) => Response.json(data, { status }),
     readBody: async (req) => (await req.json()) as Record<string, unknown>,
     sessionMismatch: (body) => (typeof body.serverSession === "string" && body.serverSession !== "srv_1" ? Response.json({ error: "stale" }, { status: 409 }) : null),
-    localOnly: () => Response.json({ error: "owner only" }, { status: 403 }),
     now: () => now,
   });
   const path = (id: string) => `/api/inbox/threads/${id}/pulls`;
-  const get = (id: string, owner = true) => route.route(new Request(`http://x${path(id)}`), path(id), owner);
-  const post = (id: string, body: Record<string, unknown>, owner = true) =>
-    route.route(new Request(`http://x${path(id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), path(id), owner);
+  const get = (id: string) => route.route(new Request(`http://x${path(id)}`), path(id));
+  const post = (id: string, body: Record<string, unknown>) =>
+    route.route(new Request(`http://x${path(id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), path(id));
   const agentAdd = (id: string, ...values: string[]) => {
     const parsed = parseInboxThreadPullRefs(values, "add");
     if ("error" in parsed) throw new Error(parsed.error);
@@ -81,12 +80,8 @@ function world(options: { fixture?: () => ThreadPullFixture | null; gh?: { run: 
 }
 
 describe("the window's route", () => {
-  test("only the owner's window may change a thread's PRs; anyone else gets 403 and nothing is written", async () => {
+  test("a window from before a restart is told so, and writes nothing", async () => {
     const w = world();
-    const refused = await w.post(w.thread, { add: ["o/r#1"] }, false);
-    expect(refused!.status).toBe(403);
-    expect(w.store.threadPulls(w.thread)).toEqual([]);
-    // A window from before a restart is told so, and writes nothing either.
     expect((await w.post(w.thread, { serverSession: "srv_old", add: ["o/r#1"] }))!.status).toBe(409);
     expect(w.store.threadPulls(w.thread)).toEqual([]);
   });
@@ -163,15 +158,6 @@ describe("the state reader", () => {
     expect(gh.calls).toHaveLength(2);
     expect(gh.calls[1]!.join(" ")).toContain("n2: pullRequest");
     expect(gh.calls[1]!.join(" ")).not.toContain("n1: pullRequest");
-  });
-
-  test("a tailnet guest's read runs no gh: it gets the stored state", async () => {
-    const gh = fakeGh({ 1: { state: "OPEN" } });
-    const w = world({ gh });
-    w.agentAdd(w.thread, "o/r#1");
-    const answer = (await (await w.get(w.thread, false))!.json()) as InboxThreadPullsAnswer;
-    expect(gh.calls).toEqual([]);
-    expect(answer.pulls[0]!.state).toBe("unknown");
   });
 
   test("the sandbox's stand-in states are read instead of the forge, by ref, key or URL", async () => {

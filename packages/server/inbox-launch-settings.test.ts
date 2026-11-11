@@ -1,7 +1,7 @@
 /**
  * Settings → Agents' read of how a launch would start (GET /api/inbox/launch/settings),
  * on a real launch module over a temp data dir and a temp home. What each test guards:
- * another site's page and a tailnet guest are refused before the person's login shell is
+ * another site's page is refused before the person's login shell is
  * started; concurrent reads share one shell read; the person's own bypass consent, read
  * from their Claude files, decides whether Full permissions can apply; and a person
  * whose Claude settings set a default mode is not shown (or started in) auto mode. And
@@ -20,7 +20,7 @@ import { createInboxLiveSessions } from "./inbox-sessions";
 import { claudeBypassSetup, createAgentEnvironmentFor } from "./inbox-agents";
 
 const restore: (() => void)[] = [];
-/** The machine's owner over the tailnet: every other allowed login is a guest. */
+/** The machine's owner over the tailnet (the only login the tailnet listener lets in). */
 const OWNER = "owner@example.com";
 afterEach(() => {
   for (const undo of restore.splice(0).reverse()) undo();
@@ -71,8 +71,6 @@ function setup(options: { shellSkips?: boolean; claude?: Record<string, unknown>
     json: (body, status = 200) => Response.json(body, { status }),
     onChange: () => {},
     selfCommand: ["plannotator"],
-    // As inbox.ts's `isGuest`: a tailnet login that is not the owner's.
-    isGuest: (req, via) => via === "tailnet" && req.headers.get("tailscale-user-login") !== OWNER,
   });
   restore.push(() => launch.stop());
   const get = async (headers: Record<string, string> = {}, via = "local", query = "") => {
@@ -164,11 +162,11 @@ describe("Start agents from New message (config.json `inboxLaunch.enabled`)", ()
       json: (body, status = 200) => Response.json(body, { status }),
       launch: off.launch,
     });
-    const send = (key: string, door: Parameters<typeof compose.route>[4]) => {
+    const send = (key: string, door: Parameters<typeof compose.route>[3]) => {
       const url = new URL("http://127.0.0.1:4000/api/inbox/messages");
       const body = { idempotency_key: key, body: "Fix the retries.", to: { launch: { agent: "claude-code", project_id: "prj_x" } } };
       const req = new Request(url, { method: "POST", headers: { host: "127.0.0.1:4000", "content-type": "application/json" }, body: JSON.stringify(body) });
-      return compose.route(req, url, true, "local", door).then(
+      return compose.route(req, url, true, door).then(
         () => null,
         (e: { code?: string; message?: string }) => ({ code: e.code, message: e.message }),
       );
@@ -190,10 +188,8 @@ describe("Start agents from New message (config.json `inboxLaunch.enabled`)", ()
     expect((await explicit.get()).body.launch).toMatchObject({ unsupported: true, enabled: true });
   });
 
-  test("the owner's alone, and only a boolean", async () => {
+  test("only a boolean; the owner's phone over the tailnet changes it too", async () => {
     const world = setup({ enabled: null });
-    expect(await world.post({ enabled: false }, { "tailscale-user-login": "guest@example.com" }, "tailnet")).toMatchObject({ status: 403, body: { code: "owner_only" } });
-    expect(world.launch.enabled()).toBe(true);
     await expect(world.post({ enabled: "false" })).rejects.toMatchObject({ code: "validation_error" });
     expect(world.saved()).toEqual({});
     // The owner over the tailnet (their phone), as the other launch settings.
@@ -203,11 +199,10 @@ describe("Start agents from New message (config.json `inboxLaunch.enabled`)", ()
 });
 
 describe("GET /api/inbox/launch/settings", () => {
-  test("another site's page and a tailnet guest are refused, and never start the login shell; the owner reads it on their phone too", async () => {
+  test("another site's page is refused, and never starts the login shell; the owner reads it on their phone too", async () => {
     const { get, reads } = setup();
     expect(await get({ origin: "https://evil.example" })).toMatchObject({ status: 403, body: { code: "cross_origin" } });
     expect(await get({ "sec-fetch-site": "cross-site" })).toMatchObject({ status: 403, body: { code: "cross_origin" } });
-    expect(await get({ "tailscale-user-login": "guest@example.com" }, "tailnet")).toMatchObject({ status: 403, body: { code: "owner_only" } });
     expect(reads.count).toBe(0);
     // The window's own page reads.
     expect((await get({ origin: "http://127.0.0.1:4000", "sec-fetch-site": "same-origin" })).status).toBe(200);

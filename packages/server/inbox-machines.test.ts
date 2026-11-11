@@ -1657,10 +1657,11 @@ describe("an agent's snooze_thread of a linked machine's thread", () => {
   });
 });
 
-describe("a tailnet guest through the forward: it answers, it never starts an agent there", () => {
+describe("linked machines through the forward, over the tailnet", () => {
   const MAGIC = "laptop.tail0000.ts.net";
   const OWNER = "owner@example.com";
-  const GUEST = "guest@example.com";
+  /** The login a tagged machine (no Tailscale owner) names as its owner in `inboxTailscaleAllow`. */
+  const ALLOWED = "allowed@example.com";
   const roots: string[] = [];
   const restore: (() => void)[] = [];
   afterAll(() => {
@@ -1701,16 +1702,17 @@ describe("a tailnet guest through the forward: it answers, it never starts an ag
 
   /**
    * A (the MacBook, `tagged`: a tagged Tailscale device with no owner) linked both ways to B (the Mini) on loopback,
-   * A's window published on the tailnet with GUEST in `inboxTailscaleAllow`, and an agent's question waiting on B.
+   * A's window published on the tailnet (ALLOWED in `inboxTailscaleAllow`, which names the owner only on a tagged
+   * machine), and an agent's question waiting on B.
    */
   async function linkedPair(prefix: string, tagged: boolean, far: Partial<Parameters<typeof startInboxServer>[0]> = {}) {
     const root = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
     roots.push(root);
     const dataA = join(root, "macbook");
     const dataB = join(root, "mini");
-    // config.json (read from PLANNOTATOR_DATA_DIR) lets GUEST onto A's window over the tailnet.
+    // config.json (read from PLANNOTATOR_DATA_DIR): on a tagged A, ALLOWED is its owner; on an owned A it is ignored.
     mkdirSync(dataA, { recursive: true });
-    writeFileSync(join(dataA, "config.json"), JSON.stringify({ inboxTailscaleAllow: [GUEST] }));
+    writeFileSync(join(dataA, "config.json"), JSON.stringify({ inboxTailscaleAllow: [ALLOWED] }));
     const previous = process.env.PLANNOTATOR_DATA_DIR;
     process.env.PLANNOTATOR_DATA_DIR = dataA;
     restore.push(() => {
@@ -1785,16 +1787,13 @@ describe("a tailnet guest through the forward: it answers, it never starts an ag
 
   const delivered = async (answer: Response) => [answer.status, answer.headers.get("x-plannotator-outbox")];
 
-  test("Update on a linked machine: the owner from any path, never a guest, another site, the generic forward or the outbox", async () => {
+  test("Update on a linked machine: the owner from any path, never another site, the generic forward or the outbox", async () => {
     const w = await linkedPair("plannotator-machines-update-gates-", false);
     try {
       const { a, b, mini } = w;
       const route = `/api/inbox/machines/${mini}/update`;
-      // A tailnet guest: refused, read and write.
-      expect((await w.throughServe(GUEST, route)).status).toBe(403);
-      const guest = await w.throughServe(GUEST, route, {});
-      expect(guest.status).toBe(403);
-      expect(((await guest.json()) as Json).code).toBe("owner_only");
+      // Another account over the tailnet (the allowlist names it, ignored on an owned machine): refused at the listener.
+      expect((await w.throughServe(ALLOWED, route, {})).status).toBe(403);
       // The owner over the tailnet: it reaches that machine (a dev build here, so it answers that and runs nothing).
       const owner = await w.throughServe(OWNER, route, {});
       expect(owner.status).toBe(409);
@@ -2027,7 +2026,7 @@ describe("a tailnet guest through the forward: it answers, it never starts an ag
   test("where Tailscale names no owner (a tagged machine), a login let on is treated as you: Update is never refused", async () => {
     const w = await linkedPair("plannotator-machines-update-tagged-", true);
     try {
-      const answer = await w.throughServe(GUEST, `/api/inbox/machines/${w.mini}/update`, {});
+      const answer = await w.throughServe(ALLOWED, `/api/inbox/machines/${w.mini}/update`, {});
       expect(answer.status).toBe(409);
       expect(((await answer.json()) as Json).code).toBe("update_dev_build");
     } finally {
@@ -2061,23 +2060,13 @@ describe("a tailnet guest through the forward: it answers, it never starts an ag
     }
   });
 
-  test("a tailnet guest of this machine answers a linked machine's thread as here, but never starts an agent there; the owner writes from every path: this window, another device, a plain local call", async () => {
+  test("the owner writes to a linked machine's thread from every path: this window, another device, a plain local call", async () => {
     const w = await linkedPair("plannotator-machines-forward-owner-", false);
     try {
       const { a, mini, asked } = w;
-      // Reads through the forward stay as they are, for the guest too.
-      const read = await w.throughServe(GUEST, `/api/inbox/m/${mini}/threads/${asked.thread_id}`);
+      // Reads through the forward stay as they are.
+      const read = await w.throughServe(OWNER, `/api/inbox/m/${mini}/threads/${asked.thread_id}`);
       expect(read.status).toBe(200);
-      const cursor = ((await read.json()) as Json).cursor as number;
-
-      // The guest, from A's own page (owner ruling 2026-11-11): its reply and its file reach B as the owner's do.
-      const guestReply = await w.throughServe(GUEST, `/api/inbox/m/${mini}/messages/${asked.message_id}/reply`, { idempotency_key: "guest-reply", words: "Guest says retry.", seen_through_seq: cursor });
-      expect(await delivered(guestReply)).toEqual([200, "delivered"]);
-      expect((await w.uploadThroughServe(GUEST, "guest-up")).status).toBe(200);
-      // Starting an agent on B stays the owner's, as it is on A: refused, and nothing is held for B.
-      const start = await w.throughServe(GUEST, `/api/inbox/m/${mini}/messages`, { idempotency_key: "guest-start", body: "Fix it.", to: { launch: { agent: "claude-code", project_id: "prj_x" } } });
-      expect([start.status, ((await start.json()) as Json).code]).toEqual([403, "owner_only"]);
-      expect(await w.personOnB()).toHaveLength(1);
 
       // The owner keeps everything through the forward, each answer delivered to B once.
       // The owner's window on this machine.
@@ -2110,23 +2099,19 @@ describe("a tailnet guest through the forward: it answers, it never starts an ag
       });
       expect(bareUpload.status).toBe(200);
       const landed = (await w.personOnB()).map((m) => m.body as string);
-      expect(landed).toHaveLength(4);
-      expect(landed[0]).toStartWith("Guest says retry.");
-      expect(landed[1]).toStartWith("From the MacBook's window.");
-      expect(landed[2]).toStartWith("From the owner's phone browser.");
-      expect(landed[3]).toStartWith("From a script on the MacBook.");
+      expect(landed).toHaveLength(3);
+      expect(landed[0]).toStartWith("From the MacBook's window.");
+      expect(landed[1]).toStartWith("From the owner's phone browser.");
+      expect(landed[2]).toStartWith("From a script on the MacBook.");
     } finally {
       await w.stop();
     }
   }, 60_000);
 
-  test("a tailnet guest cancels what waits for another machine as the owner does, but never lists its folders", async () => {
+  test("the owner's phone cancels what waits for another machine", async () => {
     const w = await linkedPair("plannotator-machines-forward-cancel-", false);
     try {
       const { a, b, mini, asked } = w;
-      // Another machine's folder names are the owner's window's: a guest gets none.
-      const folders = await w.throughServe(GUEST, `/api/inbox/m/${mini}/launch/folders?path=~`);
-      expect([folders.status, ((await folders.json()) as Json).code]).toEqual([403, "owner_only"]);
       b.stop();
       await waitFor("A sees B asleep", async () => {
         const view = (await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines`)).json()) as Json;
@@ -2136,10 +2121,10 @@ describe("a tailnet guest through the forward: it answers, it never starts an ag
       expect(held.status).toBe(202);
       const waiting = (await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/outbox`)).json()) as Json;
       expect((waiting.waiting as Json[]).map((e) => e.key)).toEqual(["owner-held-read"]);
-      // A guest's page over the tailnet: Cancel works there too.
-      const guest = await w.throughServe(GUEST, "/api/inbox/outbox/owner-held-read/cancel", {});
-      expect(guest.status).toBe(200);
-      expect(((await guest.json()) as Json).entry.state).toBe("cancelled");
+      // The owner's page over the tailnet: Cancel works there too.
+      const cancelled = await w.throughServe(OWNER, "/api/inbox/outbox/owner-held-read/cancel", {});
+      expect(cancelled.status).toBe(200);
+      expect(((await cancelled.json()) as Json).entry.state).toBe("cancelled");
     } finally {
       await w.stop();
     }
@@ -2149,22 +2134,22 @@ describe("a tailnet guest through the forward: it answers, it never starts an ag
     const w = await linkedPair("plannotator-machines-forward-tagged-", true);
     try {
       const { mini, asked } = w;
-      expect(await delivered(await w.throughServe(GUEST, `/api/inbox/m/${mini}/messages/${asked.message_id}/picks`, await w.pickBody("tagged-pick", "Alert")))).toEqual([
+      expect(await delivered(await w.throughServe(ALLOWED, `/api/inbox/m/${mini}/messages/${asked.message_id}/picks`, await w.pickBody("tagged-pick", "Alert")))).toEqual([
         200,
         "delivered",
       ]);
       expect(((await w.onB()).messages[0].questions as Json[])[0]!.state).toBe("picked");
-      const reply = await w.throughServe(GUEST, `/api/inbox/m/${mini}/messages/${asked.message_id}/reply`, {
+      const reply = await w.throughServe(ALLOWED, `/api/inbox/m/${mini}/messages/${asked.message_id}/reply`, {
         idempotency_key: "tagged-reply",
         words: "From the tagged machine's only user.",
         seen_through_seq: (await w.thread()).cursor,
       });
       expect(await delivered(reply)).toEqual([200, "delivered"]);
-      expect(await delivered(await w.throughServe(GUEST, `/api/inbox/m/${mini}/threads/${asked.thread_id}/snooze`, { idempotency_key: "tagged-snooze", until: tomorrow() }))).toEqual([
+      expect(await delivered(await w.throughServe(ALLOWED, `/api/inbox/m/${mini}/threads/${asked.thread_id}/snooze`, { idempotency_key: "tagged-snooze", until: tomorrow() }))).toEqual([
         200,
         "delivered",
       ]);
-      expect((await w.uploadThroughServe(GUEST, "tagged-up")).status).toBe(200);
+      expect((await w.uploadThroughServe(ALLOWED, "tagged-up")).status).toBe(200);
       const landed = await w.personOnB();
       expect(landed).toHaveLength(1);
       expect(landed[0]!.body).toStartWith("From the tagged machine's only user.");

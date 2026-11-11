@@ -1,9 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { INBOX_ACCOUNT_SWITCHING, type InboxAccount, type InboxAccountsFailure, type InboxAccountsRead, type InboxAccountSwitch, type InboxAccountSwitchFailure, type InboxAccountSwitchTarget, type InboxMachineAccountsRead } from '@plannotator/core/inbox-types';
-import { InboxApiError, inboxApi } from './api';
+import { inboxApi } from './api';
 
-/** The read's answer, or why there is none: a tailnet guest, or an Inbox that did not answer. */
-export type AccountsView = InboxAccountsRead | { state: 'owner_only' } | { state: 'unreachable' };
+/** The read's answer, or why there is none: an Inbox that did not answer. */
+export type AccountsView = InboxAccountsRead | { state: 'unreachable' };
 
 export type AccountsFailure = InboxAccountsFailure | 'unreachable';
 
@@ -26,7 +26,7 @@ export interface MachineAccounts {
  * person's wait and the read after it too), or `unconfirmed` (it switched, and
  * the read after it failed).
  */
-export type SwitchLine = InboxAccountSwitchFailure | 'not_installed' | 'owner_only' | 'unreachable' | 'still_switching' | 'unconfirmed';
+export type SwitchLine = InboxAccountSwitchFailure | 'not_installed' | 'unreachable' | 'still_switching' | 'unconfirmed';
 
 /** What a switch's machine is called in `switches`: this computer, or a linked machine's id. */
 export const SELF = 'self';
@@ -106,7 +106,7 @@ const isTarget = (account: InboxAccount, to: InboxAccountSwitchTarget) =>
  * read has the last word: `to` in use is done whatever the answer said, so a
  * switch that outlasted the wait and then ended is no failure.
  */
-export function switchLine(answer: InboxAccountSwitch | { state: 'failed'; reason: 'owner_only' | 'unreachable' }, after: AccountsView, to: InboxAccountSwitchTarget): SwitchLine | null {
+export function switchLine(answer: InboxAccountSwitch | { state: 'failed'; reason: 'unreachable' }, after: AccountsView, to: InboxAccountSwitchTarget): SwitchLine | null {
   if (after.state === 'accounts' && after.accounts.some((account) => account.active && isTarget(account, to))) return null;
   const readFailed = after.state !== 'accounts';
   if (answer.state === 'switched') return readFailed ? 'unconfirmed' : 'run_failed';
@@ -144,8 +144,8 @@ function useAccountsRead(): Accounts {
       let next: AccountsView;
       try {
         next = await inboxApi.accounts(fresh);
-      } catch (cause) {
-        next = { state: cause instanceof InboxApiError && cause.code === 'owner_only' ? 'owner_only' : 'unreachable' };
+      } catch {
+        next = { state: 'unreachable' };
       }
       answered.current = next;
       const failure = accountsFailure(next);
@@ -173,11 +173,11 @@ function useAccountsRead(): Accounts {
       if (!canSwitch(machine)) return;
       const set = (change: AccountSwitch) => setSwitches((held) => ({ ...held, [machine]: change }));
       set({ machine, to, label, going: true, line: null });
-      let answer: InboxAccountSwitch | { state: 'failed'; reason: 'owner_only' | 'unreachable' };
+      let answer: InboxAccountSwitch | { state: 'failed'; reason: 'unreachable' };
       try {
         answer = await inboxApi.switchAccount(to);
-      } catch (cause) {
-        answer = { state: 'failed', reason: cause instanceof InboxApiError && cause.code === 'owner_only' ? 'owner_only' : 'unreachable' };
+      } catch {
+        answer = { state: 'failed', reason: 'unreachable' };
       }
       // Never a read that started before the switch ended: it could show the account in use before.
       await running.current;
