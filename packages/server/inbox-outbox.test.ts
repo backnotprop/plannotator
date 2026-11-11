@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 import { doorRouteNames, doorWriteRoutes } from "./inbox-devices";
-import { outboxView } from "./inbox-machines";
+import { forwardedReadSearch, outboxView, startsAgentThere } from "./inbox-machines";
 import { classifyAnswer, DOOR_WRITES, doorWriteKind, InboxOutbox, OUTBOX_KEEP_SETTLED_MS, OUTBOX_MAX_SERVER_ERRORS, replyIsStale, type OutboxAnswer, type OutboxEntry } from "./inbox-outbox";
 
 const B = "ibx_01K00000000000000000000000";
@@ -128,6 +128,69 @@ describe("an unlink keeps what was not sent", () => {
     expect(reopened.notices().map((entry) => entry.key)).toEqual(["k1"]);
     reopened.dismiss("k1");
     expect(InboxOutbox.open(dir, () => clock).list(B)).toEqual([]);
+  });
+});
+
+describe("Cancel: a write still waiting that never left (a launch held for a machine that is asleep)", () => {
+  const launch = (key: string) => ({ idempotency_key: key, body: "Fix the refund retries", to: { launch: { agent: "claude-code", project_id: "prj_1" } } });
+
+  test("cancelled before it left: never sent, not waiting, no notice, and still so after a restart", async () => {
+    const dir = dataDir();
+    const outbox = InboxOutbox.open(dir);
+    outbox.submit(B, "messages", launch("k1"));
+    outbox.submit(B, "messages/m1/reply", reply("k2"));
+    expect(outbox.cancel("k1")!.state).toBe("cancelled");
+    const o = owner(ok);
+    await outbox.drain(B, o.send);
+    expect(o.sent).toEqual(["k2"]);
+    const again = InboxOutbox.open(dir);
+    expect(again.get("k1")!.state).toBe("cancelled");
+    expect(again.list(B, "pending")).toHaveLength(0);
+    expect(again.notices()).toHaveLength(0);
+    // A retried Send under the same key answers the cancelled entry: nothing is queued again.
+    expect(again.submit(B, "messages", launch("k1")).entry.state).toBe("cancelled");
+  });
+
+  test("one that left may have landed (rule 10): Cancel leaves it as it is, and it is sent again", async () => {
+    const outbox = InboxOutbox.open(dataDir());
+    outbox.submit(B, "messages", launch("k1"));
+    await outbox.drain(B, owner(null).send);
+    expect(outbox.cancel("k1")!.state).toBe("sending");
+    const o = owner(ok);
+    await outbox.drain(B, o.send);
+    expect(o.sent).toEqual(["k1"]);
+    expect(outbox.get("k1")!.state).toBe("delivered");
+    expect(outbox.cancel("nope")).toBeNull();
+  });
+
+  test("whether a press in a window made it is kept with the entry, across a restart", () => {
+    const dir = dataDir();
+    const outbox = InboxOutbox.open(dir);
+    outbox.submit(B, "messages", launch("k1"), null, true);
+    outbox.submit(B, "messages/m1/reply", reply("k2"));
+    const again = InboxOutbox.open(dir);
+    expect(again.get("k1")!.window).toBe(true);
+    expect(again.get("k2")!.window).toBeUndefined();
+  });
+});
+
+describe("remote launch: which forwarded writes start, stop or trust an agent", () => {
+  test("a new message that starts an agent, and a launch's Stop, Try again, Trust folder and Delete; nothing else", () => {
+    expect(startsAgentThere("messages", { to: { launch: { agent: "claude-code", project_id: "prj_1" } } })).toBe(true);
+    expect(startsAgentThere("messages", { to: { launch: { agent: "claude-code", scratch: true } } })).toBe(true);
+    for (const action of ["stop", "retry", "trust", "delete"]) expect(startsAgentThere(`launch/lch_1/${action}`, {})).toBe(true);
+    expect(startsAgentThere("messages", { to: { host: "claude-code", session: "ses_1" } })).toBe(false);
+    expect(startsAgentThere("messages/m1/reply", { to: { launch: {} } })).toBe(false);
+    expect(startsAgentThere("launch/lch_1/open", {})).toBe(false);
+    expect(startsAgentThere("launch/settings", {})).toBe(false);
+  });
+
+  test("a tailnet guest's read through the forward never asks for the other machine's folder-trust facts; the owner's does", () => {
+    const asked = "?trust_agent=claude-code&trust_project=prj_1&thread=thr_1";
+    expect(forwardedReadSearch(asked, true)).toBe("?thread=thr_1");
+    expect(forwardedReadSearch("?trust_agent=claude-code&trust_project=prj_1", true)).toBe("");
+    expect(forwardedReadSearch(asked, false)).toBe(asked);
+    expect(forwardedReadSearch("?thread=thr_1", true)).toBe("?thread=thr_1");
   });
 });
 
@@ -388,6 +451,12 @@ describe("rule 8: every door write is classified, and only small JSON is held", 
     expect(doorWriteKind("messages/msg_1/reply/extra")).toBeNull();
     expect(doorWriteKind("messages/msg_1/actions/not-an-action")).toBeNull();
     expect(doorWriteKind("settings")).toBeNull();
+    // On the door for a phone, in the table, and still never forwarded: a held one would answer no upload id.
+    expect(DOOR_WRITES["POST uploads/reuse"]).toBe("local");
+    expect(doorWriteKind("uploads/reuse")).toBeNull();
+    // A star is on the door for a phone and stays on the computer that holds it: never forwarded to a linked machine.
+    expect(doorWriteKind("threads/msg_1/pin")).toBeNull();
+    expect(doorWriteKind("pins")).toBeNull();
   });
 
   test("an Inbox that never holds a write keeps no outbox folder", () => {

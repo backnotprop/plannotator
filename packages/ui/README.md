@@ -36,9 +36,17 @@ configurePlannotatorUI({
   alertIconRenderer,           // (name) => ReactNode | null for a GitHub alert title line's <!-- icon: name --> (default: null, the type's icon)
   fenceTheme,                  // (colorTheme, mode) => Shiki theme name | undefined for code fences (default: SHIKI_THEME_MAP, else pierre-dark/light)
   componentTooltips,           // true: ui's own hover text (components/HostTitle) draws as ui's Tooltip, not a native title (ui 0.53.0; default false)
+  commentCard,                 // true or { pane, foot } (CSS selectors): the comment box is a small card by the words, "Comment" on its button, a chevron that keeps the words; import "@plannotator/ui/comment-card.css" (default false: today's popover)
+  visibleCommentDrafts,        // true: a Viewer comment closed with words keeps its highlight and a floating "Draft" badge that reopens it (default false)
   digitHexIssueRefs,           // true: digit-only #123456 / #12345678 link as issue refs (when a ref link can be built), not hex swatches (default false)
+  crossRepoRefsWithoutRepo,    // true | { host }: owner/repo#123 links on github.com, or that host, where InlineMarkdown has no githubRepo (default false: plain text); may be set again, mounted text re-renders
+  touchSelectionToolbar,       // true: on a touch screen the selection toolbar goes below the selection (clear of iOS's edit menu), inside the screen, with 44px buttons (default false)
   refCardTransport,            // (href, ref, signal) => card data for an issue / PR / MR link; with one, useRefHoverCards(rootRef) draws hover cards (default: none, no card, no request). refCardRouteTransport(route) builds one over a server route
+  deferOffscreenCodeHighlight, // true: a code fence off screen stays plain until it comes near (highlighted before it shows), the rest in idle time (default false)
+  codeHighlightWorker,         // { html(code, lang, theme) }: with deferOffscreenCodeHighlight, a waiting fence's markup made off the main thread (default: none)
   loadSettingsFromBackend,     // true: re-hydrate settings from your (synchronous) storageBackend after install, applied last
+  pageMarks,                   // true: <body data-pn-popout> while a PopoutDialog is open, <html data-pn-selection-chooser> while the code review's selection chooser shows, so a host's build can key theme.css's / comments.css's html:has(…) / body:has(…) on them (default false)
+  clickAWord,                  // false: a click on a word in the Viewer's Select input method makes nothing, as before (default true: it highlights the word); the Viewer's own clickAWord prop wins
 });
 ```
 
@@ -126,6 +134,7 @@ Everything a host needs around `HtmlViewer` to match Plannotator's HTML annotati
 - **`components/HtmlSurfaceControls`**: the eye / refresh / pen header controls with Plannotator's markup and `labels` overrides.
 - **`AnnotationPanel` `unanchoredIds`**: an "Unanchored" chip on the listed cards.
 - **`HtmlViewer` `scrollBehavior`** (`'auto'` for reduced motion) and **`maxAdditionalTargets`** (a product cap the bridge honors too). With the cap enforced upstream (bridge toggle, parent trust boundary on submit and on restore, `projectHostThreads` `maxTargets` on read), a composed comment never reaches the host with more targets than the cap, so a host's own cap-dropped handling (`capDroppedTargets` from `buildPersistedHtmlAnchor`, or a message-counting listener) is unreachable in normal operation; keep it only as a backstop for rows written by an older host build or by another writer. Byte-budget drops (`sizeDroppedTargets`) are a separate path and remain reachable.
+- **`HtmlViewer` `scrollClear`** (optional `() => { left, top, bottom } | null`, frame pixels): where a host's own panel floats over the frame's right side. Read when an annotation is selected and sent as `clear` on `scroll-to`: a mark under the panel scrolls to just below it where the page can scroll and there is room, else it is centred as before. Absent or null: the message and the scroll are unchanged; an older bridge ignores the field.
 - An `ExternalAnnotationTransport` whose `subscribe` emits `snapshot` on a host push keeps `useExternalAnnotations` off its fallback poll.
 
 See HANDOFF.md § "HTML annotation parity seams".
@@ -301,6 +310,24 @@ in 0.42.0 (proven by diffing the mounted `outerHTML` against the base commit).
 - **`AnnotationToolbar` `quickLabels`** (default `true`): `false` hides the Zap
   picker and makes the Alt+digit label shortcuts inert on that toolbar. The
   one-click 👍 is unaffected, and mode state is still yours to clamp.
+- **`AnnotationToolbar` `onSide`** (forwarded by `Viewer` to its text-selection
+  toolbar only, and by `HtmlViewer`): `(text, context) => void`. A "Side"
+  button (two speech bubbles and the word) after the reactions, with a divider
+  before it and the usual one before ×. Pressing it passes the selected text
+  (what Copy reads) and the same context `selectionActions` get (`blockId`,
+  offsets, `element`), and closes the toolbar; what Side opens is yours. Absent renders no
+  button and no extra divider. The Plannotator Inbox uses it for Ask AI.
+- **`AnnotationToolbar` `sideButton`** (forwarded by `Viewer` and
+  `HtmlViewer` beside `onSide`): `{ icon?: ReactNode; label: string }`. Draws
+  the `onSide` button icon-only, as an ordinary toolbar button the size of its
+  neighbours, in the same place between the same dividers: `icon` is its glyph
+  (absent means the package's two speech bubbles) and `label` its tooltip and
+  accessible name. Absent keeps the two bubbles and the word "Side"; ignored
+  without `onSide`. The press is unchanged. The Plannotator Inbox passes the
+  mark of the agent that owns the thread ("Side chat with Claude").
+- **`inbox-thread/icons` `hostHasMark(host)`**: whether `HostMark` draws that
+  host's own mark and not its neutral code glyph, for a place that would rather
+  draw something else than the neutral glyph. `HostMark` renders as before.
 - **`CommentPopover` `mentionSource`** (0.43.2 adds `heading?` above the list
   and an optional `avatar?: { url?, initials?, tint? }` per person, drawn before
   the label; both absent → the 0.43.1 rows): `{ people, emptyNotice?,
@@ -356,6 +383,17 @@ for the two viewer props and the annotation field. § "Mention token chips in
 the composer (0.44.0)" covers the chips, the metric rule, the merged-range
 refactor behind them, and the three inherited limits (duplicate labels,
 restored drafts, and a label that is a prefix of another label).
+
+### Float roots
+
+The floats that portal into `document.body` carry a stable hook on their root, so a host can style or mark them (for example `-webkit-app-region: no-drag` under a window's own buttons) without matching Tailwind classes: `.annotation-toolbar` (`AnnotationToolbar`), `[data-table-toolbar]` (`TableToolbar`), `.code-snippet-preview-window` (`CodeSnippetPreview`), `[data-floating-picker]` (`FloatingQuickLabelPicker`), `[data-comment-popover]` and `[data-popover-layer]` (`CommentPopover`). Attributes only: no look or behaviour changes.
+
+### Timeline foot seams (`AnnotationPanel`)
+
+Both opt-in and defaulting to today's behavior.
+
+- **`timelineFooter?: ReactNode`**: the host's own section after the timeline, inside its scroll area, so the cards and the section scroll as one. Absent: no wrapper element.
+- **`hideEmptyMessage?: boolean`**: an empty timeline without "No annotations yet" and its hint, for a host that shows something else there. The way to other files' comments stays.
 
 ### Annotation card seams (`AnnotationPanel`; 0.45.0)
 
@@ -490,7 +528,7 @@ See HANDOFF.md § "Decision toggle on any question, and an opener for the host's
 
 **Answers without comments (ui 0.53.0).** `Viewer` `answerOnly`: annotation authoring and the document actions (Global comment, Copy) are off as under `readOnly`, while question cards and checkboxes keep their handlers, for a host that shows a message to answer, not a document to annotate. See HANDOFF.md § "Viewer `answerOnly` (ui 0.53.0)".
 
-**Comments on an answer-only document (ui 0.53.1).** `Viewer` `textComments`, with `answerOnly`: the text-selection toolbar (comment-only) and its composer come back, a diagram's parts take comments too (ui 0.56.0), question cards stay out of selection, nothing else of authoring does. See HANDOFF.md § "Viewer `textComments` (ui 0.53.1)".
+**Comments on an answer-only document (ui 0.53.1).** `Viewer` `textComments`, with `answerOnly`: the text-selection toolbar (comment-only; `textDeletions` adds Delete back, unreleased) and its composer come back, a diagram's parts take comments too (ui 0.56.0), question cards stay out of selection, nothing else of authoring does. See HANDOFF.md § "Viewer `textComments` (ui 0.53.1)".
 
 **Local links decided by the host (ui 0.53.0).** `Viewer` `resolveLocalLink`: the host decides what a link to a local path does (open it itself, or draw it as inert text), markdown and raw HTML alike. See HANDOFF.md § "Viewer `resolveLocalLink` (ui 0.53.0)".
 
@@ -686,7 +724,7 @@ npm install @plannotator/ui @plannotator/core
 - `@plannotator/core` — pure utils + types, zero deps, browser-safe (CI enforces no `node:` imports). Published.
 - `@plannotator/ui` — React components/hooks + theme + `configure()`. Depends on an exact published `@plannotator/core` version. Published.
 - `@plannotator/shared`, `@plannotator/ai` — stay private to the monorepo; `shared` re-exports `core`'s modules via shims so Plannotator's internals are untouched.
-- Currently `@plannotator/ui` 0.61.0 (unreleased) depends exactly on `@plannotator/core` 0.25.19 (unreleased). `core` is bumped only when something under `packages/core` changes, so `ui` can advance alone. Keep the published core version exact in `packages/ui/package.json`; do not use a `workspace:` protocol there, because a directly published manifest must remain installable outside this monorepo. Bun still links the matching local workspace during development. When both packages change, publish `core` first, then build and publish the UI tarball. `bun run check:sibling-deps @plannotator/ui` (from the repo root; it reads npm) fails while the pinned core isn't on npm. See HANDOFF.md "Publishing & versioning" for the verification command.
+- Currently `@plannotator/ui` 0.63.0 (unreleased; 0.62.0 is published) depends exactly on `@plannotator/core` 0.25.22 (unreleased; 0.25.21 is published). `core` is bumped only when something under `packages/core` changes, so `ui` can advance alone. Keep the published core version exact in `packages/ui/package.json`; do not use a `workspace:` protocol there, because a directly published manifest must remain installable outside this monorepo. Bun still links the matching local workspace during development. When both packages change, publish `core` first, then build and publish the UI tarball. `bun run check:sibling-deps @plannotator/ui` (from the repo root; it reads npm) fails while the pinned core isn't on npm. See HANDOFF.md "Publishing & versioning" for the verification command.
 
 ## The one rule
 

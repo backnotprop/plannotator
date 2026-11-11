@@ -1,0 +1,73 @@
+name: Browser smoke
+
+# The browser tier of a PR: a few Playwright specs that walk the Inbox's core
+# paths on the COMPILED binary, in about five minutes. The full browser suite
+# (Inbox window e2e, inbox-e2e.yml) runs on main every two hours instead, and on
+# a PR only on demand (the `ci:e2e` label, or a manual run on the branch).
+#
+# The specs are SMOKE_SPECS in scripts/ci-e2e-shard.ts: inbox.spec.ts (the
+# agents' threads land in the list, a row opens the thread, picks and words go
+# out with Send and the agent reads them, Settings opens) and
+# inbox-message-comments.spec.ts (a comment on words in an agent's message).
+#
+# One job, so nothing waits for a second runner: the apps and the binary are
+# built on the runner, as the e2e build job does, while the Playwright image
+# is pulled; then the specs run in that image, with the user and flags of the
+# e2e shards (scripts/ci-e2e-in-image.sh).
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+# One run per PR: a newer push cancels the older run.
+concurrency:
+  group: browser-smoke-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Browser smoke (Inbox core paths against the compiled binary)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      # In the background: the image is ready by the time the build is.
+      - name: Pull the Playwright image while the apps build
+        run: |
+          version="$(jq -r '.devDependencies["@playwright/test"]' package.json)"
+          nohup docker pull --quiet "mcr.microsoft.com/playwright:v${version}-noble" > "$RUNNER_TEMP/playwright-pull.log" 2>&1 &
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build the apps
+        run: bun run build:review && bun run build:hook
+
+      - name: Compile the binary
+        run: >-
+          bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig
+          --define '__CLI_VERSION__="0.0.0-dev"' --outfile .local/plannotator
+
+      - name: Run the smoke specs in the Playwright image
+        run: bash scripts/ci-e2e-in-image.sh . bun run scripts/ci-e2e-shard.ts smoke
+
+      - name: Keep the screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: browser-smoke-proof
+          path: .local/proof/
+          if-no-files-found: ignore
+          retention-days: 7

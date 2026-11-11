@@ -296,6 +296,8 @@ test.skipIf(!hasDom)('the project the list shows stays while the person is there
   await choose('archive');
   await until(() => !!document.querySelector('[data-project-archived]'), 'the empty state');
   expect(document.querySelector('[data-project-archived]')!.textContent).toContain(`Everything in ${name} is archived.`);
+  // The rows stay drawn, archived and faded, under it until the list settles (approval "inbox-list-view", R7).
+  expect(document.querySelectorAll('.ib-lbody [data-row]:not([data-archived])').length).toBe(0);
   expect(projectRow()!.hasAttribute('data-held')).toBe(true);
   const inbox = [...document.querySelectorAll<HTMLButtonElement>('.ib-nav')].find((b) => b.textContent?.includes('Inbox'))!;
   await act(async () => {

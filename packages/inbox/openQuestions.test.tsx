@@ -245,6 +245,20 @@ describe('fitting the foot on one line (footFit.ts)', () => {
     expect(openQuestionsFormText(12, 'count')).toBe('12');
   });
 
+  test('after Skip them every form with words reads "N to skip", N being what Skip them counted (a question that came after stays open; action items are never skipped); nothing to count reads "Questions", or nothing at all when every question is answered in the draft, never "0"', () => {
+    expect(openQuestionsFormText(6, 'full', 0, false, 6)).toBe('6 to skip');
+    expect(openQuestionsFormText(6, 'short', 0, false, 6)).toBe('6 to skip');
+    expect(openQuestionsFormText(6, 'count', 0, false, 6)).toBe('6');
+    expect(openQuestionsFormText(6, 'short', 2, false, 6)).toBe('6 to skip');
+    // A seventh question landed after Skip them: this Send still skips the six.
+    expect(openQuestionsFormText(7, 'full', 0, false, 6)).toBe('6 to skip');
+    expect(openQuestionsFormText(7, 'count', 0, false, 6)).toBe('6');
+    expect(openQuestionsFormText(0, 'full')).toBe('Questions');
+    expect(openQuestionsFormText(0, 'count')).toBe('Questions');
+    expect(openQuestionsFormText(0, 'full', 0, false, null, true)).toBe('');
+    expect(openQuestionsFormText(0, 'count', 0, false, null, true)).toBe('');
+  });
+
   test('with action items: the long form names each kind; the short forms count both (the fallback the row already had)', () => {
     expect(openQuestionsFormText(0, 'full', 1)).toBe('1 open action item');
     expect(openQuestionsFormText(0, 'full', 3)).toBe('3 open action items');
@@ -265,13 +279,12 @@ describe('fitting the foot on one line (footFit.ts)', () => {
     expect(onOneLine([553, 553, 605])).toBe(false);
   });
 
-  test('the whole row shortens in the owner\'s order before the status wraps: the keycaps, skip, Edit, the checklist, the count, the draft words, tight', () => {
-    expect([0, 1, 2, 3, 4, 5, 6, 7].map((level) => footRowTokens(level))).toEqual(['', 'keys', 'keys skip', 'keys skip edit', 'keys skip edit steps', 'keys skip edit steps oq', 'keys skip edit steps oq draft', 'keys skip edit steps oq draft tight']);
-    // A phone has one more step: Edit draft as its pencil. Other windows stop at tight.
-    expect(footRowTokens(8, true)).toBe('keys skip edit steps oq draft tight icon');
-    expect(footRowTokens(8)).toBe('keys skip edit steps oq draft tight');
+  test('the whole row shortens in the owner\'s order before the status wraps: the keycaps, Edit, the checklist, the count, the draft words, tight', () => {
+    expect([0, 1, 2, 3, 4, 5, 6].map((level) => footRowTokens(level))).toEqual(['', 'keys', 'keys edit', 'keys edit steps', 'keys edit steps oq', 'keys edit steps oq draft', 'keys edit steps oq draft tight']);
+    // No step for a skip chip (it lives in the open questions list) and none past tight.
+    expect(footRowTokens(9)).toBe('keys edit steps oq draft tight');
     // The open questions button keeps its longest form until the oq step (after the checklist gave way), then shows its count.
-    expect([0, 1, 2, 3, 4, 5, 7].map((level) => footRowOpenQuestionsForm(level, 'full'))).toEqual(['full', 'full', 'full', 'full', 'full', 'count', 'count']);
+    expect([0, 1, 2, 3, 4, 5, 6].map((level) => footRowOpenQuestionsForm(level, 'full'))).toEqual(['full', 'full', 'full', 'full', 'count', 'count', 'count']);
     expect(footRowOpenQuestionsForm(0, 'short')).toBe('short');
   });
 
@@ -394,15 +407,16 @@ async function openList() {
   await until(() => !!list(), 'the list');
 }
 
-test.skipIf(!hasDom)('the button sits after Reply (no Re-ask in the foot), counts 4 questions (no replaced one) and the action item, and opens a menu', async () => {
+test.skipIf(!hasDom)('the button sits after Reply (no Re-ask in the foot), counts the 3 unanswered questions (no replaced one, not the one in the draft) and the action item, and opens a menu', async () => {
   const el = await render(thread(sample()));
   const b = button()!;
-  // Both kinds wait: "open" goes and each is named (owner, 2026-10-30).
-  expect(b.textContent?.trim()).toBe('4 questions, 1 action item');
+  // Both kinds wait: "open" goes and each is named (owner, 2026-10-30). The picked question is the draft's to count
+  // (approval "reply-bar-pairs"): its row stays in the list.
+  expect(b.textContent?.trim()).toBe('3 questions, 1 action item');
   const foot = [...el.querySelectorAll('[data-foot-buttons] button')].map((n) => n.textContent?.trim());
   expect(foot).not.toContain('Re-ask');
   expect(el.querySelector('[data-foot-buttons] [data-reask]')).toBeNull();
-  expect(foot.indexOf('4 questions, 1 action item')).toBe(foot.indexOf('Edit draft') + 1);
+  expect(foot.indexOf('3 questions, 1 action item')).toBe(foot.indexOf('Edit draft') + 1);
   expect(b.getAttribute('aria-haspopup')).toBe('menu');
   expect(b.getAttribute('aria-expanded')).toBe('false');
   expect(b.hasAttribute('title')).toBe(false);
@@ -474,9 +488,15 @@ test.skipIf(!hasDom)('arrow keys move through the rows; Escape closes the list a
     b.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
   });
   await until(() => !!list(), 'the list from the keyboard');
+  // The list's first item is the skip row's toggle (approval "reply-bar-pairs"), then the rows.
+  await until(() => !!list()?.querySelector('[data-skip-toggle][data-highlighted]'), 'the skip toggle highlighted');
+  await act(async () => {
+    (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+  });
   await until(() => rows().some((r) => r.hasAttribute('data-highlighted')), 'a highlighted row');
   const highlighted = () => rows().findIndex((r) => r.hasAttribute('data-highlighted'));
   const start = highlighted();
+  expect(start).toBe(0);
   // No per-row Skip (approval "oq-skip-select"): one step to the next row.
   await act(async () => {
     (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
@@ -647,7 +667,7 @@ test.skipIf(!hasDom)('on a phone: the long form first, and the list is a bottom 
   await render(thread(sample()), { phone: true });
   const b = button()!;
   // The owner's words on a phone too (no layout here, so nothing is shortened): "it should say both".
-  expect(b.textContent?.trim()).toBe('4 questions, 1 action item');
+  expect(b.textContent?.trim()).toBe('3 questions, 1 action item');
   expect(b.getAttribute('data-label-form')).toBe('full');
   await openList();
   const positioner = list()!.closest('.ib-oq-pos')!;
@@ -669,7 +689,79 @@ const allSent = (keepAction: boolean) =>
 
 test.skipIf(!hasDom)('no button when nothing is open', async () => {
   await render(thread(allSent(false)));
-  expect(button()).toBeNull();
+  expect(button() === null).toBe(true);
+});
+
+/** Every question answered in the draft (picked, not sent), the action item done: nothing is left unanswered. */
+const allPicked = () =>
+  sample().map((m) => ({
+    ...m,
+    ...(m.questions ? { questions: m.questions.map((q) => (q.state === 'open' ? { ...q, state: 'picked' as const, revision: 1, answer: answerFor(q, ['Yes']) } : q)) } : {}),
+    ...(m.actions ? { actions: m.actions.map((a) => ({ ...a, state: 'sent' as const })) } : {}),
+  }));
+
+test.skipIf(!hasDom)('every question answered in the draft: the button is its icon alone ("? ⌄", no count, never "0"), named "Questions, all answered in your draft"; its list stays; the draft counts them', async () => {
+  const el = await render(thread(allPicked()));
+  const b = button();
+  expect(b === null).toBe(false);
+  expect(b!.querySelector('[data-oq-words]')!.textContent).toBe('');
+  expect(/\d/.test(b!.textContent ?? '')).toBe(false);
+  expect(b!.getAttribute('aria-label')).toBe('Questions, all answered in your draft');
+  expect(b!.getAttribute('aria-keyshortcuts')).toBe('Q');
+  // The draft holds them: Send and Edit draft, and on a computer the status says how many.
+  const foot = [...el.querySelectorAll('[data-foot-buttons] button')].map((n) => n.textContent?.replace(/\s+/g, ' ').trim());
+  expect(foot[0]).toBe('Send');
+  expect(el.querySelector('[data-foot-status] [data-draft-foot]')!.textContent).toContain('4 picks');
+  // The list still opens on its rows, each a draft answer (so Unskip stays in reach).
+  await openList();
+  expect(rows().length).toBe(4);
+  expect(rows().every((r) => (r.textContent ?? '').includes('Draft'))).toBe(true);
+});
+
+test.skipIf(!hasDom)('on a phone: Send first, then one Draft button carrying the count (picks and comments), then the unanswered questions; no status; the keys stay', async () => {
+  const el = await render(thread(sample()), { phone: true });
+  const buttons = [...el.querySelectorAll<HTMLButtonElement>('[data-foot-buttons] > button')];
+  expect(buttons[0]!.textContent?.trim()).toBe('Send');
+  const draft = buttons[1]!;
+  expect(draft.hasAttribute('data-edit-draft')).toBe(true);
+  // "✎ Draft 1": the one pick, once. Its name says what the count holds.
+  expect(draft.querySelector('[data-draft-count]')!.textContent).toBe('1');
+  // Its name starts with what it shows ("Draft 1"), then what the count holds, then what it does.
+  expect(draft.getAttribute('aria-label')).toBe('Draft 1: 1 pick. Edit draft');
+  expect(draft.getAttribute('aria-keyshortcuts')).toBe('R');
+  expect(buttons[2]!.matches('[data-open-questions]')).toBe(true);
+  expect(buttons[2]!.getAttribute('aria-keyshortcuts')).toBe('Q');
+  // No pill or chip beside them: the counts live on the buttons.
+  expect(el.querySelector('[data-foot-status], [data-skip-chip], [data-draft-foot]') === null).toBe(true);
+  // Send is still described by the draft and the skip, as hidden text.
+  const text = buttons[0]!.getAttribute('aria-describedby')!.split(' ').map((i) => document.getElementById(i)?.textContent ?? '').join(' ');
+  expect(text).toContain('Draft, 1 pick');
+  expect(text).toContain('3 questions stay open');
+});
+
+test.skipIf(!hasDom)('after Skip them the button counts what Skip them counted, not the unanswered questions now (one that came after stays open); its name keeps the action items apart', async () => {
+  const { OpenQuestionsButton } = await import('./components/OpenQuestions');
+  const { questions } = threadOpenQuestions(sample());
+  const actions = threadOpenActions(sample());
+  const unanswered = questions.filter((q) => !q.picked).length;
+  expect(unanswered).toBe(3);
+  host = document.createElement('div');
+  host.className = 'pn-inbox';
+  document.body.appendChild(host);
+  act(() => {
+    root = createRoot(host!);
+    root.render(
+      <div data-foot-row="">
+        <div data-foot-buttons="">
+          <OpenQuestionsButton questions={questions} actions={actions} phone={false} measure={() => new Map()} onPick={() => {}} skip={{ count: 2, keepOpen: false, onToggle: () => {} }} />
+        </div>
+      </div>,
+    );
+  });
+  await settle();
+  const b = host.querySelector<HTMLElement>('[data-open-questions]')!;
+  expect(b.querySelector('[data-oq-words]')!.textContent).toBe('2 to skip');
+  expect(b.getAttribute('aria-label')).toBe('2 questions skipped when you send, 1 open action item');
 });
 
 test.skipIf(!hasDom)('only an action item open: the button counts it, and its list holds that item, then Re-ask', async () => {
@@ -762,6 +854,7 @@ describe('the full-screen composer counts as the foot does', () => {
           to: 'Claude Code',
           value: '',
           onChange: () => {},
+          onLateVoice: () => {},
           onSend: () => {},
           sending: false,
           canSend: false,
@@ -960,8 +1053,9 @@ test.skipIf(!hasDom)('at rest: no Skip on any row; the last row is Re-ask and "S
   // Every menu item: the four question rows, the action item's row, then Re-ask and "Skip…" on one last row.
   const items = [...list()!.querySelectorAll<HTMLElement>('[role="menuitem"]')];
   const kindOf = (n: HTMLElement) =>
-    n.hasAttribute('data-reask') ? 'reask' : n.hasAttribute('data-open-questions-skip-mode') ? 'skip…' : n.hasAttribute('data-open-action') ? 'action' : 'row';
-  expect(items.map(kindOf)).toEqual(['row', 'row', 'row', 'row', 'action', 'reask', 'skip…']);
+    n.hasAttribute('data-skip-toggle') ? 'skip them' : n.hasAttribute('data-reask') ? 'reask' : n.hasAttribute('data-open-questions-skip-mode') ? 'skip…' : n.hasAttribute('data-open-action') ? 'action' : 'row';
+  // First the skip row this Send's toggle (approval "reply-bar-pairs"), when picks wait and a question is unanswered.
+  expect(items.map(kindOf)).toEqual(['skip them', 'row', 'row', 'row', 'row', 'action', 'reask', 'skip…']);
   expect(skipMode()!.textContent).toBe('Skip…');
   expect(skipMode()!.closest('.ib-oq-last') === reaskItem()!.closest('.ib-oq-last')).toBe(true);
   expect(document.getElementById(skipMode()!.getAttribute('aria-describedby')!)?.textContent).toBe('Choose questions to skip. Skips ride your next Send.');
@@ -1028,7 +1122,9 @@ test.skipIf(!hasDom)('"Skip…" enters select mode; ticks save nothing; "Skip 2"
   // The card ends as its own Skip leaves it; nothing was sent.
   await until(() => cardState(el).skip === 'Unskip', 'the card skipped from the list');
   expect(cardState(el)).toEqual(byCard.card);
-  expect(button()!.textContent?.trim()).toBe('4 questions, 1 action item');
+  // A saved skip is an answer in the draft: the button counts only the question still unanswered (approval
+  // "reply-bar-pairs"); the skipped rows stay listed, quiet.
+  expect(button()!.textContent?.trim()).toBe('1 question, 1 action item');
 });
 
 test.skipIf(!hasDom)('Cancel and Escape drop the ticks; Escape leaves select mode before it closes the list', async () => {

@@ -27,10 +27,22 @@ export const OPEN_QUESTIONS_LABEL_FORMS: readonly OpenQuestionsLabelForm[] = ['f
  * The visible words of each form: "6 open questions" / "6 open" / "6". With
  * action items: "2 open action items" alone, "6 questions, 2 action items"
  * with questions (`openItemsLabel`); the short forms count both ("8 open", "8").
+ * `permission` (only a launched agent's permission prompts wait): "1 permission
+ * waiting" / "1 waiting" / "1". `skip` (this Send skips that many questions,
+ * the ones the list's "Skip them" counted): "6 to skip" / "6 to skip" / "6".
+ * Nothing to count: "Questions", or with `answered` (every listed question is
+ * answered in the draft) no words at all: the button is its icon.
  */
-export function openQuestionsFormText(questions: number, form: OpenQuestionsLabelForm, actions = 0): string {
+export function openQuestionsFormText(questions: number, form: OpenQuestionsLabelForm, actions = 0, permission = false, skip: number | null = null, answered = false): string {
+  // This Send skips the questions the list's "Skip them" counted (approval "reply-bar-pairs"): "6 to skip", or "6" at
+  // the count, with the skip glyph. Action items are never skipped, so they are not in it.
+  if (skip !== null && skip > 0) return form === 'count' ? String(skip) : `${skip} to skip`;
   const n = questions + actions;
+  // Nothing left to count: every listed question answered in the draft draws the icon alone ("? ⌄", never a bare "0");
+  // only Re-ask or "Decide these" keep the list: its name.
+  if (n === 0) return answered ? '' : 'Questions';
   if (form === 'count') return String(n);
+  if (permission) return form === 'short' ? `${n} waiting` : `${n} permission${n === 1 ? '' : 's'} waiting`;
   if (form === 'short') return `${n} open`;
   return openItemsLabel(questions, actions);
 }
@@ -52,6 +64,27 @@ export function footFitCandidates(max: OpenQuestionsLabelForm): FootFit[] {
     { form, tight: false },
     { form, tight: true },
   ]);
+}
+
+/**
+ * A way to draw the foot of full screen's card on a phone. `fit` is the foot's `data-fit` (inbox.css), its tokens:
+ * `chips`: "2 comments" becomes its icon and the number; `link`: "Open in thread" becomes "Thread"; `stack`: the chips
+ * take a row of their own over the paperclip, the mic and the link; `wrap`: the chips may wrap in that row.
+ */
+export interface CardFootFit extends FootFit {
+  fit: string;
+}
+
+/**
+ * What yields on the card's foot, in order, until the row holds: the open questions' words (as in the thread's foot),
+ * then the comments' word, then the link's first words; the icons, numbers and targets never shrink. Only then, with
+ * text sizes a phone's row cannot hold, do the chips take their own row, with their words back as far as they fit.
+ */
+export function cardFootFitCandidates(): CardFootFit[] {
+  const count: FootFit = { form: 'count', tight: false };
+  const rows = (forms: readonly FootFit[], fit: string) => forms.map((form) => ({ ...form, fit }));
+  const words = footFitCandidates('full').filter((c) => !c.tight);
+  return [...rows(words, ''), ...rows([count], 'chips'), ...rows([count], 'chips link'), ...rows(words, 'stack'), ...rows([count], 'stack chips'), ...rows([count], 'stack chips link wrap')];
 }
 
 /** A way to draw the row's buttons with the checklist button beside them: `steps`, its chevron gone. */
@@ -113,6 +146,14 @@ export function laidOutChildren(row: Element): HTMLElement[] {
 }
 
 /**
+ * The children that must share a line: not one that always takes its own (`flex-basis: 100%`, a phone's Send to
+ * another session and Archive), so those two never cost the open questions their words.
+ */
+function sameLineChildren(row: Element): HTMLElement[] {
+  return laidOutChildren(row).filter((el) => getComputedStyle(el).flexBasis !== '100%');
+}
+
+/**
  * Tries each way in turn on the page itself (before paint: the caller runs in
  * a layout effect) and leaves the button drawn the first way that keeps the
  * row on one line; none does: the last. `apply` draws one way on the button.
@@ -124,7 +165,7 @@ export function fitFootRow<T>(buttons: HTMLElement, candidates: readonly T[], ap
   if (buttons.getBoundingClientRect().width <= 0 || candidates.length === 0) return null;
   for (const fit of candidates) {
     apply(fit);
-    if (onOneLine(laidOutChildren(buttons).map((el) => el.getBoundingClientRect().top)) && fits()) return fit;
+    if (onOneLine(sameLineChildren(buttons).map((el) => el.getBoundingClientRect().top)) && fits()) return fit;
   }
   return candidates[candidates.length - 1]!;
 }
@@ -138,35 +179,29 @@ export function fitFootRow<T>(buttons: HTMLElement, candidates: readonly T[], ap
 // status takes its own line above the buttons:
 //   0. keys   the buttons' keycaps (R): drawn for the eye only, so they go before any words
 //             (approval "inbox-keyboard-shortcuts"; the key stays in aria-keyshortcuts and the map)
-//   1. skip   the skip chip: "1 question stays open · Skip it" → "1 open · Skip"
-//   2. edit   "Edit draft" → "Edit"
-//   3. steps  the checklist button "◑ 10/12 ⌄" → "◑ 10/12": it is read only, so it gives way
+//   1. edit   "Edit draft" → "Edit"
+//   2. steps  the checklist button "◑ 10/12 ⌄" → "◑ 10/12": it is read only, so it gives way
 //             before the open questions' words ("it should say both")
-//   4. oq     "2 open questions ⌄" → the icon, "2" and the chevron
-//   5. draft  the pick words after the Draft pill go; the comment count stays,
+//   3. oq     "2 open questions ⌄" → the icon, "2" and the chevron
+//   4. draft  the pick words after the Draft pill go; the comment count stays,
 //             as a comment glyph and the number inside the pill ("Draft 💬3";
 //             with no comments, "Draft" alone)
-//   6. tight  the buttons' side padding and the gaps (the status's too) get smaller
-//   7. icon   a phone only: "Edit draft" becomes its pencil, the gaps 4 px
+//   5. tight  the buttons' side padding and the gaps (the status's too) get smaller
 // Each step keeps the ones before it. The long words stay in the page as
 // visually hidden text (inbox.css), so names and descriptions are whole.
+// A phone has no status at the row's end (approval "reply-bar-pairs": Edit draft carries the draft's count and the
+// skip lives in the open questions list), so this runs on a computer only; a phone's open questions button fits
+// itself among the buttons.
 
 /** One step of shortening; a level is the first N of them. */
-export type FootRowStep = 'keys' | 'skip' | 'edit' | 'steps' | 'oq' | 'draft' | 'tight' | 'icon';
+export type FootRowStep = 'keys' | 'edit' | 'steps' | 'oq' | 'draft' | 'tight';
 
-/** The steps every window takes. */
-export const FOOT_ROW_STEPS: readonly FootRowStep[] = ['keys', 'skip', 'edit', 'steps', 'oq', 'draft', 'tight'];
-
-/** A phone's steps: the same, then Edit draft as its pencil. */
-export const PHONE_FOOT_ROW_STEPS: readonly FootRowStep[] = [...FOOT_ROW_STEPS, 'icon'];
-
-export function footRowSteps(phone = false): readonly FootRowStep[] {
-  return phone ? PHONE_FOOT_ROW_STEPS : FOOT_ROW_STEPS;
-}
+/** The steps, in order. */
+export const FOOT_ROW_STEPS: readonly FootRowStep[] = ['keys', 'edit', 'steps', 'oq', 'draft', 'tight'];
 
 /** The row's `data-fit` at a level: the steps taken, space-separated ("" at level 0). */
-export function footRowTokens(level: number, phone = false): string {
-  return footRowSteps(phone).slice(0, Math.max(0, level)).join(' ');
+export function footRowTokens(level: number): string {
+  return FOOT_ROW_STEPS.slice(0, Math.max(0, level)).join(' ');
 }
 
 /** The open questions button's form at a level: `max` until the `oq` step, then the count. */
@@ -180,38 +215,39 @@ export function onOneRow(mids: readonly number[]): boolean {
 }
 
 function rowMids(row: Element): number[] {
-  const parts = [...row.querySelectorAll<HTMLElement>('[data-foot-buttons], [data-foot-status]')].flatMap((group) => laidOutChildren(group));
+  const parts = [...row.querySelectorAll<HTMLElement>('[data-foot-buttons], [data-foot-status]')].flatMap((group) => sameLineChildren(group));
   return parts
     .map((el) => el.getBoundingClientRect())
     .filter((r) => r.width > 0)
     .map((r) => r.top + r.height / 2);
 }
 
-/** Draws one form on the open questions button, from the counts it carries (`data-oq-n`, `data-oq-actions`, `data-oq-label`). */
+/** Draws one form on the open questions button, from the counts it carries (`data-oq-n`, `data-oq-actions`, `data-oq-permission`, `data-oq-label`). */
 export function drawOpenQuestionsForm(button: HTMLElement, fit: FootFit): void {
   const words = button.querySelector<HTMLElement>('[data-oq-words]');
   const n = Number(button.getAttribute('data-oq-n') ?? '0');
   const actions = Number(button.getAttribute('data-oq-actions') ?? '0');
-  if (words) words.textContent = openQuestionsFormText(n, fit.form, actions);
+  const permission = button.hasAttribute('data-oq-permission');
+  const skip = button.hasAttribute('data-oq-skipping') ? Number(button.getAttribute('data-oq-skipping') || '0') : null;
+  const skipping = skip !== null && skip > 0;
+  const answered = button.hasAttribute('data-oq-answered');
+  if (words) words.textContent = openQuestionsFormText(n, fit.form, actions, permission, skip, answered);
   button.setAttribute('data-label-form', fit.form);
   button.toggleAttribute('data-fit-tight', fit.tight);
   const label = button.getAttribute('data-oq-label');
-  if (fit.form === 'full' || !label) button.removeAttribute('aria-label');
+  if ((fit.form === 'full' && !skipping && !answered) || !label) button.removeAttribute('aria-label');
   else button.setAttribute('aria-label', label);
 }
 
 /**
- * The whole row's fit with the forms a window may take: the long form first;
- * on a phone, where the long form only fits at the count (or not at all), the
- * ladder again with "6 open" (`fitWholeFootRow` keeps the long form until its
- * `oq` step, then shows the count, so "6 open" needs its own pass). The page
- * is left drawn as the result says. Null as `fitWholeFootRow`.
+ * The whole row's fit, from the long form (only a computer's foot has the
+ * draft status the row is fitted for: a phone draws none, approval
+ * "reply-bar-pairs"). The page is left drawn as the result says. Null as
+ * `fitWholeFootRow`.
  */
-export function fitWholeFootRowForms(row: HTMLElement, phone = false): { level: number; max: OpenQuestionsLabelForm } | null {
-  const level = fitWholeFootRow(row, 'full', phone);
-  if (!phone || (level !== null && footRowOpenQuestionsForm(level, 'full') !== 'count')) return level === null ? null : { level, max: 'full' };
-  const short = fitWholeFootRow(row, 'short', phone);
-  return short === null ? null : { level: short, max: 'short' };
+export function fitWholeFootRowForms(row: HTMLElement): { level: number; max: OpenQuestionsLabelForm } | null {
+  const level = fitWholeFootRow(row, 'full');
+  return level === null ? null : { level, max: 'full' };
 }
 
 /**
@@ -221,7 +257,7 @@ export function fitWholeFootRowForms(row: HTMLElement, phone = false): { level: 
  * above, and the button fits itself among the buttons). Null too where there
  * is no layout (a test DOM, a hidden pane).
  */
-export function fitWholeFootRow(row: HTMLElement, max: OpenQuestionsLabelForm, phone = false): number | null {
+export function fitWholeFootRow(row: HTMLElement, max: OpenQuestionsLabelForm): number | null {
   if (row.getBoundingClientRect().width <= 0) return null;
   const button = row.querySelector<HTMLElement>('[data-foot-buttons] [data-open-questions]');
   const was = {
@@ -230,9 +266,8 @@ export function fitWholeFootRow(row: HTMLElement, max: OpenQuestionsLabelForm, p
       ? { form: (button.getAttribute('data-label-form') ?? max) as OpenQuestionsLabelForm, tight: button.hasAttribute('data-fit-tight') }
       : null,
   };
-  const steps = footRowSteps(phone);
-  for (let level = 0; level <= steps.length; level++) {
-    const tokens = footRowTokens(level, phone);
+  for (let level = 0; level <= FOOT_ROW_STEPS.length; level++) {
+    const tokens = footRowTokens(level);
     if (tokens) row.setAttribute('data-fit', tokens);
     else row.removeAttribute('data-fit');
     if (button) drawOpenQuestionsForm(button, { form: footRowOpenQuestionsForm(level, max), tight: false });

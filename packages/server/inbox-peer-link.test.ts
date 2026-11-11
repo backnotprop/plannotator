@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InboxOutbox } from "./inbox-outbox";
+import { INBOX_AGENTS_LISTED_MAX } from "@plannotator/core/inbox-types";
 import { PeerLink, readCapped, type PeerRecord } from "./inbox-peer-link";
 import { openTransport } from "./inbox-transport";
 import { checkTailnetAddress } from "./inbox-transport-tailnet";
@@ -26,16 +27,20 @@ interface DoorScript {
   /** The event stream: hello's cursor, the records to replay, then what happens. */
   cursor?: number;
   records?: (since: number | null) => number[];
+  /** Frames sent right after hello and the records. */
+  frames?: string[];
   /** Keep the stream open with heartbeats (default), or go silent after hello. */
   silent?: boolean;
   /** The stream's answer never comes (the machine slept between health and events). */
   eventsHang?: boolean;
   threads?: () => Promise<Response> | Response;
   post?: (route: string, body: any) => Response;
+  /** Status frames its windows would hear, sent after hello. */
+  statuses?: unknown[];
 }
 
 function door(script: DoorScript) {
-  const stats = { events: 0, threads: 0, posts: [] as string[], lastEventId: [] as (string | null)[] };
+  const stats = { events: 0, threads: 0, posts: [] as string[], windowMarks: [] as (string | null)[], lastEventId: [] as (string | null)[] };
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -62,6 +67,8 @@ function door(script: DoorScript) {
             for (const seq of script.records?.(since === null ? null : Number(since)) ?? []) {
               controller.enqueue(encoder.encode(`id: ${seq}\nevent: record\ndata: ${JSON.stringify({ seq, kind: "message" })}\n\n`));
             }
+            for (const status of script.statuses ?? []) controller.enqueue(encoder.encode(`event: status\ndata: ${JSON.stringify(status)}\n\n`));
+            for (const frame of script.frames ?? []) controller.enqueue(encoder.encode(frame));
             if (!script.silent) timer = setInterval(() => controller.enqueue(encoder.encode(": ping\n\n")), 50);
           },
           cancel() {
@@ -72,6 +79,7 @@ function door(script: DoorScript) {
       }
       if (req.method === "POST") {
         stats.posts.push(route);
+        stats.windowMarks.push(req.headers.get("x-plannotator-window"));
         return script.post ? script.post(route, await req.json()) : Response.json({ ok: true });
       }
       return Response.json({ code: "device_route_not_found" }, { status: 404 });
@@ -94,7 +102,7 @@ function link(url: string, extra: Partial<ConstructorParameters<typeof PeerLink>
     onRecord: (record) => records.push(record),
     onChange: () => {},
     onRevoked: () => void revoked++,
-    timings: { silenceMs: 400, backoffMinMs: 50, backoffMaxMs: 200, requestMs: 2000, sendMs: 2000 },
+    timings: { silenceMs: 400, backoffMinMs: 50, backoffMaxMs: 200, requestMs: 2000, sendMs: 2000, deliveriesMs: 30 },
     ...extra,
   });
   cleanups.push(() => peer.stop());
@@ -177,6 +185,18 @@ describe("the line", () => {
     expect(peer.reason).toContain("0.28.30");
   });
 
+  test("Delete on its messages is offered only when its health says its store takes one", async () => {
+    // An Inbox from before Delete on a message's words says nothing, and its store refuses the DELETION (422).
+    const older = link(door({ health: () => Response.json({ inbox_id: B, machine_links: 1, version: "0.28.51" }) }).url).peer;
+    older.start();
+    await until("online", () => older.state === "online");
+    expect(older.messageDeletions).toBe(false);
+    const newer = link(door({ health: () => Response.json({ inbox_id: B, machine_links: 1, version: "0.28.54", message_deletions: 1 }) }).url).peer;
+    newer.start();
+    await until("online", () => newer.state === "online");
+    expect(newer.messageDeletions).toBe(true);
+  });
+
   test("a different Inbox at the address is never taken for this machine (rule 19)", async () => {
     const d = door({ health: () => Response.json({ inbox_id: "ibx_01K00000000000000000000009", machine_links: 1 }) });
     const { peer } = link(d.url);
@@ -187,7 +207,159 @@ describe("the line", () => {
   });
 });
 
+describe("an Update pressed there", () => {
+  const health = (version: string, more: Record<string, unknown> = {}) => () => Response.json({ ok: true, inbox_id: B, machine_links: 1, machine_update: 1, version, ...more });
+
+  test("it reads what that machine's own health says about its update and its door", async () => {
+    const d = door({ health: health("0.28.46", { self_update: false, update: { state: "available", version: "0.28.50", action: "copy", releaseUrl: "https://evil.example" } }) });
+    const { peer } = link(d.url);
+    peer.start();
+    await until("online", () => peer.state === "online");
+    expect(peer.canUpdate).toBe(true);
+    expect(peer.selfUpdate).toBe(false);
+    expect(peer.farUpdate).toEqual({ state: "available", version: "0.28.50", action: "copy" });
+  });
+
+  test("an older Inbox's health names no route: it cannot be updated from here", async () => {
+    const d = door({ health: () => Response.json({ ok: true, inbox_id: B, machine_links: 1, version: "0.28.44" }) });
+    const { peer } = link(d.url);
+    peer.start();
+    await until("online", () => peer.state === "online");
+    expect(peer.canUpdate).toBe(false);
+  });
+
+  test("back on a new version, the press ends as updated, from what to what", async () => {
+    const d = door({ health: health("0.28.50") });
+    const { peer } = link(d.url);
+    peer.asked = { from: "0.28.46", at: Date.now() };
+    peer.start();
+    await until("online", () => peer.state === "online");
+    expect(peer.asked).toBeNull();
+    expect(peer.updated).toMatchObject({ from: "0.28.46", to: "0.28.50" });
+  });
+
+  test("an agent there was asked to update it (an older door): back on a new version, it ends as updated too", async () => {
+    const d = door({ health: () => Response.json({ ok: true, inbox_id: B, machine_links: 1, version: "0.28.55" }) });
+    const { peer } = link(d.url);
+    peer.agentAsked = { from: "0.28.50", at: Date.now(), thread: "thr_1", agent: "Claude Code" };
+    peer.start();
+    await until("online", () => peer.state === "online");
+    expect(peer.agentAsked).toBeNull();
+    expect(peer.updated).toMatchObject({ from: "0.28.50", to: "0.28.55" });
+  });
+
+  test("an agent asked there that has not acted yet: back on the same version, the ask stays", async () => {
+    const d = door({ health: () => Response.json({ ok: true, inbox_id: B, machine_links: 1, version: "0.28.50" }) });
+    const { peer } = link(d.url);
+    peer.agentAsked = { from: "0.28.50", at: Date.now(), thread: "thr_1", agent: "Claude Code" };
+    peer.start();
+    await until("online", () => peer.state === "online");
+    expect(peer.agentAsked).not.toBeNull();
+    expect(peer.updated).toBeNull();
+  });
+
+  test("back on the same version with nothing running, the press is over: it never claims to be updating", async () => {
+    const d = door({ health: health("0.28.46") });
+    const { peer } = link(d.url);
+    peer.asked = { from: "0.28.46", at: Date.now() };
+    peer.start();
+    await until("online", () => peer.state === "online");
+    expect(peer.asked).toBeNull();
+    expect(peer.updated).toBeNull();
+  });
+
+  test("back on the same version while its install runs, the press goes on", async () => {
+    const d = door({ health: health("0.28.46", { update: { state: "updating", version: "0.28.50", action: "script" } }) });
+    const { peer } = link(d.url);
+    peer.asked = { from: "0.28.46", at: Date.now() };
+    peer.start();
+    await until("online", () => peer.state === "online");
+    expect(peer.asked).not.toBeNull();
+  });
+
+  test("a status frame saying the install failed ends the press, so a later sleep is not read as restarting", async () => {
+    const d = door({ health: health("0.28.46", { update: { state: "updating", version: "0.28.50", action: "script" } }), statuses: [{ update: { state: "failed", version: "0.28.50", action: "script" } }] });
+    const { peer } = link(d.url);
+    peer.asked = { from: "0.28.46", at: Date.now() };
+    peer.start();
+    await until("the failed frame", () => peer.farUpdate?.state === "failed");
+    expect(peer.asked).toBeNull();
+  });
+
+  test("a status frame saying nothing changed ends the press and is kept", async () => {
+    const d = door({ health: health("0.28.46", { update: { state: "updating", version: "0.28.50", action: "script" } }), statuses: [{ update: { state: "available", version: "0.28.50", action: "script" }, update_no_change: "0.28.50" }] });
+    const { peer } = link(d.url);
+    peer.asked = { from: "0.28.46", at: Date.now() };
+    peer.start();
+    await until("the frame", () => peer.noChange === "0.28.50");
+    expect(peer.asked).toBeNull();
+  });
+});
+
 describe("the list (rule 5)", () => {
+  test("that machine's live sessions moved its rows (no record, no cursor): the list is read again, then the windows are told", async () => {
+    let told = 0;
+    let rowsAtTold = -1;
+    const d = door({
+      cursor: 3,
+      frames: ['event: deliveries\ndata: {"sessions":true}\n\n'],
+      threads: () => Response.json({ cursor: 3, sections: [{ threads: [{ thread_id: "msg_a", session_ended: d.stats.threads > 1 }] }] }),
+    });
+    const { peer } = link(d.url, {
+      onDeliveries: (change) => {
+        expect(change.sessions).toBe(true);
+        told += 1;
+        rowsAtTold = d.stats.threads;
+      },
+    });
+    peer.start();
+    await until("told", () => told === 1);
+    expect(rowsAtTold).toBeGreaterThanOrEqual(2);
+    expect(peer.list!.rows[0]).toMatchObject({ thread_id: "msg_a", session_ended: true });
+  });
+
+  test("many of those frames read the list once, after they stopped; the windows hear of a session that moved in any of them", async () => {
+    const told: boolean[] = [];
+    const d = door({
+      cursor: 3,
+      frames: ['event: deliveries\ndata: {"sessions":true}\n\n', ...Array.from({ length: 5 }, () => "event: deliveries\ndata: {}\n\n")],
+      threads: () => Response.json({ cursor: 3, sections: [{ threads: [{ thread_id: "msg_a" }] }] }),
+    });
+    const { peer } = link(d.url, { onDeliveries: (change) => void told.push(change.sessions) });
+    peer.start();
+    await until("told", () => told.length >= 1);
+    await Bun.sleep(100);
+    expect(told).toEqual([true]);
+    // The first read of the list, then one for all six frames.
+    expect(d.stats.threads).toBe(2);
+  });
+
+  test("that machine's Agents moved (no record, no cursor): its list is read again with the new agents, and the windows hear `agents`", async () => {
+    const told: { sessions: boolean; agents: boolean }[] = [];
+    const agentsAt = (state: string) => [{ agents: [{ id: "ses_1", session: "ses_1", host: "claude-code", project: null, state, waiting: 0, live: true, started_at: null, last_seen_at: null }], total: 1, ended_today: 0 }];
+    const d = door({
+      cursor: 3,
+      frames: ['event: deliveries\ndata: {"agents":true}\n\n'],
+      threads: () => Response.json({ cursor: 3, sections: [], agents: agentsAt(d.stats.threads > 1 ? "working" : "idle") }),
+    });
+    const { peer } = link(d.url, { onDeliveries: (change) => void told.push(change) });
+    peer.start();
+    await until("told", () => told.length === 1);
+    expect(told).toEqual([{ sessions: false, agents: true }]);
+    expect(peer.list!.agents).toMatchObject({ machine: B, total: 1, agents: [{ id: "ses_1", state: "working" }] });
+  });
+
+  test("a machine's agents are kept capped and named by the machine; an older Inbox's list (no `agents`) names none", () => {
+    const { peer } = link("http://127.0.0.1:9");
+    peer.acceptList({ cursor: 1, sections: [] });
+    expect(peer.list!.agents).toBeNull();
+    const many = Array.from({ length: 300 }, (_, i) => ({ id: `ses_${i}`, session: `ses_${i}`, host: "pi", project: null, state: "idle", waiting: 0, live: true, started_at: null, last_seen_at: null }));
+    peer.acceptList({ cursor: 1, sections: [], agents: [{ agents: [...many, { id: 1 }, { id: "x", session: "x", state: "asleep" }], total: 302, ended_today: 0 }] });
+    expect(peer.list!.agents!.machine).toBe(B);
+    expect(peer.list!.agents!.agents.length).toBe(INBOX_AGENTS_LISTED_MAX);
+    expect(peer.list!.agents!.total).toBe(302);
+  });
+
   test("a list older than the one held is dropped", () => {
     const { peer } = link("http://127.0.0.1:9");
     expect(peer.acceptList({ cursor: 10, sections: [{ threads: [{ thread_id: "new" }] }] })).toBe(true);
@@ -195,7 +367,13 @@ describe("the list (rule 5)", () => {
     expect(peer.list!.rows.map((r) => [r.thread_id, r.machine])).toEqual([["new", B]]);
   });
 
-  test("a machine keeps snoozes only when its list says so: an older Inbox's list (no `snoozes`) offers no Snooze", () => {
+  test("a linked machine's row keeps its grey line (latest_preview) through the forward", () => {
+    const { peer } = link("http://127.0.0.1:9");
+    peer.acceptList({ cursor: 2, sections: [{ threads: [{ thread_id: "msg_a", latest_preview: "You: Ship it." }, { thread_id: "msg_b", latest_preview: null }] }] });
+    expect(peer.list!.rows.map((r) => [r.thread_id, r.latest_preview])).toEqual([["msg_a", "You: Ship it."], ["msg_b", null]]);
+  });
+
+  test("a machine keeps snoozes only when its list says so: an older Inbox's list (no `snoozes`) takes no snooze", () => {
     const { peer } = link("http://127.0.0.1:9");
     peer.acceptList({ cursor: 3, sections: [] });
     expect(peer.list!.snoozes).toBe(false);
@@ -233,6 +411,17 @@ describe("the outbox goes when the machine is there (rule 15)", () => {
     peer.start();
     await until("delivered", () => outbox.get("k1")!.state === "delivered");
     expect(d.stats.posts).toEqual(["messages/msg_x/reply"]);
+  });
+
+  test("a write the person pressed in a window says so to the other machine; any other write does not (remote launch)", async () => {
+    const d = door({});
+    const { peer, outbox } = link(d.url);
+    outbox.submit(B, "messages", { idempotency_key: "k-window", body: "Start it", to: { launch: { agent: "claude-code", project_id: "prj_a" } } }, null, true);
+    outbox.submit(B, "messages/msg_x/reply", { idempotency_key: "k-script", words: "yes", seen_through_seq: 1 });
+    peer.start();
+    await until("both delivered", () => outbox.get("k-script")!.state === "delivered");
+    expect(d.stats.posts).toEqual(["messages", "messages/msg_x/reply"]);
+    expect(d.stats.windowMarks).toEqual(["1", null]);
   });
 
   test("a 401 device_revoked while sending drops the queue with notices", async () => {

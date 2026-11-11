@@ -53,16 +53,18 @@ let settingsOver: (settings: Record<string, any>) => void = () => {};
 let soundShows = false;
 /** The page came through the tailnet (settings `via`). */
 let tailnetPage = false;
+/** The line's answer to the note dialog's claim (`POST /api/inbox/reveal` `agent_note`); null: the real Inbox's. */
+let noteClaim: boolean | null = null;
 const posts: { path: string; body: Record<string, unknown> }[] = [];
 
 const NOTE = '<!-- plannotator-inbox:start v1 -->\n## Plannotator Inbox\n<!-- plannotator-inbox:end -->';
 const CODEX: InboxAgentRow = {
-  id: 'codex',
-  label: 'Codex',
+  id: 'qwen',
+  label: 'Qwen Code',
   detected: true,
   reach: { kind: 'mcp', on: true, state: 'connected', path: null, locked: false, reason: null },
   reminder: null,
-  note: { agent: 'codex', path: '~/.codex/AGENTS.md', target: null, state: 'absent', create: false, created: false, reason: null },
+  note: { agent: 'qwen', path: '~/.qwen/QWEN.md', target: null, state: 'absent', create: false, created: false, reason: null },
 } as InboxAgentRow;
 const model = (over: Partial<InboxAgentsModel> = {}): InboxAgentsModel => ({
   agents: [CODEX],
@@ -126,6 +128,7 @@ beforeEach(async () => {
   settingsOver = () => {};
   soundShows = false;
   tailnetPage = false;
+  noteClaim = null;
   agentsModel = model();
   posts.length = 0;
   savedFetch = globalThis.fetch;
@@ -142,12 +145,13 @@ beforeEach(async () => {
     if (method === 'POST') posts.push({ path, body: body ? (JSON.parse(body) as Record<string, unknown>) : {} });
     // This computer's agents: a canned model (the note dialog's candidates), and its answer.
     if (path.startsWith('/api/inbox/agents/notes')) {
-      agentsModel = { ...agentsModel, notes_offered: true, notes_asked: ['codex'] };
+      agentsModel = { ...agentsModel, notes_offered: true, notes_asked: ['qwen'] };
       return Response.json({ ...agentsModel, results: [] });
     }
     // Over the tailnet the agents are local only, as the real listener answers.
     if (path.startsWith('/api/inbox/agents') && tailnetPage) return Response.json({ error: 'local only', code: 'local_only' }, { status: 403 });
     if (path.startsWith('/api/inbox/agents')) return Response.json(agentsModel);
+    if (path.startsWith('/api/inbox/reveal') && noteClaim !== null && body?.includes('"agent_note"')) return Response.json({ show: noteClaim, reveal: { next: null }, board: { on: false } });
     if (path.startsWith('/api/inbox/sound/dialog')) {
       const settings = JSON.parse((await loopback('/api/inbox/settings')).text) as { sound: unknown };
       return Response.json({ show: soundShows, sound: settings.sound });
@@ -277,7 +281,7 @@ test.skipIf(!hasDom)('the note dialog first, never with the ask; after it closes
 }, 30_000);
 
 test.skipIf(!hasDom)('with nobody to ask about, the ask is on the first-run screen at once; Turn on asks the browser once and the line goes', async () => {
-  agentsModel = model({ notes_asked: ['codex'], notes_offered: true });
+  agentsModel = model({ notes_asked: ['qwen'], notes_offered: true });
   const el = await renderApp();
   await until(() => firstRunAsk(el) !== null, 'the first-run ask');
   expect(noteDialog()).toBeNull();
@@ -290,7 +294,7 @@ test.skipIf(!hasDom)('with nobody to ask about, the ask is on the first-run scre
 }, 30_000);
 
 test.skipIf(!hasDom)('Not now on the first-run screen is the same "Not now": it stays dismissed, and the list does not ask either', async () => {
-  agentsModel = model({ notes_asked: ['codex'], notes_offered: true });
+  agentsModel = model({ notes_asked: ['qwen'], notes_offered: true });
   const el = await renderApp();
   await until(() => firstRunAsk(el) !== null, 'the first-run ask');
   await act(async () => buttonIn(firstRunAsk(el)!, 'Not now')!.click());
@@ -308,7 +312,7 @@ test.skipIf(!hasDom)('Not now on the first-run screen is the same "Not now": it 
 
 test.skipIf(!hasDom)('blocked: the first-run screen says the first question cannot notify, quietly, with How to allow', async () => {
   permission = 'denied';
-  agentsModel = model({ notes_asked: ['codex'], notes_offered: true });
+  agentsModel = model({ notes_asked: ['qwen'], notes_offered: true });
   const el = await renderApp();
   await until(() => firstRunAsk(el) !== null, 'the blocked line');
   expect(firstRunAsk(el)!.getAttribute('data-notification-ask')).toBe('blocked');
@@ -341,7 +345,7 @@ test.skipIf(!hasDom)('the ask above the list waits for the note dialog too, and 
 
 test.skipIf(!hasDom)('moved: allowed at another port of this computer, the first-run screen says so with Allow', async () => {
   setUrl('http://localhost:61000/');
-  agentsModel = model({ notes_asked: ['codex'], notes_offered: true });
+  agentsModel = model({ notes_asked: ['qwen'], notes_offered: true });
   await loopback('/api/inbox/settings', 'POST', JSON.stringify({ notifications: { enabled: true, allowed_origin: 'http://localhost:52817' } }));
   const el = await renderApp();
   await until(() => firstRunAsk(el) !== null, 'the moved line');
@@ -369,6 +373,8 @@ test.skipIf(!hasDom)('over the tailnet: the first-run screen asks nothing (anoth
 test.skipIf(!hasDom)('a load that showed the sound dialog: no ask while it is open, and none after it closes on that load', async () => {
   settingsOver = (settings) => {
     settings.sound = { ...settings.sound, dialog_due: true };
+    // A release Inbox keeps the line of one-time dialogs: the sound is the one it has next.
+    settings.reveal = { ...settings.reveal, next: 'sound', line: true };
   };
   soundShows = true;
   const el = await renderApp();
@@ -384,5 +390,39 @@ test.skipIf(!hasDom)('a load that showed the sound dialog: no ask while it is op
   await wait(3500);
   expect(firstRunAsk(el)).toBeNull();
   // And the note dialog waits for a later load too.
+  expect(noteDialog()).toBeNull();
+}, 30_000);
+
+test.skipIf(!hasDom)('the line has another dialog next (approval "inbox-one-time-dialogs"): no sound dialog on this load, and nothing waits for it', async () => {
+  settingsOver = (settings) => {
+    settings.sound = { ...settings.sound, dialog_due: true };
+    settings.reveal = { ...settings.reveal, next: 'list_intro', line: true };
+  };
+  soundShows = true;
+  const el = await renderApp();
+  // The note dialog is decided as on any load, then the ask: neither waits for a sound claim that never comes.
+  await until(() => noteDialog() !== null, 'the agent-note dialog');
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-anote-notnow]')!.click());
+  await until(() => firstRunAsk(el) !== null, 'the first-run ask');
+  expect(buttonIn(document.body, 'Keep it on')).toBeUndefined();
+  expect(posts.some((p) => p.path.startsWith('/api/inbox/sound/dialog'))).toBe(false);
+}, 30_000);
+
+test.skipIf(!hasDom)('the line says not on this load (a dialog today, or the load right after one): no note dialog, never claimed, and the ask comes at once', async () => {
+  settingsOver = (settings) => {
+    settings.reveal = { ...settings.reveal, setup: false };
+  };
+  const el = await renderApp();
+  await until(() => firstRunAsk(el) !== null, 'the first-run ask');
+  await wait(300);
+  expect(noteDialog()).toBeNull();
+  expect(posts.some((p) => p.path.startsWith('/api/inbox/reveal'))).toBe(false);
+}, 30_000);
+
+test.skipIf(!hasDom)('the note dialog is claimed through the line before it opens: a claim the Inbox refuses draws nothing, and the ask comes', async () => {
+  noteClaim = false;
+  const el = await renderApp();
+  await until(() => posts.some((p) => p.path.startsWith('/api/inbox/reveal') && p.body.id === 'agent_note'), 'the claim');
+  await until(() => firstRunAsk(el) !== null, 'the first-run ask');
   expect(noteDialog()).toBeNull();
 }, 30_000);

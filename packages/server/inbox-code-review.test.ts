@@ -18,7 +18,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { INBOX_REVIEW_SKILL_NAMES, inboxThreadHadReview } from "@plannotator/core/inbox-review";
+import { INBOX_GUIDE_FIELD_DESCRIPTION, INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES, INBOX_NOTE_BLOCK_LINE, INBOX_REVIEW_SKILL_NAMES, inboxThreadHadReview } from "@plannotator/core/inbox-review";
 import type { InboxAnnotationRecord, InboxThread } from "@plannotator/core/inbox-types";
 import type { SkillCatalogEntry } from "@plannotator/ui/utils/skillReferences";
 import { routeSendAnnotations } from "../inbox/sendTargets";
@@ -102,7 +102,7 @@ describe("the Code review switch", () => {
   test("off by default; on and off are saved in config.json; a malformed switch is refused", async () => {
     const w = await world();
     const read = async () => ((await (await fetch(`${w.base}/api/inbox/settings`)).json()) as { code_review?: { on: boolean } }).code_review;
-    // Held for 0.28.50 (inbox.ts heldSwitch): off, the settings read leaves Code review out, so Settings draws no row.
+    // Held until the next big release (inbox.ts heldSwitch): off, the settings read leaves Code review out, so Settings draws no row.
     expect(await read()).toBeUndefined();
 
     const on = await w.setCodeReview(true);
@@ -338,7 +338,7 @@ describe("the skills catalog", () => {
     expect(onList.some((s) => s.name === "review-guide")).toBe(false);
 
     const on = await catalog(true, own);
-    expect(on.map((s) => `${s.root}:${s.name}`)).toEqual(["plannotator:review-curate", "plannotator:review-recheck", "agents-project:deploy"]);
+    expect(on.map((s) => `${s.root}:${s.name}`)).toEqual(["plannotator:review-curate", "plannotator:review-walkthrough", "plannotator:review-recheck", "agents-project:deploy"]);
     expect(on[0]!.humanOnly).toBe(true);
   });
 
@@ -362,7 +362,7 @@ describe("what an agent's tool carries", () => {
   };
 
   // Off is byte-equal to an Inbox that has no Code review at all: config.json without the key, and with it false.
-  test("off: tools/list is byte-equal whether the switch was never set or turned off; on adds only submit_guide's field", async () => {
+  test("off: tools/list is byte-equal whether the switch was never set or turned off; on adds only submit_guide's fields and the context notes' words", async () => {
     const w = await world();
     const never = JSON.stringify(await rawList(w.base));
     expect(never).not.toContain("Approve or Send feedback");
@@ -370,10 +370,24 @@ describe("what an agent's tool carries", () => {
     const on = JSON.stringify(await rawList(w.base));
     await w.setCodeReview(false);
     expect(JSON.stringify(await rawList(w.base))).toBe(never);
-    // On: the only change is submit_guide's `review` property.
+    // On: the only changes are submit_guide's `review` and `walkthrough` properties and the context notes (approval
+    // "inbox-context-notes"): send_message's `body` gains the :::note line, submit_guide's `guide` names `notes?`.
+    type Prop = { description?: string };
     const strip = (list: string) => {
-      const parsed = JSON.parse(list) as { tools: { name: string; inputSchema: { properties: Record<string, unknown> } }[] };
-      for (const tool of parsed.tools) if (tool.name === "submit_guide") delete tool.inputSchema.properties.review;
+      const parsed = JSON.parse(list) as { tools: { name: string; inputSchema: { properties: Record<string, Prop> } }[] };
+      for (const tool of parsed.tools) {
+        const props = tool.inputSchema.properties;
+        if (tool.name === "submit_guide") {
+          delete props.review;
+          delete props.walkthrough;
+          expect(props.guide?.description).toBe(INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES);
+          props.guide!.description = INBOX_GUIDE_FIELD_DESCRIPTION;
+        }
+        if (tool.name === "send_message") {
+          expect(props.body?.description?.endsWith(`\n\n${INBOX_NOTE_BLOCK_LINE}`)).toBe(true);
+          props.body!.description = props.body!.description!.slice(0, -`\n\n${INBOX_NOTE_BLOCK_LINE}`.length);
+        }
+      }
       return JSON.stringify(parsed);
     };
     expect(on).not.toBe(never);

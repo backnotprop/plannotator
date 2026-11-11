@@ -18,12 +18,14 @@ import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { inboxApi, type ComposeSessionsModel, type ProjectFolder } from '../api';
 import { Icon, HostMark } from '../icons';
 import { InboxList } from '../components/InboxList';
+import { RowMarksScope } from '../letterMarks';
 import { MessageBody } from '../components/Thread';
 import { Sidebar } from '../components/Sidebar';
 import { Tip } from '../components/Tip';
 import { AttachmentTiles } from '../components/AttachmentTiles';
 import { AttachmentPane, type AttachmentPaneHandle } from '../components/AttachmentPane';
 import { ArtifactsView } from '../components/ArtifactsView';
+import { ArtifactsBar, ThreadViewSwitch } from '../components/ThreadLinksView';
 import { ReplyAnswers, draftAnswerWords, type DraftAnswer } from '../components/ReplyAnswers';
 import { AnnotationsChip } from '../components/AnnotationsChip';
 import { ComposeDialog, type ComposeTransport } from '../compose/ComposeDialog';
@@ -40,6 +42,7 @@ import { tourFileSource } from './fileSource';
 import { TourSettings, type TourSettingsHandle } from './TourSettings';
 import { sentAnswersOf } from '../sentReply';
 import { threadChipName } from '../threadChip';
+import { markInboxPage } from '../pageMarks';
 import {
   TOUR_FILM_REPLY_ID,
   TOUR_FILM_THREAD,
@@ -381,7 +384,8 @@ type Side = 'right' | 'left' | 'below' | 'above' | 'corner';
 /** Targets whose controls are at the foot of a phone's screen: the sheet sits at the top for them. */
 /** Targets whose own controls sit at the top of what they point at (a question card's prompt, picture labels and magnifiers): the sheet goes to the foot, the card is scrolled above it. */
 const PHONE_SHEET_BOTTOM = new Set<TourTarget>(['choices', 'warm-choices']);
-const PHONE_SHEET_TOP = new Set<TourTarget>(['warm-send', 'film-rail', 'film-composer', 'film-send', 'image-foot', 'markup', 'reply', 'reply-box', 'composer']);
+// New message's To and Send are in its foot's row on a phone.
+const PHONE_SHEET_TOP = new Set<TourTarget>(['warm-send', 'film-rail', 'film-composer', 'film-send', 'image-foot', 'markup', 'reply', 'reply-box', 'composer', 'compose-to', 'compose-send']);
 
 /** Targets the card never scrolls to: a comment box, a drawing's row, the open file (a scroll would close or move them). */
 const NO_SCROLL = new Set<TourTarget>(['file', 'art-grid', 'composer', 'eval-line', 'markup', 'image-foot', 'film-rail', 'film-composer', 'compose-to', 'compose-send']);
@@ -866,8 +870,8 @@ export function TourViewer({ picture, onPick, onClose }: { picture: TourViewerPi
     }
   };
   return createPortal(
-    <div className="pn-inbox ib-tour-layer">
-      <div ref={ref} className="ib-tour-viewer" role="dialog" aria-modal="true" aria-label={picture.name} onKeyDown={onKeyDown} data-tour-viewer="">
+    <div ref={markInboxPage} className="pn-inbox ib-tour-layer">
+      <div ref={ref} className="ib-tour-viewer ib-wlayer" role="dialog" aria-modal="true" aria-label={picture.name} onKeyDown={onKeyDown} data-tour-viewer="">
         <header>
           <b>{picture.name}</b>
           <span className="ib-mut">{picture.caption}</span>
@@ -928,26 +932,28 @@ export function TourNavigation({
   const folders = fixture ? [tourFolder(fixture)] : [];
   const waiting = tourWaitingCount(state);
   return (
-    <Sidebar
-      page="inbox"
-      projectId={null}
-      inboxCount={waiting}
-      projects={folders}
-      projectCounts={new Map([[TOUR_PROJECT_ID, waiting]])}
-      update={null}
-      restarting={false}
-      updated={null}
-      onSearch={() => say('Search finds your own threads; it is not part of the tour.')}
-      onCompose={onCompose}
-      onInbox={() => dispatch({ type: 'list' })}
-      onProject={() => dispatch({ type: 'list' })}
-      onSettings={onSettings}
-      onUpdate={() => {}}
-      onWhatsNew={() => {}}
-      connectPrompt={false}
-      // The tour draws Pinned and Projects open whatever this browser closed.
-      rememberSections={false}
-    />
+    <RowMarksScope look={null}>
+      <Sidebar
+        page="inbox"
+        projectId={null}
+        inboxCount={waiting}
+        projects={folders}
+        projectCounts={new Map([[TOUR_PROJECT_ID, waiting]])}
+        update={null}
+        restarting={false}
+        updated={null}
+        onSearch={() => say('Search finds your own threads; it is not part of the tour.')}
+        onCompose={onCompose}
+        onInbox={() => dispatch({ type: 'list' })}
+        onProject={() => dispatch({ type: 'list' })}
+        onSettings={onSettings}
+        onUpdate={() => {}}
+        onWhatsNew={() => {}}
+        connectPrompt={false}
+        // The tour draws Pinned and Projects open whatever this browser closed.
+        rememberSections={false}
+      />
+    </RowMarksScope>
   );
 }
 
@@ -1114,22 +1120,25 @@ export function TourMain({ fixture, state, dispatch, phone, stacked, reduced, sa
     [dispatch, phone, stacked.file, say],
   );
 
+  // No letter marks in the tour, whatever this browser's look draws (RowMarksScope with no look).
   const list = (
-    <InboxList
-      title="Inbox"
-      path={null}
-      sections={sections}
-      filtered={false}
-      narrow={openThread !== null && !phone && !stacked.thread}
-      selectedThreadId={openThread}
-      notice={null}
-      onShowNew={noop}
-      onOpen={(r) => dispatch({ type: 'open', thread: r.thread_id }, { focusCoach: true })}
-      onCompose={state.step === 9 && state.compose !== 'sent' ? onCompose : undefined}
-      phone={phone}
-      // The tour draws today's list whatever look this browser chose (as its sidebar ignores closed sections).
-      rememberLook={false}
-    />
+    <RowMarksScope look={null}>
+      <InboxList
+        title="Inbox"
+        path={null}
+        sections={sections}
+        filtered={false}
+        narrow={openThread !== null && !phone && !stacked.thread}
+        selectedThreadId={openThread}
+        notice={null}
+        onShowNew={noop}
+        onOpen={(r) => dispatch({ type: 'open', thread: r.thread_id }, { focusCoach: true })}
+        onCompose={state.step === 9 && state.compose !== 'sent' ? onCompose : undefined}
+        phone={phone}
+        // The tour draws today's list whatever look this browser chose (as its sidebar ignores closed sections).
+        rememberLook={false}
+      />
+    </RowMarksScope>
   );
 
   const threadFiles = openThread ? files.filter((a) => fixture.threads.find((t) => t.id === openThread)?.messages.some((m) => m.id === a.message_id)) : [];
@@ -1579,6 +1588,11 @@ function TourThreadPane({
           </>
         )}
       </div>
+      {state.artifactsOpen && !phone && (
+        <ArtifactsBar onBack={() => dispatch({ type: 'artifacts', open: false }, { focusCoach: true })}>
+          <ThreadViewSwitch links={0} artifacts={artifacts.length} linksOn={false} onLinks={noop} />
+        </ArtifactsBar>
+      )}
       {state.artifactsOpen ? (
         <div className="ib-pbody ib-artbody">
           <ArtifactsView
@@ -1587,7 +1601,6 @@ function TourThreadPane({
             openId={state.file?.id ?? null}
             onOpen={(artifact) => onOpenFile(artifact.attachment)}
             onOpenGuide={noop}
-            onBack={phone ? undefined : () => dispatch({ type: 'artifacts', open: false }, { focusCoach: true })}
             phone={phone}
           />
         </div>

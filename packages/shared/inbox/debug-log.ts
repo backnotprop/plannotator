@@ -33,7 +33,7 @@ export function resolveInboxDebug(config: { inboxDebug?: unknown }, env: Record<
 
 const ROUTE_WORDS = new Set(
   (
-    "api inbox ack actions agents annotations apps archived assets attachments board bridge cards check checks combine " +
+    "api inbox ack actions agents annotations apps archived assets attachments audio board bridge cards check checks combine " +
     "connect content control debug decisions delete device devices dialog dismiss download draft drafts dropped embeds " +
     "event events feedback fixture.json guide handoff health image intro key lan link linked-page list-intro log m " +
     "machines mark-unread markdown-image marks markups message messages name none notes offer open-in outbox page " +
@@ -45,6 +45,7 @@ const ROUTE_WORDS = new Set(
 const ULID = "[0-9A-HJKMNP-TV-Z]{26}";
 const ID_SEGMENT = new RegExp(`^(?:(?:msg|prj|ses|dec|dev|upl|drf|crd|tdy|ibx|att)_${ULID}|a-[0-9a-f]{8}(?:-\\d{1,3})?)$`);
 const THREAD_ID = new RegExp(`^msg_${ULID}$`);
+const FILE_ID = new RegExp(`^att_${ULID}$`);
 
 /** A path as the log may hold it: no query, and `*` for any segment that is neither a route word nor an id. */
 export function debugRoute(path: string): string {
@@ -86,6 +87,8 @@ const WINDOW_EVENTS = new Set([
   "voice_open",
   "voice_miss",
   "slow_ui",
+  "mem",
+  "renderer_gone",
 ]);
 /** The interactions the window times (packages/inbox/perfMarks.ts) that a `slow_ui` line may name. */
 const PERF_WHATS = new Set(["first-list", "thread-open", "record-refresh", "theme", "theme-settled", "expand-all", "keystroke"]);
@@ -100,7 +103,7 @@ const ERRORS = new Set(["AbortError", "TimeoutError", "TypeError", "NetworkError
 const VOICE_INPUTS = new Set(["press", "release", "lost", "toggle"]);
 const VOICE_PHASES = new Set(["idle", "opening", "listening", "sending"]);
 const VOICE_MODES = new Set(["hold", "tap"]);
-const VOICE_TROUBLES = new Set(["notheard", "blocked", "micfailed", "nothing", "badclip", "expired", "refused", "keyrefused", "offline", "inboxgone", "codexfailed", "notready", "voiceoff"]);
+const VOICE_TROUBLES = new Set(["notheard", "blocked", "micfailed", "nothing", "badclip", "expired", "refused", "keyrefused", "offline", "inboxgone", "codexfailed", "notready", "voiceoff", "failed"]);
 const VOICE_STEPS = new Set(["context", "stream", "worklet", "ready"]);
 /** Where a `voice_miss` landed, seen from the mic's hit box. */
 const VOICE_EDGES = new Set(["above", "below", "left", "right"]);
@@ -155,6 +158,16 @@ export function cleanWindowRecord(raw: unknown): Record<string, unknown> | null 
     w: count(record.w),
     h: count(record.h),
     other: typeof record.other === "boolean" ? record.other : undefined,
+    // The page's memory (`slow_ui`, `mem`, `renderer_gone`): whole MB and counts.
+    heap: count(record.heap),
+    heap_limit: count(record.heap_limit),
+    imgs: count(record.imgs),
+    nodes: count(record.nodes),
+    // A page that died without leaving (`renderer_gone`): its page id, what it had open, and whether Chrome discarded it.
+    last_page: shaped(record.last_page, PAGE_ID),
+    file: shaped(record.file, FILE_ID),
+    view: record.view === "full" || record.view === "side" ? record.view : undefined,
+    discarded: typeof record.discarded === "boolean" ? record.discarded : undefined,
   };
   return Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined));
 }

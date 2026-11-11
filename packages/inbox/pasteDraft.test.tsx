@@ -128,7 +128,7 @@ class LoopbackXhr {
 beforeAll(async () => {
   if (!hasDom) return;
   dir = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-paste-draft-dom-')));
-  // The DOM server keeps its own scratch HOME under the data dir: nothing here names one.
+  // The DOM server uses the scratch HOME it inherits from the preload: nothing here names one.
   child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), '12'], {
     env: { ...process.env, DOM_TESTS: '0', PLANNOTATOR_DATA_DIR: join(dir, 'data'), PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0', PLANNOTATOR_BROWSER: NO_BROWSER },
     stdout: 'pipe',
@@ -389,8 +389,8 @@ test.skipIf(!hasDom)('a draft of the paste alone, its box closed, goes with the 
   expect(paste(text, LOG)).toBe(true);
   await until(async () => (await serverDraft())?.files?.length === 1, 'the draft of the paste');
   const name = (await serverDraft())!.files![0]!.name;
-  // Cancel keeps it as the draft; the box closes.
-  act(() => button(el, 'Cancel').click());
+  // Closing the box (its chevron) keeps it as the draft.
+  act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
   await until(() => replyBox(el) === null, 'the box closed');
   expect((await serverDraft())?.files?.length).toBe(1);
   // The foot's Send carries the kept paste.

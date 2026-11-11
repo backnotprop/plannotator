@@ -850,9 +850,117 @@ checksum_url="${binary_url}.sha256"
 
 mkdir -p "$INSTALL_DIR"
 
+# Release downloads retry a dropped connection (#2788): one HTTP/2 reset or
+# timeout used to fail the whole install or update. This is for the small
+# .sha256; the binary resumes instead (download_release_binary below).
+# --retry-all-errors (curl 7.71+) also retries the errors plain
+# --retry treats as final, such as an HTTP/2 stream error (curl 92); an older
+# curl rejects the option, so it gets --retry alone. The probe puts the
+# option before --version, which ends curl's option parsing.
+curl_retry_args=(--retry 3 --retry-delay 2)
+if curl --retry-all-errors --version >/dev/null 2>&1; then
+    curl_retry_args+=(--retry-all-errors)
+fi
+
+# download_release_file <url> <file> <max seconds> [<retry seconds>]: each
+# attempt must connect within 30 s, gives up after a minute below 1 byte/s (an
+# update holds its lock while it runs) and after <max seconds>, and no retry
+# starts after <retry seconds> (default: <max seconds>). When curl still ends
+# in an HTTP/2 error (92), one more run goes over HTTP/1.1. Returns curl's
+# exit status.
+download_release_file() {
+    _dl_status=0
+    curl -fsSL "${curl_retry_args[@]}" --connect-timeout 30 --max-time "$3" --retry-max-time "${4:-$3}" \
+        --speed-limit 1 --speed-time 60 -o "$2" "$1" || _dl_status=$?
+    if [ "$_dl_status" -eq 92 ]; then
+        echo "The download hit an HTTP/2 error; trying again over HTTP/1.1..." >&2
+        _dl_status=0
+        curl -fsSL --http1.1 "${curl_retry_args[@]}" --connect-timeout 30 --max-time "$3" --retry-max-time "${4:-$3}" \
+            --speed-limit 1 --speed-time 60 -o "$2" "$1" || _dl_status=$?
+    fi
+    return "$_dl_status"
+}
+
+# download_release_binary <url> <file>: the binary download continues where a
+# dropped or stalled connection stopped, instead of starting the ~200 MB again
+# from zero. Each attempt is one curl run: the first starts at byte 0, each
+# later one asks for the rest with a Range request (curl -C -), always from
+# <url> again (a github.com URL that redirects to a signed one that expires,
+# so the redirected URL is never reused). curl's own --retry is not used here:
+# it throws away the bytes of the attempt it retries. Bounds: at most 30
+# attempts, at most 4 in a row that add no bytes, 2 s apart, and nothing runs
+# past 6 hours from the start, so a link at about 10 KB/s still finishes the
+# binary and a dead or trickling one stops. A stall (below 1 byte/s for 60 s)
+# ends an attempt and the next one continues. A server that ignores the Range
+# (curl exit 33) gets the whole file again, and later attempts start from zero.
+# After an HTTP/2 error (curl 92) the attempts go over HTTP/1.1. curl's error
+# is printed only when it gives up, and the status is its last exit code. The
+# SHA-256 check below still covers the whole file.
+# PLANNOTATOR_DOWNLOAD_STALL_SECONDS and PLANNOTATOR_DOWNLOAD_RETRY_DELAY are
+# internal knobs for the tests.
+download_release_binary() {
+    _db_url="$1"
+    _db_file="$2"
+    _db_stall="${PLANNOTATOR_DOWNLOAD_STALL_SECONDS:-60}"
+    case "$_db_stall" in ''|*[!0-9]*|0) _db_stall=60 ;; esac
+    _db_delay="${PLANNOTATOR_DOWNLOAD_RETRY_DELAY:-2}"
+    case "$_db_delay" in ''|*[!0-9]*) _db_delay=2 ;; esac
+    _db_deadline=$((SECONDS + 21600))
+    _db_attempt=0
+    _db_idle=0
+    _db_range=1
+    _db_http=()
+    while :; do
+        _db_attempt=$((_db_attempt + 1))
+        _db_resume=()
+        _db_have=$(wc -c < "$_db_file" 2>/dev/null | tr -d ' ') || _db_have=0
+        case "$_db_have" in ''|*[!0-9]*) _db_have=0 ;; esac
+        if [ "$_db_have" -gt 0 ]; then
+            if [ "$_db_range" -eq 1 ]; then
+                _db_resume=(-C -)
+            else
+                : > "$_db_file"
+                _db_have=0
+            fi
+        fi
+        _db_left=$((_db_deadline - SECONDS))
+        [ "$_db_left" -ge 1 ] || _db_left=1
+        _db_status=0
+        _db_err=$(curl -fsSL ${_db_http[@]+"${_db_http[@]}"} ${_db_resume[@]+"${_db_resume[@]}"} \
+            --connect-timeout 30 --max-time "$_db_left" --speed-limit 1 --speed-time "$_db_stall" \
+            -o "$_db_file" "$_db_url" 2>&1) || _db_status=$?
+        [ "$_db_status" -ne 0 ] || return 0
+        if [ "$_db_status" -eq 33 ]; then
+            _db_range=0
+        fi
+        if [ "$_db_status" -eq 92 ] && [ "${#_db_http[@]}" -eq 0 ]; then
+            echo "The download hit an HTTP/2 error; trying again over HTTP/1.1..." >&2
+            _db_http=(--http1.1)
+        fi
+        _db_now=$(wc -c < "$_db_file" 2>/dev/null | tr -d ' ') || _db_now=0
+        case "$_db_now" in ''|*[!0-9]*) _db_now=0 ;; esac
+        if [ "$_db_now" -gt "$_db_have" ]; then
+            _db_idle=0
+        else
+            _db_idle=$((_db_idle + 1))
+        fi
+        if [ "$_db_attempt" -ge 30 ] || [ "$_db_idle" -ge 4 ] || [ "$SECONDS" -ge "$_db_deadline" ]; then
+            [ -z "$_db_err" ] || printf '%s\n' "$_db_err" >&2
+            return "$_db_status"
+        fi
+        sleep "$_db_delay"
+    done
+}
+
 tmp_file=$(mktemp)
-# A stalled download gives up after a minute (an update holds its lock while it runs).
-curl -fsSL -o "$tmp_file" --speed-limit 1 --speed-time 60 "$binary_url"
+# Exit 1, not curl's code: the updater gives some codes a meaning.
+binary_status=0
+download_release_binary "$binary_url" "$tmp_file" || binary_status=$?
+if [ "$binary_status" -ne 0 ]; then
+    rm -f "$tmp_file"
+    echo "Could not download ${binary_name} ${latest_tag} (curl exit ${binary_status}). Nothing was changed; try again later." >&2
+    exit 1
+fi
 
 # Safe updates (step 1): `plannotator update`, Update now and auto-update run
 # this script after the running Plannotator downloaded it, and the .sha256 of
@@ -884,7 +992,26 @@ else
         # Plannotator, never the network): check as before rather than block.
         echo "Note: the update carried no checksum for ${binary_name}; checking the release's .sha256 instead."
     fi
-    expected_checksum=$(curl -fsSL "$checksum_url" | cut -d' ' -f1)
+    checksum_file=$(mktemp)
+    checksum_status=0
+    download_release_file "$checksum_url" "$checksum_file" 120 || checksum_status=$?
+    if [ "$checksum_status" -ne 0 ]; then
+        rm -f "$checksum_file" "$tmp_file"
+        echo "Could not download the checksum for ${binary_name} ${latest_tag} (curl exit ${checksum_status}). Nothing was changed; try again later." >&2
+        exit 1
+    fi
+    expected_checksum=$(cut -d' ' -f1 < "$checksum_file" | tr -d '\r' | tr 'ABCDEF' 'abcdef')
+    rm -f "$checksum_file"
+    # The same shape check as the pinned value: an empty or garbled .sha256
+    # (a proxy's page, a cut-off file) never gets as far as the compare.
+    case "$expected_checksum" in
+        *[!0123456789abcdef]*) expected_checksum="" ;;
+    esac
+    if [ "${#expected_checksum}" -ne 64 ]; then
+        rm -f "$tmp_file"
+        echo "The checksum file for ${binary_name} ${latest_tag} is not a SHA-256 checksum. Nothing was changed; try again later." >&2
+        exit 1
+    fi
 fi
 
 if [ "$(uname -s)" = "Darwin" ]; then
@@ -1662,6 +1789,8 @@ CLAUDE_PLUGIN_REGISTRY="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/installed_pl
 # | no-marketplace (the plannotator marketplace is gone; re-add it)
 claude_plugin_state="none"
 claude_plugin_version=""
+# The installed plugin's version before this run (for notify_claude_plugin_reload).
+claude_plugin_from_version=""
 
 # The registry value for plannotator@plannotator (a JSON array of per-scope
 # install records; an object in the older v1 file), or nothing.
@@ -1774,10 +1903,28 @@ print_claude_plugin_marketplace_readd() {
     echo "  claude plugin update ${CLAUDE_PLUGIN_ID} --scope user"
 }
 
+# The claude CLI: on PATH, else in Claude Code's own install folders (its
+# native installer's ~/.local/bin, the older ~/.claude/local), the folders the
+# Inbox's launcher also looks in. An update the Inbox or a review window starts
+# runs with that process's PATH, which often lacks ~/.local/bin (an Inbox
+# started outside a login shell), and the plugin was then never updated.
+find_claude_cli() {
+    command -v claude 2>/dev/null && return 0
+    for _fc_dir in "$HOME/.local/bin" "$HOME/.claude/local"; do
+        if [ -f "$_fc_dir/claude" ] && [ -x "$_fc_dir/claude" ]; then
+            printf '%s\n' "$_fc_dir/claude"
+            return 0
+        fi
+    done
+    return 1
+}
+
 update_claude_plugin_if_installed() {
     _cp_record=$(claude_plugin_user_record)
     [ -n "$_cp_record" ] || return 0
-    if ! command -v claude >/dev/null 2>&1; then
+    claude_plugin_from_version=$(claude_plugin_field "$_cp_record" version)
+    _cp_claude=$(find_claude_cli) || _cp_claude=""
+    if [ -z "$_cp_claude" ]; then
         claude_plugin_state="manual"
         return 0
     fi
@@ -1796,10 +1943,14 @@ update_claude_plugin_if_installed() {
         echo "Claude Code plugin: not updated: pinned to ${latest_tag}; updating would install the newest plugin."
         return 0
     fi
-    # Seconds per command. Internal knob for the tests; the default covers a
-    # slow git fetch of the marketplace clone.
-    _cp_secs="${PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT:-120}"
-    case "$_cp_secs" in ''|*[!0-9]*|0) _cp_secs=120 ;; esac
+    # Seconds per command. Internal knob for the tests. Claude Code stops its
+    # own git clone or fetch of the marketplace after 120 s unless
+    # CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS says otherwise, which failed updates on
+    # slow links: the commands get 10 minutes for git (a value the person set
+    # is kept), and 11 for the whole command.
+    _cp_secs="${PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT:-660}"
+    case "$_cp_secs" in ''|*[!0-9]*|0) _cp_secs=660 ;; esac
+    _cp_git_ms="${CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS:-600000}"
     # One private directory for claude's output and the timeout marker.
     _cp_tmp=$(mktemp -d "${TMPDIR:-/tmp}/plannotator-claude-plugin.XXXXXX" 2>/dev/null) || _cp_tmp=""
     if [ -z "$_cp_tmp" ] || [ ! -d "$_cp_tmp" ]; then
@@ -1818,9 +1969,9 @@ update_claude_plugin_if_installed() {
     for _cp_step in marketplace plugin; do
         _cp_rc=0
         if [ "$_cp_step" = "marketplace" ]; then
-            run_with_time_limit "$_cp_secs" "$_cp_tmp/timed-out" env -u CLAUDECODE claude plugin marketplace update plannotator >"$_cp_log" 2>&1 || _cp_rc=$?
+            run_with_time_limit "$_cp_secs" "$_cp_tmp/timed-out" env -u CLAUDECODE CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS="$_cp_git_ms" "$_cp_claude" plugin marketplace update plannotator >"$_cp_log" 2>&1 || _cp_rc=$?
         else
-            run_with_time_limit "$_cp_secs" "$_cp_tmp/timed-out" env -u CLAUDECODE claude plugin update "$CLAUDE_PLUGIN_ID" --scope user >"$_cp_log" 2>&1 || _cp_rc=$?
+            run_with_time_limit "$_cp_secs" "$_cp_tmp/timed-out" env -u CLAUDECODE CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS="$_cp_git_ms" "$_cp_claude" plugin update "$CLAUDE_PLUGIN_ID" --scope user >"$_cp_log" 2>&1 || _cp_rc=$?
         fi
         if [ "$_cp_rc" -eq 124 ]; then
             _cp_failed="timed out after ${_cp_secs}s"
@@ -1861,6 +2012,163 @@ update_claude_plugin_if_installed() {
 }
 update_claude_plugin_if_installed || true
 
+# OpenCode 2 runs as a background service that keeps the plugin it loaded.
+# When that service is running, ask it for the new plugin now:
+# `opencode2 plugin update <spec>` loads it without stopping a running turn, a
+# pending permission or question, or an open Plannotator review (measured on
+# OpenCode 2.0.22; `opencode2 reload` would cancel the permission and the
+# question). The step only asks the service: it writes nothing itself, and
+# any failure (no service, a hang, an exit code, the old version still
+# loaded) leaves the install as it was and prints the command to run.
+#   - Only when `opencode2` is on PATH, the run is not pinned (the same rule as
+#     the Claude Code plugin above), `opencode2 service status` prints a URL,
+#     and `opencode2 plugin list` has a `plannotator` row whose SOURCE is
+#     `@plannotator/opencode` or `@plannotator/opencode@latest`. A pinned spec
+#     (`@plannotator/opencode@0.28.31`) is left alone.
+#   - Every opencode2 call has a time limit, stdin from /dev/null, and its
+#     exit code checked.
+#   - A broken download or a registry that is down still exits 0 with the old
+#     plugin active, so the result is read back from `plugin list`, never
+#     trusted from the exit code.
+#   - It runs BEFORE the cache clearing below, and the OpenCode 2 cache is
+#     kept while the service has the plugin: with that entry gone the service
+#     answers "No plugin updates available", and the Inbox would read the
+#     loaded generation as deleted.
+# PLANNOTATOR_OPENCODE2_TIMEOUT (seconds for the update) and
+# PLANNOTATOR_OPENCODE2_WAIT (seconds to wait for the plugin to show in
+# `plugin list`, before and after the update) are internal knobs for the tests.
+opencode2_service_has_plugin=0
+oc2_version_at_least() {
+    awk -v a="$1" -v b="$2" 'BEGIN {
+        if (a !~ /^v?[0-9]+\.[0-9]+\.[0-9]+/ || b !~ /^v?[0-9]+\.[0-9]+\.[0-9]+/) exit 1
+        sub(/^v/, "", a); sub(/^v/, "", b); sub(/[-+].*/, "", a); sub(/[-+].*/, "", b)
+        split(a, x, "."); split(b, y, ".")
+        for (i = 1; i <= 3; i++) { p = x[i] + 0; q = y[i] + 0; if (p > q) exit 0; if (p < q) exit 1 }
+        exit 0
+    }'
+}
+# "<version> <source>" of the plannotator row of `opencode2 plugin list`, run
+# from $HOME. `plugin list` answers for the folder it runs in, and a folder
+# the service has not opened yet answers "No plugins found" for about a
+# second, so it asks again, once a second, up to $2 more times. A call that
+# runs out of time stops the asking. $1 is the private temp directory; the
+# time limit per call is $_oc_short (set by the caller).
+opencode2_plannotator_row() {
+    _ocr_tmp="$1"
+    _ocr_left="$2"
+    while :; do
+        _ocr_rc=0
+        (cd "$HOME" && run_with_time_limit "$_oc_short" "$_ocr_tmp/list-timed-out" opencode2 plugin list) >"$_ocr_tmp/list.out" 2>&1 || _ocr_rc=$?
+        [ "$_ocr_rc" -eq 124 ] && return 1
+        _ocr_row=$(tr -d '\r' < "$_ocr_tmp/list.out" 2>/dev/null | awk '$1 == "plannotator" { print $2 " " $3; exit }')
+        if [ "$_ocr_rc" -eq 0 ] && [ -n "$_ocr_row" ]; then
+            printf '%s\n' "$_ocr_row"
+            return 0
+        fi
+        [ "$_ocr_left" -gt 0 ] || return 1
+        _ocr_left=$((_ocr_left - 1))
+        sleep 1
+    done
+}
+update_opencode2_service_plugin() {
+    command -v opencode2 >/dev/null 2>&1 || return 0
+    if [ "$VERSION_EXPLICIT" -eq 1 ] && [ "${PLANNOTATOR_UPDATE_VERSION:-}" != "$latest_tag" ]; then
+        return 0
+    fi
+    _oc_want="${latest_tag#v}"
+    oc2_version_at_least "$_oc_want" "0.0.0" || return 0
+    _oc_secs="${PLANNOTATOR_OPENCODE2_TIMEOUT:-90}"
+    case "$_oc_secs" in ''|*[!0-9]*|0) _oc_secs=90 ;; esac
+    _oc_wait="${PLANNOTATOR_OPENCODE2_WAIT:-15}"
+    case "$_oc_wait" in ''|*[!0-9]*) _oc_wait=15 ;; esac
+    # `service status` and `plugin list` answer at once; 15 s is a hang.
+    _oc_short=15
+    if [ "$_oc_secs" -lt "$_oc_short" ]; then
+        _oc_short="$_oc_secs"
+    fi
+    _oc_tmp=$(mktemp -d "${TMPDIR:-/tmp}/plannotator-opencode2.XXXXXX" 2>/dev/null) || _oc_tmp=""
+    if [ -z "$_oc_tmp" ] || [ ! -d "$_oc_tmp" ]; then
+        return 0
+    fi
+    _oc_rc=0
+    (cd "$HOME" && run_with_time_limit "$_oc_short" "$_oc_tmp/status-timed-out" opencode2 service status) >"$_oc_tmp/status.out" 2>&1 || _oc_rc=$?
+    if [ "$_oc_rc" -ne 0 ] || ! grep -Eq '^[[:space:]]*https?://' "$_oc_tmp/status.out" 2>/dev/null; then
+        # Not running (or no answer): the next start loads the newest plugin.
+        rm -rf "$_oc_tmp" 2>/dev/null || true
+        return 0
+    fi
+    _oc_row=$(opencode2_plannotator_row "$_oc_tmp" "$_oc_wait") || _oc_row=""
+    if [ -z "$_oc_row" ]; then
+        rm -rf "$_oc_tmp" 2>/dev/null || true
+        return 0
+    fi
+    _oc_have="${_oc_row%% *}"
+    _oc_spec="${_oc_row#* }"
+    case "$_oc_spec" in
+        @plannotator/opencode|@plannotator/opencode@latest) ;;
+        @plannotator/opencode@[0-9]*.[0-9]*.[0-9]*|@plannotator/opencode@v[0-9]*.[0-9]*.[0-9]*)
+            opencode2_service_has_plugin=1
+            rm -rf "$_oc_tmp" 2>/dev/null || true
+            echo "OpenCode 2: the Plannotator plugin is pinned to ${_oc_spec#@plannotator/opencode@}; left as it is."
+            return 0
+            ;;
+        *)
+            rm -rf "$_oc_tmp" 2>/dev/null || true
+            return 0
+            ;;
+    esac
+    opencode2_service_has_plugin=1
+    if oc2_version_at_least "$_oc_have" "$_oc_want"; then
+        rm -rf "$_oc_tmp" 2>/dev/null || true
+        echo "OpenCode 2: the running service already uses Plannotator ${_oc_have}."
+        return 0
+    fi
+    echo "Updating the Plannotator plugin in the running OpenCode 2 service..."
+    _oc_rc=0
+    (cd "$HOME" && run_with_time_limit "$_oc_secs" "$_oc_tmp/update-timed-out" opencode2 plugin update "$_oc_spec") >"$_oc_tmp/update.out" 2>&1 || _oc_rc=$?
+    _oc_failed=""
+    if [ "$_oc_rc" -eq 124 ]; then
+        _oc_failed="timed out after ${_oc_secs}s"
+    elif [ "$_oc_rc" -ne 0 ]; then
+        _oc_last=$(tr -cd '[:print:]\n' < "$_oc_tmp/update.out" 2>/dev/null | grep -v '^[[:space:]]*$' | tail -n 1 | cut -c 1-200)
+        _oc_failed="opencode2 exited ${_oc_rc}${_oc_last:+: ${_oc_last}}"
+    fi
+    _oc_now="$_oc_have"
+    if [ -z "$_oc_failed" ]; then
+        # The service loads the new plugin a moment after the update returns.
+        _oc_left="$_oc_wait"
+        while :; do
+            _oc_row=$(opencode2_plannotator_row "$_oc_tmp" 0) || _oc_row=""
+            if [ -n "$_oc_row" ]; then
+                _oc_now="${_oc_row%% *}"
+            fi
+            if oc2_version_at_least "$_oc_now" "$_oc_want"; then
+                break
+            fi
+            [ "$_oc_left" -gt 0 ] || break
+            _oc_left=$((_oc_left - 1))
+            sleep 1
+        done
+    fi
+    rm -rf "$_oc_tmp" 2>/dev/null || true
+    if [ -z "$_oc_failed" ] && oc2_version_at_least "$_oc_now" "$_oc_want"; then
+        echo "OpenCode 2: the running service now uses Plannotator ${_oc_now}. Nothing was restarted."
+        return 0
+    fi
+    # `models` first waits for the plugin in a folder the service has not
+    # opened yet, where `plugin update` alone can fail (the Inbox's command).
+    # A plugin that failed to load is listed as "-".
+    if oc2_version_at_least "$_oc_now" "0.0.0"; then
+        _oc_state="still uses Plannotator ${_oc_now}"
+    else
+        _oc_state="has not loaded Plannotator ${_oc_want}"
+    fi
+    echo "OpenCode 2: the running service ${_oc_state}${_oc_failed:+ (${_oc_failed})}. To load ${_oc_want}, run: opencode2 models && opencode2 plugin update ${_oc_spec}"
+}
+if [ "$skip_opencode" -eq 0 ]; then
+    update_opencode2_service_plugin || true
+fi
+
 # Clear any cached OpenCode plugin to force fresh download on next run.
 # Both OpenCode generations root their cache at ${XDG_CACHE_HOME:-~/.cache}/opencode:
 #   OpenCode 1: node_modules/@plannotator and packages/@plannotator
@@ -1873,10 +2181,13 @@ update_claude_plugin_if_installed || true
 if [ "$skip_opencode" -eq 0 ]; then
     OPENCODE_CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/opencode"
     rm -rf "$OPENCODE_CACHE_DIR/node_modules/@plannotator" "$OPENCODE_CACHE_DIR/packages/@plannotator" 2>/dev/null || true
-    for _oc_entry in "$OPENCODE_CACHE_DIR"/npm/@plannotator/opencode@*; do
-        [ -e "$_oc_entry" ] || [ -L "$_oc_entry" ] || continue
-        rm -rf "$_oc_entry" 2>/dev/null || true
-    done
+    # A running OpenCode 2 service that has the plugin was asked above and keeps its cache.
+    if [ "$opencode2_service_has_plugin" -eq 0 ]; then
+        for _oc_entry in "$OPENCODE_CACHE_DIR"/npm/@plannotator/opencode@*; do
+            [ -e "$_oc_entry" ] || [ -L "$_oc_entry" ] || continue
+            rm -rf "$_oc_entry" 2>/dev/null || true
+        done
+    fi
     # The scope directory goes only when nothing else is left in it.
     rmdir "$OPENCODE_CACHE_DIR/npm/@plannotator" 2>/dev/null || true
 fi
@@ -3327,3 +3638,126 @@ fi
 
 # The full install completed: remember its command-line flags for auto-update.
 write_install_flags
+
+# When Claude Code sessions that are open right now cannot load the plugin by
+# themselves, tell the person the one thing to do, even when this ran in the
+# background (Update now in the Inbox, auto-update): one operating-system
+# notification, and the plugin-update page on plannotator.ai in the default
+# browser, which says what happened and shows the commands to copy. Two cases:
+# - updated, from a plugin older than 0.28.52, the first release whose mod
+#   reloads itself after an update (#2356, auto-reload): open sessions run that
+#   older mod, so /reload-plugins must be typed once in each (state=reload).
+# - manual / failed / no-marketplace, while the installed plugin is older than
+#   this release: the plugin could not be updated at all (state=manual).
+# The page URL carries only the case and the two versions:
+#   https://plannotator.ai/plugin-update?state=reload|manual[&from=X.Y.Z][&to=X.Y.Z]
+# Never on a fresh install, an opted-out or pinned plugin (skipped), or a
+# current one; never when no Claude Code session is open (no live pid among
+# Claude Code's sessions/<pid>.json); never in CI, over SSH, without a desktop
+# session or under the test sandbox (PLANNOTATOR_TEST_SANDBOX); once per run
+# (it runs once, here). Opt out of both with PLANNOTATOR_INSTALL_NOTIFY=0;
+# PLANNOTATOR_BROWSER is honored for the page as everywhere else (a "none"
+# value opens no page, a path is run with the URL). Uses only what the system
+# has (osascript and open on macOS, notify-send and xdg-open on Linux), each
+# time-bounded, and never fails the install. install.ps1 / install.cmd carry
+# the same rule.
+CLAUDE_PLUGIN_SELF_RELOAD_VERSION="0.28.52"
+CLAUDE_PLUGIN_UPDATE_PAGE="https://plannotator.ai/plugin-update"
+claude_code_session_open() {
+    _cs_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/sessions"
+    [ -d "$_cs_dir" ] || return 1
+    for _cs_file in "$_cs_dir"/*.json; do
+        [ -f "$_cs_file" ] || continue
+        _cs_pid=$(basename "$_cs_file" .json)
+        case "$_cs_pid" in ''|*[!0-9]*) continue ;; esac
+        kill -0 "$_cs_pid" 2>/dev/null && return 0
+    done
+    return 1
+}
+# A plain X.Y.Z (a leading v dropped), or nothing: only versions go in the URL.
+plain_version() {
+    _pv="${1#v}"
+    case "$_pv" in
+        ''|*[!0123456789.]*|.*|*.|*..*|*.*.*.*) return 0 ;;
+        *.*.*) printf '%s' "$_pv" ;;
+    esac
+}
+notify_claude_plugin_reload() {
+    case "${PLANNOTATOR_INSTALL_NOTIFY:-}" in
+        0|false|no|off|disabled|FALSE|NO|OFF|False|No|Off) return 0 ;;
+    esac
+    [ -z "${PLANNOTATOR_TEST_SANDBOX:-}" ] || return 0
+    [ -z "${CI:-}" ] || return 0
+    [ -z "${SSH_CONNECTION:-}${SSH_CLIENT:-}${SSH_TTY:-}" ] || return 0
+    _nt_from=$(plain_version "$claude_plugin_from_version")
+    [ -n "$_nt_from" ] || return 0
+    case "$claude_plugin_state" in
+        updated)
+            oc2_version_at_least "$_nt_from" "$CLAUDE_PLUGIN_SELF_RELOAD_VERSION" && return 0
+            _nt_state="reload"
+            _nt_to=$(plain_version "$claude_plugin_version")
+            [ -n "$_nt_to" ] || _nt_to=$(plain_version "$latest_tag")
+            _nt_title="Plannotator updated its Claude Code plugin"
+            _nt_body="Type /reload-plugins in each open Claude Code session to load it."
+            ;;
+        manual|failed|no-marketplace)
+            oc2_version_at_least "$_nt_from" "$latest_tag" && return 0
+            _nt_state="manual"
+            _nt_to=$(plain_version "$latest_tag")
+            _nt_title="Plannotator could not update its Claude Code plugin"
+            _nt_body="See Settings > Agents in the Plannotator Inbox for the two commands to run."
+            ;;
+        *) return 0 ;;
+    esac
+    claude_code_session_open || return 0
+    _nt_url="${CLAUDE_PLUGIN_UPDATE_PAGE}?state=${_nt_state}&from=${_nt_from}${_nt_to:+&to=${_nt_to}}"
+    _nt_browser="${PLANNOTATOR_BROWSER:-}"
+    _nt_browser_trim=$(printf '%s' "$_nt_browser" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+    case "$_nt_browser_trim" in
+        none|false|0|off|no|true|1|:) _nt_page=0 ;;
+        *) _nt_page=1 ;;
+    esac
+    _nt_tmp=$(mktemp -d "${TMPDIR:-/tmp}/plannotator-notify.XXXXXX" 2>/dev/null) || return 0
+    case "$(uname -s)" in
+        Darwin)
+            if command -v osascript >/dev/null 2>&1; then
+                # The words go in as arguments, never into the script text.
+                run_with_time_limit 10 "$_nt_tmp/timed-out" osascript \
+                    -e 'on run argv' \
+                    -e 'display notification (item 2 of argv) with title (item 1 of argv)' \
+                    -e 'end run' "$_nt_title" "$_nt_body" >/dev/null 2>&1 || true
+            fi
+            if [ "$_nt_page" -eq 1 ]; then
+                case "$_nt_browser" in
+                    '') run_with_time_limit 10 "$_nt_tmp/timed-out" open "$_nt_url" >/dev/null 2>&1 || true ;;
+                    */*) run_with_time_limit 10 "$_nt_tmp/timed-out" "$_nt_browser" "$_nt_url" >/dev/null 2>&1 || true ;;
+                    *) run_with_time_limit 10 "$_nt_tmp/timed-out" open -a "$_nt_browser" "$_nt_url" >/dev/null 2>&1 || true ;;
+                esac
+            fi
+            ;;
+        Linux)
+            # A desktop session: a display (and, for the notification, a session bus).
+            if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+                if command -v notify-send >/dev/null 2>&1; then
+                    if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -S "$XDG_RUNTIME_DIR/bus" ]; then
+                        DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+                        export DBUS_SESSION_BUS_ADDRESS
+                    fi
+                    if [ -n "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
+                        run_with_time_limit 10 "$_nt_tmp/timed-out" notify-send -a Plannotator \
+                            "$_nt_title" "$_nt_body" >/dev/null 2>&1 || true
+                    fi
+                fi
+                if [ "$_nt_page" -eq 1 ]; then
+                    _nt_opener="${_nt_browser:-xdg-open}"
+                    if command -v "$_nt_opener" >/dev/null 2>&1; then
+                        run_with_time_limit 10 "$_nt_tmp/timed-out" "$_nt_opener" "$_nt_url" >/dev/null 2>&1 || true
+                    fi
+                fi
+            fi
+            ;;
+    esac
+    rm -rf "$_nt_tmp" 2>/dev/null || true
+    return 0
+}
+notify_claude_plugin_reload || true

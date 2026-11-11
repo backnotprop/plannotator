@@ -16,10 +16,11 @@
  * browser-safe.
  */
 
-import { checkGhAuth, getGhUser, fetchGhPR, fetchGhPRContext, fetchGhPRFileContent, fetchGhPRFileBytes, submitGhPRReview, foldFileLevelComments, fetchGhPRViewedFiles, markGhFilesViewed, fetchGhPRStack, fetchGhPRList, fetchGhPRTree } from "./pr-github";
-import { checkGlAuth, getGlUser, fetchGlMR, fetchGlMRContext, fetchGlFileContent, fetchGlFileBytes, submitGlMRReview, fetchGlTree } from "./pr-gitlab";
+import { checkGhAuth, getGhUser, fetchGhPR, fetchGhPRContext, fetchGhRequestedReviewers, fetchGhPRFileContent, fetchGhPRFileBytes, submitGhPRReview, foldFileLevelComments, fetchGhPRViewedFiles, markGhFilesViewed, fetchGhPRStack, fetchGhPRList, fetchGhPRTree, upsertGhDescriptionSection, upsertGhMarkedComment } from "./pr-github";
+import { checkGlAuth, getGlUser, fetchGlMR, fetchGlMRContext, fetchGlFileContent, fetchGlFileBytes, submitGlMRReview, fetchGlTree, upsertGlDescriptionSection, upsertGlMarkedNote } from "./pr-gitlab";
 import { checkBbAuth, getBbUser, fetchBbPR, fetchBbPRContext, fetchBbFileContent, fetchBbFileBytes, submitBbPRReview, fetchBbPRList, fetchBbTree } from "./pr-bitbucket";
 import { ensureGhPRAccess, ghScopedRuntime } from "./pr-github-account";
+import type { PRMarkedCommentInput, PRMarkedResult, PRMarkedSectionInput } from "./pr-marked";
 import type { BitbucketPRRef, GithubPRRef, GitlabMRRef, Platform, PRAuthResult, PRFileBytesResult, PRRuntime, PRRef, PRMetadata, PRContext, PRReviewFileComment, PRReviewFileLevelComment, PRReviewAction, PRReviewSubmissionResult, PRStackTree, PRListItem, PRTreeResult } from "./pr-types";
 
 // Re-export the browser-safe surface so server callers can keep using
@@ -27,7 +28,8 @@ import type { BitbucketPRRef, GithubPRRef, GitlabMRRef, Platform, PRAuthResult, 
 // directly to avoid pulling pr-github / pr-gitlab into the client bundle.
 export * from "./pr-types";
 // GitLab's JSON diff entries as one unified patch (the Inbox's stack diff reads a compare through it).
-export { reconstructPatch as reconstructGitlabPatch, type GitLabDiffEntry } from "./pr-gitlab";
+export { entryMissingContent as glEntryMissingContent, parsePaginatedArray, reconstructPatch as reconstructGitlabPatch, type GitLabDiffEntry } from "./pr-gitlab";
+export { entryMissingContent as ghEntryMissingContent, reconstructGhPatch, type GitHubFileEntry } from "./pr-github";
 
 // --- Provider contract ---
 
@@ -61,6 +63,13 @@ export interface PRProvider<R extends PRRef = PRRef> {
   fetchList?(runtime: PRRuntime, ref: R): Promise<PRListItem[]>;
   /** Every file of one commit (All files without a checkout). Absent: no listing. */
   fetchTree?(runtime: PRRuntime, ref: R, sha: string): Promise<PRTreeResult | null>;
+  /**
+   * The person's own comment that starts with a marker line, edited in place, else posted (pr-marked.ts; the Inbox's
+   * Post decisions). Absent: the platform can't take one (Bitbucket today).
+   */
+  upsertMarkedComment?(runtime: PRRuntime, ref: R, input: PRMarkedCommentInput): Promise<PRMarkedResult>;
+  /** A section of the PR's description between two markers, replaced in place or added at the end. Absent: not offered. */
+  upsertDescriptionSection?(runtime: PRRuntime, ref: R, input: PRMarkedSectionInput): Promise<PRMarkedResult>;
 }
 
 const githubProvider: PRProvider<GithubPRRef> = {
@@ -81,6 +90,8 @@ const githubProvider: PRProvider<GithubPRRef> = {
   fetchStack: fetchGhPRStack,
   fetchList: fetchGhPRList,
   fetchTree: fetchGhPRTree,
+  upsertMarkedComment: upsertGhMarkedComment,
+  upsertDescriptionSection: upsertGhDescriptionSection,
 };
 
 const gitlabProvider: PRProvider<GitlabMRRef> = {
@@ -91,6 +102,8 @@ const gitlabProvider: PRProvider<GitlabMRRef> = {
   fetchFileContent: fetchGlFileContent,
   fetchFileBytes: fetchGlFileBytes,
   fetchTree: fetchGlTree,
+  upsertMarkedComment: upsertGlMarkedNote,
+  upsertDescriptionSection: upsertGlDescriptionSection,
   // GitLab has no file-level discussion: file comments ride the body (#1599).
   submitReview: (runtime, ref, headSha, action, body, fileComments, fileLevelComments) =>
     submitGlMRReview(runtime, ref, headSha, action, foldFileLevelComments(body, fileLevelComments), fileComments),
@@ -154,6 +167,17 @@ export async function fetchPRContext(
   ref: PRRef,
 ): Promise<PRContext> {
   return getPRProvider(ref).fetchContext(runtimeFor(runtime, ref), ref);
+}
+
+/**
+ * The context with who is asked to review. GitLab's context has them already; GitHub's take a read of their own, which
+ * the code review app does not need (it never draws them), so its context stays one read shorter.
+ */
+export async function fetchPRContextWithReviewers(runtime: PRRuntime, ref: PRRef): Promise<PRContext> {
+  if (ref.platform !== "github") return fetchPRContext(runtime, ref);
+  const scoped = runtimeFor(runtime, ref);
+  const [context, requestedReviewers] = await Promise.all([getPRProvider(ref).fetchContext(scoped, ref), fetchGhRequestedReviewers(scoped, ref)]);
+  return { ...context, requestedReviewers };
 }
 
 export async function fetchPRFileContent(
@@ -250,4 +274,23 @@ export async function fetchPRList(
 ): Promise<PRListItem[]> {
   const provider = getPRProvider(ref);
   return provider.fetchList ? provider.fetchList(runtimeFor(runtime, ref), ref) : [];
+}
+
+/** The platform can take a marked comment (and a description section): GitHub and GitLab, not Bitbucket today. */
+export function canPostMarkedText(ref: PRRef): boolean {
+  return !!getPRProvider(ref).upsertMarkedComment;
+}
+
+/** Post or update the person's marked comment (a GitLab note) on a PR. Throws on a platform without one. */
+export async function upsertPRMarkedComment(runtime: PRRuntime, ref: PRRef, input: PRMarkedCommentInput): Promise<PRMarkedResult> {
+  const provider = getPRProvider(ref);
+  if (!provider.upsertMarkedComment) throw new Error(`Posting a comment on ${ref.platform} is not supported yet.`);
+  return provider.upsertMarkedComment(runtimeFor(runtime, ref), ref, input);
+}
+
+/** Put a marked section in a PR's description. Throws on a platform without one. */
+export async function upsertPRDescriptionSection(runtime: PRRuntime, ref: PRRef, input: PRMarkedSectionInput): Promise<PRMarkedResult> {
+  const provider = getPRProvider(ref);
+  if (!provider.upsertDescriptionSection) throw new Error(`Editing a description on ${ref.platform} is not supported yet.`);
+  return provider.upsertDescriptionSection(runtimeFor(runtime, ref), ref, input);
 }

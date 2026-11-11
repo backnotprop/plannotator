@@ -1,7 +1,7 @@
 /**
  * Whether the mod is switched on. It is ON BY DEFAULT wherever Claude Code
  * runs hooks modules (register.ts still stands down in `-p` / SDK sessions
- * and where there is no `/bin/sh`). The user turns it off with:
+ * and where it finds no shell for its scripts). The user turns it off with:
  *
  *   PLANNOTATOR_CLAUDE_MOD=0            (env; also false/off/disabled; wins over the config file)
  *   { "claudeCodeMod": false }          (config.json in the data dir)
@@ -86,6 +86,30 @@ export function resolveAgentToolEnabled(envValue: string | undefined, configText
     if (v === 'false' || v === '0') return false
   }
   return AGENT_TOOL_DEFAULT
+}
+
+/**
+ * Whether the mod reviews ExitPlanMode. Off with `PLANNOTATOR_PLAN_REVIEW=0`
+ * or `{ "planReview": false }`, and ExitPlanMode gets Claude Code's own dialog.
+ * Mirrors `resolvePlanReview(config, env)` in packages/shared/config.ts.
+ */
+export function resolvePlanReviewEnabled(envValue: string | undefined, configText: string | null | undefined): boolean {
+  const fromEnv = parseClaudeModEnv(envValue)
+  if (fromEnv !== undefined) return fromEnv
+  if (!configText) return true
+  let value: unknown
+  try {
+    value = (JSON.parse(configText) as Record<string, unknown> | null)?.planReview
+  } catch {
+    return true
+  }
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'string') {
+    const v = value.trim().toLowerCase()
+    if (v === 'true' || v === '1') return true
+    if (v === 'false' || v === '0') return false
+  }
+  return true
 }
 
 /**

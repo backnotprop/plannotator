@@ -43,7 +43,7 @@ const WASH_ENDS_MS = 2300;
 export type VoicePhase = 'idle' | 'opening' | 'listening' | 'sending';
 
 /** Every reason a press can end without words; the debug log's filter must keep each (voiceDebugLog.test.ts). */
-export const VOICE_TROUBLE_CODES = ['notheard', 'blocked', 'micfailed', 'nothing', 'badclip', 'expired', 'refused', 'keyrefused', 'offline', 'inboxgone', 'codexfailed', 'notready', 'voiceoff'] as const;
+export const VOICE_TROUBLE_CODES = ['notheard', 'blocked', 'micfailed', 'nothing', 'badclip', 'expired', 'refused', 'keyrefused', 'offline', 'inboxgone', 'codexfailed', 'notready', 'voiceoff', 'failed'] as const;
 
 /** Why the last press ended without words. Kept in `VoiceView` until the next press, a Discard or, for those with no clip, typing. */
 export type VoiceTrouble = (typeof VOICE_TROUBLE_CODES)[number];
@@ -110,12 +110,18 @@ export interface VoiceDeps {
   note?(ev: 'voice_press' | 'voice_phase', fields: Record<string, unknown>): void;
 }
 
+/** What became of a take whose field went while it was being transcribed: its words, or nothing to show for it. */
+export type VoiceLate = { text: string } | { failed: true; retry: (() => void) | null };
+
 export interface VoiceSession extends VoicePressTarget {
   view(): VoiceView;
   meter(): VoiceMeter;
   subscribe(listener: () => void): () => void;
   subscribeMeter(listener: () => void): () => void;
-  /** Give the session its field; the returned function drops everything, a clip included, and any answer still on its way. */
+  /**
+   * Give the session its field. The returned function drops everything, a clip included, and any answer still on its
+   * way; with a `late` host, a take already being transcribed goes on, and a later field or `late` takes its words.
+   */
   attach(field: VoiceField): () => void;
   stop(): void;
   cancel(): void;
@@ -138,13 +144,14 @@ const TROUBLE: Record<InboxVoiceFailure, { trouble: VoiceTrouble; keeps: boolean
   voice_empty: { trouble: 'nothing', keeps: false },
   voice_bad_clip: { trouble: 'badclip', keeps: false },
 };
+const UNKNOWN_FAILURE = { trouble: 'failed', keeps: true } as const;
 
 /** The one recording in this window. */
 let recording: { drop(): void } | null = null;
 
 const freshMeter = (): VoiceMeter => ({ elapsedMs: 0, level: 0, voice: false, voiceSeen: false, quietMs: 0, bars: Array.from({ length: VOICE_BARS }, () => ({ height: QUIET_BAR, voice: false })) });
 
-export function createVoiceSession(deps: VoiceDeps): VoiceSession {
+export function createVoiceSession(deps: VoiceDeps, late?: (outcome: VoiceLate) => void): VoiceSession {
   let view = IDLE;
   let meter = freshMeter();
   const listeners = new Set<() => void>();
@@ -245,6 +252,15 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
     if (!field) return;
     if (before && field.text() === before.text) field.select(before.start, before.end);
     if (refocus && !keepFocus) field.focus();
+  };
+
+  /** A failed answer whose field and host have both gone has no line to show it on, so the host's `late` says it. */
+  const failedUnseen = (keeps: boolean) => {
+    if (field || listeners.size > 0) return false;
+    if (!keeps) clip = null;
+    set({ ...IDLE });
+    late?.({ failed: true, retry: keeps ? () => session.retry() : null });
+    return true;
   };
 
   const handle = {
@@ -398,7 +414,7 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
         run++;
         release();
         clip = null;
-        set({ ...IDLE, trouble: 'badclip', said: 'Dictation failed' });
+        if (!failedUnseen(false)) set({ ...IDLE, trouble: 'badclip', said: 'Dictation failed' });
       });
   };
 
@@ -417,9 +433,15 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
     } catch {
       answer = { code: null };
     }
-    if (mine !== run || !field) return;
+    if (mine !== run) return;
     abort = null;
     if ('text' in answer) {
+      if (!field) {
+        clip = null;
+        set({ ...IDLE });
+        late?.(answer);
+        return;
+      }
       const place = field.insert(answer.text);
       clip = null;
       set({ ...IDLE, wash: { ...place, fading: false }, said: 'Text added at the cursor' });
@@ -431,10 +453,12 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
       ];
       return;
     }
-    // Not one of this route's codes: the answer came from something other than a working Inbox, a restarted one among them.
-    const known = answer.code ? TROUBLE[answer.code] : { trouble: 'inboxgone' as const, keeps: true };
-    if (!known.keeps) clip = null;
+    // No code: the answer came from something other than a working Inbox, a restarted one among them. A `voice_` code
+    // this page does not know (a newer Inbox's): a plain failure that keeps the clip, so nothing is lost.
+    const known = answer.code ? (Object.hasOwn(TROUBLE, answer.code) ? TROUBLE[answer.code] : UNKNOWN_FAILURE) : { trouble: 'inboxgone' as const, keeps: true };
     if (answer.code === 'voice_not_ready' && answer.reason) deps.notReady(answer.reason);
+    if (failedUnseen(known.keeps)) return;
+    if (!known.keeps) clip = null;
     set({ ...IDLE, trouble: known.trouble, engine: answer.engine ?? null, kept: known.keeps, clipMs: view.clipMs, said: 'Dictation failed' });
   };
 
@@ -454,8 +478,13 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
     },
     attach: (next) => {
       field = next;
+      // A take or a line that outlived the last field carries on in this one.
+      if ((view.phase !== 'idle' || view.trouble !== null) && !stopWatching) {
+        stopWatching = next.watch(onCaret, onInput);
+        onCaret();
+      }
       return () => {
-        handle.drop();
+        if (!late || view.phase !== 'sending') handle.drop();
         for (const cancelTimer of washTimers) cancelTimer();
         washTimers = [];
         stopWatching?.();

@@ -30,6 +30,8 @@ import { INBOX_TOOL_COST_STEPS, type InboxAuthor } from "@plannotator/core/inbox
 import {
   INBOX_BRIDGE_POLL_PATH,
   INBOX_STEPS_LEAD,
+  INBOX_STEPS_START_WAKE_LINE,
+  INBOX_WAKE_CLOSING_LINE,
   inboxAgentTool,
   inboxSessionThreadsText,
   inboxWakeText,
@@ -41,12 +43,12 @@ import { INBOX_DEFAULT_TOOLS } from "../../apps/hook/hooks/mod/inbox-default-too
 import { startInboxServer, type InboxServer } from "./inbox";
 import { INBOX_MCP_INSTRUCTIONS } from "./inbox-mcp";
 
-/** The approved agent text, exact (approval "inbox-thread-steps", item 7). Pinned on purpose. */
+/** The approved agent text, exact (approval "inbox-thread-steps", item 7, amended 2026-11-07 and 2026-11-09). Pinned on purpose. */
 const APPROVED =
-  "steps: your plan for the work in this thread, as the person should see it: 3 to 8 short steps, the whole list each call (it replaces the last one). status: todo, doing, done, waiting (on the person), dropped (say why in note). Call it when a step starts or ends; it sends nothing and notifies no one. Skip it for work that ends in this reply.";
-/** The action's line in the agent tool (the owner, 2026-11-03), so the description stays under Claude Code's 2,048. */
-const ACTION_LINE = "steps: keep the person's checklist for this thread current (details on the steps field).";
-const APPROVED_WAKE = "Your steps here: 2 of 5 done; doing: Replay the failures in staging. Update them if that changed.";
+  "steps: The person's checklist for this thread, only for multi-step work you're both aligned on. Start one when the person gives the go-ahead on work with several steps. High-level steps, a few plain words each; never your own to-do list. The whole list each call. status: todo, doing, done, waiting (on the person), dropped (say why in note). Update each step as it starts and ends; notifies no one.";
+/** The action's line in the agent tool (the owner, 2026-11-07), so the description stays under Claude Code's 2,048. */
+const ACTION_LINE = "steps: person's checklist for multi-step work you're aligned on (see the steps field).";
+const APPROVED_WAKE = "Your checklist here: 2 of 5 done; doing: Replay the failures in staging. If you're still working on this, keep it current.";
 
 /** The word as an agent would read it: `steps` alone, not inside `diff_steps`. */
 const STEPS_WORD = /(?<![A-Za-z_])steps(?![A-Za-z_])/i;
@@ -244,7 +246,59 @@ describe("on", () => {
     const [command] = await w.poll();
     expect(command!.steps).toEqual({ done: 2, total: 5, doing: "Replay the failures in staging" });
     const wake = inboxWakeText(command!);
-    expect(wake).toContain(`\n\n${APPROVED_WAKE}\n\n[thread ${w.thread}`);
+    expect(wake.endsWith(`\n\n${APPROVED_WAKE}\n\n${INBOX_WAKE_CLOSING_LINE}`)).toBe(true);
+  });
+
+  // The owner, 2026-11-09: when the person answers the session's questions in a thread where it keeps no checklist,
+  // the wake says when to start one. What regresses: the line on a plain reply, with the switch off, or still there
+  // once the session keeps a list.
+  test("a reply that answers the session's questions, with no list of its own there: the wake says when to start one", async () => {
+    const w = await world();
+    const ask = async (key: string) => {
+      const sent = await w.call("send_message", { ...w.agent, project_path: w.project, reply_to: w.thread, idempotency_key: key, body: "The cursor fix is in.\n\n:::question\nHow far back should the backfill go?\n\n- [ ] Last 7 days\n- [ ] Since the October release\n:::" });
+      return sent.structuredContent!.message_id as string;
+    };
+    const answer = async (messageId: string, key: string) => {
+      const q = w.server.store.questionsOf(messageId)[0]!;
+      const response = await fetch(`${w.base}/api/inbox/messages/${messageId}/reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ serverSession: w.server.serverSession, idempotency_key: key, questions: [{ key: q.key, revision: q.revision, answer: { v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: ["Last 7 days"] } }] }),
+      });
+      expect(response.status).toBe(200);
+      return newest();
+    };
+    // The wake for the person's latest message in the thread (found by id, whatever else the poll still holds).
+    const newest = async () => {
+      const ids = w.server.store.threadMessageIds(w.thread);
+      const latest = [...ids].reverse().find((id) => w.server.store.message(id)?.author.kind === "person")!;
+      const command = (await w.poll()).find((one) => one.id === latest);
+      expect(command).toBeDefined();
+      return command!;
+    };
+    // Off: nothing, answers or not.
+    let command = await answer(await ask("k-ask-off"), "k-answer-off");
+    expect(command.steps_start).toBeUndefined();
+    expect(inboxWakeText(command)).not.toContain(INBOX_STEPS_START_WAKE_LINE);
+    await w.setSteps(true);
+    // On, answers: the line, before the closing line.
+    command = await answer(await ask("k-ask-on"), "k-answer-on");
+    expect(command.steps_start).toBe(true);
+    expect(inboxWakeText(command).endsWith(`\n\n${INBOX_STEPS_START_WAKE_LINE}\n\n${INBOX_WAKE_CLOSING_LINE}`)).toBe(true);
+    // On, a plain reply: nothing.
+    expect((await w.personReplies("Thanks.")).status).toBe(200);
+    const plain = await newest();
+    expect(plain.steps_start).toBeUndefined();
+    expect(inboxWakeText(plain)).not.toContain(INBOX_STEPS_START_WAKE_LINE);
+    // The session keeps a list there: its own line, never this one, even once it clears the list.
+    await w.call("steps", { ...w.agent, thread_id: w.thread, steps: PLAN });
+    command = await answer(await ask("k-ask-list"), "k-answer-list");
+    expect(command.steps_start).toBeUndefined();
+    expect(inboxWakeText(command)).toContain(APPROVED_WAKE);
+    await w.call("steps", { ...w.agent, thread_id: w.thread, steps: [] });
+    command = await answer(await ask("k-ask-cleared"), "k-answer-cleared");
+    expect(command.steps_start).toBeUndefined();
+    expect(inboxWakeText(command)).not.toContain(INBOX_STEPS_START_WAKE_LINE);
   });
 
   test("the entry with steps on stays within 5% of the size the window states", async () => {

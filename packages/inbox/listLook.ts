@@ -1,6 +1,7 @@
 /**
  * The thread list's look options (approval "inbox-list-options", 2026-10-30): four checkboxes in the list's ⋮
- * menu, under Tidy and Refresh. All are off by default, so the list is today's until someone turns one on.
+ * menu, under Tidy and Refresh. Smaller thread names is on by default (the owner, 2026-11-05: "I feel like we should
+ * make it the default"); every other option is off until someone turns it on.
  *
  * - Highlight thread subject: the row's title sits in the thread chip's grey pill (`.ib-key`), cut to one line.
  * - Compact rows: two lines instead of three (agents, project, title and time; then the preview).
@@ -17,9 +18,15 @@
  * (`ROWS_COOKIE`) keeps the last look this browser showed, so a reload paints it before the settings read answers.
  * The four per-option cookies of "inbox-list-options" are read, never written: the first window to find no
  * `inboxRows` saves them once (`adoptSavedRows`), and from then on the server's look wins.
+ *
+ * Until 2026-11-05 every option was off by default. A look kept from then that is exactly those old defaults (every
+ * option off: the server's `inboxRows` saved before `inboxRowsDefaults`, this cookie's "none", or no old per-option
+ * cookie on) was never a choice, so it is read as today's defaults; any other old look is the person's and stays as
+ * it is, smaller names off included. Every option off chosen today is saved as such, and this cookie says "off".
  */
 import { useSyncExternalStore } from 'react';
-import { INBOX_ROWS_OPTIONS, inboxRowsRead, type InboxRowsOption } from '@plannotator/core/inbox-types';
+import { INBOX_ROWS_DEFAULT, INBOX_ROWS_OPTIONS, inboxRowsRead, type InboxRowsOption } from '@plannotator/core/inbox-types';
+import { inboxRowsBy, type InboxRowsBy } from '@plannotator/core/inbox-types';
 import { storage } from '@plannotator/ui/utils/storage';
 import { inboxApi } from './api';
 
@@ -30,18 +37,51 @@ export interface ListLook {
   smallNames: boolean;
   /** Settings → Rows only (no ⋮ item): no project (nor its machine) on any row; a wide row takes one project's columns. */
   hideProject: boolean;
-  /** Settings → Rows only (no ⋮ item): no grey subject line under a named thread. */
+  /** Settings → Rows only (no ⋮ item): "Grey line under the name" None, no grey preview (the latest message) on any row. */
   hidePreview: boolean;
   /** Settings → Rows only: Density "Roomy", more room around every row (never with `compact`). */
   roomy: boolean;
   /** Settings → Rows only: Unread "Dot", an accent dot before an unread row (with `smallNames`: the name at the read size, bold). */
   unreadDot: boolean;
-  /** Settings → Rows only: Subject preview "2 lines", beside a thread and on a phone (a wide row is one line). Never with `hidePreview`. */
+  /** Settings → Rows only: "Grey line under the name" 2 lines, beside a thread and on a phone (a wide row is one line). Never with `hidePreview`. */
   previewTwo: boolean;
   /** Settings → Rows only: Time "Relative", "4m", "3h", "2d", then the date (relativeTime.ts). */
   relativeTime: boolean;
   /** Settings → Rows only: First line "Thread name": the name and the time on line 1, the agents and project under it (three-line and phone rows). */
   titleFirst: boolean;
+  /** Settings → Rows only: Show → Letter marks "Threads" or "Both", a thread's mark from its name (letterMarks.tsx). */
+  marksThreads: boolean;
+  /** Settings → Rows only: Show → Letter marks "Projects" or "Both", a project's mark (its picture, else its letters). */
+  marksProjects: boolean;
+  /** Settings → Rows only: Look → Mark style "Inline" (neither this nor `markDot`: "Avatar"). Only while marks show. */
+  markInline: boolean;
+  /** Settings → Rows only: Look → Mark style "Dot". Only while marks show. */
+  markDot: boolean;
+  /** Settings → Rows only: Show → Logo from the repo, a favicon or logo found in the project's folder. Only with project marks. */
+  repoLogo: boolean;
+  /** Settings → Rows only: Show → GitHub pictures, the owner's picture for a project on GitHub. Only with project marks. */
+  githubPictures: boolean;
+  /**
+   * Settings → Rows only: Look → Time position "Under the preview": on three-line and phone rows the time leaves line 1
+   * for a line of its own under the preview, at the left, with the row's end (pin, badge, words, counts) at its right.
+   * A wide row keeps its columns.
+   */
+  timeBelow: boolean;
+  /** Settings → Rows only: Show → Dividers, a hairline (the theme's border) between rows. Never an outline on a row. */
+  dividers: boolean;
+  /**
+   * Settings → Rows only: Show → Status mark, one mark at the row's end (`StatusMark`, RowStatus.tsx): waiting on you
+   * (an open question or action item) or done (Quiet), in place of the action pill and `?N`, whose words are its name
+   * and tooltip. Stopped and Holds up keep their filled question mark (or action box) beside it.
+   */
+  statusMark: boolean;
+  /** Settings → Rows only: Show → Bold thread names, every row's name in bold, read or not (Sent and Quiet included). */
+  boldNames: boolean;
+  /**
+   * Settings → Rows only: Pull requests off (approval "inbox-rows-settings-page"): no PR mark at any row's end
+   * (`RowPullsMark`). Off by default, so a look saved before it shows them. The thread's own PR button stays.
+   */
+  hidePulls: boolean;
 }
 
 export type ListLookKey = keyof ListLook;
@@ -61,7 +101,21 @@ export const LIST_LOOK_OFF: ListLook = {
   previewTwo: false,
   relativeTime: false,
   titleFirst: false,
+  marksThreads: false,
+  marksProjects: false,
+  markInline: false,
+  markDot: false,
+  repoLogo: false,
+  githubPictures: false,
+  timeBelow: false,
+  dividers: false,
+  statusMark: false,
+  boldNames: false,
+  hidePulls: false,
 };
+
+/** The look for someone who chose none (core `INBOX_ROWS_DEFAULT`): smaller thread names on, every other option off. */
+export const LIST_LOOK_DEFAULT: ListLook = { ...LIST_LOOK_OFF, ...Object.fromEntries(INBOX_ROWS_DEFAULT.map((key) => [key, true])) };
 
 /** Every option: the ⋮ menu's four, then Settings → Rows' others. */
 export const LIST_LOOK_KEYS: readonly ListLookKey[] = INBOX_ROWS_OPTIONS;
@@ -77,8 +131,13 @@ export const LIST_LOOK_COOKIES: Readonly<Record<MenuLookKey, string>> = {
   smallNames: 'plannotator-inbox-list-small-names',
 };
 
-/** The last look this browser showed: the names that are on, with commas, or "none". Paints a reload; never the truth. */
+/**
+ * The last look this browser showed: the names that are on, with commas, or "off" when none is. Paints a reload;
+ * never the truth. "none" is what a build before the new defaults wrote for every option off: today's defaults.
+ */
 export const ROWS_COOKIE = 'plannotator-inbox-rows';
+const ROWS_COOKIE_NONE = 'off';
+const ROWS_COOKIE_OLD_DEFAULTS = 'none';
 
 /** The ⋮ menu's checkboxes, in order (no icons, the owner 2026-11-02: "those could all just be check boxes"). */
 export const LIST_LOOK_OPTIONS: ReadonlyArray<{ key: MenuLookKey; label: string }> = [
@@ -98,7 +157,7 @@ export function lookFromRows(rows: readonly string[]): ListLook {
 
 /**
  * A change on top of a look, with its rivals made to agree: the option just turned on wins (Compact turns Roomy
- * off and Roomy turns Compact off; "2 lines" turns "Hide subject preview" off and back; the Dot needs the smaller
+ * off and Roomy turns Compact off; the grey line's "2 lines" and "None" turn each other off; the Dot needs the smaller
  * names, so it turns them on, and turning them off turns the Dot off).
  */
 export function lookWithChange(look: ListLook, change: Partial<ListLook>): ListLook {
@@ -109,29 +168,76 @@ export function lookWithChange(look: ListLook, change: Partial<ListLook>): ListL
   if (change.previewTwo) next.hidePreview = false;
   if (change.unreadDot) next.smallNames = true;
   if (change.smallNames === false) next.unreadDot = false;
+  if (change.markInline) next.markDot = false;
+  if (change.markDot) next.markInline = false;
+  // A picture switch turned on while no project marks show turns them on (Off becomes Projects, Threads becomes
+  // Both), so the switch never does nothing.
+  if (change.repoLogo || change.githubPictures) next.marksProjects = true;
   return lookFromRows(rowsFromLook(next));
+}
+
+/** Show → Letter marks: which marks draw. */
+export type MarksWhat = 'off' | 'threads' | 'projects' | 'both';
+/** Look → Mark style: where the mark lives. */
+export type MarkStyle = 'inline' | 'avatar' | 'dot';
+export interface MarksChoice {
+  what: MarksWhat;
+  style: MarkStyle;
+  /** Logo from the repo (only with project marks). */
+  logo: boolean;
+  /** GitHub pictures (only with project marks). */
+  github: boolean;
+}
+
+/** The letter marks a look draws (all off by default; with marks off the style reads Avatar, the first one shown). */
+export function lookMarks(look: Pick<ListLook, 'marksThreads' | 'marksProjects' | 'markInline' | 'markDot' | 'repoLogo' | 'githubPictures'>): MarksChoice {
+  const what: MarksWhat = look.marksThreads ? (look.marksProjects ? 'both' : 'threads') : look.marksProjects ? 'projects' : 'off';
+  const on = what !== 'off';
+  const projects = what === 'projects' || what === 'both';
+  return {
+    what,
+    style: on && look.markInline ? 'inline' : on && look.markDot ? 'dot' : 'avatar',
+    logo: projects && look.repoLogo,
+    github: projects && look.githubPictures,
+  };
+}
+
+/** Show → Letter marks as the look's options. */
+export function marksWhatLook(what: MarksWhat): Pick<ListLook, 'marksThreads' | 'marksProjects'> {
+  return { marksThreads: what === 'threads' || what === 'both', marksProjects: what === 'projects' || what === 'both' };
+}
+
+/** Look → Mark style as the look's options. Picked while marks are off, it turns thread marks on, so a click never does nothing. */
+export function markStyleLook(style: MarkStyle, look: ListLook): Partial<ListLook> {
+  const change: Partial<ListLook> = { markInline: style === 'inline', markDot: style === 'dot' };
+  if (lookMarks(look).what === 'off') change.marksThreads = true;
+  return change;
 }
 
 export function rowsFromLook(look: ListLook): InboxRowsOption[] {
   return LIST_LOOK_KEYS.filter((key) => look[key]);
 }
 
-/** This browser's look: the last one shown, else the old per-option cookies ("1" is on), else every option off. */
+/**
+ * This browser's look: the last one shown, else the old per-option cookies ("1" is on), else the defaults. The old
+ * defaults (the cookie's "none", or no old cookie on) were never a choice: they read as today's defaults.
+ */
 function readBrowserLook(): ListLook {
   try {
     const shown = storage.getItem(ROWS_COOKIE);
+    if (shown === ROWS_COOKIE_OLD_DEFAULTS) return LIST_LOOK_DEFAULT;
     if (shown !== null) return lookFromRows(shown.split(','));
     const look = { ...LIST_LOOK_OFF };
     for (const key of Object.keys(LIST_LOOK_COOKIES) as MenuLookKey[]) look[key] = storage.getItem(LIST_LOOK_COOKIES[key]) === '1';
-    return look;
+    return LIST_LOOK_KEYS.some((key) => look[key]) ? look : LIST_LOOK_DEFAULT;
   } catch {
-    return LIST_LOOK_OFF;
+    return LIST_LOOK_DEFAULT;
   }
 }
 
-/** Every option at its default (all off): Settings → Rows' "Balanced". */
+/** Every option at its default (smaller names on, the others off): Settings → Rows' "Balanced". */
 export function isDefaultListLook(look: ListLook): boolean {
-  return LIST_LOOK_KEYS.every((key) => !look[key]);
+  return LIST_LOOK_KEYS.every((key) => look[key] === LIST_LOOK_DEFAULT[key]);
 }
 
 const sameLook = (a: ListLook, b: ListLook) => LIST_LOOK_KEYS.every((key) => a[key] === b[key]);
@@ -156,7 +262,7 @@ const shown = (): ListLook => (current ??= readBrowserLook());
 
 function show(look: ListLook): void {
   try {
-    storage.setItem(ROWS_COOKIE, rowsFromLook(look).join(',') || 'none');
+    storage.setItem(ROWS_COOKIE, rowsFromLook(look).join(',') || ROWS_COOKIE_NONE);
   } catch {
     // A page with no cookies still shows the look; a reload only paints the defaults until the settings read.
   }
@@ -222,17 +328,6 @@ export function writeListLookOption(key: ListLookKey, on: boolean): Promise<void
   return writeListLookOptions({ [key]: on });
 }
 
-/**
- * The one-time list options dialog's Done (approval "inbox-list-options-intro"): only the options the person changed
- * in it (`look` against `opened`), on top of the look now, so every other keeps whatever it is now, even when another
- * window changed it while the dialog was open (a stale "smaller names off" would turn its Dot off). Nothing changed:
- * nothing saved.
- */
-export function writeMenuLook(look: Pick<ListLook, MenuLookKey>, opened: Pick<ListLook, MenuLookKey>): Promise<void> {
-  const changed = LIST_LOOK_OPTIONS.filter(({ key }) => look[key] !== opened[key]).map(({ key }) => [key, look[key]]);
-  return changed.length ? writeListLookOptions(Object.fromEntries(changed)) : Promise.resolve();
-}
-
 /** Taken when a settings read is sent, and given back with its answer (`adoptSavedRows`'s `sentAt`). */
 export function listLookReadMark(): number {
   return serverRev;
@@ -263,7 +358,7 @@ export function adoptSavedRows(rows: unknown, rev?: unknown, sentAt?: number): v
  * relay frames, and a rows frame has no seq to tell copies apart, sharedEvents.ts). Only a settings read can tell
  * which, so `onDoubt` asks for one.
  */
-export function hearRowsEvent(rows: unknown, rev?: unknown, onDoubt?: () => void): void {
+export function hearRowsEvent(rows: unknown, rev?: unknown, onDoubt?: () => void, last?: { prev: unknown; by: unknown }): void {
   if (rows === undefined) return;
   if (typeof rev === 'number') {
     if (rev <= eventRev) {
@@ -273,6 +368,24 @@ export function hearRowsEvent(rows: unknown, rev?: unknown, onDoubt?: () => void
     eventRev = rev;
   }
   adopt(rows, rev);
+  // An agent's command made this save (`plannotator inbox rows set`): Settings → Rows says who, with Undo.
+  const by = inboxRowsBy(last?.by);
+  const before = inboxRowsRead(last?.prev);
+  const after = inboxRowsRead(rows);
+  if (by && before && after) for (const listener of agentChangeListeners) listener({ by, before: lookFromRows(before), after: lookFromRows(after) });
+}
+
+/** A rows save an agent's command made, as the windows hear it: who, the look before it and the look it saved. */
+export interface AgentRowsChange {
+  by: InboxRowsBy;
+  before: ListLook;
+  after: ListLook;
+}
+const agentChangeListeners = new Set<(change: AgentRowsChange) => void>();
+/** Hear each save an agent's command makes while the page is open. Returns the way to stop. */
+export function onAgentRowsChange(listener: (change: AgentRowsChange) => void): () => void {
+  agentChangeListeners.add(listener);
+  return () => void agentChangeListeners.delete(listener);
 }
 
 function adopt(rows: unknown, rev: unknown): void {
@@ -288,14 +401,14 @@ function adopt(rows: unknown, rev: unknown): void {
 
 /** The list column's classes for the look: none when every option is off. */
 export function listLookClasses(look: ListLook): string {
-  return `${look.highlight ? ' ib-lk-pill' : ''}${look.compact ? ' ib-lk-compact' : ''}${look.hideAgents ? ' ib-lk-noagents' : ''}${look.smallNames ? ' ib-lk-small' : ''}${look.roomy ? ' ib-lk-roomy' : ''}${look.unreadDot ? ' ib-lk-dot' : ''}${look.previewTwo ? ' ib-lk-pv2' : ''}${look.titleFirst ? ' ib-lk-tfirst' : ''}`;
+  return `${look.highlight ? ' ib-lk-pill' : ''}${look.compact ? ' ib-lk-compact' : ''}${look.hideAgents ? ' ib-lk-noagents' : ''}${look.smallNames ? ' ib-lk-small' : ''}${look.roomy ? ' ib-lk-roomy' : ''}${look.unreadDot ? ' ib-lk-dot' : ''}${look.previewTwo ? ' ib-lk-pv2' : ''}${look.titleFirst ? ' ib-lk-tfirst' : ''}${look.timeBelow ? ' ib-lk-tbelow' : ''}${look.dividers ? ' ib-lk-div' : ''}${look.statusMark ? ' ib-lk-stm' : ''}${look.boldNames ? ' ib-lk-bold' : ''}${look.hidePulls ? ' ib-lk-nopulls' : ''}`;
 }
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
-const off = () => LIST_LOOK_OFF;
+const defaults = () => LIST_LOOK_DEFAULT;
 const ignore = () => () => {};
 const noChange = () => {};
 const change = (changes: Partial<ListLook>) => void writeListLookOptions(changes);
@@ -303,10 +416,10 @@ const change = (changes: Partial<ListLook>) => void writeListLookOptions(changes
 /**
  * The list's look and a setter for one change or several (a Settings → Rows preset), which every list on screen
  * takes together. `remember` false (the onboarding tour, as its sidebar ignores the person's closed sections):
- * every option off, nothing read or written.
+ * the defaults, nothing read or written.
  */
 export function useListLook(remember = true): [ListLook, (changes: Partial<ListLook>) => void] {
-  const look = useSyncExternalStore(remember ? subscribe : ignore, remember ? shown : off, off);
+  const look = useSyncExternalStore(remember ? subscribe : ignore, remember ? shown : defaults, defaults);
   return [look, remember ? change : noChange];
 }
 

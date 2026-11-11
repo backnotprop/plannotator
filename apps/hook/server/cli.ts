@@ -1,9 +1,12 @@
+import { INBOX_ROWS_USAGE_LINE } from "@plannotator/core/inbox-types";
 import { GUIDE_CLI_USAGE } from "@plannotator/server/guide-cli";
 import { T3_CLI_USAGE } from "@plannotator/t3-code/usage";
-import { INBOX_CARD_COLUMNS } from "@plannotator/core/inbox-types";
+import { INBOX_CARD_COLUMNS, INBOX_CARD_INITIATIVE_CLEAR_OUT, INBOX_CARD_INITIATIVE_FIELD, INBOX_CARD_INITIATIVE_RULE } from "@plannotator/core/inbox-types";
 import { INBOX_REF_LINK_RULE, INBOX_TOOL_ACTIONS } from "@plannotator/shared/inbox/connection";
 import { FEEDBACK_HEREDOC_END } from "@plannotator/core/product-feedback";
+import { SHAPE_GUIDE, SHAPE_HELP_INTRO } from "@plannotator/core/shape-skill";
 import { INBOX_LINK_USAGE } from "./inbox-link-command";
+import { LOCKFILE_NAMES, SYSTEM_COMMANDS, SYSTEM_TICK_INTERVAL_SECONDS, TEST_FOLDERS } from "@plannotator/system/commands";
 
 const HELP_FLAGS = new Set(["--help", "-h"]);
 
@@ -218,7 +221,7 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
     "  plannotator inbox projects [combine <project id> --into <project id> | undo <project id>] [--json]",
     "  plannotator inbox call [--session <id>] <action> [<json> | -]",
     "  plannotator t3 login | logout --url <T3 MCP URL>",
-    ...(options.board === true ? ["  plannotator card <create|move|say|link|ship|drop|list> ..."] : []),
+    ...(options.board === true ? ["  plannotator card <create|move|say|link|ship|drop|list|initiative_delete> ..."] : []),
     `  plannotator feedback --stdin [--category <bug|idea|other>] [--contact '<text>'] <<'${FEEDBACK_HEREDOC_END}'`,
     "  plannotator update [--check]",
     "  plannotator uninstall [--purge] [--yes] [--dry-run]",
@@ -247,9 +250,10 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
  *
  * `t3` (the T3 Code connection) was the last one to launch. Today:
  * `t3-hook`, the T3 Claude hook's settings helper, which only the installer
- * runs.
+ * runs; `shape`; and `system`, System's drawing commands, until the Inbox's
+ * System surfaces ship.
  */
-export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3-hook", "shape"]);
+export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3-hook", "shape", "system"]);
 
 /**
  * `plannotator card …` (card-command.ts): the Board's card call from a shell,
@@ -257,13 +261,14 @@ export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3-hook
  */
 export const CARD_COMMAND_USAGE = [
   "Usage:",
-  "  plannotator card create <title> [--column <column>] [--say <text>] [--you <text>] [--thread <id>] [--pr <ref>] [--ref <issue or PR>] [--key <key>]",
+  "  plannotator card create <title> [--column <column>] [--say <text>] [--you <text>] [--thread <id>] [--pr <ref>] [--ref <issue or PR>] [--key <key>] [--initiative <name>]",
   "  plannotator card create --thread <id> [...]      (the thread's subject is the title; pass a short <title> too, as subjects run long)",
   "  plannotator card move <crd_id> <column> [--say <text>] [--you <text>] [--thread <id>] [--pr <ref>] [--ref <issue or PR>] [--reason <text>]",
-  "  plannotator card say <crd_id> [<text>] [--you <text>] [--title <text>]",
+  "  plannotator card say <crd_id> [<text>] [--you <text>] [--title <text>] [--initiative <name>]",
   "  plannotator card link <crd_id> [--thread <id>] [--pr <ref>] [--ref <issue or PR>] [--say <text>]",
   "  plannotator card ship <crd_id> [--say <text>] [--pr <ref>] [--thread <id>]      (moves it to done)",
   "  plannotator card drop <crd_id> <reason> [--say <text>]",
+  "  plannotator card initiative_delete <name or ini_id>      (its cards stay, in no initiative)",
   "  plannotator card list [--anyone | --mine] [--all]",
   "",
   "Every command takes [--project <folder>] (default: your Claude Code or Pi session's project, else this folder) and [--json].",
@@ -273,6 +278,7 @@ export const CARD_COMMAND_USAGE = [
   "",
   "Keeps a card on the person's Board in the Plannotator Inbox for work that outlasts a reply.",
   "A title is 2–5 words naming the work (\"Pi update fix\"), never a sentence; status goes in --say.",
+  `--initiative: ${INBOX_CARD_INITIATIVE_FIELD} ${INBOX_CARD_INITIATIVE_RULE} ${INBOX_CARD_INITIATIVE_CLEAR_OUT}`,
   "When you move a card to in_review, link the Inbox thread where the person makes the call (--thread), so \"You: …\" opens it.",
   "--ref: an issue or PR as owner/repo#123, or any http(s) link with its scheme (https://…). GitHub and GitLab issues and PRs show their live state; a Jira or YouTrack issue link shows its key; any other link shows as a plain link.",
   `In --say and --you: ${INBOX_REF_LINK_RULE.replace(/^A/, "a")}`,
@@ -282,40 +288,11 @@ export const CARD_COMMAND_USAGE = [
 
 /**
  * `plannotator shape …` (shape-command.ts): an agent's side of Shape.
- * Unreleased (HIDDEN_SUBCOMMANDS). DRAFT: every word below needs the owner's
- * approval before Shape ships (approval "shape-living-board", "Still needs
- * its own approval").
+ * Unreleased (HIDDEN_SUBCOMMANDS). Built from the one source of Shape's agent
+ * text (packages/core/shape-skill.ts): the welcome and the commands, then the
+ * drawing guide the Inbox's `/shape` skill ends with too.
  */
-export const SHAPE_COMMAND_USAGE = [
-  "DRAFT: this text is not approved yet.",
-  "",
-  "Usage:",
-  "  plannotator shape update --file <board.json> [--id <shp_id> --base <n>] [--thread <msg_id>] [--through <msg_id>] [--project <folder>]",
-  "  plannotator shape read [<shp_id>] [--version <n>] [--notes]",
-  "  plannotator shape drawing [<shp_id>]",
-  "  plannotator shape answer [<shp_id>] --re <shn_id> --text '<answer>'",
-  "  plannotator shape done [<shp_id>]",
-  "  plannotator shape list [--all] [--json]",
-  "",
-  "A shape is a board you draw for the person: a Picture, How it works, Requirements",
-  "and Code, with numbered references. Each update stores a new version of the whole board.",
-  "",
-  "update   Stores the board in <board.json>. Without --id it makes a new shape and",
-  "         prints its id. With --id, --base is the version you drew from; if the shape",
-  "         changed since, the update is refused and the latest version is printed.",
-  "         Keep the same ids (data-mark, requirement ids) for the same parts, so the",
-  "         board redraws only what changed.",
-  "read     Prints the latest version (or --version <n>). --notes also prints the notes",
-  "         that wait for you (Change it and Ask) and marks them as received.",
-  "drawing  Tells the board you are drawing a new version (until it lands, at most 10 minutes).",
-  "answer   Answers the person's Ask (its id is in read --notes). Change it notes need",
-  "         no answer: draw the change as a new version.",
-  "done     Finishes the shape. Do this only when the person says so.",
-  "list     Lists the active shapes, newest change first (--all: finished ones too).",
-  "",
-  "Without <shp_id>, read, drawing, answer and done use your session's newest active shape,",
-  "else this project's.",
-].join("\n");
+export const SHAPE_COMMAND_USAGE = `${SHAPE_HELP_INTRO}\n\n${SHAPE_GUIDE}`.trimEnd();
 
 /**
  * `plannotator feedback` (feedback-command.ts): sends the person's feedback
@@ -359,6 +336,172 @@ export const FEEDBACK_COMMAND_USAGE = [
   "A short message typed by hand can also be given as words: plannotator feedback 'it works'",
   "",
   "Exit 0 sent, 1 not sent (the reason on stderr), 2 bad usage.",
+].join("\n");
+
+/** Words in lines of at most `width` characters, each indented by `indent` spaces. */
+function wrapWords(text: string, indent: number, width: number): string[] {
+  const lines: string[] = [];
+  let line = "";
+  for (const word of text.split(" ")) {
+    if (line && indent + line.length + 1 + word.length > width) {
+      lines.push(" ".repeat(indent) + line);
+      line = word;
+    } else line = line ? `${line} ${word}` : word;
+  }
+  if (line) lines.push(" ".repeat(indent) + line);
+  return lines;
+}
+
+/**
+ * `plannotator system …` (system-command.ts): System's drawing of a project,
+ * for the agents that draw it and the launchd job that keeps it current. The
+ * usage lines are the package's SYSTEM_COMMANDS, which its recipes name too.
+ * Unreleased (HIDDEN_SUBCOMMANDS) while the Inbox's System surfaces are built.
+ * An agent reads only this text, so it says what each command reads, prints
+ * and refuses (AGENTS.md: agent-facing text is tested clean room).
+ */
+export const SYSTEM_COMMAND_USAGE = [
+  "Usage:",
+  ...Object.values(SYSTEM_COMMANDS).map((line) => `  ${line}`),
+  "",
+  "System is a drawing of a project's code, kept in <data dir>/system/<key>/drawing/:",
+  "system.yaml (every part and line), sheets/<CODE>.yaml (the views) and revisions/.",
+  "In system.yaml the parts (under parts:) and the lines between them (under flows:)",
+  "name the files they rest on in code:, in two shapes:",
+  "  a part:  code: { <path>: <what that file does for it>, ... }, for example",
+  "             store: { name: Store, code: { src/store/db.ts: reads invoices } }",
+  "  a line:  code: { from: <path>, to: <path> }, the file at each end (either may be",
+  "           left out), for example",
+  "             call: { from: cli, to: server, code: { from: src/cli.ts, to: src/server/routes.ts } }",
+  "A path is relative to the repo's root, and a folder covers every file in it;",
+  "<alias>:<path> is a file in another repo, named under sources.repos.",
+  "sources.repos.self.at is the commit the drawing was drawn from. None of these",
+  "commands edits a file in the repo.",
+  "",
+  "check, gate, tick and revision read the drawing folder as it is on disk, so a fix to",
+  "it counts at once. Nothing is committed, branched or pushed in the repo: the drawing",
+  "stays in the drawing folder.",
+  "",
+  "Every command prints its result on stdout and nothing else: check one line per",
+  "finding (or one JSON value with --json), the others one JSON value. Exit 0 ok, 1",
+  "failed, 2 bad usage. When a command fails, stdout is empty and stderr has one line",
+  "per problem, <code>: <message>. The codes: usage (exit 2); not_a_folder (a folder",
+  "flag names no folder); no_drawing, drawing_broken and git_failed (check, gate,",
+  "revision); tick_failed; revision_refused; not_installed, unsupported and",
+  "launchctl_failed (schedule); failed (anything else). check is the one exception:",
+  "its findings are its result, on stdout, and stderr gets one line, not_clean:",
+  "<counts>, with exit 1.",
+  "",
+  "check: is the drawing right?",
+  "  Loads the drawing, then looks every cited path up in the repo's git tree at",
+  "  sources.repos.self.at. A cited file must be committed at that commit: a file only",
+  "  on disk (untracked, or committed later) does not count, nor does a symlink. Case",
+  "  matters. The drawing itself is read from disk, so an edit counts at once. One line",
+  "  per finding:",
+  "    error: <file> <field>: <message>      the drawing does not load as written",
+  "    warning: <file> <field>: <message>",
+  "    missing: <path> (cited by <field>; not in the repo at <commit>)",
+  "    clean: <drawing folder>               no findings",
+  "  <field> is where system.yaml cites the path: parts.<id>.code for a part, and",
+  "  flows.<id>.code.from or flows.<id>.code.to for a line's end. After the findings,",
+  "  stderr gets one line, for example not_clean: 0 errors, 0 warnings, 1 missing path.",
+  "  Fix a missing path in system.yaml: cite the file's real path at that commit",
+  "  (git -C <repo folder> ls-tree -r --name-only <commit> lists them), or drop the",
+  "  citation when the file is gone. Run check again until it prints clean.",
+  "  --root <repo folder>     The repo: the project's checkout, or Plannotator's clone of",
+  "                           it, <data dir>/system/<key>/source. Default: the repo the",
+  "                           current folder is in.",
+  "  --dir <drawing folder>   The drawing. Default: <data dir>/system/<key>/drawing,",
+  "                           <key> the Inbox's key for the --root folder.",
+  "  --repo <alias>=<folder>  A checkout of a repo named in sources.repos, to check its",
+  "                           <alias>:<path> citations. Repeat for each. Without it they",
+  "                           are not checked, and a warning says so.",
+  "  --at <commit>            Check this repo's paths at this commit (a sha, a branch, a",
+  "                           tag, HEAD) instead of sources.repos.self.at.",
+  "  --json                   One JSON value: { ok, errors, warnings, missing, cited_by }.",
+  "                           errors and warnings hold { file, field, message }; cited_by",
+  "                           maps each missing path to the fields that cite it.",
+  "  Exit 0 clean, 1 findings (not_clean) or a failure, 2 bad usage.",
+  "",
+  "gate: what does a change touch, and does the drawing need a redraw?",
+  "  Compares the files changed from --from to --to (git diff --name-status -M, read",
+  "  only) with the files the drawing cites. --from and --to are anything git names as",
+  "  a commit (a sha, a branch, a tag), diffed exactly as given: the command does not",
+  "  look for a merge base. To gate a branch, compute where it left main yourself and",
+  "  pass that sha: --from \"$(git merge-base main <branch>)\" --to <branch>.",
+  "  The drawing is read from the drawing folder as it is now; no branch is checked out,",
+  "  and whichever one is checked out in the repo does not matter. touched names the",
+  "  parts and lines of that drawing.",
+  "  --project <repo folder>  The repo. Default: as check's --root.",
+  "  --dir <drawing folder>   The drawing. Default: as check's --dir, for --project.",
+  "  Prints one JSON value:",
+  '    { "touched": { "parts": [<id>...], "flows": [<id>...] }, "wake": true | false,',
+  '      "why": [{ "path": <path>, "reason": <reason> }...], "ignored": [<path>...] }',
+  "  touched  The ids (keys under parts: and flows:) of every part and line that cites a",
+  "           changed file, or a folder holding one: what the change touches, and what",
+  "           may now be stale.",
+  "  wake     true when the change may alter the drawing's shape, so it wants a redraw:",
+  "           a file was added, deleted or renamed, or an edited file matches a watch:",
+  "           glob. Other edits to files that already exist do not wake it, cited or not.",
+  "  why      Each file that woke it, with exactly one reason:",
+  "             added       a new file, or a copy of one (the new path)",
+  "             cited-gone  a file deleted, or renamed away, whose exact path a part or",
+  "                         line cites; the path given is the old one",
+  "             deleted     any other deleted file (one inside a cited folder included)",
+  "             renamed     any other renamed file; the path given is the new one",
+  "             watched     an edited file that matches a watch: glob",
+  "           So a deleted file a part cites by its own path gets cited-gone, never also",
+  "           deleted. why is empty when wake is false.",
+  "  watch:   An optional top-level key in system.yaml: a list of path globs, relative to",
+  "           the repo's root, whose edits count as a shape change (** crosses folders,",
+  "           * and ? stay inside one). For example:",
+  "             watch: [wrangler.toml, config/**/*.yaml]",
+  "  ignored  Changed files the gate skips: they never wake it and touch nothing. A file",
+  "           is skipped when it is:",
+  "             a test      a folder anywhere in its path named",
+  ...wrapWords(TEST_FOLDERS.join(", "), 25, 86),
+  "                         or a name ending .test.<ext> or .spec.<ext>, <ext> one of",
+  "                         js, jsx, ts, tsx, with an optional c or m first (mjs, cts)",
+  "             a doc       a name ending .md or .mdx (any case), or a folder named docs",
+  "                         anywhere in its path",
+  "             a lockfile  a file, in any folder, named",
+  ...wrapWords(LOCKFILE_NAMES.join(", "), 25, 86),
+  "             a drawing   anything under .plannotator/system/ (a repo's own drawing)",
+  "           A rename is skipped only when both its paths are. A part or line that cites",
+  "           such a file by its exact path makes it count like any other file; a cited",
+  "           folder does not.",
+  "",
+  "tick: one scheduled check of one project (the launchd job runs it)",
+  "  Fetches the default branch, gates from the last checked commit to its tip, and when",
+  "  the gate wakes, runs the person's agent in Plannotator's clone of the project",
+  "  (<data dir>/system/<key>/source) to redraw a copy of the drawing, puts the copy in",
+  "  the drawing folder once it checks clean, and sends one Inbox note. Nothing is",
+  "  committed, branched or pushed in the repo. Reads",
+  "  <data dir>/system/<key>/setup.json, which the Inbox writes when the person sets the",
+  "  project up; without it nothing runs. <key> is the Inbox's key for the project.",
+  '  Prints { "ran": "nothing" | "gated" | "redrew", "gated": <commit>, "why"?,',
+  '  "note"? }. A failed tick exits 1.',
+  "",
+  "revision: store an open pull request's change, for the Inbox to draw",
+  "  Reads one revision (format 1 YAML, the open form: new parts as full entries with",
+  "  place:) on stdin, loads it against the drawing in <data dir>/system/<key>/drawing,",
+  "  and stores it as",
+  "  <data dir>/system/<key>/reviews/<host>/<owner>/<repo>/<n>@<head, 7 characters>.yaml.",
+  "  A revision that does not load is refused with one line per problem, naming its",
+  "  field; fix it and send it again. Its pr: and repo: must match --pr. --head is the",
+  "  pull request's head commit, as a sha. <key> is the Inbox's key for the --project",
+  "  folder. Nothing is committed anywhere.",
+  '  Prints { "stored": <path>, "revision": <id>, "pr": <host/owner/repo#n>, "head": <sha> }.',
+  "",
+  `schedule: the launchd job that runs tick every ${SYSTEM_TICK_INTERVAL_SECONDS / 60} minutes while the Mac is awake`,
+  "  (macOS only)",
+  "  install writes ~/Library/LaunchAgents/ai.plannotator.system.<key>.plist and loads",
+  "  it; remove unloads it and deletes the plist; list prints the keys that have one, as",
+  "  one JSON array. The job runs the installed plannotator binary, so install refuses",
+  "  to run from a source checkout.",
+  `  The job runs a first check as soon as install loads it, then every ${SYSTEM_TICK_INTERVAL_SECONDS / 60} minutes.`,
+  "",
+  "<data dir> is what 'plannotator data-dir' prints (PLANNOTATOR_DATA_DIR when set).",
 ].join("\n");
 
 /** `plannotator inbox projects …` (inbox-projects-command.ts): list, combine and undo, on the person's request. */
@@ -418,10 +561,15 @@ export const INBOX_COMMAND_USAGE = [
   "  plannotator inbox projects [--json]",
   "  plannotator inbox projects combine <project id> --into <project id> [--json]",
   "  plannotator inbox projects undo <project id> [--json]",
+  INBOX_ROWS_USAGE_LINE,
+  "  plannotator inbox icon set <file> --request <id> [--json]",
   "  plannotator inbox call [--session <id>] <action> [<json> | -]",
+  "  plannotator inbox pulls ls|add|rm [--session <id>] <thread> [<ref>... | --all]",
+  "  plannotator inbox export-decisions --thread <id> [--format md|html] [--out <file>] [--pr <ref>]",
   "  plannotator inbox link --offer [--tailscale] | link <code> | link --list",
   "  plannotator inbox unlink <machine>",
   "  plannotator inbox --notes <ids>",
+  "  plannotator inbox permission-hook",
   "",
   "  plannotator inbox               Start the Inbox and open it in the browser,",
   "                                  or open the one already running",
@@ -453,13 +601,23 @@ export const INBOX_COMMAND_USAGE = [
   "                                  --tailscale is published again.",
   "  plannotator inbox projects      List the projects, combine one into another, undo a",
   "                                  combine: when the person asks to clean them up.",
+  "  plannotator inbox icon set      Hand back an animated agent icon, only when an Inbox",
+  "                                  message asked you to (its request id starts ia_).",
   "  plannotator inbox call          Run one Inbox action from a script: JSON in, one JSON",
   "                                  result on stdout. See 'Scripting the Inbox'.",
+  "  plannotator inbox pulls         A thread's PRs: list them, add or remove some",
+  "                                  (owner/repo#123, group/project!45 or the URL).",
+  "  plannotator inbox export-decisions",
+  "                                  A thread's decisions as a file; --pr puts them on",
+  "                                  one of its PRs, updated in place when run again.",
   ...INBOX_LINK_USAGE,
   "  plannotator inbox --notes <ids> Add the Inbox note to these agents' instructions",
   "                                  files (claude-code, codex, gemini, qwen, pi,",
   "                                  opencode, comma-separated). Only with the",
   "                                  person's yes; starts nothing.",
+  "  plannotator inbox permission-hook",
+  "                                  Claude Code's permission hook in sessions the Inbox",
+  "                                  started (their settings file runs it). Never run it.",
   "",
   "Over the tailnet at every start: the Inbox's Settings, PLANNOTATOR_INBOX_TAILSCALE=1,",
   "or { \"inboxTailscale\": true } in config.json. Agents and MCP stay on this computer;",
@@ -692,6 +850,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   card: CARD_COMMAND_USAGE,
   shape: SHAPE_COMMAND_USAGE,
   feedback: FEEDBACK_COMMAND_USAGE,
+  system: SYSTEM_COMMAND_USAGE,
   "t3-hook": [
     "Usage:",
     "  plannotator t3-hook install --settings <settings.json> --executable <plannotator>",
@@ -719,7 +878,7 @@ export function isSubcommandHelpInvocation(args: string[]): string | null {
   const canonical = SUBCOMMAND_HELP_ALIASES[sub] ?? sub;
   if (!(canonical in SUBCOMMAND_HELP)) return null;
   // `inbox projects --help` is that command's own usage, not the whole guide.
-  if (canonical === "inbox" && args[1] === "projects") return null;
+  if (canonical === "inbox" && (args[1] === "projects" || args[1] === "rows" || args[1] === "icon")) return null;
   return hasHelpFlag(args.slice(1)) ? canonical : null;
 }
 

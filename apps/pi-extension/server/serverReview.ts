@@ -154,6 +154,7 @@ import {
 	handleReviewDraftRequest,
 	handleFavicon,
 	handleImageRequest,
+	handleStarAskRequest,
 	readDraftGenerationFromBody,
 	readDraftGenerationFromUrl,
 	handleUploadRequest,
@@ -3952,6 +3953,9 @@ export async function startReviewServer(options: {
 			} catch {
 				json(res, { error: "Invalid request" }, 400);
 			}
+		} else if (url.pathname.startsWith("/api/star-ask/")) {
+			// The "Star the repo" ask on the done screen (generated/star-ask.ts).
+			if (!(await handleStarAskRequest(req, res, url, "review", isRemoteSession()))) handleApiNotFound(res, url.pathname);
 		} else if (url.pathname === "/api/image") {
 			handleImageRequest(res, url);
 		} else if (url.pathname === "/api/upload" && req.method === "POST") {
@@ -4148,8 +4152,8 @@ export async function startReviewServer(options: {
 				return;
 			}
 			await handleReviewDraftRequest(req, res, keys, reviewDrafts);
-		} else if (url.pathname === "/favicon.png") {
-			handleFavicon(res);
+		} else if (url.pathname === "/favicon.png" || url.pathname === "/favicon.ico") {
+			handleFavicon(res, url.pathname);
 		} else if (isDiagramEngineRequest(url.pathname)) {
 			// Code review's diagram engine, fetched by the page only for a
 			// preview or guide overview that holds a diagram fence.

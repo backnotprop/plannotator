@@ -581,19 +581,165 @@ New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 
 $tmpFile = [System.IO.Path]::GetTempFileName()
 
-# Use -UseBasicParsing to avoid security prompts and ensure consistent behavior
-Invoke-WebRequest -Uri $binaryUrl -OutFile $tmpFile -UseBasicParsing
+# Release downloads retry a dropped connection (#2788): one reset used to fail
+# the whole install or update. Up to 4 attempts, 2 s apart; the last failure
+# stops the script as before. -UseBasicParsing avoids security prompts and
+# keeps behavior consistent. No progress bar: on Windows PowerShell 5.1,
+# drawing it slows a large Invoke-WebRequest download many times over. The
+# binary uses this only when Invoke-ResumableDownload below fails.
+# -ExpectedLength (when the size is known) makes a short file a failed
+# attempt: Windows PowerShell 5.1's Invoke-WebRequest can return without an
+# error when the connection closes before the end of the file.
+function Invoke-ReleaseDownload {
+    param([string]$Uri, [string]$OutFile, [long]$ExpectedLength = -1)
+    $ProgressPreference = 'SilentlyContinue'
+    $attempts = 4
+    for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+        try {
+            if ($OutFile) {
+                Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing
+                if ($ExpectedLength -ge 0 -and (Get-Item -LiteralPath $OutFile).Length -ne $ExpectedLength) {
+                    throw "the connection closed before the end of the file"
+                }
+                return
+            }
+            return Invoke-WebRequest -Uri $Uri -UseBasicParsing
+        } catch {
+            if ($attempt -eq $attempts) { throw }
+            Write-Host "Download failed ($($_.Exception.Message)); trying again..."
+            Start-Sleep -Seconds 2
+        }
+    }
+}
+
+# The binary download continues where a dropped or stalled connection stopped
+# (as install.sh's download_release_binary; keep the two in step), instead of
+# starting the ~200 MB again from zero. Each attempt is one request to $Uri,
+# the github.com URL (it redirects to a signed URL that expires, so that one
+# is never reused); after the first, it asks only for the rest of the file
+# (a Range request). Bounds: at most 30 attempts, at most 4 in a row that add
+# no bytes, 2 s apart, and nothing past 6 hours from the start. A read that
+# gets no data for 60 s is a stall: that attempt ends and the next continues.
+# A server that answers a Range with the whole file (200) has it written from
+# the start; a 206 for another part of the file empties the file so the next
+# attempt starts from zero; a 416 (nothing left to send) ends it and the
+# checksum decides. Throws when it gives up. HttpWebRequest is what
+# Invoke-WebRequest uses on Windows PowerShell 5.1 (same proxy and TLS
+# settings), and PowerShell 7 still has it.
+# PLANNOTATOR_DOWNLOAD_STALL_SECONDS and PLANNOTATOR_DOWNLOAD_RETRY_DELAY are
+# internal knobs for the tests.
+function Invoke-ResumableDownload {
+    param([string]$Uri, [string]$OutFile)
+    $stallMs = 60000
+    if ($env:PLANNOTATOR_DOWNLOAD_STALL_SECONDS -match '^[1-9][0-9]*$') { $stallMs = [int]$env:PLANNOTATOR_DOWNLOAD_STALL_SECONDS * 1000 }
+    $delay = 2
+    if ($env:PLANNOTATOR_DOWNLOAD_RETRY_DELAY -match '^[0-9]+$') { $delay = [int]$env:PLANNOTATOR_DOWNLOAD_RETRY_DELAY }
+    $deadline = [DateTime]::UtcNow.AddSeconds(21600)
+    $idle = 0
+    for ($attempt = 1; $true; $attempt++) {
+        $before = [long]0
+        if (Test-Path -LiteralPath $OutFile) { $before = [long](Get-Item -LiteralPath $OutFile).Length }
+        $request = $null
+        $response = $null
+        $body = $null
+        $file = $null
+        $failure = $null
+        try {
+            $request = [System.Net.WebRequest]::Create($Uri)
+            $request.UserAgent = "plannotator-install"
+            if ($before -gt 0) { $request.AddRange([long]$before) }
+            try {
+                $response = $request.GetResponse()
+            } catch {
+                $webError = $_.Exception
+                while ($webError -and -not ($webError -is [System.Net.WebException])) { $webError = $webError.InnerException }
+                if ($before -gt 0 -and $webError -and $webError.Response -and [int]$webError.Response.StatusCode -eq 416) {
+                    $webError.Response.Close()
+                    return
+                }
+                throw
+            }
+            $total = [long]-1
+            $mode = [System.IO.FileMode]::Append
+            if ([int]$response.StatusCode -eq 206) {
+                $contentRange = [string]$response.Headers["Content-Range"]
+                if (-not ($contentRange -match '^bytes ([0-9]+)-[0-9]+/([0-9]+)$') -or [long]$Matches[1] -ne $before) {
+                    [System.IO.File]::WriteAllBytes($OutFile, [byte[]]@())
+                    throw "the server sent another part of the file ($contentRange)"
+                }
+                $total = [long]$Matches[2]
+            } else {
+                $mode = [System.IO.FileMode]::Create
+                $before = [long]0
+                $total = [long]$response.ContentLength
+            }
+            # The size, for the fallback below to check its file against.
+            if ($total -ge 0) { $script:binaryDownloadTotal = $total }
+            $file = New-Object System.IO.FileStream -ArgumentList $OutFile, $mode, ([System.IO.FileAccess]::Write), ([System.IO.FileShare]::Read)
+            $body = $response.GetResponseStream()
+            $buffer = New-Object byte[] 65536
+            while ($true) {
+                $read = $body.ReadAsync($buffer, 0, $buffer.Length)
+                if (-not $read.Wait($stallMs)) { throw "no data for $($stallMs / 1000) s" }
+                $count = $read.Result
+                if ($count -le 0) { break }
+                $file.Write($buffer, 0, $count)
+                if ([DateTime]::UtcNow -ge $deadline) { throw "the download took more than 6 hours" }
+            }
+            $file.Flush()
+            if ($total -ge 0 -and $file.Length -ne $total) { throw "the connection closed before the end of the file" }
+        } catch {
+            $failure = $_
+        } finally {
+            # Abort first: closing a response that is still being sent could
+            # wait for the rest of it.
+            if ($failure -and $request) { try { $request.Abort() } catch { } }
+            if ($file) { try { $file.Dispose() } catch { } }
+            if ($body) { try { $body.Dispose() } catch { } }
+            if ($response) { try { $response.Close() } catch { } }
+        }
+        if (-not $failure) { return }
+        $now = [long]0
+        if (Test-Path -LiteralPath $OutFile) { $now = [long](Get-Item -LiteralPath $OutFile).Length }
+        if ($now -gt $before) { $idle = 0 } else { $idle++ }
+        if ($attempt -ge 30 -or $idle -ge 4 -or [DateTime]::UtcNow -ge $deadline) { throw $failure }
+        Write-Host "Download failed ($($failure.Exception.Message)); trying again..."
+        Start-Sleep -Seconds $delay
+    }
+}
+
+$binaryDownloadTotal = [long]-1
+try {
+    Invoke-ResumableDownload -Uri $binaryUrl -OutFile $tmpFile
+} catch {
+    # The download that came before the resumable one gets the last word, in
+    # case something in the one above does not work on this machine.
+    Write-Host "Download failed ($($_.Exception.Message)); trying again..."
+    try {
+        Invoke-ReleaseDownload -Uri $binaryUrl -OutFile $tmpFile -ExpectedLength $binaryDownloadTotal
+    } catch {
+        Remove-Item -Force -LiteralPath $tmpFile -ErrorAction SilentlyContinue
+        throw
+    }
+}
 
 # Verify checksum
 # Note: In Windows PowerShell 5.1, Invoke-WebRequest returns .Content as byte[] for non-HTML responses.
 # We must handle both byte[] (PS 5.1) and string (PS 7+) for cross-version compatibility.
-$checksumResponse = Invoke-WebRequest -Uri $checksumUrl -UseBasicParsing
+$checksumResponse = Invoke-ReleaseDownload -Uri $checksumUrl
 if ($checksumResponse.Content -is [byte[]]) {
     $checksumContent = [System.Text.Encoding]::UTF8.GetString($checksumResponse.Content)
 } else {
     $checksumContent = $checksumResponse.Content
 }
 $expectedChecksum = $checksumContent.Split(" ")[0].Trim().ToLower()
+# The value must be 64 hex characters, as install.sh checks: an empty or
+# garbled .sha256 (a proxy's page, a cut-off file) never gets as far as the compare.
+if ($expectedChecksum -notmatch '^[0-9a-f]{64}$') {
+    Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue
+    [Console]::Error.WriteLine("The checksum file for $binaryName $latestTag is not a SHA-256 checksum. Nothing was changed; try again later.")
+    exit 1
+}
 $actualChecksum = (Get-FileHash -Path $tmpFile -Algorithm SHA256).Hash.ToLower()
 
 if ($actualChecksum -ne $expectedChecksum) {
@@ -912,6 +1058,8 @@ $claudePluginRegistry = if ($env:CLAUDE_CONFIG_DIR) { "$env:CLAUDE_CONFIG_DIR\pl
 # | no-marketplace (the plannotator marketplace is gone; re-add it)
 $claudePluginState = "none"
 $claudePluginVersion = ""
+# The installed plugin's version before this run (for Show-ClaudePluginReloadAlert).
+$claudePluginFromVersion = ""
 
 # The user-scope install record for plannotator@plannotator, or $null. A record
 # without a scope (the v1 registry) counts as the user install; a project- or
@@ -1008,7 +1156,18 @@ function Update-ClaudePluginIfInstalled {
     $local:ErrorActionPreference = 'Continue'
     $record = Get-ClaudePluginUserRecord
     if ($null -eq $record) { return }
+    $script:claudePluginFromVersion = if ($record.version) { "$($record.version)" } else { "" }
     $claude = Get-Command claude -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    # Not on PATH: Claude Code's own install folders (its native installer's
+    # .local\bin, the older .claude\local), as the Inbox's launcher looks. An
+    # update started by the Inbox or a review window runs with that process's
+    # PATH, which can lack them.
+    foreach ($dir in @(@('.local', 'bin'), @('.claude', 'local'))) {
+        if (-not $claude -and $env:USERPROFILE) {
+            $candidate = [System.IO.Path]::Combine($env:USERPROFILE, $dir[0], $dir[1], 'claude')
+            $claude = Get-Command $candidate -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        }
+    }
     if (-not $claude) {
         $script:claudePluginState = "manual"
         return
@@ -1028,10 +1187,14 @@ function Update-ClaudePluginIfInstalled {
         Write-Host "Claude Code plugin: not updated: pinned to $latestTag; updating would install the newest plugin."
         return
     }
-    # Seconds per command. Internal knob for the tests; the default covers a
-    # slow git fetch of the marketplace clone.
-    $seconds = 120
+    # Seconds per command. Internal knob for the tests. Claude Code stops its
+    # own git clone or fetch of the marketplace after 120 s unless
+    # CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS says otherwise, which failed updates on
+    # slow links: the commands get 10 minutes for git (a value the person set
+    # is kept), and 11 for the whole command.
+    $seconds = 660
     if ($env:PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT -match '^[1-9][0-9]*$') { $seconds = [int]$env:PLANNOTATOR_CLAUDE_PLUGIN_TIMEOUT }
+    if (-not $env:CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS) { $env:CLAUDE_CODE_PLUGIN_GIT_TIMEOUT_MS = "600000" }
     $before = Get-ClaudePluginFingerprint $record
     # CLAUDECODE is cleared for these commands: an auto-update started from a
     # Claude Code session inherits it, and it marks a nested Claude Code.
@@ -2589,3 +2752,82 @@ if ((Test-Path $pluginHooks) -and (Test-Path $claudeSettings)) {
 
 # The full install completed: remember its command-line switches for auto-update.
 Write-InstallFlags
+
+# When Claude Code sessions that are open right now cannot load the plugin by
+# themselves: one Windows notification and the plugin-update page on
+# plannotator.ai in the default browser (same rule and URL as install.sh's
+# notify_claude_plugin_reload): updated from a plugin older than 0.28.52, the
+# first release whose mod reloads itself (#2356), state=reload; or not updated
+# (manual / failed / no-marketplace) while older than this release,
+# state=manual. Never on a fresh install, a skipped or current plugin, with no
+# live Claude Code session (sessions\<pid>.json), in CI, over SSH, in a
+# non-interactive session or under PLANNOTATOR_TEST_SANDBOX. Opt out with
+# PLANNOTATOR_INSTALL_NOTIFY=0; PLANNOTATOR_BROWSER is honored for the page (a
+# "none" value opens none). The toast is shown by Windows PowerShell
+# (powershell.exe; PowerShell 7 has no WinRT types), time-bounded; nothing here
+# fails the install.
+function Get-ClaudePluginReloadAlert {
+    param([string]$State, [string]$From, [string]$To, [string]$Tag)
+    if ($env:PLANNOTATOR_INSTALL_NOTIFY -match '^(0|false|no|off|disabled)$') { return $null }
+    if ($env:PLANNOTATOR_TEST_SANDBOX -or $env:CI -or $env:SSH_CONNECTION -or $env:SSH_CLIENT -or $env:SSH_TTY) { return $null }
+    if (-not [Environment]::UserInteractive) { return $null }
+    $plain = { param($v) if ([string]$v -match '^v?(\d+)\.(\d+)\.(\d+)$') { "$($Matches[1]).$($Matches[2]).$($Matches[3])" } else { "" } }
+    $have = & $plain $From
+    if (-not $have) { return $null }
+    $tagPlain = & $plain $Tag
+    if ($State -eq "updated") {
+        if ([version]$have -ge [version]"0.28.52") { return $null }
+        $kind = "reload"
+        $to = & $plain $To
+        if (-not $to) { $to = $tagPlain }
+        $alert = @{ Title = "Plannotator updated its Claude Code plugin"; Body = "Type /reload-plugins in each open Claude Code session to load it." }
+    } elseif ($State -in @("manual", "failed", "no-marketplace")) {
+        if (-not $tagPlain -or [version]$have -ge [version]$tagPlain) { return $null }
+        $kind = "manual"
+        $to = $tagPlain
+        $alert = @{ Title = "Plannotator could not update its Claude Code plugin"; Body = "See Settings > Agents in the Plannotator Inbox for the two commands to run." }
+    } else {
+        return $null
+    }
+    $sessions = if ($env:CLAUDE_CONFIG_DIR) { Join-Path $env:CLAUDE_CONFIG_DIR "sessions" } else { Join-Path $env:USERPROFILE ".claude\sessions" }
+    if (-not (Test-Path -LiteralPath $sessions -PathType Container)) { return $null }
+    $open = $false
+    foreach ($f in @(Get-ChildItem -LiteralPath $sessions -Filter "*.json" -File -ErrorAction SilentlyContinue)) {
+        if ($f.BaseName -match '^\d+$' -and (Get-Process -Id ([int]$f.BaseName) -ErrorAction SilentlyContinue)) { $open = $true; break }
+    }
+    if (-not $open) { return $null }
+    $alert.Url = "https://plannotator.ai/plugin-update?state=$kind&from=$have" + $(if ($to) { "&to=$to" } else { "" })
+    return $alert
+}
+
+function Show-ClaudePluginReloadAlert {
+    param($Alert)
+    if ($null -eq $Alert) { return }
+    $ps = Get-Command powershell.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($ps) {
+        $t = $Alert.Title -replace "'", "''"
+        $b = $Alert.Body -replace "'", "''"
+        $toast = "`$m = [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]; " +
+            "`$x = `$m::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02); " +
+            "`$n = `$x.GetElementsByTagName('text'); " +
+            "`$null = `$n.Item(0).AppendChild(`$x.CreateTextNode('$t')); " +
+            "`$null = `$n.Item(1).AppendChild(`$x.CreateTextNode('$b')); " +
+            "`$m::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe').Show([Windows.UI.Notifications.ToastNotification]::new(`$x))"
+        $info = New-Object System.Diagnostics.ProcessStartInfo
+        $info.FileName = $ps.Source
+        $info.Arguments = "-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand " + [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($toast))
+        $info.UseShellExecute = $false
+        $info.CreateNoWindow = $true
+        try {
+            $p = [System.Diagnostics.Process]::Start($info)
+            if (-not $p.WaitForExit(10000)) { try { $p.Kill() } catch { } }
+        } catch { }
+    }
+    $browser = [string]$env:PLANNOTATOR_BROWSER
+    if ($browser.Trim().ToLowerInvariant() -in @("none", "false", "0", "off", "no", "true", "1", ":")) { return }
+    try {
+        if ($browser) { Start-Process -FilePath $browser -ArgumentList $Alert.Url -ErrorAction Stop }
+        else { Start-Process -FilePath $Alert.Url -ErrorAction Stop }
+    } catch { }
+}
+try { Show-ClaudePluginReloadAlert (Get-ClaudePluginReloadAlert -State $claudePluginState -From $claudePluginFromVersion -To $claudePluginVersion -Tag $latestTag) } catch { }

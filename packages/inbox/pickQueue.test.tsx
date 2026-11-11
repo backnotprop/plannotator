@@ -220,9 +220,13 @@ async function until(check: () => boolean, what: string) {
   throw new Error(`timed out waiting for ${what}`);
 }
 
+/** Lands a read of the thread the test took earlier, as App's read does: whole. */
+let landRead: (thread: InboxThread) => void = () => {};
+
 /** The pane as App holds it: a save's questions go into the thread, a read takes it whole. */
 function Pane() {
   const [thread, setThread] = useState(threadNow);
+  landRead = setThread;
   return (
     <ThreadPane
       thread={thread}
@@ -257,12 +261,12 @@ async function render() {
   return host;
 }
 
-const otherField = (el: HTMLElement) => el.querySelector<HTMLInputElement>('input[aria-label="Other answer to question 1"]')!;
+const otherField = (el: HTMLElement) => el.querySelector<HTMLTextAreaElement>('textarea[aria-label="Other answer to question 1"]')!;
 
 /** One step of a keyboard or a phone's dictation in the first question's "Other…" field. */
 function type(el: HTMLElement, words: string) {
   const field = otherField(el);
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
   act(() => {
     setter.call(field, words);
     field.dispatchEvent(new Event('input', { bubbles: true }));
@@ -702,6 +706,60 @@ test.skipIf(!hasDom)('a saved pick reads the files once at most: only a read of 
   }
   expect(picks).toHaveLength(4);
   expect(attachmentReads).toBe(1);
+});
+
+/** Types `words` one key at a time, each key saved before the next, as a person typing at a steady pace. */
+async function typeKeys(el: HTMLElement, from: string, words: string) {
+  for (let i = from.length + 1; i <= words.length; i += 1) {
+    type(el, words.slice(0, i));
+    await until(() => saved.get(FIRST)!.answer?.other === words.slice(0, i), 'the key saved');
+  }
+}
+
+test.skipIf(!hasDom)("a read that left before the last keys landed after them: the field keeps every key, and the next key builds on them", async () => {
+  const el = await render();
+  await answered(el, 'do you');
+  // The window reads the thread as a save's record comes; the server answers that read now, and it lands late.
+  const read = threadNow();
+  await typeKeys(el, 'do you', "do you're");
+  // Every save answered, nothing waiting: the field shows the thread's answer now.
+  await settle(5);
+  act(() => landRead(read));
+  await settle();
+  expect(otherField(el).value).toBe("do you're");
+  type(el, "do you're s");
+  await until(() => saved.get(FIRST)!.answer?.other === "do you're s", 'the next key saved');
+  expect(otherField(el).value).toBe("do you're s");
+  // A read newer than the last save still shows: here, the same answer.
+  act(() => landRead(threadNow()));
+  await settle();
+  expect(otherField(el).value).toBe("do you're s");
+});
+
+test.skipIf(!hasDom)('a late read while typing a note: the note keeps every key', async () => {
+  const el = await render();
+  await act(async () => option(el, 'Pin it').click());
+  await until(() => saved.get(FIRST)!.answer?.selected[0] === 'Pin it', 'the pick saved');
+  const addNote = [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Add note')!;
+  await act(async () => addNote.click());
+  const note = () => el.querySelector<HTMLTextAreaElement>('textarea[placeholder="Context for the agent…"]')!;
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+  const typeNote = (words: string) =>
+    act(() => {
+      setter.call(note(), words);
+      note().dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  typeNote("it's");
+  await until(() => saved.get(FIRST)!.answer?.note === "it's", 'the note saved');
+  const read = threadNow();
+  for (const words of ["it's o", "it's ok"]) {
+    typeNote(words);
+    await until(() => saved.get(FIRST)!.answer?.note === words, 'the key saved');
+  }
+  await settle(5);
+  act(() => landRead(read));
+  await settle();
+  expect(note().value).toBe("it's ok");
 });
 
 /** Re-ask, at the foot of the open questions' list. */

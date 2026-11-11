@@ -61,6 +61,9 @@ const PATHS = {
   phone: 'M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3',
   folder:
     'M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z',
+  // The folder menu's "New scratch folder" (Heroicons outline folder-plus).
+  folderPlus:
+    'M12 10.5v6m3-3H9m4.06-7.19-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z',
   // The Projects header in the sidebar while the section is open (Heroicons outline folder-open); closed it is `folder`.
   folderOpen:
     'M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 0 0-1.883 2.542l.857 6a2.25 2.25 0 0 0 2.227 1.932H19.05a2.25 2.25 0 0 0 2.227-1.932l.857-6a2.25 2.25 0 0 0-1.883-2.542m-16.5 0V6A2.25 2.25 0 0 1 6 3.75h3.879a1.5 1.5 0 0 1 1.06.44l2.122 2.12a1.5 1.5 0 0 0 1.06.44H18A2.25 2.25 0 0 1 20.25 9v.776',
@@ -101,6 +104,8 @@ const PATHS = {
   turnDown: 'm16.49 12 3.75 3.75m0 0-3.75 3.75m3.75-3.75H3.74V4.499',
   warn: 'M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z',
   arrowDown: 'M19.5 13.5 12 21m0 0-7.5-7.5M12 21V3',
+  // Starred threads (a look over "inbox-pinned-threads"): Lucide's star, filled by CSS when starred.
+  star: 'M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z',
   // Pinned threads (approval "inbox-pinned-threads"): Unpin is Lucide's pin-off, Move up Heroicons' arrow-up.
   pinOff: 'M12 17v5M15 9.34V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H7.89M2 2l20 20M9 9v1.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h11',
   arrowUp: 'M4.5 10.5 12 3m0 0 7.5 7.5M12 3v18',
@@ -117,6 +122,11 @@ const PATHS = {
   /** The tour's Fast-forward (Heroicons outline "forward"): skip to the end of a step. */
   fastForward: 'M3 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 0 1 0 1.954l-7.108 4.061A1.125 1.125 0 0 1 3 16.811V8.69ZM12.75 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 0 1 0 1.954l-7.108 4.061a1.125 1.125 0 0 1-1.683-.977V8.69Z',
   play: 'M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z',
+  /** A recording's player (Heroicons outline "pause"). */
+  pause: 'M15.75 5.25v13.5m-7.5-13.5v13.5',
+  /** A recording (Heroicons outline "musical-note"): its tile and its face. */
+  music:
+    'm9 9 10.5-3m0 6.553v3.75a2.25 2.25 0 0 1-1.632 2.163l-1.32.377a1.803 1.803 0 1 1-.99-3.467l2.31-.66a2.25 2.25 0 0 0 1.632-2.163Zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 0 1-1.632 2.163l-1.32.377a1.803 1.803 0 0 1-.99-3.467l2.31-.66A2.25 2.25 0 0 0 9 15.553Z',
   clickHere:
     'M15.042 21.672 13.684 16.6m0 0-2.51 2.225.569-9.47 5.227 7.917-3.286-.672ZM12 2.25V4.5m5.834.166-1.591 1.591M20.25 10.5H18M7.757 14.743l-1.59 1.59M6 10.5H3.75m4.007-4.243-1.59-1.59',
   // Mark read (Heroicons outline check-circle), and a Send's skip (arrow-uturn-right).
@@ -131,6 +141,11 @@ const PATHS = {
   mailOpen:
     'M2.01592 14.551C2.08186 17.5843 2.11484 19.1009 3.24611 20.2241C4.37738 21.3473 5.95183 21.3862 9.10072 21.4641C11.0393 21.512 12.9607 21.512 14.8993 21.4641C18.0482 21.3862 19.6226 21.3473 20.7539 20.2241C21.8852 19.1009 21.9181 17.5843 21.9841 14.551C22.0164 13.0649 21.9995 11.5934 21.9334 10.0921C21.8924 9.15964 21.8719 8.69341 21.6354 8.27984C21.3989 7.86628 20.9913 7.59935 20.176 7.0655L16.4152 4.60286C14.2742 3.20096 13.2038 2.5 12 2.5C10.7962 2.5 9.72577 3.20095 7.58483 4.60286L3.82397 7.0655C3.00869 7.59935 2.60106 7.86628 2.36459 8.27984C2.12812 8.69341 2.1076 9.15965 2.06656 10.0921C2.00049 11.5934 1.98361 13.0649 2.01592 14.551Z M2 9.5L6.26537 12.5896C6.73556 12.9302 7.16587 13.2419 7.564 13.5247C8.6401 14.2891 9.41661 14.5 10.7362 14.5H13.2638C14.5834 14.5 15.3599 14.2891 16.436 13.5247C16.8341 13.2419 17.2644 12.9302 17.7346 12.5896L22 9.5',
   mail: 'M2 6L8.91302 9.91697C11.4616 11.361 12.5384 11.361 15.087 9.91697L22 6 M2.01577 13.4756C2.08114 16.5412 2.11383 18.0739 3.24496 19.2094C4.37608 20.3448 5.95033 20.3843 9.09883 20.4634C11.0393 20.5122 12.9607 20.5122 14.9012 20.4634C18.0497 20.3843 19.6239 20.3448 20.7551 19.2094C21.8862 18.0739 21.9189 16.5412 21.9842 13.4756C22.0053 12.4899 22.0053 11.5101 21.9842 10.5244C21.9189 7.45886 21.8862 5.92609 20.7551 4.79066C19.6239 3.65523 18.0497 3.61568 14.9012 3.53657C12.9607 3.48781 11.0393 3.48781 9.09882 3.53656C5.95033 3.61566 4.37608 3.65521 3.24495 4.79065C2.11382 5.92608 2.08114 7.45885 2.01576 10.5244C1.99474 11.5101 1.99475 12.4899 2.01577 13.4756Z',
+  // The order of the sidebar's Projects (packages/inbox/projectSort.ts), from the same Hugeicons free set and notice:
+  // "sorting-01" (as added), "arrow-down-a-z" (A to Z), "clock-01" (most recent, its circle written as a path).
+  sortList: 'M11.0001 8L19.0001 8.00006 M11.0001 12H16.0001 M11.0001 16H14.0001 M11.0001 4H21.0001 M5.5 21V3M5.5 21C4.79977 21 3.49153 19.0057 3 18.5M5.5 21C6.20023 21 7.50847 19.0057 8 18.5',
+  sortAZ: 'M8 19V4 M16 8H20 M20 10V6C20 4.89543 19.1046 4 18 4C16.8954 4 16 4.89543 16 6V10 M16 14H18.365C19.2886 14 19.7504 14 19.8853 14.2879C20.0201 14.5758 19.7245 14.9306 19.1332 15.6402L16.8668 18.3598C16.2755 19.0694 15.9799 19.4242 16.1147 19.7121C16.2496 20 16.7114 20 17.635 20H20 M4 16C4 16 6.94596 20 8.00003 20C9.05411 20 12 16 12 16',
+  sortRecent: 'M22 12A10 10 0 1 1 2 12A10 10 0 0 1 22 12Z M12 8V12L14 14',
   // Mark unread elsewhere (Heroicons outline envelope).
   envelope:
     'M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75',
@@ -144,6 +159,9 @@ const PATHS = {
   // lock-closed, arrow-path, x-circle, exclamation-circle, minus-circle.
   chip: 'M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 0 0 2.25-2.25V6.75a2.25 2.25 0 0 0-2.25-2.25H6.75A2.25 2.25 0 0 0 4.5 6.75v10.5a2.25 2.25 0 0 0 2.25 2.25Zm.75-12h9v9h-9v-9Z',
   disk: 'M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125',
+  // A drive in the folder menu and the folder browser's places (Heroicons outline server).
+  drive:
+    'M21.75 17.25v-.228a4.5 4.5 0 0 0-.12-1.03l-2.268-9.64a3.375 3.375 0 0 0-3.285-2.602H7.923a3.375 3.375 0 0 0-3.285 2.602l-2.268 9.64a4.5 4.5 0 0 0-.12 1.03v.228m19.5 0a3 3 0 0 1-3 3H5.25a3 3 0 0 1-3-3m19.5 0a3 3 0 0 0-3-3H5.25a3 3 0 0 0-3 3m16.5 0h.008v.008h-.008v-.008Zm-3 0h.008v.008h-.008v-.008Z',
   wifi: 'M8.288 15.038a5.25 5.25 0 0 1 7.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 0 1 1.06 0Z',
   globe:
     'M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0 1 12 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 0 1 3 12c0-1.605.42-3.113 1.157-4.418',
@@ -172,8 +190,13 @@ const PATHS = {
   puzzle:
     'M14.25 6.087c0-.355.186-.676.401-.959.221-.29.349-.634.349-1.003 0-1.036-1.007-1.875-2.25-1.875s-2.25.84-2.25 1.875c0 .369.128.713.349 1.003.215.283.401.604.401.959v0a.64.64 0 0 1-.657.643 48.39 48.39 0 0 1-4.163-.3c.186 1.613.293 3.25.315 4.907a.656.656 0 0 1-.658.663v0c-.355 0-.676-.186-.959-.401a1.647 1.647 0 0 0-1.003-.349c-1.036 0-1.875 1.007-1.875 2.25s.84 2.25 1.875 2.25c.369 0 .713-.128 1.003-.349.283-.215.604-.401.959-.401v0c.31 0 .555.26.532.57a48.039 48.039 0 0 1-.642 5.056c1.518.19 3.058.309 4.616.354a.64.64 0 0 0 .657-.643v0c0-.355-.186-.676-.401-.959a1.647 1.647 0 0 1-.349-1.003c0-1.035 1.008-1.875 2.25-1.875 1.243 0 2.25.84 2.25 1.875 0 .369-.128.713-.349 1.003-.215.283-.4.604-.4.959v0c0 .333.277.599.61.58a48.1 48.1 0 0 0 5.427-.63 48.05 48.05 0 0 0 .582-4.717.532.532 0 0 0-.533-.57v0c-.355 0-.676.186-.959.401-.29.221-.634.349-1.003.349-1.035 0-1.875-1.007-1.875-2.25s.84-2.25 1.875-2.25c.37 0 .713.128 1.003.349.283.215.604.401.96.401v0a.656.656 0 0 0 .658-.663 48.422 48.422 0 0 0-.37-5.36c-1.886.342-3.81.574-5.766.689a.578.578 0 0 1-.61-.58v0Z',
   // Pull requests (code review in the Inbox, phase 2): the sidebar row (Lucide git-pull-request), and Whole stack (Lucide layers).
+  // Reviews: the sidebar row, and a local review's mark (Lucide laptop).
+  reviews: 'M9 5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3M9 12l2 2 4-4M14 4h6v6',
+  laptop: 'M5 4h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2ZM2 20h20',
   pullRequest: 'M6 9v12M13 6h3a2 2 0 0 1 2 2v7M9 6a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm12 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z',
   layers: 'm12 3-9 4.5 9 4.5 9-4.5L12 3ZM3 12l9 4.5 9-4.5M3 16.5 12 21l9-4.5',
+  // Clone from a git URL (the Inbox's New message): a branch mark, the circles drawn as arcs.
+  gitBranch: 'M8.2 6a2.2 2.2 0 1 1-4.4 0 2.2 2.2 0 0 1 4.4 0ZM8.2 18a2.2 2.2 0 1 1-4.4 0 2.2 2.2 0 0 1 4.4 0ZM20.2 8a2.2 2.2 0 1 1-4.4 0 2.2 2.2 0 0 1 4.4 0ZM6 8.2v7.6M18 10.2c0 4-6 3-10.5 6.3',
   // Drafts' delete (Heroicons outline trash).
   trash:
     'm14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0',
@@ -216,6 +239,10 @@ const TAB_GLYPHS: Partial<Record<string, string>> = {
   zed: 'M4 4h16v16H4Z M8 8.5h8l-8 7h8',
   // DeepSeek Harness: a plain letter D over a wave, drawn here (no brand asset in the repo).
   dsh: 'M6 4h5a7 7 0 0 1 0 14H6Z M3 21c2-1.5 4-1.5 6 0s4 1.5 6 0 4-1.5 6 0',
+  // Cline: its bot head (the rounded head with a bump on top, pointed sides, two upright eyes), traced from Cline's
+  // own icon (cline/cline assets/branding/logos/cline-icon-white.svg) as an outline.
+  cline:
+    'M9.6 5.3A2.55 2.55 0 1 1 14.4 5.3H17.9A2.4 2.4 0 0 1 20.3 7.7V10.6L22.9 13.6 20.3 16.7V19.6A2.4 2.4 0 0 1 17.9 22H6.1A2.4 2.4 0 0 1 3.7 19.6V16.7L1.1 13.6 3.7 10.6V7.7A2.4 2.4 0 0 1 6.1 5.3Z M8.9 11.6v4 M15.1 11.6v4',
 };
 
 export function TabGlyph({ harness }: { harness: string }) {
@@ -229,50 +256,52 @@ export function TabGlyph({ harness }: { harness: string }) {
   );
 }
 
-/** The mark for an agent host: the real brand marks for the hosts ui carries, a neutral glyph otherwise. */
-export function HostMark({ host, big }: { host: string | null | undefined; big?: boolean }) {
-  let mark: React.ReactNode;
+/** A host's own mark (a brand mark ui carries, or the glyph drawn here for it), or null when it has none. */
+function ownMark(host: string | null | undefined): React.ReactNode | null {
   switch (host) {
     case 'claude-code':
     case 'claude':
     case 'claude-app':
-      mark = <ClaudeIcon />;
-      break;
+      return <ClaudeIcon />;
     case 'gemini':
     case 'qwen':
     case 'zed':
     case 'vscode':
     case 'dsh':
-      mark = (
+    case 'cline':
+      return (
         <svg className="ib-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <path d={TAB_GLYPHS[host]} />
         </svg>
       );
-      break;
     case 'pi':
-      mark = <PiIcon />;
-      break;
+      return <PiIcon />;
     case 'opencode':
-      mark = <OpenCodeIcon />;
-      break;
+      return <OpenCodeIcon />;
     case 'codex':
-      mark = <CodexIcon />;
-      break;
+      return <CodexIcon />;
     case 'cursor':
-      mark = <CursorIcon />;
-      break;
+      return <CursorIcon />;
     case 'grok':
       // Grok Build: a plain letter G, drawn here (no brand asset in the repo).
-      mark = (
+      return (
         <svg className="ib-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <path d="M17.6 8.4A6.6 6.6 0 1 0 18.6 12H12.6" />
         </svg>
       );
-      break;
     default:
-      mark = <Icon name="code" />;
+      return null;
   }
-  return <span className={`ib-mk${big ? ' ib-big' : ''}`}>{mark}</span>;
+}
+
+/** Whether `HostMark` draws this host's own mark, not the neutral glyph: for a place that would rather draw something else than the neutral glyph. */
+export function hostHasMark(host: string | null | undefined): boolean {
+  return ownMark(host) !== null;
+}
+
+/** The mark for an agent host: the real brand marks for the hosts ui carries, a neutral glyph otherwise. */
+export function HostMark({ host, big }: { host: string | null | undefined; big?: boolean }) {
+  return <span className={`ib-mk${big ? ' ib-big' : ''}`}>{ownMark(host) ?? <Icon name="code" />}</span>;
 }
 
 export function AuthorMark({ author, big }: { author: InboxAuthor | null | undefined; big?: boolean }) {

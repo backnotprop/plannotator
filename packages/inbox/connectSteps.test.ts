@@ -67,15 +67,15 @@ test('MCP agents come after every Plannotator host; one the person turned off or
     codex: { detected: true, reach: { kind: 'mcp', on: false, state: 'not_connected', path: null, locked: false, reason: null } },
     gemini: { detected: true, reach: { kind: 'mcp', on: false, state: 'off', path: null, locked: false, reason: null } },
     cursor: { detected: true, reach: { kind: 'mcp', on: false, state: 'removed', path: null, locked: false, reason: null } },
-    cline: { detected: true, reach: { kind: 'manual', on: false, state: 'manual', path: null, locked: false, reason: "Cline's MCP command is not verified" } },
+    cline: { detected: true, reach: { kind: 'manual', on: false, state: 'manual', path: null, locked: false, reason: "add Plannotator's Cline plugin (cline plugin install npm:@plannotator/cline), or the server in Cline's MCP settings" } },
     opencode: missing('opencode'),
     pi: toolOff(),
   });
   const plan = connectPlan(model);
   expect(ids(plan.steps)).toEqual(['pi', 'opencode', 'codex', 'cline']);
   expect(stepTitle(plan.steps[2]!)).toBe('Connect Codex');
-  expect(stepTitle(plan.steps[3]!)).toBe('Connect Cline by hand');
-  expect(stepText(plan.steps[3]!).text).toBe("Only you can add it here: Cline's MCP command is not verified.");
+  expect(stepTitle(plan.steps[3]!)).toBe('Connect Cline yourself');
+  expect(stepText(plan.steps[3]!).text).toBe("Only you can add it here: add Plannotator's Cline plugin (cline plugin install npm:@plannotator/cline), or the server in Cline's MCP settings.");
 });
 
 // Deliberately pinned: Codex is the one agent its MCP connection alone wakes (the Inbox runs `codex queue`),
@@ -99,6 +99,18 @@ test('an older Inbox without the plugin field: the tool means the plugin is inst
   const tool = { ...agentsModel({ pi: toolOff() }).agents.find((agent) => agent.id === 'pi')! };
   delete tool.plugin;
   expect(connectRowOf(tool)?.state).toBe('tool-off');
+});
+
+test("Cline through Plannotator's plugin: a step to turn its tool on, with the cost; ready with it on, never 'MCP'", () => {
+  const off = agentsModel({ cline: toolOff() }).agents.find((agent) => agent.id === 'cline')!;
+  expect(connectRowOf(off)?.state).toBe('tool-off');
+  expect(stepTitle(connectRowOf(off)!)).toBe("Turn on Cline's Inbox tool");
+  expect(stepText(connectRowOf(off)!).cost).toBe(inboxToolCostText('cline'));
+  expect(connectPlan(agentsModel({ cline: toolOff() })).next?.id).toBe('cline');
+  const on = agentsModel({ cline: ready() }).agents.find((agent) => agent.id === 'cline')!;
+  expect(connectRowOf(on)?.state).toBe('ready');
+  expect(doneNote(connectRowOf(on)!, { live: false, turnedOn: false })).toBe('plugin');
+  expect(doneNote(connectRowOf(on)!, { live: false, turnedOn: true })).toBe('next session');
 });
 
 test("DeepSeek Harness through Plannotator's plugin: ready with the tool on, a step to turn it on when off, never 'MCP'", () => {

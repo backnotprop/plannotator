@@ -12,9 +12,10 @@ import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { inboxToolCostText, type InboxAgentRow, type InboxAgentsModel } from '@plannotator/core/inbox-types';
+import type { InboxLaunchSettings } from './api';
 
 const hasDom = typeof document !== 'undefined';
-const { AgentsSettings, repliesOf } = (hasDom ? await import('./components/AgentsSettings') : {}) as typeof import('./components/AgentsSettings');
+const { AgentsSettings, repliesOf, offWords } = (hasDom ? await import('./components/AgentsSettings') : {}) as typeof import('./components/AgentsSettings');
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -72,7 +73,7 @@ function model(over: Partial<InboxAgentsModel> = {}): InboxAgentsModel {
   };
 }
 
-function mount(start: InboxAgentsModel) {
+function mount(start: InboxAgentsModel, launch?: InboxLaunchSettings) {
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.appendChild(host);
@@ -86,6 +87,7 @@ function mount(start: InboxAgentsModel) {
           render();
         }}
         context={{ command: ['/opt/plannotator', 'inbox', 'mcp'], mcpUrl: 'http://127.0.0.1:1/mcp', platform: 'mac' }}
+        {...(launch ? { launch } : {})}
       />,
     );
   act(() => {
@@ -101,8 +103,11 @@ const rows = (el: Element) =>
     k: r.querySelector('.ib-agk')?.textContent,
     v: r.querySelector('.ib-agv')?.textContent,
     sw: (r.querySelector('[role="switch"]') as HTMLButtonElement | null)?.getAttribute('aria-checked') ?? null,
-    sub: r.querySelector('.ib-agsub')?.textContent ?? null,
+    sub: r.querySelector('.ib-agsub:not([data-agent-off])')?.textContent ?? null,
   }));
+/** The off line under each row of a group, by row name (null: none). */
+const offLines = (el: Element) =>
+  Object.fromEntries([...el.querySelectorAll('.ib-agrow')].map((r) => [r.querySelector('.ib-agk')?.textContent, r.querySelector('[data-agent-off]')?.textContent ?? null]));
 
 test.skipIf(!hasDom)('one group per agent found, with its switches and the states the design names', () => {
   const el = mount(model());
@@ -129,7 +134,7 @@ test.skipIf(!hasDom)('one group per agent found, with its switches and the state
   expect(group(el, 'cursor').querySelector('.ib-agstate')?.textContent).toBe('Removed outside Plannotator');
   expect(rows(group(el, 'cursor'))).toEqual([
     { k: 'Reaches the Inbox', v: "plannotator-inbox is no longer in ~/.cursor/mcp.json. Plannotator won't add it back on its own; turn this on to add it.", sw: 'false', sub: null },
-    { k: 'Note in its instructions', v: 'Customize → Rules in Cursor · copy by handShow note', sw: null, sub: "Cursor keeps its rules in the app: copy the note into Customize → Rules yourself. Plannotator can't see, update or remove that copy." },
+    { k: 'Note in its instructions', v: 'Customize → Rules in Cursor · copy yourselfShow note', sw: null, sub: "Cursor keeps its rules in the app: copy the note into Customize → Rules yourself. Plannotator can't see, update or remove that copy." },
   ]);
 });
 
@@ -160,6 +165,53 @@ test.skipIf(!hasDom)('a switch saves that one change and says it applies to the 
   act(() => showCursor.click());
   expect(group(el, 'cursor').querySelector('pre')?.textContent).toBe('note');
   expect(group(el, 'cursor').querySelector('.ib-cbox p')?.textContent).toBe("Copy this text into Customize → Rules in Cursor. Plannotator can't see, update or remove that copy.");
+});
+
+test.skipIf(!hasDom)('"Start agents from New message": always shown, saves config.json\'s switch, and the launch rows follow it', async () => {
+  const on: InboxLaunchSettings = { enabled: true, full_permissions: false, follows: null, scratch_dir: '/Users/me/.plannotator/scratch', scratch_dir_shown: '~/.plannotator/scratch' };
+  const off: InboxLaunchSettings = { enabled: false, full_permissions: false };
+  let state = on;
+  const sent: { method: string; url: string; body: unknown }[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method ?? 'GET';
+    const body = init?.body ? JSON.parse(String(init.body)) : null;
+    sent.push({ method, url, body });
+    if (method === 'POST' && body && typeof body.enabled === 'boolean') state = body.enabled ? on : off;
+    return new Response(JSON.stringify({ launch: state }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  }) as typeof fetch;
+  const settle = () => act(async () => void (await new Promise((resolve) => setTimeout(resolve, 0))));
+  const el = mount(model(), on);
+  await settle();
+  const enabledRow = () => el.querySelector('[data-launch-enabled-row]');
+  const launchRows = () => [!!el.querySelector('[data-launch-full-row]'), !!el.querySelector('[data-launch-scratch-row]')];
+  // Its own group, first, above the agents.
+  expect(el.querySelector('.ib-agents')!.firstElementChild!.hasAttribute('data-launch-enabled-group')).toBe(true);
+  expect(enabledRow()!.getAttribute('data-launch-enabled-row')).toBe('on');
+  expect(launchRows()).toEqual([true, true]);
+  const press = async () => {
+    await act(async () => (enabledRow()!.querySelector('[role="switch"]') as HTMLButtonElement).click());
+    await settle();
+  };
+
+  await press();
+  expect(sent.filter((r) => r.method === 'POST').map((r) => r.body)).toEqual([{ enabled: false }]);
+  expect(sent.find((r) => r.method === 'POST')!.url).toContain('/api/inbox/launch/settings');
+  expect(enabledRow()!.getAttribute('data-launch-enabled-row')).toBe('off');
+  expect(enabledRow()!.querySelector('[role="switch"]')!.getAttribute('aria-checked')).toBe('false');
+  // Off: the rows for sessions you start hide; the switch stays to turn it back on.
+  expect(launchRows()).toEqual([false, false]);
+
+  await press();
+  expect(sent.filter((r) => r.method === 'POST').map((r) => r.body)).toEqual([{ enabled: false }, { enabled: true }]);
+  expect(enabledRow()!.getAttribute('data-launch-enabled-row')).toBe('on');
+  expect(launchRows()).toEqual([true, true]);
+});
+
+test.skipIf(!hasDom)('Windows (launch unsupported there): no switch, and no launch rows while off', () => {
+  const el = mount(model(), { enabled: false, full_permissions: false, unsupported: true });
+  expect(el.querySelector('[data-launch-enabled-row]')).toBeNull();
+  expect(el.querySelector('[data-launch-full-row]')).toBeNull();
 });
 
 test.skipIf(!hasDom)('connected under another QWEN_HOME: shown off, where it is, and turning it on asks to move it here', async () => {
@@ -200,7 +252,7 @@ test.skipIf(!hasDom)('PLANNOTATOR_INBOX_TOOL locks the tool and reminder switche
 test.skipIf(!hasDom)('the agents not found fold behind the harness picker, editors included', () => {
   const el = mount(model());
   const more = [...el.querySelectorAll('button')].find((b) => b.textContent?.startsWith('Not found on this computer'))!;
-  expect(more.textContent).toBe('Not found on this computer1 agent · connect one by hand');
+  expect(more.textContent).toBe('Not found on this computer1 agent · connect one yourself');
   expect(more.getAttribute('aria-expanded')).toBe('false');
   act(() => more.click());
   expect([...el.querySelectorAll('[role="tab"]')].map((t) => t.textContent)).toContain('VS Code');
@@ -265,7 +317,7 @@ test.skipIf(!hasDom)('Claude Code\'s mod off: "Reaches the Inbox" says why in pl
   expect((group(el, 'claude-code').querySelectorAll('[role="switch"]')[0] as HTMLButtonElement).disabled).toBe(true);
 });
 
-test.skipIf(!hasDom)('Claude Code connected by hand through MCP: shown, never switched (Plannotator does not own that entry)', () => {
+test.skipIf(!hasDom)('Claude Code connected yourself through MCP: shown, never switched (Plannotator does not own that entry)', () => {
   const base = model();
   base.agents[0] = mcp('claude-code', 'Claude Code', '~/.claude.json');
   const el = mount(base);
@@ -292,11 +344,143 @@ test.skipIf(!hasDom)('Your replies: a new turn through Plannotator\'s own tool, 
   expect(replies('cursor')).toBeNull();
 });
 
-test.skipIf(!hasDom)('Your replies on Windows: Claude Code\'s mod stands down there, so its group says nothing about a new turn', () => {
-  const claude = tool('claude-code', 'Claude Code');
-  expect(repliesOf(claude, 'mac')).toEqual({ text: 'arrive as a new turn', wakes: true });
-  expect(repliesOf(claude, 'windows')).toBeNull();
-  // Pi's own extension still wakes it on Windows; an MCP agent is the same everywhere.
-  expect(repliesOf(tool('pi', 'Pi'), 'windows')?.wakes).toBe(true);
-  expect(repliesOf(mcp('codex', 'Codex', '~/.codex/config.toml'), 'windows')?.wakes).toBe(false);
+test.skipIf(!hasDom)('Your replies: Claude Code and Pi arrive as a new turn on every platform, Windows included; an MCP agent reads them when it checks', () => {
+  expect(repliesOf(tool('claude-code', 'Claude Code'))).toEqual({ text: 'arrive as a new turn', wakes: true });
+  expect(repliesOf(tool('pi', 'Pi'))?.wakes).toBe(true);
+  expect(repliesOf(mcp('codex', 'Codex', '~/.codex/config.toml'))?.wakes).toBe(false);
+});
+
+test.skipIf(!hasDom)('each switch left off says what that means for the agent, one line under it, only while it is off', async () => {
+  const off = { kind: 'tool', on: false, state: 'off', path: null, locked: false, reason: null } as const;
+  const allOff = model({
+    agents: [
+      tool('claude-code', 'Claude Code', { reach: off, reminder: { on: false, locked: false, needs_tool: false }, note: note('claude-code', { path: '~/.claude/rules/plannotator-inbox.md', create: true }) }),
+      mcp('codex', 'Codex', '~/.codex/config.toml', { reach: { ...off, kind: 'mcp', path: '~/.codex/config.toml' }, note: note('codex', { path: '~/.codex/AGENTS.md' }) }),
+      tool('pi', 'Pi', { reminder: { on: false, locked: false, needs_tool: false } }),
+    ],
+  });
+  const el = mount(allOff);
+  expect(offLines(group(el, 'claude-code'))).toEqual({
+    'Reaches the Inbox': offWords.reach('Claude Code'),
+    'Reminder at session start': offWords.reminder('Claude Code'),
+    'Note in its instructions': offWords.note('Claude Code'),
+  });
+  expect(offWords.reach('Claude Code')).toBe("Off: Claude Code can't send you messages or read your replies here.");
+  expect(offLines(group(el, 'codex'))).toEqual({ 'Reaches the Inbox': offWords.reach('Codex'), 'Note in its instructions': offWords.note('Codex') });
+  // Pi's tool is on: only its reminder says it is off. The off line is the quiet info line, never the warning tone.
+  expect(offLines(group(el, 'pi'))).toEqual({ 'Reaches the Inbox': null, 'Your replies': null, 'Reminder at session start': offWords.reminder('Pi') });
+  expect(group(el, 'pi').querySelector('[data-agent-off]')?.classList.contains('ib-agwarn')).toBe(false);
+
+  // Turned back on, every line goes.
+  const on = model();
+  globalThis.fetch = (async () => new Response(JSON.stringify({ ...on, error: null }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as unknown as typeof fetch;
+  await act(async () => {
+    (group(el, 'codex').querySelector('[role="switch"]') as HTMLButtonElement).click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(offLines(group(el, 'claude-code'))['Reaches the Inbox']).toBeNull();
+  expect(offLines(group(el, 'claude-code'))['Reminder at session start']).toBeNull();
+  expect(offLines(group(el, 'codex'))).toEqual({ 'Reaches the Inbox': null, 'Your replies': null, 'Note in its instructions': null });
+});
+
+test.skipIf(!hasDom)('an off line shows only under an agent found on this computer: none under one not found, none while a run is still connecting', () => {
+  const toolOff = { tool: { on: false, locked: false }, reminder: { on: false, locked: false, needs_tool: false } };
+  const manual = { kind: 'manual', on: false, state: 'manual', path: null, locked: false, reason: null } as const;
+  const agents: InboxAgentRow[] = [
+    // Found, every switch off: each says so.
+    { ...tool('pi', 'Pi', { reach: manual, note: note('pi', { path: '~/.pi/agent/AGENTS.md' }) }), ...toolOff },
+    // The same switches off under agents this computer does not have: nothing.
+    { ...tool('opencode', 'OpenCode', { reach: manual, note: note('opencode', { path: '~/.config/opencode/AGENTS.md' }) }), ...toolOff, detected: false },
+    { ...tool('cline', 'Cline', { reach: { kind: 'tool', on: false, state: 'off', path: null, locked: false, reason: null }, reminder: null }), tool: { on: false, locked: false }, detected: false },
+    // Found with its switches on: nothing.
+    tool('claude-code', 'Claude Code'),
+  ];
+  let el = mount(model({ agents }));
+  expect(offLines(group(el, 'pi'))).toEqual({
+    'Reaches the Inbox': null,
+    'The Inbox tool': offWords.reach('Pi'),
+    'Reminder at session start': offWords.reminder('Pi'),
+    'Note in its instructions': offWords.note('Pi'),
+  });
+  for (const id of ['opencode', 'cline']) {
+    expect(group(el, id).querySelector('.ib-agstate')?.textContent).toBe('Not found on this computer');
+    expect(group(el, id).querySelector('[role="switch"][aria-checked="false"]')).not.toBeNull();
+    expect(group(el, id).querySelector('[data-agent-off]')).toBeNull();
+  }
+  expect(group(el, 'claude-code').querySelector('[data-agent-off]')).toBeNull();
+  // The folded "Not found on this computer" group, opened, has none either.
+  act(() => (el.querySelector('.ib-amore') as HTMLButtonElement).click());
+  expect(el.querySelector('#ib-aundet')).not.toBeNull();
+  expect(el.querySelectorAll('[data-agent-off]').length).toBe(3);
+  expect(el.querySelector('#ib-aundet [data-agent-off]')).toBeNull();
+
+  // While a run is still connecting the agents the switches may still turn on: no line yet, so none comes and goes.
+  act(() => root?.unmount());
+  host?.remove();
+  el = mount(model({ agents, connecting: true }));
+  expect(el.querySelector('[data-agent-off]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('no off line where there is no switch to turn on: a reminder that needs the tool, a note to copy or with no file, Claude Code\'s mod off, another QWEN_HOME', () => {
+  const reason = "Plannotator's Claude Code mod is off (PLANNOTATOR_CLAUDE_MOD or claudeCodeMod), so Claude Code has no Inbox tool";
+  const base = model();
+  const el = mount({
+    ...base,
+    agents: [
+      tool('claude-code', 'Claude Code', {
+        reach: { kind: 'tool', on: false, state: 'off', path: null, locked: false, reason },
+        tool: { on: false, locked: false, mod_off: true },
+        reminder: { on: false, locked: false, needs_tool: true },
+      }),
+      base.agents[3]!,
+      base.agents[4]!,
+      mcp('qwen', 'Qwen Code', '~/.qwen/settings.json', { reach: { kind: 'mcp', on: false, state: 'elsewhere', path: '/elsewhere/settings.json', locked: false, reason: null } }),
+    ],
+  });
+  for (const id of ['claude-code', 'opencode', 'qwen']) expect(group(el, id).querySelector('[data-agent-off]')).toBeNull();
+  // Cursor's reach was removed outside Plannotator (switch shown, off): that one says so; its hand-copied note does not.
+  expect(offLines(group(el, 'cursor'))).toEqual({ 'Reaches the Inbox': offWords.reach('Cursor'), 'Note in its instructions': null });
+});
+
+test.skipIf(!hasDom)('the Inbox tool off says what it means; beside a connected MCP server it says the agent still reaches you that way', () => {
+  const manual: InboxAgentRow = {
+    ...tool('opencode', 'OpenCode'),
+    reach: { kind: 'manual', on: false, state: 'manual', path: null, locked: false, reason: null },
+    tool: { on: false, locked: false },
+    reminder: { on: false, locked: false, needs_tool: true },
+  };
+  const piMcp: InboxAgentRow = { ...mcp('pi', 'Pi', '~/.pi/agent/mcp.json'), tool: { on: false, locked: false }, reminder: { on: false, locked: false, needs_tool: true } };
+  const piBoth: InboxAgentRow = { ...piMcp, tool: { on: true, locked: false }, reminder: { on: true, locked: false, needs_tool: false } };
+  let el = mount({ ...model(), agents: [manual, piMcp] });
+  expect(offLines(group(el, 'opencode'))['The Inbox tool']).toBe(offWords.reach('OpenCode'));
+  expect(offLines(group(el, 'opencode'))['Reminder at session start']).toBeNull();
+  expect(offLines(group(el, 'pi'))['The Inbox tool']).toBe(offWords.toolBesideMcp('Pi'));
+  act(() => root?.unmount());
+  host?.remove();
+  el = mount({ ...model(), agents: [piBoth] });
+  expect(group(el, 'pi').querySelector('[data-agent-off]')).toBeNull();
+});
+
+test.skipIf(!hasDom)("Codex's group reads its account once: the plan and the limits used, or the command that signs in", async () => {
+  const answer = (account: unknown) =>
+    (async (input: RequestInfo | URL) => {
+      asked.push(String(input));
+      return new Response(JSON.stringify({ account }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }) as typeof fetch;
+  const asked: string[] = [];
+  globalThis.fetch = answer({ state: 'signed_in', kind: 'chatgpt', plan: 'ChatGPT Plus', limits: [{ used_percent: 21, window_mins: 300, resets_at: null }, { used_percent: 40, window_mins: 10080, resets_at: null }] });
+  const el = mount(model());
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+  expect(asked.filter((url) => url.endsWith('/codex/account'))).toHaveLength(1);
+  expect(rows(group(el, 'codex')).at(-1)).toEqual({ k: 'Account', v: 'ChatGPT Plus', sw: null, sub: '5h 21% · week 40%' });
+  // Only Codex's group has it.
+  expect(el.querySelectorAll('[data-codex-account]')).toHaveLength(1);
+  act(() => root!.unmount());
+  host!.remove();
+
+  globalThis.fetch = answer({ state: 'signed_out' });
+  const out = mount(model());
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
+  expect(rows(group(out, 'codex')).at(-1)).toEqual({ k: 'Account', v: 'Not signed in', sw: null, sub: 'Run codex login in Terminal to sign in.' });
+  expect(group(out, 'codex').querySelector('[data-codex-account] code')?.textContent).toBe('codex login');
 });

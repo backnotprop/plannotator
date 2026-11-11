@@ -185,5 +185,9 @@ describe('splitShellWords', () => {
     expect(splitShellWords(`"my file.md" 'it''s' a\\ b`)).toEqual(['my file.md', 'its', 'a b'])
     expect(splitShellWords('"say \\"hi\\"" $HOME *.md')).toEqual(['say "hi"', '$HOME', '*.md'])
     expect(splitShellWords('--base "feature one"')).toEqual(['--base', 'feature one'])
+    // Windows: a backslash is a path separator, never an escape.
+    expect(splitShellWords('C:\\Users\\me\\plan.md docs\\a.md', { windows: true })).toEqual(['C:\\Users\\me\\plan.md', 'docs\\a.md'])
+    expect(splitShellWords('"C:\\My Docs\\plan.md" \\\\srv\\share', { windows: true })).toEqual(['C:\\My Docs\\plan.md', '\\\\srv\\share'])
+    expect(splitShellWords('C:\\Users\\me\\plan.md')).toEqual(['C:Usersmeplan.md'])
   })
 })

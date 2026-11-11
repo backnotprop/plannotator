@@ -6,8 +6,8 @@
 
 <p align="center">
   <strong>Everything you need to annotate and stay in the loop with your agents</strong><br/>
-  <strong>Markdown Review • Code Review • HTML Artifacts</strong><br/>
-  <sub>Annotate plans, specs, markdown, and HTML before implementation. Review diffs and PRs. Send feedback to your agent.</sub>
+  <strong>Inbox Surface • Artifacts • Code Review</strong><br/>
+  <sub>Annotate plans, specs, markdown, HTML, and other interactive artifacts. Review diffs and PRs. Send feedback to your agent.</sub>
 </p>
 
 <p align="center">
@@ -32,7 +32,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.youtube.com/watch?v=a_AT7cEN_9I">Watch the og demo</a> · <a href="https://docs.plannotator.ai/open-source/start/installation">Installation guide</a> · <a href="https://plannotator.ai/">Official site</a> · <a href="https://github.com/plannotator/effective-html">Visual HTML Skills</a> · <a href="#plannotator-inbox">Plannotator Inbox</a> · <a href="#herdr-annotate-plannotator-in-the-terminal">Herdr Annotate</a>
+  <a href="#plannotator-inbox">Plannotator Inbox</a> · <a href="https://plannotator.ai/">Official site</a> · <a href="https://plannotator.ai/code-review">Code Review</a> · <a href="https://github.com/plannotator/effective-html">Visual HTML Skills</a> · <a href="#herdr-annotate-plannotator-in-the-terminal">Herdr Annotate</a> · <a href="https://www.youtube.com/watch?v=a_AT7cEN_9I">(Legacy) Plan Mode</a>
 </p>
 
 # Plannotator
@@ -420,19 +420,21 @@ You run /plannotator-review
 
 ## Remote / SSH / devcontainer
 
-Plannotator auto-detects SSH sessions and switches to a fixed port. For explicit control:
+Plannotator auto-detects SSH sessions and switches to fixed port `19432`. For a different port, or in a devcontainer or Docker:
 
 ```bash
 export PLANNOTATOR_REMOTE=1
 export PLANNOTATOR_PORT=9999  # forward this port
 ```
 
-VS Code devcontainers forward the port automatically (check the Ports tab). For raw SSH, add to `~/.ssh/config`:
+VS Code devcontainers forward the port automatically (check the Ports tab). For raw SSH, add this to `~/.ssh/config`, using your `PLANNOTATOR_PORT` value if you set one:
 
 ```
 Host your-server
-    LocalForward 9999 localhost:9999
+    LocalForward 19432 localhost:19432
 ```
+
+In remote mode the server listens on every interface (`0.0.0.0`) with no login, so anyone who can reach the port can use it, even when you use an SSH tunnel. Keep the port closed to networks you don't trust.
 
 ---
 

@@ -1,10 +1,29 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { FEEDBACK_CONTACT_MAX, FEEDBACK_MESSAGE_MAX, FEEDBACK_UNAVAILABLE, feedbackInputError, type FeedbackCategory } from '@plannotator/core/product-feedback';
 import { Icon } from '../icons';
+import { searchShipped, type SearchHit } from '../feedbackSearch';
+import { FEEDBACK_FAQ, type FeedbackFaqAction } from '../feedbackFaq';
+import { knownAnswerFor, type KnownAnswer } from '../feedbackKnown';
 import { Modal } from './Updates';
 
 /** Shown under the box once the message is this close to the cap. */
 const COUNT_FROM = FEEDBACK_MESSAGE_MAX - 400;
+const SEARCH_PAUSE_MS = 250;
+/** "These might help" shows this many lines at most, a known answer included (three on a phone, by the CSS). */
+const LINES_SHOWN = 5;
+
+const NOTHING_TYPED = { message: '', category: null as FeedbackCategory | null, contact: '' };
+/** What was typed and not sent, for the window's life: any close, even a stray press on the backdrop, loses nothing. */
+let unsent = NOTHING_TYPED;
+export function forgetUnsentFeedback() {
+  unsent = NOTHING_TYPED;
+}
+
+type FeedbackTab = 'message' | 'questions';
+const TABS: { id: FeedbackTab; label: string }[] = [
+  { id: 'message', label: 'Message' },
+  { id: 'questions', label: 'Common questions' },
+];
 
 const CATEGORIES: { value: FeedbackCategory; label: string }[] = [
   { value: 'bug', label: 'Bug' },
@@ -20,6 +39,12 @@ export interface FeedbackDialogProps {
   onSend: (input: { message: string; category: FeedbackCategory | null; contact: string | null }) => Promise<void>;
   /** "Prompt your agent to send feedback": copies the prompt (with what is typed so far) and closes; the window's toast says how it went. */
   onCopyPrompt: (draft: string) => void;
+  /** A known answer's or a Common question's action (feedbackKnown.ts): the window closes the dialog and runs the setting it names. */
+  onAction: (kind: FeedbackFaqAction) => void;
+  /** Simple list is already on: its action says so instead of offering it. */
+  simpleListOn?: boolean;
+  /** Known answers this Inbox can't follow (no such switch here, as starting agents on Windows): never shown. */
+  hiddenAnswers?: readonly string[];
   onClose: () => void;
 }
 
@@ -30,30 +55,60 @@ function lengthOf(value: string): number {
 }
 
 /**
- * Sidebar → Feedback: a short form that sends the person's words about
- * Plannotator to its maintainers. A message, an optional category and an
- * optional email; a line saying exactly what is sent; Send and Cancel; a
+ * Sidebar → Feedback: a "Feedback" title, then the Inbox's segmented switch
+ * (approval "inbox-feedback-faq"): Message, the default, and Common questions,
+ * the known answers with a question (feedbackKnown.ts) with "Not here? Tell us about it" back to
+ * Message. Message is a short form that sends the person's words about
+ * Plannotator to its maintainers. A message; "These might help": a known answer (feedbackKnown.ts) first, then links when a
+ * search finds something similar; an optional category and an optional email;
+ * a line saying what is sent; Send and Cancel; a
  * short "Sent" state. "Prompt your agent to send feedback" copies a prompt that has
  * the person's agent collect the feedback and send it with
  * `plannotator feedback` after the person says yes. Nothing is sent without
  * Send. No shortcut (owner rule); Escape and the backdrop close it, as every
  * Inbox dialog. On a phone it is a bottom sheet.
  */
-export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onClose }: FeedbackDialogProps) {
+export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onAction, simpleListOn = false, hiddenAnswers, onClose }: FeedbackDialogProps) {
   const uid = useId().replace(/[^A-Za-z0-9_-]/g, '');
-  const [message, setMessage] = useState('');
-  const [category, setCategory] = useState<FeedbackCategory | null>(null);
-  const [contact, setContact] = useState('');
+  const [message, setMessage] = useState(unsent.message);
+  const [category, setCategory] = useState(unsent.category);
+  const [contact, setContact] = useState(unsent.contact);
   const [phase, setPhase] = useState<'edit' | 'sending' | 'sent'>('edit');
   const [error, setError] = useState<string | null>(null);
+  const [hits, setHits] = useState<SearchHit[]>([]);
+  const [known, setKnown] = useState<KnownAnswer | null>(null);
+  const [tab, setTab] = useState<FeedbackTab>('message');
+  const [openItem, setOpenItem] = useState<string | null>(null);
   const boxRef = useRef<HTMLTextAreaElement>(null);
   const doneRef = useRef<HTMLButtonElement>(null);
   const closed = useRef(false);
+  useEffect(() => {
+    let latest = true;
+    // The known answers first (feedbackKnown.ts), then the search; both in the window, so what is typed goes nowhere.
+    const pause = setTimeout(() => {
+      const answer = knownAnswerFor(message, hiddenAnswers);
+      void searchShipped(message).then((found) => {
+        if (!latest) return;
+        setKnown(answer);
+        setHits(found.filter((hit) => !(answer?.feature && hit.definition !== undefined && hit.title === answer.feature)).slice(0, answer ? LINES_SHOWN - 1 : LINES_SHOWN));
+      });
+    }, SEARCH_PAUSE_MS);
+    return () => {
+      latest = false;
+      clearTimeout(pause);
+    };
+  }, [message]);
+  useEffect(() => {
+    unsent = { message, category, contact };
+  }, [message, category, contact]);
   const sending = phase === 'sending';
   const count = lengthOf(message.trim());
 
   useEffect(() => {
-    boxRef.current?.focus();
+    const box = boxRef.current;
+    box?.focus();
+    // Kept words go on from their end.
+    box?.setSelectionRange(box.value.length, box.value.length);
   }, []);
   useEffect(() => {
     if (phase === 'sent') doneRef.current?.focus();
@@ -78,6 +133,7 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onClose }
     setPhase('sending');
     try {
       await onSend({ ...input, message: message.trim() });
+      forgetUnsentFeedback();
       setPhase('sent');
     } catch (cause) {
       setPhase('edit');
@@ -85,10 +141,37 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onClose }
     }
   };
 
+  const tabId = (id: FeedbackTab) => `ib-fbk-tab-${id}-${uid}`;
+  const panelId = (id: FeedbackTab) => `ib-fbk-panel-${id}-${uid}`;
+  // The switch's keys, as Settings → Appearance's (automatic activation): the arrows, Home and End pick the other tab and focus it.
+  const onTabKey = (event: KeyboardEvent<HTMLElement>) => {
+    const index = TABS.findIndex((choice) => choice.id === tab);
+    const next =
+      event.key === 'ArrowRight' || event.key === 'ArrowDown'
+        ? (index + 1) % TABS.length
+        : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
+          ? (index - 1 + TABS.length) % TABS.length
+          : event.key === 'Home'
+            ? 0
+            : event.key === 'End'
+              ? TABS.length - 1
+              : -1;
+    if (next < 0) return;
+    event.preventDefault();
+    const id = TABS[next]!.id;
+    setTab(id);
+    document.getElementById(tabId(id))?.focus();
+  };
+  const backToMessage = () => {
+    setTab('message');
+    // After the panel shows (a hidden box takes no focus).
+    requestAnimationFrame(() => boxRef.current?.focus());
+  };
+
   return (
     <Modal
       labelledBy={`ib-fbk-t-${uid}`}
-      describedBy={phase === 'sent' ? undefined : `ib-fbk-what-${uid}`}
+      describedBy={phase === 'sent' || tab !== 'message' ? undefined : `ib-fbk-what-${uid}`}
       testId="feedback"
       onClose={() => (sending ? undefined : close())}
       ownKeys
@@ -108,115 +191,265 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onClose }
           </div>
         </div>
       ) : (
-        <form
-          className="ib-fbk-form"
-          noValidate
-          onSubmit={(event) => {
-            event.preventDefault();
-            void send();
-          }}
-        >
+        <>
           <div className="ib-dlg-head">
-            <h2 id={`ib-fbk-t-${uid}`}>Send feedback</h2>
+            <h2 id={`ib-fbk-t-${uid}`}>Feedback</h2>
             {!phone && (
               <button type="button" className="ib-btn ib-ghost ib-icon" aria-label="Close" onClick={close} disabled={sending}>
                 <Icon name="x" />
               </button>
             )}
           </div>
-          <label className="ib-bfield" htmlFor={`ib-fbk-msg-${uid}`}>
-            <span className="ib-sr">Your feedback</span>
-            <textarea
-              id={`ib-fbk-msg-${uid}`}
-              ref={boxRef}
-              className="ib-fbk-msg"
-              rows={phone ? 5 : 6}
-              value={message}
-              placeholder="What works, what doesn't, what you'd like…"
-              aria-invalid={error ? true : undefined}
-              aria-errormessage={error ? `ib-fbk-err-${uid}` : undefined}
-              readOnly={sending}
-              data-feedback-message=""
-              onChange={(event) => {
-                setMessage(event.target.value);
-                if (error) setError(null);
-              }}
-            />
-          </label>
-          {count >= COUNT_FROM && (
-            <p className={`ib-fbk-count${count > FEEDBACK_MESSAGE_MAX ? ' ib-fbk-over' : ''}`} aria-live="polite" data-feedback-count="">
-              {count > FEEDBACK_MESSAGE_MAX
-                ? `${(count - FEEDBACK_MESSAGE_MAX).toLocaleString('en-US')} over the limit`
-                : `${(FEEDBACK_MESSAGE_MAX - count).toLocaleString('en-US')} characters left`}
-            </p>
-          )}
-          {/* Seen, not read twice: the group and the field already say "(optional)" to a screen reader. */}
-          <p className="ib-fbk-optional" aria-hidden="true" data-feedback-optional="">
-            Category and email are optional
-          </p>
-          <div className="ib-fbk-row">
-            <div className="ib-fbk-cats" role="group" aria-label="Category (optional)">
-              {CATEGORIES.map((option) => (
+          <div className="ib-seg ib-fbk-tabs" role="tablist" aria-labelledby={`ib-fbk-t-${uid}`} onKeyDown={onTabKey} data-feedback-tabs="">
+            {TABS.map((choice) => {
+              const on = tab === choice.id;
+              return (
                 <button
-                  key={option.value}
+                  key={choice.id}
                   type="button"
-                  className="ib-fbk-cat"
-                  aria-pressed={category === option.value}
-                  data-feedback-category={option.value}
-                  disabled={sending}
-                  // A second press clears it: the category is optional.
-                  onClick={() => setCategory((current) => (current === option.value ? null : option.value))}
+                  role="tab"
+                  id={tabId(choice.id)}
+                  className="ib-seg-o"
+                  data-on={on ? '' : undefined}
+                  data-feedback-tab={choice.id}
+                  aria-selected={on}
+                  aria-controls={panelId(choice.id)}
+                  tabIndex={on ? 0 : -1}
+                  onClick={() => setTab(choice.id)}
                 >
-                  {option.label}
+                  {choice.label}
                 </button>
-              ))}
+              );
+            })}
+          </div>
+          <form
+            className="ib-fbk-form"
+            role="tabpanel"
+            id={panelId('message')}
+            aria-labelledby={tabId('message')}
+            hidden={tab !== 'message'}
+            noValidate
+            onSubmit={(event) => {
+              event.preventDefault();
+              void send();
+            }}
+          >
+            <label className="ib-bfield" htmlFor={`ib-fbk-msg-${uid}`}>
+              <span className="ib-sr">Your feedback</span>
+              <textarea
+                id={`ib-fbk-msg-${uid}`}
+                ref={boxRef}
+                className="ib-fbk-msg"
+                rows={phone ? 5 : 6}
+                value={message}
+                placeholder="What works, what doesn't, what you'd like…"
+                aria-invalid={error ? true : undefined}
+                aria-errormessage={error ? `ib-fbk-err-${uid}` : undefined}
+                readOnly={sending}
+                data-feedback-message=""
+                onChange={(event) => {
+                  setMessage(event.target.value);
+                  if (error) setError(null);
+                }}
+              />
+            </label>
+            {count >= COUNT_FROM && (
+              <p className={`ib-fbk-count${count > FEEDBACK_MESSAGE_MAX ? ' ib-fbk-over' : ''}`} aria-live="polite" data-feedback-count="">
+                {count > FEEDBACK_MESSAGE_MAX
+                  ? `${(count - FEEDBACK_MESSAGE_MAX).toLocaleString('en-US')} over the limit`
+                  : `${(FEEDBACK_MESSAGE_MAX - count).toLocaleString('en-US')} characters left`}
+              </p>
+            )}
+            <div className="ib-fbk-rel" role="status" data-feedback-related="">
+              {(known || hits.length > 0) && <p className="ib-fbk-rel-h">These might help</p>}
+              {(known || hits.length > 0) && (
+                <ul>
+                  {known && <KnownLine answer={known} simpleListOn={simpleListOn} onAction={onAction} />}
+                  {hits.map((hit) => (
+                    <li key={hit.href + hit.title}>
+                      {hit.fixed && <FixedLead release={hit.fixed} />}
+                      <a href={hit.href} target="_blank" rel="noopener noreferrer">
+                        {hit.title}
+                      </a>
+                      {hit.definition && `. ${hit.definition}`}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
-            <input
-              className="ib-fbk-contact"
-              type="text"
-              inputMode="email"
-              autoComplete="email"
-              aria-label="Email (optional)"
-              placeholder="Email (optional)"
-              maxLength={FEEDBACK_CONTACT_MAX}
-              value={contact}
-              readOnly={sending}
-              data-feedback-contact=""
-              onChange={(event) => setContact(event.target.value)}
-              // Enter does not send (no new keys in the Inbox): only the Send button does.
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') event.preventDefault();
-              }}
-            />
-          </div>
-          <p className="ib-fbk-what" id={`ib-fbk-what-${uid}`} data-feedback-what="">
-            <Icon name="info" />
-            <span>
-              Sends only your message (and the category and email, if you add them), Plannotator {version}, the name of your OS and that it came
-              from the Inbox. Nothing from your threads or files.
-            </span>
-          </p>
-          {error && (
-            <p className="ib-callout ib-err ib-fbk-err" id={`ib-fbk-err-${uid}`} role="alert" data-feedback-error="">
-              <Icon name="warn" />
-              <span>{error}</span>
+            <div className="ib-fbk-row">
+              <div className="ib-fbk-cats" role="group" aria-label="Category (optional)">
+                {CATEGORIES.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className="ib-fbk-cat"
+                    aria-pressed={category === option.value}
+                    data-feedback-category={option.value}
+                    disabled={sending}
+                    // A second press clears it: the category is optional.
+                    onClick={() => setCategory((current) => (current === option.value ? null : option.value))}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <input
+                className="ib-fbk-contact"
+                type="text"
+                inputMode="email"
+                autoComplete="email"
+                aria-label="Email (optional)"
+                placeholder="Email, if you'd like a reply (optional)"
+                maxLength={FEEDBACK_CONTACT_MAX}
+                value={contact}
+                readOnly={sending}
+                data-feedback-contact=""
+                onChange={(event) => setContact(event.target.value)}
+                // Enter does not send (no new keys in the Inbox): only the Send button does.
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') event.preventDefault();
+                }}
+              />
+            </div>
+            <p className="ib-fbk-what" id={`ib-fbk-what-${uid}`} data-feedback-what="">
+              Sends your message, Plannotator {version}, the name of your OS and the names of your agents. Nothing from your threads or files. This is
+              anonymous unless you add your email.
             </p>
-          )}
-          <div className="ib-acts-row ib-fbk-acts">
-            <button type="button" className="ib-btn ib-ghost ib-left" data-feedback-copy-prompt="" disabled={sending} onClick={() => onCopyPrompt(message)}>
-              <Icon name="copy" />
-              Prompt your agent to send feedback
-            </button>
-            <button type="button" className="ib-btn" onClick={close} disabled={sending}>
-              Cancel
-            </button>
-            <button type="submit" className="ib-btn ib-pri" aria-disabled={sending || undefined} data-feedback-send="">
-              {sending ? 'Sending…' : 'Send'}
-            </button>
+            {error && (
+              <p className="ib-callout ib-err ib-fbk-err" id={`ib-fbk-err-${uid}`} role="alert" data-feedback-error="">
+                <Icon name="warn" />
+                <span>{error}</span>
+              </p>
+            )}
+            <div className="ib-acts-row ib-fbk-acts">
+              <button type="button" className="ib-btn ib-ghost ib-left" data-feedback-copy-prompt="" disabled={sending} onClick={() => onCopyPrompt(message)}>
+                <Icon name="copy" />
+                Prompt your agent to send feedback
+              </button>
+              <button type="button" className="ib-btn" onClick={close} disabled={sending}>
+                Cancel
+              </button>
+              <button type="submit" className="ib-btn ib-pri" aria-disabled={sending || undefined} data-feedback-send="">
+                {sending ? 'Sending…' : 'Send'}
+              </button>
+            </div>
+          </form>
+          <div
+            className="ib-fbk-cq"
+            role="tabpanel"
+            id={panelId('questions')}
+            aria-labelledby={tabId('questions')}
+            hidden={tab !== 'questions'}
+            data-feedback-questions=""
+          >
+            <div className="ib-fbk-faq">
+              {FEEDBACK_FAQ.map((item) => {
+                const open = openItem === item.id;
+                const answerId = `ib-fbk-a-${item.id}-${uid}`;
+                const simpleOn = item.action?.kind === 'simple-list' && simpleListOn;
+                return (
+                  <div key={item.id} className="ib-fbk-qa" data-open={open ? '' : undefined} data-feedback-faq={item.id}>
+                    <button
+                      type="button"
+                      className="ib-fbk-q"
+                      aria-expanded={open}
+                      aria-controls={answerId}
+                      // One open at a time: the panel stays short enough to show them all.
+                      onClick={() => setOpenItem(open ? null : item.id)}
+                    >
+                      <Icon name="chevR" size={14} />
+                      <span>{item.question}</span>
+                    </button>
+                    <div className="ib-fbk-a" id={answerId} hidden={!open}>
+                      <p>{item.answer}</p>
+                      {(item.action || item.link) && (
+                        <div className="ib-fbk-a-acts">
+                          {item.action && (
+                            <button
+                              type="button"
+                              className="ib-btn ib-sm"
+                              disabled={simpleOn}
+                              data-feedback-faq-action={item.action.kind}
+                              onClick={() => item.action && onAction(item.action.kind)}
+                            >
+                              {simpleOn ? 'Simple list is on' : item.action.label}
+                            </button>
+                          )}
+                          {item.link && (
+                            <a className="ib-fbk-a-link" href={item.link.href} target="_blank" rel="noopener noreferrer">
+                              {item.link.label}
+                            </a>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="ib-fbk-cq-foot">
+              <p>
+                Not here?{' '}
+                <button type="button" className="ib-fbk-back" data-feedback-back="" onClick={backToMessage}>
+                  Tell us about it
+                </button>
+              </p>
+              <button type="button" className="ib-btn" onClick={close}>
+                Close
+              </button>
+            </div>
           </div>
-        </form>
+        </>
       )}
     </Modal>
+  );
+}
+
+/** "Fixed in 0.28.52: ", with Fixed in the accent color (approval "inbox-feedback-faq", take B). */
+function FixedLead({ release }: { release: string }) {
+  return (
+    <>
+      <span className="ib-fbk-lead">Fixed</span> in {release}:{' '}
+    </>
+  );
+}
+
+/**
+ * A known answer, first of "These might help": its lead ("Fixed in 0.28.52:", "Experimental:"), its words (a link
+ * when it has one) and its action, which the window runs after closing the dialog.
+ */
+function KnownLine({ answer, simpleListOn, onAction }: { answer: KnownAnswer; simpleListOn: boolean; onAction: (kind: FeedbackFaqAction) => void }) {
+  const { action, link } = answer;
+  return (
+    <li className="ib-fbk-known" data-feedback-known={answer.id}>
+      {answer.fixedIn ? (
+        <FixedLead release={answer.fixedIn} />
+      ) : answer.experimental ? (
+        <>
+          <span className="ib-fbk-lead">Experimental</span>:{' '}
+        </>
+      ) : null}
+      {link ? (
+        <a href={link.href} target="_blank" rel="noopener noreferrer">
+          {answer.answer}
+        </a>
+      ) : (
+        <span className="ib-fbk-known-a">{answer.answer}</span>
+      )}
+      {action && (
+        <>
+          {' · '}
+          {action.kind === 'simple-list' && simpleListOn ? (
+            <span data-feedback-known-done="">Simple list is on</span>
+          ) : (
+            <button type="button" className="ib-fbk-act" data-feedback-known-action={action.kind} onClick={() => onAction(action.kind)}>
+              {action.label}
+            </button>
+          )}
+        </>
+      )}
+    </li>
   );
 }
 

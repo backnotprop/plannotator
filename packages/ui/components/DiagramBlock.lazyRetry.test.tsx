@@ -241,6 +241,58 @@ describe.each(cases)('$name lazy runtime', ({ install, runtime, element, source,
 });
 
 /**
+ * `sourceOnError` (opt-in; the Inbox's guide overview): a source that does not
+ * render shows its plain fence, never the red panel; a renderer that could
+ * not load still shows the panel and its Retry, which recovers the diagram.
+ * What regresses: a load failure left as a bare fence with no way back (the
+ * `runtimeUnavailable` exception dropped), or a parse error back on the panel.
+ */
+describe('Mermaid sourceOnError', () => {
+  test.skipIf(!hasDom)('a renderer that does not load keeps the panel and Retry, and Retry draws the diagram', async () => {
+    let healthy = false;
+    let calls = 0;
+    __setMermaidRuntimeLoaderForTests(
+      () => {
+        calls += 1;
+        return healthy ? Promise.resolve(fakeMermaid) : Promise.reject(new Error('chunk failed'));
+      },
+      { retryDelayMs: RETRY_DELAY_MS },
+    );
+    const el = await mount(<MermaidBlock block={mermaidBlock} readOnly sourceOnError />);
+    await settle(RETRY_DELAY_MS * 5);
+
+    expect(el.textContent).toContain('Mermaid Error');
+    expect(el.textContent).toContain(mermaidBlock.content);
+    const retry = el.querySelector<HTMLButtonElement>('button[title="Retry loading the diagram renderer"]');
+    expect(retry).not.toBeNull();
+
+    healthy = true;
+    const before = calls;
+    await act(async () => {
+      retry!.click();
+    });
+    await settle(RETRY_DELAY_MS * 5);
+
+    expect(calls).toBe(before + 1);
+    expect(el.innerHTML).toContain('data-sentinel="diagram"');
+    expect(el.textContent).not.toContain('Mermaid Error');
+  });
+
+  test.skipIf(!hasDom)('a source that does not render shows the plain fence, no panel and no Retry', async () => {
+    const broken = { initialize() {}, render: () => { throw new Error('Parse error'); } } as never;
+    __setMermaidRuntimeLoaderForTests(() => Promise.resolve(broken), { retryDelayMs: RETRY_DELAY_MS });
+    const el = await mount(<MermaidBlock block={mermaidBlock} readOnly sourceOnError />);
+    await settle(RETRY_DELAY_MS * 5);
+
+    expect(el.querySelector('pre')?.textContent).toBe(mermaidBlock.content);
+    expect(el.textContent).not.toContain('Mermaid Error');
+    expect(el.textContent).not.toContain('Parse error');
+    expect(el.textContent).not.toContain('Rendering diagram');
+    expect(el.querySelector('button[title="Retry loading the diagram renderer"]')).toBeNull();
+  });
+});
+
+/**
  * A host that redirects Mermaid's `katex` import to `utils/mermaid-math-slot`
  * gets `$$` labels typeset through the math slot, which is only useful if the
  * slot is filled by the time Mermaid renders. What regresses: the block stops

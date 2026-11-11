@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { inboxProjectKey } from "../inbox/project-key";
 import { createShapeStore } from "./store";
-import type { ShapeBoard } from "./format";
+import { diffShapeVersions, type ShapeBoard } from "./format";
+import { sceneBoard } from "../../../tests/fixtures/shape-scene-board";
 
 // Every test gets its own data dir under the OS temp folder: nothing here
 // touches the person's Plannotator data.
@@ -28,7 +30,7 @@ function board(words = "whistles once"): ShapeBoard {
     claim: "Built. Nothing waits on you.",
     views: {
       picture: { html: `<p data-step="1"><span data-mark="p-whistle">${words}</span></p>` },
-      reqs: { groups: [{ id: "when", label: "When", items: [{ id: "r-once", text: "Once per boil." }] }] },
+      know: "It whistles once per boil.",
     },
   };
 }
@@ -49,7 +51,9 @@ describe("shape versions", () => {
     expect(result.v).toBe(1);
     expect(result.created).toBe(true);
     expect(existsSync(join(dataDir, "shapes", inboxProjectKey(project.name, project.root), result.id, "shape.json"))).toBe(true);
-    expect(store.read(result.id)?.parts.map((p) => `${p.view}/${p.id}`)).toEqual(["header/title", "header/claim", "picture/p-whistle", "reqs/r-once"]);
+    // views.know is kept, but is not a part: nothing shows it.
+    expect(store.read(result.id)?.parts.map((p) => `${p.view}/${p.id}`)).toEqual(["header/title", "header/claim", "picture/p-whistle"]);
+    expect(store.read(result.id)?.views.know).toBe("It whistles once per boil.");
   });
 
   test("an update needs the base it drew from, and a stale base is refused with the latest attached", () => {
@@ -145,6 +149,22 @@ describe("finished, drawing and seen", () => {
 });
 
 describe("notes", () => {
+  test("a box's picture becomes a file of the shape, and a note without one stays as it was", () => {
+    const { store } = storeAt(scratch());
+    const first = store.update({ board: board(), project });
+    if (!first.ok) throw new Error("setup");
+    const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    const boxed = store.addNote(first.id, { kind: "change", v: 1, view: "picture", part: "a,b", text: "x", box: { x: 0, y: 0, w: 1, h: 1 }, picture: `data:image/png;base64,${bytes.toString("base64")}` });
+    if (!boxed.ok) throw new Error("note");
+    expect(boxed.note.picture).toMatch(/^files\/note-shn_.+\.png$/);
+    expect(readFileSync(store.filePath(first.id, boxed.note.picture!)!)).toEqual(bytes);
+    const plain = store.addNote(first.id, { kind: "change", v: 1, text: "y" });
+    if (!plain.ok) throw new Error("note");
+    expect(Object.keys(plain.note)).not.toContain("picture");
+    expect(Object.keys(plain.note)).not.toContain("box");
+    expect(Object.keys(plain.note)).not.toContain("code");
+  });
+
   test("a change waits for the agent until one reads it, once", () => {
     const { store } = storeAt(scratch());
     const first = store.update({ board: board(), project });
@@ -179,7 +199,7 @@ describe("cited images", () => {
   test("an image the board cites by relative path is copied into files/ and the ref points at the copy", () => {
     const dataDir = scratch();
     const source = scratch();
-    writeFileSync(join(source, "shot.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    writeFileSync(join(source, "shot.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
     const { store } = storeAt(dataDir);
     const withImage: ShapeBoard = { ...board(), refs: [{ n: 1, kind: "image", title: "Shot", target: "shot.png" }] };
     const result = store.update({ board: withImage, project, sourceDir: source });
@@ -187,7 +207,7 @@ describe("cited images", () => {
     const target = store.read(result.id)!.refs![0]!.target;
     expect(target).toMatch(/^files\/[0-9a-f]{10}-shot\.png$/);
     const path = store.filePath(result.id, target);
-    expect(path && readFileSync(path).length).toBe(4);
+    expect(path && readFileSync(path).length).toBe(8);
     for (const outside of ["../shape.json", "files/../shape.json", "files/a/b.png", "files\\..\\shape.json", "/etc/passwd", ".lock"]) {
       expect([outside, store.filePath(result.id, outside)]).toEqual([outside, null]);
     }
@@ -241,7 +261,7 @@ const r = createShapeStore({ dataDir }).update({ board, id, base: 1, project: ${
 console.log(r.ok ? "OK" : r.code);`,
     );
     const runs = Array.from({ length: count }, (_, i) =>
-      Bun.spawn([process.execPath, worker, dataDir, id, String(i)], { stdout: "pipe", stderr: "pipe", env: { PATH: process.env.PATH ?? "" } }),
+      Bun.spawn([process.execPath, worker, dataDir, id, String(i)], { stdout: "pipe", stderr: "pipe", env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME! } }),
     );
     return Promise.all(runs.map(async (p) => (await new Response(p.stdout).text()).trim()));
   }
@@ -267,5 +287,265 @@ console.log(r.ok ? "OK" : r.code);`,
     rmSync(join(folder, ".lock.break"));
     rmSync(join(folder, ".lock"));
     expect(await done).toEqual(["OK"]);
+  });
+});
+
+describe("a board saved with Requirements", () => {
+  const reqs = { heading: "What I understand", groups: [{ id: "when", label: "When", items: [{ id: "r-once", text: "Once per boil.", code: { path: "src/k.ts", line: 3 } }] }], foot: [{ label: "Open", text: "Nothing." }] };
+  function saved() {
+    const dataDir = scratch();
+    const { store } = storeAt(dataDir);
+    const first = store.update({ board: board(), project, session });
+    if (!first.ok) throw new Error("setup");
+    const folder = join(dataDir, "shapes", inboxProjectKey(project.name, project.root), first.id);
+    // What an older build left on disk.
+    const version = { ...JSON.parse(readFileSync(join(folder, "versions.jsonl"), "utf8").trim()), views: { picture: board().views.picture, reqs } };
+    version.parts = [{ view: "header", id: "title", text: "t" }, { view: "reqs", id: "r-once", text: "When: Once per boil." }];
+    writeFileSync(join(folder, "versions.jsonl"), `${JSON.stringify(version)}\n`);
+    const note = { id: "shn_01M6N5J925QA038Z8M96WJXJ5H", at: "2026-11-03T10:00:00Z", kind: "change", v: 1, view: "reqs", part: "r-once", quote: null, text: "Twice", from: "you", re: null, delivered: null };
+    writeFileSync(join(folder, "chat.jsonl"), `${JSON.stringify(note)}\n`);
+    return { store, id: first.id, folder };
+  }
+
+  test("it reads back whole, its parts and notes under What to know, and the files stay as written", () => {
+    const { store, id, folder } = saved();
+    const before = [readFileSync(join(folder, "versions.jsonl"), "utf8"), readFileSync(join(folder, "chat.jsonl"), "utf8")];
+    const v = store.read(id)!;
+    expect(v.views.reqs).toEqual(reqs);
+    expect(v.parts.find((p) => p.id === "r-once")?.view).toBe("know");
+    expect(store.notes(id).map((n) => n.view)).toEqual(["know"]);
+    expect([readFileSync(join(folder, "versions.jsonl"), "utf8"), readFileSync(join(folder, "chat.jsonl"), "utf8")]).toEqual(before);
+  });
+
+  test("the next version replaces it: neither its old lines nor the new views.know are a change (neither is shown)", () => {
+    const { store, id } = saved();
+    const next = store.update({ id, base: 1, board: board(), project, session });
+    expect(next.ok).toBe(true);
+    const diff = diffShapeVersions(store.read(id, 1)!, store.read(id, 2)!);
+    expect(diff.changes.filter((c) => c.view === "know")).toEqual([]);
+    expect(diff.views).not.toContain("know");
+  });
+});
+
+describe("images a drawing names", () => {
+  const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+  function withFile() {
+    const dataDir = scratch();
+    const dir = join(dataDir, "src");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "crop.png"), PNG);
+    return { dataDir, dir, store: storeAt(dataDir).store };
+  }
+  const drawing = (html: string, extra: Record<string, unknown> = {}): ShapeBoard => ({ title: "T", claim: "C", views: { picture: { html, ...extra } } });
+
+  test("relative or absolute, in the drawing, its tall and its Show more: copied in and renamed", () => {
+    const { dataDir, dir, store } = withFile();
+    const r = store.update({
+      board: drawing(`<svg><image href="crop.png" x="0" y="0" width="9" height="9"/></svg>`, { tall: { html: `<img src="${join(dir, "crop.png")}">` }, more: { html: `<img src='crop.png'>` } }),
+      project,
+      session,
+      sourceDir: dir,
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const p = store.read(r.id)!.views.picture!;
+    const name = /files\/([\w.-]+crop\.png)/.exec(p.html)?.[1];
+    expect(name).toBeTruthy();
+    expect(p.tall?.html).toContain(`files/${name}`);
+    expect(p.more?.html).toContain(`files/${name}`);
+    expect(existsSync(join(dataDir, "shapes", inboxProjectKey(project.name, project.root), r.id, "files", name!))).toBe(true);
+  });
+
+  test("however the attribute is written, a file it names is copied", () => {
+    const { dir, store } = withFile();
+    for (const html of ['<svg><image xlink:href="crop.png"/></svg>', "<img src=crop.png>", '<img src = "crop.png">', "<svg><image href='crop.png'/></svg>"]) {
+      const r = store.update({ board: drawing(html), project, session, sourceDir: dir });
+      expect(r.ok).toBe(true);
+      if (!r.ok) continue;
+      const kept = store.read(r.id)!.views.picture!.html;
+      expect(kept).toMatch(/(?:src|href)="files\/[0-9a-f]{10}-crop\.png"/);
+      expect(kept).not.toContain("xlink:href");
+    }
+  });
+
+  test("a kept picture written with xlink:href is read as href, and an alt's words are left alone", () => {
+    const { dir, store } = withFile();
+    const kept = store.update({ board: drawing('<svg><image xlink:href="files/x.png"/></svg>'), project, session, sourceDir: dir });
+    expect(kept.ok).toBe(true);
+    if (kept.ok) expect(store.read(kept.id)!.views.picture!.html).toContain('<image href="files/x.png"/>');
+    const alt = store.update({ board: drawing('<img alt="x src=crop.png y" src="crop.png">'), project, session, sourceDir: dir });
+    expect(alt.ok).toBe(true);
+    if (alt.ok) {
+      const html = store.read(alt.id)!.views.picture!.html;
+      expect(html).toContain('alt="x src=crop.png y"');
+      expect(html).toMatch(/ src="files\/[0-9a-f]{10}-crop\.png"/);
+    }
+  });
+
+  test("a real files/ folder beside the board is copied, not taken for pictures the board keeps", () => {
+    const { dataDir, dir, store } = withFile();
+    mkdirSync(join(dir, "files"));
+    writeFileSync(join(dir, "files", "x.png"), PNG);
+    const r = store.update({ board: drawing('<img src="files/x.png">'), project, session, sourceDir: dir });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const name = /files\/([\w.-]+x\.png)/.exec(store.read(r.id)!.views.picture!.html)?.[1];
+    expect(name).toMatch(/^[0-9a-f]{10}-x\.png$/);
+    expect(existsSync(join(dataDir, "shapes", inboxProjectKey(project.name, project.root), r.id, "files", name!))).toBe(true);
+  });
+
+  test("a link named .png is what it points at, and a picture past 10 MB is refused", () => {
+    const { dir, store } = withFile();
+    writeFileSync(join(dir, "secret.txt"), "not a picture");
+    symlinkSync(join(dir, "secret.txt"), join(dir, "link.png"));
+    const link = store.update({ board: drawing('<img src="link.png">'), project, session, sourceDir: dir });
+    expect(link.ok).toBe(false);
+    if (!link.ok) expect(link.errors.join()).toContain("is not a PNG, JPEG, GIF, WebP, SVG, AVIF or ICO image");
+    symlinkSync(join(dir, "crop.png"), join(dir, "real.png"));
+    expect(store.update({ board: drawing('<img src="real.png">'), project, session, sourceDir: dir }).ok).toBe(true);
+
+    writeFileSync(join(dir, "big.png"), "");
+    truncateSync(join(dir, "big.png"), 10 * 1024 * 1024 + 1);
+    const big = store.update({ board: drawing('<img src="big.png">'), project, session, sourceDir: dir });
+    expect(big.ok).toBe(false);
+    if (!big.ok) expect(big.errors.join()).toContain("at most 10485760");
+    writeFileSync(join(dir, "fits.png"), PNG);
+    truncateSync(join(dir, "fits.png"), 10 * 1024 * 1024);
+    expect(store.update({ board: drawing('<img src="fits.png">'), project, session, sourceDir: dir }).ok).toBe(true);
+  });
+
+  test("a file: URL, an SVG and an AVIF are copied in like a path", () => {
+    const { dir, store } = withFile();
+    writeFileSync(join(dir, "logo.svg"), '<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2 2"><rect width="2" height="2"/></svg>');
+    const html = `<img src="${pathToFileURL(join(dir, "crop.png")).href}"><svg><image href="file://localhost${join(dir, "logo.svg")}"/><image href="logo.svg"/></svg>`;
+    const r = store.update({ board: drawing(html), project, session, sourceDir: dir });
+    expect(r).toMatchObject({ ok: true });
+    if (!r.ok) return;
+    const kept = store.read(r.id)!.views.picture!.html;
+    expect(kept).toMatch(/<img src="files\/[0-9a-f]{10}-crop\.png">/);
+    expect(kept.match(/href="files\/[0-9a-f]{10}-logo\.svg"/g)).toHaveLength(2);
+    expect(kept).not.toContain("file:");
+    for (const name of kept.match(/files\/[\w.-]+/g)!) expect(store.filePath(r.id, name)).toBeTruthy();
+  });
+
+  test("a file whose name says picture but whose bytes do not is refused", () => {
+    const { dir, store } = withFile();
+    writeFileSync(join(dir, "fake.png"), "not a picture");
+    writeFileSync(join(dir, "page.svg"), "<html><body>not an svg</body></html>");
+    for (const name of ["fake.png", "page.svg"]) {
+      const r = store.update({ board: drawing(`<img src="${name}">`), project, session, sourceDir: dir });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.errors.join()).toContain(`"${name}" is not a PNG, JPEG, GIF, WebP, SVG, AVIF or ICO image`);
+    }
+    const remote = store.update({ board: drawing('<img src="file://some-host/a.png">'), project, session, sourceDir: dir });
+    expect(remote.ok).toBe(false);
+    if (!remote.ok) expect(remote.errors.join()).toContain("is not a file on this computer");
+  });
+
+  test("a web picture is kept from the bytes shape update fetched, and one it did not fetch is refused", () => {
+    const { dataDir, dir, store } = withFile();
+    const url = "https://example.com/brand/acme.png?v=2&amp;s=1";
+    const webPictures = new Map([[url, { bytes: new Uint8Array(PNG), name: "acme.png" }]]);
+    const r = store.update({
+      board: { ...drawing(`<svg><image href="${url}" width="40" height="40"/></svg>`), refs: [{ n: 1, kind: "image", title: "Acme", target: url, images: [{ src: url, alt: "Acme" }] }] },
+      project,
+      session,
+      sourceDir: dir,
+      webPictures,
+    });
+    expect(r).toMatchObject({ ok: true });
+    if (!r.ok) return;
+    const v = store.read(r.id)!;
+    const name = /href="files\/([0-9a-f]{10}-acme\.png)"/.exec(v.views.picture!.html)?.[1];
+    expect(name).toBeTruthy();
+    expect(v.refs![0]!.target).toBe(`files/${name}`);
+    expect(v.refs![0]!.images![0]!.src).toBe(`files/${name}`);
+    const kept = join(dataDir, "shapes", inboxProjectKey(project.name, project.root), r.id, "files", name!);
+    expect(readFileSync(kept)).toEqual(PNG);
+
+    const missed = store.update({ board: drawing('<img src="https://example.com/other.png">'), project, session, sourceDir: dir, webPictures });
+    expect(missed.ok).toBe(false);
+    if (!missed.ok) expect(missed.errors.join()).toContain("is a web picture that was not fetched");
+    // Any other scheme is still no picture.
+    const ftp = store.update({ board: { ...drawing("<p>x</p>"), refs: [{ n: 1, kind: "image", title: "F", target: "ftp://example.com/a.png" }] }, project, session, sourceDir: dir });
+    expect(ftp.ok).toBe(false);
+    if (!ftp.ok) expect(ftp.errors.join()).toContain("is a URL");
+  });
+
+  test("a later version copies its images too", () => {
+    const { dir, store } = withFile();
+    const first = store.update({ board: drawing("<p>one</p>"), project, session, sourceDir: dir });
+    if (!first.ok) throw new Error("setup");
+    const next = store.update({ id: first.id, base: 1, board: drawing('<img src="crop.png">'), project, session, sourceDir: dir });
+    expect(next.ok).toBe(true);
+    const name = /files\/[^"]+/.exec(store.read(first.id)!.views.picture!.html)![0];
+    expect(store.filePath(first.id, name)).toBeTruthy();
+  });
+
+  test("what cannot be copied is refused by field: a missing file, not an image, a URL, a bad files/ name", () => {
+    const { dir, store } = withFile();
+    writeFileSync(join(dir, "notes.txt"), "x");
+    const cases: [string, string][] = [
+      ['<img src="gone.png">', "was not found"],
+      ['<img src="notes.txt">', "not a PNG"],
+      ['<image href="https://example.com/a.png"/>', "is a web picture that was not fetched"],
+      ['<image href="//example.com/a.png"/>', "nothing may load from outside"],
+      ['<img src="files/../a.png">', "is not one file under files/"],
+    ];
+    for (const [html, words] of cases) {
+      const r = store.update({ board: drawing(html), project, session, sourceDir: dir });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.errors.join()).toContain(words);
+    }
+  });
+
+  test("a data image and a #fragment stay as written", () => {
+    const { dir, store } = withFile();
+    const html = '<svg><image href="data:image/png;base64,AAAA"/><use href="#x"/></svg>';
+    const r = store.update({ board: drawing(html), project, session, sourceDir: dir });
+    if (!r.ok) throw new Error(r.code);
+    expect(store.read(r.id)!.views.picture!.html).toBe(html);
+  });
+
+  test("a reference of any kind keeps its images and their crops", () => {
+    const { dir, store } = withFile();
+    const r = store.update({
+      board: { ...drawing("<p>x</p>"), refs: [{ n: 1, kind: "pr", title: "PR", target: "https://github.com/o/r/pull/1", images: [{ src: "crop.png", alt: "It", crop: [0, 0, 0.5, 0.5] }] }] },
+      project,
+      session,
+      sourceDir: dir,
+    });
+    if (!r.ok) throw new Error(JSON.stringify(r));
+    const image = store.read(r.id)!.refs![0]!.images![0]!;
+    expect(image.src).toMatch(/^files\/.*crop\.png$/);
+    expect(image.crop).toEqual([0, 0, 0.5, 0.5]);
+    expect(store.read(r.id)!.refs![0]!.target).toBe("https://github.com/o/r/pull/1");
+  });
+});
+
+describe("a board that plays a scene", () => {
+  test("the scene is kept in the version the board reads", () => {
+    const { store } = storeAt(scratch());
+    const r = store.update({ board: sceneBoard(), project, session });
+    if (!r.ok) throw new Error(JSON.stringify(r));
+    expect(store.read(r.id)!.scenes).toEqual(sceneBoard().scenes);
+  });
+
+  // What regresses: a scene the player cannot play is stored, and the person sees a drawing that never moves.
+  test("an update with a scene it cannot play stores nothing and names the field", () => {
+    const { store } = storeAt(scratch());
+    const late = sceneBoard();
+    late.scenes!.lamp!.tracks.ball![1]!.at = 30;
+    const ghost = sceneBoard();
+    ghost.scenes!.lamp!.tracks.ghost = [{ at: 0, opacity: 0 }];
+    for (const [board, words] of [
+      [late, "scenes.lamp.tracks.ball[1].at: must be a time from 0 to end (10)"],
+      [ghost, 'scenes.lamp.tracks.ghost: the drawing has no data-part="ghost"'],
+    ] as const) {
+      const r = store.update({ board, project, session });
+      if (r.ok || r.code !== "invalid") throw new Error("expected invalid");
+      expect(r.errors.join("\n")).toContain(words);
+    }
+    expect(store.list()).toEqual([]);
   });
 });

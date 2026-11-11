@@ -10,6 +10,8 @@ import { mkdirSync, writeFileSync } from "fs";
 import type { PRRuntime, PRMetadata, PRContext, PRReviewFileComment, PRReviewCommentFailure, PRReviewAction, PRReviewSubmissionResult, CommandResult } from "./pr-types";
 import { decodeBase64Bytes, encodeApiFilePath, isNotFoundCommandFailure, type PRFileBytesResult, type PRTreeResult } from "./pr-types";
 import { getPlannotatorDataDir } from "./data-dir";
+import { isAccessRefusal, markedCommentText, PRMarkedForbiddenError, PRMarkedRaceError, spliceMarkedSection, startsWithMarker, type PRMarkedCommentInput, type PRMarkedResult, type PRMarkedSectionInput } from "./pr-marked";
+import { diffHunkLines, parseDiffToFiles } from "@plannotator/core/diff-files";
 
 // GitLab-specific MRRef shape (used internally)
 interface GlMRRef {
@@ -130,7 +132,7 @@ export async function getGlUser(runtime: PRRuntime, host: string): Promise<strin
  * flags entirely; there an empty diff on a plain modification is the only
  * reliable withheld signal — empty adds/deletes/renames stay exempt.
  */
-function entryMissingContent(d: GitLabDiffEntry): boolean {
+export function entryMissingContent(d: GitLabDiffEntry): boolean {
   if (d.diff.trim() !== "") return false;
   if (d.too_large || d.collapsed) return true;
   // == null catches both absent (old GitLab) and explicit null (GitLab emits
@@ -350,6 +352,7 @@ export async function fetchGlMRContext(
 
   // --- Discussions (inline review threads) ---
   const reviewThreads: PRContext["reviewThreads"] = [];
+  const threadsIncomplete = discussionsResult.exitCode !== 0;
   const discussionNoteIds = new Set<string>();
   if (discussionsResult.exitCode === 0) {
     try {
@@ -515,6 +518,13 @@ export async function fetchGlMRContext(
     }
   }
 
+  const requestedReviewers: NonNullable<PRContext["requestedReviewers"]> = arr(mr.reviewers).flatMap((user: any) => {
+    const login = str(user?.username);
+    if (!login) return [];
+    const avatarUrl = resolveAvatar(user?.avatar_url);
+    return [{ login, ...(avatarUrl ? { avatarUrl } : {}), ...(isGitlabBot(user) ? { isBot: true } : {}) }];
+  });
+
   return {
     body: str(mr.description),
     state,
@@ -526,8 +536,10 @@ export async function fetchGlMRContext(
     comments: notes,
     reviews,
     reviewThreads,
+    ...(threadsIncomplete ? { threadsIncomplete } : {}),
     checks,
     linkedIssues,
+    requestedReviewers,
   };
 }
 
@@ -642,6 +654,177 @@ export async function fetchGlFileBytes(
 
 // --- Submit MR Review ---
 
+type RunWithInput = NonNullable<PRRuntime["runCommandWithInput"]>;
+
+function commandFailure(result: CommandResult): string {
+  return result.stderr.trim() || result.stdout.trim() || `exit code ${result.exitCode}`;
+}
+
+/** Approve the MR. Returns the failure message, or null on success. */
+async function approveGlMR(run: RunWithInput, host: string, mrEndpoint: string): Promise<string | null> {
+  const result = await run(
+    "glab",
+    apiArgs(host, `${mrEndpoint}/approve`, ["--method", "POST", "--input", "-", "-H", "Content-Type:application/json"]),
+    "{}",
+  );
+  return result.exitCode === 0 ? null : commandFailure(result);
+}
+
+// GitLab records requested changes only for a reviewer, and runs a document's
+// mutations in order, so the user is appended as a reviewer first.
+const REQUEST_CHANGES_MUTATION = `mutation($projectPath: ID!, $iid: String!, $username: String!) {
+  mergeRequestSetReviewers(input: { projectPath: $projectPath, iid: $iid, reviewerUsernames: [$username], operationMode: APPEND }) { errors }
+  mergeRequestRequestChanges(input: { projectPath: $projectPath, iid: $iid }) { errors }
+}`;
+
+/** GraphQL error messages from a top-level `errors` array and every mutation payload's `errors` strings. */
+function graphqlErrors(value: unknown): string[] {
+  if (!isRecord(value)) return [];
+  const top = Array.isArray(value.errors)
+    ? value.errors.map((e) => (isRecord(e) ? stringValue(e.message) : stringValue(e))).filter(Boolean)
+    : [];
+  const payloads = isRecord(value.data) ? Object.values(value.data) : [];
+  const nested = payloads.flatMap((payload) =>
+    isRecord(payload) && Array.isArray(payload.errors) ? payload.errors.map(stringValue).filter(Boolean) : [],
+  );
+  return [...top, ...nested];
+}
+
+/** The server has no `mergeRequestRequestChanges` (added in GitLab 18.9). */
+const REQUEST_CHANGES_MISSING = Symbol("request changes missing");
+
+/**
+ * GitLab before 18.9 rejects the mutation document as a whole, before running
+ * any of it (HTTP 200, no `data`; glab exits 1 and prints the body), with an
+ * `undefinedField` error naming `mergeRequestRequestChanges` on `Mutation`.
+ */
+function requestChangesMissing(value: unknown): boolean {
+  if (!isRecord(value) || value.data != null || !Array.isArray(value.errors)) return false;
+  return value.errors.some((e) => {
+    if (!isRecord(e)) return false;
+    const ext = isRecord(e.extensions) ? e.extensions : {};
+    if (ext.code === "undefinedField") {
+      return ext.typeName === "Mutation" && ext.fieldName === "mergeRequestRequestChanges";
+    }
+    return /^Field 'mergeRequestRequestChanges' doesn't exist on type 'Mutation'/.test(stringValue(e.message));
+  });
+}
+
+/**
+ * Add the current user as a reviewer and set their state to "Requested
+ * changes". Returns the failure message, null on success, or
+ * `REQUEST_CHANGES_MISSING` when the server is too old to have it (nothing
+ * changed on the MR).
+ */
+async function requestGlMRChanges(
+  runtime: PRRuntime,
+  run: RunWithInput,
+  ref: GlMRRef,
+): Promise<string | null | typeof REQUEST_CHANGES_MISSING> {
+  const username = await getGlUser(runtime, ref.host);
+  if (!username) return "could not read the current GitLab user";
+  const result = await run(
+    "glab",
+    apiArgs(ref.host, "graphql", ["--method", "POST", "--input", "-", "-H", "Content-Type:application/json"]),
+    JSON.stringify({
+      query: REQUEST_CHANGES_MUTATION,
+      variables: { projectPath: ref.projectPath, iid: String(ref.iid), username },
+    }),
+  );
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result.stdout);
+  } catch {
+    if (result.exitCode !== 0) return commandFailure(result);
+    return `unexpected GraphQL response: ${result.stdout.trim().slice(0, 200)}`;
+  }
+  if (requestChangesMissing(parsed)) return REQUEST_CHANGES_MISSING;
+  if (result.exitCode !== 0) return commandFailure(result);
+  const errors = graphqlErrors(parsed);
+  return errors.length > 0 ? errors.join("; ") : null;
+}
+
+/** One file of an MR's diff as a discussion's position needs it: its path before, and its unchanged lines' pairs. */
+interface GlPositionFile {
+  oldPath: string;
+  /** Unchanged lines: new line number to old, and old to new. */
+  newToOld: Map<number, number>;
+  oldToNew: Map<number, number>;
+}
+
+/**
+ * The MR's diff, read for discussion positions: GitLab places a comment on an unchanged line only with both its line
+ * numbers, and on a renamed file only with the path it had. Null when it can't be read (the comments then go as before).
+ */
+async function readGlPositionFiles(runtime: PRRuntime, ref: GlMRRef): Promise<Map<string, GlPositionFile> | null> {
+  const encoded = encodeProject(ref.projectPath);
+  let patch: string | null = null;
+  try {
+    const raw = await runtime.runCommand("glab", apiArgs(ref.host, `projects/${encoded}/merge_requests/${ref.iid}/raw_diffs`));
+    if (raw.exitCode === 0 && raw.stdout.trim()) {
+      patch = raw.stdout;
+    } else {
+      const json = await runtime.runCommand(
+        "glab",
+        apiArgs(ref.host, `projects/${encoded}/merge_requests/${ref.iid}/diffs?per_page=100`, ["--paginate"]),
+      );
+      if (json.exitCode === 0 && json.stdout.trim()) patch = reconstructPatch(parsePaginatedArray<GitLabDiffEntry>(json.stdout));
+    }
+  } catch {
+    return null;
+  }
+  if (!patch?.trim()) return null;
+  const files = new Map<string, GlPositionFile>();
+  for (const file of parseDiffToFiles(patch)) {
+    const newToOld = new Map<number, number>();
+    const oldToNew = new Map<number, number>();
+    for (const hunk of diffHunkLines(file.patch) ?? []) {
+      for (const line of hunk.lines) {
+        if (line.kind !== "context") continue;
+        newToOld.set(line.newLine, line.oldLine);
+        oldToNew.set(line.oldLine, line.newLine);
+      }
+    }
+    files.set(file.path, { oldPath: file.oldPath ?? file.path, newToOld, oldToNew });
+  }
+  return files;
+}
+
+/**
+ * Where a line comment sits, as GitLab's discussion `position` takes it. An unchanged line carries both its line
+ * numbers (`type: "old"` in a range, as GitLab names any line not added); a renamed file its old path.
+ */
+function glPosition(
+  comment: PRReviewFileComment,
+  shas: { base: string; head: string; start: string },
+  file: GlPositionFile | undefined,
+): Record<string, unknown> {
+  const at = (line: number, side: "LEFT" | "RIGHT") => {
+    const other = side === "LEFT" ? file?.oldToNew.get(line) : file?.newToOld.get(line);
+    const old_line = side === "LEFT" ? line : other;
+    const new_line = side === "LEFT" ? other : line;
+    return {
+      type: old_line === undefined ? "new" : "old",
+      ...(old_line !== undefined ? { old_line } : {}),
+      ...(new_line !== undefined ? { new_line } : {}),
+    };
+  };
+  const { type: _type, ...end } = at(comment.line, comment.side);
+  const position: Record<string, unknown> = {
+    position_type: "text",
+    base_sha: shas.base,
+    head_sha: shas.head,
+    start_sha: shas.start,
+    new_path: comment.path,
+    old_path: file?.oldPath ?? comment.path,
+    ...end,
+  };
+  if (comment.start_line != null && comment.start_line !== comment.line) {
+    position.line_range = { start: at(comment.start_line, comment.start_side ?? comment.side), end: at(comment.line, comment.side) };
+  }
+  return position;
+}
+
 /**
  * Submit a GitLab review across its separate note, discussion, and approval
  * APIs.
@@ -681,7 +864,7 @@ export async function submitGlMRReview(
       notePayload,
     );
     if (noteResult.exitCode !== 0) {
-      const msg = noteResult.stderr.trim() || noteResult.stdout.trim() || `exit code ${noteResult.exitCode}`;
+      const msg = commandFailure(noteResult);
       throw new Error(`Failed to post MR note: ${msg}`);
     }
     reviewBodyPosted = true;
@@ -719,38 +902,11 @@ export async function submitGlMRReview(
         error: `${comment.path}:${comment.line}: Failed to prepare inline comment: ${diffRefsError}`,
       }));
     } else {
+      const positionFiles = await readGlPositionFiles(runtime, ref);
       // Submit comments in parallel
       const results = await Promise.allSettled(
         fileComments.map(async (comment) => {
-          const isOldSide = comment.side === "LEFT";
-          const position: Record<string, unknown> = {
-            position_type: "text",
-            base_sha: baseSha,
-            head_sha: headSha,
-            start_sha: startSha,
-            new_path: comment.path,
-            old_path: comment.path,
-          };
-
-          if (isOldSide) {
-            position.old_line = comment.line;
-          } else {
-            position.new_line = comment.line;
-          }
-
-          // Multi-line range support
-          if (comment.start_line != null && comment.start_line !== comment.line) {
-            const startIsOld = (comment.start_side ?? comment.side) === "LEFT";
-            const startEntry: Record<string, unknown> = { type: startIsOld ? "old" : "new" };
-            if (startIsOld) startEntry.old_line = comment.start_line;
-            else startEntry.new_line = comment.start_line;
-
-            const endEntry: Record<string, unknown> = { type: isOldSide ? "old" : "new" };
-            if (isOldSide) endEntry.old_line = comment.line;
-            else endEntry.new_line = comment.line;
-
-            position.line_range = { start: startEntry, end: endEntry };
-          }
+          const position = glPosition(comment, { base: baseSha, head: headSha, start: startSha }, positionFiles?.get(comment.path));
 
           const payload = JSON.stringify({ body: comment.body, position });
           const res = await runCommandWithInput(
@@ -760,7 +916,7 @@ export async function submitGlMRReview(
           );
 
           if (res.exitCode !== 0) {
-            const msg = res.stderr.trim() || res.stdout.trim() || `exit code ${res.exitCode}`;
+            const msg = commandFailure(res);
             throw new Error(`${comment.path}:${comment.line}: ${msg}`);
           }
         }),
@@ -815,28 +971,28 @@ export async function submitGlMRReview(
     }
   }
 
-  // 3. Approve if requested. GitLab has no request-changes review, so a
-  //    `request_changes` action posts exactly what `comment` posts (#1611).
   let approval: "not-requested" | "succeeded" | "failed" = "not-requested";
   let approvalError: string | undefined;
-  if (action === "approve") {
+  // An older GitLab without request changes: the review stays the plain comment it already is.
+  let postedAs: "comment" | undefined;
+  if (action === "approve" || action === "request_changes") {
+    const verb = action === "approve" ? "approve MR" : "request changes on MR";
     try {
-      const approveResult = await runCommandWithInput(
-        "glab",
-        apiArgs(ref.host, `${mrEndpoint}/approve`, ["--method", "POST", "--input", "-", "-H", "Content-Type:application/json"]),
-        "{}",
-      );
-      if (approveResult.exitCode !== 0) {
-        const msg = approveResult.stderr.trim() || approveResult.stdout.trim() || `exit code ${approveResult.exitCode}`;
+      const failure = action === "approve"
+        ? await approveGlMR(runCommandWithInput, ref.host, mrEndpoint)
+        : await requestGlMRChanges(runtime, runCommandWithInput, ref);
+      if (failure === REQUEST_CHANGES_MISSING) {
+        postedAs = "comment";
+      } else if (failure) {
         approval = "failed";
-        approvalError = `Failed to approve MR: ${msg}`;
+        approvalError = `Failed to ${verb}: ${failure}`;
       } else {
         approval = "succeeded";
       }
     } catch (error) {
       approval = "failed";
       const message = error instanceof Error ? error.message : String(error);
-      approvalError = `Failed to approve MR: ${message}`;
+      approvalError = `Failed to ${verb}: ${message}`;
     }
   }
 
@@ -849,12 +1005,90 @@ export async function submitGlMRReview(
       approval,
       ...(approvalError ? { approvalError } : {}),
       ...(recoveryFile ? { recoveryFile } : {}),
+      ...(postedAs ? { postedAs } : {}),
       retry: {
-        action: approval === "failed" ? "approve" : "comment",
+        action: approval === "failed" ? action : "comment",
         fileComments: failedFileComments.map((failure) => failure.comment),
       },
     };
   }
 
-  return { status: "complete" };
+  return postedAs ? { status: "complete", postedAs } : { status: "complete" };
+}
+
+// --- Marked text: a note or a description section found again by its marker (pr-marked.ts) ---
+
+/**
+ * GitLab's limit on a note's body and on an MR's description: 1,000,000 characters on gitlab.com (the Notes API's
+ * docs; an instance may set its own `description_and_note_max_size`, checked in bytes for a description).
+ */
+export const GL_NOTE_MAX = 1_000_000;
+export const GL_DESCRIPTION_MAX = 1_000_000;
+
+interface GlNote {
+  id: number;
+  body?: string | null;
+  system?: boolean;
+  author?: { username?: string } | null;
+}
+
+const glMrUrl = (ref: GlMRRef) => `https://${ref.host}/${ref.projectPath}/-/merge_requests/${ref.iid}`;
+
+const glFailure = (result: CommandResult) => result.stderr.trim() || result.stdout.trim() || `exit code ${result.exitCode}`;
+
+/**
+ * The person's own note on the MR that starts with `input.marker`, edited in place (PUT); else a new note. Found on
+ * the forge every time: the newest non-system note of the signed-in account that starts with the marker. One gone by
+ * the time it is edited (404) is posted again as new.
+ */
+export async function upsertGlMarkedNote(runtime: PRRuntime, ref: GlMRRef, input: PRMarkedCommentInput): Promise<PRMarkedResult> {
+  if (!runtime.runCommandWithInput) throw new Error("Runtime does not support stdin input; cannot post a note");
+  const run = runtime.runCommandWithInput.bind(runtime);
+  const text = markedCommentText(input, GL_NOTE_MAX);
+  const notes = `projects/${encodeProject(ref.projectPath)}/merge_requests/${ref.iid}/notes`;
+  const json = ["-H", "Content-Type:application/json"];
+  const listed = await runtime.runCommand("glab", apiArgs(ref.host, `${notes}?per_page=100&sort=asc`, ["--paginate"]));
+  if (listed.exitCode !== 0) throw new Error(`Couldn't read the merge request's notes: ${glFailure(listed)}`);
+  const marked = parsePaginatedArray<GlNote>(listed.stdout).filter((note) => !note.system && startsWithMarker(note.body, input.marker));
+  const me = marked.length > 0 ? await getGlUser(runtime, ref.host) : null;
+  const existing = marked.filter((note) => me !== null && note.author?.username?.toLowerCase() === me.toLowerCase()).at(-1);
+  if (existing) {
+    const edited = await run("glab", apiArgs(ref.host, `${notes}/${existing.id}`, ["--method", "PUT", "--input", "-", ...json]), JSON.stringify({ body: text }));
+    if (edited.exitCode === 0) return { action: "updated", url: `${glMrUrl(ref)}#note_${existing.id}` };
+    if (!isNotFoundCommandFailure(edited.stderr)) throw new Error(`Couldn't update the note: ${glFailure(edited)}`);
+  }
+  const posted = await run("glab", apiArgs(ref.host, notes, ["--method", "POST", "--input", "-", ...json]), JSON.stringify({ body: text }));
+  if (posted.exitCode !== 0) throw new Error(`Couldn't post the note: ${glFailure(posted)}`);
+  let id: unknown;
+  try {
+    id = JSON.parse(posted.stdout)?.id;
+  } catch {
+    // The note went; its link is the MR's.
+  }
+  return { action: "created", url: typeof id === "number" ? `${glMrUrl(ref)}#note_${id}` : glMrUrl(ref) };
+}
+
+/**
+ * The MR description's section between the markers, put in place (or at the end), the rest kept byte for byte. GitLab
+ * takes no precondition on this write either: read, splice, read again just before the write, refuse
+ * (PRMarkedRaceError) when another edit landed in between.
+ */
+export async function upsertGlDescriptionSection(runtime: PRRuntime, ref: GlMRRef, input: PRMarkedSectionInput): Promise<PRMarkedResult> {
+  if (!runtime.runCommandWithInput) throw new Error("Runtime does not support stdin input; cannot edit a description");
+  const path = `projects/${encodeProject(ref.projectPath)}/merge_requests/${ref.iid}`;
+  const read = async (): Promise<{ body: string; url: string }> => {
+    const result = await runtime.runCommand("glab", apiArgs(ref.host, path));
+    if (result.exitCode !== 0) throw new Error(`Couldn't read the merge request: ${glFailure(result)}`);
+    const parsed = JSON.parse(result.stdout) as { description?: string | null; web_url?: string };
+    return { body: parsed.description ?? "", url: parsed.web_url ?? glMrUrl(ref) };
+  };
+  const first = await read();
+  const planned = spliceMarkedSection(first.body, input, GL_DESCRIPTION_MAX);
+  if ((await read()).body !== first.body) throw new PRMarkedRaceError();
+  const written = await runtime.runCommandWithInput("glab", apiArgs(ref.host, path, ["--method", "PUT", "--input", "-", "-H", "Content-Type:application/json"]), JSON.stringify({ description: planned.text }));
+  if (written.exitCode !== 0) {
+    if (isAccessRefusal(written.stderr, written.stdout)) throw new PRMarkedForbiddenError(glFailure(written));
+    throw new Error(`Couldn't edit the description: ${glFailure(written)}`);
+  }
+  return { action: planned.replaced ? "updated" : "created", url: first.url };
 }

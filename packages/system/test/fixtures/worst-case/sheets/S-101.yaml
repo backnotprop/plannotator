@@ -1,0 +1,17 @@
+sheet: S-101
+scope: core
+kind: service
+title: Dispatch and billing core
+question: What each service is, card by card.
+bands:
+  - id: services
+    show: card
+    row: [ gateway, dispatch, recon, ledger, notify, auth ]
+  - id: under
+    label: Under all six
+    show: bar
+    row: [ pg 6, s3 3, redis 3 ]
+show: []
+notes:
+  a: { on: gateway, text: "The gateway runs in five regions." }
+  b: { on: notify, text: "Notify and Auth have no card yet." }

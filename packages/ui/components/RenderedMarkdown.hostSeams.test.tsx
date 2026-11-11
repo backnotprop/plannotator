@@ -107,6 +107,28 @@ describe.if(hasDom)('RenderedMarkdown host seams (DOM)', () => {
     expect(inert?.getAttribute('title')).toBe('From the outer host');
   });
 
+  test('an unavailable link\'s `after` (deprecated) is still drawn right after the inert link, with its tooltip', async () => {
+    const el = await render(
+      <LocalLinkContext.Provider value={() => ({ kind: 'unavailable', title: 'Not here', after: <button data-after-control="">Open</button> })}>
+        <RenderedMarkdown markdown={DOC} />
+      </LocalLinkContext.Provider>,
+    );
+    const inert = Array.from(el.querySelectorAll('[data-local-link="unavailable"]')).find((n) => n.textContent === 'local doc')!;
+    expect(inert.getAttribute('title')).toBe('Not here');
+    expect(inert.nextElementSibling?.hasAttribute('data-after-control')).toBe(true);
+  });
+
+  test('`wrap` draws the inert link\'s text through the host, with no default tooltip', async () => {
+    const el = await render(
+      <LocalLinkContext.Provider value={() => ({ kind: 'unavailable', title: 'Not here', wrap: (text) => <span data-host-wrap="">{text}</span> })}>
+        <RenderedMarkdown markdown={DOC} />
+      </LocalLinkContext.Provider>,
+    );
+    const inert = Array.from(el.querySelectorAll('[data-local-link="unavailable"]')).find((n) => n.textContent === 'local doc')!;
+    expect(inert.parentElement?.hasAttribute('data-host-wrap')).toBe(true);
+    expect(inert.hasAttribute('title')).toBe(false);
+  });
+
   // A README-style themed image (#2328): with a resolver, `responsiveImages`
   // keeps the dark-mode `<source>`, its candidate resolved like the `<img>`.
   // Without it the resolver host gets today's behavior (sources dropped), and
@@ -136,6 +158,29 @@ describe.if(hasDom)('RenderedMarkdown host seams (DOM)', () => {
     const refused = await render(<RenderedMarkdown markdown={themed} resolveImage={refuseDark} responsiveImages />);
     expect(refused.querySelector('picture source')).toBeNull();
     expect(refused.innerHTML).not.toContain('dark');
+  });
+
+  // A host that serves a smaller copy of a big picture (the Inbox's `?w=`) names the original's width: the picture
+  // lays out as the original would, and decodes off the main thread only when it nears the view.
+  test("a resolved image with the original's width draws at that width, lazily and decoded async", async () => {
+    const doc = ['![shot](img/a.png)', '', '<p><img src="img/b.png" alt="raw"> <img src="img/c.png" width="300" alt="sized"></p>'].join('\n');
+    const resolveImage = (src: string) => ({ kind: 'src' as const, src: `/copy/${src}?w=1600`, width: 3840 });
+    const host = await render(<RenderedMarkdown markdown={doc} resolveImage={resolveImage} />);
+    const shot = host.querySelector<HTMLImageElement>('img[data-image-src="img/a.png"]')!;
+    expect(shot.getAttribute('src')).toBe('/copy/img/a.png?w=1600');
+    expect(shot.getAttribute('width')).toBe('3840');
+    expect(shot.getAttribute('loading')).toBe('lazy');
+    expect(shot.getAttribute('decoding')).toBe('async');
+    expect(host.querySelector('img[alt="raw"]')?.getAttribute('width')).toBe('3840');
+    // Raw HTML that sized its picture keeps its own size.
+    expect(host.querySelector('img[alt="sized"]')?.getAttribute('width')).toBe('300');
+    // A resolution without a width leaves the picture at its own size, as before.
+    const plain = await render(<RenderedMarkdown markdown="![shot](img/a.png)" resolveImage={(src) => ({ kind: 'src', src: `/copy/${src}` })} />);
+    expect(plain.querySelector('img')?.hasAttribute('width')).toBe(false);
+    // ...and decodes as the browser chooses, as before: async decoding is part of the smaller copy's opt-in only.
+    expect(plain.querySelector('img')?.hasAttribute('decoding')).toBe(false);
+    const none = await render(<RenderedMarkdown markdown="![shot](img/a.png)" />);
+    expect(none.querySelector('img')?.hasAttribute('decoding')).toBe(false);
   });
 
   // A `data:` candidate's comma is part of its URL. Split there, the tail

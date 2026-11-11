@@ -42,17 +42,12 @@ export function DraftsPage({
       <div className="ib-dh">
         <SidebarTrigger />
         <h1 tabIndex={-1}>Drafts</h1>
-        {list.length + replies.length > 0 && <span className="ib-drafts-n">{list.length + replies.length} not sent</span>}
         {phone && (
           <button type="button" className="ib-lhead-compose" aria-label="New message" aria-haspopup="dialog" onClick={(event) => onCompose(event.currentTarget)}>
             <Icon name="compose" size={20} />
           </button>
         )}
       </div>
-      <p className="ib-dsub">
-        {replies.length > 0 ? 'Replies and messages you started but did not send. ' : 'Messages you started but did not send. '}
-        A draft never sends itself: open one{replies.length > 0 ? '' : ', pick a live agent,'} and send it.
-      </p>
       {error && <div className="ib-error">{error}</div>}
       {replies.length > 0 && onOpenReply && (
         <>
@@ -106,7 +101,7 @@ export function DraftsPage({
           return (
             <div className="ib-draft" role="listitem" key={draft.id} data-draft-id={draft.id} data-draft-status={draft.status}>
               <button type="button" className="ib-draft-open" onClick={(event) => onOpen(draft, event.currentTarget)} aria-label={`Open draft: ${subject}. ${draftChip(draft)}. Saved ${whenTime(draft.updated_at)}`}>
-                <span className="ib-draft-mk">{draft.to ? <HostMark host={draft.to.host} big /> : <Icon name="doc" size={17} />}</span>
+                <span className="ib-draft-mk">{draft.to ? <HostMark host={draft.to.host} big agent={draft.to.session} /> : <Icon name="doc" size={17} />}</span>
                 <span className="ib-draft-t">
                   <span className="ib-draft-to" dir="auto">
                     {draft.to ? (

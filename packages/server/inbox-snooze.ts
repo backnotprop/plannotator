@@ -23,6 +23,8 @@ import { inboxSnoozeDelay, type InboxSnooze } from "@plannotator/core/inbox-snoo
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 
+/** On the window route: the write came through a linked machine's door, so it may have waited (`InboxStore.setHeldSnooze`). */
+export const INBOX_SNOOZE_HELD = "held";
 export const INBOX_SNOOZE_PATH = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/snooze$/;
 
 export function createInboxSnoozes(options: {
@@ -49,6 +51,7 @@ export function createInboxSnoozes(options: {
       store.clearSnooze(match[1]!);
       return json({ snoozed: null });
     }
+    if (url.searchParams.has(INBOX_SNOOZE_HELD)) return json({ snoozed: wire(store.setHeldSnooze(match[1]!, body.until, body.at)) });
     return json({ snoozed: wire(store.setSnooze(match[1]!, body.until, body.at)) });
   };
 

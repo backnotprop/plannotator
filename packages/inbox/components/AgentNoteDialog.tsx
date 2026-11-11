@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useId, useRef, useState } from 'react';
-import type { InboxAgentRow, InboxAgentsModel, InboxConnectReport, InboxNoteAgentId } from '@plannotator/core/inbox-types';
+import type { InboxAgentRow, InboxAgentsModel, InboxNoteAgentId } from '@plannotator/core/inbox-types';
 import { INBOX_AGENT_LABELS } from '@plannotator/core/inbox-types';
 import { inboxApi, type InboxNoteResult } from '../api';
-import { bandLines, CURSOR_RULES_PLACE, defaultPicks, joinNames, noteCopiedByHand, notePrimaryAction, noteResultLabel, noteWithoutMarkers, sentence, splitPath, tidyReason, whoLabel } from '../agents';
+import { CURSOR_RULES_PLACE, defaultPicks, joinNames, noteCopiedByHand, notePrimaryAction, noteResultLabel, noteWithoutMarkers, sentence, splitPath, tidyReason, whoLabel } from '../agents';
 import { HostMark, Icon } from '../icons';
 import { Modal } from './Updates';
 import { isTextCut, Tip } from './Tip';
@@ -10,13 +10,9 @@ import { isTextCut, Tip } from './Tip';
 export interface AgentNoteDialogProps {
   /** The agents asked about (fixed when the dialog opens): the candidates not asked yet. */
   rows: InboxAgentRow[];
-  /** The last run's unseen news, shown as the quiet band at the top (option A); null for none. */
-  report: InboxConnectReport | null;
   /** The exact block a note writes (Show the note). */
   noteText: string;
   onModel: (next: InboxAgentsModel) => void;
-  /** Settings → Agents. */
-  onSettings: () => void;
   onClosed: () => void;
 }
 
@@ -24,15 +20,18 @@ type RowStatus = { kind: 'busy' } | { kind: 'done'; result: InboxNoteResult };
 
 /**
  * The note in each agent's instructions, asked once per agent in a one-time
- * dialog (the approved "inbox-agent-note-dialog" design, Checklist, with the
- * "Connected …" band at the top). One row per agent, all ticked; with one
+ * dialog (the approved "inbox-agent-note-dialog" design, Checklist). Since
+ * "inbox-agent-note-auto" the Inbox writes the note by itself for the agents
+ * proven to load it, so this asks only about the others (Qwen Code, Cursor's
+ * copy by hand); its "Connected …" band moved to the line above the list
+ * (ConnectLine). One row per agent, all ticked; with one
  * agent no checkbox. The primary names who it adds to ("Don't add a note"
  * with nothing ticked: never disabled, never an error). Results show in the
  * same rows. Not now, Escape and the backdrop answer for these agents only;
  * nothing is written without the person's yes. On the sound dialog's shell,
  * no entrance motion.
  */
-export function AgentNoteDialog({ rows, report, noteText, onModel, onSettings, onClosed }: AgentNoteDialogProps) {
+export function AgentNoteDialog({ rows, noteText, onModel, onClosed }: AgentNoteDialogProps) {
   const id = useId();
   const doneRef = useRef<HTMLButtonElement>(null);
   const [picks, setPicks] = useState<Record<string, boolean>>(() => defaultPicks(rows));
@@ -63,7 +62,6 @@ export function AgentNoteDialog({ rows, report, noteText, onModel, onSettings, o
   const picked = rows.filter((row) => picks[row.id]);
   const pickedWritten = picked.filter((row) => !noteCopiedByHand(row));
   const primary = notePrimaryAction(picked);
-  const band = report ? bandLines(report) : null;
   const busy = phase === 'busy';
 
   const close = () => {
@@ -76,7 +74,7 @@ export function AgentNoteDialog({ rows, report, noteText, onModel, onSettings, o
     if (busy) return;
     close();
     inboxApi
-      .answerNotes([], asked, report !== null)
+      .answerNotes([], asked, false)
       .then(onModel)
       .catch(() => {});
   };
@@ -108,7 +106,7 @@ export function AgentNoteDialog({ rows, report, noteText, onModel, onSettings, o
     setPhase('busy');
     let results: InboxNoteResult[];
     try {
-      const next = await inboxApi.answerNotes(agents, asked, report !== null);
+      const next = await inboxApi.answerNotes(agents, asked, false);
       results = next.results;
       onModel(next);
     } catch (err) {
@@ -170,62 +168,6 @@ export function AgentNoteDialog({ rows, report, noteText, onModel, onSettings, o
       fallbackFocus={pageHeading}
       className="ib-anote"
     >
-      {/* The band is this run's news before the answer; the results view drops it, as in the approved mock. */}
-      {!done && band && (band.connected || band.trusted || band.byHand || band.failed.length > 0 || band.trustFailed.length > 0 || band.foreign.length > 0 || band.elsewhere.length > 0) && (
-        <div className="ib-anote-band" role="status" data-anote-band="">
-          {band.connected && (
-            <p className="ib-anote-ok">
-              <Icon name="checkCircle" />
-              <span dir="auto">{band.connected}</span>
-            </p>
-          )}
-          {band.trusted && (
-            <p className="ib-anote-ok" data-anote-trusted="">
-              <Icon name="checkCircle" />
-              <span dir="auto">{band.trusted}</span>
-            </p>
-          )}
-          {[...band.failed, ...band.trustFailed.map((line) => ({ ...line, agent: `t-${line.agent}` }))].map((line) => (
-            <p className="ib-anote-warn" key={`f-${line.agent}`}>
-              <Icon name="warn" />
-              <span>
-                {line.text}{' '}
-                <button type="button" className="ib-lnk" onClick={() => toSettings()}>
-                  Settings → Agents
-                </button>
-              </span>
-            </p>
-          ))}
-          {band.byHand && (
-            <p className="ib-anote-quiet">
-              <Icon name="info" />
-              <span>
-                {band.byHand}{' '}
-                <button type="button" className="ib-lnk" onClick={() => toSettings()}>
-                  Settings → Agents
-                </button>
-              </span>
-            </p>
-          )}
-          {band.elsewhere.map((line) => (
-            <p className="ib-anote-quiet" key={`m-${line.agent}`} data-anote-elsewhere="">
-              <Icon name="info" />
-              <span>
-                {line.text}{' '}
-                <button type="button" className="ib-lnk" onClick={() => toSettings()}>
-                  Settings → Agents
-                </button>
-              </span>
-            </p>
-          ))}
-          {band.foreign.map((line) => (
-            <p className="ib-anote-quiet" key={`x-${line.agent}`}>
-              <Icon name="info" />
-              <span>{line.text}</span>
-            </p>
-          ))}
-        </div>
-      )}
       <div className="ib-anote-head">
         <h2 id={`${id}-title`} tabIndex={-1} dir="auto">
           {title}
@@ -359,17 +301,10 @@ export function AgentNoteDialog({ rows, report, noteText, onModel, onSettings, o
       </div>
     </Modal>
   );
-
-  /** The band's link: Settings → Agents, where a note can still be added. The dialog closes as Not now (nothing written). */
-  function toSettings() {
-    if (done) close();
-    else decline();
-    onSettings();
-  }
 }
 
 function Pill({ row }: { row: InboxAgentRow }) {
-  return <span className="ib-anote-pill">{noteCopiedByHand(row) ? 'Copy by hand' : row.note?.create ? 'New file' : 'Adds to end'}</span>;
+  return <span className="ib-anote-pill">{noteCopiedByHand(row) ? 'Copy yourself' : row.note?.create ? 'New file' : 'Adds to end'}</span>;
 }
 
 function RowMain({ row, failure, onRetry }: { row: InboxAgentRow; failure?: string | null; onRetry?: () => void }) {

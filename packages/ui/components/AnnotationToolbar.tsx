@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef, useMemo, useSyncExternalStore } from "react";
 import { AnnotationType } from "../types";
 import { createPortal } from "react-dom";
 import { useDismissOnOutsideAndEscape } from "../hooks/useDismissOnOutsideAndEscape";
@@ -8,8 +8,46 @@ import { copyRichSelection, richCopyOutcomeLabel, type RichCopyOutcome, type Ric
 import { acquireTypeToCommentCapture } from "../shortcuts/plan-review/annotationMode.shortcuts";
 import { FloatingQuickLabelPicker } from "./FloatingQuickLabelPicker";
 import { FloatingSelectionActionsPicker } from "./SelectionActionsDropdown";
-import { buildSelectionActionContext, type SelectionAction } from "../utils/selectionActions";
+import { buildSelectionActionContext, type SelectionAction, type SelectionActionContext } from "../utils/selectionActions";
 import { HostTitle } from './HostTitle';
+import { TOUCH_PRIMARY_QUERY } from "../utils/touchSelection";
+import {
+  getTouchSelectionToolbar,
+  placeTouchToolbar,
+  readSafeAreaInsets,
+  readVisibleViewport,
+  TOUCH_TOOLBAR_SIZE_ESTIMATE,
+  type ToolbarRect,
+  type TouchToolbarPlacement,
+} from "../utils/touchToolbarPlacement";
+
+function subscribeTouchPrimary(onChange: () => void): () => void {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return () => {};
+  const mql = window.matchMedia(TOUCH_PRIMARY_QUERY);
+  mql.addEventListener('change', onChange);
+  return () => mql.removeEventListener('change', onChange);
+}
+
+function isTouchPrimary(): boolean {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(TOUCH_PRIMARY_QUERY).matches;
+}
+
+/**
+ * Touch placement is on when the host opted in (`touchSelectionToolbar`) and
+ * the main pointer is a finger. The media query is not subscribed at all for
+ * a host that did not opt in.
+ */
+function useTouchToolbar(): boolean {
+  const optedIn = getTouchSelectionToolbar();
+  const touch = useSyncExternalStore(
+    optedIn ? subscribeTouchPrimary : noopSubscribe,
+    optedIn ? isTouchPrimary : alwaysFalse,
+    alwaysFalse,
+  );
+  return optedIn && touch;
+}
+const noopSubscribe = () => () => {};
+const alwaysFalse = () => false;
 
 type PositionMode = 'center-above' | 'top-right';
 
@@ -44,6 +82,12 @@ interface AnnotationToolbarProps {
    *  keep the full toolbar. */
   commentOnly?: boolean;
   /**
+   * Opt-in: offer Delete on a `commentOnly` toolbar too (the Inbox's agent
+   * messages), in its usual place before Comment. The label picker and the
+   * Alt+digit label shortcuts stay off. Absent → Delete follows commentOnly.
+   */
+  showDelete?: boolean;
+  /**
    * Opt-in host capability: the host's own commands for this selection,
    * rendered as ONE wand button (`data-selection-actions`) that opens the
    * package's dropdown below it. Selecting an item calls `onSelect` with the
@@ -59,6 +103,25 @@ interface AnnotationToolbarProps {
    */
   selectionActionsIcon?: React.ReactNode;
   /**
+   * Opt-in host capability: a "Side" button (two speech bubbles and the word
+   * "Side") after the reactions, between a divider and the one before ×.
+   * Pressing it hands the host the selected text, the same text Copy reads,
+   * with the selection's context (the same one `selectionActions` get: block
+   * and offsets, so the host can say where the words came from), and closes
+   * the toolbar; the host opens its side conversation with it.
+   * Absent → no button and no divider: today's toolbar. No shortcut.
+   */
+  onSide?: (text: string, context: SelectionActionContext) => void;
+  /**
+   * Opt-in host capability: how the `onSide` button is drawn. With it the
+   * button is icon-only, an ordinary toolbar button the size of its
+   * neighbours, in the same place between the same dividers: `icon` is its
+   * glyph (absent → the package's two speech bubbles) and `label` its tooltip
+   * and accessible name. Absent → the two bubbles and the word "Side", as
+   * before. Ignored without `onSide`. Nothing about the press changes.
+   */
+  sideButton?: { icon?: React.ReactNode; label: string };
+  /**
    * Whether the package's own quick labels are offered (default true).
    * `false` hides the Zap picker button and the Alt+digit label shortcuts on
    * this toolbar. The one-click 👍 is a separate affordance and is unaffected.
@@ -66,6 +129,14 @@ interface AnnotationToolbarProps {
   quickLabels?: boolean;
   /** Hide the plain copy button (set when a keyboard copy handler exists) */
   hideCopyButton?: boolean;
+  /**
+   * The whole selection's rect, in viewport coordinates, when `element` is
+   * only its start (the first of several marks; a 1px anchor over an HTML
+   * frame). Read only by the touch placement (`touchSelectionToolbar`), which
+   * puts the toolbar below the selection's bottom; desktop placement uses
+   * `element` as before. Absent or null: `element`'s rect.
+   */
+  touchAnchorRect?: () => ToolbarRect | null;
   /** Close toolbar when element scrolls out of viewport */
   closeOnScrollOut?: boolean;
   /** Exit animation state */
@@ -84,17 +155,22 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   onQuickLabel,
   selectionActions,
   selectionActionsIcon,
+  onSide,
+  sideButton,
   quickLabels: quickLabelsEnabled = true,
   copyText,
   getRichCopy,
   commentOnly = false,
+  showDelete,
   hideCopyButton = false,
+  touchAnchorRect,
   closeOnScrollOut = false,
   isExiting = false,
   onMouseEnter,
   onMouseLeave,
 }) => {
-  const [position, setPosition] = useState<{ top: number; left?: number; right?: number } | null>(null);
+  const [position, setPosition] = useState<{ top: number; left?: number; right?: number; touch?: TouchToolbarPlacement; maxWidth?: number } | null>(null);
+  const touchToolbar = useTouchToolbar();
   const [copied, setCopied] = useState(false);
   const [richCopied, setRichCopied] = useState<RichCopyOutcome | false>(false);
   const richCopyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -162,19 +238,51 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     }
   };
 
+  const updatePositionRef = useRef<() => void>(() => {});
+  const touchAnchorRectRef = useRef(touchAnchorRect);
+  touchAnchorRectRef.current = touchAnchorRect;
+  const measuredSizeRef = useRef<{ width: number; height: number } | null>(null);
+  // Touch placement only: the selection is scrolled out of sight and the
+  // toolbar hidden, so its keys act on nothing until it is back.
+  const hiddenRef = useRef(false);
+
   // Update position on scroll/resize
   useEffect(() => {
     const updatePosition = () => {
       const rect = element.getBoundingClientRect();
+      // Touch screens (host opt-in) place and close by the WHOLE selection,
+      // not its first piece; elsewhere `element` alone, as before.
+      const whole = touchAnchorRectRef.current?.() ?? rect;
+      const anchor = touchToolbar ? whole : rect;
 
-      if (closeOnScrollOut && (rect.bottom < 0 || rect.top > window.innerHeight)) {
+      // Close when the WHOLE selection is out of sight, not its first piece: a
+      // long drag that scrolled the page leaves its first words above the
+      // window, and closing on them removed the highlight as it was made.
+      if (closeOnScrollOut && (whole.bottom < 0 || whole.top > window.innerHeight)) {
         onClose();
         return;
       }
 
+      if (touchToolbar) {
+        // Below the selection, where iOS's own edit menu does not go, and
+        // kept inside the visible screen.
+        const placed = placeTouchToolbar({
+          anchor,
+          toolbar: measuredSizeRef.current ?? TOUCH_TOOLBAR_SIZE_ESTIMATE,
+          viewport: readVisibleViewport(),
+          insets: readSafeAreaInsets(),
+          mode: positionMode,
+        });
+        hiddenRef.current = placed.placement === 'hidden';
+        setPosition({ top: placed.top, left: placed.left, touch: placed.placement, maxWidth: placed.maxWidth });
+        return;
+      }
+
+      hiddenRef.current = false;
       if (positionMode === 'center-above') {
+        // On screen while the selection is: its first piece may be above the window.
         setPosition({
-          top: rect.top - 48,
+          top: Math.max(rect.top - 48, 8),
           left: rect.left + rect.width / 2,
         });
       } else {
@@ -185,20 +293,58 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       }
     };
 
+    updatePositionRef.current = updatePosition;
+    measuredSizeRef.current = null;
     updatePosition();
     window.addEventListener("scroll", updatePosition, true);
     window.addEventListener("resize", updatePosition);
+    // The visible viewport moves on its own on a phone (pinch zoom, the
+    // keyboard); only the touch placement reads it.
+    const vv = touchToolbar ? window.visualViewport : null;
+    vv?.addEventListener("resize", updatePosition);
+    vv?.addEventListener("scroll", updatePosition);
 
     return () => {
       window.removeEventListener("scroll", updatePosition, true);
       window.removeEventListener("resize", updatePosition);
+      vv?.removeEventListener("resize", updatePosition);
+      vv?.removeEventListener("scroll", updatePosition);
     };
-  }, [element, positionMode, closeOnScrollOut, onClose]);
+  }, [element, positionMode, closeOnScrollOut, onClose, touchToolbar]);
+
+  // Touch placement needs the toolbar's real size to keep it inside the
+  // screen. Its width does not depend on where it sits (width: max-content in
+  // theme.css), so one measurement after the first render, before paint, is
+  // enough; a ResizeObserver catches later changes (Copy turning into
+  // Copied!). Scrolling re-places from the stored size, never re-measuring.
+  const hasPosition = position !== null;
+  useLayoutEffect(() => {
+    if (!touchToolbar || measuredSizeRef.current) return;
+    const el = toolbarRef.current;
+    if (!el || el.offsetWidth === 0) return;
+    measuredSizeRef.current = { width: el.offsetWidth, height: el.offsetHeight };
+    updatePositionRef.current();
+  });
+  useEffect(() => {
+    const el = toolbarRef.current;
+    if (!touchToolbar || !hasPosition || !el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      const last = measuredSizeRef.current;
+      const width = el.offsetWidth;
+      const height = el.offsetHeight;
+      if (width === 0 || (last && last.width === width && last.height === height)) return;
+      measuredSizeRef.current = { width, height };
+      updatePositionRef.current();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [touchToolbar, hasPosition]);
 
   // Type-to-comment + Alt+N / bare digit quick label shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.isComposing) return;
+      if (hiddenRef.current) return;
       if (isEditableElement(e.target) || isEditableElement(document.activeElement)) return;
 
       // When a picker is open, let it own all keyboard input
@@ -258,13 +404,20 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     }
   };
 
-  const isCentered = position.left !== undefined;
+  const isCentered = position.left !== undefined && !position.touch;
   const translateX = isCentered ? ' translateX(-50%)' : '';
 
   const style: React.CSSProperties & { '--pn-annotation-toolbar-anchor-x'?: string } = {
     top: position.top,
     '--pn-annotation-toolbar-anchor-x': isCentered ? `${position.left}px` : undefined,
-    ...(isCentered
+    ...(position.touch
+      ? {
+          left: position.left,
+          maxWidth: position.maxWidth,
+          // Its selection is scrolled out of sight: hidden until it is back.
+          ...(position.touch === 'hidden' ? { visibility: 'hidden' as const } : {}),
+        }
+      : isCentered
       ? { left: position.left, transform: 'translateX(-50%)' }
       : { right: position.right }),
     animation: isExiting
@@ -276,6 +429,9 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     <div
       ref={toolbarRef}
       data-pn-annotation-toolbar-centered={isCentered ? 'true' : undefined}
+      // Touch placement (host opt-in, finger pointer): which side of the
+      // selection it took. theme.css sizes the buttons for a thumb here.
+      data-pn-annotation-toolbar-touch={position.touch}
       className="annotation-toolbar fixed z-[100] bg-popover border border-border rounded-lg shadow-2xl"
       style={style}
       onMouseDown={(e) => e.stopPropagation()}
@@ -318,7 +474,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
             <div className="w-px h-5 bg-border mx-0.5" />
           </>
         )}
-        {!commentOnly && (
+        {(showDelete ?? !commentOnly) && (
           <ToolbarButton
             onClick={() => handleTypeSelect(AnnotationType.DELETION)}
             icon={<TrashIcon />}
@@ -389,6 +545,44 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
             )}
           </>
         )}
+        {onSide && (() => {
+          const pressSide = () => {
+            // Read at press time, as the selection actions read it.
+            const text = copyText ?? element.querySelector('code')?.textContent ?? element.textContent ?? '';
+            onSide(text, buildSelectionActionContext(element, text));
+            onClose();
+          };
+          return (
+            <>
+              <div className="w-px h-5 bg-border mx-0.5" />
+              {sideButton ? (
+                // The host's own drawing (`sideButton`): icon-only, as its neighbours are, named by its tooltip.
+                <ToolbarButton
+                  onClick={pressSide}
+                  icon={sideButton.icon ?? <MessagesSquareIcon />}
+                  label={sideButton.label}
+                  className="text-foreground hover:bg-muted"
+                  dataAttributes={{ 'data-annotation-side': '' }}
+                />
+              ) : (
+                // The word shows, so the name is the word: no tooltip. On a touch
+                // toolbar theme.css gives it the 44px height and the 20px glyph;
+                // its words are a bare text node, never a span (sized there as a
+                // glyph).
+                <button
+                  type="button"
+                  data-pn-touch-target="true"
+                  data-annotation-side=""
+                  onClick={pressSide}
+                  className="flex items-center gap-1.5 h-7 pl-2 pr-2.5 rounded-md text-foreground hover:bg-muted transition-colors text-[12.5px] font-medium whitespace-nowrap"
+                >
+                  <MessagesSquareIcon />
+                  Side
+                </button>
+              )}
+            </>
+          );
+        })()}
         <div className="w-px h-5 bg-border mx-0.5" />
         <ToolbarButton
           onClick={onClose}
@@ -403,6 +597,14 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
 };
 
 // Icons
+/** Lucide's messages-square (ISC): the Side button's two bubbles. */
+const MessagesSquareIcon = () => (
+  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M16 10a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 14.286V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+    <path d="M20 9a2 2 0 0 1 2 2v10.286a.71.71 0 0 1-1.212.502l-2.202-2.202A2 2 0 0 0 17.172 19H10a2 2 0 0 1-2-2v-1" />
+  </svg>
+);
+
 const CopyIcon = () => (
   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />

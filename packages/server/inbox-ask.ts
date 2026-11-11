@@ -1,14 +1,24 @@
 /**
- * Plannotator Inbox: Ask AI's routes. Off unless PLANNOTATOR_INBOX_ASK_AI is
- * set when the Inbox starts: off, every path here falls through to the
- * unknown-route 404, as if it did not exist.
+ * Plannotator Inbox: Ask AI's routes, on in every Inbox (approval
+ * "inbox-ask-ai-flow", addendum 2026-11-07: no switch).
+ *
+ * Show me (code review in the Inbox, approval "shape-in-code-review"): a POST
+ * with `kind: "show_me"` and `show_me: { review, file, lines, round, words? }`
+ * is a question that asks the agent for a Shape. Only while Code review is on
+ * (`409 code_review_off`) and Shape is on (`409 shape_off`, approval
+ * "code-review-029-shape-off"), about a review of this thread, and its `question`
+ * is exactly `inboxShowMeRequest`'s words. The board comes back the way any
+ * board does (`plannotator shape update --thread`); a read names it on the turn
+ * (`showMeShapes`), so nothing is kept twice. A dragged box's Show me sends its
+ * picture as `show_me.part.picture` (a data: URL): it is kept in the board's
+ * folder (`keepPicture`) and the stored request names the file.
  *
  *   GET  /api/inbox/ask                    `{ chats }`: every thread with a conversation, for the
  *                                          window's chat list
  *   GET  /api/inbox/threads/:id/ask        `{ subject, project, conversation, damaged?, running, can_ask, agent }`:
  *                                          null when none, the turn id being answered, whether the
  *                                          icons show, and who answers
- *   POST /api/inbox/threads/:id/ask        `{ turn_id, question, passage? }`: claim the owner's
+ *   POST /api/inbox/threads/:id/ask        `{ turn_id, question, passage?, source? }`: claim the owner's
  *                                          slot, save the question, wait for its client
  *   POST /api/inbox/threads/:id/ask/seen   `{ seen_at }`: the person saw the answers up to then
  *   POST /api/inbox/threads/:id/ask/stop   `{ turn_id }`: stop that turn, which needs no AI session,
@@ -37,7 +47,8 @@
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { inboxAgentName, type InboxThread } from "@plannotator/core/inbox-types";
 import { isAIEndpointPath } from "@plannotator/ai/endpoints";
-import { addInboxAskTurn, checkInboxAskInput, findInboxAskTurn, inboxAskFiles, inboxAskSummary, markInboxAskSeen, readInboxAsk, removeInboxAsk, updateInboxAskTurn, type InboxAskSummary } from "@plannotator/shared/inbox/ask";
+import { inboxReviewRound, inboxShowMeRequest, type InboxShowMePart, type InboxShowMeTarget } from "@plannotator/core/inbox-review";
+import { addInboxAskTurn, checkInboxAskInput, checkInboxShowMeInput, findInboxAskTurn, inboxAskFiles, inboxAskSummary, markInboxAskSeen, readInboxAsk, removeInboxAsk, showMeShapes, type ShowMeBoardVersion, updateInboxAskTurn, type InboxAskConversation, type InboxAskSummary } from "@plannotator/shared/inbox/ask";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxAskLive, type InboxAskClaim, type InboxAskContext, type InboxAskTimes } from "./inbox-ask-live";
@@ -63,9 +74,26 @@ function agentOf(thread: InboxThread, owner: { host: string | null; session: str
   return { host: (author as { host?: string | null }).host ?? owner?.host ?? null, name: inboxAgentName(author) };
 }
 
+/** A review message as Show me needs it: its thread, its title and the files of its diff. */
+export interface InboxAskReview {
+  threadId: string;
+  title: string;
+  files: readonly string[];
+}
+
 export function createInboxAsk(options: {
-  /** PLANNOTATOR_INBOX_ASK_AI, read once at start. */
-  on: boolean;
+  /** Code review (Settings → Capabilities): a review's Show me needs it, and the boards too. Absent: off. */
+  codeReviewOn?: () => boolean;
+  /**
+   * The boards are on (Shape's own switch, approval "code-review-029-shape-off"): every Show me needs them. Absent: off.
+   */
+  boardsOn?: () => boolean;
+  /** A review message (`guide.review`) by id, or null when the message is not one. Absent: none. */
+  reviewOf?: (messageId: string) => InboxAskReview | "not_a_review" | null;
+  /** A thread's Shape boards, and when each version was written, to name the board each Show me made. Absent: none. */
+  boardsOf?: (threadId: string) => { id: string; versions: ShowMeBoardVersion[] }[];
+  /** A Show me's box picture, kept in that board's folder: the file's full path, or null. Absent: no picture is kept. */
+  keepPicture?: (board: string, picture: string) => Promise<string | null>;
   store: InboxStore;
   serverSession: string;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
@@ -79,14 +107,21 @@ export function createInboxAsk(options: {
   hostOf: (session: string) => string | null;
   times?: InboxAskTimes;
 }) {
-  const { on, store, serverSession, json } = options;
+  const { store, serverSession, json } = options;
   const live = createInboxAskLive({ token: options.token, dir: store.dir, hostOf: options.hostOf, onChange: options.onChange, times: options.times });
   const stopDeletions = store.onDeletion(() => live.sweep((threadId) => store.thread(threadId) !== null));
 
+  /** A conversation as the window reads it: each Show me names the board it made (`showMeShapes`). */
+  const withShapes = <T extends InboxAskConversation | null>(conversation: T, threadId: string): T => {
+    if (!conversation?.turns.some((turn) => turn.kind === "show_me")) return conversation;
+    const shapes = showMeShapes(conversation.turns, options.boardsOf?.(threadId) ?? [], live.running(threadId));
+    return { ...conversation, turns: conversation.turns.map((turn) => (shapes.has(turn.id) ? { ...turn, shape: shapes.get(turn.id)! } : turn)) };
+  };
+
   const fromWindow = (req: Request): boolean => req.headers.get("sec-fetch-site")?.trim().toLowerCase() === "same-origin";
 
-  /** Whether this request may ask or read: the setting is on, and it is the owner's own window. */
-  const allowed = (req: Request, via: "local" | "tailnet"): boolean => on && fromWindow(req) && !options.isGuest(req, via);
+  /** Whether this request may ask or read: the owner's own window. */
+  const allowed = (req: Request, via: "local" | "tailnet"): boolean => fromWindow(req) && !options.isGuest(req, via);
 
   const refuse = (req: Request, via: "local" | "tailnet"): void => {
     if (options.isGuest(req, via)) throw new InboxError("owner_only", "Only this computer's owner can use Ask AI from this Inbox.");
@@ -125,7 +160,6 @@ export function createInboxAsk(options: {
   };
 
   const route = async (req: Request, url: URL, via: "local" | "tailnet"): Promise<Response | null> => {
-    if (!on) return null;
     if (url.pathname === INBOX_ASK_LIST_PATH) {
       refuse(req, via);
       return req.method === "GET" ? json({ chats: chats() }) : json({ error: "Use GET." }, 405);
@@ -152,7 +186,7 @@ export function createInboxAsk(options: {
         serverSession,
         subject: thread.subject,
         project: thread.project.name,
-        conversation,
+        conversation: withShapes(conversation, threadId),
         ...(damaged ? { damaged: true } : {}),
         running: live.running(threadId),
         can_ask: !!owner && live.canAnswer(owner.session),
@@ -189,6 +223,42 @@ export function createInboxAsk(options: {
     }
 
     const input = checkInboxAskInput(body);
+    // Show me: a question that asks the agent to draw, about a review of this thread. Only while Code review and Shape are on.
+    const showMe = checkInboxShowMeInput(body);
+    let showMeFields: { kind: "show_me"; show_me: InboxShowMeTarget; again_shape?: string } | null = null;
+    let boxPicture: string | null = null;
+    let requestOf: ((target: InboxShowMeTarget) => string) | null = null;
+    if (showMe) {
+      const asked = showMe.target;
+      // A review's Show me needs Code review; every Show me needs the boards (Shape's own switch). Both off: the
+      // refusal it always had. Code review on and Shape off (approval "code-review-029-shape-off"): Shape's.
+      const codeReview = options.codeReviewOn?.() ?? false;
+      const boards = options.boardsOn?.() ?? false;
+      if (asked.part ? !boards && !codeReview : !codeReview) return json({ error: "Code review is off in this Inbox (Settings → Capabilities).", code: "code_review_off" }, 409);
+      if (!boards) return json({ error: "Shape is off in this Inbox (Settings → Capabilities).", code: "shape_off" }, 409);
+      if (asked.part && !(options.boardsOf?.(threadId) ?? []).some((board) => board.id === asked.part!.board)) {
+        throw new InboxError("validation_error", `show_me.part: ${asked.part.board} is not a board of this thread.`, { field: "show_me" });
+      }
+      const review = asked.review === null ? null : (options.reviewOf?.(asked.review) ?? null);
+      if (asked.review !== null) {
+        if (review === null) return json({ error: `No review ${asked.review} here.`, code: "not_found" }, 404);
+        if (review === "not_a_review" || review.threadId !== threadId) return json({ error: `${asked.review} is not a review in this thread.`, code: "not_a_review" }, 409);
+        if (asked.file !== null && !review.files.includes(asked.file)) {
+          throw new InboxError("validation_error", `show_me.file: ${asked.file} is not a file of this review.`, { field: "show_me" });
+        }
+      }
+      if (showMe.againShape !== undefined && !(options.boardsOf?.(threadId) ?? []).some((board) => board.id === showMe.againShape)) {
+        throw new InboxError("validation_error", `again_shape: ${showMe.againShape} is not a board of this thread.`, { field: "again_shape" });
+      }
+      // The round is the Inbox's to say: the review's place among the thread's reviews.
+      // A box's picture is kept apart (below, with the turn): the window's request is written without it.
+      const { picture: _picture, ...part } = asked.part ?? {};
+      boxPicture = asked.part?.picture ?? null;
+      const target: InboxShowMeTarget = { ...asked, ...(asked.part ? { part: part as InboxShowMePart } : {}), round: asked.review === null ? 1 : inboxReviewRound(thread.messages, asked.review) };
+      requestOf = (shown) => inboxShowMeRequest({ target: shown, title: review && review !== "not_a_review" ? review.title : "", threadId, ...(showMe.againShape !== undefined ? { again: showMe.againShape } : {}) });
+      if (input.question !== requestOf(target)) throw new InboxError("validation_error", "question: a Show me's question is its request, as inboxShowMeRequest writes it.", { field: "question" });
+      showMeFields = { kind: "show_me", show_me: target, ...(showMe.againShape !== undefined ? { again_shape: showMe.againShape } : {}) };
+    }
     // Before the gates: a retry of a saved turn gets that turn, even if the thread was archived since.
     const known = findInboxAskTurn(store.dir, threadId, input.id);
     if (known && (known.turn.answer !== undefined || known.turn.stopped)) return json({ ...known, provider_id: null });
@@ -216,7 +286,16 @@ export function createInboxAsk(options: {
       if (moved) saved = updateInboxAskTurn(store.dir, threadId, input.id, { session: owner.session, host: owner.host }) ?? known;
       else if (known) saved = known;
       else {
-        const added = addInboxAskTurn(store.dir, threadId, { ...input, at: new Date().toISOString(), session: owner.session, host: owner.host });
+        // A box's Show me: its picture goes in the board's folder, and the request the agent reads names the file.
+        // A picture it cannot save leaves its line out: the Show me still goes.
+        const board = boxPicture ? showMeFields?.show_me.part?.board : undefined;
+        const kept = board && options.keepPicture ? await options.keepPicture(board, boxPicture!).catch(() => null) : null;
+        if (kept && showMeFields?.show_me.part && requestOf) {
+          const show_me: InboxShowMeTarget = { ...showMeFields.show_me, part: { ...showMeFields.show_me.part, picture: kept } };
+          showMeFields = { ...showMeFields, show_me };
+          input.question = requestOf(show_me);
+        }
+        const added = addInboxAskTurn(store.dir, threadId, { ...input, ...showMeFields, at: new Date().toISOString(), session: owner.session, host: owner.host });
         saved = { conversation: added.conversation, turn: added.turn };
         options.onChange(threadId);
       }
@@ -225,8 +304,9 @@ export function createInboxAsk(options: {
       throw error;
     }
     // The turn stays saved either way: with no connection the window offers to ask again, or to reply in the thread.
-    if (await live.connected(claim)) return json({ ...saved, provider_id: live.providerOf(claim) });
-    return json({ ...saved, provider_id: null, reason: "no_connection" });
+    const shown = { ...saved, conversation: withShapes(saved.conversation, threadId) };
+    if (await live.connected(claim)) return json({ ...shown, provider_id: live.providerOf(claim) });
+    return json({ ...shown, provider_id: null, reason: "no_connection" });
   };
 
   /** The JSON body of a request that goes on to an endpoint, or null. */
@@ -252,7 +332,7 @@ export function createInboxAsk(options: {
 
   /** Everything `/api/ai` does for Ask AI, behind the same gate: only the owner's own window. */
   const aiRoute = async (req: Request, path: string, via: "local" | "tailnet"): Promise<Response | null> => {
-    if (!on || !isAIEndpointPath(path) || path.startsWith("/api/ai/bridge/")) return null;
+    if (!isAIEndpointPath(path) || path.startsWith("/api/ai/bridge/")) return null;
     refuse(req, via);
     const endpoint = live.endpoints[path] as (request: Request) => Promise<Response> | Response;
     if (req.method !== "POST") return endpoint(req);

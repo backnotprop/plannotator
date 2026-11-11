@@ -12,8 +12,10 @@
  *   GET  /api/inbox/sessions                 every live session, grouped by project;
  *                                            `?session=<id>` adds `session: { session, live }`
  *                                            (with the asker grace) for a thread's delivery line
- *   POST /api/inbox/messages                 `{ to, body, idempotency_key, uploads?, draft_id?, thread_name?, thread_name_auto?, board_request? }`:
- *                                            a new thread (409 `session_not_live`, nothing written)
+ *   POST /api/inbox/messages                 `{ to, body, idempotency_key, uploads?, draft_id?, thread_name?, thread_name_auto?, thread_name_numbered?, review?, board_request?, decision_ask? }`:
+ *                                            a new thread (409 `session_not_live`, nothing written). With
+ *                                            `to.launch.trust` (Trust and start) only the owner's window: the
+ *                                            Send saves the folder's trust, so this form alone is never a plain write
  *   POST /api/inbox/messages/:id/to          `{ to }`: "Send to another session" for a message
  *                                            no session took yet (a live session of its project)
  *   GET  /api/inbox/drafts                   the drafts, each with its chip (`status`), and `replies`:
@@ -34,14 +36,17 @@
 import { homedir } from "node:os";
 import { basename } from "node:path";
 import { inboxHasUnsent, inboxRowArchived } from "@plannotator/shared/inbox/list";
+import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, INBOX_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import type { InboxReplyDraftRow } from "@plannotator/core/inbox-types";
-import type { InboxComposeProject, InboxComposeSession, InboxDraft, InboxDraftStatus, InboxProject } from "@plannotator/core/inbox-types";
+import type { InboxComposeProject, InboxComposeSession, InboxDraft, InboxDraftStatus, InboxLaunchFrom, InboxProject } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { deleteInboxDraft, inboxDraftUploadIds, listInboxDrafts, saveInboxDraft } from "@plannotator/shared/inbox/drafts";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import {
+  assertInboxUploadsPending,
   inboxUploadAttachments,
+  inboxUploadFromAttachment,
   INBOX_UPLOAD_MAX_BYTES,
   readInboxUploadText,
   receiveInboxUpload,
@@ -49,8 +54,8 @@ import {
   removeInboxUploads,
   sweepInboxUploads,
 } from "@plannotator/shared/inbox/uploads";
-import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest } from "./inbox-cross-site";
-import type { createInboxLiveSessions } from "./inbox-sessions";
+import type { InboxLaunch } from "./inbox-launch";
+import { replacesEndedAsker, takesOver, thereInThread, type createInboxLiveSessions } from "./inbox-sessions";
 
 /** How many characters of a reply draft the Drafts page shows. */
 const INBOX_REPLY_PREVIEW_MAX = 160;
@@ -60,6 +65,20 @@ export const INBOX_UPLOAD_SWEEP_MS = 60 * 60 * 1000;
 
 const iso = (ms: number) => new Date(ms).toISOString();
 
+/** A Send that would trust a folder: `to.launch` naming `trust` at all, whatever it holds. */
+function inboxPressesTrust(to: unknown): boolean {
+  const launch = to && typeof to === "object" && "launch" in to ? (to as { launch: unknown }).launch : null;
+  return !!launch && typeof launch === "object" && "trust" in launch;
+}
+
+/** A linked machine's request through the device door (inbox-devices.ts `InboxDoorCaller`), as compose needs it. */
+export interface InboxComposeDoor {
+  machine: boolean;
+  window: boolean;
+  /** The machine, as this Inbox knows it: the launch record's `from`. */
+  from: InboxLaunchFrom | null;
+}
+
 export function createInboxCompose(options: {
   store: InboxStore;
   serverSession: string;
@@ -68,11 +87,19 @@ export function createInboxCompose(options: {
   resolveProject: (path: string) => Promise<InboxProject>;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   json: (body: unknown, status?: number) => Response;
+  /** Launch (inbox-launch.ts): `to: { launch: { agent, project_id } }` starts the agent. Absent: that form is refused. */
+  launch?: Pick<InboxLaunch, "enabled" | "resumes" | "gone" | "target" | "prepare" | "acceptTrust" | "abandon" | "begin" | "composeBlock">;
+  /** A tailnet request from someone other than this computer's owner: never starts an agent (`to.launch`). Absent: nobody is. */
+  isGuest?: (req: Request, via: "local" | "tailnet") => boolean;
   now?: () => Date;
   /** Whether the person has the Board on: a Send's `board_request` is kept only then. Absent: off. */
   boardOn?: () => boolean;
+  /** A New review on local changes started this thread (`review` on a Send): its row shows from now on. */
+  onReviewStart?: (threadId: string, review: unknown, where: { host: string; project_id: string; at: string }) => void;
   /** This Inbox's stable id (linked machines): the sessions answer says whose sessions they are. */
   machine?: () => string;
+  /** A compose draft was saved, deleted or sent: every window's stream says `event: drafts`, so its Drafts count follows (#2593). */
+  onDraftsChange?: () => void;
 }) {
   const { store, serverSession, live, json } = options;
   const boardOn = options.boardOn ?? (() => false);
@@ -129,14 +156,15 @@ export function createInboxCompose(options: {
   const withStatus = (draft: InboxDraft) => ({ ...draft, status: draftStatus(draft) });
 
   /** A new thread the person writes, addressed to one live session (compose's Send). */
-  const startThread = async (body: Record<string, unknown>): Promise<Response> => {
+  const startThread = async (body: Record<string, unknown>, guest: boolean, from: InboxLaunchFrom | null = null): Promise<Response> => {
     const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
     // A replayed Send answers the thread it wrote, whatever the session's state now.
     const replay = store.personThreadByKey(key);
     if (replay) {
+      // A replayed launch answers its thread and never starts a second agent.
       const result = store.startPersonThread({ project_id: replay.project_id, body: body.body, to: replay.to ?? null, idempotency_key: key, thread_name: body.thread_name, thread_name_auto: body.thread_name_auto });
-      return json({ thread_id: result.message.thread_id, message: result.message, replayed: true });
+      return json({ thread_id: result.message.thread_id, message: result.message, replayed: true, ...launchAnswer(result.message) });
     }
     const uploads = body.uploads === undefined || body.uploads === null ? [] : body.uploads;
     if (!Array.isArray(uploads)) throw new InboxError("validation_error", "uploads: a list of upload ids.", { field: "uploads" });
@@ -144,18 +172,50 @@ export function createInboxCompose(options: {
     if (typeof body.body !== "string" || (body.body.trim() === "" && uploads.length === 0)) {
       throw new InboxError("validation_error", "body: write a message.", { field: "body" });
     }
-    const target = live.composeTarget(body.to);
+    // Launch: the folder and the agent are checked first; nothing is written when either fails.
+    const launchTarget = options.launch?.target(body.to) ?? null;
+    if (!launchTarget && body.to && typeof body.to === "object" && "launch" in body.to) {
+      // From a linked machine (remote launch), the words that machine's window shows: say whose switch it is.
+      throw new InboxError("launch_off", from ? "Starting agents is off on that computer. Turn it on in its Settings → Agents." : "Starting agents from the Inbox is off. Turn it on in Settings → Agents.");
+    }
+    // Starting an agent runs code on this computer: its owner's, never a login the tailnet allow list let in.
+    // Before `prepare`, so a guest's scratch Send makes no folder.
+    if (launchTarget && guest) throw new InboxError("owner_only", "Only this computer's owner can start an agent from this Inbox.");
+    // A scratch launch makes its folder here, named from the thread's name (`abandon` removes it if no thread is written).
+    const prepared = launchTarget
+      ? await options.launch!.prepare(launchTarget, { name: typeof body.thread_name === "string" ? body.thread_name : null, body: body.body, resolveProject: options.resolveProject, from })
+      : null;
+    const target = prepared ? { ...prepared.to, root: prepared.project.root } : live.composeTarget(body.to);
     if (!target) {
       throw new InboxError("session_not_live", "That session is not live any more: nothing was sent. Pick a live session, or save it as a draft.");
     }
     const root = placeOf(target.root, target.session, store.lastThreadsBySession());
     if (root === null) throw new InboxError("session_not_live", "That session has not said where it works yet; try again in a moment.");
-    const project = target.root !== null ? await options.resolveProject(root) : store.projectByRoot(root);
+    const project = prepared ? prepared.project : target.root !== null ? await options.resolveProject(root) : store.projectByRoot(root);
     if (!project) throw new InboxError("project_not_found", "That session's project is gone.");
     const at = now().toISOString();
-    const attachments = uploads.length > 0 ? inboxUploadAttachments(store.dir, uploads, at) : [];
+    let attachments: Awaited<ReturnType<typeof inboxUploadAttachments>> = [];
     let result: ReturnType<InboxStore["startPersonThread"]>;
     try {
+      attachments = uploads.length > 0 ? await inboxUploadAttachments(store.dir, uploads, at) : [];
+      // The same Send while this one copied is a replay, below; another Send of these files already has them.
+      if (uploads.length > 0 && !store.personThreadByKey(key)) assertInboxUploadsPending(store.dir, uploads, attachments);
+      // Trust and start: every check first, the trust next, and only then the thread. A name the thread would be
+      // refused must not leave the folder trusted, and `trust_failed` sends nothing.
+      if (prepared?.trust) {
+        const name = { project_id: project.id, thread_name: body.thread_name, thread_name_auto: body.thread_name_auto, thread_name_numbered: body.thread_name_numbered };
+        store.checkPersonThreadName(name);
+        // Again under the agent's lock, whose wait can run to 12 s: a name taken meanwhile saves nothing, and the write
+        // below refuses the thread as usual.
+        await options.launch!.acceptTrust(prepared.trust, () => {
+          try {
+            store.checkPersonThreadName(name);
+            return true;
+          } catch {
+            return false;
+          }
+        });
+      }
       result = store.startPersonThread({
         project_id: project.id,
         body: body.body,
@@ -164,38 +224,96 @@ export function createInboxCompose(options: {
         attachments,
         thread_name: body.thread_name,
         thread_name_auto: body.thread_name_auto,
+        thread_name_numbered: body.thread_name_numbered,
         // The Board chip (approval "inbox-compose-board-chip"): kept only while the Board is on, so an agent is
         // never asked for cards the Board would refuse (`board_off`).
         board_request: body.board_request === true && boardOn(),
+        // Settings -> Decision data's Ask: the agent also receives how to answer it (INBOX_DECISION_ASK_BLOCK).
+        decision_ask: body.decision_ask === true,
+        // Settings -> Rows' ask box: the agent also receives how to change the rows (INBOX_ROWS_ASK_BLOCK).
+        rows_ask: body.rows_ask === true,
+        ...(guest ? { by_guest: true } : {}),
+        ...(prepared ? { launch: prepared.launch } : {}),
       });
     } catch (error) {
       removeInboxAttachmentFiles(store.dir, attachments);
+      if (prepared) options.launch!.abandon(prepared.launch, prepared.project);
       throw error;
     }
     // Another Send with this key landed while this one waited on the project:
-    // its message stands, and the files written for this one are not used.
-    if (result.replayed) removeInboxAttachmentFiles(store.dir, attachments);
+    // its message stands, and the files (and a scratch folder) made for this one are not used.
+    if (result.replayed) {
+      removeInboxAttachmentFiles(store.dir, attachments);
+      if (prepared) options.launch!.abandon(prepared.launch, prepared.project);
+    }
+    // The thread is written: only now does the agent start (in the background; the answer comes at once).
+    else {
+      if (body.review && !guest) options.onReviewStart?.(result.message.thread_id, body.review, { host: target.host, project_id: project.id, at });
+      if (prepared) options.launch!.begin(result.message);
+    }
     // Sent: the uploads are attachments now, and the draft it came from is done.
     removeInboxUploads(store.dir, uploads.filter((id): id is string => typeof id === "string"));
-    if (body.draft_id !== undefined) deleteInboxDraft(store.dir, body.draft_id);
+    if (body.draft_id !== undefined && deleteInboxDraft(store.dir, body.draft_id)) options.onDraftsChange?.();
     return json({
       thread_id: result.message.thread_id,
       message: result.message,
       project: { id: project.id, name: project.name, root: project.root },
       replayed: result.replayed,
+      ...launchAnswer(result.message),
     });
   };
+
+  /** A launched thread's Send answer: `launch: { id, state }` (the run line says the rest). */
+  const launchAnswer = (message: { launch?: { id: string; error?: unknown } }) =>
+    message.launch ? { launch: { id: message.launch.id, state: message.launch.error ? "failed" : "starting" } } : {};
 
   /** "Send to another session": a message no session took yet, to a live session of its thread's project. */
   const readdress = (messageId: string, body: Record<string, unknown>): Response => {
     const message = store.message(messageId);
     if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
     const target = live.replyTarget(message.thread_id, body.to);
-    const next = store.readdressMessage(messageId, target);
+    // A move needs the session it waits on to have ended; `takesOver` says if it takes the thread too.
+    const asked = message.reply_to ? store.message(message.reply_to) : null;
+    const askedWakes = asked?.author.kind === "agent" && asked.wakes === true ? asked.author.session : null;
+    const waitsOn = message.to?.session ?? askedWakes;
+    const there = thereInThread(live, options.launch, message.thread_id);
+    // Its session's connection claimed it and will never deliver it (its wake was killed mid-delivery): that session
+    // does not get it, running or not, so it moves as off an ended one. Nothing delivers it again by itself.
+    const stuck = !!waitsOn && live.stuck(waitsOn, messageId);
+    const next = store.readdressMessage(messageId, target, {
+      targetLive: !!waitsOn && !stuck && there.askerLive(waitsOn),
+      askerEnded: stuck || replacesEndedAsker(asked, there),
+      tookOver: takesOver(store, message.thread_id, asked, waitsOn, there),
+    });
     return json({ message: next, row: store.listRow(next.thread_id) });
   };
 
-  const route = async (req: Request, url: URL): Promise<Response | null> => {
+  /** The folder To names (`?trust_agent=&trust_project=`, a project id or the scratch pick): the one whose files are read. */
+  const trustPick = (url: URL) => {
+    const agent = url.searchParams.get("trust_agent");
+    const project = url.searchParams.get("trust_project");
+    return agent && project ? { agent, project } : null;
+  };
+
+  /**
+   * Trust and start writes the person's Claude config, so it is theirs alone: never an agent's or MCP client's bare
+   * call, the device door or a guest (another site's page is refused for every POST before it gets here). Null: it may
+   * go on. Launch off: the route's own 404.
+   */
+  const trustRefused = (req: Request, body: Record<string, unknown>, owner: boolean, door: InboxComposeDoor | null): Response | null => {
+    if (!options.launch?.enabled() || !inboxPressesTrust(body.to)) return null;
+    if (!(door?.machine && door.window) && !isWindowRequest(req, body, serverSession)) return json(INBOX_WINDOW_ONLY_BODY, 403);
+    if (!owner) throw new InboxError("owner_only", "Only this computer's owner can trust a folder.");
+    return null;
+  };
+
+  /**
+   * `owner`: this computer's window or the owner's own login over the tailnet, or a linked machine (the owner's other
+   * computer); never a guest, or a phone through the device door. `via`: where the request came in; a guest
+   * (`isGuest`) never starts an agent. `door`: a linked machine asked through the device door (remote launch): it
+   * starts an agent only for a press in a window there (`window`), and the launch records which machine (`from`).
+   */
+  const route = async (req: Request, url: URL, owner: boolean = false, via: "local" | "tailnet" = "local", door: InboxComposeDoor | null = null): Promise<Response | null> => {
     const path = url.pathname;
     if (path === "/api/inbox/sessions") {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
@@ -206,12 +324,16 @@ export function createInboxCompose(options: {
         home: homedir(),
         projects: sessionsModel(),
         ...(session ? { session: { session, live: live.askerLive(session) } } : {}),
+        // Launch (only while `inboxLaunch.enabled`, on unless false; read live): the agents To offers to start and the folder menu's projects.
+        ...(options.launch ? { launch: await options.launch.composeBlock(owner && !isCrossSiteRequest(req) ? { pick: trustPick(url) } : null) } : {}),
       });
     }
     if (path === "/api/inbox/messages") {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
       const body = await options.readBody(req);
-      return staleTab(body) ?? (await startThread(body));
+      // Another machine starts an agent here only for what the person pressed in a window there: never an agent's call.
+      if (door?.machine && !door.window && body.to && typeof body.to === "object" && "launch" in body.to) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
+      return staleTab(body) ?? trustRefused(req, body, owner, door) ?? (await startThread(body, options.isGuest?.(req, via) ?? false, door?.machine ? door.from : null));
     }
     const toMatch = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/to$/.exec(path);
     if (toMatch) {
@@ -231,8 +353,13 @@ export function createInboxCompose(options: {
       const body = await options.readBody(req);
       const stale = staleTab(body);
       if (stale) return stale;
-      if (draftMatch[2]) return json({ ok: true, deleted: deleteInboxDraft(store.dir, draftMatch[1]) });
+      if (draftMatch[2]) {
+        const deleted = deleteInboxDraft(store.dir, draftMatch[1]);
+        if (deleted) options.onDraftsChange?.();
+        return json({ ok: true, deleted });
+      }
       const draft = saveInboxDraft(store.dir, draftMatch[1], body, now().toISOString());
+      options.onDraftsChange?.();
       return json({ draft: withStatus(draft) });
     }
     if (path === "/api/inbox/uploads") {
@@ -246,6 +373,19 @@ export function createInboxCompose(options: {
         throw new InboxError("upload_too_large", `Not attached: a file is at most ${INBOX_UPLOAD_MAX_BYTES / (1024 * 1024)} MB.`, { max_bytes: INBOX_UPLOAD_MAX_BYTES });
       }
       const upload = await receiveInboxUpload(store.dir, url.searchParams.get("name"), req.body, { at: now().toISOString() });
+      return json({ upload });
+    }
+    // A file the Inbox already holds, for the message being written: no bytes in the body.
+    if (path === "/api/inbox/uploads/reuse") {
+      if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+      const body = await options.readBody(req);
+      const stale = staleTab(body);
+      if (stale) return stale;
+      const hit = typeof body.attachment_id === "string" ? store.attachment(body.attachment_id) : null;
+      if (!hit) throw new InboxError("upload_not_found", "That file is no longer in the Inbox.");
+      const version = body.version === "current" ? "current" : "sent";
+      const sha256 = typeof body.sha256 === "string" ? body.sha256 : undefined;
+      const upload = await inboxUploadFromAttachment(store.dir, hit.attachment, version, { at: now().toISOString(), ...(sha256 ? { sha256 } : {}) });
       return json({ upload });
     }
     const textMatch = /^\/api\/inbox\/uploads\/([A-Za-z0-9_]+)\/text$/.exec(path);

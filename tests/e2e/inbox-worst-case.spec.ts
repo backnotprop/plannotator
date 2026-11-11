@@ -30,6 +30,7 @@ import { join, resolve } from 'node:path';
 import { LiveSessions, seedWorstCase, type WorstCaseWorld } from '../../scripts/inbox-worst-case';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
+import { INBOX_ASKER_RESTART_GRACE_MS } from '../../packages/server/inbox-sessions';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -163,10 +164,23 @@ for (const [w, scheme] of [...WIDTHS.map((w) => [w, 'light'] as const), [WIDTHS[
       expect(await shapes(page)).toEqual([]);
       const cell = await page.locator('section.ib-pane .ib-body td').first().evaluate((el) => el.getBoundingClientRect().width);
       expect(cell, 'a table cell keeps a word whole').toBeGreaterThan(40);
-      const img = page.locator('section.ib-pane .ib-body img[data-ib-tall]');
+      // A full-page capture (390 by 4000) shows its top down to 70% of the window (never under 320 px); "Show all" opens it in place.
+      const img = page.locator('section.ib-pane .ib-body img[data-ib-cut]');
       await expect(img).toHaveCount(1);
-      expect((await img.boundingBox())!.height).toBeLessThanOrEqual(481);
+      const cut = (await img.boundingBox())!;
+      expect(cut.height).toBeLessThanOrEqual(Math.max(320, w.height * 0.7) + 1);
+      expect(cut.width).toBeLessThanOrEqual(390.5);
+      const more = page.locator('section.ib-pane .ib-body').getByRole('button', { name: 'Show all of The checkout page on a phone' });
+      await expect(more).toBeVisible();
       await shot(page, `${w.name}-${scheme}-kitchen`);
+      if (scheme === 'light') {
+        const at = page.url();
+        await more.click();
+        const whole = (await page.locator('section.ib-pane .ib-body img[data-ib-open]').boundingBox())!;
+        expect(Math.round(whole.height / whole.width), 'the whole picture, its shape kept').toBe(Math.round(4000 / 390));
+        expect(page.url(), 'Show all opens nothing else').toBe(at);
+        await expect(page.locator('section.ib-pane .ib-body').getByRole('button', { name: 'Show less of The checkout page on a phone' })).toBeVisible();
+      }
       // Settings: Storage keeps its sizes and Delete in view (rows 64, 65); Archived keeps Unarchive on its row (row 67).
       await page.goto(`${world.url}/#settings/storage`);
       await page.waitForSelector('[data-store-project]');
@@ -240,8 +254,8 @@ test('the names: real folder names, a parent folder for two "api", days and year
 });
 
 test('things that grow: the reply chooser with 50 sessions, the compose To picker, a long draft', async ({ browser }) => {
-  // The session that asked counts as live for a minute after the Inbox starts.
-  await new Promise((r) => setTimeout(r, Math.max(0, world.startedAt + 70_000 - Date.now())));
+  // The session that asked counts as live for a while after the Inbox starts.
+  await new Promise((r) => setTimeout(r, Math.max(0, world.startedAt + INBOX_ASKER_RESTART_GRACE_MS + 10_000 - Date.now())));
   for (const [w, thread] of [
     [WIDTHS[2]!, world.seed.threads.ended],
     [WIDTHS[6]!, world.seed.threads.ended2],
@@ -252,13 +266,17 @@ test('things that grow: the reply chooser with 50 sessions, the compose To picke
       await page.locator('.ib-pfoot .ib-btn', { hasText: 'Reply' }).first().click();
       await page.locator('.ib-rtext').fill('Wait for Monday.');
       await page.locator('.ib-pfoot .ib-btn.ib-pri', { hasText: 'Send' }).click();
-      // The recipient pill's list takes the old chooser's place (approval "inbox-reply-recipient").
+      // The recipient pill's list takes the old chooser's place (approval "inbox-reply-recipient"). At 1024 it is the
+      // pill's own list; the 720 px window is a phone's layout, where it is the bottom sheet (approval
+      // "inbox-phone-composer-picker"), a dialog whose rows scroll in the listbox inside it.
       await page.waitForSelector('[data-recipient-list]');
       await page.waitForTimeout(300);
+      if (w.width < 768) await expect(page.locator('[data-recipient-list]')).toHaveAttribute('role', 'dialog');
       // The list starts inside the window and scrolls; Send stays in the window (row 6).
       const list = (await page.locator('[data-recipient-list]').boundingBox())!;
       expect(list.y).toBeGreaterThanOrEqual(0);
-      expect(await page.locator('[data-recipient-list]').evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+      expect(list.y + list.height, 'the list ends inside the window').toBeLessThanOrEqual(w.height);
+      expect(await page.locator('[data-recipient-list]').evaluate((el) => [el, ...el.querySelectorAll('[role="listbox"]')].some((box) => box.scrollHeight > box.clientHeight))).toBe(true);
       const send = (await page.locator('.ib-pfoot .ib-btn.ib-pri', { hasText: 'Send' }).boundingBox())!;
       expect(send.y + send.height).toBeLessThanOrEqual(w.height);
       expect(await shapes(page)).toEqual([]);
@@ -289,7 +307,7 @@ test('things that grow: the reply chooser with 50 sessions, the compose To picke
   }
 });
 
-test('a long file name never widens the window: the stepping guard, the header (rows 49, 74)', async ({ browser }) => {
+test('a long file name never widens the window: stepping to it, the header (rows 49, 74)', async ({ browser }) => {
   const { context, page } = await open(browser, WIDTHS[0]!, `thread=${world.seed.threads.files}`);
   try {
     await page.locator(`section.ib-pane .ib-atts.ib-tiles [data-attachment-name="${world.seed.files.arabic}"]`).first().click();
@@ -299,18 +317,12 @@ test('a long file name never widens the window: the stepping guard, the header (
     const box = page.getByPlaceholder(/comment/i).last();
     await box.waitFor({ timeout: 10_000 });
     await box.fill('Not saved yet.');
+    // A comment being written never stops a step: Next goes to the long name on that press (the words wait for this file).
     await page.locator('[data-step-next]').click();
-    await page.waitForSelector('[data-step-guard]', { timeout: 10_000 });
+    await expect(page.locator('section.ib-view .ib-fname', { hasText: world.seed.files.long }).first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('[data-step-guard]')).toHaveCount(0);
     expect(await shapes(page)).toEqual([]);
-    await expect(page.locator('[data-guard-discard]')).toHaveText(`Discard and go to ${world.seed.files.long}`);
-    // One space between the words and the name, not the words' space and the button's gap (about 4 px, not 11).
-    const space = await page.locator('[data-guard-discard] .ib-gto').evaluate((el) => {
-      const words = document.createRange();
-      words.selectNodeContents(el.firstChild!);
-      return el.querySelector('.ib-fname')!.getBoundingClientRect().left - words.getBoundingClientRect().right;
-    });
-    expect(space).toBeLessThan(7);
-    await shot(page, 'guard-1440');
+    await shot(page, 'long-name-step-1440');
   } finally {
     await context.close();
   }
@@ -461,16 +473,17 @@ for (const width of [944, 1024, 1180, 1280]) {
 }
 
 test('a guided review at 1024 and 900 keeps its diffs readable, with its comments a button away (row 48)', async ({ browser }) => {
-  for (const width of [900, 1024, 1440]) {
+  // The full-window review (every guide opens it): its comments fold into the header's button below 1,500 px.
+  for (const width of [900, 1024, 1440, 1600]) {
     // The guide rides the thread's first message, whose id is the thread's.
     const { context, page } = await open(browser, { name: String(width), width, height: 800 }, `thread=${world.seed.threads.guide}&guide=${world.seed.threads.guide}`);
     try {
       await expect(page.locator('section.ib-viewer .ib-gbody')).toContainText('Guard the refresh entry point', { timeout: 20_000 });
       await page.waitForTimeout(500);
       const viewer = page.locator('section.ib-viewer');
-      if (width < 1280) {
+      if (width < 1500) {
         await expect(viewer).toHaveClass(/\bib-fold\b/);
-        expect((await viewer.locator('.ib-gbody').boundingBox())!.width).toBeGreaterThan(width - 260);
+        expect((await viewer.locator('.ib-gbody').boundingBox())!.width).toBeGreaterThan(width - 40);
         const button = viewer.locator('[data-guide-comments-sheet]');
         await button.click();
         await expect(viewer.locator('.ib-gpanel')).toBeVisible();
@@ -487,9 +500,24 @@ test('a guided review at 1024 and 900 keeps its diffs readable, with its comment
         await expect(button).toBeFocused();
         await expect(viewer).toBeVisible();
       } else {
+        // Wide: the panel docks beside the diff, and the same Comments button opens and closes it. It starts open only
+        // when the review already has comments; closed, nothing of it shows and the diff takes the width.
         await expect(viewer).not.toHaveClass(/\bib-fold\b/);
-        await expect(viewer.locator('[data-guide-comments-sheet]')).toHaveCount(0);
-        await expect(viewer.locator('.ib-gpanel')).toBeVisible();
+        const button = viewer.locator('[data-guide-comments-sheet]');
+        const panel = viewer.locator('.ib-gpanel');
+        const count = Number(await panel.getAttribute('data-guide-comments'));
+        await expect(button).toHaveAttribute('aria-expanded', count > 0 ? 'true' : 'false');
+        if (count === 0) {
+          await expect(panel).toBeHidden();
+          expect((await viewer.locator('.ib-gbody').boundingBox())!.width).toBeGreaterThan(width - 40);
+          await button.click();
+        }
+        await expect(panel).toBeVisible();
+        await shot(page, `guide-${width}-docked`);
+        await viewer.getByRole('button', { name: 'Close the comments' }).click();
+        await expect(panel).toBeHidden();
+        await expect(button).toBeFocused();
+        await expect(button).toHaveAttribute('aria-expanded', 'false');
       }
       await shot(page, `guide-${width}`);
     } finally {

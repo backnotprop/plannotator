@@ -555,6 +555,32 @@ test.skipIf(!hasDom)("Done from the open row's button moves focus to the next ro
   expect(document.activeElement).toBe(toggleOf(rowOf(el, 1)));
 });
 
+test.skipIf(!hasDom)('a field the person went to while Done saved keeps focus; the toggle does not take it', async () => {
+  let release: (ok: boolean) => void = () => {};
+  const onMark = () => new Promise<boolean>((resolve) => (release = resolve));
+  const el = mount(<ActionChecklist actions={[record(0), record(1)]} agent="Claude Code" onMark={onMark} />);
+  const note = document.createElement('textarea');
+  el.appendChild(note);
+  click(panelOf(rowOf(el, 0)).querySelector('[data-action-done]')!);
+  act(() => note.focus());
+  await act(async () => {
+    release(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(document.activeElement).toBe(note);
+});
+
+test.skipIf(!hasDom)('what held focus at the press still holds it after Done (WebKit: the message, on a click): focus still moves to the toggle', async () => {
+  const el = mount(<ActionChecklist actions={[record(0), record(1)]} agent="Claude Code" onMark={async () => true} />);
+  const message = document.createElement('div');
+  message.tabIndex = -1;
+  el.appendChild(message);
+  act(() => message.focus());
+  click(panelOf(rowOf(el, 0)).querySelector('[data-action-done]')!);
+  await settle();
+  expect(document.activeElement).toBe(toggleOf(rowOf(el, 1)));
+});
+
 test.skipIf(!hasDom)("Can't do it asks for the reason; nothing goes without one", async () => {
   const marks: unknown[] = [];
   const el = mount(<ActionChecklist actions={[record(0)]} agent="Claude Code" onMark={async (_a, mark) => (marks.push(mark), true)} />);
@@ -575,6 +601,30 @@ test.skipIf(!hasDom)("Can't do it asks for the reason; nothing goes without one"
   click(panel.querySelector('[data-action-cant-send]')!);
   await settle();
   expect(marks).toEqual([{ outcome: 'cant', note: "I'm not an org owner; ask Dana." }]);
+});
+
+test.skipIf(!hasDom)("Escape or Cancel in Can't do it's note puts focus back on Can't do it…, never on the page", async () => {
+  const el = mount(<ActionChecklist actions={[record(0)]} agent="Claude Code" onMark={async () => true} />);
+  const panel = panelOf(rowOf(el, 0));
+  const cant = () => panel.querySelector<HTMLButtonElement>('[data-action-cant]')!;
+  act(() => cant().focus());
+  click(cant());
+  const area = panel.querySelector<HTMLTextAreaElement>('textarea')!;
+  expect(document.activeElement).toBe(area);
+  const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+  act(() => {
+    area.dispatchEvent(escape);
+  });
+  // One rung: the note closes and the key stops there.
+  expect(escape.defaultPrevented).toBe(true);
+  expect(panel.querySelector('textarea')).toBeNull();
+  expect(document.activeElement).toBe(cant());
+  // Cancel does the same.
+  click(cant());
+  expect(document.activeElement).toBe(panel.querySelector('textarea'));
+  click(panel.querySelector('[data-action-cant-cancel]')!);
+  expect(panel.querySelector('textarea')).toBeNull();
+  expect(document.activeElement).toBe(cant());
 });
 
 test.skipIf(!hasDom)('settled rows: sent, can\'t do it with its reason, the agent saw it done, set aside; none offers Done', () => {
@@ -697,11 +747,12 @@ test.skipIf(!hasDom)('the row draws open action items as the box pill and open q
     last_author: 'agent',
     message_count: 1,
     resolved_at: null,
-    questions: { open, picked: 0, stopped: true, holds_up: [], prompt: null, actions },
+    questions: { open, picked: 0, stopped: false, holds_up: [], prompt: null, actions },
     waiting_on_person: true,
     project: { id: 'prj_1', name: 'web' },
     thread_name: null,
-    section: 'stopped',
+    // Waiting on you: nothing blocked, so both marks are open (the fill steps are rowBadges.test.tsx's).
+    section: 'waiting',
     unread: true,
     answered_not_sent: false,
     waiting_since: null,
@@ -710,7 +761,7 @@ test.skipIf(!hasDom)('the row draws open action items as the box pill and open q
     guide: false,
   });
   const answered = { ...row('msg_e', 2, 1), answered_not_sent: true };
-  const sections: InboxListSection[] = [{ id: 'stopped', label: 'Stopped on you', threads: [row('msg_a', 1, 1), row('msg_b', 3, 1), row('msg_c', 2, 0), row('msg_d', 14, 12), row('msg_f', 256, 128), answered] }];
+  const sections: InboxListSection[] = [{ id: 'waiting', label: 'Waiting on you', threads: [row('msg_a', 1, 1), row('msg_b', 3, 1), row('msg_c', 2, 0), row('msg_d', 14, 12), row('msg_f', 256, 128), answered] }];
   const list = (narrow: boolean, phone: boolean) => (
     <SidebarProvider>
       <InboxList title="Inbox" path={null} sections={sections} filtered={false} narrow={narrow} selectedThreadId={null} notice={null} onShowNew={() => {}} onOpen={() => {}} phone={phone} />
@@ -753,13 +804,14 @@ test.skipIf(!hasDom)('the row draws open action items as the box pill and open q
   // The row's accessible name (its text less what is hidden from a screen reader) carries the counts' words apart.
   const named = rowOf('.ib-row', 'msg_b').cloneNode(true) as Element;
   named.querySelectorAll('[aria-hidden="true"]').forEach((n) => n.remove());
-  expect(named.textContent).toContain(' 1 action to do 2 questions');
-  // Beside a thread and on a phone: at line 3's end, the action pill then `?N`, after the badge.
+  // (Whitespace collapsed, as an accessible name is.)
+  expect(named.textContent!.replace(/\s+/g, ' ')).toContain(' 1 action to do 2 questions ');
+  // Beside a thread and on a phone: at line 3's end, the action pill then `?N`.
   for (const [narrow, phone, shape, line] of [[true, false, '.ib-nrow', '.ib-l3'], [false, true, '.ib-mrow', '.ib-m3']] as const) {
     rerender(list(narrow, phone));
     for (const [id, want] of Object.entries(expected)) expect(counts(rowOf(shape, id))).toEqual(want as never);
-    const tail = [...rowOf(shape, 'msg_b').querySelector(line)!.children].slice(-3).map((c) => (c.matches('[data-row-badge]') ? 'badge' : c.matches('[data-action-count]') ? 'action' : c.classList.contains('ib-qn') ? 'question' : c.className));
-    expect(tail).toEqual(['badge', 'action', 'question']);
+    const tail = [...rowOf(shape, 'msg_b').querySelector(line)!.children].slice(-2).map((c) => (c.matches('[data-action-count]') ? 'action' : c.classList.contains('ib-qn') ? 'question' : c.className));
+    expect(tail).toEqual(['action', 'question']);
   }
 });
 

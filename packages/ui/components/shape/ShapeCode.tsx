@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { PatchDiff } from '@pierre/diffs/react';
 import type { CodeAnnotation } from '../../types';
 import { CodeFileView, type CodeFileAnnotationInput, type CodeFileTokenTarget } from '../CodeFilePopout';
+import type { CommentExtraAction } from '../CommentPopover';
 import { useTheme } from '../ThemeProvider';
 import type { ShapeVersion } from '@plannotator/core/shape';
 import type { ShapeCodeGuideProps, ShapeCodeHoverCardProps, ShapeCodeHoverRequest } from './types';
@@ -56,8 +57,10 @@ export function ShapeCode({
   annotations,
   onComment,
   onAsk,
+  lineAction,
   generalComment,
   phone,
+  fileAction,
 }: {
   code: Code;
   CodeGuide?: React.ComponentType<ShapeCodeGuideProps>;
@@ -71,19 +74,24 @@ export function ShapeCode({
   annotations: CodeAnnotation[];
   onComment: (input: CodeFileAnnotationInput) => void;
   onAsk: (input: CodeFileAnnotationInput) => void;
+  /** The box's third action on these lines (Show me). */
+  lineAction?: (lines: { filePath: string; lineStart: number; lineEnd: number }) => CommentExtraAction | undefined;
   /** The Code view's own "Global comment" (on the whole guide). */
   generalComment: React.ReactNode;
   phone: boolean;
+  /** The host's control beside a file. */
+  fileAction?: (file: { path: string; line?: number }) => React.ReactNode;
 }) {
   const openable = new Map((code.files ?? []).map((f) => [f.path, f.line ?? 1]));
   const openLine = useCallback((path: string) => (readFile && openable.has(path) ? openable.get(path)! : null), [readFile, code.files]); // eslint-disable-line react-hooks/exhaustive-deps
   const renderDiff = useCallback((f: { path: string; patch: string }) => <ShapePatch patch={f.patch} />, []);
+  const guideFileAction = useCallback((path: string) => fileAction?.({ path, line: openable.get(path) }) ?? null, [fileAction, code.files]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <>
       <div className="shp-guidewrap" data-stage={code.stage}>
         {CodeGuide ? (
-          <CodeGuide code={code} renderDiff={renderDiff} openLine={openLine} onOpenFile={onOpenFile} headerActions={generalComment} />
+          <CodeGuide code={code} renderDiff={renderDiff} openLine={openLine} onOpenFile={onOpenFile} headerActions={generalComment} fileAction={fileAction ? guideFileAction : undefined} />
         ) : (
           <>
             <div className="shp-guide-fallback-acts">{generalComment}</div>
@@ -103,7 +111,9 @@ export function ShapeCode({
           annotations={annotations}
           onComment={onComment}
           onAsk={onAsk}
+          lineAction={lineAction}
           phone={phone}
+          fileAction={fileAction}
         />
       )}
     </>
@@ -123,7 +133,9 @@ function WholeFile({
   annotations,
   onComment,
   onAsk,
+  lineAction,
   phone,
+  fileAction,
 }: {
   code: Code;
   file: ShapeFileTarget;
@@ -135,7 +147,9 @@ function WholeFile({
   annotations: CodeAnnotation[];
   onComment: (input: CodeFileAnnotationInput) => void;
   onAsk: (input: CodeFileAnnotationInput) => void;
+  lineAction?: (lines: { filePath: string; lineStart: number; lineEnd: number }) => CommentExtraAction | undefined;
   phone: boolean;
+  fileAction?: (file: { path: string; line?: number }) => React.ReactNode;
 }) {
   const [contents, setContents] = useState<string | null | undefined>(undefined);
   const [hover, setHover] = useState<Hover | null>(null);
@@ -202,7 +216,7 @@ function WholeFile({
           </nav>
         )}
         <div className="shp-code-main">
-          <div className="shp-code-head"><span className="path">{file.path}</span></div>
+          <div className="shp-code-head"><span className="path">{file.path}</span>{fileAction?.({ path: file.path, line: file.line })}</div>
           {contents === undefined ? (
             <p className="shp-empty-note">Opening…</p>
           ) : contents === null ? (
@@ -219,6 +233,7 @@ function WholeFile({
               onAskAnnotation={onAsk}
               commentSubmitLabel="Change it"
               commentAskLabel="Ask"
+              commentExtraAction={lineAction}
               revealLine={{ line: file.line, token: file.token }}
               onTokenTarget={codeHover && CodeHoverCard ? onToken : undefined}
             />

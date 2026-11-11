@@ -3,18 +3,18 @@
  * browser against the compiled binary, with agents writing through
  * `plannotator inbox mcp` (scripts/inbox-sim.ts):
  *
- *  - right-click a row: Pin thread leads the menu, in its own group; the
+ *  - right-click a row: Star thread leads the menu, in its own group; the
  *    thread appears under Pinned above Projects, and its list row keeps its
  *    place with a pin;
  *  - the Count rows: Stopped and Holds N pills, a question count, a dot;
- *  - the header ⋯ menu's Pin thread / Unpin thread (no pin button in the header);
+ *  - the header ⋯ menu's Star thread / Unstar thread (no pin button in the header);
  *    the open thread's pinned row wears the selection;
  *  - the pinned row's ⋯: Move down, Move up (focus kept), Unpin with its
  *    toast and Z putting it back;
  *  - archiving a pinned thread keeps it pinned, shown archived, and it opens;
  *  - 24 pins: the sidebar scrolls, Settings stays on screen, nothing overflows;
  *  - an iPhone in WebKit: 44 px pinned rows with ⋯ always shown, the menu a
- *    bottom sheet, the header ⋯ menu's Pin thread.
+ *    bottom sheet, the header ⋯ menu's Star thread.
  *
  * Light and dark screenshots land in PLANNOTATOR_PINS_SHOTS (default
  * .local/proof/pins). Build the binary first (see inbox.spec.ts), then
@@ -173,25 +173,25 @@ test.afterAll(async () => {
   }
 });
 
-test('Pin thread leads the row menu; the thread appears under Pinned, above Projects, with its pin on the list row', async () => {
+test('Star thread leads the row menu; the thread appears under Pinned, above Projects, with its pin on the list row', async () => {
   const { page, threads } = world;
   await page.emulateMedia({ colorScheme: 'light' });
   await page.goto(world.url);
   await expect(rowButton(page, threads.board)).toBeVisible();
   // Nothing pinned: no section at all.
   await expect(page.locator('[data-pinned-section]')).toHaveCount(0);
-  await expect(page.locator('.ib-side-sec-l')).toHaveText(['Projects']);
+  await expect(page.locator('.ib-side-sec-l')).toHaveText(['Agents', 'Projects']);
 
   await rowButton(page, threads.board).click({ button: 'right' });
   const menu = page.locator('[data-row-menu]');
-  await expect(menu.getByRole('menuitem').first()).toHaveText('Pin thread');
+  await expect(menu.getByRole('menuitem').first()).toHaveText('Star thread');
   await page.locator('[data-row-action="pin"]').click();
   await expect(pinned(page, threads.board)).toBeVisible();
-  await expect(page.locator('.ib-side-sec-l')).toHaveText(['Pinned', 'Projects']);
+  await expect(page.locator('.ib-side-sec-l')).toHaveText(['Starred', 'Agents', 'Projects']);
   await expect(rowButton(page, threads.board).locator('[data-pin-mark]')).toBeVisible();
-  await expect(rowButton(page, threads.board)).toHaveAccessibleName(/, pinned$/);
+  await expect(rowButton(page, threads.board)).toHaveAccessibleName(/, starred$/);
   // Pin shows no toast; the live region says it.
-  await expect(page.locator('[data-inbox-live]')).toContainText('Pinned “Board step 2');
+  await expect(page.locator('[data-inbox-live]')).toContainText('Starred “Board step 2');
   await expect(page.locator('[data-inbox-toast]')).toHaveCount(0);
 
   // The menu as the record draws it: on the next row, before pinning it.
@@ -237,8 +237,8 @@ test("a click opens the thread and keeps the filter; the header ⋯ menu pins an
   // "inbox-thread-header"), and says it is pinned.
   await expect(page.locator('[data-pin-toggle]')).toHaveCount(0);
   const item = await openThreadMenu(page);
-  await expect(item).toHaveText('Unpin thread');
-  await expect(page.locator('[data-thread-menu] [role="menuitem"]').nth(0)).toHaveText('Unpin thread');
+  await expect(item).toHaveText('Unstar thread');
+  await expect(page.locator('[data-thread-menu] [role="menuitem"]').nth(0)).toHaveText('Unstar thread');
   await expect(page.locator('.ib-phead [data-thread-snooze]')).toBeVisible();
   await shot(page, 'desktop-thread-menu-light.png');
   await page.keyboard.press('Escape');
@@ -248,10 +248,10 @@ test("a click opens the thread and keeps the filter; the header ⋯ menu pins an
   await page.emulateMedia({ colorScheme: 'light' });
   await (await openThreadMenu(page)).click();
   await expect(pinned(page, threads.board)).toHaveCount(0);
-  await expect(page.locator('[data-inbox-toast]')).toContainText('Unpinned');
+  await expect(page.locator('[data-inbox-toast]')).toContainText('Unstarred');
   await expect(page.locator('[data-inbox-toast]')).toContainText('Still in Waiting on you');
   const again = await openThreadMenu(page);
-  await expect(again).toHaveText('Pin thread');
+  await expect(again).toHaveText('Star thread');
   await again.click();
   await expect(pinned(page, threads.board)).toBeVisible();
   await expect.poll(() => pinnedOrder(page)).toEqual([threads.nightly, threads.apns, threads.postings, threads.board]);
@@ -266,7 +266,7 @@ test("the pinned row's ⋯: Move up and down keep focus; Unpin shows the toast a
   await pinned(page, threads.apns).hover();
   await more(threads.apns).click();
   const menu = page.locator('[data-pin-menu]');
-  await expect(menu.getByRole('menuitem')).toHaveText(['Unpin', 'Move up', 'Move down', 'Copy link']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['Unstar', 'Move up', 'Move down', 'Copy link']);
   await shot(page, 'desktop-pinned-menu-light.png');
   await page.locator('[data-pin-action="up"]').click();
   await expect.poll(() => pinnedOrder(page)).toEqual([threads.apns, threads.nightly, threads.postings, threads.board]);
@@ -294,7 +294,7 @@ test("the pinned row's ⋯: Move up and down keep focus; Unpin shows the toast a
   await page.locator('[data-pin-action="unpin"]').click();
   await expect.poll(() => pinnedOrder(page)).toEqual([threads.nightly, threads.postings, threads.board]);
   const toast = page.locator('[data-inbox-toast]');
-  await expect(toast).toContainText('Unpinned');
+  await expect(toast).toContainText('Unstarred');
   await expect(toast).toContainText('Still in Stopped on you');
   await expect(more(threads.postings)).toBeFocused();
   await shot(page, 'desktop-unpinned-light.png');
@@ -307,13 +307,16 @@ test('archiving a pinned thread keeps it pinned, shown archived; it opens as an 
   const { page, threads } = world;
   await rowButton(page, threads.nightly).click({ button: 'right' });
   await page.locator('[data-row-action="archive"]').click();
+  // Archived in place, faded, until the list settles (approval "inbox-list-view", R7); the list's title tidies it away.
+  await expect(page.locator(`.ib-lbody [data-row="${threads.nightly}"]`)).toHaveAttribute('data-archived', '');
+  await page.locator('[data-list-refresh]').click();
   await expect(rowButton(page, threads.nightly)).toHaveCount(0);
   await expect(pinned(page, threads.nightly)).toHaveAttribute('data-state', 'archived');
   await expect(pinned(page, threads.nightly)).toHaveAccessibleName(/Archived$/);
   await expect(pinned(page, threads.nightly).locator('.ib-parch')).toBeVisible();
   await shot(page, 'desktop-archived-light.png');
   await pinned(page, threads.nightly).click();
-  await expect(await openThreadMenu(page)).toHaveText('Unpin thread');
+  await expect(await openThreadMenu(page)).toHaveText('Unstar thread');
   await page.keyboard.press('Escape');
   await expect(page.locator('.ib-pane')).toContainText('Unarchive');
   await page.emulateMedia({ colorScheme: 'dark' });
@@ -381,7 +384,7 @@ test.describe('iPhone 15 (WebKit)', () => {
   });
 
   for (const scheme of ['light', 'dark'] as const) {
-    test(`the sheet: 44 px pinned rows, ⋯ always shown, the menu a bottom sheet; the header menu's Pin thread (${scheme})`, async () => {
+    test(`the sheet: two-line pinned rows of 44 px or more, ⋯ always shown, the menu a bottom sheet; the header menu's Star thread (${scheme})`, async () => {
       const { threads } = world;
       const context = await browser!.newContext({ ...device, colorScheme: scheme });
       try {
@@ -391,8 +394,10 @@ test.describe('iPhone 15 (WebKit)', () => {
         await page.locator('[data-sidebar="trigger"]').first().tap();
         const row = page.locator(`[data-pinned-row="${threads.apns}"]`);
         await expect(row).toBeVisible();
+        // The name, then its project and state (approval "inbox-phone-sidebar-sheet").
         const box = await row.boundingBox();
-        expect(Math.round(box!.height)).toBe(44);
+        expect(Math.round(box!.height)).toBeGreaterThanOrEqual(44);
+        await expect(row.locator('.ib-pin-sub .ib-pin-proj')).toBeVisible();
         const more = page.locator(`[data-pin-more="${threads.apns}"]`);
         await expect(more).toHaveCSS('opacity', '1');
         const moreBox = await more.boundingBox();
@@ -412,13 +417,13 @@ test.describe('iPhone 15 (WebKit)', () => {
         await page.screenshot({ path: join(shots, `phone-menu-${scheme}.png`) });
         await page.locator('[data-pin-action="copy-link"]').tap();
         await expect(menu).toHaveCount(0);
-        // A pinned row opens its thread; the header ⋯ menu's Pin thread is the phone's way to pin.
+        // A pinned row opens its thread; the header ⋯ menu's Star thread is the phone's way to pin.
         await page.locator('[data-sidebar="trigger"]').first().tap();
         await page.locator(`[data-pinned-row="${threads.board}"]`).tap();
         await expect(page.locator('[data-pin-toggle]')).toHaveCount(0);
         await page.locator('[data-thread-more]').tap();
         const pinItem = page.locator('[data-thread-menu] [data-thread-pin-item]');
-        await expect(pinItem).toHaveText('Unpin thread');
+        await expect(pinItem).toHaveText('Unstar thread');
         const itemBox = await pinItem.boundingBox();
         expect(Math.round(itemBox!.height)).toBeGreaterThanOrEqual(44);
         await page.waitForTimeout(400);

@@ -47,6 +47,7 @@ test.beforeAll(async () => {
   markTourDecided(dataDir);
   const env = {
     PATH: process.env.PATH ?? '',
+    HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     CLAUDE_CONFIG_DIR: join(root, 'claude'),
     PLANNOTATOR_BROWSER: NO_BROWSER,
@@ -114,6 +115,8 @@ test('a draft started on the computer with a picture and a file opens on the pho
   // Each tile's × is a finger's target on a phone: its drawn 26 px grows to a
   // 44 px hit area, so a tap 8 px outside the drawn box still lands on it.
   for (const tile of await tiles.all()) {
+    // The words and files scroll in the box's capped region (approval "inbox-reply-box", D1): the tile in view first.
+    await tile.evaluate((el) => el.scrollIntoView({ block: 'center' }));
     const hits = await tile.locator('.ib-cp-fx').evaluate((button) => {
       const r = button.getBoundingClientRect();
       const cx = r.left + r.width / 2;
@@ -128,7 +131,7 @@ test('a draft started on the computer with a picture and a file opens on the pho
   await box.screenshot({ path: join(shotsDir, 'phone-draft-tiles-box-390.png') });
 
   // Send on the phone: the agent gets the words and both files, and the draft is done.
-  await mobile.locator('section.ib-pane .ib-acts').getByRole('button', { name: 'Send' }).click();
+  await mobile.locator('section.ib-pane .ib-rbox [data-reply-send]').click();
   const reply = (await world.agent.nextReply(world.thread)) as { body: string; attachments?: { name: string; path: string }[] };
   expect(reply.body.startsWith(WORDS)).toBe(true);
   expect((reply.attachments ?? []).map((a) => a.name)).toEqual(['header-jump.png', 'header-notes.md']);

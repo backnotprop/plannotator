@@ -10,13 +10,17 @@
  */
 import { describe, expect, test } from "bun:test";
 import {
+  inboxPullAncestors,
   inboxPullGroups,
   inboxPullItems,
   inboxPullLandsNext,
+  inboxPullParent,
   inboxPullMove,
   inboxPullStacks,
   inboxPullUrlsIn,
   type InboxPull,
+  inboxPullRefOfKey,
+  inboxPullRefOfUrl,
 } from "./inbox-pulls";
 
 let n = 0;
@@ -113,11 +117,71 @@ describe("inboxPullStacks", () => {
     expect(inboxPullStacks([b, a]).map((s) => keys(s.layers))).toEqual([[7, 8]]);
   });
 
+  test("a merged layer in the middle (merged into an open PR's branch): the stack runs from that open PR up, the merged one between", () => {
+    const fx = pr({ number: 48150, head: "fx-cache", base: "main" });
+    const ttl = pr({ number: 48151, head: "fx-cache-ttl", base: "fx-cache", state: "merged" });
+    const metrics = pr({ number: 48152, head: "fx-cache-metrics", base: "fx-cache-ttl" });
+    const alerts = pr({ number: 48153, head: "fx-cache-alerts", base: "fx-cache-metrics" });
+    const stacks = inboxPullStacks([alerts, metrics, ttl, fx]);
+    expect(stacks.map((s) => keys(s.layers))).toEqual([[48150, 48151, 48152, 48153]]);
+    // What lands next is the open PR at the bottom, not the layer above the merged one.
+    expect(inboxPullLandsNext(stacks[0]!)?.number).toBe(48150);
+    expect(stacks[0]!.base).toBe("main");
+    expect(stacks[0]!.open_base).toBe("main");
+  });
+
+  test("two open PRs from one branch (a backport): the layer based on that branch sits on the one into the trunk, whatever the numbers and order", () => {
+    // The backport has the lower number: the rank is the trunk, not the number.
+    const backport = pr({ number: 320, head: "fix-rounding", base: "release/2026.10" });
+    const main = pr({ number: 321, head: "fix-rounding", base: "main" });
+    const tests = pr({ number: 322, head: "fix-rounding-tests", base: "fix-rounding" });
+    for (const order of [
+      [backport, main, tests],
+      [tests, main, backport],
+      [main, backport, tests],
+    ]) {
+      const stacks = inboxPullStacks(order);
+      expect(stacks.map((s) => keys(s.layers)).sort()).toEqual([[320], [321, 322]]);
+    }
+    // The forge's default branch is the trunk, whatever its name: into `next` beats into `release/…`.
+    const intoRelease = pr({ number: 39, head: "shared-next", base: "release/1", default_branch: "next" });
+    const intoNext = pr({ number: 40, head: "shared-next", base: "next", default_branch: "next" });
+    const onShared = pr({ number: 41, head: "on-shared", base: "shared-next", default_branch: "next" });
+    expect(inboxPullStacks([intoRelease, intoNext, onShared]).find((s) => s.layers.some((l) => l.number === 41))!.layers.map((l) => l.number)).toEqual([40, 41]);
+    // Into a feature branch and into main: main's PR takes the layers above it.
+    const feature = pr({ number: 30, head: "shared", base: "feature/epic" });
+    const intoMain = pr({ number: 31, head: "shared", base: "main" });
+    const above = pr({ number: 32, head: "above", base: "shared" });
+    expect(inboxPullStacks([feature, intoMain, above]).find((s) => s.layers.some((l) => l.number === 32))!.layers.map((l) => l.number)).toEqual([31, 32]);
+  });
+
   test("two layers on one branch stay in one stack, by depth then number", () => {
     const low = pr({ number: 10, head: "base-work", base: "main" });
     const b = pr({ number: 12, head: "b", base: "base-work" });
     const a = pr({ number: 11, head: "a", base: "base-work" });
     expect(inboxPullStacks([b, a, low]).map((s) => keys(s.layers))).toEqual([[10, 11, 12]]);
+  });
+
+  test("each layer's parent is the layer it sits on, never its neighbour in the list (a fork, merged layers under and between)", () => {
+    // A on main; B and C on A (a fork); D on B. In the list D comes after C, but D sits on B.
+    const a = pr({ number: 1, head: "a", base: "main" });
+    const b = pr({ number: 2, head: "b", base: "a" });
+    const c = pr({ number: 3, head: "c", base: "a" });
+    const d = pr({ number: 4, head: "d", base: "b" });
+    const [fork] = inboxPullStacks([d, c, b, a]);
+    expect(keys(fork!.layers)).toEqual([1, 2, 3, 4]);
+    const parentNumber = (pull: InboxPull) => inboxPullParent(fork!, pull.key)?.number ?? null;
+    expect([a, b, c, d].map(parentNumber)).toEqual([null, 1, 1, 2]);
+    expect(keys(inboxPullAncestors(fork!, d.key))).toEqual([2, 1]);
+    expect(keys(inboxPullAncestors(fork!, c.key))).toEqual([1]);
+    // Merged under the root, and merged in the middle: each sits on the one below it.
+    const old = pr({ number: 50, head: "fx-base", base: "main", state: "merged" });
+    const fx = pr({ number: 51, head: "fx-cache", base: "fx-base" });
+    const ttl = pr({ number: 52, head: "fx-cache-ttl", base: "fx-cache", state: "merged" });
+    const metrics = pr({ number: 53, head: "fx-cache-metrics", base: "fx-cache-ttl" });
+    const [chain] = inboxPullStacks([metrics, ttl, fx, old]);
+    expect(keys(chain!.layers)).toEqual([50, 51, 52, 53]);
+    expect(chain!.layers.map((l) => inboxPullParent(chain!, l.key)?.number ?? null)).toEqual([null, 50, 51, 52]);
   });
 });
 
@@ -133,6 +197,19 @@ describe("whose move", () => {
     expect(inboxPullMove(pr({ number: 8, head: "h", checks: "failure" }), false)).toEqual({ move: "on_you", reason: "failing" });
     expect(inboxPullMove(pr({ number: 9, head: "i", reviewers: ["jun"] }), false)).toEqual({ move: "waiting", reason: "review" });
     expect(inboxPullMove(pr({ number: 10, head: "j", mine: false, author: "mara" }), false)).toEqual({ move: "waiting", reason: "others" });
+  });
+
+  test("a teammate's PR assigned to the person is on them; the person's own assigned PR goes by its own rules", () => {
+    expect(inboxPullMove(pr({ number: 11, head: "k", mine: false, assigned: true, author: "jun" }), false)).toEqual({ move: "on_you", reason: "assigned" });
+    // Asked for a review too: the request says why.
+    expect(inboxPullMove(pr({ number: 12, head: "l", mine: false, requested: true, assigned: true, author: "jun" }), false)).toEqual({ move: "on_you", reason: "requested" });
+    expect(inboxPullMove(pr({ number: 13, head: "m", assigned: true, reviewers: ["jun"] }), false)).toEqual({ move: "waiting", reason: "review" });
+    expect(inboxPullMove(pr({ number: 14, head: "n", mine: false, assigned: true, state: "draft" }), false)).toEqual({ move: "waiting", reason: "draft" });
+  });
+
+  test("an approved PR that conflicts with its base is not ready to land: it is on the person", () => {
+    expect(inboxPullMove(pr({ number: 82, head: "kms", review: "approved", approved_by: "jo", conflicts: true }), false)).toEqual({ move: "on_you", reason: "conflicts" });
+    expect(inboxPullMove(pr({ number: 83, head: "kms2", review: "approved", approved_by: "jo", conflicts: false }), false)).toEqual({ move: "ready", reason: "approved" });
   });
 
   test("the groups: On you holds teammates' requests and the agents' PRs; a stack goes by the layer on the person", () => {
@@ -171,3 +248,18 @@ test("inboxPullUrlsIn finds pull and merge request links, each once", () => {
   const text = "Ready: https://github.com/northwind/billing-svc/pull/412 and https://gitlab.com/northwind/ledger/-/merge_requests/57. Again https://github.com/northwind/billing-svc/pull/412 — not https://github.com/northwind/billing-svc/issues/3";
   expect(inboxPullUrlsIn(text)).toEqual(["https://github.com/northwind/billing-svc/pull/412", "https://gitlab.com/northwind/ledger/-/merge_requests/57"]);
 });
+
+describe("a PR's address", () => {
+  test("a forge's own addresses read back to the list's key", () => {
+    expect(inboxPullRefOfUrl("https://github.com/northwind/web-app/pull/869")?.key).toBe("github.com/northwind/web-app#869");
+    expect(inboxPullRefOfUrl("https://gitlab.com/infra/terraform/modules/-/merge_requests/61/diffs")).toMatchObject({ key: "gitlab.com/infra/terraform/modules#61:pull", platform: "gitlab" });
+  });
+
+  test("an agent-written address cannot walk out of repos/… or smuggle a query into the API call", () => {
+    for (const url of ["https://github.com/../../user/emails?x=/pull/1", "https://github.com/a/../../pull/1", "https://github.com/a/b?x=/pull/1", "https://github.com/a/./pull/1", "https://github.com/a%2f..%2f/b/pull/1"]) {
+      expect(inboxPullRefOfUrl(url)).toBeNull();
+    }
+    expect(inboxPullRefOfKey("github.com/../../user/emails#1")).toBeNull();
+  });
+});
+

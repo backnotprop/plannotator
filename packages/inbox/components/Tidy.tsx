@@ -6,9 +6,13 @@ import { inboxApi } from '../api';
 import { formatCount } from '../format';
 import { HostMark, Icon } from '../icons';
 import { Tip } from './Tip';
+import { ShortcutHint, useShortcutAria } from '../shortcuts/hint';
+import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 import { LIST_LOOK_OPTIONS, type ListLook, type MenuLookKey } from '../listLook';
 import { shortProjectNames } from '../projectLabels';
 import { THREAD_PANEL_LABEL } from '../threadPanel';
+import { LIST_VIEW_LABEL, LIST_VIEW_OPTIONS, type ListView } from '../listView';
+import { STARRED_ABOVE_LABEL } from '../starredPills';
 
 /**
  * Tidy (owner-approved design, 2026-10-28, simplified the same day: "quiet,
@@ -31,29 +35,88 @@ export interface TidyController {
   refresh: () => void;
   /** Combine each ticked pair, `from` into `into`, with one Undo. The window's: answers why it stopped, or null. */
   combine?: (pairs: readonly InboxTidyCombine[]) => Promise<string | null>;
+  /** The menu or the popover opened or closed: what it shows is read while it is open (useTidy). */
+  shown?: (open: boolean) => void;
+  /** The person is about to open the menu (a pointer on ⋮, or focus): a list or Board read meanwhile is read now. */
+  warm?: () => void;
+  /** That read (`warm`) is still out: the plan may be stale, so the menu shows Tidy as while it is first read. */
+  pending?: boolean;
+  /**
+   * A list read that brought nothing new (so `version` did not move, App's listSame.ts): it still counts as a list
+   * read, as when every read drew the list again. Read now while shown, else the plan is stale.
+   */
+  listRead?: () => void;
 }
 
 /** How long the window polls a run's progress. */
 const TIDY_POLL_MS = 10 * 60_000;
 
-/** Reads who Tidy would ask in `scope` again whenever `version` changes (a list or Board read), and every few seconds while a run is under way. */
+/**
+ * Reads who Tidy would ask in `scope`: when it opens, and every few seconds
+ * while a run is under way. A list or Board read (`version` changes) reads it
+ * again while the menu or the popover shows it (#2593: not after every agent
+ * message); while they are closed it only marks the plan stale, read as the
+ * person reaches for ⋮ (`warm`) or opens it (`shown`).
+ */
 export function useTidy(scope: string | null, surface: TidySurface, version: unknown, enabled = true): TidyController {
   const [plan, setPlan] = useState<InboxTidyPlan | null>(null);
   const seq = useRef(0);
+  /** A list or Board read happened since the plan was last read. */
+  const stale = useRef(false);
+  /** The menu or the popover is open. */
+  const open = useRef(false);
+  /** A stale plan is being read again (`warm`): until it lands the menu shows no count (a touch opens ⋮ at once). */
+  const [pending, setPending] = useState(false);
   const refresh = useCallback(() => {
     const mine = ++seq.current;
+    stale.current = false;
     inboxApi
       .tidy(scope, surface)
       .then((next) => {
         if (mine === seq.current) setPlan(next);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (mine === seq.current) setPending(false);
+      });
   }, [scope, surface]);
+  /** The scope (its `refresh`) the plan was last read for while enabled; null after a disable, so a return reads it again. */
+  const readFor = useRef<typeof refresh | null>(null);
   useEffect(() => {
-    if (!enabled) return;
-    const timer = setTimeout(refresh, 250);
+    if (!enabled) {
+      readFor.current = null;
+      return;
+    }
+    // Only the list or Board moved, and nothing shows the plan: read it when something does.
+    if (readFor.current === refresh && !open.current) {
+      stale.current = true;
+      return;
+    }
+    // Counted as read only once the read starts: a list read within these 250 ms puts it off, never drops it.
+    const timer = setTimeout(() => {
+      readFor.current = refresh;
+      refresh();
+    }, 250);
     return () => clearTimeout(timer);
   }, [refresh, version, enabled]);
+  const warm = useCallback(() => {
+    if (!enabled || !stale.current) return;
+    setPending(true);
+    refresh();
+  }, [enabled, refresh]);
+  const shown = useCallback(
+    (now: boolean) => {
+      open.current = now;
+      if (now) warm();
+    },
+    [warm],
+  );
+  const listRead = useCallback(() => {
+    // Not read for this scope yet: its first read is on its way anyway.
+    if (!enabled || readFor.current !== refresh) return;
+    if (open.current) refresh();
+    else stale.current = true;
+  }, [enabled, refresh]);
   const run = plan?.run ?? null;
   // Poll while a run goes, for 10 minutes at most: an agent that cannot say it
   // is done (Codex, MCP only) would otherwise keep it going all day. List and
@@ -84,7 +147,7 @@ export function useTidy(scope: string | null, surface: TidySurface, version: unk
     },
     [scope, surface, refresh],
   );
-  return { surface, scope, plan, run, start, refresh };
+  return { surface, scope, plan, run, start, refresh, shown, warm, pending, listRead };
 }
 
 
@@ -115,6 +178,25 @@ function MenuCheckbox({
   );
 }
 
+/**
+ * The list's view (listView.ts): Grouped or List, one choice of two (`menuitemradio`, its state announced), drawn as
+ * the checkboxes are with a round box, under its label (the radio group is the labelled group). A pick changes the
+ * list at once and leaves the menu open, as a tick does.
+ */
+function MenuViewChoice({ view, onChange }: { view: ListView; onChange: (view: ListView) => void }) {
+  return (
+    <Menu.RadioGroup value={view} onValueChange={(next: ListView) => onChange(next)}>
+      <Menu.GroupLabel className="ib-pm-glabel">{LIST_VIEW_LABEL}</Menu.GroupLabel>
+      {LIST_VIEW_OPTIONS.map((option) => (
+        <Menu.RadioItem key={option.value} className="ib-pmi" value={option.value} label={option.label} closeOnClick={false} data-list-view={option.value}>
+          <span className="ib-pmi-box" aria-hidden="true" data-radio="" data-on={view === option.value ? '' : undefined} />
+          <span className="ib-pmi-l">{option.label}</span>
+        </Menu.RadioItem>
+      ))}
+    </Menu.RadioGroup>
+  );
+}
+
 /** "Tidy · 3/4" while a run shows. */
 const runLabel = (run: InboxTidyRun) => `Tidy · ${run.done}/${run.agents.length}`;
 
@@ -134,6 +216,8 @@ export function TidyMenu({
   onLook,
   threadPanel,
   onCustomize,
+  view,
+  starredAbove,
 }: {
   tidy: TidyController;
   phone: boolean;
@@ -147,20 +231,47 @@ export function TidyMenu({
   threadPanel?: { on: boolean; onChange: (on: boolean) => void };
   /** "Customize rows…", last in the Rows group: Settings → Rows. Absent (the tour): no item. */
   onCustomize?: () => void;
+  /** The list's view (listView.ts), Grouped or List, first of the options. Absent (the Board, the tour): no item. */
+  view?: { value: ListView; onChange: (view: ListView) => void };
+  /**
+   * "Keep starred above the list" (starredPills.ts), last in the View group: checked while the starred threads are
+   * pills above the list and not a sidebar section. Absent (the Board, the tour, an Inbox that keeps no stars): no item.
+   */
+  starredAbove?: { on: boolean; onChange: (on: boolean) => void };
 }) {
   const trigger = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [popOpen, setPopOpen] = useState(false);
+  // Shift+R runs Refresh here too (approval "inbox-refresh-key"): its key name, gone with single keys off.
+  const refreshKeys = useShortcutAria({ scope: inboxAppShortcuts, action: 'refresh' });
   const [portal, setPortal] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => setPortal(trigger.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
-  const { plan, run } = tidy;
+  // A stale plan read again as ⋮ is reached for (touch opens it at once): drawn as while it is first read, never its old count.
+  const plan = tidy.pending ? null : tidy.plan;
+  const run = tidy.pending ? null : tidy.run;
   const count = plan?.count ?? 0;
   // Still reading (plan null): enabled, so the menu does not flash disabled on load.
   const canOpen = plan === null || run !== null || count > 0;
+  // What the menu and the popover show is read while one of them is open (useTidy).
+  const { shown, warm } = tidy;
+  const showing = menuOpen || popOpen;
+  useEffect(() => {
+    shown?.(showing);
+  }, [shown, showing]);
+  useEffect(() => () => shown?.(false), [shown]);
   return (
     <>
       <Menu.Root open={menuOpen} onOpenChange={setMenuOpen} modal={false}>
-        <Menu.Trigger ref={trigger} className={`ib-tidytrig ${className}`} aria-label="More" data-tidy-menu="" data-open={popOpen ? '' : undefined}>
+        <Menu.Trigger
+          ref={trigger}
+          className={`ib-tidytrig ${className}`}
+          aria-label="More"
+          data-tidy-menu=""
+          data-open={popOpen ? '' : undefined}
+          onPointerEnter={warm}
+          onPointerDown={warm}
+          onFocus={warm}
+        >
           <Icon name="dots" size={phone ? 20 : 18} />
         </Menu.Trigger>
         <Menu.Portal container={portal ?? undefined}>
@@ -186,10 +297,18 @@ export function TidyMenu({
                 {count > 0 || !run ? 'Tidy' : runLabel(run)}
                 {count > 0 && <span className="ib-pmi-n">{formatCount(count)}</span>}
               </Menu.Item>
-              <Menu.Item className="ib-pmi" label="Refresh" data-tidy-refresh="" onClick={onRefresh}>
+              <Menu.Item className="ib-pmi" label="Refresh" data-tidy-refresh="" onClick={onRefresh} aria-keyshortcuts={refreshKeys}>
                 <Icon name="refresh" size={15} />
                 Refresh
+                <ShortcutHint scope={inboxAppShortcuts} action="refresh" className="ib-kbd ib-pmi-kbd" />
               </Menu.Item>
+              {view && (
+                <>
+                  <Menu.Separator className="ib-pm-sep" />
+                  <MenuViewChoice view={view.value} onChange={view.onChange} />
+                  {starredAbove && <MenuCheckbox label={STARRED_ABOVE_LABEL} checked={starredAbove.on} onChange={starredAbove.onChange} data-starred-above-option="" />}
+                </>
+              )}
               {look && onLook && (
                 <>
                   <Menu.Separator className="ib-pm-sep" />
@@ -258,7 +377,10 @@ function combineGroups(pairs: readonly InboxTidyCombine[]) {
 }
 
 /** The last run (when there is one), then the picker when there is something to ask. */
-function TidyPanel({ tidy, onDone }: { tidy: TidyController; onDone: () => void }) {
+function TidyPanel({ tidy: given, onDone }: { tidy: TidyController; onDone: () => void }) {
+  // A stale plan still being read again (`pending`: a phone taps ⋮, then Tidy, before it lands): drawn as while
+  // it is first read, never the old plan or run.
+  const tidy = given.pending ? { ...given, plan: null, run: null } : given;
   const { plan, run } = tidy;
   const offered = (plan?.agents.length ?? 0) > 0 || (plan?.combine?.length ?? 0) > 0;
   return (
@@ -310,7 +432,7 @@ function TidyPicker({ tidy, onDone, below }: { tidy: TidyController; onDone: () 
             <li key={agent.session}>
               <label className="ib-tidy-ag" data-tidy-agent={agent.session}>
                 <input type="checkbox" checked={!off.has(agent.session)} onChange={(event) => tick([agent.session], event.target.checked)} />
-                <HostMark host={agent.host} />
+                <HostMark host={agent.host} agent={agent.session} />
                 <span className="ib-tidy-nm">{agent.name}</span>
                 <em>{formatCount(agent.items.length)}</em>
               </label>
@@ -410,7 +532,7 @@ function RunPanel({ run }: { run: InboxTidyRun }) {
         {run.agents.map((agent) => (
           <li key={agent.session} className="ib-tidy-ag ib-tidy-run" data-tidy-run-agent={agent.session} data-state={agent.state}>
             <span />
-            <HostMark host={agent.host} />
+            <HostMark host={agent.host} agent={agent.session} />
             <span className="ib-tidy-nm">{agent.name}</span>
             <em>{runState(agent)}</em>
           </li>

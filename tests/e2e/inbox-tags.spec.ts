@@ -80,7 +80,7 @@ async function openReply(page: Page, threadId: string): Promise<ReturnType<Page[
   // itself once read (approval "inbox-reply-drafts"); the read can land between the check and
   // the click, so a click that finds no Reply is tried again. The test starts from an empty box.
   const box = pane.getByRole('textbox', { name: /^Reply to/ });
-  const reply = pane.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ });
+  const reply = pane.locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ });
   for (let attempt = 0; attempt < 10 && !(await box.isVisible()); attempt += 1) {
     await reply.click({ timeout: 1_000 }).catch(() => {});
   }
@@ -307,7 +307,7 @@ test('a tag in a file comment: the composer offers agents with "Goes to" and the
   const { page } = world;
   await fileCommentTaggingPi(page);
   await shot(page, '4-file-comment-desktop');
-  await page.getByRole('button', { name: 'Save' }).click();
+  await page.locator('[data-comment-popover]').getByRole('button', { name: 'Comment', exact: true }).click();
   await page.getByRole('button', { name: 'Reply', exact: true }).first().click();
   const reply = page.getByRole('textbox', { name: /^Reply to/ });
   await reply.fill('See my comment on the design.');

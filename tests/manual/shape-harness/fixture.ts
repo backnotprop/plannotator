@@ -3,13 +3,14 @@
 // the approved prototype's Picture and How it works rewritten as agent HTML;
 // the code files and patch are #2547's own (files/). Thread messages are
 // invented for the harness.
-import type { ShapeBoard, ShapeCodeView, ShapeRef, ShapeRequirements } from '@plannotator/core/shape';
+import type { ShapeBoard, ShapeCodeView, ShapeRef } from '@plannotator/core/shape';
 import patch from './files/snooze.patch.txt?raw';
 import intro from './files/snoozeIntro.ts.txt?raw';
 import server from './files/inbox-snooze-intro.ts.txt?raw';
 import rows from './files/snoozeIntroRows.ts.txt?raw';
 import dialog from './files/SnoozeIntro.tsx.txt?raw';
 import tryIt from './files/snoozeIntroTry.ts.txt?raw';
+import { SNOOZE_EXAMPLES } from './examples';
 
 export const PR_URL = 'https://github.com/backnotprop/plannotator/pull/2547';
 
@@ -219,24 +220,24 @@ const at = (b: { x: number; y: number; w?: number; h?: number }) => `left:${b.x}
 
 function howWide(m: SnoozeModel): string {
   const ax = A.x + A.w / 2, dx = D.x + D.w / 2;
-  const path = (step: number, d: string) => `<g data-step="${step}"><path class="ln draw" d="${d}" pathLength="1"/></g>`;
-  const label = (step: number, x: number, y: number, text: string) => `<div class="al" data-step="${step}" style="left:${x - 150}px;top:${y - 14}px;width:300px">${text}</div>`;
-  const onLabel = (step: number, x: number, y: number, text: string) => `<div class="al on" data-step="${step}" style="left:${x - 80}px;top:${y - 30}px;width:160px"><span>${text}</span></div>`;
+  const path = (step: number, d: string, edge = '') => `<g data-step="${step}"${edge ? ` data-edge="${edge}"` : ''}><path class="ln draw" d="${d}" pathLength="1"/></g>`;
+  const label = (step: number, x: number, y: number, text: string, edge = '') => `<div class="al" data-step="${step}"${edge ? ` data-edge="${edge}"` : ''} style="left:${x - 150}px;top:${y - 14}px;width:300px">${text}</div>`;
+  const onLabel = (step: number, x: number, y: number, text: string, edge = '') => `<div class="al on" data-step="${step}"${edge ? ` data-edge="${edge}"` : ''} style="left:${x - 80}px;top:${y - 30}px;width:160px"><span>${text}</span></div>`;
   return `<div class="c">
   <div class="zone" data-step="0" style="left:0;top:0">When</div>
   <svg class="svg" width="${W}" height="520" viewBox="0 0 ${W} 520" aria-hidden="true">
     <g data-step="0"><path class="ruler draw" d="M${ax} 50 H${dx} M${ax} 42 V58 M${dx} 42 V58" pathLength="1"/></g>
-    ${path(2, `M${A.x + A.w + 4} ${MID} H${BND.x - 4} ${hr(BND.x - 4, MID)}`)}
-    ${path(4, `M${BND.x + BND.w + 4} ${MID} H${D.x - 4} ${hr(D.x - 4, MID)}`)}
-    ${path(3, `M${BND.x - 4} ${F.y + F.h / 2} H${F.x + F.w + 4} ${hl(F.x + F.w + 4, F.y + F.h / 2)}`)}
-    ${path(5, `M${T.x + T.w / 2} ${D.y + D.h + 4} V${T.y - 4} ${hd(T.x + T.w / 2, T.y - 4)}`)}
-    ${path(6, `M${N.x + N.w / 2} ${D.y + D.h + 4} V${N.y - 4} ${hd(N.x + N.w / 2, N.y - 4)}`)}
+    ${path(2, `M${A.x + A.w + 4} ${MID} H${BND.x - 4} ${hr(BND.x - 4, MID)}`, 'checks')}
+    ${path(4, `M${BND.x + BND.w + 4} ${MID} H${D.x - 4} ${hr(D.x - 4, MID)}`, 'all-hold')}
+    ${path(3, `M${BND.x - 4} ${F.y + F.h / 2} H${F.x + F.w + 4} ${hl(F.x + F.w + 4, F.y + F.h / 2)}`, 'any-fails')}
+    ${path(5, `M${T.x + T.w / 2} ${D.y + D.h + 4} V${T.y - 4} ${hd(T.x + T.w / 2, T.y - 4)}`, 'try-it')}
+    ${path(6, `M${N.x + N.w / 2} ${D.y + D.h + 4} V${N.y - 4} ${hd(N.x + N.w / 2, N.y - 4)}`, 'closes')}
   </svg>
-  ${label(2, (A.x + A.w + BND.x) / 2, MID - 16, 'checks')}
-  ${label(4, (BND.x + BND.w + D.x) / 2, MID - 16, 'all hold')}
-  ${label(3, (F.x + F.w + BND.x) / 2, F.y + F.h / 2 - 16, 'any fails')}
-  ${onLabel(5, T.x + T.w / 2, (D.y + D.h + T.y) / 2, 'Try it')}
-  ${onLabel(6, N.x + N.w / 2, (D.y + D.h + N.y) / 2, `<span data-mark="how-never">${esc(m.neverLabel)}</span>`)}
+  ${label(2, (A.x + A.w + BND.x) / 2, MID - 16, 'checks', 'checks')}
+  ${label(4, (BND.x + BND.w + D.x) / 2, MID - 16, 'all hold', 'all-hold')}
+  ${label(3, (F.x + F.w + BND.x) / 2, F.y + F.h / 2 - 16, 'any fails', 'any-fails')}
+  ${onLabel(5, T.x + T.w / 2, (D.y + D.h + T.y) / 2, 'Try it', 'try-it')}
+  ${onLabel(6, N.x + N.w / 2, (D.y + D.h + N.y) / 2, `<span data-mark="how-never">${esc(m.neverLabel)}</span>`, 'closes')}
   <div class="rl" data-step="0" style="left:${ax - 100}px;top:64px;width:200px">you leave the thread</div>
   <div class="rl mid" data-step="0" style="left:${(ax + dx) / 2 - 120}px;top:20px;width:240px">a calm moment</div>
   <div class="rl" data-step="0" style="left:${dx - 100}px;top:64px;width:200px">it opens, once</div>
@@ -251,55 +252,27 @@ function howWide(m: SnoozeModel): string {
 }
 
 function howTall(m: SnoozeModel): string {
-  const down = (step: number, label?: string) => `<div class="down" data-step="${step}"><svg width="16" height="34" viewBox="0 0 16 34" aria-hidden="true"><path class="ln draw" pathLength="1" d="M8 2 V31 M2 24 L8 31 L14 24"/></svg>${label ? `<span class="al">${label}</span>` : ''}</div>`;
+  const down = (step: number, label?: string, edge = '') => `<div class="down" data-step="${step}"${edge ? ` data-edge="${edge}"` : ''}><svg width="16" height="34" viewBox="0 0 16 34" aria-hidden="true"><path class="ln draw" pathLength="1" d="M8 2 V31 M2 24 L8 31 L14 24"/></svg>${label ? `<span class="al">${label}</span>` : ''}</div>`;
   return `<div class="t">
   <div class="zone" data-step="0">When</div>
   <div class="box" data-step="1"><div class="bi" data-mark="how-leave"><b>A quiet moment after you leave a thread</b><span>that still waits on you</span></div></div>
-  ${down(2, 'checks')}
+  ${down(2, 'checks', 'checks')}
   <div class="bound" data-step="3"><div class="zone in">How · all must hold</div>${rules(m)}</div>
-  <div class="split" data-step="4">any fails: <b>nothing shows</b>, the next leave is the next chance</div>
-  ${down(5, 'all hold')}
+  <div class="split" data-step="4" data-edge="any-fails" data-mark="how-nothing">any fails: <b>nothing shows</b>, the next leave is the next chance</div>
+  ${down(5, 'all hold', 'all-hold')}
   <div class="zone" data-step="6">What</div>
   <div class="box what" data-step="7"><div class="bi" data-mark="how-dialog" data-code="${P.dialog}#L1"><span class="new">New</span><b>Snooze a thread until later</b><span class="mini"><span>Got it</span><span class="pri">Try it</span></span></div></div>
   <div class="pair" data-step="8">
-    <div><span class="al">Try it</span><div class="box"><div class="bi" data-mark="how-menu" data-code="${P.tryIt}#L1"><b>The real Snooze menu</b><span>nothing snoozed until you pick</span></div></div></div>
-    <div><span class="al"><span data-mark="how-never">${esc(m.neverLabel)}</span></span><div class="box quiet"><div class="bi" data-mark="how-again"><b>Never shown again</b></div></div></div>
+    <div><span class="al" data-edge="try-it">Try it</span><div class="box"><div class="bi" data-mark="how-menu" data-code="${P.tryIt}#L1"><b>The real Snooze menu</b><span>nothing snoozed until you pick</span></div></div></div>
+    <div><span class="al" data-edge="closes"><span data-mark="how-never">${esc(m.neverLabel)}</span></span><div class="box quiet"><div class="bi" data-mark="how-again"><b>Never shown again</b></div></div></div>
   </div>
 </div>`;
 }
 
-// ───────────────────────── Requirements ─────────────────────────
+// ───────────────────────── views.know ─────────────────────────
 
-function reqs(m: SnoozeModel): ShapeRequirements {
-  const when = [
-    { id: 'r-when', text: 'At a quiet moment, after you leave a thread that still waits on you.', code: { path: P.when, line: 80 } },
-    { id: 'r-typing', text: 'Never over a half-typed reply.', code: { path: P.when, line: 89 } },
-    ...(m.calmReq ? [{ id: 'r-calm', text: 'Only when the page is calm: open 60 s, 3+ rows, no other one-time dialog, nothing over it.', code: { path: P.when, line: 3 } }] : []),
-  ];
-  return {
-    heading: 'What I understand you want',
-    groups: [
-      { id: 'who', label: 'Who gets it', items: [
-        { id: 'r-2days', text: 'At least 2 days since you started. No active-days rule.[^4][^9]', code: { path: P.who, line: 14 } },
-        { id: 'r-never', text: 'Never if you’ve snoozed. A snooze counts once it succeeds.', code: { path: P.who, line: 30 } },
-        { id: 'r-who', text: 'You, never a guest on your tailnet.', code: { path: P.who, line: 10 } },
-      ] },
-      { id: 'when', label: 'When it shows', items: when },
-      { id: 'what', label: 'What it shows', items: [
-        { id: 'r-new', text: '“New”, then “Snooze a thread until later”.', code: { path: P.dialog, line: 151 } },
-        { id: 'r-b', text: 'Version B: the real “Snooze until” menu, pointer on Tomorrow, Undo toast.[^2]', code: { path: P.dialog, line: 1 } },
-      ] },
-      { id: 'after', label: 'What happens after', items: [
-        { id: 'r-try', text: 'Try it opens the real Snooze menu on the thread you just left. Nothing is snoozed until you pick.', code: { path: P.tryIt, line: 3 } },
-        { id: 'r-once', text: `${m.onceLabel}.[^5]`, code: { path: P.when, line: 16 } },
-      ] },
-      { id: 'where', label: 'Where', items: [{ id: 'r-same', text: 'The same dialog on your computer and your own phone.' }] },
-    ],
-    foot: [
-      { label: 'Open', text: 'Nothing. No question waits on you.' },
-      { label: 'Next', text: `Merged in [#2547](${PR_URL}). It goes out with 0.28.48; you don’t need to publish core for it.` },
-    ],
-  };
+function know(m: SnoozeModel): string {
+  return `It shows at a quiet moment, after you leave a thread that still waits on you, and never over a half-typed reply${m.calmReq ? ', and only when the page is calm' : ''}. You get it **2 days** after you started, unless you already snoozed.[^4][^9]\n\nTry it opens the real Snooze menu on the thread you just left. Nothing is snoozed until you pick. ${m.onceLabel}.[^5] It goes out with 0.28.48 ([#2547](${PR_URL})); no question waits on you.`;
 }
 
 // ───────────────────────── Code ─────────────────────────
@@ -401,8 +374,8 @@ export function snoozeBoard(m: SnoozeModel, stage: 'before' | 'after' = 'after')
     asOf: '2026-11-03T05:39:00.000Z',
     views: {
       picture: { html: picture(m), css: PICTURE_CSS },
-      how: { html: howWide(m), css: HOW_CSS, width: 1180, height: 520, tall: { html: howTall(m) } },
-      reqs: reqs(m),
+      how: { html: howWide(m), css: HOW_CSS, width: 1180, height: 520, tall: { html: howTall(m) }, examples: SNOOZE_EXAMPLES },
+      know: know(m),
       code: code(stage),
     },
     refs: REFS,

@@ -24,6 +24,8 @@
  * There is no auto-detection anywhere in this module.
  */
 
+import { themedLinesToHtml, tokenStyle, type ThemedTokenish } from './codeHighlightHtml';
+
 type PierreModule = typeof import('@pierre/diffs');
 
 /**
@@ -59,19 +61,13 @@ export function codeBlockKeepsLayout(content: string): boolean {
   return ALIGNED_LAYOUT.test(content);
 }
 
-/** Shiki's `FontStyle` bitmask. Inlined so this module needs no shiki types. */
-const FONT_STYLE_ITALIC = 1;
-const FONT_STYLE_BOLD = 2;
-const FONT_STYLE_UNDERLINE = 4;
-const FONT_STYLE_STRIKETHROUGH = 8;
-
 let pierre: PierreModule | undefined;
 let pierreLoad: Promise<PierreModule | undefined> | undefined;
 
 /** `${lang} ${theme}` pairs attached to the shared highlighter. */
 const ready = new Set<string>();
-/** Pairs the highlighter refused (unknown grammar or theme). Never retried. */
-const rejected = new Set<string>();
+/** Pairs the highlighter refused (unknown grammar or theme), with the error it gave. Never retried. */
+const rejected = new Map<string, unknown>();
 const inflight = new Map<string, Promise<boolean>>();
 
 const pairKey = (lang: string, theme: string) => `${lang} ${theme}`;
@@ -87,41 +83,6 @@ function loadPierre(): Promise<PierreModule | undefined> {
   return pierreLoad;
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
-
-interface ThemedTokenish {
-  content: string;
-  color?: string;
-  bgColor?: string;
-  fontStyle?: number;
-  htmlStyle?: Record<string, string> | string;
-}
-
-function tokenStyle(token: ThemedTokenish): string {
-  if (typeof token.htmlStyle === 'string') return token.htmlStyle;
-  const parts: string[] = [];
-  if (token.htmlStyle) {
-    for (const [prop, value] of Object.entries(token.htmlStyle)) parts.push(`${prop}:${value}`);
-  }
-  if (token.color) parts.push(`color:${token.color}`);
-  if (token.bgColor) parts.push(`background-color:${token.bgColor}`);
-  const fontStyle = token.fontStyle ?? 0;
-  if (fontStyle > 0) {
-    if (fontStyle & FONT_STYLE_ITALIC) parts.push('font-style:italic');
-    if (fontStyle & FONT_STYLE_BOLD) parts.push('font-weight:bold');
-    const decorations: string[] = [];
-    if (fontStyle & FONT_STYLE_UNDERLINE) decorations.push('underline');
-    if (fontStyle & FONT_STYLE_STRIKETHROUGH) decorations.push('line-through');
-    if (decorations.length) parts.push(`text-decoration:${decorations.join(' ')}`);
-  }
-  return parts.join(';');
-}
-
 /**
  * Highlighted markup for `code`, or `null` when it cannot be produced right now
  * (highlighter not loaded yet, grammar/theme not attached yet, or the tokens do
@@ -134,28 +95,20 @@ function tokenStyle(token: ThemedTokenish): string {
 export function highlightToHtml(code: string, lang: string, theme: string): string | null {
   const lines = themedLines(code, lang, theme);
   if (!lines) return null;
-
-  // Invariant: the rendered text must be byte-identical to the source. The
-  // annotation layer addresses these blocks by text offset, so a tokenizer that
-  // normalised line endings (or dropped a trailing newline) would silently
-  // misplace every highlight in the block. Bail to plain text instead.
-  let html = '';
-  let plain = '';
-  for (let i = 0; i < lines.length; i++) {
-    if (i > 0) {
-      html += '\n';
-      plain += '\n';
-    }
-    for (const token of lines[i]!) {
-      plain += token.content;
-      const style = tokenStyle(token);
-      html += style
-        ? `<span style="${style}">${escapeHtml(token.content)}</span>`
-        : escapeHtml(token.content);
-    }
-  }
-  return plain === code ? html : null;
+  return themedLinesToHtml(lines, code);
 }
+
+/**
+ * Shiki's time budget for one line (its default). A line that runs over it is
+ * cut short: the rest of the line is one token in the plain colour, and the
+ * lines after it start from the wrong state. A grammar compiles its regexes as
+ * its first fence is tokenized; in JavaScriptCore (Safari) that takes most of a
+ * second for TypeScript, which used to cut the first line of a page's first
+ * TypeScript fence short, so it coloured differently from every later fence.
+ */
+const TOKENIZE_TIME_LIMIT_MS = 500;
+/** Passes over a fence at most, while each one takes the budget. */
+const TOKENIZE_PASSES = 3;
 
 /** Shiki's tokens for `code`, or null when the pair is not attached (or the tokenizer threw). */
 function themedLines(code: string, lang: string, theme: string): ThemedTokenish[][] | null {
@@ -169,7 +122,15 @@ function themedLines(code: string, lang: string, theme: string): ThemedTokenish[
     return null;
   }
   try {
-    return highlighter.codeToTokens(code, { lang, theme }).tokens as ThemedTokenish[][];
+    // A pass that took the budget may have had a line cut short. Each pass compiles what it reached, so the
+    // next one gets further; a line that is slow for its own sake stays cut short, as before, after the last.
+    let tokens: ThemedTokenish[][] = [];
+    for (let pass = 0; pass < TOKENIZE_PASSES; pass++) {
+      const started = performance.now();
+      tokens = highlighter.codeToTokens(code, { lang, theme, tokenizeTimeLimit: TOKENIZE_TIME_LIMIT_MS }).tokens as ThemedTokenish[][];
+      if (performance.now() - started < TOKENIZE_TIME_LIMIT_MS - 10) break;
+    }
+    return tokens;
   } catch {
     ready.delete(pairKey(lang, theme));
     return null;
@@ -234,8 +195,8 @@ export function ensureHighlight(lang: string, theme: string): Promise<boolean> {
       ready.add(key);
       return true;
     })
-    .catch(() => {
-      rejected.add(key);
+    .catch((cause: unknown) => {
+      rejected.set(key, cause);
       return false;
     })
     .then((ok) => {
@@ -245,6 +206,29 @@ export function ensureHighlight(lang: string, theme: string): Promise<boolean> {
 
   inflight.set(key, load);
   return load;
+}
+
+/**
+ * Let a pair that failed to attach try again on its next `ensureHighlight`.
+ *
+ * A host whose grammars are fetched on first use (a code-split build) can lose
+ * one to a server that was away for a moment; without this the pair stays
+ * plain for the life of the page. Nothing in ui calls it: a pair that failed
+ * stays rejected unless the host asks.
+ */
+export function forgetHighlightRejection(lang: string, theme: string): void {
+  rejected.delete(pairKey(lang, theme));
+}
+
+/**
+ * Why a pair failed to attach: `{ cause }`, the error its load gave, or null
+ * when it has not failed. A host whose grammars are fetched on first use can
+ * tell a chunk its server no longer has (asking again cannot help) from one a
+ * dropped link lost. Nothing in ui calls it.
+ */
+export function highlightRejection(lang: string, theme: string): { cause: unknown } | null {
+  const key = pairKey(lang, theme);
+  return rejected.has(key) ? { cause: rejected.get(key) } : null;
 }
 
 /** Monotonic stamp per element so a slow async highlight from a previous
@@ -285,6 +269,236 @@ function notifyHighlightSwap(el: HTMLElement): void {
   }
 }
 
+// ── Fences off screen (opt-in: configurePlannotatorUI({ deferOffscreenCodeHighlight: true })) ──
+//
+// Highlighted markup costs far more than the code's own text: Shiki's tokens
+// (~5 ms per 100 lines with the JavaScript engine) and then a span per token
+// for the browser to parse, style and lay out (a long agent thread with a
+// few hundred fences is ~400K spans, ~2 s of layout). With this on, a fence
+// keeps its plain text (the same characters, the same size) until it comes
+// near the screen, and is highlighted before the frame that first draws it:
+//
+//   - A ResizeObserver watches each waiting fence. Its first notice comes
+//     after layout and before paint, so a fence on screen when it is drawn
+//     (or when it stops being hidden) is highlighted before that paint.
+//   - A scroll anywhere (capture) runs before the frame that shows the new
+//     place, so a fence scrolled into view is highlighted before it shows.
+//   - The rest are highlighted in idle time, nearest first, a slice at a time,
+//     so they are done soon after the thread opens and print, find and copy
+//     see finished fences.
+//
+// Nothing changes how a fence looks: the plain text is what every fence shows
+// today until its grammar is attached, and a fence on screen is never drawn
+// plain. A host that does not turn it on keeps the synchronous highlight.
+
+let deferOffscreen = false;
+
+/** Turn the off-screen deferral on or off (configurePlannotatorUI). Off finishes every waiting fence now. */
+export function setDeferOffscreenCodeHighlight(on: boolean): void {
+  deferOffscreen = on;
+  if (!on) flushPendingHighlights();
+}
+
+/**
+ * A maker of a fence's markup off the main thread (a host's Web Worker): the
+ * same characters `highlightToHtml` gives (`./codeHighlightHtml` from the same
+ * tokens), or null when it cannot make them. Used only for fences waiting off
+ * screen: their tokens are made there, and only the markup is written here. A
+ * fence that comes near before its markup is back is highlighted here, as
+ * without a worker.
+ */
+export interface CodeHighlightWorker {
+  html(code: string, lang: string, theme: string): Promise<string | null>;
+}
+
+let highlightWorker: CodeHighlightWorker | null = null;
+
+/** Set (or clear) the background maker of waiting fences' markup (configurePlannotatorUI). */
+export function setCodeHighlightWorker(next: CodeHighlightWorker | null): void {
+  highlightWorker = next;
+}
+
+interface PendingHighlight {
+  code: string;
+  lang: string;
+  theme: string;
+  seq: number;
+  /** The worker's markup: undefined while it is being made (or with no worker), null when it could not. */
+  html?: string | null;
+  /** Sent to the worker. */
+  asked?: boolean;
+}
+
+/** Fences drawn plain, waiting to come near the screen (or for idle time). */
+const pending = new Map<HTMLElement, PendingHighlight>();
+let sizes: ResizeObserver | null = null;
+let watching = false;
+let backlog: { cancel: () => void } | null = null;
+
+/** How far beyond the window's own height (above and below) a fence counts as near: one more screen each way. */
+const NEAR_SCREENS = 1;
+/** Idle work per slice; one fence is always done even when it takes longer. */
+const BACKLOG_SLICE_MS = 8;
+/** requestIdleCallback's timeout, and the pause between slices where there is no requestIdleCallback (Safari). */
+const BACKLOG_TIMEOUT_MS = 1000;
+const BACKLOG_GAP_MS = 32;
+
+function canDefer(): boolean {
+  return deferOffscreen && typeof window !== 'undefined' && typeof ResizeObserver === 'function';
+}
+
+function viewHeight(): number {
+  return window.innerHeight || document.documentElement?.clientHeight || 0;
+}
+
+/** Distance from the window's view (0 inside it), or null when the fence is not drawn (hidden, detached). */
+function distanceFromView(el: HTMLElement, height: number): number | null {
+  const box = el.getBoundingClientRect();
+  if (box.width === 0 && box.height === 0) return null;
+  if (box.bottom < 0) return -box.bottom;
+  if (box.top > height) return box.top - height;
+  return 0;
+}
+
+function forgetPending(el: HTMLElement): void {
+  pending.delete(el);
+  sizes?.unobserve(el);
+}
+
+function highlightPending(el: HTMLElement, job: PendingHighlight): void {
+  forgetPending(el);
+  if (renderSeq.get(el) !== job.seq || !el.isConnected) return;
+  const html = typeof job.html === 'string' ? job.html : highlightToHtml(job.code, job.lang, job.theme);
+  if (html === null) return;
+  el.innerHTML = html;
+  notifyHighlightSwap(el);
+}
+
+/**
+ * Highlight every waiting fence near the view. All reads first, then the writes: one layout, not one per fence.
+ * Fences drawn but farther away are left to the idle backlog.
+ */
+function highlightNear(): void {
+  const height = viewHeight();
+  const reach = height * NEAR_SCREENS;
+  const due: [HTMLElement, PendingHighlight][] = [];
+  let farther = false;
+  for (const [el, job] of pending) {
+    if (!el.isConnected) {
+      forgetPending(el);
+      continue;
+    }
+    const distance = distanceFromView(el, height);
+    if (distance === null) continue;
+    if (distance <= reach) due.push([el, job]);
+    else farther = true;
+  }
+  for (const [el, job] of due) highlightPending(el, job);
+  if (farther) scheduleBacklog();
+  settle();
+}
+
+/** One idle slice: the nearest waiting fences until the slice's time is used. Whether drawn fences are left. */
+function drainBacklog(): boolean {
+  const height = viewHeight();
+  const order: [HTMLElement, PendingHighlight, number][] = [];
+  for (const [el, job] of pending) {
+    if (!el.isConnected) {
+      forgetPending(el);
+      continue;
+    }
+    // A fence not drawn now (inside a hidden part) waits for its ResizeObserver notice, and one whose markup the
+    // worker is still making waits for it (its arrival asks for another slice).
+    if (job.asked && job.html === undefined) continue;
+    const distance = distanceFromView(el, height);
+    if (distance !== null) order.push([el, job, distance]);
+  }
+  order.sort((a, b) => a[2] - b[2]);
+  const end = performance.now() + BACKLOG_SLICE_MS;
+  let done = 0;
+  for (const [el, job] of order) {
+    highlightPending(el, job);
+    done++;
+    if (performance.now() >= end) break;
+  }
+  return done < order.length;
+}
+
+function scheduleBacklog(): void {
+  if (backlog !== null || pending.size === 0) return;
+  const run = () => {
+    backlog = null;
+    if (drainBacklog()) scheduleBacklog();
+    settle();
+  };
+  const idle = (globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number }).requestIdleCallback;
+  const cancelIdle = (globalThis as { cancelIdleCallback?: (id: number) => void }).cancelIdleCallback;
+  if (typeof idle === 'function') {
+    const id = idle(run, { timeout: BACKLOG_TIMEOUT_MS });
+    backlog = { cancel: () => cancelIdle?.(id) };
+  } else {
+    const id = setTimeout(run, BACKLOG_GAP_MS);
+    backlog = { cancel: () => clearTimeout(id) };
+  }
+}
+
+const onViewMoved = () => highlightNear();
+const onBeforePrint = () => flushPendingHighlights();
+
+/** Listen while fences wait, stop when none is left. Reads no layout (it runs once per fence as fences mount). */
+function settle(): void {
+  if (pending.size > 0 && !watching) {
+    watching = true;
+    document.addEventListener('scroll', onViewMoved, { capture: true, passive: true });
+    window.addEventListener('resize', onViewMoved);
+    window.addEventListener('beforeprint', onBeforePrint);
+  } else if (pending.size === 0) {
+    backlog?.cancel();
+    backlog = null;
+    if (watching) {
+      watching = false;
+      document.removeEventListener('scroll', onViewMoved, { capture: true });
+      window.removeEventListener('resize', onViewMoved);
+      window.removeEventListener('beforeprint', onBeforePrint);
+    }
+  }
+}
+
+function waitForView(el: HTMLElement, job: PendingHighlight): void {
+  sizes ??= new ResizeObserver(() => highlightNear());
+  pending.set(el, job);
+  const worker = highlightWorker;
+  if (worker) {
+    job.asked = true;
+    const landed = (html: string | null) => {
+      job.html = html;
+      if (pending.get(el) === job) scheduleBacklog();
+    };
+    worker.html(job.code, job.lang, job.theme).then(landed, () => landed(null));
+  }
+  // Observed again, so its first notice (after the next layout, before that paint) decides whether it is near.
+  sizes.unobserve(el);
+  sizes.observe(el);
+  settle();
+}
+
+/**
+ * Highlight now every fence still waiting (all of them, or those inside `root`), for a reader of the
+ * DOM that needs the finished markup: print, or a host that lays ranges over the text (search hits).
+ */
+export function flushPendingHighlights(root?: Node): void {
+  for (const [el, job] of [...pending]) {
+    if (root && !root.contains(el)) continue;
+    highlightPending(el, job);
+  }
+  if (typeof window !== 'undefined') settle();
+}
+
+/** Whether `el` waits for the view (tests). */
+export function isHighlightPending(el: HTMLElement): boolean {
+  return pending.has(el);
+}
+
 /**
  * Drop-in replacement for `hljs.highlightElement(el)`.
  *
@@ -292,7 +506,8 @@ function notifyHighlightSwap(el: HTMLElement): void {
  * the very first paint (no layout shift, no empty flash), then swaps in
  * highlighted markup when the grammar is attached. When the grammar is already
  * attached the highlighted markup is written straight away with no intermediate
- * plain state.
+ * plain state. With `deferOffscreenCodeHighlight` on, a fence away from the
+ * view stays plain until it comes near, and is highlighted before it shows.
  */
 export function applyHighlight(
   el: HTMLElement,
@@ -305,10 +520,26 @@ export function applyHighlight(
 
   // #1212: a fence with no language stays plain. Never guess.
   if (!lang) {
+    if (pending.has(el)) forgetPending(el);
     el.textContent = code;
     notifyHighlightSwap(el);
     return;
   }
+
+  if (canDefer()) {
+    // What it waited to show is not what it shows now (a new theme waits for its own attach first).
+    if (pending.has(el)) forgetPending(el);
+    el.textContent = code;
+    notifyHighlightSwap(el);
+    const job = { code, lang, theme, seq };
+    if (pierre && ready.has(pairKey(lang, theme))) waitForView(el, job);
+    else
+      void ensureHighlight(lang, theme).then((ok) => {
+        if (ok && renderSeq.get(el) === seq && el.isConnected) waitForView(el, job);
+      });
+    return;
+  }
+  if (pending.has(el)) forgetPending(el);
 
   const immediate = highlightToHtml(code, lang, theme);
   if (immediate !== null) {
@@ -328,8 +559,12 @@ export function applyHighlight(
   });
 }
 
-/** Test seam: forget every cached attachment and module handle. */
+/** Test seam: forget every cached attachment and module handle (and every fence waiting for the view). */
 export function __resetCodeHighlightCacheForTests(): void {
+  for (const el of [...pending.keys()]) forgetPending(el);
+  backlog?.cancel();
+  backlog = null;
+  if (watching && typeof window !== 'undefined') settle();
   ready.clear();
   rejected.clear();
   inflight.clear();

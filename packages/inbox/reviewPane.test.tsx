@@ -14,10 +14,16 @@
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
+import type { ShapeHost } from '@plannotator/ui/components/shape';
+import type { InboxShapes } from './shape/useInboxShapes';
+
+const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, rowShown: false, subscribe: () => () => {}, refresh: () => {} };
 
 const hasDom = typeof document !== 'undefined';
 if (hasDom) {
@@ -78,6 +84,10 @@ let listHead = 'a'.repeat(40);
 let listReads: string[] = [];
 /** The thread's annotation records (`/attachments`): a guided-review comment when a test writes one. */
 let annotations: Record<string, unknown>[] = [];
+/** What asked `GET /api/inbox/pulls/details`. */
+let detailsReads: string[] = [];
+/** `GET /api/inbox/pulls/diff`: the PR's own diff, when a test gives one (else the door answers `{}`, a diff not read). */
+let pullDiffAnswer: Record<string, unknown> | null = null;
 const PR_KEY = 'github.com/acme/ledger#880';
 const PR = {
   key: PR_KEY, platform: 'github', host: 'github.com', repo: 'acme/ledger', number: 880, url: 'https://github.com/acme/ledger/pull/880', title: 'RTL layout',
@@ -94,6 +104,8 @@ beforeEach(() => {
   listHead = 'a'.repeat(40);
   listReads = [];
   annotations = [];
+  detailsReads = [];
+  pullDiffAnswer = null;
   window.localStorage.clear();
   others = [OTHER];
   backs = 0;
@@ -112,6 +124,11 @@ beforeEach(() => {
       }
       return Response.json({});
     }
+    if (path.includes('/pulls/details')) {
+      detailsReads.push(path);
+      return Response.json({ key: PR_KEY, description: 'Flips the layout for right-to-left scripts.', labels: ['i18n'], reviewers: [], checks: [{ name: 'unit', state: 'fail' }], comments: [{ id: 'c1', author: 'mira', at: '2026-10-11T10:20:00.000Z', body: 'Does this handle Hebrew?', url: `${PR.url}#c1`, file: 'src/auth.ts', line: 1 }] });
+    }
+    if (path.includes('/api/inbox/pulls/diff') && pullDiffAnswer) return Response.json(pullDiffAnswer);
     if (/\/api\/inbox\/pulls(\?|$)/.test(path)) {
       listReads.push(path);
       return Response.json({ fetched_at: null, hosts: [], pulls: [{ ...PR, head_sha: listHead }], links: {}, projects: {}, cards: {} });
@@ -143,14 +160,14 @@ async function settle() {
   }
 }
 
-async function render(on: InboxThread = thread) {
+async function render(on: InboxThread = thread, review: InboxMessageWire = message) {
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
     root.render(
       <div className="pn-inbox">
-        <ReviewPane thread={on} message={message} onBack={() => (backs += 1)} onClose={() => {}} onSent={() => {}} />
+        <ReviewPane thread={on} message={review} codeReview onBack={() => (backs += 1)} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />
       </div>,
     );
   });
@@ -164,9 +181,32 @@ const click = async (selector: string) => {
   await settle();
 };
 
+test.skipIf(!hasDom)('the top bar holds what the rail held: Walkthrough | All files, the chapter menu, the title, then the diff controls; no rail', async () => {
+  await render();
+  const bar = document.querySelector<HTMLElement>('[data-review-message] .ib-vhead')!;
+  expect(document.querySelector('[data-review-message] .ib-rrail')).toBeNull();
+  expect(bar.querySelector('[data-review-mode-choice="walkthrough"]')).not.toBeNull();
+  expect(bar.querySelector('[data-review-mode-choice="files"]')).not.toBeNull();
+  expect(bar.querySelector('[data-review-jump]')?.textContent).toContain('Overview');
+  expect(bar.querySelector('[data-review-title]')?.textContent).toBe('Token refresh');
+  // Less to read: the way back is its arrow, still named for a screen reader and a tooltip.
+  const back = bar.querySelector<HTMLElement>('.ib-back')!;
+  expect(back.textContent).toBe('');
+  expect(back.getAttribute('aria-label')).toBe('Thread');
+  // Nothing of the old header's: the review's name is said once.
+  expect(bar.textContent).not.toContain('· from');
+  // The diff controls are the bar's (approval "diff-controls-headers"): one Split / Unified button, not the old radios.
+  const controls = bar.querySelector<HTMLElement>('[data-diff-controls]')!;
+  expect(controls).not.toBeNull();
+  expect(bar.querySelector('[data-review-title]')!.compareDocumentPosition(controls) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(controls.querySelector('[data-diff-layout-toggle]')).not.toBeNull();
+  expect(controls.querySelector('[data-diff-display-options]')).not.toBeNull();
+  expect(document.querySelector('[data-review-message] [data-diff-style-switch]')).toBeNull();
+});
+
 test.skipIf(!hasDom)("a teammate's pull request (the thread holds only theirs): the review reads with no Approve or Request changes, and its card waits on no verdict", async () => {
   await render({ ...thread, pull_theirs: true });
-  expect(document.querySelector('[data-review-chapters]')).not.toBeNull();
+  expect(document.querySelector('[data-review-jump="walkthrough"]')).not.toBeNull();
   expect(document.querySelector('[data-review-decision]')).toBeNull();
   expect(document.querySelector('[data-decision-primary]')).toBeNull();
   expect(document.querySelector('[data-asker-ended]')).toBeNull();
@@ -186,6 +226,33 @@ test.skipIf(!hasDom)("a teammate's pull request (the thread holds only theirs): 
   };
   expect(card(true)).toContain('Waiting on you');
   expect(card(false)).not.toContain('Waiting on you');
+});
+
+test.skipIf(!hasDom)('a walkthrough (code as it is) reads with no Approve or Request changes and no Split, and its card has no verdict or +/- counts', async () => {
+  const walk = { ...message, guide: { ...message.guide!, additions: 0, deletions: 0, walkthrough: true as const } } as InboxMessageWire;
+  await render({ ...thread, messages: [walk] }, walk);
+  expect(document.querySelector('[data-review-message]')?.getAttribute('aria-label')).toBe('Walkthrough');
+  expect(!!document.querySelector('[data-review-decision]')).toBe(false);
+  expect(!!document.querySelector('[data-decision-primary]')).toBe(false);
+  // Nothing is marked as changed, so Split would draw the same code twice: the bar keeps its other controls only.
+  const controls = document.querySelector<HTMLElement>('[data-review-message] [data-diff-controls]')!;
+  expect(!!controls).toBe(true);
+  expect(!!controls.querySelector('[data-diff-layout-toggle]')).toBe(false);
+  expect(!!controls.querySelector('[data-diff-display-options]')).toBe(true);
+  expect(posted).toEqual([]);
+  act(() => root?.unmount());
+  host?.remove();
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  act(() => {
+    root = createRoot(host!);
+    root.render(<ReviewCard guide={walk.guide!} outcome={null} verdict={false} onOpen={() => {}} />);
+  });
+  const words = host!.textContent ?? '';
+  expect(words).toContain('Walkthrough');
+  expect(words).toContain('Open walkthrough');
+  expect(words).not.toContain('Waiting on you');
+  expect(words).not.toContain('+0');
 });
 
 test.skipIf(!hasDom)("a teammate's PR posts its full verdict on GitHub, while its agent path stays verdict-free (no reply, no choice)", async () => {
@@ -246,6 +313,23 @@ test.skipIf(!hasDom)('after a post: a follow-up main comment still posts; a push
   expect(reviewPosts.at(-1)).toMatchObject({ action: 'approve', head_sha: 'b'.repeat(40) });
 });
 
+test.skipIf(!hasDom)('a force-push under a post (pull_commit_gone): the PR is read again, and the decision is back at its new head', async () => {
+  await render({ ...thread, pull_theirs: true, pull_keys: [PR_KEY] });
+  reviewReply = () => Response.json({ error: 'The commit you read is no longer on this pull request.', code: 'pull_commit_gone' }, { status: 409 });
+  listHead = 'b'.repeat(40);
+  await click('[data-review-posts] [data-decision-primary]');
+  await act(async () => dialogButton('Approve').click());
+  await settle();
+  expect(listReads.at(-1)).toContain('refresh=1');
+  expect(document.querySelector('[data-review-pull-moved]')?.getAttribute('data-review-pull-moved')).toBe('read');
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  reviewReply = () => Response.json({ ok: true, prUrl: PR.url, submission: { status: 'complete' } });
+  await click('[data-review-posts] [data-decision-primary]');
+  await act(async () => dialogButton('Approve').click());
+  await settle();
+  expect(reviewPosts.at(-1)).toMatchObject({ action: 'approve', head_sha: 'b'.repeat(40) });
+});
+
 test.skipIf(!hasDom)('a comment posted once is never posted again, even after a push (pull_moved) and a read at the new head', async () => {
   const comment = { id: 'ann-1', type: 'comment', scope: 'line', filePath: 'src/settings/Layout.tsx', lineStart: 3, lineEnd: 3, side: 'new', text: 'Mirror the icons.', createdAt: 1 };
   annotations = [{ id: 'rec-1', message_id: REVIEW, created_at: '2026-10-11T10:40:00.000Z', annotation: comment, guide: { line_start: 3, line_end: 3, file: 'src/settings/Layout.tsx', side: 'new' } }];
@@ -273,6 +357,27 @@ test.skipIf(!hasDom)('a comment posted once is never posted again, even after a 
   const last = reviewPosts.at(-1)!;
   expect(last).toMatchObject({ action: 'approve', head_sha: 'b'.repeat(40) });
   expect(JSON.stringify(last)).not.toContain('Mirror the icons.');
+});
+
+test.skipIf(!hasDom)("a guided review's comment on lines that read the same on the PR's own diff posts inline, at that diff's commit; one off it rides the body", async () => {
+  const DIFF_HEAD = 'c'.repeat(40);
+  pullDiffAnswer = { key: PR_KEY, scope: 'layer', base: 'main', head: 'rtl', patch: snapshot.review.rawPatch, head_sha: DIFF_HEAD };
+  const onDiff = { id: 'ann-in', type: 'comment', scope: 'line', filePath: 'src/auth.ts', lineStart: 1, lineEnd: 1, side: 'new', text: 'Refresh earlier.', createdAt: 1 };
+  const offDiff = { id: 'ann-out', type: 'comment', scope: 'line', filePath: 'src/settings/Layout.tsx', lineStart: 3, lineEnd: 3, side: 'new', text: 'Mirror the icons.', createdAt: 2 };
+  annotations = [onDiff, offDiff].map((annotation, i) => ({ id: `rec-${i}`, message_id: REVIEW, created_at: '2026-10-11T10:40:00.000Z', annotation, guide: { line_start: annotation.lineStart, line_end: annotation.lineEnd, file: annotation.filePath, side: 'new' } }));
+  await render({ ...thread, pull_theirs: true, pull_keys: [PR_KEY] });
+  await click('[data-review-posts] [data-decision-caret]');
+  const approveWith = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) => /Approve with comments/.test(item.textContent ?? ''))!;
+  await act(async () => approveWith.click());
+  await settle();
+  await act(async () => dialogButton('Approve').click());
+  await settle();
+  expect(reviewPosts).toHaveLength(1);
+  const sent = reviewPosts[0]!;
+  expect(sent).toMatchObject({ action: 'approve', head_sha: DIFF_HEAD });
+  expect(sent.fileComments).toEqual([expect.objectContaining({ path: 'src/auth.ts', line: 1, side: 'RIGHT', body: expect.stringContaining('Refresh earlier.') })]);
+  expect(String(sent.body)).not.toContain('Refresh earlier.');
+  expect(String(sent.body)).toContain('Mirror the icons.');
 });
 
 test.skipIf(!hasDom)('a thread that owns the person\'s PR offers both endings: its agent by default, GitHub on a pick', async () => {
@@ -377,4 +482,192 @@ test.skipIf(!hasDom)('a global comment flips the decision to Send feedback and r
   expect(posted).toHaveLength(1);
   expect(posted[0]!.annotation_ids).toEqual(['ann-guide-global']);
   expect(String(posted[0]!.feedback)).toContain(`## Global comments\n\n${text}`);
+});
+
+// The PR page's Details in the full review (approval "inbox-review-details-panel"), and the PR title as its way in.
+const titleButton = () => document.querySelector<HTMLElement>('[data-review-message] .ib-vhead [data-pull-details-title]');
+const detailsButton = () => document.querySelector<HTMLElement>('[data-review-message] .ib-vhead [data-pull-details-button]');
+// Booleans, not `toBeNull()` on an element: Bun's matcher can pass an element it takes seconds to print.
+const detailsShown = () => !!document.querySelector('[data-pull-details]');
+
+/**
+ * App's Escape ladder stands in here: a window listener in the bubble, as App's is, that leaves the review on an Escape
+ * nothing marked used. What it saw, one entry per Escape.
+ */
+function windowLadder() {
+  const seen: boolean[] = [];
+  const onKey = (event: KeyboardEvent) => {
+    if (event.key === 'Escape') seen.push(event.defaultPrevented);
+  };
+  window.addEventListener('keydown', onKey);
+  return { seen, stop: () => window.removeEventListener('keydown', onKey) };
+}
+
+test.skipIf(!hasDom)('a thread handed one PR: its title opens the PR page\'s details and carries their status (no Details button); Escape and × close them', async () => {
+  await render({ ...thread, pull_theirs: true, pull_keys: [PR_KEY] });
+  const title = titleButton()!;
+  expect(title.tagName).toBe('BUTTON');
+  // Its name starts with the words on screen, and says what a click does.
+  expect(title.getAttribute('aria-label')).toBe('Token refresh, opens details');
+  expect(title.getAttribute('aria-expanded')).toBe('false');
+  // The owner's "title only": no Details button beside it.
+  expect(detailsButton() === null).toBe(true);
+  expect(detailsShown()).toBe(false);
+  // The status the button carried rides at the title's end: failing checks, one person's comment.
+  expect(title.querySelector('[data-pull-details-checks]')?.getAttribute('data-pull-details-checks')).toBe('fail');
+  expect(title.querySelector('[data-pull-details-comments]')?.textContent).toBe('1');
+
+  await act(async () => title.click());
+  await settle();
+  const panel = document.querySelector<HTMLElement>('[data-pull-details]')!;
+  expect(panel).not.toBeNull();
+  expect(titleButton()!.getAttribute('aria-expanded')).toBe('true');
+  expect(detailsReads.at(-1)).toContain(encodeURIComponent(PR_KEY));
+  expect(panel.textContent).toContain('Flips the layout for right-to-left scripts.');
+  expect(panel.textContent).toContain('Does this handle Hebrew?');
+  expect(panel.querySelector('[data-pull-details-labels]')?.textContent).toBe('i18n');
+
+  // Escape closes the details, not the review: App's ladder on the window finds it used.
+  const ladder = windowLadder();
+  try {
+    await act(async () => {
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+    await settle();
+  } finally {
+    ladder.stop();
+  }
+  expect(detailsShown()).toBe(false);
+  expect(!!document.querySelector('[data-review-message]')).toBe(true);
+  expect(ladder.seen).toEqual([true]);
+
+  await act(async () => titleButton()!.click());
+  await settle();
+  await click('[data-pull-details-close]');
+  expect(detailsShown()).toBe(false);
+});
+
+test.skipIf(!hasDom)('Escape in a menu over the bar closes only the menu: the details stay open', async () => {
+  await render({ ...thread, pull_theirs: true, pull_keys: [PR_KEY] });
+  await act(async () => titleButton()!.click());
+  await settle();
+  expect(detailsShown()).toBe(true);
+  await act(async () => {
+    document.querySelector<HTMLElement>('[data-review-message] [data-review-jump]')!.click();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  const menu = document.querySelector<HTMLElement>('[data-review-jump-menu]')!;
+  expect(menu).not.toBeNull();
+  const ladder = windowLadder();
+  try {
+    await act(async () => {
+      menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    await settle();
+  } finally {
+    ladder.stop();
+  }
+  expect(document.querySelector('[data-review-message] [data-review-jump]')?.getAttribute('aria-expanded')).toBe('false');
+  expect(detailsShown()).toBe(true);
+  // The menu kept its Escape (stopped or marked): the ladder never sees it as unused.
+  expect(ladder.seen).not.toContain(false);
+});
+
+test.skipIf(!hasDom)('Tab out of the details closes them, so focus never lands unseen on the code under them', async () => {
+  await render({ ...thread, pull_theirs: true, pull_keys: [PR_KEY] });
+  await act(async () => titleButton()!.click());
+  await settle();
+  const panel = document.querySelector<HTMLElement>('[data-pull-details]')!;
+  const close = panel.querySelector<HTMLElement>('[data-pull-details-close]')!;
+  await act(async () => close.focus());
+  // A click elsewhere (no Tab) leaves them open.
+  await act(async () => titleButton()!.focus());
+  expect(detailsShown()).toBe(true);
+  await act(async () => close.focus());
+  await act(async () => {
+    close.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+    document.querySelector<HTMLElement>('[data-review-message] [data-review-jump]')!.focus();
+  });
+  await settle();
+  expect(detailsShown()).toBe(false);
+});
+
+/** inbox.css's `display: none` rules for a window `width` px wide: the selectors inside a `@media` whose min/max widths hold it. */
+function hiddenAt(width: number): string[] {
+  const css = readFileSync(join(import.meta.dir, 'inbox.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, ' ');
+  const found: string[] = [];
+  const media = /@media([^{]*)\{/g;
+  for (let at = media.exec(css); at; at = media.exec(css)) {
+    const query = at[1]!;
+    if (query.includes('pointer') || query.includes('height')) continue;
+    const min = /min-width:\s*(\d+)px/.exec(query);
+    const max = /max-width:\s*(\d+)px/.exec(query);
+    if ((!min && !max) || (min && width < Number(min[1])) || (max && width > Number(max[1]))) continue;
+    let depth = 1;
+    let i = media.lastIndex;
+    while (depth > 0 && i < css.length) {
+      if (css[i] === '{') depth += 1;
+      else if (css[i] === '}') depth -= 1;
+      i += 1;
+    }
+    for (const rule of css.slice(media.lastIndex, i - 1).matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (/display:\s*none/.test(rule[2]!)) found.push(...rule[1]!.split(',').map((one) => one.trim()));
+    }
+  }
+  return found;
+}
+
+test.skipIf(!hasDom)('a short bar (768 to 959 px) hides the review\'s title but never a PR\'s: it is the only way to the details', async () => {
+  const hides = (el: Element, width = 900) => hiddenAt(width).filter((selector) => {
+    try {
+      return el.matches(selector);
+    } catch {
+      return false;
+    }
+  });
+  await render();
+  // The rule is read: a local review's title gives way there.
+  expect(hides(document.querySelector('[data-review-message] .ib-vhead [data-review-title]')!).length).toBeGreaterThan(0);
+  act(() => root?.unmount());
+  host?.remove();
+  await render({ ...thread, pull_theirs: true, pull_keys: [PR_KEY] });
+  expect(hides(titleButton()!)).toEqual([]);
+  expect(hides(titleButton()!, 1440)).toEqual([]);
+});
+
+test.skipIf(!hasDom)("a comment's file:line opens that file in All files, and the details close", async () => {
+  await render({ ...thread, pull_theirs: true, pull_keys: [PR_KEY] });
+  expect(document.querySelector('[data-review-message]')?.getAttribute('data-review-mode')).toBe('walkthrough');
+  await act(async () => titleButton()!.click());
+  await settle();
+  const file = document.querySelector<HTMLElement>('[data-pull-details] button.ib-prd-cfile')!;
+  expect(file.textContent).toBe('auth.ts:1');
+  await act(async () => file.click());
+  await settle();
+  expect(document.querySelector('[data-review-message]')?.getAttribute('data-review-mode')).toBe('files');
+  expect(detailsShown()).toBe(false);
+});
+
+test.skipIf(!hasDom)('no details where there is no one PR: a local review, and a thread handed several', async () => {
+  await render();
+  expect(titleButton() === null).toBe(true);
+  expect(detailsButton() === null).toBe(true);
+  // The title stays words, not a button.
+  expect(document.querySelector('[data-review-title]')?.tagName).toBe('SPAN');
+  act(() => root?.unmount());
+  host?.remove();
+  await render({ ...thread, pull_theirs: true, pull_keys: [PR_KEY, 'github.com/acme/ledger#881'] });
+  expect(titleButton() === null).toBe(true);
+  expect(detailsButton() === null).toBe(true);
+  expect(detailsReads).toEqual([]);
+});
+
+test.skipIf(!hasDom)("a resolved thread's review reads only, and still has its PR's details (read from the PR list itself)", async () => {
+  await render({ ...thread, resolved_at: '2026-10-11T11:00:00.000Z', pull_keys: [PR_KEY] });
+  expect(document.querySelector('[data-review-decision]') === null).toBe(true);
+  expect(listReads.length).toBe(1);
+  await act(async () => titleButton()!.click());
+  await settle();
+  expect(document.querySelector('[data-pull-details]')?.textContent).toContain('Does this handle Hebrew?');
 });

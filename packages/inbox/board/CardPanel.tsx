@@ -14,6 +14,7 @@ import {
   type InboxCardHistoryEntry,
   type InboxCardRef,
   type InboxCardWire,
+  type InboxInitiative,
   type InboxListRow,
 } from '@plannotator/core/inbox-types';
 import type { InboxProjectRepo } from '@plannotator/core/inbox-types';
@@ -28,10 +29,8 @@ import { useInboxTextSize } from '../textSize';
 import { clearCardTop, fitCardTop } from './cardTopFit';
 import { OnceButton } from './OnceButton';
 import { RefMarkIcon } from './RefMark';
+import { CardInitiativeMenu } from './BoardFilter';
 import { cardAge, cardFoot, cardYou, columnChoices, historyWords, refState, sentTo, youThread } from './model';
-import { StepsLists } from '../steps/StepsList';
-import { stepsAsCardHeadSays } from '../steps/model';
-import type { InboxStepsWire } from '@plannotator/core/inbox-types';
 
 export interface CardPanelProps {
   card: InboxCardWire;
@@ -48,8 +47,6 @@ export interface CardPanelProps {
   /** Said with "Ask for an update" when it goes to another session (the card's own agent ended). */
   askNote?: string | null;
   rowOf: (threadId: string) => InboxListRow | null;
-  /** The card's threads' checklists, the latest first (approval "inbox-thread-steps", part 4); none while the switch is off. Read only. */
-  steps?: readonly InboxStepsWire[];
   phone: boolean;
   now: number;
   onClose: () => void;
@@ -72,6 +69,12 @@ export interface CardPanelProps {
   onOpenThread: (threadId: string) => void;
   /** Create thread (a card with no thread): compose to the card's agent (or a live session in its project); the Send links the thread. */
   onCreateThread: (opener: HTMLElement) => void;
+  /**
+   * The Board's initiatives, deleted ones too (approval "board-initiatives"): the history names them, and
+   * the who line's menu offers the live ones. Absent or none live: no menu (unless the card is in one).
+   */
+  initiatives?: readonly InboxInitiative[];
+  onInitiative?: (initiative: string | null) => void;
 }
 
 /**
@@ -122,6 +125,7 @@ export function CardPanel(props: CardPanelProps) {
   const sent = sentTo(card);
   const refs = inboxCardRefsOf(card);
   const agent = card.agent?.kind === 'agent' ? card.agent : null;
+  const liveInitiatives = (props.initiatives ?? []).filter((i) => i.deleted_at === null);
   const notSent = card.column === 'backlog' && !agent && !card.sent;
   // What the person owes, and the thread where they make that call (the lane card's "You: …" goes there too).
   const you = cardYou(card);
@@ -234,6 +238,12 @@ export function CardPanel(props: CardPanelProps) {
               )}
             </>
           )}
+          {props.onInitiative && card.column !== 'dropped' && (liveInitiatives.length > 0 || card.initiative) && (
+            <>
+              <span className="ib-tdot" aria-hidden="true" />
+              <CardInitiativeMenu initiatives={liveInitiatives} value={card.initiative ?? null} onPick={props.onInitiative} />
+            </>
+          )}
         </div>
         {you && (
           <p className="ib-crdp-you" data-card-you="" id={`${headingId}-you`}>
@@ -245,14 +255,6 @@ export function CardPanel(props: CardPanelProps) {
             Cancelled {whenTime(card.dropped.at)} by {card.dropped.by.kind === 'person' ? 'you' : inboxAgentName(card.dropped.by)}
             {card.dropped.reason ? `: ${card.dropped.reason}` : ''}
           </p>
-        )}
-        {props.steps && props.steps.length > 0 && (
-          // The checklist (approval "inbox-thread-steps", part 4): the thread's steps as its foot shows them, read
-          // only. "Waiting on you ›" opens that list's thread, where the question is (with the way back here).
-          // Each list is its own named section (StepsLists), so the wrapper is not one more.
-          <div className="ib-crdp-sec ib-crdp-steps" data-card-checklist="">
-            <StepsLists lists={stepsAsCardHeadSays(props.steps, agent?.session ?? null, props.state)} heading now={new Date(props.now)} onWaiting={(list) => () => props.onOpenThread(list.thread_id)} />
-          </div>
         )}
         <Notes card={card} onSave={props.onNotes} text={text} />
         {card.threads.length > 0 && (
@@ -300,7 +302,7 @@ export function CardPanel(props: CardPanelProps) {
           ) : (
             <ol className="ib-crdp-hist">
               {props.history.map((entry, index) => {
-                const words = historyWords(entry);
+                const words = historyWords(entry, (id) => props.initiatives?.find((i) => i.id === id)?.name ?? null);
                 return (
                   <li key={`${entry.at}-${index}`}>
                     <span className="ib-crdp-hdot" aria-hidden="true" />

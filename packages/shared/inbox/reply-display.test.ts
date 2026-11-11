@@ -100,6 +100,25 @@ test("words only, questions still open: the still-open line comes out, the feedb
   expect(splitInboxReplyBody(reply.body)).toEqual({ words: "Give me a minute.", answers: false, rest: "## notes.md\n\n> Fine.", changed: true });
 });
 
+test("a multi-line Other answer: the agent gets its lines quoted, and the window still takes the answers section out", () => {
+  const { store, project } = open();
+  const multi = [":::question-multi", "Which exports?", "", "- [ ] CSV", "- [ ] Parquet", ":::"].join("\n");
+  const asked = store.sendMessage({ project_id: project.id, author: A, body: [question("Ship it?"), multi].join("\n\n") }).message;
+  const [ship, exportsQ] = store.questionsOf(asked.id);
+  const other = (q: InboxQuestion, text: string, selected: string[] = []): QuestionAnswer => ({ v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected, other: text });
+  const reply = store.sendReply(asked.id, {
+    idempotency_key: "k5",
+    words: "Two notes inline.",
+    questions: [
+      { key: ship!.key, revision: 0, answer: other(ship!, "Not yet.\nAfter the migration.\nThen behind a flag.") },
+      { key: exportsQ!.key, revision: 0, answer: other(exportsQ!, "JSON lines\nfor the audit team", ["CSV"]) },
+    ],
+  }).reply;
+  expect(reply.body).toContain("### Q1. Ship it? (line 2)\nAnswer: Other:\n> Not yet.\n> After the migration.\n> Then behind a flag.\n\n");
+  expect(reply.body).toContain("### Q2. Which exports? (line 9)\nAnswer:\n- CSV\n- Other:\n  > JSON lines\n  > for the audit team");
+  expect(splitInboxReplyBody(reply.body)).toEqual({ words: "Two notes inline.", answers: true, rest: "", changed: true });
+});
+
 test("text the store did not shape stays as it is", () => {
   expect(splitInboxReplyBody("Just words.\n\n## Answers to your questions\n\nnot the grammar")).toEqual({
     words: "Just words.\n\n## Answers to your questions\n\nnot the grammar",

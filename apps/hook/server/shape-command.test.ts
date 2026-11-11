@@ -5,10 +5,12 @@
  * the person's data, environment or Inbox.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { parseShapeCommand, runShapeCommand } from "./shape-command";
+import { checkShapeBoard } from "@plannotator/core/shape";
+import { parseShapeCommand, runShapeCommand, SHAPE_COMMAND_USAGE } from "./shape-command";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -50,6 +52,100 @@ function world(env: Record<string, string | undefined> = {}) {
 }
 
 describe("shape update", () => {
+  test("real git: a shell `cd` moves a board to the checkout it runs in, the session's folder does not hold it back", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "shape-cd-")));
+    roots.push(root);
+    const repo = (dir: string, ...args: string[]) => {
+      const done = spawnSync("git", ["-C", dir, "-c", "init.defaultBranch=main", "-c", "user.name=t", "-c", "user.email=t@example.com", ...args], {
+        encoding: "utf8",
+        env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" },
+      });
+      if (done.status !== 0) throw new Error(done.stderr);
+    };
+    const main = join(root, "kettle");
+    mkdirSync(main);
+    writeFileSync(join(main, "a.ts"), "main\n");
+    repo(main, "init", "-q");
+    repo(main, "add", "a.ts");
+    repo(main, "commit", "-qm", "one");
+    const tree = join(root, "kettle-wt");
+    repo(main, "worktree", "add", "-q", "-b", "wt", tree);
+    const other = join(root, "elsewhere");
+    mkdirSync(other);
+    writeFileSync(join(root, "b.json"), JSON.stringify({ title: "Kettle", claim: "Built.", views: { picture: { html: '<p data-mark="p">One</p>' } } }));
+
+    const dataDir = join(root, "data");
+    const write = async (session: string, cwd: string, ...argv: string[]) => {
+      const out: string[] = [];
+      const err: string[] = [];
+      const code = await runShapeCommand(["update", "--file", join(root, "b.json"), ...argv], {
+        dataDir,
+        cwd,
+        env: { PLANNOTATOR_SESSION_TAG: "claude-code:ses_abc", PLANNOTATOR_SESSION_PROJECT: `claude-code:ses_abc:${session}` },
+        stdout: (t) => out.push(t),
+        stderr: (t) => err.push(t),
+      });
+      expect(err.join("\n")).toBe("");
+      expect(code).toBe(0);
+      return (JSON.parse(out.join("\n")) as { id: string }).id;
+    };
+    const { createShapeStore } = await import("@plannotator/shared/shape/store");
+    const projectOf = (id: string) => createShapeStore({ dataDir }).get(id)!.project;
+
+    // Started in main, `cd` to a worktree: a new board, and a later write to one.
+    const made = await write(main, tree);
+    expect(projectOf(made)).toMatchObject({ root: main, worktree: tree });
+    const started = await write(main, main);
+    expect(projectOf(started).worktree).toBeUndefined();
+    await write(main, tree, "--id", started, "--base", "1");
+    expect(projectOf(started)).toMatchObject({ root: main, worktree: tree });
+    // Started in a worktree, `cd` to main: a new board, and a later write to one.
+    const back = await write(tree, main);
+    expect(projectOf(back).worktree).toBeUndefined();
+    await write(tree, main, "--id", made, "--base", "1");
+    expect(projectOf(made).worktree).toBeUndefined();
+    // A `cd` to a folder of its own (a scratch or PR folder): that folder is the project, as the help says.
+    const away = await write(tree, other);
+    expect(projectOf(away)).toMatchObject({ root: other });
+    expect(projectOf(away).worktree).toBeUndefined();
+    // `--project` says which, wherever the shell is.
+    await write(main, tree, "--id", started, "--base", "2", "--project", main);
+    expect(projectOf(started).worktree).toBeUndefined();
+  });
+
+  test("a board's checkout follows its latest write within its project, and only there", async () => {
+    const w = world();
+    const { createShapeStore } = await import("@plannotator/shared/shape/store");
+    const dataDir = join(w.project, "..", "data");
+    let here: { root: string; name: string; worktree?: string } = { root: w.project, name: "kettle", worktree: "/wt/one" };
+    const write = async (...argv: string[]) => {
+      const out: string[] = [];
+      const code = await runShapeCommand(["update", "--file", w.board("b.json", `words ${Math.random()}`), ...argv], {
+        dataDir,
+        cwd: w.project,
+        env: {},
+        stdout: (t) => out.push(t),
+        stderr: () => {},
+        projectRootOf: async () => here,
+      });
+      expect(code).toBe(0);
+      return JSON.parse(out.join("\n")) as { id: string; v: number };
+    };
+    const projectOf = (id: string) => createShapeStore({ dataDir }).get(id)!.project;
+    const { id } = await write();
+    expect(projectOf(id).worktree).toBe("/wt/one");
+    here = { root: w.project, name: "kettle", worktree: "/wt/two" };
+    await write("--id", id, "--base", "1");
+    expect(projectOf(id).worktree).toBe("/wt/two");
+    here = { root: w.project, name: "kettle" };
+    await write("--id", id, "--base", "2");
+    expect(projectOf(id).worktree).toBeUndefined();
+    // Written from another project: the board stays where it is.
+    here = { root: "/elsewhere", name: "elsewhere", worktree: "/wt/three" };
+    await write("--id", id, "--base", "3");
+    expect(projectOf(id)).toEqual({ root: w.project, name: "kettle" });
+  });
+
   test("creates a shape, then adds versions only from the latest base", async () => {
     const w = world();
     const first = await w.run("update", "--file", w.board("b1.json", "whistles once"));
@@ -79,6 +175,22 @@ describe("shape update", () => {
     expect(result.code).toBe(1);
     expect(result.err).toContain("- title: is empty");
     expect(result.err).toContain("- views.how.html: <script> is not allowed");
+  });
+
+  test("icons, logos and drawn things named in the drawing are stored as their drawing; a name it lacks is a note with close names", async () => {
+    const w = world();
+    const html = '<svg viewBox="0 0 900 500"><svg data-icon="database" x="10" y="10" width="28" height="28"/><svg data-logo="stripe" x="60" y="10"/><svg data-draw="queue" x="10" y="80" width="200" height="60" data-label="jobs"/><svg data-icon="serverr" x="300" y="10"/></svg>';
+    writeFileSync(join(w.project, "kit.json"), JSON.stringify({ title: "Kit", claim: "c", views: { picture: { html } } }));
+    const result = await w.run("update", "--file", "kit.json");
+    expect(result.code).toBe(0);
+    const { id, notes } = JSON.parse(result.out) as { id: string; notes: string[] };
+    expect(notes.some((n) => n.startsWith('data-icon="serverr": no icon by that name; close: server'))).toBe(true);
+    const stored = JSON.parse((await w.run("read", id)).out).version.views.picture.html as string;
+    // The stored board holds the drawings, so showing it looks nothing up.
+    expect(stored).toMatch(/<svg data-icon="database"[^>]*viewBox="0 0 24 24"><ellipse /);
+    expect(stored).toContain('<svg data-brand data-logo="stripe"');
+    expect(stored).toContain(">jobs</text>");
+    expect(stored).toContain('data-icon="serverr" x="300" y="10" data-missing=');
   });
 });
 
@@ -180,7 +292,36 @@ describe("parseShapeCommand", () => {
   });
 });
 
+describe("shape --help", () => {
+  // What regresses: the format or the validator changes and the help's example (the one an agent copies with no
+  // thread and no /shape skill) stops being a board the store takes.
+  test("its JSON example is a board the store accepts", () => {
+    const json = SHAPE_COMMAND_USAGE.match(/```json\n([\s\S]*?)\n```/)?.[1];
+    expect(json).toBeDefined();
+    const checked = checkShapeBoard(JSON.parse(json!));
+    expect(checked.ok ? [] : checked.errors).toEqual([]);
+  });
+});
+
 describe("the Shape switch, through the entrypoint", () => {
+  test("update tells the agent how the board will behave, and stores it either way", async () => {
+    const { run, board } = world();
+    const r = await run("update", "--file", board("kettle.json", "whistles"));
+    expect(r.code).toBe(0);
+    const out = JSON.parse(r.out);
+    expect(out.v).toBe(1);
+    expect(out.notes.join()).toContain("no width and height");
+  });
+
+  test("a board that writes Requirements is refused, and the refusal says where the words go", async () => {
+    const { run, project } = world();
+    writeFileSync(join(project, "old.json"), JSON.stringify({ title: "T", claim: "C", views: { reqs: { groups: [] } } }));
+    const r = await run("update", "--file", "old.json");
+    expect(r.code).not.toBe(0);
+    expect(r.err).toContain("a ref's sub");
+    expect(r.err).not.toContain("views.know");
+  });
+
   // Guards the gate in apps/hook/server/index.ts: while the person has not turned Shape on (config.json
   // `inboxShape` unset or false), every `plannotator shape …` (its --help too) prints only the one line that
   // says it is off and exits 1, and nothing is written. On, the same calls work.
@@ -200,6 +341,7 @@ describe("the Shape switch, through the entrypoint", () => {
     const entry = join(import.meta.dir, "index.ts");
     const env: Record<string, string> = {
       PATH: process.env.PATH ?? "",
+      HOME: process.env.HOME!,
       PLANNOTATOR_DATA_DIR: dataDir,
       PLANNOTATOR_BROWSER: NO_BROWSER,
       NO_BROWSER: "1",
@@ -223,16 +365,140 @@ describe("the Shape switch, through the entrypoint", () => {
           expect(r.stderr).toBe(`${SHAPE_OFF_TEXT}\n`);
         }
         expect(existsSync(join(dataDir, "shapes")) ? readdirSync(join(dataDir, "shapes")) : []).toEqual([]);
+        // Off, the kit is one more command that does not exist: nothing teaches the feature.
+        const kit = await run("kit");
+        expect(kit.code).toBe(1);
+        expect(kit.stdout).toBe("");
+        expect(kit.stderr).toBe(`${SHAPE_OFF_TEXT}\n`);
       }
       writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxShape: true }));
       const help = await run("--help");
       expect(help.code, help.stderr).toBe(0);
-      expect(`${help.stdout}${help.stderr}`).toContain("shape update");
+      // On, --help is the whole guide (welcome, commands, drawing); off (above) it is only SHAPE_OFF_TEXT.
+      expect(`${help.stdout}${help.stderr}`).toContain(SHAPE_COMMAND_USAGE);
       const made = await run("update", "--file", join(root, "board.json"), "--project", project);
       expect(made.code, made.stderr).toBe(0);
       expect(JSON.parse(made.stdout).v).toBe(1);
     } finally {
       removeStubbedHtml(stubbed);
+    }
+  }, 60_000);
+
+  /** The CLI from source in a fresh data dir under the OS temp folder (never the person's), with hook pages stubbed. */
+  async function cli() {
+    const { removeStubbedHtml, stubHookDistHtml } = await import("../../../tests/helpers/hook-dist-stub");
+    const { NO_BROWSER } = await import("../../../tests/helpers/no-browser");
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "shape-cli-switch-")));
+    roots.push(root);
+    const dataDir = join(root, "data");
+    const project = join(root, "kettle");
+    mkdirSync(dataDir, { recursive: true });
+    mkdirSync(project, { recursive: true });
+    const stubbed = stubHookDistHtml();
+    const entry = join(import.meta.dir, "index.ts");
+    const env: Record<string, string> = {
+      PATH: process.env.PATH ?? "",
+      HOME: process.env.HOME!,
+      PLANNOTATOR_DATA_DIR: dataDir,
+      PLANNOTATOR_BROWSER: NO_BROWSER,
+      NO_BROWSER: "1",
+      NO_ANON_PING: "1",
+      PLANNOTATOR_UPDATE_CHECK: "0",
+      PLANNOTATOR_INBOX_CONNECT: "0",
+      PLANNOTATOR_INBOX_NOTES: "0",
+      PLANNOTATOR_TEST_SANDBOX: "1",
+    };
+    const run = async (...argv: string[]) => {
+      const proc = Bun.spawn(["bun", "run", entry, "shape", ...argv], { cwd: project, env, stdout: "pipe", stderr: "pipe" });
+      const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+      return { stdout, stderr, code };
+    };
+    const config = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8"));
+    return { dataDir, run, config, done: () => removeStubbedHtml(stubbed) };
+  }
+
+  // `plannotator shape on|off` is the person's switch from a terminal: it must work while Shape is off (the only
+  // shape commands that do), flip what --help shows, be harmless twice, and keep the rest of config.json.
+  test("on and off work from the off state and decide what --help shows; on twice is harmless", async () => {
+    const { SHAPE_OFF_TEXT } = await import("./shape-command");
+    const c = await cli();
+    try {
+      writeFileSync(join(c.dataDir, "config.json"), JSON.stringify({ inboxBoard: true }));
+      // Off (unset): off works and says so; `on --help` is still gated.
+      expect(await c.run("off")).toEqual({ stdout: "Shape is off.\n", stderr: "", code: 0 });
+      expect(c.config()).toEqual({ inboxBoard: true, inboxShape: false });
+      expect(await c.run("on", "--help")).toEqual({ stdout: "", stderr: `${SHAPE_OFF_TEXT}\n`, code: 1 });
+      // on, from off, twice.
+      for (let i = 0; i < 2; i++) {
+        expect(await c.run("on")).toEqual({ stdout: "Shape is on.\n", stderr: "", code: 0 });
+        expect(c.config()).toEqual({ inboxBoard: true, inboxShape: true });
+      }
+      const help = await c.run("--help");
+      expect(help.code, help.stderr).toBe(0);
+      expect(`${help.stdout}${help.stderr}`).toContain(SHAPE_COMMAND_USAGE);
+      // off again: --help is only the off line, and the off line names the way back.
+      expect(await c.run("off")).toEqual({ stdout: "Shape is off.\n", stderr: "", code: 0 });
+      expect(await c.run("--help")).toEqual({ stdout: "", stderr: `${SHAPE_OFF_TEXT}\n`, code: 1 });
+      expect(SHAPE_OFF_TEXT).toContain("`plannotator shape on`");
+      // Extra words are refused without a word of the guide, and change nothing.
+      const extra = await c.run("on", "now");
+      expect(extra.code).toBe(2);
+      expect(extra.stdout).toBe("");
+      expect(extra.stderr).not.toContain("Usage:");
+      expect(c.config().inboxShape).toBe(false);
+    } finally {
+      c.done();
+    }
+  }, 60_000);
+
+  // A config.json that is not valid JSON is never written over, so the switch did not move: say so and exit 1,
+  // never "Shape is off." (which off would otherwise read back from the unreadable file).
+  test("on and off with a config.json that cannot be saved: an error, exit 1, the file untouched", async () => {
+    const c = await cli();
+    try {
+      const path = join(c.dataDir, "config.json");
+      writeFileSync(path, "{ not json");
+      for (const which of ["on", "off"]) {
+        const r = await c.run(which);
+        expect({ which, code: r.code, stdout: r.stdout }).toEqual({ which, code: 1, stdout: "" });
+        expect(r.stderr).toContain("config_not_saved: ");
+        expect(readFileSync(path, "utf8")).toBe("{ not json");
+      }
+    } finally {
+      c.done();
+    }
+  }, 60_000);
+
+  test("on and off set the very switch the Inbox's Settings reads (and the other way round)", async () => {
+    const { SHAPE_OFF_TEXT } = await import("./shape-command");
+    const { startInboxServer } = await import("@plannotator/server/inbox");
+    const c = await cli();
+    const saved = process.env.PLANNOTATOR_DATA_DIR;
+    // The Inbox reads config.json through the env, like the CLI child.
+    process.env.PLANNOTATOR_DATA_DIR = c.dataDir;
+    const inbox = await startInboxServer({ dataDir: c.dataDir, phones: false });
+    try {
+      const base = `http://127.0.0.1:${inbox.port}`;
+      // Off, the settings read leaves Shape out (held until the next big release, inbox.ts heldSwitch): absent reads as off.
+      const settingsShape = async () => ((await (await fetch(`${base}/api/inbox/settings`)).json()) as { shape?: { on: boolean } }).shape?.on === true;
+      expect(await settingsShape()).toBe(false);
+      expect((await c.run("on")).code).toBe(0);
+      expect(await settingsShape()).toBe(true);
+      expect((await fetch(`${base}/api/shapes`)).status).toBe(200);
+      expect((await c.run("off")).code).toBe(0);
+      expect(await settingsShape()).toBe(false);
+      expect((await fetch(`${base}/api/shapes`)).status).toBe(404);
+      // The Settings switch, and the CLI's gate follows it.
+      const set = (on: boolean) =>
+        fetch(`${base}/api/inbox/settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shape: { on } }) });
+      expect((await set(true)).status).toBe(200);
+      expect((await c.run("--help")).stdout).toContain(SHAPE_COMMAND_USAGE);
+      expect((await set(false)).status).toBe(200);
+      expect((await c.run("--help")).stderr).toBe(`${SHAPE_OFF_TEXT}\n`);
+    } finally {
+      inbox.stop();
+      process.env.PLANNOTATOR_DATA_DIR = saved;
+      c.done();
     }
   }, 60_000);
 });

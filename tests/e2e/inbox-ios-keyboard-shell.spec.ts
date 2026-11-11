@@ -21,7 +21,8 @@
  *   pick, and on its side; the reply field shows above the keyboard. A drag on
  *   the header or a short draft is refused (Safari would pan the page); a drag
  *   on the thread, a wide code block or an overflowing draft is not. A field in
- *   the thread (an action item's note) gets the room: the foot steps aside.
+ *   the thread (an action item's note) gets the room: the foot steps aside, also
+ *   when the note is taken before Done's save has finished.
  *   With the keyboard down, all is as before.
  * - Chromium as a Pixel 7: the reply foot sits on the keyboard as before, and
  *   nothing is pinned or guarded (Android is unchanged).
@@ -75,6 +76,8 @@ interface World {
   url: string;
   reply: string;
   action: string;
+  /** Its own thread: a Done stays in the thread's draft, so two tests cannot press it on one. */
+  slowAction: string;
   agent: SimAgent;
 }
 
@@ -85,10 +88,11 @@ test.beforeAll(async () => {
   mkdirSync(shotsDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-ios-keyboard-shell-');
   const dataDir = join(root, 'data');
-  mkdirSync(dataDir);
+  mkdirSync(dataDir, { recursive: true });
   markTourDecided(dataDir);
   const env = {
     PATH: process.env.PATH ?? '',
+    HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER,
@@ -112,25 +116,22 @@ test.beforeAll(async () => {
     ...Array.from({ length: 6 }, (_, i) => `${i + 7}. ${PARAGRAPH}`),
     [':::question', 'Keep the footer sticky on phones?', '', '- [ ] Yes', '- [ ] No', ':::'].join('\n'),
   ].join('\n\n');
-  // Named threads: without one, both go to the session's default thread, and the question folds behind the newer message.
+  // Named threads, each its own: the question never folds behind a newer message.
   const reply = await agent.send({ project_path: project, subject: 'Checkout: the sticky footer on phones', thread: 'checkout-footer', body }, { wakes: true });
-  const action = await agent.send({
-    project_path: project,
-    subject: 'Publish blocked on a token',
-    thread: 'publish-token',
-    body: [
-      'The publish failed with E401.',
-      '',
-      ':::action',
-      'Rotate the npm token',
-      'The publish token expired. Make a new automation token and put it in the repo secrets.',
-      '',
-      'Where: [npm tokens](https://www.npmjs.com/settings/acme/tokens)',
-      'Stopped: 4.2 cannot be published until the token is replaced',
-      ':::',
-    ].join('\n'),
-  });
-  world = { url: started.stdout.trim(), reply: reply.thread_id as string, action: action.thread_id as string, agent };
+  const actionBody = [
+    'The publish failed with E401.',
+    '',
+    ':::action',
+    'Rotate the npm token',
+    'The publish token expired. Make a new automation token and put it in the repo secrets.',
+    '',
+    'Where: [npm tokens](https://www.npmjs.com/settings/acme/tokens)',
+    'Stopped: 4.2 cannot be published until the token is replaced',
+    ':::',
+  ].join('\n');
+  const action = await agent.send({ project_path: project, subject: 'Publish blocked on a token', thread: 'publish-token', body: actionBody });
+  const slowAction = await agent.send({ project_path: project, subject: 'Publish blocked on a token, on a slow network', thread: 'publish-token-slow', body: actionBody });
+  world = { url: started.stdout.trim(), reply: reply.thread_id as string, action: action.thread_id as string, slowAction: slowAction.thread_id as string, agent };
 });
 
 test.afterAll(async () => {
@@ -263,7 +264,7 @@ async function openReply(page: Page, thread: string): Promise<Locator> {
   await page.goto(`${world.url}#thread=${thread}`);
   const pane = page.locator('section.ib-pane');
   const box = pane.locator('.ib-pfoot textarea');
-  const open = pane.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ });
+  const open = pane.locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ });
   await expect(box.or(open).first()).toBeVisible();
   // A saved draft can open the box by itself just after "Edit draft" showed: then there is nothing left to click.
   await expect(async () => {
@@ -320,7 +321,10 @@ test.describe('WebKit as an iPhone 15 (iOS 26 keyboard)', () => {
     const pane = page.locator('section.ib-pane');
     // A drag on what does not scroll would pan the page in Safari: refused.
     expect.soft(await dragRefused(pane.locator('.ib-phead')), 'a drag on the header').toBe(true);
-    expect.soft(await dragRefused(field), 'a drag on a short draft').toBe(true);
+    // A short draft has nothing to scroll, so a drag on it is refused; unless the foot itself has more than the 257 px
+    // leave it room for (the taller reply box under a Draft line), where the drag scrolls the foot, never the page.
+    const footScrolls = await pane.locator('.ib-pfoot').evaluate((el) => el.scrollHeight > el.clientHeight + 1);
+    expect.soft(await dragRefused(field), 'a drag on a short draft').toBe(!footScrolls);
     // What scrolls keeps its drag: the thread, a code line wider than the phone, an overflowing draft.
     expect.soft(await dragRefused(pane.locator('.ib-pbody').first()), 'a drag on the thread').toBe(false);
     // The innermost box a finger lands on: the code's text, inside the block that scrolls.
@@ -362,7 +366,7 @@ test.describe('WebKit as an iPhone 15 (iOS 26 keyboard)', () => {
     const field = await openReply(page, world.reply);
     // A phone's box draws no "1 pick" chip: the answers list says it (approval "inbox-reply-foot-phone").
     await expect(pane.locator('.ib-rbox [data-reply-answers]')).toBeVisible();
-    const attach = pane.locator('.ib-rbox .ib-rfoot [data-reply-attach]');
+    const attach = pane.locator('.ib-rbox [data-reply-row] [data-reply-attach]');
     await attach.setInputFiles({ name: 'image.png', mimeType: 'image/png', buffer: PNG });
     await expect(pane.locator('.ib-rbox [data-compose-file="done"]')).toHaveCount(1);
     await attach.setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('The header on my phone.\n') });
@@ -416,6 +420,30 @@ test.describe('WebKit as an iPhone 15 (iOS 26 keyboard)', () => {
     await keyboardDown(page);
     // The draft is where it was.
     await expect(page.locator('section.ib-pane .ib-pfoot textarea')).toHaveValue('Working on it.');
+    await page.context().close();
+  });
+
+  test("the note taken while Done is still saving (a slow list read): it keeps focus, and the foot stays aside", async () => {
+    const page = await phone();
+    const field = await openReply(page, world.slowAction);
+    await field.fill('Working on it.');
+    // The note draws from the thread's read; Done's save ends with the list's. Held, that is the slow network's gap, every time.
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route(/\/api\/inbox\/threads\?/, async (route) => {
+      await held;
+      await route.continue();
+    });
+    const card = page.locator('section.ib-pane [data-action-card]');
+    await card.locator('[data-action-done]').click();
+    const note = card.locator('[data-action-draft-note]');
+    await note.focus();
+    await iosKeyboardUp(page, IOS_KEYBOARD);
+    release();
+    // Said once the save has finished, so whatever Done does to focus has happened by now.
+    await expect(page.locator('[data-inbox-live]')).toHaveText('Done. It goes with your reply.');
+    await expect(note).toBeFocused();
+    await expect(page.locator('section.ib-pane .ib-pfoot')).toBeHidden();
     await page.context().close();
   });
 });

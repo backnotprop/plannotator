@@ -38,6 +38,11 @@ const NOW = 1_800_000_000_000;
 const fresh = (m: string, age = 0) => JSON.stringify({ m, savedAt: NOW - age });
 
 describe.if(hasDom)('resolveInputMethod (pure)', () => {
+  test('a stored "word" (a method that became part of Select) reads as drag', () => {
+    expect(inputMethodModule!.resolveInputMethod('markdown', 'word', null, NOW)).toBe('drag');
+    expect(inputMethodModule!.resolveInputMethod('html', null, fresh('word'), NOW)).toBe('drag');
+  });
+
   test('HTML surface with nothing saved defaults to pinpoint', () => {
     expect(inputMethodModule!.resolveInputMethod('html', null, null, NOW)).toBe('pinpoint');
   });

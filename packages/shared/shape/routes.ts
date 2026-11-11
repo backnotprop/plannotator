@@ -23,7 +23,7 @@
  */
 import { extname } from "node:path";
 import { isShapeId, type ShapeNote, type ShapeRecord, type ShapeSession, type ShapeVersion } from "./format";
-import type { ShapeStore, ShapeSummary } from "./store";
+import { shapeCodeRoot, type ShapeStore, type ShapeSummary } from "./store";
 
 export type ShapeRouteResult =
   | { status: number; body: unknown }
@@ -72,6 +72,10 @@ const IMAGE_TYPES: Record<string, string> = {
   ".jpeg": "image/jpeg",
   ".gif": "image/gif",
   ".webp": "image/webp",
+  // Served with `sandbox` and nosniff (both runtimes), so an SVG opened directly runs no script.
+  ".svg": "image/svg+xml",
+  ".avif": "image/avif",
+  ".ico": "image/x-icon",
 };
 
 const AGENT_NAMES: Record<string, string> = {
@@ -88,7 +92,8 @@ export function shapeAgentName(session: ShapeSession | null): string {
   return AGENT_NAMES[session.host] ?? session.host;
 }
 
-async function unlocked(store: ShapeStore, id: string, waitMs = 5_000): Promise<boolean> {
+/** The store's lock (and this shape's) is free, waited for without blocking; false after `waitMs`. */
+export async function unlocked(store: ShapeStore, id: string, waitMs = 5_000): Promise<boolean> {
   const until = Date.now() + waitMs;
   while (store.locked(id)) {
     if (Date.now() > until) return false;
@@ -155,7 +160,7 @@ export async function handleShapeRoute(req: ShapeRouteRequest, deps: ShapeRouteD
   }
 
   if (sub === "code" && parts.length === 3 && deps.code) {
-    const root = shape.project.root;
+    const root = shapeCodeRoot(shape.project);
     if (parts[2] === "file" && method === "GET") return deps.code.file(root, req.params.get("path"));
     if (parts[2] === "hover" && method === "POST") {
       let body: unknown;

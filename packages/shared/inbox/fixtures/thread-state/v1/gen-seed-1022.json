@@ -729,7 +729,7 @@
         "archived": [],
         "counts": {
           "waiting": 2,
-          "unread": 3
+          "unread": 2
         },
         "threads": {
           "t1": {
@@ -774,7 +774,7 @@
           },
           "t4": {
             "section": "stopped",
-            "unread": true,
+            "unread": false,
             "unseen": 0,
             "read": false,
             "archived": false,
@@ -839,7 +839,7 @@
         "archived": [],
         "counts": {
           "waiting": 3,
-          "unread": 4
+          "unread": 3
         },
         "threads": {
           "t1": {
@@ -884,7 +884,7 @@
           },
           "t4": {
             "section": "stopped",
-            "unread": true,
+            "unread": false,
             "unseen": 0,
             "read": false,
             "archived": false,
@@ -956,7 +956,7 @@
         "archived": [],
         "counts": {
           "waiting": 2,
-          "unread": 4
+          "unread": 3
         },
         "threads": {
           "t1": {
@@ -1001,7 +1001,7 @@
           },
           "t4": {
             "section": "stopped",
-            "unread": true,
+            "unread": false,
             "unseen": 0,
             "read": false,
             "archived": false,
@@ -1157,7 +1157,7 @@
       "created": [
         "m8"
       ],
-      "lands_in": "t5",
+      "lands_in": "t6",
       "expect": {
         "sections": {
           "stopped": [
@@ -1165,9 +1165,10 @@
           ],
           "holding": [],
           "waiting": [
-            "t5"
+            "t6"
           ],
           "new": [
+            "t5",
             "t4",
             "t2"
           ],
@@ -1182,9 +1183,10 @@
           ],
           "holding": [],
           "waiting": [
-            "t5"
+            "t6"
           ],
           "new": [
+            "t5",
             "t4",
             "t2"
           ],
@@ -1196,7 +1198,7 @@
         "archived": [],
         "counts": {
           "waiting": 2,
-          "unread": 4
+          "unread": 5
         },
         "threads": {
           "t1": {
@@ -1253,16 +1255,28 @@
             }
           },
           "t5": {
+            "section": "new",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m7",
+            "questions": {
+              "m7/q-5ca0ee11": "picked"
+            }
+          },
+          "t6": {
             "section": "waiting",
             "unread": true,
-            "unseen": 2,
+            "unseen": 1,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
             "last": "m8",
             "questions": {
-              "m7/q-5ca0ee11": "picked",
               "m8/q-c0f244f5": "open"
             }
           }
@@ -1288,7 +1302,9 @@
             "t3"
           ],
           "holding": [],
-          "waiting": [],
+          "waiting": [
+            "t6"
+          ],
           "new": [
             "t4",
             "t2"
@@ -1304,7 +1320,9 @@
             "t3"
           ],
           "holding": [],
-          "waiting": [],
+          "waiting": [
+            "t6"
+          ],
           "new": [
             "t4",
             "t2"
@@ -1316,8 +1334,8 @@
         },
         "archived": [],
         "counts": {
-          "waiting": 2,
-          "unread": 4
+          "waiting": 3,
+          "unread": 5
         },
         "threads": {
           "t1": {
@@ -1376,7 +1394,7 @@
           "t5": {
             "section": "stopped",
             "unread": true,
-            "unseen": 3,
+            "unseen": 2,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
@@ -1384,9 +1402,21 @@
             "last": "m9",
             "questions": {
               "m7/q-5ca0ee11": "picked",
-              "m8/q-c0f244f5": "open",
               "m9/q-4c7ff6e3": "open",
               "m9/q-24de5340": "open"
+            }
+          },
+          "t6": {
+            "section": "waiting",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m8",
+            "questions": {
+              "m8/q-c0f244f5": "open"
             }
           }
         }
@@ -1406,7 +1436,9 @@
             "t3"
           ],
           "holding": [],
-          "waiting": [],
+          "waiting": [
+            "t6"
+          ],
           "new": [
             "t4",
             "t2"
@@ -1422,7 +1454,9 @@
             "t3"
           ],
           "holding": [],
-          "waiting": [],
+          "waiting": [
+            "t6"
+          ],
           "new": [
             "t4",
             "t2"
@@ -1434,8 +1468,8 @@
         },
         "archived": [],
         "counts": {
-          "waiting": 2,
-          "unread": 4
+          "waiting": 3,
+          "unread": 5
         },
         "threads": {
           "t1": {
@@ -1494,7 +1528,7 @@
           "t5": {
             "section": "stopped",
             "unread": true,
-            "unseen": 3,
+            "unseen": 2,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
@@ -1502,9 +1536,21 @@
             "last": "m9",
             "questions": {
               "m7/q-5ca0ee11": "picked",
-              "m8/q-c0f244f5": "open",
               "m9/q-4c7ff6e3": "open",
               "m9/q-24de5340": "open"
+            }
+          },
+          "t6": {
+            "section": "waiting",
+            "unread": true,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m8",
+            "questions": {
+              "m8/q-c0f244f5": "open"
             }
           }
         }

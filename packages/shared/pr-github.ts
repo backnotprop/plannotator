@@ -4,10 +4,11 @@
  * All functions use the `gh` CLI via the PRRuntime abstraction.
  */
 
-import type { PRRuntime, PRMetadata, PRContext, PRReviewThread, PRThreadComment, PRReviewFileComment, PRReviewFileLevelComment, PRReviewAction, PRReviewSubmissionResult, CommandResult, PRStackTree, PRStackNode, PRListItem } from "./pr-types";
+import type { PRRuntime, PRMetadata, PRContext, PRRequestedReviewer, PRReviewThread, PRThreadComment, PRReviewFileComment, PRReviewFileLevelComment, PRReviewAction, PRReviewSubmissionResult, CommandResult, PRStackTree, PRStackNode, PRListItem } from "./pr-types";
 import { decodeBase64Bytes, encodeApiFilePath, isNotFoundCommandFailure, type PRFileBytesResult, type PRTreeResult } from "./pr-types";
 import { parsePaginatedArray } from "./cli-pagination";
 import { listGhAccounts } from "./pr-github-account";
+import { isAccessRefusal, markedCommentText, PRMarkedForbiddenError, PRMarkedRaceError, spliceMarkedSection, startsWithMarker, type PRMarkedCommentInput, type PRMarkedResult, type PRMarkedSectionInput } from "./pr-marked";
 
 // GitHub-specific PRRef shape (used internally)
 interface GhPRRef {
@@ -163,7 +164,7 @@ export function reconstructGhPatch(files: GitHubFileEntry[]): string {
  * always have withheld non-rename entries too, so the flag (and the local
  * recompute that fixes everything) still triggers.
  */
-function entryMissingContent(f: GitHubFileEntry): boolean {
+export function entryMissingContent(f: GitHubFileEntry): boolean {
   return !f.patch && f.status !== "renamed" && f.status !== "copied" && f.status !== "unchanged";
 }
 
@@ -337,12 +338,13 @@ function parseGhPRContext(raw: Record<string, unknown>): PRContext {
       ...(r?.url ? { url: str(r.url) } : {}),
     })),
     reviewThreads: [],  // populated via GraphQL after initial fetch
+    // A commit status (not a check run) has `context`, `state` and `targetUrl` in their place.
     checks: arr(raw.statusCheckRollup).map((c: any) => ({
-      name: str(c?.name),
-      status: str(c?.status),
-      conclusion: typeof c?.conclusion === "string" ? c.conclusion : null,
+      name: str(c?.name) || str(c?.context),
+      status: str(c?.status) || (typeof c?.state === "string" ? (c.state === "PENDING" || c.state === "EXPECTED" ? "IN_PROGRESS" : "COMPLETED") : ""),
+      conclusion: typeof c?.conclusion === "string" ? c.conclusion : typeof c?.state === "string" && c.state !== "PENDING" && c.state !== "EXPECTED" ? c.state : null,
       workflowName: str(c?.workflowName),
-      detailsUrl: str(c?.detailsUrl),
+      detailsUrl: str(c?.detailsUrl) || str(c?.targetUrl),
     })),
     linkedIssues: arr(raw.closingIssuesReferences).map((i: any) => ({
       number: typeof i?.number === "number" ? i.number : 0,
@@ -380,8 +382,9 @@ export async function fetchGhPRContext(
   // gives the login only). Non-blocking failure: degrade to no threads / no bot
   // tags rather than failing the whole context.
   try {
-    const { threads, botLogins, avatarByLogin } = await fetchGhThreadsAndBots(runtime, ref);
+    const { threads, botLogins, avatarByLogin, complete } = await fetchGhThreadsAndBots(runtime, ref);
     context.reviewThreads = threads;
+    if (!complete) context.threadsIncomplete = true;
     for (const c of context.comments) {
       if (botLogins.has(c.author)) c.isBot = true;
       const a = avatarByLogin.get(c.author);
@@ -394,6 +397,7 @@ export async function fetchGhPRContext(
     }
   } catch {
     context.reviewThreads = [];
+    context.threadsIncomplete = true;
   }
 
   return context;
@@ -401,13 +405,23 @@ export async function fetchGhPRContext(
 
 // --- Review Threads + bot detection (GraphQL) ---
 
+const PR_THREAD_COMMENT_FIELDS = `id
+              body
+              author { __typename login avatarUrl(size: 48) }
+              createdAt
+              url
+              diffHunk
+              isMinimized
+              minimizedReason`;
+
 const PR_CONTEXT_GRAPHQL_QUERY = `
-query($owner: String!, $repo: String!, $number: Int!) {
+query($owner: String!, $repo: String!, $number: Int!, $withComments: Boolean = true, $withReviews: Boolean = true, $withThreads: Boolean = true, $commentsAfter: String, $reviewsAfter: String, $threadsAfter: String) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
-      comments(first: 100) { nodes { author { __typename login avatarUrl(size: 48) } } }
-      reviews(first: 100) { nodes { author { __typename login avatarUrl(size: 48) } } }
-      reviewThreads(first: 100) {
+      comments(first: 100, after: $commentsAfter) @include(if: $withComments) { pageInfo { hasNextPage endCursor } nodes { author { __typename login avatarUrl(size: 48) } } }
+      reviews(first: 100, after: $reviewsAfter) @include(if: $withReviews) { pageInfo { hasNextPage endCursor } nodes { author { __typename login avatarUrl(size: 48) } } }
+      reviewThreads(first: 100, after: $threadsAfter) @include(if: $withThreads) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           isResolved
@@ -416,14 +430,11 @@ query($owner: String!, $repo: String!, $number: Int!) {
           startLine
           path
           diffSide
+          startDiffSide
           comments(first: 50) {
+            pageInfo { hasNextPage endCursor }
             nodes {
-              id
-              body
-              author { __typename login avatarUrl(size: 48) }
-              createdAt
-              url
-              diffHunk
+              ${PR_THREAD_COMMENT_FIELDS}
             }
           }
         }
@@ -432,72 +443,163 @@ query($owner: String!, $repo: String!, $number: Int!) {
   }
 }`;
 
+const PR_THREAD_COMMENTS_GRAPHQL_QUERY = `
+query($id: ID!, $after: String) {
+  node(id: $id) {
+    ... on PullRequestReviewThread {
+      comments(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          ${PR_THREAD_COMMENT_FIELDS}
+        }
+      }
+    }
+  }
+}`;
+
+interface GhConnection {
+  pageInfo?: { hasNextPage?: boolean; endCursor?: string | null } | null;
+  nodes?: any[] | null;
+}
+
+/** The cursor of a connection's next page, or null when it has none. */
+const nextCursor = (connection: GhConnection | null | undefined): string | null =>
+  connection?.pageInfo?.hasNextPage && connection.pageInfo.endCursor ? connection.pageInfo.endCursor : null;
+
 /**
- * One GraphQL round-trip returning the PR's inline review threads AND the set of
- * author logins that are bots (`__typename === "Bot"`) across comments, reviews,
- * and thread comments. GraphQL is the only place GitHub exposes author type —
- * `gh pr view --json` gives the login only. The caller uses the bot set to tag
- * the top-level comments/reviews; thread comments are tagged inline here.
+ * The PR's inline review threads AND the set of author logins that are bots (`__typename === "Bot"`) across comments,
+ * reviews, and thread comments, every page of them. GraphQL is the only place GitHub exposes author type — `gh pr view
+ * --json` gives the login only. The caller uses the bot set to tag the top-level comments/reviews; thread comments are
+ * tagged inline here. A read that fails partway says so (`complete: false`) and keeps what it read.
  */
 async function fetchGhThreadsAndBots(
   runtime: PRRuntime,
   ref: GhPRRef,
-): Promise<{ threads: PRReviewThread[]; botLogins: Set<string>; avatarByLogin: Map<string, string> }> {
-  const result = await runtime.runCommand("gh", hostnameArgs(ref.host, [
-    "api", "graphql",
-    "-f", `query=${PR_CONTEXT_GRAPHQL_QUERY}`,
-    "-f", `owner=${ref.owner}`,
-    "-f", `repo=${ref.repo}`,
-    "-F", `number=${ref.number}`,
-  ]));
-
-  const empty = { threads: [] as PRReviewThread[], botLogins: new Set<string>(), avatarByLogin: new Map<string, string>() };
-  if (result.exitCode !== 0) return empty;
-
-  const data = JSON.parse(result.stdout);
-  const pr = data?.data?.repository?.pullRequest;
-  if (!pr) return empty;
+): Promise<{ threads: PRReviewThread[]; botLogins: Set<string>; avatarByLogin: Map<string, string>; complete: boolean }> {
+  const read = async (fields: string[]): Promise<any | null> => {
+    const result = await runtime.runCommand("gh", hostnameArgs(ref.host, ["api", "graphql", ...fields]));
+    if (result.exitCode !== 0) return null;
+    try {
+      const parsed = JSON.parse(result.stdout);
+      return parsed?.errors?.length ? null : parsed?.data ?? null;
+    } catch {
+      return null;
+    }
+  };
 
   const botLogins = new Set<string>();
   const avatarByLogin = new Map<string, string>();
+  const threads: PRReviewThread[] = [];
   const collect = (author: any) => {
     if (!author?.login) return;
     const login = String(author.login);
     if (author.__typename === 'Bot') botLogins.add(login);
     if (author.avatarUrl && !avatarByLogin.has(login)) avatarByLogin.set(login, String(author.avatarUrl));
   };
-  for (const n of (pr.comments?.nodes ?? [])) collect(n?.author);
-  for (const n of (pr.reviews?.nodes ?? [])) collect(n?.author);
+  const commentOf = (c: any): PRThreadComment => {
+    collect(c?.author);
+    return {
+      id: String(c.id ?? ''),
+      author: c.author?.login ? String(c.author.login) : '',
+      ...(c.author?.__typename === 'Bot' ? { isBot: true } : {}),
+      ...(c.author?.avatarUrl ? { avatarUrl: String(c.author.avatarUrl) } : {}),
+      body: String(c.body ?? ''),
+      createdAt: String(c.createdAt ?? ''),
+      url: String(c.url ?? ''),
+      ...(c.diffHunk ? { diffHunk: String(c.diffHunk) } : {}),
+      ...(c.isMinimized === true ? { isMinimized: true, ...(typeof c.minimizedReason === 'string' && c.minimizedReason ? { minimizedReason: c.minimizedReason } : {}) } : {}),
+    };
+  };
 
-  const threadNodes = pr.reviewThreads?.nodes;
-  const threads: PRReviewThread[] = Array.isArray(threadNodes)
-    ? threadNodes.map((t: any): PRReviewThread => ({
-        id: String(t.id ?? ''),
-        isResolved: t.isResolved === true,
-        isOutdated: t.isOutdated === true,
-        path: String(t.path ?? ''),
-        line: typeof t.line === 'number' ? t.line : null,
-        startLine: typeof t.startLine === 'number' ? t.startLine : null,
-        diffSide: t.diffSide === 'LEFT' || t.diffSide === 'RIGHT' ? t.diffSide : null,
-        comments: Array.isArray(t.comments?.nodes)
-          ? t.comments.nodes.map((c: any): PRThreadComment => {
-              collect(c?.author);
-              return {
-                id: String(c.id ?? ''),
-                author: c.author?.login ? String(c.author.login) : '',
-                ...(c.author?.__typename === 'Bot' ? { isBot: true } : {}),
-                ...(c.author?.avatarUrl ? { avatarUrl: String(c.author.avatarUrl) } : {}),
-                body: String(c.body ?? ''),
-                createdAt: String(c.createdAt ?? ''),
-                url: String(c.url ?? ''),
-                ...(c.diffHunk ? { diffHunk: String(c.diffHunk) } : {}),
-              };
-            })
-          : [],
-      }))
-    : [];
+  // Each round asks only for the lists with more to give.
+  let page: string[] = [];
+  for (;;) {
+    const data = await read([
+      "-f", `query=${PR_CONTEXT_GRAPHQL_QUERY}`,
+      "-f", `owner=${ref.owner}`,
+      "-f", `repo=${ref.repo}`,
+      "-F", `number=${ref.number}`,
+      ...page,
+    ]);
+    const pr = data?.repository?.pullRequest;
+    if (!pr) return { threads, botLogins, avatarByLogin, complete: false };
+    for (const n of (pr.comments?.nodes ?? [])) collect(n?.author);
+    for (const n of (pr.reviews?.nodes ?? [])) collect(n?.author);
+    for (const t of (pr.reviewThreads?.nodes ?? [])) {
+      const comments: PRThreadComment[] = (t.comments?.nodes ?? []).map(commentOf);
+      let after = nextCursor(t.comments);
+      while (after) {
+        const more = await read(["-f", `query=${PR_THREAD_COMMENTS_GRAPHQL_QUERY}`, "-f", `id=${String(t.id ?? '')}`, "-f", `after=${after}`]);
+        const connection: GhConnection | undefined = more?.node?.comments;
+        if (!connection) {
+          threads.push(threadOf(t, comments));
+          return { threads, botLogins, avatarByLogin, complete: false };
+        }
+        comments.push(...(connection.nodes ?? []).map(commentOf));
+        after = nextCursor(connection);
+      }
+      threads.push(threadOf(t, comments));
+    }
+    const nextComments = nextCursor(pr.comments);
+    const nextReviews = nextCursor(pr.reviews);
+    const nextThreads = nextCursor(pr.reviewThreads);
+    if (!nextComments && !nextReviews && !nextThreads) return { threads, botLogins, avatarByLogin, complete: true };
+    page = [
+      "-F", `withComments=${!!nextComments}`,
+      "-F", `withReviews=${!!nextReviews}`,
+      "-F", `withThreads=${!!nextThreads}`,
+      ...(nextComments ? ["-f", `commentsAfter=${nextComments}`] : []),
+      ...(nextReviews ? ["-f", `reviewsAfter=${nextReviews}`] : []),
+      ...(nextThreads ? ["-f", `threadsAfter=${nextThreads}`] : []),
+    ];
+  }
+}
 
-  return { threads, botLogins, avatarByLogin };
+function threadOf(t: any, comments: PRThreadComment[]): PRReviewThread {
+  return {
+    id: String(t.id ?? ''),
+    isResolved: t.isResolved === true,
+    isOutdated: t.isOutdated === true,
+    path: String(t.path ?? ''),
+    line: typeof t.line === 'number' ? t.line : null,
+    startLine: typeof t.startLine === 'number' ? t.startLine : null,
+    diffSide: t.diffSide === 'LEFT' || t.diffSide === 'RIGHT' ? t.diffSide : null,
+    ...(t.startDiffSide === 'LEFT' || t.startDiffSide === 'RIGHT' ? { startDiffSide: t.startDiffSide } : {}),
+    comments,
+  };
+}
+
+// --- Requested reviewers ---
+
+/**
+ * Who is asked to review and has not yet: a read of its own, so a token that cannot read this one (or an older forge)
+ * costs only these names, never the PR's context. REST, as `gh pr view --json reviewRequests` needs `read:org` for a team.
+ */
+export async function fetchGhRequestedReviewers(runtime: PRRuntime, ref: GhPRRef): Promise<PRRequestedReviewer[]> {
+  const result = await runtime.runCommand("gh", hostnameArgs(ref.host, [
+    "api", `repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/requested_reviewers`,
+  ]));
+  if (result.exitCode !== 0) return [];
+  let answer: unknown;
+  try {
+    answer = JSON.parse(result.stdout);
+  } catch {
+    return [];
+  }
+  const rows = (value: unknown): Record<string, unknown>[] => (Array.isArray(value) ? value.filter((row) => typeof row === "object" && row !== null) : []);
+  const { users, teams } = (answer ?? {}) as { users?: unknown; teams?: unknown };
+  const people = rows(users).flatMap((user): PRRequestedReviewer[] => {
+    if (typeof user.login !== "string" || !user.login) return [];
+    return [{
+      login: user.login,
+      ...(typeof user.avatar_url === "string" && user.avatar_url ? { avatarUrl: user.avatar_url } : {}),
+      ...(user.type === "Bot" ? { isBot: true } : {}),
+    }];
+  });
+  const groups = rows(teams).flatMap((team): PRRequestedReviewer[] =>
+    typeof team.slug === "string" && team.slug ? [{ login: `${ref.owner}/${team.slug}`, isTeam: true }] : [],
+  );
+  return [...people, ...groups];
 }
 
 // --- File Content ---
@@ -1109,4 +1211,81 @@ export async function fetchGhPRList(
     baseBranch: pr.baseRefName,
     state: (pr.state === "OPEN" ? "open" : pr.state === "MERGED" ? "merged" : "closed") as PRListItem["state"],
   }));
+}
+
+// --- Marked text: a comment or a description section found again by its marker (pr-marked.ts) ---
+
+/**
+ * GitHub's limit on an issue or PR comment's body, and on a PR's description: 65,536 characters (the API refuses
+ * more with "body is too long"; not in GitHub's REST reference, which documents no limit).
+ */
+export const GH_BODY_MAX = 65_536;
+
+interface GhIssueComment {
+  id: number;
+  body?: string | null;
+  html_url?: string;
+  user?: { login?: string } | null;
+}
+
+const urlOf = (stdout: string): string | null => {
+  try {
+    const url = JSON.parse(stdout)?.html_url;
+    return typeof url === "string" ? url : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * The person's own comment on the PR that starts with `input.marker`, edited in place; else a new one. Found on the
+ * forge every time (no id is kept): the newest of the signed-in account's comments that start with the marker. One
+ * that is gone by the time it is edited (deleted meanwhile, HTTP 404) is posted again as new.
+ */
+export async function upsertGhMarkedComment(runtime: PRRuntime, ref: GhPRRef, input: PRMarkedCommentInput): Promise<PRMarkedResult> {
+  if (!runtime.runCommandWithInput) throw new Error("Runtime does not support stdin input; cannot post a comment");
+  const run = runtime.runCommandWithInput.bind(runtime);
+  const text = markedCommentText(input, GH_BODY_MAX);
+  const base = `repos/${ref.owner}/${ref.repo}/issues`;
+  const listed = await runtime.runCommand("gh", hostnameArgs(ref.host, ["api", `${base}/${ref.number}/comments?per_page=100`, "--paginate"]));
+  if (listed.exitCode !== 0) throw new Error(`Couldn't read the pull request's comments: ${commandError(listed)}`);
+  const marked = parsePaginatedArray<GhIssueComment>(listed.stdout).filter((comment) => startsWithMarker(comment.body, input.marker));
+  const me = marked.length > 0 ? await getGhUser(runtime, ref.host) : null;
+  const own = marked.filter((comment) => me !== null && comment.user?.login?.toLowerCase() === me.toLowerCase());
+  const existing = own.at(-1);
+  if (existing) {
+    const edited = await run("gh", hostnameArgs(ref.host, ["api", `${base}/comments/${existing.id}`, "--method", "PATCH", "--input", "-"]), JSON.stringify({ body: text }));
+    if (edited.exitCode === 0) return { action: "updated", url: urlOf(edited.stdout) ?? existing.html_url ?? "" };
+    if (!isNotFoundCommandFailure(edited.stderr)) throw new Error(`Couldn't update the comment: ${commandError(edited)}`);
+  }
+  const posted = await run("gh", hostnameArgs(ref.host, ["api", `${base}/${ref.number}/comments`, "--method", "POST", "--input", "-"]), JSON.stringify({ body: text }));
+  if (posted.exitCode !== 0) throw new Error(`Couldn't post the comment: ${commandError(posted)}`);
+  return { action: "created", url: urlOf(posted.stdout) ?? "" };
+}
+
+/**
+ * The PR description's section between `input.start` and `input.end`, put in place (or at the end), the rest of the
+ * description kept byte for byte. GitHub takes no precondition on this write, so the description is read, spliced,
+ * read again just before the write, and the write is refused (PRMarkedRaceError) when another edit landed in between.
+ * An edit in the moment between that second read and the write is not caught. A write refused for access (the person
+ * can read the PR, is not its author and has no write access) is PRMarkedForbiddenError, for the caller to fall back.
+ */
+export async function upsertGhDescriptionSection(runtime: PRRuntime, ref: GhPRRef, input: PRMarkedSectionInput): Promise<PRMarkedResult> {
+  if (!runtime.runCommandWithInput) throw new Error("Runtime does not support stdin input; cannot edit a description");
+  const path = `repos/${ref.owner}/${ref.repo}/pulls/${ref.number}`;
+  const read = async (): Promise<{ body: string; url: string }> => {
+    const result = await runtime.runCommand("gh", hostnameArgs(ref.host, ["api", path]));
+    if (result.exitCode !== 0) throw new Error(`Couldn't read the pull request: ${commandError(result)}`);
+    const parsed = JSON.parse(result.stdout) as { body?: string | null; html_url?: string };
+    return { body: parsed.body ?? "", url: parsed.html_url ?? "" };
+  };
+  const first = await read();
+  const planned = spliceMarkedSection(first.body, input, GH_BODY_MAX);
+  if ((await read()).body !== first.body) throw new PRMarkedRaceError();
+  const written = await runtime.runCommandWithInput("gh", hostnameArgs(ref.host, ["api", path, "--method", "PATCH", "--input", "-"]), JSON.stringify({ body: planned.text }));
+  if (written.exitCode !== 0) {
+    if (isAccessRefusal(written.stderr, written.stdout)) throw new PRMarkedForbiddenError(commandError(written));
+    throw new Error(`Couldn't edit the description: ${commandError(written)}`);
+  }
+  return { action: planned.replaced ? "updated" : "created", url: first.url };
 }

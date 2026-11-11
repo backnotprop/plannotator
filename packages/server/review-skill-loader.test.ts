@@ -21,8 +21,10 @@ import {
   readReferenceSkillContent,
   resolveRequestedReviewProfile,
   SKILL_CONTENT_HEAD_BYTES,
+  resolveGlobalSkillRoots,
   stripFrontmatter,
 } from "./review-skill-loader";
+import { checkoutIsScratch, makeOutsideScratch } from "../../tests/helpers/outside-scratch";
 
 // Launch-time resolution used by review.ts / serverReview.ts. Tested directly so
 // both runtimes' resolution stays pinned without standing up a full review server.
@@ -157,6 +159,104 @@ describe("discoverSkills — root resolution", () => {
     const matches = discoverSkills().filter((s) => s.name === "shared-skill");
     expect(matches).toHaveLength(1);
   });
+});
+
+// The failure this catches: a test Inbox reading the person's real skill folders
+// because its test left HOME alone (typing in a reply box lists them), or the
+// sandbox check leaking into a real run. `outside` stands in for a real home: a
+// folder that exists and is not scratch, made here, never the real one.
+describe.skipIf(checkoutIsScratch)("resolveGlobalSkillRoots — test sandbox", () => {
+  let outside = "";
+
+  const seedEveryDefaultRoot = (at: string) => {
+    writeSkill(join(at, ".claude", "skills"), "in-claude");
+    writeSkill(join(at, ".codex", "skills"), "in-codex");
+    writeSkill(join(at, ".agents", "skills"), "in-agents");
+    writeSkill(join(at, ".config", "agents", "skills"), "in-config");
+  };
+  const everyDefaultRoot = (at: string) => [
+    { dir: join(at, ".claude", "skills"), root: "claude" },
+    { dir: join(at, ".codex", "skills"), root: "codex" },
+    { dir: join(at, ".agents", "skills"), root: "universal" },
+    { dir: join(at, ".config", "agents", "skills"), root: "universal" },
+  ];
+  const useDefaultRootsOf = (at: string) => {
+    setEnv("HOME", at);
+    setEnv("CLAUDE_CONFIG_DIR", undefined);
+    setEnv("CODEX_HOME", undefined);
+    setEnv("XDG_CONFIG_HOME", undefined);
+  };
+
+  beforeEach(() => {
+    outside = makeOutsideScratch();
+  });
+
+  afterEach(() => {
+    rmSync(outside, { recursive: true, force: true });
+  });
+
+  for (const [label, value] of [["unset", undefined], ["empty", ""]] as const) {
+    test(`sandbox ${label}: the same four folders as ever, scratch or not`, () => {
+      setEnv("PLANNOTATOR_TEST_SANDBOX", value);
+      seedEveryDefaultRoot(outside);
+      useDefaultRootsOf(outside);
+
+      expect(resolveGlobalSkillRoots()).toEqual(everyDefaultRoot(outside));
+      expect(discoverSkills().map((s) => s.name)).toEqual(["in-claude", "in-codex", "in-agents", "in-config"]);
+
+      // The env overrides, too. Folders that do not exist yet are still listed.
+      setEnv("CLAUDE_CONFIG_DIR", join(outside, "c"));
+      setEnv("CODEX_HOME", join(outside, "x"));
+      setEnv("XDG_CONFIG_HOME", join(outside, "g"));
+      expect(resolveGlobalSkillRoots()).toEqual([
+        { dir: join(outside, "c", "skills"), root: "claude" },
+        { dir: join(outside, "x", "skills"), root: "codex" },
+        { dir: join(outside, ".agents", "skills"), root: "universal" },
+        { dir: join(outside, "g", "agents", "skills"), root: "universal" },
+      ]);
+    });
+  }
+
+  // Any non-empty value is on. The preload sets a path (tests/setup/feedback-archive-off.ts), specs mostly "1".
+  for (const value of ["1", "0", join(tmpdir(), "plannotator-test-marker")]) {
+    test(`sandbox ${value}: a home that is not scratch is not read at all`, () => {
+      setEnv("PLANNOTATOR_TEST_SANDBOX", value);
+      seedEveryDefaultRoot(outside);
+      useDefaultRootsOf(outside);
+
+      expect(resolveGlobalSkillRoots()).toEqual([]);
+      expect(discoverSkills()).toEqual([]);
+      expect(listReferenceSkills()).toEqual([]);
+    });
+
+    test(`sandbox ${value}: a scratch HOME's seeded skills are all found`, () => {
+      setEnv("PLANNOTATOR_TEST_SANDBOX", value);
+      seedEveryDefaultRoot(home);
+      useDefaultRootsOf(home);
+
+      expect(resolveGlobalSkillRoots()).toEqual(everyDefaultRoot(home));
+      expect(discoverSkills().map((s) => s.name)).toEqual(["in-claude", "in-codex", "in-agents", "in-config"]);
+    });
+
+    test(`sandbox ${value}: judged folder by folder, as for a runner's HOME with scratch overrides`, () => {
+      setEnv("PLANNOTATOR_TEST_SANDBOX", value);
+      seedEveryDefaultRoot(outside);
+      writeSkill(join(home, ".claude", "skills"), "scratch-skill");
+      setEnv("HOME", outside);
+      // CLAUDE_CONFIG_DIR, CODEX_HOME and XDG_CONFIG_HOME stay in the scratch home (beforeEach).
+
+      expect(discoverSkills().map((s) => s.name)).toEqual(["scratch-skill"]);
+    });
+
+    test(`sandbox ${value}: a scratch link to a folder that is not scratch is not read`, () => {
+      setEnv("PLANNOTATOR_TEST_SANDBOX", value);
+      writeSkill(join(outside, ".claude", "skills"), "through-the-link");
+      symlinkSync(join(outside, ".claude"), join(home, "claude-link"));
+      setEnv("CLAUDE_CONFIG_DIR", join(home, "claude-link"));
+
+      expect(discoverSkills()).toEqual([]);
+    });
+  }
 });
 
 describe("discoverSkills — symlinked skill directories", () => {

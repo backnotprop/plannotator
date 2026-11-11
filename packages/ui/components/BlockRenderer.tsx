@@ -67,6 +67,8 @@ export const BlockRenderer: React.FC<{
   questionStatusLabel?: QuestionBlockProps['statusLabel'];
   /** Host content under a question's prompt (see `QuestionBlock`). */
   renderQuestionBelowPrompt?: QuestionBlockProps['renderBelowPrompt'];
+  /** Host content right after a question's choices (see `QuestionBlock` `renderAfterChoices`). */
+  renderQuestionAfterChoices?: QuestionBlockProps['renderAfterChoices'];
   /** Read a standalone question's contract lines into the card (default
    *  false: context). A `question` the host passes was parsed by the host. */
   questionContractLines?: boolean;
@@ -76,7 +78,9 @@ export const BlockRenderer: React.FC<{
   questionPictureBadge?: QuestionBlockProps['pictureBadge'];
   /** A picture tile's zoom, with its question and choice (see `QuestionBlock` `onZoomChoice`). */
   onQuestionPictureZoom?: QuestionBlockProps['onZoomChoice'];
-}> = ({ block, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, onToggleCheckbox, checkboxOverrides, orderedIndex, githubRepo, repoHost, headingAnchorId, onNavigateAnchor, question, questionTotal, questionAnswer, onAnswerQuestion, onSaveQuestionAnswer, saveQuestionAnswerLabel, renderQuestionFooter, questionDecisionRecording, questionDecisionScope, onToggleQuestionDecisionRecording, onOpenQuestionDecision, questionStatusTag, questionStatusLabel, renderQuestionBelowPrompt, questionContractLines = false, questionPictureChoices, questionPictureBadge, onQuestionPictureZoom }) => {
+  /** A picture choice's size before it loads (see `QuestionBlock` `pictureSize`). */
+  questionPictureSize?: QuestionBlockProps['pictureSize'];
+}> = ({ block, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, onToggleCheckbox, checkboxOverrides, orderedIndex, githubRepo, repoHost, headingAnchorId, onNavigateAnchor, question, questionTotal, questionAnswer, onAnswerQuestion, onSaveQuestionAnswer, saveQuestionAnswerLabel, renderQuestionFooter, questionDecisionRecording, questionDecisionScope, onToggleQuestionDecisionRecording, onOpenQuestionDecision, questionStatusTag, questionStatusLabel, renderQuestionBelowPrompt, renderQuestionAfterChoices, questionContractLines = false, questionPictureChoices, questionPictureBadge, onQuestionPictureZoom, questionPictureSize }) => {
   switch (block.type) {
     case 'heading': {
       const Tag = `h${block.level || 1}` as React.ElementType;
@@ -213,9 +217,11 @@ export const BlockRenderer: React.FC<{
               statusTag={questionStatusTag}
               statusLabel={questionStatusLabel}
               renderBelowPrompt={renderQuestionBelowPrompt}
+              renderAfterChoices={renderQuestionAfterChoices}
               pictureChoices={questionPictureChoices}
               pictureBadge={questionPictureBadge}
               onZoomChoice={onQuestionPictureZoom}
+              pictureSize={questionPictureSize}
               onOpenLinkedDoc={onOpenLinkedDoc}
               onOpenCodeFile={onOpenCodeFile}
               imageBaseDir={imageBaseDir}

@@ -12,7 +12,7 @@
  */
 import { createReadStream } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { isSameOriginOrNoOrigin } from "../generated/request-origin.ts";
+import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "../generated/request-origin.ts";
 import { readRepoFile, repoFileErrorBody, REPO_FILE_ERROR_STATUS } from "../generated/repo-file.ts";
 import { resolveCodeNavHover, validateCodeNavRequest, type CodeNavRequest } from "../generated/code-nav.ts";
 import { createShapeStore, type ShapeStore } from "../generated/shape/store.ts";
@@ -40,7 +40,8 @@ const piShapeCode: NonNullable<ShapeRouteDeps["code"]> = {
 
 /**
  * NOT MOUNTED, and must not be until it has what the Bun Inbox has around it: Pi has no Shape switch (the Inbox's
- * Settings → Capabilities → Shape, config `inboxShape`: off answers 404), no owner check (a tailnet guest is
+ * Settings → Capabilities → Shape and `plannotator shape on|off`, config `inboxShape`, read and written only through
+ * @plannotator/shared/shape/switch: off answers 404), no owner check (a tailnet guest is
  * refused there) and no `serverSession` check on writes (409 for a page of a restarted server). Whoever mounts
  * this adds all three first.
  */
@@ -75,7 +76,7 @@ export function createPiShapeRoutes(options: { dataDir: string; heartbeatMs?: nu
 			if (url.pathname !== "/api/shapes" && !url.pathname.startsWith("/api/shapes/")) return false;
 			const origin = typeof req.headers.origin === "string" ? req.headers.origin : null;
 			if (!isSameOriginOrNoOrigin(origin, req.headers.host ?? "", req.headers["sec-fetch-site"])) {
-				sendJson(res, 403, { error: "Cross-origin requests are not accepted.", code: "cross_origin" });
+				sendJson(res, 403, crossOriginRefusalBody());
 				return true;
 			}
 			if (url.pathname === SHAPE_EVENTS_PATH) {

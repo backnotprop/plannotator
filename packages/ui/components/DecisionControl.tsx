@@ -77,6 +77,9 @@ export interface DecisionControlProps {
    */
   drafts?: Record<string, string>;
   onDraftsChange?: (drafts: Record<string, string>) => void;
+  /** Bumped by the host's Mod+Shift+Enter: opens the first note composer
+   *  (e.g. "Send with a note") so a note needs no mouse. */
+  openNoteRequest?: number;
 }
 
 const NOTE_MAX_HEIGHT_PX = 144;
@@ -287,6 +290,7 @@ export const DecisionControl: React.FC<DecisionControlProps> = ({
   menuFooter,
   drafts: hostDrafts,
   onDraftsChange,
+  openNoteRequest,
 }) => {
   const rootRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -409,6 +413,13 @@ export const DecisionControl: React.FC<DecisionControlProps> = ({
     handlers[item.id]?.();
   }, [closePopover, handlers]);
 
+  useEffect(() => {
+    if (!openNoteRequest || busy) return;
+    const item = spec.items.find((candidate) => candidate.composer && !candidate.muted);
+    if (item) selectItem(item);
+    // Only a new request opens the composer, never a spec or busy change.
+  }, [openNoteRequest]);
+
   const submitComposer = useCallback(() => {
     if (!activeItem) return;
     const trimmed = (drafts[activeItem.id] ?? '').trim();
@@ -505,8 +516,8 @@ export const DecisionControl: React.FC<DecisionControlProps> = ({
         }
         className={cn(
           'rounded-r-none border-r-0',
-          // Same mute treatment the old platform ApproveButton wore.
-          spec.primary.muted && 'opacity-40 cursor-not-allowed bg-muted text-muted-foreground hover:bg-muted',
+          // One control with its caret, which stays live: quiet words on the same fill, never half of a coloured pill.
+          spec.primary.muted && 'cursor-not-allowed bg-muted text-muted-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted',
         )}
       >
         {spec.primary.shortLabel ? (
@@ -562,7 +573,7 @@ export const DecisionControl: React.FC<DecisionControlProps> = ({
         aria-expanded={popover !== null}
         aria-label="More decisions"
         data-decision-caret="true"
-        className="rounded-l-none px-1.5"
+        className={cn('rounded-l-none px-1.5', spec.primary.muted && 'bg-muted text-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted/70')}
       >
         <ChevronDown
           className={cn('size-3.5 transition-transform duration-150', popover && 'rotate-180')}

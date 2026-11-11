@@ -29,13 +29,16 @@
  * text alone; an older one appends this trimmed JSON as well.
  */
 
-import { INBOX_HOST_NAMES, inboxAgentName, inboxBoardRequestBlock, isInboxNote, type InboxMessageWire, type InboxQuestion } from "@plannotator/core/inbox-types";
+import { INBOX_ROWS_ASK_BLOCK } from "@plannotator/core/inbox-types";
+import { INBOX_DECISION_ASK_BLOCK, INBOX_HOST_NAMES, inboxAgentName, inboxBoardRequestBlock, isInboxNote, type InboxMessageWire, type InboxQuestion } from "@plannotator/core/inbox-types";
 import { inboxAnswersSectionEnd } from "@plannotator/core/inbox-questions";
 import { QUESTION_ANSWERS_HEADING, type QuestionAnswer } from "@plannotator/core/question-block";
+import { inboxAckReaction } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxSearchBodyText, inboxSearchReplyText } from "@plannotator/shared/inbox/search";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { INBOX_TIDY_WITHDRAWN_HOST } from "@plannotator/shared/inbox/tidy";
+import { inboxViewingLine } from "@plannotator/shared/inbox/uploads";
 
 /** Messages read_thread shows in full by default: the newest six. */
 export const INBOX_THREAD_WINDOW = 6;
@@ -87,6 +90,12 @@ export interface AgentQuestionRef {
    */
   result?: string;
   /**
+   * A question asked inside a file the message attached (issue #2828): the
+   * file's name. `q` then numbers it among that file's questions, as the
+   * reply's answers section does under "Your file <name>, attached to message <id>".
+   */
+  file?: string;
+  /**
    * On a one-line message and in `thread.questions`: the prompt, clipped, so
    * an answer ("Yes") says what it answers (the reply's answers section,
    * which named it, is left out of the person's earlier messages).
@@ -117,7 +126,8 @@ export interface AgentMessage {
   body_bytes?: number;
   questions?: AgentQuestion[];
   attachments?: { name: string; kind: string; size: number; path: string }[];
-  ack?: { label: string; at: string };
+  /** The person's reaction (approval "inbox-reaction-tray"): always `reaction`, 👍 Looks good included. */
+  ack?: { label: string; at: string; reaction: { emoji: string; label?: string } };
   guide?: { title: string };
   /** A person's message addressed to one agent session (a New message, or a reply sent to another session because the asker ended); on a reply that tags agents, its owner. */
   to?: AgentAddressee;
@@ -130,8 +140,14 @@ export interface AgentMessage {
    * the person's words.
    */
   board_request?: true;
+  /** Asked from Decision data: `messageText` puts `INBOX_DECISION_ASK_BLOCK` after the body; `body` stays the person's words. */
+  decision_ask?: true;
+  /** Asked from Settings → Rows: `messageText` puts `INBOX_ROWS_ASK_BLOCK` after the body; `body` stays the person's words. */
+  rows_ask?: true;
   /** With `board_request`: the cards in flight that link this thread already (not done, not dropped), for `messageText`. */
   board_cards?: { id: string; title: string }[];
+  /** `inboxViewingLine`, on a reply sent from full screen's floating box. `body` stays the person's words. */
+  viewing?: string;
 }
 
 /** One agent session a person's reply tags, as an agent reads it. */
@@ -161,9 +177,12 @@ export interface AgentMessageLine {
   attachments?: string[];
   guide?: string;
   ack?: true;
+  /** With `ack`: the emoji the person reacted with, 👍 included (approval "inbox-reaction-tray"); the line shows it, never its name. */
+  reaction?: string;
   to?: AgentAddressee;
   tagged?: AgentTagged[];
   board_request?: true;
+  viewing?: string;
 }
 
 export interface ThreadReadInput {
@@ -315,7 +334,14 @@ export function answerWords(answer: AgentAnswer | undefined): string {
  */
 function numbering(questions: readonly InboxQuestion[]): Map<string, number> {
   const rank = (list: readonly InboxQuestion[]) => [...list].sort((a, b) => a.position - b.position).map((q, i) => [q.key, i + 1] as const);
-  return new Map([...rank(questions.filter((q) => q.kind !== "action")), ...rank(questions.filter((q) => q.kind === "action"))]);
+  // A question inside an attached file (issue #2828) is numbered among that file's questions.
+  const body = questions.filter((q) => !q.attachment);
+  const files = [...new Set(questions.flatMap((q) => (q.attachment ? [q.attachment.id] : [])))];
+  return new Map([
+    ...rank(body.filter((q) => q.kind !== "action")),
+    ...rank(body.filter((q) => q.kind === "action")),
+    ...files.flatMap((id) => rank(questions.filter((q) => q.attachment?.id === id && q.kind !== "action"))),
+  ]);
 }
 
 /** An action item's result in words, for the agent (`AgentQuestionRef.result`). */
@@ -336,6 +362,7 @@ function questionRef(q: InboxQuestion, n: number): AgentQuestionRef {
     key: q.key,
     q: n,
     state: q.state,
+    ...(q.attachment ? { file: q.attachment.name } : {}),
     ...(answer ? { answer } : {}),
     ...(result ? { result } : {}),
     ...(q.superseded_by ? { superseded_by: q.superseded_by.key ? `${q.superseded_by.message_id}/${q.superseded_by.key}` : q.superseded_by.message_id } : {}),
@@ -353,7 +380,7 @@ export function agentQuestions(questions: readonly InboxQuestion[]): AgentQuesti
  */
 export function questionWords(q: AgentQuestionRef, withPrompt = false): string {
   // An action item (key `a-…`) reads A1, A2…: the reply's "Action items you asked for" numbers it so.
-  const head = `${q.key.startsWith("a-") ? "A" : "Q"}${q.q} ${q.key}${withPrompt && q.prompt ? ` (${JSON.stringify(q.prompt)})` : ""}`;
+  const head = `${q.key.startsWith("a-") ? "A" : "Q"}${q.q}${q.file ? ` in your file ${q.file}` : ""} ${q.key}${withPrompt && q.prompt ? ` (${JSON.stringify(q.prompt)})` : ""}`;
   if (q.result) return `${head} ${q.result}`;
   if (q.state === "superseded") return `${head} ${q.superseded_by?.includes("/") ? `replaced by ${q.superseded_by}` : "no longer applies"}`;
   const answer = answerWords(q.answer);
@@ -414,11 +441,14 @@ export function agentMessage(message: InboxMessageWire, form: AgentMessageForm =
     ...(body !== message.body ? { body_bytes: total } : {}),
     ...(message.questions?.length ? { questions: agentQuestions(message.questions) } : {}),
     ...(message.attachments?.length ? { attachments: message.attachments.map((a) => ({ name: a.name, kind: a.kind, size: a.size, path: a.path })) } : {}),
-    ...(ack ? { ack: { label: ack.label, at: ack.at } } : {}),
+    ...(ack ? { ack: { label: ack.label, at: ack.at, reaction: agentReaction(ack.reaction) } } : {}),
     ...(message.guide ? { guide: { title: message.guide.title } } : {}),
     ...(message.to ? { to: addressee(message, caller) } : {}),
     ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller) } : {}),
     ...(message.board_request === true ? { board_request: true as const } : {}),
+    ...(message.decision_ask === true ? { decision_ask: true as const } : {}),
+    ...(message.rows_ask === true ? { rows_ask: true as const } : {}),
+    ...(inboxViewingLine(message) ? { viewing: inboxViewingLine(message) } : {}),
   };
 }
 
@@ -444,9 +474,11 @@ export function agentMessageLine(message: InboxMessageWire, caller: string | nul
     ...(message.attachments?.length ? { attachments: message.attachments.map((a) => a.name) } : {}),
     ...(message.guide ? { guide: message.guide.title } : {}),
     ...(message.ack ? { ack: true as const } : {}),
+    ...(message.ack ? { reaction: inboxAckReaction(message.ack.reaction).emoji } : {}),
     ...(message.to ? { to: addressee(message, caller) } : {}),
     ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller) } : {}),
     ...(message.board_request === true ? { board_request: true as const } : {}),
+    ...(inboxViewingLine(message) ? { viewing: inboxViewingLine(message) } : {}),
   };
 }
 
@@ -652,13 +684,29 @@ export function messageLineText(line: AgentMessageLine, context: TranscriptConte
   const tagged = taggedWords(line.tagged);
   if (tagged) parts.push(tagged);
   parts.push(`"${line.words}" (${sizeText(line.bytes)})`);
+  if (line.viewing) parts.push(line.viewing);
   if (line.questions?.length) parts.push(line.questions.map((q) => questionWords(q, true)).join("; "));
   if (line.attachments?.length) parts.push(`files: ${line.attachments.join(", ")}`);
   if (line.guide) parts.push(`guided review: ${line.guide}`);
-  if (line.ack) parts.push("👍");
+  if (line.ack) parts.push(line.reaction ?? "👍");
   // Shown in full only: the line says it is there, so a reader that sees just the line expands it.
   if (line.board_request) parts.push(`Board request (read_thread expand: ["${line.id}"] shows it)`);
   return parts.join(" · ");
+}
+
+/**
+ * The person's reaction as an agent reads it (approval "inbox-reaction-tray"): `{ emoji, label? }`, 👍 Looks good
+ * for an ack with none (an older one, or 👍 itself).
+ */
+function agentReaction(value: unknown): { emoji: string; label?: string } {
+  const { emoji, label } = inboxAckReaction(value);
+  return label ? { emoji, label } : { emoji };
+}
+
+/** The line under a message the person reacted to: the emoji, its name when it has one, and when. */
+function ackLineText(ack: NonNullable<AgentMessage["ack"]>): string {
+  const { emoji, label } = inboxAckReaction(ack.reaction);
+  return `${emoji}${label ? ` ${label}` : ""} (${shortTime(ack.at)}): the person's reaction.`;
 }
 
 /** One message in full as text: a heading line, the body, then its questions, files, guide and 👍. */
@@ -669,12 +717,13 @@ export function messageText(message: AgentMessage, context: TranscriptContext): 
   const tagged = taggedWords(message.tagged);
   if (tagged) head.push(tagged);
   const lines = [`[${head.join(" · ")}]`, message.body.trimEnd()];
+  if (message.viewing) lines.push(message.viewing);
   if (message.questions?.length) lines.push(`Questions: ${message.questions.map((q) => questionWords(q)).join("; ")}`);
   if (message.attachments?.length) {
     lines.push(`Files: ${message.attachments.map((a) => `${a.name} (${a.kind}, ${sizeText(a.size)}): ${a.path}`).join("; ")}`);
   }
   if (message.guide) lines.push(`Guided review: ${message.guide.title}`);
-  if (message.ack) lines.push(`👍 ${message.ack.label} (${shortTime(message.ack.at)}): the person read it and needs nothing more.`);
+  if (message.ack) lines.push(ackLineText(message.ack));
   // Compose's Board chip: the request, once, after the words and files (the wake's order), and the cards
   // that link the thread already, so a second reader keeps those current instead of making more.
   if (message.board_request) {
@@ -683,6 +732,8 @@ export function messageText(message: AgentMessage, context: TranscriptContext): 
       lines.push(`Already on the Board for this thread: ${message.board_cards.map((c) => `${c.id} (${c.title})`).join("; ")}. Keep ${message.board_cards.length === 1 ? "it" : "them"} current; make no other.`);
     }
   }
+  if (message.decision_ask) lines.push("", INBOX_DECISION_ASK_BLOCK);
+  if (message.rows_ask) lines.push("", INBOX_ROWS_ASK_BLOCK);
   return lines.join("\n");
 }
 
@@ -717,7 +768,7 @@ export function windowedThreadText(result: ThreadWindowResult, order: readonly s
           ? `picked, not sent${q.answer ? `: ${answerWords(q.answer)}` : ""}`
           : "open";
       const choices = q.choices.length > 0 ? ` Choices: ${q.choices.map((c) => clip(c, 200)).join(" | ")}` : "";
-      out.push(`- ${q.message_id}/${q.key} (${todo ? "A" : "Q"}${q.q}) ${state}: ${q.prompt}${choices}`);
+      out.push(`- ${q.message_id}/${q.key} (${todo ? "A" : "Q"}${q.q}${q.file ? ` in your file ${q.file}` : ""}) ${state}: ${q.prompt}${choices}`);
     }
   }
   if (thread.questions?.length) {

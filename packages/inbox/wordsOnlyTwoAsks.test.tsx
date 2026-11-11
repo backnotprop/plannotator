@@ -192,7 +192,7 @@ function button(el: ParentNode, text: string): HTMLButtonElement {
 }
 
 function type(el: HTMLElement, words: string) {
-  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  const text = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
   act(() => {
     setter.call(text, words);
@@ -201,6 +201,17 @@ function type(el: HTMLElement, words: string) {
 }
 
 const replies = () => posted.filter((p) => p.path.endsWith('/reply'));
+
+/** Base UI opens a menu (and presses its items) on the pointer's press, as a person's click does. */
+async function press(target: HTMLElement) {
+  await act(async () => {
+    target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }));
+    target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    target.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, pointerType: 'mouse' }));
+    target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
+    target.click();
+  });
+}
 
 /** What every words-only Send in this thread must come to, on the wire and on the server. */
 async function expectWordsOnly(firstId: string, secondId: string, words: string) {
@@ -228,7 +239,7 @@ test.skipIf(!hasDom)('one session asked twice: Reply, words, the Send button: on
   expect(el.querySelector('[data-skip-chip]')?.getAttribute('data-skip-chip')).toBe('keep');
   type(el, 'Is there a way to attach video?');
   act(() => button(el, 'Send').click());
-  await until(() => el.querySelector('textarea') === null, 'the Send');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   await expectWordsOnly(world.waiting, second, 'Is there a way to attach video?');
 });
 
@@ -239,11 +250,11 @@ test.skipIf(!hasDom)('one session asked twice: Mod+Enter in the reply box sends 
   act(() => button(el, 'Reply').click());
   await settle();
   type(el, 'Thinking about it.');
-  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  const text = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
   act(() => {
     text.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, ctrlKey: true, bubbles: true }));
   });
-  await until(() => el.querySelector('textarea') === null, 'the Send');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   await expectWordsOnly(world.waiting, second, 'Thinking about it.');
 });
 
@@ -265,7 +276,7 @@ test.skipIf(!hasDom)('one session asked twice: a pick made and taken back before
   expect(el.querySelector('[data-skip-chip]')?.getAttribute('data-skip-chip')).toBe('keep');
   type(el, 'Not yet.');
   act(() => button(el, 'Send').click());
-  await until(() => el.querySelector('textarea') === null, 'the Send');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   await expectWordsOnly(world.waiting, second, 'Not yet.');
 });
 
@@ -281,27 +292,27 @@ test.skipIf(!hasDom)('one session asked twice, the first message folded: the Sen
   expect(el.querySelector('[data-skip-chip]')?.getAttribute('data-skip-chip')).toBe('keep');
   type(el, 'Later.');
   act(() => button(el, 'Send').click());
-  await until(() => el.querySelector('textarea') === null, 'the Send');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   await expectWordsOnly(world.waiting, second, 'Later.');
 });
 
-test.skipIf(!hasDom)('one session asked twice: the box cancelled and opened again keeps the default, and the Send is words-only', async () => {
+test.skipIf(!hasDom)('one session asked twice: the box closed and opened again keeps the default, and the Send is words-only', async () => {
   const second = await askAgain(world);
   const el = await renderApp(`#thread=${world.waiting}`);
   await until(() => el.querySelectorAll('fieldset[data-question-key]').length === 2, 'both questions');
   act(() => button(el, 'Reply').click());
   await settle();
   type(el, 'A first try.');
-  act(() => button(el, 'Cancel').click());
+  act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
   await settle();
-  // Cancel keeps the words as a draft (approval "inbox-reply-drafts"): Edit draft brings them back.
+  // Closing the box keeps the words as a draft (approval "inbox-reply-drafts"): Edit draft brings them back.
   act(() => button(el, 'Edit draft').click());
   await settle();
-  expect((el.querySelector('textarea') as HTMLTextAreaElement).value).toBe('A first try.');
+  expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).value).toBe('A first try.');
   expect(el.querySelector('[data-skip-chip]')?.getAttribute('data-skip-chip')).toBe('keep');
   type(el, 'The second try.');
   act(() => button(el, 'Send').click());
-  await until(() => el.querySelector('textarea') === null, 'the Send');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   await expectWordsOnly(world.waiting, second, 'The second try.');
 });
 
@@ -313,7 +324,7 @@ test.skipIf(!hasDom)('one session asked twice: a second words-only Send after th
   await settle();
   type(el, 'One.');
   act(() => button(el, 'Send').click());
-  await until(() => el.querySelector('textarea') === null, 'the first Send');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the first Send');
   await settle();
   posted = [];
   act(() => button(el, 'Reply').click());
@@ -321,7 +332,7 @@ test.skipIf(!hasDom)('one session asked twice: a second words-only Send after th
   expect(el.querySelector('[data-skip-chip]')?.getAttribute('data-skip-chip')).toBe('keep');
   type(el, 'Two.');
   act(() => button(el, 'Send').click());
-  await until(() => el.querySelector('textarea') === null, 'the second Send');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the second Send');
   expect(replies().map((p) => p.path)).toEqual([`/api/inbox/messages/${second}/reply`]);
   expect(replies()[0]!.body).toMatchObject({ words: 'Two.', questions: [] });
   expect(replies()[0]!.body.skip).toBeUndefined();
@@ -368,13 +379,20 @@ test.skipIf(!hasDom)('one session asked twice: a pick on the second, the first s
   act(() => (card.querySelector('[data-question-option] input') as HTMLInputElement).click());
   await until(async () => (await readThread(world.waiting)).thread.messages.flatMap((m) => m.questions ?? []).some((q) => q.state === 'picked'), 'the pick saved');
   await settle();
-  // The default: the other question stays open.
-  const chip = () => el.querySelector('[data-skip-chip]') as HTMLElement;
-  await until(() => chip()?.textContent?.includes('1 question stays open') === true, 'the chip');
-  expect(chip().getAttribute('data-skip-chip')).toBe('keep');
-  act(() => button(chip(), 'Skip it').click());
-  expect(chip().getAttribute('data-skip-chip')).toBe('skip');
-  expect(chip().textContent).toContain('1 question will be skipped');
+  // The default: the other question stays open. The skip for this Send is the open questions list's first row
+  // (approval "reply-bar-pairs").
+  const skipRow = () => document.querySelector<HTMLElement>('[data-open-questions-list] [data-open-questions-skip-row]');
+  await until(() => !!el.querySelector('.ib-pfoot [data-open-questions]'), 'the open questions button');
+  await press(el.querySelector('.ib-pfoot [data-open-questions]') as HTMLElement);
+  await until(() => skipRow()?.textContent?.includes('1 stays open when you send') === true, 'the skip row');
+  expect(skipRow()!.getAttribute('data-open-questions-skip-row')).toBe('keep');
+  await press(skipRow()!.querySelector('[data-skip-toggle]') as HTMLElement);
+  await until(() => skipRow()?.getAttribute('data-open-questions-skip-row') === 'skip', 'skipped for this Send');
+  expect(skipRow()!.textContent).toContain('1 skipped when you send');
+  await act(async () => {
+    (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  });
+  await until(() => !skipRow(), 'the list closed');
   act(() => button(el.querySelector('.ib-pfoot') as HTMLElement, 'Send').click());
   await until(() => replies().length > 0 && el.querySelector('.ib-pfoot button[disabled]') === null, 'the Send');
   await settle();

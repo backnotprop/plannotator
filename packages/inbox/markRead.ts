@@ -91,9 +91,84 @@ export function canMarkUnread(
   return row.sent === null;
 }
 
-/** The toast after Mark unread: where the row went (the subject names it, as the list's Mark read toast does). */
-export function markUnreadToast(before: Pick<InboxListRow, 'subject'>): { lead: string; detail: string } {
-  return { lead: 'Marked unread', detail: `“${before.subject ?? '(no subject)'}” · back in New` };
+/**
+ * What a Mark read would set aside (the owner's ask, 2026-11-10: "warn the user if it will close out questions with
+ * a set-aside message to the agent"): the questions and action items still waiting on the person in the rows it
+ * takes. The store's `markRead` closes every question that is open or picked and not sent, and every open action
+ * item; the row's summary counts exactly those (`open` takes the action items, `picked` only questions). `threads`:
+ * how many of the rows hold any. A snoozed row is left out: Mark all as read never takes one.
+ */
+export interface SetAsideCount {
+  questions: number;
+  actions: number;
+  threads: number;
+}
+
+export function setAsideCount(
+  rows: readonly (Pick<InboxListRow, 'questions'> & { snoozed?: InboxListRow['snoozed'] })[],
+  options: { skipSnoozed?: boolean } = {},
+): SetAsideCount {
+  const out: SetAsideCount = { questions: 0, actions: 0, threads: 0 };
+  for (const row of rows) {
+    if (options.skipSnoozed && row.snoozed) continue;
+    const actions = row.questions.actions ?? 0;
+    const questions = Math.max(0, row.questions.open - actions) + row.questions.picked;
+    if (questions + actions === 0) continue;
+    out.questions += questions;
+    out.actions += actions;
+    out.threads += 1;
+  }
+  return out;
+}
+
+/** The person's answer to the warning: Cancel, or go on (and, with `never`, stop asking). */
+export type SetAsideAnswer = { go: false } | { go: true; never: boolean };
+
+/**
+ * Whether a Mark read goes ahead: straight on when nothing would be set aside or the person turned the warning off;
+ * else the warning asks (`ask`), and "Don't show this again" turns it off (`turnOff`) before the Mark read goes.
+ */
+export async function confirmSetAside(
+  count: SetAsideCount,
+  warnOn: boolean,
+  ask: (count: SetAsideCount) => Promise<SetAsideAnswer>,
+  turnOff: () => void,
+): Promise<boolean> {
+  if (!warnOn || count.questions + count.actions === 0) return true;
+  const answer = await ask(count);
+  if (!answer.go) return false;
+  if (answer.never) turnOff();
+  return true;
+}
+
+/** The warning's words (WORDS.md lists them for the owner). `bulk`: Mark all as read on a project. */
+export function setAsideWarning(count: SetAsideCount, bulk: boolean): { title: string; body: string; go: string } {
+  const what =
+    count.actions === 0
+      ? plural(count.questions, 'open question')
+      : count.questions === 0
+        ? plural(count.actions, 'action item')
+        : `${plural(count.questions, 'open question')} and ${plural(count.actions, 'action item')}`;
+  const one = count.questions + count.actions === 1;
+  const them = one ? 'it' : 'them';
+  const agent = count.threads > 1 ? 'the agents' : 'the agent';
+  if (!bulk) return { title: `Set aside ${what}?`, body: `Mark read closes ${them} unanswered and tells ${agent} not to wait on ${them}.`, go: 'Mark read' };
+  return {
+    title: `Set aside ${what}?`,
+    body: `Mark all as read closes ${them} unanswered in ${plural(count.threads, 'thread')} and tells ${agent} not to wait on ${them}.`,
+    go: 'Mark all as read',
+  };
+}
+
+/**
+ * The toast after Mark unread (the subject names the row, as the list's Mark read toast does). `moved`: the thread
+ * was the open one, which closes, and the list settles with its row back in New, so the toast says so. From a row
+ * the list holds still (approval "inbox-list-view", R7): the row is bold where it is and goes to New when the list
+ * next settles, so the toast names it only.
+ */
+export function markUnreadToast(before: Pick<InboxListRow, 'subject'>, moved: boolean): { lead: string; detail: string } {
+  const subject = `“${before.subject ?? '(no subject)'}”`;
+  return { lead: 'Marked unread', detail: moved ? `${subject} · back in New` : subject };
 }
 
 export interface MarkReadToast {
@@ -114,9 +189,11 @@ export interface MarkReadToast {
 /**
  * Where the thread marked read was when the person marked it:
  * - `open`: it is the thread open on screen (its header names it);
- * - `held`: another thread is open, so the list holds still (settle.ts) and
- *   the row has not moved yet;
- * - `list`: no thread is open, and the row has moved.
+ * - `held`: a row that is not the open thread (another thread open, or none):
+ *   the list holds still (settle.ts; approval "inbox-list-view", R7) and the
+ *   row has not moved yet;
+ * - `list`: the row has moved (a seen update held in New, moved to Quiet beside
+ *   an open thread, App.tsx `moveSeenToQuiet`).
  */
 export type MarkReadPlace = 'open' | 'held' | 'list';
 

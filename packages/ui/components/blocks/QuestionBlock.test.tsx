@@ -5,7 +5,8 @@
  *
  * What regresses if this fails: a pick does not reach the annotation (so the
  * answer never exports), an edit leaves a stale annotation behind, a drag
- * across option text picks the option instead of only selecting text, or an
+ * across option text picks the option instead of only selecting text, a quick
+ * tap on another card's answer is dropped as a double-click, or an
  * unparseable block stops falling back to the plain callout.
  *
  * DOM-gated (DOM_TESTS=1).
@@ -17,6 +18,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { indexQuestionBlocks, type QuestionAnswer } from '@plannotator/core/question-block';
 import type { Annotation } from '../../types';
 import { exportAnnotations, parseMarkdownToBlocks } from '../../utils/parser';
+import { plainTextPasteInsertion } from '../../utils/pasteInsert';
 import { buildQuestionPanelRows, collectQuestionAnswers, upsertQuestionAnswerAnnotation } from '../../utils/questionAnswers';
 import { BlockRenderer } from '../BlockRenderer';
 import type { QuestionBlockProps } from './QuestionBlock';
@@ -116,6 +118,8 @@ afterEach(async () => {
   window.getSelection()?.removeAllRanges();
 });
 
+/** The note field (the card's Other field is a textarea too). */
+const NOTE = 'textarea[placeholder="Context for the agent…"]';
 const cards = (el: HTMLElement) => Array.from(el.querySelectorAll<HTMLFieldSetElement>('fieldset[data-question-key]'));
 const answerOf = (n: number): QuestionAnswer | undefined => {
   const key = cards(host!)[n].dataset.questionKey!;
@@ -189,18 +193,18 @@ describe('QuestionBlock', () => {
     await click(rowText(card(), 'Toasts'));
     await click(rowText(card(), 'Dot'));
     expect(answerOf(1)?.selected).toEqual(['Dot', 'Toasts']);
-    await type(card().querySelector<HTMLInputElement>('input[type="text"]')!, 'A sound');
+    await type(card().querySelector<HTMLTextAreaElement>('textarea[aria-label^="Other answer"]')!, 'A sound');
     expect(answerOf(1)).toMatchObject({ selected: ['Dot', 'Toasts'], other: 'A sound' });
     await click(rowText(card(), 'Toasts'));
     await click(rowText(card(), 'Dot'));
-    await type(card().querySelector<HTMLInputElement>('input[type="text"]')!, '');
+    await type(card().querySelector<HTMLTextAreaElement>('textarea[aria-label^="Other answer"]')!, '');
     expect(latest).toEqual([]);
   });
 
   test.skipIf(!hasDom)('"Other…" on a single question replaces the picked choice', async () => {
     const el = await mount(<Harness markdown={DOC} />);
     await click(rowText(cards(el)[0], 'Nowhere'));
-    await type(cards(el)[0].querySelector<HTMLInputElement>('input[type="text"]')!, 'In the debug menu');
+    await type(cards(el)[0].querySelector<HTMLTextAreaElement>('textarea[aria-label^="Other answer"]')!, 'In the debug menu');
     expect(answerOf(0)).toMatchObject({ selected: [], other: 'In the debug menu' });
     expect(cards(el)[0].querySelectorAll<HTMLInputElement>('input[type="radio"]:checked')).toHaveLength(0);
   });
@@ -246,8 +250,8 @@ describe('QuestionBlock', () => {
       await click(rowText(card(), 'Dot'));
       expect(button(card(), 'Accept recommended')).toBeDefined();
       await click(button(card(), 'Add note')!);
-      await type(card().querySelector<HTMLTextAreaElement>('textarea')!, 'banner can wait');
-      await type(card().querySelector<HTMLInputElement>('input[type="text"]')!, 'A sound');
+      await type(card().querySelector<HTMLTextAreaElement>(NOTE)!, 'banner can wait');
+      await type(card().querySelector<HTMLTextAreaElement>('textarea[aria-label^="Other answer"]')!, 'A sound');
 
       // Accept sets exactly the recommendation: extra ticks and Other go, the note stays.
       await click(button(card(), 'Accept recommended')!);
@@ -316,7 +320,7 @@ describe('QuestionBlock', () => {
     const card = () => cards(el)[0];
     await click(rowText(card(), 'Nowhere'));
     await click(button(card(), 'Add note')!);
-    await type(card().querySelector<HTMLTextAreaElement>('textarea')!, 'not sure yet');
+    await type(card().querySelector<HTMLTextAreaElement>(NOTE)!, 'not sure yet');
     await click(button(card(), 'Skip')!);
     expect(answerOf(0)).toMatchObject({ selected: [], skipped: true, note: 'not sure yet' });
     expect(card().getAttribute('data-question-status')).toBe('skipped');
@@ -347,7 +351,7 @@ describe('QuestionBlock', () => {
     const el = await mount(<Harness markdown={DOC} />);
     const card = () => cards(el)[3];
     await click(button(card(), 'Add note')!);
-    await type(card().querySelector('textarea')!, 'fine as is');
+    await type(card().querySelector<HTMLTextAreaElement>(NOTE)!, 'fine as is');
     expect(answerOf(3)?.note).toBe('fine as is');
     expect(card().dataset.questionStatus).toBe('settled');
     expect(card().querySelector<HTMLInputElement>('input[type="radio"]:checked')!.closest('label')!.textContent).toContain('REST');
@@ -379,6 +383,28 @@ describe('QuestionBlock', () => {
       text.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 10, clientY: 10, pointerType: 'mouse' }));
       text.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 11, clientY: 10 }));
     });
+    expect(answerOf(0)?.selected).toEqual(['Server-side per user']);
+  });
+
+  // A phone counts a tap near the last one as its second click (detail 2), wherever it lands: tapping one
+  // card's answer and then, quickly, the next card's answer must pick both. Only a second click on the same row is a
+  // double-click.
+  test.skipIf(!hasDom)("a quick tap on another card's answer picks, even when the browser counts it as a second click", async () => {
+    const el = await mount(<Harness markdown={DOC} />);
+    const tap = async (text: HTMLElement, detail: number) => {
+      await act(async () => {
+        text.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 10, clientY: 10, pointerType: 'touch' }));
+        text.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, clientX: 10, clientY: 10, detail }));
+      });
+    };
+    await tap(rowText(cards(el)[0], 'Server-side'), 1);
+    await tap(rowText(cards(el)[3], 'WebSocket'), 2);
+    expect(answerOf(0)?.selected).toEqual(['Server-side per user']);
+    expect(answerOf(3)?.selected).toEqual(['WebSocket']);
+
+    // The same row twice is still a double-click: the second click picks nothing more and takes its pick back.
+    await tap(rowText(cards(el)[0], 'Nowhere'), 1);
+    await tap(rowText(cards(el)[0], 'Nowhere'), 2);
     expect(answerOf(0)?.selected).toEqual(['Server-side per user']);
   });
 
@@ -528,7 +554,7 @@ describe('QuestionBlock', () => {
     expect(row.contains(input)).toBe(true);
     expect(row.className).toBe(rows[0].className);
     // Then "Other…", empty.
-    const otherField = card.querySelector<HTMLInputElement>('input[aria-label^="Other answer"]')!;
+    const otherField = card.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Other answer"]')!;
     expect(row.compareDocumentPosition(otherField) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // Not a describedby line any more.
     expect(card.getAttribute('aria-describedby')).toBeNull();
@@ -540,7 +566,7 @@ describe('QuestionBlock', () => {
     const el = await mount(<Harness markdown={UNMATCHED} />);
     const card = () => cards(el)[0];
     const row = () => card().querySelector<HTMLLabelElement>('label[data-question-suggested]')!;
-    const otherField = () => card().querySelector<HTMLInputElement>('input[aria-label^="Other answer"]')!;
+    const otherField = () => card().querySelector<HTMLTextAreaElement>('textarea[aria-label^="Other answer"]')!;
     await click(row().querySelector('span')!);
     expect(answerOf(0)).toMatchObject({ selected: [], other: 'SQLite on the box' });
     expect(row().querySelector('input')!.checked).toBe(true);
@@ -561,7 +587,7 @@ describe('QuestionBlock', () => {
     await click(button(cards(again)[0], 'Accept recommended')!);
     expect(answerOf(0)).toEqual(viaRow);
     // Typing in Other replaces the recommended answer.
-    await type(cards(again)[0].querySelector<HTMLInputElement>('input[aria-label^="Other answer"]')!, 'Postgres');
+    await type(cards(again)[0].querySelector<HTMLTextAreaElement>('textarea[aria-label^="Other answer"]')!, 'Postgres');
     expect(answerOf(0)).toMatchObject({ selected: [], other: 'Postgres' });
     expect(cards(again)[0].querySelector<HTMLInputElement>('label[data-question-suggested] input')!.checked).toBe(false);
   });
@@ -585,7 +611,7 @@ describe('QuestionBlock', () => {
     // "Yes, but slower" blanked the field at "Yes" and stored ", but slower".
     const md = [':::question', 'Pick?', '- [ ] Redis', '- [ ] No', 'Recommended: Yes', ':::'].join('\n');
     const el = await mount(<Harness markdown={md} />);
-    const otherField = () => cards(el)[0].querySelector<HTMLInputElement>('input[aria-label^="Other answer"]')!;
+    const otherField = () => cards(el)[0].querySelector<HTMLTextAreaElement>('textarea[aria-label^="Other answer"]')!;
     const row = () => cards(el)[0].querySelector<HTMLInputElement>('label[data-question-suggested] input')!;
     await act(async () => otherField().focus());
     for (const ch of 'Yes, but slower') {
@@ -605,7 +631,7 @@ describe('QuestionBlock', () => {
     const [q] = indexQuestionBlocks(parseMarkdownToBlocks(UNMATCHED));
     const initial = upsertQuestionAnswerAnnotation([], q.blockId, { v: 1, key: q.question.key, kind: 'single', prompt: q.question.prompt, selected: [], other: 'SQLite on the box' }, q.question.key);
     const el = await mount(<Harness markdown={UNMATCHED} initial={initial} />);
-    const otherField = () => cards(el)[0].querySelector<HTMLInputElement>('input[aria-label^="Other answer"]')!;
+    const otherField = () => cards(el)[0].querySelector<HTMLTextAreaElement>('textarea[aria-label^="Other answer"]')!;
     const row = () => cards(el)[0].querySelector<HTMLInputElement>('label[data-question-suggested] input')!;
     expect(row().checked).toBe(true);
     expect(otherField().value).toBe('');
@@ -622,7 +648,7 @@ describe('QuestionBlock', () => {
     const el = await mount(<Harness markdown={multi} />);
     const card = () => cards(el)[0];
     const row = () => card().querySelector<HTMLLabelElement>('label[data-question-suggested]')!;
-    const otherField = () => card().querySelector<HTMLInputElement>('input[aria-label^="Other answer"]')!;
+    const otherField = () => card().querySelector<HTMLTextAreaElement>('textarea[aria-label^="Other answer"]')!;
     await click(rowText(card(), 'Redis'));
     await type(otherField(), 'Postgres with a long reason');
     await click(row().querySelector('span')!);
@@ -639,7 +665,7 @@ describe('QuestionBlock', () => {
     const el = await mount(<Harness markdown={multi} />);
     const card = () => cards(el)[0];
     const row = () => card().querySelector<HTMLLabelElement>('label[data-question-suggested]')!;
-    const otherField = () => card().querySelector<HTMLInputElement>('input[aria-label^="Other answer"]')!;
+    const otherField = () => card().querySelector<HTMLTextAreaElement>('textarea[aria-label^="Other answer"]')!;
     await type(otherField(), 'Mine');
     await click(row().querySelector('span')!);
     await click(button(card(), 'Skip')!);
@@ -657,7 +683,7 @@ describe('QuestionBlock', () => {
     const card = cards(el)[0];
     expect(card.querySelector<HTMLInputElement>('label[data-question-suggested] input')!.checked).toBe(true);
     // The Other row is not drawn: the answer is the recommended row.
-    expect(card.querySelector('input[aria-label^="Other answer"]')).toBeNull();
+    expect(card.querySelector('textarea[aria-label^="Other answer"]')).toBeNull();
   });
 
   test.skipIf(!hasDom)("a text question's recommended answer carries the Recommended tag, not \"Suggested\"", async () => {
@@ -696,7 +722,7 @@ describe('QuestionBlock', () => {
     const [q] = indexQuestionBlocks(parseMarkdownToBlocks(UNMATCHED));
     const answer = (extra: Partial<QuestionAnswer>) =>
       upsertQuestionAnswerAnnotation([], q.blockId, { v: 1, key: q.question.key, kind: 'single', prompt: q.question.prompt, selected: [], ...extra }, q.question.key);
-    const other = (el: HTMLElement) => cards(el)[0].querySelector<HTMLInputElement>('input[aria-label^="Other answer"]');
+    const other = (el: HTMLElement) => cards(el)[0].querySelector<HTMLTextAreaElement>('textarea[aria-label^="Other answer"]');
 
     let el = await mount(<Harness markdown={UNMATCHED} readOnly initial={answer({ selected: ['Redis'] })} />);
     expect(other(el)).toBeNull();
@@ -725,5 +751,90 @@ describe('QuestionBlock', () => {
     expect(cards(el)[0].textContent).toContain('host-label-sentinel');
     expect(cards(el)[0].textContent).not.toContain('Answered');
     expect(cards(el)[1].textContent).toContain('Answered');
+  });
+});
+
+// The owner: "the add your own answer blocks..., should allow for multiline input". The Other field is a
+// textarea like the note: Enter (or Shift+Enter) makes a new line, and the lines reach the agent quoted the
+// way a multi-line note's do. A one-line answer reads exactly as before.
+describe('QuestionBlock: an Other answer of several lines', () => {
+  const OTHER = 'textarea[aria-label^="Other answer"]';
+  const THREE = 'Keep the loser locally.\nShow it under History.\nPurge it after a week.';
+
+  test.skipIf(!hasDom)('every line is stored, shown on the answered card and exported quoted', async () => {
+    const el = await mount(<Harness markdown={DOC} />);
+    await type(cards(el)[0].querySelector<HTMLTextAreaElement>(OTHER)!, THREE);
+    expect(answerOf(0)).toMatchObject({ selected: [], other: THREE });
+    const blocks = parseMarkdownToBlocks(DOC);
+    expect(exportAnnotations(blocks, latest)).toContain(
+      'Answer: Other:\n> Keep the loser locally.\n> Show it under History.\n> Purge it after a week.\n',
+    );
+
+    // The answered card (read-only, as a sent Inbox answer is) shows the lines, not one run-on line.
+    const saved = latest;
+    await act(async () => root!.unmount());
+    host!.remove();
+    const ro = await mount(<Harness markdown={DOC} readOnly initial={saved} />);
+    const field = cards(ro)[0].querySelector<HTMLTextAreaElement>(OTHER)!;
+    expect(field.value).toBe(THREE);
+    expect(field.disabled).toBe(true);
+  });
+
+  test.skipIf(!hasDom)('on pick any, the lines sit under their bullet after the picks', async () => {
+    const el = await mount(<Harness markdown={DOC} />);
+    await click(rowText(cards(el)[1], 'Dot'));
+    await type(cards(el)[1].querySelector<HTMLTextAreaElement>(OTHER)!, 'A sound\nOnly when muted');
+    expect(exportAnnotations(parseMarkdownToBlocks(DOC), latest)).toContain('Answer:\n- Dot\n- Other:\n  > A sound\n  > Only when muted\n');
+  });
+
+  test.skipIf(!hasDom)('a one-line answer, or one ended by an Enter, exports exactly as before', async () => {
+    const el = await mount(<Harness markdown={DOC} />);
+    const field = () => cards(el)[0].querySelector<HTMLTextAreaElement>(OTHER)!;
+    const blocks = parseMarkdownToBlocks(DOC);
+    await type(field(), 'In the debug menu');
+    const before = exportAnnotations(blocks, latest);
+    expect(before).toContain('Answer: Other: In the debug menu\n');
+    expect(latest[0].text).toBe('Answer: Other: In the debug menu');
+    await type(field(), 'In the debug menu\n');
+    expect(exportAnnotations(blocks, latest)).toBe(before);
+    expect(latest[0].text).toBe('Answer: Other: In the debug menu');
+  });
+
+  test.skipIf(!hasDom)('Enter and Shift+Enter are the field\'s own new line: nothing cancels them, nothing else acts, mid-IME too', async () => {
+    const el = await mount(<Harness markdown={DOC} />);
+    const field = cards(el)[0].querySelector<HTMLTextAreaElement>(OTHER)!;
+    await type(field, 'First line');
+    const heard: string[] = [];
+    const onWindow = (event: KeyboardEvent) => heard.push(`${event.shiftKey ? 'Shift+' : ''}${event.metaKey ? 'Meta+' : ''}${event.key}`);
+    window.addEventListener('keydown', onWindow);
+    try {
+      for (const init of [{}, { shiftKey: true }, { isComposing: true }, { metaKey: true }] as KeyboardEventInit[]) {
+        const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...init });
+        await act(async () => {
+          field.dispatchEvent(event);
+        });
+        expect(event.defaultPrevented).toBe(false);
+      }
+    } finally {
+      window.removeEventListener('keydown', onWindow);
+    }
+    // Each reached the window as before (⌘Enter still goes to the page's own Send key, where a host has one).
+    expect(heard).toEqual(['Enter', 'Shift+Enter', 'Enter', 'Meta+Enter']);
+    expect(answerOf(0)).toMatchObject({ selected: [], other: 'First line' });
+    expect(latest).toHaveLength(1);
+  });
+
+  test.skipIf(!hasDom)('a paste of several lines keeps its line breaks', async () => {
+    const el = await mount(<Harness markdown={DOC} />);
+    const field = cards(el)[0].querySelector<HTMLTextAreaElement | HTMLInputElement>('[aria-label^="Other answer"]')!;
+    field.focus();
+    const data = new DataTransfer();
+    data.setData('text/plain', 'Pasted one\r\nPasted two');
+    // What the page inserts for a paste here (the browser's own rule: a one-line field turns each break into a space).
+    const insertion = plainTextPasteInsertion({ defaultPrevented: false, clipboardData: data, target: field } as unknown as ClipboardEvent);
+    expect(insertion?.text).toBe('Pasted one\nPasted two');
+    // Inserted as the browser does (this DOM has no setRangeText), it is the answer.
+    await type(field, insertion!.text);
+    expect(answerOf(0)?.other).toBe('Pasted one\nPasted two');
   });
 });

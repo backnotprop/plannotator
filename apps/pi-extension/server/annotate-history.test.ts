@@ -16,6 +16,7 @@
  */
 
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -60,6 +61,30 @@ describe("pi annotate server: folder annotate history", () => {
 		mintedProjects.push(project);
 		return project;
 	}
+
+	test("/api/plan identifies the annotated file's repository, not the launch repository", async () => {
+		const targetRoot = mkdtempSync(join(tmpdir(), "plannotator-pi-annotate-target-repo-"));
+		const filePath = join(targetRoot, "specs", "refunds.md");
+		mkdirSync(join(targetRoot, "specs"), { recursive: true });
+		writeFileSync(filePath, "# Refunds\n", "utf-8");
+		execFileSync("git", ["init", "-q"], { cwd: targetRoot });
+		execFileSync("git", ["remote", "add", "origin", "https://github.com/acme/payments-docs.git"], { cwd: targetRoot });
+		const server = await startAnnotateServer({
+			markdown: "# Refunds\n",
+			filePath,
+			htmlContent: "<html><body>Plannotator</body></html>",
+			project: uniqueProject("repo-info"),
+		});
+		try {
+			const payload = (await (await fetch(`${server.url}/api/plan`)).json()) as {
+				repoInfo?: { display: string };
+			};
+			expect(payload.repoInfo?.display).toBe("acme/payments-docs");
+		} finally {
+			server.stop();
+			rmSync(targetRoot, { recursive: true, force: true });
+		}
+	});
 
 	afterAll(() => {
 		const historyDir = join(getPlannotatorDataDir(), "history");

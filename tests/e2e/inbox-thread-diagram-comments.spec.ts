@@ -127,7 +127,7 @@ async function nothingOpened(page: Page): Promise<void> {
   await expect(composer(page)).toHaveCount(0);
 }
 
-const openReply = (page: Page) => page.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ }).first().click();
+const openReply = (page: Page) => page.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).first().click();
 
 test.describe.configure({ mode: 'serial' });
 
@@ -361,10 +361,12 @@ test('on a phone: a tap opens the composer in the window, a swipe scrolls, a sid
     await page.touchscreen.tap(low.x, low.y);
     await expect(composer(page)).toContainText('Fix the build');
     await insideTheCanvas();
-    await composer(page).getByRole('button', { name: 'Cancel' }).tap();
+    await composer(page).getByRole('button', { name: 'Close (your words are kept)' }).tap();
     await expect(composer(page)).toHaveCount(0);
 
-    // A tap on a part names it, and the comment goes out with the reply.
+    // A tap on a part names it, and the comment goes out with the reply. Round 3's card (#2846) is taller: the thread
+    // scrolled to keep it on screen, low in the diagram, so the part is brought back into view first, as a person would.
+    await target.scrollIntoViewIfNeeded();
     const tap = await centreOf(target);
     await page.touchscreen.tap(tap.x, tap.y);
     await expect(composer(page)).toContainText('Tests pass?');
@@ -545,7 +547,7 @@ test('on a phone, full screen: a pinch zooms about the fingers, one or two finge
     const codex = await centreOf(part(popout, 'Codex'));
     await page.touchscreen.tap(codex.x, codex.y);
     await expect(composer(page)).toContainText('Codex');
-    await composer(page).getByRole('button', { name: 'Cancel' }).tap();
+    await composer(page).getByRole('button', { name: 'Close (your words are kept)' }).tap();
     await expect(composer(page)).toHaveCount(0);
     expect(errors).toEqual([]);
   } finally {

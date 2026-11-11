@@ -42,6 +42,12 @@ export interface AnnotationToolstripProps {
    * Markup and Comment).
    */
   hideRedline?: boolean;
+  /**
+   * Omit the action group (Markup, Comment, Redline, Label) and show only the
+   * Select / Pinpoint pair. For a host whose composer decides the action (a
+   * Shape board: Change it or Ask).
+   */
+  hideActionModes?: boolean;
 }
 
 /** Render the shared input-method and annotation-mode controls. */
@@ -57,6 +63,7 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
   hideInputMethodSwitch = false,
   hideQuickLabel = false,
   hideRedline = false,
+  hideActionModes = false,
 }) => {
   const [showHelp, setShowHelp] = useState(false);
   const [helpTab, setHelpTab] = useState<'selection' | 'plannotator'>('selection');
@@ -114,6 +121,7 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
         )}
 
         {/* Action mode group */}
+        {!hideActionModes && (
         <div className="inline-flex items-center gap-0.5 bg-muted/50 rounded-lg p-0.5 border border-border/30">
           <ToolstripButton
             active={mode === 'selection'}
@@ -176,6 +184,7 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
             />
           )}
         </div>
+        )}
 
         {/* Help */}
         {!compact && showHelpLink && (

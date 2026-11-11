@@ -46,6 +46,8 @@ import type { VoiceHandle } from '../voice';
 import { textareaField } from '../voiceField';
 import { isPhone, isTouchScreen } from '../phone';
 import { inboxSkillFilter } from '../skills';
+import { builtinSkillIcon } from './BuiltinSkillIcon';
+import { hashtagMenuLeft, useHashtagPicker, useInitiativeTags } from '../hashtags';
 
 /** The chip class a tag gets in the composer's highlight layer (inbox.css: colour, background and box-shadow only). */
 export const TAG_TOKEN_CLASS = 'ib-tg-tok';
@@ -73,6 +75,18 @@ export interface InboxComposerTags {
   note?: (props: { id: string; tagged: readonly TagOption[]; focusField: () => void }) => React.ReactNode;
 }
 
+/**
+ * A command of the Inbox's own in the `/` list (the reply box's `/side`): a window action, not a skill. Picking it
+ * sends nothing to the agent: the typed `/…` leaves the words and `run` gets what is left.
+ */
+export interface ComposerCommand {
+  /** The name typed after `/`. */
+  name: string;
+  /** The list's one line. */
+  description: string;
+  run: (words: string) => void;
+}
+
 export interface InboxComposerFieldProps {
   value: string;
   onChange: (value: string) => void;
@@ -93,8 +107,12 @@ export interface InboxComposerFieldProps {
   escapeClosesMenu?: boolean;
   /** Voice dictation (voice.ts): the host's session, whose button sits in the host's toolbar. */
   voice?: VoiceHandle;
+  /** The voice note opens and closes in one motion (the reply box, approval "inbox-reply-box"). */
+  voiceNoteGlide?: boolean;
   /** Which skills this field offers and paints (skills.ts `inboxSkillFilter`); all by default. Keep its identity stable. */
   skillFilter?: (entry: SkillCatalogEntry) => boolean;
+  /** The Inbox's own commands this field lists with the skills after a `/` (`ComposerCommand`). Absent: none. Keep its identity stable. */
+  commands?: readonly ComposerCommand[];
 }
 
 const NO_PEOPLE: readonly MentionPerson[] = [];
@@ -114,7 +132,9 @@ export function InboxComposerField({
   caretMenu,
   escapeClosesMenu = false,
   voice,
+  voiceNoteGlide = false,
   skillFilter = OUTSIDE_A_REVIEW,
+  commands,
 }: InboxComposerFieldProps) {
   const innerRef = useRef<HTMLTextAreaElement | null>(null);
   const attach = useCallback(
@@ -124,13 +144,20 @@ export function InboxComposerField({
     },
     [textareaRef],
   );
-  // The field going away (the box closed, Reply to Comment in full screen) ends the session's run and drops its clip.
+  // The field going away (the box closed, Reply to Comment in full screen) ends the session's run and drops its clip;
+  // a host with a `late` keeps a take being transcribed (voiceSession.ts `attach`).
   const voiceSession = voice?.session;
   useEffect(() => {
     if (!voiceSession || !innerRef.current) return;
     return voiceSession.attach(textareaField(innerRef.current, isTouchScreen));
   }, [voiceSession]);
   const voiceLive = voice ? voiceHidesCaret(voice.view) : false;
+  // The commands as the list's rows: the built-ins' own row ("Plannotator" at its right end), and never a reference.
+  const commandRows = useMemo<SkillCatalogEntry[] | undefined>(
+    () => (commands?.length ? commands.map((command) => ({ name: command.name, root: 'plannotator', description: command.description, humanOnly: false })) : undefined),
+    [commands],
+  );
+  const runCommand = useCallback((row: SkillCatalogEntry, words: string) => commands?.find((command) => command.name === row.name)?.run(words), [commands]);
   const skills = useSkillReferenceAutocomplete({
     text: value,
     setText: onChange,
@@ -138,6 +165,10 @@ export function InboxComposerField({
     enabled: true,
     bareEscapeDismisses: escapeClosesMenu,
     catalogFilter: skillFilter,
+    commands: commandRows,
+    onCommand: runCommand,
+    // Plannotator's built-ins are one group at the top of the list (the owner, 2026-11-09), whatever was typed.
+    hostRowsFirst: true,
   });
   const [announce, setAnnounce] = useState('');
   const options = tags?.options;
@@ -161,6 +192,13 @@ export function InboxComposerField({
     [options, people, onTagsChange],
   );
   const mention = useMentionAutocomplete({ text: value, setText: onChange, textareaRef: innerRef, source });
+  // `#` names an initiative (approval "board-hashtags"): the skill list's menu, the skill list's keys.
+  const initiativeTags = useInitiativeTags();
+  const hash = useHashtagPicker({ text: value, setText: onChange, fieldRef: innerRef, tags: initiativeTags, bareEscapeDismisses: escapeClosesMenu });
+  const hashListboxId = `ib-hash-${useId().replace(/:/g, '')}`;
+  const hashMenu = hash.menu && !mention.menu && !skills.menu ? hash.menu : null;
+  const [hashShown, setHashShown] = useState(false);
+  const hashMenuShown = hashMenu !== null && hashShown;
   // The agents can arrive after the person typed `@` (the list is read when the box opens): read the caret then.
   const tagsReady = source !== undefined;
   const readMentionCaret = mention.onSelect;
@@ -175,13 +213,17 @@ export function InboxComposerField({
   const showNotes = tagged.some((t) => !t.owner);
   const skillActive = skills.menu?.activeIndex;
   const tagMenu = mention.menu;
-  const listboxId = tagMenu ? tagListboxId : skillListboxId;
+  const listboxId = tagMenu ? tagListboxId : hashMenu ? hashListboxId : skillListboxId;
   const activeOption =
     tagMenu && tagMenu.activeIndex !== null
       ? `${tagListboxId}-option-${tagMenu.activeIndex}`
-      : !tagMenu && skillActive !== null && skillActive !== undefined
-        ? `${skillListboxId}-option-${skillActive}`
-        : undefined;
+      : hashMenu
+        ? hashMenu.activeIndex !== null
+          ? `${hashListboxId}-option-${hashMenu.activeIndex}`
+          : undefined
+        : !tagMenu && skillActive !== null && skillActive !== undefined
+          ? `${skillListboxId}-option-${skillActive}`
+          : undefined;
   const select = (index: number) => {
     const person = tagMenu?.items[index];
     const option = person ? options?.find((o) => o.id === person.id) : undefined;
@@ -207,6 +249,31 @@ export function InboxComposerField({
               items={skills.menu!.items}
               activeIndex={skills.menu!.activeIndex}
               onSelect={skills.select}
+              groupHostRows
+              rowIcon={builtinSkillIcon}
+              boundary={boundary}
+              prefer={caretMenu?.prefer ?? 'above'}
+              maxListHeight={maxListHeight}
+            />
+          )}
+        </FloatingSkillMenu>
+      ) : null}
+      {hashMenu && textarea && wrap && host ? (
+        <FloatingSkillMenu
+          textarea={textarea}
+          wrap={wrap}
+          host={host}
+          caret={caretMenu ?? null}
+          onShown={setHashShown}
+          kind="hashtag"
+          left={(box) => hashtagMenuLeft(textarea, hashMenu.start, box.left, box.width)}
+        >
+          {(boundary, maxListHeight) => (
+            <SkillReferenceMenu
+              id={hashListboxId}
+              items={hashMenu.items}
+              activeIndex={hashMenu.activeIndex}
+              onSelect={hash.select}
               boundary={boundary}
               prefer={caretMenu?.prefer ?? 'above'}
               maxListHeight={maxListHeight}
@@ -222,6 +289,7 @@ export function InboxComposerField({
           onChange(event.target.value);
           skills.onSelect();
           mention.onSelect();
+          hash.onSelect();
         }}
         onKeyDown={(event) => {
           if (tagMenu && (event.key === 'Enter' || event.key === 'Tab') && !event.metaKey && !event.ctrlKey && !event.altKey && tagMenu.activeIndex !== null) {
@@ -230,12 +298,14 @@ export function InboxComposerField({
             return;
           }
           if (mention.onKeyDown(event)) return;
+          if (hashMenuShown && hash.onKeyDown(event)) return;
           if (skillMenuShown && skills.onKeyDown(event)) return;
           onKeyDown?.(event);
         }}
         onSelectCaret={() => {
           skills.onSelect();
           mention.onSelect();
+          hash.onSelect();
         }}
         placeholder={voiceLive ? '' : placeholder}
         mirrorPaint={voice ? voicePaint(voice.view, voice.session, value) : undefined}
@@ -244,14 +314,14 @@ export function InboxComposerField({
         inputClassName="ib-rtext"
         mirrorClassName="ib-rmirror"
         skillReferences
-        tokens={skills.referenceTokens}
+        tokens={hash.tokens.length > 0 ? [...skills.referenceTokens, ...hash.tokens].sort((a, b) => a.start - b.start) : skills.referenceTokens}
         mentionChips={source ? { people: mention.mentions, tokenClassName: TAG_TOKEN_CLASS } : null}
         listboxId={listboxId}
-        listboxOpen={skillMenuShown || tagMenu !== null}
+        listboxOpen={skillMenuShown || hashMenuShown || tagMenu !== null}
         activeOptionId={activeOption}
         inputProps={{ 'aria-label': ariaLabel, 'aria-describedby': describedBy, rows: 2 }}
       />
-      {voice && <VoiceNote voice={voice} />}
+      {voice && <VoiceNote voice={voice} glide={voiceNoteGlide} />}
       <HumanOnlySkillNotice skills={skills.humanOnlyReferences} destination={destination} />
       {options && showNotes && (tags?.note ? tags.note({ id: notesId, tagged, focusField: () => innerRef.current?.focus() }) : <TagNotes id={notesId} tagged={tagged} owner={owner} />)}
       {options && (
@@ -335,11 +405,17 @@ function FloatingSkillMenu({
   caret,
   onShown,
   children,
+  kind = 'skill',
+  left,
 }: {
   textarea: HTMLTextAreaElement;
   wrap: HTMLElement;
   host: HTMLElement;
   caret: CaretMenuOptions | null;
+  /** `hashtag`: the initiatives (inbox.css draws `#` in place of the skill icon, without the source column). */
+  kind?: 'skill' | 'hashtag';
+  /** The list's left edge inside the anchor, from the anchor's box in viewport x (the `#` list: under the `#`). */
+  left?: (box: { left: number; width: number }) => number;
   onShown: (shown: boolean) => void;
   children: (boundary: () => VerticalBox | null, maxListHeight: number | undefined) => React.ReactNode;
 }) {
@@ -476,7 +552,17 @@ function FloatingSkillMenu({
       onMouseDown={(event) => event.preventDefault()}
       className="ib-skanchor"
       data-skill-menu-anchor={caret ? 'caret' : 'field'}
-      style={{ top: box.top, left: box.left, width: box.width, height: Math.max(0, box.bottom - box.top), '--ib-skill-list-least': `${frame.least}px` } as React.CSSProperties}
+      data-hashtag-menu={kind === 'hashtag' ? '' : undefined}
+      style={
+        {
+          top: box.top,
+          left: box.left,
+          width: box.width,
+          height: Math.max(0, box.bottom - box.top),
+          '--ib-skill-list-least': `${frame.least}px`,
+          ...(left ? { '--ib-hash-x': `${left({ left: box.left + host.getBoundingClientRect().left + host.clientLeft - host.scrollLeft, width: box.width })}px` } : {}),
+        } as React.CSSProperties
+      }
     >
       {children(room, frame.cap)}
     </div>,

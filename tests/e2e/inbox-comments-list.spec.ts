@@ -10,13 +10,14 @@
  *  - the full-screen card's count does the same, and Escape takes the list
  *    first, from the window and from inside the page;
  *  - a highlight leaves the open file when its comment goes (Send, the list),
- *    in Markdown and on an HTML page;
+ *    in Markdown and on an HTML page; a sent one stays as an earlier comment;
  *  - words half written in the list come back however it closed;
  *  - the stale guard takes the foot: no list behind it, then or later;
  *  - the list stays on screen at 1000, 390 and 320 wide, with the keyboard up
  *    and over a tall card; its header stays;
- *  - where the foot has room only for the pill, the pill's count is the button,
- *    44 px to press, and its neighbours keep theirs;
+ *  - on a phone the closed foot's Draft carries the comment count, 44 px to
+ *    press, and its neighbours keep theirs (the pill's count as the button at
+ *    step 4 is in inbox-thread-foot.spec.ts);
  *  - a thread with no comments gains nothing.
  *
  * An iPhone in WebKit: inbox-comments-list-webkit.spec.ts. Build the binary
@@ -24,7 +25,7 @@
  */
 
 import { expect, test, type Browser, type Locator, type Page } from '@playwright/test';
-import { cardChip, countLink, fileHighlight, fileUrl, highlight, layout, onScreen, openThread, pane, quietThread, rowOf, rowShown, seededThread, startWorld, stopWorld, theList, threadUrl, type ListThread, type ListWorld } from './inbox-comments-list-world';
+import { cardChip, countLink, fileHighlight, fileUrl, highlight, layout, onScreen, openThread, pane, pointerOffTheEdge, quietThread, rowOf, rowShown, seededThread, startWorld, stopWorld, theList, threadUrl, type ListThread, type ListWorld } from './inbox-comments-list-world';
 
 let world: ListWorld;
 
@@ -77,7 +78,7 @@ test('the foot count opens the list without the reply box: a real button, nothin
   await link.click();
   const list = theList(page, t.count);
   await expect(list).toBeVisible();
-  await expect(pane(page).locator('.ib-rfoot')).toHaveCount(0);
+  await expect(pane(page).locator('.ib-rbox')).toHaveCount(0);
   await expect(link).toHaveAttribute('aria-expanded', 'true');
   expect(await layout(page)).toBe(before);
   await expect(rowOf(page, t.onMessage)).toContainText('Is that true when the first request times out?');
@@ -219,6 +220,8 @@ test('the full-screen card count opens the list above the card; Escape takes the
   const page = await desk(browser);
   const t = await seededThread(world);
   await page.goto(fileUrl(world, t, t.page, 'full'));
+  // The card opens on Comment, as an image's does; the count is the Reply tab's (it says what rides the Send).
+  await page.locator('[data-fcomp] [data-fcomp-mode="reply"]').click();
   const chip = cardChip(page);
   await expect(chip).toBeVisible();
   await expect(chip).toHaveJSProperty('tagName', 'BUTTON');
@@ -265,8 +268,10 @@ test('over a tall card in a short window the list stays on screen, with its Clos
   const page = await desk(browser, 1000, 560);
   const t = await seededThread(world, 8);
   await page.goto(fileUrl(world, t, t.page, 'full'));
+  await page.locator('[data-fcomp] [data-fcomp-mode="reply"]').click();
   await expect(cardChip(page)).toBeVisible();
-  await page.locator('[data-fcomp] textarea').first().fill(Array.from({ length: 12 }, (_, i) => `Line ${i + 1} of a long reply.`).join('\n'));
+  // The reply's field: the page's comment row stays drawn, hidden, on the Reply tab.
+  await page.locator('[data-fcomp] [data-fcomp-field] textarea').fill(Array.from({ length: 12 }, (_, i) => `Line ${i + 1} of a long reply.`).join('\n'));
   await cardChip(page).click();
   const list = theList(page, t.count);
   await expect(list).toBeVisible();
@@ -436,6 +441,8 @@ test('on a phone, the last comment removed from the card leaves focus on the car
   await page.goto(fileUrl(world, t, t.page, 'full'));
   // An HTML page on a phone opens clear, the card folded to its pill (inbox-html-phone.spec.ts): the pill opens it.
   await page.locator('[data-fcomp-pill]').tap();
+  // It opens on Comment, as an image's card does: the count is the Reply tab's.
+  await page.locator('[data-fcomp-mode="reply"]').tap();
   await cardChip(page).tap();
   await rowOf(page, t.onMessage).getByRole('button', { name: 'Remove' }).tap();
   await expect(rowOf(page, t.onMessage)).toHaveCount(0);
@@ -452,9 +459,10 @@ async function pinOnPage(page: Page, t: ListThread): Promise<Locator> {
   await frame.getByRole('heading', { name: 'Dead-lettered charges' }).click();
   const composer = page.locator('[data-comment-popover]');
   await composer.locator('textarea').first().fill('Say how many are waiting.');
-  await composer.getByRole('button', { name: 'Save' }).click();
+  await composer.getByRole('button', { name: 'Comment', exact: true }).click();
   const pin = frame.locator('[data-plannotator-marker]');
   await expect(pin).toHaveCount(1);
+  await pointerOffTheEdge(page);
   return pin;
 }
 
@@ -466,7 +474,9 @@ test('an HTML page\'s pin leaves with its comment: after Send, after Remove in t
   const pin = await pinOnPage(page, sent);
   await footSend(page).click();
   await expect(pane(page).locator('[data-foot-status]')).toHaveCount(0);
-  await expect(panel).toContainText('No annotations yet');
+  // What was sent stays as an earlier comment, read only; its pin does not.
+  await expect(panel.locator('[data-earlier-row]')).toBeVisible();
+  await expect(panel.locator('.ib-apanel [data-annotation-id]')).toHaveCount(0);
   await expect(pin).toHaveCount(0);
 
   const listed = await seededThread(world);
@@ -490,9 +500,12 @@ test('a highlight leaves the open file with its comment after Send', async ({ br
   const t = await seededThread(world);
   await page.goto(fileUrl(world, t, t.plan, 'side'));
   await expect(fileHighlight(page)).toBeVisible();
+  await pointerOffTheEdge(page);
   await pane(page).locator('.ib-footrow').getByRole('button', { name: 'Send' }).click();
   await expect(pane(page).locator('[data-foot-status]')).toHaveCount(0);
-  await expect(page.locator('[data-attachment-pane]')).toContainText('No annotations yet');
+  const filePane = page.locator('[data-attachment-pane]');
+  await expect(filePane.locator('[data-earlier-row]')).toBeVisible();
+  await expect(filePane.locator('.ib-apanel [data-annotation-id]')).toHaveCount(0);
   await expect(fileHighlight(page)).toHaveCount(0);
   await page.context().close();
 });
@@ -502,6 +515,7 @@ test('a highlight leaves the open file when the list removes its comment', async
   const t = await seededThread(world);
   await page.goto(fileUrl(world, t, t.plan, 'side'));
   await expect(fileHighlight(page)).toBeVisible();
+  await pointerOffTheEdge(page);
   await countLink(page, t.count).click();
   await rowOf(page, t.onPlan).getByRole('button', { name: 'Remove' }).click();
   await expect(rowOf(page, t.onPlan)).toHaveCount(0);
@@ -520,7 +534,8 @@ for (const size of [
     const page = await context.newPage();
     const t = await seededThread(world, 6);
     await page.goto(size.beside ? fileUrl(world, t, t.plan, 'side') : threadUrl(world, t));
-    const link = countLink(page, t.count);
+    // A phone's closed foot has no count link (approval "reply-bar-pairs": Edit draft carries the count): a highlight opens it.
+    const link = size.phone ? highlight(page, t) : countLink(page, t.count);
     await expect(link).toBeVisible();
     const before = await layout(page);
     if (size.phone) await link.tap();
@@ -539,7 +554,7 @@ test('the sheet ends at the keyboard, and the comment being edited shows above i
   const page = await context.newPage();
   const t = await seededThread(world, 6);
   await openThread(page, world, t);
-  await countLink(page, t.count).tap();
+  await highlight(page, t).tap();
   const list = theList(page, t.count);
   await rowOf(page, t.onPlan).getByRole('button', { name: 'Edit' }).tap();
   const visible = await keyboardUp(page);
@@ -548,53 +563,34 @@ test('the sheet ends at the keyboard, and the comment being edited shows above i
   await context.close();
 });
 
-test('where the foot has room only for the pill, its count is the button, and the clipped words are out of the Tab order', async ({ browser }) => {
-  const context = await browser.newContext(phoneContext);
-  const page = await context.newPage();
-  const t = await seededThread(world);
-  await openThread(page, world, t);
-  const pill = pane(page).locator('button[data-draft-pill-count]');
-  const words = pane(page).locator('button[data-draft-comments]');
-  await expect(pill).toBeVisible();
-  await expect(words).toBeHidden();
-  expect(await words.evaluate((el: HTMLElement) => (el.focus(), document.activeElement === el))).toBe(false);
-  await pill.tap();
-  await expect(theList(page, t.count)).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(pill).toBeFocused();
-  await context.close();
-});
+// Where the foot has room only for the pill (step 4, a thread beside a file with picks and comments), its count is the button:
+// inbox-thread-foot.spec.ts, "step 4 keeps the comment count in the Draft pill".
 
 for (const [width, height] of [[390, 844], [320, 640]] as const) {
-  test(`at ${width} wide the count is 44 px to press, drawn on an overlay, and every button beside it keeps its own press`, async ({ browser }) => {
+  test(`at ${width} wide the closed foot's Draft carries the comment count, 44 px to press, and every foot button keeps its own press`, async ({ browser }) => {
     const context = await browser.newContext({ ...phoneContext, viewport: { width, height } });
     const page = await context.newPage();
     const t = await seededThread(world);
     await openThread(page, world, t);
-    // The pill's count, or the words where the foot wraps instead: whichever this width shows.
-    const count = pane(page).locator('[data-foot-status] [data-comments-link]:visible').first();
-    await expect(count).toBeVisible();
+    // No count link and no status in a phone's closed foot: Edit draft counts the comments (approval "reply-bar-pairs").
+    await expect(pane(page).locator('.ib-pfoot [data-comments-link]')).toHaveCount(0);
+    const draft = pane(page).locator('.ib-pfoot [data-edit-draft]');
+    await expect(draft.locator('[data-draft-count]')).toHaveText(String(t.count));
+    await expect(draft).toHaveAccessibleName(`Draft ${t.count}: ${t.count} comments. Edit draft`);
     await layout(page);
-    const drawn = (await count.boundingBox())!;
-
-    // Every button of the row answers for itself, corner to corner.
-    const taken = await count.evaluate((self) => {
-      const buttons = [...document.querySelectorAll<HTMLElement>('section.ib-pane .ib-pfoot button')].filter((el) => el !== self && el.getClientRects().length > 0 && getComputedStyle(el).visibility === 'visible');
+    const box = (await draft.boundingBox())!;
+    expect(box.width).toBeGreaterThanOrEqual(44);
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    // No button's press is taken by another (a hit area drawn over it), corner to corner.
+    const taken = await page.evaluate(() => {
+      const buttons = [...document.querySelectorAll<HTMLElement>('section.ib-pane .ib-pfoot button')].filter((el) => el.getClientRects().length > 0 && getComputedStyle(el).visibility === 'visible');
       return buttons.flatMap((el) => {
-        const box = el.getBoundingClientRect();
-        const points = [[box.left + 2, box.top + 2], [box.right - 2, box.top + 2], [box.left + 2, box.bottom - 2], [box.right - 2, box.bottom - 2], [box.left + box.width / 2, box.top + box.height / 2]];
-        return points.filter(([x, y]) => document.elementFromPoint(x!, y!)?.closest('button') === self).map(() => el.textContent);
+        const r = el.getBoundingClientRect();
+        const points = [[r.left + 2, r.top + 2], [r.right - 2, r.top + 2], [r.left + 2, r.bottom - 2], [r.right - 2, r.bottom - 2], [r.left + r.width / 2, r.top + r.height / 2]];
+        return points.filter(([x, y]) => { const hit = document.elementFromPoint(x!, y!)?.closest('button'); return !!hit && hit !== el; }).map(() => el.textContent);
       });
     });
     expect(taken).toEqual([]);
-
-    // A finger 21 px from the count's middle, each way, still lands on it.
-    const [x, y] = [drawn.x + drawn.width / 2, drawn.y + drawn.height / 2];
-    for (const [dx, dy] of [[0, -21], [0, 21], [-21, 0], [21, 0]] as const) {
-      expect(await count.evaluate((self, [px, py]) => self.contains(document.elementFromPoint(px!, py!)), [x + dx, y + dy])).toBe(true);
-    }
-    await page.touchscreen.tap(x, y - 21);
-    await expect(theList(page, t.count)).toBeVisible();
     await context.close();
   });
 }

@@ -28,6 +28,8 @@ import {
   composeOpening,
   statusLine,
   subjectPreview,
+  startBlock,
+  startStatusLine,
 } from './compose/model';
 
 const session = (id: string, host: string, extra: Partial<InboxComposeProject['sessions'][number]> = {}) => ({
@@ -143,6 +145,13 @@ describe('the palette\'s Actions', () => {
     expect(composeActions('', targets, 'ses-gone').map(actionLabel)).toEqual(['New message…']);
   });
 
+  test('with Code review off, a word about reviews still offers New message…, as if there were no reviews at all', () => {
+    for (const query of ['new review', 'send review', 'new pull']) {
+      expect(composeActions(query, targets, null, false).map((action) => action.kind)).toEqual(['new']);
+      expect(composeActions(query, targets, null, true).map((action) => action.kind)).toContain('review');
+    }
+  });
+
   test('typed words: the action words offer New message…; a host or project names the sessions; other words offer nothing', () => {
     expect(composeActions('new', targets, null).map(actionLabel)).toEqual(['New message…']);
     expect(composeActions('idea', targets, null).map(actionLabel)).toEqual(['New message…']);
@@ -215,5 +224,38 @@ describe('the subject preview and the thread name', () => {
     expect(suggestThreadName('can you fix the paste bug in the reply box')).toBe('Paste bug');
     expect(suggestThreadName('', ['relay-retry-budget.md'])).toBe('Relay retry budget');
     expect(suggestThreadName('What do you think?')).toBe('');
+  });
+});
+
+describe('launch: the start block under the live sessions (UX screen 01)', () => {
+  const launch = {
+    agents: [{ agent: 'claude-code' as const, name: 'Claude Code' }],
+    projects: [
+      { id: 'prj_a', name: 'workspaces-cli', root: '/u/workspaces-cli', exists: true },
+      { id: 'prj_b', name: 'plannotator', root: '/u/plannotator/plannotator', exists: true },
+      { id: 'prj_c', name: 'billing-svc', root: '/u/work/billing-svc', exists: false },
+    ],
+  };
+
+  test('the caption names the project the person is looking at, else the most recently active', () => {
+    expect(startBlock(launch, { id: 'prj_b', root: null }, '')?.project.name).toBe('plannotator');
+    expect(startBlock(launch, null, '')?.project.name).toBe('workspaces-cli');
+  });
+
+  test('a filter word naming a project moves the caption there; agent words narrow the rows; no match, no block', () => {
+    expect(startBlock(launch, { id: 'prj_b', root: null }, 'billing')?.project.id).toBe('prj_c');
+    expect(startBlock(launch, null, 'claude billing')).toMatchObject({ project: { id: 'prj_c' }, agents: [{ agent: 'claude-code' }] });
+    expect(startBlock(launch, null, 'zzz')).toBeNull();
+  });
+
+  test('no agent available (or none installed new enough): no block at all, never a grey row', () => {
+    expect(startBlock({ ...launch, agents: [] }, null, '')).toBeNull();
+    expect(startBlock(undefined, null, '')).toBeNull();
+  });
+
+  test('a start says nothing beside Send, unless its folder is gone (screen 13)', () => {
+    const start = { agent: 'claude-code' as const, name: 'Claude Code', project: launch.projects[1]! };
+    expect(startStatusLine(start)).toBe('');
+    expect(startStatusLine({ ...start, project: launch.projects[2]! })).not.toBe('');
   });
 });

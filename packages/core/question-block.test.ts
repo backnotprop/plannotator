@@ -660,6 +660,36 @@ Answer:
     expect(single).toContain("Answer: Nowhere\nNote: one line\n");
   });
 
+  test("a multi-line Other answer keeps its line breaks, quoted the way a multi-line note is", () => {
+    const three = "Keep the loser locally.\nShow it under History.\nPurge it after a week.";
+    const single = formatQuestionAnswersSection(items, [answer({ key: key(2), prompt: "Background sync?", other: three })]);
+    expect(single).toContain(
+      "### Q2. Background sync? (line 34)\nAnswer: Other:\n> Keep the loser locally.\n> Show it under History.\n> Purge it after a week.\n\n",
+    );
+    // A blank line inside it and Windows line ends: still one quote, never a blank line that would end the block.
+    const gaps = formatQuestionAnswersSection(items, [answer({ key: key(2), prompt: "Background sync?", other: "First.\r\n\r\nThird." })]);
+    expect(gaps).toContain("Answer: Other:\n> First.\n> \n> Third.\n\n");
+    // With picks (pick any): the quote sits under its bullet, Other last as today.
+    const picks = formatQuestionAnswersSection(items, [
+      answer({ key: key(3), kind: "multi", prompt: "Which indicators?", selected: ["Dot"], other: "A sound\nOnly when muted" }),
+    ]);
+    expect(picks).toContain("### Q3. Which indicators? (line 45)\nAnswer:\n- Dot\n- Other:\n  > A sound\n  > Only when muted\n\n");
+    // With a multi-line note too: each keeps its own quote.
+    const both = formatQuestionAnswersSection(items, [
+      answer({ key: key(2), prompt: "Background sync?", other: "One.\nTwo.", note: "Why.\nBecause." }),
+    ]);
+    expect(both).toContain("Answer: Other:\n> One.\n> Two.\nNote:\n> Why.\n> Because.\n");
+  });
+
+  test("a one-line Other answer reads exactly as before, whatever spaces or a last Enter it carries", () => {
+    for (const other of ["foreground only", "foreground  only", "foreground only\n", "\n  foreground\tonly  \n\n"]) {
+      const out = formatQuestionAnswersSection(items, [answer({ key: key(2), prompt: "Background sync?", other })]);
+      expect(out).toContain("### Q2. Background sync? (line 34)\nAnswer: Other: foreground only\n\n");
+    }
+    const picks = formatQuestionAnswersSection(items, [answer({ key: key(3), kind: "multi", prompt: "Which indicators?", selected: ["Dot"], other: "A sound\n" })]);
+    expect(picks).toContain("Answer:\n- Dot\n- Other: A sound\n\n");
+  });
+
   test("no reportable answer means no section", () => {
     expect(formatQuestionAnswersSection(items, [])).toBe("");
     expect(formatQuestionAnswersSection(items, [answer({ key: key(1) })])).toBe("");

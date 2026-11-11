@@ -43,6 +43,12 @@
  *    for the next look (any person's item, a Codex thread's next message, a
  *    thread coming back, an Inbox restart).
  *
+ * A session the Inbox launched (packages/server/inbox-launch-codex.ts) is
+ * asked first (`deliver`): its host puts the text in as a turn over the
+ * `codex app-server` the Inbox runs for it, and it is delivered at once. That
+ * needs no `codex queue`, so it never waits for a Codex CLI that queues; only
+ * `queue` from the host sends an item the CLI's way.
+ *
  * The text goes to `codex queue` as an argument, so while the call runs (a
  * few hundred milliseconds) it can be read in the process list (`ps`) by
  * other processes of this user and, on a shared machine, by anyone who can
@@ -55,14 +61,16 @@
  * mid-turn.
  */
 
+import { INBOX_ROWS_ASK_CLOSE, INBOX_ROWS_ASK_OPEN } from "@plannotator/core/inbox-types";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { lstat, open, readdir, type FileHandle } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { INBOX_CODEX_HOST, codexCallWakes, codexCliQueues, codexThreadOfCall, isCodexThreadId, parseCodexCliVersion, type InboxMessage } from "@plannotator/core/inbox-types";
-import { INBOX_TOOL_NAME, inboxWakeText, type InboxReplyCommand } from "@plannotator/shared/inbox/connection";
-import { INBOX_BOARD_REQUEST_CLOSE, INBOX_BOARD_REQUEST_OPEN } from "@plannotator/core/inbox-types";
+import { INBOX_TOOL_NAME, inboxWakeCommand, inboxWakeText, type InboxReplyCommand } from "@plannotator/shared/inbox/connection";
+import { INBOX_BOARD_REQUEST_CLOSE, INBOX_BOARD_REQUEST_OPEN, INBOX_DECISION_ASK_CLOSE, INBOX_DECISION_ASK_OPEN } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { agentHomeAllowed, codexHome, type AgentEnvironment } from "./inbox-agents";
+import type { LaunchDelivery } from "./inbox-launch-host";
 
 /** The ChatGPT desktop app's own Codex CLI (macOS), used when no `codex` is on PATH. */
 export const INBOX_CODEX_DESKTOP_CLI = "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex";
@@ -291,8 +299,10 @@ const BODY_SLOT = "\u0000PLANNOTATOR_BODY\u0000";
  * connections). The person's words are never touched.
  */
 export function codexWakeText(command: InboxReplyCommand): string {
-  const template = inboxWakeText({ ...command, body: BODY_SLOT }).split(`${INBOX_TOOL_NAME} `).join("");
-  return template.replace(BODY_SLOT, () => command.body);
+  const { body } = inboxWakeCommand(command);
+  // Worded now and held by the host from here (Codex, Qwen, T3 Code): `queued`, so it never says "nothing open".
+  const template = inboxWakeText({ ...command, body: BODY_SLOT }, Date.now(), { queued: true }).split(`${INBOX_TOOL_NAME} `).join("");
+  return template.replace(BODY_SLOT, () => body);
 }
 
 /** The wake text, cut to INBOX_CODEX_MESSAGE_MAX_BYTES with a pointer to the thread when the reply is longer. */
@@ -301,9 +311,11 @@ export function codexQueueMessage(command: InboxReplyCommand): string {
   const whole = clean(command.body);
   const full = codexWakeText({ ...command, body: whole });
   if (Buffer.byteLength(full) <= INBOX_CODEX_MESSAGE_MAX_BYTES) return full;
-  // The Board request (compose's chip) ends the body: only the words before it are cut, and it stays whole after the note.
-  const at = whole.lastIndexOf(`\n\n${INBOX_BOARD_REQUEST_OPEN}\n`);
-  const tail = at >= 0 && whole.endsWith(INBOX_BOARD_REQUEST_CLOSE) ? whole.slice(at) : "";
+  // The Board request (compose's chip) or a Decision data Ask's instructions end the body: only the words before them
+  // are cut, and they stay whole after the note.
+  const closing = whole.endsWith(INBOX_ROWS_ASK_CLOSE) ? INBOX_ROWS_ASK_OPEN : whole.endsWith(INBOX_DECISION_ASK_CLOSE) ? INBOX_DECISION_ASK_OPEN : whole.endsWith(INBOX_BOARD_REQUEST_CLOSE) ? INBOX_BOARD_REQUEST_OPEN : null;
+  const at = closing ? whole.lastIndexOf(`\n\n${closing}\n`) : -1;
+  const tail = at >= 0 ? whole.slice(at) : "";
   const body = tail ? whole.slice(0, at) : whole;
   const note = `\n\n[Cut here: the rest is in the Inbox. read_thread with message_id ${command.id} shows it whole.]${tail}`;
   const overhead = Buffer.byteLength(codexWakeText({ ...command, body: note }));
@@ -324,6 +336,10 @@ export function createInboxCodexWake(options: {
   environment: AgentEnvironment;
   /** The wake command for an item and the session it goes to (the bridge's `replyCommand`). */
   commandOf: (item: InboxMessage, session: string) => InboxReplyCommand;
+  /** A launched session's host, asked before `codex queue` (the launch engine's `deliver`): `queue` lets the CLI carry it. */
+  deliver?: (session: string, text: string) => Promise<LaunchDelivery>;
+  /** Whether a launch of this Inbox owns the session (its host can take an item with no Codex CLI that queues). */
+  launched?: (session: string) => boolean;
   /** An item not to hand at all (a steps-only Tidy wake once steps are off: the server withdraws it). */
   skip?: (item: InboxMessage, session: string) => boolean;
   /** Where to look for a Codex CLI besides PATH. Default: the ChatGPT and Codex apps' own (macOS), never under the test sandbox. */
@@ -481,13 +497,15 @@ export function createInboxCodexWake(options: {
     (retryTimer as { unref?: () => void }).unref?.();
   };
 
-  const queueOne = async (path: string, item: InboxMessage, session: string): Promise<void> => {
-    const key = `${item.id}.${session}`;
+  /** `path`: a Codex CLI that queues, or null when none was found (then only a launched session's host can take it). */
+  const queueOne = async (path: string | null, item: InboxMessage, session: string): Promise<void> => {
+    const id = store.deliveryIdOf(item, session);
+    const key = `${id}.${session}`;
     const retry = retryAt.get(key);
     if (retry && retry.at > now()) return;
     try {
       mkdirSync(dir, { recursive: true });
-      mkdirSync(claimDir(item.id, session));
+      mkdirSync(claimDir(id, session));
     } catch {
       // Claimed already (another sweep, or before a restart).
       claimed.add(key);
@@ -497,8 +515,47 @@ export function createInboxCodexWake(options: {
     const text = codexQueueMessage(options.commandOf(item, session));
     const at = now();
     // An idle thread starts its turn while `codex queue` still runs; that turn's tool call is kept until the call exits 0.
-    const flight = { at, session, itemId: item.id, taken: false };
+    const flight = { at, session, itemId: id, taken: false };
     inFlight.set(key, flight);
+    // A launched session: its host puts it in as a turn now (delivered), or leaves it to `codex queue`.
+    const own = options.deliver ? await options.deliver(session, text).catch((error: unknown) => ({ failed: error instanceof Error ? error.message : String(error) })) : "queue";
+    if (own === "delivered") {
+      inFlight.delete(key);
+      retryAt.delete(key);
+      delivered(id, session);
+      return;
+    }
+    if (own === "hold") {
+      // Not now, and never `codex queue`: it waits in the Inbox, looked at again when the next line lands.
+      inFlight.delete(key);
+      retryAt.delete(key);
+      dropClaim(id, session);
+      return;
+    }
+    if (typeof own === "object" && "uncertain" in own) {
+      // Sent, and no answer: the turn may have started. Kept claimed and uncertain, never sent again (as a timed-out `codex queue`).
+      inFlight.delete(key);
+      retryAt.delete(key);
+      log(`the Codex launch may have delivered ${item.id} to ${session} (${own.uncertain}); it is not sent again: the agent sees it when it reads the thread.`);
+      if (!claimed.has(key)) return;
+      uncertain.add(key);
+      writeFileSync(join(claimDir(id, session), "queued.json"), `${JSON.stringify({ at, timed_out: true })}\n`);
+      return;
+    }
+    if (own !== "queue") {
+      inFlight.delete(key);
+      dropClaim(id, session);
+      const wait = Math.min((retry?.wait ?? RETRY_FIRST_MS / 2) * 2, RETRY_MAX_MS);
+      retryAt.set(key, { at: now() + wait, wait });
+      log(`the Codex launch could not deliver ${item.id} to ${session}: ${own.failed}. Trying again later.`);
+      return;
+    }
+    if (path === null) {
+      // No Codex CLI that queues: the item waits for the next look.
+      inFlight.delete(key);
+      dropClaim(id, session);
+      return;
+    }
     // `--name=value`: a value that starts with "-" would be read as a flag.
     const run = await environment.run([path, "queue", `--thread=${session}`, `--message=${text}`], { timeoutMs: options.queueTimeoutMs ?? INBOX_CODEX_QUEUE_TIMEOUT_MS, signal: stopping.signal });
     inFlight.delete(key);
@@ -513,7 +570,7 @@ export function createInboxCodexWake(options: {
       log(`codex queue ran out of time for ${item.id} (thread ${session}); it may not have gone, and is not sent again: the agent sees it when it reads the thread.`);
       if (!claimed.has(key)) return;
       uncertain.add(key);
-      writeFileSync(join(claimDir(item.id, session), "queued.json"), `${JSON.stringify({ at, timed_out: true })}\n`);
+      writeFileSync(join(claimDir(id, session), "queued.json"), `${JSON.stringify({ at, timed_out: true })}\n`);
       return;
     }
     if (run.exitCode === 0) {
@@ -521,14 +578,14 @@ export function createInboxCodexWake(options: {
       unproven.delete(session);
       if (!claimed.has(key)) return;
       if (flight.taken) {
-        delivered(item.id, session);
+        delivered(id, session);
         return;
       }
-      writeFileSync(join(claimDir(item.id, session), "queued.json"), `${JSON.stringify({ at })}\n`);
-      (queued.get(session) ?? queued.set(session, new Map()).get(session)!).set(item.id, at);
+      writeFileSync(join(claimDir(id, session), "queued.json"), `${JSON.stringify({ at })}\n`);
+      (queued.get(session) ?? queued.set(session, new Map()).get(session)!).set(id, at);
       return;
     }
-    dropClaim(item.id, session);
+    dropClaim(id, session);
     const said = `${run.stderr}${run.stdout}`.trim().split("\n")[0]?.slice(0, 300) ?? "";
     if (run.exitCode === 1 && UNKNOWN_THREAD.test(`${run.stderr}\n${run.stdout}`)) {
       dead.add(session);
@@ -560,9 +617,11 @@ export function createInboxCodexWake(options: {
     const pendingKeys = new Set<string>();
     const work: { item: InboxMessage; session: string }[] = [];
     for (const [session, items] of pending) {
+      // Only a Codex thread id is ever handed on: never a launch's placeholder (`launch:<id>`) before its thread exists.
+      if (!isCodexThreadId(session)) continue;
       for (const item of items) {
         if (!wakesItem(item, session) || options.skip?.(item, session)) continue;
-        const key = `${item.id}.${session}`;
+        const key = `${store.deliveryIdOf(item, session)}.${session}`;
         pendingKeys.add(key);
         if (dead.has(session) || claimed.has(key)) continue;
         work.push({ item, session });
@@ -576,11 +635,13 @@ export function createInboxCodexWake(options: {
     }
     for (const key of [...retryAt.keys()]) if (!pendingKeys.has(key)) retryAt.delete(key);
     if (work.length > 0) {
+      // A launched session's host needs no CLI that queues; without one, only those items can go.
       const found = await cli();
-      if (found) {
-        for (const { item, session } of work) {
+      const sendable = found ? work : options.deliver ? work.filter((one) => options.launched?.(one.session) === true) : [];
+      if (sendable.length > 0) {
+        for (const { item, session } of sendable) {
           if (stopping.signal.aborted) return;
-          await queueOne(found.path, item, session);
+          await queueOne(found?.path ?? null, item, session);
         }
       }
     }

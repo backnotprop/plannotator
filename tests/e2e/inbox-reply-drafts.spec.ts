@@ -49,6 +49,9 @@ const row = (page: Page, threadId: string) => page.locator(`.ib-lbody [data-thre
 const sectionOf = (page: Page, threadId: string) => row(page, threadId).getAttribute('data-section');
 const pane = (page: Page) => page.locator('section.ib-pane');
 const box = (page: Page) => pane(page).locator('textarea');
+/** The thread's reply draft as the Inbox holds it: its words, or null. (`world.url` ends in `/`: a `//api/…` path is the page's 404.) */
+const draftWords = async (threadId: string) =>
+  ((await (await fetch(new URL(`/api/inbox/threads/${threadId}/draft`, world.url))).json()) as { draft: { body: string } | null }).draft?.body ?? null;
 
 function startInbox(): string {
   const started = spawnSync(binary, ['inbox', '--background'], { env: world?.env ?? {}, encoding: 'utf8', timeout: 60_000 });
@@ -107,10 +110,11 @@ test('type, leave: the words are kept, the row says "Draft · Your reply", and t
   await row(page, threads.news).click();
   await pane(page).locator('.ib-pfoot').getByRole('button', { name: 'Reply' }).click();
   await box(page).fill(WORDS);
-  // The soft pill with when it was saved, and Discard.
-  await expect(pane(page).locator('[data-draft-head] .ib-draft-pill')).toHaveText('Draft');
-  await expect(pane(page).locator('[data-draft-head] .ib-draft-saved')).toHaveText(/^Saved \d{1,2}:\d{2} [AP]M$/);
-  await expect(pane(page).locator('[data-draft-discard]')).toHaveText('Discard');
+  // Saved, silently on a computer (approval "inbox-reply-box", T6): no Draft pill or Saved time in the box; Discard is
+  // the bin in the box's row.
+  await expect.poll(() => draftWords(threads.news)).toBe(WORDS);
+  await expect(pane(page).locator('[data-draft-head]')).toHaveCount(0);
+  await expect(pane(page).locator('[data-reply-row] [data-reply-discard]')).toHaveAccessibleName('Discard draft');
   await page.setViewportSize({ width: 1280, height: 860 });
   await shot(page, 'inside-thread-draft-1280');
   // Leave the thread: the row it settles in says what waits.
@@ -223,12 +227,12 @@ test('Discard drops the words; typing again and Send clears them, and the row go
   const { page, threads } = world;
   await page.goto(`${world.url}#thread=${threads.news}`);
   await expect(box(page)).toHaveValue(WORDS);
-  await pane(page).locator('[data-draft-discard]').click();
+  await pane(page).locator('[data-reply-discard]').click();
   await expect(box(page)).toHaveCount(0);
   await expect(row(page, threads.news).locator('[data-draft-label]')).toHaveCount(0);
   await pane(page).locator('.ib-pfoot').getByRole('button', { name: 'Reply' }).click();
   await box(page).fill('Ship it as cards.');
-  await expect(pane(page).locator('[data-draft-head] .ib-draft-pill')).toHaveText('Draft');
+  await expect.poll(() => draftWords(threads.news)).toBe('Ship it as cards.');
   await pane(page).getByRole('button', { name: 'Send', exact: true }).click();
   await expect(box(page)).toHaveCount(0);
   await page.goto(world.url);

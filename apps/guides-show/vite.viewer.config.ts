@@ -5,6 +5,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { GUIDE_SNAPSHOT_VERSION } from '../../packages/core/guide-format';
 import { viewerManifestPlugin } from './build/manifest-plugin';
 import { readOnlyStubsPlugin } from './build/read-only-stubs-plugin';
+import { diffsWorkerCatalogs } from '../../build/diffs-worker-catalogs';
 
 /**
  * The portable Guided Review viewer — a MULTI-FILE build (never single-file):
@@ -27,6 +28,10 @@ export default defineConfig({
       // Same as apps/review: drop the dead Oniguruma WASM. resolve.alias is
       // shared with the worker build; plugins would not be.
       'shiki/wasm': path.resolve(__dirname, '../../build/shiki-wasm-stub.ts'),
+      // Highlights, Pierre's second highlighter (WASM), never runs: Plannotator
+      // highlights with Shiki. See build/pierre-highlights-stub.ts.
+      '@pierre/highlights/themes/loader': path.resolve(__dirname, '../../build/pierre-highlights-stub.ts'),
+      '@pierre/highlights': path.resolve(__dirname, '../../build/pierre-highlights-stub.ts'),
       // Read-only hosts never render the annotation composer, comment popover
       // or reviewer identity — stub them at build time so their dependency
       // tails (markdown/sanitizer, base-ui dialogs, the username wordlist)
@@ -36,6 +41,8 @@ export default defineConfig({
   },
   worker: {
     format: 'es',
+    // Pierre's language and theme catalogs, dead code in its worker (see the plugin).
+    plugins: () => [diffsWorkerCatalogs()],
     rollupOptions: { output: { inlineDynamicImports: true, entryFileNames: 'worker.[hash].js' } },
   },
   build: {

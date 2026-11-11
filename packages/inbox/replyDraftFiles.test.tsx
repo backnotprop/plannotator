@@ -4,7 +4,7 @@
  * server in a temp data dir (its own process, tests/helpers/inbox-dom-server.ts),
  * its fetches and uploads carried to it over loopback. What is proved:
  *  - a file attached with the paperclip is saved in the draft beside the
- *    words: Cancel keeps it (Edit draft brings its tile back), and so does a
+ *    words: closing the box keeps it (Edit draft brings its tile back), and so does a
  *    reload;
  *  - another window's file comes into a box with no edits, and a file it
  *    removed goes; two windows adding files at once both keep theirs, with no
@@ -19,11 +19,11 @@
  *    no answer waits for the next save (the restart guard asks); Discard and
  *    Discard mine drop waiting file changes. After each step the box's tiles
  *    are the saved draft's files;
- *  - a file still uploading when Cancel closes the box lands in the draft
+ *  - a file still uploading when the box closes lands in the draft
  *    once in (the restart guard asks meanwhile), and the foot's Send carries
  *    it; so does one when the pane is given another thread, or closes;
  *  - Discard drops the files with the words, and a file still uploading (in
- *    the box, or landing from an earlier Cancel) joins no draft.
+ *    the box, or landing from an earlier close) joins no draft.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -131,7 +131,7 @@ class LoopbackXhr {
 beforeAll(async () => {
   if (!hasDom) return;
   dir = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-inbox-reply-draft-files-dom-')));
-  // The DOM server keeps its own scratch HOME under the data dir: nothing here names one.
+  // The DOM server uses the scratch HOME it inherits from the preload: nothing here names one.
   child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), '44'], {
     env: { ...process.env, DOM_TESTS: '0', PLANNOTATOR_DATA_DIR: join(dir, 'data'), PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0', PLANNOTATOR_BROWSER: NO_BROWSER },
     stdout: 'pipe',
@@ -301,7 +301,7 @@ async function saveAsOther(body: string, files: string[], base: string | null) {
   expect(answer.status).toBe(200);
 }
 
-test.skipIf(!hasDom)('a file attached with the paperclip is in the draft: Cancel keeps it and Edit draft brings its tile back; a reload brings it back too', async () => {
+test.skipIf(!hasDom)('a file attached with the paperclip is in the draft: closing the box keeps it and Edit draft brings its tile back; a reload brings it back too', async () => {
   let el = await renderApp(`#thread=${world.waiting}`);
   const text = await openReply(el);
   type(text, 'See the chart.');
@@ -311,8 +311,8 @@ test.skipIf(!hasDom)('a file attached with the paperclip is in the draft: Cancel
   // Saved in the draft: a restart would lose nothing.
   await until(() => unsentReply() === null, 'the guard at rest');
 
-  // Cancel: the box closes, the draft keeps the file; Edit draft brings the tile back beside the words.
-  act(() => button(el, 'Cancel').click());
+  // Closed (its chevron): the draft keeps the file; Edit draft brings the tile back beside the words.
+  act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
   await until(() => replyBox(el) === null, 'the box closed');
   expect(await draftNames()).toEqual(['chart.png']);
   act(() => button(el, 'Edit draft').click());
@@ -365,7 +365,7 @@ test.skipIf(!hasDom)("another window's file comes into a box with no edits, and 
   await until(() => tiles(el).sort().join() === 'extra.png:done,mine.png:done', 'the merged tiles');
 }, 30_000);
 
-test.skipIf(!hasDom)("a file still uploading when Cancel closes the box lands in the draft once in, and the foot's Send carries it", async () => {
+test.skipIf(!hasDom)("a file still uploading when the box closes lands in the draft once in, and the foot's Send carries it", async () => {
   const el = await renderApp(`#thread=${world.waiting}`);
   const text = await openReply(el);
   type(text, 'The log is attached.');
@@ -373,7 +373,7 @@ test.skipIf(!hasDom)("a file still uploading when Cancel closes the box lands in
   const held = holdUploads();
   attach(el, [image('slow.png', 4)]);
   expect(tiles(el)).toEqual(['slow.png:uploading']);
-  act(() => button(el, 'Cancel').click());
+  act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
   await until(() => replyBox(el) === null, 'the box closed');
   // Not in the draft yet: a restart would lose it, so the guard asks.
   expect(unsentReply()).not.toBeNull();
@@ -399,8 +399,8 @@ test.skipIf(!hasDom)('Discard drops the files with the words', async () => {
   type(text, 'Never mind');
   attach(el, [image('drop-me.png', 5)]);
   await until(async () => (await draftNames()).join() === 'drop-me.png', 'the draft with the file');
-  await until(() => el.querySelector('[data-draft-discard]') !== null, 'Discard');
-  act(() => (el.querySelector('[data-draft-discard]') as HTMLButtonElement).click());
+  await until(() => el.querySelector('[data-reply-discard]') !== null, 'the bin');
+  act(() => (el.querySelector('[data-reply-discard]') as HTMLButtonElement).click());
   await until(async () => (await serverDraft()) === null, 'the draft gone');
   await until(() => replyBox(el) === null, 'the box closed');
   act(() => button(el, 'Reply').click());
@@ -426,7 +426,7 @@ test.skipIf(!hasDom)("saves on a slow link (one on its way, one more key behind 
   await until(() => tiles(el).join() === 'theirs.png:done', 'their tile in the box');
   expect(await draftNames()).toEqual(['theirs.png']);
   expect(await boxMatchesDraft(el)).toBe(true);
-  act(() => button(el, 'Cancel').click());
+  act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
   await until(() => replyBox(el) === null, 'the box closed');
   expect(await draftNames()).toEqual(['theirs.png']);
   expect(el.querySelector('[data-draft-conflict]')).toBeNull();
@@ -479,7 +479,7 @@ test.skipIf(!hasDom)("a file attached while the save that will be refused is on 
   // No save after the release took either file out on its way.
   const saves = posted.slice(before).filter((p) => p.path.endsWith('/draft'));
   for (const save of saves) expect(save.body.files_remove ?? []).toEqual([]);
-  act(() => button(el, 'Cancel').click());
+  act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
   await until(() => replyBox(el) === null, 'the box closed');
   await settle(300);
   expect((await draftNames()).sort()).toEqual(['mine.png', 'theirs.png']);
@@ -576,17 +576,17 @@ test.skipIf(!hasDom)("a file attached while this window's save is on its way sta
   expect(tiles(el).sort()).toEqual(['mine.png:done', 'theirs.png:done']);
 }, 30_000);
 
-test.skipIf(!hasDom)('Discard after a Cancel that left an upload running: the file does not come back as a draft', async () => {
+test.skipIf(!hasDom)('Discard after a close that left an upload running: the file does not come back as a draft', async () => {
   const el = await renderApp(`#thread=${world.waiting}`);
   type(await openReply(el), 'Words first');
   await until(async () => (await serverDraft())?.body === 'Words first', 'the words saved');
   const held = holdUploads();
   attach(el, [image('slow.png', 7)]);
-  act(() => button(el, 'Cancel').click());
+  act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
   await until(() => replyBox(el) === null, 'the box closed');
   act(() => button(el, 'Edit draft').click());
-  await until(() => el.querySelector('[data-draft-discard]') !== null, 'Discard');
-  act(() => (el.querySelector('[data-draft-discard]') as HTMLButtonElement).click());
+  await until(() => el.querySelector('[data-reply-discard]') !== null, 'the bin');
+  act(() => (el.querySelector('[data-reply-discard]') as HTMLButtonElement).click());
   await until(async () => (await serverDraft()) === null, 'the draft gone');
   held.release();
   await settle(1500);
@@ -601,8 +601,8 @@ test.skipIf(!hasDom)('Discard while a file uploads in the box: it joins no draft
   const held = holdUploads();
   attach(el, [image('slow.png', 8)]);
   expect(tiles(el)).toEqual(['slow.png:uploading']);
-  await until(() => el.querySelector('[data-draft-discard]') !== null, 'Discard');
-  act(() => (el.querySelector('[data-draft-discard]') as HTMLButtonElement).click());
+  await until(() => el.querySelector('[data-reply-discard]') !== null, 'the bin');
+  act(() => (el.querySelector('[data-reply-discard]') as HTMLButtonElement).click());
   await until(async () => (await serverDraft()) === null, 'the draft gone');
   held.release();
   await settle(1500);
@@ -701,12 +701,12 @@ test.skipIf(!hasDom)("a save refused twice (the phone adds a file, then another,
   await until(() => tiles(el).sort().join() === 'p1.png:done,p2.png:done', 'both phone tiles in the box');
   expect((await draftNames()).sort()).toEqual(['p1.png', 'p2.png']);
   expect(await boxMatchesDraft(el)).toBe(true);
-  // One more key, then Cancel: both stay.
+  // One more key, then the box closed: both stay.
   type(replyText(el)!, 'Hi there!!');
   await until(async () => (await serverDraft())?.body === 'Hi there!!', 'one more key saved');
   expect((await draftNames()).sort()).toEqual(['p1.png', 'p2.png']);
   expect(await boxMatchesDraft(el)).toBe(true);
-  act(() => button(el, 'Cancel').click());
+  act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
   await until(() => replyBox(el) === null, 'the box closed');
   await settle(300);
   expect((await draftNames()).sort()).toEqual(['p1.png', 'p2.png']);
@@ -760,7 +760,7 @@ test.skipIf(!hasDom)('a save refused for a file gone meanwhile never lands after
   expect(await boxMatchesDraft(el)).toBe(true);
   expect(posted.slice(before).filter((p) => p.path.endsWith('/draft')).length).toBeLessThan(5);
   await until(() => unsentReply() === null, 'the guard at rest');
-  act(() => button(el, 'Cancel').click());
+  act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
   await until(() => replyBox(el) === null, 'the box closed');
   expect((await serverDraft())?.body).toBe('Hi ab');
 }, 30_000);
@@ -779,7 +779,7 @@ test.skipIf(!hasDom)('a file whose save gets no answer waits for the next save: 
   expect(await draftNames()).toEqual([]);
   expect(unsentReply()).not.toBeNull();
   // The box closed (its own save gets no answer either): the file change still waits, and the guard still asks.
-  act(() => button(el, 'Cancel').click());
+  act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
   await until(() => replyBox(el) === null, 'the box closed');
   await settle(1500);
   expect(unsentReply()).not.toBeNull();
@@ -826,7 +826,7 @@ test.skipIf(!hasDom)('Discard drops a file change that is still waiting for a sa
   await settle(1500);
   offline = false;
   expect(unsentReply()).not.toBeNull();
-  act(() => (el.querySelector('[data-draft-discard]') as HTMLButtonElement).click());
+  act(() => (el.querySelector('[data-reply-discard]') as HTMLButtonElement).click());
   await until(async () => (await serverDraft()) === null, 'the draft gone');
   await until(() => unsentReply() === null, 'the guard at rest');
   type(await openReply(el), 'New words');
@@ -912,8 +912,8 @@ test.skipIf(!hasDom)("the stale page's reload saves a file change still waiting 
   offline = true;
   act(() => (replyBox(el)!.querySelector('[data-compose-file] .ib-cp-fx') as HTMLButtonElement).click());
   await settle(1500);
-  // The box closed (Cancel), its removal still waiting: no link, so the reload waits.
-  act(() => button(el, 'Cancel').click());
+  // The box closed, its removal still waiting: no link, so the reload waits.
+  act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
   await until(() => replyBox(el) === null, 'the box closed');
   expect(await flushBeforeReload()).toBe(false);
   offline = false;
@@ -1079,14 +1079,14 @@ test.skipIf(!hasDom)("a file that finished uploading while the words are too lon
   expect(await boxMatchesDraft(el)).toBe(true);
 }, 30_000);
 
-test.skipIf(!hasDom)("attach, then Cancel while its save is on its way, and the phone changes the words: no conflict, the file stays in the draft with the phone's words", async () => {
+test.skipIf(!hasDom)("attach, then the box closed while its save is on its way, and the phone changes the words: no conflict, the file stays in the draft with the phone's words", async () => {
   const el = await renderApp(`#thread=${world.waiting}`);
   type(await openReply(el), 'Hi');
   await until(async () => (await serverDraft())?.body === 'Hi', 'the words saved');
   const slow = holdSaveWhere((body) => body.includes('"files_add":[{'));
   attach(el, [image('mine.png', 251)]);
   await until(slow.held, 'the file save held');
-  act(() => button(el, 'Cancel').click());
+  act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
   await until(() => replyBox(el) === null, 'the box closed');
   await saveAsOther('Phone words', [], (await serverDraft())!.updated_at);
   slow.release();
@@ -1132,7 +1132,7 @@ test.skipIf(!hasDom)("attach, then the pane is given another thread while its sa
   await until(() => unsentReply() === null, 'the guard at rest');
 }, 30_000);
 
-test.skipIf(!hasDom)('words typed, then Cancel while the file save is on its way, the phone changes the words: Edit draft shows the conflict with the file, and Keep mine keeps it', async () => {
+test.skipIf(!hasDom)('words typed, then the box closed while the file save is on its way, the phone changes the words: Edit draft shows the conflict with the file, and Keep mine keeps it', async () => {
   const el = await renderApp(`#thread=${world.waiting}`);
   type(await openReply(el), 'Hi');
   await until(async () => (await serverDraft())?.body === 'Hi', 'the words saved');
@@ -1140,7 +1140,7 @@ test.skipIf(!hasDom)('words typed, then Cancel while the file save is on its way
   attach(el, [image('mine.png', 261)]);
   await until(slow.held, 'the file save held');
   type(replyText(el)!, 'Hi there');
-  act(() => button(el, 'Cancel').click());
+  act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
   await until(() => replyBox(el) === null, 'the box closed');
   await saveAsOther('Phone words', [], (await serverDraft())!.updated_at);
   slow.release();
@@ -1204,10 +1204,10 @@ test.skipIf(!hasDom)('the pane given another thread and then this one again duri
   expect(await boxMatchesDraft(el)).toBe(true);
 }, 30_000);
 
-test.skipIf(!hasDom)('a tile removed in the conflict box stays removed once the conflict clears, after Cancel and Edit draft', async () => {
+test.skipIf(!hasDom)('a tile removed in the conflict box stays removed once the conflict clears, after closing and Edit draft', async () => {
   const el = await renderApp(`#thread=${world.waiting}`);
   const slow = await attachThenType(el);
-  act(() => button(el, 'Cancel').click());
+  act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
   await until(() => replyBox(el) === null, 'the box closed');
   await saveAsOther('Phone words', [], (await serverDraft())!.updated_at);
   slow.release();
@@ -1219,7 +1219,7 @@ test.skipIf(!hasDom)('a tile removed in the conflict box stays removed once the 
   await until(() => tiles(el).length === 0, 'the tile removed');
   type(replyText(el)!, '');
   await settle(1500);
-  act(() => button(el, 'Cancel').click());
+  act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
   await until(() => replyBox(el) === null, 'the box closed again');
   act(() => button(el, 'Edit draft').click());
   await until(() => replyBox(el) !== null, 'the box again');

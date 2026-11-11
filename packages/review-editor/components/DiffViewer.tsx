@@ -24,7 +24,7 @@ import { fileViewOfRendered, renderedViewOf, type MarkdownPreviewView } from '..
 import { MarkdownViewMenu } from './MarkdownViewMenu';
 import { BinaryFileNotice } from './BinaryFileNotice';
 import { FileCommentBanner } from './FileCommentBanner';
-import { DiffHScrollbar } from './DiffHScrollbar';
+import { DiffBottomBar } from './DiffBottomBar';
 import { OversizedFileNotice } from './OversizedFileNotice';
 import { isContentlessBinaryPatch, isImagePreviewCandidate, isOversizedReviewStubPatch } from '@plannotator/shared/diff-paths';
 import { ImageDiffPreview } from './ImageDiffPreview';
@@ -40,6 +40,7 @@ import { markdownPreviewSourcePath, markdownViewsFor, resolveMarkdownView, type 
 import { InlineAnnotation } from './InlineAnnotation';
 import { InlineAIMarker } from './InlineAIMarker';
 import type { AIChatEntry } from '../hooks/useAIChat';
+import { NO_HOST_LINE_NOTES, projectHostLineNotes, type HostLineNote } from './hostLineNotes';
 import { type ReviewSearchMatch } from '../utils/reviewSearch';
 import {
   applySearchHighlights,
@@ -178,6 +179,8 @@ const PierreDiffContent = React.memo(({
 ));
 
 interface DiffViewerProps {
+  /** What the host draws itself under lines (hostLineNotes.ts), such as a hunk's "Call tree" entry. Absent: none. */
+  hostLineNotes?: readonly HostLineNote[];
   /** A control drawn in the file header (the Changes | Whole file switch). */
   headerAccessory?: React.ReactNode;
   /** Replaces the diff below the header (the Whole file view): the header,
@@ -321,6 +324,7 @@ export const MarkdownPreviewFailed: React.FC<{ notice: React.ReactNode }> = ({ n
 );
 
 export const DiffViewer: React.FC<DiffViewerProps> = ({
+  hostLineNotes = NO_HOST_LINE_NOTES,
   headerAccessory,
   bodyOverride,
   patch,
@@ -811,9 +815,15 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       }));
   }, [aiMessages]);
 
+  const hostNoteAnnotations = useMemo(
+    () => projectHostLineNotes(hostLineNotes, filePath),
+    [hostLineNotes, filePath],
+  );
   const mergedAnnotations = useMemo(
-    () => [...lineAnnotations, ...aiLineAnnotations],
-    [lineAnnotations, aiLineAnnotations],
+    () => (hostNoteAnnotations.length > 0
+      ? [...hostNoteAnnotations, ...lineAnnotations, ...aiLineAnnotations]
+      : [...lineAnnotations, ...aiLineAnnotations]),
+    [hostNoteAnnotations, lineAnnotations, aiLineAnnotations],
   );
 
   // Handle edit: find annotation and start editing in toolbar
@@ -825,6 +835,11 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   // Render annotation or AI marker in diff
   const renderAnnotation = useCallback((annotation: { side: string; lineNumber: number; metadata?: DiffAnnotationMetadata }) => {
     if (!annotation.metadata) return null;
+
+    if (annotation.metadata.kind === 'host-note') {
+      const id = annotation.metadata.annotationId;
+      return hostLineNotes.find((note) => note.id === id)?.render() ?? null;
+    }
 
     if (annotation.metadata.kind === 'ai-marker') {
       return (
@@ -851,7 +866,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         explainDisabled={isAILoading}
       />
     );
-  }, [filePath, selectedAnnotationId, onSelectAnnotation, handleEdit, onDeleteAnnotation, onExplainAnnotation, agentFindingSources, isAILoading, onClickAIMarker]);
+  }, [filePath, selectedAnnotationId, onSelectAnnotation, handleEdit, onDeleteAnnotation, onExplainAnnotation, agentFindingSources, isAILoading, onClickAIMarker, hostLineNotes]);
 
   const handleLineSelectionInteraction = useCallback((
     source: LineSelectionSource,
@@ -1077,9 +1092,6 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
 
   return (
     <div className="h-full flex flex-col">
-      {/* `relative` anchors this file's horizontal scrollbar to the header's
-          bottom edge (#1048) — same placement as the all-files surface. */}
-      <div className="relative flex-none">
       <FileHeader
         filePath={filePath}
         patch={patch}
@@ -1125,10 +1137,6 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           )
           : undefined}
       />
-      {!collapsed && !markdownPreviewEnabled && diffOverflow !== 'wrap' && (
-        <DiffHScrollbar className="absolute inset-x-2 bottom-0 z-30" />
-      )}
-      </div>
 
       {!collapsed && bodyOverride ? (
         <div className="flex-1 min-h-0 relative flex flex-col" data-diff-body-override>{bodyOverride}</div>
@@ -1264,6 +1272,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           )}
         </OverlayScrollArea>
       )}
+      {!collapsed && !bodyOverride && !markdownPreviewEnabled && diffOverflow !== 'wrap' && <DiffBottomBar root={viewport} />}
 
       {/* The header's Comment button works in every view (diff, preview,
           collapsed), so its composer is mounted outside them. */}

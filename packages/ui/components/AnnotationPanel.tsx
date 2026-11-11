@@ -123,6 +123,8 @@ interface PanelProps {
   onEdit?: (id: string, updates: Partial<Annotation>) => void;
   selectedId: string | null;
   codeAnnotations?: CodeAnnotation[];
+  /** A short note on a code annotation's card (the Inbox's "Written on older code"). */
+  codeAnnotationNote?: (annotation: CodeAnnotation) => string | null;
   onSelectCodeAnnotation?: (id: string) => void;
   onDeleteCodeAnnotation?: (id: string) => void;
   onEditCodeAnnotation?: (id: string, updates: Partial<CodeAnnotation>) => void;
@@ -243,6 +245,25 @@ interface PanelProps {
    * Absent: no crop.
    */
   imageRegionSrc?: (src: string) => string | null;
+  /**
+   * The host's own section at the foot of the timeline, inside its scroll area,
+   * so the cards and the section scroll as one (the Inbox's earlier comments).
+   * Absent: no wrapper element, exactly as before.
+   */
+  timelineFooter?: React.ReactNode;
+  /**
+   * An empty timeline without "No annotations yet" and its hint, for a host
+   * that has something else to show there (see `timelineFooter`). The way to
+   * other files' comments stays. Default false: exactly as before.
+   */
+  hideEmptyMessage?: boolean;
+  /**
+   * Opt-in: an edit of a saved comment that the host kept (its file closed)
+   * and puts back. Each new object opens that card's edit box once, holding
+   * those words, not saved (the card's own Save and Cancel act on it). The
+   * open document's cards and code cards only. Absent: nothing changes.
+   */
+  reopenEdit?: { id: string; text: string } | null;
 }
 
 export const AnnotationPanel: React.FC<PanelProps> = ({
@@ -255,6 +276,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   onEdit,
   selectedId,
   codeAnnotations = [],
+  codeAnnotationNote,
   onSelectCodeAnnotation,
   onDeleteCodeAnnotation,
   onEditCodeAnnotation,
@@ -289,6 +311,9 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   renderCardBody,
   imageRegionSrc,
   onNavigateAnchor,
+  timelineFooter,
+  hideEmptyMessage = false,
+  reopenEdit,
 }) => {
   // `#Heading` links in comment text; nothing is parsed unless the host can navigate.
   const sectionRefs = useMemo(
@@ -560,6 +585,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                             header={group.isCurrent ? renderCardHeader?.(annotation) : undefined}
                             parts={group.isCurrent ? cardParts?.(annotation) : undefined}
                             body={group.isCurrent ? renderCardBody?.(annotation) : undefined}
+                            reopenEdit={group.isCurrent && reopenEdit?.id === annotation.id ? reopenEdit : undefined}
                             mentionSource={mentionSource}
                             unanchored={group.isCurrent ? (unanchoredIds?.has(annotation.id) ?? false) : false}
                             sectionRefs={group.isCurrent ? sectionRefs : undefined}
@@ -590,6 +616,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                   <CodeAnnotationCard
                     key={annotation.id}
                     annotation={annotation}
+                    note={codeAnnotationNote?.(annotation)}
                     isSelected={selectedId === annotation.id}
                     isMe={isCurrentUser(annotation.author)}
                     onSelect={() => onSelectCodeAnnotation?.(annotation.id)}
@@ -635,21 +662,25 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
             Select text in the document to comment. Question and option text is selectable too.
           </p>
         ) : timelineCount === 0 ? (
-          (!directEdits || directEdits.length === 0) && (
-            <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
-              <p className="text-xs text-muted-foreground/60">
-                No annotations yet
-              </p>
-              <p className="mt-1 text-[11px] text-muted-foreground/40">
-                {emptyHint}
-              </p>
+          (!directEdits || directEdits.length === 0) && (!hideEmptyMessage || (scopeEnabled && otherGroupCount > 0)) && (
+            <div className={`flex flex-col items-center justify-center px-4 ${hideEmptyMessage ? 'py-1' : 'py-16'} text-center`}>
+              {!hideEmptyMessage && (
+                <>
+                  <p className="text-xs text-muted-foreground/60">
+                    No annotations yet
+                  </p>
+                  <p className="mt-1 text-[11px] text-muted-foreground/40">
+                    {emptyHint}
+                  </p>
+                </>
+              )}
               {scopeEnabled && otherGroupCount > 0 && (
                 <button
                   type="button"
                   data-pn-touch-target="true"
                   data-annotation-view-all="true"
                   onClick={() => onAnnotationScopeChange!('all')}
-                  className="mt-3 cursor-pointer rounded-md px-2 py-1 text-[11px] text-primary/80 transition-colors hover:bg-surface-1 hover:text-primary"
+                  className={`${hideEmptyMessage ? '' : 'mt-3 '}cursor-pointer rounded-md px-2 py-1 text-[11px] text-primary/80 transition-colors hover:bg-surface-1 hover:text-primary`}
                 >
                   View all {otherGroupCount} in {otherGroups.length} other file{otherGroups.length === 1 ? '' : 's'}
                 </button>
@@ -680,6 +711,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                       header={renderCardHeader?.(entry.annotation)}
                   parts={cardParts?.(entry.annotation)}
                   body={renderCardBody?.(entry.annotation)}
+                      reopenEdit={reopenEdit?.id === entry.annotation.id ? reopenEdit : undefined}
                       mentionSource={mentionSource}
                       unanchored={unanchoredIds?.has(entry.annotation.id) ?? false}
                     />
@@ -700,6 +732,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                   header={renderCardHeader?.(entry.annotation)}
                   parts={cardParts?.(entry.annotation)}
                   body={renderCardBody?.(entry.annotation)}
+                  reopenEdit={reopenEdit?.id === entry.annotation.id ? reopenEdit : undefined}
                   mentionSource={mentionSource}
                   unanchored={unanchoredIds?.has(entry.annotation.id) ?? false}
                 />
@@ -708,12 +741,14 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                 <CodeAnnotationCard
                   key={entry.annotation.id}
                   annotation={entry.annotation}
+                  note={codeAnnotationNote?.(entry.annotation)}
                   isSelected={selectedId === entry.annotation.id}
                   isMe={isCurrentUser(entry.annotation.author)}
                   onSelect={() => onSelectCodeAnnotation?.(entry.annotation.id)}
                   onDelete={() => onDeleteCodeAnnotation?.(entry.annotation.id)}
                   onEdit={onEditCodeAnnotation ? (updates: Partial<CodeAnnotation>) => onEditCodeAnnotation(entry.annotation.id, updates) : undefined}
                   readOnly={readOnly}
+                  reopenEdit={reopenEdit?.id === entry.annotation.id ? reopenEdit : undefined}
                 />
               )
             ))}
@@ -738,6 +773,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
 
           </>
         )}
+        {timelineFooter}
         </div>
       </OverlayScrollArea>
 
@@ -1013,7 +1049,9 @@ const AnnotationEditComposer: React.FC<{
   onSave: (mentions: readonly string[]) => void;
   onCancel: () => void;
   mentionSource?: MentionSource;
-}> = ({ value, onChange, onSave, onCancel, mentionSource }) => {
+  /** Words put back (`reopenEdit`): the caret after them instead of selecting them all. */
+  caretAtEnd?: boolean;
+}> = ({ value, onChange, onSave, onCancel, mentionSource, caretAtEnd = false }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const mention = useMentionAutocomplete({ text: value, setText: onChange, textareaRef, source: mentionSource });
   const listboxId = `annotation-card-mentions-${useId().replace(/:/g, '')}`;
@@ -1024,8 +1062,10 @@ const AnnotationEditComposer: React.FC<{
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.focus();
-      textareaRef.current.select();
+      if (caretAtEnd) textareaRef.current.setSelectionRange(textareaRef.current.value.length, textareaRef.current.value.length);
+      else textareaRef.current.select();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1091,7 +1131,9 @@ const AnnotationCard: React.FC<{
   body?: React.ReactNode;
   sectionRefs?: Map<string, string>;
   onNavigateAnchor?: (hash: string) => void;
-}> = ({ annotation, isSelected, isMe, onSelect, onDelete, onEdit, readOnly = false, footer, header, mentionSource, unanchored = false, parts, body, sectionRefs, onNavigateAnchor }) => {
+  /** An edit put back for this card (`PanelProps.reopenEdit`). */
+  reopenEdit?: { id: string; text: string } | null;
+}> = ({ annotation, isSelected, isMe, onSelect, onDelete, onEdit, readOnly = false, footer, header, mentionSource, unanchored = false, parts, body, sectionRefs, onNavigateAnchor, reopenEdit }) => {
   // `text: false`: the stored text is the host's stand-in, never the person's words; the edit box starts empty.
   const shownText = parts?.text === false ? '' : annotation.text || '';
   const [isEditing, setIsEditing] = useState(false);
@@ -1109,8 +1151,20 @@ const AnnotationCard: React.FC<{
     }
   }, [shownText, isEditing]);
 
+  // An edit the host put back opens once, holding its words.
+  const reopenedRef = useRef<{ id: string; text: string } | null>(null);
+  const [caretAtEnd, setCaretAtEnd] = useState(false);
+  useEffect(() => {
+    if (!reopenEdit || readOnly || !onEdit || reopenEdit.id !== annotation.id || reopenedRef.current === reopenEdit) return;
+    reopenedRef.current = reopenEdit;
+    setCaretAtEnd(true);
+    setEditText(reopenEdit.text);
+    setIsEditing(true);
+  }, [annotation.id, onEdit, readOnly, reopenEdit]);
+
   const handleStartEdit = (e: React.MouseEvent) => {
     e.stopPropagation();
+    setCaretAtEnd(false);
     setEditText(shownText);
     setIsEditing(true);
   };
@@ -1144,6 +1198,7 @@ const AnnotationCard: React.FC<{
       onSave={handleSaveEdit}
       onCancel={handleCancelEdit}
       mentionSource={mentionSource}
+      caretAtEnd={caretAtEnd}
     />
   );
 
@@ -1312,28 +1367,46 @@ const AnnotationCard: React.FC<{
 
 const CodeAnnotationCard: React.FC<{
   annotation: CodeAnnotation;
+  note?: string | null;
   isSelected: boolean;
   isMe: boolean;
   onSelect: () => void;
   onDelete: () => void;
   onEdit?: (updates: Partial<CodeAnnotation>) => void;
   readOnly?: boolean;
-}> = ({ annotation, isSelected, isMe, onSelect, onDelete, onEdit, readOnly = false }) => {
+  /** An edit put back for this card (`PanelProps.reopenEdit`). */
+  reopenEdit?: { id: string; text: string } | null;
+}> = ({ annotation, note, isSelected, isMe, onSelect, onDelete, onEdit, readOnly = false, reopenEdit }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(annotation.text || '');
   const enterSavesComment = useConfigValue('enterSavesComment');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const reopenedRef = useRef<{ id: string; text: string } | null>(null);
+  const caretAtEndRef = useRef(false);
 
   useEffect(() => {
     if (isEditing) {
-      textareaRef.current?.focus();
-      textareaRef.current?.select();
+      const area = textareaRef.current;
+      area?.focus();
+      // Words put back: the caret after them (selecting them would let one key replace them all).
+      if (caretAtEndRef.current && area) area.setSelectionRange(area.value.length, area.value.length);
+      else area?.select();
+      caretAtEndRef.current = false;
     }
   }, [isEditing]);
 
   useEffect(() => {
     if (!isEditing) setEditText(annotation.text || '');
   }, [annotation.text, isEditing]);
+
+  // An edit the host put back opens once, holding its words.
+  useEffect(() => {
+    if (!reopenEdit || readOnly || !onEdit || reopenEdit.id !== annotation.id || reopenedRef.current === reopenEdit) return;
+    reopenedRef.current = reopenEdit;
+    caretAtEndRef.current = true;
+    setEditText(reopenEdit.text);
+    setIsEditing(true);
+  }, [annotation.id, onEdit, readOnly, reopenEdit]);
 
   const handleSaveEdit = () => {
     onEdit?.({ text: editText });
@@ -1409,6 +1482,7 @@ const CodeAnnotationCard: React.FC<{
           </div>
         </HostTitle>
       )}
+      {note && <p className="mt-1 text-[11px] text-muted-foreground" data-code-annotation-note="">{note}</p>}
 
       {annotation.originalCode && (
         <p className="mt-1.5 line-clamp-2 whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[11px] leading-relaxed text-muted-foreground/80">

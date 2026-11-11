@@ -1,10 +1,12 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Menu } from '@base-ui/react/menu';
-import { INBOX_CARD_NOTES_MAX, INBOX_CARD_TITLE_MAX } from '@plannotator/core/inbox-types';
+import { INBOX_CARD_NOTES_MAX, INBOX_CARD_TITLE_MAX, type InboxInitiative } from '@plannotator/core/inbox-types';
 import type { ComposeSessionsModel, ProjectFolder } from '../api';
 import { tildePath } from '../format';
 import { HostMark, Icon } from '../icons';
 import { Modal } from '../components/Updates';
+import { HashtagFieldMenu } from '../components/HashtagFieldMenu';
+import { useHashtagPicker, useInitiativeTags } from '../hashtags';
 import { SessionDetail, ToPicker } from '../compose/ToPicker';
 import { composeGroups, findTarget, hostLabel, type ComposeTarget } from '../compose/model';
 
@@ -19,6 +21,8 @@ export interface NewCardInput {
   mode: NewCardMode;
   project: string | null;
   to: ComposeTarget | null;
+  /** The initiative the card starts in (the Board's filter, approval "board-initiatives"), or null. */
+  initiative: string | null;
 }
 
 /**
@@ -52,9 +56,15 @@ export function NewCardDialog({
   phone,
   initialMode = 'backlog',
   fixed = null,
+  initiatives = [],
+  defaultInitiative = null,
   onClose,
   onCreate,
 }: {
+  /** The live initiatives: the one the card starts in is named by its id. */
+  initiatives?: readonly InboxInitiative[];
+  /** The initiative the Board is filtered to: the card starts in it (the × takes it out). */
+  defaultInitiative?: string | null;
   /** Sending a card that exists (the opened card's Send to an agent): its title and notes, shown and not edited; only the agent is picked. */
   fixed?: { title: string; notes: string | null } | null;
   projects: readonly ProjectFolder[];
@@ -72,13 +82,23 @@ export function NewCardDialog({
   const [links, setLinks] = useState('');
   const [mode, setMode] = useState<NewCardMode>(initialMode);
   const [project, setProject] = useState<string | null>(defaultProject ?? projects[0]?.id ?? null);
+  const [initiative, setInitiative] = useState<string | null>(defaultInitiative && initiatives.some((i) => i.id === defaultInitiative) ? defaultInitiative : null);
+  const initiativeName = initiative ? (initiatives.find((i) => i.id === initiative)?.name ?? null) : null;
   const [chosen, setChosen] = useState<string | null>(null);
   const [picker, setPicker] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
+  const notesRef = useRef<HTMLTextAreaElement>(null);
   const toRef = useRef<HTMLButtonElement>(null);
   const uid = useId().replace(/[^A-Za-z0-9_-]/g, '');
+  // `#` in the title or notes picks the card's initiative (approval "board-hashtags"): the token below says it, and
+  // the tag leaves the text (cards show no mark, so a title carries none). A card sent as it is (`fixed`) has none.
+  const known = useInitiativeTags();
+  const tags = useMemo(() => ({ ...known, initiatives: fixed ? [] : initiatives }), [fixed, initiatives, known]);
+  const pickInitiative = (picked: InboxInitiative) => setInitiative(picked.id);
+  const titleHash = useHashtagPicker({ text: title, setText: setTitle, fieldRef: titleRef, tags, onPick: pickInitiative, bareEscapeDismisses: true });
+  const notesHash = useHashtagPicker({ text: notes, setText: setNotes, fieldRef: notesRef, tags, onPick: pickInitiative, bareEscapeDismisses: true });
   useEffect(() => titleRef.current?.focus(), []);
   const projectRow = projects.find((p) => p.id === project) ?? null;
   const groups = useMemo(() => composeGroups(sessions?.projects ?? [], projectRow ? { id: projectRow.id, root: projectRow.root } : null), [sessions, projectRow]);
@@ -104,7 +124,7 @@ export function NewCardDialog({
     }
     setBusy(true);
     setError(null);
-    const failed = await onCreate({ title: text, notes: notes.trim() || null, refs: splitRefs(links), mode, project, to: mode === 'send' ? target : null });
+    const failed = await onCreate({ title: text, notes: notes.trim() || null, refs: splitRefs(links), mode, project, to: mode === 'send' ? target : null, initiative: fixed ? null : initiative });
     setBusy(false);
     if (failed) setError(failed);
   };
@@ -159,31 +179,60 @@ export function NewCardDialog({
           <label className="ib-sr" htmlFor={`ib-ncd-title-${uid}`}>
             Title
           </label>
-          <input
-            id={`ib-ncd-title-${uid}`}
-            ref={titleRef}
-            className="ib-ncd-title"
-            type="text"
-            placeholder="Title"
-            value={title}
-            maxLength={INBOX_CARD_TITLE_MAX}
-            onChange={(event) => setTitle(event.target.value)}
-            readOnly={fixed !== null}
-            data-new-card-title=""
-          />
+          <div className="ib-hashwrap">
+            {titleHash.menu && <HashtagFieldMenu id={`ib-ncd-hash-t-${uid}`} field={titleRef.current} menu={titleHash.menu} onSelect={titleHash.select} />}
+            <input
+              id={`ib-ncd-title-${uid}`}
+              ref={titleRef}
+              className="ib-ncd-title"
+              type="text"
+              placeholder="Title"
+              value={title}
+              maxLength={INBOX_CARD_TITLE_MAX}
+              onChange={(event) => {
+                setTitle(event.target.value);
+                titleHash.onSelect();
+              }}
+              onSelect={titleHash.onSelect}
+              onKeyDown={(event) => {
+                if (titleHash.onKeyDown(event)) event.stopPropagation();
+              }}
+              readOnly={fixed !== null}
+              role={titleHash.menu ? 'combobox' : undefined}
+              aria-expanded={titleHash.menu ? true : undefined}
+              aria-controls={titleHash.menu ? `ib-ncd-hash-t-${uid}` : undefined}
+              aria-activedescendant={titleHash.menu?.activeIndex != null ? `ib-ncd-hash-t-${uid}-option-${titleHash.menu.activeIndex}` : undefined}
+              data-new-card-title=""
+            />
+          </div>
           <label className="ib-sr" htmlFor={`ib-ncd-notes-${uid}`}>
             Notes
           </label>
-          <textarea
-            id={`ib-ncd-notes-${uid}`}
-            className="ib-ncd-notes"
-            placeholder={mode === 'send' ? 'Notes: what the agent should do. They are the message it gets.' : 'Notes (optional)'}
-            value={notes}
-            maxLength={INBOX_CARD_NOTES_MAX}
-            onChange={(event) => setNotes(event.target.value)}
-            readOnly={fixed !== null}
-            data-new-card-notes=""
-          />
+          <div className="ib-hashwrap ib-hashwrap-notes">
+            {notesHash.menu && <HashtagFieldMenu id={`ib-ncd-hash-n-${uid}`} field={notesRef.current} menu={notesHash.menu} onSelect={notesHash.select} />}
+            <textarea
+              id={`ib-ncd-notes-${uid}`}
+              ref={notesRef}
+              className="ib-ncd-notes"
+              placeholder={mode === 'send' ? 'Notes: what the agent should do. They are the message it gets.' : 'Notes (optional)'}
+              value={notes}
+              maxLength={INBOX_CARD_NOTES_MAX}
+              onChange={(event) => {
+                setNotes(event.target.value);
+                notesHash.onSelect();
+              }}
+              onSelect={notesHash.onSelect}
+              onKeyDown={(event) => {
+                if (notesHash.onKeyDown(event)) event.stopPropagation();
+              }}
+              readOnly={fixed !== null}
+              role={notesHash.menu ? 'combobox' : undefined}
+              aria-expanded={notesHash.menu ? true : undefined}
+              aria-controls={notesHash.menu ? `ib-ncd-hash-n-${uid}` : undefined}
+              aria-activedescendant={notesHash.menu?.activeIndex != null ? `ib-ncd-hash-n-${uid}-option-${notesHash.menu.activeIndex}` : undefined}
+              data-new-card-notes=""
+            />
+          </div>
           {fixed === null && (
           <label className="ib-ncd-links">
             <Icon name="link" size={15} />
@@ -221,7 +270,7 @@ export function NewCardDialog({
                 >
                   {target ? (
                     <>
-                      <HostMark host={target.host} />
+                      <HostMark host={target.host} agent={target.session} />
                       <b>{hostLabel(target.host)}</b>
                       <SessionDetail name={target.project.name} root={target.project.root} label={target.label} />
                     </>
@@ -237,6 +286,18 @@ export function NewCardDialog({
               <span className="ib-ncd-l">In</span>
               <ProjectPicker projects={projects} project={projectRow} home={home} onPick={setProject} />
             </>
+          )}
+          {fixed === null && initiativeName && (
+            // Made on a Board filtered to an initiative: the card starts in it; × takes it out.
+            <span className="ib-bflt-tok ib-ncd-ini" data-new-card-initiative={initiative ?? ''}>
+              <Icon name="hash" size={13} />
+              <span className="ib-bflt-tok-l" dir="auto">
+                {initiativeName}
+              </span>
+              <button type="button" className="ib-bflt-tok-x" aria-label={`Not in ${initiativeName}`} onClick={() => setInitiative(null)} data-new-card-initiative-clear="">
+                <Icon name="x" size={12} />
+              </button>
+            </span>
           )}
         </div>
         {picker && mode === 'send' && (

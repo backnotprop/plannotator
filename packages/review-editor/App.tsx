@@ -37,6 +37,7 @@ import { storage } from '@plannotator/ui/utils/storage';
 import { RefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { refCardRouteTransport, setRefCardTransport } from '@plannotator/ui/utils/refCard';
 import { CompletionOverlay } from '@plannotator/ui/components/CompletionOverlay';
+import { useStarAskDoneScreen } from '@plannotator/ui/components/StarAskDoneScreen';
 import {
   closePendingTab,
   openPendingTab,
@@ -119,6 +120,11 @@ import { useCallFlowInstall } from './hooks/useCallFlowInstall';
 import { useCallFlowAutoInstall } from './hooks/useCallFlowAutoInstall';
 import { extractLinesFromPatch, isLineRangeInPatch } from './utils/patchParser';
 import { resolveCallFlowAnnotationPlacement } from './utils/callFlowAnnotations';
+import { callTreeHunkTargets as callTreeHunkTargetsFor, type CallTreeHunkTarget } from './utils/callTreeHunks';
+import { CallTreeHunkEntry } from './components/callTree/CallTreeHunkEntry';
+import { selectionForCallFlowNode } from './components/CallFlowTreeView';
+import { useSemanticDiffChanges } from './hooks/useFileSemanticChanges';
+import type { HostLineNote } from './components/hostLineNotes';
 import {
   shouldHandleReviewSearchShortcut,
   isTypingTarget,
@@ -209,6 +215,7 @@ import {
 import {
   buildContextualAIHandlers,
   ReviewStateProvider,
+  type CallTreeRequest,
   type LineAnnotationComposeRequest,
   type ReviewState,
 } from './dock/ReviewStateContext';
@@ -239,7 +246,7 @@ import type { ChangedFileView } from './components/FileViewSwitch';
 import type { CodeFileAnnotationInput, CodeFileTokenTarget } from '@plannotator/ui/components/CodeFilePopout';
 import type { DiffFile, AnnotationScrollTarget } from './types';
 import { annotationMatchesPrScope, proseAnnotationMatchesPr } from './utils/annotationScope';
-import { annotationNavigation, reanchorCodeAnnotations, restorableViewedFiles } from './utils/codeAnnotationAnchor';
+import { annotationNavigation, reanchorCodeAnnotations, restorableViewedFiles } from '@plannotator/ui/utils/codeAnnotationAnchor';
 import { localReviewDraftTransport, withLocalReviewTarget } from './utils/localReviewDraft';
 import type { DiffOption, WorktreeInfo, GitContext, SinceBaseSections, CommitDiffInfo, ReviewSourceKind } from '@plannotator/shared/types';
 import { SectionsPanel } from './components/SectionsPanel';
@@ -295,8 +302,10 @@ import {
 declare const __APP_VERSION__: string;
 
 // Plannotator's own code review: the selection toolbar's Copy copies rich
-// text; @plannotator/ui hosts keep plain Copy unless they opt in.
-configurePlannotatorUI({ richCopy: true });
+// text, and on a touch screen the toolbar sits below the selection (clear of
+// iOS's edit menu), inside the screen, with thumb-sized buttons;
+// @plannotator/ui hosts keep both unchanged unless they opt in.
+configurePlannotatorUI({ richCopy: true, touchSelectionToolbar: true });
 
 function getReviewRecoveryStorage(): ReviewRecoveryStorage | null {
   try {
@@ -643,6 +652,9 @@ const ReviewApp: React.FC = () => {
   // jumps while the guide is open route here instead of mutating the hidden
   // dock. Cleared on guide close below so reopening doesn't replay the reveal.
   const [guideRevealFile, setGuideRevealFile] = useState<{ path: string; token: number } | null>(null);
+  // The top bar's place for an open guide's diff controls (GuideDiffControls):
+  // the guide hides the dock and with it the dock strip's controls.
+  const [guideBarSlot, setGuideBarSlot] = useState<HTMLElement | null>(null);
   useEffect(() => {
     // BACKSTOP only — this effect runs AFTER a switched guide's keyed cards
     // have mounted (child effects before parent effects), so every
@@ -955,14 +967,13 @@ const ReviewApp: React.FC = () => {
   const mrLabel = prMetadata ? getMRLabel(prMetadata) : 'PR';
   const mrNumberLabel = prMetadata ? getMRNumberLabel(prMetadata) : '';
   const displayRepo = prMetadata ? getDisplayRepo(prMetadata) : '';
-  // #1611: GitHub has a REQUEST_CHANGES review (refused on your own PR, like
-  // approve) and Bitbucket a request-changes decision; GitLab has none, so
-  // Request changes posts as a comment there.
   const requestChangesSupported = prCapabilities?.requestChanges === true;
+  // GitHub refuses request changes on your own PR, like approve. GitLab accepts it.
+  const selfRequestChangesBlocked = prCapabilities?.selfRequestChangesBlocked !== false;
   const requestChangesUnavailableReason = !requestChangesSupported
     ? `${platformLabel} has no request-changes review; this posts as a comment.`
-    : isOwnPR
-      ? `You can't request changes on your own pull request on ${platformLabel}.`
+    : isOwnPR && selfRequestChangesBlocked
+      ? `You can't request changes on your own ${mrLabel === 'MR' ? 'merge request' : 'pull request'} on ${platformLabel}.`
       : undefined;
   const appVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0';
   // The server's update advert (the machine's once-a-day check): the Options
@@ -3098,6 +3109,69 @@ const ReviewApp: React.FC = () => {
     return true;
   }, [files, identity, withPRContext, addCodeAnnotationsWithHistory]);
 
+  // --- Call tree (phase 1): a "Call tree" entry on each hunk Call flow can draw
+  // a tree for, opening that tree in the Call flow tab, rooted at the function
+  // around the hunk (sem's range when known). No server change: the existing
+  // analysis and sem output are re-read here.
+  const callTreeSemChanges = useSemanticDiffChanges(
+    diffData?.rawPatch ?? '',
+    semanticDiffUsable && callFlowAnalysis.status === 'ready',
+  );
+  const callTreeHunkTargets = useMemo(() => {
+    if (callFlowAnalysis.status !== 'ready') return [];
+    const { data } = callFlowAnalysis;
+    return callTreeHunkTargetsFor(files, data.trees, callTreeSemChanges, { from: data.from, to: data.to });
+  }, [callFlowAnalysis, files, callTreeSemChanges]);
+  const [callTreeRequest, setCallTreeRequest] = useState<CallTreeRequest | null>(null);
+  const callTreeTokenRef = useRef(0);
+  const callTreeFromAllFilesRef = useRef(false);
+  const openCallTreeForHunk = useCallback((target: CallTreeHunkTarget) => {
+    callTreeTokenRef.current += 1;
+    callTreeFromAllFilesRef.current = isAllFilesActiveRef.current;
+    setCallTreeRequest({
+      doc: target.doc,
+      origin: { filePath: target.filePath, line: target.hunk.firstChange.line, side: target.hunk.firstChange.side },
+      token: callTreeTokenRef.current,
+    });
+    openCallFlowPanel();
+  }, [openCallFlowPanel]);
+  const callTreeHunkNotes = useMemo<HostLineNote[]>(() => callTreeHunkTargets.map((target) => ({
+    id: `call-tree:${target.filePath}:${target.hunk.index}`,
+    filePath: target.filePath,
+    line: target.hunk.anchor.line,
+    side: target.hunk.anchor.side,
+    key: `${target.doc.rootPath}|${target.doc.title}`,
+    render: () => <CallTreeHunkEntry title={target.doc.title} onOpen={() => openCallTreeForHunk(target)} />,
+  })), [callTreeHunkTargets, openCallTreeForHunk]);
+  const clearCallTreeRequest = useCallback(() => setCallTreeRequest(null), []);
+  // A new analysis (another snapshot, a retry) draws new trees: drop a tree cut from the old one.
+  useEffect(() => setCallTreeRequest(null), [callFlowAnalysis]);
+  const returnFromCallTree = useCallback(() => {
+    const origin = callTreeRequest?.origin;
+    if (!origin) return;
+    if (callTreeFromAllFilesRef.current && dockApi?.getPanel(REVIEW_ALL_FILES_PANEL_ID)) {
+      dockApi.getPanel(REVIEW_ALL_FILES_PANEL_ID)?.api.setActive();
+      return;
+    }
+    handleScrollToAILines(origin.filePath, origin.line, origin.line, origin.side);
+  }, [callTreeRequest, dockApi, handleScrollToAILines]);
+  // Opening a Call tree row: the same open as the Call flow cards when the
+  // line is in the patch; any other line of the new side opens the file's
+  // whole-file view (recorded for Back). A removed call outside the patch has
+  // no new-side line to show.
+  const openCallTreeNode = useCallback((node: CallFlowNode) => {
+    if (!node.file || !node.line) return;
+    if (isCallFlowNodeInPatch(node)) {
+      openDiffFile(node.file);
+      handleLineSelection(selectionForCallFlowNode(node));
+      return;
+    }
+    if (node.status === 'removed') return;
+    const origin = currentNavLocation();
+    const flipped = goToNavLocation({ path: node.file, line: node.line });
+    setNavHistory((history) => pushNavJump(history, origin && flipped ? { ...origin, restoreView: flipped } : origin));
+  }, [currentNavLocation, goToNavLocation, handleLineSelection, isCallFlowNodeInPatch, openDiffFile]);
+
   // Sink for the experimental edit-to-suggestion flow: a completed edit
   // session delivers one hunk per contiguous changed region, each becoming a
   // normal suggestion annotation (same shape SuggestionModal produces —
@@ -4726,6 +4800,11 @@ const ReviewApp: React.FC = () => {
     isCallFlowActive,
     openCallFlowPanel,
     callFlowInstall,
+    callTreeHunkNotes,
+    callTreeRequest,
+    openCallTreeNode,
+    returnFromCallTree,
+    clearCallTreeRequest,
     openTourPanel: handleOpenTour,
     openGuide: handleOpenGuide,
     onCodeNavRequest: canUseLiveWorkspaceActions ? handleCodeNavRequest : undefined,
@@ -4761,6 +4840,7 @@ const ReviewApp: React.FC = () => {
     handleOpenTour, handleOpenGuide, isAllFilesActive, allFilesOrder, allFilesAllCollapsed, onToggleAllFilesCollapsed, registerAllFilesCollapseToggle, commitInfo, isSemanticDiffActive, semanticDiffUsable,
     handleSemanticDiffUnavailable, handleSemanticDiffLoadError, handleSemanticDiffLoadSuccess, handleAddAnnotationForFile,
     callFlowAvailable, callFlowAdvert, callFlowAnalysis, retryCallFlowAnalysis, isCallFlowNodeInPatch, isCallFlowActive, openCallFlowPanel, callFlowInstall,
+    callTreeHunkNotes, callTreeRequest, openCallTreeNode, returnFromCallTree, clearCallTreeRequest,
     editSuggestionsEnabled, handleAddSuggestionsForFile, handleAddEditorCommentForFile,
     handleCodeNavRequest, codeNav.result, codeNav.isLoading, codeNav.activeSymbol,
     tokenHoverEnabled, handleTokenHoverEnter, tokenHover.onTokenHoverLeave,
@@ -5032,16 +5112,17 @@ const ReviewApp: React.FC = () => {
   // the sidebar's existing delete); like it, it is deliberately NOT
   // withPRContext-stamped, so it survives an in-place PR switch (see the
   // factory's doc in reviewDecision.ts).
-  const handleAddGeneralComment = useCallback((text: string) => {
+  const handleAddGeneralComment = useCallback((text: string): boolean => {
     // Mirrors the 'note' route's guard: a commit during an in-flight decision
     // POST would append an annotation the captured body never carries — the
     // server then deletes the draft and the comment vanishes from wire and
     // archive alike.
-    if (submitted || busyWithDecision) return;
+    if (submitted || busyWithDecision) return false;
     const note = createGeneralReviewComment(text, identity);
-    if (!note) return;
+    if (!note) return false;
     if (localDraftTarget) note.localReviewTarget = localDraftTarget;
     addCodeAnnotationsWithHistory([note]);
+    return true;
   }, [identity, addCodeAnnotationsWithHistory, busyWithDecision, submitted, localDraftTarget]);
 
   // A global comment chosen in the guide's list: the sidebar's Annotations tab
@@ -5229,7 +5310,8 @@ const ReviewApp: React.FC = () => {
       const prLinks = openUrls.join(', ');
       const statusMessage = action === 'approve'
         ? `${mrLabel === 'MR' ? 'Merge request' : 'Pull request'} approved on ${platformLabel}${prLinks ? ': ' + prLinks : ''}`
-        : action === 'request_changes' && getPRPlatformCapabilities(prMetadata).requestChanges
+        // What went, not the button pressed: an older GitLab posts a request for changes as a comment.
+        : action === 'request_changes' && attempt.postedAs !== 'comment'
           ? `Changes requested on ${platformLabel}${prLinks ? ': ' + prLinks : ''}`
           : `${mrLabel === 'MR' ? 'Merge request' : 'Pull request'} reviewed on ${platformLabel}${prLinks ? ': ' + prLinks : ''}`;
       await flushReviewProgress();
@@ -5350,8 +5432,8 @@ const ReviewApp: React.FC = () => {
     count: totalAnnotationCount,
     hasFeedback: totalAnnotationCount > 0,
     approvalNotesSupported: false, // ignored by the platform arm
-    platform: { label: platformLabel, mrLabel, selfAuthored: isOwnPR, requestChangesSupported },
-  }), [totalAnnotationCount, platformLabel, mrLabel, isOwnPR, requestChangesSupported]);
+    platform: { label: platformLabel, mrLabel, selfAuthored: isOwnPR, requestChangesSupported, selfRequestChangesBlocked },
+  }), [totalAnnotationCount, platformLabel, mrLabel, isOwnPR, requestChangesSupported, selfRequestChangesBlocked]);
 
   const runPlatformDecisionAction = useCallback((id: DecisionActionId) => {
     if (submitted || busyWithPlatformDecision) return;
@@ -5445,6 +5527,14 @@ const ReviewApp: React.FC = () => {
     },
   });
 
+  // The "Star the repo" ask (approval "star-ask"): claimed once the page loads (the server stops on the decision),
+  // shown on the done screen only, once a decision was sent (approved or feedback; never a closed session), never in
+  // the VS Code webview or without a live session. The server decides the rest.
+  const starAskFooter = useStarAskDoneScreen({
+    ready: !isLoading,
+    decided: submitted === 'approved' || submitted === 'feedback',
+    eligible: !!origin && !isVSCodeWebview(),
+  });
   // Explorer keys (the `review-explorer` scope): never over a dialog, the
   // guide, or while the review is settling; only Go to File works from a text
   // field (as in VS Code), every other key leaves typing alone.
@@ -5933,7 +6023,8 @@ const ReviewApp: React.FC = () => {
             : 'min-w-0 w-full min-[480px]:w-auto flex flex-wrap min-[480px]:flex-nowrap shrink-0 items-center justify-end gap-1 lg:gap-2'
           }>
             {/* Split/Unified toggle + diff options moved to the dock tab strip
-                (rightHeaderActionsComponent → ReviewDockRightActions). */}
+                (rightHeaderActionsComponent → ReviewDockRightActions). An open
+                guide hides the dock; it draws them below, before the tool icons. */}
             {!isCompactTouchLayout && (origin ? (
               <>
                 {/* Destination dropdown (PR mode only) */}
@@ -6198,6 +6289,11 @@ const ReviewApp: React.FC = () => {
             ))}
 
             <div className="w-px h-5 bg-border/50 mx-1 hidden lg:block" />
+
+            {/* An open guide's Split/Unified, Collapse all and gear (with their
+                own divider after): GuideScreen portals GuideDiffControls in
+                here, between Close/Approve and the tool icons. */}
+            {guideVisible && !isCompactTouchLayout && <div ref={setGuideBarSlot} className="contents" />}
 
             {/* Sidebar tab toggles */}
             {!isCompactTouchLayout && (
@@ -6561,6 +6657,7 @@ const ReviewApp: React.FC = () => {
                 onMarkFilesViewed={handleGuideMarkFilesViewed}
                 onAddGlobalComment={submitted || busyWithDecision ? undefined : handleAddGeneralComment}
                 onShowGlobalComment={handleShowGlobalComment}
+                barSlot={guideBarSlot}
               />
             </div>
           )}
@@ -7021,6 +7118,7 @@ const ReviewApp: React.FC = () => {
                   : `${getAgentName(origin)} will address your review feedback.`
           }
           agentLabel={getAgentName(origin)}
+          footer={starAskFooter}
           links={platformMode && submitted !== 'exited'
             ? platformPostedUrls.map((href) => ({
               href,

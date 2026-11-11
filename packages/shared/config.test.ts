@@ -42,11 +42,48 @@ import {
   resolveSharingEnabled,
   resolveDefaultDiffType,
   resolveDefaultDiffTypeFor,
+  resolveInboxLaunch,
   DEFAULT_GUIDE_SHARE_URL,
   __setConfigLockTimingsForTest,
   __setConfigSaveMergeWindowHookForTest,
 } from "./config";
 import type { PlannotatorConfig } from "./config";
+
+describe("resolveInboxLaunch", () => {
+  test("on unless enabled is false; the model only when it is a plain model name, never settings of another shape", () => {
+    // fullPermissions null: never set (a launch follows the login shell); a value once set, either way.
+    expect(resolveInboxLaunch({}, "darwin")).toEqual({ enabled: true, fullPermissions: null, model: null, scratchDir: null });
+    // Absent is on (0.29's default) on macOS and Linux; an explicit false, as Settings → Agents' switch writes it, is off.
+    const on = (config: unknown, platform: NodeJS.Platform = "linux") => resolveInboxLaunch(config as PlannotatorConfig, platform).enabled;
+    expect(on({ inboxLaunch: {} })).toBe(true);
+    expect(on({ inboxLaunch: { fullPermissions: true } })).toBe(true);
+    expect(on({ inboxLaunch: { enabled: "nonsense" } })).toBe(true);
+    // Every false-like hand edit is off, in `enabled` or as `inboxLaunch` itself.
+    for (const off of [false, 0, "false", "0", "off", "OFF", " no "]) {
+      expect(on({ inboxLaunch: { enabled: off } })).toBe(false);
+      expect(on({ inboxLaunch: off })).toBe(false);
+    }
+    expect(on({ inboxLaunch: { enabled: "on" } })).toBe(true);
+    // Windows has no launch support: off unless explicitly on.
+    expect(on({}, "win32")).toBe(false);
+    expect(on({ inboxLaunch: { fullPermissions: true } }, "win32")).toBe(false);
+    expect(on({ inboxLaunch: { enabled: true } }, "win32")).toBe(true);
+    expect(resolveInboxLaunch({ inboxLaunch: { enabled: true, model: "haiku" } })).toEqual({ enabled: true, fullPermissions: null, model: "haiku", scratchDir: null });
+    expect(resolveInboxLaunch({ inboxLaunch: { fullPermissions: false } }).fullPermissions).toBe(false);
+    expect(resolveInboxLaunch({ inboxLaunch: { fullPermissions: true } }).fullPermissions).toBe(true);
+    expect(resolveInboxLaunch({ inboxLaunch: { model: "opus[1m]" } }).model).toBe("opus[1m]");
+    for (const model of ["haiku --dangerously-skip-permissions", "a\"b", "", { hooks: {} }, "x".repeat(65)]) {
+      expect(resolveInboxLaunch({ inboxLaunch: { model } } as unknown as PlannotatorConfig).model).toBeNull();
+    }
+  });
+
+  test("the scratch root only as an absolute path other than /; a relative path or / is the default", () => {
+    expect(resolveInboxLaunch({ inboxLaunch: { scratchDir: "/tmp/scratch/../work" } }).scratchDir).toBe("/tmp/work");
+    for (const scratchDir of ["scratch", "~/scratch", "", "/", "//", 42]) {
+      expect(resolveInboxLaunch({ inboxLaunch: { scratchDir } } as unknown as PlannotatorConfig).scratchDir).toBeNull();
+    }
+  });
+});
 
 describe("resolveDefaultDiffType", () => {
   test("accepts local-vs-remote as a persisted review default", () => {
@@ -709,9 +746,9 @@ describe("favicon config persistence", () => {
   });
 
   test("persists and reads valid favicon styles via saveConfig and getServerConfig", () => {
-    saveConfig({ favicon: "classic" });
-    expect(loadConfig().favicon).toBe("classic");
-    expect(getServerConfig(null).favicon).toBe("classic");
+    saveConfig({ favicon: "yellow" });
+    expect(loadConfig().favicon).toBe("yellow");
+    expect(getServerConfig(null).favicon).toBe("yellow");
 
     saveConfig({ favicon: "totman" });
     expect(loadConfig().favicon).toBe("totman");
@@ -723,6 +760,12 @@ describe("favicon config persistence", () => {
     saveConfig({ favicon: unknownFavicon });
     expect(loadConfig().favicon).toBe(unknownFavicon);
     expect(getServerConfig(null).favicon).toBeUndefined();
+  });
+
+  test("a 'classic' left by 0.28.57 (the removed P icon) reads as unset and stays in the file", () => {
+    saveConfig({ favicon: "classic" as unknown as PlannotatorConfig["favicon"] });
+    expect(getServerConfig(null).favicon).toBeUndefined();
+    expect(loadConfig().favicon as string).toBe("classic");
   });
 });
 
@@ -802,8 +845,8 @@ describe("saveConfig never writes over a config.json it could not read", () => {
   test("a UTF-8 BOM (Notepad's “UTF-8 with BOM”) is read, and a save keeps every setting", () => {
     writeFileSync(configPath(), '﻿{"displayName":"Ada","theme":{"mode":"dark"}}');
     expect(loadConfig().displayName).toBe("Ada");
-    expect(saveConfig({ favicon: "classic" })).toBe(true);
-    expect(loadConfig()).toMatchObject({ displayName: "Ada", theme: { mode: "dark" }, favicon: "classic" });
+    expect(saveConfig({ favicon: "yellow" })).toBe(true);
+    expect(loadConfig()).toMatchObject({ displayName: "Ada", theme: { mode: "dark" }, favicon: "yellow" });
   });
 
   test("a hand-edited value a save does not name is kept verbatim, whatever it holds", () => {
@@ -871,12 +914,12 @@ describe("saveConfig write serialization", () => {
     await Promise.all([
       (async () => saveConfig({ displayName: "a" }))(),
       (async () => saveConfig({ conventionalComments: true }))(),
-      (async () => saveConfig({ favicon: "classic" }))(),
+      (async () => saveConfig({ favicon: "yellow" }))(),
     ]);
     const cfg = loadConfig();
     expect(cfg.displayName).toBe("a");
     expect(cfg.conventionalComments).toBe(true);
-    expect(cfg.favicon).toBe("classic");
+    expect(cfg.favicon).toBe("yellow");
   });
 
   test("a lock left behind by a dead writer is taken over, not waited out", () => {
@@ -1111,6 +1154,20 @@ describe("experimental features", () => {
     expect(loadConfig().experimental).toEqual({ otherFlag: true, decisionMode: true } as unknown as { decisionMode?: boolean });
     saveConfig({ inboxTextSize: 13 });
     expect(loadConfig().experimental).toEqual({ otherFlag: true, decisionMode: true } as unknown as { decisionMode?: boolean });
+  });
+
+  test("inboxLaunch merges key by key: Settings → Agents' switches, saved one key each, never undo one another", () => {
+    writeFileSync(join(dir, "config.json"), JSON.stringify({ inboxLaunch: { fullPermissions: true, model: "haiku" } }));
+    saveConfig({ inboxLaunch: { enabled: false } });
+    saveConfig({ inboxLaunch: { scratchDir: "/tmp/scratch-root" } });
+    expect(loadConfig().inboxLaunch).toEqual({ fullPermissions: true, model: "haiku", enabled: false, scratchDir: "/tmp/scratch-root" });
+    // Back to the default folder: the key goes.
+    saveConfig({ inboxLaunch: { scratchDir: undefined } as { scratchDir?: string } });
+    expect(loadConfig().inboxLaunch).toEqual({ fullPermissions: true, model: "haiku", enabled: false });
+    // A hand-written non-object is replaced, never spread into characters.
+    writeFileSync(join(dir, "config.json"), JSON.stringify({ inboxLaunch: "off" }));
+    saveConfig({ inboxLaunch: { enabled: true } });
+    expect(loadConfig().inboxLaunch).toEqual({ enabled: true });
   });
 
   test("a hand-edited experimental value that is not an object is replaced, never spread", () => {

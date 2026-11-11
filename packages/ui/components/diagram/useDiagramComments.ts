@@ -129,6 +129,10 @@ export function useDiagramComments({
   readonly pickTarget: (candidates: readonly Element[]) => Element | null;
   readonly submit: (body: string) => Promise<void>;
   readonly cancel: () => void;
+  /** Open the composer at a part of this render (a comment being written that
+   * the host put back): false when commenting is off, nothing is drawn yet,
+   * or the part is not in the render. */
+  readonly openAt: (target: DiagramTarget) => boolean;
 } {
   const [hover, setHover] = useState<DiagramHover | null>(null);
   const [composer, setComposer] = useState<DiagramComposerDraft | null>(null);
@@ -294,6 +298,31 @@ export function useDiagramComments({
     setSubmitError(null);
   }, []);
 
+  const openAt = useCallback(
+    (target: DiagramTarget): boolean => {
+      if (!canCreate || svgRoot === null || renderId === null) return false;
+      const element = finder.findTarget(svgRoot, target, renderId) ?? (target.kind === 'diagram' ? svgRoot : null);
+      if (element === null) return false;
+      const part: DiagramTarget = {
+        family: target.family,
+        kind: target.kind,
+        ...(target.id !== undefined ? { id: target.id } : {}),
+        ...(target.from !== undefined ? { from: target.from } : {}),
+        ...(target.to !== undefined ? { to: target.to } : {}),
+        label: target.label,
+      };
+      const line = finder.sourceLine(savedSource, part);
+      setSubmitError(null);
+      setComposer({
+        primary: { element, target: part },
+        additional: [],
+        sourceLine: line === null ? null : [line[0] + sourceLineOffset, line[1] + sourceLineOffset],
+      });
+      return true;
+    },
+    [canCreate, finder, renderId, savedSource, sourceLineOffset, svgRoot],
+  );
+
   const submit = useCallback(
     async (body: string) => {
       if (composer === null || submitting || onCreateComment === undefined) return;
@@ -337,5 +366,6 @@ export function useDiagramComments({
     pickTarget,
     submit,
     cancel,
+    openAt,
   };
 }

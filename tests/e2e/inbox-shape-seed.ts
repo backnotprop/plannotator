@@ -22,6 +22,7 @@ export function shapeWorldEnv(root: string): Record<string, string> {
   mkdirSync(scratchConfig, { recursive: true });
   return {
     PATH: process.env.PATH ?? '',
+    HOME: scratchConfig,
     PLANNOTATOR_DATA_DIR: join(root, 'data'),
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER: '1',
@@ -66,12 +67,7 @@ function dialogBoard(title: string, claim: string, heading: string, lines: [stri
         width: 900,
         height: 300,
       },
-      reqs: {
-        groups: [
-          { id: 'who', label: 'Who gets it', items: [{ id: 'r-who', text: 'Everyone who used the app **2 days** or more [^1]' }] },
-          { id: 'when', label: 'When it shows', items: [{ id: 'r-once', text: 'Once, ever. Any way out counts.' }] },
-        ],
-      },
+      know: 'Everyone who used the app **2 days** or more sees it [^1]. It shows once, ever, and any way out counts.',
     },
     refs: [
       { n: 1, kind: 'file', title: 'Who gets it', target: 'src/reveal.ts', line: 3 },
@@ -111,7 +107,7 @@ export async function seedShapeWorld(options: { binary: string; /** config.json 
   rememberInboxOf(dataDir);
   const src = join(root, 'src');
   const projects = { plannotator: scratchProject(src, 'plannotator'), relay: scratchProject(src, 'relay'), pando: scratchProject(src, 'pando') };
-  // One agent per thread: a session's messages in one project share a thread.
+  // Each message starts a thread of its own.
   const claude = await SimAgent.connect({ binary: options.binary, env, name: 'Claude Code', host: 'claude-code' });
   const codex = await SimAgent.connect({ binary: options.binary, env, name: 'Codex', host: 'codex' });
   const threads: Record<string, string> = {};

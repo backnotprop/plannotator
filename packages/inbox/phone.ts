@@ -118,6 +118,18 @@ export function stripHeight(vv: { height: number; scale: number }, layoutHeight:
 }
 
 /**
+ * How much of the layout viewport's bottom the keyboard (or a hardware keyboard's bar) covers, in px: the layout
+ * height less what the visual viewport shows. New message's sheet on a phone covers the whole layout viewport and
+ * pads its own bottom by this (`--ib-kbd-inset`, phoneComposer.css), so its row with Send ends at the keyboard's top
+ * and what iOS shows below the visual viewport while the keyboard moves is the sheet's own ground, never the
+ * dialog's backdrop. 0: nothing covered, not a phone, or a pinch-zoom.
+ */
+export function keyboardInset(vv: { height: number; scale: number }, layoutHeight: number, phone: boolean): number {
+  const left = stripHeight(vv, layoutHeight, phone);
+  return left === null ? 0 : layoutHeight - left;
+}
+
+/**
  * iOS or iPadOS, where every browser is WebKit and Safari pans the whole page
  * under the keyboard whatever the page's own overflow says: an iPhone, iPad or
  * iPod user agent, or iPadOS's desktop-class one (it names itself a Mac, but a
@@ -189,7 +201,8 @@ function pagePanGuard(): { on: () => void; off: () => void } {
  * Keeps `--ib-vvh` on the document element equal to the visual viewport's
  * height while a phone's keyboard is up (`data-ib-keyboard`), so the window
  * shrinks to the part the keyboard leaves and the reply box sits on top of the
- * keyboard, and undoes a pan of the page.
+ * keyboard, and undoes a pan of the page. `--ib-kbd-inset` is what the keyboard
+ * covers (`keyboardInset`), for New message's sheet.
  *
  * On iOS (`isIOSWebKit`) it also pins the page, since Safari pans the whole
  * page under the keyboard: `data-ib-keyboard-pin` on the root makes html no
@@ -201,10 +214,16 @@ function pagePanGuard(): { on: () => void; off: () => void } {
  * nothing it is not asked to.
  *
  * The state is read again on every visual viewport change, the window's
- * resize and scroll, a rotation, and a return to the tab, so a keyboard that
- * closed while the tab was away never leaves the page pinned. Returns the
- * cleanup.
+ * resize and scroll, a rotation, a return to the tab, and a field taking or
+ * losing focus, so a keyboard that closed while the tab was away never leaves
+ * the page pinned. Each of those is read once more `RECHECK_MS` later: WebKit
+ * can report `clientHeight` after the event (after a rotation, say), and a
+ * stale height read as a keyboard would leave the page clipped and the reply
+ * foot hidden with no keyboard open. Returns the cleanup.
  */
+/** How long after an event trackKeyboard reads the viewport again, for a height WebKit reports late. */
+const RECHECK_MS = 300;
+
 export function trackKeyboard(): () => void {
   const vv = typeof window !== 'undefined' ? window.visualViewport : null;
   if (!vv) return () => {};
@@ -213,6 +232,7 @@ export function trackKeyboard(): () => void {
   const guard = pagePanGuard();
   let guarding = false;
   let frame = 0;
+  let recheck = 0;
   const pin = (state: 'tight' | '' | null) => {
     if (state === null) delete root.dataset.ibKeyboardPin;
     else root.dataset.ibKeyboardPin = state;
@@ -229,6 +249,9 @@ export function trackKeyboard(): () => void {
     const strip = stripHeight(vv, root.clientHeight, isPhone());
     if (strip !== null) root.style.setProperty('--ib-cp-vvh', `${strip}px`);
     else root.style.removeProperty('--ib-cp-vvh');
+    const inset = keyboardInset(vv, root.clientHeight, isPhone());
+    if (inset > 0) root.style.setProperty('--ib-kbd-inset', `${inset}px`);
+    else root.style.removeProperty('--ib-kbd-inset');
     if (layout.height !== null) {
       root.style.setProperty('--ib-vvh', `${layout.height}px`);
       root.dataset.ibKeyboard = '';
@@ -240,8 +263,16 @@ export function trackKeyboard(): () => void {
       pin(null);
     }
   };
-  const schedule = () => {
+  const read = () => {
     if (!frame) frame = requestAnimationFrame(apply);
+  };
+  const schedule = () => {
+    read();
+    window.clearTimeout(recheck);
+    recheck = window.setTimeout(() => {
+      recheck = 0;
+      read();
+    }, RECHECK_MS);
   };
   const onVisible = () => {
     if (document.visibilityState === 'visible') schedule();
@@ -251,6 +282,8 @@ export function trackKeyboard(): () => void {
   window.addEventListener('resize', schedule);
   window.addEventListener('orientationchange', schedule);
   document.addEventListener('visibilitychange', onVisible);
+  document.addEventListener('focusin', schedule);
+  document.addEventListener('focusout', schedule);
   // iOS 26 reports a pan as the window's scroll as often as the visual viewport's (the probe's readings).
   if (ios) window.addEventListener('scroll', schedule, { passive: true });
   apply();
@@ -260,11 +293,15 @@ export function trackKeyboard(): () => void {
     window.removeEventListener('resize', schedule);
     window.removeEventListener('orientationchange', schedule);
     document.removeEventListener('visibilitychange', onVisible);
+    document.removeEventListener('focusin', schedule);
+    document.removeEventListener('focusout', schedule);
     if (ios) window.removeEventListener('scroll', schedule);
     if (frame) cancelAnimationFrame(frame);
+    window.clearTimeout(recheck);
     pin(null);
     root.style.removeProperty('--ib-vvh');
     root.style.removeProperty('--ib-cp-vvh');
+    root.style.removeProperty('--ib-kbd-inset');
     delete root.dataset.ibKeyboard;
   };
 }

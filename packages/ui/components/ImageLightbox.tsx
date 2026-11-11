@@ -4,6 +4,7 @@ import { AnnotationType, type Annotation, type ImageAttachment } from '../types'
 import type { MentionSource } from '../utils/mentions';
 import { getIdentity } from '../utils/identity';
 import { THUMBS_UP_LABEL } from '../utils/quickLabels';
+import { hashDraftScope } from '../utils/draftScopeHash';
 import { AnnotationPanel } from './AnnotationPanel';
 import { CommentPopover, type CommentAskAIHandler } from './CommentPopover';
 import { ImagePeek, type ImagePeekHandle, type ImagePeekRow } from './ImagePeek';
@@ -53,6 +54,11 @@ export interface LightboxRegionComments {
   /** Ask AI from the comment box (the viewer closes once a question is taken, as the diagram popout does). */
   onAskAI?: CommentAskAIHandler;
   mentionSource?: MentionSource;
+}
+
+/** The image a region draft is kept for: its src as written, or a hash of a data URL (which can be megabytes long). */
+function imageRegionDraftScope(writtenSrc: string): string {
+  return writtenSrc.startsWith('data:') ? `data:${hashDraftScope(writtenSrc)}` : writtenSrc;
 }
 
 /** `Region 3 · 356 × 486 px`, the comment box's header. */
@@ -175,7 +181,13 @@ export const ImageLightbox: React.FC<{
    * no swipe.
    */
   swipe?: boolean;
-}> = ({ src, alt, onClose, images, regions, swipe }) => {
+  /**
+   * Which of `images` opens first when more than one of them is `src` (one
+   * picture shown for two choices): its place in `images`. Ignored unless that
+   * image is `src`. Additive: absent, the first image that is `src` opens.
+   */
+  at?: number;
+}> = ({ src, alt, onClose, images, regions, swipe, at }) => {
   const overlayRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -188,7 +200,8 @@ export const ImageLightbox: React.FC<{
     const focus = regions?.focusId ? regions.annotations.find((a) => a.id === regions.focusId) : undefined;
     const focusSrc = focus ? regionOf(focus)?.src : undefined;
     const byFocus = focusSrc ? list.findIndex((i) => i.writtenSrc === focusSrc) : -1;
-    return Math.max(0, byFocus >= 0 ? byFocus : list.findIndex((i) => i.src === src));
+    const named = at !== undefined && list[at]?.src === src ? at : -1;
+    return Math.max(0, byFocus >= 0 ? byFocus : named >= 0 ? named : list.findIndex((i) => i.src === src));
   });
   const [zoomMode, setZoomMode] = useState<ZoomMode>('fit');
   const [scale, setScale] = useState<number | null>(null);
@@ -214,6 +227,12 @@ export const ImageLightbox: React.FC<{
   const [draft, setDraft] = useState<NaturalBox | null>(null);
   const [pending, setPending] = useState<NaturalBox | null>(null);
   const [pendingEl, setPendingEl] = useState<HTMLDivElement | null>(null);
+  // Taken only while a box waits for its comment, and once per image (not on every zoom or pan).
+  const hasPending = pending !== null;
+  const regionDraftScope = useMemo(
+    () => (hasPending && current.writtenSrc ? imageRegionDraftScope(current.writtenSrc) : null),
+    [hasPending, current.writtenSrc],
+  );
   const [drawerOpen, setDrawerOpen] = useState(() => !!regions?.focusId);
   const [scope, setScope] = useState<'image' | 'all'>('image');
   const [selectedId, setSelectedId] = useState<string | null>(() => regions?.focusId ?? null);
@@ -904,6 +923,8 @@ export const ImageLightbox: React.FC<{
           placement="side"
           zIndex={210}
           allowImages={false}
+          // The words typed for this box survive a close (Escape, X) and come back when the same box is drawn again.
+          draftKey={`image-region:${regionDraftScope}:${pending.x},${pending.y},${pending.w},${pending.h}`}
           mentionSource={regions!.mentionSource}
           onAskAI={askAI}
           askAIContext={askAI ? {

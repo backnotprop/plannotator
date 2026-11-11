@@ -49,10 +49,20 @@ function question(text: string, holds?: string): string {
   return [':::question', text, ...(holds ? [`Holds up: ${holds}.`] : []), '', '- [ ] Yes', '- [ ] No', ':::'].join('\n');
 }
 
+/**
+ * Open a row's card: on hover of a wide row's words (full-width mode, `WIDE_ROW_WAIT_WORDS`), else by the row's
+ * keyboard focus. A wide row's filled question mark sits in its open counts, which the row's hover action covers, so
+ * a pointer does not reach it there (approval "inbox-question-mark").
+ */
 async function hoverBadge(page: Page, threadId: string): Promise<void> {
   await page.mouse.move(5, 5);
   await expect(card(page)).toHaveCount(0);
-  await page.locator(`[data-thread-id="${threadId}"] [data-row-badge]`).hover();
+  const words = page.locator(`[data-thread-id="${threadId}"] [data-wait-words]`);
+  if (await words.count()) await words.hover();
+  else {
+    await page.keyboard.press('Shift');
+    await page.locator(`[data-thread-id="${threadId}"]`).first().focus();
+  }
   await expect(card(page)).toBeVisible();
   await page.waitForTimeout(300);
 }
@@ -166,7 +176,7 @@ test('a window narrower than the card has room for: the card shifts in and stays
 });
 
 test('a narrow window (390): the card is capped to the viewport less its gutter', async ({ browser }) => {
-  // The phone layout draws icons only and opens no card, so the cap is proved on the card's own CSS: a card
+  // The phone layout draws the marks only and opens no card, so the cap is proved on the card's own CSS: a card
   // with the longest line, drawn with the real classes, at 390 px.
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: 'light', reducedMotion: 'reduce' });
   try {

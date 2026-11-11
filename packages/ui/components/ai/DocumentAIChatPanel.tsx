@@ -25,6 +25,8 @@ interface DocumentAIChatPanelProps {
   onSessionAskAction?: (questionId: string, action: SessionAskAction) => void;
   /** Optional note under the provider bar on how to get "Ask this session" (askSessionSetupHint). */
   askSessionSetupHint?: string | null;
+  /** Opt-in: no provider bar at all (a host with nothing true to say there). Absent: the bar, as always. */
+  hideProviderBar?: boolean;
   /**
    * Start a new chat: clear the panel so the next question starts a fresh AI
    * session (#1981). Shown above the messages once there are any; disabled
@@ -78,6 +80,7 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
   onAIConfigChange,
   onSessionAskAction,
   askSessionSetupHint,
+  hideProviderBar,
   onNewChat,
 }) => {
   // A session that is never interrupted (T3 Code): Stop only stops listening.
@@ -168,7 +171,7 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
         </div>
       )}
 
-      <AIProviderBar
+      {!hideProviderBar && <AIProviderBar
         providers={aiProviders}
         selectedProviderId={aiConfig?.providerId ?? null}
         selectedModel={aiConfig?.model ?? null}
@@ -177,7 +180,7 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
         onModelChange={(model) => onAIConfigChange?.({ model })}
         onReasoningEffortChange={(reasoningEffort) => onAIConfigChange?.({ reasoningEffort })}
         setupHint={askSessionSetupHint}
-      />
+      />}
 
       {onAskGeneral && (
         <GeneralInput

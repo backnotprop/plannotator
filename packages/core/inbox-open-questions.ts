@@ -134,13 +134,17 @@ export function openActionState(a: OpenActionItem): OpenQuestionState {
   return null;
 }
 
-/** "5 open questions" / "1 open question"; `noun` "action item" when only action items wait (`openItemsLabel` names both). */
+/**
+ * "5 open questions" / "1 open question"; `noun` "action item" when only action items wait (`openItemsLabel` names both),
+ * and "1 permission waiting" when only a launched agent's permission prompts do.
+ */
 export function openQuestionsLabel(n: number, noun: OpenQuestionsNoun = 'question'): string {
+  if (noun === 'permission') return `${formatCount(n)} permission${n === 1 ? '' : 's'} waiting`;
   return `${formatCount(n)} open ${noun}${n === 1 ? '' : 's'}`;
 }
 
-/** What the button counts: questions, or action items when no question waits. */
-export type OpenQuestionsNoun = 'question' | 'action item';
+/** What the button counts: questions, action items when no question waits, or permission prompts when only those wait. */
+export type OpenQuestionsNoun = 'question' | 'action item' | 'permission';
 
 /** The list's accessible name: "5 open questions in this thread" (not drawn). */
 export function openQuestionsHeading(n: number, noun: OpenQuestionsNoun = 'question'): string {

@@ -70,7 +70,8 @@ export function artifactKey(artifact: Artifact): string {
   return artifact.type === 'file' ? artifact.attachment.id : `guide:${artifact.messageId}`;
 }
 
-function originOf(message: InboxMessageWire): ArtifactOrigin {
+/** Who sent a message and when, as a tile says it (also the Artifacts wall's, from its rows). */
+export function originOf(message: Pick<InboxMessageWire, 'id' | 'author' | 'created_at'>): ArtifactOrigin {
   const fromPerson = message.author.kind === 'person';
   return {
     messageId: message.id,
@@ -157,9 +158,10 @@ export function artifactOfFile(artifacts: readonly Artifact[], attachmentId: str
   return null;
 }
 
-/** How many messages the artifacts came from ("11 from 5 messages"). */
-export function artifactMessageCount(artifacts: readonly Artifact[]): number {
-  return new Set(artifacts.map((a) => a.messageId)).size;
+/** The pin key of an open file: its artifact's (the shown image's id for an attached twin), else its own id. */
+export function openArtifactKey(artifacts: readonly Artifact[], attachmentId: string): string {
+  const artifact = artifactOfFile(artifacts, attachmentId);
+  return artifact ? artifactKey(artifact) : attachmentId;
 }
 
 /**

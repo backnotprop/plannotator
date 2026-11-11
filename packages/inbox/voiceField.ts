@@ -34,7 +34,8 @@ export function textareaField(textarea: HTMLTextAreaElement, touch: () => boolea
         // One undo step. Focus goes back to wherever the person went meanwhile.
         const elsewhere = document.activeElement;
         textarea.focus({ preventScroll: true });
-        done = document.execCommand('insertText', false, out);
+        // A field that cannot take focus (hidden under a sheet): the browser would type into whatever has it.
+        if (document.activeElement === textarea) done = document.execCommand('insertText', false, out);
         if (elsewhere instanceof HTMLElement && elsewhere !== textarea && elsewhere !== document.body) elsewhere.focus({ preventScroll: true });
       }
       if (!done) {
@@ -49,11 +50,16 @@ export function textareaField(textarea: HTMLTextAreaElement, touch: () => boolea
       const onSelection = () => {
         if (document.activeElement === textarea) onCaret();
       };
+      // On the document, so after React's listener on its root. What this hears can change the session's view and draw
+      // the field at once; before React has heard of the key, that puts the old words back and the key is lost.
+      const onField = (event: Event) => {
+        if (event.target === textarea) onInput();
+      };
       document.addEventListener('selectionchange', onSelection);
-      textarea.addEventListener('input', onInput);
+      document.addEventListener('input', onField);
       return () => {
         document.removeEventListener('selectionchange', onSelection);
-        textarea.removeEventListener('input', onInput);
+        document.removeEventListener('input', onField);
       };
     },
   };
