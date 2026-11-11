@@ -1,17 +1,8 @@
 import React from 'react';
 
 /**
- * App brand icons for the "Open in app" picker.
- *
- * Each icon asset is base64-inlined as a data URI so the single-file HTML
- * build never emits separate asset files. Source assets live alongside this
- * module in ./app/ (SVGs + PNGs); the literal data URIs below are generated
- * from them — do NOT read the files at runtime.
- *
- * Brand logos are full-color: rendered as <img>, NOT recolored with
- * currentColor. The keys map every icon id referenced by the OPEN_IN_APPS
- * catalog (packages/shared/open-in-apps.ts), including the per-platform
- * 'finder' / 'file-explorer' reveal icons.
+ * App brand icons for the "Open in app" picker. Each icon asset is base64-inlined as a data URI
+ * so the single-file HTML build never emits separate asset files.
  */
 
 export const APP_ICON_DATA: Record<string, string> = {
@@ -34,14 +25,10 @@ export const APP_ICON_DATA: Record<string, string> = {
 };
 
 interface AppIconProps {
-  /** Icon id from the OPEN_IN_APPS catalog (e.g. 'vscode', 'finder'). */
   id: string;
   className?: string;
 }
 
-/**
- * Renders a full-color app brand icon. Unknown ids render nothing.
- */
 export const AppIcon: React.FC<AppIconProps> = ({ id, className }) => {
   const src = APP_ICON_DATA[id];
   if (!src) return null;

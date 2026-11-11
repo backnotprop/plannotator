@@ -15,7 +15,6 @@ interface ToolbarProps {
   onRedo?: () => void;
   onClear: () => void;
   onSave: () => void;
-  /** The key named in the ✓'s title: Escape by default; Enter where Escape cancels (`escapeCancels`). */
   saveKey?: 'Escape' | 'Enter';
 }
 
@@ -125,7 +124,6 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         className="min-w-0 flex-1 overflow-x-auto overscroll-x-contain"
       >
         <div className="flex w-max items-center gap-2">
-      {/* Tools */}
       <div className="flex items-center gap-1">
         {TOOLS.map(({ id, icon: Icon, label }) => (
           <button
@@ -148,7 +146,6 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
       <div className="w-px h-5 bg-border" />
 
-      {/* Stroke size */}
       <div className="flex items-center gap-0.5">
         <button
           type="button"
@@ -197,7 +194,6 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
       <div className="w-px h-5 bg-border" />
 
-      {/* Colors */}
       <div className="flex items-center gap-1">
         {COLORS.map((c) => (
           <button
@@ -216,7 +212,6 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
       <div className="w-px h-5 bg-border" />
 
-      {/* Undo */}
       <button
         type="button"
         onClick={onUndo}
@@ -249,7 +244,6 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </button>
       )}
 
-      {/* Clear all */}
       <button
         type="button"
         onClick={onClear}
@@ -264,7 +258,6 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
       <div className="w-px h-5 shrink-0 bg-border" />
 
-      {/* Save */}
       <button
         type="button"
         onClick={onSave}

@@ -1,11 +1,3 @@
-/**
- * PlanRawDiffView — Raw markdown diff mode (P2 style)
- *
- * Shows the raw markdown source with +/- prefixed lines,
- * like a traditional code diff. Monospace font, line numbers,
- * colored backgrounds.
- */
-
 import React, { useMemo } from "react";
 import type { PlanDiffBlock } from "../../utils/planDiffEngine";
 
@@ -26,13 +18,11 @@ export const PlanRawDiffView: React.FC<PlanRawDiffViewProps> = ({ blocks }) => {
 
     for (const block of blocks) {
       const rawLines = block.content.split("\n");
-      // Remove trailing empty string from split
       if (rawLines.length > 0 && rawLines[rawLines.length - 1] === "") {
         rawLines.pop();
       }
 
       if (block.type === "modified" && block.oldContent) {
-        // Show old content as removed
         const oldLines = block.oldContent.split("\n");
         if (oldLines.length > 0 && oldLines[oldLines.length - 1] === "") {
           oldLines.pop();
@@ -40,7 +30,6 @@ export const PlanRawDiffView: React.FC<PlanRawDiffViewProps> = ({ blocks }) => {
         for (const line of oldLines) {
           result.push({ type: "removed", content: line, lineNumber: null });
         }
-        // Show new content as added
         for (const line of rawLines) {
           result.push({ type: "added", content: line, lineNumber: lineNum++ });
         }
@@ -80,7 +69,6 @@ export const PlanRawDiffView: React.FC<PlanRawDiffViewProps> = ({ blocks }) => {
                   : "hover:bg-muted/30"
             }`}
           >
-            {/* Gutter: +/- prefix */}
             <div className="w-5 flex-shrink-0 select-none opacity-60 text-right pr-2">
               {line.type === "added"
                 ? "+"
@@ -88,11 +76,9 @@ export const PlanRawDiffView: React.FC<PlanRawDiffViewProps> = ({ blocks }) => {
                   ? "-"
                   : " "}
             </div>
-            {/* Line number */}
             <div className="w-8 flex-shrink-0 select-none text-muted-foreground/40 text-right pr-3 text-[11px]">
               {line.lineNumber ?? ""}
             </div>
-            {/* Content */}
             <div className="whitespace-pre-wrap break-words min-w-0">{line.content || " "}</div>
           </div>
         ))}

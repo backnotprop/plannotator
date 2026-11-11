@@ -61,7 +61,6 @@ async function submitGoalSetup(payload: unknown): Promise<void> {
       const body = await response.json();
       if (typeof body.error === 'string') message = body.error;
     } catch {
-      // Keep the generic message.
     }
     throw new Error(message);
   }
@@ -78,10 +77,7 @@ async function copyGoalSetupText(text: string): Promise<void> {
   } catch (err) {
     writeError = err;
   }
-  // Clipboard API absent or rejected: try the legacy copy-event fallback.
   if (await copyTextToClipboard(text)) return;
-  // All strategies failed. When the API existed but rejected, surface its
-  // real error; use the generic message only when the API was absent.
   if (writeError instanceof Error) throw writeError;
   throw new Error('Clipboard is unavailable in this browser');
 }
@@ -326,7 +322,6 @@ const InterviewSurface = React.forwardRef<GoalSetupSurfaceHandle, {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
 
-      // Ctrl+letter shortcuts — work from anywhere, including inside text fields
       if (event.ctrlKey && !event.metaKey && !event.altKey && activeQuestionId) {
         const key = event.key.toLowerCase();
         if (key === 'u') {
@@ -351,7 +346,6 @@ const InterviewSurface = React.forwardRef<GoalSetupSurfaceHandle, {
         }
       }
 
-      // Escape — blur current input so shortcuts work again
       if (event.key === 'Escape') {
         const el = event.target;
         if (el instanceof HTMLElement && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {
@@ -361,7 +355,6 @@ const InterviewSurface = React.forwardRef<GoalSetupSurfaceHandle, {
         return;
       }
 
-      // Tab / Shift+Tab — advance between questions
       if (event.key === 'Tab') {
         const target = event.target;
         if (!(target instanceof HTMLElement)) return;
@@ -371,7 +364,6 @@ const InterviewSurface = React.forwardRef<GoalSetupSurfaceHandle, {
         return;
       }
 
-      // Number keys — toggle options on the active question
       if (!activeQuestionId) return;
       const el = event.target;
       if (el instanceof HTMLElement && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
@@ -381,7 +373,6 @@ const InterviewSurface = React.forwardRef<GoalSetupSurfaceHandle, {
       const mode = activeQuestion.answerMode || 'text';
       const isMulti = mode === 'multi' || mode === 'multi-custom';
 
-      // "/" — focus the custom input for the active question
       if (event.key === '/' && (mode === 'custom' || mode === 'single-custom' || mode === 'multi-custom')) {
         event.preventDefault();
         const row = questionRefs.current.get(activeQuestionId);
@@ -827,8 +818,6 @@ const FactsSurface = React.forwardRef<GoalSetupSurfaceHandle, {
   onSubmitted?: () => void;
   onActionStateChange?: (state: GoalSetupActionState) => void;
 }>(({ bundle, onSubmitted, onActionStateChange }, ref) => {
-  // Product choice: facts stay visible after acceptance so later review passes keep context.
-  // `showAccepted` is legacy model state and does not hide rows in this surface.
   const [facts, setFacts] = useState<GoalSetupFactResult[]>(() =>
     bundle.facts.map((fact) => ({
       id: fact.id,

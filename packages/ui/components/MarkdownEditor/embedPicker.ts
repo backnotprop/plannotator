@@ -16,43 +16,22 @@ import type { EditorView } from '@codemirror/view';
 import type { SlashCommandItem } from '@plannotator/atomic-editor';
 import { planEmbedInsert } from '@plannotator/core/embed-insert';
 
-/** What an embed can point at. The union grows as new media kinds ship. */
 export type EmbedKind = 'html';
 
-/** One embeddable target supplied by the host. */
 export interface EmbedTarget {
-  /** Media kind represented by this target. */
   readonly kind: EmbedKind;
-  /** Host-meaningful target identifier or path. */
   readonly path: string;
-  /** Display title. Blank and absent titles fall back to {@link path}. */
   readonly title?: string | null;
 }
 
-/** Per-editor host callbacks for the `/embed` picker. */
 export interface EmbedPickerConfig {
-  /** Live read of embeddable targets. Dynamic data belongs behind this callback. */
   readonly getTargets: () => readonly EmbedTarget[];
-  /** Build the exact host-owned embed line for a picked target. */
   readonly buildInsertLine: (target: EmbedTarget) => string;
-  /**
-   * Optionally upload a target. Resolve with a target to insert it, or `null`
-   * when the user cancels. The host owns error presentation.
-   */
   readonly uploadTarget?: (kind: EmbedKind) => Promise<EmbedTarget | null>;
-  /** Return an optional informational row for the current document text. */
   readonly getNotice?: (docBody: string) => string | null;
-  /**
-   * Host copy for the three rows that name the target type (0.45.1). A host
-   * that feeds the picker more than HTML files passes its own wording; each
-   * absent key keeps the built-in text, so Plannotator's menu is unchanged.
-   */
   readonly labels?: {
-    /** The upload row. Default: "Upload HTML..." */
     readonly upload?: string;
-    /** The row shown when there are no targets at all. Default: "No HTML files in this workspace" */
     readonly empty?: string;
-    /** The row shown when the query matches nothing. Default: "No HTML files match “<query>”" */
     readonly noMatch?: (query: string) => string;
   };
 }
@@ -81,21 +60,15 @@ const IDLE_UPLOAD_STATE: UploadState = { _tag: 'idle' };
 const EMBED_PREFIX = '/embed ';
 const HTML_KIND: EmbedKind = 'html';
 
-// Framed `</>` for an HTML document rendered in place. This follows the
-// editor package convention: 16x16 viewBox, currentColor, 1.5 stroke.
 const EMBED_ICON =
   '<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M6.4 6 4.4 8l2 2"/><path d="M9.6 6 11.6 8l-2 2"/></svg>';
 
-// A document with an upward arrow. `slashCommands()` owns the shared menu's
-// icon renderer; its completion metadata lets this picker use the same gutter.
 const UPLOAD_ICON =
   '<svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5V13h10V8.5"/><path d="M8 11V3M5 6l3-3 3 3"/></svg>';
 
 /**
- * Build the static slash-menu item that hands completion to the `/embed` picker.
- *
- * @returns A slash command that rewrites the typed query to `/embed ` and
- * immediately reopens completion.
+ * Build the static slash-menu item that hands completion to the `/embed` picker. immediately
+ * reopens completion.
  */
 export function embedSlashItem(): SlashCommandItem {
   return {
@@ -113,15 +86,7 @@ export function embedSlashItem(): SlashCommandItem {
   };
 }
 
-/**
- * Build the `/embed` target picker extension for one editor mount.
- *
- * The editor captures extensions once per document mount. Keep the returned
- * extension stable and feed changing target data through the config callbacks.
- *
- * @param config - Host target, serialization, upload, and notice callbacks.
- * @returns A CodeMirror extension that composes with `slashCommands()`.
- */
+/** Build the `/embed` target picker extension for one editor mount. */
 export function embedPicker(config: EmbedPickerConfig): Extension {
   const uploadStateEffect = StateEffect.define<UploadStateEffect>();
   const uploadStateField = StateField.define<UploadState>({
@@ -178,8 +143,6 @@ function createEmbedPickerSource(
       options.push({
         label: notice,
         apply: () => {
-          // Informational row: selection closes the menu and leaves the typed
-          // command in place so the author can keep deciding.
         },
       });
     }
@@ -218,7 +181,6 @@ function createEmbedPickerSource(
               label: 'Uploading...',
               slashCommandIcon: UPLOAD_ICON,
               apply: () => {
-                // Inert while the existing host callback is still pending.
               },
             }
           : {
@@ -241,8 +203,7 @@ function createEmbedPickerSource(
     }
 
     return {
-      // The entire `/embed query` is the completion range. Our case-insensitive
-      // substring matcher owns filtering because CM's fuzzy matcher closes a
+      // Our case-insensitive substring matcher owns filtering because CM's fuzzy matcher closes a
       // completion session when a title query contains spaces.
       from: match.from,
       options,

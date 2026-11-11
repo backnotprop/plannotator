@@ -2,11 +2,9 @@ import { DEFAULT_STATE, type AnnotatorState, type Stroke } from './types';
 
 /** Internal image-annotator state that adds redo without widening the published state contract. */
 export interface StrokeHistoryState extends AnnotatorState {
-  /** Strokes removed by undo, newest redo candidate last. */
   futureStrokes: Stroke[];
 }
 
-/** Initial state for the image annotator's internal stroke history. */
 export const DEFAULT_STROKE_HISTORY_STATE: StrokeHistoryState = {
   ...DEFAULT_STATE,
   futureStrokes: [],
@@ -34,7 +32,6 @@ export function undoStroke(state: StrokeHistoryState): StrokeHistoryState {
   };
 }
 
-/** Restore the latest stroke removed by undo. */
 export function redoStroke(state: StrokeHistoryState): StrokeHistoryState {
   const stroke = state.futureStrokes.at(-1);
   if (!stroke) return state;
@@ -46,7 +43,6 @@ export function redoStroke(state: StrokeHistoryState): StrokeHistoryState {
   };
 }
 
-/** Clear the canvas and invalidate both stroke branches. */
 export function clearStrokeHistory(state: StrokeHistoryState): StrokeHistoryState {
   if (state.strokes.length === 0 && state.futureStrokes.length === 0 && state.currentStroke === null) return state;
   return {

@@ -1,10 +1,3 @@
-/**
- * PlanDiffBadge — The +/- change badge
- *
- * Sits in the repo info area of the document card (top-left).
- * Shows addition/deletion counts and toggles plan diff view when clicked.
- */
-
 import React from "react";
 import type { PlanDiffStats } from "../../utils/planDiffEngine";
 
@@ -13,17 +6,7 @@ interface PlanDiffBadgeProps {
   isActive: boolean;
   onToggle: () => void;
   hasPreviousVersion: boolean;
-  /**
-   * Optional baseline context for surfaces whose diff baseline is NOT "the
-   * previous plan revision" — annotate/folder sessions pass "since last
-   * review" so the counts read against the right baseline (not, e.g., the
-   * git uncommitted-vs-HEAD numbers shown elsewhere). Rendered as a short
-   * muted suffix after the counts. Plan review passes nothing and renders
-   * exactly as before.
-   */
   baselineLabel?: string;
-  /** Tooltip override for the inactive state, paired with `baselineLabel`
-   *  (e.g. "Changes since you last reviewed this file"). */
   baselineTooltip?: string;
 }
 

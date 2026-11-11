@@ -8,9 +8,6 @@ const STROKE_OPTIONS = {
   streamline: 0.5,
 };
 
-/**
- * Convert perfect-freehand output to SVG path data
- */
 function getSvgPathFromStroke(stroke: number[][]): string {
   if (!stroke.length) return '';
 
@@ -27,9 +24,6 @@ function getSvgPathFromStroke(stroke: number[][]): string {
   return d.join(' ');
 }
 
-/**
- * Render a freehand pen stroke using perfect-freehand
- */
 export function renderPenStroke(
   ctx: CanvasRenderingContext2D,
   points: Point[],
@@ -47,9 +41,6 @@ export function renderPenStroke(
   ctx.fill(path);
 }
 
-/**
- * Render an arrow from start to end point
- */
 export function renderArrow(
   ctx: CanvasRenderingContext2D,
   start: Point,
@@ -66,7 +57,6 @@ export function renderArrow(
   const lineWidth = size * scale * 0.75;
   const headLength = size * scale * 3;
 
-  // Draw line
   ctx.strokeStyle = color;
   ctx.lineWidth = lineWidth;
   ctx.lineCap = 'round';
@@ -75,7 +65,6 @@ export function renderArrow(
   ctx.lineTo(x2, y2);
   ctx.stroke();
 
-  // Draw arrowhead
   const angle = Math.atan2(y2 - y1, x2 - x1);
   ctx.fillStyle = color;
   ctx.beginPath();
@@ -92,9 +81,7 @@ export function renderArrow(
   ctx.fill();
 }
 
-/**
- * Render a circle from edge to edge (first click is one edge, drag to opposite edge)
- */
+/** Render a circle from edge to edge (first click is one edge, drag to opposite edge) */
 export function renderCircle(
   ctx: CanvasRenderingContext2D,
   start: Point,
@@ -108,11 +95,9 @@ export function renderCircle(
   const x2 = end.x * scale;
   const y2 = end.y * scale;
 
-  // Center is midpoint between start and end
   const cx = (x1 + x2) / 2;
   const cy = (y1 + y2) / 2;
 
-  // Radius is half the distance
   const radius = Math.hypot(x2 - x1, y2 - y1) / 2;
   const lineWidth = size * scale * 0.75;
 
@@ -123,9 +108,6 @@ export function renderCircle(
   ctx.stroke();
 }
 
-/**
- * Render a stroke based on its tool type
- */
 export function renderStroke(
   ctx: CanvasRenderingContext2D,
   stroke: Stroke,

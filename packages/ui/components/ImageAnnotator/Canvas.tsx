@@ -28,7 +28,6 @@ export const Canvas: React.FC<CanvasProps> = ({
   const imageRef = useRef<HTMLImageElement>(null);
   const isDrawing = useRef(false);
 
-  // Render all strokes
   const render = useCallback(() => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
@@ -36,27 +35,22 @@ export const Canvas: React.FC<CanvasProps> = ({
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Render completed strokes
     strokes.forEach(stroke => renderStroke(ctx, stroke));
 
-    // Render current stroke
     if (currentStroke) {
       renderStroke(ctx, currentStroke);
     }
   }, [strokes, currentStroke]);
 
-  // Re-render when strokes change
   useEffect(() => {
     render();
   }, [render]);
 
-  // Handle image load and canvas sizing
   const handleImageLoad = () => {
     const img = imageRef.current;
     const canvas = canvasRef.current;
     if (!img || !canvas) return;
 
-    // Match canvas to displayed image size
     canvas.width = img.clientWidth;
     canvas.height = img.clientHeight;
 
@@ -64,7 +58,6 @@ export const Canvas: React.FC<CanvasProps> = ({
     render();
   };
 
-  // Get point from pointer event relative to canvas
   const getPoint = (e: React.PointerEvent): Point => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };

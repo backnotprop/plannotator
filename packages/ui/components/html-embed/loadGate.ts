@@ -1,13 +1,3 @@
-/**
- * How many live HTML embeds a page runs, and when they load (approval
- * "inbox-inline-html"; the gate Workspaces settled on for its previews):
- * - a frame loads only once it comes within `EMBED_NEAR_PX` of the screen;
- * - at most `EMBED_CONCURRENT_LOADS` load at once, each holding its permit
- *   until its document has loaded (or `EMBED_LOAD_TIMEOUT_MS` passed);
- * - at most `EMBED_LIVE_MAX` are live at once; past that an embed waits as
- *   a "Show page" button until the person asks or a live one goes away.
- */
-
 import { useEffect, useState, type RefObject } from 'react';
 
 export const EMBED_NEAR_PX = 400;
@@ -59,7 +49,6 @@ export function onEmbedLiveFreed(listener: () => void): () => void {
   return () => liveListeners.delete(listener);
 }
 
-/** For tests: forget every permit and slot. */
 export function resetEmbedGateForTests(): void {
   loading = 0;
   waiting.length = 0;
@@ -67,7 +56,6 @@ export function resetEmbedGateForTests(): void {
   liveListeners.clear();
 }
 
-/** The nearest ancestor that scrolls vertically, or null for the page itself. */
 function scrollParentOf(el: Element): Element | null {
   for (let node = el.parentElement; node; node = node.parentElement) {
     const overflow = getComputedStyle(node).overflowY;
@@ -76,11 +64,7 @@ function scrollParentOf(el: Element): Element | null {
   return null;
 }
 
-/**
- * True once the element has come within `EMBED_NEAR_PX` of the screen (and
- * stays true). Measured against the pane that scrolls it: a margin on the
- * viewport would stop at the pane's clip.
- */
+/** Measured against the pane that scrolls it: a margin on the viewport would stop at the pane's clip. */
 export function useNearViewport(ref: RefObject<Element | null>): boolean {
   const [near, setNear] = useState(false);
   useEffect(() => {

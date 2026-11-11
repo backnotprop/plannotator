@@ -1,9 +1,6 @@
 /**
- * PlanCleanDiffView — Rendered/clean diff mode
- *
- * Shows the new plan content rendered as markdown, with colored left borders
- * indicating what changed. Annotation uses block-level hover (like code block
- * hover in Viewer) — no text selection, no web-highlighter.
+ * Annotation uses block-level hover (like code block hover in Viewer) — no text selection, no
+ * web-highlighter.
  */
 
 import React, { useEffect, useRef, useState, useCallback, createContext, useContext, useMemo } from "react";
@@ -31,28 +28,23 @@ import { getIdentity } from "../../utils/identity";
 import { useHighlightCopy } from "../../utils/highlightCopy";
 
 /**
- * Which version a rendered chunk comes from: 'old' for a removed block and
- * the old half of a modified block, 'new' for everything else.
+ * Which version a rendered chunk comes from: 'old' for a removed block and the old half of a
+ * modified block, 'new' for everything else.
  */
 export type PlanDiffSide = "old" | "new";
 
-/** Host renderer for one parsed markdown block (see `renderBlock`). */
 export type PlanDiffBlockRenderer = (
   block: Block,
   orderedIndex: number | null,
   side: PlanDiffSide,
 ) => React.ReactNode;
 
-/** Provided only when a host passes `renderBlock`; absent, chunks render as always. */
 const RenderBlockContext = createContext<PlanDiffBlockRenderer | null>(null);
 
-/** A config or data file diffed as its own text: see `codeDocument`. */
 export interface PlanDiffCodeDocument {
-  /** Shiki grammar for the chunks, or undefined for plain monospace text. */
   language?: string;
 }
 
-/** Provided only when a host passes `codeDocument`; absent, chunks parse as markdown. */
 const CodeDocumentContext = createContext<PlanDiffCodeDocument | null>(null);
 
 interface PlanCleanDiffViewProps {
@@ -62,52 +54,20 @@ interface PlanCleanDiffViewProps {
   onSelectAnnotation?: (id: string | null) => void;
   selectedAnnotationId?: string | null;
   mode?: EditorMode;
-  /**
-   * When true (default), modified blocks that passed the qualification gate
-   * render with inline word-level highlights. When false, every modified
-   * block falls back to the stacked old-struck / new-green layout — the
-   * "Classic" diff view exposed in the mode switcher.
-   */
   wordLevel?: boolean;
-  /**
-   * Optional: render each parsed markdown block (headings, paragraphs, code,
-   * tables, …) with the host's renderer instead of the view's built-in
-   * simple one. Not used for inline word-level modified blocks. Absent, the
-   * view renders exactly as before.
-   */
   renderBlock?: PlanDiffBlockRenderer;
-  /**
-   * Optional: a left gutter on every block naming its source lines
-   * ("11–12", "old 15–16"; a modified block shows both). Needs the line
-   * ranges `computePlanDiff` fills. Absent, no gutter.
-   */
   lineGutter?: boolean;
-  /**
-   * Optional: fold long runs of unchanged sections behind a "N unchanged
-   * sections" row that expands in place (see `foldUnchangedPlanDiff`).
-   */
   foldUnchanged?: boolean;
-  /**
-   * Optional: classes for unchanged blocks, replacing the default dimming
-   * (`opacity-60 hover:opacity-100 transition-opacity`).
-   */
   unchangedClassName?: string;
   /**
-   * Optional: the document is a config or data file (`renderAs: "code"`).
-   * Every chunk renders as its own monospace text in `language` instead of
-   * being parsed as markdown, so a `#` comment stays a comment, and a
-   * modified block word-diffs the raw text. `renderBlock` is not used.
-   * Absent, the view renders exactly as before.
+   * Every chunk renders as its own monospace text in `language` instead of being parsed as
+   * markdown, so a `#` comment stays a comment, and a modified block word-diffs the raw text.
    */
   codeDocument?: PlanDiffCodeDocument;
 }
 
 const DEFAULT_UNCHANGED_CLASS = "opacity-60 hover:opacity-100 transition-opacity";
 
-/**
- * The strike on a removed block. A config file's chunks strike their own text
- * instead (see `chunkSegments`), so a removed line's indentation stays unstruck.
- */
 const STRIKE_CLASS = "line-through decoration-destructive/30";
 
 export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
@@ -144,13 +104,9 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
     block: PlanDiffBlock;
     index: number;
     diffContext: Annotation['diffContext'];
-    /** The words dragged over when the composer opened: Ctrl+C copies them. */
     selectedWords?: string;
   } | null>(null);
 
-  // A click on a block opens its composer, whose textarea then takes the
-  // focus and with it the person's selection, so Ctrl+C would copy nothing.
-  // Keep the words they dragged over inside that block.
   useHighlightCopy(commentPopover?.selectedWords);
 
   const [quickLabelPicker, setQuickLabelPicker] = useState<{
@@ -163,7 +119,6 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
   useEffect(() => { modeRef.current = mode; }, [mode]);
   useEffect(() => { onAddAnnotationRef.current = onAddAnnotation; }, [onAddAnnotation]);
 
-  // Clean up timers on unmount
   useEffect(() => {
     return () => {
       if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
@@ -171,8 +126,6 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
     };
   }, []);
 
-  // Scroll to selected annotation's diff block
-  // Only depends on selectedAnnotationId — annotations ref is read but not a trigger
   const annotationsRef = useRef(annotations);
   annotationsRef.current = annotations;
 
@@ -195,7 +148,6 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
     return () => clearTimeout(timer);
   }, [selectedAnnotationId]);
 
-  // Build set of annotated block IDs for highlight rings
   const annotatedBlockIds = React.useMemo(() => {
     const set = new Set<string>();
     annotations.forEach(ann => {
@@ -206,13 +158,6 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
     return set;
   }, [annotations]);
 
-  /**
-   * Resolve content for a diff block section (handles modified blocks with
-   * old/new sides). For inline-diff modified blocks — one clickable target
-   * with diffContext 'modified' — we capture BOTH sides in git-diff shape
-   * so comments about a struck-through deleted word preserve that word in
-   * the exported feedback, instead of sending only the new content.
-   */
   const getBlockContent = useCallback((block: PlanDiffBlock, diffContext: Annotation['diffContext']) => {
     if (block.type === 'modified') {
       if (diffContext === 'removed') return block.oldContent || block.content;
@@ -259,7 +204,6 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
     onAddAnnotationRef.current?.(newAnnotation);
   }, [getBlockContent]);
 
-  // Hover handlers
   const handleHover = useCallback((element: HTMLElement, block: PlanDiffBlock, index: number, diffContext: Annotation['diffContext']) => {
     if (hoverTimeoutRef.current) {
       clearTimeout(hoverTimeoutRef.current);
@@ -282,7 +226,6 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
     }, 100);
   }, []);
 
-  // Toolbar handlers
   const handleAnnotate = (type: AnnotationType) => {
     if (!hoveredBlock) return;
     createDiffAnnotation(hoveredBlock.block, hoveredBlock.index, hoveredBlock.diffContext, type);
@@ -346,14 +289,12 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
     setQuickLabelPicker(null);
   }, []);
 
-  // Mode-aware click on hovered block
   const handleBlockClick = useCallback((block: PlanDiffBlock, index: number, element: HTMLElement, diffContext: Annotation['diffContext']) => {
     if (modeRef.current === 'redline') {
       createDiffAnnotation(block, index, diffContext, AnnotationType.DELETION);
     } else if (modeRef.current === 'quickLabel') {
       setQuickLabelPicker({ anchorEl: element, block, index, diffContext });
     } else {
-      // selection or comment → open the comment popover directly on click
       const content = getBlockContent(block, diffContext);
       setCommentPopover({
         anchorEl: element,
@@ -366,10 +307,8 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
     }
   }, [createDiffAnnotation, getBlockContent]);
 
-  // Check if a block index has been annotated (for highlight ring)
   const isBlockAnnotated = (index: number) => annotatedBlockIds.has(`diff-block-${index}`);
 
-  // Fold state per fold key (expanded folds render their pieces in place).
   const [expandedFolds, setExpandedFolds] = useState<ReadonlySet<string>>(() => new Set());
   const toggleFold = useCallback((key: string) => {
     setExpandedFolds((prev) => {
@@ -470,7 +409,6 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
         body
       )}
 
-      {/* Block hover toolbar (selection mode) */}
       {hoveredBlock && !commentPopover && !quickLabelPicker && (
         <AnnotationToolbar
           element={hoveredBlock.element}
@@ -491,7 +429,6 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
         />
       )}
 
-      {/* Comment popover */}
       {commentPopover && (
         <CommentPopover
           anchorEl={commentPopover.anchorEl}
@@ -505,7 +442,6 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
         />
       )}
 
-      {/* Quick label picker */}
       {quickLabelPicker && (
         <FloatingQuickLabelPicker
           anchorEl={quickLabelPicker.anchorEl}
@@ -517,10 +453,6 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
   );
 };
 
-// --- Line gutter + fold row (optional seams) ---
-
-/** The words the person has selected inside `element`, for Ctrl+C once its
- *  composer has the focus; undefined when the selection is elsewhere or empty. */
 function selectedWordsIn(element: HTMLElement): string | undefined {
   const live = window.getSelection();
   if (!live || live.isCollapsed || live.rangeCount === 0) return undefined;
@@ -529,13 +461,11 @@ function selectedWordsIn(element: HTMLElement): string | undefined {
   return text.trim() ? text : undefined;
 }
 
-/** "11–12", or "14" for one line; null when the side has no lines. */
 function rangeLabel(start?: number, end?: number): string | null {
   if (start === undefined) return null;
   return end !== undefined && end !== start ? `${start}–${end}` : `${start}`;
 }
 
-/** The gutter lines for one rendered diff block. */
 function blockGutterLabels(block: PlanDiffBlock): string[] {
   const newLabel = rangeLabel(block.newStart, block.newEnd);
   const oldLabel = rangeLabel(block.oldStart, block.oldEnd);
@@ -549,9 +479,7 @@ function blockGutterLabels(block: PlanDiffBlock): string[] {
   }
 }
 
-/** A block beside its source-line gutter. The gutter is never selectable or part of a quote. */
-// Baseline alignment puts the label beside the first line of text, past a
-// heading's top margin.
+/** The gutter is never selectable or part of a quote. */
 const GutterRow: React.FC<{ labels: string[]; children: React.ReactNode }> = ({ labels, children }) => (
   <div className="flex items-baseline gap-3">
     <div
@@ -582,17 +510,13 @@ const FoldChevron: React.FC<{ expanded: boolean }> = ({ expanded }) => (
   </svg>
 );
 
-// --- DiffBlockRenderer with hover support ---
-
 interface DiffBlockRendererProps {
   block: PlanDiffBlock;
   index: number;
   hoveredIndex: number | null;
   hoveredDiffContext?: Annotation['diffContext'];
   isBlockAnnotated: (index: number) => boolean;
-  /** When false, force block-level fallback even if inlineTokens is populated. */
   wordLevel: boolean;
-  /** Replaces the default unchanged-block dimming classes when set. */
   unchangedClassName?: string;
   onHover?: (element: HTMLElement, diffContext: Annotation['diffContext']) => void;
   onLeave?: () => void;
@@ -625,8 +549,6 @@ const DiffBlockRenderer: React.FC<DiffBlockRendererProps> = ({
         <div
           className={`plan-diff-unchanged ${unchangedClassName ?? DEFAULT_UNCHANGED_CLASS}`}
           data-doc-text=""
-          // A config file reads by its columns: line its unchanged chunks up
-          // with the changed ones, which sit past a 3px border and 0.75rem.
           style={codeDocument ? { paddingLeft: "calc(3px + 0.75rem)" } : undefined}
         >
           <MarkdownChunk content={block.content} />
@@ -656,8 +578,6 @@ const DiffBlockRenderer: React.FC<DiffBlockRendererProps> = ({
       );
 
     case "modified": {
-      // A config file word-diffs its raw text; the engine's tokens come from
-      // the markdown parse, which drops a comment's `#` and reads `- ` as a list.
       const codeTokens = codeDocument && wordLevel ? computeCodeInlineDiff(block.oldContent ?? "", block.content) : null;
       if (codeDocument && codeTokens) {
         const { style: hoverStyle, ...hoverRest } = hoverProps('modified');
@@ -677,10 +597,6 @@ const DiffBlockRenderer: React.FC<DiffBlockRendererProps> = ({
           </div>
         );
       }
-      // When the engine populated inlineTokens, we render a single in-context
-      // block with <ins>/<del> spans inside the structural wrapper. Falls
-      // back to the stacked strike-through rendering when tokens are absent
-      // (gate rejected: code/table/structural mismatch/inline-code hazard).
       if (!codeDocument && wordLevel && block.inlineTokens && block.inlineWrap) {
         return (
           <InlineModifiedBlock
@@ -715,10 +631,6 @@ const DiffBlockRenderer: React.FC<DiffBlockRendererProps> = ({
   }
 };
 
-// --- Shared block-rendering style helpers ---
-// Kept as module-scope constants so InlineModifiedBlock and SimpleBlockRenderer
-// share a single source of truth for heading/paragraph/list-item styling.
-
 const HEADING_STYLE_BY_LEVEL: Record<number, string> = {
   1: "text-2xl font-bold mb-4 mt-6 first:mt-0 tracking-tight",
   2: "text-xl font-semibold mb-3 mt-8 text-foreground/90",
@@ -734,8 +646,6 @@ const listItemIndentRem = (level: number): string => `${level * 1.25}rem`;
 const listItemTextClass = (isCheckbox: boolean, checked?: boolean): string =>
   `text-sm leading-relaxed ${isCheckbox && checked ? "text-muted-foreground line-through" : "text-foreground/90"}`;
 
-// --- Inline word-diff renderer for modified blocks ---
-
 interface InlineModifiedBlockProps {
   tokens: InlineDiffToken[];
   wrap: InlineDiffWrap;
@@ -750,11 +660,8 @@ interface InlineModifiedBlockProps {
 }
 
 /**
- * Renders a 'modified' diff block in-context: one structural wrapper
- * (h1-h6, p, or list-item div) containing a single InlineMarkdown parse
- * over a unified string with <ins>/<del> tags wrapping changed tokens.
- * Preserves markdown AST context across token boundaries (bold pairs,
- * links) which per-token rendering would break.
+ * Preserves markdown AST context across token boundaries (bold pairs, links) which per-token
+ * rendering would break.
  */
 const InlineModifiedBlock: React.FC<InlineModifiedBlockProps> = ({
   tokens,
@@ -771,9 +678,6 @@ const InlineModifiedBlock: React.FC<InlineModifiedBlockProps> = ({
     })
     .join("");
 
-  // Modified blocks rendered inline carry BOTH additions and deletions, so
-  // their border/background uses the amber "modified" class — not the green
-  // "added" one. Inline <ins>/<del> word highlights render on top unchanged.
   const wrapperBase = `plan-diff-modified transition-shadow ${ringClass}`;
   const { style: hoverStyle, ...hoverRest } = hoverProps;
 
@@ -815,7 +719,6 @@ const InlineModifiedBlock: React.FC<InlineModifiedBlockProps> = ({
     );
   }
 
-  // paragraph
   return (
     <p
       data-diff-block-index={index}
@@ -828,28 +731,15 @@ const InlineModifiedBlock: React.FC<InlineModifiedBlockProps> = ({
   );
 };
 
-// --- Rendering components (unchanged from main) ---
-
-/**
- * One chunk of a config or data file: its own lines in monospace, highlighted
- * in the file's language. Chunks sit flush so the diff reads as one file; the
- * `pn-code` fence styling (padding, its own background) would box each one.
- */
 const CODE_CHUNK_CLASS = "font-mono text-[13px] leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere] px-2 py-0.5 m-0 bg-transparent";
 
-/** A chunk ends with its last line's newline, which is not another line. */
 const chunkText = (content: string) => content.replace(/\n$/, "");
 
-/**
- * Shiki's runs for `text` in `language`, or null while the grammar attaches
- * (the chunk shows plain, then re-renders once it is ready) or without one.
- */
 function useHighlightRuns(text: string, language: string | undefined): HighlightRun[] | null {
   const fenceTheme = useFenceTheme();
   const [attached, setAttached] = useState(0);
   const runs = useMemo(
     () => (language ? highlightToRuns(text, language, fenceTheme) : null),
-    // `attached` re-reads the runs once ensureHighlight below lands.
     [text, language, fenceTheme, attached],
   );
   const waiting = Boolean(language) && runs === null;
@@ -880,7 +770,6 @@ const CodeChunk: React.FC<{ content: string; language?: string; side: PlanDiffSi
   );
 };
 
-/** A modified block's word diff, each side's words in that side's colours. */
 const CodeWordDiff: React.FC<{
   oldText: string;
   newText: string;
@@ -917,10 +806,8 @@ const ParsedMarkdownChunk: React.FC<{ content: string; side: PlanDiffSide }> = (
     () => parseMarkdownToBlocks(content),
     [content]
   );
-  // Compute ordered-list display indices across the entire chunk so every
-  // list-item gets the right numeral even though we don't group here.
-  // Non-list blocks pass through as `null` and act as streak-breaks — same
-  // behavior as the main Viewer's per-group counter.
+  // Compute ordered-list display indices across the entire chunk so every list-item gets the right
+  // numeral even though we don't group here.
   const orderedIndices = React.useMemo(
     () => computeListIndices(blocks),
     [blocks]
@@ -962,10 +849,6 @@ const SimpleBlockRenderer: React.FC<{ block: Block; orderedIndex?: number | null
     }
 
     case "blockquote": {
-      // The document's quote renderer, without a block id (the diff view
-      // keeps none): a prose quote renders as it always has, and a quote
-      // with a code fence, a list or a nested quote renders them inside one
-      // quote. Alerts keep the plain quote look they have always had here.
       if (block.alertKind) {
         const paragraphs = block.content.split(/\n\n+/);
         return (
@@ -1064,7 +947,7 @@ const SimpleCodeBlock: React.FC<{ block: Block }> = ({ block }) => {
   useEffect(() => {
     if (codeRef.current) {
       codeRef.current.className = codeBlockClassName(block.language);
-      // Language-less fences stay plain (#1212) — applyHighlight never guesses.
+      // Language-less fences stay plain — applyHighlight never guesses.
       applyHighlight(codeRef.current, block.content, block.language, fenceTheme);
     }
   }, [block.content, block.language, fenceTheme]);
@@ -1089,15 +972,6 @@ const SimpleCodeBlock: React.FC<{ block: Block }> = ({ block }) => {
   );
 };
 
-/**
- * Block dangerous link protocols (javascript:, data:, vbscript:, file:) from
- * rendering as clickable anchors in the diff view. Plan content is attacker-
- * influenced (Claude pulls from source comments, READMEs, fetched URLs), so
- * a malicious `[click me](javascript:...)` link embedded in a plan must not
- * render as a live <a>. Mirrors the same guard in Viewer.tsx; returns null
- * for blocked schemes so the caller can render the anchor text as plain
- * text instead of a clickable link.
- */
 const DANGEROUS_PROTOCOL = /^\s*(javascript|data|vbscript|file)\s*:/i;
 function sanitizeLinkUrl(url: string): string | null {
   if (DANGEROUS_PROTOCOL.test(url)) return null;
@@ -1111,11 +985,6 @@ const InlineMarkdown: React.FC<{ text: string }> = ({ text }) => {
   let previousChar = "";
 
   while (remaining.length > 0) {
-    // Plan-diff word markers: <ins>...</ins> and <del>...</del>. These are
-    // emitted by PlanCleanDiffView's modified-block renderer when the
-    // diff engine populates `inlineTokens`. Content is recursively parsed
-    // so inline formatting inside a diff token (e.g., **bold** on an
-    // added word) still renders.
     let match = remaining.match(/^<(ins|del)>([\s\S]+?)<\/\1>/);
     if (match) {
       const tag = match[1] as "ins" | "del";
@@ -1139,7 +1008,6 @@ const InlineMarkdown: React.FC<{ text: string }> = ({ text }) => {
       continue;
     }
 
-    // Bold: **text** ([\s\S]+? allows matching across hard line breaks)
     match = remaining.match(/^\*\*([\s\S]+?)\*\*/);
     if (match) {
       parts.push(
@@ -1152,7 +1020,6 @@ const InlineMarkdown: React.FC<{ text: string }> = ({ text }) => {
       continue;
     }
 
-    // Italic: *text* or _text_ (avoid intraword underscores)
     match = remaining.match(/^\*([\s\S]+?)\*/);
     if (match) {
       parts.push(<em key={key++}><InlineMarkdown text={match[1]} /></em>);
@@ -1188,11 +1055,8 @@ const InlineMarkdown: React.FC<{ text: string }> = ({ text }) => {
 
     match = remaining.match(/^\[([^\]]+)\]\(([^)]+)\)/);
     if (match) {
-      // Recursively parse the anchor text so <ins>/<del> diff tags (and
-      // other inline markdown) inside the link render correctly instead of
-      // showing up as literal HTML tag text. Sanitize the href: dangerous
-      // schemes (javascript:, data:, vbscript:, file:) are rendered as
-      // plain text instead of a live anchor to block XSS via plan content.
+      // Sanitize the href: dangerous schemes (javascript:, data:, vbscript:, file:) are rendered
+      // as plain text instead of a live anchor to block XSS via plan content.
       const safeHref = sanitizeLinkUrl(match[2]);
       if (safeHref === null) {
         parts.push(
@@ -1218,7 +1082,6 @@ const InlineMarkdown: React.FC<{ text: string }> = ({ text }) => {
       continue;
     }
 
-    // Hard line break: two+ trailing spaces + newline, or backslash + newline
     match = remaining.match(/ {2,}\n|\\\n/);
     if (match && match.index !== undefined) {
       const before = remaining.slice(0, match.index);

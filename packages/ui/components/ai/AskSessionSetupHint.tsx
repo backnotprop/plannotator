@@ -1,8 +1,8 @@
 import React from 'react';
 
 /**
- * The muted line under an Ask AI provider bar that says how to get "Ask this
- * session" (text from askSessionSetupHint). Renders nothing without text.
+ * The muted line under an Ask AI provider bar that says how to get "Ask this session" (text from
+ * askSessionSetupHint).
  */
 export const AskSessionSetupHint: React.FC<{ text?: string | null }> = ({ text }) =>
   text ? (

@@ -1,5 +1,3 @@
-/** Fence languages a host with `htmlEmbeds` draws instead of showing code (approval "inbox-inline-html"). */
-
 function fenceLanguage(language?: string): string | undefined {
   return language?.trim().split(/\s+/, 1)[0]?.toLowerCase();
 }

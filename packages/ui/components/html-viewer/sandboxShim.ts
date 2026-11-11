@@ -1,32 +1,4 @@
-/**
- * What a page needs to run in the viewer's frame as it runs in a browser tab.
- *
- * The frame is sandboxed with scripts but without `allow-same-origin`: an
- * opaque origin, so two web APIs throw where a tab never would, and a page
- * that calls one of them while it builds itself stops there and stays blank:
- *
- * - `history.replaceState` / `pushState`. A srcdoc document's address is
- *   `about:srcdoc`, and the URL a page passes resolves against the viewer's
- *   `<base href>` (the page's folder on the asset route), so even
- *   `replaceState(null, '', '#state=C4')` names another address and throws a
- *   SecurityError. A served page (the Inbox's "Pages only") takes it, but its
- *   address becomes the folder's. A bare fragment (or an empty URL) is applied
- *   to the page's own address, as in a tab; any other URL the frame refuses
- *   keeps the page's address and takes only that URL's fragment. The state
- *   object is kept either way.
- * - `localStorage` / `sessionStorage`, whose getter throws in an opaque
- *   origin. Each becomes an in-memory Storage for this load of the page:
- *   nothing is written anywhere, so the frame still keeps nothing between
- *   loads (the sandbox is unchanged; this only stops the throw).
- *
- * Never in live mode: a proxied app runs on its own real origin. The shim is
- * idempotent: the inline path runs it first in `<head>` (so a page's own head
- * scripts find it) and the bridge runs it again (so the `bridgeScriptUrl`
- * path gets it too), where it does nothing the second time.
- *
- * A dependency-free string, like BRIDGE_SCRIPT: no backslashes, backticks or
- * closing script tag.
- */
+/** What a page needs to run in the viewer's frame as it runs in a browser tab. */
 export const SANDBOX_SHIM_SCRIPT = `(function() {
   var h = window.history;
   if (h && !(h.replaceState && h.replaceState.plannotatorSandboxShim)) {
