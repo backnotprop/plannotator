@@ -57,6 +57,7 @@ import {
   type InboxStopResult,
 } from "@plannotator/shared/inbox/registry";
 import { handleInboxServerReady, startInboxServer } from "@plannotator/server/inbox";
+import { INBOX_IMPORT_SLOW_MS, INBOX_UPGRADING_LINE, inboxUpgradeRunning } from "@plannotator/shared/inbox/store-log/sqlite/move-words";
 import { exposureWarning, type InboxTailscaleState } from "@plannotator/server/inbox-tailscale";
 import { openBrowser, openBrowserDetached } from "@plannotator/server/browser";
 import { isRemoteSession } from "@plannotator/server/remote";
@@ -136,11 +137,21 @@ export function detachedInboxEnv(env: Readonly<Record<string, string | undefined
   return out;
 }
 
-/** Wait for the Inbox to answer as running; null on timeout. */
+/**
+ * Wait for the Inbox to answer as running; null on timeout. While it moves its records into SQLite (the switch, off
+ * for everyone) past 2 s, say so once on stderr: the window cannot, the server is not listening yet.
+ */
 function waitUntilRunning(dataDir: string): Promise<InboxRegistryEntry | null> {
+  const started = Date.now();
+  let told = false;
   return waitForInbox(async () => {
     const next = await inboxStatus(dataDir, 1000);
-    return next.state === "running" ? next.entry : null;
+    if (next.state === "running") return next.entry;
+    if (!told && Date.now() - started > INBOX_IMPORT_SLOW_MS && inboxUpgradeRunning(dataDir)) {
+      told = true;
+      process.stderr.write(`${INBOX_UPGRADING_LINE}\n`);
+    }
+    return null;
   }, START_TIMEOUT_MS);
 }
 
