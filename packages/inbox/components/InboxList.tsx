@@ -32,6 +32,8 @@ import { TimeWithTick } from './DeliveryTick';
 import { ActionBadge, QuestionMark, WIDE_ROW_WAIT_WORDS, WaitCard, WaitWords, badgeDescription, rowHasBadge, rowMarks, type RowMarks } from './RowBadge';
 import { StatusMark, rowStatus } from './RowStatus';
 import { attachPullToRefresh } from '../pullRefresh';
+import { attachRowSwipe, rowSwipeActions } from '../rowSwipe';
+import { RowSwipeLayer } from './RowSwipeLayer';
 import { TidyMenu, type TidyController } from './Tidy';
 import { ListFilterButton, type ListFilterSource } from './ListFilter';
 import { awayLine, type MachinesModel } from '../machines';
@@ -144,7 +146,7 @@ export interface InboxListProps {
    * The row's right-click menu (Copy link, Copy thread ID, Mark read or
    * Move back, Archive). Absent: no menu, the browser's own.
    */
-  onRowAction?: (row: InboxListRow, action: RowMenuAction) => void;
+  onRowAction?: (row: InboxListRow, action: RowMenuAction) => unknown;
   /** A press on a starred row's star. Absent (an older Inbox keeps no pins): the star is only a mark. */
   onUnstar?: (row: InboxListRow) => void;
   /** Snooze a row until a moment, from its menu (approval "inbox-snooze"). Absent (an older Inbox keeps no snoozes): no Snooze. */
@@ -1548,6 +1550,35 @@ export function InboxList(props: InboxListProps) {
   useLayoutEffect(() => {
     latest.current = props;
   });
+  // Swipe a row on a touch screen (rowSwipe.ts): right is the row's hover action (Quiet, or Mark unread), left Archive,
+  // both through the row menu's action. One set of listeners on the list's scroll box, for every row shape.
+  const swipeLayerRef = useRef<HTMLDivElement>(null);
+  const swipes = onRowAction !== undefined;
+  useEffect(() => {
+    const body = bodyRef.current;
+    const layer = swipeLayerRef.current;
+    if (!swipes || !body || !layer) return;
+    const find = (threadId: string) => {
+      for (const section of latest.current.sections) {
+        const row = section.threads.find((r) => r.thread_id === threadId);
+        if (row) return { row, drawn: section.id };
+      }
+      return null;
+    };
+    return attachRowSwipe(body, layer, {
+      actionsOf: (threadId) => {
+        const found = find(threadId);
+        if (!found) return null;
+        const can = { markRead: latest.current.onMarkRead !== undefined, markUnread: latest.current.onMarkUnread !== undefined };
+        return { ...rowSwipeActions(found.row, found.drawn, can), title: titleOf(found.row) };
+      },
+      onAction: (threadId, action) => {
+        const found = find(threadId);
+        return found ? latest.current.onRowAction?.(found.row, action) : undefined;
+      },
+      reduced: () => typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+    });
+  }, [swipes]);
   const openRow = useCallback((row: InboxListRow) => latest.current.onOpen(row), []);
   const markRead = useCallback((row: InboxListRow) => latest.current.onMarkRead?.(row), []);
   const markUnread = useCallback((row: InboxListRow) => latest.current.onMarkUnread?.(row), []);
@@ -1743,6 +1774,7 @@ export function InboxList(props: InboxListProps) {
           disabled={!onRowAction}
           held={props.selectedThreadId !== null}
         >
+          {swipes && <RowSwipeLayer ref={swipeLayerRef} />}
           {props.stale}
           {props.ask}
           {awayLines.map((line) => (

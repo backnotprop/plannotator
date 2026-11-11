@@ -3551,6 +3551,29 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   .ib-pull-dot svg, .ib-pull[data-state="refreshing"] .ib-pull-dot svg { transform: none; animation: none; }
 }
 
+/* Swipe a thread row on a touch screen (rowSwipe.ts): the row follows the finger (its transform, written by the
+   script) over one action layer the script puts under it: Quiet (or Mark unread) on the left, Archive on the right.
+   A vertical drag stays the browser's (pan-y; a pinch still zooms). The layer is hidden until a swipe shows a side
+   (`data-side`), so its buttons are out of reach and out of the accessibility tree until then. */
+.ib-lbody > .ib-group > :is(.ib-mrow, .ib-rw) { touch-action: pan-y pinch-zoom; }
+/* Opaque at once (a button's colour transition would let the layer show through the row as it starts to move). */
+.ib-lbody > .ib-group > .ib-mrow[data-swipe] { background: var(--card); transition: none; }
+.ib-swl { position: absolute; top: 0; left: 0; width: 0; height: 0; overflow: hidden; visibility: hidden; pointer-events: none; }
+.ib-swl[data-side] { visibility: visible; }
+.ib-swa { position: absolute; inset: 0; display: flex; align-items: stretch; padding: 0; border: 0; font: inherit; visibility: hidden; pointer-events: auto; -webkit-tap-highlight-color: transparent; }
+.ib-swl[data-side="lead"] > .ib-swa-lead, .ib-swl[data-side="trail"] > .ib-swa-trail { visibility: visible; }
+.ib-swa-trail { justify-content: flex-end; }
+.ib-swa-in { display: flex; align-items: center; justify-content: center; width: 96px; flex: none; }
+.ib-swa-v { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; line-height: 1.2; white-space: nowrap; }
+.ib-swa-lead .ib-swa-v { display: none; }
+.ib-swl[data-lead="read"] .ib-swa-lead .ib-swa-v[data-v="read"], .ib-swl[data-lead="mark-unread"] .ib-swa-lead .ib-swa-v[data-v="mark-unread"] { display: flex; }
+.ib-swa-v svg { transition: scale 150ms ease-out; }
+.ib-swl[data-armed] .ib-swa-v svg { scale: 1.15; }
+/* The right swipe's look (Quiet): a calm neutral tint, quieter than Archive's. */
+.ib-swa-lead { background: color-mix(in oklch, var(--muted) 85%, var(--card)); color: var(--foreground); }
+.ib-swa-trail { background: var(--primary); color: var(--primary-foreground); }
+@media (prefers-reduced-motion: reduce) { .ib-swa-v svg { transition: none; } }
+
 /* ───────────── The Inbox on a phone ─────────────
    One screen at a time, like a mail app: the list, then a thread (Back to
    the list), then a file (Back to the thread). The query is PHONE_QUERY in
