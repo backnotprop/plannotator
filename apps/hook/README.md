@@ -103,7 +103,7 @@ When Claude Code calls `ExitPlanMode`, this hook intercepts and waits for your d
 
 | Variable | Description |
 |----------|-------------|
-| `PLANNOTATOR_REMOTE` | Set to `1` / `true` for remote mode, `0` / `false` for local mode; unset is local (over SSH: the fixed port `19432` and no browser opened, every feature on). Uses a fixed port in remote mode; browser-opening behavior depends on the environment. |
+| `PLANNOTATOR_REMOTE` | Set to `1` / `true` for remote mode, `0` / `false` for local mode, or leave unset for SSH auto-detection. Uses a fixed port in remote mode; browser-opening behavior depends on the environment. |
 | `PLANNOTATOR_PORT` | Fixed port to use. Default: random locally, `19432` for remote sessions. |
 | `PLANNOTATOR_BROWSER` | Custom browser to open plans in. macOS: app name or path. Linux/Windows: executable path. `none` (also `false`, `0`, `off`, `no`, `true`, `1`, `:`) opens no browser at all; the session URL is always printed. |
 | `PLANNOTATOR_SHARE_URL` | Custom share portal URL for self-hosting. Default: `https://share.plannotator.ai`. |
@@ -112,7 +112,7 @@ When Claude Code calls `ExitPlanMode`, this hook intercepts and waits for your d
 
 ## Remote / Devcontainer Usage
 
-Over SSH you only need to forward the port (the server listens on loopback, so every feature works through the tunnel): `19432`, or your `PLANNOTATOR_PORT` if you set one. WSL2 does not need remote mode. Devcontainers and Docker are not detected. In a VS Code devcontainer the browser usually opens by itself, so you need the settings below only if it does not. In any other devcontainer or Docker, set:
+Over SSH, remote mode turns on by itself, so you only need to forward the port: `19432`, or your `PLANNOTATOR_PORT` if you set one. WSL2 does not need remote mode. Devcontainers and Docker are not detected. In a VS Code devcontainer the browser usually opens by itself, so you need the settings below only if it does not. In any other devcontainer or Docker, set:
 
 ```bash
 export PLANNOTATOR_REMOTE=1

@@ -22,7 +22,8 @@ import {
   isDiagramEngineRequest,
   type DiagramEngineSource,
 } from "@plannotator/shared/diagram-engine-assets";
-import { isRemoteSession, isRemoteOrSsh, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl, getLocalUrlHostname } from "./remote";
+import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl, getLocalUrlHostname } from "./remote";
+import { isSshTunnelRequest, notePeer } from "./this-machine";
 import { createRequestHostGuard } from "./request-host-guard";
 import { withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { refuseCrossOriginWrite } from "./request-origin-guard";
@@ -217,7 +218,7 @@ import {
 // markJobReviewFailed) now live in @plannotator/shared/agent-jobs.
 
 // Re-export utilities
-export { isRemoteSession, isRemoteOrSsh, getServerPort } from "./remote";
+export { isRemoteSession, getServerPort } from "./remote";
 export { openBrowser } from "./browser";
 export { type DiffType, type DiffOption, type GitContext, type WorktreeInfo } from "./vcs";
 export { type PRMetadata } from "./pr";
@@ -318,7 +319,7 @@ export interface ReviewServerOptions {
   approvalNotesSupported?: boolean;
   /** Custom base URL for share links (default: https://share.plannotator.ai) */
   shareBaseUrl?: string;
-  /** Called when server starts with the URL, whether it is remote mode or SSH (no browser here), and port */
+  /** Called when server starts with the URL, remote status, and port */
   onReady?: (url: string, isRemote: boolean, port: number) => void | Promise<void>;
   /** OpenCode client for querying available agents (OpenCode only) */
   opencodeClient?: OpencodeClient;
@@ -364,7 +365,7 @@ export interface ReviewServerResult {
   port: number;
   /** The full URL to access the server */
   url: string;
-  /** Remote mode or SSH: the person is not at this screen (no browser opens here) */
+  /** Whether running in remote mode */
   isRemote: boolean;
   /** Wait for user review decision */
   waitForDecision: () => Promise<{
@@ -1967,16 +1968,13 @@ export async function startReviewServer(
   const aiRuntime = aiEnabled ? await createAIRuntime({ getCwd: resolveAgentCwd, sessionBridge: options.sessionBridge, getServerPort: () => boundPort, localHostname, ...(options.tailnetPublished === true ? { tailnet: sessionTailnetGate } : {}) }) : null;
 
   const isRemote = isRemoteSession();
-  // Remote mode or SSH: no browser on this screen, the fixed port, compressed
-  // pages. Only remote mode (isRemote) turns features off.
-  const remoteOrSsh = isRemoteOrSsh();
   // Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for, and
   // never in remote mode. In a `--tailscale` session only this machine's tabs and the tailnet owner's get
   // them (`refCardsTailnetAllowed`): other devices must not drive the user's gh / glab.
   const refCards = createRefCards(options.refRunner ? { run: options.refRunner } : {});
   // The app page is served compressed only to sessions reachable from another
   // device: remote mode or --tailscale (#1617). Local sessions are unchanged.
-  const compressAppHtml = remoteOrSsh || options.tailnetPublished === true;
+  const compressAppHtml = isRemote || options.tailnetPublished === true;
   const app = openPackedApp(htmlContent);
   // Hashed off the request path, so `/api/diff` finds it ready.
   const diagramEngineAssets = createDiagramEngineAssets(options.diagramEngine);
@@ -2341,6 +2339,8 @@ export async function startReviewServer(
         idleTimeout: 0,
 
         async fetch(req, server) {
+          // Who sent it (an SSH session answers its own tunnel as local: this-machine.ts).
+          notePeer(req, server);
           // Host allowlist first, before any route (request-host-guard.ts).
           const hostRefusal = requestHostGuard.check(req);
           if (hostRefusal) return hostRefusal;
@@ -4115,7 +4115,8 @@ export async function startReviewServer(
 
           // API: a hover card's data for an issue, PR or MR link (GET /api/ref, ref-cards.ts).
           const refRoute = await refCardRouteResponse(req, url, refCards, {
-            enabled: isRemote ? false : options.tailnetPublished === true ? refCardsTailnetAllowed : true,
+            // Remote mode: only an SSH session's own tunnel (isSshTunnelRequest) may drive gh / glab here.
+            enabled: isRemote ? isSshTunnelRequest : options.tailnetPublished === true ? refCardsTailnetAllowed : true,
             serverSession,
           });
           if (refRoute) return refRoute;
@@ -4687,7 +4688,7 @@ export async function startReviewServer(
   // loopback server keeps listening and the session hangs forever.
   if (onReady) {
     try {
-      await onReady(serverUrl, remoteOrSsh, port);
+      await onReady(serverUrl, isRemote, port);
     } catch (error) {
       stop();
       throw error;
@@ -4697,7 +4698,7 @@ export async function startReviewServer(
   return {
     port,
     url: serverUrl,
-    isRemote: remoteOrSsh,
+    isRemote,
     waitForDecision: () => decisionPromise,
     stop,
     hostControl,

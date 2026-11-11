@@ -12,7 +12,7 @@ All Plannotator environment variables and their defaults.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PLANNOTATOR_REMOTE` | local | Set to `1` or `true` for remote mode, `0` or `false` for local mode. Unset is local mode; over SSH (`SSH_TTY` / `SSH_CONNECTION`) it also uses the fixed port `19432` and opens no browser on the remote machine, with every feature on, since only your SSH tunnel reaches it. Uses a fixed port in remote mode; browser-opening behavior depends on the environment. Remote mode binds every interface and turns off some features (listed under [Remote mode behavior](#remote-mode-behavior), "Ask this session" included); every other route stays reachable by anyone who can reach the URL. WSL2 does not need it: local mode is reachable from Windows at `http://localhost:<port>` ([WSL2](/docs/guides/remote-and-devcontainers/#wsl2)). Remote mode also turns off [live local app annotation](/docs/commands/annotate/#local-apps): `plannotator annotate http://localhost:5173` exits with a startup failure suggesting `--static` rather than opening a live session. |
+| `PLANNOTATOR_REMOTE` | auto-detect | Set to `1` or `true` to force remote mode, `0` or `false` to force local mode, or leave unset to auto-detect via `SSH_TTY` / `SSH_CONNECTION`. Uses a fixed port in remote mode; browser-opening behavior depends on the environment. Remote mode binds every interface and turns off some features (listed under [Remote mode behavior](#remote-mode-behavior), "Ask this session" included); every other route stays reachable by anyone who can reach the URL. WSL2 does not need it: local mode is reachable from Windows at `http://localhost:<port>` ([WSL2](/docs/guides/remote-and-devcontainers/#wsl2)). Remote mode also turns off [live local app annotation](/docs/commands/annotate/#local-apps): `plannotator annotate http://localhost:5173` exits with a startup failure suggesting `--static` rather than opening a live session. |
 | `PLANNOTATOR_PORT` | random (local) / `19432` (remote) | Fixed server port or inclusive range such as `19432-19463`. A range uses the first available port. When not set, local sessions use a random port; remote sessions default to `19432`. |
 | `PLANNOTATOR_LIVE_PORT` | random | Live app proxy port or inclusive range, such as `19440-19447`. Uses the first available port and always binds to `127.0.0.1`. For SSH forwarding, set `PLANNOTATOR_REMOTE=0`, fix the editor's port with `PLANNOTATOR_PORT` (it is random otherwise), and forward both ports, keeping the same port numbers on each side. |
 | `PLANNOTATOR_PUBLIC_URL` | unset | Full HTTP(S) origin advertised for a remote session behind a reverse proxy, for example `https://plannotator.example.com`. Plannotator uses it as-is instead of appending the local runtime port. For a configured port range, it applies only to the first port; sessions on later ports fall back to `PLANNOTATOR_URL_HOST` or `localhost` with the runtime port appended. Origin only: credentials, paths, query strings, fragments, and non-HTTP(S) schemes warn once on stderr and fall back to `PLANNOTATOR_URL_HOST` or `localhost`. Strictly display-only and remote-only: it never changes the bind interface or same-machine agent API URL. Can also be set via `~/.plannotator/config.json` (`{ "publicUrl": "https://plannotator.example.com" }`); the env var takes precedence, and setting it to an empty value suppresses the config key. On the port it fronts it wins over `PLANNOTATOR_URL_HOST`, including `plannotator.localhost`. |
@@ -123,7 +123,7 @@ When running your own paste service binary, these variables configure it:
 
 ## Remote mode behavior
 
-When remote mode is on (`PLANNOTATOR_REMOTE=1` / `true`):
+When remote mode is forced with `PLANNOTATOR_REMOTE=1` / `true`, or SSH is detected while `PLANNOTATOR_REMOTE` is unset:
 
 - Server binds to `PLANNOTATOR_PORT` (default `19432`) instead of a random port
 - Server listens on every interface (`0.0.0.0`) instead of loopback only
@@ -132,14 +132,16 @@ When remote mode is on (`PLANNOTATOR_REMOTE=1` / `true`):
 - In headless setups, you may need to open the forwarded URL manually
 - [Live local app annotation](/docs/commands/annotate/#local-apps) is unavailable. Annotating a loopback `http` URL that serves HTML exits with a startup failure asking for `--static`, instead of silently converting the page as earlier versions did. Loopback URLs that would not have opened live anyway (unreachable, or not HTML) still convert as before. `--tailscale` sessions refuse live mode the same way, since the session is reachable across your tailnet.
 
-### SSH sessions
+### Legacy SSH detection
+
+These environment variables are still detected for backwards compatibility:
 
 | Variable | Description |
 |----------|-------------|
 | `SSH_TTY` | Set by SSH when a TTY is allocated |
 | `SSH_CONNECTION` | Set by SSH with connection details |
 
-If either is present and `PLANNOTATOR_REMOTE` is unset, Plannotator stays in local mode (loopback only, every feature on) but uses the fixed port `19432` so you can forward it, opens no browser on the remote machine, and hides Open in, which would open an app on the remote machine's screen. Earlier versions turned remote mode on here. Set `PLANNOTATOR_REMOTE=1` / `true` to open the page from another computer without a tunnel, or `0` / `false` for plain local mode.
+If either is present, Plannotator enables remote mode automatically when `PLANNOTATOR_REMOTE` is unset. When remote mode is on only because of SSH (`PLANNOTATOR_REMOTE` unset), the server listens and advertises exactly as above, and a request that reaches it over loopback (your own `ssh -L` tunnel or editor port forward, or a browser on that machine) gets what a local session gives: Ask this session, link hover cards, the annotate agent terminal, and documents outside the project. A request from any other address gets what remote mode gives. Open in, opening a browser and live app annotation stay off over SSH. `PLANNOTATOR_REMOTE=1` keeps remote mode whole for every request. Set `PLANNOTATOR_REMOTE=1` / `true` to force remote mode or `0` / `false` to force local mode.
 
 ## Port resolution order
 

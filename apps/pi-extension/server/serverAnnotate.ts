@@ -70,7 +70,7 @@ import { handleApiNotFound, serveApp, json, parseBody, requestUrl } from "./help
 import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.ts";
 import type { SessionBridge } from "../generated/ai/session-bridge.ts";
 
-import { buildAdvertisedUrl, isRemoteOrSsh, isRemoteSession, listenOnPort } from "./network.ts";
+import { buildAdvertisedUrl, isRemoteSession, listenOnPort } from "./network.ts";
 import { isNotionAvailable } from "./integrations.ts";
 import { getAvailableOpenInApps, handleOpenInRequest } from "./open-in-apps.ts";
 
@@ -718,6 +718,8 @@ export async function startAnnotateServer(options: {
 		enabled: false,
 		reason: "unsupported-runtime",
 	};
+	// Per request once the bridge exists: an SSH session offers the terminal to its own tunnel only.
+	let agentTerminalCapabilityFor = (_req: IncomingMessage): AgentTerminalCapability => agentTerminalCapability;
 
 	// The fallback is silent to the reviewer, so the reason is logged once per
 	// process: a genuine bug in the read must not hide behind the snapshot.
@@ -989,7 +991,7 @@ export async function startAnnotateServer(options: {
 				projectRoot: process.cwd(),
 				serverConfig: getServerConfig(gitUser, currentPiHost(), { cookieHost: !isRemoteSession() }),
 				...piUpdateAdvert(options.origin),
-				agentTerminal: agentTerminalCapability,
+				agentTerminal: agentTerminalCapabilityFor(req),
 				feedbackTemplates: {
 					fileFeedback: getAnnotateFileFeedbackTemplate(
 						(options.origin ?? "pi") as PromptRuntime,
@@ -1069,7 +1071,7 @@ export async function startAnnotateServer(options: {
 				...(annotateDrafts.documentsEnabled ? { documentDrafts: true } : {}),
 				serverConfig: getServerConfig(gitUser, currentPiHost(), { cookieHost: !isRemoteSession() }),
 				...piUpdateAdvert(options.origin),
-				agentTerminal: agentTerminalCapability,
+				agentTerminal: agentTerminalCapabilityFor(req),
 				...(options.recentMessages ? { recentMessages: options.recentMessages } : {}),
 				// Resolved copy-wrapper templates (config-aware, placeholders
 				// intact) so clipboard Copy matches what Send Feedback produces
@@ -1234,13 +1236,13 @@ export async function startAnnotateServer(options: {
 			// URL annotations have no local file to reveal — report unavailable so
 			// the UI hides the control entirely.
 			const urlSource = /^https?:\/\//i.test(options.filePath);
-			if (isRemoteOrSsh() || urlSource) {
+			if (isRemoteSession() || urlSource) {
 				json(res, { available: false, apps: [] });
 				return;
 			}
 			json(res, { available: true, apps: getAvailableOpenInApps() });
 		} else if (url.pathname === "/api/open-in" && req.method === "POST") {
-			if (isRemoteOrSsh() || /^https?:\/\//i.test(options.filePath)) {
+			if (isRemoteSession() || /^https?:\/\//i.test(options.filePath)) {
 				json(res, { ok: false, error: "Open in app is unavailable for this source" }, 400);
 				return;
 			}
@@ -1527,7 +1529,7 @@ export async function startAnnotateServer(options: {
 			res.writeHead(404, htmlAssetDocumentHeaders(HTML_ASSET_ERROR_CSP));
 			res.end(buildHtmlAssetErrorDocument(404, "Not found", name));
 		} else {
-			await serveApp(app, req, res, url.pathname, isRemoteOrSsh());
+			await serveApp(app, req, res, url.pathname, isRemoteSession());
 		}
 	});
 	// Startup failures must not leave anything behind in the long-lived Pi
@@ -1582,9 +1584,10 @@ export async function startAnnotateServer(options: {
 		throw error;
 	}
 	agentTerminalCapability = agentTerminal.capability;
+	agentTerminalCapabilityFor = agentTerminal.capabilityFor;
 	// Remote sessions serve the app page compressed (#1617); start gzip (what
 	// browsers ask for over plain http) now so the first load does not wait.
-	if (isRemoteOrSsh()) prewarmAppHtml(app.html, likelyAppHtmlEncoding(false));
+	if (isRemoteSession()) prewarmAppHtml(app.html, likelyAppHtmlEncoding(false));
 
 	if (options.liveApp) {
 		// Compose the proxy-served bridge body via the shared assembly (config

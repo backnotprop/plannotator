@@ -59,7 +59,7 @@ import {
 import { handleInboxServerReady, startInboxServer } from "@plannotator/server/inbox";
 import { exposureWarning, type InboxTailscaleState } from "@plannotator/server/inbox-tailscale";
 import { openBrowser, openBrowserDetached } from "@plannotator/server/browser";
-import { isRemoteOrSsh } from "@plannotator/server/remote";
+import { isRemoteSession } from "@plannotator/server/remote";
 import { assertTestHome } from "@plannotator/server/test-home-guard";
 import { agentSpec, createAgentEnvironment, formatConnectReport, inboxConnectDisabled } from "@plannotator/server/inbox-agents";
 import { addInboxNote, INBOX_NOTE_BODY, inboxNotesDisabled, markNotesAsked } from "@plannotator/server/inbox-agent-notes";
@@ -732,7 +732,7 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
       // --open: the person asked for the window (the /plannotator-inbox
       // commands). The opener is never waited for: a browser it starts may
       // hold its output open for as long as it runs.
-      if (open && (await openBrowserDetached(entry.url, { isRemote: isRemoteOrSsh() })) === "remote") {
+      if (open && (await openBrowserDetached(entry.url, { isRemote: isRemoteSession() })) === "remote") {
         process.stderr.write(`${inboxRemoteOpenHint(entry.port)}\n`);
       }
       process.stdout.write(`${entry.url}\n`);

@@ -420,7 +420,7 @@ You run /plannotator-review
 
 ## Remote / SSH / devcontainer
 
-Over SSH, Plannotator uses the fixed port `19432` and listens only on the remote machine's loopback, so you reach it through your SSH tunnel with every feature on. For a different port, or to open it from another computer without a tunnel (a devcontainer or Docker):
+Plannotator auto-detects SSH sessions and switches to fixed port `19432`. For a different port, or in a devcontainer or Docker:
 
 ```bash
 export PLANNOTATOR_REMOTE=1
@@ -434,7 +434,7 @@ Host your-server
     LocalForward 19432 localhost:19432
 ```
 
-With `PLANNOTATOR_REMOTE=1` the server listens on every interface (`0.0.0.0`) with no login, so anyone who can reach the port can use it, even when you use an SSH tunnel. Keep the port closed to networks you don't trust.
+In remote mode the server listens on every interface (`0.0.0.0`) with no login, so anyone who can reach the port can use it, even when you use an SSH tunnel. Keep the port closed to networks you don't trust.
 
 ---
 
@@ -520,7 +520,7 @@ implementation architecture.
 
 | Variable | Description |
 |---|---|
-| `PLANNOTATOR_REMOTE` | `1`/`true` for remote mode, `0`/`false` for local; unset is local (over SSH: fixed port `19432`, no browser opened) |
+| `PLANNOTATOR_REMOTE` | `1`/`true` for remote mode, `0`/`false` for local, unset for SSH auto-detection |
 | `PLANNOTATOR_PORT` | Fixed port (default: random locally, `19432` remote) |
 | `PLANNOTATOR_BROWSER` | Custom browser to open plans in. `none` (also `false`, `0`, `off`, `no`, `true`, `1`, `:`) opens no browser at all; the session URL is always printed. |
 | `PLANNOTATOR_AI` | `disabled` to disable Ask AI, Review Agents, and Guided Review; the annotate agent terminal is separate |

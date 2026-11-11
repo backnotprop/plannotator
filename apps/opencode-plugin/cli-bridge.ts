@@ -10,7 +10,7 @@ import {
   SESSION_BRIDGE_TOKEN_ENV,
 } from "@plannotator/ai/session-bridge-pull";
 import { runPullSessionBridgeClient } from "@plannotator/ai/session-bridge-pull-client";
-import { isSshSession } from "@plannotator/server/remote";
+import { isSshDetectedRemote } from "@plannotator/server/remote";
 import { inboxOpenedText, openInboxInBrowser } from "@plannotator/shared/inbox/agent-link";
 import { INBOX_COMMAND_BRIEFING } from "@plannotator/shared/inbox/connection";
 import { annotateTargetWords, parseAnnotateArgs, type ParsedAnnotateArgs } from "@plannotator/shared/annotate-args";
@@ -550,8 +550,9 @@ async function runPlannotatorCli(options: RunCliOptions): Promise<RunCliResult> 
     }
     const { port, isRemote } = metadata;
     // The server keeps the bridge off in remote mode; nothing to poll there.
-    // `isRemote` also says "SSH, no browser here", where the bridge is on.
-    if (port === undefined || !sessionBridge || !bridgeToken || bridgeClientStarted || (isRemote && !isSshSession())) return;
+    // A remote session only SSH turned on keeps it for its own tunnel, and this
+    // client polls over loopback, so it starts there too.
+    if (port === undefined || !sessionBridge || !bridgeToken || bridgeClientStarted || (isRemote && !isSshDetectedRemote())) return;
     bridgeClientStarted = true;
     void runPullSessionBridgeClient({
       baseUrl: `http://127.0.0.1:${port}`,

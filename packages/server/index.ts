@@ -19,7 +19,7 @@ import { openPackedApp, packedAppResponse } from "@plannotator/shared/packed-app
 import type { Origin } from "@plannotator/shared/agents";
 import { isAbsolute, resolve } from "path";
 import { statSync } from "node:fs";
-import { isRemoteSession, isRemoteOrSsh, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl, getLocalUrlHostname } from "./remote";
+import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl, getLocalUrlHostname } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
 import { withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { isSameOriginRequest, refuseCrossOriginWrite } from "./request-origin-guard";
@@ -74,14 +74,14 @@ import { handleHostControl, resolveHostControlToken, type HostControl } from "./
 import { countUnsentDraftComments } from "@plannotator/shared/host-control";
 import { isAIEndpointPath, isLongLivedAIEndpointPath, type AIEndpoints, type SessionBridge } from "@plannotator/ai";
 import { isArchiveDocumentMutation } from "@plannotator/shared/archive-mode";
-import { isThisMachineRequest } from "./this-machine";
+import { isSshTunnelRequest, isThisMachineRequest, notePeer } from "./this-machine";
 import { getAllowedRootPaths, isDocServeAllowed, isPlanLinkedDocPath, readPlanFile } from "@plannotator/shared/doc-resolve";
 import { isReferenceReadPath, referenceReadRefusal } from "@plannotator/shared/reference-reader";
 import { createDocumentDraftStore, documentDraftIndexKey, loadSessionDraftWithDocuments } from "@plannotator/shared/annotate-draft";
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "@plannotator/shared/server-session";
 
 // Re-export utilities
-export { isRemoteSession, isRemoteOrSsh, getServerPort } from "./remote";
+export { isRemoteSession, getServerPort } from "./remote";
 export { openBrowser } from "./browser";
 export * from "./integrations";
 export * from "./storage";
@@ -120,7 +120,7 @@ export interface ServerOptions {
   shareBaseUrl?: string;
   /** Base URL of the paste service API for short URL sharing */
   pasteApiUrl?: string;
-  /** Called when server starts with the URL, whether it is remote mode or SSH (no browser here), and port */
+  /** Called when server starts with the URL, remote status, and port */
   onReady?: (url: string, isRemote: boolean, port: number) => void | Promise<void>;
   /** Tests: run the hover cards' `gh` / `glab` through this instead of the real ones (ref-cards.ts). */
   refRunner?: RefRunner;
@@ -180,7 +180,7 @@ export interface ServerResult {
   port: number;
   /** The full URL to access the server */
   url: string;
-  /** Remote mode or SSH: the person is not at this screen (no browser opens here) */
+  /** Whether running in remote mode */
   isRemote: boolean;
   /** Wait for user decision (approve/deny) */
   waitForDecision: () => Promise<{
@@ -275,9 +275,6 @@ export async function startPlannotatorServer(
   };
 
   const isRemote = isRemoteSession();
-  // Remote mode or SSH: no browser on this screen, the fixed port, compressed
-  // pages. Only remote mode (isRemote) turns features off.
-  const remoteOrSsh = isRemoteOrSsh();
   const app = openPackedApp(htmlContent);
   // The localhost subdomain this session is advertised at (#2184), read once:
   // the one extra name the loopback Host checks accept.
@@ -452,6 +449,8 @@ export async function startPlannotatorServer(
         idleTimeout: 0,
 
         async fetch(req, server) {
+          // Who sent it (an SSH session answers its own tunnel as local: this-machine.ts).
+          notePeer(req, server);
           // Host allowlist first, before any route (request-host-guard.ts).
           const hostRefusal = requestHostGuard.check(req);
           if (hostRefusal) return hostRefusal;
@@ -593,7 +592,7 @@ export async function startPlannotatorServer(
           if (updateRoute) return updateRoute;
 
           // API: a hover card's data for an issue, PR or MR link (GET /api/ref, ref-cards.ts).
-          const refRoute = await refCardRouteResponse(req, url, refCards, { enabled: !isRemote, serverSession });
+          const refRoute = await refCardRouteResponse(req, url, refCards, { enabled: isRemote ? isSshTunnelRequest : true, serverSession });
           if (refRoute) return refRoute;
 
           // API: Update user config (write-back to ~/.plannotator/config.json)
@@ -965,7 +964,7 @@ export async function startPlannotatorServer(
           }
 
           // Serve the app for all other routes (SPA): the page or a packed asset
-          return packedAppResponse(app, req, url.pathname, remoteOrSsh);
+          return packedAppResponse(app, req, url.pathname, isRemote);
         },
 
         error(err) {
@@ -996,7 +995,7 @@ export async function startPlannotatorServer(
 
   // Remote sessions serve the app page compressed (#1617); start the likely
   // encoding (gzip over plain http) now so the first load does not wait.
-  if (remoteOrSsh) prewarmAppHtml(app.html, likelyAppHtmlEncoding(false));
+  if (isRemote) prewarmAppHtml(app.html, likelyAppHtmlEncoding(false));
 
   // The cache warm must never gate the listening socket. Its async filesystem
   // walk yields between directories while requests remain serviceable.
@@ -1005,7 +1004,7 @@ export async function startPlannotatorServer(
   // Notify caller that server is ready
   if (onReady) {
     try {
-      await onReady(serverUrl, remoteOrSsh, port);
+      await onReady(serverUrl, isRemote, port);
     } catch (error) {
       await stop();
       throw error;
@@ -1015,7 +1014,7 @@ export async function startPlannotatorServer(
   return {
     port,
     url: serverUrl,
-    isRemote: remoteOrSsh,
+    isRemote,
     waitForDecision: () => decisionPromise,
     ...(donePromise && { waitForDone: () => donePromise }),
     updatePlan: (next) => {

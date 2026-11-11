@@ -14,7 +14,7 @@
 import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { likelyAppHtmlEncoding, prewarmAppHtml } from "@plannotator/shared/app-html";
 import { openPackedApp, packedAppResponse } from "@plannotator/shared/packed-app";
-import { isRemoteSession, isRemoteOrSsh, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl, getLocalUrlHostname } from "./remote";
+import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl, getLocalUrlHostname } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
 import { withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { isSameOriginRequest, refuseCrossOriginWrite } from "./request-origin-guard";
@@ -28,7 +28,7 @@ import { getExtraMarkdownExtensions, isAnnotatableTextPath, MAX_ANNOTATABLE_FILE
 import { contentHash } from "./draft";
 import { annotateDraftFilePath, annotateSessionHasRootlessDocuments, createAnnotateDraftSession } from "@plannotator/shared/annotate-draft";
 import { isDocServeAllowed, isPathAllowed } from "@plannotator/shared/doc-resolve";
-import { isThisMachineRequest } from "./this-machine";
+import { isSshTunnelRequest, isThisMachineRequest, notePeer } from "./this-machine";
 import { isReferenceReadPath, referenceReadRefusal } from "@plannotator/shared/reference-reader";
 import { getPlanVersion, getVersionCount, listVersions } from "@plannotator/shared/storage";
 import { computeAnnotateHistory, deriveAnnotateHistorySlug, persistAnnotateSubmission, type AnnotateHistoryResult } from "@plannotator/shared/annotate-history";
@@ -98,7 +98,7 @@ import {
 import { readFileSync } from "fs";
 
 // Re-export utilities
-export { isRemoteSession, isRemoteOrSsh, getServerPort } from "./remote";
+export { isRemoteSession, getServerPort } from "./remote";
 export { openBrowser } from "./browser";
 export { handleServerReady as handleAnnotateServerReady } from "./shared-handlers";
 
@@ -214,7 +214,7 @@ export interface AnnotateServerOptions {
   refRunner?: RefRunner;
   /** Project name for keying per-file version history (powers the annotate version diff). */
   project?: string;
-  /** Called when server starts with the URL, whether it is remote mode or SSH (no browser here), and port */
+  /** Called when server starts with the URL, remote status, and port */
   onReady?: (url: string, isRemote: boolean, port: number) => void | Promise<void>;
 }
 
@@ -225,7 +225,7 @@ export interface AnnotateServerResult {
   liveProxyPort?: number;
   /** The full URL to access the server */
   url: string;
-  /** Remote mode or SSH: the person is not at this screen (no browser opens here) */
+  /** Whether running in remote mode */
   isRemote: boolean;
   /** Wait for user feedback submission */
   waitForDecision: () => Promise<{
@@ -356,9 +356,6 @@ export async function startAnnotateServer(
   }
 
   const isRemote = isRemoteSession();
-  // Remote mode or SSH: no browser on this screen, the fixed port, compressed
-  // pages. Only remote mode (isRemote) turns features off.
-  const remoteOrSsh = isRemoteOrSsh();
   // The localhost subdomain this session is advertised at (#2184), read once:
   // the one extra name the loopback Host checks accept. A live app session
   // stays on localhost (see serverUrl below), so it accepts none.
@@ -369,7 +366,7 @@ export async function startAnnotateServer(
   const refCards = createRefCards(options.refRunner ? { run: options.refRunner } : {});
   // The app page is served compressed only to sessions reachable from another
   // device: remote mode or --tailscale (#1617). Local sessions are unchanged.
-  const compressAppHtml = remoteOrSsh || options.tailnetPublished === true;
+  const compressAppHtml = isRemote || options.tailnetPublished === true;
   const app = openPackedApp(htmlContent);
   // Save to Notion uses the server's NOTION_TOKEN: never for a session another device can open.
   const notionAvailable = isNotionAvailable(isRemote || options.tailnetPublished === true);
@@ -921,6 +918,8 @@ export async function startAnnotateServer(
         idleTimeout: 0,
 
         async fetch(req, server) {
+          // Who sent it (an SSH session answers its own tunnel as local: this-machine.ts).
+          notePeer(req, server);
           // Host allowlist first, before any route (request-host-guard.ts).
           const hostRefusal = requestHostGuard.check(req);
           if (hostRefusal) return hostRefusal;
@@ -977,7 +976,7 @@ export async function startAnnotateServer(
               serverConfig: getServerConfig(gitUser, agentToolHostForServer(options.sessionBridge), { cookieHost: !isRemote && options.tailnetPublished !== true }),
               ...getAutoUpdateAdvert(),
               ...getUpdateAdvert(origin, { exposed: isRemote || options.tailnetPublished === true }),
-              agentTerminal: agentTerminal.capability,
+              agentTerminal: agentTerminal.capabilityFor(req),
               feedbackTemplates: {
                 fileFeedback: getAnnotateFileFeedbackTemplate(origin),
                 messageFeedback: getAnnotateMessageFeedbackTemplate(origin),
@@ -1058,7 +1057,7 @@ export async function startAnnotateServer(
               serverConfig: getServerConfig(gitUser, agentToolHostForServer(options.sessionBridge), { cookieHost: !isRemote && options.tailnetPublished !== true }),
               ...getAutoUpdateAdvert(),
               ...getUpdateAdvert(origin, { exposed: isRemote || options.tailnetPublished === true }),
-              agentTerminal: agentTerminal.capability,
+              agentTerminal: agentTerminal.capabilityFor(req),
               ...(recentMessages ? { recentMessages } : {}),
               // Resolved copy-wrapper templates (config-aware, placeholders
               // intact) so clipboard Copy matches what Send Feedback produces
@@ -1210,7 +1209,8 @@ export async function startAnnotateServer(
 
           // API: a hover card's data for an issue, PR or MR link (GET /api/ref, ref-cards.ts).
           const refRoute = await refCardRouteResponse(req, url, refCards, {
-            enabled: isRemote ? false : options.tailnetPublished === true ? refCardsTailnetAllowed : true,
+            // Remote mode: only an SSH session's own tunnel (isSshTunnelRequest) may drive gh / glab here.
+            enabled: isRemote ? isSshTunnelRequest : options.tailnetPublished === true ? refCardsTailnetAllowed : true,
             serverSession,
           });
           if (refRoute) return refRoute;
@@ -1773,7 +1773,7 @@ export async function startAnnotateServer(
   // loopback server keeps listening and the session hangs forever.
   if (onReady) {
     try {
-      await onReady(serverUrl, remoteOrSsh, port);
+      await onReady(serverUrl, isRemote, port);
     } catch (error) {
       stop();
       throw error;
@@ -1784,7 +1784,7 @@ export async function startAnnotateServer(
     port,
     liveProxyPort: liveProxy?.port,
     url: serverUrl,
-    isRemote: remoteOrSsh,
+    isRemote,
     waitForDecision: () => decisionPromise,
     stop,
     hostControl,
