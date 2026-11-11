@@ -15,6 +15,7 @@ import { CURSOR_RULES_PLACE, noteCopiedByHand, noteWithoutMarkers } from '../age
 import { HARNESSES, type ConnectContext } from '../harnesses';
 import { HostMark, Icon } from '../icons';
 import { ConnectPicker } from './ConnectPicker';
+import { LaunchDefaults } from './LaunchDefaults';
 import { CommandLine, CopyCommand, Fold, OpenCodeQuiet, OpenCodeWords, openCodeCommand, ReloadCopy, ReloadLead, type ReloadSpec } from './RestartNote';
 import type { InboxReloadRuntime } from '@plannotator/core/inbox-types';
 import { clockTime, dayWords, formatCount } from '../format';
@@ -310,7 +311,7 @@ export const offWords = {
 
 type OffKind = 'reach' | 'tool' | 'reminder' | 'note';
 
-function Row({
+export function Row({
   k,
   v,
   r,
@@ -857,7 +858,7 @@ export function AgentsSettings({
             busy={busy.has(row.id)}
             settling={model.connecting}
             onChange={(input) => void change(row.id, input)}
-            {...(row.id === 'claude-code' && launchRow ? { extra: <>{launchRow}{scratchRow}</> } : {})}
+            {...(row.id === 'claude-code' && launchRow ? { extra: <>{launchRow}{launchState?.enabled && <LaunchDefaults launch={launchState} busy={launchBusy} onLaunch={setLaunchState} onError={setError} />}{scratchRow}</> } : {})}
             {...(row.id === 'codex' && row.detected ? { extra: <CodexAccountRow /> } : {})}
             {...(model.sessions && (row.id === 'claude-code' || row.id === 'pi' || row.id === 'opencode') && model.sessions[row.id] ? { sessions: model.sessions[row.id] } : {})}
           />

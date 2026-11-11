@@ -120,6 +120,13 @@
 .ib-cp-startlineb > :is(bdi, s, .ib-cp-on) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ib-cp-startlineb > svg { flex: none; }
 .ib-cp-startlineb:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+/* Model and effort (compose/LaunchChoiceMenu.tsx): the same pill, unfilled and muted, giving way first when the line is short. */
+.ib-cp-startlineb.ib-cp-choicebtn { flex: 0 100 auto; background: transparent; color: var(--muted-foreground); font-weight: 400; }
+.ib-cp-picker[data-phone].ib-cp-choice { right: 0; }
+.ib-cp-picker[data-phone] .ib-cp-choicecols { grid-auto-flow: row; overflow-y: auto; }
+.ib-cp-picker[data-phone] .ib-cp-choicecols > .ib-cp-choicecol + .ib-cp-choicecol { border-left: 0; border-top: 1px solid var(--ib-line); }
+.ib-cp-picker[data-phone] .ib-cp-choicecol { display: grid; }
+.ib-cp-picker[data-phone] .ib-cp-opt.ib-cp-choiceopt { display: flex; justify-content: space-between; padding: 0 10px; }
 .ib-cp-hint { flex: none; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); white-space: nowrap; }
 /* The Launch tip over the row, its arrow pointing down at To. */
 .ib-ctip-arrow[data-side="down"] { top: auto; bottom: -5px; box-shadow: 1px 1px 0 0 var(--ib-ctip-ring); }

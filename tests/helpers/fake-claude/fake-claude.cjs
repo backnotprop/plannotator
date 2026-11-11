@@ -15,6 +15,7 @@
  *
  * Calls:
  *  --version                 "<version> (Claude Code)"
+ *  --help                    the --effort and --model lines of 2.1.322's help
  *  --bg --name N --settings F [--allow-dangerously-skip-permissions] [--permission-mode M]
  *                            no prompt; faults: untrusted (Claude's error, exit 1;
  *                            with `trustCheck`, only in a folder HOME's .claude.json
@@ -222,6 +223,15 @@ function main() {
   if (args[0] === "--version" || args[0] === "-v") {
     record({});
     process.stdout.write(`${cfg.version || "2.1.314"} (Claude Code)\n`);
+    return;
+  }
+  // The two options compose's Model and Effort menus read, as 2.1.322 prints them (`helpModels` adds aliases).
+  if (args[0] === "--help") {
+    record({});
+    const models = (cfg.helpModels || ["fable", "opus", "sonnet"]).map((m) => `'${m}'`);
+    process.stdout.write(
+      `Usage: claude [options] [command] [prompt]\n\n  --effort <level>    Effort level for the current session\n                      (low, medium, high, xhigh, max)\n  --model <model>     Model for the current session. Provide\n                      an alias for the latest model (e.g.\n                      ${models.slice(0, -1).join(", ")}, or ${models[models.length - 1]}) or a\n                      model's full name.\n`,
+    );
     return;
   }
   if (args.includes("--bg")) {

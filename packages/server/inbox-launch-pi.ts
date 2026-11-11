@@ -56,6 +56,8 @@ import { childEnv } from "@plannotator/shared/child-env";
 import { getDefaultPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { readPiSessionClaims, type PiSessionClaim } from "@plannotator/shared/inbox/pi-session-claim";
 import { agentVersionRun, createAgentEnvironmentFor } from "./inbox-agents";
+import { launchChoiceArgs, parsePiChoices } from "@plannotator/core/inbox-launch-choice";
+import { launchChoiceCache } from "./inbox-launch-choice";
 import { shellQuote, versionAtLeast } from "./inbox-launch-claude";
 import { launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
 import { launchNoteText, writeLaunchNote, type LaunchAvailability, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchLive, type LaunchPermissionContext } from "./inbox-launch-host";
@@ -127,9 +129,12 @@ export function piExtensionListed(settingsText: string | null): boolean {
   return names.some((name) => /@plannotator\/pi-extension/i.test(name) || (/plannotator/i.test(name) && /pi-extension/i.test(name)));
 }
 
-/** The argv of one Pi process for a session: RPC mode, its exact session id (made when missing), its name (Pi takes the next argument as it is). */
-export function piArgv(pi: string, session: string, name: string): string[] {
-  return [pi, "--mode", "rpc", "--session-id", session, "--name", name.trim() || "Inbox"];
+/**
+ * The argv of one Pi process for a session: RPC mode, its exact session id (made when missing), its name (Pi takes the
+ * next argument as it is), then the launch's `--model` / `--thinking` (`launchChoiceArgs`), on every start and restart.
+ */
+export function piArgv(pi: string, session: string, name: string, choice: readonly string[] = []): string[] {
+  return [pi, "--mode", "rpc", "--session-id", session, "--name", name.trim() || "Inbox", ...choice];
 }
 
 /** The process's env: the login env through the launch filter, the Inbox tool on, and this Inbox's data dir when not the default. */
@@ -551,7 +556,7 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
     if (!path) return { ok: false, cancelled: false, missing: true, text: "pi is not on the login PATH.", output: "pi not found" };
     // The last moment a Stop, Delete or Open in Terminal can keep the process from being made at all.
     if (cancelled()) return { ok: false, cancelled: true, missing: false, text: "", output: "" };
-    const argv = piArgv(path, session, name);
+    const argv = piArgv(path, session, name, launchChoiceArgs(PI, { model: launch.model, effort: launch.effort }));
     let proc: ReturnType<typeof Bun.spawn>;
     try {
       proc = Bun.spawn(argv, { cwd: launch.folder, env, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
@@ -697,6 +702,17 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
   /** The highest bridge poll count seen per session: a session held elsewhere reads one above it (Stop waits for a higher one). */
   const pollsSeen = new Map<string, number>();
 
+  let choiceKey: string | null = null;
+  const choiceLists = launchChoiceCache(async () => {
+    const e = await ctx.environment();
+    const path = e.which("pi");
+    if (!path) return null;
+    const help = await e.run([path, "--help"], { timeoutMs: 10_000 });
+    if (help.exitCode !== 0) return null;
+    const models = await e.run([path, "--list-models"], { timeoutMs: 15_000 });
+    return parsePiChoices(help.stdout, models.exitCode === 0 ? models.stdout : null);
+  });
+
   return {
     agent: PI,
     name: PI_NAME,
@@ -713,8 +729,12 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
       if (!piExtensionListed(settingsText())) return { ok: false, missing: false, reason: "Plannotator's Pi extension is not installed (pi install npm:@plannotator/pi-extension)" };
       const version = parsePiVersion((await agentVersionRun(e, path, { timeoutMs: 10_000 })).stdout);
       if (!version || !versionAtLeast(version, PI_LAUNCH_MIN_VERSION)) return { ok: false, missing: false, reason: `Pi ${version ?? "?"} is older than ${PI_LAUNCH_MIN_VERSION}` };
+      choiceKey = `${path}@${version}`;
       return { ok: true, version };
     },
+
+    /** Pi's own lists: `--thinking` levels from its help, and the models `pi --list-models` says it can use here. Read once per version. */
+    choices: async () => (await choiceLists(choiceKey)) ?? parsePiChoices("", null),
 
     /** Pi has no permission modes: nothing to fix on the record. */
     startOf: () => ({ full: false, ownMode: false, bypass: false }),

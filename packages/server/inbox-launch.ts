@@ -84,6 +84,8 @@ import { createDriveList } from "./inbox-drives";
 import { checkGitRemote, cloneTarget, defaultCloneFolder, originKeyOf, readLastCloneFolder, runGitClone, tildeOf, writeLastCloneFolder, type CloneRun } from "./inbox-launch-clone";
 import { parseInboxGitUrl } from "@plannotator/core/inbox-git-url";
 import { inboxLaunchNotReadyWords } from "@plannotator/core/inbox-launch-ready";
+import { inboxLaunchTokenOk, LaunchChoiceError, parseLaunchChoice, type InboxLaunchChoice } from "@plannotator/core/inbox-launch-choice";
+import { readLastLaunchChoice, writeLastLaunchChoice } from "./inbox-launch-choice";
 import { accessSync, appendFileSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmdirSync, rmSync, statSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchFrom, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
@@ -118,7 +120,20 @@ export type InboxLaunchTarget = (
   | { agent: InboxLaunchAgent; folder: string; create?: true; clone?: { url: string; branch?: string } }
 ) & {
   trust?: InboxLaunchTrust;
+  /** Compose's Model and Effort for this launch (`to.launch.model`, `.effort`), plain tokens; absent: the default. */
+  choice?: InboxLaunchChoice;
 };
+
+/** `to.launch.model` / `.effort` as tokens (the effort's level is checked against the agent's list in `prepare`). */
+function choiceOfTarget(value: Record<string, unknown>): { choice?: InboxLaunchChoice } {
+  try {
+    const choice = parseLaunchChoice(value, null);
+    return choice.model || choice.effort ? { choice } : {};
+  } catch (error) {
+    const field = error instanceof LaunchChoiceError ? error.field : "model";
+    throw new InboxError("validation_error", (error as Error).message, { field: `to.launch.${field}` });
+  }
+}
 
 /** The reading a press was made on, or nothing when the press came without one. */
 function trustOfTarget(value: Record<string, unknown>): { trust?: InboxLaunchTrust } {
@@ -1247,6 +1262,19 @@ ${result.text}`);
         if (config().scratchDir !== (path ? resolve(path) : null)) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
         return json({ launch: settingsState() });
       }
+      if ("model" in body || "effort" in body) {
+        // Settings → Agents' Claude Code Model and Effort: the default a launch takes when compose leaves "Default".
+        // Empty or null drops the key (Claude Code's own default). A model is a plain token (an alias or a full name).
+        const field = "model" in body ? "model" : "effort";
+        const raw = body[field];
+        const value = typeof raw === "string" ? raw.trim() : raw;
+        if (value !== null && value !== "" && !inboxLaunchTokenOk(value)) throw new InboxError("validation_error", field === "model" ? "Give a model name, such as opus." : "effort: a level.", { field });
+        const efforts = (claude.settingsState() as { efforts: string[] }).efforts;
+        if (field === "effort" && value && !efforts.includes(value as string)) throw new InboxError("validation_error", `effort: one of ${efforts.join(", ")}.`, { field });
+        saveConfig({ inboxLaunch: { [field]: value || undefined } as { model?: string; effort?: string } });
+        if (config()[field] !== (value || null)) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
+        return json({ launch: settingsState() });
+      }
       if (typeof body.full_permissions !== "boolean") throw new InboxError("validation_error", "full_permissions: a boolean.", { field: "full_permissions" });
       saveConfig({ inboxLaunch: { fullPermissions: body.full_permissions } });
       if (config().fullPermissions !== body.full_permissions) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
@@ -1545,7 +1573,7 @@ ${result.text}`);
       if (!enabled()) return null;
       const value = (to as { launch: unknown }).launch as Record<string, unknown> | null;
       const host = value && typeof value === "object" && typeof value.agent === "string" && Object.hasOwn(hosts, value.agent) ? hosts[value.agent]! : null;
-      if (host && value!.scratch === true && value!.project_id === undefined) return { agent: host.agent, scratch: true, ...trustOfTarget(value!) };
+      if (host && value!.scratch === true && value!.project_id === undefined) return { agent: host.agent, scratch: true, ...trustOfTarget(value!), ...choiceOfTarget(value!) };
       // "Another folder on <machine>…": a folder under home that is not a project yet (`~/…`).
       // `create: true` (Create a folder): its last folder may not be there yet; the Send makes it.
       if (host && typeof value!.folder === "string" && value!.project_id === undefined && value!.scratch === undefined) {
@@ -1556,15 +1584,15 @@ ${result.text}`);
           if (!repo || repo.kind !== "repo" || (clone.branch !== undefined && (typeof clone.branch !== "string" || clone.branch.startsWith("-") || !/^[A-Za-z0-9_][A-Za-z0-9._/-]{0,199}$/.test(clone.branch)))) {
             throw new InboxError("validation_error", "to.launch.clone: { url: an https or ssh git URL, branch? }.", { field: "to.launch.clone" });
           }
-          return { agent: host.agent, folder: value!.folder, clone: { url: clone.url as string, ...(typeof clone.branch === "string" ? { branch: clone.branch } : {}) }, ...trustOfTarget(value!) };
+          return { agent: host.agent, folder: value!.folder, clone: { url: clone.url as string, ...(typeof clone.branch === "string" ? { branch: clone.branch } : {}) }, ...trustOfTarget(value!), ...choiceOfTarget(value!) };
         }
-        return { agent: host.agent, folder: value!.folder, ...(value!.create === true ? { create: true as const } : {}), ...trustOfTarget(value!) };
+        return { agent: host.agent, folder: value!.folder, ...(value!.create === true ? { create: true as const } : {}), ...trustOfTarget(value!), ...choiceOfTarget(value!) };
       }
       if (!host || typeof value!.project_id !== "string") {
         const agent = hostList.map((h) => `"${h.agent}"`).join(" | ");
         throw new InboxError("validation_error", `to.launch: { agent: ${agent}, project_id }, { agent: ${agent}, folder } or { agent: ${agent}, scratch: true }.`, { field: "to.launch" });
       }
-      return { agent: host.agent, project_id: value!.project_id, ...trustOfTarget(value!) };
+      return { agent: host.agent, project_id: value!.project_id, ...trustOfTarget(value!), ...choiceOfTarget(value!) };
     },
 
     /**
@@ -1646,6 +1674,15 @@ ${result.text}`);
         }
         throw new InboxError("agent_unavailable", `${host.name} can't be started here: ${ok.reason}. Nothing was sent.`);
       }
+      // Model and effort: the Send's, field by field, else Settings → Agents' default; an effort the agent doesn't list,
+      // or a choice for an agent that offers none, is refused before anything is written.
+      const lists = host.choices ? await host.choices() : null;
+      if (target.choice && !lists) throw new InboxError("validation_error", `${host.name} takes no model or effort from the Inbox. Nothing was sent.`, { field: "to.launch.model" });
+      if (target.choice?.effort && lists && !lists.efforts.includes(target.choice.effort)) {
+        throw new InboxError("validation_error", `${host.name} takes ${lists.effort_word.toLowerCase()} ${lists.efforts.join(", ")}. Nothing was sent.`, { field: "to.launch.effort" });
+      }
+      const model = target.choice?.model ?? lists?.default?.model;
+      const effort = target.choice?.effort ?? lists?.default?.effort;
       const id = inboxId("lch");
       // How it starts, fixed for this launch (the host's `startOf`: for Claude Code the switch, the person's own
       // setup with this folder's settings, and the last finished shell read, however old; the start reads the
@@ -1706,8 +1743,18 @@ ${result.text}`);
         ...(start.full ? { full_permissions: true } : {}),
         ...(start.ownMode ? { own_mode: true } : {}),
         ...(start.bypass ? { bypass_available: true } : {}),
+        ...(model ? { model } : {}),
+        ...(effort ? { effort } : {}),
         ...(input.from ? { from: { machine: input.from.machine, name: input.from.name } } : {}),
       };
+      // The next New message here starts on this choice (the default too).
+      if (lists) {
+        try {
+          writeLastLaunchChoice(options.dataDir, host.agent, target.choice ?? {});
+        } catch {
+          // Only where the menu starts.
+        }
+      }
       // C1c: the next clone on this machine goes where this one went.
       if (launch.clone) {
         try {
@@ -1794,7 +1841,12 @@ ${result.text}`);
           const ok = await available(host, state.lastAvailable !== null && !state.lastAvailable.ok);
           state.lastAvailable = ok;
           // `scratch_trusted`: whether it starts in the scratch root without a trust prompt (the trust-once row).
-          return ok.ok ? [{ agent: host.agent, name: host.name, scratch_trusted: host.trusts(root), ...(owner ? { untrusted: untrustedOf(host, owner.pick) } : {}) }] : [];
+          if (!ok.ok) return [];
+          // Model and Effort (compose's menu on the row): the CLI's lists, this machine's default and the last choice.
+          const lists = host.choices ? await host.choices() : null;
+          const last = lists ? readLastLaunchChoice(options.dataDir, host.agent) : null;
+          const choices = lists ? { ...lists, ...(last && (last.model || last.effort) ? { last } : {}) } : null;
+          return [{ agent: host.agent, name: host.name, scratch_trusted: host.trusts(root), ...(owner ? { untrusted: untrustedOf(host, owner.pick) } : {}), ...(choices ? { choices } : {}) }];
         }),
       );
       // Why the others can't start now, for a linked machine's window to say with this machine's name (remote launch).

@@ -18,6 +18,7 @@
 import { join } from "node:path";
 import type { InboxLaunchAgent, InboxLaunchError, InboxLaunchNotReady, InboxLaunchRecord, InboxMessage } from "@plannotator/core/inbox-types";
 import type { InboxRunHostState } from "@plannotator/core/inbox-run-line";
+import type { InboxLaunchChoices } from "@plannotator/core/inbox-launch-choice";
 import type { resolveInboxLaunch } from "@plannotator/shared/config";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -209,6 +210,11 @@ export interface LaunchHost {
   readonly shellFlags?: readonly string[];
   /** Whether To may offer it. The engine caches it 30 s. */
   available(): Promise<LaunchAvailability>;
+  /**
+   * Compose's Model and Effort menus for this agent (packages/core/inbox-launch-choice.ts): the CLI's own lists and
+   * Settings → Agents' default. No member: the agent offers no choice, and a Send's `model` / `effort` is refused.
+   */
+  choices?(): Promise<Omit<InboxLaunchChoices, "last">>;
   /** How a launch made now in `folder` starts; fixed on the record at Send. */
   startOf(folder: string): { full: boolean; ownMode: boolean; bypass: boolean };
   /** It starts in `folder` (and every scratch folder in it) without a trust prompt. */
