@@ -15,6 +15,8 @@ export interface PatchHunk extends CallTreeHunk {
   firstChange: { side: 'new' | 'old'; line: number };
   /** Drawn under this line: the last context line before the first change, else the first change itself. */
   anchor: { side: 'new' | 'old'; line: number };
+  /** The changed lines only, per side (start > end: no change on that side). */
+  changed: { newStart: number; newEnd: number; oldStart: number; oldEnd: number };
 }
 
 /** The hunks of one file's unified patch. */
@@ -42,6 +44,7 @@ export function listPatchHunks(file: { path: string; oldPath?: string; patch: st
         oldEnd: oldStart + Math.max(oldCount, 1) - 1,
         firstChange: { side: 'new', line: newStart },
         anchor: { side: 'new', line: newStart },
+        changed: { newStart: Infinity, newEnd: -Infinity, oldStart: Infinity, oldEnd: -Infinity },
       };
       hunks.push(current);
       oldLine = oldStart;
@@ -62,8 +65,16 @@ export function listPatchHunks(file: { path: string; oldPath?: string; patch: st
         current.firstChange = marker === '+' ? { side: 'new', line: newLine } : { side: 'old', line: oldLine };
         current.anchor = lastContextNew !== null ? { side: 'new', line: lastContextNew } : { ...current.firstChange };
       }
-      if (marker === '+') newLine += 1;
-      else oldLine += 1;
+      const changed = current.changed;
+      if (marker === '+') {
+        changed.newStart = Math.min(changed.newStart, newLine);
+        changed.newEnd = Math.max(changed.newEnd, newLine);
+        newLine += 1;
+      } else {
+        changed.oldStart = Math.min(changed.oldStart, oldLine);
+        changed.oldEnd = Math.max(changed.oldEnd, oldLine);
+        oldLine += 1;
+      }
     }
   }
   return hunks;
@@ -116,7 +127,9 @@ export function callTreeHunkTargets(
   for (const file of files) {
     for (const hunk of listPatchHunks(file)) {
       const fn = functionAroundHunk(semChanges, hunk);
-      const location = findCallTreeRoot(trees, hunk, fn);
+      // Without sem, only the changed lines decide: a context line is often
+      // another function (an entry defined just above the change).
+      const location = findCallTreeRoot(trees, { ...hunk, ...hunk.changed }, fn);
       if (!location) continue;
       targets.push({ filePath: file.path, hunk, doc: callTreeAt(trees, location, { ...range, ...(fn ? { title: fn.name } : {}) }) });
     }

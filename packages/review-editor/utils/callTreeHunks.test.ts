@@ -6,7 +6,9 @@
  *    below the change instead of just above it;
  *  - a deletion-only hunk read on the new side;
  *  - sem's outer class chosen over the inner method around the hunk;
- *  - a hunk with no tree still getting an entry.
+ *  - a hunk with no tree still getting an entry;
+ *  - without sem, an entry defined in the hunk's context lines winning over
+ *    the function the changed lines are in.
  */
 import { describe, expect, test } from 'bun:test';
 import type { SemanticDiffChange } from '@plannotator/shared/semantic-diff-types';
@@ -75,5 +77,20 @@ describe('callTreeHunkTargets', () => {
     expect(targets[0]!.hunk.index).toBe(0);
     expect(targets[0]!.doc.title).toBe('measure');
     expect(targets[0]!.doc.trail).toEqual(['run']);
+  });
+
+  test('without sem, context lines do not decide: an entry defined just above the change is not the root', () => {
+    const trees = [{
+      entry: 'context10',
+      tree: {
+        key: 'entry', label: 'context10()', status: 'same' as const, file: 'src/a.ts', line: 11,
+        children: [{
+          key: 'helper', label: 'helper()', status: 'same' as const, file: 'src/main.ts', line: 3,
+          children: [{ key: 'x', label: 'added13()', status: 'added' as const, file: 'src/a.ts', line: 13, children: [] }],
+        }],
+      },
+    }];
+    const targets = callTreeHunkTargets([{ path: 'src/a.ts', patch }], trees, []);
+    expect(targets.map((target) => target.doc.title)).toEqual(['helper']);
   });
 });

@@ -30,6 +30,7 @@
 }
 .call-tree-provenance {
   display: inline-flex;
+  font-family: var(--font-sans);
   align-items: center;
   gap: 0.3rem;
   font-size: 0.6875rem;
@@ -63,6 +64,7 @@
 }
 .call-tree-trail {
   flex-basis: 100%;
+  order: 9;
   margin: 0;
   font: 0.6875rem/1.4 var(--font-mono);
   color: var(--muted-foreground);
