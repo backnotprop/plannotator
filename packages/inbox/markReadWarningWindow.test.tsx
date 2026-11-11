@@ -179,6 +179,8 @@ test.skipIf(!hasDom)('Mark read on a thread with questions asks first: Cancel wr
   act(() => head().click());
   await until(() => warning() !== null, 'the warning');
   expect(warning()!.querySelector('h2')!.textContent).toBe('Set aside 2 open questions?');
+  // Not drawn as read behind the question: nothing is decided yet.
+  expect(head().getAttribute('aria-pressed')).toBe('false');
   act(() => warning()!.querySelector<HTMLButtonElement>('[data-mark-read-warning-cancel]')!.click());
   await settle();
   expect(warning()).toBeNull();
