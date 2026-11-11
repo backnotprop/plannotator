@@ -671,7 +671,7 @@ export interface InboxStorageModel {
     /** The projects combined into this one, by name: deleting it leaves them. */
     combined?: string[];
   }[];
-  /** The Inbox on SQLite (its switch, off for everyone): the database file's bytes, counted in `bytes`. */
+  /** The Inbox on SQLite (a new install, or its switch on): the database file's bytes, counted in `bytes`. */
   database?: number;
   /** The dated backups a move into SQLite left, counted in `bytes`: listed with Remove (StorageBackups.tsx). */
   backups?: { name: string; kind: 'jsonl' | 'sqlite'; date: string; bytes: number }[];
