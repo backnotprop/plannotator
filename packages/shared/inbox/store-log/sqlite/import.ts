@@ -18,8 +18,7 @@
  *    a crash midway is finished by the next start (step 1).
  */
 import { Database } from "bun:sqlite";
-import { existsSync, readdirSync, renameSync, statfsSync, statSync, writeFileSync } from "node:fs";
-import { open } from "node:fs/promises";
+import { closeSync, existsSync, fsync, openSync, readdirSync, renameSync, statfsSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { inboxDir as inboxDirOf } from "../../schema";
 import { jsonlInboxLog } from "../jsonl-log";
@@ -202,14 +201,20 @@ export async function importJsonlInbox(dataDir: string, options: InboxImportOpti
 /** The import's step boundaries (the crash test stops it at each one). */
 export type InboxImportStep = "read" | "rows" | "load" | "integrity" | "checked" | "marked" | "renamed" | "backup-entry";
 
-/** Flush a file to disk on the I/O thread pool, so the caller can work meanwhile. */
-async function flushFile(path: string): Promise<void> {
-  const handle = await open(path, "r");
-  try {
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
+/**
+ * Flush a file to disk on the I/O thread pool, so the caller can work meanwhile. The descriptor is opened here and
+ * the flush handed over at once: a promise-based open would leave the flush itself waiting for this thread to be
+ * free, which is after the checks it is meant to run beside.
+ */
+function flushFile(path: string): Promise<void> {
+  const fd = openSync(path, "r");
+  return new Promise((resolve, reject) => {
+    fsync(fd, (error) => {
+      closeSync(fd);
+      if (error) reject(error);
+      else resolve();
+    });
+  });
 }
 
 /** A log that hands back contents already read once, then behaves as `log` (the check reads the same lines the import wrote). */
