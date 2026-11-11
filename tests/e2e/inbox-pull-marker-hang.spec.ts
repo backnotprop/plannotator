@@ -122,6 +122,7 @@ test.afterAll(async () => {
     await world?.claude.close();
   } finally {
     // A stuck glab from an Inbox before the fix ignores TERM: only the ones our fake wrote, and only while still that fake.
+    // inbox-guard: own child (the fake glab this test wrote, never an Inbox)
     if (world) for (const pid of liveGlabs(world.glabLog)) process.kill(pid, 'SIGKILL');
     await removeInboxScratch();
   }
