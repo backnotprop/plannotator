@@ -1,15 +1,7 @@
 /**
- * Shared key cases for every comment composer (#1934, "Enter saves a
- * comment"). Each composer's test file mounts the REAL composer and hands
- * this a probe; the cases are the same everywhere, which is the point: one
- * setting, one behaviour.
- *
- * Off (the default): plain Enter is the field's (a new line), Cmd/Ctrl+Enter
- * saves. On: plain Enter saves, Shift+Enter is the field's, Cmd/Ctrl+Enter
- * still saves, and an Enter that belongs to an IME composition never saves
- * (`isComposing`, or Safari's keyCode 229 with `isComposing` false).
- *
- * DOM-gated: callers skip it without a document.
+ * On: plain Enter saves, Shift+Enter is the field's, Cmd/Ctrl+Enter still saves, and an Enter
+ * that belongs to an IME composition never saves (`isComposing`, or Safari's keyCode 229 with
+ * `isComposing` false).
  */
 import { expect, test } from 'bun:test';
 import { act } from 'react';
@@ -17,7 +9,6 @@ import { configStore } from '../config/configStore';
 
 export interface MountedComposer {
   field: () => HTMLTextAreaElement;
-  /** How many times the composer saved so far. */
   saves: () => number;
 }
 
@@ -27,7 +18,6 @@ export async function setEnterSavesComment(on: boolean): Promise<void> {
   });
 }
 
-/** Type into a React-controlled textarea. */
 export async function typeInto(el: HTMLTextAreaElement, value: string): Promise<void> {
   const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value')?.set;
   await act(async () => {
@@ -52,11 +42,7 @@ export async function pressKey(
   return event;
 }
 
-/**
- * Register the shared cases. `mount` mounts a fresh composer with `text`
- * already written (so a save has something to save); the caller's afterEach
- * unmounts it and the cases reset the setting themselves.
- */
+/** Register the shared cases. */
 export function describeCommentSubmitKeys(
   name: string,
   mount: (text: string) => Promise<MountedComposer>,

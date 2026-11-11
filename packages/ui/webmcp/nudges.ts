@@ -1,13 +1,6 @@
 /**
- * Nudge computation: every response carries `nudges` computed synchronously
- * from state the page already holds. No nudge needs a second call to
- * discover, and every nudge names the ids/paths needed to act on it.
- *
- * Messages are static strings we own. Document text, heading titles and
- * comment text are never concatenated into a message (prompt-injection
- * hygiene); they travel as data in `ids`, `path` and `section`.
- *
- * Pure, no DOM.
+ * Document text, heading titles and comment text are never concatenated into a message
+ * (prompt-injection hygiene); they travel as data in `ids`, `path` and `section`.
  */
 
 import type { AnnotationChangeTracker } from './changes';
@@ -21,9 +14,7 @@ export interface OtherDocumentActivity {
   annotations: number;
   newSinceLastRead: number;
   composerOpen: boolean;
-  /** The human opened this document since the last response. */
   openedSinceLastRead: boolean;
-  /** Wall-clock ms of the last change, for ordering; null when never changed. */
   lastActivity?: number | null;
 }
 
@@ -32,20 +23,14 @@ export interface NudgeSnapshot {
   composer: { open: boolean; section?: string };
   sourceStale: boolean;
   documentEdited: boolean;
-  /** Live app: the page the human is on now, and the one at the last response. */
   pageUrl: string | null;
   lastPageUrl: string | null;
   annotationCount: number;
-  /** The human approved / sent feedback / closed. */
   decided: boolean;
-  /** First response of the session (surface hints fire once). */
   firstResponse: boolean;
-  /** Set by the response builder when text was windowed: the continuation call's arguments. */
   truncated?: { nextOffset: number; args: Record<string, unknown> };
-  /** `inReplyTo` per live annotation id, for `replies_new`. */
   annotations: ReadonlyArray<{ id: string; inReplyTo?: string; source?: string }>;
   otherDocuments: OtherDocumentActivity[];
-  /** Watermark the novelty checks run against. */
   since: number;
 }
 
@@ -57,7 +42,6 @@ function plural(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? '' : 's'}`;
 }
 
-/** The first MAX_NUDGE_IDS ids plus a suffix for the message when some are left out. */
 function capIds(ids: string[]): { ids: string[]; suffix: string } {
   if (ids.length <= MAX_NUDGE_IDS) return { ids, suffix: '' };
   const more = ids.length - MAX_NUDGE_IDS;

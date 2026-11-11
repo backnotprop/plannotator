@@ -3,7 +3,6 @@ export * from './runtime';
 export { historyShortcuts, useHistoryShortcuts } from './history.shortcuts';
 export { decisionControlShortcuts } from './decisionControl.shortcuts';
 
-// plan-review scopes
 export { annotationModeShortcuts, useAnnotationModeShortcuts } from './plan-review/annotationMode.shortcuts';
 export { annotationToolbarShortcuts, useAnnotationToolbarShortcuts } from './plan-review/annotationToolbar.shortcuts';
 export { annotationPanelShortcuts, useAnnotationPanelShortcuts } from './plan-review/annotationPanel.shortcuts';
@@ -26,7 +25,6 @@ export type {
 export { goalSetupShortcuts, useGoalSetupShortcuts } from './plan-review/goalSetup.shortcuts';
 export { annotateSidebarShortcuts, useAnnotateSidebarShortcuts } from './plan-review/sidebar.shortcuts';
 
-// code-review scopes
 export { reviewAnnotationToolbarShortcuts, useReviewAnnotationToolbarShortcuts } from './code-review/annotationToolbar.shortcuts';
 export { reviewFileTreeShortcuts, useReviewFileTreeShortcuts } from './code-review/fileTree.shortcuts';
 export { reviewPrCommentsShortcuts, useReviewPrCommentsShortcuts } from './code-review/prComments.shortcuts';

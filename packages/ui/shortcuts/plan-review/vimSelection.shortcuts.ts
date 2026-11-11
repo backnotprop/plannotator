@@ -1,12 +1,7 @@
 import { defineShortcutScope } from '../core';
 import { createShortcutScopeHook } from '../runtime';
 
-/**
- * Modal document-navigation commands shared by plan review and annotate mode.
- *
- * The bindings are active only while the opted-in document focus surface owns
- * focus; native controls and annotation composers remain outside this scope.
- */
+/** Modal document-navigation commands shared by plan review and annotate mode. */
 export const vimSelectionShortcuts = defineShortcutScope({
   id: 'vim-selection',
   title: 'Vim selection',
@@ -166,10 +161,8 @@ export const vimSelectionShortcuts = defineShortcutScope({
   },
 });
 
-/** Stable action identifiers emitted by the Vim selection shortcut scope. */
 export type VimSelectionActionId = keyof typeof vimSelectionShortcuts.shortcuts;
 
-/** Vim navigation state used to make HUD command descriptions contextual. */
 export type VimSelectionHudContext =
   | 'inactive'
   | 'block'
@@ -179,12 +172,7 @@ export type VimSelectionHudContext =
   | 'visual-block'
   | 'action';
 
-/**
- * Return the user-facing HUD description for a handled Vim action.
- *
- * Contextual movement keys keep one registered shortcut while accurately
- * describing whether they moved by document structure, line, or character.
- */
+/** Return the user-facing HUD description for a handled Vim action. */
 export function describeVimSelectionAction(
   actionId: VimSelectionActionId,
   context: VimSelectionHudContext,

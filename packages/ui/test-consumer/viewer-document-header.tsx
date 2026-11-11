@@ -10,7 +10,6 @@ const annotationHeader: ViewerAnnotationHeaderConfig = {
   hideQuickLabel: true,
 };
 
-/** Compile-only proof of the published Viewer-owned document-header API. */
 export function PublishedViewerDocumentHeaderConsumer(props: ViewerProps) {
   return <Viewer {...props} annotationHeader={annotationHeader} stickyActions={false} />;
 }

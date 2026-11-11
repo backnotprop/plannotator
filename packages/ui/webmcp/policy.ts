@@ -1,19 +1,10 @@
 /**
- * Host seam for the WebMCP provider, following the `utils/upload.ts` shape:
- * a module-level default, `set`/`reset`/`get`, wired through
- * `configurePlannotatorUI({ webmcp })`. Plannotator passes nothing and gets
- * today's behavior: enabled (whenever `document.modelContext` exists) with the
- * `plannotator.` name prefix.
+ * Host seam for the WebMCP provider, following the `utils/upload.ts` shape: a module-level
+ * default, `set`/`reset`/`get`, wired through `configurePlannotatorUI({ webmcp })`.
  */
 
 export interface WebMcpPolicy {
-  /**
-   * Master switch. Default `true`; the engine still registers nothing when
-   * the browser has no `document.modelContext` or the user turned the tools
-   * off in Settings.
-   */
   enabled?: boolean;
-  /** Prefix applied to every bare tool name. Default `"plannotator."`; hosts namespace their own tools. */
   namePrefix?: string;
 }
 
@@ -31,7 +22,6 @@ const defaultPolicy: ResolvedWebMcpPolicy = {
 
 let policy: ResolvedWebMcpPolicy = defaultPolicy;
 
-/** Override the provider policy. Call once at app startup. */
 export function setWebMcpPolicy(next: WebMcpPolicy): void {
   policy = {
     enabled: next.enabled ?? defaultPolicy.enabled,
@@ -39,7 +29,6 @@ export function setWebMcpPolicy(next: WebMcpPolicy): void {
   };
 }
 
-/** Reset to Plannotator's default policy. Mainly for tests. */
 export function resetWebMcpPolicy(): void {
   policy = defaultPolicy;
 }

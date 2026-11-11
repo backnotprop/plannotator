@@ -1,28 +1,3 @@
-/**
- * Generate the HTML viewer bridge assets that ship in the npm package.
- *
- * `components/html-viewer/bridge-script.ts` stays the source of truth: the
- * Plannotator CLI and the Pi extension import its string exports under Bun,
- * and the srcdoc path inlines `BRIDGE_SCRIPT` by default. This script derives
- * two files from it at `prepack` (both gitignored, both deterministic):
- *
- * - `bridge-script.asset.js`: the bridge IIFE, byte-for-byte `BRIDGE_SCRIPT`,
- *   for hosts that serve it as a hashed static asset and pass its URL to
- *   `HtmlViewer` as `bridgeScriptUrl` (a Vite `?url` import of the package
- *   subpath). The `.asset.js` name is deliberate: a plain `bridge-script.js`
- *   beside `bridge-script.ts` would be picked FIRST by Vite's extension probe
- *   for the package's own `./bridge-script` imports (`.js` precedes `.ts` in
- *   `resolve.extensions`), which would break every consumer build.
- * - `bridge-script.lite.ts`: an alias target with the same CSS, protocol
- *   version and live bootstrap but `BRIDGE_SCRIPT = ""`, so a host on the URL
- *   path can point its bundler's `./bridge-script` resolution at it and drop
- *   the 185 KB literal from its viewer chunk. Optional; without the alias the
- *   URL path still works, the literal is merely carried unused.
- *
- * `bridgeAsset.test.ts` regenerates both into a temp dir and compares them to
- * the source exports, so a drift between the generator and the module fails
- * the suite rather than shipping.
- */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";

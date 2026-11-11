@@ -1,21 +1,7 @@
-/**
- * ConfigStore — Unified config resolver for Plannotator
- *
- * Singleton that resolves settings with precedence:
- *   server config file > cookie > default
- *
- * Works both inside and outside React. React components subscribe
- * via useSyncExternalStore (see useConfig.ts).
- *
- * Server-synced settings automatically write back to ~/.plannotator/config.json
- * via a debounced POST /api/config.
- */
-
 import { SETTINGS, type SettingName, type SettingsMap } from './settings';
 
 type Listener = () => void;
 
-/** Deep-merge source into target, recursing into plain objects. */
 function deepMerge(target: Record<string, unknown>, source: Record<string, unknown>): void {
   for (const key of Object.keys(source)) {
     if (
@@ -33,11 +19,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/**
- * Remove every leaf `shape` describes from `target`, pruning containers that
- * empty out. Used to retract a queued server write once the server has spoken
- * for the same leaves.
- */
 function deletePaths(target: Record<string, unknown>, shape: Record<string, unknown>): void {
   for (const key of Object.keys(shape)) {
     if (!(key in target)) continue;
@@ -54,8 +35,6 @@ function deletePaths(target: Record<string, unknown>, shape: Record<string, unkn
 /** Server write-back transport: posts a batch of changed server-synced settings. */
 export type ServerSyncFn = (payload: Record<string, unknown>) => void;
 
-/** Default = today's inline POST /api/config (best-effort).
-    keepalive lets the request outlive page teardown (pagehide flush). */
 const defaultServerSync: ServerSyncFn = (payload) => {
   fetch('/api/config', {
     method: 'POST',
@@ -65,7 +44,6 @@ const defaultServerSync: ServerSyncFn = (payload) => {
   }).catch(() => {}); // best-effort
 };
 
-/** Infer the value type from a SettingDef */
 type SettingValue<K extends SettingName> = SettingsMap[K] extends { defaultValue: infer D }
   ? D extends (...args: unknown[]) => infer R ? R : D
   : never;
@@ -78,23 +56,11 @@ class ConfigStore {
   private serverSyncTimer: ReturnType<typeof setTimeout> | null = null;
   private pagehideFlushRegistered = false;
   private serverSync: ServerSyncFn = defaultServerSync;
-  /** True once a host installed its own transport via setServerSync(). */
   private serverSyncInstalled = false;
   /** Settings whose value came from the server config; seeds must not undo them. */
   private serverOverridden = new Set<string>();
   private loaded = false;
 
-  /**
-   * Resolve all settings from the LIVE storage backend (cookie > default) on
-   * first use — deliberately not in the constructor. The singleton is created
-   * at module import, which for a host app is before configurePlannotatorUI()
-   * can install its StorageBackend; resolving eagerly there would write every
-   * missing default (including a generated identity) as cookies onto the host's
-   * origin. Deferring to first use means a host that configures at startup gets
-   * its own backend for the initial resolution too — no cookies are ever
-   * written on a configured host. Plannotator is unchanged: same resolution,
-   * same default-seeding writes, on first settings access instead of at import.
-   */
   private ensureLoaded(): void {
     if (this.loaded) return;
     this.loaded = true;
@@ -105,22 +71,13 @@ class ConfigStore {
         : def.defaultValue;
       const resolved = fromCookie ?? defaultVal;
       this.values.set(name, resolved);
-      // Persist generated defaults to cookie so the value is stable across calls
       if (fromCookie === undefined) {
         def.toCookie(resolved as never);
       }
     }
   }
 
-  /**
-   * Re-hydrate all settings from the currently installed StorageBackend.
-   * ADDITIVE host hook — Plannotator never calls this (eager cookie default unchanged).
-   * Host installs a SYNCHRONOUS StorageBackend serving prefetched settings, then calls
-   * this to route the initial load through that backend. Precedence after a host call:
-   * server (init) > host backend (loadFromBackend) > cookie/default (constructor).
-   * Call this BEFORE init(serverConfig): init() always wins, so calling loadFromBackend()
-   * after init() would silently overwrite server-supplied settings.
-   */
+  /** Re-hydrate all settings from the currently installed StorageBackend. */
   loadFromBackend(): void {
     this.ensureLoaded();
     for (const [name, def] of Object.entries(SETTINGS)) {
@@ -128,27 +85,12 @@ class ConfigStore {
       if (fromBackend !== undefined) {
         this.values.set(name, fromBackend);
       } else {
-        // Seed the host backend with the resolved default. This matters when
-        // the store was already resolved BEFORE the host installed its
-        // StorageBackend (e.g. something read a setting pre-configure): those
-        // default-seeding writes went to the earlier backend, not this one.
-        // Without this, a fresh host store is never populated, so generated
-        // defaults (e.g. displayName) regenerate on every reload. In the normal
-        // configure-at-startup flow ensureLoaded() above already resolved
-        // through the host backend and this loop is a no-op re-read.
         def.toCookie(this.values.get(name) as never);
       }
     }
     this.notify();
   }
 
-  /**
-   * Apply server config overrides.
-   * Call once after fetching /api/plan or /api/diff.
-   *
-   * Server values take precedence over the cookie/default already resolved
-   * by the constructor. Settings without a server value are left untouched.
-   */
   init(serverConfig?: Record<string, unknown>): void {
     this.ensureLoaded();
     if (serverConfig) {
@@ -159,10 +101,9 @@ class ConfigStore {
             this.values.set(name, fromServer);
             def.toCookie(fromServer as never);
             this.serverOverridden.add(name);
-            // Retract any write still queued for the leaves the server just
-            // spoke for. Without this, a write queued before init() flushes
-            // AFTER it and pushes the pre-init value back to the config file,
-            // which the next session would then restore over the cookie.
+            // Retract any write still queued for the leaves the server just spoke for. Without
+            // this, a write queued before init() flushes AFTER it and pushes the pre-init value
+            // back to the config file, which the next session would then restore over the cookie.
             if (def.toServer) {
               deletePaths(
                 this.pendingServerWrites,
@@ -176,13 +117,7 @@ class ConfigStore {
     this.notify();
   }
 
-  /**
-   * Install a resolved default for a setting: memory + cookie, never the
-   * server. For values a component computes at mount (e.g. ThemeProvider's
-   * default theme pair) rather than values a user chose — seeding must not
-   * write to ~/.plannotator/config.json, and must never overwrite a value the
-   * server already supplied through init().
-   */
+  /** Install a resolved default for a setting: memory + cookie, never the server. */
   seed<K extends SettingName>(key: K, value: SettingValue<K>): void {
     this.ensureLoaded();
     if (this.serverOverridden.has(key)) return;
@@ -193,9 +128,7 @@ class ConfigStore {
   }
 
   /**
-   * Persist a user choice to memory + cookie, queuing the server write-back
-   * only when this store is actually talking to a server. Hosts that never
-   * installed a serverSync seam have no /api/config endpoint, so the legacy
+   * Hosts that never installed a serverSync seam have no /api/config endpoint, so the legacy
    * cookie-only APIs (ThemeProvider.setColorTheme) use this instead of set().
    */
   setLocal<K extends SettingName>(key: K, value: SettingValue<K>): void {
@@ -210,13 +143,11 @@ class ConfigStore {
     this.notify();
   }
 
-  /** Get a resolved config value. Works outside React. */
   get<K extends SettingName>(key: K): SettingValue<K> {
     this.ensureLoaded();
     return this.values.get(key) as SettingValue<K>;
   }
 
-  /** Set a config value. Writes cookie (sync), queues server write-back if applicable. */
   set<K extends SettingName>(key: K, value: SettingValue<K>): void {
     this.ensureLoaded();
     const def = SETTINGS[key];
@@ -231,13 +162,11 @@ class ConfigStore {
     this.notify();
   }
 
-  /** Subscribe to changes. Returns unsubscribe function. */
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   }
 
-  /** Override the server write-back transport (default = inline POST /api/config). */
   setServerSync(fn: ServerSyncFn): void {
     this.serverSync = fn;
     this.serverSyncInstalled = true;
@@ -254,12 +183,8 @@ class ConfigStore {
   }
 
   private scheduleServerSync(): void {
-    // The debounce loses writes when the page goes away within 300ms — and
-    // review/plan sessions end abruptly (approve/feedback shuts the server
-    // down right after a settings change). A lost write leaves the cookie and
-    // ~/.plannotator/config.json disagreeing; on the next session init() then
-    // "restores" the stale server value over the cookie. Flush on pagehide so
-    // the two stores can't diverge this way.
+    // A lost write leaves the cookie and ~/.plannotator/config.json disagreeing; on the next
+    // session init() then "restores" the stale server value over the cookie.
     if (!this.pagehideFlushRegistered && typeof window !== 'undefined') {
       this.pagehideFlushRegistered = true;
       window.addEventListener('pagehide', () => this.flushServerSync());

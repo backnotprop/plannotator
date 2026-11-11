@@ -5,10 +5,9 @@ import {
   type UseShortcutScopeOptions,
 } from '../runtime';
 
-// Shift+digit rather than mnemonic letters: bare letters are swallowed by
-// type-to-comment, bare digits by the label picker, Mod+digit by the browser's
-// tab switching, and Mod+Shift+3/4 by macOS screenshots. Follows the toolstrip
-// left to right.
+// Shift+digit rather than mnemonic letters: bare letters are swallowed by type-to-comment, bare
+// digits by the label picker, Mod+digit by the browser's tab switching, and Mod+Shift+3/4 by macOS
+// screenshots.
 export const annotationModeShortcuts = defineShortcutScope({
   id: 'annotation-mode',
   title: 'Annotation Mode',
@@ -48,20 +47,9 @@ export const annotationModeShortcuts = defineShortcutScope({
   },
 });
 
-// --- Type-to-comment capture guard (#1244 follow-up) ---
-// Shift+1..4 produce printable characters (! @ # $). While a surface's
-// type-to-comment listener owns printable keys (a selection exists and the
-// annotation toolbar is open), those characters belong to the comment being
-// started: a mode shortcut firing there both eats the character and silently
-// re-arms the mode (Shift+3 arming Redline mid-thought). The toolbar
-// registers its capture here; the scope hook refuses to dispatch while any
-// capture is held.
 let typeToCommentCaptures = 0;
 
-/**
- * Held by AnnotationToolbar for the lifetime of its type-to-comment keydown
- * listener. Returns a release function; releasing more than once is safe.
- */
+/** Held by AnnotationToolbar for the lifetime of its type-to-comment keydown listener. */
 export function acquireTypeToCommentCapture(): () => void {
   typeToCommentCaptures += 1;
   let released = false;

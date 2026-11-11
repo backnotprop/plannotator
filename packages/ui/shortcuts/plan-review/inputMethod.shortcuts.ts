@@ -1,12 +1,6 @@
 import { defineShortcutScope } from '../core';
 
-// Heads-up for future migrators: these bindings (`Alt hold`, `Alt Alt`) are
-// declarative metadata for the help modal and marketing docs. They do NOT
-// dispatch through `useShortcutScope`. `Alt Alt` works via
-// `useDoubleTapShortcuts`; `Alt hold` has no shared hook yet — it's wired
-// today by the bespoke `useInputMethodSwitch` hook in
-// `packages/editor/hooks/`. See the comment block above
-// `useDoubleTapShortcuts` in `packages/ui/shortcuts/runtime.ts`.
+// They do NOT dispatch through `useShortcutScope`.
 
 export const inputMethodShortcuts = defineShortcutScope({
   id: 'input-method',

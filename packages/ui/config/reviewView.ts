@@ -16,31 +16,8 @@ export interface VcsReviewSettingsDescriptor {
   diffOptions: ReviewSettingsDiffOption[];
 }
 
-/**
- * The ONLY writers for the coupled setting pair (reviewPanelView,
- * defaultDiffType).
- *
- * Invariant: the Sections (Git status) view can only render the since-base
- * diff. So:
- *   - choosing the sections view forces defaultDiffType = 'since-base'
- *   - choosing a non-since-base default diff snaps the view to 'tree'
- *   - tree + since-base IS valid — switching to Tree leaves the diff, and
- *     choosing since-base leaves the view
- *
- * Hand-mirroring these rules at call sites is how the split-brain bug
- * happened (a writer persisted one half of the pair; configStore.init()
- * then re-corrupted it from the server every session). Never write either
- * setting directly — always go through these setters. configStore.init()
- * remains the one non-writer that can produce a conflicted pair from a
- * stale config.json; the App-level load reconciler heals that case by
- * calling setReviewPanelView('sections', { recordLastUsed: false }).
- *
- * The registry default is 'tree', which any diff type can render, so the pair
- * only ever needs reconciling for a reviewer who explicitly persisted
- * 'sections'.
- */
+/** Invariant: the Sections (Git status) view can only render the since-base diff. */
 
-/** Store seam for tests (fresh ConfigStoreForTest); production always uses the singleton. */
 type PanelViewConfigStore = typeof configStore;
 
 export function setReviewPanelView(
@@ -49,11 +26,6 @@ export function setReviewPanelView(
   store: PanelViewConfigStore = configStore,
 ): void {
   store.set('reviewPanelView', view);
-  // An explicit persisted choice also becomes the last-used view — otherwise
-  // a stale last-used cookie would immediately shadow what the user just
-  // picked in Settings. recordLastUsed: false is for
-  // NON-choices: the App self-heal repairs a conflicted persisted pair
-  // without any user action, so it must not overwrite the user's memo.
   if (options?.recordLastUsed !== false) {
     store.set('reviewPanelViewLastUsed', view);
   }
@@ -62,13 +34,7 @@ export function setReviewPanelView(
   }
 }
 
-/**
- * The panel view the reviewer has actually persisted, or `undefined` when they
- * never chose one. Distinct from `configStore.get('reviewPanelView')`, which
- * cannot tell a stored choice apart from the built-in default. Plannotator
- * itself no longer needs the distinction (nothing seeds this setting any
- * more); it stays exported for hosts that must not write over a real choice.
- */
+/** The panel view the reviewer has actually persisted, or `undefined` when they never chose one. */
 export function getPersistedReviewPanelView(): 'sections' | 'tree' | undefined {
   return SETTINGS.reviewPanelView.fromCookie();
 }
@@ -89,18 +55,11 @@ export function setReviewDefaultDiffType(
   store.set('defaultDiffType', value);
   if (value !== 'since-base' && store.get('reviewPanelView') !== 'tree') {
     store.set('reviewPanelView', 'tree');
-    // The snap is an explicit-choice consequence (the user picked a classic
-    // diff default), so it syncs the memo like any explicit view write.
     store.set('reviewPanelViewLastUsed', 'tree');
   }
 }
 
-/**
- * The saved default diff for a VCS other than Git (today: Jujutsu), read from
- * `reviewDefaults[id]`. Git keeps its original `defaultDiffType` setting and
- * its coupled setter above; a value this VCS does not offer reads as its own
- * default, never as a Git mode.
- */
+/** The saved default diff for a VCS other than Git (today: Jujutsu), read from `reviewDefaults[id]`. */
 export function getProviderReviewDefaultDiffType(
   descriptor: VcsReviewSettingsDescriptor,
   store: PanelViewConfigStore = configStore,
@@ -122,18 +81,6 @@ export function setProviderReviewDefaultDiffType(
   });
 }
 
-/**
- * One-time gate for the auto-mark-viewed notice — the toast that fires the
- * FIRST time auto-view actually marks a file, i.e. the moment the feature
- * demonstrates itself. Cookie-based, mirroring the other review first-run
- * gates, so it survives the random port each session runs on. Versioned so a
- * meaningful revision can re-show it.
- *
- * It lives beside the setting rather than in the review app because BOTH
- * writers of the setting (Settings → Review here, and the file-list gear in the
- * review app) must consume the gate: someone who found the switch has
- * demonstrably discovered the feature and must never be told about it.
- */
 const AUTO_VIEWED_NOTICE_SEEN_KEY = 'plannotator-auto-viewed-notice-seen';
 const AUTO_VIEWED_NOTICE_VERSION = '1';
 
@@ -145,10 +92,7 @@ export function markAutoViewedNoticeSeen(): void {
   storage.setItem(AUTO_VIEWED_NOTICE_SEEN_KEY, AUTO_VIEWED_NOTICE_VERSION);
 }
 
-/**
- * The only writer of `reviewAutoViewed` outside the notice's own "Turn off"
- * action. Stamps the notice gate: an explicit toggle is proof of discovery.
- */
+/** The only writer of `reviewAutoViewed` outside the notice's own "Turn off" action. */
 export function setReviewAutoViewed(
   value: boolean,
   store: PanelViewConfigStore = configStore,
