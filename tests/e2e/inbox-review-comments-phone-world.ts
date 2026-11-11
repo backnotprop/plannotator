@@ -129,7 +129,8 @@ const GUIDE = {
   ],
 };
 
-export async function startWorld(browser: Browser): Promise<PhoneWorld> {
+/** `guide`: what the agent submits as its guided review (the default is the two-chapter one above). */
+export async function startWorld(browser: Browser, guide: object = GUIDE): Promise<PhoneWorld> {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const root = inboxScratch('plannotator-review-comments-phone-e2e-');
   const home = join(root, 'home');
@@ -163,7 +164,7 @@ export async function startWorld(browser: Browser): Promise<PhoneWorld> {
   expect(on.status()).toBe(200);
   await context.close();
   const agent = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
-  const review = await agent.submitGuide({ project_path: project, subject: 'Retry a failed charge', guide: GUIDE, patch, body: 'Two files to read.', review: true } as never);
+  const review = await agent.submitGuide({ project_path: project, subject: 'Retry a failed charge', guide, patch, body: 'Two files to read.', review: true } as never);
   return { url, thread: String(review.thread_id), message: String(review.message_id), agent };
 }
 

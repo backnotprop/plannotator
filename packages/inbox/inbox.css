@@ -11398,8 +11398,9 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
 /* Why the thread is where it is, or why it was folded: a quiet line above its first comment. */
 .ib-lt-top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-bottom: 6px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .ib-lt-refold { display: inline-flex; align-items: center; gap: 4px; color: var(--muted-foreground); }
-/* Folded: one line, who, the first words, how many, why. */
-.ib-lt-fold { display: flex; align-items: center; gap: 8px; min-height: 34px; padding-block: 6px; color: var(--muted-foreground); cursor: pointer; }
+/* Folded: one line, who, the first words, how many, why. `contain: inline-size`: it asks the diff's code column for no width (see
+   `.context-note-slot`): its first words are one nowrap line, and a line counts in full toward the column's width. */
+.ib-lt-fold { display: flex; align-items: center; gap: 8px; min-height: 34px; padding-block: 6px; color: var(--muted-foreground); cursor: pointer; contain: inline-size; }
 .ib-lt-fold:hover { background: color-mix(in oklch, var(--muted) 45%, var(--background)); }
 .ib-lt-fold:focus-visible { outline: none; background: color-mix(in oklch, var(--muted) 60%, var(--background)); }
 .ib-lt-fold > svg { flex: none; }
@@ -11445,7 +11446,11 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
    one row (Show me's Pebble, the writer in words, the first words), opened in place. Shape's paper with a breath of the
    accent; a stale note goes grey. No comment chrome: no border, no card shadow, no count. */
 .ib-review, .ib-prreview { --ctxn-paper: color-mix(in oklab, var(--shp-paper, color-mix(in oklab, var(--background) 92%, var(--muted))) 95%, var(--primary)); }
-.context-note-slot { margin: 4px 0.25rem; font-family: var(--font-sans); white-space: normal; }
+/* `contain: inline-size`: a note asks the diff's code column for no width. Closed, a note is one line of all its words
+   (`.ib-ctxn-first`, nowrap, cut by an ellipsis), and a line counts in full toward the width of the column: with Wrap long
+   lines on, the column grew to the note's length, every row wrapped there instead of at the window, the diff panned sideways,
+   and scrolling a note into and out of the rows the diff draws flipped it back and forth. */
+.context-note-slot { margin: 4px 0.25rem; font-family: var(--font-sans); white-space: normal; contain: inline-size; }
 .ib-ctxn { color: var(--foreground); }
 .ib-ctxn-line { border-radius: 8px; background: var(--ctxn-paper, color-mix(in oklab, var(--muted) 60%, var(--card))); }
 .ib-ctxn-line[data-stale] { background: color-mix(in oklch, var(--muted) 40%, var(--card)); }
