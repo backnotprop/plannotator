@@ -6,6 +6,7 @@ import { agentHostName } from './model';
 import { FACE_LABELS, GLASS_FACES, isOwnFace, type AgentFace, type OurFace } from './faceChoices';
 import { ownIconSrc } from './ownIcons';
 import { fanLayout, type FanOptions, type FanSpot } from './fanLayout';
+import { focusBackTo } from './focusBack';
 
 /**
  * The face picker: a half-circle fan of an agent mark's faces round the mark, like a sundial's upper half laid on its
@@ -206,7 +207,7 @@ export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onC
             data-touch={touch ? '' : undefined}
             aria-label={`Icon for ${name}`}
             initialFocus={openedBy === 'keyboard' ? () => items.current[Math.max(0, order.indexOf(chosen))] ?? true : false}
-            finalFocus={openedBy === 'keyboard' ? { current: anchor } : false}
+            finalFocus={openedBy === 'keyboard' ? focusBackTo(anchor, '.am-fan') : false}
           >
             <span className="am-fan-dial" aria-hidden="true" style={{ '--r': `${Math.round(dial.reach)}px`, '--a': `${dial.aim.toFixed(1)}deg` } as CSSProperties}>
               <span className="am-fan-shade">

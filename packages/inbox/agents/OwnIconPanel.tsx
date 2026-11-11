@@ -5,6 +5,7 @@ import { keepAgentFace, keepOwnPicture, removeOwnPicture, type AgentFaceRef } fr
 import { isOwnFace, type AgentFace } from './faceChoices';
 import { OWN_LABEL } from './FaceFan';
 import { ownIconSrc, useOwnIcons } from './ownIcons';
+import { focusBackTo } from './focusBack';
 
 /**
  * "Your own…" (the face picker's last inner place): the pictures the person uploaded, any of which this agent can
@@ -76,7 +77,7 @@ export function OwnIconPanel({ anchor, open, agent, name, face, touch, onClose }
             }}
             onDragLeave={() => setOver(false)}
             onDrop={onDrop}
-            finalFocus={{ current: anchor }}
+            finalFocus={focusBackTo(anchor, '.am-own')}
           >
             <div className="am-own-t">{OWN_LABEL}</div>
             <div className="am-own-g" role="radiogroup" aria-label={OWN_LABEL}>
