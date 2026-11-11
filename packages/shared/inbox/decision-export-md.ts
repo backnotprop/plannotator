@@ -8,7 +8,7 @@
  * the marker), a `![` cannot start an image, a table cell's `|` and line breaks are escaped, and a line that would
  * start a heading, list, quote, fence or table in a multi-line field is escaped at its start.
  */
-import { decisionAnswerLine, decisionExportDates, type DecisionExportChoice, type DecisionExportItem, type DecisionExportV1 } from "./decision-export";
+import { decisionAnswerLine, decisionExportDates, decisionExportGroups, decisionOtherDetail, type DecisionExportChoice, type DecisionExportItem, type DecisionExportV1 } from "./decision-export";
 
 /** The hidden first line a later step finds its own comment by (brief section 5). */
 export const DECISION_EXPORT_MARKER = (threadId: string) => `<!-- plannotator-decisions v1 thread=${threadId} -->`;
@@ -104,7 +104,7 @@ function section(item: DecisionExportItem, when: ReturnType<typeof decisionExpor
 /** The whole document. */
 export function renderDecisionExportMarkdown(doc: DecisionExportV1): string {
   const when = decisionExportDates(doc.tz);
-  const head = [doc.thread.project ? `**${mdInline(doc.thread.project)}**` : null, when.range(doc.thread.started_at, doc.thread.last_at) || null, `${doc.counts.decided} decided, ${doc.counts.skipped} skipped, ${doc.counts.open} still open`]
+  const head = [doc.thread.project ? `**${mdInline(doc.thread.project)}**` : null, when.range(doc.thread.started_at, doc.thread.last_at) || null, `${doc.counts.decided} decided${doc.others.length > 0 ? `, ${doc.others.length} other ${doc.others.length === 1 ? "question" : "questions"}` : ""}`]
     .filter(Boolean)
     .join(" · ");
   const out = [DECISION_EXPORT_MARKER(doc.thread.id), `## Decisions: ${mdInline(doc.thread.subject)}`, "", head];
@@ -119,16 +119,11 @@ export function renderDecisionExportMarkdown(doc: DecisionExportV1): string {
     out.push("");
     for (const item of doc.decisions) out.push(...section(item, when));
   }
-  if (doc.not_answered.length > 0) {
-    out.push("### Skipped", "");
-    for (const item of doc.not_answered) out.push(`- ${mdInline(item.prompt)} <sub>(${mdInline(item.asked.by)}, ${when.day(item.asked.at)})</sub>`);
-    out.push("");
-  }
-  if (doc.still_open.length > 0) {
-    out.push("### Still open", "");
-    for (const item of doc.still_open) {
-      const rec = item.recommendation.labels.length > 0 ? item.recommendation.labels.join(", ") : item.recommendation.text;
-      out.push(`- ${mdInline(item.prompt)}${rec ? ` Recommended: ${mdInline(rec)}.` : ""} <sub>(${mdInline(item.asked.by)}, ${when.day(item.asked.at)})</sub>`);
+  for (const group of decisionExportGroups(doc)) {
+    out.push(`### ${group.title}`, "");
+    for (const item of group.items) {
+      const detail = decisionOtherDetail(item);
+      out.push(`- ${mdInline(item.prompt)}${detail ? ` — ${mdInline(detail)}` : ""} <sub>(${mdInline(item.asked.by)}, ${when.day(item.asked.at)})</sub>`);
     }
     out.push("");
   }

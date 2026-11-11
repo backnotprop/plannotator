@@ -2,7 +2,7 @@
  * Export decisions in the thread's ⋯ More (design brief "export-decisions", 2026-11-10), on the real ThreadMore.
  *
  * What regresses: the item showing on a thread with no question cards (most threads; action items are not questions),
- * or missing on one that has them; leaving its place right after Copy thread; a download that is not a plain link to
+ * or missing on one that has them; leaving its place right after Add a pull request…, or hiding when the thread has no linked PR to add from; a download that is not a plain link to
  * the thread's own route (relative, so it works over the tailnet or a tunnel; through the forward for a linked
  * machine's thread); anything about pull requests in the menu (not in this version); the phone sheet not swapping to
  * its sub-view and back.
@@ -88,7 +88,7 @@ async function openExportSubmenu(menu: HTMLElement) {
 }
 
 const itemKeys = (menu: HTMLElement) =>
-  [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].map((el) => (el.hasAttribute('data-thread-export-item') ? 'export' : (el.getAttribute('data-copy-item') ?? '?')));
+  [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].map((el) => (el.hasAttribute('data-thread-export-item') ? 'export' : el.hasAttribute('data-thread-add-pull-item') ? 'add-pull' : (el.getAttribute('data-copy-item') ?? '?')));
 
 function expectDownload(link: HTMLAnchorElement, format: 'md' | 'html', prefix = '/api/inbox') {
   expect(link.tagName).toBe('A');
@@ -112,11 +112,11 @@ describe.skipIf(!hasDom)('Export decisions in ⋯ More', () => {
     }
   });
 
-  test('desktop: right after Copy thread, a submenu of two plain download links, nothing about pull requests', async () => {
+  test('desktop: right after Add a pull request…, a submenu of two plain download links, nothing about pull requests', async () => {
     frame(<ThreadMore thread={thread(['single', 'action'])} linkOf={() => ''} phone={false} addPull={() => {}} />);
     const menu = await openMore();
     const keys = itemKeys(menu);
-    expect(keys[keys.indexOf('thread') + 1]).toBe('export');
+    expect(keys[keys.indexOf('add-pull') + 1]).toBe('export');
     const sub = await openExportSubmenu(menu);
     const links = [...sub.querySelectorAll<HTMLAnchorElement>('[data-decision-export]')];
     expect(links.map((l) => l.getAttribute('data-decision-export'))).toEqual(['md', 'html']);
@@ -124,6 +124,13 @@ describe.skipIf(!hasDom)('Export decisions in ⋯ More', () => {
     expectDownload(links[1]!, 'html');
     // No PR posting in this version: the submenu holds the two downloads only.
     expect(sub.querySelectorAll('[role="menuitem"]').length).toBe(2);
+  });
+
+  test('shown without Add a pull request… too (no PR offered): in its own group after Copy thread ID', async () => {
+    frame(<ThreadMore thread={thread(['single'])} linkOf={() => ''} phone={false} />);
+    const menu = await openMore();
+    const keys = itemKeys(menu);
+    expect(keys.slice(keys.indexOf('thread-id') + 1)).toEqual(['export']);
   });
 
   test("a linked machine's thread downloads through this Inbox's forward to that machine", async () => {

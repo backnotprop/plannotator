@@ -3,8 +3,9 @@
  * documents read back by structure (Markdown through `marked`'s lexer, HTML through Bun's HTMLRewriter), never by
  * wording.
  *
- * What regresses: a question landing in the wrong list for its fate; the counts drifting from Decision data's on the
- * same store; an unsent pick, a session id, a local path or a localhost/tailnet address reaching any output; thread
+ * What regresses: a question card missing, or in the wrong group for its state; the counts drifting from Decision data's
+ * on the same store; an unsent pick passing for a sent one; a session id, a local path or a localhost/tailnet address
+ * reaching any output; thread
  * text injecting HTML or Markdown structure; the HTML making a request or losing its embedded JSON or its dark look;
  * the v1 JSON's field names (the wire later sharing reads) changing.
  */
@@ -73,21 +74,27 @@ function everyFate() {
 }
 
 describe("which question goes where", () => {
-  test("each fate lands in its list, numbered in the order asked; replaced and action items are not listed; the counts are Decision data's", async () => {
+  test("every question card is listed with its state: decisions first, then each group in the order asked; action items are not; the counts are Decision data's", async () => {
     const { w, threadId } = everyFate();
     const { doc } = w.exported(threadId);
-    expect(doc.decisions.map((d) => d.prompt)).toEqual(["Keep the losing version where?", "Which apps first?", "How should a failed upload retry?"]);
-    expect(doc.decisions.map((d) => d.n)).toEqual([1, 2, 3]);
-    expect(doc.not_answered.map((d) => [d.prompt, d.status])).toEqual([["Rename Sync?", "skipped"]]);
-    expect(doc.still_open.map((d) => [d.prompt, d.status])).toEqual([
-      ["Unsent pick here?", "picked_unsent"],
-      ["Nobody touched this?", "open"],
+    expect(doc.decisions.map((d) => [d.n, d.prompt, d.state])).toEqual([
+      [1, "Keep the losing version where?", "decided"],
+      [2, "Which apps first?", "decided"],
+      [3, "How should a failed upload retry?", "decided"],
     ]);
-    // The unsent pick is the person's draft: no answer goes out.
-    expect(doc.still_open.every((d) => d.answer === null)).toBe(true);
-    const all = [...doc.decisions, ...doc.not_answered, ...doc.still_open];
-    expect(all.some((d) => d.prompt === "Old retry question?" || d.prompt.includes("migration"))).toBe(false);
+    expect(doc.others.map((d) => [d.n, d.prompt, d.state])).toEqual([
+      [4, "Unsent pick here?", "picked_unsent"],
+      [5, "Nobody touched this?", "open"],
+      [6, "Rename Sync?", "skipped"],
+      [7, "Old retry question?", "replaced"],
+    ]);
+    // The owner's choice: an unsent pick is shown, marked as not sent.
+    expect(doc.others[0]!.answer).toMatchObject({ selected: ["A"], sent: false, note: "UNSENT-NOTE-do-not-export" });
+    expect(doc.others[1]!.answer).toBeNull();
+    expect(doc.others[3]!.replaced_by).toEqual({ id: expect.stringContaining("/q-"), prompt: "How should a failed upload retry?" });
     expect(doc.decisions[2]!.replaces!.map((r) => r.prompt)).toEqual(["Old retry question?"]);
+    expect(doc.decisions.every((d) => d.answer?.sent === true)).toBe(true);
+    expect([...doc.decisions, ...doc.others].some((d) => d.prompt.includes("migration"))).toBe(false);
     expect(doc.decisions.map((d) => d.recommendation.taken)).toEqual([true, false, true]);
     expect(doc.decisions[0]!.choices.map((c) => c.chosen)).toEqual([true, false]);
 
@@ -97,49 +104,64 @@ describe("which question goes where", () => {
       .map((q) => decisionRowOf(q, input.byId, input.headOf, input.closedByArchive))
       .filter((row) => row?.thread_id === threadId)
       .map((row) => row!.fate);
-    const n = (...names: string[]) => fates.filter((f) => names.includes(f)).length;
-    expect(doc.counts).toEqual({ decided: n("answered"), skipped: n("skipped", "set_aside", "archived"), open: n("open", "picked_unsent"), replaced: n("replaced") });
+    const n = (name: string) => fates.filter((f) => f === name).length;
+    expect([doc.counts.decided, doc.counts.picked_unsent, doc.counts.open, doc.counts.skipped, doc.counts.replaced]).toEqual([n("answered"), n("picked_unsent"), n("open"), n("skipped"), n("replaced")]);
+    expect(doc.decisions.length + doc.others.length).toBe(fates.length);
     const summary = await decisionDataSummary(input, { since: null, until: NOW + 86_400_000, tz_offset_min: 0, now: NOW });
     expect(doc.counts.decided).toBe(summary.counts.answered);
+    expect(doc.counts.skipped).toBe(summary.counts.skipped);
+    expect(doc.counts.replaced).toBe(summary.counts.replaced);
   });
 
-  test("Mark read and the archive close what was waiting: those go to the short skipped list, and their unsent picks stay out", () => {
+  test("a question the person answered with a plain reply is 'answered in words', as Decision data counts it", async () => {
+    const w = world();
+    const m = w.send([w.block("Words instead?"), w.block("Also words?")].join("\n\n"));
+    w.store.sendReply(m.id, { words: "Go with the simpler one for both.", idempotency_key: w.key() });
+    const later = w.send(w.block("Asked after the words?"), m.id);
+    void later;
+    const { doc } = w.exported(m.thread_id);
+    expect(doc.others.map((d) => [d.prompt, d.state])).toEqual([
+      ["Words instead?", "answered_in_words"],
+      ["Also words?", "answered_in_words"],
+      ["Asked after the words?", "open"],
+    ]);
+    const input = w.store.decisionDataInput();
+    const summary = await decisionDataSummary(input, { since: null, until: NOW + 86_400_000, tz_offset_min: 0, now: NOW });
+    expect(doc.counts.answered_in_words).toBe(summary.settled_in_words);
+  });
+
+  test("Mark read and the archive: set aside shows no answer (the Inbox's own skip), an archived pick shows as not sent", () => {
     const w = world();
     const read = w.send([w.block("Closed by Mark read?"), w.block("Answered before?")].join("\n\n"));
     w.pick(read.id, 1, { selected: ["A"] });
     w.sendPicks(read.id, [1]);
-    w.pick(read.id, 0, { selected: ["B"], note: "UNSENT-BEFORE-MARK-READ" });
+    w.pick(read.id, 0, { selected: ["B"] });
     w.store.markRead(read.thread_id, true);
     const a = w.exported(read.thread_id).doc;
-    expect(a.not_answered.map((d) => d.status)).toEqual(["set_aside"]);
+    expect(a.others.map((d) => [d.state, d.answer])).toEqual([["set_aside", null]]);
     expect(a.decisions.map((d) => d.prompt)).toEqual(["Answered before?"]);
 
     const archived = w.send(w.block("Archived while open?"));
-    w.pick(archived.id, 0, { selected: ["A"], note: "UNSENT-BEFORE-ARCHIVE" });
+    w.pick(archived.id, 0, { selected: ["A"] });
     w.store.resolveThread(archived.id, true, "person");
     const b = w.exported(archived.thread_id).doc;
-    expect(b.not_answered.map((d) => d.status)).toEqual(["archived"]);
-    expect(b.not_answered[0]!.answer).toBeNull();
-    for (const doc of [a, b]) {
-      for (const out of [JSON.stringify(doc), renderDecisionExportMarkdown(doc), renderDecisionExportHtml(doc)]) {
-        expect(out).not.toContain("UNSENT-BEFORE");
-      }
-    }
+    expect(b.others.map((d) => d.state)).toEqual(["archived"]);
+    expect(b.others[0]!.answer).toMatchObject({ selected: ["A"], sent: false });
   });
 
-  test("a thread whose questions are all waiting exports only the still open list", () => {
+  test("a thread whose questions are all waiting has no decisions and no index table", () => {
     const w = world();
     const m = w.send(w.block("Waiting?"));
     const { doc } = w.exported(m.thread_id);
     expect(doc.decisions).toEqual([]);
-    expect(doc.still_open.length).toBe(1);
+    expect(doc.others.map((d) => d.state)).toEqual(["open"]);
     const tokens = marked.lexer(renderDecisionExportMarkdown(doc));
     expect(tokens.some((t) => t.type === "table")).toBe(false);
   });
 });
 
 describe("privacy", () => {
-  test("no session id, home path, local address, store path or unsent pick in any output", () => {
+  test("no session id, home path, local address or store path in any output, an unsent pick's words included", () => {
     const w = world();
     const leaky = [
       "Context: See /Users/alice/work/plan.md and C:\\Users\\bob\\x.txt and /home/carol/notes, open http://localhost:5173/proto or https://my-mac.tail1234.ts.net:8443/x or 127.0.0.1:4000/a.",
@@ -150,11 +172,11 @@ describe("privacy", () => {
     w.pick(root.id, 0, { selected: ["A"], note: "Saw it at http://100.101.102.103:9000/p, file /Users/alice/x" });
     w.sendPicks(root.id, [0]);
     const later = w.send(w.block("Unsent?"), root.id);
-    w.pick(later.id, 0, { selected: ["B"], note: "UNSENT-PRIVATE-WORDS" });
+    w.pick(later.id, 0, { selected: ["B"], note: "A pick not sent, about /Users/alice/y and http://localhost:8080/z" });
     const { doc } = w.exported(root.thread_id);
     const outputs = [JSON.stringify(doc), renderDecisionExportMarkdown(doc), renderDecisionExportHtml(doc)];
     for (const out of outputs) {
-      for (const secret of [SESSION, "/Users/", "C:\\Users", "/home/carol", "localhost", "ts.net", "127.0.0.1", "192.168.", "100.101.", w.dir, "UNSENT-PRIVATE-WORDS"]) {
+      for (const secret of [SESSION, "/Users/", "C:\\Users", "/home/carol", "localhost", "ts.net", "127.0.0.1", "192.168.", "100.101.", w.dir]) {
         expect(out).not.toContain(secret);
       }
     }
@@ -177,8 +199,10 @@ describe("the documents", () => {
       [
         `:::question\n${HOSTILE}\nContext: ## Fake heading\n\n- [ ] A <b>bold</b>\n- [ ] B\n\nRecommended: A <b>bold</b>\n:::`,
         w.block("Second | with pipe?"),
+        w.block("Third, picked and not sent?"),
       ].join("\n\n"),
     );
+    w.pick(root.id, 2, { selected: ["A"], note: HOSTILE });
     w.pick(root.id, 0, { selected: ["B"], other: undefined, note: `</script><script>alert(2)</script>\n# not a heading\n| x | y |` });
     w.pick(root.id, 1, { selected: ["A"] });
     w.sendPicks(root.id, [0, 1]);
@@ -195,7 +219,7 @@ describe("the documents", () => {
     expect(table.rows.length).toBe(doc.decisions.length);
     expect(table.rows.every((row) => row.length === 4)).toBe(true);
     const headings = tokens.filter((t): t is Tokens.Heading => t.type === "heading").map((t) => t.depth);
-    expect(headings).toEqual([2, 3, 3]);
+    expect(headings).toEqual([2, 3, 3, 3]);
     // Our own tags only: the marker, <details>/<summary> and <sub>.
     const html = (list: Token[]): string[] => list.flatMap((t) => [...(t.type === "html" ? [t.raw.trim()] : []), ...("tokens" in t && t.tokens ? html(t.tokens) : [])]);
     for (const raw of html(tokens)) expect(raw).toMatch(/^(<!-- plannotator-decisions v1 thread=msg_\w+ -->|<\/?details>(<summary>Context<\/summary>)?|<\/?sub>|<\/?summary>)/);
@@ -282,13 +306,14 @@ describe("the documents", () => {
   test("the v1 JSON's field names stay what later readers expect", () => {
     const { w, threadId } = everyFate();
     const { doc } = w.exported(threadId, [{ ref: "acme/notes#482", url: "https://github.com/acme/notes/pull/482", title: null }]);
-    expect(Object.keys(doc).sort()).toEqual(["counts", "decisions", "exported_at", "format", "generator", "images", "not_answered", "pulls", "still_open", "thread", "tz", "v"]);
+    expect(Object.keys(doc).sort()).toEqual(["counts", "decisions", "exported_at", "format", "generator", "images", "others", "pulls", "thread", "tz", "v"]);
     expect([doc.format, doc.v, doc.tz]).toEqual(["plannotator.decisions", 1, "America/Los_Angeles"]);
     expect(Object.keys(doc.thread).sort()).toEqual(["id", "last_at", "project", "started_at", "subject"]);
-    expect(Object.keys(doc.counts).sort()).toEqual(["decided", "open", "replaced", "skipped"]);
+    expect(Object.keys(doc.counts).sort()).toEqual(["answered_in_words", "archived", "decided", "open", "picked_unsent", "replaced", "set_aside", "skipped"]);
     const d = doc.decisions[1]!;
-    expect(Object.keys(d).sort()).toEqual(["answer", "answered", "asked", "choices", "id", "kind", "n", "prompt", "recommendation", "replaces", "status"]);
-    expect(Object.keys(d.answer!).sort()).toEqual(["note", "other", "selected", "skipped", "text"]);
+    expect(Object.keys(d).sort()).toEqual(["answer", "answered", "asked", "choices", "id", "kind", "n", "prompt", "recommendation", "replaces", "state"]);
+    expect(Object.keys(d.answer!).sort()).toEqual(["note", "other", "selected", "sent", "skipped", "text"]);
+    expect(Object.keys(doc.others.find((o) => o.state === "replaced")!).sort()).toContain("replaced_by");
     expect(Object.keys(d.recommendation).sort()).toEqual(["labels", "taken", "text"]);
     expect(Object.keys(d.asked).sort()).toEqual(["at", "by", "message_id"]);
     expect(Object.keys(d.choices[0]!).sort()).toEqual(["chosen", "label", "recommended"]);

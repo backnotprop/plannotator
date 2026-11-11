@@ -10,7 +10,7 @@
  * - Every piece of thread text goes through `esc`.
  */
 import { createHash } from "node:crypto";
-import { decisionAnswerLine, decisionExportDates, type DecisionExportChoice, type DecisionExportItem, type DecisionExportV1 } from "./decision-export";
+import { decisionAnswerLine, decisionExportDates, decisionExportGroups, decisionOtherDetail, type DecisionExportChoice, type DecisionExportItem, type DecisionExportV1 } from "./decision-export";
 
 /** HTML text and attribute escaping: thread text is untrusted. */
 export function esc(text: string): string {
@@ -161,8 +161,7 @@ export function renderDecisionExportHtml(doc: DecisionExportV1): string {
   const counts = [
     [String(doc.counts.decided), "decided"],
     ...(offered.length > 0 ? [[`${took} of ${offered.length}`, "took the recommendation"]] : []),
-    [String(doc.counts.skipped), "skipped"],
-    [String(doc.counts.open), "still open"],
+    [String(doc.others.length), doc.others.length === 1 ? "other question" : "other questions"],
   ];
   const toc = doc.decisions.length
     ? `<div class="toc"><table><thead><tr><th></th><th>Question</th><th>Answer</th><th>Recommendation</th></tr></thead><tbody>${doc.decisions
@@ -172,13 +171,17 @@ export function renderDecisionExportHtml(doc: DecisionExportV1): string {
         })
         .join("")}</tbody></table></div>`
     : "";
-  const rest = (title: string, items: DecisionExportItem[], line: (item: DecisionExportItem) => string) =>
-    items.length ? `<h3>${esc(title)}</h3><ul class="restlist">${items.map((item) => `<li>${esc(item.prompt)}<br><small>${line(item)}</small></li>`).join("")}</ul>` : "";
-  const skipped = rest("Skipped", doc.not_answered, (item) => `Skipped · asked by ${esc(item.asked.by)}, ${esc(when.day(item.asked.at))}`);
-  const open = rest("Still open", doc.still_open, (item) => {
-    const rec = item.recommendation.labels.length ? item.recommendation.labels.join(", ") : item.recommendation.text;
-    return `${rec ? `Recommended: ${esc(rec)} · ` : ""}asked by ${esc(item.asked.by)}, ${esc(when.day(item.asked.at))}`;
-  });
+  const rest = decisionExportGroups(doc)
+    .map(
+      (group) =>
+        `<h3>${esc(group.title)}</h3><ul class="restlist" data-state="${group.state}">${group.items
+          .map((item) => {
+            const detail = decisionOtherDetail(item);
+            return `<li>${esc(item.prompt)}<br><small>${detail ? `${esc(detail)} · ` : ""}asked by ${esc(item.asked.by)}, ${esc(when.day(item.asked.at))}</small></li>`;
+          })
+          .join("")}</ul>`,
+    )
+    .join("");
   const pulls = doc.pulls.map((p) => (/^https:\/\/[^\s"'<>]+$/.test(p.url) ? `<a class="pr" href="${esc(p.url)}">${esc(p.ref)}</a>` : `<span class="pr">${esc(p.ref)}</span>`)).join("");
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -194,7 +197,7 @@ export function renderDecisionExportHtml(doc: DecisionExportV1): string {
 <div class="counts">${counts.map(([n, l]) => `<div class="count"><div class="n">${esc(n!)}</div><div class="l">${esc(l!)}</div></div>`).join("")}</div>
 ${toc}
 ${doc.decisions.map((d) => card(doc, d, when)).join("\n")}
-${skipped || open ? `<section class="rest">${skipped}${open}</section>` : ""}
+${rest ? `<section class="rest">${rest}</section>` : ""}
 <footer>Exported from Plannotator on ${esc(when.at(doc.exported_at))}.</footer>
 </main>
 <script type="application/json" id="plannotator-decisions">${jsonForScript({ ...doc, images: {} })}</script>

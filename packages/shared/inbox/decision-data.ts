@@ -250,6 +250,19 @@ export async function runInSlices<T>(steps: Generator<void, T>, signal?: AbortSi
   }
 }
 
+/**
+ * When the person wrote this message in their own words, or null when it is not such a message: an agent's, a note the
+ * Inbox wrote, a Re-ask press (the Inbox writes its words, the person typed none), or a reply that carried answers
+ * (`carried`: the questions' `sent_reply_id`s). Decision data's "settled in words" and the decision export's
+ * "Answered in words" both read it.
+ */
+export function ownWordsTime(message: InboxMessage, carried: ReadonlySet<string>): number | null {
+  if (message.author.kind !== "person" || isInboxNote(message) || (message.reask?.length ?? 0) > 0) return null;
+  const at = ms(message.created_at);
+  if (!readableTime(at) || carried.has(message.id)) return null;
+  return at;
+}
+
 // ── Trends: the last 30 days against the 30 before. Two periods, no series, nothing stored. ──
 
 export const TREND_DAYS = 30;
@@ -408,10 +421,8 @@ function* summarySteps(input: DecisionDataInput, query: DecisionQuery): Generato
   for (const message of input.messages) {
     if (++tick % EVERY === 0) yield;
     try {
-      // A Re-ask note is a press: the Inbox writes its words, the person typed none.
-      if (message.author.kind !== "person" || isInboxNote(message) || (message.reask?.length ?? 0) > 0) continue;
-      const at = ms(message.created_at);
-      if (!readableTime(at) || carried.has(message.id)) continue;
+      const at = ownWordsTime(message, carried);
+      if (at === null) continue;
       const times = ownWordsAt.get(message.thread_id);
       if (times) times.push(at);
       else ownWordsAt.set(message.thread_id, [at]);

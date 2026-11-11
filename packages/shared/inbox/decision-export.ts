@@ -3,31 +3,55 @@
  * v1 shape, which the Markdown and HTML documents (decision-export-md.ts, decision-export-html.ts) are drawn from.
  *
  * Nothing here decides a question's fate on its own: each record goes through Decision data's `decisionRowOf`, so a
- * thread's "decided" and "skipped" match Settings -> Decision data on the same store; the answer is the wire's
+ * thread's "decided" matches Settings -> Decision data on the same store; the answer is the wire's
  * (`toInboxQuestion`, canonical labels), and "took the recommendation" is the reply's own rule
  * (`inboxAnswerTookRecommendation`).
  *
- * What is never in it: a pick the person did not send (the agent never got it), action items, attachments, a link back
- * to the Inbox, localhost or tailnet addresses, local file paths (a home folder in prose becomes `~`), session ids and
- * machine names (an agent is its host's name). Pictures are opaque refs; only the HTML embeds their bytes.
+ * Every question card is in it with its state (the owner, 2026-11-10), action items aside. What is never in it:
+ * attachments, a link back to the Inbox, localhost or tailnet addresses, local file paths (a home folder in prose
+ * becomes `~`), session ids and machine names (an agent is its host's name). Pictures are opaque refs; only the HTML
+ * embeds their bytes.
  *
  * Later steps (not built): posting the Markdown on a pull request and a CLI read this same shape.
  */
 import { inboxAnswerTookRecommendation, toInboxQuestion } from "@plannotator/core/inbox-questions";
 import type { InboxMessage, InboxQuestionRecord } from "@plannotator/core/inbox-types";
-import { agentLabel, decisionRowOf, type DecisionFate } from "./decision-data";
+import { agentLabel, decisionRowOf, ownWordsTime, type DecisionFate } from "./decision-data";
 
-// ── The choices the owner has not answered yet (brief section 8): each in this one place. ──
+// ── The owner's choices (answers to brief section 8, 2026-11-10): each in this one place. ──
 
-/** Which fates land in which list. A fate in none (`replaced`) is counted, never listed. */
-export const DECISION_EXPORT_LISTS: Readonly<Record<"decisions" | "not_answered" | "still_open", readonly DecisionFate[]>> = {
-  /** A question the person sent with an answer: Decision data's "answered". */
-  decisions: ["answered"],
-  /** Sent as skipped, closed by Mark read, or closed by the archive. */
-  not_answered: ["skipped", "set_aside", "archived"],
-  /** Waiting on the person. A pick not sent stays theirs: its answer is never exported. */
-  still_open: ["open", "picked_unsent"],
+/**
+ * Every question card's state in the export ("Everything, with each question's state"). `decided` is Decision data's
+ * "answered" (a question sent with an answer), so its count matches Settings -> Decision data; the rest are Decision
+ * data's other fates, except that an open or archived question the person answered with a plain reply after it was
+ * asked (Decision data's "settled in words") is `answered_in_words`. Action items are never in it.
+ */
+export type DecisionExportState = "decided" | "picked_unsent" | "answered_in_words" | "open" | "skipped" | "set_aside" | "archived" | "replaced";
+
+/** The quiet groups after the decisions, in this order. */
+export const DECISION_EXPORT_OTHER_STATES: readonly Exclude<DecisionExportState, "decided">[] = ["picked_unsent", "answered_in_words", "open", "skipped", "set_aside", "archived", "replaced"];
+
+/** A group's heading in both documents. */
+export const DECISION_EXPORT_STATE_TITLES: Readonly<Record<Exclude<DecisionExportState, "decided">, string>> = {
+  picked_unsent: "Picked, not sent",
+  answered_in_words: "Answered in words",
+  open: "Still open",
+  skipped: "Skipped",
+  set_aside: "Set aside",
+  archived: "Closed by the archive",
+  replaced: "Replaced",
 };
+
+const STATE_OF_FATE: Readonly<Record<DecisionFate, DecisionExportState>> = {
+  answered: "decided",
+  picked_unsent: "picked_unsent",
+  open: "open",
+  skipped: "skipped",
+  set_aside: "set_aside",
+  archived: "archived",
+  replaced: "replaced",
+};
+
 /** Each picture at most this many bytes in the HTML, the file's pictures together at most `FILE`; past either, the alt text shows. */
 export const DECISION_EXPORT_PICTURE_MAX_BYTES = 400 * 1024;
 export const DECISION_EXPORT_PICTURES_MAX_BYTES = 5 * 1024 * 1024;
@@ -62,7 +86,7 @@ export interface DecisionExportChoice {
 export interface DecisionExportItem {
   n: number;
   id: string;
-  status: DecisionFate | "decided";
+  state: DecisionExportState;
   kind: "single" | "multi" | "text";
   prompt: string;
   context?: string;
@@ -75,11 +99,13 @@ export interface DecisionExportItem {
   prototype?: string;
   choices: DecisionExportChoice[];
   recommendation: { labels: string[]; text: string | null; taken: boolean | null };
-  /** Only what the person sent; null while nothing was. */
-  answer: { selected: string[]; other: string | null; text: string | null; note: string | null; skipped: boolean } | null;
+  /** The person's answer: sent (`sent: true`), or a pick they saved and did not send (`picked_unsent`). Null for none. */
+  answer: { selected: string[]; other: string | null; text: string | null; note: string | null; skipped: boolean; sent: boolean } | null;
   asked: { by: string; at: string; message_id: string };
   answered?: { at: string | null; sent_at: string | null };
   replaces?: { id: string; prompt: string; asked_at: string | null }[];
+  /** On a replaced question: what replaced it, or null when the agent withdrew it with nothing in its place. */
+  replaced_by?: { id: string; prompt: string | null } | null;
 }
 
 export interface DecisionExportV1 {
@@ -90,10 +116,11 @@ export interface DecisionExportV1 {
   generator: string;
   thread: { id: string; subject: string; project: string | null; started_at: string | null; last_at: string | null };
   pulls: { ref: string; url: string; title: string | null }[];
-  counts: { decided: number; skipped: number; open: number; replaced: number };
+  counts: Record<DecisionExportState, number>;
+  /** The decisions (state `decided`), D1…Dn in the order asked. */
   decisions: DecisionExportItem[];
-  not_answered: DecisionExportItem[];
-  still_open: DecisionExportItem[];
+  /** Every other question card, grouped by state in `DECISION_EXPORT_OTHER_STATES` order, each group in the order asked. */
+  others: DecisionExportItem[];
   /** ref -> `data:` URI (HTML and JSON only; filled by the server, `withPictures`). */
   images: Record<string, string>;
 }
@@ -241,25 +268,35 @@ export function buildDecisionExport(input: DecisionExportInput, options: Decisio
     replacedBy.set(target, list);
   }
 
-  const lists = { decisions: [] as DecisionExportItem[], not_answered: [] as DecisionExportItem[], still_open: [] as DecisionExportItem[] };
-  const counts = { decided: 0, skipped: 0, open: 0, replaced: 0 };
-  const listOf = (fate: DecisionFate): keyof typeof lists | null =>
-    (Object.keys(DECISION_EXPORT_LISTS) as (keyof typeof lists)[]).find((name) => DECISION_EXPORT_LISTS[name].includes(fate)) ?? null;
-  const ordered: { list: keyof typeof lists; record: InboxQuestionRecord; row: (typeof rows)[number]["row"] }[] = [];
-  for (const { record, row } of rows) {
-    if (row.fate === "replaced") counts.replaced++;
-    const list = listOf(row.fate);
-    if (!list) continue;
-    ordered.push({ list, record, row });
-  }
-  // Numbered across the lists, decisions first, each in the order asked (D1…Dn, then the short lists).
-  const sequence = [...ordered.filter((e) => e.list === "decisions"), ...ordered.filter((e) => e.list === "not_answered"), ...ordered.filter((e) => e.list === "still_open")];
-  sequence.forEach(({ list, record, row }, index) => {
+  // The person's own words in the thread, as times (Decision data's rule): an open or archived question asked before
+  // one of them was answered in words.
+  const carried = new Set(input.questions.flatMap((q) => (q.sent_reply_id ? [q.sent_reply_id] : [])));
+  const wordsAt = input.messages.map((m) => ownWordsTime(m, carried)).filter((at): at is number => at !== null);
+  const byRecordId = new Map(input.questions.map((q) => [q.id, q]));
+  const replacementOf = (record: InboxQuestionRecord): { id: string; prompt: string | null } | null => {
+    const by = record.superseded_by;
+    if (!by?.key) return null;
+    const id = `${by.message_id}/${by.key}`;
+    const next = byRecordId.get(id);
+    return { id, prompt: next ? clean(oneLine(next.prompt)) : null };
+  };
+  const stateOf = (row: (typeof rows)[number]["row"]): DecisionExportState => {
+    const state = STATE_OF_FATE[row.fate];
+    return (state === "open" || state === "archived") && wordsAt.some((at) => at > row.asked_at) ? "answered_in_words" : state;
+  };
+
+  const counts = Object.fromEntries((["decided", ...DECISION_EXPORT_OTHER_STATES] as DecisionExportState[]).map((state) => [state, 0])) as Record<DecisionExportState, number>;
+  const staged = rows.map((entry) => ({ ...entry, state: stateOf(entry.row) }));
+  // Numbered across the groups: the decisions first (D1…Dn), then each group in its order, each in the order asked.
+  const sequence = [staged.filter((e) => e.state === "decided"), ...DECISION_EXPORT_OTHER_STATES.map((state) => staged.filter((e) => e.state === state))].flat();
+  const decisions: DecisionExportItem[] = [];
+  const others: DecisionExportItem[] = [];
+  sequence.forEach(({ state, record, row }, index) => {
     const message = input.byId.get(record.message_id)!;
     const facts = record.parsed;
-    // Only a sent answer: an answered or skipped fate is one the agent received.
+    // Sent: an answered or skipped fate is one the agent received. A Mark read's answer is the Inbox's own skip, not the person's.
     const sent = row.fate === "answered" || row.fate === "skipped";
-    const wire = sent ? toInboxQuestion(record, false).answer : null;
+    const wire = record.answer && row.fate !== "set_aside" ? toInboxQuestion(record, false).answer : null;
     const selected = new Set(wire?.selected ?? []);
     const labels = facts.choices.filter((c) => c.recommended).map((c) => clean(c.label));
     const recText = labels.length > 0 ? null : (facts.recommendation ?? facts.suggested_text ?? null);
@@ -267,7 +304,7 @@ export function buildDecisionExport(input: DecisionExportInput, options: Decisio
     const item: DecisionExportItem = {
       n: index + 1,
       id: record.id,
-      status: list === "decisions" ? "decided" : row.fate,
+      state,
       kind: record.kind === "multi" ? "multi" : record.kind === "text" ? "text" : "single",
       prompt: clean(oneLine(record.prompt)),
       ...(facts.context ? { context: clean(facts.context) } : {}),
@@ -298,7 +335,7 @@ export function buildDecisionExport(input: DecisionExportInput, options: Decisio
       recommendation: {
         labels,
         text: recText === null ? null : clean(recText),
-        taken: list === "decisions" && offered && wire ? inboxAnswerTookRecommendation(record, wire) : null,
+        taken: state === "decided" && offered && wire ? inboxAnswerTookRecommendation(record, wire) : null,
       },
       answer: wire
         ? {
@@ -307,16 +344,16 @@ export function buildDecisionExport(input: DecisionExportInput, options: Decisio
             text: wire.text ? clean(wire.text) : null,
             note: wire.note ? clean(wire.note) : null,
             skipped: wire.skipped === true,
+            sent,
           }
         : null,
       asked: { by: message.author.kind === "agent" ? agentLabel(message.author) : "An agent", at: iso(row.asked_at)!, message_id: message.id },
       ...(sent ? { answered: { at: iso(row.answered_at), sent_at: iso(row.sent_at) } } : {}),
-      ...(list === "decisions" ? { replaces: replacedBy.get(record.id) ?? [] } : {}),
+      ...(state === "decided" ? { replaces: replacedBy.get(record.id) ?? [] } : {}),
+      ...(state === "replaced" ? { replaced_by: replacementOf(record) } : {}),
     };
-    lists[list].push(item);
-    if (list === "decisions") counts.decided++;
-    else if (list === "not_answered") counts.skipped++;
-    else counts.open++;
+    (state === "decided" ? decisions : others).push(item);
+    counts[state]++;
   });
 
   const times = input.messages.map((m) => ms(m.created_at)).filter((at): at is number => at !== null);
@@ -335,7 +372,8 @@ export function buildDecisionExport(input: DecisionExportInput, options: Decisio
     },
     pulls: options.pulls.map((pull) => ({ ref: pull.ref, url: pull.url, title: pull.title === null ? null : clean(pull.title) })),
     counts,
-    ...lists,
+    decisions,
+    others,
     images: {},
   };
   return { doc, pictures };
@@ -350,4 +388,25 @@ export function decisionAnswerLine(item: Pick<DecisionExportItem, "answer">, cut
   if (answer.text) parts.push(answer.text);
   const line = oneLine(parts.join(", "));
   return cut !== null && line.length > cut ? `${line.slice(0, cut - 1).trimEnd()}…` : line;
+}
+
+/** The other questions by group, in `DECISION_EXPORT_OTHER_STATES` order, empty groups left out. */
+export function decisionExportGroups(doc: Pick<DecisionExportV1, "others">): { state: Exclude<DecisionExportState, "decided">; title: string; items: DecisionExportItem[] }[] {
+  return DECISION_EXPORT_OTHER_STATES.map((state) => ({ state, title: DECISION_EXPORT_STATE_TITLES[state], items: doc.others.filter((item) => item.state === state) })).filter((group) => group.items.length > 0);
+}
+
+/** The one line a non-decision says after its prompt (plain text; each document escapes it): its pick, its replacement, or its recommendation. */
+export function decisionOtherDetail(item: DecisionExportItem): string | null {
+  if (item.state === "replaced") return item.replaced_by ? `Replaced by “${item.replaced_by.prompt ?? item.replaced_by.id}”` : "Withdrawn";
+  if (item.answer && !item.answer.sent && !item.answer.skipped) {
+    const line = decisionAnswerLine(item, null);
+    const note = item.answer.note ? ` (note: ${oneLine(item.answer.note)})` : "";
+    if (line || note) return `Picked: ${line || "—"}${note}`;
+  }
+  if (item.state === "skipped" && item.answer?.note) return `Note: ${oneLine(item.answer.note)}`;
+  if (item.state === "open" || item.state === "answered_in_words") {
+    const rec = item.recommendation.labels.length > 0 ? item.recommendation.labels.join(", ") : item.recommendation.text;
+    return rec ? `Recommended: ${oneLine(rec)}` : null;
+  }
+  return null;
 }

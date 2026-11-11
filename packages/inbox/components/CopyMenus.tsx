@@ -289,7 +289,10 @@ export function ThreadMore(
     if (!exportView) return;
     return focusAfterSwap(() => popup.current?.querySelector<HTMLElement>('[data-decision-export]'));
   }, [exportView]);
-  // The two downloads: plain links the server answers as attachments (no dialog), named by the server.
+  // Export decisions (the owner, 2026-11-10): beside Add a pull request…, on every thread with question cards, linked PR
+  // or not. Its submenu (and the phone's sub-view) is `downloads`: plain links the server answers as attachments (no
+  // dialog), named by the server. A later "Post on a pull request" group goes after them, in both places; with no PR
+  // linked it will lead to Add a pull request… first. Not built in this version.
   const downloads = (
     <>
       <Menu.Item className="ib-pmi" label="Download as Markdown" render={<a href={decisionExportUrl(thread.thread_id, 'md')} download="" />} data-decision-export="md">
@@ -490,7 +493,6 @@ export function ThreadMore(
                   <Icon name="stack" size={15} />
                   Copy thread
                 </Menu.Item>
-                {exportItem}
                 <Menu.Separator className="ib-pm-sep" />
                 <Menu.Item className="ib-pmi" label="Copy link" onClick={() => copies.threadLink()} data-copy-item="thread-link">
                   <Icon name="link" size={15} />
@@ -500,13 +502,16 @@ export function ThreadMore(
                   <Icon name="hash" size={15} />
                   Copy thread ID
                 </Menu.Item>
-                {addPull && (
+                {(addPull || exportItem) && (
                   <>
                     <Menu.Separator className="ib-pm-sep" />
-                    <Menu.Item className="ib-pmi" label="Add a pull request" onClick={addPull} data-thread-add-pull-item="">
-                      <Icon name="link" size={15} />
-                      Add a pull request…
-                    </Menu.Item>
+                    {addPull && (
+                      <Menu.Item className="ib-pmi" label="Add a pull request" onClick={addPull} data-thread-add-pull-item="">
+                        <Icon name="link" size={15} />
+                        Add a pull request…
+                      </Menu.Item>
+                    )}
+                    {exportItem}
                   </>
                 )}
                 {requestGuide && (
