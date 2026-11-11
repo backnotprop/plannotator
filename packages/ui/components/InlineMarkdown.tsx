@@ -1081,8 +1081,9 @@ export const InlineMarkdown: React.FC<{
     if (match) {
       const tag = imgTagAttributes(match[0]);
       const resolved = tag.src ? resolveImage!(tag.src) : null;
-      if (resolved?.kind === 'src') {
-        parts.push(<HostResolvedImage key={key++} src={resolved.src} alt={tag.alt} width={tag.width ?? resolved.width} height={tag.height} writtenSrc={tag.src} onImageClick={onImageClick} />);
+      const shown = resolved?.kind === 'src' ? resolved.src : !resolved && /^https?:\/\//i.test(tag.src) ? tag.src : null;
+      if (shown) {
+        parts.push(<HostResolvedImage key={key++} src={shown} alt={tag.alt} width={tag.width ?? (resolved?.kind === 'src' ? resolved.width : undefined)} height={tag.height} writtenSrc={tag.src} onImageClick={onImageClick} />);
       } else if (tag.src) {
         parts.push(
           <span key={key++} className={UNAVAILABLE_IMAGE_CLASS} title={resolved?.kind === 'unavailable' ? resolved.title : undefined} data-image-unavailable="">
