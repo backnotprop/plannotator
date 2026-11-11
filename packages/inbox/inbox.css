@@ -4221,13 +4221,12 @@ label.ib-anote-r:hover { background: color-mix(in oklch, var(--muted) 40%, trans
 /* Settings → Agents' "Scratch folders" path, while it is changed. */
 .ib-agrow .ib-agpath { width: 100%; min-width: 0; height: 30px; padding: 0 8px; border-radius: 7px; border: 1px solid var(--border); background: var(--background); color: var(--foreground); font: inherit; font-family: var(--font-mono); font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-agrow .ib-agpath:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; }
-/* Settings → Agents' launch defaults (LaunchDefaults.tsx): one line each, the value, what sits beside it (Effort's
-   menu) and a short muted hint; a long value is cut in the middle (FileName) so the hint keeps its place. On a phone the
-   hint takes the next line when the line has no room. */
+/* Settings → Agents' Claude settings file (LaunchSettingsFile.tsx): one line, the value and a short muted hint; a long
+   value is cut in the middle (FileName) so the hint keeps its place. On a phone the hint takes the next line when the
+   line has no room. */
 .ib-agrow .ib-aglv { display: flex; align-items: center; gap: 4px 10px; min-width: 0; }
 .ib-agrow .ib-aglv > .ib-agval { display: block; min-width: 0; max-width: 100%; }
 .ib-agrow .ib-aglv > .ib-agpath { flex: 1 1 200px; width: auto; }
-.ib-agrow .ib-aglv > .ib-agselect { flex: none; height: 26px; }
 .ib-agrow .ib-aghint { flex: none; }
 .ib-agrow .ib-agsub { grid-column: 2 / 4; margin-top: -2px; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; display: flex; gap: 6px; align-items: flex-start; color: var(--muted-foreground); }
 .ib-agrow .ib-agsub.ib-agwarn { color: color-mix(in oklch, var(--warning) 80%, var(--foreground)); }
@@ -4724,7 +4723,6 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .pn-inbox .ib-cp-opt.ib-cp-lchopt:hover, .pn-inbox .ib-cp-opt.ib-cp-lchopt:focus-visible { background: color-mix(in oklch, var(--muted) 80%, transparent); outline: none; }
 :root.light .pn-inbox .ib-cp-opt.ib-cp-lchopt:is(:hover, :focus-visible) { background: var(--muted); }
 .ib-cp-lchopt .ib-cp-op { display: flex; gap: 0.4em; align-items: baseline; }
-.ib-cp-lchopt .ib-cp-of { display: inline; }
 .ib-cp-to[data-start] { flex-wrap: wrap; row-gap: 0; }
 /* Trust and start (approval "inbox-launch-trust-compose"). The question circle, quiet as any icon button unless the folder has hooks or similar;
    its details, the Inbox's popover at the button (`.ib-state.ib-nmpop`, a sheet on a phone), over the dialog: nothing under it moves. */
@@ -10700,7 +10698,6 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
 .pn-inbox .ib-dd-box .ib-btn { height: 36px; flex: none; max-width: 50%; }
 .ib-dd-box .ib-btn > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ib-dd-who { margin-top: 8px; }
-.pn-inbox .ib-agselect { max-width: 100%; height: 30px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font: inherit; font-size: var(--ib-fs-13, 13px); }
 .ib-dd-who select { max-width: 100%; height: 30px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font: inherit; font-size: var(--ib-fs-13, 13px); }
 .ib-sgroup > p.ib-dd-note { margin: 10px 0; }
 @media (max-width: 480px) {

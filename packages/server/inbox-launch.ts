@@ -84,7 +84,7 @@ import { createDriveList } from "./inbox-drives";
 import { checkGitRemote, cloneTarget, defaultCloneFolder, originKeyOf, readLastCloneFolder, runGitClone, tildeOf, writeLastCloneFolder, type CloneRun } from "./inbox-launch-clone";
 import { parseInboxGitUrl } from "@plannotator/core/inbox-git-url";
 import { inboxLaunchNotReadyWords } from "@plannotator/core/inbox-launch-ready";
-import { inboxLaunchTokenOk, LaunchChoiceError, parseLaunchChoice, type InboxLaunchChoice } from "@plannotator/core/inbox-launch-choice";
+import { LaunchChoiceError, parseLaunchChoice, type InboxLaunchChoice } from "@plannotator/core/inbox-launch-choice";
 import { readLastLaunchChoice, withinLaunchWait, writeLastLaunchChoice } from "./inbox-launch-choice";
 import { claudeSettingsFilePath, readClaudeSettingsFile } from "./inbox-launch-claude-settings-file";
 import { accessSync, appendFileSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmdirSync, rmSync, statSync } from "node:fs";
@@ -1279,19 +1279,6 @@ ${result.text}`);
         if (config().settingsFile !== (typed || null)) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
         return json({ launch: settingsState() });
       }
-      if ("model" in body || "effort" in body) {
-        // Settings → Agents' Claude Code Model and Effort: the default a launch takes when compose leaves "Default".
-        // Empty or null drops the key (Claude Code's own default). A model is a plain token (an alias or a full name).
-        const field = "model" in body ? "model" : "effort";
-        const raw = body[field];
-        const value = typeof raw === "string" ? raw.trim() : raw;
-        if (value !== null && value !== "" && !inboxLaunchTokenOk(value)) throw new InboxError("validation_error", field === "model" ? "Give a model name, such as opus." : "effort: a level.", { field });
-        const efforts = (claude.settingsState() as { efforts: string[] }).efforts;
-        if (field === "effort" && value && !efforts.includes(value as string)) throw new InboxError("validation_error", `effort: one of ${efforts.join(", ")}.`, { field });
-        saveConfig({ inboxLaunch: { [field]: value || undefined } as { model?: string; effort?: string } });
-        if (config()[field] !== (value || null)) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
-        return json({ launch: settingsState() });
-      }
       if (typeof body.full_permissions !== "boolean") throw new InboxError("validation_error", "full_permissions: a boolean.", { field: "full_permissions" });
       saveConfig({ inboxLaunch: { fullPermissions: body.full_permissions } });
       if (config().fullPermissions !== body.full_permissions) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
@@ -1691,18 +1678,16 @@ ${result.text}`);
         }
         throw new InboxError("agent_unavailable", `${host.name} can't be started here: ${ok.reason}. Nothing was sent.`);
       }
-      // Model and effort: the Send's, field by field, else Settings → Agents' default; an effort the agent doesn't list,
-      // or a choice for an agent that offers none, is refused before anything is written.
+      // Model and effort: the Send's only (none: no flag, the agent's own CLI decides); an effort the agent doesn't
+      // list, or a choice for an agent that offers none, is refused before anything is written.
       // Waited on a moment at most; lists not read yet (a slow CLI) check the tokens only, never refuse the start.
       const lists = host.choices ? await withinLaunchWait(host.choices()) : null;
       if (target.choice && !host.choices) throw new InboxError("validation_error", `${host.name} takes no model or effort from the Inbox. Nothing was sent.`, { field: "to.launch.model" });
       if (target.choice?.effort && lists && !lists.efforts.includes(target.choice.effort)) {
         throw new InboxError("validation_error", `${host.name} takes ${lists.effort_word.toLowerCase()} ${lists.efforts.join(", ")}. Nothing was sent.`, { field: "to.launch.effort" });
       }
-      // Settings → Agents' defaults are Claude Code's, read from config.json whether or not its lists could be read.
-      const defaults = host.agent === "claude-code" ? { model: config().model ?? undefined, effort: config().effort ?? undefined } : {};
-      const model = target.choice?.model ?? defaults.model;
-      const effort = target.choice?.effort ?? defaults.effort;
+      const model = target.choice?.model;
+      const effort = target.choice?.effort;
       const id = inboxId("lch");
       // How it starts, fixed for this launch (the host's `startOf`: for Claude Code the switch, the person's own
       // setup with this folder's settings, and the last finished shell read, however old; the start reads the
@@ -1862,7 +1847,7 @@ ${result.text}`);
           state.lastAvailable = ok;
           // `scratch_trusted`: whether it starts in the scratch root without a trust prompt (the trust-once row).
           if (!ok.ok) return [];
-          // Model and Effort (compose's menu on the row): the CLI's lists, this machine's default and the last choice.
+          // Model and Effort (compose's menu on the row): the CLI's lists and the last choice.
           // A moment at most: a CLI that can't list them (or is slow to) is offered as before, with no menu.
           const lists = host.choices ? await withinLaunchWait(host.choices()) : null;
           const last = lists ? readLastLaunchChoice(options.dataDir, host.agent) : null;

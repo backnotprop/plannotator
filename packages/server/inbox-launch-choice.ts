@@ -42,7 +42,7 @@ export function writeLastLaunchChoice(dataDir: string, agent: string, choice: In
   renameSync(temp, file);
 }
 
-export type LaunchChoiceLists = Omit<InboxLaunchChoices, "default" | "last">;
+export type LaunchChoiceLists = Omit<InboxLaunchChoices, "last">;
 
 /** How long a launch offer (compose's read, a Send) waits on a host's lists before going on without them. */
 export const LAUNCH_CHOICES_WAIT_MS = 250;
@@ -86,7 +86,5 @@ export function launchChoiceCache(load: () => Promise<LaunchChoiceLists | null>,
     reading = { key, answer };
     return answer;
   };
-  /** What was read last, without reading (Settings → Agents' menus, drawn at once): null before any read. */
-  read.kept = (): LaunchChoiceLists | null => kept?.value ?? null;
   return read;
 }

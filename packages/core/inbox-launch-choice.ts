@@ -5,7 +5,7 @@
  *
  * The lists come from the CLI's own `--help` on each machine (`parseClaudeChoices`, `parsePiChoices`), so a new
  * alias or level shows with the CLI that brings it; the constants below are only the fallback when the help can't
- * be read. A full model name the menu doesn't list can still be set in Settings → Agents (Claude Code's Model).
+ * be read. "Default" passes nothing: the agent starts on what its own CLI would use.
  */
 
 /** One launch's choice. Absent: pass nothing, the agent's own default applies (as before this existed). */
@@ -22,8 +22,6 @@ export interface InboxLaunchChoices {
   efforts: string[];
   /** The word the CLI uses for effort: "Effort" (Claude Code), "Thinking" (Pi). */
   effort_word: string;
-  /** Settings → Agents' default on that machine (Claude Code only): what "Default" means there. */
-  default?: InboxLaunchChoice;
   /** The last choice sent to this agent on that machine (`<dataDir>/inbox/launch/last-choice.json`): the menu starts on it. */
   last?: InboxLaunchChoice;
 }
@@ -53,7 +51,7 @@ const words = (list: string) =>
  * and the levels `--effort` lists ("(low, medium, high, xhigh, max)"). Help wraps lines, so whitespace is folded first.
  * Either list unreadable: the fallback's.
  */
-export function parseClaudeChoices(help: string): Omit<InboxLaunchChoices, "default" | "last"> {
+export function parseClaudeChoices(help: string): Omit<InboxLaunchChoices, "last"> {
   const text = help.replace(/\s+/g, " ");
   const model = /--model <model>.*?\(e\.g\. ([^)]*)\)/.exec(text);
   const effort = /--effort <level>[^(]*\(([^)]*)\)/.exec(text);
@@ -70,7 +68,7 @@ export function parseClaudeChoices(help: string): Omit<InboxLaunchChoices, "defa
  * `pi --help` (`--thinking <level>  Set thinking level: off, minimal, …`) and `pi --list-models` (a table: provider,
  * model, …; only the providers Pi can use here). A model is `provider/model`, which `--model` takes as it is.
  */
-export function parsePiChoices(help: string, listModels: string | null): Omit<InboxLaunchChoices, "default" | "last"> {
+export function parsePiChoices(help: string, listModels: string | null): Omit<InboxLaunchChoices, "last"> {
   const text = help.replace(/\s+/g, " ");
   const thinking = /--thinking <level> Set thinking level: (.*?)(?: --|$)/.exec(text);
   const efforts = thinking ? words(thinking[1]!) : [];

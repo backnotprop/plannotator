@@ -485,7 +485,10 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const path = join(dir, "settings.json");
     const isDefaultDataDir = resolve(ctx.dataDir) === resolve(getDefaultPlannotatorDataDir(ctx.homeDir));
+    // config.json's hand-set `inboxLaunch.model` (never written by the window; the real-CLI smoke sets haiku).
+    const model = ctx.config().model;
     const ours = {
+      ...(model ? { model } : {}),
       env: launchSettingsEnv(login, {
         launchId: launch.id,
         key: randomBytes(32).toString("hex"),
@@ -505,12 +508,6 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
     return path;
   };
 
-  /**
-   * The launch's model and effort: fixed on the record at Send. A launch made before they were recorded (no `model`
-   * key and no `effort` key) still takes the hidden `inboxLaunch.model`, as it did when it was made.
-   */
-  const choiceOf = (launch: InboxLaunchRecord) =>
-    launch.model !== undefined || launch.effort !== undefined ? { model: launch.model, effort: launch.effort } : { model: ctx.config().model ?? undefined };
   let version: string | null = null;
   const choiceLists = launchChoiceCache(async () => {
     // Killed at its deadline (the CLI itself, never its group). Help that names no `--effort` lists nothing: no menu.
@@ -585,13 +582,8 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
       return { ok: true, version: found };
     },
 
-    /** The Model and Effort lists of the installed CLI (its `--help`, read once per version), with Settings → Agents' default. */
-    async choices() {
-      const lists = await choiceLists(version);
-      if (!lists) return null;
-      const { model, effort } = ctx.config();
-      return { ...lists, ...(model || effort ? { default: { ...(model ? { model } : {}), ...(effort ? { effort } : {}) } } : {}) };
-    },
+    /** The Model and Effort lists of the installed CLI (its `--help`, read once per version). */
+    choices: () => choiceLists(version),
 
     /** The switch, the person's own Claude setup (with this folder's settings) and the last finished shell read. */
     startOf: (folder: string) => startNow(claudeSetup(folder)),
@@ -655,7 +647,8 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
         name: input.name,
         settingsPath,
         mode: modeOf(launch),
-        choice: launchChoiceArgs(CLAUDE, choiceOf(launch)),
+        // The launch's model and effort, fixed on the record at Send; none: no flag, Claude Code's own.
+        choice: launchChoiceArgs(CLAUDE, { model: launch.model, effort: launch.effort }),
         allowBypass: launch.bypass_available === true,
         environment: loginEnvironment(input.login),
       });
@@ -712,14 +705,9 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
       const setup = claudeSetup();
       const start = startNow(setup);
       const follows = setting === null && start.wantsFull ? (setup.defaultMode === "bypassPermissions" ? "claude" : "shell") : null;
-      // Model, Effort and Claude settings file (Settings → Agents' defaults): the lists as last read from the CLI.
-      const lists = choiceLists.kept() ?? parseClaudeChoices("");
-      const { model, effort, settingsFile } = ctx.config();
+      // Claude settings file (Settings → Agents), as typed and as shown.
+      const { settingsFile } = ctx.config();
       return {
-        model,
-        effort,
-        models: lists.models,
-        efforts: lists.efforts,
         settings_file: settingsFile,
         ...(settingsFile ? { settings_file_shown: ctx.displayFolder(claudeSettingsFilePath(settingsFile, ctx.homeDir)) } : {}),
         full_permissions: setting ?? start.wantsFull,

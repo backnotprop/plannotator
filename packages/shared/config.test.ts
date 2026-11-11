@@ -52,7 +52,7 @@ import type { PlannotatorConfig } from "./config";
 describe("resolveInboxLaunch", () => {
   test("on unless enabled is false; the model only when it is a plain model name, never settings of another shape", () => {
     // fullPermissions null: never set (a launch follows the login shell); a value once set, either way.
-    expect(resolveInboxLaunch({}, "darwin")).toEqual({ enabled: true, fullPermissions: null, model: null, effort: null, settingsFile: null, scratchDir: null });
+    expect(resolveInboxLaunch({}, "darwin")).toEqual({ enabled: true, fullPermissions: null, model: null, settingsFile: null, scratchDir: null });
     // Absent is on (0.29's default) on macOS and Linux; an explicit false, as Settings → Agents' switch writes it, is off.
     const on = (config: unknown, platform: NodeJS.Platform = "linux") => resolveInboxLaunch(config as PlannotatorConfig, platform).enabled;
     expect(on({ inboxLaunch: {} })).toBe(true);
@@ -68,11 +68,11 @@ describe("resolveInboxLaunch", () => {
     expect(on({}, "win32")).toBe(false);
     expect(on({ inboxLaunch: { fullPermissions: true } }, "win32")).toBe(false);
     expect(on({ inboxLaunch: { enabled: true } }, "win32")).toBe(true);
-    expect(resolveInboxLaunch({ inboxLaunch: { enabled: true, model: "haiku" } })).toEqual({ enabled: true, fullPermissions: null, model: "haiku", effort: null, settingsFile: null, scratchDir: null });
+    expect(resolveInboxLaunch({ inboxLaunch: { enabled: true, model: "haiku" } })).toEqual({ enabled: true, fullPermissions: null, model: "haiku", settingsFile: null, scratchDir: null });
     expect(resolveInboxLaunch({ inboxLaunch: { fullPermissions: false } }).fullPermissions).toBe(false);
     expect(resolveInboxLaunch({ inboxLaunch: { fullPermissions: true } }).fullPermissions).toBe(true);
     expect(resolveInboxLaunch({ inboxLaunch: { model: "opus[1m]" } }).model).toBe("opus[1m]");
-    for (const model of ["haiku --dangerously-skip-permissions", "--dangerously-skip-permissions", "a\"b", "", { hooks: {} }, "x".repeat(129)]) {
+    for (const model of ["haiku --dangerously-skip-permissions", "a\"b", "", { hooks: {} }, "x".repeat(65)]) {
       expect(resolveInboxLaunch({ inboxLaunch: { model } } as unknown as PlannotatorConfig).model).toBeNull();
     }
   });

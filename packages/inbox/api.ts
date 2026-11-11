@@ -692,11 +692,6 @@ export interface InboxLaunchSettings {
   /** Where new scratch folders go (absolute), and as shown (`~/…`). Absent from an older Inbox. */
   scratch_dir?: string;
   scratch_dir_shown?: string;
-  /** Claude Code's Model and Effort defaults (`inboxLaunch.model`, `.effort`; null: Claude Code's own), and the lists its CLI documents. Absent from an older Inbox. */
-  model?: string | null;
-  effort?: string | null;
-  models?: string[];
-  efforts?: string[];
   /** Claude Code's "Claude settings file" (`inboxLaunch.settingsFile`, as typed; null: none), and as shown (`~/…`). Its contents never reach the window. */
   settings_file?: string | null;
   settings_file_shown?: string;
@@ -1914,11 +1909,9 @@ export const inboxApi = {
   launchSettings: (fullPermissions: boolean) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { full_permissions: fullPermissions }),
   /** Settings → Agents' "Start agents from New message": writes config.json `inboxLaunch.enabled`; New message follows at once. */
   launchEnabled: (enabled: boolean) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { enabled }),
-  /** Settings → Agents' "Scratch folders": a full path (`~/…` too), or null for the default. */
-  /** Settings → Agents' Claude Code Model or Effort default: a value, or null for Claude Code's own. */
-  launchDefault: (field: 'model' | 'effort', value: string | null) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { [field]: value }),
   /** Settings → Agents' "Claude settings file": a full path (`~/…` too), or null for none. */
   launchSettingsFile: (path: string | null) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { settings_file: path }),
+  /** Settings → Agents' "Scratch folders": a full path (`~/…` too), or null for the default. */
   launchScratchDir: (path: string | null) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { scratch_dir: path }),
   readdress: (messageId: string, to: { host: string; session: string }) =>
     post<{ message: InboxMessage; row: InboxListRow | null }>(messageUrl(messageId, `/to`), { to }),

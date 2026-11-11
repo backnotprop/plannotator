@@ -1128,7 +1128,7 @@ export interface InboxLaunchRecord {
    */
   bypass_available?: true;
   /**
-   * Model and effort it started with (compose's choice, else Settings → Agents' default; `inbox-launch-choice.ts`),
+   * Model and effort it started with (compose's choice; `inbox-launch-choice.ts`),
    * fixed at Send: a start, Try again and every restart pass them. Absent: none, the agent's own default.
    */
   model?: string;

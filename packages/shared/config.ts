@@ -732,7 +732,7 @@ export interface PlannotatorConfig {
    * absolute path; default `<dataDir>/scratch`). Moving it applies to new
    * folders only.
    */
-  inboxLaunch?: { enabled?: boolean; fullPermissions?: boolean; model?: string; effort?: string; settingsFile?: string; scratchDir?: string };
+  inboxLaunch?: { enabled?: boolean; fullPermissions?: boolean; model?: string; settingsFile?: string; scratchDir?: string };
   /**
    * Inject a Plannotator Flavored Markdown reminder into every EnterPlanMode
    * call so the agent is aware it can enrich plans with code-file links,
@@ -1399,12 +1399,8 @@ export function resolveDefaultDiffTypeFor(
   return v === 'jj-current' || v === 'jj-last' || v === 'jj-line' || v === 'jj-evolog' || v === 'jj-all' ? v : 'jj-current';
 }
 
-
-/**
- * A launch model or effort as it may go on argv: `INBOX_LAUNCH_TOKEN` in packages/core/inbox-launch-choice.ts (kept
- * here too: the Pi extension vendors this file without core). Never a leading "-".
- */
-const inboxLaunchTokenOk = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:/@[\]-]{0,127}$/.test(value);
+/** A model name as Claude Code takes it (`haiku`, `claude-opus-4-1`, `opus[1m]`): letters, digits, `.`, `_`, `-`, `[`, `]`. */
+const LAUNCH_MODEL = /^[\w.\-[\]]{1,64}$/;
 
 /** A hand-edited on/off: false, 0, "false", "0", "off", "no" are off; true, 1, "true", "1", "on", "yes" on; anything else says nothing. */
 function parseLaunchFlag(value: unknown): boolean | undefined {
@@ -1422,14 +1418,14 @@ function parseLaunchFlag(value: unknown): boolean | undefined {
  * on, but off on Windows, where launch has no support (Claude Code's mod, which carries the messages, stands down
  * there): only an explicit true turns it on. Any false-like value (`false`, `0`, `"false"`, `"0"`, `"off"`, `"no"`),
  * in `enabled` or as `inboxLaunch` itself, is off. A config.json that does not parse reads as `{}` (`loadConfig`),
- * so as the default. `model` and `effort` (Settings → Agents' Claude Code defaults) only as plain tokens
- * (`INBOX_LAUNCH_TOKEN`: never one that starts with "-"); `settingsFile` (Claude settings file) as typed, read at each start;
+ * so as the default. `model` only when it is a plain model name;
+ * `settingsFile` (Claude settings file) as typed, read at each start;
  * `scratchDir` only when it is an absolute path other than `/` (null: the default, `<dataDir>/scratch`).
  */
 export function resolveInboxLaunch(
   config: PlannotatorConfig,
   platform: NodeJS.Platform = process.platform,
-): { enabled: boolean; fullPermissions: boolean | null; model: string | null; effort: string | null; settingsFile: string | null; scratchDir: string | null } {
+): { enabled: boolean; fullPermissions: boolean | null; model: string | null; settingsFile: string | null; scratchDir: string | null } {
   const raw: unknown = config.inboxLaunch;
   const value = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as NonNullable<PlannotatorConfig["inboxLaunch"]>) : {};
   // `"inboxLaunch": false` (or "off") by hand: the whole feature off.
@@ -1438,8 +1434,7 @@ export function resolveInboxLaunch(
     enabled: whole ?? parseLaunchFlag(value.enabled) ?? platform !== "win32",
     // null: the person never set the switch (a launch follows their login shell).
     fullPermissions: parseConfigBoolean(value.fullPermissions) ?? null,
-    model: inboxLaunchTokenOk(value.model) ? value.model : null,
-    effort: inboxLaunchTokenOk(value.effort) ? value.effort : null,
+    model: typeof value.model === "string" && LAUNCH_MODEL.test(value.model) ? value.model : null,
     settingsFile: typeof value.settingsFile === "string" && value.settingsFile.trim() ? value.settingsFile.trim() : null,
     scratchDir: typeof value.scratchDir === "string" && isAbsolute(value.scratchDir) && resolve(value.scratchDir) !== resolve("/") ? resolve(value.scratchDir) : null,
   };

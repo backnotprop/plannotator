@@ -221,4 +221,3 @@
   .ib-tour-coach.ib-ctip[data-side="above"] { top: auto; }
 }
 .ib-cp-picker[data-phone] .ib-cp-lchopt .ib-cp-op { color: var(--foreground); font-size: inherit; }
-.ib-cp-picker[data-phone] .ib-cp-lchopt .ib-cp-of { display: inline; }

@@ -64,7 +64,7 @@ export function LaunchChoiceMenu({
     button?.focus();
   };
   const effortWord = choices.effort_word;
-  const column = (field: 'model' | 'effort', caption: string, values: string[], fallback: string | undefined, show: (value: string) => string) => (
+  const column = (field: 'model' | 'effort', caption: string, values: string[], show: (value: string) => string) => (
     <div className="ib-cp-list ib-cp-lchcol" role="group" aria-label={caption} data-compose-choice-menu={field}>
       <div className="ib-cp-cap">{caption}</div>
       {[null, ...values].map((value) => {
@@ -86,7 +86,6 @@ export function LaunchChoiceMenu({
           >
             <span className="ib-cp-op">
               {value === null ? 'Default' : show(value)}
-              {value === null && fallback && <span className="ib-cp-of"> {show(fallback)}</span>}
             </span>
             <span className="ib-cp-check" aria-hidden="true">
               {on && <Icon name="check" size={15} />}
@@ -109,8 +108,8 @@ export function LaunchChoiceMenu({
         </div>
       )}
       <div className="ib-cp-lchcols">
-        {models.length > 0 && column('model', 'Model', models, choices.default?.model, shortLaunchModel)}
-        {choices.efforts.length > 0 && column('effort', effortWord, choices.efforts, choices.default?.effort, (v) => v)}
+        {models.length > 0 && column('model', 'Model', models, shortLaunchModel)}
+        {choices.efforts.length > 0 && column('effort', effortWord, choices.efforts, (v) => v)}
       </div>
     </div>
   );
