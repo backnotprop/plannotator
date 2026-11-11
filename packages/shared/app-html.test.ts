@@ -5,7 +5,6 @@ import { acceptsGzip, encodeAppHtml, negotiateAppHtmlEncoding, prepareAppHtml } 
 
 describe("negotiateAppHtmlEncoding", () => {
   test.each([
-    // [Accept-Encoding, expected]
     [undefined, "identity"],
     [null, "identity"],
     ["", "identity"],
@@ -72,11 +71,9 @@ describe("prepareAppHtml", () => {
 
   test("each body is compressed once per encoding and then reused", async () => {
     const html = makeAppHtml("cache-unit");
-    // Concurrent first requests share one in-flight compression.
     const [a, b] = await Promise.all([encodeAppHtml(html, "br"), encodeAppHtml(html, "br")]);
     expect(a).toBe(b);
     expect(await encodeAppHtml(html, "br")).toBe(a);
-    // A different body does not collide with the cached one.
     const other = await encodeAppHtml(makeAppHtml("cache-unit-other"), "br");
     expect(other).not.toBe(a);
     expect(await encodeAppHtml(html, "br")).toBe(a);

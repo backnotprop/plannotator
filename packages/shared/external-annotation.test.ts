@@ -1,8 +1,4 @@
-/**
- * Scope-aware review annotation validation: line requires a file and line,
- * file requires a file, general requires neither — so a general (review-level)
- * finding submits cleanly while a broken line finding is still rejected.
- */
+/** Scope-aware validation: line requires a file and line, file requires a file, general requires neither. */
 import { describe, expect, test } from "bun:test";
 import { createAnnotationStore, transformPlanInput, transformReviewInput, validateAnnotationPatch } from "./external-annotation";
 
@@ -106,10 +102,7 @@ describe("annotation store update — identity fields are pinned", () => {
   type Ann = { id: string; source?: string; text?: string; dismissed?: boolean };
 
   test("update cannot clear, change, or set `source` (the injection guard field)", () => {
-    // #1229's exporter defense keys on `source`: annotations carrying one are
-    // tool-submitted and never receive verbatim SKILL.md injection. PATCH is
-    // an unauthenticated localhost surface, so `{"source": ""}` must not be
-    // able to strip the marker and re-arm injection.
+    // Annotations carrying a `source` are tool-submitted and never get verbatim SKILL.md injection. PATCH is an unauthenticated localhost surface, so `{"source": ""}` must not strip the marker.
     const store = createAnnotationStore<Ann>();
     store.add([{ id: "a1", source: "rogue-agent", text: "apply $skill" }]);
 
@@ -149,9 +142,7 @@ describe("annotation store update — identity fields are pinned", () => {
   });
 });
 
-// Owner decision 5: agents may read answers to `:::question` blocks but never
-// write them. What regresses: the external-annotations API starts passing a
-// `questionAnswer` through, so a script or agent could answer for the human.
+// Agents may read answers to `:::question` blocks but never write them: the external-annotations API must not pass a `questionAnswer` through.
 describe("external annotations never carry questionAnswer", () => {
   const questionAnswer = { v: 1, key: "q-1a2b3c4d", kind: "single", prompt: "Which?", selected: ["A"] };
 

@@ -1,7 +1,4 @@
-/**
- * The browser rule both runtimes share. Pure: every case hands the resolver
- * its own env object, nothing is launched and process.env is never touched.
- */
+/** Pure: every case hands the resolver its own env object; process.env is never touched. */
 import { describe, expect, test } from "bun:test";
 import {
   BROWSER_NONE_VALUES,
@@ -12,9 +9,7 @@ import {
 } from "./browser-intent";
 
 describe("resolveBrowserIntent", () => {
-  // A "none" value on PLANNOTATOR_BROWSER (or --browser, which sets it) opens
-  // nothing, whatever BROWSER says. Before #756 every one of these opened
-  // nothing; #756 made them fall through to the system default by mistake.
+  // A "none" value on PLANNOTATOR_BROWSER (or --browser) opens nothing, whatever BROWSER says.
   const none: [Record<string, string>, string][] = [
     [{ PLANNOTATOR_BROWSER: "none" }, "none"], // no-browser-guard: sentinel under test
     [{ PLANNOTATOR_BROWSER: "false" }, "false"], // no-browser-guard: sentinel under test
@@ -36,9 +31,7 @@ describe("resolveBrowserIntent", () => {
     expect([...BROWSER_NONE_VALUES].sort()).toEqual(["0", "1", ":", "false", "no", "none", "off", "true"]);
   });
 
-  // BROWSER is shared with other tools, and hosts set it (Claude Code's agent
-  // view sets BROWSER=true): its no-op values stay "unset" (#756), so the
-  // default chain still runs.
+  // BROWSER is shared with other tools and hosts set it (Claude Code's agent view sets BROWSER=true): its no-op values stay "unset".
   const defaults: Record<string, string>[] = [
     {},
     { PLANNOTATOR_BROWSER: "" },
@@ -60,7 +53,7 @@ describe("resolveBrowserIntent", () => {
     [{ PLANNOTATOR_BROWSER: "/usr/bin/true" }, { kind: "explicit", browser: "/usr/bin/true", source: "PLANNOTATOR_BROWSER" }],
     [{ PLANNOTATOR_BROWSER: "open-in-vscode", BROWSER: "firefox" }, { kind: "explicit", browser: "open-in-vscode", source: "PLANNOTATOR_BROWSER" }],
     [{ BROWSER: "firefox" }, { kind: "explicit", browser: "firefox", source: "BROWSER" }],
-    // BROWSER keeps #756's six values only: anything else is a command.
+    // BROWSER no-op values are a fixed set: anything else is a command.
     [{ BROWSER: "off" }, { kind: "explicit", browser: "off", source: "BROWSER" }],
     [{ PLANNOTATOR_BROWSER: "", BROWSER: "firefox" }, { kind: "explicit", browser: "firefox", source: "BROWSER" }],
   ];

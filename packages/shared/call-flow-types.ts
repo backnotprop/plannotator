@@ -1,5 +1,3 @@
-/** Browser-safe contracts for Plannotator's optional CallDiff integration. */
-
 import type { CallFlowLanguageId } from "./call-flow-languages";
 
 export type CallFlowNodeStatus = "same" | "added" | "removed";
@@ -22,24 +20,19 @@ interface CallFlowTreeBase {
 }
 
 interface CallFlowTreeWithRaw extends CallFlowTreeBase {
-  /** Canonical colorless CallDiff rendering for this complete entry tree. */
   raw: string;
-  /** One-based line where `raw` begins inside the response-level raw output. */
   rawLineStart: number;
 }
 
 interface CallFlowTreeWithoutRaw extends CallFlowTreeBase {
-  /** Omitted when upstream's per-entry rendering cannot be aligned safely. */
   raw?: undefined;
   rawLineStart?: undefined;
 }
 
-/** One structured inferred entry tree, optionally aligned to canonical raw output. */
 export type CallFlowTree = CallFlowTreeWithRaw | CallFlowTreeWithoutRaw;
 
 export interface CallFlowFileImpact {
   entry: string;
-  /** Every inferred entry path containing this same changed source node. */
   entries: string[];
   key: string;
   label: string;
@@ -79,12 +72,9 @@ export interface CallFlowAdvert {
   version?: string;
   reason?: string;
   message?: string;
-  /** True only when the managed install flow applies; its Node preflight can still require user action. */
   installable?: boolean;
   languages?: CallFlowLanguageAdvert[];
-  /** Static current-review footprint shown at the disabled consent boundary; it never starts work. */
   consentPlan?: CallFlowInstallPlan;
-  /** Exact missing targets the managed installer can install now. */
   installPlan?: CallFlowInstallPlan;
 }
 
@@ -112,14 +102,8 @@ export interface CallFlowSkippedLanguage {
   installSizeBytes: number;
 }
 
-/** Coarse phases reported while the opt-in runtime install runs. */
 export type CallFlowInstallStage = "downloading" | "verifying" | "installing-deps" | "building";
 
-/**
- * Wire contract for POST /api/call-flow/install and
- * GET /api/call-flow/install-status. done identifies the completed target
- * set; error persists until the next install POST retries.
- */
 export type CallFlowInstallStatus =
   | { state: "idle" }
   | { state: "running"; stage: CallFlowInstallStage; languageIds: CallFlowLanguageId[]; currentLanguageId?: CallFlowLanguageId }
@@ -135,7 +119,6 @@ export type CallFlowResponse =
       from: string;
       to: string;
       message?: string;
-      /** Canonical colorless CallDiff rendering, including source locations. */
       raw: string;
       trees: CallFlowTree[];
       fileImpacts: Record<string, CallFlowFileImpact[]>;
@@ -154,7 +137,6 @@ export interface ParsedCallDiffWorkerResult {
   from: string;
   to: string;
   message?: string;
-  /** Canonical colorless CallDiff rendering, including source locations. */
   raw: string;
   trees: CallFlowTree[];
   diagnostics: CallFlowDiagnostic[];
@@ -206,7 +188,6 @@ function boundedRelativeFile(value: unknown): string | undefined {
   return normalized.slice(0, MAX_TEXT_LENGTH);
 }
 
-/** Parse and bound the untrusted JSON emitted by the isolated Node worker. */
 export function parseCallDiffWorkerResult(value: unknown): ParsedCallDiffWorkerResult {
   if (!isRecord(value) || value.protocol !== 1 || value.ok !== true) {
     const message = isRecord(value) && typeof value.message === "string"
@@ -217,11 +198,7 @@ export function parseCallDiffWorkerResult(value: unknown): ParsedCallDiffWorkerR
   if (!isRecord(value.result) || !Array.isArray(value.result.trees)) {
     throw new Error("CallDiff worker response is missing its diff trees.");
   }
-  // A large-but-valid result (many small entry trees — common in Swift, TS,
-  // and other per-function languages) degrades instead of failing: keep the
-  // first MAX_TREES trees and say so in diagnostics (#1351). The caps that
-  // guard against genuinely unbounded worker output (total nodes, depth, raw
-  // length) still throw below.
+  // A large-but-valid result degrades instead of failing: keep the first MAX_TREES trees and say so in diagnostics. The caps against unbounded worker output still throw below.
   const totalTreeCount = value.result.trees.length;
   const truncatedTrees = totalTreeCount > MAX_TREES;
   const boundedTreeCandidates = truncatedTrees
@@ -318,11 +295,6 @@ function treeContainsChangedNodeInFiles(node: CallFlowNode, files: ReadonlySet<s
   return node.children.some((child) => treeContainsChangedNodeInFiles(child, files));
 }
 
-/**
- * Select complete inferred entry trees that contain a changed node in one of
- * the requested files. The trees are never pruned: the Lens shows the same
- * parent/child context as the Dock, filtered only at the entry-tree boundary.
- */
 export function getCallFlowTreesForFiles(
   trees: readonly CallFlowTree[],
   filePaths: readonly string[],
@@ -332,7 +304,6 @@ export function getCallFlowTreesForFiles(
   return trees.filter(({ tree }) => treeContainsChangedNodeInFiles(tree, files));
 }
 
-/** Flatten changed call sites once so the Dock and per-file Lens share counts. */
 export function indexCallFlowImpacts(trees: readonly CallFlowTree[]): {
   fileImpacts: Record<string, CallFlowFileImpact[]>;
   summary: CallFlowSummary;

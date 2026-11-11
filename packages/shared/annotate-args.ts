@@ -1,44 +1,13 @@
 /**
- * Parse CLI-style args arriving as a single whitespace-delimited string.
- *
- * Extracts known annotate flags from the remainder, which is treated as the
- * target path. Leading `@` is
- * stripped via the shared at-reference helper — reference-mode is primary.
- * Scoped-package-style literal `@` paths are handled by a fallback that the
- * downstream resolver opts into (see at-reference.ts).
- *
- * Used by the OpenCode plugin and Pi extension, where the whole args string
- * arrives pre-joined from the harness slash-command dispatcher. The Claude
- * Code binary parses argv directly with indexOf/splice and does not use
- * this helper.
- *
- * Implementation: walks the raw string once, preserving whitespace runs and
- * non-whitespace tokens as separate segments. Only known flag tokens
- * (whole-word match) plus one adjacent whitespace run are removed.
- * This keeps double-spaces and tabs inside file paths intact — which
- * matches the pre-PR behavior on `main`, where OpenCode and Pi passed
- * the raw args string straight through to the filesystem resolver.
- *
- * Remaining edge: if a path literally contains a known flag as a standalone
- * whitespace-separated token (e.g. `"Feature --gate spec.md"`), that token
- * is stripped. Supporting this would need shell-style quoting, which isn't
- * worth the complexity for a vanishingly rare naming pattern.
+ * Parses CLI-style args arriving as one whitespace-delimited string (OpenCode, Pi), removing known flags and a leading `@`.
+ * Whitespace runs inside paths are preserved; a path with a known flag as a standalone token has it stripped.
  */
 
 import { stripAtPrefix } from "./at-reference";
 import { stripWrappingQuotes } from "./resolve-file";
 
 export interface ParsedAnnotateArgs {
-  /**
-   * Primary resolution path with any leading `@` stripped (reference-mode
-   * convention). Most call sites should use this directly.
-   */
   filePath: string;
-  /**
-   * Raw path with the `@` prefix preserved (if the user supplied one).
-   * Callers that want the literal-`@` fallback for scoped-package-style
-   * paths pair this with `resolveAtReference` from at-reference.ts.
-   */
   rawFilePath: string;
   gate: boolean;
   json: boolean;
@@ -46,9 +15,7 @@ export interface ParsedAnnotateArgs {
   renderHtml: boolean;
   renderMarkdown: boolean;
   noJina: boolean;
-  /** --app: force a live app session (recognized only with `liveFlags`). */
   app: boolean;
-  /** --static: force the classic conversion pipeline (only with `liveFlags`). */
   static: boolean;
 }
 
@@ -63,18 +30,13 @@ const FLAG_MAP = {
   "--no-jina": "noJina",
 } as const satisfies Record<string, keyof Omit<ParsedAnnotateArgs, "filePath" | "rawFilePath">>;
 
-/** Live-mode flags, recognized only where the host actually supports live
- * app sessions (`liveFlags: true` — Pi today). A host that cannot act on
- * --app must NOT silently strip it: leaving the token in the path keeps the
- * legacy "File not found: --app ..." error, which is honest about the flag
- * being unsupported there. */
+/** Recognized only where the host supports live app sessions; otherwise leaving --app in the path keeps the honest "File not found" error. */
 const LIVE_FLAG_MAP = {
   "--app": "app",
   "--static": "static",
 } as const satisfies Record<string, keyof Omit<ParsedAnnotateArgs, "filePath" | "rawFilePath">>;
 
 export interface ParseAnnotateArgsOptions {
-  /** Recognize --app / --static (hosts with live app annotation support). */
   liveFlags?: boolean;
 }
 
@@ -103,8 +65,7 @@ export function parseAnnotateArgs(raw: string, opts?: ParseAnnotateArgsOptions):
     flags[key] = true;
     keep[j] = false;
 
-    // Drop one adjacent whitespace run so removed flags don't leave dangling
-    // spaces. Prefer trailing whitespace; fall back to leading if at the end.
+    // Drop one adjacent whitespace run so removed flags leave no dangling spaces.
     if (j + 1 < segments.length && segments[j + 1].type === "ws") {
       keep[j + 1] = false;
     } else if (j > 0 && segments[j - 1].type === "ws") {
@@ -112,11 +73,7 @@ export function parseAnnotateArgs(raw: string, opts?: ParseAnnotateArgsOptions):
     }
   }
 
-  // Trim covers the case where two adjacent flags (`... --gate --json`)
-  // both claim the single whitespace between them, leaving a trailing space
-  // after the kept token. Wrapping quotes come from OpenCode/Pi users who
-  // quote paths with spaces (shell muscle memory); strip them here so
-  // downstream callers never see tokenization artifacts.
+  // Trim: two adjacent flags both claim the whitespace between them. Wrapping quotes (users quoting paths with spaces) are stripped here.
   const rawFilePath = stripWrappingQuotes(
     segments
       .filter((_, j) => keep[j])
@@ -131,21 +88,8 @@ export function parseAnnotateArgs(raw: string, opts?: ParseAnnotateArgsOptions):
 }
 
 /**
- * The target words of a slash command's raw annotate arguments (the text
- * `parseAnnotateArgs` takes), known flags dropped, for a host that hands them
- * to `plannotator annotate` as separate arguments so the CLI's tolerant
- * resolution reads them one by one (`. notes.md` opens notes.md).
- *
- * Quotes group a path that holds spaces (`"my notes.md" b.md`) and are
- * dropped. A quote groups only when it opens a word and closes at a word's
- * end; anywhere else it is an ordinary character, so the apostrophes of prose
- * stay inside their words (`it's notes.md, don't` keeps `notes.md` a word of
- * its own). A quote left open is prose too, and that input splits on
- * whitespace alone. Nothing is expanded and a backslash is an ordinary
- * character, so a Windows path keeps its separators.
- *
- * Read from the raw text rather than `rawFilePath`, whose wrapping-quote strip
- * turns `"a b.md" "c d.md"` into `a b.md" "c d.md`.
+ * The target words of a slash command's raw annotate args, known flags dropped, for hosts that pass them to the CLI as separate arguments.
+ * A quote groups only when it opens a word and closes at a word's end, so prose apostrophes stay ordinary; an open quote splits on whitespace alone.
  */
 export function annotateTargetWords(raw: string, opts?: ParseAnnotateArgsOptions): string[] {
   const text = (raw ?? "").trim();

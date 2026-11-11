@@ -1,9 +1,4 @@
-/**
- * The `/api/doc` containment gate. Normalization has to be two-sided: macOS
- * `tmpdir()` is a symlink, so
- * realpath containment against a non-realpathed root would deny legitimate
- * reads for anyone whose root sits under one.
- */
+/** Normalization has to be two-sided: macOS `tmpdir()` is a symlink, so realpath containment against a non-realpathed root would deny legitimate reads. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -156,7 +151,6 @@ describe("resolvePlanLinkedDoc", () => {
 		]) {
 			expect(resolvePlanLinkedDoc(path, dir, planFile)).not.toBe(join(dir, "other-plan.md"));
 		}
-		// The suffix is dropped, so the linked target itself is what is served.
 		expect(resolvePlanLinkedDoc("evidence.md?/../other-plan.md", dir, planFile)).toBe(join(dir, "evidence.md"));
 	});
 

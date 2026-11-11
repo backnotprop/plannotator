@@ -1,31 +1,16 @@
-/**
- * Draft Storage
- *
- * Persists annotation drafts to ~/.plannotator/drafts/ so they survive
- * server crashes. Each draft is keyed by a content hash of the plan/diff
- * it was created against.
- *
- * Runtime-agnostic: uses only node:fs, node:path, node:os, node:crypto.
- */
+/** Persists annotation drafts under the data dir so they survive server crashes, keyed by a content hash. */
 
 import { join } from "path";
 import { mkdirSync, writeFileSync, readFileSync, renameSync, unlinkSync, existsSync } from "fs";
 import { createHash } from "crypto";
 import { getPlannotatorDataDir } from "./data-dir";
 
-/**
- * Get the drafts directory, creating it if needed.
- */
 export function getDraftDir(): string {
   const dir = join(getPlannotatorDataDir(), "drafts");
   mkdirSync(dir, { recursive: true });
   return dir;
 }
 
-/**
- * Generate a stable key from content using truncated SHA-256.
- * Same content always produces the same key across server restarts.
- */
 export function contentHash(content: string): string {
   return createHash("sha256").update(content).digest("hex").slice(0, 16);
 }
@@ -55,12 +40,7 @@ function readTombstoneGeneration(key: string): number | null {
   }
 }
 
-/**
- * Generation recorded by the key's delete tombstone, or null when the key has
- * never been deleted with a generation. Exposed for callers that store one
- * logical draft under several keys (PR review drafts, see review-draft.ts) and
- * must let one key's tombstone guard the others.
- */
+/** Exposed for callers that store one logical draft under several keys, so one key's tombstone can guard the others. */
 export function getDraftTombstoneGeneration(key: string): number | null {
   return readTombstoneGeneration(key);
 }
@@ -98,9 +78,6 @@ function clearTombstone(key: string): void {
   }
 }
 
-/**
- * Save a draft to disk.
- */
 export function saveDraft(key: string, data: object): boolean {
   const draftGeneration = readGeneration((data as { draftGeneration?: unknown }).draftGeneration);
   const deletedGeneration = readTombstoneGeneration(key);
@@ -125,9 +102,6 @@ export function saveDraft(key: string, data: object): boolean {
   return true;
 }
 
-/**
- * Load a draft from disk. Returns null if not found.
- */
 export function loadDraft(key: string): object | null {
   const filePath = draftPath(key);
   try {
@@ -144,9 +118,6 @@ export function loadDraft(key: string): object | null {
   }
 }
 
-/**
- * Delete a draft from disk. No-op if not found.
- */
 export function deleteDraft(key: string, draftGeneration?: number): void {
   const filePath = draftPath(key);
   try {

@@ -1,64 +1,17 @@
 /**
- * Negotiated compression for the single-file app HTML (#1617).
- *
- * Every Plannotator server answers its SPA catch-all with the app page, and
- * the plan and review pages with the code-split chunks packed behind them
- * (./packed-app). Over a slow tunnel the bytes are the load time, so a session
- * reachable over a network sends the page and its text chunks brotli- or
- * gzip-compressed when the client says it can decode it.
- *
- * Shared by the Bun and the Pi node:http servers (through ./packed-app, and
- * the Inbox's own page; vendored to Pi by `apps/pi-extension/vendor.sh`), so
- * the negotiation and the cache cannot drift between runtimes. Only
- * `node:zlib` is used, which both runtimes provide.
- *
- * Which sessions compress (the `compress` argument): remote mode
- * (PLANNOTATOR_REMOTE or SSH detection) and `--tailscale`-published sessions,
- * i.e. exactly the sessions whose browser can be on another device. A plain
- * local session never compresses and its response is unchanged, headers
- * included: on loopback the transfer is free, and measured cold loads were
- * slower with compression, because the first request waits on the one-time
- * ~0.2 s compression pass. The decision deliberately ignores the client
- * address: `tailscale serve` connects from 127.0.0.1 too.
- *
- * Which encoding a client asks for depends on the ORIGIN, not the browser
- * alone: browsers advertise `br` only to secure contexts (HTTPS, and Chromium
- * also to http://localhost / 127.0.0.1). Measured with Playwright: Chromium to
- * http://<LAN IP> sends `gzip, deflate`; WebKit sends `gzip, deflate` to every
- * plain-http origin. So:
- * - direct remote mode (http://<host>:19432, PLANNOTATOR_URL_HOST) is served
- *   GZIP in practice, from every browser;
- * - `--tailscale` (HTTPS through `tailscale serve`) is served brotli;
- * - remote mode reached through an SSH port forward on localhost is served
- *   brotli by Chromium, gzip by Safari.
- * Each server prewarms the ONE encoding its session will most likely use
- * (`prewarmAppHtml`: gzip for remote mode, brotli for --tailscale) at server
- * start, off the event loop, so the page is usually ready before the first
- * request; the other encoding is compressed lazily if a client ever asks.
- *
- * Invariants:
- * - Identity (no `Accept-Encoding`, `identity`, `br;q=0, gzip;q=0`, the VS Code
- *   cookie proxy's forced `identity`) sends the original string untouched; a
- *   compressing session adds only `Vary: Accept-Encoding`.
- * - Each HTML body is compressed at most once per encoding per process, off the
- *   event loop (async zlib), and the result is reused for every later request;
- *   a request that arrives while compression is in flight awaits the same work.
- * - A compression failure falls back to identity rather than failing the page.
+ * Negotiated brotli/gzip compression for the single-file app HTML, only for sessions whose browser can be on another device (remote mode, `--tailscale`). A local session is never compressed: on loopback it measured slower cold.
+ * The decision ignores the client address: `tailscale serve` connects from 127.0.0.1 too.
+ * Browsers advertise `br` only to secure contexts, so direct remote http gets gzip and `--tailscale` (HTTPS) gets brotli.
+ * Identity responses send the original string untouched; each body is compressed once per encoding and reused; a compression failure falls back to identity.
  */
 import * as zlib from "node:zlib";
 
 export type AppHtmlEncoding = "br" | "gzip" | "identity";
 
-/**
- * Brotli quality 5: on the 24.7 MB plan HTML it takes ~0.2 s once and yields
- * 6.77 MB (q4: 7.13 MB in 0.11 s; q6: 6.70 MB in 0.29 s; q11: 6.1 MB in 22 s).
- * The 0.36 MB it saves over q4 is ~1.8 s on a 206 KB/s link, paid for with
- * ~0.1 s of one-time CPU. Gzip level 6 is zlib's default balance.
- */
+/** Brotli quality 5 balances ~0.2 s one-time CPU against size (q11 takes ~22 s); gzip level 6 is zlib's default. */
 export const APP_HTML_BROTLI_QUALITY = 5;
 export const APP_HTML_GZIP_LEVEL = 6;
 
-/** Only a handful of distinct app bodies exist per process; bound it anyway. */
 const MAX_CACHED_BODIES = 8;
 
 interface Coding {
@@ -84,12 +37,7 @@ function parseAcceptEncoding(header: string): Coding[] {
   return codings;
 }
 
-/**
- * Pick the encoding for an `Accept-Encoding` header value. The highest
- * q-value among br / gzip wins (ties prefer br); a coding listed with `q=0` is
- * refused, `*` stands for any coding not listed explicitly, and anything else
- * — including an absent header — is identity.
- */
+/** Highest q wins among br/gzip (ties prefer br); `q=0` refuses; `*` matches codings not listed; anything else is identity. */
 export function negotiateAppHtmlEncoding(
   acceptEncoding: string | null | undefined,
 ): AppHtmlEncoding {
@@ -107,10 +55,6 @@ export function negotiateAppHtmlEncoding(
   return br >= gzip ? "br" : "gzip";
 }
 
-/**
- * Whether an `Accept-Encoding` header value takes gzip (or `x-gzip`, or `*`) with a q above 0. For a body that is
- * only kept gzipped (the Shape page): it is sent as it is when this holds, unzipped otherwise.
- */
 export function acceptsGzip(acceptEncoding: string | null | undefined): boolean {
   if (!acceptEncoding) return false;
   const codings = parseAcceptEncoding(acceptEncoding);
@@ -125,21 +69,10 @@ interface CacheEntry {
   encoded: Partial<Record<"br" | "gzip", Promise<Buffer>>>;
 }
 
-/**
- * Module-level on purpose: one compression per body per process. In
- * long-lived hosts (the Pi extension, the OpenCode plugin) a module outlives
- * any one session, so the compressed bodies persist for the host process's
- * lifetime; the cache is bounded to MAX_CACHED_BODIES (8) distinct bodies,
- * oldest evicted first, and in practice holds the plan and review pages and
- * code review's diagram engine files (./diagram-engine-assets).
- */
+/** Module-level on purpose: one compression per body per process, bounded to MAX_CACHED_BODIES, oldest evicted first. */
 const cache: CacheEntry[] = [];
 
-/**
- * Compress `html` once, uncached, off the event loop. The packed app's chunks
- * (./packed-app) use it with a cache of their own, so a page load's few dozen
- * chunks never evict the page from the one above.
- */
+/** Compress once, uncached; the packed app's chunks use a cache of their own so they never evict the page. */
 export function compressAppText(html: string, encoding: "br" | "gzip"): Promise<Buffer> {
   const input = Buffer.from(html, "utf8");
   return new Promise((resolve, reject) => {
@@ -162,7 +95,6 @@ export function compressAppText(html: string, encoding: "br" | "gzip"): Promise<
   });
 }
 
-/** The cached compressed bytes of `html`, compressing on first use. */
 export function encodeAppHtml(html: string, encoding: "br" | "gzip"): Promise<Buffer> {
   let entry = cache.find((e) => e.html === html);
   if (!entry) {
@@ -183,40 +115,24 @@ export function encodeAppHtml(html: string, encoding: "br" | "gzip"): Promise<Bu
   return pending;
 }
 
-/**
- * The encoding a compressing session's clients will most likely ask for:
- * brotli behind `tailscale serve` (HTTPS), gzip for direct remote mode (plain
- * http, where browsers do not advertise br).
- */
 export function likelyAppHtmlEncoding(tailnetPublished: boolean): "br" | "gzip" {
   return tailnetPublished ? "br" : "gzip";
 }
 
-/**
- * Start compressing `html` in `encoding` now, in the background, so the first
- * page load does not wait for it. Never throws; a failure is retried lazily by
- * the request that needs it.
- */
+/** Never throws; a failure is retried lazily by the request that needs it. */
 export function prewarmAppHtml(html: string, encoding: "br" | "gzip"): void {
   encodeAppHtml(html, encoding).catch(() => {});
 }
 
 export interface PreparedAppHtml {
   encoding: AppHtmlEncoding;
-  /** The original string for identity, else the compressed bytes. */
   body: string | Buffer;
   headers: Record<string, string>;
 }
 
 const CONTENT_TYPE = "text/html";
 
-/**
- * Negotiate and produce the body + headers for one app-HTML response.
- * `compress: false` (a local-only session) returns exactly the pre-#1617
- * response: the original string with `Content-Type` only. `contentType`
- * lets another large text body the app loads (code review's diagram engine
- * files) take the same negotiation and cache.
- */
+/** `compress: false` returns the original string with `Content-Type` only. `contentType` lets other large text bodies share the negotiation and cache. */
 export async function prepareAppHtml(
   html: string,
   acceptEncoding: string | null | undefined,

@@ -77,7 +77,6 @@ describe("file-browser-watch-core", () => {
 		});
 		try {
 			subscribe("client", dirTarget(root));
-			// Let the deferred directory watcher warm up.
 			await Bun.sleep(250);
 			writeFileSync(join(root, "plan.md"), "created");
 			await waitFor(() => (recorded.get("client")?.events.length ?? 0) > 0);
@@ -92,7 +91,6 @@ describe("file-browser-watch-core", () => {
 		"a native-watch runtime error swaps to the fallback and forces a catch-up refresh",
 		async () => {
 			const root = makeTempDir();
-			// A fake native watcher: created successfully, then fails at runtime.
 			let created: (EventEmitter & { close: () => void }) | null = null;
 			const fakeNativeWatch = ((path, watchOptions, listener) => {
 				if (watchOptions && "recursive" in watchOptions && watchOptions.recursive) {
@@ -114,8 +112,6 @@ describe("file-browser-watch-core", () => {
 				// The swap itself forces one refresh so changes made during the
 				// gap are not lost.
 				await waitFor(() => (recorded.get("client")?.events.length ?? 0) > 0);
-				// The replacement keeps delivering real events, with the swap counted
-				// as a second construction in diagnostics.
 				expect(registry.diagnostics().contentWatcherStarts).toBe(2);
 				await Bun.sleep(250);
 				const before = recorded.get("client")?.events.length ?? 0;
@@ -136,17 +132,14 @@ describe("file-browser-watch-core", () => {
 			await Bun.sleep(100);
 			expect(registry.diagnostics()).toMatchObject({ entries: 1, contentWatcherStarts: 1 });
 
-			// Last subscriber leaves: the entry must survive the grace window.
 			registry.release(handle, "first");
 			expect(registry.diagnostics().entries).toBe(1);
 
-			// Reconnect: same entry, no second construction. This is the #1313
-			// freeze loop regression guard: a rebuild here re-pays the full scan.
+			// Reconnect reuses the entry: a rebuild here re-pays the full scan (the freeze-loop regression).
 			subscribe("second", dirTarget(root));
 			await Bun.sleep(100);
 			expect(registry.diagnostics()).toMatchObject({ entries: 1, contentWatcherStarts: 1 });
 
-			// The reused watcher still delivers to the new subscriber.
 			writeFileSync(join(root, "reconnect.md"), "x");
 			await waitFor(() => (recorded.get("second")?.events.length ?? 0) > 0);
 		} finally {

@@ -3,10 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// Bun resolves homedir() from the environment captured at process start, so
-// mutating process.env.HOME inside this test process has no effect. Each case
-// therefore runs the resolver in a subprocess with a fully controlled
-// environment (fake HOME, explicit PLANNOTATOR_DATA_DIR / XDG_DATA_HOME).
+// Bun resolves homedir() from the environment captured at start, so each case runs the resolver in a subprocess with a controlled environment.
 const MODULE_PATH = join(import.meta.dir, "data-dir.ts");
 
 let fakeHome = "";
@@ -75,12 +72,9 @@ describe("getPlannotatorDataDir", () => {
     expect(dir).toBe(join(fakeHome, ".plannotator"));
   });
 
-  // #2305: an agent following old skill text made ~/.plannotator on an XDG
-  // install, and every process then switched to that near-empty folder.
   test("a stray ~/.plannotator does not hide an XDG folder that holds the data", () => {
     const xdg = join(fakeHome, "xdg-data");
     mkdirSync(join(xdg, "plannotator", "history"), { recursive: true });
-    // Exactly what the compound skill and old help text could leave behind.
     mkdirSync(join(fakeHome, ".plannotator", "hooks", "compound"), { recursive: true });
     writeFileSync(join(fakeHome, ".plannotator", "hooks", "compound", "enterplanmode-improve-hook.txt"), "1. x\n");
     mkdirSync(join(fakeHome, ".plannotator", "plans"));

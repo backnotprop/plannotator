@@ -8,8 +8,7 @@ import {
   type ReviewGitRuntime,
 } from "./review-core";
 
-// Real-git runtime against a throwaway repo — fingerprints are only meaningful
-// against actual VCS behavior, so no mocks.
+// Real git against a throwaway repo, no mocks: fingerprints are only meaningful against actual VCS behavior.
 const runtime: ReviewGitRuntime = {
   async runGit(args, options) {
     const proc = Bun.spawn(["git", ...args], {

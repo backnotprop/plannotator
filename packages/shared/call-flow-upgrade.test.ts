@@ -1,9 +1,4 @@
-/**
- * Moving between CallDiff pins must never strand a user's install: the older
- * pin's folder is never adopted, a too-old Node fails before any download,
- * stale folders go only after the new pin is published, and installed
- * language packs cross over instead of downloading again.
- */
+/** Pin upgrades never strand an install: older folders are not adopted, stale ones go only after the new pin is published, and installed packs cross over. */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -49,10 +44,7 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-/**
- * Put a `node` that reports `version` and an `npm` that must not run first on
- * PATH. Downloads are blocked unless the test supplies a fake `fetch`.
- */
+/** Put a `node` that reports `version` and an `npm` that must not run first on PATH. */
 async function withFakeNode<T>(version: string, body: () => Promise<T>, fakeFetch?: typeof fetch): Promise<T> {
   const bin = join(root, "bin");
   mkdirSync(bin, { recursive: true });
@@ -72,7 +64,6 @@ async function withFakeNode<T>(version: string, body: () => Promise<T>, fakeFetc
   }
 }
 
-/** A managed core folder that looks fully installed for the given pin. */
 function writeManagedCore(runtimeDir: string, pin: { version: string; commit: string }): void {
   const callDiffRoot = join(runtimeDir, "node_modules", "calldiff");
   mkdirSync(join(callDiffRoot, "dist"), { recursive: true });
@@ -119,7 +110,6 @@ describe("the Node floor", () => {
       expect(await resolveCallFlowRuntime()).toEqual({ ok: false, reason: "node-version", message });
       expect(await installCallFlowRuntime()).toMatchObject({ ok: false, status: "failed", message });
     });
-    // Nothing was half-installed, and the older pin's folder is kept for a downgrade.
     expect(readdirSync(store).filter((name) => name !== ".install.lock")).toEqual([`calldiff-${OLDER_PIN.version}`]);
     expect(readFileSync(join(olderCore, ".calldiff-revision"), "utf8").trim()).toBe(OLDER_PIN.commit);
   });
@@ -130,7 +120,6 @@ describe("moving between CallDiff pins", () => {
     writeManagedCore(join(store, `calldiff-${OLDER_PIN.version}`), OLDER_PIN);
     await withFakeNode("v24.15.0", async () => {
       expect(await resolveCallFlowRuntime()).toMatchObject({ ok: false, reason: "runtime-unavailable" });
-      // The same build sitting under the current pin's name is stale, not adopted.
       writeManagedCore(getCallFlowManagedRuntimeDir(), OLDER_PIN);
       expect(await resolveCallFlowRuntime()).toMatchObject({ ok: false, reason: "version-mismatch" });
       writeManagedCore(getCallFlowManagedRuntimeDir(), { version: CALLDIFF_VERSION, commit: OLDER_PIN.commit });
@@ -150,7 +139,6 @@ describe("moving between CallDiff pins", () => {
     for (const name of [...keepNames, `calldiff-${OLDER_PIN.version}`, `calldiff-${CALLDIFF_VERSION}.previous-12-34`]) {
       mkdirSync(join(store, name, "node_modules"), { recursive: true });
     }
-    // A tombstone an earlier, interrupted cleanup left behind.
     mkdirSync(join(store, ".calldiff-stale-1-2-0", "node_modules"), { recursive: true });
     writeFileSync(join(store, ".install.lock"), "token");
     writeFileSync(join(store, "calldiff-0.3.0"), "a file, not a core");
@@ -179,7 +167,6 @@ describe("moving between CallDiff pins", () => {
     writeInstalledPack(olderCore, "go", "tree-sitter-go", "0.25.0", { stale: true });
     const candidate = join(store, ".calldiff-install-test");
     mkdirSync(join(candidate, "node_modules", "calldiff", "dist"), { recursive: true });
-    // The candidate core's extractor loads every grammar except Ruby's.
     writeFileSync(join(candidate, "node_modules", "calldiff", "dist", "extract.js"), [
       "export function extractFunctions(file) {",
       "  if (file.endsWith('.rb')) throw new Error('grammar did not load');",
@@ -197,7 +184,6 @@ describe("moving between CallDiff pins", () => {
     const cache = join(candidate, "grammar-cache");
     expect(JSON.parse(readFileSync(join(cache, "node_modules", "tree-sitter-python", "package.json"), "utf8")).version).toBe("0.25.0");
     expect(JSON.parse(readFileSync(join(cache, ".plannotator-locks", "python.json"), "utf8"))).toEqual(CALL_FLOW_PACK_LOCKS.python);
-    // A stale marker is not verified, and a pack that fails to load does not cross.
     expect(existsSync(join(cache, "node_modules", "tree-sitter-go"))).toBe(false);
     expect(existsSync(join(cache, "node_modules", "tree-sitter-ruby"))).toBe(false);
     expect(existsSync(join(cache, ".plannotator-locks", "ruby.json"))).toBe(false);
@@ -213,7 +199,6 @@ describe("moving between CallDiff pins", () => {
       expect(existsSync(olderCore)).toBe(false);
       const tombstones = readdirSync(store).filter((name) => name.startsWith(".calldiff-stale-"));
       expect(tombstones).toHaveLength(1);
-      // The next install sweeps the tombstone once it can be deleted.
       chmodSync(join(store, tombstones[0], "node_modules", "tree-sitter"), 0o755);
       removeStaleCallFlowRuntimeDirs(dataDir);
       expect(readdirSync(store)).toEqual([]);

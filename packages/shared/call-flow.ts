@@ -1,10 +1,4 @@
-/**
- * Isolated CallDiff execution over immutable review snapshots.
- *
- * CallDiff is a Node-native, synchronous Tree-sitter library. Plannotator runs
- * it in a short-lived Node worker (22.18 or newer) and never imports it into
- * Bun or Pi.
- */
+/** Runs CallDiff in a short-lived Node worker (22.18 or newer); it is never imported into Bun or Pi. */
 import { childEnv } from "./child-env";
 import { createHash } from "node:crypto";
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -40,7 +34,6 @@ export const CALLDIFF_COMMIT = "2086f6e4e9ed3c410bba7c94ca3dde77791b1956";
 export const CALLDIFF_SOURCE_SPEC = `https://github.com/tanishqkancharla/calldiff/archive/${CALLDIFF_COMMIT}.tar.gz`;
 export const CALLDIFF_SOURCE_INTEGRITY = "sha512-t+YCPz0WkETiwSOznwx3mLxVkEUe7DVACV+it2HJER7q/ha+K0IavN9IfBvP+7/ijzPXoUHgJIkAM/kg1O5S6A==";
 export const CALLDIFF_TREE_SITTER_VERSION = "0.25.1";
-/** CallDiff's own `engines.node` floor at the pinned commit (>=22.18.0). */
 export const CALL_FLOW_MIN_NODE_VERSION = { major: 22, minor: 18 } as const;
 const CALL_FLOW_NODE_REQUIREMENT = "Node.js 22.18 or newer";
 const CALLDIFF_ARCHIVE_FILE = `calldiff-${CALLDIFF_COMMIT}.tar.gz`;
@@ -76,7 +69,6 @@ export interface CallFlowAnalysisInput {
   snapshotId: string;
   rawPatch: string;
   snapshot: CallFlowSnapshotSource;
-  /** Revalidate mutable review state before an ok result can enter the cache. */
   verifySnapshot?: () => Promise<boolean>;
 }
 
@@ -252,7 +244,6 @@ function hasCommittedRuntimeLock(runtimeDir: string): boolean {
   }
 }
 
-/** True when a `node --version` string meets CallDiff's 22.18 floor. */
 export function callFlowNodeVersionSupported(version: string): boolean {
   const match = /^v?(\d+)\.(\d+)/.exec(version.trim());
   if (!match) return false;
@@ -288,11 +279,6 @@ function findExecutable(name: string): string | null {
   return null;
 }
 
-/**
- * Cheap Node availability check used before any runtime download starts.
- * The in-app install endpoint runs this preflight synchronously so a
- * missing or too-old Node reports immediately, without background work.
- */
 export async function preflightCallFlowNode(): Promise<CallFlowNodePreflight> {
   const nodePath = findExecutable("node");
   if (!nodePath) return { ok: false, reason: "node-unavailable", message: `Call flow needs ${CALL_FLOW_NODE_REQUIREMENT}, which was not found on PATH.` };
@@ -301,7 +287,6 @@ export async function preflightCallFlowNode(): Promise<CallFlowNodePreflight> {
   return { ok: true };
 }
 
-/** Resolve the pruned core and report independently installed language packs. */
 export async function resolveCallFlowRuntime(): Promise<CallFlowRuntimeResolution> {
   const nodePath = findExecutable("node");
   if (!nodePath) return { ok: false, reason: "node-unavailable", message: `Call flow needs ${CALL_FLOW_NODE_REQUIREMENT}, which was not found on PATH.` };
@@ -476,7 +461,6 @@ async function downloadVerifiedLockArtifacts(
       throw new Error(`Pinned grammar package failed its repository-owned SHA-512 check: ${artifact.url}`);
     }
     const path = join(destination, `artifact-${index}.tgz`);
-    // Only verified bytes become visible to npm.
     writeFileSync(path, artifact.bytes);
     verifiedPaths.push(path);
   }
@@ -579,7 +563,6 @@ function assertNativePackagePruned(packageRoot: string): void {
   }
 }
 
-/** Keep only the loadable native payload for one npm Tree-sitter package. */
 export function pruneCallFlowNativePackage(packageRoot: string): void {
   const builtAddons: Array<{ name: string; bytes: Buffer }> = [];
   const collectBuiltAddons = (directory: string): void => {
@@ -644,7 +627,6 @@ function pruneCoreRuntime(runtimeDir: string): void {
 
 function validationFilesForLanguage(id: CallFlowLanguageId): string[] {
   if (id === CALL_FLOW_CORE_LANGUAGE_ID) {
-    // Exercise both independently pinned core grammar packages after pruning.
     return ["validation.js", "validation.ts"];
   }
   const extension = getCallFlowLanguage(id).extensions[0];
@@ -675,8 +657,7 @@ for (const file of request.files) mod.extractFunctions(file, "");
       maxOutputBytes: 1024 * 1024,
       env: {
         ...process.env,
-        // CallDiff runs git itself; keep a user's `color.diff = always` from
-        // wrapping its diff in ANSI escapes (#1661).
+        // Keep a user's `color.diff = always` from wrapping CallDiff's diff in ANSI escapes.
         ...gitColorFreeEnvironment(process.env),
         PATH: `${npmBlocker.path}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
         CALLDIFF_GRAMMAR_CACHE: grammarCacheDir,
@@ -702,13 +683,7 @@ function ensureGrammarCacheManifest(cacheDir: string): void {
   }), "utf8");
 }
 
-/**
- * Copy optional packs into a candidate core. Sources are tried in order (the
- * current runtime first, then folders left by older pins); a pack crosses only
- * when its exact committed lock marker matches and it loads through the
- * candidate core. Packs are pinned independently of CallDiff, so an upgrade
- * keeps the user's installed languages instead of downloading them again.
- */
+/** Sources are tried in order (the current runtime, then folders of older pins); a pack crosses only when its lock marker matches and it loads through the candidate core. */
 export async function preserveValidatedLanguagePacks(
   nodePath: string,
   sourceRuntimeDirs: readonly string[],
@@ -742,11 +717,7 @@ export async function preserveValidatedLanguagePacks(
   return preserved;
 }
 
-/**
- * Folder names Plannotator itself creates for a managed core: the published
- * `calldiff-<version>` and the `.previous-<pid>-<ms>` backup a core swap
- * leaves when it is interrupted. Nothing else in vendor/call-flow matches.
- */
+/** Folder names Plannotator creates for a managed core: `calldiff-<version>` and the `.previous-<pid>-<ms>` backup an interrupted swap leaves. */
 const MANAGED_CORE_DIR_PATTERN = /^calldiff-(\d+)\.(\d+)\.(\d+)(\.previous-\d+-\d+)?$/;
 
 function compareVersionTriples(a: readonly number[], b: readonly number[]): number {
@@ -756,12 +727,6 @@ function compareVersionTriples(a: readonly number[], b: readonly number[]): numb
   return 0;
 }
 
-/**
- * Managed core folders under this data dir that no current or newer
- * Plannotator uses: cores of an older CallDiff pin, and interrupted-swap
- * backups of an older or the current pin. A newer pin's folder and backups
- * are kept, so downgrading and upgrading again finds it still installed.
- */
 export function listStaleCallFlowRuntimeDirs(dataDir = getPlannotatorDataDir()): string[] {
   const currentDir = getCallFlowManagedRuntimeDir(dataDir);
   const parent = dirname(currentDir);
@@ -786,22 +751,10 @@ export function listStaleCallFlowRuntimeDirs(dataDir = getPlannotatorDataDir()):
   return stale.sort();
 }
 
-/**
- * A stale core is renamed to this dot-prefixed name before it is deleted. No
- * Plannotator version resolves a dot-prefixed folder, so a delete cut short
- * (a killed process, a busy file on Windows) never leaves a half-deleted
- * `calldiff-<x.y.z>` that an older Plannotator would take as installed.
- */
+/** A stale core is renamed to a dot-prefixed name before deletion: a delete cut short must never leave a half-deleted `calldiff-<x.y.z>` that an older Plannotator would take as installed. */
 const STALE_TOMBSTONE_PATTERN = /^\.calldiff-stale-\d+-\d+-\d+$/;
 
-/**
- * Remove stale managed cores once the current pin is published. Runs only
- * under the install lease and only after a successful install, so a failed
- * upgrade keeps the previous folder for a downgrade. Each folder is first
- * renamed to a tombstone (atomic); one that cannot be renamed (in use on
- * Windows) stays whole and is retried by the next install. Tombstones,
- * including any an earlier interrupted delete left, are then removed.
- */
+/** Runs only under the install lease after a successful install, so a failed upgrade keeps the previous folder. A folder that cannot be renamed (in use on Windows) is retried by the next install. */
 export function removeStaleCallFlowRuntimeDirs(dataDir = getPlannotatorDataDir()): void {
   const parent = dirname(getCallFlowManagedRuntimeDir(dataDir));
   const stamp = `${process.pid}-${Date.now()}`;
@@ -825,7 +778,6 @@ export function removeStaleCallFlowRuntimeDirs(dataDir = getPlannotatorDataDir()
   }
 }
 
-/** Recursively measure installed bytes for size regression tests and release evidence. */
 export function measureCallFlowDirectoryBytes(path: string): number {
   if (!existsSync(path)) return 0;
   const stat = statSync(path);
@@ -916,9 +868,6 @@ async function installCallFlowRuntimeUnlocked(
     await validatePrunedLanguage(nodePath, installDir, getCallFlowGrammarCacheDir(installDir), [CALL_FLOW_CORE_LANGUAGE_ID]);
     const sizeAfterPruneBytes = measureCallFlowDirectoryBytes(installDir);
 
-    // A core repair or upgrade preserves only packs whose exact marker,
-    // package version, and native payload all still validate against the
-    // candidate core. An upgrade takes them from the older pin's folder.
     const nextCache = getCallFlowGrammarCacheDir(installDir);
     await preserveValidatedLanguagePacks(nodePath, [runtimeDir, ...listStaleCallFlowRuntimeDirs()], installDir);
     ensureGrammarCacheManifest(nextCache);
@@ -931,7 +880,6 @@ async function installCallFlowRuntimeUnlocked(
       throw error;
     }
     removeDirectoryBestEffort(backupDir);
-    // Only now that the new pin is published do older pins' folders go.
     removeStaleCallFlowRuntimeDirs();
     return { ok: true, status: "installed", runtimeDir, languageId: CALL_FLOW_CORE_LANGUAGE_ID, sizeBeforePruneBytes, sizeAfterPruneBytes, message: `Installed the pruned CallDiff ${CALLDIFF_VERSION} core at ${runtimeDir}.` };
   } catch (error) {
@@ -960,7 +908,6 @@ function packManifest(id: Exclude<CallFlowLanguageId, "javascript-typescript">):
   };
 }
 
-/** Install one optional grammar through its own integrity-locked pipeline. */
 export async function installCallFlowLanguagePack(
   id: Exclude<CallFlowLanguageId, "javascript-typescript">,
   onStage: (stage: CallFlowInstallStage) => void = () => {},
@@ -1242,8 +1189,7 @@ async function executeWorker(
       signal,
       env: {
         ...process.env,
-        // CallDiff runs git itself; keep a user's `color.diff = always` from
-        // wrapping its diff in ANSI escapes (#1661).
+        // Keep a user's `color.diff = always` from wrapping CallDiff's diff in ANSI escapes.
         ...gitColorFreeEnvironment(process.env),
         PATH: `${npmBlocker.path}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}`,
         CALLDIFF_GRAMMAR_CACHE: runtime.grammarCacheDir,
@@ -1343,7 +1289,6 @@ async function executeCallFlowAnalysis(
   }
 }
 
-/** Injectable boundaries used to verify CallFlowService concurrency and cache policy. */
 export interface CallFlowServiceOptions {
   readonly now?: () => number;
   readonly runtimeProbeTtlMs?: number;
@@ -1355,7 +1300,6 @@ export interface CallFlowServiceOptions {
   ) => Promise<ParsedCallDiffWorkerResult>;
 }
 
-/** Session-local cache + single execution slot for a review server. */
 export class CallFlowService {
   private readonly cache = new Map<string, Extract<CallFlowResponse, { status: "ok" }>>();
   private readonly failureCache = new Map<string, { expiresAt: number; response: CallFlowResponse }>();
@@ -1368,7 +1312,6 @@ export class CallFlowService {
   private runtimeProbe: { expiresAt: number; result: Promise<CallFlowRuntimeResolution> } | undefined;
   private queue: Promise<void> = Promise.resolve();
 
-  /** Create one session-owned service; omitted boundaries use the production runtime. */
   constructor(options: CallFlowServiceOptions = {}) {
     this.now = options.now ?? Date.now;
     this.runtimeProbeTtlMs = options.runtimeProbeTtlMs ?? 30_000;
@@ -1510,21 +1453,11 @@ export class CallFlowService {
     for (const controller of this.controllers.values()) controller.abort();
   }
 
-  /**
-   * Drop the cached runtime probe so the next capability advert re-resolves
-   * from disk. Called when an in-app runtime install completes; without this,
-   * the 30 second probe cache would keep advertising unavailable after a
-   * successful install.
-   */
   invalidateRuntimeProbe(): void {
     this.runtimeProbe = undefined;
   }
 
-  /**
-   * Reconcile a completed core/pack install with the live review session.
-   * A partial result for this same snapshot must not survive the install or
-   * the client retry would replay its old skipped-language set.
-   */
+  /** A partial result for this snapshot must not survive the install, or the client retry would replay its old skipped-language set. */
   invalidateRuntimeState(): void {
     this.cancelAll();
     this.runtimeProbe = undefined;

@@ -7,12 +7,7 @@ export interface AnnotateReferenceRootOptions {
 	filePath: string;
 	folderPath?: string;
 	initialSingleFileSourcePath?: string | null;
-	/**
-	 * `annotate-bundle`: the bundle's files (absolute). Each contributes its
-	 * directory, the single-file rule applied per file, so the documents a
-	 * bundle file links to resolve exactly as they would if it were opened
-	 * alone.
-	 */
+	/** Each bundle file contributes its directory, as a single-file session does. */
 	bundlePaths?: readonly string[];
 }
 
@@ -39,9 +34,7 @@ export function getAnnotateReferenceRootPaths(options: AnnotateReferenceRootOpti
 	if (options.mode === "annotate-bundle" && options.bundlePaths) {
 		for (const path of options.bundlePaths) {
 			addRoot(dirname(path));
-			// A bundle file that is a symlink is served from where it really
-			// lives, so the directory of its target becomes a root too (the
-			// whole directory, as for a single-file session on that path).
+			// A symlinked bundle file is served from where it really lives, so its target's directory is a root too.
 			try {
 				addRoot(dirname(realpathSync(path)));
 			} catch {

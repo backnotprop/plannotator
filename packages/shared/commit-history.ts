@@ -1,15 +1,4 @@
-/**
- * Commit-history rail — backs GET /api/commits and the commitInfo sidecar.
- *
- * Runtime-agnostic like review-core (Pi consumes a build-time copy via
- * vendor.sh). Deliberately separate from review-core: nothing here
- * participates in the diff-type dispatch — it is the Commits panel's data
- * layer (linear --first-parent pages + one commit's full metadata). The
- * commit:<sha> DIFF plumbing (parseCommitDiffType, the runGitDiff /
- * fingerprint / file-contents cases) stays in review-core with the other
- * diff types; the jj-commit:<id> plumbing likewise stays in jj-core. The jj
- * rail and card live at the bottom of this file.
- */
+/** Data layer of the Commits panel: linear `--first-parent` pages plus one commit's metadata. The `commit:<sha>` diff plumbing stays in review-core, `jj-commit:<id>` in jj-core. Runtime-agnostic. */
 
 import {
   BARE_HEX_SHA_RE,
@@ -22,77 +11,44 @@ import {
 } from "./review-core";
 import type { ReviewJjRuntime } from "./jj-core";
 
-// --- Commit history rail ------------------------------------------------------
-//
-// Backs GET /api/commits: the Commits panel's linear `--first-parent` walk from
-// HEAD, newest first. Paged (before = the previous page's last sha), with a
-// per-commit "past the base" flag so the client can draw the divider where the
-// branch meets the resolved base.
-
 export interface CommitListEntry {
-  /** Full SHA — sent back as `commit:<sha>` on click (in a jj session the
-   * full commit id, sent back as `jj-commit:<id>`). */
   sha: string;
-  /** Display id: the abbreviated sha, or in a jj session the short CHANGE id,
-   * the identity jj users read (`sha` stays the commit id). */
   shortSha: string;
   subject: string;
   author: string;
-  /** Author email — the key the avatar resolver matches on. */
   authorEmail: string;
-  /** Committer time, epoch milliseconds. Clients format it themselves —
-   * git's `%cr` relative strings are locale-dependent (gettext), so a
-   * pre-formatted string couldn't be compacted reliably. */
+  /** Epoch milliseconds: git's `%cr` relative strings are locale-dependent. */
   committedAt: number;
   isHead: boolean;
-  /** True once the walk is at/below the base (reachable from it) — everything
-   * above the first past-base commit is branch-local work. */
   isPastBase: boolean;
-  /** Author profile image, when the forge could resolve one (server-enriched
-   * via commit-avatars; absent → the client renders an initials fallback). */
   avatarUrl?: string;
 }
 
 export interface CommitHistoryPage {
   commits: CommitListEntry[];
-  /** More history exists below this page. */
   hasMore: boolean;
-  /** The base ref the divider represents (echoed for the divider label). */
   base: string;
 }
 
-/** Full metadata for ONE commit — the description card above the all-files
- * view when a `commit:<sha>` diff is active. */
 export interface CommitDiffInfo {
   sha: string;
   shortSha: string;
   subject: string;
-  /** Full message body (everything after the subject), "" when absent.
-   * Rendered as markdown client-side. */
   body: string;
   author: string;
   authorEmail: string;
-  /** Committer time, epoch milliseconds. Clients format it themselves —
-   * git's `%cr` relative strings are locale-dependent (gettext), so a
-   * pre-formatted string couldn't be compacted reliably. */
+  /** Epoch milliseconds: git's `%cr` relative strings are locale-dependent. */
   committedAt: number;
-  /** Author profile image (server-enriched via commit-avatars). */
   avatarUrl?: string;
 }
 
-/**
- * Fetch one commit's metadata for the description card. Best-effort: null
- * when the sha is invalid or doesn't resolve (callers omit the sidecar).
- */
 export async function getCommitDiffInfo(
   runtime: ReviewGitRuntime,
   sha: string,
   cwd?: string,
 ): Promise<CommitDiffInfo | null> {
   if (!BARE_HEX_SHA_RE.test(sha)) return null;
-  // Body (%b) is multiline, so it must be the LAST field — the rejoin target
-  // of the shared splitter. A literal US byte in the subject would shift the
-  // split (same accepted pathological edge as the list parsers).
+  // Body (%b) is multiline, so it must be the LAST field. A literal US byte in the subject would shift the split (accepted edge).
   const fmt = ["%H", "%h", "%an", "%ae", "%ct", "%s", "%b"].join(COMMIT_FIELD_SEP);
   const result = await runtime.runGit(
     ["--no-optional-locks", "show", "-s", `--pretty=format:${fmt}`, "--end-of-options", sha],
@@ -116,12 +72,6 @@ export async function getCommitDiffInfo(
 const COMMIT_HISTORY_LIMIT_DEFAULT = 50;
 const COMMIT_HISTORY_LIMIT_MAX = 200;
 
-/**
- * One page of the linear (`--first-parent`) history from HEAD. Returns null
- * when the repo can't answer at all (no HEAD, not a repo); an unresolvable
- * `before` yields an empty terminal page instead (the commit paged past may
- * be a root commit, whose `^` doesn't resolve).
- */
 export async function listCommitHistory(
   runtime: ReviewGitRuntime,
   defaultBranch: string,
@@ -140,11 +90,7 @@ export async function listCommitHistory(
   const runReadOnlyGit = (args: string[]) =>
     runtime.runGit(["--no-optional-locks", ...args], { cwd });
 
-  // A cursor from a rewritten history (rebase/force-push mid-session) still
-  // resolves in the object store but is no longer on the branch — paging on
-  // from it would walk the orphaned pre-rewrite chain. A non-ancestor (or
-  // vanished) cursor ends the pagination with an empty terminal page; the
-  // client's freshness poll replaces the list moments later.
+  // A cursor from rewritten history still resolves in the object store but is off the branch: paging from it would walk the orphaned chain, so a non-ancestor (or vanished) cursor ends with an empty terminal page.
   if (before) {
     const onBranch = await runReadOnlyGit([
       "merge-base",
@@ -169,11 +115,7 @@ export async function listCommitHistory(
     startRef,
   ]);
   if (log.exitCode !== 0) {
-    // Paging past a root commit (`before^` unresolvable) is a normal terminal
-    // page. A first page failing because the repo simply has no commits yet
-    // (no HEAD) is also an empty page, not an error — every other review
-    // surface degrades gracefully on a commit-less repo. Anything else
-    // (not a repo at all) stays null → the endpoint reports a real error.
+    // Paging past a root commit, or a first page on a repo with no commits yet, is an empty page; anything else (not a repo at all) stays null.
     if (before) return emptyPage;
     const headResolves =
       (await runReadOnlyGit(["rev-parse", "--verify", "--quiet", "HEAD"])).exitCode === 0;
@@ -200,11 +142,7 @@ export async function listCommitHistory(
 
   const [head, branchOnly] = await Promise.all([
     runReadOnlyGit(["rev-parse", "HEAD"]),
-    // The branch-local set: first-parent commits from HEAD NOT reachable from
-    // the base. Reachability (not merge-base position) is what the divider
-    // means — a base merged INTO the branch keeps its commits below the line.
-    // Best-effort: an unresolvable base yields no divider (all isPastBase
-    // false), matching how since-base degrades on such repos.
+    // Branch-local set: first-parent commits from HEAD not reachable from the base (a base merged into the branch keeps its commits below the line). An unresolvable base yields no divider.
     defaultBranch
       ? runReadOnlyGit(["rev-list", "--first-parent", "--end-of-options", "HEAD", `^${defaultBranch}`])
       : Promise.resolve(null),
@@ -226,14 +164,7 @@ export async function listCommitHistory(
 }
 
 
-// --- Jujutsu -----------------------------------------------------------------
-//
-// The same rail and card for a jj session. jj has no HEAD: the rail starts at
-// the working-copy revision `@` and walks FIRST parents (`first_ancestors`,
-// jj >= 0.33), which is what git's `--first-parent` walk is on a merge. The
-// virtual root is never a row. `@` is skipped when it is the usual fresh
-// working copy (no changes, no description): its diff is empty, and it would
-// otherwise be the row the panel auto-opens. `isHead` marks `@` itself.
+// jj has no HEAD: the rail starts at `@` and walks first parents (`first_ancestors`, jj >= 0.33). `@` is skipped when it is a fresh empty working copy, which would otherwise be the row the panel auto-opens.
 
 const JJ_FIELD_JOIN = ' ++ "\\t" ++ ';
 
@@ -262,7 +193,6 @@ function parseJjJsonString(value: string | undefined): string {
 
 interface JjRailRow {
   entry: Omit<CommitListEntry, "isPastBase">;
-  /** An empty working copy with no description (a fresh `jj new`). */
   blankWorkingCopy: boolean;
 }
 
@@ -294,14 +224,7 @@ function parseJjRailRows(stdout: string): JjRailRow[] {
   return rows;
 }
 
-/**
- * The compare target the jj rail's divider stands for, plus its label. The
- * session base is the jj compare target (the line-of-work fork point, or a
- * bookmark the reviewer picked) EXCEPT while an Evolution diff is active,
- * when it is an earlier state of `@` rather than a line base, so the
- * context's own default target stands in. A full commit id reads as the
- * bookmark the line-base resolution names, else as a 12-character id.
- */
+/** The jj session base is the compare target, except while an Evolution diff is active (an earlier state of `@`), when the context's default target stands in. */
 export function resolveJjCommitRailBase(
   currentBase: string,
   context: Pick<GitContext, "defaultBranch" | "jjEvologs" | "jjLineBase"> | undefined,
@@ -317,13 +240,6 @@ export function resolveJjCommitRailBase(
   return { target, label };
 }
 
-/**
- * One page of a jj session's first-parent history from `@`. Same contract as
- * listCommitHistory: null when jj cannot answer at all, an empty terminal page
- * for a stale `before` cursor. `base` is the jj compare target
- * (resolveJjCommitRailBase) and `baseLabel` what the page echoes for the
- * divider; a target that does not resolve just draws no divider.
- */
 export async function listJjCommitHistory(
   runtime: ReviewJjRuntime,
   base: string,
@@ -345,9 +261,7 @@ export async function listJjCommitHistory(
       { cwd },
     );
 
-  // A cursor must still be on the rail: history rewritten mid-session
-  // (rebase, abandon, squash) leaves the old id resolvable but off `@`'s line.
-  // The client's freshness poll replaces the list moments later.
+  // A cursor must still be on the rail: rewritten history leaves the old id resolvable but off `@`'s line.
   if (before) {
     const onRail = await log(`${jjCommitRevset(before)} & first_ancestors(@)`, JJ_COMMIT_ID_TEMPLATE, 1);
     if (onRail.exitCode !== 0 || !onRail.stdout.trim()) return emptyPage;
@@ -387,7 +301,6 @@ export async function listJjCommitHistory(
   };
 }
 
-/** The description card for a `jj-commit:<commit id>` diff. Best-effort, like getCommitDiffInfo. */
 export async function getJjCommitDiffInfo(
   runtime: ReviewJjRuntime,
   commitId: string,

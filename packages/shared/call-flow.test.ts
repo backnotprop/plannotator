@@ -137,7 +137,6 @@ describe("VCS snapshot materialization", () => {
 
   test("materializes the parseable Jujutsu source tree without touching the checkout", async () => {
     const calls: string[][] = [];
-    // The base side is the whole parseable tree at the resolved first parent.
     const basePatch = [
       "diff --git a/alias.ts b/alias.ts",
       "new file mode 120000",
@@ -163,7 +162,6 @@ describe("VCS snapshot materialization", () => {
       "+export const tool = 1;",
       "",
     ].join("\n");
-    // The second side is only what changed between the two revisions.
     const deltaPatch = [
       "diff --git a/alias.ts b/alias.ts",
       "--- a/alias.ts",
@@ -227,16 +225,13 @@ describe("VCS snapshot materialization", () => {
       expect(run(["status", "--short"])).toBe("");
 
       const diffs = calls.filter((args) => args.includes("diff"));
-      // Exactly one whole-tree pass; the second side is the changed files only.
       expect(diffs.map((args) => args[args.indexOf("--from") + 1]))
         .toEqual(["root()", mergeParents[0]]);
       expect(diffs.map((args) => args[args.indexOf("--to") + 1]))
         .toEqual([mergeParents[0], "@"]);
-      // Ambiguous parent shorthands must never reach jj.
       expect(calls.flat()).not.toContain("@-");
       expect(calls.flat()).not.toContain("parents(@-)");
       expect(calls.every((args) => args[0] === "--ignore-working-copy")).toBe(true);
-      // Repo-root-anchored, so the review's invocation directory cannot narrow it.
       expect(diffs.every((args) => args.includes('root-glob-i:"**/*.ts"'))).toBe(true);
       expect(diffs.every((args) => args.some((arg) => arg.startsWith("glob-i:")))).toBe(false);
     } finally {

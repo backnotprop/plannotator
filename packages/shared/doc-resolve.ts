@@ -1,25 +1,7 @@
 /**
- * Document resolution and containment for `/api/doc` and `/api/doc/exists`,
- * shared by the Bun and node:http servers.
- *
- * Resolving which file a path names is separated from reading it so
- * authorization sits on one seam: every reachable path comes from
- * `resolveDocTarget`, and `isDocServeAllowed` alone decides whether it is served.
- * Resolution may `stat`; it never reads contents (`readPlanFile` reads the
- * plan file once, at server start).
- *
- * Plan review adds one path outside the roots: when the harness reports the
- * plan's own file (Claude Code writes it under `~/.claude/plans/`),
- * `resolvePlanLinkedDoc` serves the documents the plan links from that
- * directory. Only exact link targets are served, the directory never becomes
- * an allowed root, and a named file there shadows a project document of the
- * same relative name. That base is not used for root resolution.
- *
- * A reader on this machine (`isThisMachineReader`, this-machine-reader.ts) may open a document
- * anywhere (`anyPath`, #2291): one in a folder added in Settings → Files, or
- * one the current document links outside the project. Only document types
- * (`isAnyPathDocument`); code files and data formats keep the roots, and so
- * does every reader that may be on another machine (`isDocServeAllowed`).
+ * Resolution and containment for `/api/doc` and `/api/doc/exists`. Every reachable path comes from `resolveDocTarget` and `isDocServeAllowed` alone decides whether it is served; resolution may `stat` but never reads contents.
+ * Plan review also serves documents the plan links from the plan file's directory (`resolvePlanLinkedDoc`): only exact link targets, and that directory never becomes an allowed root.
+ * A reader on this machine (`anyPath`) may open document types (`isAnyPathDocument`) anywhere; code files and data formats keep the roots, as does every reader that may be on another machine.
  */
 
 import { readFileSync, realpathSync, statSync } from "fs";
@@ -38,7 +20,6 @@ import {
 	resolveUserPath,
 } from "./resolve-file";
 
-/** How a resolved file is rendered: an annotatable document, or a code-file popout. */
 export type DocRender = "document" | "code";
 
 export type DocResolution =
@@ -51,12 +32,9 @@ export type DocResolution =
 	| { kind: "unavailable"; input: string };
 
 export interface DocResolveOptions {
-	/** Base directory for relative paths, already vetted by `getTrustedBaseDir`. */
 	base?: string | null;
-	/** `?doc=1`. Renders annotatable plain text for extensions that overlap code files. */
 	forceDoc?: boolean;
 	roots: string[];
-	/** A reader on this machine (`isThisMachineReader`, this-machine-reader.ts): documents may be anywhere (`isAnyPathDocument`). */
 	anyPath?: boolean;
 }
 
@@ -97,11 +75,7 @@ export function getAllowedRootPaths(options?: { rootPath?: string; rootPaths?: s
 	return roots;
 }
 
-/**
- * Realpath the deepest existing ancestor and re-join the rest, so a candidate
- * whose leaf need not exist still resolves through symlinked parents. Any
- * failure other than a missing entry fails closed.
- */
+/** A candidate whose leaf need not exist still resolves through symlinked parents. Any failure other than a missing entry fails closed. */
 function realpathAllowingMissingLeaf(candidate: string): string | null {
 	if (!candidate) return null;
 	let current = candidate;
@@ -121,12 +95,8 @@ function realpathAllowingMissingLeaf(candidate: string): string | null {
 }
 
 /**
- * The containment gate: a path must sit inside an allowed root both as written
- * and after symlink resolution. Lexical containment alone reads a symlink
- * planted under a root through to whatever it points at.
- *
- * Path-based, so it does not survive a local writer swapping the path between
- * this check and the reader's open.
+ * A path must sit inside an allowed root both as written and after symlink resolution; lexical containment alone reads through a planted symlink.
+ * Path-based, so it does not survive a local writer swapping the path between this check and the reader's open.
  */
 export function isPathAllowed(candidate: string, roots: string[]): boolean {
 	if (!candidate) return false;
@@ -142,7 +112,6 @@ export function getTrustedBaseDir(base: string | null | undefined, roots: string
 	return isDocPathAllowed(resolvedBase, roots, anyPath) ? resolvedBase : null;
 }
 
-/** The containment half of the gate: `isPathAllowed`, or any path when `anyPath`. */
 export function isDocPathAllowed(candidate: string, roots: string[], anyPath = false): boolean {
 	return anyPath ? !!candidate : isPathAllowed(candidate, roots);
 }
@@ -153,7 +122,6 @@ export function isDocPathAllowed(candidate: string, roots: string[], anyPath = f
 // and never a code file: those keep the roots for every reader.
 const ANY_PATH_DOCUMENT_RE = /\.(?:mdx?|html?|adoc|asciidoc|mmd|mermaid|dot|gv)$/i;
 
-/** Whether `path` is a document type a reader on this machine may open anywhere (#2291). */
 export function isAnyPathDocument(path: string): boolean {
 	const trimmed = path.trim();
 	if (ANY_PATH_DOCUMENT_RE.test(trimmed)) return true;
@@ -162,14 +130,8 @@ export function isAnyPathDocument(path: string): boolean {
 }
 
 /**
- * The `/api/doc` gate for a resolved path. `render` is how it would be
- * served (null for a name that does not exist).
- *  - A document a reader on this machine asked for (`anyPath`) may be
- *    anywhere when both its name and its real path are `isAnyPathDocument`.
- *    Anything else (code files, config and text formats, every reader that
- *    keeps the roots) must be inside the roots, as written and as resolved.
- *  - For every reader, the real file must be of the type its name was served
- *    as, so `key.md -> ~/.ssh/id_ed25519` is refused inside the roots too.
+ * A document a reader on this machine asked for (`anyPath`) may be anywhere when both its name and real path are `isAnyPathDocument`; everything else must be inside the roots, as written and as resolved.
+ * For every reader the real file must be of the type its name was served as, so `key.md -> ~/.ssh/id_ed25519` is refused inside the roots too.
  */
 export function isDocServeAllowed(
 	candidate: string,
@@ -188,23 +150,13 @@ export function isDocServeAllowed(
 }
 
 
-/**
- * A plan file on disk whose contents match the plan under review. Its
- * directory serves the documents the plan links, but is never an allowed root.
- */
 export interface PlanFile {
-	/** The plan file's real path (absolute). */
 	path: string;
 	dir: string;
-	/** The plan's link targets, computed once (`planLinkTargets`). */
 	targets: Set<string>;
 }
 
-/**
- * Read a harness-supplied plan path, returning null unless the file holds the
- * plan under review. The path is model-generated tool input, so without the
- * content check it could name any directory as the plan's own.
- */
+/** The path is model-generated tool input, so without the content check it could name any directory as the plan's own. */
 export function readPlanFile(planFilePath: unknown, plan: string): PlanFile | null {
 	if (typeof planFilePath !== "string" || !plan) return null;
 	if (!isAbsoluteUserPath(planFilePath) || !/\.md$/i.test(planFilePath)) return null;
@@ -257,13 +209,6 @@ function stripCode(plan: string): string {
 // Wiki-link targets without an extension open as `.md`, as the renderer does.
 const WIKI_LINK_DOC_EXTENSION = /\.(mdx?|txt|html?)$/i;
 
-/**
- * The link targets the plan text makes clickable: markdown links
- * `[label](target)`, wiki links `[[target]]` / `[[target|label]]`, and
- * `href` attributes in raw HTML. Plain mentions of a filename do not count,
- * and neither does a longer name that contains the requested one, or a link
- * written inside code.
- */
 export function planLinkTargets(plan: string): Set<string> {
 	const targets = new Set<string>();
 	const text = stripCode(plan);
@@ -284,20 +229,11 @@ export function planLinkTargets(plan: string): Set<string> {
 	return targets;
 }
 
-/** Whether `base` is the plan file's directory, the base the plan review client sends. */
 export function isPlanDirBase(base: string | null | undefined, planFile: PlanFile | null | undefined): boolean {
 	return !!planFile && !!base && resolveUserPath(base) === planFile.dir;
 }
 
-/**
- * A document the plan links relative to its own directory. Only a relative
- * path that is exactly one of the plan's link targets is served, and it must
- * stay inside that directory after symlink resolution, so the directory's
- * other files (other plans in `~/.claude/plans/`) stay unreachable.
- *
- * This runs before root resolution, so a linked file beside the plan shadows
- * a project document of the same relative name.
- */
+/** Only a relative path that is exactly one of the plan's link targets is served, and it must stay inside that directory after symlink resolution. Runs before root resolution, so a linked file beside the plan shadows a project document of the same name. */
 export function resolvePlanLinkedDoc(
 	requestedPath: string,
 	base: string | null | undefined,
@@ -316,11 +252,6 @@ export function resolvePlanLinkedDoc(
 	return isReadableFile(candidate) ? candidate : null;
 }
 
-/**
- * Whether a real (symlink-resolved) absolute path is one of the documents the
- * plan links beside its own file, as `resolvePlanLinkedDoc` would serve it.
- * Plan review's per-document drafts accept exactly what `/api/doc` serves.
- */
 export function isPlanLinkedDocPath(realPath: string, planFile: PlanFile | null | undefined): boolean {
 	if (!planFile || !realPath) return false;
 	for (const target of planFile.targets) {
@@ -339,12 +270,7 @@ export type ResolveAllowedDocPathResult =
 	| { kind: "resolved"; path: string }
 	| { kind: "denied" };
 
-/**
- * Resolve a path through the same gate `/api/doc` uses, for callers needing the
- * canonical contained path without reading the file. The annotate version
- * endpoints derive a history slug from it, since the history dir lookup joins
- * the slug into a path unsanitized.
- */
+/** The annotate version endpoints derive a history slug from it, since the history dir lookup joins the slug into a path unsanitized. */
 export function resolveAllowedDocPath(
 	requestedPath: string,
 	base: string | null,
@@ -449,7 +375,6 @@ function searchMarkdownFile(input: string, roots: string[]): RootSearchResult {
 	return summarizeRootSearch(found, ambiguous, unavailable);
 }
 
-/** The returned path is not authorized here. */
 export async function resolveDocTarget(
 	requestedPath: string,
 	options: DocResolveOptions,
@@ -461,7 +386,6 @@ export async function resolveDocTarget(
 	const wantsDocRender = (path: string) =>
 		docExtensions.test(path) && (options.forceDoc || !isCodeFilePath(path));
 
-	// Relative to the source document's own directory (annotate sibling links).
 	if (base && !isAbsoluteUserPath(requestedPath) && wantsDocRender(requestedPath)) {
 		const fromBase = resolveUserPath(requestedPath, base);
 		// An escaping name means only itself, so it never falls through.
@@ -523,7 +447,6 @@ export async function resolveDocTarget(
 	return { kind: "not_found", input: requestedPath };
 }
 
-/** The response both transports send for a non-`file` resolution. */
 export function docResolutionError(
 	resolution: Exclude<DocResolution, { kind: "file" }>,
 	roots: string[],

@@ -1,16 +1,4 @@
-/**
- * Feedback archive module — record shape, append durability, failure policy.
- *
- * Each test names the regression it guards. The archive is the only durable
- * copy of a submitted review, so the failures worth pinning are: an append
- * that damages earlier records, a record that silently grows to the size of
- * the diff it describes, a sidecar that overwrites an earlier one, and a
- * storage failure that escapes into a request handler.
- *
- * All writes are sandboxed under a temp PLANNOTATOR_DATA_DIR set INSIDE the
- * tests (the module resolves the data dir per call precisely so this works
- * under Bun's one-process rule), and the env var is restored in afterEach.
- */
+/** Each test names the regression it guards. Writes are sandboxed under a temp PLANNOTATOR_DATA_DIR set inside the tests (the module resolves the data dir per call) and restored in afterEach. */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -82,7 +70,6 @@ describe("feedback archive: record shape", () => {
     expect(record.counts).toEqual({ annotations: 1, external: 0, images: 0 });
     expect(record.annotations?.[0]).toMatchObject({ file: "src/parse.ts", lineStart: 12, side: "new" });
 
-    // The sidecar the index names must exist and carry the same feedback.
     expect(record.recordFile).toBeTruthy();
     const sidecar = readFileSync(join(projectDir(dataDir), record.recordFile!), "utf-8");
     expect(sidecar).toContain("Please handle the null case in parse().");
@@ -90,10 +77,7 @@ describe("feedback archive: record shape", () => {
   });
 
   test("a review-level general comment records its scope; a line comment stays scope-free", () => {
-    // Regression (maintainer ruling on open question 2): without `scope` in
-    // the normalizer's copied-field allowlist, a review-level general comment
-    // archives byte-identically to a line comment with sentinel 0/0 lines and
-    // "which comments were review-level?" is unanswerable from the index.
+    // Without `scope` in the normalizer's copied-field allowlist, a review-level general comment archives like a line comment and cannot be told apart in the index.
     const dataDir = useTempDataDir();
     appendFeedbackRecord({
       project: PROJECT,
@@ -107,7 +91,6 @@ describe("feedback archive: record shape", () => {
     });
     const record = readIndex(dataDir)[0];
     expect(record.annotations?.find((a) => a.id === "g1")?.scope).toBe("general");
-    // Absent scope stays absent (the pre-scope default), not defaulted-in.
     expect(record.annotations?.find((a) => a.id === "l1")?.scope).toBeUndefined();
   });
 
@@ -167,8 +150,6 @@ describe("feedback archive: record shape", () => {
   });
 
   test("a bare decision is a decision-only line with no sidecar", () => {
-    // Approval and dismissal rates are the behavior data the archive exists
-    // for; writing an empty markdown file for each would be noise.
     const dataDir = useTempDataDir();
     appendFeedbackRecord({ project: PROJECT, surface: "annotate", decision: "dismissed" });
     const record = readIndex(dataDir)[0];
@@ -178,8 +159,7 @@ describe("feedback archive: record shape", () => {
   });
 
   test("a review record carries diff identity and size metadata, never the patch bytes", () => {
-    // Disk-growth regression: guide history stores full patches and had to be
-    // flagged loudly in the docs. A feedback record must stay text-sized.
+    // A feedback record must stay text-sized: no patches.
     const dataDir = useTempDataDir();
     const patch = "diff --git a/big.ts b/big.ts\n" + "+x\n".repeat(50_000);
     appendFeedbackRecord({
@@ -261,7 +241,6 @@ describe("feedback archive: append durability", () => {
     const bodies = files.map((f) => readFileSync(join(recordsDir, f), "utf-8"));
     expect(bodies.some((b) => b.includes("first"))).toBe(true);
     expect(bodies.some((b) => b.includes("second"))).toBe(true);
-    // Each index line names its own sidecar.
     const named = readIndex(dataDir).map((r) => r.recordFile);
     expect(new Set(named).size).toBe(2);
   });
@@ -435,7 +414,6 @@ describe("feedback archive: question answers", () => {
     expect(record.annotations?.[0]?.questionAnswer).toEqual(answer);
     expect(record.annotations?.[1]).not.toHaveProperty("questionAnswer");
     expect(record.annotations?.[2]).not.toHaveProperty("questionAnswer");
-    // Additive: the existing fields of an answer row are unchanged.
     expect(record.annotations?.[0]?.text).toBe("Answer: Local only");
     expect(record.annotations?.[0]?.blockId).toBe("block-3");
   });
@@ -500,7 +478,6 @@ describe("feedback archive: element identity", () => {
       elementName: "Primary",
       pageUrl: "/dashboard?tab=2",
     });
-    // Identity only: the skeleton is feedback-sized, not index-sized.
     expect(JSON.stringify(record.annotations?.[0])).not.toContain("<nav>");
     const plain = record.annotations?.[1] as Record<string, unknown>;
     for (const key of ["elementTag", "elementSelector", "elementPath", "elementRole", "elementName", "pageUrl"]) {

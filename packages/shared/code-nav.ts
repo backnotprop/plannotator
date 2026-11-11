@@ -1,19 +1,8 @@
-/**
- * Search-based code navigation — shared types and pure logic.
- *
- * Runtime-agnostic: both Bun and Node servers provide their own
- * CodeNavRuntime implementation to run subprocess commands.
- */
-
 function validateFilePath(filePath: string): void {
   if (filePath.includes("..") || filePath.startsWith("/")) {
     throw new Error("Invalid file path");
   }
 }
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
 
 export interface CodeNavRequest {
   symbol: string;
@@ -48,25 +37,13 @@ export interface CodeNavRuntime {
     args: string[],
     options?: { cwd?: string; timeoutMs?: number },
   ) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
-  /**
-   * Read one repo-relative file for hover enrichment. Optional so the vendored
-   * type stays backward compatible and `/resolve` callers never provide it —
-   * without it hover degrades to the definition location plus references.
-   *
-   * Implementations must return `null` (never throw) for a missing or
-   * unreadable file, and for one larger than CODE_NAV_MAX_FILE_BYTES — the
-   * ceiling rg itself searches under (`--max-filesize 1M`).
-   */
+  /** Optional; without it hover degrades to the definition location plus references. Must return `null` (never throw) for a missing or unreadable file, or one larger than CODE_NAV_MAX_FILE_BYTES. */
   readFile?: (
     path: string,
     options?: { cwd?: string },
   ) => Promise<string | null>;
 }
 
-/**
- * What a definition regex matched. Tier 0 reads it off the pattern that fired;
- * later tiers fill it from an AST or an index.
- */
 export type SymbolKind =
   | "function"
   | "method"
@@ -88,16 +65,11 @@ export interface CodeNavHoverLocation {
 
 export interface CodeNavHoverDefinition extends CodeNavHoverLocation {
   confidence: "likely" | "possible";
-  /** Tier 0: from the matched def-regex. Tier 1+: AST / SCIP. */
   symbolKind: SymbolKind | null;
-  /** Tier 0: the matched line plus a short read-ahead. Tier 1+: exact. */
   signature: string | null;
-  /** True in Tier 0 — the card renders a "matched line" cue. */
   signatureApproximate: boolean;
-  /** Tier 0: heuristic comment scan. Tier 1+: the real doc node. */
   doc: string | null;
   preview: { startLine: number; lines: string[] } | null;
-  /** Ranked definitions beyond this one, within the search caps. */
   otherCandidateCount: number;
 }
 
@@ -110,15 +82,10 @@ export interface CodeNavHoverReference {
 
 export interface CodeNavHoverResponse {
   backend: "search" | "unavailable";
-  /** Tier 1 widens this to 'syntax', Tier 2 to 'index'. */
   source: "search";
   symbol: string;
   definition: CodeNavHoverDefinition | null;
-  /**
-   * The runner-up definition, present only when the search found EXACTLY two
-   * candidates. Three or more means the top match is too weak to name a second
-   * on the card, and the extras belong in the References panel.
-   */
+  /** Present only when the search found exactly two candidates; with three or more the extras belong in the References panel. */
   alternateDefinition: CodeNavHoverLocation | null;
   references: CodeNavHoverReference[];
   referenceCount: number;
@@ -126,26 +93,9 @@ export interface CodeNavHoverResponse {
   stats: { elapsedMs: number };
 }
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
 /**
- * Directory exclusions are split in two (#1558).
- *
- * A ripgrep glob with no slash matches a path SEGMENT at any depth, so
- * `--glob !vendor` prunes every directory named `vendor` anywhere in the tree
- * — including a first-party Java package such as
- * `src/main/java/com/example/vendor/app/`, whose symbols then resolve to
- * "No results". The same trap applies to `target` (Maven's build dir, but also
- * an ordinary package/module name) and to `build` / `dist` / `coverage`, which
- * are common nested directories in monorepos and in source trees alike.
- *
- * ALWAYS_IGNORED names can only ever be tool output, so they stay excluded at
- * any depth. ROOT_ONLY names are ambiguous and are excluded only at the search
- * root (`--glob !/vendor`, anchored like a gitignore rule); nested copies that
- * really are build output are already skipped by ripgrep's default .gitignore
- * handling.
+ * A glob with no slash matches a path segment at any depth, so `--glob !vendor` would also prune a first-party package like `src/main/java/com/example/vendor/app/`.
+ * ALWAYS_IGNORED names are only ever tool output and are excluded at any depth; ROOT_ONLY names are ambiguous and excluded only at the search root (`--glob !/vendor`).
  */
 const CODE_NAV_ALWAYS_IGNORED_DIRS = [
   "node_modules",
@@ -178,17 +128,7 @@ const RG_TYPE_MAP: Record<string, string> = {
   c: "c",
 };
 
-// ---------------------------------------------------------------------------
-// Definition patterns
-// ---------------------------------------------------------------------------
-
-/**
- * Each pattern carries the kind it proves. Alternations that used to span
- * several kinds (`const|let|var`, `interface|type`, go's optional receiver)
- * are split one-per-kind: the union of the patterns is unchanged, so
- * definition-vs-reference classification is identical, but a match now also
- * names WHAT was defined.
- */
+/** Each pattern carries the kind it proves; alternations spanning several kinds are split one per kind (their union is unchanged). */
 interface DefinitionPattern {
   pattern: string;
   kind: SymbolKind;
@@ -258,10 +198,6 @@ const GENERIC_DEFINITION_PATTERNS: DefinitionPattern[] = [
   { pattern: String.raw`(?:let|var|val)\s+SYMBOL\s*[=:]`, kind: "variable" },
 ];
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -277,35 +213,15 @@ function isTestFile(filePath: string): boolean {
   return /(?:test|spec|__tests__|_test\.|\.test\.|\.spec\.)/i.test(filePath);
 }
 
-// ---------------------------------------------------------------------------
-// rg argument construction
-// ---------------------------------------------------------------------------
-
-/** Path segments of a repo-relative file path, `/` and `\` alike. */
 function pathSegments(filePath: string): Set<string> {
   return new Set(splitPath(filePath));
 }
 
-/** Ordered path segments, `/` and `\` alike, with `.` and empties dropped. */
 function splitPath(filePath: string): string[] {
   return filePath.split(/[/\\]/).filter((segment) => segment && segment !== ".");
 }
 
-/**
- * Is `matchPath` allowed for a request that came from `originFilePath`?
- *
- * The origin-file exemption (#1558) lifts a directory exclusion so a symbol in
- * a changed file can always find its own siblings. Lifting the GLOB, though,
- * lifts it for the whole tree: a request from
- * `src/main/java/com/example/vendor/app/Widget.java` also started returning
- * matches from the repo-ROOT `vendor/`, which is exactly the third-party tree
- * the exclusion exists for (#1559 follow-up).
- *
- * So the exemption is narrowed to the directory INSTANCE the origin lives in:
- * a match under an excluded directory is kept only when that same directory is
- * an ancestor of the origin file. Root-only names are additionally only
- * considered at the search root, which is where `--glob !/vendor` prunes.
- */
+/** Whether `matchPath` is allowed for a request from `originFilePath`. The origin exemption lifts an exclusion only for the directory instance the origin lives under: a match under an excluded directory is kept only when that same directory is an ancestor of the origin file. Root-only names are considered only at the search root. */
 export function isCodeNavPathAllowed(
   matchPath: string,
   originFilePath?: string,
@@ -324,7 +240,6 @@ export function isCodeNavPathAllowed(
   return true;
 }
 
-/** Do `segments[0..i]` name the same directory the origin sits under? */
 function isAncestorOfOrigin(
   segments: string[],
   origin: string[],
@@ -340,12 +255,6 @@ function isAncestorOfOrigin(
 export function buildRgArgs(
   symbol: string,
   language?: string,
-  /**
-   * Repo-relative path the request originated from. Belt and braces for
-   * #1558: a segment the origin file itself lives under is never excluded for
-   * that request, so a symbol in a changed file can always find its own
-   * siblings even if the directory name looks like tool output.
-   */
   originFilePath?: string,
 ): string[] {
   const args: string[] = [
@@ -362,11 +271,7 @@ export function buildRgArgs(
   const originSegments = originFilePath
     ? pathSegments(originFilePath)
     : new Set<string>();
-  // Which directory the origin file sits at the TOP of, if any. A root-only
-  // glob prunes the search root alone, so only an origin that actually lives
-  // under that root directory needs the exclusion lifted — a first-party
-  // package deeper in the tree (`src/…/vendor/app/`) was never pruned by it,
-  // and lifting it for that request un-excluded the real `vendor/` (#1559).
+  // Which directory the origin file sits at the top of: a root-only glob prunes the search root alone, so only an origin under that root directory needs the exclusion lifted.
   const originRoot = originFilePath ? (splitPath(originFilePath)[0] ?? "") : "";
 
   for (const dir of CODE_NAV_ALWAYS_IGNORED_DIRS) {
@@ -390,10 +295,6 @@ export function buildRgArgs(
 
   return args;
 }
-
-// ---------------------------------------------------------------------------
-// rg JSON output parsing
-// ---------------------------------------------------------------------------
 
 interface RgMatchData {
   path: { text: string };
@@ -446,15 +347,6 @@ export function parseRgJsonOutput(
   return locations;
 }
 
-// ---------------------------------------------------------------------------
-// Match classification
-// ---------------------------------------------------------------------------
-
-/**
- * Same decision as {@link classifyMatch}, but it also reports WHICH pattern
- * fired. The kind is free information the classifier already computed and
- * used to throw away; the hover card renders it as a badge.
- */
 export function classifyMatchDetailed(
   snippet: string,
   symbol: string,
@@ -489,10 +381,6 @@ export function classifyMatch(
 ): "definition" | "reference" {
   return classifyMatchDetailed(snippet, symbol, language).kind;
 }
-
-// ---------------------------------------------------------------------------
-// Ranking
-// ---------------------------------------------------------------------------
 
 export function rankLocations(
   locations: CodeNavLocation[],
@@ -531,10 +419,6 @@ export function rankLocations(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Changed files extraction from unified diff patch
-// ---------------------------------------------------------------------------
-
 export function extractChangedFiles(patch: string | null): string[] {
   if (!patch) return [];
   const set = new Set<string>();
@@ -546,10 +430,6 @@ export function extractChangedFiles(patch: string | null): string[] {
   }
   return [...set];
 }
-
-// ---------------------------------------------------------------------------
-// Validation
-// ---------------------------------------------------------------------------
 
 export function validateCodeNavRequest(
   body: unknown,
@@ -575,10 +455,6 @@ export function validateCodeNavRequest(
   return null;
 }
 
-// ---------------------------------------------------------------------------
-// Main entry point
-// ---------------------------------------------------------------------------
-
 let rgAvailable: boolean | null = null;
 
 export async function resolveCodeNav(
@@ -586,10 +462,7 @@ export async function resolveCodeNav(
   request: CodeNavRequest,
   cwd: string,
   changedFiles: string[],
-  /**
-   * Additive: hover passes a shorter timeout than Cmd+click's 5s, because a
-   * 5s hover answer is useless. `/resolve` keeps the original default.
-   */
+  /** Hover passes a shorter timeout than Cmd+click's 5s. */
   options?: { timeoutMs?: number },
 ): Promise<CodeNavResponse> {
   const start = Date.now();
@@ -658,10 +531,6 @@ export function resetRgCache(): void {
   rgAvailable = null;
 }
 
-// ---------------------------------------------------------------------------
-// Hover enrichment (Tier 0)
-// ---------------------------------------------------------------------------
-
 /** Mirrors rg's own `--max-filesize 1M`: never read what rg would not search. */
 export const CODE_NAV_MAX_FILE_BYTES = 1024 * 1024;
 
@@ -682,11 +551,6 @@ function parenBalance(text: string): number {
   return depth;
 }
 
-/**
- * The matched definition line, extended by a short balanced-paren read-ahead
- * when the signature obviously continues. Always approximate in Tier 0: it is
- * a line of source, not a parsed declaration.
- */
 export function buildSignature(
   lines: string[],
   defLineIdx: number,
@@ -713,7 +577,6 @@ export function buildSignature(
   return { text, approximate: true };
 }
 
-/** Contiguous run of line comments directly above the def, skipping `skip` lines. */
 function scanLineCommentRun(
   lines: string[],
   defLineIdx: number,
@@ -727,7 +590,6 @@ function scanLineCommentRun(
   while (i >= 0 && collected.length < DOC_MAX_LINES + 1) {
     const trimmed = lines[i].trim();
     const prefix = prefixes.find((p) => trimmed.startsWith(p));
-    // A blank line (or anything that is not a comment) breaks the association.
     if (!prefix) break;
     collected.unshift(trimmed.slice(prefix.length).trim());
     i--;
@@ -795,16 +657,10 @@ function scanPythonDocstring(lines: string[], defLineIdx: number): string[] {
       return collected;
     }
   }
-  // No docstring: fall back to a `#` run above, looking through decorators.
   return scanLineCommentRun(lines, defLineIdx, ["#"], (t) => t.startsWith("@"));
 }
 
-/**
- * Lines a linter, formatter or type checker addresses to a tool, never to a
- * reader. A comment run that opens with these is machine bookkeeping that
- * happens to sit above a definition, and rendering it as documentation is
- * exactly the "garbage over nothing" failure the scan exists to avoid.
- */
+/** Lines a linter, formatter or type checker addresses to a tool, never to a reader. */
 const TOOLING_DIRECTIVE_PREFIXES = [
   "eslint-disable",
   "@ts-expect-error",
@@ -823,15 +679,7 @@ function isToolingDirective(line: string): boolean {
   return /^\/*\s*<reference\b/.test(line);
 }
 
-/**
- * Drop directives from BOTH ENDS of the run, never from the middle.
- *
- * Both ends, because the commonest real position for a directive is the line
- * immediately above the definition — which is the TRAILING end of the run as
- * collected — and a leading-only strip would leak it onto the end of the
- * paragraph. Never the middle, because a directive surrounded by prose sits
- * inside documentation whose shape we would have to interpret to cut safely.
- */
+/** Drop directives from both ends of the run, never the middle: the commonest position is the line directly above the definition (the trailing end), and cutting inside prose would mean interpreting it. */
 function stripEdgeDirectives(lines: string[]): string[] {
   const isDroppable = (line: string): boolean => {
     const trimmed = line.trim();
@@ -864,17 +712,7 @@ function finishDoc(collectedLines: string[]): string | null {
   return truncated ? `${text}…` : text;
 }
 
-/**
- * Heuristic doc-comment scan around a definition line. Per-language and
- * deliberately narrow: an unknown language returns null rather than guessing,
- * and so does anything that scans to decoration or to tooling directives.
- *
- * Only the five languages `DEFINITION_PATTERNS` covers are scanned at all.
- * That is accepted, not an oversight: a generic "comment characters above the
- * line" rule reads shell here-docs, SQL banners and C preprocessor lines as
- * prose, and a wrong doc paragraph on the card is worse than none. Widening
- * this set means adding a language's real comment rules, not loosening these.
- */
+/** Only the five languages `DEFINITION_PATTERNS` covers are scanned: a generic "comment characters above the line" rule reads shell here-docs, SQL banners and C preprocessor lines as prose, and a wrong doc paragraph is worse than none. Unknown languages return null. */
 export function scanDocComment(
   lines: string[],
   defLineIdx: number,
@@ -889,7 +727,6 @@ export function scanDocComment(
     case "python":
       return finishDoc(scanPythonDocstring(lines, defLineIdx));
     case "go":
-      // godoc convention: the comment run directly above the declaration.
       return finishDoc(scanLineCommentRun(lines, defLineIdx, ["//"], () => false));
     case "rust":
       return finishDoc(
@@ -923,11 +760,6 @@ async function readDefinitionFile(
   return content.split("\n");
 }
 
-/**
- * The hover answer: the search pipeline `/resolve` already runs, plus the
- * three cheap enrichments the card needs. Every enrichment degrades to null on
- * its own — a definition location with no readable file still makes a card.
- */
 export async function resolveCodeNavHover(
   runtime: CodeNavRuntime,
   request: CodeNavRequest,
@@ -988,8 +820,6 @@ export async function resolveCodeNavHover(
       doc: fileLines
         ? scanDocComment(fileLines, defLineIdx, request.language)
         : null,
-      // Declared for a later tier, populated when a consumer exists: the card
-      // renders the signature, so shipping source lines nothing reads is cost.
       preview: null,
       otherCandidateCount: Math.max(0, resolved.definitions.length - 1),
     };
@@ -999,8 +829,6 @@ export async function resolveCodeNavHover(
     ...base,
     backend: "search",
     definition,
-    // Exactly two candidates: name the runner-up. Three or more and the top
-    // match is too weak to name a second, so the extras stay in the panel.
     alternateDefinition:
       resolved.definitions.length === 2 && runnerUp
         ? {

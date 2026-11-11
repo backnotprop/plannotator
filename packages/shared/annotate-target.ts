@@ -1,34 +1,7 @@
 /**
- * Tolerant annotate target selection (#1182).
- *
- * Slash-command hosts forward raw user arguments to `plannotator annotate`
- * verbatim. On Claude Code the skill runs the CLI through a bash-substitution
- * prefix that executes before the model sees anything, so trailing natural
- * language ("/plannotator-annotate the aim doc") lands in the argument slot
- * and used to die with `File not found: the`.
- *
- * This module implements the shared three-tier fallback that every host hooks
- * into at its existing "nothing found" terminal (the first resolution pass is
- * always the host's unchanged pipeline):
- *
- *   1. Fast path: probe each whitespace-delimited token; if exactly one names
- *      an existing file, URL, or folder, proceed with it directly.
- *   2. Ambiguity: two or more tokens resolve; error naming every candidate,
- *      never guess.
- *   3. Handoff: nothing resolves; emit a message that echoes the words tried
- *      and (for CLI surfaces whose output lands in an agent's context) asks
- *      the agent to interpret the request and re-run with a concrete target.
- *
- * Bundles (0.29) come first when the host can open them: several arguments
- * that are ALL existing files named by their paths open as one review, in
- * the typed order (`probeAnnotateBundlePath`, the `bundle` selection, and
- * `resolveAnnotateBundleFiles` for the type and size checks). Anything else
- * falls to the tiers above unchanged; the ambiguity error then gains a hint
- * (`ANNOTATE_BUNDLE_HINT`).
- *
- * Selection and message building are pure; the token probe touches the
- * filesystem via the same primitives the host pipelines use, so a token that
- * probes true resolves on the re-run.
+ * Tolerant annotate target selection: slash-command hosts forward raw user arguments, so trailing prose must not die with `File not found`.
+ * One token naming an existing target proceeds; several are an ambiguity error; none is a handoff message. Several arguments that are all existing files open as a bundle first.
+ * Selection and messages are pure; the token probe uses the same filesystem primitives as the host pipelines.
  */
 
 import { existsSync, realpathSync, statSync } from "node:fs";
@@ -45,14 +18,8 @@ import type { AnnotateBundleFile } from "./annotate-bundle";
 import { looksLikeFilePath } from "./plannotator-tool";
 
 export interface AnnotateTokenCandidate {
-  /** The whitespace-delimited token the user typed. */
   token: string;
-  /**
-   * What the token resolved to: an absolute path for folders, HTML files and
-   * document matches, the token itself for URLs and ambiguous document names.
-   * Feeding this back into the host pipeline on a single match keeps hosts
-   * without fuzzy resolution (Pi) consistent with the probe's answer.
-   */
+  /** Absolute path for folders, HTML files and document matches; the token itself for URLs and ambiguous document names. */
   value: string;
 }
 
@@ -88,32 +55,13 @@ export type AnnotateTokenSelection =
 export type AnnotateTokenProbe = (token: string) => string | null;
 
 export interface ProbeAnnotateTokenOptions {
-  /**
-   * Whether a bare directory name (no path separator) may resolve as a
-   * folder candidate. Defaults to true, which is correct when the token is
-   * the sole argument. Multi-token selection passes false so a stray word
-   * that happens to match a directory name (or `.`) cannot hijack the
-   * fast path; explicit paths like `src/` or `docs/guides` still resolve.
-   */
+  /** Multi-token selection passes false so a stray word matching a directory name (or `.`) cannot hijack the fast path; defaults to true for a sole argument. */
   bareDirectories?: boolean;
 }
 
 /**
- * Would `plannotator annotate <token>` reach a specific verdict on this
- * token: open it, or fail with a target-specific error ("Ambiguous
- * filename", "File type not supported", "File too large", empty folder)?
- *
- * Mirrors the CLI resolution branch order: URL, folder, HTML file, then
- * document resolution (strip-first with the literal-`@` fallback for
- * scoped-package-style names), then bare existence (existing-but-unsupported
- * targets belong to the pipeline so its specific errors keep surfacing
- * verbatim). Returns the value to feed the pipeline, or null. An ambiguous
- * document name returns the stripped token so that a sole-candidate run
- * surfaces the existing "Ambiguous filename" error instead of guessing.
- *
- * Cheap for natural-language words: without an annotatable extension the
- * document resolver returns before walking the project, and the remaining
- * checks are single stat calls.
+ * Would `plannotator annotate <token>` reach a specific verdict: open it, or fail with a target-specific error? Mirrors the CLI resolution branch order.
+ * Existing-but-unsupported targets are left to the pipeline so its errors surface verbatim; an ambiguous document name returns the stripped token.
  */
 export function probeAnnotateToken(
   token: string,
@@ -122,10 +70,7 @@ export function probeAnnotateToken(
 ): string | null {
   if (!token) return null;
 
-  // Unwrap the `@` reference marker and wrapping quotes before the URL
-  // check: the pipeline strips them first (and re-strips harmlessly), so
-  // `@https://example.com/page` in a multi-token invocation must count as a
-  // URL candidate, not fall through to the handoff.
+  // Unwrap `@` and wrapping quotes before the URL check, as the pipeline does.
   const unwrapped = stripAtPrefix(token);
   if (/^https?:\/\//i.test(unwrapped)) return unwrapped;
 
@@ -154,9 +99,7 @@ export function probeAnnotateToken(
   if (doc.kind === "found") return doc.path;
   if (doc.kind === "ambiguous") return unwrapped;
 
-  // Bare existence is file-only: directories are candidates exclusively via
-  // the folder branch above, so disabling bare directories cannot be undone
-  // by this fallback.
+  // Bare existence is file-only: directories are candidates only via the folder branch above.
   const literal = resolveAtReference(token, (candidate) => {
     try {
       return statSync(resolveUserPath(candidate, projectRoot)).isFile();
@@ -169,12 +112,6 @@ export function probeAnnotateToken(
   return null;
 }
 
-/**
- * Does the whole input name something that the annotate pipeline would reach
- * a specific verdict on? Used by hosts that run the token fallback as a
- * pre-pass: when this is true the unchanged pipeline runs and produces
- * exactly today's behavior.
- */
 export function annotateInputNamesExistingTarget(
   input: string,
   projectRoot: string,
@@ -185,16 +122,8 @@ export function annotateInputNamesExistingTarget(
 }
 
 /**
- * The regular file `token` names BY ITS PATH, absolute, or null.
- *
- * "By its path" means the token, resolved against `projectRoot` (absolute
- * paths as they are, `~` expanded, one leading `@` reference marker or
- * wrapping quotes unwrapped, with the literal-`@` fallback for scoped-package
- * names), is a file that exists. A bare name found only by searching the
- * project does NOT count: that is a guess, and a bundle opens exactly what was
- * named. URLs and directories are never bundle files. The file's type is not
- * checked here (`resolveAnnotateBundleFiles` does that, so an unsupported file
- * fails naming itself instead of turning the input into prose).
+ * The regular file `token` names by its path, absolute, or null. A bare name found only by searching does NOT count: a bundle opens exactly what was named.
+ * The file's type is checked by `resolveAnnotateBundleFiles`.
  */
 export function probeAnnotateBundlePath(token: string, projectRoot: string): string | null {
   if (!token) return null;
@@ -210,27 +139,14 @@ export function probeAnnotateBundlePath(token: string, projectRoot: string): str
 }
 
 export interface SelectAnnotateTokenTargetOptions {
-  /**
-   * The bundle probe (normally `probeAnnotateBundlePath`). When given and
-   * every token names a file by its path, the selection is `bundle`. Hosts
-   * that cannot open bundles leave it out and keep the #1182 tiers exactly.
-   */
   bundlePath?: (token: string) => string | null;
-  /**
-   * Whether anything (file or directory) exists at the token's path
-   * (normally `annotatePathExists`). The `missing` selection needs it: only a
-   * token with nothing at its path is missing, so an existing directory such
-   * as a stray `.` keeps the #1182 behavior. Without it there is no `missing`.
-   */
   pathExists?: (token: string) => boolean;
 }
 
-/** Whether anything (file or directory) exists at the path `token` names. */
 export function annotatePathExists(token: string, projectRoot: string): boolean {
   return resolveAtReference(token, (value) => existsSync(resolveUserPath(value, projectRoot))) !== null;
 }
 
-/** Identity of a file for dropping duplicates: its real path when it has one. */
 function bundleIdentity(path: string): string {
   try {
     return realpathSync(path);
@@ -239,15 +155,7 @@ function bundleIdentity(path: string): string {
   }
 }
 
-/**
- * Tier 1/2/3 selection over the tokens of the raw argument input. Accepts
- * either the pre-split argv tokens (preserving quoted arguments that contain
- * whitespace) or a single raw string that is split on whitespace. Duplicate
- * tokens are probed once. Any dash-prefixed token makes the selection
- * `flagged` (see the type comment): known flags are stripped by the caller
- * before selection, so whatever remains is an unrecognized flag that must
- * error the way it always did, not be skipped.
- */
+/** Any dash-prefixed token makes the selection `flagged`: known flags are stripped by the caller, so what remains is an unrecognized flag that must error, not be skipped. */
 export function selectAnnotateTokenTarget(
   rawInput: string | string[],
   probe: AnnotateTokenProbe,
@@ -263,10 +171,6 @@ export function selectAnnotateTokenTarget(
     return { kind: "flagged", flagTokens };
   }
 
-  // Bundle rule (0.29): several arguments that are ALL existing files named
-  // by their paths open as one review, in the typed order. Anything less
-  // (prose around a path, a URL or folder among them, a name found only by
-  // searching) keeps the #1182 tiers below unchanged.
   const bundlePath = options.bundlePath;
   const uniqueTokens = [...new Set(tokens)];
   if (bundlePath && uniqueTokens.length > 1) {
@@ -289,12 +193,7 @@ export function selectAnnotateTokenTarget(
         ? { kind: "single", candidate: files[0] as AnnotateTokenCandidate }
         : { kind: "bundle", files };
     }
-    // Every word reads as a file path, yet some name nothing at all (nothing
-    // at the path, and nothing found by search): a list of files with a typo.
-    // Opening the rest would review fewer files than were named, so it fails
-    // naming the missing ones. An existing path (a directory such as a stray
-    // `.`) is never "missing". Known edge: a dotted word such as `Node.js`
-    // or `v2.0` reads as a file path too.
+    // Every word reads as a file path yet some name nothing: a list with a typo. Opening the rest would review fewer files than named, so it fails naming the missing ones. Existing paths (a stray `.`) are never missing.
     const pathExists = options.pathExists;
     if (pathExists && uniqueTokens.every((token) => looksLikeFilePath(stripAtPrefix(token)))) {
       const missing = uniqueTokens.filter((token) => !pathExists(token) && probe(token) === null);
@@ -326,10 +225,6 @@ export function selectAnnotateTokenTarget(
 export const ANNOTATE_USAGE_TARGET =
   "<file.md | file.txt | file.html | https://... | folder/>";
 
-/**
- * Tier-2 error: several tokens each name an existing target. Never guess;
- * name every candidate so the caller can re-run with exactly one.
- */
 export function buildAmbiguousAnnotateArgsMessage(
   candidates: AnnotateTokenCandidate[],
   options: { bundleHint?: boolean } = {},
@@ -342,19 +237,10 @@ export function buildAmbiguousAnnotateArgsMessage(
   ].join("\n");
 }
 
-/**
- * The hint line a host that opens bundles adds to the ambiguity error. Its
- * absence is how a host tells an OLDER CLI's refusal of several paths from
- * the current one's (`isOlderCliBundleRefusal` in the tool contract, which
- * keeps its own copy of this text).
- */
+/** Its absence is how a host tells an older CLI's refusal of several paths from the current one's (`isOlderCliBundleRefusal` keeps its own copy of this text). */
 export const ANNOTATE_BUNDLE_HINT =
   "To review several files together, pass only their paths: plannotator annotate a.md b.html";
 
-/**
- * The `missing` selection's error: an explicit list of files with one or more
- * that do not exist. Nothing is opened.
- */
 export function buildMissingAnnotateFilesMessage(missing: readonly string[]): string {
   return [
     `${missing.length === 1 ? "File" : "Files"} not found: ${missing.join(", ")}`,
@@ -366,14 +252,7 @@ export type AnnotateBundleResolution =
   | { ok: true; files: AnnotateBundleFile[] }
   | { ok: false; message: string };
 
-/**
- * The bundle's files, checked and in order: every one must be a file annotate
- * opens (markdown, plain text, config, diagram source, or HTML) and within the
- * 2MB annotate cap. The first one that is not fails the whole bundle with a
- * message naming it. HTML renders as raw HTML unless `convertHtml` (the
- * `--markdown` flag), exactly as a single HTML file does. Duplicates (the same
- * real file twice) are dropped, keeping the first.
- */
+/** Every file must be one annotate opens and within the 2MB cap; the first that is not fails the whole bundle. Duplicates (the same real file) are dropped, keeping the first. */
 export function resolveAnnotateBundleFiles(
   paths: readonly string[],
   options: { convertHtml?: boolean } = {},
@@ -419,12 +298,6 @@ export function resolveAnnotateBundleFiles(
   return { ok: true, files };
 }
 
-/**
- * Tier-3 message: nothing in the arguments names an existing target. Echoes
- * the words tried and, when `agentHandoff` is set (CLI surfaces whose output
- * lands in an agent's context), asks the reading agent to interpret the
- * request and re-run with a concrete target, preserving the given flags.
- */
 export function buildUnresolvedAnnotateArgsMessage(options: {
   words: string[];
   flags?: string[];

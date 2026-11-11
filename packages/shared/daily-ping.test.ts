@@ -1,10 +1,4 @@
-/**
- * The daily ping's client (daily-ping.ts) against a loopback receiver, never
- * the real host, in a temp PLANNOTATOR_DATA_DIR. Guards: what turns it off
- * (NO_ANON_PING, the do-not-track convention, CI, a dev build); once a day per
- * tool, also across two processes; `first` on one ping a day only; the exact
- * bytes; a failed send tries again at the next check.
- */
+/** Runs the ping client against a loopback receiver in a temp PLANNOTATOR_DATA_DIR, never the real host. */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,7 +8,7 @@ import { checkDailyPing, cliDailyPingTool, DAILY_PING_URL, dailyPingAge, dailyPi
 
 const VERSION = "0.28.46";
 const DAY = 86_400_000;
-const NOW = Date.parse("2026-11-04T10:00:00Z"); // a Wednesday
+const NOW = Date.parse("2026-11-04T10:00:00Z");
 const TODAY = "2026-11-04";
 
 interface Received {
@@ -73,7 +67,6 @@ describe("the request", () => {
     const [r] = received;
     expect(r!.method).toBe("POST");
     expect(r!.path).toBe("/ping");
-    // The payload, byte for byte: version, install-age bucket (3 weeks: 2), tool, first of the day. Nothing else.
     expect(r!.body).toBe('{"version":"0.28.46","age_week":2,"tool":"plan","first":1,"favicon":"none"}');
     expect(r!.headers["content-type"]).toBe("application/json");
     expect(r!.headers["user-agent"]).toBe("plannotator");
@@ -84,7 +77,6 @@ describe("the request", () => {
     expect(received).toHaveLength(1);
     expect(await check("plan", NOW + DAY)).toBe("sent");
     expect(received).toHaveLength(2);
-    // A new day: the first ping of it carries first again.
     expect(received[1]!.body).toBe('{"version":"0.28.46","age_week":2,"tool":"plan","first":1,"favicon":"none"}');
   });
 
@@ -123,7 +115,6 @@ describe("the request", () => {
   });
 
   test("favicon is config.json's setting, read when the ping is sent: glass, yellow, totman is face, anything else (classic included) none", async () => {
-    // Weeks 5-24 (age_week 3) on every day this test sends.
     writeState({ firstWeek: "2026-09-07" });
     const config = (value: string) => writeFileSync(join(dataDir, "config.json"), value);
     const sends: [string | null, string][] = [
@@ -147,7 +138,6 @@ describe("the request", () => {
       expect({ value, body: received.at(-1)!.body }).toEqual({ value, body: `{"version":"0.28.46","age_week":3,"tool":"plan","first":1,"favicon":"${favicon}"}` });
       day++;
     }
-    // Every tool's ping carries it, not only the day's first.
     config('{"favicon":"totman"}');
     expect(await check("review", NOW + (day - 1) * DAY)).toBe("sent");
     expect(received.at(-1)!.body).toBe('{"version":"0.28.46","age_week":3,"tool":"review","first":0,"favicon":"face"}');
@@ -160,7 +150,6 @@ describe("the request", () => {
   });
 
   test("an existing user's first ping counts from first use: the oldest time in the data folder, never later than today", async () => {
-    // Plannotator was used here 10 weeks before the ping arrived (a file it wrote then).
     const ten = (NOW - 70 * DAY) / 1000;
     mkdirSync(join(dataDir, "history"));
     writeFileSync(join(dataDir, "config.json"), "{}");
@@ -168,7 +157,6 @@ describe("the request", () => {
     expect(await check("plan")).toBe("sent");
     expect(readDailyPingState(dataDir).firstWeek).toBe("2026-08-24");
     expect(received[0]!.body).toBe('{"version":"0.28.46","age_week":3,"tool":"plan","first":1,"favicon":"none"}');
-    // ping.json only holds the week: nothing else about the folder.
     expect(Object.keys(JSON.parse(readFileSync(join(dataDir, "ping.json"), "utf8")))).toEqual(["firstWeek", "day", "sent"]);
   });
 });
@@ -186,7 +174,6 @@ describe("off means no request", () => {
     test(name, async () => {
       expect(await check("plan", NOW, extra)).toBe(reason as never);
       expect(received).toEqual([]);
-      // Nothing is written while the ping is off.
       expect(() => readFileSync(join(dataDir, "ping.json"))).toThrow();
     });
   }
@@ -230,7 +217,6 @@ describe("failures and the lock", () => {
     answer = () => 204;
     expect(await check("annotate", NOW + 60_000)).toBe("sent");
     expect(received).toHaveLength(2);
-    // The retry is still the day's first ping: the failed one did not count.
     expect(received[1]!.body).toBe('{"version":"0.28.46","age_week":2,"tool":"annotate","first":1,"favicon":"none"}');
   });
 
@@ -263,7 +249,6 @@ describe("failures and the lock", () => {
     };
     expect(await check("plan")).toBe("failed");
     expect(received).toHaveLength(1);
-    // Its state stays the other process's to write, and its lock is still there.
     expect(readDailyPingState(dataDir).sent).toBeUndefined();
     expect(readFileSync(lock, "utf8")).toBe("the-other-process");
   });

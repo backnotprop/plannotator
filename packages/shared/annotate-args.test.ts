@@ -92,11 +92,7 @@ describe("parseAnnotateArgs", () => {
     });
   });
 
-  // `@` is the reference-mode marker (Claude Code / OpenCode / Pi convention),
-  // not part of the filename. The parser strips it on `filePath` as the primary
-  // behavior — that's the common case. `rawFilePath` preserves the original
-  // for callers that want to try the literal form as a fallback (scoped-package-
-  // style names). See at-reference.ts for the combined helper.
+  // `@` is the reference-mode marker, not part of the filename; `rawFilePath` keeps the original.
 
   test("leading @ is stripped (reference-mode primary) and rawFilePath preserves it", () => {
     expect(parseAnnotateArgs("@spec.md --gate")).toEqual({
@@ -248,12 +244,6 @@ describe("parseAnnotateArgs", () => {
     });
   });
 
-  // Regressions from the initial parser: the tokenize-and-rejoin approach
-  // collapsed consecutive whitespace in file paths. Before this branch,
-  // OpenCode and Pi passed the raw args string straight through, so files
-  // with double-spaces or tabs in their names worked fine. These tests pin
-  // that behavior so we don't regress it again.
-
   test("double-space inside a file path is preserved (flag at end)", () => {
     expect(parseAnnotateArgs("My  Notes.md --gate")).toEqual({
       filePath: "My  Notes.md",
@@ -314,10 +304,7 @@ describe("parseAnnotateArgs", () => {
     });
   });
 
-  // OpenCode and Pi don't go through a shell, so users who quote paths
-  // (shell muscle memory, copy-paste from docs) have literal quote
-  // characters reach the parser. Strip them at the tokenization layer
-  // so downstream callers don't have to reason about quoting.
+  // OpenCode and Pi do not go through a shell, so wrapping quotes reach the parser literally.
 
   test("wrapping double quotes are stripped from both filePath and rawFilePath", () => {
     expect(parseAnnotateArgs(`"@foo.md" --gate`)).toEqual({
@@ -379,10 +366,7 @@ describe("parseAnnotateArgs", () => {
     });
   });
 
-  // --hook emits hook-native JSON ({"decision":"block","reason":"..."}) for
-  // annotations and empty stdout for approve/close. It implies --gate in the
-  // binary, but the parser is a pure tokenizer — it reports which flags were
-  // present without applying implication logic.
+  // The parser only reports which flags are present; --hook's implication of --gate is applied in the binary.
 
   test("--hook alongside --gate", () => {
     expect(parseAnnotateArgs("spec.md --gate --hook")).toEqual({
@@ -519,9 +503,7 @@ describe("parseAnnotateArgs: live flags (--app / --static)", () => {
   });
 
   test("without liveFlags the tokens stay in the path (honest unsupported-flag error downstream)", () => {
-    // A host that cannot act on --app must not silently strip it: leaving the
-    // token in the path preserves the legacy "File not found: --app ..."
-    // failure instead of quietly ignoring the user's flag.
+    // A host that cannot act on --app must leave the token in the path.
     const parsed = parseAnnotateArgs("http://localhost:5173 --app");
     expect(parsed.filePath).toBe("http://localhost:5173 --app");
     expect(parsed.app).toBe(false);
