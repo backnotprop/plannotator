@@ -52,7 +52,6 @@ describe("parseTourStreamOutput", () => {
     expect(parseTourStreamOutput(stdout)).toBeNull();
   });
 
-  // Multiple result events: see findClaudeStructuredOutput in claude-review.ts.
   test("reads an earlier result's tour when trailing results are empty or errors", () => {
     const stdout = [
       JSON.stringify({ type: "result", is_error: false, result_index: 0, structured_output: validOutput }),

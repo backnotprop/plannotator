@@ -153,7 +153,6 @@ describe("writeServerReadyMetadata", () => {
   });
 });
 
-/** Run `fn` with stdout and stderr captured, so a test can assert what landed where. */
 async function captureStreams(fn: () => Promise<void>): Promise<{ stdout: string; stderr: string }> {
   const out: string[] = [];
   const err: string[] = [];
@@ -176,22 +175,13 @@ async function captureStreams(fn: () => Promise<void>): Promise<{ stdout: string
   return { stdout: out.join(""), stderr: err.join("") };
 }
 
-/**
- * The session URL appears exactly once, on the stable line. Written out
- * literally rather than built from `SESSION_READY_LINE_PREFIX`: building it
- * from the constant would check the constant against itself and stay green
- * while consumers matching the text (the OpenCode CLI bridge's stderr filter)
- * stopped finding the URL. The two-space indent and the newlines are part of
- * the format.
- */
+/** Written out literally, not built from `SESSION_READY_LINE_PREFIX`: that would check the constant against itself while consumers matching the text stop finding the URL. */
 function expectSingleReadyLine(output: string, url: string): void {
   expect(output.split(url).length - 1).toBe(1);
   expect(output).toContain(`\n  Plannotator session ready: ${url}\n`);
 }
 
 describe("SESSION_READY_LINE_PREFIX", () => {
-  // A cross-component contract: the OpenCode CLI bridge matches it with its
-  // own regex and the docs quote it as the line to grep.
   test("is the exact text consumers match on", () => {
     expect(SESSION_READY_LINE_PREFIX).toBe("Plannotator session ready: ");
   });
@@ -212,8 +202,6 @@ describe("handleServerReady", () => {
     expect(opened).toBe(false);
   });
 
-  // Regression (#1134): a local session whose browser opened fine printed no
-  // URL, so a closed tab left neither the person nor the agent a way back.
   test("prints the ready line for a local session whose browser opens", async () => {
     let opened = "";
     const { stderr } = await captureStreams(async () => {
@@ -228,8 +216,6 @@ describe("handleServerReady", () => {
     expect(opened).toBe("http://localhost:3000");
   });
 
-  // A launcher that never exits (a blocking BROWSER, #746) must not hide the
-  // URL: the line is out before the launch starts.
   test("prints the ready line before it launches the browser", async () => {
     const written: string[] = [];
     const original = process.stderr.write.bind(process.stderr);
@@ -251,8 +237,6 @@ describe("handleServerReady", () => {
     expectSingleReadyLine(seenAtLaunch, "http://localhost:3100");
   });
 
-  // Regression: a remote session must surface a reachable URL regardless of
-  // URL sharing; the forwarding advice is its own line under it.
   test("prints the URL once for a remote session, with the forwarding line under it", async () => {
     const { stderr } = await captureStreams(async () => {
       await handleServerReady("http://localhost:19432", true, 19432, { skipBrowserOpen: true });
@@ -263,8 +247,6 @@ describe("handleServerReady", () => {
     );
   });
 
-  // Regression: a headless box must say why no tab appeared, without
-  // printing the URL a second time.
   test("prints the URL once and a failure line when the browser won't open", async () => {
     const { stderr } = await captureStreams(async () => {
       await handleServerReady("http://localhost:4000", false, 4000, {
@@ -298,7 +280,6 @@ describe("handleServerReady", () => {
     }
   });
 
-  // A reverse-proxy origin has no port to forward; the advice would be wrong.
   test("a public proxy URL gets the device line, not the forwarding advice", async () => {
     const url = "https://plannotator.example.com";
     const { stderr } = await captureStreams(async () => {
@@ -309,8 +290,6 @@ describe("handleServerReady", () => {
     expect(stderr).not.toContain("forward port");
   });
 
-  // PLANNOTATOR_BROWSER=none (or --browser none) opens nothing: the reason
-  // goes under the URL, and no launch (so no failure line) follows.
   test.each([
     ["local", false, ""],
     ["remote", true, "  Open it on your local machine (forward port 6000 if needed).\n"],
@@ -341,7 +320,6 @@ describe("handleServerReady", () => {
     }
   });
 
-  // A host that opens the browser itself (skipBrowserOpen) has nothing to explain.
   test("PLANNOTATOR_BROWSER=none with skipBrowserOpen prints no reason line", async () => { // no-browser-guard: sentinel under test (expected text, nothing is set)
     const saved = process.env.PLANNOTATOR_BROWSER;
     // no-browser-guard: sentinel under test (in process; nothing is launched)
@@ -357,9 +335,6 @@ describe("handleServerReady", () => {
     }
   });
 
-  // OpenCode's embedded runtime shares stderr with its TUI and shows the URL
-  // itself: announce: false prints nothing but still writes the ready file
-  // and opens the browser.
   test("announce: false prints nothing but still writes the ready file and opens the browser", async () => {
     const dir = mkdtempSync(join(tmpdir(), "plannotator-announce-"));
     const readyFile = join(dir, "ready.jsonl");
@@ -385,8 +360,6 @@ describe("handleServerReady", () => {
     }
   });
 
-  // `--json`, `--hook` and `--gate` reserve stdout for the record an agent
-  // parses: the announcement never writes there, in any branch.
   test.each([
     ["local session, browser opens", false, true, {}],
     ["local session, browser fails", false, false, {}],
@@ -403,13 +376,7 @@ describe("handleServerReady", () => {
   });
 });
 
-/**
- * Deliberately a unit test on the handler rather than an HTTP round trip: this
- * file never calls global fetch, so it stays correct in either CI lane. The DOM
- * lanes in .github/workflows/test.yml list individual files and include no
- * server tests, but a server test that booted a server and fetched it would
- * break the moment someone added one (happy-dom replaces global fetch).
- */
+/** A unit test on the handler, not an HTTP round trip: this file never calls global fetch, so it stays correct in the DOM CI lanes (happy-dom replaces global fetch). */
 describe("handleFavicon", () => {
   const savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
   let tempDir: string;
@@ -441,7 +408,6 @@ describe("handleFavicon", () => {
     ] as const) {
       saveConfig({ favicon: style as never });
       const response = handleFavicon();
-      // The entry HTML's <link> declares no type, so the header is all the browser has.
       expect(response.headers.get("content-type"), style).toBe("image/png");
       expect(new Uint8Array(await response.arrayBuffer()), style).toEqual(expected);
     }
@@ -471,8 +437,6 @@ describe("handleFavicon", () => {
     expect(response.headers.get("content-type")).toBe("image/png");
   });
 
-  // One URL, two possible bodies: a long-lived cache would re-paint the old icon
-  // on the next session after a switch.
   test("does not let either payload be cached under the shared URL", () => {
     expect(handleFavicon().headers.get("cache-control")).toBe("no-cache");
     saveConfig({ favicon: "totman" });

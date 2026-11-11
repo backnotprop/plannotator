@@ -1,18 +1,4 @@
-/**
- * Safe updates, step 1: `update-prepare` (the running Plannotator downloads
- * the install script and both binaries' checksums with its own fetch) and the
- * POSIX update wrapper that runs it, then runs the saved script with
- * PLANNOTATOR_EXPECTED_SHA256.
- *
- * The rule these guard: an update either installs the genuine release or
- * changes nothing, and never leaves the install stuck. Offline, a refusing
- * proxy, a bad `.sha256`, Ctrl-C and a kill all end with the old binary in
- * place, the lock released and a result recorded.
- *
- * Everything is loopback or a stub: a fake release server, a stub `curl` for
- * install.sh's own binary download, a temp HOME and TMPDIR. Nothing reaches
- * the network and nothing downloaded is a real binary.
- */
+/** Update-prepare and the POSIX wrapper: an update either installs the genuine release or changes nothing, leaving the lock released and a result recorded. Everything is loopback or a stub (fake release server, stub `curl`, temp HOME and TMPDIR). */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createHash, X509Certificate } from "node:crypto";
 import { spawn } from "node:child_process";
@@ -57,7 +43,6 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
 const staged = (dir: string = root) => readdirSync(dir).filter((n) => n.startsWith("plannotator-update-"));
 
 type Route = (path: string) => Response | Promise<Response>;
-/** A fetch over a route table, as the release server would answer. */
 function fakeFetch(route: Route): typeof fetch {
   return (async (input: RequestInfo | URL) => route(new URL(String(input)).pathname)) as typeof fetch;
 }
@@ -103,7 +88,6 @@ describe("prepareUpdate", () => {
     expect(await prepare(genuine, "1.2.3", "linux", "ia32")).toMatchObject({ ok: false });
   });
 
-  // A release that stops shipping one CPU type must never stop updates for the other.
   for (const [name, route] of [
     ["missing", (p: string) => (p.endsWith("x64.sha256") ? new Response("", { status: 404 }) : genuine(p))],
     ["unreadable", (p: string) => (p.endsWith("x64.sha256") ? new Response("<html>") : genuine(p))],
@@ -118,7 +102,6 @@ describe("prepareUpdate", () => {
     });
   }
 
-  // Never stuck: each of these is "couldn't download", nothing is staged, and the caller retries later.
   const failures: Array<[string, Route]> = [
     ["offline", () => Promise.reject(new TypeError("Unable to connect. Is the computer able to access the url?"))],
     ["a refusing proxy, as Bun 1.3.14 reports it (a 502 response)", () => new Response("Bad Gateway", { status: 502 })],
@@ -147,8 +130,7 @@ describe("prepareUpdate", () => {
     expect(r).toMatchObject({ ok: false });
   });
 
-  // The other CPU type's checksum is optional: a stall there must not hold
-  // up the update (main never fetched it at all).
+  // The other CPU type's checksum is optional: a stall there must not hold up the update.
   test("the other CPU type's .sha256 stalling: staged after a short grace, with a note", async () => {
     const stallOther: typeof fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
       String(input).endsWith("x64.sha256")
@@ -172,7 +154,6 @@ describe("prepareUpdate", () => {
     expect(r.ok && r.expected).toBe(`plannotator-linux-arm64=${ARM} plannotator-linux-x64=${X64}`);
   });
 
-  // A temp folder that can't hold the update is not a download failure: its own words.
   test("a temp folder that can't be written: a staging failure in plain words, nothing staged", async () => {
     const missing = join(root, "no-such-tmp");
     const r = await prepareUpdate({ version: "1.2.3", platform: "linux", arch: "arm64", env: ENV, tmpRoot: missing, fetchImpl: fakeFetch(genuine) });
@@ -255,15 +236,11 @@ describe("update-prepare command", () => {
   });
 });
 
-// ─────────────── The POSIX wrapper, end to end ───────────────
-
 const ENTRY = resolve(import.meta.dir, "update-prepare-entry.ts");
 const INSTALL_SH = resolve(import.meta.dir, "../../scripts/install.sh");
 
 interface Release {
-  /** The install script served at /install.sh. */
   script: string;
-  /** The .sha256 body per asset name; absent = 404. */
   sums: Record<string, string>;
 }
 
@@ -284,12 +261,7 @@ function serve(release: Release) {
   return { server, hits };
 }
 
-/**
- * A sandbox for one wrapper run: HOME, TMPDIR, a data dir, and stub-bin with
- * a `curl` that serves the binary install.sh downloads (and logs every call,
- * so a test can prove the wrapper itself never used curl), plus a `git` that
- * fails so the skills checkout never reaches the network.
- */
+/** A sandbox for one wrapper run: HOME, TMPDIR, data dir, and stub-bin with a `curl` that logs every call (to prove the wrapper never used curl) and a `git` that fails so the skills checkout never reaches the network. */
 function sandbox(binaryServed: string) {
   const home = join(root, "home");
   const tmp = join(root, "tmp");
@@ -363,7 +335,6 @@ async function runWrapper(box: Box, port: number, extra: Record<string, string> 
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 const pins = (arm: string, x64: string) => ({ [`plannotator-${OS}-arm64`]: `${arm}  x\n`, [`plannotator-${OS}-x64`]: `${x64}  x\n` });
-/** The binary install.sh picks here (its `uname -m`), the same one `update-prepare` requires. */
 const NATIVE = `plannotator-${OS}-${process.arch === "x64" ? "x64" : "arm64"}`;
 
 describe.skipIf(process.platform === "win32")("POSIX update wrapper (safe updates)", () => {
@@ -400,8 +371,7 @@ describe.skipIf(process.platform === "win32")("POSIX update wrapper (safe update
   test("never-stuck: a bad .sha256 means the script never runs", async () => {
     const box = sandbox("new");
     const marker = join(box.home, "script-ran");
-    // This machine's CPU type: a bad .sha256 for the other type only drops
-    // that pin (staged, with a note), so it would pass on arm64 and not on x64.
+    // This machine's CPU type: a bad .sha256 for the other type only drops that pin, so it would pass on arm64 and not on x64.
     const { server } = serve({ script: `${SCRIPT_HEAD}touch "${marker}"\n`, sums: { ...pins(ARM, X64), [NATIVE]: "not-a-checksum  x\n" } });
     try {
       const r = await runWrapper(box, server.port!);
@@ -415,9 +385,7 @@ describe.skipIf(process.platform === "win32")("POSIX update wrapper (safe update
   }, 30_000);
 
   test("tamper, through the real install.sh: the network swaps the binary and its .sha256; a mismatch, old binary kept", async () => {
-    // The attacker controls install.sh's own curl (the stub serves an altered
-    // binary with a matching .sha256), but not Plannotator's fetch, which got
-    // the genuine checksums.
+    // The attacker controls install.sh's own curl (altered binary with a matching .sha256) but not Plannotator's fetch, which got the genuine checksums.
     const box = sandbox("#!/bin/sh\necho evil\n");
     const genuineSha = sha("#!/bin/sh\necho genuine\n");
     const { server, hits } = serve({ script: readFileSync(INSTALL_SH, "utf-8"), sums: pins(genuineSha, genuineSha) });
@@ -428,7 +396,6 @@ describe.skipIf(process.platform === "win32")("POSIX update wrapper (safe update
       expect(readFileSync(box.installed, "utf-8")).toContain("plannotator-old");
       expect(r.lockHeld).toBe(false);
       expect(staged(box.tmp)).toEqual([]);
-      // The script came from Plannotator's fetch, not curl.
       expect(hits).toContain("/install.sh");
       expect(readFileSync(box.curlLog, "utf-8")).not.toContain("install.sh");
     } finally {
@@ -447,7 +414,6 @@ describe.skipIf(process.platform === "win32")("POSIX update wrapper (safe update
       expect(r.result).toEqual({ version: "v1.2.3", exitCode: 0 });
       expect(r.lockHeld).toBe(false);
       expect(staged(box.tmp)).toEqual([]);
-      // install.sh did not fetch the .sha256 again over its own connection.
       expect(readFileSync(box.curlLog, "utf-8")).not.toContain(".sha256");
     } finally {
       server.stop(true);
@@ -525,8 +491,7 @@ describe.skipIf(process.platform === "win32")("POSIX update wrapper (safe update
 
   test("Ctrl-C mid-install: 130 recorded, lock released, the staged copy removed", async () => {
     const box = sandbox("new");
-    // `exec`, as in auto-update.test.ts: a group SIGINT never lands on a child
-    // between fork and exec, which would leave the sleep holding stdout.
+    // `exec`, as in auto-update.test.ts: a group SIGINT never lands on a child between fork and exec, which would leave the sleep holding stdout.
     const { server } = serve({ script: `${SCRIPT_HEAD}echo "fake installer started"\nexec sleep 30\n`, sums: pins(ARM, X64) });
     try {
       const { paths, env } = wrapperEnv(box, server.port!);
@@ -549,8 +514,7 @@ describe.skipIf(process.platform === "win32")("POSIX update wrapper (safe update
     }
   }, 30_000);
 
-  // The wrapper removes the dir `update-prepare` printed: it must only ever
-  // remove a plannotator-update-* path, whatever that output is.
+  // The wrapper must only ever remove a plannotator-update-* path, whatever the printed output is.
   for (const [name, printed] of [
     ["the temp root itself", "$TMPDIR"],
     ["a dir below one named plannotator-update-*", "$TMPDIR/plannotator-update-x/inner"],
@@ -577,13 +541,7 @@ describe.skipIf(process.platform === "win32")("POSIX update wrapper (safe update
   }
 });
 
-// ─────────────── A network that inspects HTTPS ───────────────
-//
-// Bun's own roots (which drop the leaked eMudhra root) refuse a company's
-// inspecting root; curl, which main used, trusted it through this computer's
-// store. So a certificate error is retried once with Bun's roots plus this
-// computer's. A stand-in serves the release over HTTPS with a certificate from
-// a private root, made per test run.
+// Bun's own roots refuse a company's HTTPS-inspecting root, which the computer's store trusts. A certificate error is retried once with Bun's roots plus the computer's; a stand-in serves HTTPS with a certificate from a per-run private root.
 
 describe.skipIf(process.platform === "win32")("certificate errors", () => {
   let tlsFiles: SelfSignedTls;
@@ -628,7 +586,6 @@ describe.skipIf(process.platform === "win32")("certificate errors", () => {
       expect(r.ok).toBe(true);
       if (!r.ok) return;
       expect(r.expected.split(" ").toSorted()).toEqual([`plannotator-${OS}-arm64=${ARM}`, `plannotator-${OS}-x64=${X64}`]);
-      // The store is read once for all three downloads.
       expect(asked).toBe(1);
     } finally {
       site.stop();
@@ -691,15 +648,12 @@ describe.skipIf(process.platform === "win32")("certificate errors", () => {
     expect(roots).toContain(tlsFiles.caPem);
     expect(roots.some((pem) => new X509Certificate(pem).fingerprint256 === new X509Certificate(EMSIGN_ECC_G3_PEM).fingerprint256)).toBe(false);
     expect(systemTrustedCa(store([]), {})).toBeNull();
-    // Nor from what only curl reads.
     const g3File = join(root, "g3.pem");
     writeFileSync(g3File, EMSIGN_ECC_G3_PEM);
     expect(systemTrustedCa(store([]), { CURL_CA_BUNDLE: g3File })).toBeNull();
   });
 
-  // The NODE_EXTRA_CA_CERTS hint must be complete: Plannotator's fetch trusts
-  // that root, so install.sh's curl (which downloads the binary) must too,
-  // without losing any root it trusted before.
+  // The NODE_EXTRA_CA_CERTS hint must be complete: install.sh's curl must trust that root too, without losing any root it trusted before.
   test("NODE_EXTRA_CA_CERTS: a curl bundle of every root curl had plus that one, never G3; nothing without it", () => {
     const store = (kind: string) => (kind === "system" ? [] : [...tls.rootCertificates]);
     expect(curlBundleWithExtraCa({}, store)).toBeNull();
@@ -719,7 +673,6 @@ describe.skipIf(process.platform === "win32")("certificate errors", () => {
   test("end to end: following the hint, install.sh's own curl reaches the inspected host too; without it curl is untouched", async () => {
     const box = sandbox("new");
     const site = serveHttps({ script: "", sums: pins(ARM, X64) });
-    // The served install.sh does what the real one does next: curl over the same network.
     const script = `${SCRIPT_HEAD}# PLANNOTATOR_EXPECTED_SHA256\nprintf '%s' "\${CURL_CA_BUNDLE-unset}" > "$HOME/ca-env"\n/usr/bin/curl -fsS -o /dev/null "https://127.0.0.1:${site.port}/dl/v1.2.3/${NATIVE}.sha256"\n`;
     const scriptServer = Bun.serve({ hostname: "127.0.0.1", port: 0, tls: { cert: tlsFiles.cert, key: tlsFiles.key }, fetch: () => new Response(script) });
     const env = { ...site.env, PLANNOTATOR_INSTALL_SCRIPT_URL: `https://127.0.0.1:${scriptServer.port}/install.sh` };
@@ -729,7 +682,6 @@ describe.skipIf(process.platform === "win32")("certificate errors", () => {
       expect(readFileSync(join(box.home, "ca-env"), "utf-8")).toEndWith("/curl-ca-bundle.pem");
       expect(staged(box.tmp)).toEqual([]);
 
-      // Nothing set: the wrapper never touches curl's trust.
       const plain = serve({ script: `${SCRIPT_HEAD}# PLANNOTATOR_EXPECTED_SHA256\nprintf '%s' "\${CURL_CA_BUNDLE-unset}" > "$HOME/ca-env"\n`, sums: pins(ARM, X64) });
       try {
         const r = await runWrapper(box, plain.server.port!);
@@ -744,9 +696,7 @@ describe.skipIf(process.platform === "win32")("certificate errors", () => {
     }
   }, 60_000);
 
-  // On main, curl also read $CURL_CA_BUNDLE and `cacert` / `capath` in
-  // ~/.curlrc: a company root only there must still get the update through.
-  // Every test here gives its own HOME; the real ~/.curlrc is never read.
+  // curl also reads $CURL_CA_BUNDLE and `cacert`/`capath` in ~/.curlrc: a company root only there must still get the update through. Every test gives its own HOME.
   describe("a root only curl read", () => {
     const pem = () => tlsFiles.caPem.trim();
     const home = () => {
@@ -781,7 +731,6 @@ describe.skipIf(process.platform === "win32")("certificate errors", () => {
       mkdirSync(curlHome);
       writeFileSync(join(curlHome, ".curlrc"), "verbose\n");
       expect(curlCaCertificates({ HOME: h, CURL_HOME: curlHome })).toEqual([]);
-      // An unreadable or missing one: nothing, no error.
       expect(curlCaCertificates({ HOME: join(root, "no-such-home") })).toEqual([]);
     });
 
@@ -793,7 +742,6 @@ describe.skipIf(process.platform === "win32")("certificate errors", () => {
         const site = serveHttps({ script: `${SCRIPT_HEAD}# PLANNOTATOR_EXPECTED_SHA256\n`, sums: pins(ARM, X64) });
         try {
           const env = { ...site.env, ...setup(home()) };
-          // The default retry roots: this computer's store (read-only) plus what curl read.
           const r = await prepareUpdate({ version: "1.2.3", platform: process.platform, env, tmpRoot: root });
           expect(r.ok, r.ok ? "" : r.error).toBe(true);
         } finally {
@@ -838,8 +786,6 @@ describe("update.log: the last run's TLS failure", () => {
   });
 });
 
-// ─────────────── A relative TMPDIR ───────────────
-
 describe.skipIf(process.platform === "win32")("a relative TMPDIR", () => {
   test("the staged dir is still absolute, so the wrapper uses it and the update runs", async () => {
     const box = sandbox("new");
@@ -861,12 +807,7 @@ describe.skipIf(process.platform === "win32")("a relative TMPDIR", () => {
   });
 });
 
-// ─────────────── The release's asset names ───────────────
-//
-// Every binary from the first safe-updates release on asks for
-// `<tag>/<name>.sha256` for each name candidateAssets returns, and an update
-// fails (75) without its own. A shipped binary can't be changed, so the
-// release workflow must keep publishing exactly these names.
+// Every shipped binary asks for `<tag>/<name>.sha256` for each name candidateAssets returns and an update fails without it, so the release workflow must keep publishing exactly these names.
 
 test("release.yml publishes a .sha256 for every name update-prepare asks for", () => {
   const workflow = readFileSync(resolve(import.meta.dir, "../../.github/workflows/release.yml"), "utf-8");
@@ -874,7 +815,6 @@ test("release.yml publishes a .sha256 for every name update-prepare asks for", (
     expect(workflow).toContain(`--outfile ${name}\n`);
     expect(workflow).toContain(`sha256sum ${name} > ${name}.sha256\n`);
   }
-  // Uploaded with the binaries, and every artifact goes into the release.
   expect(workflow).toMatch(/name: binaries\n\s+path: \|\n\s+plannotator-\*\n/);
   expect(workflow).toContain("files: artifacts/*\n");
 });

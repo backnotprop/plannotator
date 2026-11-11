@@ -7,30 +7,17 @@ import {
 import { AGENT_FILE_MAX_BYTES } from "./agent-files";
 import type { Unreadable } from "./uninstall-host-references";
 
-/**
- * The most of one agent file this check parses. A file over 1 MiB (Claude
- * Code's ~/.claude.json holds its history) is first searched, raw and a chunk
- * at a time, for "plannotator-inbox"; only a file that has it is read whole
- * and parsed, and only up to this size. One bigger than this that has it is
- * not read: a warning says so, never a reason to keep the CLI.
- */
+/** Size cap per agent file. A file over 1 MiB (~/.claude.json holds history) is first searched raw, chunk by chunk, for "plannotator-inbox"; only a file that has it is parsed, up to this cap. A bigger one is not read: a warning, never a reason to keep the CLI. */
 export const UNINSTALL_PARSE_MAX_BYTES = 64 * 1024 * 1024;
 
-/** This scan writes nothing, so it reads every agent's JSON leniently (comments, trailing commas). */
+/** This scan writes nothing, so it reads agent JSON leniently (comments, trailing commas). */
 const SCAN_READ: RawReadOptions = { maxBytes: UNINSTALL_PARSE_MAX_BYTES, lenient: true, searchAbove: AGENT_FILE_MAX_BYTES };
 
 export type InboxReferenceScan = {
-  /** Entries no record says Plannotator added that still run it: named with how to remove them, never a reason to keep the CLI. */
   warnings: string[];
-  /** Agent configs that could not be read. */
   unreadable: Array<Unreadable & { owner: string }>;
 };
 
-/**
- * Every agent's `plannotator-inbox` entry that still runs Plannotator,
- * whoever added it. `skip`: the agents whose entry uninstall already removed
- * or named (`planInboxAgentRemoval`).
- */
 export function remainingInboxReferences(
   environment: AgentEnvironment,
   binaryPaths: readonly string[],
@@ -63,7 +50,6 @@ export function remainingInboxReferences(
     }
     const argv = read.kind === "value" ? entryArgv(read.value) : read.argv;
     const executable = argv?.[0];
-    // Source execution uses Bun/Node; the interpreter alone is not Plannotator.
     const sourceCommand = argv?.length === 4 && isPlannotatorInboxCommand(argv);
     if (executable && (executables.has(normalize(executable)) || sourceCommand)) {
       scan.warnings.push(

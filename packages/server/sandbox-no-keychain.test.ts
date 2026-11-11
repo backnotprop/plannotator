@@ -1,11 +1,4 @@
-/**
- * A sandboxed run (scratch HOME, PLANNOTATOR_TEST_SANDBOX) must never reach the
- * macOS Keychain: with a scratch HOME macOS finds no keychain and shows
- * "Keychain Not Found" on the person's screen for each try. Xcode's system
- * gitconfig sets `credential.helper=osxkeychain`, so a git the Inbox starts must
- * skip it, and the gh runners must carry the same env. Outside the sandbox
- * nothing changes.
- */
+/** A sandboxed run must never reach the macOS Keychain: with a scratch HOME it shows "Keychain Not Found" on screen. Xcode's system gitconfig sets `credential.helper=osxkeychain`, so git and the gh runners must skip it. */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

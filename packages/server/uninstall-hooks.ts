@@ -19,7 +19,6 @@ function sameCommand(left: string, right: string, platform: NodeJS.Platform): bo
     : normalizedLeft === normalizedRight;
 }
 
-/** Read a literal executable, never shell wrappers or commands that merely mention it. */
 function commandParts(command: string) {
   const match = /^(?:"([^"$`]+)"|'([^']+)'|([^\s"';&|<>()$`*?\[{}]+))(?=\s|[;&|<>()]|$)([\s\S]*)$/.exec(command.trim());
   if (!match) return null;
@@ -44,13 +43,12 @@ function isPlannotatorExecutable(
   return name === "plannotator" || name === "plannotator.exe";
 }
 
-/** The whole command is an install path, as written: install.sh writes the Codex hook unquoted, so a path with spaces is one word there. */
+/** The whole command is an install path as written: install.sh writes the Codex hook unquoted, so a path with spaces is one word. */
 function isBinaryPathCommand(command: string, binaryPaths: readonly string[], tail: string, platform: NodeJS.Platform): boolean {
   const trimmed = command.trim();
   return binaryPaths.some((path) => sameCommand(trimmed, `${path}${tail}`, platform));
 }
 
-/** Only supported hook arguments are safe to remove automatically. */
 export function isManagedHook(
   value: unknown,
   binaryPaths: readonly string[],
@@ -85,7 +83,7 @@ export function isManagedHook(
     : remaining.length === 1 && remaining[0] === suffix;
 }
 
-/** Split only outside quotes/comments. These segments are inspected, never executed or auto-removed. */
+/** Split only outside quotes/comments; segments are inspected, never executed or auto-removed. */
 function commandSegments(command: string): string[] {
   const segments: string[] = [];
   let start = 0;
@@ -125,7 +123,6 @@ function commandSegments(command: string): string[] {
   return segments;
 }
 
-/** Skip literal shell assignments, keeping quoted values intact. */
 function withoutAssignments(segment: string): string {
   let rest = segment.trimStart();
   while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(rest)) {
@@ -143,7 +140,6 @@ function withoutAssignments(segment: string): string {
   return rest;
 }
 
-/** Find surviving invocations in any event/matcher, including commands we must not edit. */
 export function remainingHookReferences(
   config: unknown,
   binaryPaths: readonly string[],
@@ -155,7 +151,6 @@ export function remainingHookReferences(
   const root = asRecord(config);
   const invokesPlannotator = (command: unknown): boolean => {
     if (typeof command !== "string") return false;
-    // An install path written unquoted, spaces and all, as its first word.
     const trimmed = command.trim();
     if (binaryPaths.some((path) => sameCommand(trimmed.slice(0, path.length), path, platform) && /^(?:\s|$)/.test(trimmed.slice(path.length)))) return true;
     const gated = parseT3HookCommand(command)?.executable;
@@ -165,7 +160,7 @@ export function remainingHookReferences(
       return executable !== undefined && isPlannotatorExecutable(executable, binaryPaths, platform, allowRelocatedBinary);
     });
   };
-  // Vibe stores commands directly in [[hooks]], rather than nested event entries.
+  // Vibe stores commands directly in [[hooks]], not in nested event entries.
   if (Array.isArray(root?.hooks)) {
     return root.hooks.flatMap((value: unknown, index) =>
       !removedVibeIndices.has(index) && invokesPlannotator(asRecord(value)?.command) ? [`hooks[${index}].command`] : [],

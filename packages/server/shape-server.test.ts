@@ -1,18 +1,4 @@
-/**
- * The Shapes server (shape.ts): Shape's page for people without the Inbox.
- *
- * What regresses:
- *  - it serves boards while the person never turned Shape on (config.json
- *    `inboxShape` unset or off): every `/api/shapes` path must answer 404;
- *  - another site reads a board (it names files and folders) or writes a note;
- *  - a DNS-rebinding page reaches it under another host name;
- *  - a page left open across a restart writes to the new server's boards
- *    (a foreign `serverSession` must answer 409; the page's own is accepted);
- *  - `server.json` names a stopped or dead server as running, or the next
- *    start forgets the last port, or annotate's
- *    live app probe does not know the port is Plannotator's;
- *  - it never exits once the last page closes (or exits with one open).
- */
+/** Guards the Shapes server: 404 on every `/api/shapes` path when Shape is off, cross-site and DNS-rebinding refusal, 409 for a foreign `serverSession`, an honest `server.json`, and idle exit. */
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -53,8 +39,7 @@ async function world(options: { config?: Record<string, unknown> | null; idleMs?
   return { root, dataDir, server, base, get, post, id: made.id };
 }
 
-// The binary embeds the page gzipped (13 MB → 3 MB). What regresses: a browser that takes gzip gets the bytes without
-// `Content-Encoding: gzip` (a page of binary garbage), or one that does not gets gzip anyway.
+// The binary embeds the page gzipped: a gzip-capable browser must get `Content-Encoding: gzip`, others must not get gzip.
 test("a gzipped page: sent as it is to a browser that takes gzip, unzipped to one that does not", async () => {
   const { gzipSync, gunzipSync } = await import("node:zlib");
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-shape-server-gz-")));
@@ -68,7 +53,7 @@ test("a gzipped page: sent as it is to a browser that takes gzip, unzipped to on
   servers.push(server);
   const raw = (headers: Record<string, string>) =>
     new Promise<{ headers: Record<string, string | string[] | undefined>; body: Buffer }>((done, fail) => {
-      // node:http: no Accept-Encoding of its own and no automatic unzip, so the bytes are what was sent.
+      // node:http sends no Accept-Encoding and does not unzip, so the bytes are what was sent.
       const req = require("node:http").request({ host: "127.0.0.1", port: server.port, path: "/", headers }, (res: import("node:http").IncomingMessage) => {
         const chunks: Buffer[] = [];
         res.on("data", (c: Buffer) => chunks.push(c));
@@ -106,7 +91,6 @@ test("Shape unset or off: the page loads, and every board path answers 404", asy
     expect((await w.get(`/api/shapes/${w.id}`)).status).toBe(404);
     expect((await w.post(`/api/shapes/${w.id}/notes`, { kind: "change", v: 1, view: "picture", text: "Two" })).status).toBe(404);
     expect(await eventsStatus(w.base)).toBe(404);
-    // Nothing was written while off.
     expect(createShapeStore({ dataDir: w.dataDir }).notes(w.id)).toHaveLength(0);
   }
 });
@@ -158,12 +142,10 @@ test("server.json names the running server; a stopped or dead one is not running
   const entry = readShapeServerEntry(w.dataDir);
   expect(entry).toMatchObject({ v: 1, pid: process.pid, port: w.server.port, version: "9.9.9" });
   expect((await runningShapeServer(w.dataDir))?.port).toBe(w.server.port);
-  // Annotate's live app probe never proxies a Plannotator server: this one is on its list.
   expect(listPlannotatorServerPorts(w.dataDir)).toContain(w.server.port);
   const port = w.server.port;
   w.server.stop();
   servers.splice(servers.indexOf(w.server), 1);
-  // Kept with no process: nothing reads it as running, and the next start takes the same port.
   expect(readShapeServerEntry(w.dataDir)).toMatchObject({ pid: 0, port });
   expect(await runningShapeServer(w.dataDir)).toBeNull();
   expect(listPlannotatorServerPorts(w.dataDir)).not.toContain(port);
@@ -171,7 +153,6 @@ test("server.json names the running server; a stopped or dead one is not running
   servers.push(again);
   expect(again.port).toBe(port);
   again.stop();
-  // An entry whose process died without stopping (a crash): the same.
   writeFileSync(shapeServerPath(w.dataDir), JSON.stringify({ v: 1, pid: 2 ** 22 + 12345, port, url: `http://127.0.0.1:${port}`, version: "old", started: "" }));
   expect(await runningShapeServer(w.dataDir)).toBeNull();
   again = await startShapeServer({ dataDir: w.dataDir, version: "9.9.9" });

@@ -1,9 +1,3 @@
-/**
- * The session registry: writes are atomic, and the read-only lister the
- * update advert runs on every page payload never deletes a file. OpenCode's
- * in-process servers are listed apart: the update checks never see them, and
- * no entry outlives its server.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -40,7 +34,6 @@ const info = (pid: number): SessionInfo => ({
   label: "review-p",
 });
 
-/** A pid that has exited. */
 function deadPid(): number {
   const proc = Bun.spawnSync(["true"]);
   return proc.pid;
@@ -65,7 +58,6 @@ test("listLiveSessions reads only: a half-written or dead entry is skipped, neve
   for (let i = 0; i < 3; i++) expect(listLiveSessions().map((s) => s.pid)).toEqual([process.pid]);
   expect(readdirSync(dir).sort()).toEqual([`${dead}.json`, "424242.json", `${process.pid}.json`, "99.json.abc.tmp"].sort());
 
-  // listSessions keeps its cleanup (plannotator sessions); the temp file is not its business either.
   expect(listSessions().map((s) => s.pid)).toEqual([process.pid]);
   expect(readdirSync(dir).sort()).toEqual([`${process.pid}.json`, "99.json.abc.tmp"].sort());
 });
@@ -98,8 +90,7 @@ describe("in-process sessions (OpenCode)", () => {
     const server = serve();
     try {
       const unlist = registerInProcessSession("opencode", entry(server.port));
-      // listSessions and listLiveSessions read what every released binary
-      // reads (the top folder's *.json), so an older binary skips it too.
+      // Both listers must read only the top folder's *.json, as every released binary does.
       expect(listSessions()).toEqual([]);
       expect(listLiveSessions()).toEqual([]);
       expect(readdirSync(opencodeDir())).toEqual([`${process.pid}-${server.port}.json`]);

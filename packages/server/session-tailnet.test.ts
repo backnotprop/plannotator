@@ -2,9 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { readTailnetOwners, resetSessionTailnetForTests, sessionTailnetAskAllowed, setSessionTailnetOwners, setSessionTailnetServedUrl } from "./session-tailnet";
 
-// #2166: which Host the owner's tab may ask the agent session with. The
-// failures guarded: an owner on port 443 (the browser drops `:443`) is
-// refused, or another name or port is let in.
+// Guards which Host the owner's tab may ask the agent session with: port 443 (browser drops `:443`) must work, other names or ports must not.
 
 const OWNER = "owner@example.com";
 const NAME = "studio.tail0000.ts.net";
@@ -41,11 +39,7 @@ describe("sessionTailnetAskAllowed", () => {
   });
 });
 
-// The owner rule the Inbox follows (#2564, isOwnerRequest): when Tailscale
-// names no owner, the inboxTailscaleAllow logins count as the owner. The
-// failures guarded: the one person using a tagged machine is refused Ask this
-// session from their other devices, or the allowlist lets someone else in
-// where Tailscale does name an owner.
+// When Tailscale names no owner, the inboxTailscaleAllow logins count as the owner; where it does name one, the allowlist must not let anyone else in.
 
 const TAGGED = JSON.stringify({ Self: { UserID: 1, Tags: ["tag:server"] }, User: {} });
 const OWNED = JSON.stringify({ Self: { UserID: 1 }, User: { "1": { LoginName: "Owner@Example.com" } } });
@@ -56,7 +50,6 @@ const loginRequest = (login: string) =>
     headers: { host: `${NAME}:6060`, "tailscale-user-login": login, "x-forwarded-for": "100.64.0.9" },
   });
 
-/** Who may ask over the tailnet, after the CLI read the owners (as handleTailscaleReady does). */
 function askers(stdout: string, allowlist: string[], logins: string[]): Record<string, boolean> {
   setSessionTailnetOwners(readTailnetOwners(status(stdout), () => allowlist).logins);
   setSessionTailnetServedUrl(`https://${NAME}:6060`);

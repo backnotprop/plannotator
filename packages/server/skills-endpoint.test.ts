@@ -1,20 +1,10 @@
-/**
- * /api/skills — end-to-end route wiring, both runtimes.
- *
- * Same class of guard as annotate.test.ts (#844): a handler that exists but is
- * not wired into a server's route table falls through to the SPA HTML
- * catch-all (plan/annotate) and the composer silently loses skill references.
- * This boots the real Bun and Pi plan + annotate servers — the four surfaces
- * that serve the comment composer — against isolated skill roots and asserts
- * the route answers with the real discovered catalog as JSON.
- */
+/** End-to-end /api/skills wiring on the Bun and Pi plan and annotate servers: a handler missing from a route table falls through to the SPA HTML catch-all. */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-// Distinct module key so unrelated mock.module() tests cannot replace the
-// real server (same pattern as api-404-guard.test.ts).
+// Distinct module key so unrelated mock.module() tests cannot replace the real server.
 import { startAnnotateServer as startBunAnnotateServer } from "./annotate.ts?skills-endpoint";
 import { startPlannotatorServer as startBunPlanServer } from "./index";
 import {
@@ -52,7 +42,6 @@ beforeAll(() => {
   mkdirSync(home, { recursive: true });
   mkdirSync(archivePath, { recursive: true });
 
-  // One model-invocable and one human-only skill in the isolated Claude root.
   const root = join(home, ".claude", "skills");
   for (const [name, fm] of [
     ["endpoint-skill", "description: A test skill."],
@@ -62,7 +51,6 @@ beforeAll(() => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "SKILL.md"), `---\nname: ${name}\n${fm}\n---\n# ${name}\n`);
   }
-  // A real file outside every skill root, for the traversal probe below.
   writeFileSync(join(home, "outside.md"), "must never be served");
 });
 
@@ -166,7 +154,7 @@ describe("GET /api/skills route wiring", () => {
   }
 });
 
-// Both runtimes: Pi runs its own vendored copy of the loader.
+// Pi runs its own vendored copy of the loader.
 describe.skipIf(checkoutIsScratch)("GET /api/skills under the test sandbox", () => {
   for (const serverCase of serverCases) {
     test(`${serverCase.name}: a home that is not scratch is read only outside the sandbox`, async () => {
@@ -217,8 +205,6 @@ describe("GET /api/skills/content route wiring", () => {
         const missing = await fetch(`${server.url}/api/skills/content?name=nope`);
         expect(missing.status).toBe(404);
 
-        // Traversal: a name is only ever MATCHED against discovered skills,
-        // never used as a path — outside.md must be unreachable.
         for (const name of ["../../outside.md", "..%2F..%2Foutside.md", "/etc/hosts"]) {
           const res = await fetch(
             `${server.url}/api/skills/content?name=${encodeURIComponent(name)}`,

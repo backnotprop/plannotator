@@ -1,11 +1,3 @@
-/**
- * Shared route handlers used by plan, review, and annotate servers.
- *
- * Eliminates duplication of /api/image, /api/upload, /api/draft, unmatched API
- * responses, and the server-ready handler across all three server files. Also
- * shares /api/agents for plan + review.
- */
-
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { openBrowser as openBrowserImpl } from "./browser";
@@ -43,11 +35,8 @@ export function readDraftGenerationFromBody(body: unknown): number | undefined {
   return normalizeDraftGeneration((body as { draftGeneration?: unknown }).draftGeneration);
 }
 
-/** Serve images from local paths or temp uploads. Used by all 3 servers. */
 export async function handleImage(req: Request): Promise<Response> {
-  // Every answer carries the sandbox CSP, nosniff and CORP (see
-  // @plannotator/shared/local-image): an SVG opened directly must not run
-  // script on the session origin.
+  // Every answer carries the sandbox CSP, nosniff and CORP: an SVG opened directly must not run script on the session origin.
   const text = (body: string, status: number) =>
     new Response(body, { status, headers: localImageResponseHeaders("text/plain; charset=utf-8") });
   const image = (file: ReturnType<typeof Bun.file>, path: string) =>
@@ -67,7 +56,6 @@ export async function handleImage(req: Request): Promise<Response> {
     if (await file.exists()) {
       return image(file, validation.resolved);
     }
-    // If not found and a base directory is provided, try resolving relative to it
     const base = url.searchParams.get("base");
     if (base && !imagePath.startsWith("/")) {
       const { resolve: resolvePath } = await import("path");
@@ -86,7 +74,6 @@ export async function handleImage(req: Request): Promise<Response> {
   }
 }
 
-/** Upload image to temp dir, return path. Used by all 3 servers. */
 export async function handleUpload(req: Request): Promise<Response> {
   try {
     const formData = await req.formData();
@@ -110,7 +97,6 @@ export async function handleUpload(req: Request): Promise<Response> {
   }
 }
 
-/** OpenCode agent client interface (subset of OpenCode SDK) */
 export interface OpencodeClient {
   app: {
     agents: (options?: object) => Promise<{
@@ -119,7 +105,6 @@ export interface OpencodeClient {
   };
 }
 
-/** List available agents. Used by plan + review servers (OpenCode only). */
 export async function handleAgents(opencodeClient?: OpencodeClient): Promise<Response> {
   if (!opencodeClient) {
     return Response.json({ agents: [] });
@@ -137,7 +122,6 @@ export async function handleAgents(opencodeClient?: OpencodeClient): Promise<Res
   }
 }
 
-/** Save annotation draft. Used by all 3 servers. */
 export async function handleDraftSave(req: Request, contentKey: string): Promise<Response> {
   try {
     const body = await req.json();
@@ -150,7 +134,6 @@ export async function handleDraftSave(req: Request, contentKey: string): Promise
   }
 }
 
-/** Load annotation draft. Used by all 3 servers. */
 export function handleDraftLoad(contentKey: string): Response {
   const draft = loadDraft(contentKey);
   if (!draft) {
@@ -163,17 +146,12 @@ export function handleDraftLoad(contentKey: string): Response {
   return Response.json(draft);
 }
 
-/** Delete annotation draft. Used by all 3 servers. */
 export function handleDraftDelete(contentKey: string, req?: Request): Response {
   deleteDraft(contentKey, req ? readDraftGenerationFromUrl(req) : undefined);
   return Response.json({ ok: true });
 }
 
-/**
- * List global agent skills for comment skill references. Used by plan +
- * annotate servers. Takes no client input (fixed roots only) and degrades to an
- * empty catalog on any failure so the composer never breaks.
- */
+/** Takes no client input (fixed roots only) and degrades to an empty catalog on any failure so the composer never breaks. */
 export function handleReferenceSkills(): Response {
   try {
     return Response.json({ skills: listReferenceSkills() });
@@ -185,12 +163,7 @@ export function handleReferenceSkills(): Response {
   }
 }
 
-/**
- * Serve a referenced skill's SKILL.md contents for feedback injection
- * (`?name=<skill>`). Used by plan + annotate servers. The name is matched
- * against discovered skills only — it is never used as a path — so traversal
- * and absolute-path inputs answer 404, never a file outside the skill roots.
- */
+/** The name is matched against discovered skills only, never used as a path, so traversal and absolute paths answer 404. */
 export function handleReferenceSkillContent(req: Request): Response {
   try {
     const name = new URL(req.url).searchParams.get("name") ?? "";
@@ -207,27 +180,11 @@ export function handleReferenceSkillContent(req: Request): Response {
   }
 }
 
-/** Return the shared JSON response for an unmatched API route. */
 export function handleApiNotFound(path: string): Response {
   return Response.json({ error: "Not found", path }, { status: 404 });
 }
 
-/**
- * Serve the app favicon. Used by all 3 servers (plus goal-setup).
- *
- * Reads the persisted style (Glass, Face or P; Glass when nothing is
- * stored) so the first painted frame already shows the person's icon. Without
- * this the static route always answered one icon and the preference only
- * landed once React mounted, i.e. a visible flash on every load.
- *
- * Two URLs, each with three possible payloads: `/favicon.ico` (what every
- * entry HTML links, see apps/hook/index.html: Glass's multi-size .ico, so the
- * tab shows its hand-pixelled 16 or 32 frame) and `/favicon.png` (one PNG, for
- * anything that links it and for the Inbox's tab-count badge). The response
- * declares its type and is not cached: a day-long cache would re-paint the old
- * icon after a switch. loadConfig() is a small unmemoized JSON read, once per
- * page load.
- */
+/** Reads the persisted favicon style so the first painted frame shows the person's icon (no flash on load). Not cached: a long cache would re-paint the old icon after a switch. */
 export function handleFavicon(pathname = "/favicon.png"): Response {
   const style = getServerConfig(null).favicon;
   const { body, contentType } = pathname === "/favicon.ico" ? faviconIcoBody(style) : faviconBody(style);
@@ -240,14 +197,7 @@ interface ServerReadyOptions {
   readyFile?: string;
   skipBrowserOpen?: boolean;
   openBrowser?: typeof openBrowserImpl;
-  /**
-   * Set false to suppress the stderr line(s) this function writes, while
-   * still writing the ready file and opening the browser. For hosts that run
-   * the server in their own process and share stderr with a TUI renderer
-   * (OpenCode's embedded runtime) and already show the URL through their own
-   * surface (a toast or a transcript notice). Default true: every CLI start
-   * prints the line.
-   */
+  /** false suppresses the stderr line(s) while still writing the ready file and opening the browser, for hosts sharing stderr with a TUI (OpenCode's embedded runtime). */
   announce?: boolean;
 }
 
@@ -255,34 +205,19 @@ export interface ServerReadyMetadata {
   url: string;
   isRemote: boolean;
   port: number;
-  /**
-   * What this server shows, in full (absolute path, URL, bundle files,
-   * reviewed directory or PR URL), so a host names the right file before any
-   * decision. Additive; absent when the CLI did not set it.
-   */
+  /** What this server shows, in full, so a host names the right file before any decision. Absent when the CLI did not set it. */
   target?: string | string[];
-  /**
-   * Present only for a session published with `--tailscale` (#2166): `ask`
-   * true when "Ask this session" answers the machine owner's tab over the
-   * tailnet. A host that asked for a tailnet session reads its absence as a
-   * CLI from before the bridge was kept there.
-   */
+  /** Present only for a `--tailscale` session; `ask` is true when "Ask this session" answers the owner's tab over the tailnet. */
   tailnet?: { ask: boolean };
 }
 
 let serverReadyTarget: string | string[] | undefined;
 let serverReadyTailnet: { ask: boolean } | undefined;
 
-/** The `tailnet` field the next ready line carries (`--tailscale` sessions only). */
 export function setServerReadyTailnet(tailnet: { ask: boolean } | undefined): void {
   serverReadyTailnet = tailnet ? { ask: tailnet.ask } : undefined;
 }
 
-/**
- * The full target the next ready line names (`ServerReadyMetadata.target`).
- * The CLI serves one session per process and sets it once it has resolved
- * what it opens, before the server starts.
- */
 export function setServerReadyTarget(target: string | readonly string[] | undefined): void {
   if (target === undefined || (typeof target === "string" ? !target.trim() : target.length === 0)) {
     serverReadyTarget = undefined;
@@ -296,18 +231,9 @@ export function writeServerReadyMetadata(readyFile: string, metadata: ServerRead
   appendFileSync(readyFile, `${JSON.stringify(metadata)}\n`, "utf8");
 }
 
-/**
- * Stable prefix of the session URL line written to stderr on every start:
- * `  Plannotator session ready: <url>`.
- *
- * The format is a contract: one line, two leading spaces, this prefix, then
- * the URL last. Agents and host plugins grep it (the OpenCode CLI bridge's
- * stderr filter matches it), so anything else worth saying (port forwarding,
- * a failed browser launch) goes on its own line under it.
- */
+/** Stable prefix of the session URL line on stderr (`  Plannotator session ready: <url>`). A contract: agents and host plugins grep it, so other messages go on their own lines. */
 export const SESSION_READY_LINE_PREFIX = "Plannotator session ready: ";
 
-/** Announce the session URL, then attempt to open the browser for it. */
 export async function handleServerReady(
   url: string,
   isRemote: boolean,
@@ -332,21 +258,13 @@ export async function handleServerReady(
 
   const announce = options.announce ?? true;
 
-  // One line, every session, URL last, printed BEFORE the launch: a launcher
-  // that never exits (a blocking BROWSER) must not hide it, and a local
-  // session whose browser opened fine still needs a way back to a closed tab.
-  // The URL appears exactly once; the lines below only add context.
+  // Printed before the launch: a launcher that never exits (a blocking BROWSER) must not hide the URL. It appears exactly once.
   if (announce) process.stderr.write(`\n  ${SESSION_READY_LINE_PREFIX}${url}\n`);
 
-  // A remote/SSH session can't pop a browser on the user's machine, so say
-  // what to do with the URL, independently of whether URL sharing is enabled.
   if (isRemote && announce) {
-    // A non-local advertised URL (a tailnet host, a reverse-proxy origin) is
-    // directly reachable, so the port-forwarding advice would be wrong.
     if (!isLocalOnlyAdvertisedUrl(url)) {
       process.stderr.write(`  Open it on your device (the URL above).\n`);
-      // The URL makes a device hop; a QR skips retyping it (TTY only). A QR
-      // of a localhost URL would scan to nowhere, so only render one here.
+      // A QR of a localhost URL would scan to nowhere, so only render one for a non-local URL (TTY only).
       writeUrlQr(url);
     } else {
       process.stderr.write(`  Open it on your local machine (forward port ${port} if needed).\n`);
@@ -354,9 +272,6 @@ export async function handleServerReady(
   }
 
   const skipBrowserOpen = options.skipBrowserOpen ?? process.env.PLANNOTATOR_SKIP_BROWSER_OPEN === "1";
-  // PLANNOTATOR_BROWSER=none (or --browser none): open nothing, anywhere, and
-  // say so under the URL instead of reporting a failed launch. A host that
-  // opens the browser itself (skipBrowserOpen) has nothing to explain.
   const intent = resolveBrowserIntent(process.env);
   if (!skipBrowserOpen && intent.kind === "none") {
     if (announce) process.stderr.write(`  ${browserNoneReason(intent)}\n\n`);
@@ -367,33 +282,18 @@ export async function handleServerReady(
 
   const opened = await (options.openBrowser ?? openBrowserImpl)(url, { isRemote, useGlimpse: true });
 
-  // The URL is already out; say the automatic launch failed (headless box,
-  // devcontainer with no display, broken open/xdg-open) so nobody waits on a
-  // tab that never appears. Remote sessions were told what to do above.
   if (!opened && !isRemote && announce) {
     process.stderr.write("  Could not open a browser automatically — open the URL above.\n\n");
   }
 }
 
 export interface HandleSaveNotesOptions {
-  /**
-   * This server's stale-tab nonce (packages/core/server-session.ts). A body
-   * carrying a different `serverSession` is refused with 409 before anything
-   * is written or opened; a body without one is accepted.
-   */
+  /** This server's stale-tab nonce: a different `serverSession` is refused with 409 before anything is written or opened. */
   serverSession?: string;
-  /** Notion saves run only when this session offers Notion (packages/shared/notion.ts isNotionAvailable). */
   notion?: boolean;
 }
 
-/**
- * Save to external note apps (Obsidian, Bear, Octarine, Notion). Used by plan + annotate servers.
- *
- * Writes a file into the vault the body names and opens `bear://` /
- * `octarine://` URLs, so it refuses another site's page (the servers also do
- * this before routing; repeated here so the handler is safe wherever it is
- * mounted) and a stale tab.
- */
+/** Writes into the vault the body names and opens `bear://`/`octarine://` URLs, so it refuses another site's page and a stale tab itself (safe wherever mounted). */
 export async function handleSaveNotes(req: Request, options: HandleSaveNotesOptions = {}): Promise<Response> {
   if (!isSameOriginRequest(req)) {
     return Response.json(crossOriginRefusalBody(), { status: 403 });
@@ -441,12 +341,7 @@ export async function handleSaveNotes(req: Request, options: HandleSaveNotesOpti
   return Response.json({ ok: true, results });
 }
 
-/**
- * The "Star the repo" ask on the done screen (packages/shared/star-ask.ts): `POST /api/star-ask/claim` (at load: may
- * it show), `/shown` (at the decision: stamp it, draw it) and `/answer`. Null for any other path. In remote mode the ask
- * never shows: gh there is the server machine's login, not the person's own (`claim` and `shown` answer
- * `show: false`, with no gh and no stamp).
- */
+/** In remote mode the ask never shows: gh there is the server machine's login, not the person's. */
 export async function handleStarAsk(req: Request, url: URL, surface: StarAskSurface, options: { remote: boolean }): Promise<Response | null> {
   if (!url.pathname.startsWith("/api/star-ask/")) return null;
   const body = req.method === "POST" ? await req.json().catch(() => ({})) : undefined;

@@ -1,11 +1,3 @@
-/**
- * The review windows' update notice through the Bun servers: the payload's
- * `updateAvailable` comes from the machine's cached check (never a network
- * call on a page load), only for the compiled CLI, only while update checks
- * are on; the action follows the host; POST /api/update is same-origin only
- * and runs the installer at most once (update.lock). The installer never
- * runs here: the managed-binary case holds the lock first.
- */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -118,7 +110,6 @@ describe("POST /api/update", () => {
   });
 
   test("a managed binary while an update runs: refused, nothing started (once, under update.lock)", async () => {
-    // HOME whose ~/.local/bin/plannotator is this bun: the running binary counts as the install script's.
     const home = mkdtempSync(join(tmpdir(), "plannotator-update-advert-home-"));
     mkdirSync(join(home, ".local", "bin"), { recursive: true });
     symlinkSync(realpathSync(process.execPath), join(home, ".local", "bin", "plannotator"));
@@ -138,7 +129,6 @@ describe("POST /api/update", () => {
   });
 });
 
-/** A managed binary: HOME whose ~/.local/bin/plannotator is this bun. */
 function managedHome(): string {
   const home = mkdtempSync(join(tmpdir(), "plannotator-update-advert-home-"));
   mkdirSync(join(home, ".local", "bin"), { recursive: true });
@@ -171,8 +161,7 @@ describe("POST /api/update answers only this computer, and only for a session no
     const home = managedHome();
     setCliNoticeVersionForTests("0.28.10");
     process.env.PLANNOTATOR_REMOTE = "1";
-    // A port the OS says is free right now. A random pick in 30000-50000 sat in Linux's ephemeral range
-    // (32768-60999), where the suite's own outgoing connections hold ports: CI hit "Port … in use after 5 retries".
+    // A port the OS says is free now: a random pick in 30000-50000 sat in Linux's ephemeral range, where the suite's own connections hold ports.
     const probe = Bun.serve({ port: 0, hostname: "0.0.0.0", fetch: () => new Response("") });
     process.env.PLANNOTATOR_PORT = String(probe.port);
     probe.stop(true);
@@ -242,12 +231,10 @@ describe("updateCheckFailing on the payloads (checking has failed for hours)", (
         expect(payload.updateAvailable).toBeUndefined();
       }
       expect(((await (await fetch(`${review.url}/api/diff`)).json()) as Record<string, unknown>).updateCheckFailing).toMatchObject(expected);
-      // A newer release known: the advert, not the failing line.
       setCliNoticeVersionForTests("0.28.10");
       const payload = await planPayload(plan.url);
       expect(payload.updateAvailable).toMatchObject({ version: "0.28.12" });
       expect(payload.updateCheckFailing).toBeUndefined();
-      // Checks off (the person's choice): nothing.
       setCliNoticeVersionForTests("0.28.12");
       process.env.PLANNOTATOR_UPDATE_CHECK = "0";
       expect((await planPayload(plan.url)).updateCheckFailing).toBeUndefined();

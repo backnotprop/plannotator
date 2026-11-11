@@ -2,13 +2,10 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describeFsError } from "./agent-files";
 
-/** A file uninstall must read to finish, and why it could not. Nothing is written to it. */
 export type Unreadable = { file: string; reason: string };
 
 export type HostReferences = {
-  /** What the host's own remove command takes away. While any is left, the CLI stays. */
   references: string[];
-  /** Installs in another scope (a project's), which that command leaves. Named in a warning only. */
   otherScopes: OtherScope[];
   unreadable: Unreadable[];
 };
@@ -38,7 +35,7 @@ function readJson(file: string): JsonRead {
     if (missing(error)) return { kind: "missing" };
     return { kind: "unreadable", unreadable: { file, reason: describeFsError(error) } };
   }
-  // An empty file holds nothing; a BOM (Windows editors) is not part of the JSON.
+  // A BOM (Windows editors) is not part of the JSON.
   if (!text.trim()) return { kind: "missing" };
   try {
     return { kind: "value", value: JSON.parse(text.replace(/^﻿/, "")) };
@@ -62,12 +59,7 @@ export function enabledPluginReferences(file: string, id: string): HostReference
   return { references: enabled?.[id] === true ? [`${file}, ${field}`] : [], otherScopes: [], unreadable: read.unreadable };
 }
 
-/**
- * Claude Code's and Droid's plugin records: `enabledPlugins` in the user's
- * settings.json, and one `installed_plugins.json` entry per scope. `--scope
- * user` removes only the user's; a project's or a managed one stays, so it
- * is named, never waited for. An entry with no scope predates scopes: the user's.
- */
+/** Claude Code's and Droid's plugin records. `--scope user` removes only the user's; project or managed ones stay and are named, never waited for. An entry with no scope predates scopes: the user's. */
 export function pluginReferences(directory: string, id: string): HostReferences {
   const enabled = enabledPluginReferences(join(directory, "settings.json"), id);
   const file = join(directory, "plugins", "installed_plugins.json");
@@ -87,8 +79,7 @@ export function pluginReferences(directory: string, id: string): HostReferences 
       otherScopes.push({ field, scope, project: typeof project === "string" ? project : null });
     });
   }
-  // A user enabledPlugins key counts even with no user install: Claude Code installs (or rescopes) the plugin
-  // for the user from it at its next start.
+  // A user enabledPlugins key counts even with no user install: Claude Code installs the plugin from it at its next start.
   return { references: [...enabled.references, ...installs], otherScopes, unreadable: [...enabled.unreadable, ...installed.unreadable] };
 }
 
@@ -140,7 +131,6 @@ export function vscodeReferences(directory: string): HostReferences {
       unreadable: [],
     };
   }
-  // Older installations may not have a registration index. Honor their removal markers.
   const directories = directoryReferences(directory, `${id}-`);
   if (directories.references.length === 0) return directories;
   const obsolete = objectFile(join(directory, ".obsolete"));
