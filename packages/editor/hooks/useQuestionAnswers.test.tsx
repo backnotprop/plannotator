@@ -164,7 +164,7 @@ describe('useQuestionAnswers: undo history', () => {
     await act(async () => {
       Array.from(cards()[0].querySelectorAll('button')).find((b) => b.textContent === 'Add note')!.click();
     });
-    await type(cards()[0].querySelector('textarea')!, 'Per user', 200);
+    await type(cards()[0].querySelector<HTMLTextAreaElement>('textarea[placeholder="Context for the agent…"]')!, 'Per user', 200);
     expect(answerAt(0)).toMatchObject({ selected: ['Server-side'], note: 'Per user' });
     await undo();
     expect(answerAt(0)).toMatchObject({ selected: ['Server-side'] });

@@ -535,6 +535,12 @@ export interface PlannotatorConfig {
    */
   inboxFloatDrafts?: boolean;
   /**
+   * The warning before a Mark read that sets questions aside (the owner's ask, 2026-11-10). On unless false: false
+   * once the person ticked "Don't show this again" in it. Written by the warning and by Settings → General → When an
+   * agent asks you (`POST /api/inbox/settings` `{ mark_read_warning: { on } }`), read on every request.
+   */
+  inboxMarkReadWarning?: boolean;
+  /**
    * The "Star the repo" ask (approval "star-ask", 2026-11-06), once across
    * every surface (packages/shared/star-ask.ts reads and writes it, nothing
    * else does). `shownAt`: a surface showed it, so none shows it again.

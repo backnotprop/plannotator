@@ -15,6 +15,8 @@ import type { EditSelectionComment } from '../edit/useEditSession';
 import type { CallFlowAnalysisState } from '../hooks/useCallFlowAnalysis';
 import type { CallFlowInstallController } from '../hooks/useCallFlowInstall';
 import type { CallFlowAdvert, CallFlowNode } from '@plannotator/shared/call-flow-types';
+import type { CallTreeDoc } from '@plannotator/shared/call-tree';
+import type { HostLineNote } from '../components/hostLineNotes';
 import type { CodeFileAnnotationInput } from '@plannotator/ui/components/CodeFilePopout';
 import type { ChangedFileView } from '../components/FileViewSwitch';
 import type { DiagramEngineUrls } from '../utils/diagramEngineContract';
@@ -33,6 +35,13 @@ export interface LineAnnotationComposeRequest {
  * to panels registered in dockview's static component map (which can't
  * receive arbitrary props from a parent).
  */
+/** A Call tree opened from a hunk, and the hunk it came from. */
+export interface CallTreeRequest {
+  readonly doc: CallTreeDoc;
+  readonly origin: { readonly filePath: string; readonly line: number; readonly side: 'old' | 'new' };
+  readonly token: number;
+}
+
 export interface ReviewState {
   // Files & diff
   files: DiffFile[];
@@ -302,6 +311,16 @@ export interface ReviewState {
   openCallFlowPanel: () => void;
   /** Opt-in runtime install controller backing the Dock's install funnel. */
   callFlowInstall: CallFlowInstallController;
+  /** The "Call tree" entries drawn on hunks (empty unless Call flow has a tree for them). Optional: other hosts draw none. */
+  callTreeHunkNotes?: readonly HostLineNote[];
+  /** The tree a hunk's "Call tree" entry opened, shown by the Call flow tab; bumps `token` per open. */
+  callTreeRequest?: CallTreeRequest | null;
+  /** Open a Call tree row's line: the diff when the line is in it, else the file's whole-file view. */
+  openCallTreeNode?: (node: CallFlowNode) => void;
+  /** Escape in a tree opened from a hunk: back to that hunk. */
+  returnFromCallTree?: () => void;
+  /** Stop showing the hunk's tree (the tab's own trees again). */
+  clearCallTreeRequest?: () => void;
 
   // Tour
   openTourPanel: (jobId: string) => void;

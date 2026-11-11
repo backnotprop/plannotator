@@ -1858,6 +1858,7 @@ Everything below is opt-in and byte-identical when a host passes none of it.
 
 ## Publishing & versioning
 
+- **Unreleased: core 0.25.23 (#3086, the Call tree).** Core adds one `exports` subpath, `./call-tree` (`plannotator.callTree/1`: the Call tree document, re-rooting at a hunk's function, its rows and search; browser-safe, no imports). Additive: nothing removed or renamed. ui does not import it; ui pins core `0.25.23` exactly only so `smoke:package` matches the source manifest. bun.lock changes only the two core version lines. Publish core 0.25.23 before the next ui.
 - **Unreleased: ui 0.63.0 + core 0.25.22: publish core first, then ui.** ui pins `@plannotator/core` `0.25.22` exactly. Versions only: both are what `main` already holds since ui 0.62.0 and core 0.25.21 went to npm (2026-11-10). No `exports` subpath is added, removed or renamed in either package, and no export is removed. The only `package.json` edits are the two versions and the core pin. Every section below still headed "unreleased" and not marked ui 0.63.0 shipped in ui 0.62.0 or earlier.
   - **ui 0.63.0 is a minor, and not additive**: a host that does nothing gets new behaviour (1 to 4 below).
     1. **Click a word is ON by default.** In every `Viewer` that can annotate, in the Select input method, one click on a word highlights it 300 ms later (the toolbar, the composer or the label picker opens, as after a drag). Before, a click on text made nothing. **To keep the old behaviour**: `configurePlannotatorUI({ clickAWord: false })` for every Viewer, or the `Viewer` prop `clickAWord={false}` for one (the prop wins). Both are read when the Viewer mounts. See "Click a word".
@@ -3075,3 +3076,11 @@ Pinned by `hooks/useAnnotationHighlighter.selectionEdges.test.tsx`, `hooks/useAn
 - Known: a triple click while the page scrolls under the pointer takes the block then under it (the browser's own triple click). A press on a list marker or other unselectable text starts no selection.
 
 Pinned by `components/Viewer.clickAWord.test.tsx`, `hooks/useClickWord.test.tsx`, `utils/wordAtPoint.test.ts` and `utils/inputMethod.test.ts`.
+
+## Questions: the Other field takes several lines (unreleased; every host, no opt-in; needs the core with the quoted Other)
+
+- **What changes for a host that does nothing.** `QuestionBlock`'s Other field is a `<textarea rows={1}>` instead of `<input type="text">`, same classes, same aria-label ("Other answer to question N"), plus `data-question-other`. Empty or holding one line it is the old field's height and the "+" mark sits where it sat. It grows a line at a time (typed, wrapped or pasted lines) up to `max-h-48`, then scrolls inside; a read-only card shows it whole. Enter and Shift+Enter make a new line (the textarea's own keys, as in the note and the free-text field); the card cancels no key, so a host's own ⌘/Ctrl+Enter still hears it.
+- **A host with its own CSS or tests on the field**: a selector `input[type="text"]` or `input[aria-label^="Other answer"]` no longer matches it; use `textarea[aria-label^="Other answer"]` or `[data-question-other]`. A test that takes a card's first `textarea` as the note now gets the Other field on a choice question. Plannotator's Inbox sizes it on a phone with `textarea[data-question-other]` (40 px for one line).
+- **The answer's text.** `QuestionAnswer.other` may hold line breaks (it always could from decision mode's textarea). core's `formatQuestionAnswerLines` (and so `formatQuestionAnswersSection` and ui's `exportAnnotations`) now quotes a multi-line Other under `Answer: Other:` as `> line` lines, indented two spaces under its `- Other:` bullet when there are several picks, the way a multi-line note is quoted. A one-line Other prints byte for byte as before. `formatQuestionAnswerText` (`Annotation.text`) and the panel row stay one line.
+
+Pinned by `components/blocks/QuestionBlock.test.tsx` ("an Other answer of several lines") and core's `question-block.test.ts`.
