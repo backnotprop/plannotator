@@ -1,31 +1,3 @@
-/**
- * Compose's thread chip (the owner's 2026-10-16 note on #1956: "why can't I
- * just type in the little chip?"): the thread's name, drawn as the grey chip
- * the list shows, and a real text field. It follows the message while the
- * person has not typed in it (`suggested`, compose's short suggestion), and
- * stops following once they do. Emptied, it follows the message again, but
- * only once focus leaves it, so it never refills under the person's caret.
- *
- * While it follows the message its words are muted and a small "auto"
- * follows them; a screen reader hears the same through aria-describedby.
- * Nothing to suggest yet: an empty dashed chip saying "Name this thread".
- * `error` (the name is taken, or not a valid name) is said beside it, and
- * `action` (the name is another open thread's: send there instead) is a
- * button after those words, outside them so it is read once, with the
- * action's `picture` before it (compose: the thread it goes to). With an action
- * the words are an offer, not a failure (the owner, 2026-11-09): muted text
- * said politely (`role="status"`), and the chip marked with the focus ring's
- * colour (`data-offer`) instead of the error's.
- * Enter moves to the message; Escape is the dialog's (close or ask).
- *
- * Text pasted into it that is not a name (a line break, longer than a name
- * may be, or a whole sentence: dictation lands here when the chip has focus)
- * is never cut short: it goes to the message instead (`onOverflow`), and the
- * chip says so.
- *
- * Room left for later: picking an existing thread before Send would be a ⌄
- * after the chip, the way To has one.
- */
 import { useRef, useState } from 'react';
 import { INBOX_THREAD_NAME_MAX } from '@plannotator/core/inbox-types';
 import { shownThreadName, typeThreadName, type ThreadNameState } from './model';
@@ -38,7 +10,6 @@ export function capThreadName(value: string): string {
 
 export const THREAD_NAME_PLACEHOLDER = 'Name this thread';
 
-/** Columns of monospace text: CJK, Hangul and emoji take two. */
 function widthOf(text: string): number {
   let n = 0;
   for (const ch of text) {
@@ -48,13 +19,8 @@ function widthOf(text: string): number {
   return n;
 }
 
-/** Words a pasted name may have before it reads as a sentence (dictation), not a name. */
 export const THREAD_NAME_PASTE_WORDS = 8;
 
-/**
- * Pasted text that is not a thread name: a line break, longer than a name may
- * be once added, or a sentence (`THREAD_NAME_PASTE_WORDS` words or more).
- */
 export function pasteOverflows(current: string, pasted: string): boolean {
   return (
     /[\r\n]/.test(pasted) ||
@@ -64,20 +30,16 @@ export function pasteOverflows(current: string, pasted: string): boolean {
 }
 
 export const THREAD_NAME_OVERFLOW_NOTE = 'Too long for a name, so it went into your message.';
-/** A paste of 32 KB or more into the chip goes to the message as a pasted text tile (approval "inbox-paste-attachment"). */
 export const THREAD_NAME_ATTACHED_NOTE = 'Too long for a name, so it was attached to your message.';
 
 export function ThreadNameChip(props: {
   state: ThreadNameState;
   suggested: string;
-  /** What the name follows until the person types, for a screen reader. Absent: their message. */
   hint?: string;
   onChange: (state: ThreadNameState) => void;
   onDone: () => void;
-  /** Text pasted into the chip that cannot be a name: the caller puts it in the message (and may say how, in the note). */
   onOverflow: (text: string) => string | void;
   error?: string | null;
-  /** A way through `error` besides changing the name. `name` is its full name for a screen reader; `picture` (where it goes) is drawn before it. */
   action?: { label: string; name: string; onPress: () => void; disabled?: boolean; picture?: React.ReactNode } | null;
   idBase: string;
 }) {
@@ -103,7 +65,6 @@ export function ThreadNameChip(props: {
         data-empty={value === '' ? '' : undefined}
         data-invalid={error && !action ? '' : undefined}
         data-offer={error && action ? '' : undefined}
-        // The chip's padding (and a phone's larger hit area) puts the caret in the field.
         onMouseDown={(event) => {
           if (event.target === inputRef.current) return;
           event.preventDefault();
@@ -134,7 +95,6 @@ export function ThreadNameChip(props: {
           onPaste={(event) => {
             const text = event.clipboardData.getData('text/plain');
             if (!text || !pasteOverflows(event.currentTarget.value, text)) return;
-            // Never cut short: the words go to the message, said beside the chip.
             event.preventDefault();
             event.stopPropagation();
             setNote(onOverflow(text) || THREAD_NAME_OVERFLOW_NOTE);

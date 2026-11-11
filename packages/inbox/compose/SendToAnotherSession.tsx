@@ -4,10 +4,8 @@ import { HostMark, Icon } from '../icons';
 import { shortLabel } from '../sessionLabels';
 import { busyWord, hostLabel, startedLine } from './model';
 
-/** The longest label the Send button names, in characters; cut in the middle past it, so the button stays one line on a phone. */
 const SEND_LABEL_MAX = 24;
 
-/** After a move: the moved message's delivery line, else the thread's heading; never the page. */
 function focusAfterMove(messageId: string): void {
   const target = () =>
     document.querySelector<HTMLElement>(`[data-message-article="${CSS.escape(messageId)}"] [data-delivery]`) ?? document.querySelector<HTMLElement>('.ib-pane .ib-subject');
@@ -17,23 +15,11 @@ function focusAfterMove(messageId: string): void {
       el.focus();
       if (document.activeElement === el) return;
     }
-    // The thread re-renders after the move; try again on the next tasks for a moment.
     if (left > 0) setTimeout(() => attempt(left - 1), 16);
   };
   attempt(20);
 }
 
-/**
- * "Send to another session" (compose): a message of the person's that the
- * session it was addressed to never took, because that session stopped. It
- * moves the same message to another live session of the thread's project
- * (`POST /api/inbox/messages/:id/to`). Nothing moves on its own; a session
- * that comes back with the same id (a resume) still gets it until then.
- *
- * The choice is the ended-session reply's radio rows (ReplyRoute's
- * `RouteChoice` look): one radio group of the live sessions, arrows move the
- * selection, Enter or the primary moves the message, Esc or Cancel closes it.
- */
 export function SendToAnotherSession({
   messageId,
   stuck = false,
@@ -45,7 +31,6 @@ export function SendToAnotherSession({
   onMoved,
 }: {
   messageId: string;
-  /** That session's connection took it and stopped while delivering it: a resumed session does not get it either. */
   stuck?: boolean;
   ended: { host: string; session: string };
   /** The sessions that already took this message through a tag: moving it to one would deliver it twice. */
@@ -64,10 +49,7 @@ export function SendToAnotherSession({
   const name = `ib-readdress-${useId().replace(/[^A-Za-z0-9_-]/g, '')}`;
   const running = (live?.sessions ?? []).filter((s) => s.session !== ended.session);
   const others = running.filter((s) => !taken.includes(s.session));
-  // The selection stays on its session across re-reads; one that left falls back to the first.
   const chosen = others.find((s) => s.session === selected) ?? others[0] ?? null;
-  // Two sessions with one label (a label is display only, and a session can name itself like another): each of
-  // them says its agent before the label, so the rows and the button never read alike for two different targets.
   const labelKey = (label: string | undefined) => (label ? label.trim().toLowerCase() : null);
   const shared = new Set(
     others
@@ -79,10 +61,8 @@ export function SendToAnotherSession({
   useEffect(() => {
     if (!open) return;
     void onReload();
-    // onReload once per open.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
-  // Opening puts focus on the selected radio (or the form's first control).
   useEffect(() => {
     if (!open) return;
     const form = formRef.current;
@@ -103,10 +83,8 @@ export function SendToAnotherSession({
       await inboxApi.readdress(messageId, { host: chosen.host, session: chosen.session });
       setOpen(false);
       await onMoved();
-      // The choice goes with the move: focus goes to the message's delivery line, else the thread's heading.
       focusAfterMove(messageId);
     } catch (cause) {
-      // The session came back as the person moved it: nothing to move, and the thread's line says where it is now.
       if (cause instanceof InboxApiError && cause.code === 'session_still_live') {
         setOpen(false);
         await onMoved();
@@ -120,7 +98,6 @@ export function SendToAnotherSession({
     }
   };
 
-  // Every live session already has it: there is nowhere to move it, and "no other session is running" would be false.
   if (!open && running.length > 0 && others.length === 0) return null;
 
   return (
@@ -174,7 +151,6 @@ export function SendToAnotherSession({
                 />
                 <HostMark host={session.host} agent={session.session} />
                 {session.label ? (
-                  // A named session (issue #2450): its label on top, cut with "…" (the whole of it on hover), the agent under it.
                   <span className="ib-opt-txt">
                     <span className="ib-t" data-session-label="" title={`${agentFirst(session.label, session.host)}${session.label}`}>
                       {agentFirst(session.label, session.host)}

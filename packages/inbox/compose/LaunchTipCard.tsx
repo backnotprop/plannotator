@@ -1,9 +1,4 @@
-/**
- * The Launch tip's card (approval "launch-tip", variant Beside; rules in launchTip.ts): the tour's coach card look
- * (`.ib-tour-coach`), drawn inside compose's To row (a phone: its foot's row, where To is), so inside the modal `<dialog>` (a portal to the body would sit
- * under the backdrop, inert) and one Tab after To. It never takes focus: Got it keeps focus where it was on a press,
- * and on a keyboard press sends it to To, the thing the tip was about.
- */
+/** Drawn inside compose's modal <dialog>: a portal to the body would sit under the backdrop, inert. */
 import { useRef } from 'react';
 import { LAUNCH_TIP_WORDS, type LaunchTipPlace } from './launchTip';
 
@@ -13,7 +8,6 @@ export function LaunchTipCard(props: {
   leaving: boolean;
   titleId: string;
   lineId: string;
-  /** Got it. `keyboard`: the button had focus (it was pressed from the keyboard). */
   onOk: (keyboard: boolean) => void;
 }) {
   const { place, leaving } = props;

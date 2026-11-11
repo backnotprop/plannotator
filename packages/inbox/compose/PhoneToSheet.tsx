@@ -1,13 +1,3 @@
-/**
- * New message's To on a phone (approval "inbox-phone-composer-picker"): the sheet the pill in the bottom row opens.
- * A computer keeps ToPicker.tsx; the rows, their order and the filter are the same rules (`compose/model.ts`).
- *
- * - Running sessions, each by its own title (issue #2450) with "<agent> · <project> · <time>" under it; a session
- *   with no title is its agent. A check on the one To names.
- * - A hairline, then "Start a new session in <folder>" with one row per agent the Inbox can start (Launch on).
- * - The filter on top takes no focus when the sheet opens, so the keyboard stays down and the list has the screen;
- *   a tap on it raises the keyboard and the sheet sits above it. ↓ ↑ and Enter work from it, as in ToPicker.
- */
 import { useEffect, useId, useLayoutEffect, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { InboxComposeLaunch } from '@plannotator/core/inbox-types';
 import { BottomSheet } from '../components/BottomSheet';
@@ -31,18 +21,14 @@ export function PhoneToSheet({
 }: {
   open: boolean;
   groups: readonly ComposeGroup[];
-  /** The session To names, or `start:<agent>` for a start. */
   selected: string | null;
   onPick: (target: ComposeTarget) => void;
   onClose: () => void;
-  /** Launch on: the agents To offers to start and where. Absent: sessions only. */
   start?: { launch: InboxComposeLaunch; current: { id: string | null; root: string | null } | null } | null;
   onStart?: (start: ComposeStart) => void;
-  /** The compose dialog: the sheet is drawn in it (a modal dialog is the top layer). */
   host: HTMLElement | null;
 }) {
   const [query, setQuery] = useState('');
-  // Each opening starts with no filter.
   useEffect(() => {
     if (open) setQuery('');
   }, [open]);
@@ -56,14 +42,12 @@ export function PhoneToSheet({
     ],
     [rows, block],
   );
-  // The highlight follows a row's key (the list is read again every 5 s). Null: none, until typing or an arrow key.
   const [hlKey, setHlKey] = useState<string | null>(null);
   const found = options.findIndex((o) => o.key === hlKey);
   const hl = hlKey === null ? -1 : found >= 0 ? found : 0;
   const setHl = (index: number) => setHlKey(options[index]?.key ?? null);
   useLayoutEffect(() => {
     setHlKey(query === '' ? null : (options[0]?.key ?? null));
-    // Only the filter and an opening move it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, open]);
   const uid = useId().replace(/[^A-Za-z0-9_-]/g, '');
@@ -152,7 +136,6 @@ export function PhoneToSheet({
                 id={optionId(i)}
                 host={target.host}
                 agent={target.session}
-                // A session with a title leads with it and names its agent under it; one without is its agent.
                 title={target.label ?? agent}
                 detail={[target.label ? agent : null, target.project.name, time].filter(Boolean).join(' · ')}
                 selected={on}

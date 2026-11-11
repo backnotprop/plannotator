@@ -1,19 +1,10 @@
-/**
- * A picture copied from this Inbox and pasted (approval "reuse-attachments"; the
- * owner: "a way to point to the original file"). A browser's Copy image makes a
- * new PNG, so its hash matches no blob and its name is lost. But the clipboard's
- * HTML names where it came from: `<img src=".../api/inbox/attachments/att_…/image">`.
- * When that is this Inbox, the paste is that file. When a browser leaves the tag
- * out, or it is anything else (words around the picture, two pictures, another
- * Inbox's, another machine's), this answers null and the paste goes on as a paste.
- */
+/** A browser's Copy image makes a new PNG whose hash matches no blob, but the clipboard HTML names the source. When that is this Inbox's own picture, the paste is that file; anything else returns null. */
 
 const OWN_ROUTE = /^\/api\/inbox\/attachments\/(att_[0-9A-HJKMNP-TV-Z]{26})\/image$/;
 
 export interface OwnAttachmentPaste {
   id: string;
   version: 'current' | 'sent';
-  /** The route, for the tile's picture while it is added. */
   src: string;
 }
 

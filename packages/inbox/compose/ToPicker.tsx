@@ -6,30 +6,8 @@ import { splitPath } from '../agents';
 import type { InboxComposeLaunch, InboxLaunchAgent } from '@plannotator/core/inbox-types';
 import { filterGroups, hostLabel, pickerRows, splitProjectName, startBlock, type ComposeGroup, type ComposeStart, type ComposeTarget, type MachineLaunchProject } from './model';
 
-/** One row of the listbox: a live session, or (launch on) "<agent> New session". Keyed so a re-read never moves the highlight. */
 type PickerOption = { key: string; target: ComposeTarget; started: string | null; start?: undefined } | { key: string; start: ComposeStart; target?: undefined };
 
-/**
- * The To picker (compose; approval "inbox-compose-to-picker"): a filter field
- * over one listbox of live sessions, one line each: the agent's mark and
- * name, the project, its folder (muted, cut in the middle), a check on the
- * chosen one. On a phone two lines each (inbox.css): the project's whole name
- * goes under the agent, since To there has room for only part of it. A start
- * time shows only where one project has two or more live sessions. The current project first, then the most recently active.
- * ↓ ↑ move a wrapping highlight, Enter picks, Escape closes the picker only
- * (the dialog stays), typing filters by host, label, project and last subject.
- * A session with a label (approval "inbox-session-label") shows it in the
- * project's place, with the project after it on a phone.
- * With nobody in To it opens with no row highlighted, so Enter picks nothing
- * (the first row is the session last sent to: one Enter must not bring back
- * the auto-fill compose dropped); typing or an arrow key highlights the first row.
- * Focus stays in the filter (`aria-activedescendant`).
- *
- * Launch on (`start`): after the live sessions, under a hairline, one caption
- * "Start a new session in <project>" and one row per available agent (UX
- * screen 01). They join the arrow and Enter order; a filter word that names a
- * project moves the caption to it.
- */
 export function ToPicker({
   groups,
   selected,
@@ -41,13 +19,11 @@ export function ToPicker({
   onStart,
 }: {
   groups: readonly ComposeGroup[];
-  /** The session To names, or `start:<agent>` for a start. */
   selected: string | null;
   home: string | null;
   phone: boolean;
   onPick: (target: ComposeTarget) => void;
   onClose: () => void;
-  /** Launch on: the agents To offers to start and where (`GET /api/inbox/sessions` `launch`). Absent: sessions only, as always. */
   start?: { launch: InboxComposeLaunch; current: { id: string | null; root: string | null } | null } | null;
   onStart?: (start: ComposeStart) => void;
 }) {
@@ -78,12 +54,10 @@ export function ToPicker({
   const inputRef = useRef<HTMLInputElement>(null);
   const ref = useRef<HTMLDivElement>(null);
 
-  // The highlight starts on the session To names, else on no row (To empty); a filter snaps it to the first row.
   useLayoutEffect(() => {
     const at = options.findIndex((o) => o.key === selected);
     if (query === '') setHlSession(at >= 0 ? options[at]!.key : null);
     else setHl(0);
-    // Only the filter moves it; the re-read keeps the session it is on.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
   useEffect(() => inputRef.current?.focus(), []);
@@ -91,7 +65,6 @@ export function ToPicker({
     document.getElementById(optionId(hl))?.scrollIntoView?.({ block: 'nearest' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hl]);
-  // A press outside closes it (the To button toggles it itself).
   useEffect(() => {
     const onDown = (event: PointerEvent) => {
       const target = event.target as Element | null;
@@ -113,7 +86,6 @@ export function ToPicker({
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
       if (options.length === 0) return;
-      // Nothing highlighted yet: either arrow lands on the first row.
       if (hl < 0) {
         setHl(0);
         return;
@@ -124,7 +96,6 @@ export function ToPicker({
     }
     if (event.key === 'Enter') {
       event.preventDefault();
-      // Nothing highlighted: Enter picks nothing.
       pick(hl >= 0 ? options[hl] : undefined);
     }
   };
@@ -174,7 +145,6 @@ export function ToPicker({
                 {i === rows.length && (
                   <div className={`ib-cp-cap${rows.length ? ' ib-cp-cap-line' : ''}`} aria-hidden="true" data-compose-start-caption="">
                     Start a new session in <b dir="auto">{s.project.name}</b>
-                    {/* Another machine's project (remote launch) names its machine, as the list's rows do. */}
                     {(s.project as MachineLaunchProject).machine_name ? <> · {(s.project as MachineLaunchProject).machine_name}</> : null}
                   </div>
                 )}
@@ -246,19 +216,8 @@ export function ToPicker({
   );
 }
 
-/** The picker key of a start row (`selected` uses it too). */
 export const startKey = (agent: InboxLaunchAgent): string => `start:${agent}`;
 
-/**
- * To's detail after the agent's name, always one line: "· main · workspaces/worktrees".
- * The folder's own name stays whole while it fits; the parents (`splitProjectName`)
- * give way first, cut with "…", and drop out entirely once only a sliver of them
- * would show (they wrap onto a line the box hides); a folder name too long for
- * the row is then cut with its own "…". The whole name and folder in a tooltip while
- * anything is cut; on a phone the picker shows it whole. A session's `label` leads
- * and stays whole in the folder's place, and the project gives way as the parents
- * do ("· Fix login redirect · ai-collab"); a " · " inside the label splits nothing.
- */
 export function SessionDetail({ name, root, suffix, label }: { name: string; root: string | null; suffix?: string; label?: string }) {
   const { folder, parents } = label ? { folder: label, parents: name } : splitProjectName(name);
   const whole = label ? `${label} · ${name}` : name;
@@ -284,17 +243,13 @@ export function SessionDetail({ name, root, suffix, label }: { name: string; roo
   );
 }
 
-/** Whether any part of To's detail is cut or dropped (wrapped below the one line the box shows). */
 function detailCut(trigger: Element): boolean {
   const bottom = (trigger.querySelector('.ib-cp-tdw') ?? trigger).getBoundingClientRect().bottom;
   return [...trigger.querySelectorAll('[data-cut]')].some((part) => isTextCut(part) || part.getBoundingClientRect().top >= bottom - 1);
 }
 
-/** A project folder on one line, cut in the middle: the leading folders shrink with "…", the last name stays; the whole path in a tooltip while it is cut. */
 export function FolderPath({ path, drive }: { path: string; drive?: { name: string; folders: readonly string[] } | null }) {
   if (drive) {
-    // A folder on a drive: "Studio SSD › footage-tools". The drive's name and the last folder stay whole; the folders
-    // between are cut first.
     const last = drive.folders[drive.folders.length - 1];
     const middle = drive.folders.slice(0, -1);
     const SEP = '\u00a0›\u00a0';
