@@ -210,7 +210,7 @@ test.if(hasDom)('a picture is only ever an image of its address, set as an attri
   expect(sidebarImg.tagName).toBe('IMG');
   // Nothing but the image under its layer: no inlined svg, no element the picture's bytes could have made.
   for (const s of ['sidebar', ...OUTSIDE]) {
-    const box = s === 'sidebar' ? at(host, s).querySelector('.am-own')! : at(host, s).querySelector('.ib-own')!;
+    const box = s === 'sidebar' ? at(host, s).querySelector('.am-ownart')! : at(host, s).querySelector('.ib-own')!;
     expect({ s, tags: [...new Set([...box.querySelectorAll('*')].map((el) => el.tagName))] }).toEqual({ s, tags: ['IMG'] });
   }
   // A face that is not a picture's id never reaches an icon (a hostile file or wire is dropped).

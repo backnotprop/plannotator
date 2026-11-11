@@ -1007,7 +1007,7 @@ function ownFaceEl(icon: Icon, f: HTMLElement, face: AgentFace): void {
   body.className = 'am-p am-fb';
   body.dataset.p = 'body';
   const x = document.createElement('span');
-  x.className = 'am-x am-fb am-own';
+  x.className = 'am-x am-fb am-ownart';
   const img = document.createElement('img');
   img.className = 'am-art';
   img.alt = '';

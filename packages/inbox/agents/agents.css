@@ -169,12 +169,14 @@
    Shown as uploaded, only scaled to fit: its own shape and transparency, no crop, no tile colour behind it and no
    rounded mask. It takes the mark's whole tile (the tile's box is unchanged, so no row changes size), and a wide or
    tall picture sits letterboxed in it with clear room either side. */
-.am-own > img.am-art { object-fit: contain; }
+/* The sidebar's: the mark's box exactly, whatever the picture's own size (its layers would otherwise take it). */
+.am-f-own > .am-fb, .am-f-own .am-ownart { width: var(--am); height: var(--am); }
+.am-ownart > img.am-art { width: 100%; height: 100%; object-fit: contain; }
 :root .ib-mk.ib-face.ib-own { background: none; }
 :root .ib-mk.ib-face.ib-own > img[src] { width: 100%; height: 100%; object-fit: contain; }
 /* In a list row's grey tile (or another tile round the mark): the picture fills the tile's box, and the tile shows no colour. */
-:root .ib-atile > .ib-mk.ib-face.ib-own { width: 100%; height: 100%; }
-:root .ib-atile:has(> .ib-mk.ib-own) { background: none; }
+:root :is(.ib-atile, .ib-bc-who) > .ib-mk.ib-face.ib-own { width: 100%; height: 100%; }
+:root :is(.ib-atile, .ib-draft-mk, .ib-bc-who):has(> .ib-mk.ib-own) { background: none; }
 
 /* The fan's last inner place: a dashed "+", or the agent's own picture. */
 .am-own-add { position: relative; display: block; width: 18px; height: 18px; border-radius: 6px; border: 1.25px dashed color-mix(in oklch, var(--foreground) 45%, transparent); }
