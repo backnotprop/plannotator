@@ -3,7 +3,7 @@
  *
  * What regresses: thread text opening HTML in the comment, or a second marker the next post would find; the body
  * not shrinking to the forge's limit (the forge then refuses the post); the description's short form carrying HTML
- * (it may become a squash commit's message); an unsent pick or its note reaching the posted shape; the splice
+ * (it may become a squash commit's message); a draft (picked, not sent) losing its mark; the splice
  * changing a byte outside the markers, or writing over a section whose end marker is gone.
  */
 import { expect, test } from "bun:test";
@@ -87,35 +87,51 @@ test("the body shrinks to the room it is given: folds without context, then the 
   expect(cut).toMatch(/_and \d+ more, in the thread's download_/);
 });
 
-test("a pick saved and not sent is not posted: no answer, no note, under Still open", () => {
-  const unsent = item(2, { state: "picked_unsent", answer: { selected: ["B"], other: null, text: null, note: "SECRET-NOTE", skipped: false, sent: false }, recommendation: { labels: ["A"], text: null, taken: null } });
-  const posted = decisionExportForPost(doc([item(1)], [unsent]));
-  expect(posted.others.map((o) => [o.state, o.answer])).toEqual([["open", null]]);
-  expect([posted.counts.open, posted.counts.picked_unsent]).toEqual([1, 0]);
-  const body = renderDecisionComment(posted, { platform: "github" });
-  expect(body).not.toContain("SECRET-NOTE");
-  expect(body).toContain("#### Still open");
-  expect(body).not.toContain("Picked, not sent");
+test("a pick saved and not sent is posted as a draft: its own mark in the table, the fold and the counts, never the decided check", () => {
+  const draft = item(2, { prompt: "Show who made it?", state: "picked_unsent", choices: [{ label: "A", recommended: true, chosen: false }, { label: "B", recommended: false, chosen: true }], answer: { selected: ["B"], other: null, text: null, note: "a draft note", skipped: false, sent: false }, recommendation: { labels: ["A"], text: null, taken: null }, answered: undefined });
+  const d = decisionExportForPost(doc([item(1)], [draft, item(3, { state: "open", answer: null })]));
+  for (const body of [renderDecisionComment(d, { platform: "github" }), renderDecisionSection(d, { platform: "github" })!]) {
+    expect(body).toContain("1 decided, 1 draft, 1 open");
+    expect(body).toContain("| D2 | Show who made it? | B · _draft, not sent to the agent_ | |");
+    expect(body).toContain("<details><summary>D2 · <b>Show who made it?</b> B · draft, not sent to the agent</summary>");
+    expect(body).toContain("- **B** · _draft, not sent to the agent_");
+    expect(body).not.toContain("- ✓ **B**");
+    expect(body).toContain("> a draft note");
+    // Listed once, as a draft: not again under another state.
+    expect(body).not.toContain("#### Draft");
+  }
 });
 
-test("the description's short form is plain Markdown with one line per question and a link to the comment", () => {
+test("the description's short form: the banner and one line with the title and counts, linking to the comment", () => {
   const d = doc([item(1, { prompt: HOSTILE }), item(2)], [item(3, { state: "skipped", answer: null })]);
-  const short = renderDecisionSummary(d, { commentUrl: "https://github.com/acme/notes/pull/12#issuecomment-9" });
-  expect(short).not.toMatch(/<[a-z!/]/i);
-  expect(short.split("\n").filter((l) => l.startsWith("- D"))).toHaveLength(3);
-  expect(short).toEndWith("[Every decision, with its options and reasons](https://github.com/acme/notes/pull/12#issuecomment-9)");
-  expect(renderDecisionSummary(d, { commentUrl: "javascript:alert(1)" })).not.toContain("javascript:");
+  const short = renderDecisionSummary(d, { platform: "github", commentUrl: "https://github.com/acme/notes/pull/12#issuecomment-9" });
+  const [banner, blank, line] = short.split("\n");
+  expect(banner).toStartWith("<picture>");
+  expect(blank).toBe("");
+  expect(line).toBe("**[Decisions: Offline sync](https://github.com/acme/notes/pull/12#issuecomment-9)** · 2 decided, 1 skipped");
+  expect(renderDecisionSummary(d, { platform: "github", commentUrl: "javascript:alert(1)" })).not.toContain("javascript:");
 });
 
-test("the description section: plain lines before any HTML; past its room the folds lose context, then null (a comment instead)", () => {
-  const d = doc(Array.from({ length: 12 }, (_, i) => item(i + 1)));
+test("the description section: the banner, then everything inside ONE collapsed details whose summary carries title and counts", () => {
+  const d = doc(Array.from({ length: 12 }, (_, i) => item(i + 1)), [item(13, { state: "open", answer: null })]);
   const full = renderDecisionSection(d, { platform: "github" })!;
-  const plain = full.slice(0, full.search(/<[a-z]/i));
-  expect(plain.split("\n")[0]).toBe("### Decisions: Offline sync");
-  expect(plain.split("\n").filter((l) => l.startsWith("- D"))).toHaveLength(12);
+  const lines = full.split("\n");
+  expect(lines[0]).toStartWith("<picture>");
+  expect(lines[2]).toBe("<details><summary><b>Decisions: Offline sync</b> · 12 decided, 1 open</summary>");
+  expect(lines.at(-1)).toBe("</details>");
+  // Nothing of the decisions outside it: before the outer fold only the banner; the outer fold closes last, and every
+  // nested fold (one per decision) opens and closes inside it.
+  expect(full.slice(0, full.indexOf("<details>")).trim()).toBe(lines[0]);
+  let depth = 0;
+  const closesAt: number[] = [];
+  for (const m of full.matchAll(/<(\/?)details>/g)) {
+    depth += m[1] ? -1 : 1;
+    if (depth === 0) closesAt.push(m.index!);
+  }
+  expect(closesAt).toEqual([full.lastIndexOf("</details>")]);
+  expect(full.match(/<details>/g)).toHaveLength(13);
   expect(full).toContain("<dl>");
   const compact = renderDecisionSection(d, { platform: "github", room: full.length - 1 })!;
-  expect(compact).toContain("<details>");
   expect(compact).not.toContain("<dl>");
   expect(renderDecisionSection(d, { platform: "github", room: compact.length - 1 })).toBeNull();
   expect(renderDecisionSection(d, { platform: "gitlab" })).not.toContain("<picture>");
@@ -124,7 +140,7 @@ test("the description section: plain lines before any HTML; past its room the fo
 test("no task-list item anywhere in what is posted (GitHub would count them as the PR's tasks and make them clickable)", () => {
   const d = doc([item(1), item(2, { kind: "multi", answer: { selected: ["A"], other: "Own words", text: null, note: null, skipped: false, sent: true } })], [item(3, { state: "open", answer: null })]);
   for (const platform of ["github", "gitlab"] as const) {
-    for (const body of [renderDecisionComment(d, { platform }), renderDecisionSection(d, { platform })!, renderDecisionSummary(d, { commentUrl: "https://github.com/a/b/pull/1#issuecomment-1" })]) {
+    for (const body of [renderDecisionComment(d, { platform }), renderDecisionSection(d, { platform })!, renderDecisionSummary(d, { platform, commentUrl: "https://github.com/a/b/pull/1#issuecomment-1" })]) {
       expect(body).not.toMatch(/^\s*[-*+]\s+\[[ xX]\]/m);
       const tokens = marked.lexer(body);
       const items = tokens.flatMap((t) => (t.type === "list" ? (t as { items: { task: boolean }[] }).items : []));

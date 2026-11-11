@@ -119,7 +119,7 @@ export async function postThreadDecisions(
     const posted = await comment();
     step = "description";
     try {
-      await section((room) => renderDecisionSummary(doc, { commentUrl: posted.url, room }));
+      await section((room) => renderDecisionSummary(doc, { platform, commentUrl: posted.url, room }));
     } catch (cause) {
       // The comment is there; a description the person may not edit, or that is full, keeps it as the comment alone.
       const fallback = cause instanceof PRMarkedForbiddenError ? "no_permission" : cause instanceof PRMarkedTooLongError ? "too_long" : null;

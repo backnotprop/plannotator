@@ -193,14 +193,16 @@ test("GitHub: the first post creates one comment starting with the marker; the n
   ]);
 });
 
-test("an unsent pick never reaches the forge: its question is listed under Still open", async () => {
+test("a pick saved and not sent is posted as a draft, not sent to the agent (the owner, 2026-11-10)", async () => {
   const world = seed(["acme/notes#12"]);
   const forge = fakeForge("github");
   await postThreadDecisions(world.store, world.thread, { pull: "acme/notes#12" }, { runtime: forge.runtime, version: "test", destination: "comment" });
   const body = forge.comments("acme/notes#12")[0]!.body;
-  expect(body).not.toContain("PRIVATE-UNSENT-NOTE");
-  expect(body).not.toContain("Picked");
-  expect(body).toMatch(/#### Still open\n\n- D2 Show who made the losing edit\?/);
+  expect(body).toContain("1 decided, 1 draft");
+  expect(body).toContain("| D2 | Show who made the losing edit? | Name and time · _draft, not sent to the agent_ | |");
+  expect(body).toContain("- **Name and time** · _draft, not sent to the agent_");
+  expect(body).toContain("> PRIVATE-UNSENT-NOTE");
+  expect(body).not.toContain("#### Still open");
 });
 
 test("someone else's comment with the same marker is never edited; a comment deleted meanwhile is posted again", async () => {
@@ -330,11 +332,13 @@ test("both: the full comment, and a short section in the description that links 
   const url = (result.body as { url: string }).url;
   expect(url).toStartWith("https://github.com/acme/notes/pull/12#issuecomment-");
   const section = forge.descriptions.get("acme/notes#12")!;
-  expect(section).toContain(`[Every decision, with its options and reasons](${url})`);
-  expect(section).not.toMatch(/<(?:picture|details|img|dl)/);
+  // The banner and one line linking to the comment; no fold in the description.
+  expect(section).toContain(`**[Decisions: Offline sync: conflicts](${url})** · 1 decided, 1 draft`);
+  expect(section).toContain("<picture>");
+  expect(section).not.toMatch(/<(?:details|dl)/);
 });
 
-test("by default the decisions go in the description: read raw, a plain heading and one line per decision come before any HTML", async () => {
+test("by default the decisions go in the description: the banner, then one collapsed details whose summary names them", async () => {
   const world = seed(["acme/notes#12"]);
   const forge = fakeForge("github");
   forge.descriptions.set("acme/notes#12", "Adds offline sync.");
@@ -342,20 +346,14 @@ test("by default the decisions go in the description: read raw, a plain heading 
   expect(result.body).toMatchObject({ ok: true, action: "created", destination: "description", url: "https://github.com/acme/notes/pull/12" });
   expect(forge.comments("acme/notes#12")).toHaveLength(0);
   const text = forge.descriptions.get("acme/notes#12")!;
-  const section = text.slice(text.indexOf("-->") + 4);
-  const beforeHtml = section.slice(0, section.search(/<[a-z]/i));
-  expect(beforeHtml.split("\n").filter(Boolean)).toEqual([
-    "### Decisions: Offline sync: conflicts",
-    "1 decided, 1 open",
-    "- D1 Where should the losing version be kept? **Local only**",
-    "- D2 Show who made the losing edit? _open_",
-  ]);
-  expect(section).toContain("<picture>");
-  expect(section).toContain("<details>");
+  const lines = text.split("\n");
+  expect(lines.slice(0, 3)).toEqual(["Adds offline sync.", "", `<!-- plannotator-decisions:start v1 thread=${world.thread} -->`]);
+  expect(lines[3]).toStartWith("<picture>");
+  expect(lines[5]).toBe("<details><summary><b>Decisions: Offline sync: conflicts</b> · 1 decided, 1 draft</summary>");
+  expect(lines.slice(-2)).toEqual(["</details>", "<!-- plannotator-decisions:end -->"]);
   // No task-list items: in a description GitHub counts them as the PR's tasks ("N of M tasks") and makes them clickable.
   expect(text).not.toMatch(/^\s*[-*+]\s+\[[ xX]\]/m);
-  expect(section).toContain("- ✓ **Local only**");
-  expect(text).not.toContain("PRIVATE-UNSENT-NOTE");
+  expect(text).toContain("- ✓ **Local only**");
 });
 
 for (const platform of ["github", "gitlab"] as const) {

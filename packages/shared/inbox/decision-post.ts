@@ -7,12 +7,12 @@
  *
  * Where it goes is the person's setting (config.json `inboxDecisionsPostTo`, the Post group's "Where" in Export
  * decisions); the owner chose the DESCRIPTION as the default ("In the description only", 2026-11-10): a section of the
- * PR's description between hidden markers (`renderDecisionSection`: read raw it starts with a plain heading and one
- * line per decision, so a squash commit that inherits the description stays legible; the banner and the folds follow).
- * The other two: the comment, or a short section in the description that links to the comment.
+ * PR's description between hidden markers (`renderDecisionSection`: the banner, then everything in ONE collapsed
+ * `<details>` whose summary line carries the title and the counts). The other two: the comment, or a short section in
+ * the description (banner and one line) that links to the comment.
  *
- * What a public post leaves out that the download keeps: a pick the person saved and did not send is not posted;
- * its question shows under "Still open" instead (`decisionExportForPost`).
+ * A pick the person saved and did not send is posted too, marked `DECISION_POST_DRAFT` ("draft, not sent to the
+ * agent"; the owner, 2026-11-10), as the download marks it.
  *
  * Every piece of thread text is untrusted: inside HTML blocks (`<details>`, `<dl>`) it is HTML-escaped, in Markdown
  * it goes through the download's own `mdInline`.
@@ -22,7 +22,7 @@ import { decisionExportDesignDates } from "./decision-export-html";
 import { DECISION_EXPORT_MARKER, mdInline } from "./decision-export-md";
 import type { PRMarkedDestination } from "../pr-marked";
 
-// ── The switch (the owner's to choose; the comment until he answers) ──
+// ── The switch (the person's setting; the description by default) ──
 
 /** Where Post decisions puts them when the person never chose: the description (the owner, 2026-11-10). */
 export const DECISION_POST_DESTINATION: PRMarkedDestination = "description";
@@ -56,17 +56,15 @@ export type DecisionPostPlatform = "github" | "gitlab";
 // ── Privacy for a public post ──
 
 /**
- * The shape as a post shows it: a pick that was saved and not sent is not posted (its question is "Still open", with
- * no answer), and no other unsent answer is carried. The download keeps them (`buildDecisionExport`).
+ * The shape as a post shows it. A pick saved and not sent IS posted (the owner, 2026-11-10: "Post them as draft not
+ * sent to agent"), marked `DECISION_POST_DRAFT` wherever it shows; only the embedded pictures are left out.
  */
 export function decisionExportForPost(doc: DecisionExportV1): DecisionExportV1 {
-  const unsent = (item: DecisionExportItem) => !!item.answer && !item.answer.sent && !item.answer.skipped;
-  const others = doc.others
-    .map((item): DecisionExportItem => (item.state === "picked_unsent" ? { ...item, state: "open", answer: null } : unsent(item) ? { ...item, answer: null } : item))
-    .sort((a, b) => DECISION_EXPORT_OTHER_STATES.indexOf(a.state as never) - DECISION_EXPORT_OTHER_STATES.indexOf(b.state as never) || a.n - b.n);
-  const counts = { ...doc.counts, open: doc.counts.open + doc.counts.picked_unsent, picked_unsent: 0 } as Record<DecisionExportState, number>;
-  return { ...doc, others, counts, images: {} };
+  return { ...doc, images: {} };
 }
+
+/** How a pick saved and not sent is marked in the posts and the downloads, one wording everywhere. */
+export const DECISION_POST_DRAFT = "draft, not sent to the agent";
 
 // ── Pieces ──
 
@@ -76,7 +74,7 @@ const clip = (text: string, n: number) => (text.length <= n ? text : `${text.sli
 const joinWords = (items: string[]) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`);
 const SHORT: Readonly<Record<Exclude<DecisionExportState, "decided">, string>> = {
   open: "open",
-  picked_unsent: "not sent",
+  picked_unsent: "draft",
   answered_in_words: "in words",
   skipped: "skipped",
   set_aside: "set aside",
@@ -118,13 +116,23 @@ function shortState(doc: DecisionExportV1, item: DecisionExportItem): string {
   return SHORT[item.state as Exclude<DecisionExportState, "decided">];
 }
 
+/** The other states' groups, drafts left out (they are folded and listed beside the decisions). */
 function groups(doc: DecisionExportV1) {
-  return DECISION_EXPORT_OTHER_STATES.map((state) => ({ state, items: doc.others.filter((d) => d.state === state) })).filter((g) => g.items.length > 0);
+  return DECISION_EXPORT_OTHER_STATES.filter((state) => state !== "picked_unsent")
+    .map((state) => ({ state, items: doc.others.filter((d) => d.state === state) }))
+    .filter((g) => g.items.length > 0);
 }
 
-/** "4 decided, 1 open, 1 skipped, 1 replaced". */
+/** Picks saved and not sent, in the order asked. */
+const draftsOf = (doc: DecisionExportV1) => doc.others.filter((d) => d.state === "picked_unsent");
+
+/** Every question in the order the posts show them: the decisions, the drafts, then the other states. */
+const orderedOf = (doc: DecisionExportV1) => [...doc.decisions, ...draftsOf(doc), ...groups(doc).flatMap((g) => g.items)];
+
+/** "2 decided, 1 draft, 1 open, 1 skipped". */
 export function decisionPostTally(doc: DecisionExportV1): string {
-  return [`${doc.decisions.length} decided`, ...groups(doc).map(({ state, items }) => `${items.length} ${SHORT[state]}`)].join(", ");
+  const drafts = draftsOf(doc).length;
+  return [`${doc.decisions.length} decided`, ...(drafts ? [`${drafts} ${SHORT.picked_unsent}`] : []), ...groups(doc).map(({ state, items }) => `${items.length} ${SHORT[state]}`)].join(", ");
 }
 
 function banner(platform: DecisionPostPlatform): string {
@@ -144,9 +152,10 @@ function head(doc: DecisionExportV1, when: ReturnType<typeof decisionExportDesig
 function table(doc: DecisionExportV1, max = Infinity): string[] {
   const rows = ["| | Question | Answer | Recommendation |", "|---|---|---|---|"];
   const cell = (text: string) => mdInline(text).replace(/\|/g, "\\|");
-  const all = [...doc.decisions, ...doc.others];
+  const all = orderedOf(doc);
   for (const item of all.slice(0, max)) {
     if (item.state === "decided") rows.push(`| D${item.n} | ${cell(item.prompt)} | ${cell(clip(answerOf(item), 70))} | ${decisionVerdict(item)?.word ?? ""} |`);
+    else if (item.state === "picked_unsent") rows.push(`| D${item.n} | ${cell(item.prompt)} | ${answerOf(item) ? `${cell(clip(answerOf(item), 50))} · ` : ""}_${DECISION_POST_DRAFT}_ | |`);
     else rows.push(`| D${item.n} | ${cell(item.prompt)} | _${shortState(doc, item)}_ | |`);
   }
   if (all.length > max) rows.push(`| | _and ${all.length - max} more, in the thread's download_ | | |`);
@@ -156,12 +165,16 @@ function table(doc: DecisionExportV1, max = Infinity): string[] {
 type Level = "full" | "compact";
 
 function folded(doc: DecisionExportV1, item: DecisionExportItem, level: Level, when: ReturnType<typeof decisionExportDesignDates>): string[] {
-  const out = [`<details><summary>D${item.n} · <b>${html(item.prompt)}</b> ${html(clip(answerOf(item), 60))}</summary>`, ""];
+  // A draft (picked, not sent): its pick carries the draft mark instead of the decided check, and no verdict.
+  const draft = item.state === "picked_unsent";
+  const mark = (label: string) => (draft ? `- **${label}** · _${DECISION_POST_DRAFT}_` : `- ✓ **${label}**`);
+  const answer = html(clip(answerOf(item), 60));
+  const out = [`<details><summary>D${item.n} · <b>${html(item.prompt)}</b> ${answer}${draft ? `${answer ? " · " : ""}${DECISION_POST_DRAFT}` : ""}</summary>`, ""];
   for (const c of item.choices) {
     const label = mdInline(c.label);
     // Never task-list syntax (`- [x]`): in a PR description GitHub counts those as the PR's tasks ("N of M tasks") and
     // makes them clickable checkboxes that edit the text. The chosen option is "✓" and bold, read as plain text too.
-    let line = c.chosen ? `- ✓ **${label}**` : `- ${label}`;
+    let line = c.chosen ? mark(label) : `- ${label}`;
     if (c.description) line += ` · ${mdInline(c.description)}`;
     if (c.image) line += ` · _(picture: ${mdInline(c.image.alt)})_`;
     if (c.prototype) line += ` · prototype: ${mdInline(c.prototype)}`;
@@ -171,9 +184,9 @@ function folded(doc: DecisionExportV1, item: DecisionExportItem, level: Level, w
     if (signs.length) line += `<br><sub>${signs.join(" &nbsp; ")}</sub>`;
     out.push(line);
   }
-  for (const own of [item.answer?.other, item.answer?.text]) if (own) out.push(`- ✓ **${mdInline(own)}** · own answer`);
+  for (const own of [item.answer?.other, item.answer?.text]) if (own) out.push(`${mark(mdInline(own))} · own answer`);
   out.push("");
-  const verdict = decisionVerdict(item);
+  const verdict = draft ? null : decisionVerdict(item);
   if (verdict) out.push(mdInline(verdict.sentence), "");
   if (item.answer?.note) out.push(`> ${mdInline(item.answer.note)}`, "");
   if (level === "full") {
@@ -232,7 +245,7 @@ export function renderDecisionComment(doc: DecisionExportV1, options: { platform
   const top = [DECISION_EXPORT_MARKER(doc.thread.id), banner(options.platform), "", head(doc, when), ""];
   const foot = `<sub>Posted from Plannotator · ${when.footer(doc.exported_at)}</sub>\n`;
   const build = (level: Level | "table", max = Infinity) =>
-    [...top, ...table(doc, max), "", ...(level === "table" ? [DECISION_POST_TRIMMED, ""] : doc.decisions.flatMap((d) => folded(doc, d, level, when))), ...rest(doc), foot].join("\n");
+    [...top, ...table(doc, max), "", ...(level === "table" ? [DECISION_POST_TRIMMED, ""] : [...doc.decisions, ...draftsOf(doc)].flatMap((d) => folded(doc, d, level, when))), ...rest(doc), foot].join("\n");
   for (const level of ["full", "compact", "table"] as const) {
     const body = build(level);
     if (body.length <= room) return body;
@@ -244,44 +257,43 @@ export function renderDecisionComment(doc: DecisionExportV1, options: { platform
   return body;
 }
 
-/** The plain head every description form starts with: a heading, the counts, one line per question. No HTML. */
-function plainSummary(doc: DecisionExportV1): string[] {
-  const lines = [`### Decisions: ${mdInline(doc.thread.subject)}`, "", decisionPostTally(doc), ""];
-  for (const item of doc.decisions) lines.push(`- D${item.n} ${mdInline(item.prompt)} **${mdInline(clip(answerOf(item), 80))}**`);
-  for (const item of doc.others) lines.push(`- D${item.n} ${mdInline(item.prompt)} _${shortState(doc, item)}_`);
-  return lines;
-}
-
 /**
- * The description section (the default destination): read raw, a plain heading, the counts and one line per
- * question come first, before any HTML, so a squash commit message that inherits the description stays legible; then
- * the banner, each decision folded, the other states and the footer, as the comment has them. Past `room`, the folds
+ * The description section (the default destination; the owner, 2026-11-10: "the whole thing can go into a details
+ * section"): the banner, then ONE collapsed `<details>` whose summary carries the title and the counts (so read raw, as
+ * a squash commit message that inherits the description, it still says what it is), and inside it the table, each
+ * decision and draft in its own nested `<details>`, the other states and the footer. Past `room`, the nested folds
  * without context, facts and pros/cons; past that, null (the caller posts a comment instead).
  */
 export function renderDecisionSection(doc: DecisionExportV1, options: { platform: DecisionPostPlatform; room?: number }): string | null {
   const room = options.room ?? Infinity;
   const when = decisionExportDesignDates(doc.tz);
   for (const level of ["full", "compact"] as const) {
-    const body = [...plainSummary(doc), "", banner(options.platform), "", ...doc.decisions.flatMap((d) => folded(doc, d, level, when)), ...rest(doc), `<sub>Posted from Plannotator · ${when.footer(doc.exported_at)}</sub>`].join("\n");
+    const body = [
+      banner(options.platform),
+      "",
+      `<details><summary><b>Decisions: ${html(doc.thread.subject)}</b> · ${html(decisionPostTally(doc))}</summary>`,
+      "",
+      ...table(doc),
+      "",
+      ...[...doc.decisions, ...draftsOf(doc)].flatMap((d) => folded(doc, d, level, when)),
+      ...rest(doc),
+      `<sub>Posted from Plannotator · ${when.footer(doc.exported_at)}</sub>`,
+      "",
+      "</details>",
+    ].join("\n");
     if (body.length <= room) return body;
   }
   return null;
 }
 
 /**
- * The description's short form: the title, the counts, one line per decision (and per other question), and a link to
- * the comment when there is one. Plain Markdown, no HTML: it may end up in a squash commit's message.
+ * The description's short form ("Short in the description, full in a comment"): the banner, then one line with the
+ * title and the counts, linking to the comment that holds everything.
  */
-export function renderDecisionSummary(doc: DecisionExportV1, options: { commentUrl?: string | null; room?: number } = {}): string {
-  const lines = [`**Decisions: ${mdInline(doc.thread.subject)}**`, decisionPostTally(doc), ""];
-  for (const item of doc.decisions) lines.push(`- D${item.n} ${mdInline(item.prompt)} **${mdInline(clip(answerOf(item), 80))}**`);
-  for (const item of doc.others) lines.push(`- D${item.n} ${mdInline(item.prompt)} _${shortState(doc, item)}_`);
-  const link = options.commentUrl && /^https:\/\/[^\s()<>]+$/.test(options.commentUrl) ? `\n[Every decision, with its options and reasons](${options.commentUrl})` : "";
-  let text = `${lines.join("\n")}\n${link}`.trim();
-  const room = options.room ?? Infinity;
-  while (text.length > room && lines.length > 3) {
-    lines.splice(lines.length - 1, 1);
-    text = `${lines.join("\n")}\n- …\n${link}`.trim();
-  }
-  return text;
+export function renderDecisionSummary(doc: DecisionExportV1, options: { platform: DecisionPostPlatform; commentUrl?: string | null; room?: number }): string {
+  const title = `Decisions: ${mdInline(doc.thread.subject)}`;
+  const url = options.commentUrl && /^https:\/\/[^\s()<>]+$/.test(options.commentUrl) ? options.commentUrl : null;
+  const line = `${url ? `**[${title}](${url})**` : `**${title}**`} · ${decisionPostTally(doc)}`;
+  const text = `${banner(options.platform)}\n\n${line}`;
+  return text.length <= (options.room ?? Infinity) ? text : line;
 }
