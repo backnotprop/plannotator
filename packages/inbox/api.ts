@@ -8,6 +8,7 @@
 import { readHello, type RestartHello } from './sessionAdopt';
 import type { InboxSidebarLayout } from '@plannotator/core/inbox-sidebar';
 import type { DecisionDataSummary, InboxAgentsGroup } from '@plannotator/core/inbox-types';
+import { problemOf } from '@plannotator/core/problem';
 import type { FaviconStyle } from '@plannotator/core/favicon';
 import type { InboxShowMeTarget } from '@plannotator/core/inbox-review';
 import type { SystemSetup, SystemSetupAnswer, SystemSetupInput } from '@plannotator/core/inbox-system-setup';
@@ -86,6 +87,7 @@ import type {
   InboxCardWire,
   InboxStepsWire,
   InboxThreadPullsAnswer,
+  InboxThreadPullWire,
   InboxAttachmentState,
   InboxMessageWire,
   InboxNoteAgentId,
@@ -1114,10 +1116,18 @@ export type OpenInFileScope = { thread: string; message?: string; from?: 'root' 
 export type OpenInFileCode = { found: false } | { found: true; contents: string; pull?: { label: string; platform: 'github' | 'gitlab'; url: string } };
 
 /** A thread's PRs answer as the window uses it: anything missing reads as none. */
+function withProblemChecked(pull: InboxThreadPullWire): InboxThreadPullWire {
+  if (!pull || typeof pull !== 'object' || !('problem' in pull)) return pull;
+  const { problem, ...rest } = pull;
+  const checked = problemOf(problem);
+  return checked ? { ...rest, problem: checked } : rest;
+}
+
 function threadPullsOf(answer: unknown): InboxThreadPullsAnswer {
   const value = (answer && typeof answer === 'object' ? answer : {}) as Partial<InboxThreadPullsAnswer>;
   return {
-    pulls: Array.isArray(value.pulls) ? value.pulls : [],
+    // A PR's problem (newer servers) is kept only when it reads as one; an older server sends none.
+    pulls: Array.isArray(value.pulls) ? value.pulls.map(withProblemChecked) : [],
     groups: Array.isArray(value.groups) ? value.groups : [],
     removed: Array.isArray(value.removed) ? value.removed : [],
   };
@@ -1570,13 +1580,14 @@ export const inboxApi = {
    * lately. A linked machine's thread has none here (its read is not forwarded), and an Inbox older than PRs on
    * threads answers 404: both read as none.
    */
-  threadPulls: async (threadId: string, signal?: AbortSignal): Promise<InboxThreadPullsAnswer> => {
+  threadPulls: async (threadId: string, signal?: AbortSignal, options?: { retry?: boolean }): Promise<InboxThreadPullsAnswer> => {
     if (machineOf(threadId)) return { pulls: [], groups: [], removed: [] };
     // Aborted when the card closes or a newer read starts, and given up after THREAD_PULLS_READ_MS: an unanswered
-    // read never holds one of the browser's few connections to this Inbox.
+    // read never holds one of the browser's few connections to this Inbox. `retry`: the card's Try again (the
+    // server reads a held failure again and waits a little for it; an older server ignores it).
     const within = signalWithin(THREAD_PULLS_READ_MS, signal);
     try {
-      return threadPullsOf(await get<unknown>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/pulls`), within.signal));
+      return threadPullsOf(await get<unknown>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/pulls${options?.retry ? '?retry=1' : ''}`), within.signal));
     } catch (cause) {
       if (cause instanceof InboxApiError && cause.status === 404) return { pulls: [], groups: [], removed: [] };
       throw cause;

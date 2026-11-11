@@ -64,6 +64,11 @@ export function refCardTarget(href: string | null | undefined): ForgeRef | null 
   return parseForgeRefUrl(href);
 }
 
+/** Drop a ref's kept answer, so the next `loadRefCard` asks again (a failure the person fixed since). */
+export function forgetRefCard(ref: ForgeRef): void {
+  cache.delete(forgeRefKey(ref));
+}
+
 /** The card for a link, through the installed transport (shared and cached per ref). */
 export function loadRefCard(href: string, ref: ForgeRef): Promise<ForgeRefCardResult | null> {
   const t = transport;

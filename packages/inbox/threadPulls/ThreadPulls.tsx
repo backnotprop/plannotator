@@ -25,7 +25,9 @@ import { createPortal } from 'react-dom';
 import type { InboxThreadPullsAnswer, InboxThreadPullsSummary, InboxThreadPullWire } from '@plannotator/core/inbox-types';
 import { parseForgeRefUrl, type ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 import { REF_CARD_CLOSE_MS, REF_CARD_DELAY_MS, RefCardView } from '@plannotator/ui/components/RefHoverCard';
-import { loadRefCard } from '@plannotator/ui/utils/refCard';
+import { forgetRefCard, loadRefCard } from '@plannotator/ui/utils/refCard';
+import { cardProblem } from '@plannotator/core/problem-words';
+import { PullProblems, pullProblems } from './PullProblems';
 import { inboxApi } from '../api';
 import { INBOX_UNREACHABLE } from '../toastError';
 import { RefMarkIcon } from '../board/RefMark';
@@ -54,32 +56,43 @@ export function PullsMarkIcon({ summary, size }: { summary: InboxThreadPullsSumm
  * unanswered read never holds one of the browser's few connections to the Inbox. `failed`: the last read got no
  * answer and nothing is known yet; the card says so instead of loading for ever.
  */
-export function useThreadPulls(threadId: string, active: boolean, read: (threadId: string, signal?: AbortSignal) => Promise<InboxThreadPullsAnswer> = inboxApi.threadPulls) {
+export function useThreadPulls(
+  threadId: string,
+  active: boolean,
+  read: (threadId: string, signal?: AbortSignal, options?: { retry?: boolean }) => Promise<InboxThreadPullsAnswer> = inboxApi.threadPulls,
+) {
   const [state, setState] = useState<{ thread: string; answer: InboxThreadPullsAnswer | null; failed: boolean }>({ thread: threadId, answer: null, failed: false });
+  // The person's Try again is in flight (its button says so); what shows stays until it answers, so nothing flickers.
+  const [retrying, setRetrying] = useState(false);
   const seq = useRef(0);
   const inFlight = useRef<AbortController | null>(null);
-  const load = useCallback(() => {
-    const mine = ++seq.current;
-    inFlight.current?.abort();
-    const controller = new AbortController();
-    inFlight.current = controller;
-    // A new read: "Loading…" again until it answers.
-    setState((now) => (now.failed ? { ...now, failed: false } : now));
-    read(threadId, controller.signal)
-      .then((answer) => {
-        // Only the newest read lands.
-        if (mine === seq.current) setState({ thread: threadId, answer, failed: false });
-      })
-      .catch(() => {
-        // A read this hook aborted says nothing. A failed one keeps what shows; with nothing shown yet, the card says
-        // so (hovering again, or the next event, reads again).
-        if (mine !== seq.current || controller.signal.aborted) return;
-        setState((now) => (now.thread === threadId && now.answer ? now : { thread: threadId, answer: null, failed: true }));
-      })
-      .finally(() => {
-        if (inFlight.current === controller) inFlight.current = null;
-      });
-  }, [threadId, read]);
+  const load = useCallback(
+    (options?: { retry?: boolean }) => {
+      const mine = ++seq.current;
+      inFlight.current?.abort();
+      const controller = new AbortController();
+      inFlight.current = controller;
+      // A new read: "Loading…" again until it answers.
+      setState((now) => (now.failed ? { ...now, failed: false } : now));
+      setRetrying(!!options?.retry);
+      read(threadId, controller.signal, options?.retry ? { retry: true } : undefined)
+        .then((answer) => {
+          // Only the newest read lands.
+          if (mine === seq.current) setState({ thread: threadId, answer, failed: false });
+        })
+        .catch(() => {
+          // A read this hook aborted says nothing. A failed one keeps what shows; with nothing shown yet, the card says
+          // so (hovering again, or the next event, reads again).
+          if (mine !== seq.current || controller.signal.aborted) return;
+          setState((now) => (now.thread === threadId && now.answer ? now : { thread: threadId, answer: null, failed: true }));
+        })
+        .finally(() => {
+          if (inFlight.current === controller) inFlight.current = null;
+          if (mine === seq.current) setRetrying(false);
+        });
+    },
+    [threadId, read],
+  );
   useEffect(() => {
     if (!active) return;
     load();
@@ -96,7 +109,14 @@ export function useThreadPulls(threadId: string, active: boolean, read: (threadI
   }, [active, threadId, load]);
   const answer = state.thread === threadId ? state.answer : null;
   const failed = state.thread === threadId && !answer && state.failed;
-  return { answer, failed, setAnswer: (next: InboxThreadPullsAnswer) => setState({ thread: threadId, answer: next, failed: false }), reload: load };
+  return {
+    answer,
+    failed,
+    retrying,
+    setAnswer: (next: InboxThreadPullsAnswer) => setState({ thread: threadId, answer: next, failed: false }),
+    reload: () => load(),
+    retry: () => load({ retry: true }),
+  };
 }
 
 /** The card's open state and its pointer rules: a hover rests REF_CARD_DELAY_MS, leaving closes after REF_CARD_CLOSE_MS. */
@@ -239,11 +259,16 @@ function PullsPopover({ anchor, sheet, label, onClose, cardHover, children }: { 
  * One PR: the full hover card when the forge answers (its loading state meanwhile); else (no gh or glab, signed
  * out, a phone) the list's row from what the Inbox knows, never a card that makes up a description or comments.
  */
-function OnePull({ pull, sheet, onClose }: { pull: InboxThreadPullWire; sheet: boolean; onClose: () => void }) {
+function OnePull({ pull, sheet, onClose, onRetry, retrying }: { pull: InboxThreadPullWire; sheet: boolean; onClose: () => void; onRetry?: () => void; retrying?: boolean }) {
   const target = parseForgeRefUrl(pull.url);
   const [result, setResult] = useState<ForgeRefCardResult | null | undefined>(undefined);
+  const problemCode = pull.problem?.code ?? null;
+  const lastCode = useRef(problemCode);
   useEffect(() => {
     if (!target) return;
+    // The PR's problem changed (signed in since, a Try again): a failure kept for this ref is asked again.
+    if (lastCode.current !== problemCode) forgetRefCard(target);
+    lastCode.current = problemCode;
     let live = true;
     loadRefCard(pull.url, target)
       .then((answer) => live && setResult(answer))
@@ -253,9 +278,17 @@ function OnePull({ pull, sheet, onClose }: { pull: InboxThreadPullWire; sheet: b
     };
     // The card is per PR; its url says which.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pull.url]);
-  if (target && (result === undefined || result?.ok)) return <RefCardView target={target} href={pull.url} result={result} sheet={sheet} onClose={onClose} />;
-  return <PullsList answer={{ pulls: [pull], groups: [{ kind: 'related', pulls: [pull.pull] }], removed: [] }} />;
+  }, [pull.url, problemCode]);
+  // The full card once the forge answers. While it loads, its skeleton, unless the Inbox already knows why the PR
+  // can't be read: then what is known and why show at once, never a skeleton that turns into a failure.
+  if (target && (result?.ok || (result === undefined && !pull.problem))) return <RefCardView target={target} href={pull.url} result={result} sheet={sheet} onClose={onClose} />;
+  const problem = pull.problem ?? (target ? cardProblem(result, target) : null);
+  return (
+    <>
+      <PullsList answer={{ pulls: [pull], groups: [{ kind: 'related', pulls: [pull.pull] }], removed: [] }} />
+      <PullProblems problems={problem ? [problem] : []} onRetry={onRetry} retrying={retrying} touch={sheet} linked={pull.url} />
+    </>
+  );
 }
 
 function PullRow({ pull, oneRepo, onRemove }: { pull: InboxThreadPullWire; oneRepo: boolean; onRemove?: (pull: InboxThreadPullWire) => void }) {
@@ -326,7 +359,28 @@ function PullsList({ answer, onRemove }: { answer: InboxThreadPullsAnswer; onRem
  * The card's body: the PRs (one: the hover card; several: the list), then the person's edit, an Add field and,
  * after a removal, its Undo.
  */
-export function PullsCard({ threadId, answer, failed = false, onAnswer, sheet, onClose, adding = false }: { threadId: string; answer: InboxThreadPullsAnswer | null; failed?: boolean; onAnswer: (answer: InboxThreadPullsAnswer) => void; sheet: boolean; onClose: () => void; adding?: boolean }) {
+export function PullsCard({
+  threadId,
+  answer,
+  failed = false,
+  onAnswer,
+  sheet,
+  onClose,
+  adding = false,
+  onRetry,
+  retrying = false,
+}: {
+  threadId: string;
+  answer: InboxThreadPullsAnswer | null;
+  failed?: boolean;
+  onAnswer: (answer: InboxThreadPullsAnswer) => void;
+  sheet: boolean;
+  onClose: () => void;
+  adding?: boolean;
+  /** Try again on a problem that offers it (the read asks the forge again at once). */
+  onRetry?: () => void;
+  retrying?: boolean;
+}) {
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -364,11 +418,12 @@ export function PullsCard({ threadId, answer, failed = false, onAnswer, sheet, o
     <div className="ib-prpop-body flex min-h-0 flex-1 flex-col" data-pr-card="">
       {pulls.length === 1 ? (
         <div className="ib-prpop-one min-h-0 overflow-y-auto" data-pr-one="">
-          <OnePull pull={pulls[0]!} sheet={false} onClose={onClose} />
+          <OnePull pull={pulls[0]!} sheet={false} onClose={onClose} onRetry={onRetry} retrying={retrying} />
         </div>
       ) : pulls.length > 1 ? (
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           <PullsList answer={answer!} onRemove={(pull) => void remove(pull)} />
+          <PullProblems problems={pullProblems(pulls)} onRetry={onRetry} retrying={retrying} touch={sheet} />
         </div>
       ) : answer ? (
         <div className="ib-prpop-empty">No pull requests on this thread.</div>
@@ -454,7 +509,7 @@ export function PullsCard({ threadId, answer, failed = false, onAnswer, sheet, o
  */
 export function RowPullsMark({ threadId, summary }: { threadId: string; summary: InboxThreadPullsSummary | undefined }) {
   const { open, setOpen, hover, cardHover, close } = usePopover();
-  const { answer, failed, setAnswer } = useThreadPulls(threadId, !!open);
+  const { answer, failed, retrying, setAnswer, retry } = useThreadPulls(threadId, !!open);
   if (!summary) return null;
   // Once read, the card's answer is the newest (the row's summary follows on the next list read).
   const shown = (answer && pullsSummaryOf(answer)) ?? summary;
@@ -481,7 +536,7 @@ export function RowPullsMark({ threadId, summary }: { threadId: string; summary:
       </span>
       {open && (
         <PullsPopover anchor={open.anchor} sheet={open.sheet} label={words} onClose={close} cardHover={cardHover}>
-          <PullsCard threadId={threadId} answer={answer} failed={failed} onAnswer={setAnswer} sheet={open.sheet} onClose={close} />
+          <PullsCard threadId={threadId} answer={answer} failed={failed} onAnswer={setAnswer} sheet={open.sheet} onClose={close} onRetry={retry} retrying={retrying} />
         </PullsPopover>
       )}
     </>
@@ -497,7 +552,7 @@ export function ThreadPullsButton({ threadId, summary, adding = false, onAddingD
   const { open, setOpen, hover, cardHover, close } = usePopover();
   const button = useRef<HTMLButtonElement>(null);
   // The thread is open: its PRs are read now (states older than 30 s again), and on every change.
-  const { answer, failed, setAnswer } = useThreadPulls(threadId, true);
+  const { answer, failed, retrying, setAnswer, retry } = useThreadPulls(threadId, true);
   const shown = answer ? pullsSummaryOf(answer) : summary;
   useEffect(() => {
     if (adding && button.current) setOpen({ anchor: button.current, sheet: coarse(), pinned: true });
@@ -533,7 +588,7 @@ export function ThreadPullsButton({ threadId, summary, adding = false, onAddingD
       </button>
       {open && (
         <PullsPopover anchor={open.anchor} sheet={open.sheet} label={words} onClose={closeAll} cardHover={cardHover}>
-          <PullsCard threadId={threadId} answer={answer} failed={failed} onAnswer={setAnswer} sheet={open.sheet} onClose={() => closeAll(true)} adding={adding} />
+          <PullsCard threadId={threadId} answer={answer} failed={failed} onAnswer={setAnswer} sheet={open.sheet} onClose={() => closeAll(true)} adding={adding} onRetry={retry} retrying={retrying} />
         </PullsPopover>
       )}
     </>
