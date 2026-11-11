@@ -202,6 +202,8 @@ import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxLiveSites, type InboxLiveBridgeSources, type InboxLiveSites } from "./inbox-live";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
 import { INBOX_DECISION_EXPORT_ROUTE, inboxDecisionExportRoute } from "./inbox-decision-export";
+import { INBOX_DECISION_POST_ROUTE, postThreadDecisions } from "./inbox-decision-post";
+import { DECISION_POST_DESTINATIONS, decisionPostDestinationOf } from "@plannotator/shared/inbox/decision-post";
 import { createInboxAccountsFor, switchTarget } from "./inbox-accounts";
 import { INBOX_ACCOUNT_SWITCHING, INBOX_ACTIVITY_MAX_DAYS, type InboxNoteAutoAdd } from "@plannotator/core/inbox-types";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
@@ -235,6 +237,10 @@ import { createInboxAsk } from "./inbox-ask";
 import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
 import { createInboxAgentFaces } from "./inbox-agent-faces";
+import { createAgentIcons, createInboxAgentIcons, INBOX_AGENT_ICONS_DIR } from "./inbox-agent-icons";
+import { createInboxIconAnimate } from "./inbox-icon-animate";
+import { createBuiltInIconSets, createInboxIconSets } from "./inbox-icon-sets";
+import { createIconSetFetcher, iconSetsPointer, INBOX_ICON_SETS_DIR } from "./inbox-icon-set-fetch";
 import { createInboxAgentFacesFile } from "@plannotator/shared/inbox/agent-faces";
 import type { InboxAgentFacesWire } from "@plannotator/core/inbox-types";
 import { createInboxArtifactPins } from "./inbox-artifact-pins";
@@ -1151,8 +1157,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const sidebarListeners = new Set<(sidebar: InboxSidebarLayout, rev: number) => void>();
   /** An agent icon's face was saved (inbox/agent-faces.json): the windows' streams say `event: agent-faces`. */
   const agentFaceListeners = new Set<(wire: InboxAgentFacesWire) => void>();
+  // The pictures uploaded for agents' icons ("Your own…", inbox-agent-icons.ts): every faces wire carries them.
+  const agentIconFiles = createAgentIcons({ dir: join(inboxDir(dataDir), INBOX_AGENT_ICONS_DIR) });
   const agentFacesFile = createInboxAgentFacesFile(inboxDir(dataDir), (wire) => {
-    for (const listener of agentFaceListeners) listener(wire);
+    const withIcons = { ...wire, icons: agentIconFiles.list() };
+    for (const listener of agentFaceListeners) listener(withIcons);
   });
   /** The reaction tray's saved emoji changed (config.json `inboxReactions`): the windows' streams say `event: reactions`. */
   const reactionsListeners = new Set<(reactions: readonly InboxReaction[], rev: number) => void>();
@@ -4359,7 +4368,33 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // Pinned artifacts and the Artifacts wall (packages/server/inbox-artifact-pins.ts).
   const artifactPins = createInboxArtifactPins({ store, serverSession, readBody: (req) => readBody(req), json });
   // Agent icons' faces (packages/server/inbox-agent-faces.ts).
-  const agentFaces = createInboxAgentFaces({ file: agentFacesFile, serverSession, readBody: (req) => readBody(req), json });
+  // "Animate it": an agent hands an animated picture back for the one icon it was asked about (inbox-icon-animate.ts).
+  const iconAnimate = createInboxIconAnimate({
+    inboxDir: inboxDir(dataDir),
+    icons: agentIconFiles,
+    faces: agentFacesFile,
+    serverSession,
+    localOnly: () => localOnly(),
+    readBody: (req) => readBody(req),
+    json,
+    touch: () => void agentFacesFile.touch(),
+  });
+  const agentIcons = createInboxAgentIcons({
+    icons: agentIconFiles,
+    faces: agentFacesFile,
+    serverSession,
+    localOnly: () => localOnly(),
+    readBody: (req) => readBody(req),
+    json,
+    kept: () => iconAnimate.kept(),
+  });
+  const agentFaces = createInboxAgentFaces({ file: agentFacesFile, serverSession, readBody: (req) => readBody(req), json, icons: () => agentIconFiles.list() });
+  // Icon sets for agents' icons ("Sets": built in, or fetched into the data folder on one click; inbox-icon-sets.ts).
+  const builtInIconSets = createBuiltInIconSets();
+  const iconSetFetcher = createIconSetFetcher({ dir: join(inboxDir(dataDir), INBOX_ICON_SETS_DIR), pointer: iconSetsPointer(), builtIn: builtInIconSets.ids });
+  // A download a stop cut short goes on (only one the person started; nothing is asked otherwise).
+  iconSetFetcher.resume();
+  const iconSets = createInboxIconSets({ builtIn: builtInIconSets, fetcher: iconSetFetcher, serverSession, localOnly: () => localOnly(), readBody: (req) => readBody(req), json });
   // Snoozes: threads out of the list until a time (packages/server/inbox-snooze.ts).
   const snoozes = createInboxSnoozes({
     store,
@@ -5415,6 +5450,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           throw error;
         }
       }
+      // Post decisions (the thread's ⋯ More, Export decisions › Post on a pull request, and the PR card's row): the
+      // thread's decisions as one comment on one of its PRs, edited in place on a later post (inbox-decision-post.ts).
+      // A write to the forge as the person's own gh / glab: the review post's guards, the owner only and same origin.
+      {
+        const posting = INBOX_DECISION_POST_ROUTE.exec(path);
+        if (posting) {
+          if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+          if (!ownerOrLocal(req, via)) return localOnly();
+          if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+            return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+          }
+          const body = await readBody(req);
+          if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+          const result = await postThreadDecisions(store, posting[1]!, { pull: body.pull, tz: body.tz }, { runtime: options.prRuntime ?? prCommandRuntime, version, destination: loadConfig().inboxDecisionsPostTo });
+          return json(result.status === 200 ? { serverSession, ...result.body } : result.body, result.status);
+        }
+      }
       // Export decisions (the thread's ⋯ More): one thread's decisions as a Markdown, HTML or JSON download. Read only,
       // the same origin as the thread's own read; the phone door carries it (inbox-decision-export.ts).
       if (INBOX_DECISION_EXPORT_ROUTE.test(path)) {
@@ -5425,6 +5477,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return (await inboxDecisionExportRoute(url, store, { version }))!;
       }
       // Settings → Storage's sizes walk every file in the store, so only that panel asks for them, when it is shown.
+      // Where Post decisions puts them (config.json `inboxDecisionsPostTo`; the Post group's "Where" in Export decisions):
+      // read by any window that may post, changed by the owner only, like the post itself.
+      if (path === "/api/inbox/settings/decisions-post") {
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (req.method === "GET") return json({ serverSession, post_to: decisionPostDestinationOf(loadConfig().inboxDecisionsPostTo) });
+        if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        if (!DECISION_POST_DESTINATIONS.includes(body.post_to as never)) throw new InboxError("validation_error", "post_to: description, comment or both.", { field: "post_to" });
+        saveConfig({ inboxDecisionsPostTo: body.post_to as "description" | "comment" | "both" });
+        const saved = decisionPostDestinationOf(loadConfig().inboxDecisionsPostTo);
+        if (saved !== body.post_to) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+        return json({ serverSession, post_to: saved });
+      }
       if (path === "/api/inbox/settings/storage") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         return json(perfPhase("disk", () => store.diskUsage()));
@@ -5769,6 +5838,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Agent icons' faces: the face each agent shows in every window.
       const faced = await agentFaces.route(req, url);
       if (faced) return faced;
+      // The pictures uploaded for agents' icons ("Your own…"): this computer's windows and the owner's.
+      const iconed = await agentIcons.route(req, url, ownerOrLocal(req, via));
+      if (iconed) return iconed;
+      const animated = await iconAnimate.route(req, url, ownerOrLocal(req, via));
+      if (animated) return animated;
+      // Icon sets for agents' icons ("Sets"): built-in ones to any window, fetched ones and downloads to the owner's.
+      const setIconed = await iconSets.route(req, url, ownerOrLocal(req, via));
+      if (setIconed) return setIconed;
       // Snooze and Unsnooze (approval "inbox-snooze").
       const snoozed = await snoozes.route(req, url);
       if (snoozed) return snoozed;
