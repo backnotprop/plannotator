@@ -431,6 +431,11 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
                 />
                 <p className="mt-1 text-[11px] leading-snug text-muted-foreground/60">
                   Added on top of the built-in guide methodology for every guide you generate. Saved for next time.
+                  {instructions.length >= GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS - 1000 && (
+                    <span data-guide-instructions-count="" className="ml-1 tabular-nums">
+                      {instructions.length.toLocaleString('en-US')} / {GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS.toLocaleString('en-US')}
+                    </span>
+                  )}
                 </p>
               </div>
             )}
