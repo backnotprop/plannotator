@@ -871,7 +871,7 @@ export function isSubcommandHelpInvocation(args: string[]): string | null {
   const canonical = SUBCOMMAND_HELP_ALIASES[sub] ?? sub;
   if (!(canonical in SUBCOMMAND_HELP)) return null;
   // `inbox projects --help` is that command's own usage, not the whole guide.
-  if (canonical === "inbox" && (args[1] === "projects" || args[1] === "rows")) return null;
+  if (canonical === "inbox" && (args[1] === "projects" || args[1] === "rows" || args[1] === "icon")) return null;
   return hasHelpFlag(args.slice(1)) ? canonical : null;
 }
 
