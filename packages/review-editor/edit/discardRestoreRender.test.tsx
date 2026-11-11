@@ -42,10 +42,6 @@ import { useEditSession, type EditSessionApi } from './useEditSession';
 
 const hasDom = typeof document !== 'undefined';
 
-// The repo's happy-dom preload (packages/ui/test-setup/happy-dom.ts) keeps
-// Bun's native Worker global, so the pool below spawns REAL workers running
-// Pierre's actual worker script — the bug only exists on the worker-pool
-// rendering path.
 const workerScriptPath = fileURLToPath(import.meta.resolve('@pierre/diffs/worker/worker.js'));
 const spawnedWorkers: Worker[] = [];
 
@@ -83,13 +79,10 @@ afterAll(() => {
     try {
       worker.terminate();
     } catch {
-      // Already gone.
     }
   }
 });
 
-// A realistically sized file (not a 3-liner) so the unfixed async heal has a
-// real window — matching how the defect presents on actual review diffs.
 const filler = (n: number, name: string) =>
   Array.from({ length: n }, (_, i) => `const ${name}${i} = ${i};`).join('\n');
 const HEAD = filler(60, 'filler');
@@ -258,7 +251,6 @@ describe.if(hasDom)('edit-mode Discard repaints the pristine diff (DOM)', () => 
         );
       });
 
-      // Reach the live FileDiff instance the same way the fix does.
       const getInstance = () =>
         handle
           ?.getInstance()
@@ -269,24 +261,17 @@ describe.if(hasDom)('edit-mode Discard repaints the pristine diff (DOM)', () => 
             }
           | undefined;
 
-      // Wait for the initial render to reach a HIGHLIGHTED cache — the exact
-      // precondition under which upstream's renderDiff refuses to swap
-      // content on the restore repaint.
       expect(
         await waitFor(() => getInstance()?.hunksRenderer?.renderCache?.highlighted === true, 15_000),
       ).toBe(true);
       expect(shadowText(host)).toContain(PRISTINE_MARKER);
 
-      // Enter edit mode through the real controller (awaits the real lazy
-      // editor chunk, then flips item.edit on).
       await act(async () => {
         api!.startEdit(item.id);
       });
       expect(await waitFor(() => api!.editingItemIdRef.current === item.id, 10_000)).toBe(true);
       expect(await waitFor(() => handle?.getEditor(item.id) != null, 10_000)).toBe(true);
 
-      // A real keystroke through the real Editor: insert a uniquely
-      // greppable line into the function body.
       const editor = handle!.getEditor(item.id) as unknown as {
         applyEdits: (edits: unknown[]) => void;
       };
@@ -300,9 +285,6 @@ describe.if(hasDom)('edit-mode Discard repaints the pristine diff (DOM)', () => 
       });
       expect(await waitFor(() => shadowText(host!).includes(EDITED_MARKER), 10_000)).toBe(true);
 
-      // DISCARD, then assert within one short bounded settle (a frame's
-      // worth) — NOT after the unbounded async worker heal the unfixed code
-      // depends on.
       await act(async () => {
         api!.cancelEdit();
       });
@@ -313,7 +295,6 @@ describe.if(hasDom)('edit-mode Discard repaints the pristine diff (DOM)', () => 
       const text = shadowText(host!);
       expect(text).toContain(PRISTINE_MARKER);
       expect(text).not.toContain(EDITED_MARKER);
-      // And no annotation was created: Discard leaves state fully pristine.
       expect(api!.editingItemIdRef.current).toBeNull();
     },
     60_000,

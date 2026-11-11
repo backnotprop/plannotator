@@ -2,12 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
-/**
- * Adapter-wall invariant: every reference to Pierre's experimental
- * `@pierre/diffs/edit` entry must live in exactly one module,
- * packages/review-editor/edit/pierreEditAdapter.ts, so an upstream rename is
- * a one-file fix. App code imports the adapter, never the entry.
- */
 const REPO_ROOT = join(import.meta.dir, '..', '..', '..');
 const SCAN_ROOTS = ['packages', 'apps'];
 const ALLOWED = 'packages/review-editor/edit/pierreEditAdapter.ts';
@@ -40,9 +34,6 @@ describe('pierre edit adapter wall', () => {
 
   test('the adapter itself only imports the edit entry lazily or as types', () => {
     const content = readFileSync(join(REPO_ROOT, ALLOWED), 'utf8');
-    // Static VALUE imports of the edit entry would defeat the lazy chunk.
-    // `import type` and `typeof import(...)` are type-only; the single
-    // runtime reference must be a dynamic import().
     const staticValueImport = /^import\s+(?!type\b)[^;]*from\s+['"]@pierre\/diffs\/edit['"]/m;
     expect(staticValueImport.test(content)).toBe(false);
     expect(content.includes("import('@pierre/diffs/edit')")).toBe(true);

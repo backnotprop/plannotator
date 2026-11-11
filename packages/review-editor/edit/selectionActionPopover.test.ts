@@ -31,7 +31,6 @@ describe.if(hasDom)('buildSelectionActionElement (DOM)', () => {
     const style = button.getAttribute('style') ?? '';
     expect(style).toContain('var(--card)');
     expect(style).toContain('var(--border)');
-    // No class names: Tailwind cannot reach into the editor's shadow root.
     expect(button.className).toBe('');
   });
 

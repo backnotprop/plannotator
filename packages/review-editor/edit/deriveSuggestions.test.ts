@@ -18,8 +18,6 @@ function splitContentLines(content: string): string[] {
   return lines;
 }
 
-/** Apply hunks the way an agent would: sequentially against original line
- * numbers, tracking the running insert/delete offset. */
 function applyHunks(before: string, hunks: SuggestionHunk[]): string {
   const lines = splitContentLines(before);
   let offset = 0;
@@ -169,8 +167,6 @@ describe('deriveSuggestionHunks', () => {
 
   test('trailing-newline-only difference is not a phantom hunk on untouched lines', () => {
     const hunks = deriveSuggestionHunks(`${FILE}\n`, FILE);
-    // The last line loses its newline; diffLines reports the final line changed.
-    // Whatever the diff engine reports must stay anchored to the final line only.
     for (const hunk of hunks) {
       expect(hunk.lineStart).toBeGreaterThanOrEqual(7);
     }
@@ -185,9 +181,6 @@ describe('deriveSuggestionHunks', () => {
 
   describe('anchor collisions between adjacent regions', () => {
     test('file-start insert plus adjacent insert do not claim the same line', () => {
-      // Region 1 (insert S before line 1) must anchor forward to line 1;
-      // region 2 (insert N0 before line 2) then finds its backward anchor
-      // (line 1) taken and anchors forward to line 2 instead.
       const before = 'A\nB\nC\n';
       const after = 'S\nA\nN0\nB\nC\n';
       const hunks = deriveSuggestionHunks(before, after);
@@ -199,8 +192,6 @@ describe('deriveSuggestionHunks', () => {
     });
 
     test('two deletes sharing one kept line between them do not overlap', () => {
-      // Region 1 (delete line 1) anchors forward to line 2; region 2 (delete
-      // line 3) finds line 2 taken and anchors forward to line 4.
       const before = 'A\nB\nC\nD\n';
       const after = 'B\nD\n';
       const hunks = deriveSuggestionHunks(before, after);
@@ -220,9 +211,6 @@ describe('deriveSuggestionHunks', () => {
     });
 
     test('adjacent regions at file end merge into one spanning hunk', () => {
-      // Region 1 (delete line 1) anchors forward, claiming line 2 (the last
-      // line); region 2 (append X at end of file) then has no anchor in
-      // either direction and merges into region 1's hunk.
       const before = 'A\nB\n';
       const after = 'B\nX\n';
       const hunks = deriveSuggestionHunks(before, after);
@@ -233,9 +221,6 @@ describe('deriveSuggestionHunks', () => {
     });
 
     test('delete at file end after a claimed neighbor merges into the previous hunk', () => {
-      // Region 1 (insert before line 1 at file start) anchors forward to line
-      // 1; region 2 (delete line 2, the last line) finds backward taken and
-      // has no forward line, so it merges.
       const before = 'A\nB\n';
       const after = 'X\nA\n';
       const hunks = deriveSuggestionHunks(before, after);
@@ -247,7 +232,6 @@ describe('deriveSuggestionHunks', () => {
   });
 
   describe('fuzz: derived hunks never overlap and reconstruct the edit', () => {
-    // Deterministic seeded PRNG (mulberry32) so failures are reproducible.
     function mulberry32(seed: number): () => number {
       let a = seed >>> 0;
       return () => {
@@ -262,15 +246,13 @@ describe('deriveSuggestionHunks', () => {
     const POOL = ['alpha', 'bravo', 'charlie', 'delta', 'echo'];
 
     function generateCase(rand: () => number): { before: string; after: string } {
-      const lineCountBefore = Math.floor(rand() * 9); // 0..8 lines
+      const lineCountBefore = Math.floor(rand() * 9);
       const beforeLines: string[] = [];
       for (let i = 0; i < lineCountBefore; i++) {
         beforeLines.push(POOL[Math.floor(rand() * POOL.length)]);
       }
       const afterLines: string[] = [];
       const maybeInsert = () => {
-        // Insertions between every position (including file start and end)
-        // are what produce adjacent expanding regions.
         while (rand() < 0.25) {
           afterLines.push(POOL[Math.floor(rand() * POOL.length)]);
         }
@@ -279,11 +261,10 @@ describe('deriveSuggestionHunks', () => {
       for (const line of beforeLines) {
         const roll = rand();
         if (roll < 0.25) {
-          // delete the line
         } else if (roll < 0.45) {
-          afterLines.push(POOL[Math.floor(rand() * POOL.length)]); // replace
+          afterLines.push(POOL[Math.floor(rand() * POOL.length)]);
         } else {
-          afterLines.push(line); // keep
+          afterLines.push(line);
         }
         maybeInsert();
       }

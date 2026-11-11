@@ -20,7 +20,6 @@ describe('cloneFileDiff', () => {
     const reference = JSON.stringify(original);
     const clone = cloneFileDiff(original);
 
-    // Byte-identical snapshot.
     expect(JSON.stringify(clone)).toBe(reference);
 
     // Simulate what Pierre's edit session does to the live object: replace

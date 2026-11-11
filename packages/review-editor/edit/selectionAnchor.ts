@@ -1,41 +1,13 @@
 import { diffLines } from 'diff';
 
 /**
- * Anchor mapping for "Make annotation" selections made INSIDE an edit session.
- *
- * The selection lives in the EDITED buffer, but annotations anchor to the
- * rendered diff's new-side line numbers — which are the session's PRE-EDIT
- * content (the pristine FileDiffMetadata restored when the session ends).
- * Pre-edit coordinates are session-invariant: the pristine content never
- * changes while the session runs, so an anchor mapped at click time stays
- * correct after the session completes OR is discarded, no matter what the
- * user edits afterwards.
- *
- * Mapping rules (computed from diffLines(preEdit, edited) at click time):
- * - Lines in UNEDITED regions map 1:1 (edits above only shift the offset,
- *   which the diff walk accounts for). This is the common case — a reviewer
- *   highlighting existing code — and it maps exactly (`exact: true`).
- * - Lines in EDITED regions map to the pristine lines that region replaces
- *   (the removed side of the modification). The annotation is still created,
- *   but flagged `exact: false` so the caller can record the highlighted text
- *   and label the anchor as approximate.
- * - Lines in PURE-INSERT regions (no pristine lines replaced) anchor to the
- *   adjacent pristine line, preferring the preceding one — the same anchor
- *   preference deriveSuggestionHunks uses. Also `exact: false`.
- * - A selection whose covering range straddles a pure DELETION (kept lines
- *   highlighted on both sides of removed pristine lines) includes the removed
- *   lines in its covering range and is flagged `exact: false` — the range is
- *   honest but wider than what was highlighted.
- * - Results are clamped to [1, pristine line count]; an empty pristine file
- *   anchors to line 1 with `exact: false`.
+ * Pre-edit coordinates are session-invariant: the pristine content never changes while the session
+ * runs, so an anchor mapped at click time stays correct after the session completes OR is
+ * discarded, no matter what the user edits afterwards.
  */
 export interface PristineAnchor {
-  /** 1-based first pristine (pre-edit, new-side) line of the anchor. */
   lineStart: number;
-  /** 1-based last pristine line of the anchor (inclusive). */
   lineEnd: number;
-  /** True when every highlighted line lies in an unedited region and the
-   * covering range contains no in-session changes. */
   exact: boolean;
 }
 
@@ -54,25 +26,19 @@ interface SameSegment {
   kind: 'same';
   editStart: number;
   editEnd: number;
-  /** Pristine line corresponding to editStart. */
   origStart: number;
 }
 
 interface ChangedSegment {
   kind: 'changed';
-  /** Edited lines this region occupies (empty for pure deletions: editEnd < editStart). */
   editStart: number;
   editEnd: number;
-  /** Pristine lines this region replaces (empty for pure inserts: origEnd < origStart). */
   origStart: number;
   origEnd: number;
 }
 
 type Segment = SameSegment | ChangedSegment;
 
-/** Group the diffLines parts into alternating same/changed segments with both
- * coordinate spaces attached. Consecutive removed+added parts fold into one
- * changed segment regardless of emission order. */
 function buildSegments(original: string, edited: string): Segment[] {
   const parts = diffLines(original, edited);
   const segments: Segment[] = [];
@@ -121,10 +87,6 @@ function buildSegments(original: string, edited: string): Segment[] {
   return segments;
 }
 
-/**
- * Map a 1-based inclusive line range of the EDITED buffer to the pristine
- * (pre-edit) new-side coordinates the annotation system anchors to.
- */
 export function mapEditedRangeToPristine(
   preEditContent: string,
   editedContent: string,
@@ -170,18 +132,12 @@ export function mapEditedRangeToPristine(
       if (seg.editStart > e || seg.editEnd < s) continue;
       exact = false;
       if (hasOrigLines) {
-        // Modification: anchor to the pristine lines the edit replaces.
         extend(seg.origStart, seg.origEnd);
       } else {
-        // Pure insert: anchor to the adjacent pristine line, preferring the
-        // preceding one (mirrors deriveSuggestionHunks' anchor preference).
         const anchor = seg.origStart > 1 ? seg.origStart - 1 : clamp(seg.origStart);
         extend(anchor, anchor);
       }
     } else if (hasOrigLines) {
-      // Pure deletion: occupies no edited lines. It sits strictly inside the
-      // selection only when highlighted lines exist on BOTH sides — i.e. the
-      // selection starts before the deletion point and ends at or after it.
       if (s < seg.editStart && e >= seg.editStart) {
         exact = false;
         extend(seg.origStart, seg.origEnd);
@@ -190,18 +146,12 @@ export function mapEditedRangeToPristine(
   }
 
   if (!Number.isFinite(minLine)) {
-    // Selection matched no segment (degenerate input): clamp into the file.
     return { lineStart: clamp(s), lineEnd: clamp(e), exact: false };
   }
   return { lineStart: clamp(minLine), lineEnd: clamp(maxLine), exact };
 }
 
-/**
- * Convert an editor selection (zero-based Positions, exclusive-feeling end:
- * a selection ending at character 0 of a line does not include that line)
- * into a 1-based inclusive line range. Mirrors the line-range treatment in
- * Pierre's own selection-action demo.
- */
+/** Mirrors the line-range treatment in Pierre's own selection-action demo. */
 export function selectionToLineRange(selection: {
   start: { line: number; character: number };
   end: { line: number; character: number };

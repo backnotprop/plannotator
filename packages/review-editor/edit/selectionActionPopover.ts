@@ -1,15 +1,7 @@
 /**
- * DOM builder for the edit-session Selection Action popover content.
- *
- * Pierre's `renderSelectionAction` returns a PLAIN DOM node (not React) that
- * renders inside the editor's shadow DOM, where the app's Tailwind/global CSS
- * does not apply — so everything here is styled inline. CSS custom properties
- * DO inherit through the shadow boundary, so colors come from the app's theme
- * tokens (var(--card), var(--border), ...) and track light/dark and theme
- * switches for free.
- *
- * No Pierre types cross this module: the caller (useEditSession) adapts the
- * SelectionActionContext into the single `onMakeAnnotation` callback.
+ * Pierre's `renderSelectionAction` returns a PLAIN DOM node (not React) that renders inside the
+ * editor's shadow DOM, where the app's Tailwind/global CSS does not apply — so everything here is
+ * styled inline.
  */
 
 const ICON_COMMENT_SVG =
@@ -36,13 +28,9 @@ const BUTTON_STYLE = [
 const BUTTON_HOVER_BACKGROUND = 'var(--muted)';
 
 /**
- * Build the popover element: a single "Make annotation" action.
- *
- * `onMakeAnnotation` receives the button's viewport rect so the caller can
- * anchor the app-side comment entry where the popover was. The handler must
- * snapshot everything it needs from the editor synchronously — the caller
- * closes the Pierre popover right after, and the editor selection may
- * collapse as soon as focus moves to the app-side entry.
+ * The handler must snapshot everything it needs from the editor synchronously — the caller closes
+ * the Pierre popover right after, and the editor selection may collapse as soon as focus moves to
+ * the app-side entry.
  */
 export function buildSelectionActionElement(
   onMakeAnnotation: (anchorRect: DOMRect) => void,
@@ -64,9 +52,8 @@ export function buildSelectionActionElement(
   button.addEventListener('mouseleave', () => {
     button.style.backgroundColor = 'var(--card)';
   });
-  // Suppress the default mousedown so clicking the action doesn't blur the
-  // editor and collapse the selection we're about to read (same trick as
-  // Pierre's own selection-action demo).
+  // Suppress the default mousedown so clicking the action doesn't blur the editor and collapse the
+  // selection we're about to read (same trick as Pierre's own selection-action demo).
   button.addEventListener('mousedown', (event) => event.preventDefault());
   button.addEventListener('click', () => {
     onMakeAnnotation(button.getBoundingClientRect());
