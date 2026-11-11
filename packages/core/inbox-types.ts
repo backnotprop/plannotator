@@ -3572,12 +3572,26 @@ export const INBOX_ACTIVITY_MAX_DAYS = 400;
 export const INBOX_GLASS_FACES = ["glass", "glass-red", "glass-orange", "yellow", "glass-green", "glass-teal", "glass-blue", "glass-purple", "glass-pink", "glass-ice"] as const;
 export type InboxGlassFace = (typeof INBOX_GLASS_FACES)[number];
 /** `agent`: the agent's own mark (never stored); then the Glass colours, Transparent and Face (`totman`). */
-export type InboxAgentFace = "agent" | InboxGlassFace | "transparent" | "totman";
+export type InboxBuiltInFace = "agent" | InboxGlassFace | "transparent" | "totman";
+/**
+ * A picture the person uploaded ("Your own…" in the picker): `own:` and the SHA-256 of its bytes, in lowercase hex.
+ * The file is the Inbox's (`inbox/agent-icons/<hash>.<ext>`, packages/server/inbox-agent-icons.ts); a window without
+ * it (another machine, a removed picture) draws the agent's own mark. An older Plannotator, whose faces are the
+ * closed built-in list, drops these entries when it reads the file: the file stays `v: 1` so it never refuses it.
+ */
+export type InboxOwnFace = `own:${string}`;
+export type InboxAgentFace = InboxBuiltInFace | InboxOwnFace;
 
-/** Every face, in the picker's order. */
-export const INBOX_AGENT_FACES: readonly InboxAgentFace[] = ["agent", ...INBOX_GLASS_FACES, "transparent", "totman"];
+/** Every built-in face, in the picker's order. */
+export const INBOX_AGENT_FACES: readonly InboxBuiltInFace[] = ["agent", ...INBOX_GLASS_FACES, "transparent", "totman"];
 
-export const isInboxAgentFace = (value: unknown): value is InboxAgentFace => typeof value === "string" && (INBOX_AGENT_FACES as readonly string[]).includes(value);
+/** An uploaded picture's face id: `own:` and 64 lowercase hex digits. */
+export const INBOX_OWN_FACE = /^own:[0-9a-f]{64}$/;
+export const isInboxOwnFace = (value: unknown): value is InboxOwnFace => typeof value === "string" && INBOX_OWN_FACE.test(value);
+/** The picture's hash (its file's name) of an `own:` face. */
+export const inboxOwnFaceHash = (face: InboxOwnFace): string => face.slice(4);
+
+export const isInboxAgentFace = (value: unknown): value is InboxAgentFace => typeof value === "string" && ((INBOX_AGENT_FACES as readonly string[]).includes(value) || INBOX_OWN_FACE.test(value));
 
 /** The most agents a person's faces are kept for: the latest choice last, the oldest forgotten past this. */
 export const INBOX_AGENT_FACES_KEPT = 200;
@@ -3593,10 +3607,35 @@ export interface InboxAgentFaceEntry {
   sessions: string[];
 }
 
-/** `GET /api/inbox/agent-faces`, a write's answer and `event: agent-faces`. `rev` counts the saves. */
+/** One uploaded picture the Inbox keeps ("Your own…"): its hash, its type (sniffed from the bytes), when it was added (ms). */
+export interface InboxAgentIcon {
+  id: string;
+  type: string;
+  at: number;
+}
+
+/**
+ * `GET /api/inbox/agent-faces`, a write's answer and `event: agent-faces`. `rev` counts the saves (an upload or a
+ * removal counts as one). `icons`: the uploaded pictures, newest first; absent from an Inbox before uploads.
+ */
 export interface InboxAgentFacesWire {
   faces: Record<string, InboxAgentFaceEntry>;
   rev: number;
+  icons?: InboxAgentIcon[];
+}
+
+/** The most uploaded pictures kept: past it, the oldest one no agent shows goes. */
+export const INBOX_AGENT_ICONS_KEPT = 60;
+
+/** The uploaded pictures as a wire names them: well-formed entries only, at most the cap. */
+export function readInboxAgentIcons(value: unknown): InboxAgentIcon[] {
+  const out: InboxAgentIcon[] = [];
+  for (const raw of Array.isArray(value) ? value : []) {
+    const icon = raw as Partial<InboxAgentIcon> | null;
+    if (!icon || typeof icon.id !== "string" || !/^[0-9a-f]{64}$/.test(icon.id) || typeof icon.type !== "string" || typeof icon.at !== "number") continue;
+    if (!out.some((kept) => kept.id === icon.id)) out.push({ id: icon.id, type: icon.type, at: icon.at });
+  }
+  return out.slice(0, INBOX_AGENT_ICONS_KEPT * 2);
 }
 
 /** `POST /api/inbox/agent-faces`: one agent's face (`agent`: forget it), or this browser's faces from before (`adopt`). */
