@@ -357,6 +357,8 @@ const leakedIds =
 // due from day one and would be the line's next dialog, ahead of the one a test is about. The warning before a Mark
 // read that sets questions aside is off too (as for someone who ticked "Don't show this again"), so a test about Mark
 // read itself is not stopped by it; the warning's own test turns it on (POST /api/inbox/settings `mark_read_warning`).
+// On the release-numbered modes (whats-new, restart, reload-hosts) Code review's one-time offer is settled as already
+// shown (since 0.29 it opens at once on a release build, over the window a test drives); the switch stays unset.
 {
   mkdirSync(dataDir, { recursive: true });
   const file = join(dataDir, "config.json");
@@ -364,6 +366,9 @@ const leakedIds =
   const settled = {
     ...(config.inboxThemeChooser === undefined ? { inboxThemeChooser: { notNeededAt: "2026-10-01T10:00:00.000Z" } } : {}),
     ...(config.inboxMarkReadWarning === undefined ? { inboxMarkReadWarning: false } : {}),
+    ...((whatsNewMode || restartMode) && config.inboxCodeReview === undefined
+      ? { inboxReveals: { ...(config.inboxReveals as Record<string, unknown> | undefined), code_review: { shownAt: "2026-10-01T10:00:00.000Z" } } }
+      : {}),
   };
   if (Object.keys(settled).length > 0) writeFileSync(file, JSON.stringify({ ...config, ...settled }));
 }

@@ -7502,7 +7502,6 @@ dialog.ib-lvc .ib-lvc-frame .ib-listcol.ib-lo-list { position: relative; inset: 
 .ib-cro-body h2 { margin: 0; font-size: var(--ib-fs-20, 20px); font-weight: 600; letter-spacing: -0.01em; color: var(--foreground); }
 .ib-cro-feats { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .ib-cro-feats li { display: flex; align-items: flex-start; gap: 11px; font-size: var(--ib-fs-14, 14px); line-height: 1.45; color: var(--foreground); }
-.ib-cro-name { font-weight: 600; }
 .ib-cro-feats svg { flex: none; width: 18px; height: 18px; margin-top: 1px; fill: none; stroke: var(--muted-foreground); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .ib-cro-acts { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .pn-inbox .ib-cro-acts .ib-btn, dialog .ib-cro-acts .ib-btn { height: 36px; padding: 0 16px; font-size: var(--ib-fs-14, 14px); justify-content: center; }

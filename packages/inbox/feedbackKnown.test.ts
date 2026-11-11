@@ -134,9 +134,9 @@ describe('known answers', () => {
     }
   });
 
-  test('features held until 0.29 (heldSwitch: Code review, Shape, System) are never offered', () => {
-    for (const answer of KNOWN_ANSWERS) expect(`${answer.answer} ${answer.faq?.answer ?? ''}`).not.toMatch(/code review|\bshape\b|\bsystem\b/i);
-    for (const text of ['can I review code in the inbox', 'I want the shape boards', 'show me the system drawing']) expect(found(text)).toBeNull();
+  test('features still held (heldShapeSwitch: Shape; SYSTEM_SETTINGS_ROW_VISIBLE: System) are never offered', () => {
+    for (const answer of KNOWN_ANSWERS) expect(`${answer.answer} ${answer.faq?.answer ?? ''}`).not.toMatch(/\bshape\b|\bsystem\b/i);
+    for (const text of ['I want the shape boards', 'show me the system drawing']) expect(found(text)).toBeNull();
   });
 
   test('Common questions are the entries with a question, in the list\'s order', () => {

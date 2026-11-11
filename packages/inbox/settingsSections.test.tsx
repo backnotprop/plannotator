@@ -454,8 +454,8 @@ test.skipIf(!hasDom)('Capabilities: the Checklist switch, off by default under t
   await until(() => switchNamed(el, 'Checklist') !== null, 'the Checklist switch');
   const group = el.querySelector('[data-settings-capabilities]')!;
   const rows = [...group.querySelectorAll('.ib-prow')].map((row) => row.querySelector('.ib-l')?.textContent);
-  // Code review and Shape are held until the next big release: off, and without PLANNOTATOR_INBOX_PREVIEW, they have no row.
-  expect(rows).toEqual(['Board', 'Checklist']);
+  // Code review's row shows to everyone, off; Shape is held: off, and without PLANNOTATOR_INBOX_PREVIEW, it has no row.
+  expect(rows).toEqual(['Board', 'Checklist', 'Code review']);
   // Peers: each switch has its own element, so the Board's selector finds one switch (e2e inbox-board, inbox-tailnet-owner).
   expect(el.querySelectorAll('[data-settings-board] [role="switch"]').length).toBe(1);
   expect(el.querySelector('[data-settings-steps]')?.contains(switchNamed(el, 'Checklist'))).toBe(true);
@@ -511,14 +511,13 @@ test.skipIf(!hasDom)('Capabilities → Experimental: Float reply drafts is off b
   }
 });
 
-// Code review (approval "inbox-code-review-direction") and Shape (approval "shape-inbox-placement"), held until the
-// next big release (owner decision 2026-11-04; packages/server/inbox.ts `heldSwitch`): a person who never turned them on sees no row;
-// one who has them on keeps the row and can turn it off (the row then goes at the next load); PLANNOTATOR_INBOX_PREVIEW=1
-// shows both. Each saves config.json `inboxCodeReview` / `inboxShape`. That release restores "off by default, shown".
-const HELD = [
-  { name: 'Code review', key: 'inboxCodeReview', wire: 'code_review', selector: '[data-settings-code-review]' },
-  { name: 'Shape', key: 'inboxShape', wire: 'shape', selector: '[data-settings-shape]' },
-] as const;
+// Code review (approval "inbox-code-review-direction"): released in 0.29, off by default and shown to everyone. Shape
+// (approval "shape-inbox-placement"), held until the owner releases it (approval "code-review-029-shape-off";
+// packages/server/inbox.ts `heldShapeSwitch`): a person who never turned it on sees no row; one who has it on keeps the
+// row and can turn it off (the row then goes at the next load); PLANNOTATOR_INBOX_PREVIEW=1 shows it. Each saves
+// config.json `inboxCodeReview` / `inboxShape`. The release that ships Shape restores "off by default, shown".
+const CODE_REVIEW = { name: 'Code review', key: 'inboxCodeReview', wire: 'code_review', selector: '[data-settings-code-review]' } as const;
+const HELD = [{ name: 'Shape', key: 'inboxShape', wire: 'shape', selector: '[data-settings-shape]' }] as const;
 
 function readConfig(server: Server): Record<string, unknown> {
   try {
@@ -528,13 +527,39 @@ function readConfig(server: Server): Record<string, unknown> {
   }
 }
 
-test.skipIf(!hasDom)('Capabilities: Code review and Shape, never turned on and no preview, have no row', async () => {
+test.skipIf(!hasDom)('Capabilities, never turned on and no preview: Code review has its row, off; Shape has no row', async () => {
   const el = await renderApp('#settings/capabilities');
   await until(() => switchNamed(el, 'Checklist') !== null, 'the Checklist switch');
+  expect(readConfig(current!)[CODE_REVIEW.key]).toBeUndefined();
+  await until(() => switchNamed(el, CODE_REVIEW.name) !== null, 'the Code review switch');
+  expect(el.querySelector(CODE_REVIEW.selector)?.contains(switchNamed(el, CODE_REVIEW.name))).toBe(true);
+  expect(switchNamed(el, CODE_REVIEW.name)!.getAttribute('aria-checked')).toBe('false');
   for (const held of HELD) {
     expect(readConfig(current!)[held.key]).toBeUndefined();
     expect(switchNamed(el, held.name)).toBeNull();
     expect(el.querySelector(held.selector)).toBeNull();
+  }
+});
+
+test.skipIf(!hasDom)('Capabilities: Code review turned on and off saves inboxCodeReview both ways, and the next load still has its row, off', async () => {
+  try {
+    const el = await renderApp('#settings/capabilities');
+    await until(() => switchNamed(el, CODE_REVIEW.name) !== null, 'the Code review switch');
+    act(() => switchNamed(el, CODE_REVIEW.name)!.click());
+    await until(() => readConfig(current!)[CODE_REVIEW.key] === true, `config.json ${CODE_REVIEW.key} true`);
+    await until(() => switchNamed(el, CODE_REVIEW.name)?.getAttribute('aria-checked') === 'true', 'the switch on');
+    act(() => switchNamed(el, CODE_REVIEW.name)!.click());
+    await until(() => readConfig(current!)[CODE_REVIEW.key] === false, `config.json ${CODE_REVIEW.key} false`);
+    await until(() => switchNamed(el, CODE_REVIEW.name)?.getAttribute('aria-checked') === 'false', 'the switch off');
+    act(() => root?.unmount());
+    host?.remove();
+    const again = await renderApp('#settings/capabilities');
+    await until(() => switchNamed(again, CODE_REVIEW.name) !== null, 'the Code review switch again');
+    expect(switchNamed(again, CODE_REVIEW.name)!.getAttribute('aria-checked')).toBe('false');
+  } finally {
+    // The world is shared across this file's tests: back to never set.
+    const { [CODE_REVIEW.key]: _codeReview, ...rest } = readConfig(current!);
+    writeFileSync(join(current!.dataDir, 'config.json'), JSON.stringify(rest));
   }
 });
 
@@ -563,7 +588,7 @@ for (const held of HELD) {
 // Read only: the window keeps the first server session it saw, so a save to this second Inbox would be refused. The
 // server test (packages/server/inbox-held-switches.test.ts) proves the preview's saves and events.
 test.skipIf(!hasDom)(
-  'Capabilities: PLANNOTATOR_INBOX_PREVIEW=1 shows the Code review and Shape rows while off',
+  'Capabilities: PLANNOTATOR_INBOX_PREVIEW=1 shows the Shape row while off, beside Code review\'s',
   async () => {
     const preview = await spawnServer('preview', [], { PLANNOTATOR_INBOX_PREVIEW: '1' });
     current = preview;
@@ -572,7 +597,7 @@ test.skipIf(!hasDom)(
       await until(() => switchNamed(el, 'Shape') !== null, 'the Shape switch');
       const rows = [...el.querySelectorAll('[data-settings-capabilities] .ib-prow')].map((row) => row.querySelector('.ib-l')?.textContent);
       expect(rows).toEqual(['Board', 'Checklist', 'Code review', 'Shape']);
-      for (const held of HELD) {
+      for (const held of [CODE_REVIEW, ...HELD]) {
         expect(el.querySelector(held.selector)?.contains(switchNamed(el, held.name))).toBe(true);
         expect(switchNamed(el, held.name)!.getAttribute('aria-checked')).toBe('false');
       }

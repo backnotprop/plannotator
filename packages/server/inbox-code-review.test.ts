@@ -102,8 +102,8 @@ describe("the Code review switch", () => {
   test("off by default; on and off are saved in config.json; a malformed switch is refused", async () => {
     const w = await world();
     const read = async () => ((await (await fetch(`${w.base}/api/inbox/settings`)).json()) as { code_review?: { on: boolean } }).code_review;
-    // Held until the next big release (inbox.ts heldSwitch): off, the settings read leaves Code review out, so Settings draws no row.
-    expect(await read()).toBeUndefined();
+    // Off, and still in the settings read: Settings draws its row for everyone (0.29 released it; only Shape is held).
+    expect(await read()).toEqual({ on: false });
 
     const on = await w.setCodeReview(true);
     expect(on.status).toBe(200);
@@ -114,11 +114,11 @@ describe("the Code review switch", () => {
     const off = await w.setCodeReview(false);
     expect(off.status).toBe(200);
     expect(((await off.json()) as { code_review: unknown }).code_review).toEqual({ on: false });
-    expect(await read()).toBeUndefined();
+    expect(await read()).toEqual({ on: false });
 
     const bad = await w.post("/api/inbox/settings", { code_review: true });
     expect(bad.status).toBe(422);
-    expect(await read()).toBeUndefined();
+    expect(await read()).toEqual({ on: false });
   });
 
   test("only the owner turns it on: a tailnet guest is refused and the switch stays as it was", async () => {
