@@ -25,10 +25,7 @@ describe("resolveReviewOpenState", () => {
   });
 
   test("git + --base seeds base and requests the base-relative default explicitly", () => {
-    // Requesting the default EXPLICITLY (not leaving it to configuredDiffType)
-    // is what makes `--base trunk` work on a repo where getGitContext omitted
-    // since-base — resolveRequestedDiffType honors owned requests regardless
-    // of diffOptions. Dropping this reverts §4.6.
+    // Requesting the default explicitly is what makes `--base trunk` work where getGitContext omitted since-base.
     const state = resolveReviewOpenState(
       input({ parsed: { base: "feature/part-1" }, baseResolves: true }),
     );
@@ -41,9 +38,7 @@ describe("resolveReviewOpenState", () => {
   test.each(["gitbutler", "jj", "p4"] as const)(
     "%s + --base errors instead of accept-and-ignore",
     (providerId) => {
-      // resolveInitialBase hard-returns the detected default on jj/gitbutler
-      // (and p4 has no base at all): accepting the flag would quietly review
-      // against the wrong base — the silent lie this matrix exists to prevent.
+      // resolveInitialBase hard-returns the detected default on jj/gitbutler (p4 has no base): accepting the flag would quietly review against the wrong base.
       const state = resolveReviewOpenState(
         input({ providerId, parsed: { base: "feature/part-1" }, baseResolves: true }),
       );
@@ -55,8 +50,7 @@ describe("resolveReviewOpenState", () => {
   test.each(["gitbutler", "jj", "p4"] as const)(
     "%s + --diff-type since-base errors instead of accept-and-ignore",
     (providerId) => {
-      // ownsDiffType rejects git diff ids on these providers, so the request
-      // would be silently dropped by resolveRequestedDiffType.
+      // ownsDiffType rejects git diff ids on these providers, so the request would be silently dropped.
       const state = resolveReviewOpenState(
         input({ providerId, parsed: { diffType: "since-base" } }),
       );
@@ -87,9 +81,7 @@ describe("resolveReviewOpenState", () => {
   });
 
   test("--base with a base-irrelevant resolved default promotes to since-base with one notice", () => {
-    // Without the promotion, "the base I passed did nothing" — the exact bug
-    // the flag exists to fix. Without the notice, the second thing the flag
-    // changed would be silent.
+    // Without the promotion the passed base does nothing; without the notice the second change is silent.
     const state = resolveReviewOpenState(
       input({
         parsed: { base: "feature/part-1" },
@@ -129,9 +121,7 @@ describe("resolveReviewOpenState", () => {
   });
 
   test("a probed base that does not resolve is fatal", () => {
-    // The worst failure this feature could ship: since-base silently degrades
-    // a bad base to HEAD (review-core.ts merge-base fallback) under the label
-    // "All changes since <bad-ref>" — a plausible, wrong, confident diff.
+    // since-base silently degrades a bad base to HEAD under an "All changes since <bad-ref>" label: a plausible, wrong diff.
     const state = resolveReviewOpenState(
       input({ parsed: { base: "feature/prat-1" }, baseResolves: false }),
     );

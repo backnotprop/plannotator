@@ -212,18 +212,8 @@ function collectWorkspaceRepos(
 }
 
 /**
- * Discovers the first Git, GitButler, or JJ repository below each workspace path.
- *
- * Directory symlinks and junctions are followed while their logical paths are
- * retained for labels and file routing. Each canonical directory is traversed
- * at most once, so cycles and duplicate aliases cannot duplicate repositories.
- * Unreadable, broken, and non-directory entries are ignored.
- *
- * The walk visits at most `PLANNOTATOR_FILE_BROWSER_MAX_FILES` directories.
- * Symlinks may legitimately lead outside the workspace root (that is how
- * symlinked repos are discovered), so a link into a huge unrelated tree cannot
- * be fenced by path — the visit budget is what keeps discovery from scanning
- * indefinitely before the server starts.
+ * Discovers the first Git, GitButler or JJ repository below each workspace path. Directory symlinks are followed (logical paths kept) and each canonical directory is visited once.
+ * The walk visits at most `PLANNOTATOR_FILE_BROWSER_MAX_FILES` directories: symlinks may legitimately lead outside the root, so the visit budget, not a path fence, stops scanning of a huge unrelated tree.
  */
 export function discoverWorkspaceRepoPaths(root: string): string[] {
   const resolvedRoot = resolve(root);

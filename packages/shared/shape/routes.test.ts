@@ -1,12 +1,3 @@
-/**
- * Shape's routes, in process, on a scratch data dir. What regresses if these fail:
- * - a page cannot open a board, its history or an older version;
- * - a Change it or an Ask from the page is lost, or a bad one is stored;
- * - "seen" or finishing does not stick;
- * - a file outside the shape's files/ (or not an image) is served;
- * - the event feed misses an agent's new version or the agent picking up a
- *   waiting change, so the board's "1 change waits" never clears.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -153,7 +144,7 @@ describe("the routes never block the server", () => {
     const timer = setInterval(() => ticks++, 5);
     const pending = w.call("POST", `/api/shapes/${w.id}/seen`, { n: 1 });
     await Bun.sleep(60);
-    expect(ticks).toBeGreaterThan(3); // the event loop kept running
+    expect(ticks).toBeGreaterThan(3);
     rmSync(lock);
     const done = await pending;
     clearInterval(timer);

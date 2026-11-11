@@ -9,7 +9,6 @@ import { diffShapeVersions, type ShapeBoard } from "./format";
 import { sceneBoard } from "../../../tests/fixtures/shape-scene-board";
 
 // Every test gets its own data dir under the OS temp folder: nothing here
-// touches the person's Plannotator data.
 const dirs: string[] = [];
 function scratch(): string {
   const dir = mkdtempSync(join(tmpdir(), "shape-store-"));
@@ -23,7 +22,6 @@ afterEach(() => {
 const project = { name: "kettle", root: "/work/kettle" };
 const session = { host: "claude-code", id: "11111111-2222-3333-4444-555555555555" };
 
-// Invented content: a kettle that whistles once.
 function board(words = "whistles once"): ShapeBoard {
   return {
     title: "The kettle whistles once",
@@ -51,7 +49,6 @@ describe("shape versions", () => {
     expect(result.v).toBe(1);
     expect(result.created).toBe(true);
     expect(existsSync(join(dataDir, "shapes", inboxProjectKey(project.name, project.root), result.id, "shape.json"))).toBe(true);
-    // views.know is kept, but is not a part: nothing shows it.
     expect(store.read(result.id)?.parts.map((p) => `${p.view}/${p.id}`)).toEqual(["header/title", "header/claim", "picture/p-whistle"]);
     expect(store.read(result.id)?.views.know).toBe("It whistles once per boil.");
   });
@@ -174,7 +171,6 @@ describe("notes", () => {
     expect(change.ok && general.ok).toBe(true);
     expect(store.list()[0]!.waiting).toBe(1);
 
-    // Reading them marks nothing: a hand-over that fails leaves them waiting.
     const waiting = store.waiting(first.id);
     expect(waiting.map((n) => n.text)).toEqual(["Make it twice", "Is this for the office kettle too?"]);
     expect(store.waiting(first.id)).toHaveLength(2);
@@ -183,7 +179,6 @@ describe("notes", () => {
     expect(store.waiting(first.id)).toEqual([]);
     expect(store.markDelivered(first.id, waiting.map((n) => n.id))).toEqual([]);
     expect(store.list()[0]!.waiting).toBe(0);
-    // Delivery appends; the note keeps its place and its words.
     expect(store.notes(first.id).map((n) => n.text)).toEqual(["Make it twice", "Is this for the office kettle too?"]);
   });
 
@@ -243,7 +238,6 @@ describe("the lock", () => {
     const first = store.update({ board: board(), project });
     if (!first.ok) throw new Error("setup");
     const folder = join(dataDir, "shapes", inboxProjectKey(project.name, project.root), first.id);
-    // A lock left by a process that died a minute ago.
     writeFileSync(join(folder, ".lock"), "dead");
     const old = new Date(Date.now() - 60_000);
     utimesSync(join(folder, ".lock"), old, old);
@@ -277,13 +271,11 @@ console.log(r.ok ? "OK" : r.code);`,
 
   test("while another process is breaking a stale lock, a waiter leaves it alone and waits", async () => {
     const { dataDir, store, id, folder } = lockedShape();
-    // Someone is breaking it right now.
     writeFileSync(join(folder, ".lock.break"), "");
     const done = updaters(dataDir, id, 1);
     await Bun.sleep(400);
     expect(readFileSync(join(folder, ".lock"), "utf8")).toBe("dead");
     expect(store.versions(id)).toHaveLength(1);
-    // The breaker finishes; the waiter takes the lock and lands.
     rmSync(join(folder, ".lock.break"));
     rmSync(join(folder, ".lock"));
     expect(await done).toEqual(["OK"]);
@@ -298,7 +290,6 @@ describe("a board saved with Requirements", () => {
     const first = store.update({ board: board(), project, session });
     if (!first.ok) throw new Error("setup");
     const folder = join(dataDir, "shapes", inboxProjectKey(project.name, project.root), first.id);
-    // What an older build left on disk.
     const version = { ...JSON.parse(readFileSync(join(folder, "versions.jsonl"), "utf8").trim()), views: { picture: board().views.picture, reqs } };
     version.parts = [{ view: "header", id: "title", text: "t" }, { view: "reqs", id: "r-once", text: "When: Once per boil." }];
     writeFileSync(join(folder, "versions.jsonl"), `${JSON.stringify(version)}\n`);
@@ -466,7 +457,6 @@ describe("images a drawing names", () => {
     const missed = store.update({ board: drawing('<img src="https://example.com/other.png">'), project, session, sourceDir: dir, webPictures });
     expect(missed.ok).toBe(false);
     if (!missed.ok) expect(missed.errors.join()).toContain("is a web picture that was not fetched");
-    // Any other scheme is still no picture.
     const ftp = store.update({ board: { ...drawing("<p>x</p>"), refs: [{ n: 1, kind: "image", title: "F", target: "ftp://example.com/a.png" }] }, project, session, sourceDir: dir });
     expect(ftp.ok).toBe(false);
     if (!ftp.ok) expect(ftp.errors.join()).toContain("is a URL");
@@ -531,7 +521,6 @@ describe("a board that plays a scene", () => {
     expect(store.read(r.id)!.scenes).toEqual(sceneBoard().scenes);
   });
 
-  // What regresses: a scene the player cannot play is stored, and the person sees a drawing that never moves.
   test("an update with a scene it cannot play stores nothing and names the field", () => {
     const { store } = storeAt(scratch());
     const late = sceneBoard();

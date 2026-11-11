@@ -1,11 +1,3 @@
-/**
- * Shape's shapeKeepSvgWhole held to parse5, the HTML spec's parser (the
- * board's sanitizer parses the drawing this way). What regresses if these
- * fail: an HTML tag inside an `<svg>` (an empty `<span data-ref="1"></span>`
- * among the shapes, as agents write it) ends the SVG there, and every part
- * drawn after it is lost from the board; or HTML the page reads as HTML (in a
- * foreignObject, outside any SVG) gets renamed.
- */
 import { describe, expect, test } from "bun:test";
 import * as parse5 from "parse5";
 import { shapeKeepSvgWhole } from "@plannotator/core/shape";
@@ -15,7 +7,6 @@ type Node = { nodeName: string; namespaceURI?: string; attrs?: { name: string; v
 const SVG = "http://www.w3.org/2000/svg";
 const HTML = "http://www.w3.org/1999/xhtml";
 
-/** The board draws the picture inside a div; DOMPurify parses it as a document. Both must agree. */
 function parsed(html: string): Node[] {
   const context = parse5.parseFragment("<div></div>").childNodes[0] as unknown as parse5.DefaultTreeAdapterMap["element"];
   return [parse5.parseFragment(context, html) as unknown as Node, parse5.parse(html) as unknown as Node];
@@ -35,7 +26,6 @@ const inside = (node: Node | undefined, name: string): boolean => {
   return false;
 };
 
-/** An agent's board: a number after a part's words, one inside words, an empty HTML block, then more shapes. */
 const BOARD =
   '<svg viewBox="0 0 400 200"><g data-mark="queue"><rect x="10" y="10" width="100" height="40"/><text x="20" y="35">Queue</text><span data-ref="1"></span></g>' +
   '<g data-mark="diff"><rect id="k1" x="200" y="10" width="100" height="40"/><text x="210" y="35">Diff <span data-ref="2"></span></text></g>' +

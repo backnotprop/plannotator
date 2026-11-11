@@ -1,27 +1,12 @@
 /**
- * Web pictures on a Shape board: `<image href="https://…/logo.png">`, an
- * image ref's `https://` target. `plannotator shape update` fetches each one
- * once, here, and the store copies the bytes into the shape's files/ like a
- * picture from this computer (store.ts, `webPictures`). So the stored board
- * names only its own files: nothing is fetched when someone views it, the
- * Inbox window's policy (`img-src 'self' data: blob:`) stays as it is, and the
- * board still shows the picture offline, on a phone, and after the site
- * changes it.
- *
- * The rules: `http:` or `https:` with a host and no credentials; one 15 s
- * deadline per picture, across its redirects and its body, and 30 s for the
- * whole board, so the agent hears back quickly however many it names; at most 10 MB
- * (the store's cap); the bytes must sniff as an image (an SVG by its `<svg>`
- * root), and the kept name carries the sniffed type's extension. CLI only
- * (Bun): Pi has no `shape update`, so this is not vendored.
+ * `plannotator shape update` fetches each web picture once here and the store copies the bytes into files/, so the stored board names only its own files: nothing is fetched on view and the Inbox's img-src policy stays as it is.
+ * Rules: http(s) with a host and no credentials; 15 s per picture, 30 s per board; at most 10 MB; bytes must sniff as an image. CLI only (Bun); not vendored to Pi.
  */
 import { sniffImageContentType } from "../review-image";
 import { SHAPE_IMAGE_MAX_BYTES, shapeBoardPictureSources, type ShapeWebPicture } from "./store";
 
 export const SHAPE_WEB_PICTURE_TIMEOUT_MS = 15_000;
-/** All of one board's web pictures, together: past this, the ones still on their way are refused. */
 export const SHAPE_WEB_PICTURES_TIMEOUT_MS = 30_000;
-/** The most web pictures one board fetches. */
 export const SHAPE_WEB_PICTURES_MAX = 60;
 
 const EXTENSIONS: Record<string, string> = {
@@ -35,7 +20,6 @@ const EXTENSIONS: Record<string, string> = {
 };
 
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
-/** An attribute's source text as the browser would read it (`&amp;` is `&`). */
 const decodeEntities = (raw: string) =>
   raw.replace(/&(?:#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|([a-zA-Z]+));/g, (e, d?: string, h?: string, name?: string) => {
     if (name !== undefined) return ENTITIES[name] ?? e;
@@ -43,7 +27,6 @@ const decodeEntities = (raw: string) =>
     return c > 0 && c <= 0x10ffff ? String.fromCodePoint(c) : e;
   });
 
-/** The web address a picture names, or null when it is not one we fetch. `html`: written in a drawing, so `&amp;` is `&`. */
 function webPictureUrl(src: string, html: boolean): URL | null {
   try {
     const url = new URL(html ? decodeEntities(src.trim()) : src.trim());
@@ -54,7 +37,6 @@ function webPictureUrl(src: string, html: boolean): URL | null {
   }
 }
 
-/** The name a fetched picture is kept under: the address's last segment, with the extension its bytes say. */
 function pictureName(url: URL, contentType: string): string {
   const segment = url.pathname.split("/").filter(Boolean).at(-1) ?? "";
   let decoded = segment;
@@ -70,7 +52,6 @@ function pictureName(url: URL, contentType: string): string {
 
 type Fetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
-/** The body, or null past `max`. The deadline stops it too, even from a server that sends nothing more. */
 async function readCapped(res: Response, max: number, signal: AbortSignal): Promise<Uint8Array | null> {
   const declared = Number(res.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > max) return null;
@@ -101,7 +82,6 @@ async function readCapped(res: Response, max: number, signal: AbortSignal): Prom
   return out;
 }
 
-/** What to do about a picture that did not come: said once, after the reason. */
 const INSTEAD = "; download it and name the file, or leave it out";
 
 /** Rejects when `signal` aborts: a fetch that does not listen to its signal still stops at the deadline. */
@@ -111,7 +91,6 @@ const untilAbort = (signal: AbortSignal) =>
     signal.addEventListener("abort", () => reject(new Error("timed out")), { once: true });
   });
 
-/** Why a fetch threw, in a few words: the runtime's code and message ("ConnectionRefused: Unable to connect…"). */
 function reason(e: unknown): string {
   const err = e as { code?: unknown; message?: unknown; cause?: { code?: unknown; message?: unknown } } | null;
   const code = typeof err?.code === "string" ? err.code : typeof err?.cause?.code === "string" ? err.cause.code : "";
@@ -153,11 +132,6 @@ async function fetchOne(src: string, html: boolean, fetchImpl: Fetch, timeoutMs:
   }
 }
 
-/**
- * Fetch every web picture the board names, by the address as written: what
- * `store.update` takes as `webPictures`. A picture that fails is one error
- * line under its field; the board is then refused, as for a missing file.
- */
 export async function fetchShapeWebPictures(
   board: unknown,
   options: { fetch?: Fetch; timeoutMs?: number; boardTimeoutMs?: number } = {},
@@ -175,7 +149,6 @@ export async function fetchShapeWebPictures(
     return { pictures, errors: [`the board names ${wanted.length} web pictures; at most ${SHAPE_WEB_PICTURES_MAX}`] };
   }
   // A few at a time: a board of logos fetches quickly without opening dozens of connections at once.
-  // Errors in the order the board names them, whichever answers first.
   const failed: (string | null)[] = wanted.map(() => null);
   const allOf = new AbortController();
   const deadline = setTimeout(() => allOf.abort(), boardMs);

@@ -1,31 +1,6 @@
 /**
- * Code-review Markdown preview: images a reviewed Markdown file shows.
- * `GET /api/review-markdown-image?doc=&side=old|new&src=&snapshot=`.
- *
- * The preview renders a Markdown file at one side of the diff, and an image
- * it names (`![shot](img/after.png)`) must be read at THAT side's revision,
- * never from the working tree by default, so a deleted file, a PR or a
- * committed diff shows the image as it was. Every decision lives here; the
- * Bun server and the Pi mirror supply only `readSide`, the same reader
- * `/api/review-image` uses. The rules, in order:
- *
- *  1. The session must have full file contents (`available`), the request
- *     must name `doc`, `side`, `src` and the current `snapshot`.
- *  2. `doc` must be a file in the current patch whose path at that side is a
- *     Markdown file (`.md`, `.mdx`, `.markdown`, or a config.json
- *     `markdownExtensions` entry), and that side must exist.
- *  3. `src` (as written; leading and trailing whitespace dropped, as a
- *     browser does) must be a plain relative or root-relative path (no scheme, no
- *     `//`, no backslash, no control characters, at most 2048 characters)
- *     naming an image by extension, checked before anything is read.
- *  4. It resolves against the doc's folder at that side (`/` = repository
- *     root, GitHub's README rule); one that climbs above the root is refused.
- *  5. The doc's text at that side must reference `src` as an image (a
- *     markdown image, a reference-style image definition, or an `<img src>`,
- *     never one inside a code block or code span), so the route reads only
- *     what the file shows.
- *  6. The image is read at that side and answered exactly like
- *     `/api/review-image` (caps, LFS pointer, sniffed type, headers, ETag).
+ * Reads the images a reviewed Markdown file shows, at that diff side's revision (never the working tree by default).
+ * Checks run cheap-first: the session has file contents, `doc` is a Markdown file in the patch, `src` is a plain relative path naming an image, and the doc's text references `src` as an image outside code; only then is it read.
  */
 
 import { MAX_REVIEW_IMAGE_PREVIEW_BYTES, isReviewImagePath } from "./diff-paths";
@@ -44,30 +19,21 @@ import {
 
 export const REVIEW_MARKDOWN_IMAGE_ENDPOINT = "/api/review-markdown-image";
 
-/** The longest `src` the route takes (the Inbox's message-image rule). */
 export const REVIEW_MARKDOWN_IMAGE_SRC_MAX = 2048;
 
-/** The most of the Markdown file read to check that it references `src`. */
 export const REVIEW_MARKDOWN_DOC_MAX_BYTES = 2 * 1024 * 1024;
 
 const BUILTIN_MARKDOWN_RE = /\.(md|mdx|markdown)$/i;
 
-/** True when `path` is a Markdown file the preview renders. */
 export function isReviewMarkdownPath(path: string, extraExtensions: readonly string[] = []): boolean {
   if (BUILTIN_MARKDOWN_RE.test(path)) return true;
   const lower = path.toLowerCase();
   return extraExtensions.some((ext) => ext && lower.endsWith(ext.toLowerCase()));
 }
 
-// --- References -------------------------------------------------------------
-
-/** `![alt](src)`, `![alt](<src>)`, `![alt](src "title")`. */
 const MARKDOWN_IMAGE_RE = /!\[[^\]]*\]\(\s*(<[^>\n]*>|[^)\s]+)(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)/g;
-/** `![alt][ref]`, `![alt][]` and `![ref]`: the labels a reference image uses. */
 const MARKDOWN_REF_IMAGE_RE = /!\[([^\]]*)\](?:\[([^\]]*)\])?/g;
-/** `[ref]: src "title"` link reference definitions. */
 const REFERENCE_DEFINITION_RE = /^ {0,3}\[([^\]]+)\]:[ \t]*(<[^>\n]*>|\S+)/gm;
-/** An `<img>` tag's src attribute, quoted or not. */
 const HTML_IMG_SRC_RE = /<img\b[^>]*?\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/gi;
 
 const NAMED_ENTITIES: Record<string, string> = { amp: "&", quot: '"', apos: "'", lt: "<", gt: ">", nbsp: " " };
@@ -91,28 +57,16 @@ function normalizeLabel(label: string): string {
   return label.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
-/**
- * An image source with the leading and trailing ASCII whitespace a browser's
- * URL parser strips (`<img src=" a.png">` loads `a.png`). The route applies it
- * to the requested `src` and to every reference alike, so the client can send
- * the source exactly as written.
- */
+/** Strips the leading and trailing ASCII whitespace a browser's URL parser strips (`<img src=" a.png">` loads `a.png`); applied to the requested `src` and every reference alike. */
 export function normalizeImageSource(src: string): string {
   return src.replace(/^[\t\n\f\r ]+|[\t\n\f\r ]+$/g, "");
 }
 
-/** A fence opener: up to three spaces, then three or more backticks or tildes. */
 const FENCE_OPEN_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 const FENCE_CLOSE_RE = /^ {0,3}(`{3,}|~{3,})\s*$/;
-/** An inline code span that stays inside one paragraph (CommonMark's backtick-run rule). */
 const INLINE_CODE_RE = /(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\r?\n)[\s\S])*?[^`]\1(?!`)/g;
 
-/**
- * The Markdown text with its code taken out: fenced code blocks (``` or ~~~,
- * to the matching close or the end of the text) become empty lines and inline
- * code spans are removed. An image written inside code renders as code, so it
- * is not an image the file shows.
- */
+/** Fenced blocks become empty lines and inline code spans are removed: an image written inside code is not one the file shows. */
 export function stripMarkdownCode(text: string): string {
   const lines = text.split("\n");
   let fence: { char: string; length: number } | null = null;
@@ -134,14 +88,7 @@ export function stripMarkdownCode(text: string): string {
   return lines.join("\n").replace(INLINE_CODE_RE, "");
 }
 
-/**
- * Every image source the Markdown text names, as the preview's renderer
- * asks for it: a markdown image target as written (angle brackets removed),
- * a reference-style image's definition target, and each `<img src>` value
- * decoded, each through `normalizeImageSource`. Images inside code (fenced
- * blocks, inline spans) are not shown and are left out, as are remote,
- * `data:` and `blob:` sources.
- */
+/** Every image source the text names, each through `normalizeImageSource`. Images inside code and remote, `data:` and `blob:` sources are left out. */
 export function markdownImageRefs(markdown: string): Set<string> {
   const text = stripMarkdownCode(markdown);
   const refs = new Set<string>();
@@ -170,9 +117,6 @@ export function markdownImageRefs(markdown: string): Set<string> {
   return refs;
 }
 
-// --- Path resolution --------------------------------------------------------
-
-/** A URL scheme (`file:`, `javascript:`, `http:`); a Windows drive letter counts too. */
 function hasScheme(src: string): boolean {
   return /^[a-z][a-z0-9+.-]*:/i.test(src);
 }
@@ -183,10 +127,6 @@ export type MarkdownImagePathResult =
   | { kind: "not-image" }
   | { kind: "outside-repo" };
 
-/**
- * Resolve `src`, as written in the Markdown file at `docPath` (a
- * repository-relative path), to a repository-relative path. Pure.
- */
 export function resolveMarkdownImagePath(docPath: string, src: string): MarkdownImagePathResult {
   if (!src || src.length > REVIEW_MARKDOWN_IMAGE_SRC_MAX) return { kind: "bad-request" };
   if (/[\u0000-\u001f\u007f]/.test(src)) return { kind: "bad-request" };
@@ -226,27 +166,14 @@ export function resolveMarkdownImagePath(docPath: string, src: string): Markdown
   return { kind: "ok", path };
 }
 
-// --- The request ------------------------------------------------------------
-
 export interface ReviewMarkdownImageRequest {
-  /** Query parameters (`doc`, `side`, `src`, `snapshot`). */
   params: URLSearchParams;
-  /** `If-None-Match` request header, for the 304 path. */
   ifNoneMatch?: string | null;
-  /** False when the session has no full file contents (static patch, P4). */
   available: boolean;
-  /** The session's current patch: `doc` must be one of its files. */
   patch: string;
-  /** config.json `markdownExtensions`, normalized (`.livemd`). */
   markdownExtensions?: readonly string[];
-  /** Whether `snapshot` names the snapshot the server is serving right now. */
   isCurrentSnapshot: (snapshot: string) => boolean;
-  /** Aborts when the client goes away. */
   signal?: AbortSignal;
-  /**
-   * Read one repository path at one side in the server's current mode (the
-   * `/api/review-image` reader). For the old side `oldPath` names the path.
-   */
   readSide: (
     side: DiffSide,
     filePath: string,
@@ -280,7 +207,6 @@ function isResponse(value: FileBytesRead | ReviewImageResponse): value is Review
   return "status" in value;
 }
 
-/** Resolve one `GET /api/review-markdown-image` request to a transport-neutral response. */
 export async function handleReviewMarkdownImageRequest(
   request: ReviewMarkdownImageRequest,
 ): Promise<ReviewImageResponse> {

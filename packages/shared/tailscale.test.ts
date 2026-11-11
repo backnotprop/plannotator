@@ -1,13 +1,3 @@
-/**
- * Tailscale helper tests — pure parsers and the injectable detection edge.
- *
- * Run: bun test packages/shared/tailscale.test.ts
- *
- * No test here ever spawns the real `tailscale` CLI or touches tailnet state:
- * detection and serve-command construction are exercised through fixtures and
- * an injected runner.
- */
-
 import { describe, expect, test } from "bun:test";
 import {
   buildServeArgs,
@@ -124,8 +114,7 @@ describe("describeTailscaleFailure", () => {
     );
   });
 
-  // Tailscale's own words (cmd/tailscale/cli isRunningOrStarting, the local
-  // client's connect error, serve's enable prompt) -> the plain next step.
+  // Tailscale's own words map to the plain next step.
   const failed = (stderr: string, stdout = "") => describeTailscaleFailure({ status: 1, stdout, stderr });
 
   test("Serve off for the tailnet without a link points at the admin console", () => {
@@ -152,10 +141,7 @@ describe("describeTailscaleFailure", () => {
   });
 });
 
-// A Mac with the Tailscale app but without its command-line tool turned on
-// has no `tailscale` on PATH; the app's own program is the CLI when run by its
-// real path. The spawn, the platform and the existence check are injected, so
-// nothing here runs a real tailscale or looks at the real /Applications.
+// A Mac with the Tailscale app but no CLI turned on has no `tailscale` on PATH; the app's program is the CLI by its real path. Spawn, platform and existence check are injected.
 describe("the Mac app's CLI when `tailscale` is not on PATH", () => {
   const enoent = (): TailscaleRunResult => ({
     error: Object.assign(new Error("spawnSync tailscale ENOENT"), { code: "ENOENT" }),
@@ -245,8 +231,7 @@ describe("the Mac app's CLI when `tailscale` is not on PATH", () => {
 });
 
 describe("serve command construction", () => {
-  // These argv shapes are the contract with the `tailscale` CLI; a drift here
-  // silently breaks publishing or, worse, cleanup.
+  // These argv shapes are the contract with the `tailscale` CLI.
   test("serve args proxy the exact loopback port and its teardown matches", () => {
     expect(buildServeArgs(19432)).toEqual([
       "serve",
@@ -263,7 +248,6 @@ describe("serve command construction", () => {
 });
 
 describe("serveStatusProxy", () => {
-  // The shape `tailscale serve status --json` printed on a Mac (1.9x) with a 443 mapping and the Inbox's 8443.
   const status = JSON.stringify({
     TCP: { "443": { HTTPS: true }, "8443": { HTTPS: true } },
     Web: {

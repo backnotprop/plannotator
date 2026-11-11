@@ -1,12 +1,4 @@
-/**
- * The opt-in T3 Code connection's per-thread workers, as uninstall and
- * `plannotator t3 logout` see them: each running worker leaves
- * `<data dir>/t3-code/<endpoint>/threads/<thread>/daemon.json`
- * (`{ endpoint, thread, pid, port, token }`, mode 0600) while it listens.
- * A worker is stopped only through its own token-guarded `/stop` route, after
- * its `/health` names the same pid, endpoint and thread; nothing is ever
- * signalled by a pid read from a file.
- */
+/** Per-thread worker registries: `<data dir>/t3-code/<endpoint>/threads/<thread>/daemon.json` (mode 0600). A worker is stopped only through its own token-guarded `/stop` route after its `/health` names the same pid, endpoint and thread; nothing is ever signalled by a pid read from a file. */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -18,7 +10,6 @@ function isEntry(value: unknown): value is Omit<T3WorkerEntry, "directory"> {
     && Number.isInteger(v.port) && (v.port as number) > 0 && (v.port as number) < 65536 && typeof v.token === "string" && v.token.length >= 32;
 }
 
-/** Every worker registry under the data dir (running or left behind by a crash). */
 export function listT3Workers(dataDir: string): T3WorkerEntry[] {
   const root = join(dataDir, "t3-code");
   if (!existsSync(root)) return [];
@@ -57,7 +48,6 @@ async function workerAnswers(entry: T3WorkerEntry): Promise<boolean> {
 
 export type T3WorkerStop = { entry: T3WorkerEntry; state: "stopped" | "not_running" | "still_running" };
 
-/** Stop the running workers (optionally only one endpoint's). Reviews stay open. */
 export async function stopT3Workers(dataDir: string, endpoint?: string): Promise<T3WorkerStop[]> {
   const results: T3WorkerStop[] = [];
   for (const entry of listT3Workers(dataDir)) {
@@ -76,7 +66,6 @@ export async function stopT3Workers(dataDir: string, endpoint?: string): Promise
   return results;
 }
 
-/** What `stopT3Workers` would stop, for a dry run. */
 export async function runningT3Workers(dataDir: string): Promise<T3WorkerEntry[]> {
   const running: T3WorkerEntry[] = [];
   for (const entry of listT3Workers(dataDir)) if (await workerAnswers(entry)) running.push(entry);

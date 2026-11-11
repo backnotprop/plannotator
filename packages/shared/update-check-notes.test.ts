@@ -1,9 +1,4 @@
-/**
- * One release's notes fetched by its tag (fetchReleaseNotesFor), for a
- * version installed before the release check saw it, against a fake release API
- * on loopback (never GitHub): the request, the saved notes, the knob, the
- * per-version throttle, and stored notes without a "What's New" part.
- */
+/** Notes fetched by tag for a version installed before the release check saw it, against a fake release API on loopback (never GitHub). */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -117,7 +112,6 @@ describe("fetchReleaseNotesFor", () => {
     expect(await fetchNotes("0.28.19")).toEqual({ outcome: "failed", error: "HTTP 403" });
     expect(readUpdateState(dataDir).notesFetch?.["0.28.19"]).toMatchObject({ attemptedAt: NOW, failedAt: NOW, error: "HTTP 403" });
     expect((await fetchNotes("0.28.19", { now: NOW + 60_000 })).outcome).toBe("not-due");
-    // Notes keep their own back-off, not the hourly release check's.
     expect((await fetchNotes("0.28.19", { now: NOW + RELEASE_CHECK_RETRY_MS })).outcome).toBe("not-due");
     expect((await fetchNotes("0.28.19", { now: NOW + RELEASE_ASSETS_FETCH_RETRY_MS - 1 })).outcome).toBe("not-due");
     expect(seen.length).toBe(1);
@@ -126,20 +120,17 @@ describe("fetchReleaseNotesFor", () => {
     expect(seen.length).toBe(2);
   });
 
-  // The request-count promise of the network retry (F3 of #2338): a quick retry only after the network
-  // came back, and a tag API that keeps failing while the release check answers waits 6 h, never 15 min.
+  // A quick retry only after the network came back; a tag API that keeps failing while the release check answers waits 6 h, never 15 min.
   test("a failure is asked again 15 minutes after it once a release check answers, once; then 6 h while the check keeps answering", async () => {
     const answered = (at: number) =>
       patchUpdateState((s) => ({ ...s, latestRelease: { tag: "v0.28.19", fetchedAt: at }, releaseCheck: { attemptedAt: at } }), dataDir);
     answer = () => new Response("unavailable", { status: 502 });
     expect((await fetchNotes("0.28.19")).outcome).toBe("failed");
-    // No release check has answered since: the network may still be down, 6 h.
     expect((await fetchNotes("0.28.19", { now: NOW + RELEASE_NOTES_PENDING_RETRY_MS })).outcome).toBe("not-due");
     answered(NOW + RELEASE_CHECK_RETRY_MS);
     expect((await fetchNotes("0.28.19", { now: NOW + RELEASE_NOTES_PENDING_RETRY_MS - 1 })).outcome).toBe("not-due");
     expect((await fetchNotes("0.28.19", { now: NOW + RELEASE_NOTES_PENDING_RETRY_MS })).outcome).toBe("failed");
     expect(seen.length).toBe(2);
-    // It failed again with the network up: the check answers, so this source waits 6 h.
     answered(NOW + RELEASE_NOTES_PENDING_RETRY_MS + RELEASE_CHECK_RETRY_MS);
     const second = NOW + RELEASE_NOTES_PENDING_RETRY_MS;
     expect((await fetchNotes("0.28.19", { now: second + RELEASE_NOTES_PENDING_RETRY_MS })).outcome).toBe("not-due");
@@ -168,7 +159,7 @@ describe("fetchReleaseNotesFor", () => {
 
   // The answer clears the claim's in-flight mark: notes that could not be saved wait a day, not 15 minutes.
   test("an answer whose notes could not be saved is not asked again in 15 minutes", async () => {
-    writeFileSync(updateCheckPaths(dataDir).notes, "not a folder"); // update-notes/ cannot be created
+    writeFileSync(updateCheckPaths(dataDir).notes, "not a folder");
     expect((await fetchNotes("0.28.19")).outcome).toBe("fetched");
     expect((await fetchNotes("0.28.19", { now: NOW + RELEASE_NOTES_PENDING_RETRY_MS })).outcome).toBe("not-due");
     expect(seen.length).toBe(1);
@@ -181,13 +172,11 @@ describe("fetchReleaseNotesFor", () => {
   });
 
   test("notes saved before the release body was edited (no What's New part) are fetched again, once a day at most", async () => {
-    // What the release check saved from GitHub's generated notes, before the body was replaced.
     writeReleaseNotes({ version: "0.28.19", notes: "", highlights: [] }, dataDir);
     expect((await fetchNotes("0.28.19")).outcome).toBe("fetched");
     expect(readReleaseNotes("0.28.19", dataDir)!.notes).toBe("Notes the person reads.");
     expect(seen.length).toBe(1);
 
-    // A release that really has no What's New part is not asked for again within 24 h.
     writeReleaseNotes({ version: "0.28.20", notes: "", highlights: [] }, dataDir);
     answer = () => Response.json({ tag_name: "v0.28.20", body: "## What's Changed\n\n* a PR" });
     expect((await fetchNotes("0.28.20")).outcome).toBe("fetched");
@@ -195,9 +184,7 @@ describe("fetchReleaseNotesFor", () => {
     expect(seen.length).toBe(2);
   });
 
-  // The 0.28.37 bug: CI publishes GitHub's generated body and the written
-  // notes replace it minutes later. An Inbox that asked in between waited a
-  // day, so its "What's new" link never showed for that run.
+  // Regression: CI publishes GitHub's generated body and the written notes replace it minutes later; an Inbox that asked in between waited a day.
   test("a young release answered without a What's New part is asked again after 15 minutes, not a day", async () => {
     const generated = "## What's Changed\n\n* a PR by someone";
     const publishedAt = new Date(NOW - 60_000).toISOString();
@@ -207,12 +194,10 @@ describe("fetchReleaseNotesFor", () => {
     expect((await fetchNotes("0.28.37", { now: NOW + RELEASE_NOTES_PENDING_RETRY_MS - 1 })).outcome).toBe("not-due");
     expect(seen.length).toBe(1);
 
-    // Still the generated body: asked again on the same quick cadence.
     expect((await fetchNotes("0.28.37", { now: NOW + RELEASE_NOTES_PENDING_RETRY_MS })).outcome).toBe("fetched");
     expect((await fetchNotes("0.28.37", { now: NOW + 2 * RELEASE_NOTES_PENDING_RETRY_MS - 1 })).outcome).toBe("not-due");
     expect(seen.length).toBe(2);
 
-    // The written notes are in now: the next try saves them, and nothing more is asked.
     answer = () => Response.json({ tag_name: "v0.28.37", published_at: publishedAt, body: bodyFor("0.28.37") });
     expect((await fetchNotes("0.28.37", { now: NOW + 2 * RELEASE_NOTES_PENDING_RETRY_MS })).outcome).toBe("fetched");
     expect(readReleaseNotes("0.28.37", dataDir)!.notes).toBe("Notes the person reads.");
@@ -235,7 +220,6 @@ describe("fetchReleaseNotesFor", () => {
     const published = NOW - RELEASE_NOTES_YOUNG_MS + RELEASE_NOTES_PENDING_RETRY_MS;
     answer = () => Response.json({ tag_name: "v0.28.37", published_at: new Date(published).toISOString(), body: "" });
     expect((await fetchNotes("0.28.37")).outcome).toBe("fetched");
-    // Due 15 minutes later, when the release is exactly 2 days old: no longer young, so a day.
     expect((await fetchNotes("0.28.37", { now: NOW + RELEASE_NOTES_PENDING_RETRY_MS })).outcome).toBe("not-due");
     expect(seen.length).toBe(1);
   });
@@ -244,7 +228,6 @@ describe("fetchReleaseNotesFor", () => {
     const publishedAt = new Date(NOW - 60_000).toISOString();
     answer = () => Response.json({ tag_name: "v0.28.37", published_at: publishedAt, body: "## What's Changed\n" });
     expect((await fetchNotes("0.28.37")).outcome).toBe("fetched");
-    // The next try claims, then its process goes away before GitHub answers.
     void fetchReleaseNotesFor({
       version: "0.28.37",
       dataDir,
@@ -253,9 +236,7 @@ describe("fetchReleaseNotesFor", () => {
       fetchRelease: () => new Promise<never>(() => {}),
     });
     expect(readUpdateState(dataDir).notesFetch?.["0.28.37"]?.attemptedAt).toBe(NOW + RELEASE_NOTES_PENDING_RETRY_MS);
-    // A concurrent process still waits out the claim...
     expect((await fetchNotes("0.28.37", { now: NOW + 2 * RELEASE_NOTES_PENDING_RETRY_MS - 1 })).outcome).toBe("not-due");
-    // ...and asks again 15 minutes after it, because the claim kept the release's date.
     answer = () => Response.json({ tag_name: "v0.28.37", published_at: publishedAt, body: bodyFor("0.28.37") });
     expect((await fetchNotes("0.28.37", { now: NOW + 2 * RELEASE_NOTES_PENDING_RETRY_MS })).outcome).toBe("fetched");
     expect(readReleaseNotes("0.28.37", dataDir)!.notes).toBe("Notes the person reads.");
@@ -274,7 +255,6 @@ describe("fetchReleaseNotesFor", () => {
     }
     expect(seen.length).toBe(4);
     expect(pendingLines("0.28.37")).toBe(1);
-    // Another version gets its own line.
     expect((await fetchNotes("0.28.38")).outcome).toBe("fetched");
     expect(pendingLines("0.28.38")).toBe(1);
   });

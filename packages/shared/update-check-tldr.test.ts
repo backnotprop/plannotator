@@ -1,9 +1,4 @@
-/**
- * A release's TL;DR (`### TL;DR` right under "What's New in vX"): read apart
- * from the notes, in the release skill's labels, and nothing taken from the
- * notes when it is malformed or missing. Saved notes keep it, and notes an
- * older version saved with the section still in them are read the same way.
- */
+/** A release's TL;DR is read apart from the notes; nothing is taken from the notes when it is malformed or missing; notes an older version saved with the section still in them read the same way. */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -41,7 +36,6 @@ test("the TL;DR's lines come apart from the notes, labels in the skill's spellin
     { label: "Removed", text: "`PLANNOTATOR_INBOX_ASK_AI`: Ask AI is always on" },
     { label: "Off by default", text: "Bro mode" },
   ]);
-  // The page draws the TL;DR itself: the notes start at the opening paragraph.
   expect(out.notes).toBe("Starting an agent from New message now covers a new folder.");
   expect(out.highlights).toEqual([{ version: "0.28.52", text: "Ask AI everywhere" }]);
 });
@@ -57,7 +51,6 @@ test("malformed: a heading with no list, or a TL;DR below the opening paragraph,
   expect(splitTldr(paragraph)).toEqual({ tldr: [], notes: paragraph });
   const later = "Opening paragraph.\n\n### TL;DR\n\n- **New:** Something";
   expect(splitTldr(later)).toEqual({ tldr: [], notes: later });
-  // An empty item is skipped, not drawn as an empty line.
   expect(splitTldr("### TL;DR\n\n- **New:**\n- **Fixed:** It works\n\nRest").tldr).toEqual([{ label: "Fixed", text: "It works" }]);
 });
 
@@ -76,7 +69,6 @@ test("at most 8 lines, each capped", () => {
   const out = splitTldr(`### TL;DR\n${lines.join("\n")}\n\nNotes.`);
   expect(out.tldr).toHaveLength(8);
   expect(out.tldr.every((l) => l.text.length <= 300)).toBe(true);
-  // All twelve are still taken out of the notes.
   expect(out.notes).toBe("Notes.");
 });
 

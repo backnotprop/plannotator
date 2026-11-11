@@ -21,10 +21,7 @@ interface ViewedRecord {
   suppressed: boolean;
 }
 
-/** Local Git uses the generation-time sidecar, including metadata-only changes.
- * Platform patches have no sidecar: text hunks can use an exact patch hash,
- * but opaque binary/metadata-only patches cannot prove unchanged content.
- */
+/** Local Git uses the generation-time sidecar. Platform patches have none: text hunks use an exact patch hash, but opaque binary/metadata-only patches cannot prove unchanged content. */
 export function reviewFileFingerprints(patch: string, identities?: Record<string, string>): Record<string, string> {
   const result: Record<string, string> = Object.create(null);
   for (const file of parseDiffToFiles(patch)) {
@@ -35,8 +32,7 @@ export function reviewFileFingerprints(patch: string, identities?: Record<string
     const header = file.patch.split(/^(?:@@|--- |Binary files |GIT binary patch)/m)[0];
     const index = header.match(/^index ([a-f0-9]{40}|[a-f0-9]{64})\.\.([a-f0-9]{40}|[a-f0-9]{64})(?: (\d+))?$/m);
     const modes = header.split("\n").filter(line => /^(?:old mode|new mode|new file mode|deleted file mode) /.test(line));
-    // An opaque binary stub without IDs cannot prove that its bytes stayed the
-    // same. It may be marked for this session, but must not restore as viewed.
+    // An opaque binary stub without ids cannot prove its bytes stayed the same: it may be marked for this session but must not restore as viewed.
     if (!index && !/^@@ /m.test(file.patch)) continue;
     result[file.path] = hash(JSON.stringify(index
       ? [file.path, file.oldPath, index[1], index[2], index[3], modes]
@@ -67,20 +63,16 @@ export async function captureReviewProgress(
   if (input.prUrl) {
     identity = ["pr", input.prUrl, input.prScope ?? "layer"];
   } else if (input.cwd && !input.workspaceRoot && (!input.vcsType || input.vcsType === "git")) {
-    // Local reviews without generation-time identities retain the draft path.
     if (!input.fileIdentities) return null;
     identity = await localGitReviewIdentity(input, runGit);
     if (!identity) return null;
   } else {
-    // Piped patches and other VCS/workspace modes keep their existing draft UX.
     return null;
   }
   return { key: hash(JSON.stringify(identity)), fingerprints };
 }
 
-/** Shared identity for local drafts and viewed progress, independent of either
- * feature's settings. Capture alongside the patch, never on a draft write:
- * the working directory may have changed branches since the review opened. */
+/** Capture alongside the patch, never on a draft write: the working directory may have changed branches since the review opened. */
 export async function localGitReviewIdentity(
   input: Pick<ReviewProgressInput, "cwd" | "vcsType" | "workspaceRoot" | "prUrl" | "diffType" | "base">,
   runGit: ReviewGitRuntime["runGit"],
@@ -98,7 +90,6 @@ export async function localGitReviewIdentity(
       runGit(["rev-parse", "HEAD"], { cwd }),
     ]);
     if (root.exitCode !== 0 || !root.stdout.trim()) return null;
-    // Detached checkouts have no durable branch identity.
     const head = branch.exitCode === 0 ? branch : commit;
     if (head.exitCode !== 0 || !head.stdout.trim()) return null;
     return ["git", canonicalPath(root.stdout.trim()), head.stdout.trim(), scope];
@@ -152,10 +143,7 @@ export function validReviewProgressChanges(value: unknown, snapshot: ReviewProgr
     && snapshot.fingerprints[change.path] === change.fingerprint);
 }
 
-/** One atomic record per file: independent tabs/processes cannot clobber each
- * other's unrelated marks through a whole-review read/modify/write race.
- * Explicit false records override GitHub's potentially stale viewed seed.
- */
+/** One atomic record per file, so independent tabs/processes cannot clobber each other's marks through a whole-review read/modify/write race. Explicit false overrides GitHub's possibly stale viewed seed. */
 export function saveReviewProgress(snapshot: ReviewProgressSnapshot, changes: ReviewProgressChange[]): void {
   for (const change of changes) {
     const file = recordPath(snapshot, change.path);
@@ -174,7 +162,6 @@ export function saveReviewProgress(snapshot: ReviewProgressSnapshot, changes: Re
   }
 }
 
-/** Both HTTP runtimes use the same snapshot/validation boundary. */
 export async function handleReviewProgress(input: {
   method: string;
   snapshotId: string | null;

@@ -167,9 +167,7 @@ export function createSourceSaveCapabilityFromSnapshot(
 	return enabledSourceSave(scope, resolved, snapshot);
 }
 
-// Used when Plannotator already read the source text, but the file vanished
-// before the browser asked for /api/plan. Disk reads should use
-// createSourceSaveCapability/createSourceSaveCapabilityFromSnapshot instead.
+// For when the source text was already read but the file vanished before /api/plan; disk reads use createSourceSaveCapability*.
 export function createSourceSaveCapabilityFromText(
 	scope: SourceSaveScope,
 	filePath: string,
@@ -237,16 +235,8 @@ export function createSourceSaveCapability(
 	}
 }
 
-// --- Reviews of several files (annotate bundles) ---
-//
-// A bundle is several single-file sessions in one review, so source save
-// follows the single-file rule for each listed file and nothing else: the
-// writable set is the real paths of the bundle's own files (a symlinked entry
-// resolves to its target, as its reference roots do), captured when the
-// review opens. Documents a bundle file links to stay read-only, exactly as
-// documents linked from a single file do.
+// Bundle: source save writes only the real paths of the bundle's own files (symlinks resolved), captured when the review opens; linked documents stay read-only.
 
-/** Where `filePath` lives: its real path, or for a missing file its real parent plus its name. */
 function resolveSourceSaveLocation(filePath: string): string | null {
 	const resolved = resolveUserPath(filePath);
 	if (!resolved) return null;
@@ -258,12 +248,6 @@ function resolveSourceSaveLocation(filePath: string): string | null {
 	}
 }
 
-/**
- * The real paths source save may write in a review of several files: each
- * listed file whose named path and real path are both a source-save type
- * (`SOURCE_SAVE_FILE_REGEX`) and which is a regular file. Raw HTML, diagram
- * sources and data files are left out, as they are for a single file.
- */
 export function resolveBundleSourceSavePaths(paths: readonly string[]): Set<string> {
 	const allowed = new Set<string>();
 	for (const path of paths) {
@@ -282,19 +266,13 @@ export function resolveBundleSourceSavePaths(paths: readonly string[]): Set<stri
 	return allowed;
 }
 
-/** Where a save request for `filePath` writes in a bundle, or null when it names none of the bundle's files. */
 export function resolveBundleSourceSaveTarget(filePath: string, allowed: ReadonlySet<string>): string | null {
 	if (!isSourceSaveFilePath(filePath)) return null;
 	const real = resolveSourceSaveLocation(filePath);
 	return real && allowed.has(real) ? real : null;
 }
 
-/**
- * The source-save capability of a document served in a bundle: enabled only
- * for one of the bundle's own files, null otherwise. Its scope is
- * "folder-file" because the client addresses the save by path
- * (`SourceSaveRequest.path`), as it does in a folder session.
- */
+/** Enabled only for the bundle's own files; scope is "folder-file" because the client addresses the save by path. */
 export function createBundleSourceSaveCapability(
 	filePath: string,
 	allowed: ReadonlySet<string>,
@@ -315,7 +293,6 @@ export function saveSourceFileAtomic(
 		allowMissingBase?: boolean;
 		missingBaseEol?: SourceFileEol;
 		allowedRoot?: string;
-		/** Only these real paths may be written (a review of several files: its own files). */
 		allowedFiles?: ReadonlySet<string>;
 	} = {},
 ): SourceSaveResponse {

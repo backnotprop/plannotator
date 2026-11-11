@@ -1,35 +1,21 @@
 /**
- * Things a drawing names instead of drawing: `plannotator shape update` fills them
- * in before it checks the board, so an agent writing SVG by hand gets a real icon,
- * logo or drawn object by name, and the stored board holds plain SVG (no lookup
- * when it is shown, nothing fetched).
- *
- *   <svg data-icon="database" x="40" y="40" width="28" height="28"/>   a Lucide icon, in the ink (or `style="color:…"`)
- *   <svg data-logo="stripe" x="40" y="40" width="40" height="40"/>     a product's real logo, in its own colour
- *   <svg data-draw="database" x="40" y="40" width="160" height="120" data-label="Postgres"/>   a drawn object
- *
- * `data-to="x y"` on any of them sends it from where it is to that point, again
- * and again (an envelope crossing a wire); with reduced motion it stays still, halfway.
- * A filled one carries `data-stamped`, a short hash of what it was drawn from (the
- * name, size, place, label and `data-to`): a board read back and stored again is
- * left as it is, and one whose name, size, place, label or `data-to` was edited is
- * drawn again. A name we do not have is left empty with `data-missing` saying so,
- * which `shape update` passes on as a note (`shapeBoardNotes`).
+ * Fills `data-icon`, `data-logo` and `data-draw` elements before the board is checked, so the stored board is plain SVG.
+ * A filled element carries `data-stamped`, a hash of its inputs: unchanged ones are left alone, edited ones are redrawn. An unknown name stays empty with `data-missing` (reported via `shapeBoardNotes`).
  */
 import { STAMP_CODEX, STAMP_ICON_ALIASES, STAMP_ICONS, STAMP_LOGOS, STAMP_MARKS } from './stamp-data';
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-/** Source text as written, made safe inside double quotes or between tags. Its entities are left as they are, so it means the same and a second pass changes nothing. */
+/** Source text made safe inside double quotes or between tags; entities are left as written so a second pass changes nothing. */
 const keep = (raw: string) => raw.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0' };
-/** What an attribute's source text says: the basic named entities and numeric ones decoded, any other left as written. */
+/** Decodes the basic named and numeric entities; any other is left as written. */
 const decode = (raw: string) =>
   raw.replace(/&(?:#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|([a-zA-Z]+));/g, (e, d?: string, h?: string, name?: string) => {
     if (name !== undefined) return own(ENTITIES, name) ?? e;
     const c = d !== undefined ? Number(d) : parseInt(h!, 16);
     return c > 0 && c <= 0x10ffff ? String.fromCodePoint(c) : e;
   });
-/** A table's own entry: `constructor`, `__proto__` and the rest of Object's are no names. */
+/** `constructor`, `__proto__` and the rest of Object's names are not valid names. */
 const own = <T>(table: Record<string, T>, key: string): T | undefined => (Object.hasOwn(table, key) ? table[key] : undefined);
 const num = (v: string | undefined, d: number) => {
   const n = Number(v);
@@ -37,11 +23,9 @@ const num = (v: string | undefined, d: number) => {
 };
 const r = (n: number) => Math.round(n * 10) / 10;
 
-/** A `<svg … data-icon|data-logo|data-draw="…" …>` start tag (empty when `/>` or `></svg>` follows), its attributes kept whole. */
 const STAMP_RE = /<svg\b((?:[^>"']|"[^"]*"|'[^']*')*?)\/?>(?:\s*<\/svg>)?/g;
 const ATTR_RE = /([^\s"'=<>/`]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>"'`=<]+)))?/g;
 
-/** An element's attributes: what each says (decoded), and its source text when it came from the drawing. */
 class Attrs {
   private readonly m = new Map<string, { v: string; raw?: string }>();
   constructor(text: string) {
@@ -62,18 +46,17 @@ class Attrs {
   delete(k: string) {
     this.m.delete(k);
   }
-  /** The value as words between tags: the agent's own text kept as written (so `R&amp;D` stays one ampersand), ours escaped. */
+  /** The agent's own text is kept as written (so `R&amp;D` stays one ampersand), ours is escaped. */
   words(k: string) {
     const a = this.m.get(k);
     return a === undefined ? '' : a.raw !== undefined ? keep(a.raw) : esc(a.v);
   }
-  /** The attributes again, each in double quotes. */
   text() {
     return [...this.m].map(([k, a]) => ` ${k}="${a.raw !== undefined ? keep(a.raw) : esc(a.v)}"`).join('');
   }
 }
 
-/** What a stamp is drawn from, hashed short (FNV-1a): a filled element whose inputs no longer give this is drawn again. */
+/** Short FNV-1a hash of a stamp's inputs: a filled element whose inputs no longer give it is redrawn. */
 function stampKey(attrs: Attrs): string {
   const what = ['data-icon', 'data-logo', 'data-draw', 'width', 'height', 'x', 'y', 'data-label', 'data-to'].map((k) => attrs.get(k) ?? '\u0000').join('\u0001');
   let h = 0x811c9dc5;
@@ -81,7 +64,6 @@ function stampKey(attrs: Attrs): string {
   return (h >>> 0).toString(36);
 }
 
-/** A few names agents reach for that Lucide spells another way. */
 const ICON_WORDS: Record<string, string> = {
   db: 'database', phone: 'smartphone', mobile: 'smartphone', email: 'mail', envelope: 'mail', person: 'user', people: 'users',
   browser: 'app-window', page: 'file-text', document: 'file-text', doc: 'file-text', payment: 'credit-card', card: 'credit-card', money: 'banknote',
@@ -93,7 +75,6 @@ const ICON_WORDS: Record<string, string> = {
   worker: 'cog', function: 'square-function', bucket: 'archive', files: 'folder', file: 'file', home: 'house', search: 'search', settings: 'settings',
 };
 
-/** Product names agents write that Simple Icons spells another way. */
 const LOGO_WORDS: Record<string, string> = {
   postgres: 'postgresql', pg: 'postgresql', nextjs: 'nextdotjs', next: 'nextdotjs', node: 'nodedotjs', nodejs: 'nodedotjs',
   gcp: 'googlecloud', fly: 'flydotio', golang: 'go', k8s: 'kubernetes', mongo: 'mongodb', elastic: 'elasticsearch',
@@ -127,7 +108,6 @@ export function stampIcon(name: string): string | null {
   return own(STAMP_ICONS, key) ?? own(STAMP_ICONS, own(STAMP_ICON_ALIASES, key) ?? '') ?? own(STAMP_ICONS, own(ICON_WORDS, key) ?? '') ?? null;
 }
 
-/** The logo's inner SVG and its viewBox, or null. */
 export function stampLogo(name: string): { box: string; body: string; title: string } | null {
   const key = name.trim().toLowerCase().replace(/\s+/g, '');
   const slug = own(LOGO_WORDS, key) ?? key;
@@ -141,7 +121,6 @@ export function stampLogo(name: string): { box: string; body: string; title: str
   return { box: '0 0 24 24', body: `<path ${paint} d="${logo.d}"/>`, title: logo.t };
 }
 
-/** Drawn objects: the outline in the current colour (the ink unless `style="color:…"`), filled with a tint of it. */
 const OBJECTS: Record<string, { w: number; h: number; draw: (w: number, h: number) => { body: string; face: [number, number, number, number] } }> = {
   database: {
     w: 140, h: 120,
@@ -227,13 +206,10 @@ const OBJECTS: Record<string, { w: number; h: number; draw: (w: number, h: numbe
 };
 const OBJECT_WORDS: Record<string, string> = { db: 'database', cylinder: 'database', smartphone: 'phone', mobile: 'phone', computer: 'laptop', window: 'browser', page: 'browser', web: 'browser', mail: 'envelope', email: 'envelope', message: 'envelope', letter: 'envelope', rack: 'server' };
 
-/** Things whose face is full (slots, cells, a flap): a label goes under them. */
 const BELOW = new Set(['server', 'queue', 'envelope']);
 
-/** What `data-draw` can be. */
 export const SHAPE_DRAWN_OBJECTS: readonly string[] = Object.keys(OBJECTS);
 
-/** The wrapper that holds a server's, queue's or envelope's label under it. */
 const LABEL_UNDER = '<g class="shp-lb">';
 
 function drawObject(kind: string, attrs: Attrs): string | null {
@@ -248,7 +224,6 @@ function drawObject(kind: string, attrs: Attrs): string | null {
   const { body, face } = o.draw(w, h);
   const label = attrs.get('data-label');
   if (label && BELOW.has(name)) {
-    // Its slots, cells or flap fill the face, so the label goes under it, where nothing is drawn.
     const size = 17;
     const under = `<text x="${r(num(attrs.get('x'), 0) + w / 2)}" y="${r(num(attrs.get('y'), 0) + h + size * 1.35)}" font-size="${size}" font-weight="600" text-anchor="middle">${attrs.words('data-label')}</text>`;
     return `${LABEL_UNDER}<svg${attrs.text()} viewBox="0 0 ${w} ${h}">${body}</svg>${under}</g>`;
@@ -261,7 +236,6 @@ function drawObject(kind: string, attrs: Attrs): string | null {
   return `<svg${attrs.text()} viewBox="0 0 ${w} ${h}">${body}${words}</svg>`;
 }
 
-/** The moving wrapper for `data-to`: from the element's x, y to the point, again and again (the frame's `.shp-go`). */
 function moving(svg: string, attrs: Attrs): string {
   const to = (attrs.get('data-to') ?? '').trim().split(/[\s,]+/).map(Number);
   if (to.length !== 2 || !to.every(Number.isFinite)) return svg;
@@ -271,13 +245,10 @@ function moving(svg: string, attrs: Attrs): string {
 
 export interface ShapeStampResult {
   html: string;
-  /** One line per name we do not have, with names we do. */
   missing: string[];
 }
 
-/** One element's drawing from its attributes, or the element left empty with `data-missing` (the line goes in `missing`). */
 function stamp(attrs: Attrs, missing: string[]): string {
-  // Ours from an earlier drawing: drawn again from the inputs alone.
   for (const k of ['data-missing', 'data-stamped', 'data-brand', 'viewbox']) attrs.delete(k);
   const miss = (line: string) => {
     missing.push(line);
@@ -318,10 +289,7 @@ function stamp(attrs: Attrs, missing: string[]): string {
 const MOVING_BEFORE = /<g class="shp-go" style="--dx:-?[\d.]+px;--dy:-?[\d.]+px">$/;
 const LABEL_AFTER = /<text\b[^>]*>[^<]*<\/text><\/g>/y;
 
-/**
- * Where an earlier stamp's drawing ends, and how far before its `<svg` it starts (its label and
- * moving wrappers), or null when it is not as we drew it (hand-made, or edited inside): left as it is.
- */
+/** Null when it is not as we drew it (hand-made, or edited inside): left as it is. */
 function stampedSpan(html: string, from: number, openStart: number, openEnd: number): { start: number; end: number } | null {
   const close = html.indexOf('</svg>', openEnd);
   if (close < 0 || html.slice(openEnd, close).includes('<svg')) return null;
@@ -343,10 +311,6 @@ function stampedSpan(html: string, from: number, openStart: number, openEnd: num
   return { start, end };
 }
 
-/**
- * Fills in every empty `data-icon`, `data-logo` and `data-draw` element, and draws again one we
- * filled before whose inputs were edited since (its `data-stamped` no longer matches them).
- */
 export function expandShapeStamps(html: string): ShapeStampResult {
   const missing: string[] = [];
   if (!/data-(?:icon|logo|draw)\b/i.test(html)) return { html, missing };
@@ -360,7 +324,6 @@ export function expandShapeStamps(html: string): ShapeStampResult {
     const empty = /\/>$/.test(whole) || />\s*<\/svg>$/.test(whole);
     let start = m.index, end = m.index + whole.length;
     if (!empty) {
-      // Filled: by hand (no data-stamped), or by us from the inputs it still has. Either way, left as it is.
       const was = attrs.get('data-stamped');
       if (!was || was === stampKey(attrs)) continue;
       const span = stampedSpan(html, at, m.index, end);
@@ -376,7 +339,6 @@ export function expandShapeStamps(html: string): ShapeStampResult {
 
 type Drawn = { html?: unknown; tall?: { html?: unknown }; more?: { html?: unknown } };
 
-/** The board with its drawn views' stamps filled in, and what could not be. The board's shape is otherwise untouched. */
 export function expandBoardStamps(board: unknown): { board: unknown; missing: string[] } {
   const plain = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
   // Not a board's shape: left for the checks to refuse as written.

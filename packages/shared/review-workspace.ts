@@ -17,8 +17,6 @@ export type WorkspaceDiffType =
   | "workspace-unstaged"
   | "workspace-last";
 
-// The prompt-context types moved to @plannotator/core/review-prompt
-// (browser-safe); re-exported so existing importers keep working unchanged.
 import type {
   WorkspaceChildVcsType,
   WorkspacePromptRepoContext,
@@ -68,7 +66,6 @@ export interface WorkspaceReviewRuntime {
     oldPath?: string,
     cwd?: string,
   ): Promise<{ oldContent: string | null; newContent: string | null }>;
-  /** Byte reader for image previews; absent means the preview is unavailable. */
   getVcsFileBytesForDiff?(
     diffType: DiffType,
     defaultBranch: string,
@@ -78,13 +75,11 @@ export interface WorkspaceReviewRuntime {
     maxBytes: number,
     cwd?: string,
   ): Promise<FileBytesRead>;
-  /** The repository at a child's new side (All files); absent means no All files. */
   listVcsFiles?(diffType: DiffType, defaultBranch: string, cwd?: string): Promise<RepoFileListing | null>;
   canStageFiles(diffType: string, cwd?: string): Promise<boolean>;
   stageFile(diffType: string, filePath: string, cwd?: string): Promise<void>;
   unstageFile(diffType: string, filePath: string, cwd?: string): Promise<void>;
-  /** Optional staleness fingerprint probe (see vcs-core). Absent or `null`
-   * results are treated as always-fresh. */
+  /** Absent or `null` results are treated as always-fresh. */
   getVcsDiffFingerprint?(
     diffType: DiffType,
     defaultBranch?: string,
@@ -230,10 +225,7 @@ function aggregateRepos(repos: WorkspaceRepoRuntimeState[]): WorkspaceDiffSnapsh
   };
 }
 
-// Guards a normalizeWorkspacePath(relative(...)) result: on Windows,
-// path.relative cannot relativize across drives and returns the target's
-// absolute path instead (after backslash normalization, e.g. "L:/other/..."),
-// which must be treated as escaping the repo the same as "..".
+// On Windows path.relative cannot relativize across drives and returns the target's absolute path (e.g. "L:/other/..."), which must count as escaping the repo like "..".
 export function isRepoRelative(rel: string): boolean {
   return Boolean(rel) && !rel.startsWith("..") && !rel.startsWith("/") && !/^[A-Za-z]:/.test(rel);
 }
@@ -418,9 +410,7 @@ export class WorkspaceReviewSession implements WorkspaceReviewState {
     return snapshot;
   }
 
-  /** Combined staleness fingerprint across EVERY child repo (selected or not —
-   * a repo with no changes at snapshot time still alters the workspace diff if
-   * it gains changes later). `null` when the runtime has no fingerprint probe. */
+  /** Covers every child repo, selected or not: one with no changes now still alters the diff if it gains some. `null` when the runtime has no fingerprint probe. */
   async getFingerprint(): Promise<string | null> {
     const probe = this.runtime.getVcsDiffFingerprint;
     if (!probe) return null;
@@ -433,8 +423,7 @@ export class WorkspaceReviewSession implements WorkspaceReviewState {
       const fingerprint = await probe(repoDiffType, repo.gitContext.defaultBranch, repo.cwd, {
         hideWhitespace: this.hideWhitespace,
       });
-      // "unknown" is stable across probes, so an unfingerprintable child never
-      // flip-flops the combined result.
+      // "unknown" is stable across probes, so an unfingerprintable child never flip-flops the combined result.
       parts.push(`${repo.id}=${fingerprint ?? "unknown"}`);
     }
     return parts.join("|");
@@ -460,7 +449,6 @@ export class WorkspaceReviewSession implements WorkspaceReviewState {
     return normalizeAgentPath(this.root, this.repos, filePath);
   }
 
-  /** Map workspace display paths onto one child repository's diff. */
   private resolveFileTarget(filePath: string, oldPath?: string) {
     const resolved = resolveWorkspaceFilePath(this.repos, filePath);
     if (!resolved) throw new Error("File is not part of this workspace review");
@@ -516,11 +504,6 @@ export class WorkspaceReviewSession implements WorkspaceReviewState {
     );
   }
 
-  /**
-   * Every child repository's files at its new side, folder-prefixed like the
-   * workspace diff (All files). The workspace is live when any child lists its
-   * working tree; a child that cannot be listed is left out.
-   */
   async listFiles(): Promise<RepoFileListing | null> {
     const list = this.runtime.listVcsFiles;
     if (!list) return null;

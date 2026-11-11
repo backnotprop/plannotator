@@ -1,22 +1,6 @@
 /**
- * The Shape store: one folder per shape under `<data dir>/shapes/`, shared by
- * the Inbox and the standalone Shapes page (SPEC.md §1, "Where the files live").
- *
- *   <data>/shapes/
- *     seen.json                        { "<shp id>": 7 }   the last version you looked at
- *     <projectKey>/<shp_id>/
- *       shape.json                     the shape (ShapeRecord), rewritten whole (temp file, then rename)
- *       versions.jsonl                 one full snapshot per line (ShapeVersion), append only
- *       chat.jsonl                     notes (ShapeNote), append only; a later line for the same id wins
- *       files/                         copies of the images the board cites
- *
- * `projectKey` is the Inbox's own `inboxProjectKey(name, root)`, so shapes and
- * Inbox threads group under the same project names. Nothing here reads or
- * writes the Inbox's store: an Inbox shape is a shape with `thread` set.
- *
- * Several processes may write (two agents, the CLI and a server), so every
- * change to one shape holds that shape's lock file. A torn last line (a crash
- * mid-append) is skipped on read, and the next append starts on a new line.
+ * One folder per shape under `<data dir>/shapes/`, shared by the Inbox and the Shapes page. `projectKey` is the Inbox's `inboxProjectKey(name, root)`; nothing here touches the Inbox's own store.
+ * Several processes may write, so every change to a shape holds its lock file. A torn last line (crash mid-append) is skipped on read and the next append starts on a new line.
  */
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -58,12 +42,9 @@ import {
 } from "./format";
 
 export const SHAPE_DRAWING_MAX_MS = 10 * 60 * 1000;
-/** An image a board cites, copied into the shape's files/. */
 export const SHAPE_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
-/** The pictures a board may copy in, by name; the bytes must then sniff as an image too. */
 const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".avif", ".ico"]);
 const IMAGE_KINDS = "a PNG, JPEG, GIF, WebP, SVG, AVIF or ICO image";
-/** A web picture (`http:` or `https:`), named as written. */
 const WEB_PICTURE_RE = /^https?:\/\//i;
 const LOCK_WAIT_MS = 5000;
 const LOCK_STALE_MS = 30_000;
@@ -77,54 +58,32 @@ export interface ShapeSummary {
   state: ShapeState;
   updated: string;
   latest: number;
-  /** The last version you looked at, or null. */
   seen: number | null;
-  /** The agent wrote a version newer than the one you looked at. */
   changed: boolean;
-  /** The agent is drawing now. */
   drawing: boolean;
-  /** Change it notes no agent has picked up. */
   waiting: number;
   session: ShapeSession | null;
 }
 
 export interface ShapeUpdateInput {
-  /** What the agent wrote; validated here. */
   board: unknown;
-  /** The shape to add a version to. Absent: a new shape. */
   id?: string | null;
-  /** The version the agent started from. Required for an existing shape. */
   base?: number | null;
-  /** The Inbox thread a new shape hangs off (`msg_…`). */
   thread?: string | null;
-  /** The last thread message this version took in. */
   through?: string | null;
   project: ShapeProject;
   session?: ShapeSession | null;
-  /** The folder the board file is in: image references by relative path are read from here. */
   sourceDir?: string | null;
-  /**
-   * The web pictures the board names (`https://…/a.png`), already fetched
-   * (`fetchShapeWebPictures`, web-pictures.ts), by the address as written:
-   * copied in like a file. One that is not here is refused.
-   */
   webPictures?: ReadonlyMap<string, ShapeWebPicture>;
 }
 
-/** A web picture `shape update` fetched: its bytes and the file name it is kept under (`logo.png`). */
 export interface ShapeWebPicture {
   bytes: Uint8Array;
   name: string;
 }
 
-/** A picture to copy into files/: from a file, or bytes already read (a web picture). */
 type ShapeImageFile = { path: string; name: string } | { bytes: Uint8Array; name: string };
 
-/**
- * Where each picture a board names sits (`<img src>`, `<image href>` in a drawn
- * view, its tall and its Show more; an image ref's target and every ref's
- * `images`), with its field: what `shape update` copies in. As written.
- */
 export function shapeBoardPictureSources(input: unknown): { src: string; field: string }[] {
   const out: { src: string; field: string }[] = [];
   const board = input as { views?: unknown; refs?: unknown } | null;
@@ -154,7 +113,7 @@ export function shapeBoardPictureSources(input: unknown): { src: string; field: 
   return out;
 }
 
-/** An `<img>` or `<image>` start tag's picture: the tag up to it, its attribute, and its value (one of three quotings). Attribute by attribute, so words inside another attribute's value (alt="x src=y") are left alone. */
+/** An `<img>`/`<image>` start tag's picture, attribute by attribute, so words inside another attribute's value (alt="x src=y") are left alone. */
 const DRAWN_PICTURE_RE = /(<(?:img|image)\b(?:\s+(?!(?:xlink:href|src|href)\s*=)[\w:.-]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+))?)*\s+)(xlink:href|src|href)\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s"'>]+))/gi;
 
 export type ShapeUpdateResult =
@@ -172,13 +131,10 @@ export interface ShapeStore {
   readonly dir: string;
   update(input: ShapeUpdateInput): ShapeUpdateResult;
   get(id: string): ShapeRecord | null;
-  /** One version (the latest when `n` is absent). */
   read(id: string, n?: number): ShapeVersion | null;
   versions(id: string): { n: number; at: string; note: string | null; base: number | null }[];
-  /** When each version was written and the review it took in, for naming the board a Show me made. */
   versionStamps(id: string): { n: number; at: string; through: string | null }[];
   list(options?: { state?: ShapeState | "all" }): ShapeSummary[];
-  /** The newest active shape of a session, else of a project root. For CLI calls that name no shape. */
   latestFor(options: { session?: ShapeSession | null; root?: string | null }): ShapeRecord | null;
   drawing(id: string, options?: { untilMs?: number }): ShapeRecord | null;
   setState(id: string, state: ShapeState): ShapeRecord | null;
@@ -188,37 +144,17 @@ export interface ShapeStore {
   addNote(id: string, input: unknown): ShapeNoteResult;
   answer(id: string, input: { re: string | null; text: string; from: ShapeSession }): ShapeNoteResult;
   notes(id: string): ShapeNote[];
-  /**
-   * The notes waiting for an agent (Change it, Ask). Reading them marks
-   * nothing: the caller hands them over, then calls `markDelivered`, so a
-   * hand-over that fails (a closed pipe) leaves them waiting. Two readers at
-   * once may both get them: delivery is at least once.
-   */
+  /** Reading marks nothing: the caller hands the notes over, then calls `markDelivered`, so a failed hand-over leaves them waiting. Delivery is at least once. */
   waiting(id: string): ShapeNote[];
-  /** Mark these notes delivered (the ones not delivered yet); the notes as marked. */
   markDelivered(id: string, noteIds: readonly string[]): ShapeNote[];
   /** A file under the shape's files/ folder, path-guarded; null when absent or outside. */
   filePath(id: string, name: string): string | null;
-  /**
-   * A Show me's box picture (a PNG `data:` URL), kept in the shape's files/ folder as a box note's picture is: the
-   * file's full path, or null (no such shape, or not a PNG data: URL).
-   */
   keepShowMePicture(id: string, picture: string): string | null;
-  /**
-   * Someone holds the store's lock (or this shape's). A server awaits this
-   * clearing before it writes, so the store's blocking wait never stalls its
-   * event loop behind an agent's CLI.
-   */
+  /** Servers await this clearing before writing, so the store's blocking wait never stalls their event loop behind an agent's CLI. */
   locked(id?: string | null): boolean;
 }
 
-// The lock is a file holding its owner's token. A lock older than
-// LOCK_STALE_MS is broken, but only under a second lock (`.lock.break`) and
-// only if it is still stale when looked at again there, so two waiters can
-// never both break it and each take a fresh lock. The owner removes the lock
-// only while it still holds its own token. `sleep` blocks the thread: the
-// store is called from the CLI, one command per process; a server that calls
-// it must call it off its event loop.
+// The lock file holds its owner's token. A stale lock is broken only under a second lock (`.lock.break`) and only if still stale on a second look, so two waiters never both break it. The owner removes it only while it holds its own token. `sleep` blocks the thread: a server must call this off its event loop.
 function sleep(ms: number) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
@@ -256,7 +192,7 @@ function readLines<T>(path: string): T[] {
   return out;
 }
 
-/** Append one line; when the file's last line is torn, start on a new one so both stay readable. */
+/** Append one line; if the last line is torn, start on a new one so both stay readable. */
 function appendLine(path: string, value: unknown) {
   let prefix = "";
   try {
@@ -331,7 +267,6 @@ export function shapesDirOf(dataDir: string): string {
 
 export type { ShapeProject };
 
-/** A linked worktree's `.git` is a file saying `gitdir: <path>`, and that path exists; a main checkout's is a folder. */
 export function isLinkedWorktree(folder: string): boolean {
   try {
     const dotGit = join(folder, ".git");
@@ -343,7 +278,6 @@ export function isLinkedWorktree(folder: string): boolean {
   }
 }
 
-/** The checkout a board's code lives in: the linked worktree of its latest write while that is still one, else the project's root. */
 export function shapeCodeRoot(project: ShapeProject): string {
   return project.worktree && isLinkedWorktree(project.worktree) ? project.worktree : project.root;
 }
@@ -372,7 +306,7 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
   }
 
   const recordOf = (folder: string) => readJson<ShapeRecord>(join(folder, "shape.json"));
-  // A version or note saved when What to know was Requirements says "reqs": read it as the view it is now. The file stays as written.
+  // A legacy "reqs" reads as the view it is now; the file stays as written.
   const nowKnow = <T extends { view: unknown }>(x: T): T => (shapeViewNow(x.view) === x.view ? x : { ...x, view: "know" });
   const versionsOf = (folder: string) => readLines<ShapeVersion>(join(folder, "versions.jsonl")).map((v) => (v.parts ? { ...v, parts: v.parts.map(nowKnow) } : v));
 
@@ -386,7 +320,6 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
 
   const drawingNow = (record: ShapeRecord) => !!record.drawing && Date.parse(record.drawing.until) > now();
 
-  /** Where an image comes from and its name in files/. Null: it stays as written (a files/ name, a data:image) or an error was recorded. */
   function imageFile(src: string, field: string, sourceDir: string | null | undefined, errors: string[], web?: ReadonlyMap<string, ShapeWebPicture>): ShapeImageFile | null {
     // files/… is a picture the board keeps, unless the board's own folder really has one by that name: that one is copied.
     const local = src.startsWith("files/") && sourceDir ? resolve(sourceDir, src) : null;
@@ -395,7 +328,6 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
       return null;
     }
     if (/^data:image\/(?:png|jpeg|gif|webp)[;,]/i.test(src)) return null;
-    // A web picture: fetched by `shape update` before the store sees it, and copied in like a file.
     if (WEB_PICTURE_RE.test(src)) {
       const picture = web?.get(src);
       if (!picture) {
@@ -466,11 +398,6 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
     else writeFileSync(dest, file.bytes, { mode: 0o600 });
   }
 
-  /**
-   * A picture a drawing names by its path (`<img src>`, SVG `<image href>`) gets
-   * its files/ name before the board is checked; the file is copied once the
-   * board's folder is known. A URL stays as written, for the check to refuse.
-   */
   function drawnImages(input: unknown, sourceDir: string | null | undefined, web?: ReadonlyMap<string, ShapeWebPicture>): { board: unknown; files: ShapeImageFile[]; errors: string[] } {
     const errors: string[] = [];
     const files: ShapeImageFile[] = [];
@@ -506,7 +433,6 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
     return { board: { ...(input as object), views: next }, files, errors };
   }
 
-  /** Copy the images the refs cite into files/, and point the refs at the copies. */
   function keepImages(board: ShapeBoard, folder: string, sourceDir: string | null | undefined, web?: ReadonlyMap<string, ShapeWebPicture>): { board: ShapeBoard; errors: string[] } {
     const errors: string[] = [];
     if (!board.refs?.length) return { board, errors };
@@ -616,7 +542,6 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
         parts: shapeParts(kept.board),
       };
       appendLine(join(folder, "versions.jsonl"), version);
-      // The board's checkout follows its latest write, within its project.
       const project = input.project.root === record.project.root ? { ...input.project, name: record.project.name } : record.project;
       const next: ShapeRecord = { ...record, project, title: kept.board.title, updated: at, latest: n, drawing: null };
       writeJsonAtomic(join(folder, "shape.json"), next);
@@ -714,7 +639,6 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
         });
       }
     }
-    // Newest change first (SPEC: "Last changed, by default and everywhere").
     return out.sort((a, b) => b.updated.localeCompare(a.updated) || b.id.localeCompare(a.id));
   }
 
@@ -778,7 +702,6 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
       const noteId = shapeNoteId(now());
       let picture: string | undefined;
       if (checked.value.picture) {
-        // A box's picture: a file the shape keeps, named for its note.
         const name = `note-${noteId}.png`;
         ensureDir(join(folder, "files"));
         writeFileSync(join(folder, "files", name), Buffer.from(checked.value.picture.slice(checked.value.picture.indexOf(",") + 1), "base64"), { mode: 0o600 });

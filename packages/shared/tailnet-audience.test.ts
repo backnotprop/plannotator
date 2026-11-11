@@ -1,9 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { cameThroughTailscale, cameThroughTailscaleServe, forwardedForIsTailnet, isTailnetAddress, tailnetAudience } from './tailnet-audience'
 
-// #2166: who may use "Ask this session" in a `--tailscale` session. The
-// failure guarded: a request through `tailscale serve` reads as local (and so
-// skips the owner check), or a login that is not the owner reads as the owner.
+// Guards: a request through `tailscale serve` reading as local (skipping the owner check), or a non-owner login reading as the owner.
 
 const OWNER = 'owner@example.com'
 const served = (extra: Record<string, string> = {}) => new Headers({ 'x-forwarded-for': '100.64.0.7', ...extra })

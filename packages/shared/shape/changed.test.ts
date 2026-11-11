@@ -1,10 +1,4 @@
-/**
- * `views.changed` through the store: once What's changed, now kept but never shown (approval
- * "shape-whats-changed-removed"). What regresses if these fail:
- * - a board that still sends it is refused, or it is lost or rewritten on its way to disk and back;
- * - it is stored as parts again (a change in it would then light a dot);
- * - a board without it is stored differently than before (an older agent's board, every board on disk today).
- */
+/** `views.changed` is kept but never shown: a board still sending it is accepted and round-trips to disk, it is not stored as parts, and a board without it stores as before. */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -29,7 +23,6 @@ test('views.changed is stored and read back as written, version after version, a
   if (!made.ok) throw new Error(JSON.stringify(made));
   expect(s.read(made.id)!.views.changed).toEqual(KETTLE_CHANGED);
   expect(s.read(made.id)!.parts.some((p) => p.view === 'changed')).toBe(false);
-  // A new version that drops one change: the stored one has exactly the rest.
   const fewer = { ...KETTLE_CHANGED, items: KETTLE_CHANGED.items.slice(1) };
   const next = s.update({ id: made.id, base: 1, board: kettleBoard(fewer), project: project(dir) });
   if (!next.ok) throw new Error(JSON.stringify(next));

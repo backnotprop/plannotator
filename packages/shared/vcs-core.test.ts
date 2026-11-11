@@ -520,7 +520,6 @@ describe("resolveInitialDiffType", () => {
     });
 
     expect(resolveInitialDiffType(jjContext, "jj-line")).toBe("jj-line");
-    // Evolution diff is only offered with evolog history.
     expect(resolveInitialDiffType(jjContext, "jj-evolog")).toBe("jj-current");
   });
 

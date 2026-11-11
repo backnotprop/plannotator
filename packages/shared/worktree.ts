@@ -1,46 +1,17 @@
-/**
- * Worktree — runtime-agnostic git worktree primitives.
- *
- * Uses ReviewGitRuntime so both Bun and Node runtimes can use the same logic.
- * Lives in packages/shared/ and gets vendored to Pi via vendor.sh.
- *
- * Designed as composable primitives, not tied to any specific use case.
- * PR local checkout, agent sandboxes, parallel sessions — all compose from these.
- */
-
 import type { ReviewGitRuntime } from "./review-core";
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 export interface CreateWorktreeOptions {
-  /** Git ref to check out (branch name, SHA, FETCH_HEAD, etc.) */
   ref: string;
-  /** Absolute path where the worktree will be created. */
   path: string;
-  /** Create in detached HEAD mode (no branch). Default: false. */
   detach?: boolean;
-  /** CWD of the source repository. Defaults to process.cwd(). */
   cwd?: string;
 }
 
 export interface RemoveWorktreeOptions {
-  /** Force removal even if the worktree has modifications. Default: false. */
   force?: boolean;
-  /** CWD of the source repository. Required if the worktree was created from a different cwd. */
   cwd?: string;
 }
 
-// ---------------------------------------------------------------------------
-// Primitives
-// ---------------------------------------------------------------------------
-
-/**
- * Fetch a ref from origin.
- * Runs: `git fetch origin <ref>`
- * Throws on failure.
- */
 export async function fetchRef(
   runtime: ReviewGitRuntime,
   ref: string,
@@ -53,11 +24,6 @@ export async function fetchRef(
   }
 }
 
-/**
- * Ensure a git object (commit SHA) is available locally.
- * Checks with `git cat-file -t`, fetches from origin if missing.
- * Returns true if the object is available after the attempt.
- */
 export async function ensureObjectAvailable(
   runtime: ReviewGitRuntime,
   sha: string,
@@ -66,20 +32,13 @@ export async function ensureObjectAvailable(
   const check = await runtime.runGit(["cat-file", "-t", sha], { cwd: options?.cwd });
   if (check.exitCode === 0) return true;
 
-  // Object missing locally — try fetching it
   const fetch = await runtime.runGit(["fetch", "origin", "--", sha], { cwd: options?.cwd });
   if (fetch.exitCode !== 0) return false;
 
-  // Verify it's now available
   const recheck = await runtime.runGit(["cat-file", "-t", sha], { cwd: options?.cwd });
   return recheck.exitCode === 0;
 }
 
-/**
- * Create a git worktree.
- * Runs: `git worktree add [--detach] <path> <ref>`
- * Throws on failure with a descriptive error.
- */
 export async function createWorktree(
   runtime: ReviewGitRuntime,
   options: CreateWorktreeOptions,
@@ -96,10 +55,7 @@ export async function createWorktree(
   return { worktreePath: options.path };
 }
 
-/**
- * Remove a git worktree. Best-effort — logs errors but does not throw.
- * Runs: `git worktree remove [--force] <path>`
- */
+/** Best-effort: logs errors but does not throw. */
 export async function removeWorktree(
   runtime: ReviewGitRuntime,
   worktreePath: string,

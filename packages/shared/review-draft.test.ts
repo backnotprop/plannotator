@@ -1,9 +1,4 @@
-/**
- * PR review drafts reachable by target identity (#1590).
- *
- * Every test sandboxes drafts under its own temp PLANNOTATOR_DATA_DIR (set
- * inside the test, restored in afterEach) — never the real ~/.plannotator.
- */
+/** Every test sandboxes drafts under its own temp PLANNOTATOR_DATA_DIR, set in the test and restored in afterEach. */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -57,7 +52,6 @@ describe("prDraftTargetKey", () => {
     expect(prDraftTargetKey(github, "full-stack")).not.toBe(layer);
     expect(prDraftTargetKey({ ...github, number: 43 }, "layer")).not.toBe(layer);
     expect(prDraftTargetKey({ ...github, host: "ghe.example.com" }, "layer")).not.toBe(layer);
-    // Never collides with a content-hash key's shape.
     expect(layer).toMatch(/^pr-[0-9a-f]{16}$/);
   });
 });
@@ -89,13 +83,11 @@ describe("with a target key (PR mode)", () => {
     if (!loaded.found) return;
     expect(loaded.draft.codeAnnotations).toEqual(draft(3).codeAnnotations);
     expect(loaded.draft.patchChanged).toBe(true);
-    // The server's stamp is internal; it never reaches the client.
     expect("patchKey" in loaded.draft).toBe(false);
   });
 
   test("a newer target copy beats a stale patch-key copy from an earlier visit to the same patch", () => {
-    // Session 1 on P1, session 2 on P2 continues the draft, the PR is then
-    // force-pushed back to P1: the P1 file is older than what session 2 saved.
+    // Session 1 on P1, session 2 on P2 continues the draft, then the PR is force-pushed back to P1.
     saveReviewDraft({ patchKey: P1, targetKey: T }, draft(3, "old"));
     saveReviewDraft({ patchKey: P2, targetKey: T }, draft(5, "newer"));
     const loaded = loadReviewDraft({ patchKey: P1, targetKey: T });
@@ -111,7 +103,6 @@ describe("with a target key (PR mode)", () => {
 
   test("delete clears the patch key, the target key, and the patch the target copy was last saved on", () => {
     saveReviewDraft({ patchKey: P1, targetKey: T }, draft(3));
-    // A new session on P2 loaded it but has not saved yet, then submits.
     deleteReviewDraft({ patchKey: P2, targetKey: T }, 4);
     expect(loadReviewDraft({ patchKey: P2, targetKey: T }).found).toBe(false);
     expect(loadReviewDraft({ patchKey: P1, targetKey: T }).found).toBe(false);
@@ -122,10 +113,8 @@ describe("with a target key (PR mode)", () => {
   test("after a delete, a late save from another tab (older generation) is rejected under BOTH keys", () => {
     saveReviewDraft({ patchKey: P2, targetKey: T }, draft(3));
     deleteReviewDraft({ patchKey: P2, targetKey: T }, 4);
-    // Stale tab still looking at the older patch P1, debounced save gen 4.
     expect(saveReviewDraft({ patchKey: P1, targetKey: T }, draft(4))).toBe(false);
     expect(existsSync(join(getDraftDir(), `${P1}.json`))).toBe(false);
-    // Stale tab on the current patch, gen 2.
     expect(saveReviewDraft({ patchKey: P2, targetKey: T }, draft(2))).toBe(false);
     expect(loadReviewDraft({ patchKey: P1, targetKey: T }).found).toBe(false);
     expect(loadReviewDraft({ patchKey: P2, targetKey: T }).found).toBe(false);
@@ -135,14 +124,11 @@ describe("with a target key (PR mode)", () => {
     saveReviewDraft({ patchKey: P1, targetKey: T }, draft(3));
     deleteReviewDraft({ patchKey: P1, targetKey: T }, 7);
     expect(loadReviewDraft({ patchKey: P2, targetKey: T })).toEqual({ found: false, draftGeneration: 7 });
-    // A save past the tombstone is a new draft and is accepted.
     expect(saveReviewDraft({ patchKey: P2, targetKey: T }, draft(8))).toBe(true);
     expect(loadReviewDraft({ patchKey: P2, targetKey: T }).found).toBe(true);
   });
 
   test("a patch-key draft written before the target key was deleted is not resurrected", () => {
-    // An orphaned patch-key copy (e.g. from a tab the delete could not name)
-    // at or below the target tombstone is dead.
     saveDraft(P1, draft(2));
     saveReviewDraft({ patchKey: P2, targetKey: T }, draft(3));
     deleteReviewDraft({ patchKey: P2, targetKey: T }, 4);
@@ -160,8 +146,6 @@ describe("older patch copies (#1590 review, item 5)", () => {
   const P3 = contentHash("patch three");
 
   test("a delete WITHOUT a generation still removes the patch copies of every earlier push", () => {
-    // Three pushes, the draft saved on each; then an external caller deletes
-    // with no generation (no tombstone is written).
     saveReviewDraft({ patchKey: P1, targetKey: T }, draft(1));
     saveReviewDraft({ patchKey: P2, targetKey: T }, draft(2));
     saveReviewDraft({ patchKey: P3, targetKey: T }, draft(3));
@@ -188,20 +172,18 @@ describe("session bookkeeping across in-place target switches (#1590 review, ite
   test("a decision clears every PR target this session saved to, not only the one on screen", () => {
     const session = createReviewDraftSession();
     session.save({ patchKey: P1, targetKey: A }, draft(1));
-    session.save({ patchKey: P1, targetKey: A_FULL }, draft(2)); // scope switch
-    session.save({ patchKey: P2, targetKey: B }, draft(3)); // PR switch
+    session.save({ patchKey: P1, targetKey: A_FULL }, draft(2));
+    session.save({ patchKey: P2, targetKey: B }, draft(3));
     session.settle({ patchKey: P2, targetKey: B }, 4);
-    // Nothing comes back after a later push to any of them.
     const P9 = contentHash("after push");
     for (const targetKey of [A, A_FULL, B]) {
       expect(loadReviewDraft({ patchKey: P9, targetKey }).found).toBe(false);
     }
-    // And each keeps a tombstone, so a stale tab cannot recreate it.
     expect(saveReviewDraft({ patchKey: P9, targetKey: A }, draft(4))).toBe(false);
   });
 
   test("a target the session only restored from is cleared by the decision too", () => {
-    saveReviewDraft({ patchKey: P1, targetKey: A }, draft(1)); // earlier session
+    saveReviewDraft({ patchKey: P1, targetKey: A }, draft(1));
     const session = createReviewDraftSession();
     expect(session.load({ patchKey: P2, targetKey: A }).found).toBe(true);
     session.save({ patchKey: P2, targetKey: B }, draft(2));
@@ -233,7 +215,6 @@ describe("reviewDraftState (#1590 review, item 2)", () => {
     saveReviewDraft({ patchKey: P1, targetKey: B }, draft(39));
     deleteReviewDraft({ patchKey: P1, targetKey: B }, 40);
     expect(reviewDraftState({ patchKey: P2, targetKey: B })).toEqual({ found: false, draftGeneration: 40 });
-    // A client that adopts the floor saves successfully; one that does not is rejected.
     expect(saveReviewDraft({ patchKey: P2, targetKey: B }, draft(5))).toBe(false);
     expect(saveReviewDraft({ patchKey: P2, targetKey: B }, draft(41))).toBe(true);
   });
@@ -278,8 +259,7 @@ test('a local caller without a page id cannot erase another target by omission o
 });
 
 test('a hung git gives a local review no draft target instead of blocking startup', async () => {
-  // Runtime semantics: a call without timeoutMs never settles; with one, the
-  // process is killed when it expires.
+  // A call without timeoutMs never settles; with one, the process is killed when it expires.
   const hungGit = (_args: string[], options?: { timeoutMs?: number }) => new Promise<{ stdout: string; stderr: string; exitCode: number }>((resolve) => {
     if (options?.timeoutMs) setTimeout(() => resolve({ stdout: '', stderr: '', exitCode: 137 }), options.timeoutMs);
   });

@@ -86,8 +86,6 @@ export interface VcsProvider {
     oldPath?: string,
     cwd?: string,
   ): Promise<{ oldContent: string | null; newContent: string | null }>;
-  /** One side of a changed file as raw bytes (code-review image preview).
-   * Providers without it (e.g. p4) report the preview unavailable. */
   getFileBytes?(
     diffType: DiffType,
     defaultBranch: string,
@@ -97,11 +95,8 @@ export interface VcsProvider {
     maxBytes: number,
     cwd?: string,
   ): Promise<FileBytesRead>;
-  /** Every file of the repository at the diff's new side (the review tree's
-   * All files). Providers without it (e.g. p4) offer no All files. */
   listFiles?(diffType: DiffType, defaultBranch: string, cwd?: string): Promise<RepoFileListing | null>;
-  /** Cheap staleness fingerprint for a diff (see review-core/jj-core). Providers
-   * without an implementation (e.g. p4) are treated as always-fresh. */
+  /** Providers without one (e.g. p4) are treated as always-fresh. */
   getDiffFingerprint?(
     diffType: DiffType,
     defaultBranch: string,
@@ -164,10 +159,8 @@ export interface VcsApi {
     maxBytes: number,
     cwd?: string,
   ): Promise<FileBytesRead>;
-  /** The repository at the diff's new side; null when the provider cannot list it. */
   listVcsFiles(diffType: DiffType, defaultBranch: string, cwd?: string): Promise<RepoFileListing | null>;
-  /** Best-effort staleness fingerprint for the given diff parameters. `null`
-   * means "cannot fingerprint" and must be treated as always-fresh. */
+  /** `null` means "cannot fingerprint" and must be treated as always-fresh. */
   getVcsDiffFingerprint(
     diffType: DiffType,
     defaultBranch?: string,
@@ -202,13 +195,10 @@ export interface PreparedLocalReviewDiff {
   rawPatch: string;
   gitRef: string;
   error?: string;
-  /** Provider freshness token captured atomically with the initial patch. */
   fingerprint?: string;
 }
 
-// Exported so review-args can pin REVIEW_OPEN_DIFF_TYPES (the flat ids
-// `review --diff-type` accepts) against it — a git diff type added to one set
-// and not the other would make a valid mode unreachable from the CLI.
+// Exported so review-args can pin REVIEW_OPEN_DIFF_TYPES against it: a type added to one set and not the other would make a mode unreachable from the CLI.
 export const GIT_DIFF_TYPES = new Set(["since-base", "local-vs-remote", "uncommitted", "staged", "unstaged", "last-commit", "branch", "merge-base", "all"]);
 const JJ_DIFF_TYPES = new Set(["jj-current", "jj-last", "jj-line", "jj-evolog", "jj-all"]);
 
@@ -376,7 +366,6 @@ export function createJjProvider(runtime: ReviewJjRuntime, gitRuntime: ReviewGit
   };
 }
 
-/** Create the provider for an actively checked-out GitButler workspace. */
 export function createGitButlerProvider(runtime: ReviewGitButlerRuntime): VcsProvider {
   return {
     id: "gitbutler",
@@ -467,10 +456,7 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
   }
 
   async function detectVcs(cwd?: string): Promise<VcsProvider> {
-    // OpenCode and Pi keep this module alive across review sessions. Always
-    // re-detect at the session boundary so `but setup`/`but teardown`, JJ
-    // colocating, or nested-repo changes cannot leave a stale provider with
-    // the wrong staging semantics cached for this cwd.
+    // OpenCode and Pi keep this module alive across review sessions: re-detect at each session boundary so `but setup`/`teardown`, JJ colocating or nested-repo changes cannot leave a stale provider cached.
     return (await detectManagedVcs(cwd)) ?? defaultProvider;
   }
 
@@ -553,8 +539,7 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
       if (diffType === "jj-line" && ownsRequestedDiffType && requestedBase) {
         return requestedBase;
       }
-      // Evolution diff compares against the change's previous state, never
-      // the line base (the same base the UI picks when switching to it).
+      // Evolution diff compares against the change's previous state, never the line base.
       if (diffType === "jj-evolog" && gitContext.jjEvologs?.[1]) {
         return gitContext.jjEvologs[1].commitId;
       }
@@ -675,8 +660,7 @@ export function createVcsApi(providers: readonly VcsProvider[]): VcsApi {
         if (!provider.getDiffFingerprint) return null;
         return await provider.getDiffFingerprint(diffType, defaultBranch, cwd, options);
       } catch {
-        // Fingerprinting is best-effort: failure means "always fresh", never
-        // a user-facing error.
+        // Fingerprinting is best-effort: failure means "always fresh", never a user-facing error.
         return null;
       }
     },
@@ -914,14 +898,7 @@ async function materializeGitSnapshot(
   return createSyntheticSnapshot(runtime, cwd, head, [stagedPatch, patch]);
 }
 
-/**
- * One `jj diff` between two revisions, bounded and stripped of the entries
- * `git apply` cannot replay.
- *
- * The byte cap is passed to the runtime so it stops READING at the limit; the
- * post-check only covers runtimes that ignore the option, so a 64 MB tree can
- * never be fully buffered just to be rejected afterwards.
- */
+/** The byte cap is passed to the runtime so it stops reading at the limit; the post-check only covers runtimes that ignore the option, so a huge tree is never fully buffered just to be rejected. */
 async function jjSnapshotPatch(
   runtime: ReviewJjRuntime,
   options: VcsSnapshotOptions,
@@ -980,7 +957,6 @@ async function materializeJjSnapshot(
     await git(gitRuntime, tempRoot, ["init", "--quiet", "--", snapshotCwd]);
     const emptyCommit = await commitIndex(gitRuntime, snapshotCwd, undefined, "Plannotator review empty snapshot");
 
-    // Only the base side materializes the whole parseable tree.
     const basePatch = await jjSnapshotPatch(jjRuntime, options, "root()", fromRevision, filesets);
     await git(gitRuntime, snapshotCwd, ["read-tree", "--empty"]);
     await applyPatchToIndex(gitRuntime, snapshotCwd, basePatch);

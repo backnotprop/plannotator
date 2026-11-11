@@ -64,9 +64,8 @@ describe("worktree-pool", () => {
     expect(entry.number).toBe(5);
     expect(entry.ready).toBe(true);
 
-    // Verify fetch order: baseBranch → baseSha → PR head → worktree add
     expect(commands[0]).toEqual(["fetch", "origin", "--", "main"]);
-    expect(commands[1][0]).toBe("cat-file"); // ensureObjectAvailable check
+    expect(commands[1][0]).toBe("cat-file");
     expect(commands[2]).toEqual(["fetch", "origin", "--", "refs/pull/5/head"]);
     expect(commands[3]).toEqual(["worktree", "add", "--detach", "/tmp/session/pool/pr-5", "FETCH_HEAD"]);
   });
@@ -80,7 +79,7 @@ describe("worktree-pool", () => {
 
     const second = await pool.ensure(runtime, makeMetadata(5));
     expect(second.path).toBe("/tmp/session/pool/pr-5");
-    expect(commands.length).toBe(commandCountAfterFirst); // No new git commands
+    expect(commands.length).toBe(commandCountAfterFirst);
   });
 
   test("ensure creates separate entries for different PRs", async () => {
@@ -126,13 +125,12 @@ describe("worktree-pool", () => {
 
     await pool.ensure(runtime, makeMetadata(3));
     await pool.ensure(runtime, makeMetadata(4, "feature/pr-3"));
-    commands.length = 0; // Reset
+    commands.length = 0;
 
     await pool.cleanup(runtime);
 
     expect(pool.has("https://github.com/acme/widgets/pull/3")).toBe(false);
     expect(pool.has("https://github.com/acme/widgets/pull/4")).toBe(false);
-    // Should have called worktree remove for both
     const removeCommands = commands.filter(c => c[0] === "worktree" && c[1] === "remove");
     expect(removeCommands.length).toBe(2);
   });
@@ -163,8 +161,6 @@ describe("worktree-pool", () => {
   });
 });
 
-// --- Seeded background warmup (non-blocking PR checkout) ---------------------
-
 function deferred<T>() {
   let resolve!: (value: T) => void;
   let reject!: (err: unknown) => void;
@@ -188,11 +184,11 @@ describe("worktree-pool seeded warmup", () => {
     );
 
     expect(pool.resolve(PR3_URL)).toBeUndefined();
-    expect(pool.has(PR3_URL)).toBe(true); // entry exists — consumers can distinguish "warming up" from "unknown"
+    expect(pool.has(PR3_URL)).toBe(true);
 
     warmup.resolve({ path: "/tmp/session/pool/pr-3", prUrl: PR3_URL, number: 3, ready: true });
     await warmup.promise;
-    await Bun.sleep(0); // let the pool's bookkeeping handlers run
+    await Bun.sleep(0);
 
     expect(pool.resolve(PR3_URL)).toBe("/tmp/session/pool/pr-3");
     expect(pool.get(PR3_URL)?.ready).toBe(true);
@@ -209,14 +205,14 @@ describe("worktree-pool seeded warmup", () => {
 
     const ensured = pool.ensure(runtime, makeMetadata(3));
     await Bun.sleep(0);
-    expect(commands.length).toBe(0); // no parallel creation kicked off
+    expect(commands.length).toBe(0);
 
     warmup.resolve({ path: "/tmp/session/pool/pr-3", prUrl: PR3_URL, number: 3, ready: true });
     const entry = await ensured;
 
     expect(entry.path).toBe("/tmp/session/pool/pr-3");
     expect(entry.ready).toBe(true);
-    expect(commands.length).toBe(0); // creation was the warmup's job, not ensure's
+    expect(commands.length).toBe(0);
   });
 
   test("failed warmup keeps the entry not-ready so resolve never hands out the dead path", async () => {
@@ -250,7 +246,6 @@ describe("worktree-pool seeded warmup", () => {
 
     expect(entry.ready).toBe(true);
     expect(pool.resolve(PR3_URL)).toBe("/tmp/session/pool/pr-3");
-    // The retry ran the full creation sequence itself this time.
     expect(commands.some(c => c[0] === "worktree" && c[1] === "add")).toBe(true);
   });
 
@@ -278,10 +273,9 @@ describe("worktree-pool seeded warmup", () => {
       warmup.promise,
     );
 
-    // pr-switch arrives while the initial checkout is still being fetched
     const switched = pool.ensure(runtime, makeMetadata(5));
     await Bun.sleep(0);
-    expect(commands.length).toBe(0); // PR #5's fetch must not clobber the warmup's FETCH_HEAD
+    expect(commands.length).toBe(0);
 
     warmup.resolve({ path: "/tmp/session/pool/pr-3", prUrl: PR3_URL, number: 3, ready: true });
     const entry = await switched;
@@ -314,8 +308,6 @@ describe("worktree-pool seeded warmup", () => {
     expect(a.path).toBe("/tmp/session/pool/pr-3");
     expect(b.path).toBe("/tmp/session/pool/pr-4");
 
-    // PR #3's entire sequence (ending in worktree add) must complete before
-    // any PR #4 command runs.
     const firstPr4Index = commands.findIndex(c => c.join(" ").includes("pr-4") || c.join(" ").includes("refs/pull/4"));
     const pr3AddIndex = commands.findIndex(c => c[0] === "worktree" && c[3] === "/tmp/session/pool/pr-3");
     expect(pr3AddIndex).toBeGreaterThanOrEqual(0);

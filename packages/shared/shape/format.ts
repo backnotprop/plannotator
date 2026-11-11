@@ -1,4 +1,2 @@
-// The Shape format lives in @plannotator/core (browser-safe), so the board's UI
-// in @plannotator/ui reads the same types and diff. This shim keeps the store's
-// imports in one place, as shared does for its other core modules.
+// Shim over @plannotator/core so the store's imports stay in one place.
 export * from "@plannotator/core/shape";

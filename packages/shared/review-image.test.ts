@@ -1,7 +1,3 @@
-/**
- * Code-review image preview (#1598), pure half: the decisions the Bun server
- * and the Pi mirror share. Each block names the regression it guards.
- */
 import { describe, expect, test } from "bun:test";
 import {
   type DiffType,
@@ -68,8 +64,7 @@ describe("sniffImageContentType (content type comes from bytes, never the name)"
   });
 
   test("HTML, a zip named .png, an LFS pointer and an empty file are not images", () => {
-    // Serving HTML as image/svg+xml (or at all) from the session origin is the
-    // risk the sniffer exists for.
+    // Serving HTML as image/svg+xml from the session origin is the risk the sniffer exists for.
     expect(sniffImageContentType(enc("<!DOCTYPE html><html><svg></svg></html>"))).toBeNull();
     expect(sniffImageContentType(enc("<html><body><svg/></body></html>"))).toBeNull();
     expect(sniffImageContentType(bytes(0x50, 0x4b, 0x03, 0x04, 0, 0))).toBeNull();

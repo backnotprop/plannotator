@@ -1,11 +1,7 @@
 export interface TourDiffAnchor {
-  /** Relative file path within the repo. */
   file: string;
-  /** Start line in the new file (post-change). */
   line: number;
-  /** End line in the new file. */
   end_line: number;
-  /** Raw unified diff hunk for this anchor. */
   hunk: string;
   /** One-line chip label, e.g. "Add retry logic". */
   label: string;
@@ -57,5 +53,4 @@ export interface CodeTourOutput {
   qa_checklist: TourQAItem[];
 }
 
-/** UI-side tour shape: server output extended with persisted checklist state. */
 export type CodeTourData = CodeTourOutput & { checklist: boolean[] };
