@@ -11809,12 +11809,13 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-prpop-tbtn { flex: none; height: 28px; padding: 0 10px; border-radius: 6px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; color: var(--foreground); background: var(--muted); }
 .ib-prpop-tbtn:hover:not(:disabled) { background: color-mix(in oklch, var(--muted) 70%, var(--foreground) 8%); }
 .ib-prpop-tbtn:disabled { opacity: 0.5; }
-.ib-prpop-rm1 { align-self: flex-start; background: none; color: var(--muted-foreground); padding: 0 4px; }
+/* Remove <PR>: wraps inside the card or the phone's sheet, however long the project's path. */
+.ib-prpop-rm1 { align-self: flex-start; background: none; color: var(--muted-foreground); padding: 4px; height: auto; min-height: 28px; max-width: 100%; text-align: start; white-space: normal; overflow-wrap: anywhere; }
 .ib-prpop-rm1:hover:not(:disabled) { background: var(--muted); color: var(--foreground); }
 .ib-prpop-undo { display: flex; align-items: center; gap: 8px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .ib-prpop-err { font-size: var(--ib-fs-12, 12px); line-height: 1.4; color: var(--ib-ref-closed); }
 .ib-prpop-close { min-height: 44px; padding: 0 12px; border-radius: 6px; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); align-self: flex-end; }
-@media (pointer: coarse) { .ib-prpop-input, .ib-prpop-tbtn { height: 44px; font-size: var(--ib-fs-16-in, 16px); } }
+@media (pointer: coarse) { .ib-prpop-input, .ib-prpop-tbtn { height: 44px; font-size: var(--ib-fs-16-in, 16px); } .ib-prpop-rm1 { height: auto; min-height: 44px; } }
 
 /* ── A phone's sidebar sheet, once open (approval "inbox-phone-sidebar-sheet", "Sheet 1 · Same sections, fixed") ──
    Every rule here is under `.ib-sb-sheet-in`, which exists only while the navigation is a phone's sheet
