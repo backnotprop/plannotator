@@ -34,9 +34,12 @@ function plain(value: unknown): unknown {
 
 const byThread = <T extends { thread_id: string }>(rows: T[]) => [...rows].sort((a, b) => a.thread_id.localeCompare(b.thread_id));
 
+/** Storage without its byte counts, and without the order they give (biggest first): projects by id, threads by id. */
 function withoutBytes(usage: ReturnType<InboxStore["diskUsage"]>) {
   return {
-    projects: usage.projects.map(({ bytes: _b, threads, ...rest }) => ({ ...rest, threads: threads.map(({ bytes: _t, ...thread }) => thread).sort((a, b) => a.thread_id.localeCompare(b.thread_id)) })),
+    projects: usage.projects
+      .map(({ bytes: _b, threads, ...rest }) => ({ ...rest, threads: threads.map(({ bytes: _t, ...thread }) => thread).sort((a, b) => a.thread_id.localeCompare(b.thread_id)) }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
   };
 }
 

@@ -123,7 +123,9 @@ export function writeLine(db: InboxDbWriter, line: InboxLine): void {
     case "question": {
       const prev = current ? (JSON.parse(current.record) as InboxQuestionRecord) : undefined;
       // Typing goes over the row before it: history keeps each change of choice, never each key.
-      if (prev && continuesTyping(prev, line.record)) db.delete(t.events).where(eq(t.events.seq, current!.seq)).run();
+      if (prev && continuesTyping(prev, line.record)) {
+        db.delete(t.events).where(and(eq(t.events.seq, current!.seq), eq(t.events.kind, "question"), eq(t.events.subject_id, line.id))).run();
+      }
       writeQuestion(db, line.record, data, seq, line.at, actor);
       return;
     }

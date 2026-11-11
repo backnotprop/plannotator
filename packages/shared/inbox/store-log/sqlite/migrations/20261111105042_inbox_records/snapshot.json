@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "85c3033a-bfe5-4408-a7b9-ea9dedaaf68e",
+  "id": "a9369817-ec76-4de8-ad69-f0b53f3601d2",
   "prevIds": [
     "00000000-0000-0000-0000-000000000000"
   ],
@@ -474,9 +474,19 @@
     },
     {
       "table": "events",
-      "name": "seq",
+      "name": "id",
       "type": "integer",
       "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "events",
+      "name": "seq",
+      "type": "integer",
+      "notNull": true,
       "autoincrement": false,
       "default": null,
       "generated": null,
@@ -1264,9 +1274,19 @@
     },
     {
       "table": "thread_pull_events",
-      "name": "seq",
+      "name": "id",
       "type": "integer",
       "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "thread_pull_events",
+      "name": "seq",
+      "type": "integer",
+      "notNull": true,
       "autoincrement": false,
       "default": null,
       "generated": null,
@@ -1608,6 +1628,20 @@
     },
     {
       "table": "events",
+      "name": "events_seq",
+      "columns": [
+        {
+          "value": "seq",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "entityType": "indexes"
+    },
+    {
+      "table": "events",
       "name": "events_subject",
       "columns": [
         {
@@ -1616,6 +1650,10 @@
         },
         {
           "value": "subject_id",
+          "isExpression": false
+        },
+        {
+          "value": "seq",
           "isExpression": false
         }
       ],
@@ -1915,6 +1953,10 @@
         {
           "value": "thread_id",
           "isExpression": false
+        },
+        {
+          "value": "seq",
+          "isExpression": false
         }
       ],
       "isUnique": false,
@@ -2110,7 +2152,7 @@
       "table": "events",
       "name": "events_pk",
       "columns": [
-        "seq"
+        "id"
       ],
       "nameExplicit": false,
       "entityType": "pks"
@@ -2173,7 +2215,7 @@
       "table": "thread_pull_events",
       "name": "thread_pull_events_pk",
       "columns": [
-        "seq"
+        "id"
       ],
       "nameExplicit": false,
       "entityType": "pks"

@@ -47,10 +47,16 @@ export const actors = sqliteTable(
   (t) => [uniqueIndex("actors_identity").on(t.kind, t.host, t.session)],
 );
 
+/**
+ * The change log. `seq` is the store's (it hands seqs out, not SQLite) and is not unique here: today's JSONL keeps
+ * two lines that share a seq (two writers over one store, before the lock), and this log keeps what that one keeps,
+ * so an import never fails on them. A line is found by its seq, kind and id together.
+ */
 export const events = sqliteTable(
   "events",
   {
-    seq: integer("seq").primaryKey(),
+    id: integer("id").primaryKey(),
+    seq: integer("seq").notNull(),
     at: text("at").notNull(),
     v: integer("v").notNull(),
     kind: text("kind").notNull(),
@@ -64,7 +70,7 @@ export const events = sqliteTable(
     /** The record as written (JSON). */
     data: text("data").notNull(),
   },
-  (t) => [index("events_subject").on(t.kind, t.subject_id), index("events_project").on(t.project_id), index("events_thread").on(t.thread_id), index("events_message").on(t.message_id)],
+  (t) => [index("events_seq").on(t.seq), index("events_subject").on(t.kind, t.subject_id, t.seq), index("events_project").on(t.project_id), index("events_thread").on(t.thread_id), index("events_message").on(t.message_id)],
 );
 
 export const projects = sqliteTable(
@@ -252,8 +258,8 @@ export const threadPulls = sqliteTable(
 /** Each PR add or remove (`pullEventOf`), at its line's seq: a thread's PR history. A state line is no event. */
 export const threadPullEvents = sqliteTable(
   "thread_pull_events",
-  { seq: integer("seq").primaryKey(), thread_id: text("thread_id").notNull(), project_id: text("project_id").notNull(), event: text("event").notNull() },
-  (t) => [index("thread_pull_events_thread").on(t.thread_id), index("thread_pull_events_project").on(t.project_id)],
+  { id: integer("id").primaryKey(), seq: integer("seq").notNull(), thread_id: text("thread_id").notNull(), project_id: text("project_id").notNull(), event: text("event").notNull() },
+  (t) => [index("thread_pull_events_thread").on(t.thread_id, t.seq), index("thread_pull_events_project").on(t.project_id)],
 );
 
 export const annotations = sqliteTable(

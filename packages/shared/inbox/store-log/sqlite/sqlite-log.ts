@@ -28,14 +28,15 @@ export const INBOX_DB_FILE = "inbox.db";
 /** Kinds whose rows belong to a thread (Settings → Storage counts them per thread). */
 const THREAD_KINDS = ["message", "question", "annotation", "steps", "thread_pull"];
 
-export function sqliteInboxLog(dir: string): InboxLog {
-  return new SqliteInboxLog(dir);
+/** The SQLite log over `<dir>/<file>` (`file`: the import writes `inbox.db.importing` first). `close()` lets go of the file. */
+export function sqliteInboxLog(dir: string, file: string = INBOX_DB_FILE): InboxLog & { close(): void } {
+  return new SqliteInboxLog(dir, file);
 }
 
-/** Open (and bring up to date) the Inbox database in `dir`. */
-export function openInboxDb(dir: string): { sqlite: Database; db: InboxDb } {
+/** Open (and bring up to date) the Inbox database `file` in `dir`. */
+export function openInboxDb(dir: string, file: string = INBOX_DB_FILE): { sqlite: Database; db: InboxDb } {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const sqlite = new Database(join(dir, INBOX_DB_FILE), { create: true, strict: true });
+  const sqlite = new Database(join(dir, file), { create: true, strict: true });
   sqlite.run("PRAGMA journal_mode = WAL");
   sqlite.run("PRAGMA synchronous = NORMAL");
   sqlite.run("PRAGMA busy_timeout = 5000");
@@ -50,8 +51,12 @@ class SqliteInboxLog implements InboxLog {
   private readonly db: InboxDb;
   private readonly sqlite: Database;
 
-  constructor(dir: string) {
-    ({ db: this.db, sqlite: this.sqlite } = openInboxDb(dir));
+  constructor(dir: string, file: string) {
+    ({ db: this.db, sqlite: this.sqlite } = openInboxDb(dir, file));
+  }
+
+  close(): void {
+    this.sqlite.close();
   }
 
   read(): InboxLogContents {
@@ -65,7 +70,7 @@ class SqliteInboxLog implements InboxLog {
    */
   private state(): InboxLogState {
     const latest = (kind: string, table: string, where = "") =>
-      `SELECT '${kind}' AS kind, r.id AS subject_id, r.record AS data, r.first_seq AS first_seq, e.seq AS seq, e.at AS at, e.v AS v FROM ${table} r JOIN events e ON e.seq = r.seq ${where}`;
+      `SELECT '${kind}' AS kind, r.id AS subject_id, r.record AS data, r.first_seq AS first_seq, e.seq AS seq, e.at AS at, e.v AS v FROM ${table} r JOIN events e ON e.kind = '${kind}' AND e.subject_id = r.id AND e.seq = r.seq ${where}`;
     const sql = [
       latest("project", "projects", "WHERE r.deleted_at IS NULL"),
       latest("message", "messages"),
@@ -97,7 +102,7 @@ class SqliteInboxLog implements InboxLog {
       cards.set(row.id, { card: JSON.parse(row.card) as InboxCard, heardSeq: row.heard_seq });
     }
     const pullEvents = new Map<string, InboxThreadPullEvent[]>();
-    for (const row of this.sqlite.query<{ thread_id: string; event: string }, []>("SELECT thread_id, event FROM thread_pull_events ORDER BY seq").iterate()) {
+    for (const row of this.sqlite.query<{ thread_id: string; event: string }, []>("SELECT thread_id, event FROM thread_pull_events ORDER BY seq, id").iterate()) {
       const events = pullEvents.get(row.thread_id);
       const event = JSON.parse(row.event) as InboxThreadPullEvent;
       if (events) events.push(event);
@@ -122,7 +127,7 @@ class SqliteInboxLog implements InboxLog {
     const ids = [...messageIds];
     const at = new Date().toISOString();
     this.db.transaction((tx) => {
-      keepFloor(tx, seq);
+      keepSeqFloor(tx, seq);
       tx.delete(t.events)
         .where(or(eq(t.events.thread_id, threadId), and(eq(t.events.kind, "question"), inArray(t.events.message_id, ids))))
         .run();
@@ -147,7 +152,7 @@ class SqliteInboxLog implements InboxLog {
   deleteProject(project: InboxProject, seq: number): void {
     const at = new Date().toISOString();
     this.db.transaction((tx) => {
-      keepFloor(tx, seq);
+      keepSeqFloor(tx, seq);
       const messageIds = tx.select({ id: t.messages.id }).from(t.messages).where(eq(t.messages.project_id, project.id)).all().map((m) => m.id);
       const questionIds = tx.select({ id: t.questions.id }).from(t.questions).where(eq(t.questions.project_id, project.id)).all().map((q) => q.id);
       tx.delete(t.events).where(eq(t.events.project_id, project.id)).run();
@@ -191,7 +196,8 @@ class SqliteInboxLog implements InboxLog {
   }
 }
 
-function keepFloor(db: Parameters<typeof writeLine>[0], seq: number): void {
+/** Raise the seq floor to `seq` (never lower it). */
+export function keepSeqFloor(db: Parameters<typeof writeLine>[0], seq: number): void {
   db.insert(t.meta)
     .values({ key: "seq_floor", value: String(seq) })
     .onConflictDoUpdate({ target: t.meta.key, set: { value: sql`cast(max(cast(${t.meta.value} as integer), ${seq}) as text)` } })

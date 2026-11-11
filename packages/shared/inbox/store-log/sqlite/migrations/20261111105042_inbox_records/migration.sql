@@ -54,7 +54,8 @@ CREATE TABLE `cards` (
 ) STRICT;
 --> statement-breakpoint
 CREATE TABLE `events` (
-	`seq` integer PRIMARY KEY,
+	`id` integer PRIMARY KEY,
+	`seq` integer NOT NULL,
 	`at` text NOT NULL,
 	`v` integer NOT NULL,
 	`kind` text NOT NULL,
@@ -170,7 +171,8 @@ CREATE TABLE `thread_names` (
 ) STRICT;
 --> statement-breakpoint
 CREATE TABLE `thread_pull_events` (
-	`seq` integer PRIMARY KEY,
+	`id` integer PRIMARY KEY,
+	`seq` integer NOT NULL,
 	`thread_id` text NOT NULL,
 	`project_id` text NOT NULL,
 	`event` text NOT NULL
@@ -208,7 +210,8 @@ CREATE INDEX `answers_seq` ON `answers` (`seq`);--> statement-breakpoint
 CREATE INDEX `attachments_sha` ON `attachments` (`sha256`);--> statement-breakpoint
 CREATE INDEX `cards_project` ON `cards` (`project_id`);--> statement-breakpoint
 CREATE INDEX `cards_seq` ON `cards` (`seq`);--> statement-breakpoint
-CREATE INDEX `events_subject` ON `events` (`kind`,`subject_id`);--> statement-breakpoint
+CREATE INDEX `events_seq` ON `events` (`seq`);--> statement-breakpoint
+CREATE INDEX `events_subject` ON `events` (`kind`,`subject_id`,`seq`);--> statement-breakpoint
 CREATE INDEX `events_project` ON `events` (`project_id`);--> statement-breakpoint
 CREATE INDEX `events_thread` ON `events` (`thread_id`);--> statement-breakpoint
 CREATE INDEX `events_message` ON `events` (`message_id`);--> statement-breakpoint
@@ -229,7 +232,7 @@ CREATE INDEX `steps_project` ON `steps` (`project_id`);--> statement-breakpoint
 CREATE INDEX `steps_seq` ON `steps` (`seq`);--> statement-breakpoint
 CREATE INDEX `thread_names_project` ON `thread_names` (`project_id`);--> statement-breakpoint
 CREATE INDEX `thread_names_seq` ON `thread_names` (`seq`);--> statement-breakpoint
-CREATE INDEX `thread_pull_events_thread` ON `thread_pull_events` (`thread_id`);--> statement-breakpoint
+CREATE INDEX `thread_pull_events_thread` ON `thread_pull_events` (`thread_id`,`seq`);--> statement-breakpoint
 CREATE INDEX `thread_pull_events_project` ON `thread_pull_events` (`project_id`);--> statement-breakpoint
 CREATE INDEX `thread_pulls_thread` ON `thread_pulls` (`thread_id`);--> statement-breakpoint
 CREATE INDEX `thread_pulls_project` ON `thread_pulls` (`project_id`);--> statement-breakpoint

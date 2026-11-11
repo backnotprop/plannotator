@@ -8,9 +8,9 @@
  */
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import type { InboxDb } from "./write-line";
-import records from "./migrations/20261111104000_inbox_records/migration.sql" with { type: "text" };
+import records from "./migrations/20261111105042_inbox_records/migration.sql" with { type: "text" };
 
-export const INBOX_DB_MIGRATIONS = [{ name: "20261111104000_inbox_records", timestamp: Date.UTC(2026, 10, 11, 10, 40, 0), sql: records }];
+export const INBOX_DB_MIGRATIONS = [{ name: "20261111105042_inbox_records", timestamp: Date.UTC(2026, 10, 11, 10, 50, 42), sql: records }];
 
 export function migrateInboxDb(db: InboxDb): void {
   migrate(db, INBOX_DB_MIGRATIONS);
