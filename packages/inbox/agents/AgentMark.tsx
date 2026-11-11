@@ -6,6 +6,7 @@ import { keepAgentFace, useAgentFace } from './agentFaces';
 import { agentFaceSources, loadAgentFaceArt } from './faceArtLoad';
 import type { AgentFace } from './faceChoices';
 import { FAN_DWELL_MS, FAN_PRESS_MS, FaceFan, type FaceSources, type FanOpenedBy } from './FaceFan';
+import { AgentIconDialog, type AgentIconPlace } from './AgentIconDialog';
 import { agentFaceArtReady, agentRigOf, mountAgentMark, nextAgentFace, showAgentFace, unmountAgentMark } from './motion';
 
 export { loadAgentFaceArt } from './faceArtLoad';
@@ -41,7 +42,7 @@ export function AgentMark({ id, host, name, agent }: { id: string; host: string 
     const el = ref.current;
     if (!el) return;
     const withMotion = clicked.current;
-    if (face === 'agent' || agentFaceArtReady()) {
+    if (face === 'agent' || face.startsWith('own:') || face.startsWith('set:') || agentFaceArtReady()) {
       showAgentFace(el, face, withMotion);
       return;
     }
@@ -87,6 +88,14 @@ export function AgentMark({ id, host, name, agent }: { id: string; host: string 
     clearTimeout(dwell.current);
     setFan((was) => (was ? { ...was, open: false } : was));
   };
+  // "Your own…" and "Sets": the fan's last two inner places open the agent icon dialog in the middle of the window
+  // (AgentIconDialog.tsx). The face takes focus first, so the dialog gives it back when it closes.
+  const [dialog, setDialog] = useState<AgentIconPlace | null>(null);
+  const openDialog = (place: AgentIconPlace) => {
+    closeFan();
+    button.current?.focus({ preventScroll: true });
+    setDialog(place);
+  };
   const choose = (next: AgentFace) => {
     clicked.current = true;
     keepAgentFace(agent ?? id, next);
@@ -114,7 +123,7 @@ export function AgentMark({ id, host, name, agent }: { id: string; host: string 
     dwell.current = setTimeout(() => openFan('hover'), FAN_DWELL_MS);
   };
   const onPointerEnter = (event: PointerEvent) => {
-    if (event.pointerType === 'touch' || fan?.open || quiet.current) return;
+    if (event.pointerType === 'touch' || fan?.open || dialog || quiet.current) return;
     rest();
   };
   const onPointerLeave = () => {
@@ -137,7 +146,7 @@ export function AgentMark({ id, host, name, agent }: { id: string; host: string 
     };
   };
   const onPointerMove = (event: PointerEvent) => {
-    if (quiet.current && event.pointerType !== 'touch' && !fan?.open) {
+    if (quiet.current && event.pointerType !== 'touch' && !fan?.open && !dialog) {
       quiet.current = false;
       rest();
     }
@@ -181,7 +190,21 @@ export function AgentMark({ id, host, name, agent }: { id: string; host: string 
         <span ref={ref} className="am" aria-hidden="true" data-agent-mark={id} data-rig={rig ?? 'plain'} />
       </button>
       {plain && createPortal(<HostMark host={host} />, plain)}
-      {fan && button.current && <FaceFan anchor={button.current} open={fan.open} openedBy={fan.by} host={host} name={name} face={face} sources={sources} onChoose={choose} onClose={closeFan} />}
+      {fan && button.current && <FaceFan anchor={button.current} open={fan.open} openedBy={fan.by} host={host} name={name} face={face} sources={sources} onChoose={choose} onOwn={() => openDialog('own')} onSets={() => openDialog('sets')} onClose={closeFan} />}
+      {dialog && (
+        <AgentIconDialog
+          place={dialog}
+          agent={agent ?? id}
+          host={host}
+          name={name}
+          face={face}
+          onClose={() => {
+            clicked.current = true;
+            quiet.current = true;
+            setDialog(null);
+          }}
+        />
+      )}
     </>
   );
 }

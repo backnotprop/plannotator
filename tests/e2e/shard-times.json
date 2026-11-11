@@ -67,6 +67,7 @@
   "inbox-held-notice-line.spec.ts": 5,
   "inbox-html-links.spec.ts": 29,
   "inbox-html-phone.spec.ts": 63,
+  "inbox-icon-animate.spec.ts": 27,
   "inbox-image-swipe.spec.ts": 34,
   "inbox-image-viewer.spec.ts": 75,
   "inbox-inline-html.spec.ts": 20,
