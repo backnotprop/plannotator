@@ -22,7 +22,7 @@ import { inboxImageSrcResolver } from './images';
 
 const hasDom = typeof document !== 'undefined';
 const { MessageBody } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
-const { PrototypeWindow, PICK_CLOSE_MS, openingOption } = (hasDom ? await import('./components/PrototypeWindow') : {}) as typeof import('./components/PrototypeWindow');
+const { PrototypeWindow, PICK_CLOSE_MS, openingOption, followPrototypeLink } = (hasDom ? await import('./components/PrototypeWindow') : {}) as typeof import('./components/PrototypeWindow');
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -193,5 +193,35 @@ test.skipIf(!hasDom)('the window opens on the recommended page; ‹ › skip an 
     expect(closed).toBe(1);
   } finally {
     globalThis.fetch = realFetch;
+  }
+});
+
+// A link in a prototype's page works as in a tab (the owner, 2026-11-11: "I should be able to click and navigate").
+// Before, the window's page handed every link to no one: its own switcher (`?variant=2`), a link to another
+// option's page and a link to another site all did nothing.
+test.if(hasDom)('a link in a prototype: the page itself with a query reloads it; another option steps; another site opens a tab', () => {
+  const dir = '/work/roster/proto';
+  const file = (id: string, name: string) => ({ id, path: `${dir}/${name}`, named_path: null, name, kind: 'html' }) as unknown as import('@plannotator/core/inbox-types').InboxAttachmentState;
+  const files = [file('a1', '1-names.html'), file('a3', '3-unfold.html')];
+  const reloads: Array<[string, string | undefined]> = [];
+  const frame = { reload: (search: string, hash?: string) => (reloads.push([search, hash]), true) };
+  const opened: string[] = [];
+  const steps: string[] = [];
+  const realOpen = window.open;
+  window.open = ((url: string) => (opened.push(url), null)) as typeof window.open;
+  try {
+    const follow = (href: string) => followPrototypeLink(href, frame, { attachment: files[1]!, html: '<p>page</p>', attachments: files }, (id) => (steps.push(id), true));
+    follow('?variant=2&n=3');
+    follow('3-unfold.html?variant=4#top');
+    follow('1-names.html');
+    follow('https://example.com/docs');
+    // Not attached and not an option: the window shows no other file, so nothing moves.
+    follow('2-faces.html');
+    follow('../../etc/passwd');
+    expect(reloads).toEqual([['?variant=2&n=3', ''], ['?variant=4', '#top']]);
+    expect(steps).toEqual(['a1']);
+    expect(opened).toEqual(['https://example.com/docs']);
+  } finally {
+    window.open = realOpen;
   }
 });

@@ -20,7 +20,7 @@ import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkCont
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
 import { HtmlSurfaceControls } from '@plannotator/ui/components/HtmlSurfaceControls';
-import { HtmlViewer } from '@plannotator/ui/components/html-viewer';
+import { HtmlViewer, type HtmlViewerFrame } from '@plannotator/ui/components/html-viewer';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { ScrollViewportProvider } from '@plannotator/ui/hooks/useScrollViewport';
 import type { Annotation, EditorMode, InputMethod } from '@plannotator/ui/types';
@@ -1399,8 +1399,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     props.onLinked?.(before ? linkedValue(before.relative, before.hash) : null, { back: true });
     requestAnimationFrame(() => sectionRef.current?.focus({ preventScroll: true }));
   };
-  /** A link the page's bridge handed over (a plain click, armed or not; ⌘/Ctrl-click while armed pins it instead). `baseDir`: the folder of the page it is in. */
-  const followLink = (href: string, baseDir: string) => {
+  /**
+   * A link the page's bridge handed over (a plain click, armed or not; ⌘/Ctrl-click while armed pins it instead). `baseDir`:
+   * the folder of the page it is in; `page`: that page's path and its frame, for a link to the page itself (a query).
+   */
+  const followLink = (href: string, baseDir: string, page?: { path: string; frame?: HtmlViewerFrame }) => {
     // Ahead of the page's own rules, which read the window's own origin as the page's folder, not as 'external'. Only
     // a full address: `/#thread=…` and `./#thread=…` are the page's folder, as those rules say. And only after a
     // person's click: the page's own script can post this message too, and must not move the window
@@ -1421,9 +1424,14 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       assetRoute: pageAssetRoute,
       serverOrigin: window.location.origin,
       markdown: kind === 'markdown',
+      selfPath: page?.path,
     });
     switch (link.kind) {
       case 'ignored':
+        return;
+      case 'self':
+        // The page again with that query, in its own frame (as a tab loads `?variant=2`).
+        page?.frame?.reload(link.search, link.hash);
         return;
       case 'external':
         window.open(link.url, '_blank', 'noopener,noreferrer');
@@ -2685,7 +2693,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               // A plain ] or [ pressed in the page while armed (the bridge forwards nothing in Interact).
               onStep={multi ? (dir) => !blockedRef.current && armed && stepRef.current(dir, 'key') : undefined}
               // A link the page's bridge handed over: another file of the thread, a page or image beside it, another site (htmlLinks.ts).
-              onOpenLink={(href) => followLinkRef.current(href, pageFolder)}
+              onOpenLink={(href, frame) => followLinkRef.current(href, pageFolder, { path: attachment.path, frame })}
+              // Forms and in-page links work as in a tab (a GET form loads the page again with its fields; `#` sets the hash).
+              pageNavigation
               initialFragment={linkFragment?.id === attachment.id ? linkFragment.hash : undefined}
               onUnanchoredChange={(ids) => setUnanchored(new Set(ids))}
               fullViewport
@@ -2754,7 +2764,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                   annotateModeActive={false}
                   // An Escape the page did not use: one page back (full screen: the ladder, whose next rung is that).
                   onPageEscape={() => void escapeFromPage()}
-                  onOpenLink={(href) => followLinkRef.current(href, folderOf(linkedTop.path))}
+                  onOpenLink={(href, frame) => followLinkRef.current(href, folderOf(linkedTop.path), { path: linkedTop.path, frame })}
+                  pageNavigation
                   initialFragment={linkedTop.hash || undefined}
                   fullViewport
                   hideControls

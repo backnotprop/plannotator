@@ -492,6 +492,7 @@ packages/ui/hooks/useLinkedDoc.revealSidebar.test.tsx
 packages/ui/hooks/useLinkedDoc.reapplyFilter.test.tsx
 packages/ui/hooks/useLinkedDoc.scrollRestore.test.tsx
 packages/ui/components/html-viewer/htmlLinkProtocol.test.tsx
+packages/ui/components/html-viewer/bridgePageNavigation.test.ts
 packages/editor/hooks/useAnnotationJump.test.tsx
 packages/ui/components/TableOfContents.linkedDoc.test.tsx
 packages/ui/components/MarkdownContentsRail.test.tsx

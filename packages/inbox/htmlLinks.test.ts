@@ -80,6 +80,30 @@ describe('resolveInboxHtmlLink', () => {
     expect(resolveInboxHtmlLink('#section', context())).toEqual({ kind: 'ignored' });
   });
 
+  // A prototype's own switcher (`<a href="?variant=2">`) is a link to the page itself: it loads again with the
+  // query, as in a tab. It used to resolve to nothing (the query dropped, nothing left), so the click did nothing.
+  test('a bare query is the page itself, with its query and fragment', () => {
+    expect(resolveInboxHtmlLink('?variant=2&n=3', context())).toEqual({ kind: 'self', search: '?variant=2&n=3', hash: '' });
+    expect(resolveInboxHtmlLink(' ?x=1#top ', context())).toEqual({ kind: 'self', search: '?x=1', hash: '#top' });
+    // A GET form with no fields.
+    expect(resolveInboxHtmlLink('?', context())).toEqual({ kind: 'self', search: '?', hash: '' });
+  });
+
+  test('the page by its own name: a query or a fresh load is the page itself; a fragment alone still scrolls', () => {
+    const self = context({ selfPath: `${FOLDER}/SHEET.html` });
+    expect(resolveInboxHtmlLink('SHEET.html?variant=2', self)).toEqual({ kind: 'self', search: '?variant=2', hash: '' });
+    expect(resolveInboxHtmlLink('./SHEET.html', self)).toEqual({ kind: 'self', search: '', hash: '' });
+    expect(resolveInboxHtmlLink('SHEET.html#top', self)).toEqual({ kind: 'attachment', id: 'att_sheet', name: 'SHEET.html', hash: 'top' });
+    // Another page with a query is that page, as before.
+    expect(resolveInboxHtmlLink('B-cards.html?variant=2', self)).toMatchObject({ kind: 'page', relative: 'B-cards.html' });
+    // With no page named, a link to a file by name is never `self`.
+    expect(resolveInboxHtmlLink('SHEET.html?variant=2', context()).kind).toBe('attachment');
+  });
+
+  test('a Markdown file has no query to read: a bare query there is not the page itself', () => {
+    expect(resolveInboxHtmlLink('?x=1', context({ markdown: true, assetRoute: null })).kind).not.toBe('self');
+  });
+
   test('folderOf', () => {
     expect(folderOf('/a/b/c.html')).toBe('/a/b');
     expect(folderOf('C:\\a\\c.html')).toBe('c:/a');
