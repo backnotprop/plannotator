@@ -6,6 +6,7 @@
  * reads wrong must not take them with it); only the record log points at the real files. Every database a side
  * opened is closed before this returns, so the file can be renamed.
  */
+import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -32,7 +33,8 @@ export function checkDigests(dataDir: string, now: () => Date, a: InboxCheckSide
   return { same: left.sha256 === right.sha256, a: left, b: right };
 }
 
-function digestOf(dataDir: string, now: () => Date, side: InboxCheckSide): InboxStoreDigest {
+/** One side's digest: the store over `side`'s log, opened over a scratch data dir. */
+export function digestOf(dataDir: string, now: () => Date, side: InboxCheckSide): InboxStoreDigest {
   const scratch = mkdtempSync(join(tmpdir(), "plannotator-inbox-check-"));
   const real = inboxDir(dataDir);
   const opened: InboxLog[] = [];
@@ -49,5 +51,15 @@ function digestOf(dataDir: string, now: () => Date, side: InboxCheckSide): Inbox
   } finally {
     for (const log of opened) (log as { close?: () => void }).close?.();
     rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+/** `PRAGMA integrity_check` of the database `file`: "ok", or what it found. */
+export function integrityOf(file: string): string {
+  const db = new Database(file, { readwrite: true, create: false, strict: true });
+  try {
+    return db.query<{ integrity_check: string }, []>("PRAGMA integrity_check").get()?.integrity_check ?? "no answer";
+  } finally {
+    db.close();
   }
 }

@@ -155,7 +155,7 @@ import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { inboxPromptsModel, parseInboxPromptsChange, saveInboxPromptsChange } from "./inbox-prompts";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { INBOX_UPGRADING_LINE, storeMoveNote } from "@plannotator/shared/inbox/store-log/sqlite/move-words";
-import { openInboxStore, resolveInboxSqlite } from "@plannotator/shared/inbox/store-log/sqlite/open-store";
+import { inboxImportDelayFromEnv, openInboxStore, resolveInboxSqlite } from "@plannotator/shared/inbox/store-log/sqlite/open-store";
 import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly, inboxTidyStepsOnlyWakes } from "@plannotator/shared/inbox/tidy";
 import { inboxArchivedRows, inboxListSections, inboxRowArchived } from "@plannotator/shared/inbox/list";
 import { archiveProject, markProjectRead, unarchiveProject, unmarkProjectRead } from "@plannotator/shared/inbox/project-batch";
@@ -1054,6 +1054,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     sqlite: options.sqlite ?? resolveInboxSqlite(loadConfig(), process.env),
     now: options.storeNow,
     onSlow: () => process.stderr.write(`${INBOX_UPGRADING_LINE}\n`),
+    importStep: inboxImportDelayFromEnv(process.env),
+    // A move checks its files' side in a second run of this program, beside the write.
+    checkFilesCommand: options.selfCommand?.length ? options.selfCommand : undefined,
   });
   const store = opened.store;
   // Read every project's log and replayed it (store.ts load): the debug log notes how long that took.

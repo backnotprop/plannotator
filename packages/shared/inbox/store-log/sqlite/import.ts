@@ -23,12 +23,16 @@ import { join } from "node:path";
 import { inboxDir as inboxDirOf } from "../../schema";
 import { jsonlInboxLog } from "../jsonl-log";
 import type { InboxLog, InboxLogContents } from "../log";
-import { checkDigests } from "./check";
+import type { InboxLine } from "@plannotator/core/inbox-types";
+import { checkDigests, digestOf, integrityOf } from "./check";
+import { type FilesCheckProcess, filesDigest, spawnFilesCheck } from "./check-child";
+import type { InboxStoreDigest } from "./digest";
 import { loadImportRows } from "./import-load";
 import { ImportRows } from "./import-rows";
 import { INBOX_IMPORT_SLOW_MS } from "./move-words";
 import { bytesUnder, freeBackupName, fsyncPath, INBOX_DB_IMPORTING, JSONL_ENTRIES, moveIntoBackup, readMeta, removeDb, removeSidecars } from "./move-files";
 import { INBOX_DB_FILE, keepSeqFloor, openInboxDb, sqliteInboxLog } from "./sqlite-log";
+import { clearStaleUpgradeMarker, clearUpgradeMarker, markUpgradeRunning } from "./upgrade-marker";
 
 export { INBOX_DB_IMPORTING };
 
@@ -67,6 +71,11 @@ export interface InboxImportOptions {
   afterWrite?: (db: Database) => void;
   /** Test-only: at each step boundary (the crash test kills the process there). */
   step?: (name: InboxImportStep) => void;
+  /**
+   * This program, to run the check's files side and integrity check in a second process beside the write
+   * (`check-child.ts`; the Inbox passes its `selfCommand`). Without it, every step runs here, one after another.
+   */
+  checkFilesCommand?: readonly string[];
 }
 
 /** Move the Inbox under `dataDir` from its JSONL files into `inbox.db`, or say why the files keep serving. */
@@ -75,6 +84,7 @@ export async function importJsonlInbox(dataDir: string, options: InboxImportOpti
   const step = options.step ?? (() => {});
   const inboxDir = inboxDirOf(dataDir);
   const target = join(inboxDir, INBOX_DB_FILE);
+  clearStaleUpgradeMarker(inboxDir);
   if (existsSync(target)) {
     const backup = readMeta(target, "import_backup");
     if (backup) moveIntoBackup(inboxDir, backup, () => step("backup-entry"));
@@ -107,16 +117,24 @@ export async function importJsonlInbox(dataDir: string, options: InboxImportOpti
   };
   /** The flush of the whole file, started once it is written: the disk works while this thread checks it. */
   let flushing: Promise<void> | null = null;
+  let second: FilesCheckProcess | null = null;
+  let lineCount = 0;
+  // Starters wait for the move while this names a live process (`upgrade-marker.ts`).
+  markUpgradeRunning(inboxDir);
   try {
     // Today's exact rules: the JSONL log's own reader, then the store's order (seq; equal seqs in read order).
     const sources = filesFingerprint(inboxDir);
-    const contents = jsonlInboxLog(inboxDir).read();
-    const lines = contents.lines!;
+    // The check's other half (the files' side, then the new file's integrity) in a second process, from now on.
+    second = options.checkFilesCommand ? spawnFilesCheck(options.checkFilesCommand, dataDir, now()) : null;
+    let contents: InboxLogContents | null = jsonlInboxLog(inboxDir).read();
+    let lines: InboxLine[] | null = contents.lines!;
     lines.sort((a, b) => a.seq - b.seq);
+    lineCount = lines.length;
+    const seqFloor = contents.seqFloor;
     lap("read");
     step("read");
     // Every table's final rows, worked out once in memory, then written in one pass.
-    const rows = new ImportRows();
+    let rows: ImportRows | null = new ImportRows();
     for (let i = 0; i < lines.length; i++) {
       rows.add(lines[i]!);
       if ((i & 4095) === 4095) tick();
@@ -127,36 +145,50 @@ export async function importJsonlInbox(dataDir: string, options: InboxImportOpti
     try {
       options.beforeLoad?.(sqlite);
       loadImportRows(sqlite, rows);
-      keepSeqFloor(db, contents.seqFloor);
+      keepSeqFloor(db, seqFloor);
       options.afterWrite?.(sqlite);
     } finally {
       sqlite.close();
     }
+    rows = null;
     lap("load");
     step("load");
     // The file goes to disk on another thread while this one checks it: the two longest waits overlap.
     flushing = flushFile(importing);
 
-    const integrity = new Database(importing, { readwrite: true, create: false, strict: true });
-    try {
-      const result = integrity.query<{ integrity_check: string }, []>("PRAGMA integrity_check").get();
-      if (result?.integrity_check !== "ok") throw new Error(`integrity_check: ${result?.integrity_check}`);
-    } finally {
-      integrity.close();
+    let check: { same: boolean; a: InboxStoreDigest; b: InboxStoreDigest };
+    if (second) {
+      // The files' side is the second process's: the lines read here are let go before the database's side is read.
+      contents = null;
+      lines = null;
+      const asked = await second.integrity(importing).catch(() => null);
+      const dbSide = digestOf(dataDir, now, { log: (dir) => sqliteInboxLog(dir, INBOX_DB_IMPORTING) });
+      lap("checkDb");
+      // A second process that failed: its half done here.
+      const integrity = asked ? await asked.answer.catch(() => integrityOf(importing)) : integrityOf(importing);
+      if (integrity !== "ok") throw new Error(`integrity_check: ${integrity}`);
+      lap("integrity");
+      step("integrity");
+      const filesSide = await second.digest().catch(() => filesDigest(dataDir, now));
+      lap("checkFiles");
+      check = { same: filesSide.sha256 === dbSide.sha256, a: filesSide, b: dbSide };
+    } else {
+      const integrity = integrityOf(importing);
+      if (integrity !== "ok") throw new Error(`integrity_check: ${integrity}`);
+      lap("integrity");
+      step("integrity");
+      // The check: everything as the app serves it, from the files (the lines just read, replayed by the store)
+      // and from the new database (read back from its tables).
+      const read = contents;
+      check = checkDigests(
+        dataDir,
+        now,
+        { log: (dir) => readOnce(jsonlInboxLog(dir), read) },
+        { log: (dir) => sqliteInboxLog(dir, INBOX_DB_IMPORTING) },
+        () => lap("checkFiles"),
+      );
+      lap("checkDb");
     }
-    lap("integrity");
-    step("integrity");
-
-    // The check: everything as the app serves it, from the files (the lines just read, replayed by the store)
-    // and from the new database (read back from its tables).
-    const check = checkDigests(
-      dataDir,
-      now,
-      { log: (dir) => readOnce(jsonlInboxLog(dir), contents) },
-      { log: (dir) => sqliteInboxLog(dir, INBOX_DB_IMPORTING) },
-      () => lap("checkFiles"),
-    );
-    lap("checkDb");
     step("checked");
     await flushing;
     if (!check.same) {
@@ -189,12 +221,15 @@ export async function importJsonlInbox(dataDir: string, options: InboxImportOpti
     step("renamed");
     moveIntoBackup(inboxDir, backup, () => step("backup-entry"));
     lap("finish");
-    return { status: "imported", lines: lines.length, ms: Math.round(performance.now() - started), backup, phases };
+    return { status: "imported", lines: lineCount, ms: Math.round(performance.now() - started), backup, phases };
   } catch (error) {
     // A flush still running holds the file open: let it end before the file goes.
     await flushing?.catch(() => {});
     removeDb(importing);
     return { status: "kept_files", reason: "failed", detail: error instanceof Error ? error.message : String(error) };
+  } finally {
+    second?.close();
+    clearUpgradeMarker(inboxDir);
   }
 }
 
@@ -218,11 +253,11 @@ function flushFile(path: string): Promise<void> {
 }
 
 /** A log that hands back contents already read once, then behaves as `log` (the check reads the same lines the import wrote). */
-function readOnce(log: InboxLog, contents: InboxLogContents): InboxLog {
+function readOnce(log: InboxLog, contents: InboxLogContents | null): InboxLog {
   let first = true;
   return Object.assign(Object.create(log) as InboxLog, {
     read(): InboxLogContents {
-      if (!first) return log.read();
+      if (!first || !contents) return log.read();
       first = false;
       return { lines: [...contents.lines!], seqFloor: contents.seqFloor };
     },

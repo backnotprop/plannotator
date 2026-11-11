@@ -130,6 +130,14 @@ describe("moving an Inbox from its files into inbox.db", () => {
       expect(changed).toMatchObject({ status: "kept_files", reason: "mismatch" });
       expect(readdirSync(inbox).some((name) => name.startsWith("import-check-"))).toBe(true);
       untouched();
+      // The same, with the files' side checked in a second process, as the Inbox runs it.
+      const changedThere = await importJsonlInbox(dataDir, {
+        now,
+        checkFilesCommand: [process.execPath, join(import.meta.dir, "fixtures", "import-child.ts")],
+        afterWrite: (db) => db.run("UPDATE cards SET heard_seq = heard_seq + 1 WHERE rowid = (SELECT min(rowid) FROM cards)"),
+      });
+      expect(changedThere).toMatchObject({ status: "kept_files", reason: "mismatch" });
+      untouched();
 
       const failed = await importJsonlInbox(dataDir, {
         now,
