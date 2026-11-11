@@ -7,9 +7,15 @@
  * prefixed ULIDs. `seq` is the store's one change counter. A deleted thread keeps a tombstone in `threads`
  * (id and `deleted_at`, no words); its messages, questions and the rest are really removed, as today.
  *
- * `events` is the ordered change log: one row per line the store writes, read back in seq order at start
- * (the store replays it, as it replays the JSONL files today) and later the decision history and what a
- * publish outbox reads. `meta` holds the seq floor (the highest seq ever handed out, kept across a deletion).
+ * A start reads current state from these tables, never the change log: each record table has its latest line
+ * (`seq`, joined to `events` for its time) and its first line's seq (`first_seq`, the order the store's maps keep),
+ * and what the store works out from the ORDER of lines (`../history.ts`) is kept as it happens: a thread's archive
+ * line and moved address (`threads`), the names that route (`thread_names`), first-line hashtags (`message_tags`),
+ * a card as the Board reads it and its last real change (`cards`), PR adds and removes (`thread_pull_events`).
+ *
+ * `events` is the ordered change log: one row per line the store writes (a run of typing on a question is one
+ * row, its last), kept as history: a card's History reads it, and later the decision history and what a publish
+ * outbox reads. `meta` holds the seq floor (the highest seq ever handed out, kept across a deletion).
  *
  * Changing this file: `bunx drizzle-kit generate` (config `drizzle.config.ts` beside it) writes the next
  * migration under `migrations/`; `migrations.ts` imports each one as text so the compiled binary carries it.
@@ -69,6 +75,7 @@ export const projects = sqliteTable(
     root: text("root").notNull(),
     name: text("name").notNull(),
     record: text("record").notNull(),
+    first_seq: integer("first_seq").notNull(),
     seq: integer("seq").notNull(),
     deleted_at: text("deleted_at"),
   },
@@ -83,6 +90,10 @@ export const threads = sqliteTable(
     project_id: text("project_id").notNull(),
     thread_name: text("thread_name"),
     resolved_at: text("resolved_at"),
+    /** The archive line: the seq of the root line that set the current `resolved_at` (`archiveSeqAfter`). */
+    resolved_seq: integer("resolved_seq"),
+    /** A thread the person started whose address moved ("Send to another session", `movesAddress`). */
+    readdressed: integer("readdressed", { mode: "boolean" }).notNull().default(false),
     first_seq: integer("first_seq").notNull(),
     last_seq: integer("last_seq").notNull(),
     last_at: text("last_at").notNull(),
@@ -169,6 +180,7 @@ export const questions = sqliteTable(
     current_answer_id: text("current_answer_id"),
     sent_reply_id: text("sent_reply_id"),
     asked_by_actor_id: text("asked_by_actor_id"),
+    first_seq: integer("first_seq").notNull(),
     seq: integer("seq").notNull(),
     record: text("record").notNull(),
   },
@@ -197,33 +209,85 @@ export const answers = sqliteTable(
   (t) => [uniqueIndex("answers_author").on(t.question_id, t.author_id), index("answers_seq").on(t.seq)],
 );
 
-/** The Board's cards, initiatives, steps, PRs and the person's annotations: columns, the record, its seq. */
+/**
+ * The Board's cards, initiatives, steps, PRs and the person's annotations: columns, the record, its first and
+ * latest seq. A steps or PR record the store does not read (an old or broken shape) is still kept, as the JSONL
+ * keeps its line, so its columns may be empty.
+ */
 export const cards = sqliteTable(
   "cards",
-  { id: text("id").primaryKey(), project_id: text("project_id").notNull(), seq: integer("seq").notNull(), record: text("record").notNull() },
+  {
+    id: text("id").primaryKey(),
+    project_id: text("project_id").notNull(),
+    first_seq: integer("first_seq").notNull(),
+    seq: integer("seq").notNull(),
+    /** The latest line as written. */
+    record: text("record").notNull(),
+    /** The card as the Board reads it (`cardAfter`: old shapes mapped, fields an older Inbox left out kept). */
+    card: text("card").notNull(),
+    /** The seq of the card's last real change (a drop's seen mark is not one): the Board's unread rule. */
+    heard_seq: integer("heard_seq").notNull(),
+  },
   (t) => [index("cards_project").on(t.project_id), index("cards_seq").on(t.seq)],
 );
 
 export const initiatives = sqliteTable(
   "initiatives",
-  { id: text("id").primaryKey(), seq: integer("seq").notNull(), record: text("record").notNull() },
+  { id: text("id").primaryKey(), first_seq: integer("first_seq").notNull(), seq: integer("seq").notNull(), record: text("record").notNull() },
   (t) => [index("initiatives_seq").on(t.seq)],
 );
 
 export const steps = sqliteTable(
   "steps",
-  { id: text("id").primaryKey(), thread_id: text("thread_id").notNull(), project_id: text("project_id").notNull(), seq: integer("seq").notNull(), record: text("record").notNull() },
-  (t) => [index("steps_thread").on(t.thread_id), index("steps_seq").on(t.seq)],
+  { id: text("id").primaryKey(), thread_id: text("thread_id"), project_id: text("project_id"), first_seq: integer("first_seq").notNull(), seq: integer("seq").notNull(), record: text("record").notNull() },
+  (t) => [index("steps_thread").on(t.thread_id), index("steps_project").on(t.project_id), index("steps_seq").on(t.seq)],
 );
 
 export const threadPulls = sqliteTable(
   "thread_pulls",
-  { id: text("id").primaryKey(), thread_id: text("thread_id").notNull(), project_id: text("project_id").notNull(), seq: integer("seq").notNull(), record: text("record").notNull() },
-  (t) => [index("thread_pulls_thread").on(t.thread_id), index("thread_pulls_seq").on(t.seq)],
+  { id: text("id").primaryKey(), thread_id: text("thread_id"), project_id: text("project_id"), first_seq: integer("first_seq").notNull(), seq: integer("seq").notNull(), record: text("record").notNull() },
+  (t) => [index("thread_pulls_thread").on(t.thread_id), index("thread_pulls_project").on(t.project_id), index("thread_pulls_seq").on(t.seq)],
+);
+
+/** Each PR add or remove (`pullEventOf`), at its line's seq: a thread's PR history. A state line is no event. */
+export const threadPullEvents = sqliteTable(
+  "thread_pull_events",
+  { seq: integer("seq").primaryKey(), thread_id: text("thread_id").notNull(), project_id: text("project_id").notNull(), event: text("event").notNull() },
+  (t) => [index("thread_pull_events_thread").on(t.thread_id), index("thread_pull_events_project").on(t.project_id)],
 );
 
 export const annotations = sqliteTable(
   "annotations",
-  { id: text("id").primaryKey(), thread_id: text("thread_id").notNull(), project_id: text("project_id").notNull(), seq: integer("seq").notNull(), record: text("record").notNull() },
+  { id: text("id").primaryKey(), thread_id: text("thread_id").notNull(), project_id: text("project_id").notNull(), first_seq: integer("first_seq").notNull(), seq: integer("seq").notNull(), record: text("record").notNull() },
   (t) => [index("annotations_thread").on(t.thread_id), index("annotations_seq").on(t.seq)],
+);
+
+/**
+ * Thread names, in the order they were taken (`seq`): a root's first-line name (`firstLineName`; an agent's
+ * routes, one the person gave only holds the name) and the line where an agent named a thread the person
+ * started (`agentNamesHere`, routes). Routing reads them oldest first.
+ */
+export const threadNames = sqliteTable(
+  "thread_names",
+  {
+    root_id: text("root_id").notNull(),
+    seq: integer("seq").notNull(),
+    project_id: text("project_id").notNull(),
+    name: text("name").notNull(),
+    routes: integer("routes", { mode: "boolean" }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.root_id, t.seq] }), index("thread_names_project").on(t.project_id), index("thread_names_seq").on(t.seq)],
+);
+
+/** The hashtags of each message's first line (`firstLineTagKeys`), at its seq: the Board's `#` tags. */
+export const messageTags = sqliteTable(
+  "message_tags",
+  {
+    message_id: text("message_id").notNull(),
+    tag_key: text("tag_key").notNull(),
+    thread_id: text("thread_id").notNull(),
+    project_id: text("project_id").notNull(),
+    seq: integer("seq").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.message_id, t.tag_key] }), index("message_tags_thread").on(t.thread_id), index("message_tags_project").on(t.project_id), index("message_tags_seq").on(t.seq)],
 );

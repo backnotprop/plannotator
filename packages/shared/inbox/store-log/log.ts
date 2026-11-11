@@ -15,12 +15,41 @@
  * lines, the registry) stay files and are not part of it.
  */
 import type { InboxCard, InboxLine, InboxProject } from "@plannotator/core/inbox-types";
+import type { InboxThreadPullEvent } from "../store";
 
-export interface InboxLogContents {
-  /** Every readable line still stored, in any order. Unreadable lines (a torn last line) are left out. */
-  lines: InboxLine[];
-  /** The highest seq ever handed out that `lines` may no longer show (deleted lines, an older store's decisions); 0 for none. */
+/**
+ * What a log gives back at start: either every line, for the store to replay (today's JSONL), or the current
+ * state with the facts that come from the order of lines already worked out (`history.ts`), which the store
+ * takes as it is (the SQLite log). Both must read the same: the every-read test holds them to it.
+ */
+export type InboxLogContents = (
+  | {
+      /** Every readable line still stored, in any order. Unreadable lines (a torn last line) are left out. */
+      lines: InboxLine[];
+      state?: never;
+    }
+  | { state: InboxLogState; lines?: never }
+) & {
+  /** The highest seq ever handed out that the contents may no longer show (deleted lines, an older store's decisions); 0 for none. */
   seqFloor: number;
+};
+
+/** Current state, read from tables: what replaying every line would leave, without the replay. */
+export interface InboxLogState {
+  /** Each record's latest line, in the order the records' FIRST lines were written (`firstSeq`): the store's maps keep that order. */
+  records: { line: InboxLine; firstSeq: number }[];
+  /** A resolved thread's archive line seq, by root id (`history.ts` `archiveSeqAfter`). */
+  archiveSeq: ReadonlyMap<string, number>;
+  /** The roots of threads the person started whose address moved (`movesAddress`). */
+  readdressed: ReadonlySet<string>;
+  /** Thread names in the order they were taken (`firstLineName`, `agentNamesHere`); `routes: false` only holds the name. */
+  names: readonly { projectId: string; name: string; rootId: string; routes: boolean }[];
+  /** First-line hashtags in seq order (`firstLineTagKeys`). */
+  tags: readonly { key: string; threadId: string; seq: number }[];
+  /** Each card as the Board reads it, and its last real change's seq (`cardAfter`). */
+  cards: ReadonlyMap<string, { card: InboxCard; heardSeq: number }>;
+  /** Each thread's PR adds and removes, oldest first (`pullEventOf`). */
+  pullEvents: ReadonlyMap<string, readonly InboxThreadPullEvent[]>;
 }
 
 /** Settings → Storage: what one project takes on disk. */
@@ -32,7 +61,7 @@ export interface InboxLogUsage {
 }
 
 export interface InboxLog {
-  /** Everything stored, read whole at start and after a deletion. */
+  /** Everything stored, read whole at start and after a deletion: lines to replay, or the current state. */
   read(): InboxLogContents;
   /** Persist one line. `project` is the record's project (null for an initiative, which crosses projects). Throws when not written. */
   append(line: InboxLine, project: InboxProject | null): void;

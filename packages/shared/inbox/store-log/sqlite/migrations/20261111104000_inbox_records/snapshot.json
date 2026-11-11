@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "9bda28e6-1526-4b09-a406-6d5e4b13cb1e",
+  "id": "85c3033a-bfe5-4408-a7b9-ea9dedaaf68e",
   "prevIds": [
     "00000000-0000-0000-0000-000000000000"
   ],
@@ -39,6 +39,10 @@
       "entityType": "tables"
     },
     {
+      "name": "message_tags",
+      "entityType": "tables"
+    },
+    {
       "name": "messages",
       "entityType": "tables"
     },
@@ -60,6 +64,14 @@
     },
     {
       "name": "steps",
+      "entityType": "tables"
+    },
+    {
+      "name": "thread_names",
+      "entityType": "tables"
+    },
+    {
+      "name": "thread_pull_events",
       "entityType": "tables"
     },
     {
@@ -174,6 +186,16 @@
       "table": "annotations",
       "name": "project_id",
       "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "annotations",
+      "name": "first_seq",
+      "type": "integer",
       "notNull": true,
       "autoincrement": false,
       "default": null,
@@ -402,6 +424,16 @@
     },
     {
       "table": "cards",
+      "name": "first_seq",
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "cards",
       "name": "seq",
       "type": "integer",
       "notNull": true,
@@ -414,6 +446,26 @@
       "table": "cards",
       "name": "record",
       "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "cards",
+      "name": "card",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "cards",
+      "name": "heard_seq",
+      "type": "integer",
       "notNull": true,
       "autoincrement": false,
       "default": null,
@@ -532,6 +584,16 @@
     },
     {
       "table": "initiatives",
+      "name": "first_seq",
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "initiatives",
       "name": "seq",
       "type": "integer",
       "notNull": true,
@@ -604,6 +666,56 @@
       "table": "mentions",
       "name": "record",
       "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "message_tags",
+      "name": "message_id",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "message_tags",
+      "name": "tag_key",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "message_tags",
+      "name": "thread_id",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "message_tags",
+      "name": "project_id",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "message_tags",
+      "name": "seq",
+      "type": "integer",
       "notNull": true,
       "autoincrement": false,
       "default": null,
@@ -802,6 +914,16 @@
     },
     {
       "table": "projects",
+      "name": "first_seq",
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "projects",
       "name": "seq",
       "type": "integer",
       "notNull": true,
@@ -942,6 +1064,16 @@
     },
     {
       "table": "questions",
+      "name": "first_seq",
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "questions",
       "name": "seq",
       "type": "integer",
       "notNull": true,
@@ -1034,7 +1166,7 @@
       "table": "steps",
       "name": "thread_id",
       "type": "text",
-      "notNull": true,
+      "notNull": false,
       "autoincrement": false,
       "default": null,
       "generated": null,
@@ -1044,6 +1176,16 @@
       "table": "steps",
       "name": "project_id",
       "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "steps",
+      "name": "first_seq",
+      "type": "integer",
       "notNull": true,
       "autoincrement": false,
       "default": null,
@@ -1071,6 +1213,96 @@
       "entityType": "columns"
     },
     {
+      "table": "thread_names",
+      "name": "root_id",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "thread_names",
+      "name": "seq",
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "thread_names",
+      "name": "project_id",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "thread_names",
+      "name": "name",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "thread_names",
+      "name": "routes",
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "thread_pull_events",
+      "name": "seq",
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "thread_pull_events",
+      "name": "thread_id",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "thread_pull_events",
+      "name": "project_id",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "thread_pull_events",
+      "name": "event",
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
       "table": "thread_pulls",
       "name": "id",
       "type": "text",
@@ -1084,7 +1316,7 @@
       "table": "thread_pulls",
       "name": "thread_id",
       "type": "text",
-      "notNull": true,
+      "notNull": false,
       "autoincrement": false,
       "default": null,
       "generated": null,
@@ -1094,6 +1326,16 @@
       "table": "thread_pulls",
       "name": "project_id",
       "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "thread_pulls",
+      "name": "first_seq",
+      "type": "integer",
       "notNull": true,
       "autoincrement": false,
       "default": null,
@@ -1157,6 +1399,26 @@
       "notNull": false,
       "autoincrement": false,
       "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "threads",
+      "name": "resolved_seq",
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "threads",
+      "name": "readdressed",
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "false",
       "generated": null,
       "entityType": "columns"
     },
@@ -1433,6 +1695,48 @@
       "entityType": "indexes"
     },
     {
+      "table": "message_tags",
+      "name": "message_tags_thread",
+      "columns": [
+        {
+          "value": "thread_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "entityType": "indexes"
+    },
+    {
+      "table": "message_tags",
+      "name": "message_tags_project",
+      "columns": [
+        {
+          "value": "project_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "entityType": "indexes"
+    },
+    {
+      "table": "message_tags",
+      "name": "message_tags_seq",
+      "columns": [
+        {
+          "value": "seq",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "entityType": "indexes"
+    },
+    {
       "table": "messages",
       "name": "messages_thread",
       "columns": [
@@ -1550,10 +1854,80 @@
     },
     {
       "table": "steps",
+      "name": "steps_project",
+      "columns": [
+        {
+          "value": "project_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "entityType": "indexes"
+    },
+    {
+      "table": "steps",
       "name": "steps_seq",
       "columns": [
         {
           "value": "seq",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "entityType": "indexes"
+    },
+    {
+      "table": "thread_names",
+      "name": "thread_names_project",
+      "columns": [
+        {
+          "value": "project_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "entityType": "indexes"
+    },
+    {
+      "table": "thread_names",
+      "name": "thread_names_seq",
+      "columns": [
+        {
+          "value": "seq",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "entityType": "indexes"
+    },
+    {
+      "table": "thread_pull_events",
+      "name": "thread_pull_events_thread",
+      "columns": [
+        {
+          "value": "thread_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "entityType": "indexes"
+    },
+    {
+      "table": "thread_pull_events",
+      "name": "thread_pull_events_project",
+      "columns": [
+        {
+          "value": "project_id",
           "isExpression": false
         }
       ],
@@ -1568,6 +1942,20 @@
       "columns": [
         {
           "value": "thread_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "entityType": "indexes"
+    },
+    {
+      "table": "thread_pulls",
+      "name": "thread_pulls_project",
+      "columns": [
+        {
+          "value": "project_id",
           "isExpression": false
         }
       ],
@@ -1653,11 +2041,31 @@
       "entityType": "pks"
     },
     {
+      "table": "message_tags",
+      "name": "message_tags_pk",
+      "columns": [
+        "message_id",
+        "tag_key"
+      ],
+      "nameExplicit": false,
+      "entityType": "pks"
+    },
+    {
       "table": "read_state",
       "name": "read_state_pk",
       "columns": [
         "thread_id",
         "actor_id"
+      ],
+      "nameExplicit": false,
+      "entityType": "pks"
+    },
+    {
+      "table": "thread_names",
+      "name": "thread_names_pk",
+      "columns": [
+        "root_id",
+        "seq"
       ],
       "nameExplicit": false,
       "entityType": "pks"
@@ -1757,6 +2165,15 @@
       "name": "steps_pk",
       "columns": [
         "id"
+      ],
+      "nameExplicit": false,
+      "entityType": "pks"
+    },
+    {
+      "table": "thread_pull_events",
+      "name": "thread_pull_events_pk",
+      "columns": [
+        "seq"
       ],
       "nameExplicit": false,
       "entityType": "pks"

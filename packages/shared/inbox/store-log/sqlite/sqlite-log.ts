@@ -4,8 +4,9 @@
  * with Bun's built-in SQLite and Drizzle. NOT wired to users: nothing opens it unless a caller hands
  * `sqliteInboxLog` to `InboxStore.open` (the tests do). No import from the JSONL files, no flag.
  *
- * Every append is one transaction (the change-log row and the record's current row together), synchronous, so
- * the store stays the one writer it is today. WAL with `synchronous=NORMAL`: a power cut may lose the last
+ * Every append is one transaction (the change-log row, the record's current row and the facts its order gives),
+ * synchronous, so the store stays the one writer it is today. A start reads current state from the tables
+ * (`read`), never the change log. WAL with `synchronous=NORMAL`: a power cut may lose the last
  * commits, never corrupt the file (no worse than today's unsynced appends). Tables are STRICT (a migration
  * edit; Drizzle does not write it), so a wrong type is refused rather than stored.
  */
@@ -15,7 +16,8 @@ import { join } from "node:path";
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import type { InboxCard, InboxLine, InboxProject } from "@plannotator/core/inbox-types";
-import type { InboxLog, InboxLogContents, InboxLogUsage } from "../log";
+import type { InboxThreadPullEvent } from "../../store";
+import type { InboxLog, InboxLogContents, InboxLogState, InboxLogUsage } from "../log";
 import { lineBytes, lineOfRow } from "./line-row";
 import { migrateInboxDb } from "./migrations";
 import * as t from "./schema";
@@ -53,13 +55,55 @@ class SqliteInboxLog implements InboxLog {
   }
 
   read(): InboxLogContents {
-    const lines: InboxLine[] = [];
-    // The whole log, streamed row by row (plain SQL: the one bulk read, where Drizzle's row objects only cost memory).
-    for (const row of this.sqlite.query("SELECT seq, at, v, kind, subject_id, data FROM events ORDER BY seq").iterate()) {
+    return { state: this.state(), seqFloor: this.seqFloor() };
+  }
+
+  /**
+   * Current state from the tables: each record's latest line (its row, with the time and version of the line that
+   * wrote it), in the order the records began, and the facts kept as they happened. Plain SQL: the one bulk read,
+   * streamed row by row, where Drizzle's row objects would only cost memory.
+   */
+  private state(): InboxLogState {
+    const latest = (kind: string, table: string, where = "") =>
+      `SELECT '${kind}' AS kind, r.id AS subject_id, r.record AS data, r.first_seq AS first_seq, e.seq AS seq, e.at AS at, e.v AS v FROM ${table} r JOIN events e ON e.seq = r.seq ${where}`;
+    const sql = [
+      latest("project", "projects", "WHERE r.deleted_at IS NULL"),
+      latest("message", "messages"),
+      latest("question", "questions"),
+      latest("annotation", "annotations"),
+      latest("card", "cards"),
+      latest("steps", "steps"),
+      latest("thread_pull", "thread_pulls"),
+      latest("initiative", "initiatives"),
+    ].join(" UNION ALL ");
+    const records: InboxLogState["records"] = [];
+    for (const row of this.sqlite.query<{ first_seq: number }, []>(`${sql} ORDER BY first_seq`).iterate()) {
       const line = lineOfRow(row);
-      if (line) lines.push(line);
+      if (line) records.push({ line, firstSeq: row.first_seq });
     }
-    return { lines, seqFloor: this.seqFloor() };
+    const archiveSeq = new Map<string, number>();
+    const readdressed = new Set<string>();
+    for (const row of this.sqlite.query<{ id: string; resolved_seq: number | null; readdressed: number }, []>("SELECT id, resolved_seq, readdressed FROM threads WHERE deleted_at IS NULL AND (resolved_seq IS NOT NULL OR readdressed = 1)").iterate()) {
+      if (row.resolved_seq !== null) archiveSeq.set(row.id, row.resolved_seq);
+      if (row.readdressed) readdressed.add(row.id);
+    }
+    const names = this.sqlite
+      .query<{ projectId: string; name: string; rootId: string; routes: number }, []>("SELECT project_id AS projectId, name, root_id AS rootId, routes FROM thread_names ORDER BY seq")
+      .all()
+      .map((row) => ({ ...row, routes: row.routes === 1 }));
+    const tags = this.sqlite.query<{ key: string; threadId: string; seq: number }, []>("SELECT tag_key AS key, thread_id AS threadId, seq FROM message_tags ORDER BY seq").all();
+    const cards = new Map<string, { card: InboxCard; heardSeq: number }>();
+    for (const row of this.sqlite.query<{ id: string; card: string; heard_seq: number }, []>("SELECT id, card, heard_seq FROM cards").iterate()) {
+      cards.set(row.id, { card: JSON.parse(row.card) as InboxCard, heardSeq: row.heard_seq });
+    }
+    const pullEvents = new Map<string, InboxThreadPullEvent[]>();
+    for (const row of this.sqlite.query<{ thread_id: string; event: string }, []>("SELECT thread_id, event FROM thread_pull_events ORDER BY seq").iterate()) {
+      const events = pullEvents.get(row.thread_id);
+      const event = JSON.parse(row.event) as InboxThreadPullEvent;
+      if (events) events.push(event);
+      else pullEvents.set(row.thread_id, [event]);
+    }
+    return { records, archiveSeq, readdressed, names, tags, cards, pullEvents };
   }
 
   append(line: InboxLine, _project: InboxProject | null): void {
@@ -92,8 +136,11 @@ class SqliteInboxLog implements InboxLog {
       tx.delete(t.annotations).where(eq(t.annotations.thread_id, threadId)).run();
       tx.delete(t.steps).where(eq(t.steps.thread_id, threadId)).run();
       tx.delete(t.threadPulls).where(eq(t.threadPulls.thread_id, threadId)).run();
+      tx.delete(t.threadPullEvents).where(eq(t.threadPullEvents.thread_id, threadId)).run();
+      tx.delete(t.threadNames).where(eq(t.threadNames.root_id, threadId)).run();
+      tx.delete(t.messageTags).where(eq(t.messageTags.thread_id, threadId)).run();
       // The tombstone: the thread's id and when it went, no words.
-      tx.update(t.threads).set({ thread_name: null, deleted_at: at }).where(eq(t.threads.id, threadId)).run();
+      tx.update(t.threads).set({ thread_name: null, resolved_seq: null, readdressed: false, deleted_at: at }).where(eq(t.threads.id, threadId)).run();
     });
   }
 
@@ -110,8 +157,8 @@ class SqliteInboxLog implements InboxLog {
       tx.delete(t.mentions).where(inArray(t.mentions.message_id, messageIds)).run();
       tx.delete(t.readState).where(inArray(t.readState.thread_id, tx.select({ id: t.threads.id }).from(t.threads).where(eq(t.threads.project_id, project.id)))).run();
       tx.delete(t.messages).where(eq(t.messages.project_id, project.id)).run();
-      for (const table of [t.annotations, t.cards, t.steps, t.threadPulls]) tx.delete(table).where(eq(table.project_id, project.id)).run();
-      tx.update(t.threads).set({ thread_name: null, deleted_at: at }).where(eq(t.threads.project_id, project.id)).run();
+      for (const table of [t.annotations, t.cards, t.steps, t.threadPulls, t.threadPullEvents, t.threadNames, t.messageTags]) tx.delete(table).where(eq(table.project_id, project.id)).run();
+      tx.update(t.threads).set({ thread_name: null, resolved_seq: null, readdressed: false, deleted_at: at }).where(eq(t.threads.project_id, project.id)).run();
       tx.update(t.projects).set({ deleted_at: at, record: "{}" }).where(eq(t.projects.id, project.id)).run();
     });
   }

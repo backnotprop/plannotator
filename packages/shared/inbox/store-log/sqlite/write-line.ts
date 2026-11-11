@@ -1,12 +1,26 @@
 /**
- * One store line into the SQLite tables, inside the caller's transaction: its `events` row (the change log the
- * store replays at start), then the current row of its record (`messages`, `questions`, the Board's tables…)
- * with the columns a query will need, its thread's list facts, the person's read state, the message's
- * attachments and tags, a question's answer, and the actors who wrote them.
+ * One store line into the SQLite tables, inside the caller's transaction: its `events` row (the change log, kept
+ * as history), then the current row of its record (`messages`, `questions`, the Board's tables…) with the columns
+ * a query will need, its thread's list facts, the person's read state, the message's attachments and tags, a
+ * question's answer, the actors who wrote them, and the facts that come from the order of lines (`../history.ts`),
+ * worked out here against the record's previous row, so a start reads them instead of replaying the log.
+ *
+ * A line older than its record's current row (an import of out-of-order files) is kept in `events` only, as the
+ * store's replay ignores it.
  */
 import { and, eq, sql } from "drizzle-orm";
 import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
-import { ulid, type InboxAuthor, type InboxLine, type InboxMessage, type InboxQuestionRecord } from "@plannotator/core/inbox-types";
+import {
+  isInboxThreadPullRecord,
+  ulid,
+  type InboxAuthor,
+  type InboxCard,
+  type InboxLine,
+  type InboxMessage,
+  type InboxQuestionRecord,
+  type InboxThreadPull,
+} from "@plannotator/core/inbox-types";
+import { agentNamesHere, archiveSeqAfter, cardAfter, continuesTyping, firstLineName, firstLineTagKeys, movesAddress, pullEventOf } from "../history";
 import * as t from "./schema";
 
 export type InboxDb = SQLiteBunDatabase;
@@ -46,8 +60,38 @@ function projectOf(line: InboxLine): string | null {
   return line.record.project_id;
 }
 
+/** The table that holds a kind's current rows. */
+function tableOf(kind: InboxLine["kind"]) {
+  switch (kind) {
+    case "project":
+      return t.projects;
+    case "message":
+      return t.messages;
+    case "question":
+      return t.questions;
+    case "annotation":
+      return t.annotations;
+    case "card":
+      return t.cards;
+    case "steps":
+      return t.steps;
+    case "thread_pull":
+      return t.threadPulls;
+    case "initiative":
+      return t.initiatives;
+  }
+}
+
+/** A string field of a record that may be an old or broken shape (steps, PRs), or null. */
+const field = (record: unknown, key: string): string | null => {
+  const value = (record as Record<string, unknown> | null)?.[key];
+  return typeof value === "string" ? value : null;
+};
+
 export function writeLine(db: InboxDbWriter, line: InboxLine): void {
   const data = JSON.stringify(line.record);
+  const table = tableOf(line.kind);
+  const current = db.select({ seq: table.seq, record: table.record }).from(table).where(eq(table.id, line.id)).get();
   const actor = line.kind === "message" ? actorOf(db, line.record.author, line.at) : line.kind === "question" && line.record.picked_by ? actorOf(db, { kind: "person" }, line.at) : null;
   db.insert(t.events)
     .values({
@@ -63,69 +107,90 @@ export function writeLine(db: InboxDbWriter, line: InboxLine): void {
       data,
     })
     .run();
+  if (current && current.seq > line.seq) return;
   const seq = line.seq;
+  const first = { first_seq: seq };
   switch (line.kind) {
     case "project": {
       const r = line.record;
       const row = { key: r.key, root: r.root, name: r.name, record: data, seq, deleted_at: null };
-      db.insert(t.projects).values({ id: r.id, ...row }).onConflictDoUpdate({ target: t.projects.id, set: row }).run();
+      db.insert(t.projects).values({ id: r.id, ...first, ...row }).onConflictDoUpdate({ target: t.projects.id, set: row }).run();
       return;
     }
     case "message":
-      writeMessage(db, line.record, data, seq, line.at, actor!);
+      writeMessage(db, line.record, current ? (JSON.parse(current.record) as InboxMessage) : undefined, data, seq, line.at, actor!);
       return;
-    case "question":
+    case "question": {
+      const prev = current ? (JSON.parse(current.record) as InboxQuestionRecord) : undefined;
+      // Typing goes over the row before it: history keeps each change of choice, never each key.
+      if (prev && continuesTyping(prev, line.record)) db.delete(t.events).where(eq(t.events.seq, current!.seq)).run();
       writeQuestion(db, line.record, data, seq, line.at, actor);
       return;
+    }
     case "annotation": {
       const r = line.record;
       const row = { thread_id: r.thread_id, project_id: r.project_id, seq, record: data };
-      db.insert(t.annotations).values({ id: r.id, ...row }).onConflictDoUpdate({ target: t.annotations.id, set: row }).run();
+      db.insert(t.annotations).values({ id: r.id, ...first, ...row }).onConflictDoUpdate({ target: t.annotations.id, set: row }).run();
       return;
     }
     case "card": {
-      const row = { project_id: line.record.project_id, seq, record: data };
-      db.insert(t.cards).values({ id: line.record.id, ...row }).onConflictDoUpdate({ target: t.cards.id, set: row }).run();
+      const before = current ? db.select({ card: t.cards.card, heard_seq: t.cards.heard_seq }).from(t.cards).where(eq(t.cards.id, line.id)).get() : undefined;
+      const { card, heard } = cardAfter(before ? (JSON.parse(before.card) as InboxCard) : undefined, line.record);
+      const row = { project_id: line.record.project_id, seq, record: data, card: JSON.stringify(card), heard_seq: heard || !before ? seq : before.heard_seq };
+      db.insert(t.cards).values({ id: line.record.id, ...first, ...row }).onConflictDoUpdate({ target: t.cards.id, set: row }).run();
       return;
     }
     case "steps": {
-      const r = line.record;
-      const row = { thread_id: r.thread_id, project_id: r.project_id, seq, record: data };
-      db.insert(t.steps).values({ id: r.id, ...row }).onConflictDoUpdate({ target: t.steps.id, set: row }).run();
+      const row = { thread_id: field(line.record, "thread_id"), project_id: field(line.record, "project_id"), seq, record: data };
+      db.insert(t.steps).values({ id: line.id, ...first, ...row }).onConflictDoUpdate({ target: t.steps.id, set: row }).run();
       return;
     }
     case "thread_pull": {
       const r = line.record;
-      const row = { thread_id: r.thread_id, project_id: r.project_id, seq, record: data };
-      db.insert(t.threadPulls).values({ id: r.id, ...row }).onConflictDoUpdate({ target: t.threadPulls.id, set: row }).run();
+      if (isInboxThreadPullRecord(r)) {
+        const prev = current ? (JSON.parse(current.record) as unknown) : undefined;
+        const event = pullEventOf(isInboxThreadPullRecord(prev) ? (prev as InboxThreadPull) : undefined, r, seq);
+        if (event) db.insert(t.threadPullEvents).values({ seq, thread_id: r.thread_id, project_id: r.project_id, event: JSON.stringify(event) }).run();
+      }
+      const row = { thread_id: field(r, "thread_id"), project_id: field(r, "project_id"), seq, record: data };
+      db.insert(t.threadPulls).values({ id: line.id, ...first, ...row }).onConflictDoUpdate({ target: t.threadPulls.id, set: row }).run();
       return;
     }
     case "initiative": {
       const row = { seq, record: data };
-      db.insert(t.initiatives).values({ id: line.record.id, ...row }).onConflictDoUpdate({ target: t.initiatives.id, set: row }).run();
+      db.insert(t.initiatives).values({ id: line.record.id, ...first, ...row }).onConflictDoUpdate({ target: t.initiatives.id, set: row }).run();
       return;
     }
   }
 }
 
-function writeMessage(db: InboxDbWriter, m: InboxMessage, data: string, seq: number, at: string, authorId: string): void {
-  const before = db.select({ first_seq: t.messages.first_seq }).from(t.messages).where(eq(t.messages.id, m.id)).get();
+function writeMessage(db: InboxDbWriter, m: InboxMessage, prev: InboxMessage | undefined, data: string, seq: number, at: string, authorId: string): void {
   const row = { thread_id: m.thread_id, project_id: m.project_id, reply_to: m.reply_to, author_id: authorId, created_at: m.created_at, seq, subject: m.subject, body: m.body, record: data };
   db.insert(t.messages)
     .values({ id: m.id, first_seq: seq, ...row })
     .onConflictDoUpdate({ target: t.messages.id, set: row })
     .run();
   const root = m.id === m.thread_id;
+  if (!prev) {
+    // A message's first line: the name it gives its thread, and its hashtags, at this seq.
+    const named = firstLineName(m);
+    if (named) db.insert(t.threadNames).values({ root_id: m.id, seq, project_id: m.project_id, name: named.name, routes: named.routes }).run();
+    for (const tag_key of firstLineTagKeys(m)) db.insert(t.messageTags).values({ message_id: m.id, tag_key, thread_id: m.thread_id, project_id: m.project_id, seq }).run();
+  } else if (root && agentNamesHere(prev, m)) {
+    db.insert(t.threadNames).values({ root_id: m.id, seq, project_id: m.project_id, name: m.thread_name!, routes: true }).run();
+  }
+  const had = root && prev ? (db.select({ resolved_seq: t.threads.resolved_seq }).from(t.threads).where(eq(t.threads.id, m.id)).get()?.resolved_seq ?? null) : null;
+  const rootFacts = root ? { resolved_seq: archiveSeqAfter(prev?.resolved_at, had, m, seq), ...(movesAddress(prev, m) ? { readdressed: true } : {}) } : {};
   db.insert(t.threads)
-    .values({ id: m.thread_id, project_id: m.project_id, thread_name: root ? (m.thread_name ?? null) : null, resolved_at: root ? m.resolved_at : null, first_seq: seq, last_seq: seq, last_at: at, message_count: 1, seq })
+    .values({ id: m.thread_id, project_id: m.project_id, thread_name: root ? (m.thread_name ?? null) : null, resolved_at: root ? m.resolved_at : null, first_seq: seq, last_seq: seq, last_at: at, message_count: 1, seq, ...rootFacts })
     .onConflictDoUpdate({
       target: t.threads.id,
       set: {
         last_seq: seq,
         last_at: at,
         seq,
-        message_count: before ? sql`${t.threads.message_count}` : sql`${t.threads.message_count} + 1`,
-        ...(root ? { project_id: m.project_id, thread_name: m.thread_name ?? null, resolved_at: m.resolved_at } : {}),
+        message_count: prev ? sql`${t.threads.message_count}` : sql`${t.threads.message_count} + 1`,
+        ...(root ? { project_id: m.project_id, thread_name: m.thread_name ?? null, resolved_at: m.resolved_at, ...rootFacts } : {}),
       },
     })
     .run();
@@ -183,5 +248,5 @@ function writeQuestion(db: InboxDbWriter, q: InboxQuestionRecord, data: string, 
     seq,
     record: data,
   };
-  db.insert(t.questions).values({ id: q.id, ...row }).onConflictDoUpdate({ target: t.questions.id, set: row }).run();
+  db.insert(t.questions).values({ id: q.id, first_seq: seq, ...row }).onConflictDoUpdate({ target: t.questions.id, set: row }).run();
 }

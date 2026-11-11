@@ -3,15 +3,18 @@
  * replaying the change log: each message's and question's current row is the store's record, each thread's
  * message count and archive time match, the person's answer is one row in the state the question says
  * (picked, sent, withdrawn), a deleted thread is a tombstone with no words left, and the seq floor survives it.
+ * The change log keeps each question's history of choices and Sends, with a run of typing kept as one row.
  *
  * The failures this guards: a row that drifts from the record it mirrors (a later query would serve stale
- * words or a wrong count), an answer that loses its state, or a deletion that leaves a message behind.
+ * words or a wrong count), an answer that loses its state, a deletion that leaves a message behind, and a
+ * decision history that drops a change of choice or a Send (or keeps every key typed).
  */
 import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
+import type { InboxQuestionRecord } from "@plannotator/core/inbox-types";
 import { InboxStore } from "../../store";
 import { jsonlInboxLog } from "../jsonl-log";
 import { teeLog } from "../tee-log";
@@ -66,6 +69,23 @@ test("every message, question, answer and thread row matches the store's record;
       expect(store.message(id)).toBeNull();
       expect(db.query("SELECT count(*) AS n FROM messages WHERE thread_id = ?").get(id)).toEqual({ n: 0 });
       expect(db.query("SELECT count(*) AS n FROM events WHERE thread_id = ?").get(id)).toEqual({ n: 0 });
+    }
+    // Decision history: per question, the choices and Sends in order read the same from the change log as from
+    // every line today's JSONL kept; typing (the world types notes a few keys at a time) left fewer rows.
+    const steps = (records: InboxQuestionRecord[]) =>
+      records
+        .map((q) => JSON.stringify([q.answer?.selected ?? null, q.answer?.skipped ?? false, q.sent_reply_id !== null && q.sent_revision === q.revision, q.superseded_by ?? null, q.set_aside ?? null]))
+        .filter((step, i, all) => i === 0 || step !== all[i - 1]);
+    const jsonlLines = jsonlInboxLog(join(dataDir, "inbox"))
+      .read()
+      .lines!.filter((line) => line.kind === "question" && store.questionRecord(line.id) !== null)
+      .sort((a, b) => a.seq - b.seq);
+    const logged = db.query("SELECT subject_id, data FROM events WHERE kind = 'question' ORDER BY seq").all() as { subject_id: string; data: string }[];
+    expect(logged.length).toBeLessThan(jsonlLines.length);
+    for (const id of new Set(jsonlLines.map((line) => line.id))) {
+      const today = jsonlLines.flatMap((line) => (line.id === id ? [line.record as InboxQuestionRecord] : []));
+      const kept = logged.flatMap((row) => (row.subject_id === id ? [JSON.parse(row.data) as InboxQuestionRecord] : []));
+      expect(steps(kept)).toEqual(steps(today));
     }
     const floor = db.query("SELECT value FROM meta WHERE key = 'seq_floor'").get() as { value: string };
     expect(Number(floor.value)).toBeGreaterThan(0);

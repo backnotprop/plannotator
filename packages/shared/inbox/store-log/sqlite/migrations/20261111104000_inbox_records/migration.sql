@@ -13,6 +13,7 @@ CREATE TABLE `annotations` (
 	`id` text PRIMARY KEY,
 	`thread_id` text NOT NULL,
 	`project_id` text NOT NULL,
+	`first_seq` integer NOT NULL,
 	`seq` integer NOT NULL,
 	`record` text NOT NULL
 ) STRICT;
@@ -45,8 +46,11 @@ CREATE TABLE `attachments` (
 CREATE TABLE `cards` (
 	`id` text PRIMARY KEY,
 	`project_id` text NOT NULL,
+	`first_seq` integer NOT NULL,
 	`seq` integer NOT NULL,
-	`record` text NOT NULL
+	`record` text NOT NULL,
+	`card` text NOT NULL,
+	`heard_seq` integer NOT NULL
 ) STRICT;
 --> statement-breakpoint
 CREATE TABLE `events` (
@@ -64,6 +68,7 @@ CREATE TABLE `events` (
 --> statement-breakpoint
 CREATE TABLE `initiatives` (
 	`id` text PRIMARY KEY,
+	`first_seq` integer NOT NULL,
 	`seq` integer NOT NULL,
 	`record` text NOT NULL
 ) STRICT;
@@ -76,6 +81,15 @@ CREATE TABLE `mentions` (
 	`wakes` integer,
 	`record` text NOT NULL,
 	CONSTRAINT `mentions_pk` PRIMARY KEY(`message_id`, `position`)
+) STRICT;
+--> statement-breakpoint
+CREATE TABLE `message_tags` (
+	`message_id` text NOT NULL,
+	`tag_key` text NOT NULL,
+	`thread_id` text NOT NULL,
+	`project_id` text NOT NULL,
+	`seq` integer NOT NULL,
+	CONSTRAINT `message_tags_pk` PRIMARY KEY(`message_id`, `tag_key`)
 ) STRICT;
 --> statement-breakpoint
 CREATE TABLE `messages` (
@@ -104,6 +118,7 @@ CREATE TABLE `projects` (
 	`root` text NOT NULL,
 	`name` text NOT NULL,
 	`record` text NOT NULL,
+	`first_seq` integer NOT NULL,
 	`seq` integer NOT NULL,
 	`deleted_at` text
 ) STRICT;
@@ -121,6 +136,7 @@ CREATE TABLE `questions` (
 	`current_answer_id` text,
 	`sent_reply_id` text,
 	`asked_by_actor_id` text,
+	`first_seq` integer NOT NULL,
 	`seq` integer NOT NULL,
 	`record` text NOT NULL
 ) STRICT;
@@ -137,16 +153,34 @@ CREATE TABLE `read_state` (
 --> statement-breakpoint
 CREATE TABLE `steps` (
 	`id` text PRIMARY KEY,
-	`thread_id` text NOT NULL,
-	`project_id` text NOT NULL,
+	`thread_id` text,
+	`project_id` text,
+	`first_seq` integer NOT NULL,
 	`seq` integer NOT NULL,
 	`record` text NOT NULL
 ) STRICT;
 --> statement-breakpoint
-CREATE TABLE `thread_pulls` (
-	`id` text PRIMARY KEY,
+CREATE TABLE `thread_names` (
+	`root_id` text NOT NULL,
+	`seq` integer NOT NULL,
+	`project_id` text NOT NULL,
+	`name` text NOT NULL,
+	`routes` integer NOT NULL,
+	CONSTRAINT `thread_names_pk` PRIMARY KEY(`root_id`, `seq`)
+) STRICT;
+--> statement-breakpoint
+CREATE TABLE `thread_pull_events` (
+	`seq` integer PRIMARY KEY,
 	`thread_id` text NOT NULL,
 	`project_id` text NOT NULL,
+	`event` text NOT NULL
+) STRICT;
+--> statement-breakpoint
+CREATE TABLE `thread_pulls` (
+	`id` text PRIMARY KEY,
+	`thread_id` text,
+	`project_id` text,
+	`first_seq` integer NOT NULL,
 	`seq` integer NOT NULL,
 	`record` text NOT NULL
 ) STRICT;
@@ -156,6 +190,8 @@ CREATE TABLE `threads` (
 	`project_id` text NOT NULL,
 	`thread_name` text,
 	`resolved_at` text,
+	`resolved_seq` integer,
+	`readdressed` integer DEFAULT false NOT NULL,
 	`first_seq` integer NOT NULL,
 	`last_seq` integer NOT NULL,
 	`last_at` text NOT NULL,
@@ -178,6 +214,9 @@ CREATE INDEX `events_thread` ON `events` (`thread_id`);--> statement-breakpoint
 CREATE INDEX `events_message` ON `events` (`message_id`);--> statement-breakpoint
 CREATE INDEX `initiatives_seq` ON `initiatives` (`seq`);--> statement-breakpoint
 CREATE INDEX `mentions_target` ON `mentions` (`target_actor_id`);--> statement-breakpoint
+CREATE INDEX `message_tags_thread` ON `message_tags` (`thread_id`);--> statement-breakpoint
+CREATE INDEX `message_tags_project` ON `message_tags` (`project_id`);--> statement-breakpoint
+CREATE INDEX `message_tags_seq` ON `message_tags` (`seq`);--> statement-breakpoint
 CREATE INDEX `messages_thread` ON `messages` (`thread_id`,`first_seq`);--> statement-breakpoint
 CREATE INDEX `messages_seq` ON `messages` (`seq`);--> statement-breakpoint
 CREATE INDEX `projects_key` ON `projects` (`key`);--> statement-breakpoint
@@ -186,8 +225,14 @@ CREATE INDEX `questions_message` ON `questions` (`message_id`);--> statement-bre
 CREATE INDEX `questions_thread` ON `questions` (`thread_id`);--> statement-breakpoint
 CREATE INDEX `questions_seq` ON `questions` (`seq`);--> statement-breakpoint
 CREATE INDEX `steps_thread` ON `steps` (`thread_id`);--> statement-breakpoint
+CREATE INDEX `steps_project` ON `steps` (`project_id`);--> statement-breakpoint
 CREATE INDEX `steps_seq` ON `steps` (`seq`);--> statement-breakpoint
+CREATE INDEX `thread_names_project` ON `thread_names` (`project_id`);--> statement-breakpoint
+CREATE INDEX `thread_names_seq` ON `thread_names` (`seq`);--> statement-breakpoint
+CREATE INDEX `thread_pull_events_thread` ON `thread_pull_events` (`thread_id`);--> statement-breakpoint
+CREATE INDEX `thread_pull_events_project` ON `thread_pull_events` (`project_id`);--> statement-breakpoint
 CREATE INDEX `thread_pulls_thread` ON `thread_pulls` (`thread_id`);--> statement-breakpoint
+CREATE INDEX `thread_pulls_project` ON `thread_pulls` (`project_id`);--> statement-breakpoint
 CREATE INDEX `thread_pulls_seq` ON `thread_pulls` (`seq`);--> statement-breakpoint
 CREATE INDEX `threads_project` ON `threads` (`project_id`);--> statement-breakpoint
 CREATE INDEX `threads_last` ON `threads` (`last_seq`);--> statement-breakpoint
