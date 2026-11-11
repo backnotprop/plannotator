@@ -1559,6 +1559,12 @@ export const inboxApi = {
   changeThreadPulls: async (threadId: string, change: { add?: string[]; remove?: string[] }): Promise<InboxThreadPullsAnswer> =>
     threadPullsOf(await post<unknown>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/pulls`), change)),
   /**
+   * Post decisions (Export decisions › Post on a pull request, and the PR card's row): the thread's decisions as one
+   * comment on one of its PRs, edited in place on a later post. `pull`: the PR as the thread writes it (`ref`).
+   */
+  postThreadDecisions: (threadId: string, pull: string, tz: string) =>
+    post<{ ok: true; action: 'created' | 'updated'; ref: string; url: string }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/decisions/post`), { pull, tz }),
+  /**
    * The person looked at the thread. `throughSeq`: the seq of the newest
    * message the window showed; the look stops there, so a message that landed
    * after the window read the thread stays new (an older Inbox ignores it).

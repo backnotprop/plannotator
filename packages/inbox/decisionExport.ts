@@ -4,6 +4,8 @@
  * question records the thread shows; this window only links to them.
  */
 import type { InboxThread } from '@plannotator/core/inbox-types';
+import { inboxApi } from './api';
+import type { InboxToastModel } from './components/Toast';
 import { inboxUrl, machineOf } from './inboxUrl';
 
 export type DecisionExportDownload = 'md' | 'html';
@@ -29,4 +31,21 @@ function readerZone(): string {
 export function decisionExportUrl(threadId: string, format: DecisionExportDownload): string {
   const query = new URLSearchParams({ format, tz: readerZone() }).toString();
   return inboxUrl(`/threads/${encodeURIComponent(threadId)}/decisions`, query, machineOf(threadId));
+}
+
+/**
+ * Post decisions (step 2): the thread's decisions as one comment on `ref`, one of its PRs, edited in place when
+ * posted again. One click, no dialog; the toast says where it went with Open, or what to do when it did not go.
+ */
+export async function postDecisions(threadId: string, ref: string, onToast?: (toast: Omit<InboxToastModel, 'id'>) => void): Promise<void> {
+  try {
+    const answer = await inboxApi.postThreadDecisions(threadId, ref, readerZone());
+    onToast?.({
+      icon: 'check',
+      lead: `Decisions ${answer.action === 'updated' ? 'updated' : 'posted'} on ${answer.ref}`,
+      ...(answer.url.startsWith('https://') ? { action: { label: 'Open', onPress: () => void window.open(answer.url, '_blank', 'noopener,noreferrer') } } : {}),
+    });
+  } catch (cause) {
+    onToast?.({ icon: 'warn', lead: cause instanceof Error && cause.message ? cause.message : `Couldn't post on ${ref}. Try again.`, wrap: true });
+  }
 }

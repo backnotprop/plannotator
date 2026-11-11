@@ -11810,6 +11810,10 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-prpop-tbtn:hover:not(:disabled) { background: color-mix(in oklch, var(--muted) 70%, var(--foreground) 8%); }
 .ib-prpop-tbtn:disabled { opacity: 0.5; }
 .ib-prpop-rm1 { align-self: flex-start; background: none; color: var(--muted-foreground); padding: 0 4px; }
+/* Post decisions (export-decisions step 2): a quiet button on each PR's row, and above the edit for one PR. */
+.ib-prpop-post { margin: 7px 2px 0 0; font-weight: 500; color: var(--muted-foreground); }
+.ib-prpop-post:hover:not(:disabled) { color: var(--foreground); }
+.ib-prpop-post1 { align-self: flex-start; }
 .ib-prpop-rm1:hover:not(:disabled) { background: var(--muted); color: var(--foreground); }
 .ib-prpop-undo { display: flex; align-items: center; gap: 8px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .ib-prpop-err { font-size: var(--ib-fs-12, 12px); line-height: 1.4; color: var(--ib-ref-closed); }
