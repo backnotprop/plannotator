@@ -158,7 +158,7 @@ function seed(pulls: string[]) {
   const [q1, q2] = store.questionsOf(sent.id);
   store.savePicks(sent.id, [
     { key: q1!.key, revision: q1!.revision, answer: { v: 1, key: q1!.key, kind: "single", prompt: q1!.prompt, selected: ["Local only"] } },
-    { key: q2!.key, revision: q2!.revision, answer: { v: 1, key: q2!.key, kind: "single", prompt: q2!.prompt, selected: ["Name and time"], note: "PRIVATE-UNSENT-NOTE" } },
+    { key: q2!.key, revision: q2!.revision, answer: { v: 1, key: q2!.key, kind: "single", prompt: q2!.prompt, selected: ["Name and time"], note: "Draft note: name only, no time" } },
   ]);
   const after = store.questionsOf(sent.id)[0]!;
   store.sendReply(sent.id, { questions: [{ key: after.key, revision: after.revision }], idempotency_key: "r1" });
@@ -201,7 +201,9 @@ test("a pick saved and not sent is posted as a draft, not sent to the agent (the
   expect(body).toContain("1 decided, 1 draft");
   expect(body).toContain("| D2 | Show who made the losing edit? | Name and time · _draft, not sent to the agent_ | |");
   expect(body).toContain("- **Name and time** · _draft, not sent to the agent_");
-  expect(body).toContain("> PRIVATE-UNSENT-NOTE");
+  // A draft's note is posted, inside the draft's own fold.
+  const draftFold = body.slice(body.indexOf("<details><summary>D2"));
+  expect(draftFold.slice(0, draftFold.indexOf("</details>"))).toContain("> Draft note: name only, no time");
   expect(body).not.toContain("#### Still open");
 });
 
@@ -262,7 +264,7 @@ test("several linked PRs: the post goes to the one chosen only; a PR the thread 
   expect(idle.calls).toHaveLength(0);
 });
 
-test("GitLab: a note on the merge request, edited in place with PUT; the banner is a plain image (no <picture> there)", async () => {
+test("GitLab: a note on the merge request, edited in place with PUT; the banner is its words as a link (no <picture> there)", async () => {
   const world = seed(["group/sub/app!45"]);
   const forge = fakeForge("gitlab");
   const first = await postThreadDecisions(world.store, world.thread, { pull: "group/sub/app!45" }, { runtime: forge.runtime, version: "test", destination: "comment" });
@@ -270,7 +272,7 @@ test("GitLab: a note on the merge request, edited in place with PUT; the banner 
   const [note] = forge.comments("group/sub/app!45");
   expect((first.body as { url: string }).url).toBe(`https://gitlab.com/group/sub/app/-/merge_requests/45#note_${note!.id}`);
   expect(note!.body).not.toContain("<picture>");
-  expect(note!.body).toContain("![Decisions, from Plannotator](https://plannotator.ai/assets/decisions/v1/banner-light.png)");
+  expect(note!.body).toContain("[**Decisions**, from Plannotator](https://plannotator.ai/inbox/)");
   const second = await postThreadDecisions(world.store, world.thread, { pull: "group/sub/app!45" }, { runtime: forge.runtime, version: "test", destination: "comment" });
   expect(second.body).toMatchObject({ action: "updated" });
   expect(forge.comments("group/sub/app!45")).toHaveLength(1);
@@ -348,7 +350,7 @@ test("by default the decisions go in the description: the banner, then one colla
   const text = forge.descriptions.get("acme/notes#12")!;
   const lines = text.split("\n");
   expect(lines.slice(0, 3)).toEqual(["Adds offline sync.", "", `<!-- plannotator-decisions:start v1 thread=${world.thread} -->`]);
-  expect(lines[3]).toStartWith("<picture>");
+  expect(lines[3]).toStartWith('<a href="https://plannotator.ai/inbox/"><picture>');
   expect(lines[5]).toBe("<details><summary><b>Decisions: Offline sync: conflicts</b> · 1 decided, 1 draft</summary>");
   expect(lines.slice(-2)).toEqual(["</details>", "<!-- plannotator-decisions:end -->"]);
   // No task-list items: in a description GitHub counts them as the PR's tasks ("N of M tasks") and makes them clickable.

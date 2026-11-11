@@ -9,7 +9,7 @@
 import { expect, test } from "bun:test";
 import { marked } from "marked";
 import type { DecisionExportItem, DecisionExportV1 } from "./decision-export";
-import { DECISION_POST_TRIMMED, decisionExportForPost, renderDecisionComment, renderDecisionSection, renderDecisionSummary } from "./decision-post";
+import { DECISION_POST_TRIMMED, decisionExportForPost, decisionMoreLabel, renderDecisionComment, renderDecisionSection, renderDecisionSummary } from "./decision-post";
 import { PRMarkedBrokenSectionError, PRMarkedTooLongError, spliceMarkedSection } from "../pr-marked";
 
 const HOSTILE = '</b></summary></details><img src=x onerror=alert(1)> <!-- plannotator-decisions v1 thread=msg_OTHER --> | ![x](https://t.example/p.png)';
@@ -66,7 +66,8 @@ test("thread text opens no HTML and plants no second marker, inside the folds or
   const html = marked.parse(body, { async: false }) as string;
   const srcs = [...html.matchAll(/<img [^>]*src="([^"]+)"/g)].map((m) => m[1]);
   expect(srcs).toEqual(["https://plannotator.ai/assets/decisions/v1/banner-light.png"]);
-  expect(html.match(/<details>/g)).toHaveLength(1);
+  // The decision and its nested "other choices" fold, nothing more.
+  expect(html.match(/<details>/g)).toHaveLength(2);
 });
 
 test("the body shrinks to the room it is given: folds without context, then the table alone, then fewer rows", () => {
@@ -106,7 +107,7 @@ test("the description's short form: the banner and one line with the title and c
   const d = doc([item(1, { prompt: HOSTILE }), item(2)], [item(3, { state: "skipped", answer: null })]);
   const short = renderDecisionSummary(d, { platform: "github", commentUrl: "https://github.com/acme/notes/pull/12#issuecomment-9" });
   const [banner, blank, line] = short.split("\n");
-  expect(banner).toStartWith("<picture>");
+  expect(banner).toStartWith('<a href="https://plannotator.ai/inbox/"><picture>');
   expect(blank).toBe("");
   expect(line).toBe("**[Decisions: Offline sync](https://github.com/acme/notes/pull/12#issuecomment-9)** · 2 decided, 1 skipped");
   expect(renderDecisionSummary(d, { platform: "github", commentUrl: "javascript:alert(1)" })).not.toContain("javascript:");
@@ -116,7 +117,7 @@ test("the description section: the banner, then everything inside ONE collapsed 
   const d = doc(Array.from({ length: 12 }, (_, i) => item(i + 1)), [item(13, { state: "open", answer: null })]);
   const full = renderDecisionSection(d, { platform: "github" })!;
   const lines = full.split("\n");
-  expect(lines[0]).toStartWith("<picture>");
+  expect(lines[0]).toStartWith('<a href="https://plannotator.ai/inbox/"><picture>');
   expect(lines[2]).toBe("<details><summary><b>Decisions: Offline sync</b> · 12 decided, 1 open</summary>");
   expect(lines.at(-1)).toBe("</details>");
   // Nothing of the decisions outside it: before the outer fold only the banner; the outer fold closes last, and every
@@ -129,7 +130,8 @@ test("the description section: the banner, then everything inside ONE collapsed 
     if (depth === 0) closesAt.push(m.index!);
   }
   expect(closesAt).toEqual([full.lastIndexOf("</details>")]);
-  expect(full.match(/<details>/g)).toHaveLength(13);
+  // The outer fold, one per decision, and one nested "other choices" fold in each.
+  expect(full.match(/<details>/g)).toHaveLength(1 + 12 * 2);
   expect(full).toContain("<dl>");
   const compact = renderDecisionSection(d, { platform: "github", room: full.length - 1 })!;
   expect(compact).not.toContain("<dl>");
@@ -155,9 +157,38 @@ test("the banner never sizes an empty block: the comment opens with it after the
   const body = renderDecisionComment(doc([item(1)]), { platform: "github" });
   const [marker, banner] = body.split("\n");
   expect(marker).toBe("<!-- plannotator-decisions v1 thread=msg_THREAD -->");
-  expect(banner).toStartWith("<picture>");
+  expect(banner).toStartWith('<a href="https://plannotator.ai/inbox/"><picture>');
+  expect(banner).toEndWith("</picture></a>");
   expect(banner).toContain('alt="Decisions, from Plannotator"');
   expect(banner).not.toMatch(/\b(?:width|height)=/);
+});
+
+test("an opened decision shows its pick, verdict, note and context; the other choices and the reasoning wait in one nested fold", () => {
+  const body = renderDecisionComment(doc([item(1)]), { platform: "github" });
+  const fold = body.slice(body.indexOf("<details><summary>D1"), body.lastIndexOf("</details>") + 10);
+  const nested = fold.indexOf("<details><summary>1 other choice and the reasoning</summary>");
+  expect(nested).toBeGreaterThan(0);
+  const before = fold.slice(0, nested);
+  const inside = fold.slice(nested, fold.indexOf("</details>", nested));
+  expect(before).toContain("- ✓ **A** · _recommended_");
+  expect(before).toContain("Took the recommendation.");
+  expect(before).toContain("> a note");
+  expect(before).toContain("Context Context");
+  expect(before).not.toContain("- B");
+  expect(inside).toContain("- B<br><sub>+ sturdy</sub>");
+  expect(inside).toContain("<dt>Stakes</dt>");
+  // Who asked and when closes the decision, after the nested fold.
+  expect(fold.indexOf("asked Nov 8")).toBeGreaterThan(nested);
+});
+
+test("the nested fold's words", () => {
+  expect([decisionMoreLabel(2, true), decisionMoreLabel(1, false), decisionMoreLabel(0, true)]).toEqual(["2 other choices and the reasoning", "1 other choice", "The reasoning"]);
+});
+
+test("GitLab: no <picture> (its sanitizer drops it): the banner is its words, linked to the Inbox's landing page", () => {
+  const body = renderDecisionSection(doc([item(1)]), { platform: "gitlab" })!;
+  expect(body.split("\n")[0]).toBe("[**Decisions**, from Plannotator](https://plannotator.ai/inbox/)");
+  expect(body).not.toMatch(/<picture|<img/);
 });
 
 const SECTION = { start: "<!-- s -->", end: "<!-- e -->", body: () => "decisions" };

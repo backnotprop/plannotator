@@ -51,6 +51,9 @@ export const DECISION_POST_BANNER = {
   alt: "Decisions, from Plannotator",
 } as const;
 
+/** Where the banner links: the Plannotator Inbox landing page (its canonical URL; answers 200, checked 2026-11-10). */
+export const DECISION_POST_LANDING = "https://plannotator.ai/inbox/";
+
 export type DecisionPostPlatform = "github" | "gitlab";
 
 // ── Privacy for a public post ──
@@ -136,12 +139,14 @@ export function decisionPostTally(doc: DecisionExportV1): string {
 }
 
 function banner(platform: DecisionPostPlatform): string {
-  // GitLab's sanitizer keeps no <picture>/<source> (nor an <img>'s width): the light banner alone, as a Markdown image.
-  if (platform === "gitlab") return `![${DECISION_POST_BANNER.alt}](${DECISION_POST_BANNER.light})`;
+  // GitLab's sanitizer keeps no <picture>/<source>, and the banner is transparent with text coloured per theme, so one
+  // image would vanish on GitLab's dark theme: there the banner is its words, as a link.
+  if (platform === "gitlab") return `[**Decisions**, from Plannotator](${DECISION_POST_LANDING})`;
   // No width or height: a banner that fails to load (the site not deployed yet, a proxy refusing it) leaves only its
   // alt text on one line, never an empty block the size of the picture.
   const img = `<img alt="${DECISION_POST_BANNER.alt}" src="${DECISION_POST_BANNER.light}">`;
-  return `<picture><source media="(prefers-color-scheme: dark)" srcset="${DECISION_POST_BANNER.dark}">${img}</picture>`;
+  // Linked to the Inbox's landing page (the owner, 2026-11-10).
+  return `<a href="${DECISION_POST_LANDING}"><picture><source media="(prefers-color-scheme: dark)" srcset="${DECISION_POST_BANNER.dark}">${img}</picture></a>`;
 }
 
 function head(doc: DecisionExportV1, when: ReturnType<typeof decisionExportDesignDates>): string {
@@ -164,34 +169,50 @@ function table(doc: DecisionExportV1, max = Infinity): string[] {
 
 type Level = "full" | "compact";
 
+/** One choice as a list line: its label (marked when picked), description, recommendation and, in full, pros and cons. */
+function choiceLine(c: DecisionExportItem["choices"][number], picked: ((label: string) => string) | null, level: Level): string {
+  const label = mdInline(c.label);
+  // Never task-list syntax (`- [x]`): in a PR description GitHub counts those as the PR's tasks ("N of M tasks") and
+  // makes them clickable checkboxes that edit the text. The chosen option is "✓" and bold, read as plain text too.
+  let line = picked ? picked(label) : `- ${label}`;
+  if (c.description) line += ` · ${mdInline(c.description)}`;
+  if (c.image) line += ` · _(picture: ${mdInline(c.image.alt)})_`;
+  if (c.prototype) line += ` · prototype: ${mdInline(c.prototype)}`;
+  if (c.recommended) line += " · _recommended_";
+  if (c.settled) line += " · _already settled by the agent_";
+  const signs = level === "full" ? [...(c.pros ?? []).map((p) => `+ ${mdInline(p)}`), ...(c.cons ?? []).map((p) => `− ${mdInline(p)}`)] : [];
+  if (signs.length) line += `<br><sub>${signs.join(" &nbsp; ")}</sub>`;
+  return line;
+}
+
+/** "2 other choices and the reasoning", "1 other choice", "The reasoning": the nested fold's summary. */
+export function decisionMoreLabel(others: number, reasons: boolean): string {
+  if (others === 0) return "The reasoning";
+  return `${others} other ${others === 1 ? "choice" : "choices"}${reasons ? " and the reasoning" : ""}`;
+}
+
+/**
+ * One decision (or draft) folded. Opened, it shows what was picked (with its note and whether it took the
+ * recommendation) and the context; the choices not picked and the reasoning (stakes, why, what it holds up…) wait in
+ * one small nested fold (the owner, 2026-11-10: "hide the choices not picked at first"); who asked and when closes it.
+ */
 function folded(doc: DecisionExportV1, item: DecisionExportItem, level: Level, when: ReturnType<typeof decisionExportDesignDates>): string[] {
   // A draft (picked, not sent): its pick carries the draft mark instead of the decided check, and no verdict.
   const draft = item.state === "picked_unsent";
   const mark = (label: string) => (draft ? `- **${label}** · _${DECISION_POST_DRAFT}_` : `- ✓ **${label}**`);
   const answer = html(clip(answerOf(item), 60));
   const out = [`<details><summary>D${item.n} · <b>${html(item.prompt)}</b> ${answer}${draft ? `${answer ? " · " : ""}${DECISION_POST_DRAFT}` : ""}</summary>`, ""];
-  for (const c of item.choices) {
-    const label = mdInline(c.label);
-    // Never task-list syntax (`- [x]`): in a PR description GitHub counts those as the PR's tasks ("N of M tasks") and
-    // makes them clickable checkboxes that edit the text. The chosen option is "✓" and bold, read as plain text too.
-    let line = c.chosen ? mark(label) : `- ${label}`;
-    if (c.description) line += ` · ${mdInline(c.description)}`;
-    if (c.image) line += ` · _(picture: ${mdInline(c.image.alt)})_`;
-    if (c.prototype) line += ` · prototype: ${mdInline(c.prototype)}`;
-    if (c.recommended) line += " · _recommended_";
-    if (c.settled) line += " · _already settled by the agent_";
-    const signs = level === "full" ? [...(c.pros ?? []).map((p) => `+ ${mdInline(p)}`), ...(c.cons ?? []).map((p) => `− ${mdInline(p)}`)] : [];
-    if (signs.length) line += `<br><sub>${signs.join(" &nbsp; ")}</sub>`;
-    out.push(line);
-  }
+  for (const c of item.choices) if (c.chosen) out.push(choiceLine(c, mark, level));
   for (const own of [item.answer?.other, item.answer?.text]) if (own) out.push(`${mark(mdInline(own))} · own answer`);
   out.push("");
   const verdict = draft ? null : decisionVerdict(item);
   if (verdict) out.push(mdInline(verdict.sentence), "");
+  // A draft's note is posted with it, inside the draft (the owner chose to post drafts).
   if (item.answer?.note) out.push(`> ${mdInline(item.answer.note)}`, "");
+  if (level === "full" && item.context) out.push(mdInline(item.context), "");
+  const others = item.choices.filter((c) => !c.chosen);
+  const facts: [string, string][] = [];
   if (level === "full") {
-    if (item.context) out.push(mdInline(item.context), "");
-    const facts: [string, string][] = [];
     if (item.stakes) facts.push(["Stakes", item.stakes]);
     if (item.recommendation.text) facts.push(["Recommendation", item.recommendation.text]);
     if (item.why) facts.push(["Why", item.why]);
@@ -203,7 +224,12 @@ function folded(doc: DecisionExportV1, item: DecisionExportItem, level: Level, w
       const kept = doc.others.find((x) => x.id === old.id);
       facts.push(["Replaces", `${kept ? `D${kept.n}, ` : ""}“${old.prompt}”`]);
     }
+  }
+  if (others.length > 0 || facts.length > 0) {
+    out.push(`<details><summary>${decisionMoreLabel(others.length, facts.length > 0)}</summary>`, "");
+    if (others.length) out.push(...others.map((c) => choiceLine(c, null, level)), "");
     if (facts.length) out.push(`<dl>${facts.map(([k, v]) => `<dt>${html(k)}</dt><dd>${html(v)}</dd>`).join("")}</dl>`, "");
+    out.push("</details>", "");
   }
   const at = item.answered?.sent_at ?? item.answered?.at ?? null;
   out.push(`<sub>${mdInline(item.asked.by)} · asked ${when.stamp(item.asked.at)}${at ? ` · answered ${when.stamp(at)}` : ""}</sub>`, "", "</details>", "");
