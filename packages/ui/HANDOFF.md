@@ -3025,6 +3025,13 @@ Pinned by `components/CommentPopover.card.test.tsx` ("/" lists the skills, and i
 
 Pinned by `components/DiagramBlock.lazyRetry.test.tsx` ("Mermaid sourceOnError").
 
+## A failed Mermaid render stays inside its block (unreleased; every host, no opt-in, no core change)
+
+- **Nothing is left on `document.body`.** Mermaid renders into a temporary `#d{id}` node on the body and, on a parse failure or a draw error, drew its "Syntax error in text" graphic there and threw without removing it, so every failed render left one at the bottom of the page (one more per re-render). `MERMAID_CONFIG` now carries `suppressErrorRendering: true` (an added key; every other value unchanged) and the render slot removes `#d{id}` / `#i{id}` after any failed render, so a host with its own `initialize` is covered too.
+- **A diagram-type chunk that does not load** (Mermaid 12 loads sequence, flowchart, ELK and the rest each on first use) is re-attempted once, then the block shows the source under `LazyLoadNotice` ("Couldn't load this view. Reload"), not the red panel. Not a Retry: WebKit keeps a failed module fetch that a modulepreload link started for the page, so only a reload fetches it again. `DiagramRenderError` gains an optional `chunkFailed`.
+
+Pinned by `components/DiagramBlock.lazyRetry.test.tsx` ("Mermaid diagram-type chunk", "Mermaid failure leaves nothing outside the block") and `tests/e2e/inbox-mermaid-failure-webkit.spec.ts`.
+
 ## `useSkillReferenceAutocomplete` `commands` / `onCommand` (ui 0.63.0; additive, opt-in, no core change)
 
 - **`commands?: readonly SkillCatalogEntry[]`** and **`onCommand?: (command, text) => void`**. A host's own rows in the `/` list that are not skills (the Inbox's `/side`). They are listed after the catalog's leading `plannotator` rows; a catalog skill with the same name wins; `$` never lists them; the list opens for them even with an empty catalog. Picking one inserts nothing: the typed trigger leaves the text through `setText`, focus is left to the host, and `onCommand` gets the row and the text that is left. A command is never painted (`referenceTokens`) or counted (`humanOnlyReferences`), and never reaches an export. Absent: unchanged.
