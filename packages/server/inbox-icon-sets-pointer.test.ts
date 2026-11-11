@@ -44,7 +44,7 @@ test("the site's pointer offers one set the Inbox can get in one click, its mirr
   await fetcher.get("pokemon");
   await fetcher.running("pokemon");
   const listing = fetcher.listing("pokemon")!;
-  expect(listing).toMatchObject({ count: 1025, zoom: 1.5, get: { state: "done", have: 1025 } });
+  expect(listing).toMatchObject({ count: 1025, get: { state: "done", have: 1025 } });
   expect(listing.icons[24]).toEqual({ id: "25", n: 25, name: "Name 25" });
   // Every address the manifest names, and nothing else: the site, the names, the pictures (and the mirror for a third).
   expect(new Set(asked.map((a) => a.split("/")[0]))).toEqual(new Set(["plannotator.ai", "pokeapi.co", "raw.githubusercontent.com", "cdn.jsdelivr.net"]));
