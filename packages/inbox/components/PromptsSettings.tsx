@@ -28,7 +28,7 @@ import { Tip } from './Tip';
 const AGENT_NAME: Record<InboxPromptHost, string> = { 'claude-code': 'Claude Code', pi: 'Pi', opencode: 'OpenCode' };
 
 /** The count shows from here; past `max` Save is refused. */
-export const PROMPT_COUNT_FROM = 3700;
+export const PROMPT_COUNT_FROM = 8000;
 
 type Slot = 'shared' | InboxPromptHost;
 

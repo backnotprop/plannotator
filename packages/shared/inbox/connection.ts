@@ -717,11 +717,15 @@ export function inboxCommandBriefing(toolName: string = INBOX_TOOL_NAME): string
 
 /**
  * The most characters (UTF-16 code units, a string's `length`) a custom Inbox
- * reminder may hold. Longer text is refused when saved and ignored when read,
- * so the host falls back to the next text in line (the shared one, then the
- * default).
+ * reminder may hold: Claude Code's ceiling for hook text it puts in context
+ * (10,000 characters; past it the agent gets a file path and a 2,000-character
+ * preview), less room for the thread list a compaction adds (5 threads, under
+ * 1,000 characters). Longer text is refused when saved (the count says so)
+ * and, written by hand, ignored when read (Settings → Prompts says so), so
+ * the host falls back to the next text in line (the shared one, then the
+ * default). Through 0.28.61 it was 4,128, for no stated reason.
  */
-export const INBOX_REMINDER_MAX_CHARS = 4128
+export const INBOX_REMINDER_MAX_CHARS = 9000
 
 /**
  * The person's own reminder for a host, from config.json
