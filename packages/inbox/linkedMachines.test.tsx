@@ -474,3 +474,9 @@ test.skipIf(!hasDom)("a tailnet guest's page: no Unlink, the buttons are disable
   expect(document.querySelector('[data-machine-row] .ib-del-l')).not.toBeNull();
   expect(document.querySelector<HTMLButtonElement>('[data-machine-link]')!.disabled).toBe(false);
 });
+
+test.skipIf(!hasDom)('a link code asked for on a dropped connection says the Inbox did not answer, never the browser’s own words', async () => {
+  const { linkErrorText } = await import('./components/Machines');
+  const { INBOX_UNREACHABLE } = await import('./toastError');
+  for (const words of ['Failed to fetch', 'Load failed', 'NetworkError when attempting to fetch resource.']) expect(linkErrorText(new TypeError(words))).toBe(INBOX_UNREACHABLE);
+});

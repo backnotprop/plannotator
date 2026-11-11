@@ -6,6 +6,7 @@ import { machineNotice, machineStatus } from '../machines';
 import { MachineUpdateButton } from './MachineUpdate';
 import { CodeBox, CopyButton } from './ConnectPicker';
 import { UnlinkLink } from './Devices';
+import { errorText } from '../toastError';
 
 /**
  * What a refused link means, in the window's words. The server's messages
@@ -13,7 +14,8 @@ import { UnlinkLink } from './Devices';
  * are said here; anything else shows the server's own sentence.
  */
 export function linkErrorText(error: unknown): string {
-  if (!(error instanceof InboxApiError)) return error instanceof Error ? error.message : 'The link did not go through.';
+  // A fetch that never reached the Inbox (a phone on a dropped link) says so in plain words, never the browser's own.
+  if (!(error instanceof InboxApiError)) return errorText(error, 'The link did not go through.');
   if (error.code === 'validation_error') {
     if (error.message.startsWith('address:')) return "Type the other machine's address on your tailnet, like mini.tail1234.ts.net:8443.";
     if (error.message.startsWith('link:')) return 'That is not a link code. A link code starts with plannotator://link.';
