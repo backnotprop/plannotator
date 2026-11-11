@@ -338,31 +338,33 @@ export function ThreadMore(
             Add a pull request…
           </Menu.Item>
         )}
+        {/* Where to post belongs to the PR rows (the owner, 2026-11-10: "should be a part of the PR section"): in the same
+            group, no divider, a quiet indented sub-choice under them. */}
+        {postTo && (
+          <Menu.RadioGroup
+            aria-label="Where to post"
+            className="ib-pm-subchoice"
+            data-decision-post-where=""
+            value={postTo}
+            onValueChange={(next: DecisionsPostTo) => {
+              if (next === postTo) return;
+              const was = postTo;
+              setPostTo(next);
+              inboxApi.saveDecisionsPostTo(next).catch(() => setPostTo(was));
+            }}
+          >
+            <div className="ib-pm-sublabel" aria-hidden="true">
+              Where to post
+            </div>
+            {DECISIONS_POST_TO_WORDS.map(({ value, label }) => (
+              <Menu.RadioItem key={value} value={value} closeOnClick={false} className="ib-pmi ib-pmi-sub" label={label} data-decision-post-to={value}>
+                {postTo === value ? <Icon name="check" size={13} /> : <span className="ib-pmi-slot" aria-hidden="true" />}
+                {label}
+              </Menu.RadioItem>
+            ))}
+          </Menu.RadioGroup>
+        )}
       </Menu.Group>
-      {postTo && (
-        <>
-          <Menu.Separator className="ib-pm-sep" />
-          <Menu.Group>
-            <Menu.GroupLabel className="ib-pm-glabel">Where to post</Menu.GroupLabel>
-            <Menu.RadioGroup
-              value={postTo}
-              onValueChange={(next: DecisionsPostTo) => {
-                if (next === postTo) return;
-                const was = postTo;
-                setPostTo(next);
-                inboxApi.saveDecisionsPostTo(next).catch(() => setPostTo(was));
-              }}
-            >
-              {DECISIONS_POST_TO_WORDS.map(({ value, label }) => (
-                <Menu.RadioItem key={value} value={value} closeOnClick={false} className="ib-pmi" label={label} data-decision-post-to={value}>
-                  {postTo === value ? <Icon name="check" size={15} /> : <span className="ib-pmi-slot" aria-hidden="true" />}
-                  {label}
-                </Menu.RadioItem>
-              ))}
-            </Menu.RadioGroup>
-          </Menu.Group>
-        </>
-      )}
     </>
   );
   const downloads = (

@@ -180,6 +180,11 @@ describe.skipIf(!hasDom)('Export decisions in ⋯ More', () => {
     expect(postToSaves).toEqual(['comment']);
     expect(choices()[1]).toEqual(['comment', 'true']);
     expect(document.querySelector('[data-thread-export-menu]')).not.toBeNull();
+    // One group with the PR rows (the owner: "should be a part of the PR section"): no divider between them.
+    const group = sub.querySelector('[data-decision-post="acme/notes#12"]')!.closest('[role="group"]')!;
+    expect(group.contains(sub.querySelector('[data-decision-post-to="both"]'))).toBe(true);
+    const between = [...group.querySelectorAll('[role="separator"]')];
+    expect(between).toEqual([]);
   });
 
   test('Post on a pull request with none linked: Add a pull request… starts the add-then-post', async () => {

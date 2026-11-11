@@ -11814,8 +11814,14 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-prpop-post { margin: 7px 2px 0 0; font-weight: 500; color: var(--muted-foreground); }
 .ib-prpop-post:hover:not(:disabled) { color: var(--foreground); }
 .ib-prpop-post1 { align-self: flex-start; }
-/* Export decisions › Where to post: the unchecked choices keep the check's room. */
-.ib-pmi-slot { flex: none; width: 15px; height: 15px; }
+/* Export decisions › Post on a pull request: Where to post is part of the PR group (no divider), a quiet sub-choice
+   indented under the PR rows' text; the unchecked choices keep the check's room. */
+.ib-pm-sublabel { padding: 6px 8px 2px 31px; font-size: var(--ib-fs-11-5, 11.5px); font-weight: 500; color: var(--muted-foreground); cursor: default; user-select: none; }
+.ib-pmi.ib-pmi-sub { padding-left: 31px; height: 26px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-pmi.ib-pmi-sub[data-checked] { color: var(--foreground); }
+.ib-pmi-slot { flex: none; width: 13px; height: 13px; }
+.ib-pm-pos[data-phone] .ib-pm-sublabel { padding: 8px 12px 2px 44px; font-size: var(--ib-fs-13, 13px); }
+.ib-pm-pos[data-phone] .ib-pmi.ib-pmi-sub { height: 40px; padding-left: 44px; font-size: var(--ib-fs-15, 15px); }
 .ib-prpop-rm1:hover:not(:disabled) { background: var(--muted); color: var(--foreground); }
 .ib-prpop-undo { display: flex; align-items: center; gap: 8px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .ib-prpop-err { font-size: var(--ib-fs-12, 12px); line-height: 1.4; color: var(--ib-ref-closed); }
