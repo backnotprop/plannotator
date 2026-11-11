@@ -102,7 +102,7 @@ Plannotator's own entries import the eager math and identity modules (`math-eage
 
 Wiki links require `@plannotator/markdown-editor ^0.3.2` and `@plannotator/atomic-editor ^0.7.0` (see HANDOFF.md § "Wiki-link seams (0.27.0)"); link widgets require `@plannotator/markdown-editor ^0.5.0` and `@plannotator/atomic-editor ^0.9.0`, which is what 0.47.0 declares (see HANDOFF.md § "Host link widgets (0.47.0)").
 
-### Hover-card providers and plain-text linkers (`utils/refCardProviders`; unreleased, core 0.25.24)
+### Hover-card providers and plain-text linkers (`utils/refCardProviders`; unreleased, core 0.25.29)
 
 Hover cards beyond GitHub and GitLab, added for the Inbox's Linear cards (#3063). Two global registers, outside `configurePlannotatorUI`; both are empty by default, so a host that registers nothing renders and fetches exactly as before.
 
