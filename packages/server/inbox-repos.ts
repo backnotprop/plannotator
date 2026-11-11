@@ -46,6 +46,8 @@ export interface InboxRepoCache {
   get(root: string): InboxProjectRepo | null;
   /** What the cache holds for a root, however old; never runs git. For a read too frequent to refresh from. */
   peek(root: string): InboxProjectRepo | null;
+  /** Whether a read for the root has landed (its answer may be null: no `origin`), however old. Never runs git. */
+  known(root: string): boolean;
   /** Resolve a root now (deduplicated while one is running); resolves once the cache holds the answer. */
   refresh(root: string): Promise<InboxProjectRepo | null>;
   /** Whether a read is running or queued, so a `peek` may not hold the answer yet. Never runs git. */
@@ -103,6 +105,7 @@ export function createInboxRepoCache(options: {
       return entry?.repo ?? null;
     },
     peek: (root) => entries.get(root)?.repo ?? null,
+    known: (root) => entries.has(root),
     refresh,
     reading: () => pending.size > 0,
   };

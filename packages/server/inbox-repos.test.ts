@@ -103,6 +103,30 @@ test("a git project's origin rides on the thread payload; a folder without git, 
   // The same answers straight from git, so null here is the resolved answer, not a pending one.
   expect(await readInboxProjectRepo(notes)).toBeNull();
   expect(await readInboxProjectRepo(noOrigin)).toBeNull();
+  // Once resolved, the payload says so (`repo_known`): the window stops reading the thread again on every record
+  // for a repo that will never come.
+  const known = async (threadId: string) => {
+    for (let i = 0; i < 100; i++) {
+      const project = ((await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/threads/${threadId}`)).json()) as { thread: { project: { repo_known?: true } } }).thread.project;
+      if (project.repo_known) return true;
+      await Bun.sleep(30);
+    }
+    return false;
+  };
+  expect(await known(scratchThread)).toBe(true);
+  expect(await known(notesThread)).toBe(true);
+});
+
+test("a repo not resolved yet is not known: the payload carries no repo_known until its read lands", async () => {
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const cache = createInboxRepoCache({ read: async () => (await gate, null) });
+  expect(cache.get("/p")).toBeNull();
+  expect(cache.known("/p")).toBe(false);
+  release();
+  await cache.refresh("/p");
+  expect(cache.get("/p")).toBeNull();
+  expect(cache.known("/p")).toBe(true);
 });
 
 test("an Inbox that starts on an existing store resolves its projects' remotes; GitLab subgroups and https URLs parse", async () => {

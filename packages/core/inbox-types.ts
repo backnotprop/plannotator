@@ -1953,8 +1953,12 @@ export interface InboxThread {
    * `repo` rides only on `GET /api/inbox/threads/:id` and is never stored:
    * the project's `origin`, or null for a folder without one or until the
    * Inbox has resolved it. Absent from an older Inbox.
+   * `repo_known` (additive, same read): the Inbox has resolved it, so a null
+   * `repo` means the folder has no `origin`, not "not known yet". Absent
+   * until then, and from an older Inbox (the window then reads the thread
+   * again on each of its records, as before).
    */
-  project: InboxProject & { repo?: InboxProjectRepo | null };
+  project: InboxProject & { repo?: InboxProjectRepo | null; repo_known?: true };
   subject: string | null;
   /** The thread's name, or null for an unnamed thread. */
   thread_name: string | null;

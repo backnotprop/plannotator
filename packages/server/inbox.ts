@@ -4642,7 +4642,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const pullKeys = codeReviewOn() ? pullOwners.keys(thread.thread_id) : [];
     const withRepo = {
       ...thread,
-      project: { ...thread.project, repo: repos.get(thread.project.root) },
+      // `repo_known` (additive): resolved, so a null repo is "no origin" and the window need not read again for it.
+      project: { ...thread.project, repo: repos.get(thread.project.root), ...(repos.known(thread.project.root) ? { repo_known: true as const } : {}) },
       ...(pullOwners.theirs(thread.thread_id) ? { pull_theirs: true as const } : {}),
       ...(pullKeys.length > 0 ? { pull_keys: pullKeys } : {}),
       ...(codeReviewOn() && pullOwners.started().has(thread.thread_id) ? { review_started: true as const } : {}),
