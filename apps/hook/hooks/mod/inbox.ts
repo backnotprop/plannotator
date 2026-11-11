@@ -52,21 +52,27 @@
  *
  * Ask AI: a poll answer can say a question waits on this session, and only
  * then does this link start a client on the session's Ask AI bridge
- * (`startAskClient`; the Inbox's setting off means none ever waits).
+ * (`startAskClient`).
  */
 
 import { bridgeBaseUrl, createBridge, type BridgeHandle } from './bridge'
 import { PromptDropped, type Host, type HttpResult, type LoadedPluginInfo } from './host'
+import { isAbsolutePath } from './paths'
+import { shellArgv } from './shell'
 import {
   INBOX_ASK_POLL_FIELD,
   INBOX_AUTO_RELOAD_POLL_FIELD,
+  INBOX_CONTINUES_POLL_FIELD,
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
   inboxAskBridgeBase,
   inboxReminderFor,
   inboxToolCall,
+  inboxResultWithNote,
   inboxToolCallParams,
   inboxToolResultText,
+  inboxToolsWithoutBro,
+  INBOX_HELD_POLL_FIELD,
   INBOX_SEND_NOW_POLL_FIELD,
   INBOX_STEER_POLLS_POLL_FIELD,
   INBOX_TAGS_POLL_FIELD,
@@ -249,10 +255,10 @@ export function inboxSessionProjectEnvValue(sessionId: string, folder: string): 
  * nothing answers with an absolute path.
  */
 export async function sessionProjectFolder(host: Host, live: string | null, first: string | null, cwd: string | null): Promise<string | null> {
-  const usable = async (folder: string | null): Promise<boolean> => !!folder && folder.startsWith('/') && (await host.exists(folder).catch(() => false))
+  const usable = async (folder: string | null): Promise<boolean> => !!folder && isAbsolutePath(folder) && (await host.exists(folder).catch(() => false))
   if (live && (await usable(live))) return live
   if (first && (await usable(first))) return first
-  return cwd && cwd.startsWith('/') ? cwd : null
+  return cwd && isAbsolutePath(cwd) ? cwd : null
 }
 
 /** The Inbox tools whose relative paths resolve against the folder the agent works in (INBOX_WORKING_FOLDER_META_KEY). */
@@ -269,7 +275,7 @@ const INBOX_WORKING_FOLDER_ACTIONS: ReadonlySet<string> = new Set(['send_message
  * threads. Never throws.
  */
 export async function readSessionThreads(host: Host, dataDir: string, sessionId: string, cwd: string, toolName: string): Promise<string | null> {
-  if (!sessionId || !cwd.startsWith('/')) return null
+  if (!sessionId || !isAbsolutePath(cwd)) return null
   const work = (async () => {
     const path = inboxRegistryPathOf(dataDir)
     if (!(await host.exists(path))) return null
@@ -422,8 +428,8 @@ export function sessionNamesAfterCommand(
  * newline yet is read again once the file grows, never on every poll. Another
  * inode under the path is a rewrite: its end is read as new. A read that fails
  * or times out waits longer each time, and a region that fails
- * TRANSCRIPT_TITLE_FAILURES_MAX times is skipped. No `/bin/sh` (Windows), no
- * file found, or a read that fails: the last title, else null, and the
+ * TRANSCRIPT_TITLE_FAILURES_MAX times is skipped. No file found, or a read
+ * that fails: the last title, else null, and the
  * `/rename` store answers.
  */
 export const TRANSCRIPT_TITLE_FIRST_READ_BYTES = 4 * 1024 * 1024
@@ -460,7 +466,7 @@ export function claudeProjectSlug(folder: string): string | null {
 /** Where Claude Code keeps `sessionId`'s transcript for each folder it may have started in, first first. */
 export function claudeTranscriptPaths(configDir: string, folders: readonly string[], sessionId: string): string[] {
   if (!configDir || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(sessionId)) return []
-  const base = configDir.replace(/\/+$/, '')
+  const base = configDir.replace(/[\\/]+$/, '')
   const out: string[] = []
   for (const folder of folders) {
     const slug = folder ? claudeProjectSlug(folder) : null
@@ -502,6 +508,203 @@ export function transcriptTitleOf(output: string, sessionId: string, start: numb
   // Every line but the last ended with a newline; one more byte counted than read says the last did not.
   const cut = end.counted > length ? end.last : 0
   return { title, next: start + length - cut }
+}
+
+/**
+ * The session this conversation was branched from, as Claude Code records it:
+ * a branch (`/branch`; the new conversation gets a new session id) copies the
+ * conversation's rows into the new transcript, each with
+ * `"forkedFrom":{"sessionId":"<the session it came from>","messageUuid":…}`
+ * (read in the 2.1.321 binary). The Inbox routes a person's reply by session
+ * id, so the branch says which id it continues on every poll
+ * (INBOX_CONTINUES_POLL_FIELD) and is handed what waits for that id once it no
+ * longer polls. A transcript without such a row (a conversation that started
+ * here, a `--resume` or `--continue` that kept its id) names nothing.
+ *
+ * `$1` the file, `$2` how many of its first bytes to look in: the copied rows
+ * open a branch's transcript. Bare quotes are structure only, as for the
+ * title: inside a message's text they are escaped.
+ */
+export const TRANSCRIPT_FORKED_FROM_READ_BYTES = 8 * 1024 * 1024
+export const TRANSCRIPT_FORKED_FROM_SCRIPT = `head -c "$2" -- "$1" 2>/dev/null | LC_ALL=C grep -a -o -m 1 '"forkedFrom":{"sessionId":"[A-Za-z0-9._-]*"' | head -n 1; exit 0`
+/** While the transcript is not there yet (or a read failed), the first wait before the next look; it doubles up to the most. */
+export const TRANSCRIPT_FORKED_FROM_RETRY_MS = 2_000
+export const TRANSCRIPT_FORKED_FROM_RETRY_MAX_MS = 60_000
+/** Failed reads before the transcript is taken to name nothing. */
+export const TRANSCRIPT_FORKED_FROM_FAILURES_MAX = 3
+
+/** The session id in TRANSCRIPT_FORKED_FROM_SCRIPT's output, or null: none, not an id, or `sessionId` itself. */
+export function transcriptForkedFromOf(output: string, sessionId: string): string | null {
+  const id = /^"forkedFrom":\{"sessionId":"([A-Za-z0-9][A-Za-z0-9._-]{0,127})"$/m.exec(output)?.[1] ?? null
+  return id !== null && id !== sessionId ? id : null
+}
+
+/** Reads, once per session in this process, which session its transcript says it was branched from. */
+export class TranscriptForkedFrom {
+  private settled: string[] | null = null
+  private retryAt = Number.NEGATIVE_INFINITY
+  private looks = 0
+  private failures = 0
+
+  constructor(
+    private readonly host: Pick<Host, 'fileSize' | 'run' | 'now'>,
+    private readonly sessionId: string,
+    /** Where the transcript may be (`claudeTranscriptPaths`). */
+    private readonly candidates: () => Promise<readonly string[]>,
+  ) {}
+
+  /** The session ids this conversation continues (INBOX_CONTINUES_POLL_FIELD): one, or none while unknown and when there is none. */
+  async read(): Promise<string[]> {
+    if (this.settled) return this.settled
+    const now = await this.host.now()
+    if (now < this.retryAt) return []
+    this.looks += 1
+    this.retryAt = now + Math.min(TRANSCRIPT_FORKED_FROM_RETRY_MAX_MS, TRANSCRIPT_FORKED_FROM_RETRY_MS * 2 ** Math.min(30, this.looks - 1))
+    for (const path of await this.candidates().catch(() => [] as readonly string[])) {
+      const size = await this.host.fileSize(path).catch(() => null)
+      if (size === null || size === 0) continue
+      const result = await this.host
+        .run(shellArgv('transcript-forked-from', TRANSCRIPT_FORKED_FROM_SCRIPT, 'sh', [path, String(TRANSCRIPT_FORKED_FROM_READ_BYTES)]), { timeoutMs: 5_000 })
+        .catch(() => null)
+      if (!result || result.exitCode !== 0) {
+        this.failures += 1
+        if (this.failures >= TRANSCRIPT_FORKED_FROM_FAILURES_MAX) this.settled = []
+        return []
+      }
+      const from = transcriptForkedFromOf(result.stdout, this.sessionId)
+      this.settled = from ? [from] : []
+      return this.settled
+    }
+    return []
+  }
+}
+
+/**
+ * The sessions this conversation was handed over from, as Claude Code records
+ * it: when a conversation moves to a new session that goes on without the old
+ * one (read in the 2.1.321 binary: its hand-off to a background session, which
+ * starts the new session from the old transcript in another process), it
+ * appends `{"type":"continued-in","timestamp":…,"sessionId":"<the old
+ * session>","continuedInSessionId":"<the new one>"}` to the OLD transcript.
+ * The new transcript names nothing (no `forkedFrom`), so the new session looks
+ * for the transcript that names it, in the project folders its own transcript
+ * may be in.
+ *
+ * Every record counts, wherever it is in the transcript and whatever follows
+ * it (a report of 2026-11-10: one conversation still listed as two agents
+ * after many more rows went into its old transcript). Claude Code itself drops a record once a real turn follows it
+ * (the person went back to that session); here that is the Inbox's to judge,
+ * and it does: a session that still polls keeps its own, and the continuing
+ * one stands in only while the old one does not
+ * (packages/server/inbox-continuations.ts).
+ *
+ * `$1` the folder, `$2` how many of each transcript's last bytes to look in,
+ * `$3` how many transcripts, the most recently written first. The work is
+ * capped by those two (TRANSCRIPT_CONTINUED_IN_READ_BYTES and
+ * TRANSCRIPT_CONTINUED_IN_FILES_MAX) and by the call's time
+ * (TRANSCRIPT_CONTINUED_IN_TIMEOUT_MS). Each file is streamed through `grep`,
+ * a line at a time, never held whole; only its last 4 records come back, each
+ * cut to 1,024 characters: no transcript is copied into the module. Bare
+ * quotes are structure only, as for the title.
+ */
+/** The last bytes of each transcript looked in: 64 MB, so a record under months of later rows is still found. */
+export const TRANSCRIPT_CONTINUED_IN_READ_BYTES = 64 * 1024 * 1024
+/** The most transcripts of one project folder looked in, the most recently written first. */
+export const TRANSCRIPT_CONTINUED_IN_FILES_MAX = 200
+/** The longest one look over a folder may take. */
+export const TRANSCRIPT_CONTINUED_IN_TIMEOUT_MS = 20_000
+export const TRANSCRIPT_CONTINUED_IN_SCRIPT = `cd -- "$1" 2>/dev/null || exit 0; ls -t 2>/dev/null | LC_ALL=C grep '^[A-Za-z0-9][A-Za-z0-9._-]*[.]jsonl$' | head -n "$3" | while IFS= read -r f; do tail -c "$2" -- "$f" 2>/dev/null | LC_ALL=C grep -a -F '"type":"continued-in"' | tail -n 4 | LC_ALL=C cut -c 1-1024; done | head -n 400; exit 0`
+/** The waits between looks, doubling: the record is written just after the new session starts, so the first look may be too early. */
+export const TRANSCRIPT_CONTINUED_IN_RETRY_MS = 2_000
+/** Quick looks before the session is taken to continue nothing for now (about a minute in all). */
+export const TRANSCRIPT_CONTINUED_IN_LOOKS_MAX = 6
+/** After those, while nothing is found: one more look this often (a record this module could not read before, a folder that came late). */
+export const TRANSCRIPT_CONTINUED_IN_LOOK_AGAIN_MS = 10 * 60_000
+/** The longest line of sessions followed back (the poll's `continues` takes as many). */
+export const TRANSCRIPT_CONTINUED_IN_CHAIN_MAX = 8
+
+/** The hand-overs in TRANSCRIPT_CONTINUED_IN_SCRIPT's output: each whole record that names two different session ids. */
+export function transcriptHandoversOf(output: string): { from: string; to: string }[] {
+  const id = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
+  const out: { from: string; to: string }[] = []
+  for (const line of output.split('\n')) {
+    let record: { type?: unknown; sessionId?: unknown; continuedInSessionId?: unknown } | null = null
+    try {
+      const parsed = JSON.parse(line)
+      record = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
+    } catch {
+      // Cut short or garbled: never a hand-over.
+      continue
+    }
+    if (record?.type !== 'continued-in') continue
+    const { sessionId: from, continuedInSessionId: to } = record
+    if (typeof from !== 'string' || typeof to !== 'string' || !id.test(from) || !id.test(to) || from === to) continue
+    out.push({ from, to })
+  }
+  return out
+}
+
+/**
+ * The sessions `sessionId` continues through `handovers`, nearest first: the
+ * one handed over to it, the one handed over to that, and so on. A session is
+ * named once and never `sessionId` itself, so records that point at each other
+ * end the line instead of going round.
+ */
+export function transcriptContinuedLineOf(handovers: readonly { from: string; to: string }[], sessionId: string): string[] {
+  const out: string[] = []
+  let heads = [sessionId]
+  while (heads.length > 0 && out.length < TRANSCRIPT_CONTINUED_IN_CHAIN_MAX) {
+    const next: string[] = []
+    for (const { from, to } of handovers) {
+      if (!heads.includes(to) || from === sessionId || out.includes(from)) continue
+      if (out.length >= TRANSCRIPT_CONTINUED_IN_CHAIN_MAX) break
+      out.push(from)
+      next.push(from)
+    }
+    heads = next
+  }
+  return out
+}
+
+/**
+ * Finds the sessions whose transcripts say they were continued in this one. Found: kept for the session in this
+ * process. Not found: looked for a few times at once, then every TRANSCRIPT_CONTINUED_IN_LOOK_AGAIN_MS.
+ */
+export class TranscriptContinuedIn {
+  private settled: string[] | null = null
+  private retryAt = Number.NEGATIVE_INFINITY
+  private looks = 0
+
+  constructor(
+    private readonly host: Pick<Host, 'run' | 'now'>,
+    private readonly sessionId: string,
+    /** Where this session's transcript may be (`claudeTranscriptPaths`): their folders are looked in. */
+    private readonly candidates: () => Promise<readonly string[]>,
+  ) {}
+
+  /** The session ids this conversation continues (INBOX_CONTINUES_POLL_FIELD), nearest first: none while unknown and when there is none. */
+  async read(): Promise<string[]> {
+    if (this.settled) return this.settled
+    const now = await this.host.now()
+    if (now < this.retryAt) return []
+    this.looks += 1
+    this.retryAt = now + (this.looks >= TRANSCRIPT_CONTINUED_IN_LOOKS_MAX ? TRANSCRIPT_CONTINUED_IN_LOOK_AGAIN_MS : TRANSCRIPT_CONTINUED_IN_RETRY_MS * 2 ** (this.looks - 1))
+    const folders: string[] = []
+    for (const path of await this.candidates().catch(() => [] as readonly string[])) {
+      const folder = path.replace(/[\\/][^\\/]*$/, '')
+      if (folder && folder !== path && !folders.includes(folder)) folders.push(folder)
+    }
+    const handovers: { from: string; to: string }[] = []
+    for (const folder of folders) {
+      const result = await this.host
+        .run(shellArgv('transcript-continued-in', TRANSCRIPT_CONTINUED_IN_SCRIPT, 'sh', [folder, String(TRANSCRIPT_CONTINUED_IN_READ_BYTES), String(TRANSCRIPT_CONTINUED_IN_FILES_MAX)]), { timeoutMs: TRANSCRIPT_CONTINUED_IN_TIMEOUT_MS })
+        .catch(() => null)
+      if (result && result.exitCode === 0) handovers.push(...transcriptHandoversOf(result.stdout))
+    }
+    const line = transcriptContinuedLineOf(handovers, this.sessionId)
+    if (line.length > 0) this.settled = line
+    return line
+  }
 }
 
 export class TranscriptTitle {
@@ -550,7 +753,7 @@ export class TranscriptTitle {
     if (size < this.offset || size - this.offset > TRANSCRIPT_TITLE_FIRST_READ_BYTES) this.fresh = true
     const start = this.fresh ? Math.max(0, size - TRANSCRIPT_TITLE_FIRST_READ_BYTES) : this.offset
     const length = size - start
-    const result = await this.host.run(['/bin/sh', '-c', TRANSCRIPT_TITLE_SCRIPT, 'sh', String(start + 1), path, String(length)], { timeoutMs: 5_000 }).catch(() => null)
+    const result = await this.host.run(shellArgv('transcript-title', TRANSCRIPT_TITLE_SCRIPT, 'sh', [String(start + 1), path, String(length)]), { timeoutMs: 5_000 }).catch(() => null)
     const found = result && result.exitCode === 0 ? transcriptTitleOf(result.stdout, this.sessionId, start, length) : null
     if (!found) return this.failed(size)
     const id = transcriptFileIdOf(result!.stdout)
@@ -633,7 +836,7 @@ export const INBOX_CLAIM_SCRIPT = [
 ].join('\n')
 
 export function inboxClaimArgv(dir: string, claimant: string): string[] {
-  return ['/bin/sh', '-c', INBOX_CLAIM_SCRIPT, 'plannotator-inbox-claim', dir, claimant]
+  return shellArgv('inbox-claim', INBOX_CLAIM_SCRIPT, 'plannotator-inbox-claim', [dir, claimant])
 }
 
 /**
@@ -651,7 +854,7 @@ export const INBOX_RELEASE_SCRIPT = [
 ].join('\n')
 
 export function inboxReleaseArgv(dir: string, claimant: string): string[] {
-  return ['/bin/sh', '-c', INBOX_RELEASE_SCRIPT, 'plannotator-inbox-release', dir, claimant]
+  return shellArgv('inbox-release', INBOX_RELEASE_SCRIPT, 'plannotator-inbox-release', [dir, claimant])
 }
 
 /**
@@ -667,7 +870,7 @@ export const INBOX_PROJECT_DIR_SCRIPT = [
 ].join('\n')
 
 export function inboxProjectDirArgv(cwd: string, given: string): string[] {
-  return ['/bin/sh', '-c', INBOX_PROJECT_DIR_SCRIPT, 'plannotator-inbox-project', cwd, given]
+  return shellArgv('inbox-project', INBOX_PROJECT_DIR_SCRIPT, 'plannotator-inbox-project', [cwd, given])
 }
 
 async function mcpCall(host: Host, port: number, method: string, params: Record<string, unknown>): Promise<{ result?: unknown; error?: { message?: string } } | null> {
@@ -712,7 +915,7 @@ export async function discoverInboxTools(host: Host, dataDir: string): Promise<I
       return tools
     }
   }
-  const remembered = parseInboxToolList(await host.storeGet(STORE_INBOX_TOOLS).catch(() => null))
+  const remembered = inboxToolsWithoutBro(parseInboxToolList(await host.storeGet(STORE_INBOX_TOOLS).catch(() => null)))
   return remembered.length > 0 ? remembered : INBOX_DEFAULT_TOOLS.map((tool) => ({ ...tool }))
 }
 
@@ -770,6 +973,12 @@ export interface InboxLinkOptions {
    * by the host, never by the model: it is no tool argument. Absent: no `label`.
    */
   label?: () => string | Promise<string>
+  /**
+   * The session ids this conversation continues (`TranscriptForkedFrom`), read
+   * for every poll and sent as INBOX_CONTINUES_POLL_FIELD when there is one.
+   * Set by the host, never by the model. Absent, empty or a rejection: nothing sent.
+   */
+  continues?: () => Promise<readonly string[]>
   /** Names this process in the lease and the claims. */
   instanceId: string
   /** The session's turns, which a question from Ask AI runs in. Absent: the connection never offers to answer one. */
@@ -850,6 +1059,8 @@ export class InboxLink {
   private appendOk: boolean | null = null
   /** What the Inbox was last told about Send now (`send_now` on the poll and the state events). */
   private lastSendNow: boolean | null = null
+  /** What the Inbox was last told about `heldForInput` (`held` on the poll and the state events): its "Stopped" line. */
+  private lastHeld = false
   /** Send now could not go into the running turn (the engine refused the row): these wait for idle, as before. */
   private noSteer = new Set<string>()
   /** The engine refused a row once (an engine without `$.session.append`): stop offering Send now. */
@@ -999,17 +1210,17 @@ export class InboxLink {
       // The agent named the project: an existing folder, relative to the working folder, or nothing reaches the Inbox.
       // Its relative paths stay relative to that folder, as before.
       const dir = await this.host.run(inboxProjectDirArgv(cwd, call.projectPath), { timeoutMs: 5_000 }).catch(() => null)
-      const resolved = dir?.exitCode === 0 ? dir.stdout.replace(/\n$/, '') : ''
-      if (!resolved.startsWith('/')) return { deny: `Invalid plannotator_inbox call: project_path ${call.projectPath} is not an existing folder.` }
+      const resolved = dir?.exitCode === 0 ? dir.stdout.replace(/\r?\n$/, '') : ''
+      if (!isAbsolutePath(resolved)) return { deny: `Invalid plannotator_inbox call: project_path ${call.projectPath} is not an existing folder.` }
       call.arguments.project_path = resolved
-    } else if (cwd.startsWith('/') && cwd !== project && INBOX_WORKING_FOLDER_ACTIONS.has(call.name)) {
+    } else if (isAbsolutePath(cwd) && cwd !== project && INBOX_WORKING_FOLDER_ACTIONS.has(call.name)) {
       // The project stays where the session started, the agent works here: its relative paths resolve here, as they did
       // when the project followed the cd. Attachments are made absolute here too, so an older Inbox that ignores the
       // working folder never resolves them against the project folder (a missing file, or another one of that name).
       workingFolder = cwd
       const attachments = call.arguments.attachments
       if (Array.isArray(attachments)) {
-        call.arguments.attachments = attachments.map((path) => (typeof path === 'string' && path !== '' && !path.startsWith('/') ? `${cwd}/${path}` : path))
+        call.arguments.attachments = attachments.map((path) => (typeof path === 'string' && path !== '' && !isAbsolutePath(path) ? `${cwd}/${path}` : path))
       }
     }
     const running = await this.ensureRunning()
@@ -1029,7 +1240,9 @@ export class InboxLink {
       return { deny: `The Plannotator Inbox refused the call: ${message}` }
     }
     const result = inboxToolResultText(answer.result)
-    return result.isError ? { deny: result.text } : { text: result.text }
+    // A call the host could not parse, read again with a bare id quoted: the result says so.
+    const text = inboxResultWithNote(result.text, call.note)
+    return result.isError ? { deny: text } : { text }
   }
 
   private get registryPath(): string {
@@ -1088,13 +1301,17 @@ export class InboxLink {
     const now = await this.host.now()
     // Whether a Send now reply could go in right now: never while this session's own Ask question holds it.
     const sendNow = await this.sendNowNow()
-    if (busy !== this.busy || sendNow !== this.lastSendNow) {
+    const held = this.heldForInput
+    if (busy !== this.busy || sendNow !== this.lastSendNow || held !== this.lastHeld) {
       const known = this.busy !== null
       if (busy !== this.busy && !busy) this.idleSince = now
       this.busy = busy
       this.lastSendNow = sendNow
-      // A turn started or ended: the Inbox's live sessions say so (step 8), and whether Send now can go in.
-      if (known && this.leader) void this.bridge(INBOX_BRIDGE_EVENT_PATH, { type: 'state', busy, idle_since: this.idleSince, [INBOX_SEND_NOW_POLL_FIELD]: sendNow })
+      this.lastHeld = held
+      // A turn started or ended: the Inbox's live sessions say so (step 8), whether Send now can go in, and
+      // whether Claude Code holds this session's replies until the person types (the window's "Stopped").
+      if (known && this.leader)
+        void this.bridge(INBOX_BRIDGE_EVENT_PATH, { type: 'state', busy, idle_since: this.idleSince, [INBOX_SEND_NOW_POLL_FIELD]: sendNow, [INBOX_HELD_POLL_FIELD]: held })
     }
     if (now - this.leaseCheckedAt >= LEASE_EVERY_MS) {
       await this.holdLease(now)
@@ -1251,8 +1468,11 @@ export class InboxLink {
     const loaded = await this.loadedNow()
     const folder = await this.folderNow()
     const label = await this.labelNow()
+    const continues = this.options.continues ? await this.options.continues().catch(() => [] as readonly string[]) : []
     const response = await this.bridge(INBOX_BRIDGE_POLL_PATH, {
       waitMs,
+      // The session this conversation was branched from: the Inbox hands this one what waits for it once it is gone.
+      ...(continues.length > 0 ? { [INBOX_CONTINUES_POLL_FIELD]: [...continues] } : {}),
       ...(project ? { project_path: project } : {}),
       // The session's title (additive): the To picker's name for it; empty clears it.
       ...(label === null ? {} : { label }),
@@ -1260,6 +1480,8 @@ export class InboxLink {
       ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),
       // Send now: this engine can put a reply into a running turn (`$.session.append`).
       ...((await this.sendNowNow()) ? { [INBOX_SEND_NOW_POLL_FIELD]: true } : {}),
+      // Claude Code refused a reply and holds them all until the person types there: the window says "Stopped".
+      ...(this.heldForInput ? { [INBOX_HELD_POLL_FIELD]: true } : {}),
       [INBOX_STEER_POLLS_POLL_FIELD]: true,
       // Tags (approval "inbox-tag-agents"): this connection words a reply it was tagged in truthfully.
       [INBOX_TAGS_POLL_FIELD]: true,

@@ -18,6 +18,7 @@ import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
 import { INBOX_AGENT_FIELD_DESCRIPTIONS, INBOX_REF_LINK_RULE, inboxAgentTool, parseInboxToolList } from "@plannotator/shared/inbox/connection";
 import { INBOX_DEFAULT_SERVED_TOOLS, INBOX_MCP_INSTRUCTIONS, INBOX_SERVED_TOOLS, INBOX_STOP_EXAMPLE, SEND_BODY_DESCRIPTION } from "./inbox-mcp";
 import { INBOX_FORBIDDEN_PORT, startInboxServer, type InboxServer } from "./inbox";
+import { FACE_FAVICON_PNG_BYTES, FAVICON_ICO_BYTES, FAVICON_PNG_BYTES, YELLOW_FAVICON_PNG_BYTES } from "@plannotator/shared/favicon";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -854,6 +855,57 @@ describe("the window's routes: settings, restart, favicon", () => {
     }
   });
 
+  test("the favicon saves into config.json `favicon`, glass unless chosen, and /favicon.png answers with it", async () => {
+    const root = tempRoot();
+    const dataDir = join(root, "data");
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    try {
+      mkdirSync(dataDir, { recursive: true });
+      const server = await start(dataDir);
+      const base = `http://127.0.0.1:${server.port}`;
+      const read = async () => (await (await fetch(`${base}/api/inbox/settings`)).json()).favicon;
+      const onDisk = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as { favicon?: unknown; theme?: unknown };
+      const icon = async () => new Uint8Array(await (await fetch(`${base}/favicon.png`)).arrayBuffer());
+      expect(await read()).toBe("glass");
+      expect(await icon()).toEqual(FAVICON_PNG_BYTES);
+      // "classic" was the P icon until it was removed after 0.28.57: no longer a choice.
+      for (const bad of ["face", "Glass", "classic", "", null, 1, { style: "glass" }]) {
+        const refused = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, favicon: bad });
+        expect(refused.status).toBe(422);
+        expect((await refused.json()).code).toBe("validation_error");
+      }
+      // A refused part saves nothing, the valid parts beside it included.
+      const mixed = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, theme: { mode: "light" }, favicon: "navy" });
+      expect(mixed.status).toBe(422);
+      expect(existsSync(join(dataDir, "config.json")) ? onDisk().theme : undefined).toBeUndefined();
+
+      for (const [style, bytes] of [
+        ["totman", FACE_FAVICON_PNG_BYTES],
+        ["yellow", YELLOW_FAVICON_PNG_BYTES],
+        ["glass", FAVICON_PNG_BYTES],
+      ] as const) {
+        const saved = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, favicon: style });
+        expect(saved.status).toBe(200);
+        expect((await saved.json()).favicon).toBe(style);
+        expect(onDisk().favicon).toBe(style);
+        expect(await read()).toBe(style);
+        expect(await icon()).toEqual(bytes);
+      }
+      // A choice made in plan review (config.json written by POST /api/config) is what the Inbox reads.
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ ...onDisk(), favicon: "totman" }));
+      expect(await read()).toBe("totman");
+      // A config.json that still says "classic" (0.28.57's P): read as unset, Glass, and the file is left as it is.
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ ...onDisk(), favicon: "classic" }));
+      expect(await read()).toBe("glass");
+      expect(await icon()).toEqual(FAVICON_PNG_BYTES);
+      expect(onDisk().favicon).toBe("classic");
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+    }
+  });
+
   // Approval "inbox-customize-rows" (the owner, 2026-11-02: "Whatever they set goes wherever they're using the app").
   test("the rows' look saves into config.json `inboxRows`, null until first saved, and every open window hears it", async () => {
     const root = tempRoot();
@@ -890,7 +942,8 @@ describe("the window's routes: settings, restart, favicon", () => {
       const saved = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, rows: ["previewTwo", "roomy", "compact", "previewTwo"] });
       expect(saved.status).toBe(200);
       expect(await saved.json()).toMatchObject({ rows: ["compact", "previewTwo"], rows_rev: 1 });
-      expect(onDisk()).toEqual({ inboxTextSize: 13, inboxRows: ["compact", "previewTwo"], inboxRowsRev: 1, inboxRowsDefaults: 2 });
+      // With it: the look from before (never saved reads as the defaults) and who saved (no one: the window), for Undo.
+      expect(onDisk()).toEqual({ inboxTextSize: 13, inboxRows: ["compact", "previewTwo"], inboxRowsRev: 1, inboxRowsDefaults: 2, inboxRowsPrev: ["smallNames"], inboxRowsBy: null });
       expect(await settings()).toMatchObject({ rows: ["compact", "previewTwo"], rows_rev: 1 });
 
       const deadline = Date.now() + 1500;
@@ -899,7 +952,8 @@ describe("the window's routes: settings, restart, favicon", () => {
         if (chunk && chunk.value) text += decoder.decode(chunk.value);
       }
       controller.abort();
-      expect(text).toContain(`event: rows\ndata: ${JSON.stringify({ rows: ["compact", "previewTwo"], rev: 1 })}`);
+      // With the look from before and who saved (the window: no one), for "<agent> changed" and Undo.
+      expect(text).toContain(`event: rows\ndata: ${JSON.stringify({ rows: ["compact", "previewTwo"], rev: 1, prev: ["smallNames"], by: null })}`);
 
       // All off is a saved look (not "never saved"): an empty list, so no window adopts old cookies again.
       const none = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, rows: [] });
@@ -927,6 +981,119 @@ describe("the window's routes: settings, restart, favicon", () => {
       writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxRows: [], inboxRowsRev: 7 }));
       const after = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, rows: ["highlight"] });
       expect(await after.json()).toMatchObject({ rows: ["highlight"], rows_rev: 8 });
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+    }
+  });
+
+  // Approval "inbox-rows-settings-page" ("tell your agent"): `plannotator inbox rows set` saves with who made it, and
+  // any save can be undone once. What can regress: an agent's save the windows cannot attribute, a save that forgets
+  // the look before it, an undo that is not one save (or that invents a look when there is nothing to put back), and
+  // `rows_by` or `rows_undo` reaching another setting.
+  test("a rows save keeps the look before it and who made it; windows hear both; rows_undo puts the look back once", async () => {
+    const root = tempRoot();
+    const dataDir = join(root, "data");
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    try {
+      mkdirSync(dataDir, { recursive: true });
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTextSize: 13, inboxRows: ["smallNames", "roomy"], inboxRowsRev: 4, inboxRowsDefaults: 2 }));
+      const server = await start(dataDir);
+      const save = async (body: Record<string, unknown>) => {
+        const res = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, ...body });
+        return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+      };
+      const onDisk = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as Record<string, unknown>;
+      // A look saved before this build has nothing to undo.
+      expect((await save({ rows_undo: true })).body).toMatchObject({ rows: ["smallNames", "roomy"], rows_rev: 4, rows_undone: false, rows_prev: null, rows_by: null });
+
+      const controller = new AbortController();
+      const stream = await fetch(`http://127.0.0.1:${server.port}/api/inbox/events?cursor=${server.store.cursor()}&window=window-rows-by&permission=granted`, { signal: controller.signal });
+      const reader = stream.body!.getReader();
+      const decoder = new TextDecoder();
+      let text = "";
+      while (!text.includes("event: hello")) text += decoder.decode((await reader.read()).value);
+      const heard = async (rev: number) => {
+        while (!text.includes(`"rev":${rev}`)) text += decoder.decode((await reader.read()).value);
+        return JSON.parse(text.split("\n").find((line) => line.startsWith("data: ") && line.includes(`"rev":${rev}`))!.slice(6)) as Record<string, unknown>;
+      };
+
+      // An agent's command: who made it rides with the save, to the file, the answer and every window.
+      const by = { host: "claude-code", session: "ses_rows" };
+      expect((await save({ rows: ["compact", "smallNames"], rows_by: by })).body).toMatchObject({ rows: ["compact", "smallNames"], rows_rev: 5, rows_prev: ["smallNames", "roomy"], rows_by: by });
+      expect(onDisk()).toEqual({ inboxTextSize: 13, inboxRows: ["compact", "smallNames"], inboxRowsRev: 5, inboxRowsDefaults: 2, inboxRowsPrev: ["smallNames", "roomy"], inboxRowsBy: by });
+      expect(await heard(5)).toEqual({ rows: ["compact", "smallNames"], rev: 5, prev: ["smallNames", "roomy"], by });
+
+      // Undo is one save of the look from before, by whoever asked (here the window: no one); undo again is a redo.
+      expect((await save({ rows_undo: true })).body).toMatchObject({ rows: ["smallNames", "roomy"], rows_rev: 6, rows_undone: true, rows_prev: ["compact", "smallNames"], rows_by: null });
+      expect(await heard(6)).toEqual({ rows: ["smallNames", "roomy"], rev: 6, prev: ["compact", "smallNames"], by: null });
+      expect((await save({ rows_undo: true, rows_by: by })).body).toMatchObject({ rows: ["compact", "smallNames"], rows_rev: 7, rows_undone: true, rows_by: by });
+      // A save of the same look leaves nothing to put back.
+      expect((await save({ rows: ["compact", "smallNames"] })).body).toMatchObject({ rows_rev: 8, rows_prev: ["compact", "smallNames"], rows_by: null });
+      expect((await save({ rows_undo: true })).body).toMatchObject({ rows_rev: 8, rows_undone: false });
+      // A `rows_by` that is not a host and a session is no one, never an error; no other setting moved.
+      expect((await save({ rows: ["smallNames"], rows_by: { host: "claude-code" } })).body).toMatchObject({ rows: ["smallNames"], rows_rev: 9, rows_by: null });
+      expect(onDisk().inboxTextSize).toBe(13);
+      controller.abort();
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+    }
+  });
+
+  // Approval "inbox-reaction-tray": two windows (a laptop and a phone) saving emoji never write over each other's.
+  test("the tray's saved emoji change one at a time on the list as it is, count their saves, and every open window hears them", async () => {
+    const root = tempRoot();
+    const dataDir = join(root, "data");
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    try {
+      mkdirSync(dataDir, { recursive: true });
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTextSize: 13 }));
+      const server = await start(dataDir);
+      const settings = async () => (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json()) as { reactions: unknown; reactions_rev: unknown };
+      const change = (reaction_change: unknown) => post(server, "/api/inbox/settings", { serverSession: server.serverSession, reaction_change });
+      const onDisk = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as Record<string, unknown>;
+      expect(await settings()).toMatchObject({ reactions: [], reactions_rev: 0 });
+
+      const controller = new AbortController();
+      const stream = await fetch(`http://127.0.0.1:${server.port}/api/inbox/events?cursor=${server.store.cursor()}&window=window-reactions-1&permission=granted`, { signal: controller.signal });
+      const reader = stream.body!.getReader();
+      const decoder = new TextDecoder();
+      let text = "";
+      while (!text.includes("event: hello")) text += decoder.decode((await reader.read()).value);
+
+      // Window A saves 🚀; window B, which never heard of it, saves 🔥: both are kept, in the order saved.
+      expect(await (await change({ op: "add", emoji: "🚀" })).json()).toMatchObject({ reactions: [{ emoji: "🚀" }], reactions_rev: 1 });
+      expect(await (await change({ op: "add", emoji: "🔥" })).json()).toMatchObject({ reactions: [{ emoji: "🚀" }, { emoji: "🔥" }], reactions_rev: 2 });
+      // A name with a bidi override and a zero-width space keeps only what shows.
+      expect(await (await change({ op: "name", emoji: "🚀", label: "Ship‮ it​" })).json()).toMatchObject({ reactions: [{ emoji: "🚀", label: "Ship it" }, { emoji: "🔥" }], reactions_rev: 3 });
+      expect(await (await change({ op: "change", emoji: "🔥", to: "🎉" })).json()).toMatchObject({ reactions: [{ emoji: "🚀", label: "Ship it" }, { emoji: "🎉" }], reactions_rev: 4 });
+      expect(onDisk()).toEqual({ inboxTextSize: 13, inboxReactions: [{ emoji: "🚀", label: "Ship it" }, { emoji: "🎉" }], inboxReactionsRev: 4 });
+      // A name for an emoji another window took out changes nothing and writes nothing.
+      expect(await (await change({ op: "name", emoji: "🦄", label: "Gone" })).json()).toMatchObject({ reactions_rev: 4 });
+
+      const deadline = Date.now() + 1500;
+      while (!text.includes('"rev":4') && Date.now() < deadline) {
+        const chunk = await Promise.race([reader.read(), new Promise<null>((resolve) => setTimeout(() => resolve(null), 200))]);
+        if (chunk && chunk.value) text += decoder.decode(chunk.value);
+      }
+      controller.abort();
+      expect(text).toContain(`event: reactions\ndata: ${JSON.stringify({ reactions: [{ emoji: "🚀" }], rev: 1 })}`);
+      expect(text).toContain(`event: reactions\ndata: ${JSON.stringify({ reactions: [{ emoji: "🚀", label: "Ship it" }, { emoji: "🎉" }], rev: 4 })}`);
+
+      // Refused: not an emoji, 👍 (the tray's first), and a sixth emoji. Nothing changes.
+      for (const bad of [{ op: "add", emoji: "ok" }, { op: "add", emoji: "👍" }, { op: "rename", emoji: "🚀" }, { op: "change", emoji: "🚀" }]) {
+        const refused = await change(bad);
+        expect(refused.status).toBe(422);
+        expect((await refused.json()).code).toBe("validation_error");
+      }
+      for (const emoji of ["🧪", "👀", "❤️"]) expect((await change({ op: "add", emoji })).status).toBe(200);
+      const full = await change({ op: "add", emoji: "🌮" });
+      expect(full.status).toBe(422);
+      expect(await settings()).toMatchObject({ reactions_rev: 7 });
+      expect((await (await change({ op: "remove", emoji: "🚀" })).json()).reactions).toEqual([{ emoji: "🎉" }, { emoji: "🧪" }, { emoji: "👀" }, { emoji: "❤️" }]);
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
       else process.env.PLANNOTATOR_DATA_DIR = previous;
@@ -1123,6 +1290,11 @@ describe("the window's routes: settings, restart, favicon", () => {
       const icon = await fetch(`http://127.0.0.1:${server.port}/favicon.png`);
       expect(icon.status).toBe(200);
       expect(icon.headers.get("content-type")).toMatch(/^image\//);
+      // The window links /favicon.ico: Glass's .ico, so the tab shows the hand-pixelled 16 or 32.
+      const ico = await fetch(`http://127.0.0.1:${server.port}/favicon.ico`);
+      expect(ico.status).toBe(200);
+      expect(ico.headers.get("content-type")).toBe("image/x-icon");
+      expect(new Uint8Array(await ico.arrayBuffer())).toEqual(FAVICON_ICO_BYTES);
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
       else process.env.PLANNOTATOR_DATA_DIR = previous;

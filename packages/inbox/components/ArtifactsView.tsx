@@ -12,18 +12,26 @@
  * a video's first frame and length, the first lines of a document or code
  * file, a diagram drawn small, an HTML page drawn small in a frame that runs
  * no script, a typed face for anything else, the guide's own face.
+ *
+ * Pins (approval "inbox-artifact-stars"; the word is Pin): a card's pin (on
+ * hover, and always once pinned) marks it to come back to. The thread's pinned
+ * artifacts come first, small ("Pinned N", the newest pin first), then
+ * "Everything else"; with nothing pinned the grid is as it always was.
  */
 
 import { forwardRef, useEffect, useRef, useState } from 'react';
+import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import {
   formatInboxVideoTime,
   inboxAttachmentKindLabel,
+  isInboxTimedKind,
   readInboxAttachmentKind,
   type InboxAttachmentKind,
   type InboxAttachmentState,
 } from '@plannotator/core/inbox-types';
-import { artifactKey, artifactMessageCount, artifactsNewestFirst, type Artifact, type FileArtifact, type GuideArtifact } from '../artifacts';
+import { artifactKey, artifactsNewestFirst, type Artifact, type FileArtifact, type GuideArtifact } from '../artifacts';
 import { readableVersion } from '../attachments';
+import { drawnImageUrl, GALLERY_IMAGE_WIDTH } from '../images';
 import { useInboxFileSource, type InboxFileSource } from '../fileSource';
 import { formatBytes, formatCount, fullTime, plural } from '../format';
 import { HostMark, Icon, type IconName } from '../icons';
@@ -31,14 +39,19 @@ import { ArtifactDiagramFace } from './ArtifactDiagramFace';
 import { opensInWindow, sizeLine } from './AttachmentTiles';
 import { FileName } from './FileName';
 import { ReuseButton } from '../reuse';
-import { OpenInTileMenu, type OpenInSurface } from './OpenIn';
+import { TileMenu, type OpenInSurface } from './OpenIn';
 import { Tip } from './Tip';
+import { gridStep, isGridKey, type GridKey } from '../gridMove';
+import { inboxArtifactsShortcuts } from '../shortcuts/grid.shortcuts';
+import { threadPinnedKeys, useArtifactPins } from '../artifactPins';
+import { ARTIFACT_PIN_LOOK, ArtifactPinButton } from './ArtifactPinButton';
+import { isComposingKey, keyTarget, modalOpen } from '../shortcuts/guards';
 
 /** The words under a tile's name: "PNG image, 1280 × 800, 38.4 KB", "Code (.sql), 331 B", "WebM video · 0:03 · 48.2 KB". */
 export function artifactDetail(artifact: Artifact): string {
   if (artifact.type === 'guide') {
     const { guide } = artifact;
-    return `Guided review, ${plural(guide.sections, 'section')}, ${plural(guide.files, 'file')}`;
+    return `${guide.walkthrough ? 'Walkthrough' : 'Guided review'}, ${plural(guide.sections, 'section')}, ${plural(guide.files, 'file')}`;
   }
   const { attachment } = artifact;
   if (readInboxAttachmentKind(attachment.kind) === 'image') {
@@ -73,6 +86,7 @@ export function artifactLabel(artifact: Artifact, comments: number): string {
   const from = `from ${artifact.fromPerson ? 'you' : artifact.sender} at ${artifact.sentAt}`;
   if (artifact.type === 'guide') {
     const { guide } = artifact;
+    if (guide.walkthrough) return `Walkthrough: ${guide.title}, ${plural(guide.sections, 'section')}, ${plural(guide.files, 'file')}, ${from}`;
     return `Guided review: ${guide.title}, ${plural(guide.sections, 'section')}, ${plural(guide.files, 'file')}, ${formatCount(guide.additions)} lines added, ${formatCount(guide.deletions)} removed, ${from}`;
   }
   const { attachment } = artifact;
@@ -100,7 +114,7 @@ const UNLOAD_MARGIN = '2000px 0px';
  * for the whole grid at once, and dropped again once the tile is far off
  * screen, so a long thread never keeps every page frame and video alive.
  */
-function useNear<T extends Element>(): [React.RefObject<T | null>, boolean] {
+export function useNear<T extends Element>(): [React.RefObject<T | null>, boolean] {
   const ref = useRef<T>(null);
   const [near, setNear] = useState(false);
   useEffect(() => {
@@ -113,8 +127,9 @@ function useNear<T extends Element>(): [React.RefObject<T | null>, boolean] {
     const load = new IntersectionObserver((entries) => {
       if (entries.some((e) => e.isIntersecting)) setNear(true);
     }, { rootMargin: LOAD_MARGIN });
+    // Hidden (the grid under the view's Links side) is not far away: a tile keeps its preview for the way back.
     const unload = new IntersectionObserver((entries) => {
-      if (entries.every((e) => !e.isIntersecting)) setNear(false);
+      if (entries.every((e) => !e.isIntersecting && (e.boundingClientRect.width > 0 || e.boundingClientRect.height > 0))) setNear(false);
     }, { rootMargin: UNLOAD_MARGIN });
     load.observe(el);
     unload.observe(el);
@@ -133,7 +148,7 @@ const PREVIEW_CACHE_MAX = 48;
 /** Reads kept by file version: the grid opens, closes and scrolls back without reading again. */
 const previewCache = new Map<string, Promise<{ text: string; html: string | null }>>();
 
-function previewOf(source: InboxFileSource, attachment: InboxAttachmentState): Promise<{ text: string; html: string | null }> {
+export function previewOf(source: InboxFileSource, attachment: InboxAttachmentState): Promise<{ text: string; html: string | null }> {
   const version = readableVersion(attachment);
   const key = `${attachment.id}:${version}:${version === 'current' ? (attachment.current?.sha256 ?? '') : attachment.sent_sha256}`;
   let cached = previewCache.get(key);
@@ -152,13 +167,14 @@ function previewOf(source: InboxFileSource, attachment: InboxAttachmentState): P
 }
 
 /** A short type mark ("SQL", "MD", "PDF"): the extension, else the kind. */
-function typeMark(attachment: Pick<InboxAttachmentState, 'name' | 'kind'>): string {
+export function typeMark(attachment: Pick<InboxAttachmentState, 'name' | 'kind'>): string {
   const ext = /\.([A-Za-z0-9]{1,5})$/.exec(attachment.name)?.[1];
   return (ext ?? readInboxAttachmentKind(attachment.kind)).toUpperCase().slice(0, 5);
 }
 
-function typedIcon(kind: InboxAttachmentKind): IconName {
+export function typedIcon(kind: InboxAttachmentKind): IconName {
   if (kind === 'video') return 'film';
+  if (kind === 'audio') return 'music';
   if (kind === 'image') return 'photo';
   if (kind === 'file') return 'cube';
   return 'doc';
@@ -189,7 +205,7 @@ function TextLines({ text, code }: { text: string; code: boolean }) {
 }
 
 /** An HTML page drawn small: its own markup in a frame that runs no script and takes no pointer or focus. */
-function PageFrame({ html }: { html: string }) {
+export function PageFrame({ html }: { html: string }) {
   const box = useRef<HTMLSpanElement>(null);
   const [scale, setScale] = useState(0.2);
   useEffect(() => {
@@ -210,7 +226,7 @@ function PageFrame({ html }: { html: string }) {
 }
 const PAGE_WIDTH = 1024;
 
-/** The face of a file: what it is, at a glance. */
+/** The face of a file: what it is, at a glance. Also the Artifacts wall's (ArtifactsWall.tsx). */
 function FileFace({ artifact, near }: { artifact: FileArtifact; near: boolean }) {
   const { attachment } = artifact;
   const source = useInboxFileSource();
@@ -245,7 +261,7 @@ function FileFace({ artifact, near }: { artifact: FileArtifact; near: boolean })
   if (kind === 'image') {
     return (
       <span className="ib-art-prev ib-art-f-img" data-face="image">
-        {near && !failed ? <img src={source.imageUrl(attachment, version)} alt="" loading="lazy" decoding="async" draggable={false} onError={() => setFailed(true)} /> : typed}
+        {near && !failed ? <img src={drawnImageUrl(source.imageUrl(attachment, version), attachment.width, GALLERY_IMAGE_WIDTH)} alt="" loading="lazy" decoding="async" draggable={false} onError={() => setFailed(true)} /> : typed}
       </span>
     );
   }
@@ -257,6 +273,18 @@ function FileFace({ artifact, near }: { artifact: FileArtifact; near: boolean })
         ) : (
           typed
         )}
+        <span className="ib-art-play" aria-hidden="true">
+          <Icon name="play" size={16} />
+        </span>
+        {attachment.duration_ms ? <span className="ib-art-dur">{formatInboxVideoTime(attachment.duration_ms / 1000)}</span> : null}
+      </span>
+    );
+  }
+  if (kind === 'audio') {
+    // A recording: its note and type, the play mark, and its length when the header gave one.
+    return (
+      <span className="ib-art-prev ib-art-f-audio" data-face="audio">
+        {typed}
         <span className="ib-art-play" aria-hidden="true">
           <Icon name="play" size={16} />
         </span>
@@ -296,28 +324,31 @@ function FileFace({ artifact, near }: { artifact: FileArtifact; near: boolean })
   );
 }
 
-function GuideFace({ artifact }: { artifact: GuideArtifact }) {
+export function GuideFace({ artifact }: { artifact: GuideArtifact }) {
   const { guide } = artifact;
   return (
     <span className="ib-art-prev ib-art-f-guide" data-face="guide">
       <span className="ib-art-g-ic">
         <Icon name="book" size={20} />
       </span>
-      <span className="ib-art-g-t">Guided review</span>
+      <span className="ib-art-g-t">{guide.walkthrough ? 'Walkthrough' : 'Guided review'}</span>
       <span className="ib-art-g-bars" aria-hidden="true">
         <s style={{ width: '72%' }} />
         <s style={{ width: '48%' }} />
         <s style={{ width: '86%' }} />
       </span>
-      <span className="ib-art-g-n">
-        <span className="ib-add">+{formatCount(guide.additions)}</span> <span className="ib-del">-{formatCount(guide.deletions)}</span>
-      </span>
+      {!guide.walkthrough && (
+        <span className="ib-art-g-n">
+          <span className="ib-add">+{formatCount(guide.additions)}</span> <span className="ib-del">-{formatCount(guide.deletions)}</span>
+        </span>
+      )}
     </span>
   );
 }
 
 function Tile({
   artifact,
+  threadId,
   comments,
   current,
   openIn,
@@ -326,6 +357,8 @@ function Tile({
   onOpenAs,
 }: {
   artifact: Artifact;
+  /** The thread: its cards can be pinned. Absent (the tour): no pin. */
+  threadId?: string;
   comments: number;
   current: boolean;
   openIn?: OpenInSurface;
@@ -342,7 +375,7 @@ function Tile({
   const name = artifact.type === 'file' ? artifact.attachment.name : artifact.guide.title;
   const body = (
     <>
-      <span className="ib-art-stage" data-video={artifact.type === 'file' && readInboxAttachmentKind(artifact.attachment.kind) === 'video' ? '' : undefined}>
+      <span className="ib-art-stage" data-video={artifact.type === 'file' && isInboxTimedKind(artifact.attachment.kind) ? '' : undefined}>
         {artifact.type === 'file' ? <FileFace artifact={artifact} near={near} /> : <GuideFace artifact={artifact} />}
         {changed && <span className="ib-art-chg">{changed.short}</span>}
         {comments > 0 && (
@@ -415,25 +448,40 @@ function Tile({
       </button>
     );
   }
+  if (artifact.type === 'guide') {
+    return (
+      <li className="ib-art-cell" ref={ref}>
+        <div className="ib-art-w">
+          {tile}
+          {threadId && <ArtifactPinButton threadId={threadId} artifactKey={key} name={name} surface="card" />}
+        </div>
+      </li>
+    );
+  }
   return (
     <li className="ib-art-cell" ref={ref}>
-      <div className={`ib-art-w${openIn === 'apps' ? ' ib-art-w-more' : ''}`}>
-        {tile}
-        {artifact.type === 'file' && <ReuseButton file={artifact.attachment} surface="card" />}
-        {/* The tile's ⋯ "Open in" is its sibling (a button in a button is invalid): the next tab stop after the tile. */}
-        {artifact.type === 'file' && openIn === 'apps' && (
-          <OpenInTileMenu
-            attachment={artifact.attachment}
-            version={readableVersion(artifact.attachment)}
-            onOpenAs={onOpenAs && !downloads ? (view) => onOpenAs(artifact, view) : undefined}
-          />
+      {/* The card's ⋯ is its sibling (a button in a button is invalid): the next tab stop after the card. A right-click on the card opens the same list (TileMenu). */}
+      <TileMenu
+        attachment={artifact.attachment}
+        surface={openIn}
+        onOpenAs={onOpenAs && !downloads ? (view) => onOpenAs(artifact, view) : undefined}
+        render={(more, status) => (
+          <div className={`ib-art-w${more ? ' ib-art-w-more' : ''}`}>
+            {tile}
+            {threadId && <ArtifactPinButton threadId={threadId} artifactKey={key} name={name} surface="card" />}
+            <ReuseButton file={artifact.attachment} surface="card" />
+            {more}
+            {status}
+          </div>
         )}
-      </div>
+      />
     </li>
   );
 }
 
 export interface ArtifactsViewProps {
+  /** The thread, for its pins. Absent (the tour's grid): no pins, no Pinned group. */
+  threadId?: string;
   /** The thread's artifacts in thread order (artifacts.ts), or null while the thread's files load. */
   artifacts: readonly Artifact[] | null;
   /** Annotations waiting for a Send, by file path: a tile's comment count. */
@@ -444,45 +492,77 @@ export interface ArtifactsViewProps {
   onOpenGuide: (artifact: GuideArtifact) => void;
   /** A tile's ⋯ "Open side by side" / "Open full screen" (absent on a phone or a stacked window). */
   onOpenAs?: (artifact: FileArtifact, view: 'full' | 'side') => void;
-  /** "Back to the thread" (desktop; a phone's header has its own Back). */
-  onBack?: () => void;
   openIn?: OpenInSurface;
-  /** A phone: the header names the view, so the heading here is for a screen reader only. */
+  /** A phone: a tile has no "Open in". */
   phone?: boolean;
 }
 
 /** The grid itself, with its heading ("Artifacts") as the region's name and the focus target when it opens. */
 export const ArtifactsView = forwardRef<HTMLHeadingElement, ArtifactsViewProps>(function ArtifactsView(
-  { artifacts, annotationCounts, openId, onOpen, onOpenGuide, onOpenAs, onBack, openIn, phone = false },
+  { threadId, artifacts, annotationCounts, openId, onOpen, onOpenGuide, onOpenAs, openIn, phone = false },
   headingRef,
 ) {
   const ordered = artifacts ? artifactsNewestFirst(artifacts) : [];
   const count = ordered.length;
+  // The thread's pinned artifacts first, the newest pin first; the rest in the grid's own order.
+  const { pins } = useArtifactPins();
+  const pinnedKeys = threadId ? threadPinnedKeys(pins, threadId) : [];
+  const byKey = new Map(ordered.map((artifact) => [artifactKey(artifact), artifact]));
+  const pinned = pinnedKeys.map((key) => byKey.get(key)).filter((artifact): artifact is Artifact => !!artifact);
+  const pinnedSet = new Set(pinned);
+  const rest = pinned.length > 0 ? ordered.filter((artifact) => !pinnedSet.has(artifact)) : ordered;
   // The open file's tile stays in sight beside it (a step, a reload with a file open).
   const section = useRef<HTMLElement>(null);
   useEffect(() => {
     if (openId === null) return;
     section.current?.querySelector<HTMLElement>('.ib-art-current')?.scrollIntoView?.({ block: 'nearest' });
   }, [openId, count]);
+  // Arrow keys between the tiles (approval "inbox-keyboard-keys-2026-11-07", item 1; gridMove.ts), while a tile has
+  // focus: ← → the tile before or after, ↑ ↓ the one above or below, Home End the first or last. Enter opens. From the
+  // heading (where Shift+O lands), ↓ → Home go into the grid at its first tile and End at its last.
+  const HEADING_ID = 'ib-art-h';
+  const fromHeading = (event: KeyboardEvent) => event.key === 'ArrowDown' || event.key === 'ArrowRight' || event.key === 'Home' || event.key === 'End';
+  const tileKey = {
+    when: (event: KeyboardEvent) => {
+      if (event.defaultPrevented || isComposingKey(event) || modalOpen() || !isGridKey(event.key)) return false;
+      const target = keyTarget(event);
+      if (!target || !section.current?.contains(target)) return false;
+      if (target.id === HEADING_ID) return fromHeading(event) && !!section.current.querySelector('[data-artifact-tile]');
+      return target.matches('[data-artifact-tile]');
+    },
+    handle: (event: KeyboardEvent) => {
+      const tiles = [...(section.current?.querySelectorAll<HTMLElement>('[data-artifact-tile]') ?? [])];
+      const target = keyTarget(event);
+      const from = tiles.indexOf(target as HTMLElement);
+      const to = target?.id === HEADING_ID ? (event.key === 'End' ? tiles.length - 1 : 0) : gridStep(tiles.map((tile) => tile.getBoundingClientRect()), from, event.key as GridKey);
+      const next = to === null ? null : tiles[to];
+      next?.focus({ preventScroll: true });
+      next?.scrollIntoView?.({ block: 'nearest' });
+    },
+  };
+  useShortcutScope({ scope: inboxArtifactsShortcuts, handlers: { move: tileKey, ends: tileKey } });
+  const tileOf = (artifact: Artifact) => {
+    const current = openId !== null && artifact.type === 'file' && (artifact.attachment.id === openId || artifact.alsoIds.includes(openId));
+    return (
+      <Tile
+        key={artifactKey(artifact)}
+        artifact={artifact}
+        threadId={threadId}
+        comments={artifact.type === 'file' ? (annotationCounts.get(artifact.attachment.path) ?? 0) : 0}
+        current={current}
+        openIn={phone ? undefined : openIn}
+        onOpen={onOpen}
+        onOpenGuide={onOpenGuide}
+        onOpenAs={onOpenAs}
+      />
+    );
+  };
   return (
     <section ref={section} className="ib-art" aria-labelledby="ib-art-h" data-artifacts-view="">
-      <div className="ib-art-top">
-        {onBack && (
-          <button type="button" className="ib-art-back" onClick={onBack} data-artifacts-back="">
-            <Icon name="chevL" size={15} />
-            <span>Back to the thread</span>
-          </button>
-        )}
-        <h2 id="ib-art-h" ref={headingRef} className={phone ? 'ib-sr' : 'ib-art-h'} tabIndex={-1}>
-          Artifacts
-        </h2>
-        {artifacts !== null && count > 0 && (
-          <span className="ib-art-sum" data-artifacts-summary="">
-            {count === 1 ? '1 artifact' : `${formatCount(count)} from ${plural(artifactMessageCount(ordered), 'message')}`}
-            {count > 1 ? ' · newest first' : ''}
-          </span>
-        )}
-      </div>
+      {/* For a screen reader and for focus: the view's switch is what the eye reads. */}
+      <h2 id="ib-art-h" ref={headingRef} className="ib-sr" tabIndex={-1}>
+        Artifacts
+      </h2>
       {artifacts === null ? (
         <p className="ib-art-load" aria-busy="true">
           Loading the artifacts…
@@ -495,25 +575,33 @@ export const ArtifactsView = forwardRef<HTMLHeadingElement, ArtifactsViewProps>(
           <b>No artifacts in this thread yet</b>
           <span>Files, images and guided reviews an agent sends, and files you paste into a reply, show here.</span>
         </div>
-      ) : (
+      ) : pinned.length === 0 ? (
         <ul className="ib-art-grid" aria-label={plural(count, 'artifact')}>
-          {ordered.map((artifact) => {
-            const current =
-              openId !== null && artifact.type === 'file' && (artifact.attachment.id === openId || artifact.alsoIds.includes(openId));
-            return (
-              <Tile
-                key={artifactKey(artifact)}
-                artifact={artifact}
-                comments={artifact.type === 'file' ? (annotationCounts.get(artifact.attachment.path) ?? 0) : 0}
-                current={current}
-                openIn={phone ? undefined : openIn}
-                onOpen={onOpen}
-                onOpenGuide={onOpenGuide}
-                onOpenAs={onOpenAs}
-              />
-            );
-          })}
+          {ordered.map(tileOf)}
         </ul>
+      ) : (
+        <>
+          {pinned.length > 0 && (
+            <div className="ib-art-part" data-artifacts-group="pinned">
+              <h3 className="ib-art-gh" data-look={ARTIFACT_PIN_LOOK}>
+                <Icon name="pin" size={13} />
+                Pinned
+                <span className="ib-art-gh-n">{formatCount(pinned.length)}</span>
+              </h3>
+              <ul className="ib-art-grid ib-art-pinned" aria-label={plural(pinned.length, 'pinned artifact')}>
+                {pinned.map(tileOf)}
+              </ul>
+            </div>
+          )}
+          {rest.length > 0 && (
+            <div className="ib-art-part" data-artifacts-group="rest">
+              <h3 className="ib-art-gh">Everything else</h3>
+              <ul className="ib-art-grid" aria-label={plural(rest.length, 'artifact')}>
+                {rest.map(tileOf)}
+              </ul>
+            </div>
+          )}
+        </>
       )}
     </section>
   );

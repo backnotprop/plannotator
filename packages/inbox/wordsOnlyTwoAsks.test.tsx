@@ -192,7 +192,7 @@ function button(el: ParentNode, text: string): HTMLButtonElement {
 }
 
 function type(el: HTMLElement, words: string) {
-  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  const text = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
   act(() => {
     setter.call(text, words);
@@ -239,7 +239,7 @@ test.skipIf(!hasDom)('one session asked twice: Reply, words, the Send button: on
   expect(el.querySelector('[data-skip-chip]')?.getAttribute('data-skip-chip')).toBe('keep');
   type(el, 'Is there a way to attach video?');
   act(() => button(el, 'Send').click());
-  await until(() => el.querySelector('textarea') === null, 'the Send');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   await expectWordsOnly(world.waiting, second, 'Is there a way to attach video?');
 });
 
@@ -250,11 +250,11 @@ test.skipIf(!hasDom)('one session asked twice: Mod+Enter in the reply box sends 
   act(() => button(el, 'Reply').click());
   await settle();
   type(el, 'Thinking about it.');
-  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  const text = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
   act(() => {
     text.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, ctrlKey: true, bubbles: true }));
   });
-  await until(() => el.querySelector('textarea') === null, 'the Send');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   await expectWordsOnly(world.waiting, second, 'Thinking about it.');
 });
 
@@ -276,7 +276,7 @@ test.skipIf(!hasDom)('one session asked twice: a pick made and taken back before
   expect(el.querySelector('[data-skip-chip]')?.getAttribute('data-skip-chip')).toBe('keep');
   type(el, 'Not yet.');
   act(() => button(el, 'Send').click());
-  await until(() => el.querySelector('textarea') === null, 'the Send');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   await expectWordsOnly(world.waiting, second, 'Not yet.');
 });
 
@@ -292,27 +292,27 @@ test.skipIf(!hasDom)('one session asked twice, the first message folded: the Sen
   expect(el.querySelector('[data-skip-chip]')?.getAttribute('data-skip-chip')).toBe('keep');
   type(el, 'Later.');
   act(() => button(el, 'Send').click());
-  await until(() => el.querySelector('textarea') === null, 'the Send');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   await expectWordsOnly(world.waiting, second, 'Later.');
 });
 
-test.skipIf(!hasDom)('one session asked twice: the box cancelled and opened again keeps the default, and the Send is words-only', async () => {
+test.skipIf(!hasDom)('one session asked twice: the box closed and opened again keeps the default, and the Send is words-only', async () => {
   const second = await askAgain(world);
   const el = await renderApp(`#thread=${world.waiting}`);
   await until(() => el.querySelectorAll('fieldset[data-question-key]').length === 2, 'both questions');
   act(() => button(el, 'Reply').click());
   await settle();
   type(el, 'A first try.');
-  act(() => button(el, 'Cancel').click());
+  act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
   await settle();
-  // Cancel keeps the words as a draft (approval "inbox-reply-drafts"): Edit draft brings them back.
+  // Closing the box keeps the words as a draft (approval "inbox-reply-drafts"): Edit draft brings them back.
   act(() => button(el, 'Edit draft').click());
   await settle();
-  expect((el.querySelector('textarea') as HTMLTextAreaElement).value).toBe('A first try.');
+  expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).value).toBe('A first try.');
   expect(el.querySelector('[data-skip-chip]')?.getAttribute('data-skip-chip')).toBe('keep');
   type(el, 'The second try.');
   act(() => button(el, 'Send').click());
-  await until(() => el.querySelector('textarea') === null, 'the Send');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   await expectWordsOnly(world.waiting, second, 'The second try.');
 });
 
@@ -324,7 +324,7 @@ test.skipIf(!hasDom)('one session asked twice: a second words-only Send after th
   await settle();
   type(el, 'One.');
   act(() => button(el, 'Send').click());
-  await until(() => el.querySelector('textarea') === null, 'the first Send');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the first Send');
   await settle();
   posted = [];
   act(() => button(el, 'Reply').click());
@@ -332,7 +332,7 @@ test.skipIf(!hasDom)('one session asked twice: a second words-only Send after th
   expect(el.querySelector('[data-skip-chip]')?.getAttribute('data-skip-chip')).toBe('keep');
   type(el, 'Two.');
   act(() => button(el, 'Send').click());
-  await until(() => el.querySelector('textarea') === null, 'the second Send');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the second Send');
   expect(replies().map((p) => p.path)).toEqual([`/api/inbox/messages/${second}/reply`]);
   expect(replies()[0]!.body).toMatchObject({ words: 'Two.', questions: [] });
   expect(replies()[0]!.body.skip).toBeUndefined();

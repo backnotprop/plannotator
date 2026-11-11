@@ -2,7 +2,7 @@
   "format": "plannotator-inbox-thread-state",
   "version": 1,
   "name": "hand-19-person-started-thread",
-  "description": "The person starts a thread addressed to a session (Sent); its delivery moves it to Quiet; the agent's reply_to answer lands in it (New), and a look makes it Quiet. The session's message without reply_to starts its own thread: a thread the person started is no session's default thread. A second person thread waits in Sent until delivered.",
+  "description": "The person starts a thread addressed to a session (Sent); its delivery moves it to Quiet; the agent's reply_to answer lands in it (New), and a look makes it Quiet. The session's message without reply_to starts a thread of its own. A second person thread waits in Sent until delivered.",
   "source": "hand",
   "seed": null,
   "clock": {

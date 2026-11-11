@@ -36,7 +36,8 @@ export interface PinnedRowProps {
  * list row would be. ⋯ beside it (the project row's pattern: two buttons side
  * by side) opens Unpin, Move up, Move down and Copy link; a right-click on the
  * row opens the same menu. On a phone ⋯ is always shown, 44 px, and the menu
- * is a bottom sheet titled by the row's label.
+ * is a bottom sheet titled by the row's label, and the row has two lines: the
+ * name in full (up to two lines), then its project and its state in words.
  */
 export function PinnedRow(props: PinnedRowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -81,6 +82,16 @@ export function PinnedRow(props: PinnedRowProps) {
         <Icon name="archive" size={13} />
       </span>
     ) : null;
+  // On a phone the state is said in words after the project: the pills as they are, a count as its words, news as "New".
+  const phoneState =
+    state.kind === 'stop' || state.kind === 'hold' ? (
+      tail
+    ) : state.kind === 'wait' || state.kind === 'new' || state.kind === 'archived' ? (
+      <span className="ib-pin-st" data-k={state.kind}>
+        {/* One open question has no words of its own in the list (`questionCount`); here it is said. */}
+        {state.words || '1 question'}
+      </span>
+    ) : null;
   const row_ = (children: ReactNode, extra: Record<string, unknown> = {}) => (
     <div className="ib-pinrow" data-pin={row.thread_id} data-menu={menuOpen || contextOpen ? '' : undefined} {...extra}>
       {children}
@@ -99,10 +110,26 @@ export function PinnedRow(props: PinnedRowProps) {
           data-state={state.kind}
         >
           <AuthorMark author={rowAgent(row)} />
-          <span className="ib-name" dir="auto">
-            {label}
-          </span>
-          {tail}
+          {props.phone ? (
+            // A phone's sheet (approval "inbox-phone-sidebar-sheet"): the name in full on up to two lines, then its project and state.
+            <span className="ib-pin-t">
+              <span className="ib-name" dir="auto">
+                {label}
+              </span>
+              <span className="ib-pin-sub" aria-hidden="true">
+                <bdi className="ib-pin-proj">{project}</bdi>
+                {phoneState && <span className="ib-pin-dot">·</span>}
+                {phoneState}
+              </span>
+            </span>
+          ) : (
+            <>
+              <span className="ib-name" dir="auto">
+                {label}
+              </span>
+              {tail}
+            </>
+          )}
         </button>
       </Tip>
       <Menu.Root open={menuOpen} onOpenChange={setMenuOpen} modal={false}>

@@ -377,8 +377,10 @@ import { scrollableEditSurface } from './editScroll';
 import { configurePlannotatorUI } from '@plannotator/ui/configure';
 
 // Plannotator's own plan review and annotate: the selection toolbar's Copy
-// copies rich text; @plannotator/ui hosts keep plain Copy unless they opt in.
-configurePlannotatorUI({ richCopy: true });
+// copies rich text, and on a touch screen the toolbar sits below the selection
+// (clear of iOS's edit menu), inside the screen, with thumb-sized buttons;
+// @plannotator/ui hosts keep both unchanged unless they opt in.
+configurePlannotatorUI({ richCopy: true, touchSelectionToolbar: true });
 
 type NoteAutoSaveResults = {
   obsidian?: boolean;
@@ -614,6 +616,7 @@ const App: React.FC = () => {
   // render-assigned ref (same pattern as headerHandlersRef) so keyboard and
   // header share literally one submitPrimaryDecision.
   const submitPrimaryDecisionRef = useRef<() => void>(() => {});
+  const [decisionNoteRequest, setDecisionNoteRequest] = useState(0);
   // The `document-view` scope is registered above `handleEditToggle`; the
   // handler is read through a render-assigned ref (same pattern as above) so
   // the chord and the card's `Edit` control share one enter path.
@@ -5009,6 +5012,12 @@ const App: React.FC = () => {
 
       e.preventDefault();
 
+      // Mod+Shift+Enter opens the note composer instead of submitting.
+      if (e.shiftKey) {
+        setDecisionNoteRequest((n) => n + 1);
+        return;
+      }
+
       // Mod+Enter always equals the visible header primary, in annotate and
       // plan review alike: one submitPrimaryDecision for keyboard, header and
       // compact (spec §4; #1057 brought plan review onto it).
@@ -7559,6 +7568,7 @@ const App: React.FC = () => {
           questionProgress={headerQuestionProgress}
           annotateDecision={annotateMode ? annotateDecision : undefined}
           planDecision={annotateMode ? undefined : planDecision}
+          decisionNoteRequest={decisionNoteRequest}
           callbackConfig={callbackConfig}
           taterMode={taterMode}
           mobileSettingsOpen={mobileSettingsOpen}

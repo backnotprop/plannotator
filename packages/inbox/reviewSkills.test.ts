@@ -8,13 +8,17 @@
  *    review happened (the owner's rule: only after a verdict or review
  *    comments in that thread);
  *  - a typed review skill name turning into a reference while the catalog
- *    has none (Code review off: the Inbox lists no Plannotator skill).
+ *    has none (Code review off: the Inbox lists no Plannotator skill);
+ *  - the skills' overview-drawing lines reaching the agent while Shape is off
+ *    (approval "code-review-029-shape-off"), or missing while it is on;
+ *  - a chapter diagram's line reaching the agent while Settings → Capabilities →
+ *    Chapter diagrams is off, Shape off or on.
  */
 import { describe, expect, test } from 'bun:test';
 import { INBOX_REPLY_SKILL_AUDIENCE, splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
-import { INBOX_GUIDE_FEEDBACK_TITLE, INBOX_REVIEW_SKILL_TEXTS, inboxThreadHadReview, type InboxReviewThreadMessage } from '@plannotator/core/inbox-review';
+import { INBOX_GUIDE_FEEDBACK_TITLE, INBOX_REVIEW_CURATE_DRAWING_LINE, INBOX_REVIEW_CURATE_DRAWING_LINE_NO_SHAPE, INBOX_REVIEW_RECHECK_DRAWING_LINE, INBOX_REVIEW_SKILL_TEXTS, INBOX_REVIEW_SKILL_TEXTS_WITH_SHAPE, inboxThreadHadReview, type InboxReviewThreadMessage } from '@plannotator/core/inbox-review';
 import type { SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
-import { inboxSkillFilter, inboxSkillsBlock } from './skills';
+import { inboxSkillFilter, inboxSkillsBlock, setReviewSkillsDiagrams, setReviewSkillsShape } from './skills';
 
 const ON: SkillCatalogEntry[] = [
   { name: 'review-curate', root: 'plannotator', humanOnly: true },
@@ -74,5 +78,49 @@ describe('/review-recheck needs a review in the thread', () => {
     expect(await inboxSkillsBlock(words, INBOX_REPLY_SKILL_AUDIENCE, sources(ON), inboxSkillFilter(false))).toBe('');
     const block = await inboxSkillsBlock(words, INBOX_REPLY_SKILL_AUDIENCE, sources(ON), inboxSkillFilter(true));
     expect(block).toContain(INBOX_REVIEW_SKILL_TEXTS['review-recheck']!.body);
+  });
+});
+
+describe("the review skills' Shape words ride Shape's switch", () => {
+  test('Shape off (the window\'s start): the chapter lines in Mermaid only, no Shape word; Shape on: Mermaid preferred', async () => {
+    const words = ['/review-curate', '/review-recheck'];
+    const reviewed = inboxSkillFilter(true);
+    try {
+      setReviewSkillsShape(false);
+      const off = await inboxSkillsBlock(words, INBOX_REPLY_SKILL_AUDIENCE, sources(ON), reviewed);
+      expect(off).toContain(INBOX_REVIEW_SKILL_TEXTS['review-curate']!.body);
+      expect([off.includes(INBOX_REVIEW_CURATE_DRAWING_LINE), off.includes(INBOX_REVIEW_CURATE_DRAWING_LINE_NO_SHAPE), off.includes(INBOX_REVIEW_RECHECK_DRAWING_LINE), off.includes('overview.diagram')]).toEqual([false, true, true, false]);
+      setReviewSkillsShape(true);
+      const on = await inboxSkillsBlock(words, INBOX_REPLY_SKILL_AUDIENCE, sources(ON), reviewed);
+      expect(on).toContain(INBOX_REVIEW_SKILL_TEXTS_WITH_SHAPE['review-curate']!.body);
+      expect(on).toContain(INBOX_REVIEW_SKILL_TEXTS_WITH_SHAPE['review-recheck']!.body);
+    } finally {
+      setReviewSkillsShape(false);
+    }
+  });
+});
+
+describe("the review skills' chapter diagram lines ride Chapter diagrams", () => {
+  test('off: the pasted skills hold no diagram word, Shape off or on; on again: the lines are back', async () => {
+    const words = ['/review-curate', '/review-recheck'];
+    const reviewed = inboxSkillFilter(true);
+    try {
+      setReviewSkillsDiagrams(false);
+      for (const shape of [false, true]) {
+        setReviewSkillsShape(shape);
+        const off = await inboxSkillsBlock(words, INBOX_REPLY_SKILL_AUDIENCE, sources(ON), reviewed);
+        // Both skills are pasted, with their other words.
+        expect(off).toContain('Give one chapter to each comment you acted on');
+        expect(off).toContain('Needs the person:');
+        expect([shape, /diagram|mermaid/i.test(off)]).toEqual([shape, false]);
+      }
+      setReviewSkillsDiagrams(true);
+      setReviewSkillsShape(false);
+      const on = await inboxSkillsBlock(words, INBOX_REPLY_SKILL_AUDIENCE, sources(ON), reviewed);
+      expect([on.includes(INBOX_REVIEW_CURATE_DRAWING_LINE_NO_SHAPE), on.includes(INBOX_REVIEW_RECHECK_DRAWING_LINE)]).toEqual([true, true]);
+    } finally {
+      setReviewSkillsDiagrams(true);
+      setReviewSkillsShape(false);
+    }
   });
 });

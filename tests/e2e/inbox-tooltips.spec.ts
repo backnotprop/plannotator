@@ -106,13 +106,13 @@ test('nothing in the window has a native title; a cut preview and a sidebar proj
     await expect(tooltip(page)).toHaveText(LONG, { timeout: 1000 });
     await page.mouse.move(700, 880);
     await expect(tooltip(page)).toHaveCount(0);
-    // Its preview (the named thread's subject), cut with "…".
-    const SUBJECT = 'Ledger totals disagree after the nightly batch finished';
-    const preview = page.locator('.ib-lbody .ib-nrow .ib-pv', { hasText: SUBJECT }).first();
+    // Its preview (the thread's latest message, here its open question: approval "inbox-row-latest-preview"), cut with "…".
+    const PREVIEW = 'Asked: Detect the installed agents, or ask the reader to pick?';
+    const preview = page.locator('.ib-lbody .ib-nrow .ib-pv', { hasText: PREVIEW }).first();
     expect(await preview.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
     const t0 = Date.now();
     await preview.hover();
-    await expect(tooltip(page)).toHaveText(SUBJECT, { timeout: 1000 });
+    await expect(tooltip(page)).toHaveText(PREVIEW, { timeout: 1000 });
     expect(Date.now() - t0).toBeLessThan(1000);
     await page.waitForTimeout(200);
     await page.screenshot({ path: join(proofDir, 'list-project-label-1440.png') });
@@ -120,7 +120,7 @@ test('nothing in the window has a native title; a cut preview and a sidebar proj
     await expect(tooltip(page)).toHaveCount(0);
 
     // A sidebar project: its whole name over its folder, drawn above the panes.
-    const project = page.locator('.ib-side .ib-proj', { hasText: LONG });
+    const project = page.locator('.ib-side .ib-projs .ib-proj', { hasText: LONG });
     await project.hover();
     await expect(tooltip(page)).toContainText(LONG);
     await expect(tooltip(page)).toContainText(`/${LONG}`);
@@ -202,7 +202,7 @@ test("a tooltip floats with no visible border (owner's ruling q4), Soft's float 
   const { context, page } = await openPage(browser);
   try {
     const styleOf = async () => {
-      await page.locator('.ib-side .ib-proj', { hasText: LONG }).hover();
+      await page.locator('.ib-side .ib-projs .ib-proj', { hasText: LONG }).hover();
       await expect(tooltip(page)).toBeVisible({ timeout: 1000 });
       const found = await tooltip(page).evaluate((el) => {
         const cs = getComputedStyle(el);
@@ -235,7 +235,9 @@ test('Escape with a tooltip open still closes the thread (the tooltip does not s
     await expect(tooltip(page)).toBeVisible({ timeout: 1000 });
     await page.keyboard.press('Escape');
     await expect(page.locator('section.ib-pane')).toHaveCount(0);
-    await expect(tooltip(page)).toHaveCount(0);
+    // The ⋯'s own tooltip goes with the pane. The pointer, still where the ⋯ was, may now rest on the list header's
+    // controls (the filter's funnel, #2921), whose own tooltip is not this one.
+    await expect(tooltip(page).filter({ hasText: /^More$/ })).toHaveCount(0);
   } finally {
     await context.close();
   }

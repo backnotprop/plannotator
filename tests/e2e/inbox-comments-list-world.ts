@@ -37,6 +37,8 @@ export interface ListWorld {
   url: string;
   agent: SimAgent;
   project: string;
+  /** A second agent (Codex), when asked for (`second`): a thread both write in has the recipient pill. */
+  other?: SimAgent;
 }
 
 export interface ListThread {
@@ -51,8 +53,8 @@ export interface ListThread {
   count: number;
 }
 
-/** `agentName`: the name the agent writes under (inbox-reply-foot-phone.spec.ts: a long one). */
-export async function startWorld(options: { agentName?: string } = {}): Promise<ListWorld> {
+/** `agentName`: the name the agent writes under (inbox-reply-foot-phone.spec.ts: a long one); `second`: a second agent's name. */
+export async function startWorld(options: { agentName?: string; second?: string } = {}): Promise<ListWorld> {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const root = inboxScratch('plannotator-inbox-comments-list-');
   const dataDir = join(root, 'data');
@@ -75,12 +77,15 @@ export async function startWorld(options: { agentName?: string } = {}): Promise<
   mkdirSync(join(project, 'docs'));
   writeFileSync(join(project, 'docs', 'retry-plan.md'), PLAN);
   writeFileSync(join(project, 'docs', 'admin-view.html'), PAGE);
-  return { url: started.stdout.trim(), agent: await SimAgent.connect({ binary, env, name: options.agentName ?? 'Claude Code', host: 'claude-code' }), project };
+  const agent = await SimAgent.connect({ binary, env, name: options.agentName ?? 'Claude Code', host: 'claude-code' });
+  const other = options.second ? await SimAgent.connect({ binary, env, name: options.second, host: 'codex' }) : undefined;
+  return { url: started.stdout.trim(), agent, project, ...(other ? { other } : {}) };
 }
 
 export async function stopWorld(world: ListWorld | undefined): Promise<void> {
   try {
     await world?.agent.close().catch(() => {});
+    await world?.other?.close().catch(() => {});
   } finally {
     await removeInboxScratch();
   }

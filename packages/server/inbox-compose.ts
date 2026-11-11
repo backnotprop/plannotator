@@ -174,7 +174,10 @@ export function createInboxCompose(options: {
     }
     // Launch: the folder and the agent are checked first; nothing is written when either fails.
     const launchTarget = options.launch?.target(body.to) ?? null;
-    if (!launchTarget && body.to && typeof body.to === "object" && "launch" in body.to) throw new InboxError("launch_off", "Starting agents from the Inbox is off.");
+    if (!launchTarget && body.to && typeof body.to === "object" && "launch" in body.to) {
+      // From a linked machine (remote launch), the words that machine's window shows: say whose switch it is.
+      throw new InboxError("launch_off", from ? "Starting agents is off on that computer. Turn it on in its Settings → Agents." : "Starting agents from the Inbox is off. Turn it on in Settings → Agents.");
+    }
     // Starting an agent runs code on this computer: its owner's, never a login the tailnet allow list let in.
     // Before `prepare`, so a guest's scratch Send makes no folder.
     if (launchTarget && guest) throw new InboxError("owner_only", "Only this computer's owner can start an agent from this Inbox.");
@@ -227,6 +230,8 @@ export function createInboxCompose(options: {
         board_request: body.board_request === true && boardOn(),
         // Settings -> Decision data's Ask: the agent also receives how to answer it (INBOX_DECISION_ASK_BLOCK).
         decision_ask: body.decision_ask === true,
+        // Settings -> Rows' ask box: the agent also receives how to change the rows (INBOX_ROWS_ASK_BLOCK).
+        rows_ask: body.rows_ask === true,
         ...(guest ? { by_guest: true } : {}),
         ...(prepared ? { launch: prepared.launch } : {}),
       });
@@ -243,7 +248,7 @@ export function createInboxCompose(options: {
     }
     // The thread is written: only now does the agent start (in the background; the answer comes at once).
     else {
-      if (body.review) options.onReviewStart?.(result.message.thread_id, body.review, { host: target.host, project_id: project.id, at });
+      if (body.review && !guest) options.onReviewStart?.(result.message.thread_id, body.review, { host: target.host, project_id: project.id, at });
       if (prepared) options.launch!.begin(result.message);
     }
     // Sent: the uploads are attachments now, and the draft it came from is done.
@@ -319,7 +324,7 @@ export function createInboxCompose(options: {
         home: homedir(),
         projects: sessionsModel(),
         ...(session ? { session: { session, live: live.askerLive(session) } } : {}),
-        // Launch (only while `inboxLaunch.enabled`): the agents To offers to start and the folder menu's projects.
+        // Launch (only while `inboxLaunch.enabled`, on unless false; read live): the agents To offers to start and the folder menu's projects.
         ...(options.launch ? { launch: await options.launch.composeBlock(owner && !isCrossSiteRequest(req) ? { pick: trustPick(url) } : null) } : {}),
       });
     }

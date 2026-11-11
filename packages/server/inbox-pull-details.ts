@@ -4,8 +4,8 @@
  * page's to lay out.
  */
 
-import type { InboxPullCheck, InboxPullCheckState, InboxPullDetailComment, InboxPullDetailsAnswer, InboxPullReviewer, InboxPullReviewState } from "@plannotator/core/inbox-types";
-import type { PRCheck, PRContext } from "@plannotator/shared/pr-types";
+import type { InboxPullCheck, InboxPullCheckState, InboxPullDetailComment, InboxPullDetailsAnswer, InboxPullReviewer, InboxPullReviewState, InboxPullThread } from "@plannotator/core/inbox-types";
+import type { PRCheck, PRContext, PRThreadComment } from "@plannotator/shared/pr-types";
 
 export interface PullDetailsRead {
   answer: InboxPullDetailsAnswer;
@@ -83,6 +83,43 @@ function checkOf(check: PRCheck): InboxPullCheck | null {
   return { name: check.name, ...(check.workflowName ? { workflow: check.workflowName } : {}), state, ...(note ? { note } : {}), ...(url ? { url } : {}) };
 }
 
+/** A comment of a thread on the code: where it is, and whether the forge hides it. */
+function threadComment(file: string, line: number | null, c: PRThreadComment, person: (login: string, avatarUrl?: string) => string): InboxPullDetailComment {
+  return {
+    id: c.id,
+    author: person(c.author, c.avatarUrl),
+    ...(c.isBot ? { bot: true } : {}),
+    at: c.createdAt,
+    body: c.body,
+    url: c.url,
+    ...(file ? { file } : {}),
+    ...(line !== null ? { line } : {}),
+    ...(c.isMinimized ? { hidden: (c.minimizedReason ?? "").toLowerCase().replace(/_/g, "-") } : {}),
+  };
+}
+
+/**
+ * The discussions on the code, each whole and in the forge's order, for the page to draw on their lines. A thread with
+ * no comment (every one deleted) or no file says nothing and is left out.
+ */
+function threadsOf(context: PRContext): InboxPullThread[] {
+  const person = (login: string) => goneLogin(login);
+  return context.reviewThreads.flatMap((thread): InboxPullThread[] => {
+    if (!thread.path || thread.comments.length === 0) return [];
+    return [{
+      id: thread.id,
+      file: thread.path,
+      line: thread.line,
+      // A range across the two sides has numbers from two files: its end line alone says where it is.
+      start_line: thread.startLine !== null && thread.line !== null && thread.startLine < thread.line && (!thread.startDiffSide || thread.startDiffSide === thread.diffSide) ? thread.startLine : null,
+      side: thread.diffSide === "LEFT" ? "old" : "new",
+      resolved: thread.isResolved,
+      outdated: thread.isOutdated,
+      comments: thread.comments.map((c) => threadComment(thread.path, thread.line, c, person)),
+    }];
+  });
+}
+
 function commentsOf(context: PRContext, avatars: Record<string, string>): InboxPullDetailComment[] {
   const out: InboxPullDetailComment[] = [];
   const person = (login: string, avatarUrl?: string) => {
@@ -99,18 +136,7 @@ function commentsOf(context: PRContext, avatars: Record<string, string>): InboxP
     out.push({ id: r.id, author: person(r.author, r.avatarUrl), ...(r.isBot ? { bot: true } : {}), at: r.submittedAt, body: r.body, url: r.url ?? "" });
   }
   for (const thread of context.reviewThreads) {
-    for (const c of thread.comments) {
-      out.push({
-        id: c.id,
-        author: person(c.author, c.avatarUrl),
-        ...(c.isBot ? { bot: true } : {}),
-        at: c.createdAt,
-        body: c.body,
-        url: c.url,
-        ...(thread.path ? { file: thread.path } : {}),
-        ...(thread.line !== null ? { line: thread.line } : {}),
-      });
-    }
+    for (const c of thread.comments) out.push(threadComment(thread.path, thread.line, c, person));
   }
   return out
     .map((comment, index) => ({ comment, index }))
@@ -122,7 +148,8 @@ export function pullDetailsOf(key: string, context: PRContext, author: string | 
   const avatars: Record<string, string> = {};
   const reviewers = reviewersOf(context, author, avatars);
   const comments = commentsOf(context, avatars);
-  const body = context.body.replace(/<!--[\s\S]*?(?:-->|$)/g, "").trim();
+  // `-{2}`, not a literal `--`: Semgrep's TypeScript parser reads `<!--` and `-->` as HTML-like comments.
+  const body = context.body.replace(/<!-{2}[\s\S]*?(?:-{2}>|$)/g, "").trim();
   return {
     answer: {
       key,
@@ -131,6 +158,7 @@ export function pullDetailsOf(key: string, context: PRContext, author: string | 
       reviewers,
       checks: context.checks.flatMap((check) => checkOf(check) ?? []),
       comments,
+      threads: threadsOf(context),
       ...(context.threadsIncomplete ? { threads_incomplete: true } : {}),
     },
     avatars,

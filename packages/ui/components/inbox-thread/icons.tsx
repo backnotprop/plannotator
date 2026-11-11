@@ -122,6 +122,11 @@ const PATHS = {
   /** The tour's Fast-forward (Heroicons outline "forward"): skip to the end of a step. */
   fastForward: 'M3 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 0 1 0 1.954l-7.108 4.061A1.125 1.125 0 0 1 3 16.811V8.69ZM12.75 8.689c0-.864.933-1.406 1.683-.977l7.108 4.061a1.125 1.125 0 0 1 0 1.954l-7.108 4.061a1.125 1.125 0 0 1-1.683-.977V8.69Z',
   play: 'M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z',
+  /** A recording's player (Heroicons outline "pause"). */
+  pause: 'M15.75 5.25v13.5m-7.5-13.5v13.5',
+  /** A recording (Heroicons outline "musical-note"): its tile and its face. */
+  music:
+    'm9 9 10.5-3m0 6.553v3.75a2.25 2.25 0 0 1-1.632 2.163l-1.32.377a1.803 1.803 0 1 1-.99-3.467l2.31-.66a2.25 2.25 0 0 0 1.632-2.163Zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 0 1-1.632 2.163l-1.32.377a1.803 1.803 0 0 1-.99-3.467l2.31-.66A2.25 2.25 0 0 0 9 15.553Z',
   clickHere:
     'M15.042 21.672 13.684 16.6m0 0-2.51 2.225.569-9.47 5.227 7.917-3.286-.672ZM12 2.25V4.5m5.834.166-1.591 1.591M20.25 10.5H18M7.757 14.743l-1.59 1.59M6 10.5H3.75m4.007-4.243-1.59-1.59',
   // Mark read (Heroicons outline check-circle), and a Send's skip (arrow-uturn-right).
@@ -154,6 +159,9 @@ const PATHS = {
   // lock-closed, arrow-path, x-circle, exclamation-circle, minus-circle.
   chip: 'M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 0 0 2.25-2.25V6.75a2.25 2.25 0 0 0-2.25-2.25H6.75A2.25 2.25 0 0 0 4.5 6.75v10.5a2.25 2.25 0 0 0 2.25 2.25Zm.75-12h9v9h-9v-9Z',
   disk: 'M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125',
+  // A drive in the folder menu and the folder browser's places (Heroicons outline server).
+  drive:
+    'M21.75 17.25v-.228a4.5 4.5 0 0 0-.12-1.03l-2.268-9.64a3.375 3.375 0 0 0-3.285-2.602H7.923a3.375 3.375 0 0 0-3.285 2.602l-2.268 9.64a4.5 4.5 0 0 0-.12 1.03v.228m19.5 0a3 3 0 0 1-3 3H5.25a3 3 0 0 1-3-3m19.5 0a3 3 0 0 0-3-3H5.25a3 3 0 0 0-3 3m16.5 0h.008v.008h-.008v-.008Zm-3 0h.008v.008h-.008v-.008Z',
   wifi: 'M8.288 15.038a5.25 5.25 0 0 1 7.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 0 1 1.06 0Z',
   globe:
     'M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0 1 12 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 0 1 3 12c0-1.605.42-3.113 1.157-4.418',
@@ -187,6 +195,8 @@ const PATHS = {
   laptop: 'M5 4h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2ZM2 20h20',
   pullRequest: 'M6 9v12M13 6h3a2 2 0 0 1 2 2v7M9 6a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm12 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z',
   layers: 'm12 3-9 4.5 9 4.5 9-4.5L12 3ZM3 12l9 4.5 9-4.5M3 16.5 12 21l9-4.5',
+  // Clone from a git URL (the Inbox's New message): a branch mark, the circles drawn as arcs.
+  gitBranch: 'M8.2 6a2.2 2.2 0 1 1-4.4 0 2.2 2.2 0 0 1 4.4 0ZM8.2 18a2.2 2.2 0 1 1-4.4 0 2.2 2.2 0 0 1 4.4 0ZM20.2 8a2.2 2.2 0 1 1-4.4 0 2.2 2.2 0 0 1 4.4 0ZM6 8.2v7.6M18 10.2c0 4-6 3-10.5 6.3',
   // Drafts' delete (Heroicons outline trash).
   trash:
     'm14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0',
@@ -246,51 +256,52 @@ export function TabGlyph({ harness }: { harness: string }) {
   );
 }
 
-/** The mark for an agent host: the real brand marks for the hosts ui carries, a neutral glyph otherwise. */
-export function HostMark({ host, big }: { host: string | null | undefined; big?: boolean }) {
-  let mark: React.ReactNode;
+/** A host's own mark (a brand mark ui carries, or the glyph drawn here for it), or null when it has none. */
+function ownMark(host: string | null | undefined): React.ReactNode | null {
   switch (host) {
     case 'claude-code':
     case 'claude':
     case 'claude-app':
-      mark = <ClaudeIcon />;
-      break;
+      return <ClaudeIcon />;
     case 'gemini':
     case 'qwen':
     case 'zed':
     case 'vscode':
     case 'dsh':
     case 'cline':
-      mark = (
+      return (
         <svg className="ib-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <path d={TAB_GLYPHS[host]} />
         </svg>
       );
-      break;
     case 'pi':
-      mark = <PiIcon />;
-      break;
+      return <PiIcon />;
     case 'opencode':
-      mark = <OpenCodeIcon />;
-      break;
+      return <OpenCodeIcon />;
     case 'codex':
-      mark = <CodexIcon />;
-      break;
+      return <CodexIcon />;
     case 'cursor':
-      mark = <CursorIcon />;
-      break;
+      return <CursorIcon />;
     case 'grok':
       // Grok Build: a plain letter G, drawn here (no brand asset in the repo).
-      mark = (
+      return (
         <svg className="ib-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <path d="M17.6 8.4A6.6 6.6 0 1 0 18.6 12H12.6" />
         </svg>
       );
-      break;
     default:
-      mark = <Icon name="code" />;
+      return null;
   }
-  return <span className={`ib-mk${big ? ' ib-big' : ''}`}>{mark}</span>;
+}
+
+/** Whether `HostMark` draws this host's own mark, not the neutral glyph: for a place that would rather draw something else than the neutral glyph. */
+export function hostHasMark(host: string | null | undefined): boolean {
+  return ownMark(host) !== null;
+}
+
+/** The mark for an agent host: the real brand marks for the hosts ui carries, a neutral glyph otherwise. */
+export function HostMark({ host, big }: { host: string | null | undefined; big?: boolean }) {
+  return <span className={`ib-mk${big ? ' ib-big' : ''}`}>{ownMark(host) ?? <Icon name="code" />}</span>;
 }
 
 export function AuthorMark({ author, big }: { author: InboxAuthor | null | undefined; big?: boolean }) {

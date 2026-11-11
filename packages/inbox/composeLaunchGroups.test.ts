@@ -95,16 +95,52 @@ describe('linked machines: one group per machine', () => {
     const pluginOff: InboxComposeLaunch = { agents: [], projects: mini.projects, not_ready: [{ agent: 'claude-code', name: 'Claude Code', code: 'plugin_off' }] };
     const out = launchGroups({ agent: 'claude-code', self, machines: [SELF_VIEW, machine(MINI, 'Mac mini'), machine(STUDIO, 'Studio')], reads: reads([[MINI, signedOut], [STUDIO, pluginOff]]) });
     expect(out.grouped).toBe(true);
-    expect(out.groups[1]!.notice).toEqual({ line: "Claude Code isn't signed in on Mac mini", command: null });
+    expect(out.groups[1]!.notice?.line).toBe("Claude Code isn't signed in on Mac mini");
+    expect(out.groups[1]!.notice?.command).toBeNull();
     expect(out.groups[1]!.projects).toEqual([]);
     expect(out.groups[1]!.scratch).toBeNull();
     expect(out.groups[2]!.notice?.line).toContain('Studio');
     expect(out.groups[2]!.notice?.command).toContain('claude plugin install');
   });
 
+  test("a signed-out machine's line comes with what to do there, under it: over SSH, not seen as SSH, and Codex", () => {
+    const signedOut = (agent: 'claude-code' | 'codex', name: string, overSsh: boolean): InboxComposeLaunch => ({
+      agents: [],
+      projects: mini.projects,
+      not_ready: [{ agent, name, code: 'signed_out', ...(overSsh ? { over_ssh: true as const } : {}) }],
+    });
+    const fixOn = (agent: 'claude-code' | 'codex', launch: InboxComposeLaunch) =>
+      launchGroups({ agent, self, machines: [SELF_VIEW, machine(MINI, 'Mac mini')], reads: reads([[MINI, launch]]) }).groups.find((g) => g.machine === MINI)?.notice?.fix;
+    expect(fixOn('claude-code', signedOut('claude-code', 'Claude Code', true))).toBe(
+      'Plannotator on Mac mini was started over SSH, and macOS keeps the login locked for SSH. In Terminal on Mac mini itself, run `plannotator inbox restart`, then try again.',
+    );
+    expect(fixOn('claude-code', signedOut('claude-code', 'Claude Code', false))).toBe(
+      'Run `claude` on Mac mini once to sign in, then try again. Already signed in there? In Terminal on Mac mini itself, run `plannotator inbox restart`.',
+    );
+    expect(fixOn('codex', signedOut('codex', 'Codex', false))).toBe('Run `codex login` on Mac mini, then try again. Already signed in there? In Terminal on Mac mini itself, run `plannotator inbox restart`.');
+    // The other reasons keep their one line: launch off there, and a missing plugin (its command is the Copy button).
+    const off = launchGroups({ agent: 'claude-code', self, machines: [SELF_VIEW, machine(MINI, 'Mac mini', { launch: false })], reads: new Map() });
+    expect(off.groups[1]!.notice?.fix ?? null).toBeNull();
+    const pluginOff: InboxComposeLaunch = { agents: [], projects: mini.projects, not_ready: [{ agent: 'claude-code', name: 'Claude Code', code: 'plugin_off' }] };
+    expect(fixOn('claude-code', pluginOff)).toBeNull();
+  });
+
   test('launch off there, or an older Plannotator there, says so without reading it', () => {
     const out = launchGroups({ agent: 'claude-code', self, machines: [SELF_VIEW, machine(MINI, 'Mac mini', { launch: false }), machine(STUDIO, 'Studio', { launch: null })], reads: new Map() });
     expect(out.groups.map((g) => g.notice?.line ?? null)).toEqual([null, 'Starting agents is off on Mac mini', 'Update Plannotator on Studio to start agents there']);
+  });
+
+  test("the machine's switch turned since the link connected: its last sessions read decides, not the link's health", () => {
+    // Turned off there: health still said on, the read has no launch block. Turned on there: health said off, the read has one.
+    const out = launchGroups({
+      agent: 'claude-code',
+      self,
+      machines: [SELF_VIEW, machine(MINI, 'Mac mini', { launch: true }), machine(STUDIO, 'Studio', { launch: false })],
+      reads: reads([[MINI, undefined], [STUDIO, mini]]),
+    });
+    expect(out.groups.map((g) => g.notice?.line ?? null)).toEqual([null, 'Starting agents is off on Mac mini', null]);
+    expect(out.groups[2]!.name).toBe('Studio');
+    expect(out.groups[2]!.projects.map((p) => p.id)).toEqual(['prj_infra', 'prj_bill_m']);
   });
 
   test('an unlinked (revoked) machine is gone', () => {

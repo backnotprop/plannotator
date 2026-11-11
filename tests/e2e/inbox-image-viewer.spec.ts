@@ -173,11 +173,13 @@ test('an agent sends three messages: images in their text are captured at send, 
   });
   const second = await world.claude.send({
     project_path: world.project,
+    reply_to: first.message_id,
     body: ['The empty orders page, and its copy:', '', '![Empty orders](design/empty-orders.png)'].join('\n'),
     attachments: ['docs/empty-states.md'],
   });
   const third = await world.claude.send({
     project_path: world.project,
+    reply_to: second.message_id,
     body: 'The phone checkout and the receipt spec.',
     attachments: ['shots/checkout-mobile.png', 'docs/receipt-spec.pdf'],
   });
@@ -328,16 +330,20 @@ test('an image the agent overwrites says it changed since it was sent, and opens
   await expect(pane()).toHaveAttribute('data-version', 'sent');
 });
 
-test('a typed comment on an image asks before a step', async () => {
+test('a typed comment on an image never stops a step, and waits in its box for that image', async () => {
   const page = world.page;
   await pane().getByRole('textbox', { name: 'Comment on checkout-c-drawer.png' }).fill('The drawer hides the total.');
   await pane().locator('.ib-imgstage').click();
   await page.keyboard.press(']');
-  const guard = page.locator('[data-step-guard]');
-  await expect(guard).toBeVisible();
-  await expect(guard.getByRole('button', { name: 'Discard and go to empty-orders.png' })).toBeVisible();
-  await shot(page, '06-guard');
-  await guard.getByRole('button', { name: 'Discard and go to empty-orders.png' }).click();
+  await expectAt(page, 4, 'empty-orders.png');
+  await expect(page.locator('[data-step-guard]')).toHaveCount(0);
+  await page.keyboard.press('[');
+  await expect(pane().getByRole('textbox', { name: 'Comment on checkout-c-drawer.png' })).toHaveValue('The drawer hides the total.');
+  await shot(page, '06-kept');
+  // Cleared on the comment itself, then on: nothing waits for it.
+  await pane().getByRole('textbox', { name: 'Comment on checkout-c-drawer.png' }).fill('');
+  await pane().locator('.ib-imgstage').click();
+  await page.keyboard.press(']');
   await expectAt(page, 4, 'empty-orders.png');
 });
 

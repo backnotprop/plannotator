@@ -146,7 +146,7 @@ test("both feeds name the shape when an agent picks up its waiting change", asyn
 	}
 });
 
-test("What's changed comes back from Pi as from Bun, as the agent wrote it, and a Change it on one change is kept", async () => {
+test("views.changed (kept, never shown) comes back from Pi as from Bun, as the agent wrote it, and an old note on it is still taken", async () => {
 	const { KETTLE_CHANGED, kettleBoard } = await import("../../../tests/fixtures/shape-whats-changed.ts");
 	const answers: string[][] = [];
 	for (const start of [startPi, async (d: string) => startBun(d)]) {

@@ -29,6 +29,20 @@ export function keyTarget(event: Event): Element | null {
   return first instanceof Element ? first : event.target instanceof Element ? event.target : null;
 }
 
+/**
+ * The element the person aimed a key at on purpose: one with keyboard focus
+ * (`:focus-visible`). A row that holds focus because it was clicked, or because
+ * the window put focus there after a mouse action, is not.
+ */
+export function keyboardFocused(el: Element): boolean {
+  try {
+    return el.matches(':focus-visible');
+  } catch {
+    // A DOM without the selector (tests): focus counts.
+    return true;
+  }
+}
+
 /** Where focus is a place to type: a bare key, `[` `]` and the arrows are text there. */
 export function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;

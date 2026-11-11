@@ -6,8 +6,8 @@
 
 <p align="center">
   <strong>Everything you need to annotate and stay in the loop with your agents</strong><br/>
-  <strong>Markdown Review • Code Review • HTML Artifacts</strong><br/>
-  <sub>Annotate plans, specs, markdown, and HTML before implementation. Review diffs and PRs. Send feedback to your agent.</sub>
+  <strong>Inbox Surface • Artifacts • Code Review</strong><br/>
+  <sub>Annotate plans, specs, markdown, HTML, and other interactive artifacts. Review diffs and PRs. Send feedback to your agent.</sub>
 </p>
 
 <p align="center">
@@ -32,7 +32,7 @@
 </p>
 
 <p align="center">
-  <a href="https://www.youtube.com/watch?v=a_AT7cEN_9I">Watch the og demo</a> · <a href="https://docs.plannotator.ai/open-source/start/installation">Installation guide</a> · <a href="https://plannotator.ai/">Official site</a> · <a href="https://github.com/plannotator/effective-html">Visual HTML Skills</a> · <a href="#plannotator-inbox">Plannotator Inbox</a> · <a href="#herdr-annotate-plannotator-in-the-terminal">Herdr Annotate</a>
+  <a href="#plannotator-inbox">Plannotator Inbox</a> · <a href="https://plannotator.ai/">Official site</a> · <a href="https://plannotator.ai/code-review">Code Review</a> · <a href="https://github.com/plannotator/effective-html">Visual HTML Skills</a> · <a href="#herdr-annotate-plannotator-in-the-terminal">Herdr Annotate</a> · <a href="https://www.youtube.com/watch?v=a_AT7cEN_9I">(Legacy) Plan Mode</a>
 </p>
 
 # Plannotator

@@ -5,7 +5,8 @@
  * dir (the dialog is once per machine), its event log written three days back before the Inbox starts
  * (inbox-snooze-intro-seed.ts), so the release start's backfill makes it due.
  *
- *  - Never on load: a page open a minute shows nothing. Once the page is past a minute, the person opens a thread that
+ *  - Never on load: a page open a minute shows nothing, and a thread read and closed on a page younger than a minute
+ *    shows nothing and stamps nothing. Once the page is past a minute, the person opens a thread that
  *    waits on them, reads it, and closes it: the dialog shows (B "The real menu": their rows, the real Snooze until
  *    menu, the real toast), and the Inbox stamped it before it drew. A second tab reaching the same moment shows
  *    nothing; Got it closes it; a reload reaching the moment again shows nothing.
@@ -14,7 +15,11 @@
  *  - A 390 px phone layout on this computer: the ⋯ sheet's times; Try it opens the thread just left again and its ⋯
  *    sheet on the times, snoozing nothing.
  *
- * The page's thresholds are real (60 s, 5 s, 2.5 s), so each case waits a minute. Build the apps first (bun run --cwd
+ * The read and settling times are real (5 s, 2.5 s). The page's minute is on the page's own clock: the gate reads
+ * `Date.now()` in the page, so each context installs Playwright's clock before its pages load (it then runs in real
+ * time) and a case fast-forwards it a minute instead of waiting one out. Every time the spec reads from the Inbox
+ * (config.json stamps, the backfilled first use) is the Inbox's own, never the page's; the page's need (rows read and
+ * left a day or more ago) reads its clock against rows seeded three days back. Build the apps first (bun run --cwd
  * apps/review build && bun run build:hook), then `bunx playwright test -c tests/e2e/playwright.config.ts
  * inbox-snooze-intro.spec.ts`. PNGs land in PLANNOTATOR_E2E_PROOF_DIR/snooze-intro, or .local/proof/snooze-intro/.
  */
@@ -29,8 +34,8 @@ const repo = resolve(__dirname, '../..');
 const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'snooze-intro');
 const VERSION = '0.30.0';
 const DIALOG = '[data-dialog="snooze-intro"]';
-/** Past the page's minute, with room for the list's first read. */
-const PAGE_AGE_MS = 57_000;
+/** The page's minute, on the page's clock (fast-forwarded, never waited out). */
+const PAGE_AGE_MS = 60_000;
 /** Past the 5 s read. */
 const READ_MS = 5_600;
 
@@ -76,8 +81,15 @@ async function world(): Promise<World> {
       inboxNotifications: { dismissed: true },
       inboxAgentNotes: { offered: true, asked: ['claude-code', 'codex', 'opencode', 'pi', 'gemini', 'qwen', 'cursor'] },
       inboxSound: { dialogShownFor: VERSION },
-      inboxListIntro: { shownAt: past },
+      inboxListIntro: { shownAt: past, version: 2 },
       inboxVoiceIntro: { shownAt: past },
+      // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
+      favicon: 'glass',
+      // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
+      inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' },
+      // The Sidebar tip: shown long ago. Since the tips keep the line's 40-minute gap both ways, a tip claimed by a tab
+      // left idle (the second tab here, a minute into the page) would hold Snooze's dialog back for the gap.
+      inboxReveals: { sidebar_tip: { shownAt: past } },
     }),
   );
   const env = {
@@ -116,6 +128,8 @@ async function context(browser: Browser, options: { phone?: boolean; dark?: bool
     colorScheme: options.dark ? 'dark' : 'light',
     ...(options.phone ? { isMobile: true, hasTouch: true } : {}),
   });
+  // Before any page loads: the dialog's page age is the page's `Date.now()`, so the minute can be fast-forwarded.
+  await ctx.clock.install();
   contexts.push(ctx);
   return ctx;
 }
@@ -175,8 +189,13 @@ test('desktop, light: never on load; once at the calm moment; a second tab and a
   const [a, b] = await Promise.all([ctx.newPage(), ctx.newPage()]);
   await Promise.all([a.goto(w.url), b.goto(w.url)]);
   await expect(rowOf(a, w.ids['cache-rate']!)).toBeVisible();
-  // A minute on the page: nothing, in either tab.
-  await a.waitForTimeout(PAGE_AGE_MS);
+  // The moment on a page younger than a minute: cache-rate read and left, and the page may not claim it yet.
+  await readAndLeave(a, w.ids['cache-rate']!);
+  await a.waitForTimeout(5_000);
+  await expect(a.locator(DIALOG)).toHaveCount(0);
+  expect(saved(w)?.shownAt).toBeUndefined();
+  // A minute on the page: nothing, in either tab (one context, one clock).
+  await ctx.clock.fastForward(PAGE_AGE_MS);
   await expect(a.locator(DIALOG)).toHaveCount(0);
   await expect(b.locator(DIALOG)).toHaveCount(0);
   expect(saved(w)?.shownAt).toBeUndefined();
@@ -202,7 +221,7 @@ test('desktop, light: never on load; once at the calm moment; a second tab and a
   await expect(a.locator(DIALOG)).toHaveCount(0);
   await a.reload();
   await expect(rowOf(a, w.ids['release-notes']!)).toBeVisible();
-  await a.waitForTimeout(PAGE_AGE_MS);
+  await a.clock.fastForward(PAGE_AGE_MS);
   await readAndLeave(a, w.ids['release-notes']!);
   await a.waitForTimeout(5_000);
   await expect(a.locator(DIALOG)).toHaveCount(0);
@@ -215,7 +234,7 @@ test('desktop, dark: Try it opens the real Snooze menu of the row just left, and
   const page = await (await context(browser, { dark: true })).newPage();
   await page.goto(w.url);
   await expect(rowOf(page, w.ids['cache-rate']!)).toBeVisible();
-  await page.waitForTimeout(PAGE_AGE_MS);
+  await page.clock.fastForward(PAGE_AGE_MS);
   await readAndLeave(page, w.ids['cache-rate']!);
   await expect(page.locator(DIALOG)).toBeVisible({ timeout: 8_000 });
   // The person's own mode: no light scope anywhere in it.
@@ -240,7 +259,7 @@ test('a 390 px phone layout, light: the ⋯ sheet picture; Try it opens the thre
   const page = await (await context(browser, { phone: true })).newPage();
   await page.goto(w.url);
   await expect(rowOf(page, w.ids['cache-rate']!)).toBeVisible();
-  await page.waitForTimeout(PAGE_AGE_MS);
+  await page.clock.fastForward(PAGE_AGE_MS);
   await readAndLeave(page, w.ids['cache-rate']!, true);
   await expect(page.locator(DIALOG)).toBeVisible({ timeout: 8_000 });
   await expect(page.locator(`${DIALOG} .ib-zx-pos [data-snooze-intro-choice]`).first()).toBeVisible();

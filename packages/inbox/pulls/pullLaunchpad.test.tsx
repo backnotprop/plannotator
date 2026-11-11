@@ -9,7 +9,10 @@
  *  - a thread that only named the PR (the Reviews page's rule) taken for its review thread: no way to start one;
  *  - a guide the agent has not sent as a review (`review: false`) counted as one (the stack page's rule);
  *  - the facts losing "by you" on the person's own PR, or "Draft" on a draft;
- *  - the Shape board door offering a board that is not there, or showing while Shape is off;
+ *  - the Shape board door offering a board that is not there, or showing while Shape is off; the System door showing
+ *    while System does not (both are off in 0.29), or the grid keeping an empty slot for a door that is not there;
+ *  - a Reviews row about one open PR opening anything but its launchpad, also once an agent reviewed it (the owner's
+ *    routing answer, 2026-11-09); a local review, a thread of a stack of several, losing its way to the thread;
  *  - the details panel drawing its own head (author, branches, Close) under the page's;
  *  - a PR pane covering the list (stack.ts) with no way back to it but Close, unlike a covering thread's ‹ Inbox;
  *  - a phone's bar keeping `‹ Reviews` whole when the PR's number and repository have no room (a thread's
@@ -23,9 +26,9 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxPull, InboxPullLink, InboxPullsAnswer } from '@plannotator/core/inbox-types';
+import { inboxPullStacks, inboxReviewRows, type InboxPull, type InboxPullLink, type InboxPullsAnswer, type InboxReviewThread } from '@plannotator/core/inbox-types';
 import type { InboxShapeSummary } from '../api';
-import type { PullsPageProps } from './PullsPage';
+import type { PullsPageProps, PullsSystem } from './PullsPage';
 import { pullsStateOf } from './reviewsTestState';
 
 const hasDom = typeof document !== 'undefined';
@@ -350,17 +353,30 @@ test.skipIf(!hasDom)('an agent that ended with no guide: Start a guided review i
   expect($('[data-launch-go="start"]')!.getAttribute('data-pulls-primary')).toBe('again');
 });
 
-test.skipIf(!hasDom)('Shape on with no board for this thread: the door, with nothing to open; Shape off: no door', async () => {
-  mount(single.key, answer({ [single.key]: live }), { shapes: new Map() });
-  await settle();
-  expect(!!$('[data-launch-door="shape"]')).toBe(true);
+const systemOn: PullsSystem = { projects: [], open: null, sheet: null, full: false, onOpen: () => {}, onSheet: () => {}, onFull: () => {}, onMenu: () => {} };
+const doors = () => [...document.querySelectorAll('[data-launch-door]')].map((door) => door.getAttribute('data-launch-door'));
+
+test.skipIf(!hasDom)('Shape and System off (0.29): three doors and a grid laid out for three; each comes back with its switch', async () => {
+  const draw = async (extra: Partial<PullsPageProps>) => {
+    act(() => root?.unmount());
+    host?.remove();
+    mount(single.key, answer({ [single.key]: live }), extra);
+    await settle();
+  };
+  await draw({});
+  expect(doors()).toEqual(['guide', 'diff', 'thread']);
+  expect($('.ib-lp-grid')!.getAttribute('data-doors')).toBe('3');
+  // Shape on, with no board for this thread: the door, with nothing to open.
+  await draw({ shapes: new Map() });
+  expect(doors()).toEqual(['guide', 'diff', 'thread', 'shape']);
+  expect($('.ib-lp-grid')!.getAttribute('data-doors')).toBe('4');
   expect(!!$('[data-launch-go="shape"]')).toBe(false);
-  act(() => root!.unmount());
-  host!.remove();
-  mount(single.key, answer({ [single.key]: live }));
-  await settle();
-  expect(!!$('[data-launch-door="shape"]')).toBe(false);
-  expect(!!$('[data-launch-door="system"]')).toBe(true);
+  await draw({ system: systemOn });
+  expect(doors()).toEqual(['guide', 'diff', 'thread', 'system']);
+  expect($('.ib-lp-grid')!.getAttribute('data-doors')).toBe('4');
+  await draw({ shapes: new Map(), system: systemOn });
+  expect(doors()).toEqual(['guide', 'diff', 'thread', 'shape', 'system']);
+  expect($('.ib-lp-grid')!.getAttribute('data-doors')).toBe('5');
 });
 
 test.skipIf(!hasDom)("the details sit in the page under its own heading: no head of their own, no Close", async () => {
@@ -370,4 +386,47 @@ test.skipIf(!hasDom)("the details sit in the page under its own heading: no head
   expect(!!details).toBe(true);
   expect(!!details.querySelector('.ib-prd-head')).toBe(false);
   expect(!!details.querySelector('[data-pull-details-close]')).toBe(false);
+});
+
+/** A thread whose guided review of the PR arrived (`review: true`), as the server's review index has it. */
+const reviewed = (thread_id: string): InboxReviewThread => ({
+  thread_id,
+  project_id: 'prj_web',
+  subject: 'Review',
+  first_review_id: 'msg_guide',
+  latest_review_id: 'msg_guide',
+  round: 1,
+  title: 'The RTL fix',
+  files: 2,
+  additions: 3,
+  deletions: 1,
+  agent: { host: 'claude-code', session: 'ses_web', name: null },
+  source: null,
+  verdict: null,
+  answered: null,
+  reviewed_at: '2026-11-03T09:10:00.000Z',
+  updated_at: '2026-11-03T09:10:00.000Z',
+  resolved_at: null,
+});
+
+test.skipIf(!hasDom)("a Reviews row about one open PR opens its launchpad, also once an agent reviewed it; a reviewed stack of several opens its thread", async () => {
+  // #880 reviewed in thr_review; the stack #901 + #902 handed to thr_stack and reviewed there.
+  const model = answer({ [single.key]: live, [low.key]: { ...live, thread_id: 'thr_stack' }, [high.key]: { ...live, thread_id: 'thr_stack' } });
+  const stacks = inboxPullStacks(model.pulls);
+  const rows = inboxReviewRows({ threads: [reviewed('thr_review'), reviewed('thr_stack')], stacks, links: model.links, pulls: model.pulls });
+  const state = pullsStateOf(model);
+  const opened: string[] = [];
+  mount('', model, {
+    stackId: null,
+    state: { ...state, reviews: { ...state.reviews!, rows } },
+    onOpenStack: (id) => opened.push(`stack ${id}`),
+    onOpenThread: (id) => opened.push(`thread ${id}`),
+  });
+  await settle();
+  const one = stacks.find((stack) => stack.layers.length === 1)!;
+  const row = (thread: string) => `[data-reviews-kind="reviewed"][data-row="${thread}"]`;
+  expect(!!$(row('thr_review'))).toBe(true);
+  await click(row('thr_review'));
+  await click(row('thr_stack'));
+  expect(opened).toEqual([`stack ${one.id}`, 'thread thr_stack']);
 });

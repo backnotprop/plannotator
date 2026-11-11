@@ -37,6 +37,7 @@ import { NO_BROWSER } from '../helpers/no-browser';
 import { expectNoBlankFiles } from './on-screen-files';
 import { markTourDecided } from '../helpers/tour-decided';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { diffRowBox } from './diff-row-box';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -295,8 +296,10 @@ test('on: the "/" list offers /review-curate as Plannotator\'s, and a reply that
   await box.pressSequentially('/review-', { delay: 30 });
   const menu = page.locator('[data-skill-menu]');
   await expect(menu).toBeVisible();
-  await expect(plannotatorOptions(page)).toHaveCount(1);
+  // /review-curate first, then /review-walkthrough; /review-recheck waits for a review in this thread.
+  await expect(plannotatorOptions(page)).toHaveCount(2);
   await expect(menu.getByRole('option').first()).toContainText('review-curate');
+  await expect(plannotatorOptions(page).nth(1)).toContainText('review-walkthrough');
   await expect(menu).not.toContainText('review-recheck');
   await shot(page, '2-slash-list');
   await page.keyboard.press('ArrowDown');
@@ -408,8 +411,8 @@ test('the review card, the full-window review with a comment and a Viewed tick, 
   await box.click();
   await box.pressSequentially('/review-', { delay: 20 });
   const menu = page.locator('[data-skill-menu]');
-  await expect(plannotatorOptions(page)).toHaveCount(2);
-  await expect(menu).toContainText('review-recheck');
+  await expect(plannotatorOptions(page)).toHaveCount(3);
+  await expect(plannotatorOptions(page).nth(2)).toContainText('review-recheck');
   await shot(page, '7-slash-list-recheck');
   await page.keyboard.press('Escape');
   await box.fill('');
@@ -530,12 +533,12 @@ async function expectBarFits(page: Page): Promise<void> {
     parts.forEach((part, i) => {
       if (part.box.right > window.innerWidth + 0.5 || part.box.left < -0.5) problems.push(`${part.name} leaves the window`);
       const next = parts[i + 1];
-      if (next && next.box.left < part.box.right - 0.5) problems.push(`${part.name} overlaps ${next.name}`);
+      if (next && next.box.left < part.box.right - 0.5) problems.push(`${part.name} overlaps ${next.name} (${Math.round(part.box.right)} > ${Math.round(next.box.left)})`);
     });
     if (head.scrollWidth > head.clientWidth + 1) problems.push('the bar overflows');
     return problems;
   });
-  expect(trouble).toEqual([]);
+  expect(trouble, `at ${page.viewportSize()?.width} px`).toEqual([]);
 }
 
 /** The tooltip showing now does not sit on the verdict's buttons. */
@@ -552,7 +555,8 @@ async function expectTipClearOfDecision(page: Page, words = 'Split view. Click f
 async function expectOverviewWhole(page: Page): Promise<void> {
   const name = page.locator('[data-review-message] .ib-rj-name');
   await expect(name).toHaveText('Overview');
-  expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  const cut = await name.evaluate((el) => `${el.scrollWidth} in ${el.clientWidth}`);
+  expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth), `Overview reads ${cut} at ${page.viewportSize()?.width} px`).toBe(true);
 }
 
 test('the top bar holds what the rail held: chapters, the count, files, Overview, and the diff controls, by mouse and by keyboard', async () => {
@@ -1044,7 +1048,7 @@ test('a long line scrolls sideways in the code by wheel or trackpad, and the pag
   await shell.evaluate((el) => el.scrollIntoView({ block: 'start' }));
   await settled(body);
 
-  const line = (await shell.locator('[data-line-type]').first().boundingBox())!;
+  const line = await diffRowBox(shell.locator('[data-line-type]').first());
   const shellBox = (await shell.boundingBox())!;
   const top = await body.evaluate((el) => el.scrollTop);
   await page.mouse.move(shellBox.x + shellBox.width * 0.7, line.y + 30);
@@ -1138,7 +1142,7 @@ test('a phone: a sideways drag on the code scrolls it, and the page does not mov
     await settled(body);
 
     const shellBox = (await shell.boundingBox())!;
-    const line = (await shell.locator('[data-line-type]').nth(4).boundingBox())!;
+    const line = await diffRowBox(shell.locator('[data-line-type]').nth(4));
     const top = await body.evaluate((el) => el.scrollTop);
     await fingerDrag(page, { x: shellBox.x + shellBox.width * 0.8, y: line.y + line.height / 2 }, { x: -170, y: 0 }, async () => {
       await expect.poll(scrolled).toBeGreaterThan(0);

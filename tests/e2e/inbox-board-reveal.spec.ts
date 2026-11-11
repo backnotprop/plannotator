@@ -7,19 +7,23 @@
  *
  * Reveals are opt-in (the owner, 2026-11-04): showing the dialog turns nothing on.
  *
- *  - Desktop: never on load, and no Board row. Past a minute on the page the person reads a thread and closes it: the
- *    Board's own first-visit dialog (BoardIntro) opens as an offer (Not now, Turn it on), config.json has the reveal
- *    stamped (never the Board's welcome) and the Board still unset, and there is no Board row. A second tab reaching its
- *    moment shows nothing. Not now closes it and the Board stays off (unset, no row). A reload reaching the moment
- *    again shows nothing.
+ *  - Desktop: never on load, and no Board row; a thread read and closed on a page younger than a minute shows nothing
+ *    and stamps nothing. Past a minute on the page the person reads a thread and closes it: the Board's own
+ *    first-visit dialog (BoardIntro) opens as an offer (Not now, Turn it on), config.json has the reveal stamped (never
+ *    the Board's welcome) and the Board still unset, and there is no Board row. A second tab reaching its moment shows
+ *    nothing. Not now closes it and the Board stays off (unset, no row). A reload reaching the moment again shows
+ *    nothing.
  *  - A 390 px phone: the dialog as a sheet, Turn it on on top; Turn it on writes the Board on and its row is in the
  *    sidebar sheet, and at once in a desktop tab open beside it (settings sync everywhere: `event: capabilities`); the
  *    Board's first visit shows its welcome with Copy prompt once (the owner, 2026-11-04), never again.
  *
- * Each scene is shot in light and dark (the Inbox follows the system's mode). The page's thresholds are real (60 s,
- * 5 s, 2.5 s). Build the apps first (bun run --cwd apps/review build && bun run build:hook), then `bunx playwright test
- * -c tests/e2e/playwright.config.ts inbox-board-reveal.spec.ts`. PNGs land in PLANNOTATOR_E2E_PROOF_DIR/board-reveal,
- * or .local/proof/board-reveal/.
+ * Each scene is shot in light and dark (the Inbox follows the system's mode). The read and settling times are real
+ * (5 s, 2.5 s). The page's minute is on the page's own clock: the gate reads `Date.now()` in the page, so each context
+ * installs Playwright's clock before its pages load (it then runs in real time) and a case fast-forwards it a minute
+ * instead of waiting one out. Every time the spec reads from the Inbox (config.json stamps, the seeded days) is the
+ * Inbox's own, never the page's. Build the apps first (bun run --cwd apps/review build && bun run build:hook), then
+ * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-board-reveal.spec.ts`. PNGs land in
+ * PLANNOTATOR_E2E_PROOF_DIR/board-reveal, or .local/proof/board-reveal/.
  */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
@@ -33,8 +37,8 @@ const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo
 const VERSION = '0.30.0';
 const DIALOG = '[data-dialog="board-intro"]';
 const DAY = 24 * 3600_000;
-/** Past the page's minute, with room for the list's first read. */
-const PAGE_AGE_MS = 57_000;
+/** The page's minute, on the page's clock (fast-forwarded, never waited out). */
+const PAGE_AGE_MS = 60_000;
 /** Past the 5 s read. */
 const READ_MS = 5_600;
 
@@ -82,8 +86,12 @@ async function world(): Promise<World> {
       inboxNotifications: { dismissed: true },
       inboxAgentNotes: { offered: true, asked: ['claude-code', 'codex', 'opencode', 'pi', 'gemini', 'qwen', 'cursor'] },
       inboxSound: { dialogShownFor: VERSION },
-      inboxListIntro: { shownAt: past },
+      inboxListIntro: { shownAt: past, version: 2 },
       inboxVoiceIntro: { shownAt: past },
+      // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
+      favicon: 'glass',
+      // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
+      inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' },
       inboxSnoozeIntro: { shownAt: snoozeShown },
       inboxReveals: { lastShownAt: snoozeShown },
     }),
@@ -115,6 +123,14 @@ async function world(): Promise<World> {
 
 const config = (w: World) => JSON.parse(readFileSync(join(w.dataDir, 'config.json'), 'utf8')) as Record<string, any>;
 
+/**
+ * This spec proves the leave moment ("back on the list"), so the page is never idle (idleClock.ts: 20 s without input
+ * is also the moment, and Playwright tells every page it is focused): a pointer move every 3 s, from the first paint.
+ */
+const neverIdle = () => {
+  setInterval(() => window.dispatchEvent(new Event('pointermove')), 3_000);
+};
+
 async function context(browser: Browser, phone = false): Promise<BrowserContext> {
   const ctx = await browser.newContext({
     viewport: phone ? { width: 390, height: 844 } : { width: 1440, height: 900 },
@@ -122,6 +138,9 @@ async function context(browser: Browser, phone = false): Promise<BrowserContext>
     colorScheme: 'light',
     ...(phone ? { isMobile: true, hasTouch: true } : {}),
   });
+  // Before any page loads: the reveal's page age is the page's `Date.now()`, so the minute can be fast-forwarded.
+  await ctx.clock.install();
+  await ctx.addInitScript(neverIdle);
   contexts.push(ctx);
   return ctx;
 }
@@ -179,8 +198,13 @@ test('desktop: never on load; at the calm moment the first-visit dialog offers t
   await expect(rowOf(a, w.ids['invoice-pdf']!)).toBeVisible();
   await expect(a.locator('[data-board-nav]')).toHaveCount(0);
   await shots(a, 'desktop-{s}-before');
-  // A minute on the page: nothing, in either tab, and the Board still undecided.
-  await a.waitForTimeout(PAGE_AGE_MS);
+  // The moment on a page younger than a minute: a thread read and closed, and the page may not claim it yet.
+  await readAndLeave(a, w.ids['invoice-pdf']!);
+  await a.waitForTimeout(5_000);
+  await expect(a.locator(DIALOG)).toHaveCount(0);
+  expect(config(w).inboxReveals.board).toBeUndefined();
+  // A minute on the page: nothing, in either tab (one context, one clock), and the Board still undecided.
+  await ctx.clock.fastForward(PAGE_AGE_MS);
   await expect(a.locator(DIALOG)).toHaveCount(0);
   await expect(b.locator(DIALOG)).toHaveCount(0);
   expect(config(w).inboxBoard).toBeUndefined();
@@ -213,7 +237,7 @@ test('desktop: never on load; at the calm moment the first-visit dialog offers t
   // A reload and the same moment a minute on: never again.
   await a.goto(`${w.url.replace(/#.*$/, '')}`);
   await expect(rowOf(a, w.ids['release-notes']!)).toBeVisible();
-  await a.waitForTimeout(PAGE_AGE_MS);
+  await a.clock.fastForward(PAGE_AGE_MS);
   await readAndLeave(a, w.ids['release-notes']!);
   await a.waitForTimeout(5_000);
   await expect(a.locator(DIALOG)).toHaveCount(0);
@@ -238,7 +262,7 @@ test('a 390 px phone: the dialog as a sheet; Turn it on writes the Board on, its
   await shots(page, 'phone-{s}-before');
   await page.keyboard.press('Escape');
   await expect(page.locator('[data-mobile="true"]')).toHaveCount(0);
-  await page.waitForTimeout(PAGE_AGE_MS);
+  await page.clock.fastForward(PAGE_AGE_MS);
   await readAndLeave(page, w.ids['invoice-pdf']!, true);
   await expect(page.locator(DIALOG)).toBeVisible({ timeout: 8_000 });
   expect(config(w).inboxBoard).toBeUndefined();

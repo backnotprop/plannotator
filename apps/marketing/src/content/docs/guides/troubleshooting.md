@@ -97,7 +97,7 @@ On Claude Code 2.1.287 or newer, the [Plannotator mod](/docs/guides/claude-code/
 1. Update the plugin: `claude plugin marketplace update plannotator`, then `claude plugin update plannotator@plannotator`, then restart Claude Code. Refreshing the marketplace alone does not update the plugin.
 2. Update the `plannotator` binary by running the install script again. With an older binary, plan review falls back to the classic flow.
 3. Check that `PLANNOTATOR_CLAUDE_MOD` is not set to `0` and `~/.plannotator/config.json` has no `"claudeCodeMod": false`.
-4. The mod does not run in `claude -p` or SDK runs, or on Windows. Those always use the classic flow.
+4. The mod does not run in `claude -p` or SDK runs. Those always use the classic flow.
 5. To report a problem, start Claude Code with `PLANNOTATOR_MOD_DEBUG=1` and attach `~/.plannotator/claude-code-mod/debug.log`.
 
 ## Codex plan review doesn't open

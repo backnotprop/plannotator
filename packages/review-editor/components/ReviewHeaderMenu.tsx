@@ -92,7 +92,11 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
             if (!isOpen && showUpdateDot) updateInfo?.dismiss();
             toggleMenu();
           }}
-          className={`relative flex h-7 items-center gap-1.5 px-1.5 lg:px-2.5 rounded-md text-xs font-medium transition-colors ${
+          // Desktop: the ☰ alone (owner's header order), named by its tooltip
+          // and aria-label. Compact touch keeps today's button and word.
+          className={`relative flex h-7 items-center rounded-md transition-colors ${
+            compactTouchLayout ? 'gap-1.5 px-1.5 lg:px-2.5 text-xs font-medium' : 'w-7 justify-center'
+          } ${
             isOpen
               ? 'bg-muted text-foreground'
               : 'text-muted-foreground hover:text-foreground hover:bg-muted'
@@ -103,9 +107,11 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
         >
           {isOpen ? <CloseIcon /> : <MenuIcon />}
           {/* The dot says an update is out; the label never moves (no shimmer). */}
-          <span className="hidden lg:inline">Options</span>
+          {compactTouchLayout && <span className="hidden lg:inline">Options</span>}
           {showUpdateDot && (
-            <span className="absolute top-0.5 right-0.5 lg:-top-0.5 lg:-right-0.5 w-2 h-2 rounded-full bg-primary ring-2 ring-background" />
+            <span className={`absolute w-2 h-2 rounded-full bg-primary ring-2 ring-background ${
+              compactTouchLayout ? 'top-0.5 right-0.5 lg:-top-0.5 lg:-right-0.5' : 'top-0.5 right-0.5'
+            }`} />
           )}
         </button>
       )}

@@ -26,6 +26,7 @@
  */
 import { useSyncExternalStore } from 'react';
 import { INBOX_ROWS_DEFAULT, INBOX_ROWS_OPTIONS, inboxRowsRead, type InboxRowsOption } from '@plannotator/core/inbox-types';
+import { inboxRowsBy, type InboxRowsBy } from '@plannotator/core/inbox-types';
 import { storage } from '@plannotator/ui/utils/storage';
 import { inboxApi } from './api';
 
@@ -36,13 +37,13 @@ export interface ListLook {
   smallNames: boolean;
   /** Settings → Rows only (no ⋮ item): no project (nor its machine) on any row; a wide row takes one project's columns. */
   hideProject: boolean;
-  /** Settings → Rows only (no ⋮ item): no grey subject line under a named thread. */
+  /** Settings → Rows only (no ⋮ item): "Grey line under the name" None, no grey preview (the latest message) on any row. */
   hidePreview: boolean;
   /** Settings → Rows only: Density "Roomy", more room around every row (never with `compact`). */
   roomy: boolean;
   /** Settings → Rows only: Unread "Dot", an accent dot before an unread row (with `smallNames`: the name at the read size, bold). */
   unreadDot: boolean;
-  /** Settings → Rows only: Subject preview "2 lines", beside a thread and on a phone (a wide row is one line). Never with `hidePreview`. */
+  /** Settings → Rows only: "Grey line under the name" 2 lines, beside a thread and on a phone (a wide row is one line). Never with `hidePreview`. */
   previewTwo: boolean;
   /** Settings → Rows only: Time "Relative", "4m", "3h", "2d", then the date (relativeTime.ts). */
   relativeTime: boolean;
@@ -60,6 +61,27 @@ export interface ListLook {
   repoLogo: boolean;
   /** Settings → Rows only: Show → GitHub pictures, the owner's picture for a project on GitHub. Only with project marks. */
   githubPictures: boolean;
+  /**
+   * Settings → Rows only: Look → Time position "Under the preview": on three-line and phone rows the time leaves line 1
+   * for a line of its own under the preview, at the left, with the row's end (pin, badge, words, counts) at its right.
+   * A wide row keeps its columns.
+   */
+  timeBelow: boolean;
+  /** Settings → Rows only: Show → Dividers, a hairline (the theme's border) between rows. Never an outline on a row. */
+  dividers: boolean;
+  /**
+   * Settings → Rows only: Show → Status mark, one mark at the row's end (`StatusMark`, RowStatus.tsx): waiting on you
+   * (an open question or action item) or done (Quiet), in place of the action pill and `?N`, whose words are its name
+   * and tooltip. Stopped and Holds up keep their filled question mark (or action box) beside it.
+   */
+  statusMark: boolean;
+  /** Settings → Rows only: Show → Bold thread names, every row's name in bold, read or not (Sent and Quiet included). */
+  boldNames: boolean;
+  /**
+   * Settings → Rows only: Pull requests off (approval "inbox-rows-settings-page"): no PR mark at any row's end
+   * (`RowPullsMark`). Off by default, so a look saved before it shows them. The thread's own PR button stays.
+   */
+  hidePulls: boolean;
 }
 
 export type ListLookKey = keyof ListLook;
@@ -85,6 +107,11 @@ export const LIST_LOOK_OFF: ListLook = {
   markDot: false,
   repoLogo: false,
   githubPictures: false,
+  timeBelow: false,
+  dividers: false,
+  statusMark: false,
+  boldNames: false,
+  hidePulls: false,
 };
 
 /** The look for someone who chose none (core `INBOX_ROWS_DEFAULT`): smaller thread names on, every other option off. */
@@ -130,7 +157,7 @@ export function lookFromRows(rows: readonly string[]): ListLook {
 
 /**
  * A change on top of a look, with its rivals made to agree: the option just turned on wins (Compact turns Roomy
- * off and Roomy turns Compact off; "2 lines" turns "Hide subject preview" off and back; the Dot needs the smaller
+ * off and Roomy turns Compact off; the grey line's "2 lines" and "None" turn each other off; the Dot needs the smaller
  * names, so it turns them on, and turning them off turns the Dot off).
  */
 export function lookWithChange(look: ListLook, change: Partial<ListLook>): ListLook {
@@ -301,17 +328,6 @@ export function writeListLookOption(key: ListLookKey, on: boolean): Promise<void
   return writeListLookOptions({ [key]: on });
 }
 
-/**
- * The one-time list options dialog's Done (approval "inbox-list-options-intro"): only the options the person changed
- * in it (`look` against `opened`), on top of the look now, so every other keeps whatever it is now, even when another
- * window changed it while the dialog was open (a stale "smaller names off" would turn its Dot off). Nothing changed:
- * nothing saved.
- */
-export function writeMenuLook(look: Pick<ListLook, MenuLookKey>, opened: Pick<ListLook, MenuLookKey>): Promise<void> {
-  const changed = LIST_LOOK_OPTIONS.filter(({ key }) => look[key] !== opened[key]).map(({ key }) => [key, look[key]]);
-  return changed.length ? writeListLookOptions(Object.fromEntries(changed)) : Promise.resolve();
-}
-
 /** Taken when a settings read is sent, and given back with its answer (`adoptSavedRows`'s `sentAt`). */
 export function listLookReadMark(): number {
   return serverRev;
@@ -342,7 +358,7 @@ export function adoptSavedRows(rows: unknown, rev?: unknown, sentAt?: number): v
  * relay frames, and a rows frame has no seq to tell copies apart, sharedEvents.ts). Only a settings read can tell
  * which, so `onDoubt` asks for one.
  */
-export function hearRowsEvent(rows: unknown, rev?: unknown, onDoubt?: () => void): void {
+export function hearRowsEvent(rows: unknown, rev?: unknown, onDoubt?: () => void, last?: { prev: unknown; by: unknown }): void {
   if (rows === undefined) return;
   if (typeof rev === 'number') {
     if (rev <= eventRev) {
@@ -352,6 +368,24 @@ export function hearRowsEvent(rows: unknown, rev?: unknown, onDoubt?: () => void
     eventRev = rev;
   }
   adopt(rows, rev);
+  // An agent's command made this save (`plannotator inbox rows set`): Settings → Rows says who, with Undo.
+  const by = inboxRowsBy(last?.by);
+  const before = inboxRowsRead(last?.prev);
+  const after = inboxRowsRead(rows);
+  if (by && before && after) for (const listener of agentChangeListeners) listener({ by, before: lookFromRows(before), after: lookFromRows(after) });
+}
+
+/** A rows save an agent's command made, as the windows hear it: who, the look before it and the look it saved. */
+export interface AgentRowsChange {
+  by: InboxRowsBy;
+  before: ListLook;
+  after: ListLook;
+}
+const agentChangeListeners = new Set<(change: AgentRowsChange) => void>();
+/** Hear each save an agent's command makes while the page is open. Returns the way to stop. */
+export function onAgentRowsChange(listener: (change: AgentRowsChange) => void): () => void {
+  agentChangeListeners.add(listener);
+  return () => void agentChangeListeners.delete(listener);
 }
 
 function adopt(rows: unknown, rev: unknown): void {
@@ -367,7 +401,7 @@ function adopt(rows: unknown, rev: unknown): void {
 
 /** The list column's classes for the look: none when every option is off. */
 export function listLookClasses(look: ListLook): string {
-  return `${look.highlight ? ' ib-lk-pill' : ''}${look.compact ? ' ib-lk-compact' : ''}${look.hideAgents ? ' ib-lk-noagents' : ''}${look.smallNames ? ' ib-lk-small' : ''}${look.roomy ? ' ib-lk-roomy' : ''}${look.unreadDot ? ' ib-lk-dot' : ''}${look.previewTwo ? ' ib-lk-pv2' : ''}${look.titleFirst ? ' ib-lk-tfirst' : ''}`;
+  return `${look.highlight ? ' ib-lk-pill' : ''}${look.compact ? ' ib-lk-compact' : ''}${look.hideAgents ? ' ib-lk-noagents' : ''}${look.smallNames ? ' ib-lk-small' : ''}${look.roomy ? ' ib-lk-roomy' : ''}${look.unreadDot ? ' ib-lk-dot' : ''}${look.previewTwo ? ' ib-lk-pv2' : ''}${look.titleFirst ? ' ib-lk-tfirst' : ''}${look.timeBelow ? ' ib-lk-tbelow' : ''}${look.dividers ? ' ib-lk-div' : ''}${look.statusMark ? ' ib-lk-stm' : ''}${look.boldNames ? ' ib-lk-bold' : ''}${look.hidePulls ? ' ib-lk-nopulls' : ''}`;
 }
 
 function subscribe(listener: () => void): () => void {

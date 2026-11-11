@@ -10,7 +10,7 @@
  * attachment on the message that carries the words); a reply of a pasted
  * image alone is sent as a words-only reply; a paste of text alone makes no
  * tile and is left to the browser, as is text copied from a spreadsheet with
- * the picture Chromium adds beside it; Cancel keeps the reply box's files as its draft;
+ * the picture Chromium adds beside it; closing the reply box keeps its files as its draft;
  * a file pasted while a Send is in flight stays for the next one; a retry
  * whose contents changed is a new reply, never the earlier one replayed; and
  * each attach by paste is said in a polite live region. On a phone (iOS
@@ -380,15 +380,15 @@ test.skipIf(!hasDom)('the reply box: two pasted images make two tiles (the secon
   expect(replyTiles()).toEqual(names);
 }, 30_000);
 
-test.skipIf(!hasDom)('the reply box: pasted images alone are sent as a words-only reply (questions stay open); Cancel keeps a pasted file in the draft', async () => {
+test.skipIf(!hasDom)('the reply box: pasted images alone are sent as a words-only reply (questions stay open); closing the box keeps a pasted file in the draft', async () => {
   const el = await renderApp(`#thread=${world.waiting}`);
   await until(() => el.querySelectorAll('fieldset[data-question-key]').length === 1, 'the question');
   act(() => button(el, 'Reply').click());
   await until(() => replyBox(el) !== null, 'the reply box');
   expect(paste(replyBox(el)!.querySelector('textarea')!, { files: [image()] })).toBe(true);
   await until(() => tiles(replyBox(el)!)[0]?.getAttribute('data-compose-file') === 'done', 'the first upload');
-  // Cancel: the file stays, as the reply's draft (the box's files are part of it).
-  act(() => button(el, 'Cancel').click());
+  // Closed (the box's chevron): the file stays, as the reply's draft (the box's files are part of it).
+  act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
   await until(async () => (await draftUploads()).length === 1, 'the file in the draft');
   const kept = (await draftUploads())[0]!;
   // The thread's foot now offers Edit draft, which brings its tile back.
@@ -449,7 +449,9 @@ test.skipIf(!hasDom)('a file pasted while a Send is in flight stays in the box f
     const model = JSON.parse((await loopback(`/api/inbox/threads/${world.waiting}`)).text) as { thread: { messages: InboxMessage[] } };
     expect(model.thread.messages.at(-1)!.attachments!.map((a) => a.name)).toEqual([first]);
 
-    // The next Send carries it.
+    // The next Send carries it. Send stays off until the first Send has read the thread and the files again (its tile
+    // goes before that), as the person sees it: a click before then does nothing, so wait for Send to come back.
+    await until(() => !button(el, 'Send').disabled, 'Send back after the first Send');
     act(() => button(el, 'Send').click());
     await until(() => el.querySelector('.ib-rbox') === null, 'the second Send');
     const again = JSON.parse((await loopback(`/api/inbox/threads/${world.waiting}`)).text) as { thread: { messages: InboxMessage[] } };
@@ -490,6 +492,8 @@ test.skipIf(!hasDom)('a Send the Inbox never got, then a file pasted and the sam
   // The person pastes the screenshot they meant to send, and sends the same words again.
   expect(paste(text, { files: [image()] })).toBe(true);
   await until(() => tiles(replyBox(el)!)[0]?.getAttribute('data-compose-file') === 'done', 'the upload');
+  // The error shows before the failed Send has finished looking for its reply; Send is off until then.
+  await until(() => !button(el, 'Send').disabled, 'Send back after the failed Send');
   act(() => button(el, 'Send').click());
   await until(() => el.querySelector('.ib-rbox') === null, 'the Send');
   const reply = posted.filter((p) => p.path.endsWith('/reply')).at(-1)!;
@@ -557,15 +561,17 @@ test.skipIf(!hasDom)('a phone: the reply box has an attach button; a chosen imag
   }
 }, 30_000);
 
-test.skipIf(!hasDom)('a desktop reply box: the paperclip in its toolbar and a drop on the box add tiles with their own names, a text drag attaches nothing, and Send carries them', async () => {
+test.skipIf(!hasDom)('a desktop reply box: the paperclip beside its Send and a drop on the box add tiles with their own names, a text drag attaches nothing, and Send carries them', async () => {
   const el = await renderApp(`#thread=${world.waiting}`);
   await until(() => el.querySelectorAll('fieldset[data-question-key]').length === 1, 'the question');
   act(() => button(el, 'Reply').click());
   await until(() => replyBox(el) !== null, 'the reply box');
 
-  // The paperclip is the first thing in the box's toolbar, the way to browse for any file.
-  const input = replyBox(el)!.querySelector<HTMLInputElement>('.ib-rfoot > label:first-child input[type="file"][data-reply-attach]')!;
+  // The paperclip comes right after Send in the box's own row (approval "inbox-reply-box", T6), the way to browse for any file.
+  const input = replyBox(el)!.querySelector<HTMLInputElement>('[data-reply-row] input[type="file"][data-reply-attach]')!;
   expect(input).not.toBeNull();
+  const beforeClip = input.closest('label')!.previousElementSibling;
+  expect(beforeClip?.matches('[data-reply-send]') || beforeClip?.querySelector('[data-reply-send]') != null).toBe(true);
   expect(input.closest('label')!.getAttribute('aria-label')).toBe('Attach files');
   expect(input.accept).toBe('');
   choose(input, [markdown('currency-notes.md')]);

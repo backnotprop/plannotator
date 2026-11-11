@@ -1,3 +1,4 @@
+import { INBOX_ROWS_USAGE_LINE } from "@plannotator/core/inbox-types";
 import { GUIDE_CLI_USAGE } from "@plannotator/server/guide-cli";
 import { T3_CLI_USAGE } from "@plannotator/t3-code/usage";
 import { INBOX_CARD_COLUMNS, INBOX_CARD_INITIATIVE_CLEAR_OUT, INBOX_CARD_INITIATIVE_FIELD, INBOX_CARD_INITIATIVE_RULE } from "@plannotator/core/inbox-types";
@@ -560,7 +561,11 @@ export const INBOX_COMMAND_USAGE = [
   "  plannotator inbox projects [--json]",
   "  plannotator inbox projects combine <project id> --into <project id> [--json]",
   "  plannotator inbox projects undo <project id> [--json]",
+  INBOX_ROWS_USAGE_LINE,
+  "  plannotator inbox icon set <file> --request <id> [--json]",
   "  plannotator inbox call [--session <id>] <action> [<json> | -]",
+  "  plannotator inbox pulls ls|add|rm [--session <id>] <thread> [<ref>... | --all]",
+  "  plannotator inbox export-decisions --thread <id> [--format md|html] [--out <file>] [--pr <ref>]",
   "  plannotator inbox link --offer [--tailscale] | link <code> | link --list",
   "  plannotator inbox unlink <machine>",
   "  plannotator inbox --notes <ids>",
@@ -596,8 +601,15 @@ export const INBOX_COMMAND_USAGE = [
   "                                  --tailscale is published again.",
   "  plannotator inbox projects      List the projects, combine one into another, undo a",
   "                                  combine: when the person asks to clean them up.",
+  "  plannotator inbox icon set      Hand back an animated agent icon, only when an Inbox",
+  "                                  message asked you to (its request id starts ia_).",
   "  plannotator inbox call          Run one Inbox action from a script: JSON in, one JSON",
   "                                  result on stdout. See 'Scripting the Inbox'.",
+  "  plannotator inbox pulls         A thread's PRs: list them, add or remove some",
+  "                                  (owner/repo#123, group/project!45 or the URL).",
+  "  plannotator inbox export-decisions",
+  "                                  A thread's decisions as a file; --pr puts them on",
+  "                                  one of its PRs, updated in place when run again.",
   ...INBOX_LINK_USAGE,
   "  plannotator inbox --notes <ids> Add the Inbox note to these agents' instructions",
   "                                  files (claude-code, codex, gemini, qwen, pi,",
@@ -866,7 +878,7 @@ export function isSubcommandHelpInvocation(args: string[]): string | null {
   const canonical = SUBCOMMAND_HELP_ALIASES[sub] ?? sub;
   if (!(canonical in SUBCOMMAND_HELP)) return null;
   // `inbox projects --help` is that command's own usage, not the whole guide.
-  if (canonical === "inbox" && args[1] === "projects") return null;
+  if (canonical === "inbox" && (args[1] === "projects" || args[1] === "rows" || args[1] === "icon")) return null;
   return hasHelpFlag(args.slice(1)) ? canonical : null;
 }
 

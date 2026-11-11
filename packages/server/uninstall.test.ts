@@ -18,7 +18,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, parse } from "node:path";
-import { t3HookCommand } from "@plannotator/shared/t3-hook-command";
+import { quoteHookWord, t3HookCommand } from "@plannotator/shared/t3-hook-command";
 import {
   formatPurgeWarning,
   runPlannotatorUninstall,
@@ -314,6 +314,16 @@ describe("a leftover usage-counts/ folder (the removed usage counts)", () => {
     expect(JSON.parse(readFileSync(join(fixture.dataDir, "config.json"), "utf-8")).usageCounts).toBe(false);
   });
 
+  test("the numbers Decision data keeps from deleted threads go with a purge, and stay through a plain uninstall", async () => {
+    const fixture = createFixture();
+    const lines = join(fixture.dataDir, "inbox", "decision-lines.jsonl");
+    writeText(lines);
+    await runPlannotatorUninstall({ purge: false, dryRun: false }, fixture.environment);
+    expect(existsSync(lines)).toBe(true);
+    await runPlannotatorUninstall({ purge: true, dryRun: false }, fixture.environment);
+    expect(existsSync(lines)).toBe(false);
+  });
+
   test("purge removes it, listed once in a dry run", async () => {
     const fixture = createFixture();
     const dir = seed(fixture.dataDir);
@@ -362,6 +372,8 @@ describe("default uninstall", () => {
       theme: "dark",
       hooks: { PreToolUse: [{ matcher: "Bash", hooks: [
         { type: "command", command: t3HookCommand(binary, fixture.dataDir), timeout: 10 },
+        // A hook from an earlier build, with the old SDK-only gate (before `t3-code`): removed too.
+        { type: "command", command: `case "$CLAUDE_CODE_ENTRYPOINT" in sdk*) PLANNOTATOR_DATA_DIR=${quoteHookWord(fixture.dataDir)} ${quoteHookWord(binary)} t3-hook;; esac`, timeout: 10 },
         ...customHooks,
       ] }] },
     });

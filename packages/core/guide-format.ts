@@ -11,6 +11,7 @@
 
 import { parseDiffToFiles } from "./diff-files";
 import type { CodeGuideOutput, GuideDiffRef, GuideOverview, GuideOverviewDiagram, GuideOverviewDiagramKind, GuideSection } from "./guide";
+import { readGuideDiffNotes, type GuideDiffNote } from "./guide-notes";
 
 /** Discriminator for a portable guided-review snapshot. */
 export const GUIDE_SNAPSHOT_KIND = "plannotator-guided-review" as const;
@@ -39,8 +40,32 @@ export const GUIDE_SNAPSHOT_OVERVIEW_VERSION = 2 as const;
  */
 export const GUIDE_SNAPSHOT_DRAWN_VERSION = 3 as const;
 
+/**
+ * Format version 4 adds the author's notes on lines of a file:
+ * `guide.sections[].diffs[].notes` (context notes in the Inbox's code review).
+ * A snapshot carries version 4 exactly when some file has a note, so a
+ * version-3 reader (strict) never meets one; everything version 3 allows
+ * (an overview, drawn or not) is allowed with it.
+ */
+export const GUIDE_SNAPSHOT_NOTES_VERSION = 4 as const;
+
+/**
+ * Format version 5 adds a diagram per chapter: `guide.sections[].diagram`,
+ * the same shape as the overview's (drawn keys allowed on an html one). A
+ * snapshot carries version 5 exactly when some chapter has a diagram, so a
+ * version-4 reader (strict) never meets one; everything version 4 allows is
+ * allowed with it.
+ */
+export const GUIDE_SNAPSHOT_CHAPTER_DIAGRAM_VERSION = 5 as const;
+
 /** Every snapshot version the current parser reads. */
-export const GUIDE_SNAPSHOT_VERSIONS = [GUIDE_SNAPSHOT_VERSION, GUIDE_SNAPSHOT_OVERVIEW_VERSION, GUIDE_SNAPSHOT_DRAWN_VERSION] as const;
+export const GUIDE_SNAPSHOT_VERSIONS = [
+  GUIDE_SNAPSHOT_VERSION,
+  GUIDE_SNAPSHOT_OVERVIEW_VERSION,
+  GUIDE_SNAPSHOT_DRAWN_VERSION,
+  GUIDE_SNAPSHOT_NOTES_VERSION,
+  GUIDE_SNAPSHOT_CHAPTER_DIAGRAM_VERSION,
+] as const;
 
 /** The drawn-picture keys of an overview diagram (format version 3). */
 const DRAWN_DIAGRAM_KEYS = ["css", "width", "height", "tall"] as const;
@@ -137,6 +162,23 @@ export type GuideSnapshotV1 = GuideSnapshot & { readonly version: typeof GUIDE_S
 export type GuideSnapshotV2 = GuideSnapshot & { readonly version: typeof GUIDE_SNAPSHOT_OVERVIEW_VERSION };
 /** A version-3 snapshot: the overview's diagram is a drawn picture. */
 export type GuideSnapshotV3 = GuideSnapshot & { readonly version: typeof GUIDE_SNAPSHOT_DRAWN_VERSION };
+/** A version-4 snapshot: some file carries the author's notes. */
+export type GuideSnapshotV4 = GuideSnapshot & { readonly version: typeof GUIDE_SNAPSHOT_NOTES_VERSION };
+/** A version-5 snapshot: some chapter carries a diagram. */
+export type GuideSnapshotV5 = GuideSnapshot & { readonly version: typeof GUIDE_SNAPSHOT_CHAPTER_DIAGRAM_VERSION };
+
+/** Whether a version keeps notes on lines (4 and up). */
+function versionHasNotes(version: GuideSnapshotVersion): boolean {
+  return version === GUIDE_SNAPSHOT_NOTES_VERSION || version === GUIDE_SNAPSHOT_CHAPTER_DIAGRAM_VERSION;
+}
+
+/** The version a guide is written as: 5 with a chapter diagram, else 4 with a note, else 3 with a drawn overview, 2 with an overview, else 1. */
+export function guideSnapshotVersionFor(guide: Pick<CodeGuideOutput, "overview" | "sections">): GuideSnapshotVersion {
+  if (guide.sections.some((section) => section.diagram !== undefined)) return GUIDE_SNAPSHOT_CHAPTER_DIAGRAM_VERSION;
+  if (guide.sections.some((section) => section.diffs.some((ref) => (ref.notes?.length ?? 0) > 0))) return GUIDE_SNAPSHOT_NOTES_VERSION;
+  if (!guide.overview) return GUIDE_SNAPSHOT_VERSION;
+  return guideDiagramIsDrawn(guide.overview.diagram) ? GUIDE_SNAPSHOT_DRAWN_VERSION : GUIDE_SNAPSHOT_OVERVIEW_VERSION;
+}
 
 /**
  * What a producer captures when a guide job LAUNCHES: the exact review the
@@ -183,15 +225,16 @@ export function buildGuideSnapshot(input: BuildGuideSnapshotInput): GuideSnapsho
     Object.entries(generatorInput).filter(([, v]) => typeof v === "string" && v.length > 0),
   ) as GuideSnapshotGenerator;
   const overview = guide.overview ? copyOverview(guide.overview) : undefined;
+  const version = guideSnapshotVersionFor({ overview, sections: guide.sections });
   return {
     kind: GUIDE_SNAPSHOT_KIND,
-    version: overview ? (guideDiagramIsDrawn(overview.diagram) ? GUIDE_SNAPSHOT_DRAWN_VERSION : GUIDE_SNAPSHOT_OVERVIEW_VERSION) : GUIDE_SNAPSHOT_VERSION,
+    version,
     exportedAt: input.exportedAt ?? new Date().toISOString(),
     guide: {
       title: guide.title,
       intent: guide.intent,
       ...(overview && { overview }),
-      sections: guide.sections,
+      sections: snapshotSections(guide.sections, version),
       ...(guide.unplacedFiles !== undefined && { unplacedFiles: guide.unplacedFiles }),
       reviewed,
     },
@@ -207,20 +250,41 @@ export function buildGuideSnapshot(input: BuildGuideSnapshotInput): GuideSnapsho
   };
 }
 
+/**
+ * The sections as a snapshot of `version` carries them: a chapter's diagram
+ * only from version 5 (copied, so stray producer fields never travel), notes
+ * only from version 4.
+ */
+function snapshotSections(sections: GuideSection[], version: GuideSnapshotVersion): GuideSection[] {
+  const kept = versionHasNotes(version) ? sections : withoutNotes(sections);
+  if (!kept.some((section) => "diagram" in section)) return kept;
+  return kept.map(({ diagram, ...section }) =>
+    version === GUIDE_SNAPSHOT_CHAPTER_DIAGRAM_VERSION && diagram ? { ...section, diagram: copyDiagram(diagram) } : section,
+  );
+}
+
+/** Below version 4 a diff reference carries no `notes` key, not even an empty list (an older reader refuses it). */
+function withoutNotes(sections: GuideSection[]): GuideSection[] {
+  if (!sections.some((section) => section.diffs.some((ref) => "notes" in ref))) return sections;
+  return sections.map((section) => ({ ...section, diffs: section.diffs.map(({ notes: _notes, ...ref }) => ref) }));
+}
+
 /** Only `{ text, diagram? }` travels (a drawn diagram's own keys with it): stray producer fields never reach a snapshot. */
 function copyOverview(overview: GuideOverview): GuideOverview {
   const d = overview.diagram;
   if (!d) return { text: overview.text };
+  return { text: overview.text, diagram: copyDiagram(d) };
+}
+
+/** A diagram's own keys, and nothing else. */
+function copyDiagram(d: GuideOverviewDiagram): GuideOverviewDiagram {
   return {
-    text: overview.text,
-    diagram: {
-      kind: d.kind,
-      source: d.source,
-      ...(d.css !== undefined && { css: d.css }),
-      ...(d.width !== undefined && { width: d.width }),
-      ...(d.height !== undefined && { height: d.height }),
-      ...(d.tall !== undefined && { tall: { source: d.tall.source, ...(d.tall.css !== undefined && { css: d.tall.css }) } }),
-    },
+    kind: d.kind,
+    source: d.source,
+    ...(d.css !== undefined && { css: d.css }),
+    ...(d.width !== undefined && { width: d.width }),
+    ...(d.height !== undefined && { height: d.height }),
+    ...(d.tall !== undefined && { tall: { source: d.tall.source, ...(d.tall.css !== undefined && { css: d.tall.css }) } }),
   };
 }
 
@@ -297,38 +361,56 @@ function optNum(record: Record<string, unknown>, key: string, path: string): Par
   return { ok: true, value: input };
 }
 
-function parseDiffRef(input: unknown, path: string): Parsed<GuideDiffRef> {
+function parseDiffRef(input: unknown, path: string, version: GuideSnapshotVersion): Parsed<GuideDiffRef> {
   const object = asRecord(input, path);
   if (isFail(object)) return object;
-  const s = strict(object.value, ["file", "summary"], path);
+  // Notes exist from version 4: an older document stays as strict as every reader of its version.
+  const s = strict(object.value, versionHasNotes(version) ? ["file", "summary", "notes"] : ["file", "summary"], path);
   if (isFail(s)) return s;
   const file = str(s.value.file, `${path}.file`, { nonEmpty: true });
   if (isFail(file)) return file;
   const summary = optStr(s.value, "summary", path);
   if (isFail(summary)) return summary;
+  let notes: GuideDiffNote[] | undefined;
+  if (s.value.notes !== undefined) {
+    const read = readGuideDiffNotes(s.value.notes, `${path}.notes`);
+    if (read.problems.length > 0) return fail(`${path}.notes`, read.problems[0]!);
+    if (read.notes.length > 0) notes = read.notes;
+  }
   return {
     ok: true,
-    value: summary.value === undefined ? { file: file.value } : { file: file.value, summary: summary.value },
+    value: {
+      file: file.value,
+      ...(summary.value !== undefined && { summary: summary.value }),
+      ...(notes !== undefined && { notes }),
+    },
   };
 }
 
-function parseSection(input: unknown, path: string): Parsed<GuideSection> {
+function parseSection(input: unknown, path: string, version: GuideSnapshotVersion): Parsed<GuideSection> {
   const object = asRecord(input, path);
   if (isFail(object)) return object;
-  const s = strict(object.value, ["title", "overview", "diffs"], path);
+  // A chapter's diagram exists only in version 5: an older document stays as strict as every reader of its version.
+  const s = strict(object.value, version === GUIDE_SNAPSHOT_CHAPTER_DIAGRAM_VERSION ? ["title", "overview", "diffs", "diagram"] : ["title", "overview", "diffs"], path);
   if (isFail(s)) return s;
   const title = str(s.value.title, `${path}.title`, { nonEmpty: true });
   if (isFail(title)) return title;
   const overview = str(s.value.overview, `${path}.overview`);
   if (isFail(overview)) return overview;
+  let diagram: GuideOverviewDiagram | undefined;
+  if (s.value.diagram !== undefined) {
+    const parsed = parseDiagram(s.value.diagram, `${path}.diagram`, version);
+    if (isFail(parsed)) return parsed;
+    diagram = parsed.value;
+  }
   if (!Array.isArray(s.value.diffs)) return fail(`${path}.diffs`, "Expected an array");
   const diffs: GuideDiffRef[] = [];
   for (let i = 0; i < s.value.diffs.length; i++) {
-    const ref = parseDiffRef(s.value.diffs[i], `${path}.diffs[${i}]`);
+    const ref = parseDiffRef(s.value.diffs[i], `${path}.diffs[${i}]`, version);
     if (isFail(ref)) return ref;
     diffs.push(ref.value);
   }
-  return { ok: true, value: { title: title.value, overview: overview.value, diffs } };
+  return { ok: true, value: { title: title.value, overview: overview.value, diffs, ...(diagram !== undefined && { diagram }) } };
 }
 
 function parseOverview(input: unknown, path: string, version: GuideSnapshotVersion): Parsed<GuideOverview> {
@@ -339,11 +421,17 @@ function parseOverview(input: unknown, path: string, version: GuideSnapshotVersi
   const text = str(s.value.text, `${path}.text`, { nonEmpty: true });
   if (isFail(text)) return text;
   if (s.value.diagram === undefined) return { ok: true, value: { text: text.value } };
-  const dpath = `${path}.diagram`;
-  const dobj = asRecord(s.value.diagram, dpath);
+  const diagram = parseDiagram(s.value.diagram, `${path}.diagram`, version);
+  if (isFail(diagram)) return diagram;
+  return { ok: true, value: { text: text.value, diagram: diagram.value } };
+}
+
+/** An overview's or a chapter's diagram: `{ kind, source }`, plus the drawn keys from version 3 (html only). */
+function parseDiagram(input: unknown, dpath: string, version: GuideSnapshotVersion): Parsed<GuideOverviewDiagram> {
+  const dobj = asRecord(input, dpath);
   if (isFail(dobj)) return dobj;
-  // The drawn keys exist only in version 3: a version-2 document stays as strict as every version-2 reader.
-  const drawnVersion = version === GUIDE_SNAPSHOT_DRAWN_VERSION;
+  // The drawn keys exist from version 3: a version-2 document stays as strict as every version-2 reader.
+  const drawnVersion = version === GUIDE_SNAPSHOT_DRAWN_VERSION || versionHasNotes(version);
   const d = strict(dobj.value, drawnVersion ? ["kind", "source", ...DRAWN_DIAGRAM_KEYS] : ["kind", "source"], dpath);
   if (isFail(d)) return d;
   const kind = d.value.kind;
@@ -354,18 +442,18 @@ function parseOverview(input: unknown, path: string, version: GuideSnapshotVersi
   if (isFail(source)) return source;
   const diagram: GuideOverviewDiagram = { kind: kind as GuideOverviewDiagramKind, source: source.value };
   if (drawnVersion) {
-    const drawn = parseDrawnKeys(d.value, dpath, kind as GuideOverviewDiagramKind);
+    const drawn = parseDrawnKeys(d.value, dpath, kind as GuideOverviewDiagramKind, version === GUIDE_SNAPSHOT_DRAWN_VERSION);
     if (isFail(drawn)) return drawn;
     Object.assign(diagram, drawn.value);
   }
-  return { ok: true, value: { text: text.value, diagram } };
+  return { ok: true, value: diagram };
 }
 
 const CANVAS_MIN = 200;
 const CANVAS_MAX = 4000;
 
 /** A version-3 diagram's drawn keys: HTML only, a canvas given whole or not at all. */
-function parseDrawnKeys(record: Record<string, unknown>, dpath: string, kind: GuideOverviewDiagramKind): Parsed<Partial<GuideOverviewDiagram>> {
+function parseDrawnKeys(record: Record<string, unknown>, dpath: string, kind: GuideOverviewDiagramKind, required = true): Parsed<Partial<GuideOverviewDiagram>> {
   const out: Partial<GuideOverviewDiagram> = {};
   const used = DRAWN_DIAGRAM_KEYS.filter((key) => record[key] !== undefined);
   if (used.length > 0 && kind !== "html") return fail(`${dpath}.${used[0]}`, "Only an html diagram takes css, width, height or tall");
@@ -393,7 +481,8 @@ function parseDrawnKeys(record: Record<string, unknown>, dpath: string, kind: Gu
     if (isFail(tcss)) return tcss;
     out.tall = { source: tsource.value, ...(tcss.value !== undefined && { css: tcss.value }) };
   }
-  if (Object.keys(out).length === 0) return fail(dpath, "A version-3 diagram carries css, width and height, or tall");
+  // Version 3 exists for a drawn picture; versions 4 (notes) and 5 (chapter diagrams) take any diagram.
+  if (required && Object.keys(out).length === 0) return fail(dpath, "A version-3 diagram carries css, width and height, or tall");
   return { ok: true, value: out };
 }
 
@@ -426,7 +515,7 @@ function parseGuide(input: unknown, version: GuideSnapshotVersion): Parsed<Guide
   const sections: GuideSection[] = [];
   let refCount = 0;
   for (let i = 0; i < s.value.sections.length; i++) {
-    const section = parseSection(s.value.sections[i], `${path}.sections[${i}]`);
+    const section = parseSection(s.value.sections[i], `${path}.sections[${i}]`, version);
     if (isFail(section)) return section;
     refCount += section.value.diffs.length;
     if (refCount > MAX_GUIDE_DIFF_REFS) {
@@ -600,7 +689,7 @@ export interface GuideSnapshotParseOptions {
   readonly versions?: readonly GuideSnapshotVersion[];
 }
 
-/** Parse an unknown value into a snapshot (version 1, 2 or 3). Never throws. */
+/** Parse an unknown value into a snapshot (version 1 to 5). Never throws. */
 export function parseGuideSnapshot(input: unknown, options: GuideSnapshotParseOptions = {}): GuideSnapshotParseResult {
   const object = asRecord(input, "$");
   if (isFail(object)) return object;
@@ -643,7 +732,7 @@ export function parseGuideSnapshot(input: unknown, options: GuideSnapshotParseOp
   };
 }
 
-/** Parse serialized JSON into a snapshot (version 1, 2 or 3). Never throws. */
+/** Parse serialized JSON into a snapshot (version 1 to 5). Never throws. */
 export function parseGuideSnapshotJson(text: string, options: GuideSnapshotParseOptions = {}): GuideSnapshotParseResult {
   let input: unknown;
   try {

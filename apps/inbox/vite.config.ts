@@ -5,6 +5,8 @@ import tailwindcss from '@tailwindcss/vite';
 import pkg from '../../package.json';
 import { katexWoff2Only } from '../../build/katex-woff2-only';
 import { packedInboxApp } from '../../build/pack-inbox';
+import { diffsWorkerCatalogs } from '../../build/diffs-worker-catalogs';
+import { inboxPageMarks } from '../../build/inbox-page-marks';
 
 /**
  * What the window, the phone's surface (vite.surface.config.ts) and the Shape
@@ -27,6 +29,10 @@ export const sharedConfig = defineConfig({
       // Drop the dead Oniguruma WASM (~622 KB base64). The message body's code
       // fences reach Pierre's shared highlighter. See build/shiki-wasm-stub.ts.
       'shiki/wasm': path.resolve(__dirname, '../../build/shiki-wasm-stub.ts'),
+      // Highlights, Pierre's second highlighter (WASM), never runs: Plannotator
+      // highlights with Shiki. See build/pierre-highlights-stub.ts.
+      '@pierre/highlights/themes/loader': path.resolve(__dirname, '../../build/pierre-highlights-stub.ts'),
+      '@pierre/highlights': path.resolve(__dirname, '../../build/pierre-highlights-stub.ts'),
       '@plannotator/shared': path.resolve(__dirname, '../../packages/shared'),
       '@plannotator/ui': path.resolve(__dirname, '../../packages/ui'),
       '@plannotator/inbox': path.resolve(__dirname, '../../packages/inbox/index.ts'),
@@ -39,6 +45,8 @@ export const sharedConfig = defineConfig({
   // imports collapsed, as apps/review does.
   worker: {
     format: 'es',
+    // Pierre's language and theme catalogs, dead code in its worker (see the plugin).
+    plugins: () => [diffsWorkerCatalogs()],
     rollupOptions: {
       output: {
         inlineDynamicImports: true,
@@ -69,6 +77,7 @@ export default mergeConfig(
   sharedConfig,
   defineConfig({
     esbuild: { charset: 'ascii' },
-    plugins: [packedInboxApp()],
+    // The window's sheet keys on page marks, not on :has() anchored on the page (build/inbox-page-marks.ts).
+    plugins: [packedInboxApp(), inboxPageMarks()],
   }),
 );

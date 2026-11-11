@@ -54,8 +54,17 @@ const CODEX: InboxAgentRow = {
   reminder: null,
   note: { agent: 'codex', path: '~/.codex/AGENTS.md', target: null, state: 'absent', create: false, created: false, reason: null },
 } as InboxAgentRow;
+/** Qwen Code still gets the one-time note dialog; Codex's note is written by itself (inbox-agent-note-auto). */
+const QWEN: InboxAgentRow = {
+  id: 'qwen',
+  label: 'Qwen Code',
+  detected: true,
+  reach: { kind: 'mcp', on: true, state: 'connected', path: null, locked: false, reason: null },
+  reminder: null,
+  note: { agent: 'qwen', path: '~/.qwen/QWEN.md', target: null, state: 'absent', create: false, created: false, reason: null },
+} as InboxAgentRow;
 const AGENTS: InboxAgentsModel = {
-  agents: [CODEX],
+  agents: [CODEX, QWEN],
   last_report: null,
   connecting: false,
   connect_env_off: true,

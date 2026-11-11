@@ -1,9 +1,10 @@
 /**
- * One PR's launchpad (approval "pr-launchpad"): what clicking a single open PR in Reviews opens. The bar (the PR's
- * mark, number and repository; Open on GitHub, Close), the title and one line of facts (author, branch into base,
- * size, checks), then the ways into it: Guided review (wide, the primary), The diff, Review thread, Shape board (while
- * Shape is on) and System (coming, from Workspaces, no button). Then the PR's Details (`PullDetails`, laid in the page),
- * and Reply to the agent at the foot. A stack of several PRs keeps the stack page (`PullsPage` `StackView`), which owns
+ * One PR's launchpad (approval "pr-launchpad"): what clicking a single open PR in Reviews opens, reviewed or not
+ * (`reviewRowLaunchpad`). The bar (the PR's mark, number and repository; Open on GitHub, Close), the title and one line
+ * of facts (author, branch into base, size, checks), the risk line when the PR was ranked, then the ways into it:
+ * Guided review (wide, the primary), The diff, Review thread, Shape board (only while Shape is on) and System (coming,
+ * from Workspaces, no button; only while System shows). Shape and System are both off in 0.29, so the page has three
+ * doors there. Then the PR's Details (`PullDetails`, laid in the page), and Reply to the agent at the foot. A stack of several PRs keeps the stack page (`PullsPage` `StackView`), which owns
  * the hand-off (the New review box filled in with the PR, one review thread at a time) and passes it in. No keyboard
  * shortcuts of its own.
  */
@@ -91,6 +92,8 @@ export function PullLaunchpad({
   heading,
   start,
   shapes,
+  system = false,
+  risk = null,
   onClose,
   onDiff,
   onThread,
@@ -112,6 +115,10 @@ export function PullLaunchpad({
   start: LaunchpadStart | null;
   /** Shape boards by thread; null while Shape is off (no Shape board door then). */
   shapes: ReadonlyMap<string, InboxShapeSummary> | null;
+  /** System shows (`systemShown`, the Reviews page's `system`): only then the System door. */
+  system?: boolean;
+  /** The risk line(s) the stack page shows under its title (`PullsPage`), or null. */
+  risk?: ReactNode;
   onClose: () => void;
   onDiff: () => void;
   onThread: (threadId: string) => void;
@@ -134,6 +141,8 @@ export function PullLaunchpad({
   const shape = shapes && link ? (shapes.get(link.thread_id) ?? null) : null;
   const repo = stack.host === 'github.com' ? stack.repo : `${stack.host}/${stack.repo}`;
   const checks = checksWords(pr);
+  // The grid lays itself out by how many doors there are (inbox.css `data-doors`), so no slot is left empty.
+  const doors = 3 + (shapes ? 1 : 0) + (system ? 1 : 0);
   const agentMark = <HostMark host={given?.agent?.host ?? null} />;
   // The thread door's thread: the review thread, or the one that only named the PR.
   const named = mentioned ? given : null;
@@ -196,8 +205,9 @@ export function PullLaunchpad({
               </span>
             )}
           </div>
+          {risk}
 
-          <div className="ib-lp-grid" role="list" aria-label={`What to do with ${inboxPullLabel(pr)}`} data-doors={shapes ? 5 : 4}>
+          <div className="ib-lp-grid" role="list" aria-label={`What to do with ${inboxPullLabel(pr)}`} data-doors={doors}>
             <Door
               kind="guide"
               wide
@@ -347,14 +357,14 @@ export function PullLaunchpad({
                 )}
               </Door>
             )}
-            <Door kind="system" soon icon={<Icon name="cube" size={18} />} title="System" sub={<>Where this change sits among the services, data and owners around it. From Workspaces.</>} />
+            {system && <Door kind="system" soon icon={<Icon name="cube" size={18} />} title="System" sub={<>Where this change sits among the services, data and owners around it. From Workspaces.</>} />}
           </div>
 
           <h3 className="ib-lp-h">Details</h3>
           <div className="ib-lp-details">
             <PullDetails
               layer={pr}
-              description={null}
+              description={details.data?.description}
               headSha={pr.head_sha}
               data={details.data}
               failed={details.failed}
@@ -367,6 +377,7 @@ export function PullLaunchpad({
               onClose={() => {}}
               onFile={() => {}}
               headless
+              descriptionUnread={details.failed && !details.data}
             />
           </div>
         </div>

@@ -23,6 +23,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { isAbsolute } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import { parseDiffToFiles, patchBlobIds, type DiffFile, type PatchBlobIds } from "@plannotator/core/diff-files";
@@ -33,6 +34,7 @@ import {
   GUIDE_SNAPSHOT_OVERVIEW_VERSION,
   GUIDE_SNAPSHOT_VERSION,
   guideDiagramIsDrawn,
+  guideSnapshotVersionFor,
   parseGuideSnapshot,
   parseGuideSnapshotJson,
   type GuideSnapshot,
@@ -41,9 +43,22 @@ import type { GuideOverviewDiagram } from "@plannotator/core/guide";
 import { displayInboxSubject, inboxReviewSourceOf, type InboxFileContents, type InboxGuideRef } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { readFileSync } from "node:fs";
-import { checkInboxDrawing, INBOX_REVIEW_FIELD_DESCRIPTION, INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC, inboxReviewTitleLine } from "@plannotator/core/inbox-review";
+import {
+  checkInboxDrawing,
+  INBOX_GUIDE_FIELD_DESCRIPTION,
+  INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES,
+  INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES_NO_DIAGRAM,
+  INBOX_REVIEW_FIELD_DESCRIPTION,
+  INBOX_REVIEW_NOTES_RULE,
+  inboxReviewChapterDiagramDoc,
+  INBOX_WALKTHROUGH_FIELD_DESCRIPTION,
+  inboxReviewTitleLine,
+} from "@plannotator/core/inbox-review";
+import { checkGuideNotes, readGuideDiffNotes, type GuideDiffNote } from "@plannotator/core/inbox-context-notes";
+import { readInboxWalkthrough } from "./inbox-walkthrough";
 import { inboxBlobPath, writeBlob } from "@plannotator/shared/inbox/attachments";
 import { questionOpenersWithTextText } from "@plannotator/shared/inbox/question-openers";
+import { questionsToCheckText } from "@plannotator/shared/inbox/questions-to-check";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { readDiffSideBytes, readGitObjectBytes } from "@plannotator/shared/review-core";
@@ -84,6 +99,25 @@ export const GUIDE_BRIEF_EXAMPLE = {
     "diff --git a/package.json b/package.json\n--- a/package.json\n+++ b/package.json\n@@ -1 +1 @@\n-{}\n+{ }\n",
 };
 
+/**
+ * The worked example while Code review is on: the same call as a review (`review: true`), its one file with one note
+ * (context notes, approval "inbox-context-notes"). Off, the brief's example is `GUIDE_BRIEF_EXAMPLE`, byte for byte.
+ */
+export const GUIDE_BRIEF_EXAMPLE_WITH_NOTE = {
+  ...GUIDE_BRIEF_EXAMPLE,
+  // Notes are kept only on a review: the example sends `review: true` so its note is kept.
+  review: true,
+  guide: {
+    ...GUIDE_BRIEF_EXAMPLE.guide,
+    sections: [
+      {
+        ...GUIDE_BRIEF_EXAMPLE.guide.sections[0]!,
+        diffs: [{ file: "src/auth.ts", summary: "Adds the refresh guard.", notes: [{ lineStart: 1, lineEnd: 1, text: "Refresh happens here so callers stop retrying on their own (from the PR description)." }] }],
+      },
+    ],
+  },
+};
+
 export const GET_GUIDE_BRIEF_DESCRIPTION =
   "Get what you need to write a guided review of a code change for the person: Plannotator's method, the JSON shape of the guide, how to read the diff, the rules, and a worked submit_guide call. Read the diff in your checkout, write the guide on your own model, then call submit_guide with the guide and that exact patch.";
 
@@ -99,8 +133,13 @@ const OFF_SNAPSHOT_VERSIONS = [GUIDE_SNAPSHOT_VERSION, GUIDE_SNAPSHOT_OVERVIEW_V
  * A guide as an agent sent it, checked by Plannotator's own code. `cwd` is the
  * project root, where `buildAuthoredGuideSnapshot` reads provenance (origin,
  * branch, head) for a guide that does not name its `source`.
+ *
+ * Context notes (approval "inbox-context-notes") are kept only on a review (`review`, Code review on): only the
+ * review draws them, so a plain guided review's notes are left out, unread, and its snapshot keeps the version it
+ * has without them.
  */
-export function checkInboxGuide(input: { snapshot?: unknown; guide?: unknown; patch?: string }, cwd: string, options: { codeReview?: boolean } = {}): InboxGuideCheck {
+export function checkInboxGuide(input: { snapshot?: unknown; guide?: unknown; patch?: string }, cwd: string, options: { codeReview?: boolean; review?: boolean } = {}): InboxGuideCheck {
+  const keepNotes = options.codeReview === true && options.review === true;
   const hasSnapshot = input.snapshot !== undefined;
   if (hasSnapshot === (input.guide !== undefined || input.patch !== undefined)) {
     return { ok: false, error: "Send either `snapshot`, or `guide` with `patch`." };
@@ -111,11 +150,18 @@ export function checkInboxGuide(input: { snapshot?: unknown; guide?: unknown; pa
     const parseOptions = options.codeReview ? {} : { versions: OFF_SNAPSHOT_VERSIONS };
     const parsed = typeof input.snapshot === "string" ? parseGuideSnapshotJson(input.snapshot, parseOptions) : parseGuideSnapshot(input.snapshot, parseOptions);
     if (!parsed.ok) return { ok: false, error: `Invalid guide snapshot (${parsed.error.path}): ${parsed.error.message}` };
-    const snapshot = parsed.value;
+    const snapshot = keepNotes ? parsed.value : snapshotWithoutNotes(parsed.value);
+    if (!snapshot) return { ok: false, error: "Invalid guide snapshot: it could not be read without its notes." };
     // A drawn picture (version 3, read only while Code review is on): Shape's rules and the patch's files. A version-2
     // document is taken as it always was; the review pane draws its html picture only if it keeps Shape's rules.
     const drawnProblem = overviewDiagramProblem(snapshot.guide.overview?.diagram, snapshot.review.rawPatch);
     if (drawnProblem) return { ok: false, error: drawnProblem };
+    // A chapter's html picture (version 5, read only while Code review is on): Shape's rules and the patch's files.
+    const chapterProblem = chapterDiagramProblem(snapshot);
+    if (chapterProblem) return { ok: false, error: chapterProblem };
+    // Notes (version 4, read only while Code review is on): each inside one hunk of its file.
+    const noteProblems = checkGuideNotes(snapshot.guide, snapshot.review.rawPatch);
+    if (noteProblems.length > 0) return { ok: false, error: `Guide notes are not valid:\n- ${noteProblems.join("\n- ")}` };
     // The strict placement checks, on the snapshot's own guide and patch. The
     // snapshot format lets a file reference omit its summary (a shipped
     // fixture does); the authored form wants a string, so an absent one is "".
@@ -144,8 +190,55 @@ export function checkInboxGuide(input: { snapshot?: unknown; guide?: unknown; pa
     }
   }
   const overview = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>).overview : undefined;
-  if (overview === undefined) return { ok: true, snapshot: built.snapshot };
-  return withAuthoredOverview(built.snapshot, overview);
+  const withOverview = overview === undefined ? ({ ok: true, snapshot: built.snapshot } as const) : withAuthoredOverview(built.snapshot, overview);
+  if (!withOverview.ok) return withOverview;
+  const withDiagrams = withAuthoredChapterDiagrams(withOverview.snapshot, raw);
+  if (!withDiagrams.ok) return withDiagrams;
+  return keepNotes ? withAuthoredNotes(withDiagrams.snapshot, raw) : withDiagrams;
+}
+
+/** A snapshot with its notes left out, at the version it has without them (unchanged when it has none); null if that fails its parse. */
+function snapshotWithoutNotes(snapshot: GuideSnapshot): GuideSnapshot | null {
+  if (!snapshot.guide.sections.some((section) => section.diffs.some((ref) => ref.notes !== undefined))) return snapshot;
+  const guide = { ...snapshot.guide, sections: snapshot.guide.sections.map((section) => ({ ...section, diffs: section.diffs.map(({ notes: _notes, ...ref }) => ref) })) };
+  const parsed = parseGuideSnapshot({ ...snapshot, version: guideSnapshotVersionFor(guide), guide });
+  return parsed.ok ? parsed.value : null;
+}
+
+/**
+ * An authored guide's `sections[].diffs[].notes` (context notes, code review in the Inbox), on the snapshot built from
+ * it: each read and checked inside one hunk of its file (a refusal names the note), then the snapshot is version 4
+ * and parsed again by its own strict parser. A guide with no note is returned as it was.
+ */
+function withAuthoredNotes(snapshot: GuideSnapshot, raw: unknown): InboxGuideCheck {
+  const sections = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>).sections : undefined;
+  if (!Array.isArray(sections)) return { ok: true, snapshot };
+  const byFile = new Map<string, GuideDiffNote[]>();
+  const problems: string[] = [];
+  sections.forEach((section, i) => {
+    const diffs = section && typeof section === "object" ? (section as Record<string, unknown>).diffs : undefined;
+    if (!Array.isArray(diffs)) return;
+    diffs.forEach((ref, j) => {
+      const r = ref && typeof ref === "object" ? (ref as Record<string, unknown>) : {};
+      if (r.notes === undefined || typeof r.file !== "string") return;
+      const read = readGuideDiffNotes(r.notes, `sections[${i}].diffs[${j}].notes`);
+      problems.push(...read.problems);
+      if (read.notes.length > 0) byFile.set(r.file, read.notes);
+    });
+  });
+  if (problems.length > 0) return { ok: false, error: `Guide notes are not valid:\n- ${problems.join("\n- ")}` };
+  if (byFile.size === 0) return { ok: true, snapshot };
+  const guide = {
+    ...snapshot.guide,
+    sections: snapshot.guide.sections.map((section) => ({
+      ...section,
+      diffs: section.diffs.map((ref) => (byFile.has(ref.file) ? { ...ref, notes: byFile.get(ref.file)! } : ref)),
+    })),
+  };
+  const hunkProblems = checkGuideNotes(guide, snapshot.review.rawPatch);
+  if (hunkProblems.length > 0) return { ok: false, error: `Guide notes are not valid:\n- ${hunkProblems.join("\n- ")}` };
+  const parsed = parseGuideSnapshot({ ...snapshot, version: guideSnapshotVersionFor(guide), guide });
+  return parsed.ok ? { ok: true, snapshot: parsed.value } : { ok: false, error: `Invalid notes (${parsed.error.path}): ${parsed.error.message}` };
 }
 
 /** What is wrong with an overview's drawn (version-3) diagram, by Shape's rules and the patch's files, or null. */
@@ -156,11 +249,81 @@ function overviewDiagramProblem(diagram: GuideOverviewDiagram | undefined, rawPa
   return checked.ok ? null : `overview.diagram has problems:\n${checked.problems.map((p) => `  - ${p}`).join("\n")}`;
 }
 
+/** What is wrong with a chapter's html picture (version 5), by Shape's rules and the patch's files, or null. */
+function chapterDiagramProblem(snapshot: GuideSnapshot): string | null {
+  const files = parseDiffToFiles(snapshot.review.rawPatch).map((file) => file.path);
+  for (const [i, section] of snapshot.guide.sections.entries()) {
+    const diagram = section.diagram;
+    if (diagram?.kind !== "html") continue;
+    const checked = checkInboxDrawing(diagram, files, { withTitle: false });
+    if (!checked.ok) return `sections[${i}].diagram has problems:\n${checked.problems.map((p) => `  - ${p}`).join("\n")}`;
+  }
+  return null;
+}
+
+/**
+ * A diagram as the agent sent it, at `where` (`overview` or `sections[2]`): `{ kind: "mermaid", source }`, or an
+ * html drawing checked by Shape's rules and the patch's files (`source`, `css`, `width` and `height`, `tall`).
+ */
+function readAuthoredDiagram(input: unknown, where: string, files: readonly string[]): { ok: true; diagram: GuideOverviewDiagram } | { ok: false; error: string } {
+  const bad = (error: string) => ({ ok: false as const, error: `${where}: ${error}` });
+  const d = input as Record<string, unknown>;
+  if (!d || typeof d !== "object" || Array.isArray(d)) return bad('diagram must be { "kind": "html", "source", … } or { "kind": "mermaid", "source" }.');
+  if (d.kind === "mermaid") {
+    for (const key of Object.keys(d)) if (key !== "kind" && key !== "source") return bad(`diagram.${key}: a mermaid diagram is { kind, source }.`);
+    if (typeof d.source !== "string" || !d.source.trim()) return bad("diagram.source is empty.");
+    return { ok: true, diagram: { kind: "mermaid", source: d.source } };
+  }
+  const checked = checkInboxDrawing(d, files, { withTitle: false });
+  if (!checked.ok) return { ok: false, error: `${where}.diagram has problems:\n${checked.problems.map((p) => `  - ${p}`).join("\n")}` };
+  const v = checked.view;
+  return {
+    ok: true,
+    diagram: {
+      kind: "html",
+      source: v.html,
+      ...(v.css !== undefined && { css: v.css }),
+      ...(v.width !== undefined && v.height !== undefined && { width: v.width, height: v.height }),
+      ...(v.tall && { tall: { source: v.tall.html, ...(v.tall.css !== undefined && { css: v.tall.css }) } }),
+    },
+  };
+}
+
+/**
+ * An authored guide's `sections[].diagram` (a chapter's one diagram, code review in the Inbox), on the snapshot built
+ * from it: each read as the overview's is, then the snapshot is version 5 and parsed again by its own strict parser.
+ * A guide with no chapter diagram is returned as it was.
+ */
+function withAuthoredChapterDiagrams(snapshot: GuideSnapshot, raw: unknown): InboxGuideCheck {
+  const sections = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>).sections : undefined;
+  if (!Array.isArray(sections)) return { ok: true, snapshot };
+  const sent = sections.map((section) => (section && typeof section === "object" && !Array.isArray(section) ? (section as Record<string, unknown>).diagram : undefined));
+  if (sent.every((d) => d === undefined)) return { ok: true, snapshot };
+  // buildAuthoredGuideSnapshot keeps every section of a guide it accepts, in order.
+  if (sent.length !== snapshot.guide.sections.length) return { ok: false, error: "sections: a chapter's diagram could not be matched to its chapter." };
+  const files = parseDiffToFiles(snapshot.review.rawPatch).map((file) => file.path);
+  const diagrams: Array<GuideOverviewDiagram | undefined> = [];
+  for (const [i, d] of sent.entries()) {
+    if (d === undefined) {
+      diagrams.push(undefined);
+      continue;
+    }
+    const read = readAuthoredDiagram(d, `sections[${i}]`, files);
+    if (!read.ok) return read;
+    diagrams.push(read.diagram);
+  }
+  const guide = { ...snapshot.guide, sections: snapshot.guide.sections.map((section, i) => (diagrams[i] ? { ...section, diagram: diagrams[i] } : section)) };
+  const parsed = parseGuideSnapshot({ ...snapshot, version: guideSnapshotVersionFor(guide), guide });
+  return parsed.ok ? { ok: true, snapshot: parsed.value } : { ok: false, error: `Invalid chapter diagram (${parsed.error.path}): ${parsed.error.message}` };
+}
+
 /**
  * An authored guide's `overview: { text, diagram? }` (code review in the
  * Inbox), on the snapshot buildAuthoredGuideSnapshot built: version 2, or 3
  * for a drawn picture (`css`, `width` and `height`, `tall`), then parsed again
- * by the snapshot's own strict parser.
+ * by the snapshot's own strict parser. get_guide_brief no longer offers the
+ * overview's diagram (diagrams go in chapters); one sent by an older session
+ * is still taken.
  */
 function withAuthoredOverview(snapshot: GuideSnapshot, overview: unknown): InboxGuideCheck {
   const bad = (error: string): InboxGuideCheck => ({ ok: false, error: `overview: ${error}` });
@@ -170,25 +333,9 @@ function withAuthoredOverview(snapshot: GuideSnapshot, overview: unknown): Inbox
   if (typeof o.text !== "string" || !o.text.trim()) return bad("text must be a few sentences of markdown.");
   let diagram: GuideOverviewDiagram | undefined;
   if (o.diagram !== undefined) {
-    const d = o.diagram as Record<string, unknown>;
-    if (!d || typeof d !== "object" || Array.isArray(d)) return bad('diagram must be { "kind": "html", "source", … } or { "kind": "mermaid", "source" }.');
-    if (d.kind === "mermaid") {
-      for (const key of Object.keys(d)) if (key !== "kind" && key !== "source") return bad(`diagram.${key}: a mermaid diagram is { kind, source }.`);
-      if (typeof d.source !== "string" || !d.source.trim()) return bad("diagram.source is empty.");
-      diagram = { kind: "mermaid", source: d.source };
-    } else {
-      const files = parseDiffToFiles(snapshot.review.rawPatch).map((file) => file.path);
-      const checked = checkInboxDrawing(d, files, { withTitle: false });
-      if (!checked.ok) return { ok: false, error: `overview.diagram has problems:\n${checked.problems.map((p) => `  - ${p}`).join("\n")}` };
-      const v = checked.view;
-      diagram = {
-        kind: "html",
-        source: v.html,
-        ...(v.css !== undefined && { css: v.css }),
-        ...(v.width !== undefined && v.height !== undefined && { width: v.width, height: v.height }),
-        ...(v.tall && { tall: { source: v.tall.html, ...(v.tall.css !== undefined && { css: v.tall.css }) } }),
-      };
-    }
+    const read = readAuthoredDiagram(o.diagram, "overview", parseDiffToFiles(snapshot.review.rawPatch).map((file) => file.path));
+    if (!read.ok) return read;
+    diagram = read.diagram;
   }
   const { title, intent, overview: _old, sections, unplacedFiles, reviewed } = snapshot.guide;
   const next = {
@@ -216,7 +363,7 @@ export function inboxGuideInputHash(input: { snapshot?: unknown; guide?: unknown
  * asked for a verdict (submit_guide `review: true` while Code review is on); the record then carries `review` and the
  * chapter titles the review card lists.
  */
-export function describeInboxGuide(snapshot: GuideSnapshot, inputSha256: string, review = false): { text: string; ref: InboxGuideRef } {
+export function describeInboxGuide(snapshot: GuideSnapshot, inputSha256: string, review = false, walkthrough = false): { text: string; ref: InboxGuideRef } {
   const text = JSON.stringify(snapshot);
   const files = parseDiffToFiles(snapshot.review.rawPatch);
   const ref: InboxGuideRef = {
@@ -229,6 +376,7 @@ export function describeInboxGuide(snapshot: GuideSnapshot, inputSha256: string,
     additions: files.reduce((n, f) => n + f.additions, 0),
     deletions: files.reduce((n, f) => n + f.deletions, 0),
     ...(review ? { review: true as const, chapters: snapshot.guide.sections.map((section) => inboxReviewTitleLine(section.title)) } : {}),
+    ...(walkthrough ? { walkthrough: true as const } : {}),
   };
   // Reviews (approval "inbox-reviews-page") lists a review by where its changes came from.
   const source = review ? inboxReviewSourceOf(snapshot) : null;
@@ -419,30 +567,48 @@ export async function inboxGuideRoute(
 }
 
 /**
- * get_guide_brief's output_schema while Code review is on: the guide's, plus
- * an optional `overview: { text, diagram? }` (a drawing: `kind: "html"` with
- * source, css, width and height, tall; or `kind: "mermaid"` with source).
+ * get_guide_brief's output_schema while Code review is on (`shapeOn`: Shape's own switch, approval
+ * "code-review-029-shape-off"): the guide's, plus
+ * an optional `overview: { text }` and a chapter's optional `diagram` (a
+ * drawing: `kind: "html"` with source, css, width and height, tall; or
+ * `kind: "mermaid"` with source; with Shape off, Mermaid only). The overview's
+ * diagram is no longer offered (approval "guide-chapter-diagrams"); submit_guide still takes one.
+ * `diagrams` false (Chapter diagrams off): no `diagram` on a chapter either; submit_guide still takes one.
  */
-function guideSchemaWithOverview(): Record<string, unknown> {
+function guideSchemaWithOverview(shapeOn: boolean, diagrams = true): Record<string, unknown> {
   const schema = JSON.parse(GUIDE_SCHEMA_JSON) as { properties: Record<string, unknown> } & Record<string, unknown>;
+  // Context notes: a diff reference's optional `notes` (only this brief's copy; the review app's guide job keeps its schema).
+  const diffItem = (schema.properties.sections as { items: { properties: { diffs: { items: { properties: Record<string, unknown> } } } } }).items.properties.diffs.items;
+  diffItem.properties.notes = {
+    type: "array",
+    items: {
+      type: "object",
+      properties: { lineStart: { type: "integer" }, lineEnd: { type: "integer" }, side: { type: "string", enum: ["new", "old"] }, text: { type: "string" } },
+      required: ["lineStart", "lineEnd", "text"],
+      additionalProperties: false,
+    },
+  };
   const drawnSide = { type: "object", properties: { source: { type: "string" }, css: { type: "string" } }, required: ["source"], additionalProperties: false };
-  schema.properties.overview = {
+  if (diagrams) (schema.properties.sections as { items: { properties: Record<string, unknown> } }).items.properties.diagram = {
     type: "object",
-    properties: {
-      text: { type: "string" },
-      diagram: {
-        type: "object",
-        properties: {
-          kind: { enum: ["html", "mermaid"] },
+    // The html kind (a drawing by Shape's rules) only while Shape is on; Mermaid always (see inboxReviewChapterDiagramDoc).
+    properties: shapeOn
+      ? {
+          kind: { enum: ["mermaid", "html"] },
           source: { type: "string" },
           css: { type: "string" },
           width: { type: "integer", minimum: 200, maximum: 4000 },
           height: { type: "integer", minimum: 200, maximum: 4000 },
           tall: drawnSide,
-        },
-        required: ["kind", "source"],
-        additionalProperties: false,
-      },
+        }
+      : { kind: { enum: ["mermaid"] }, source: { type: "string" } },
+    required: ["kind", "source"],
+    additionalProperties: false,
+  };
+  schema.properties.overview = {
+    type: "object",
+    properties: {
+      text: { type: "string" },
     },
     required: ["text"],
     additionalProperties: false,
@@ -460,15 +626,20 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
       inputSchema: z.object({}).strict(),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async () =>
-      ok("The guided-review method, the guide's shape, how to read the diff, the rules and a worked submit_guide call.", {
+    async () => {
+      // Chapter diagrams off (Settings → Capabilities): the brief names no chapter diagram (rule and schema), nothing in its place.
+      const diagrams = context.chapterDiagramsOn?.() ?? true;
+      return ok("The guided-review method, the guide's shape, how to read the diff, the rules and a worked submit_guide call.", {
         methodology: GUIDE_REVIEW_PROMPT,
-        output_schema: context.codeReviewOn?.() ? guideSchemaWithOverview() : (JSON.parse(GUIDE_SCHEMA_JSON) as Record<string, unknown>),
+        output_schema: context.codeReviewOn?.() ? guideSchemaWithOverview(context.shapeOn?.() ?? false, diagrams) : (JSON.parse(GUIDE_SCHEMA_JSON) as Record<string, unknown>),
         diff_steps: GUIDE_DIFF_STEPS,
-        // Code review on (approval "shape-in-code-review", AGENT-TEXT §4, approved): the overview and its one drawing. Off: as before, byte for byte.
-        rules: context.codeReviewOn?.() ? [...GUIDE_RULES, INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC] : GUIDE_RULES,
-        example: GUIDE_BRIEF_EXAMPLE,
-      }),
+        // Code review on: a chapter's diagram (approval "guide-chapter-diagrams"), Mermaid always and Shape's html kind
+        // only while Shape is on too (approval "code-review-029-shape-off"). Off: as before, byte for byte.
+        // Context notes ride Code review's switch (approval "inbox-context-notes"): a rule, the schema's `notes` and an example note.
+        rules: context.codeReviewOn?.() ? [...GUIDE_RULES, ...(diagrams ? [inboxReviewChapterDiagramDoc(context.shapeOn?.() ?? false)] : []), INBOX_REVIEW_NOTES_RULE] : GUIDE_RULES,
+        example: context.codeReviewOn?.() ? GUIDE_BRIEF_EXAMPLE_WITH_NOTE : GUIDE_BRIEF_EXAMPLE,
+      });
+    },
   );
 
   server.registerTool(
@@ -481,7 +652,13 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
           guide: z
             .union([z.record(z.string(), z.unknown()), z.string()])
             .optional()
-            .describe("The guide: { title, intent, sections: [{ title, overview, diffs: [{ file, summary }] }], unplacedFiles?, review?: { gitRef, base }, source?, generator? } (get_guide_brief's output_schema), as an object or its JSON."),
+            .describe(
+              context.codeReviewOn?.()
+                ? context.chapterDiagramsOn?.() === false
+                  ? INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES_NO_DIAGRAM
+                  : INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES
+                : INBOX_GUIDE_FIELD_DESCRIPTION,
+            ),
           patch: z.string().optional().describe("The exact unified diff the guide describes (get_guide_brief's diff_steps)."),
           snapshot: z
             .union([z.record(z.string(), z.unknown()), z.string()])
@@ -489,7 +666,7 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
             .describe("Instead of guide and patch: a complete Plannotator guide snapshot, as an object or its JSON."),
           body: z.string().optional().describe("Your note above the card, markdown. Default: the guide's intent."),
           // Code review (approval "inbox-code-review-direction"): listed only while the person has it on.
-          ...(context.codeReviewOn?.() ? { review: z.boolean().optional().describe(INBOX_REVIEW_FIELD_DESCRIPTION) } : {}),
+          ...(context.codeReviewOn?.() ? { review: z.boolean().optional().describe(INBOX_REVIEW_FIELD_DESCRIPTION), walkthrough: z.boolean().optional().describe(INBOX_WALKTHROUGH_FIELD_DESCRIPTION) } : {}),
           ...SEND_ROUTING_FIELDS,
         })
         .strict(),
@@ -498,13 +675,26 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
     async (input, ctx) =>
       guarded(async () => {
         const project = await sendProject(context, input);
-        const checked = checkInboxGuide(input, project.root, { codeReview: context.codeReviewOn?.() ?? false });
+        // A walkthrough: asked for here, or any guide in a thread the New review box started as one, so a real agent's
+        // own patch (or an empty one) can't turn it back into a diff, and the verdict stays away. Only while Code review
+        // is on (the owner: a walkthrough is part of code review): off, the field means nothing and no text names it.
+        const codeReviewOn = !!context.codeReviewOn?.();
+        const replyThread = input.reply_to ? context.store.message(input.reply_to)?.thread_id : null;
+        const walkthrough = codeReviewOn && ((input as { walkthrough?: boolean }).walkthrough === true || (!!replyThread && !!context.walkthroughThread?.(replyThread)));
+        let submitted: { snapshot?: unknown; guide?: unknown; patch?: string } = input;
+        if (walkthrough && input.snapshot === undefined && input.guide !== undefined) {
+          const read = readInboxWalkthrough(input.guide, [callerWorkingFolder(ctx), input.project_path, project.root].filter((folder): folder is string => !!folder && isAbsolute(folder)));
+          if (!read.ok) throw new InboxError("invalid_guide", read.error);
+          submitted = { guide: read.guide, patch: read.patch };
+        }
+        const review = (input as { review?: boolean }).review === true || walkthrough;
+        // Notes ride only a review: a plain guided review's are left out (only the review draws them).
+        const checked = checkInboxGuide(submitted, project.root, { codeReview: context.codeReviewOn?.() ?? false, review });
         if (!checked.ok) throw new InboxError("invalid_guide", checked.error);
         // `review` exists only while Code review is on (the schema above); a session that listed it before the
         // switch went off is refused here rather than sending a review the window would not draw.
-        const review = (input as { review?: boolean }).review === true;
         if (review && !context.codeReviewOn?.()) throw new InboxError("code_review_off", "Code review is off in this Inbox (Settings → Capabilities): send the guide without `review`.");
-        const described = describeInboxGuide(checked.snapshot, inboxGuideInputHash(input), review);
+        const described = describeInboxGuide(checked.snapshot, inboxGuideInputHash(input), review, walkthrough);
         const body = input.body?.trim() ? input.body : checked.snapshot.guide.intent;
         // A reply never gets the default: its only subject is one the agent gives (it may name a thread the person started).
         // The default is made one line here (displayInboxSubject), so the guide's own title can never fail the subject check.
@@ -518,7 +708,7 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
         if (!sent.replayed) writeBlob(context.store.dir, described.ref.sha256, Buffer.from(described.text, "utf8"));
         const guide = context.store.message(String(sent.structured.message_id))?.guide ?? described.ref;
         return ok(
-          `${sent.replayed ? "Already sent" : "Sent"} the ${guide.review ? "review" : "guided review"} "${guide.title}" (${guide.sections} section${guide.sections === 1 ? "" : "s"}, ${guide.files} file${guide.files === 1 ? "" : "s"}) to the Plannotator Inbox (thread ${sent.structured.thread_id}, ${sent.structured.url}).${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host)}${imagesNotShownText(sent.imagesNotShown)}${noStakesText(sent.noStakes)}${recommendedInLabelText(sent.recommendedInLabel)}${questionOpenersWithTextText(sent.questionOpenersWithText)}`,
+          `${sent.replayed ? "Already sent" : "Sent"} the ${guide.review ? "review" : "guided review"} "${guide.title}" (${guide.sections} section${guide.sections === 1 ? "" : "s"}, ${guide.files} file${guide.files === 1 ? "" : "s"}) to the Plannotator Inbox (thread ${sent.structured.thread_id}, ${sent.structured.url}).${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host)}${imagesNotShownText(sent.imagesNotShown)}${noStakesText(sent.noStakes)}${recommendedInLabelText(sent.recommendedInLabel)}${questionsToCheckText(String(sent.structured.message_id), sent.questionsToCheck)}${questionOpenersWithTextText(sent.questionOpenersWithText)}`,
           { ...sent.structured, guide },
         );
       }),

@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { PatchDiff } from '@pierre/diffs/react';
 import type { CodeAnnotation } from '../../types';
 import { CodeFileView, type CodeFileAnnotationInput, type CodeFileTokenTarget } from '../CodeFilePopout';
+import type { CommentExtraAction } from '../CommentPopover';
 import { useTheme } from '../ThemeProvider';
 import type { ShapeVersion } from '@plannotator/core/shape';
 import type { ShapeCodeGuideProps, ShapeCodeHoverCardProps, ShapeCodeHoverRequest } from './types';
@@ -56,6 +57,7 @@ export function ShapeCode({
   annotations,
   onComment,
   onAsk,
+  lineAction,
   generalComment,
   phone,
   fileAction,
@@ -72,6 +74,8 @@ export function ShapeCode({
   annotations: CodeAnnotation[];
   onComment: (input: CodeFileAnnotationInput) => void;
   onAsk: (input: CodeFileAnnotationInput) => void;
+  /** The box's third action on these lines (Show me). */
+  lineAction?: (lines: { filePath: string; lineStart: number; lineEnd: number }) => CommentExtraAction | undefined;
   /** The Code view's own "Global comment" (on the whole guide). */
   generalComment: React.ReactNode;
   phone: boolean;
@@ -107,6 +111,7 @@ export function ShapeCode({
           annotations={annotations}
           onComment={onComment}
           onAsk={onAsk}
+          lineAction={lineAction}
           phone={phone}
           fileAction={fileAction}
         />
@@ -128,6 +133,7 @@ function WholeFile({
   annotations,
   onComment,
   onAsk,
+  lineAction,
   phone,
   fileAction,
 }: {
@@ -141,6 +147,7 @@ function WholeFile({
   annotations: CodeAnnotation[];
   onComment: (input: CodeFileAnnotationInput) => void;
   onAsk: (input: CodeFileAnnotationInput) => void;
+  lineAction?: (lines: { filePath: string; lineStart: number; lineEnd: number }) => CommentExtraAction | undefined;
   phone: boolean;
   fileAction?: (file: { path: string; line?: number }) => React.ReactNode;
 }) {
@@ -226,6 +233,7 @@ function WholeFile({
               onAskAnnotation={onAsk}
               commentSubmitLabel="Change it"
               commentAskLabel="Ask"
+              commentExtraAction={lineAction}
               revealLine={{ line: file.line, token: file.token }}
               onTokenTarget={codeHover && CodeHoverCard ? onToken : undefined}
             />

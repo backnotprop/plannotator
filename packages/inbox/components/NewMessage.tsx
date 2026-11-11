@@ -226,7 +226,7 @@ export function NewMessagePopover({
             onFocus={() => setActive(index)}
             onClick={() => onPick(session)}
           >
-            <HostMark host={session.host} />
+            <HostMark host={session.host} agent={session.session} />
             <span>
               <span className="ib-t">Started {whenTime(session.started_at)}</span>
               <span className="ib-d">{sessionWords(session)}</span>

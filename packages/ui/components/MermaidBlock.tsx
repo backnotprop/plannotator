@@ -23,5 +23,8 @@ export const MermaidBlock = React.memo(
     prev.onSelectAnnotation === next.onSelectAnnotation &&
     prev.onAddAnnotation === next.onAddAnnotation &&
     prev.readOnly === next.readOnly &&
-    prev.onRestoreReport === next.onRestoreReport,
+    prev.sourceOnError === next.sourceOnError &&
+    prev.onRestoreReport === next.onRestoreReport &&
+    prev.reopenComment === next.reopenComment &&
+    prev.onComposerAnchor === next.onComposerAnchor,
 );

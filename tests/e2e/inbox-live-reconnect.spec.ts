@@ -20,6 +20,10 @@
  * - Healthy: for about 30 s with nothing written, the note never shows, the
  *   list and the open thread are not read again and the stream is not opened
  *   again.
+ * - The first list read fails as the page loads (dropped once), alone and
+ *   with a thread link: the list comes by itself, the stream opens, and what
+ *   an agent writes next shows. The build before the retry never opens its
+ *   stream after that failure (firstListRead.ts).
  * - Shots (PLANNOTATOR_LIVE_RECONNECT_SHOTS, a folder): the list with the note
  *   (1440 by 900 at 2x, light and dark; a phone, 390 by 844 at 3x) and the
  *   healthy list.
@@ -287,6 +291,43 @@ test('healthy for about 30 s: the note never shows, nothing is read again, the s
   await expect(note(page)).toHaveCount(0);
   // The stream was alive throughout: the window's heartbeat came every 10 s.
   expect(world.proxy.heartbeats - beats).toBeGreaterThanOrEqual(3);
+});
+
+/** The page's first read of the list is dropped once (a connection reset as the page loads); every later one goes through. Answers the reads so far. */
+async function dropFirstListRead(page: Page): Promise<() => number> {
+  let reads = 0;
+  await page.route(/\/api\/inbox\/threads\?/, (route) => (reads++ === 0 ? route.abort('connectionreset') : route.continue()));
+  return () => reads;
+}
+
+test('the first list read fails as the page loads: the list comes by itself and a new thread is announced, with no reload', async ({ page }) => {
+  test.setTimeout(60_000);
+  const reads = await dropFirstListRead(page);
+  await page.goto(pageUrl());
+  // Read again by itself (firstListRead.ts): the rows are on screen within the first waits.
+  await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible({ timeout: 10_000 });
+  expect(reads()).toBeGreaterThanOrEqual(2);
+  // And the page listens from then on: its stream is open, and an agent's new thread waits behind the list's notice.
+  await expect.poll(() => world.proxy.openStreams, { timeout: 10_000 }).toBeGreaterThanOrEqual(1);
+  await agentStarts('Pager rota for the rollout');
+  await expect(page.locator('[data-inbox-notice]')).toBeVisible({ timeout: 5_000 });
+});
+
+test('a thread link whose first list read fails: the page still listens, and the agent\'s next message shows in the open thread', async ({ page }) => {
+  test.setTimeout(60_000);
+  const threadId = await agentStarts('Canary checklist for the worker');
+  const reads = await dropFirstListRead(page);
+  await page.goto(`${pageUrl()}#thread=${threadId}`);
+  // The thread's own read lands, and its look reads the list: the page looks whole either way.
+  const pane = page.locator('section.ib-pane');
+  await expect(pane.locator('h2.ib-subject')).toContainText('Canary checklist for the worker');
+  await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible({ timeout: 10_000 });
+  expect(reads()).toBeGreaterThanOrEqual(2);
+  // Before the retry the page never opened its stream here, and nothing an agent wrote reached it until a reload.
+  await expect.poll(() => world.proxy.openStreams, { timeout: 10_000 }).toBeGreaterThanOrEqual(1);
+  const body = `Step one is done; the canary holds (${Date.now()}).`;
+  await world.agent.send({ project_path: world.path, reply_to: threadId, body } as Parameters<SimAgent['send']>[0]);
+  await expect(pane.getByText(body)).toBeVisible({ timeout: 5_000 });
 });
 
 test('shots: the list with "Reconnecting…" (light, dark, a phone) and the healthy list', async ({ browser }) => {

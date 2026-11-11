@@ -22,11 +22,12 @@ import {
 import { AnnotationType, type Annotation, type Block, type CodeAnnotation, type ImageAttachment } from '@plannotator/ui/types';
 import { diagramDocumentBlocks, exportLinkedDocAnnotations, parseMarkdownToBlocks, quickLabelTipLine } from '@plannotator/ui/utils/parser';
 import { whenTime } from './format';
+import type { PrototypeNames } from './prototypes';
 
 /** Plannotator's blocks for a file: one diagram block for a diagram source, one code block for code, the markdown pipeline for text, none for HTML or a binary kind. */
 export function attachmentBlocks(kindValue: InboxAttachmentKind | string, text: string, name: string): Block[] {
   const kind = readInboxAttachmentKind(kindValue);
-  if (kind === 'html' || kind === 'image' || kind === 'video' || kind === 'pdf' || kind === 'file') return [];
+  if (kind === 'html' || kind === 'image' || kind === 'video' || kind === 'audio' || kind === 'pdf' || kind === 'file') return [];
   if (kind === 'mermaid' || kind === 'graphviz') return diagramDocumentBlocks(text, kind);
   if (kind === 'code') return codeDocumentBlocks(text, name);
   return parseMarkdownToBlocks(text, shouldStripFrontmatter(name) ? undefined : { frontmatter: false });
@@ -150,9 +151,10 @@ export function attachmentImageUrl(attachment: Pick<InboxAttachmentState, 'id'>,
   return inboxUrl(`/attachments/${encodeURIComponent(attachment.id)}/image${version === 'sent' ? '?version=sent' : ''}`, undefined, machineOf(attachment.id));
 }
 
-/** A video's bytes for `<video src>` (HTTP Range, by id only). */
-export function attachmentVideoUrl(attachment: Pick<InboxAttachmentState, 'id'>, version: 'current' | 'sent' = 'current'): string {
-  return inboxUrl(`/attachments/${encodeURIComponent(attachment.id)}/video${version === 'sent' ? '?version=sent' : ''}`, undefined, machineOf(attachment.id));
+/** A video's bytes for `<video src>`, a recording's for `<audio src>` (its `audio` route, by its kind): HTTP Range, by id only. */
+export function attachmentVideoUrl(attachment: Pick<InboxAttachmentState, 'id'> & { kind?: unknown }, version: 'current' | 'sent' = 'current'): string {
+  const route = readInboxAttachmentKind(attachment.kind) === 'audio' ? 'audio' : 'video';
+  return inboxUrl(`/attachments/${encodeURIComponent(attachment.id)}/${route}${version === 'sent' ? '?version=sent' : ''}`, undefined, machineOf(attachment.id));
 }
 
 export function attachmentDownloadUrl(attachment: Pick<InboxAttachmentState, 'id'>, version: 'current' | 'sent' = 'current'): string {
@@ -557,7 +559,46 @@ export function isMessageComment(record: InboxAnnotationRecord): boolean {
 
 /** A comment on a file (not a guided review's diff, not a message's text): what the file viewers list. */
 export function isFileComment(record: InboxAnnotationRecord): boolean {
-  return !record.guide && !record.message;
+  return !record.guide && !record.message && !record.live;
+}
+
+/** The heading of comments on running apps (a question's prototypes), and what each section is ("this site"). */
+export const LIVE_SITE_FEEDBACK_HEADING = {
+  title: 'Feedback on your running app',
+  intro:
+    "The following feedback is on the running app your question's options named as prototypes, made on the live pages through Plannotator's local proxy, one section per prototype. Each comment names the page it was made on and the element it is on.",
+  subject: 'site',
+};
+
+/**
+ * Comments on running apps as the feedback text a Send carries: one section
+ * per site, named for the option whose prototype it is when `names` knows it
+ * (`## Prototype of "B · Total first": http://localhost:5173/checkout`), else
+ * by its address (`## http://localhost:5173/ (live site)`), the entries
+ * grouped by page (`### Page: /settings`) by the shared renderer in the order
+ * they were made, each with the element's context block (selector, path,
+ * role, name, text, a collapsed outline) as annotate's live export prints
+ * it. The page is the one the store kept (`live.page_url`); a comment on the
+ * whole site has none.
+ */
+export function liveSiteFeedback(records: readonly InboxAnnotationRecord[], names?: PrototypeNames): string {
+  const live = records
+    .filter((record) => record.live)
+    .sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+  if (live.length === 0) return '';
+  const groups = new Map<string, { annotations: Annotation[]; globalAttachments: []; blocks: Block[] }>();
+  for (const record of live) {
+    const named = names?.sites.get(record.live!.site_id);
+    const label = named ? `${named}: ${record.live!.url}` : `${record.live!.url} (live site)`;
+    const group = groups.get(label) ?? { annotations: [], globalAttachments: [], blocks: [] };
+    // Never a client's `exportLocation` or page: the page is the store's.
+    const { exportLocation: _stored, pageUrl: _page, ...annotation } = annotationOf(record) as Annotation & { exportLocation?: unknown };
+    // Comments keep the order they were made in (the exporter orders a section by offset).
+    const index = group.annotations.length;
+    group.annotations.push({ ...annotation, startOffset: index, endOffset: index, ...(record.live!.page_url ? { pageUrl: record.live!.page_url } : {}) } as Annotation);
+    groups.set(label, group);
+  }
+  return exportLinkedDocAnnotations(groups, LIVE_SITE_FEEDBACK_HEADING).trim();
 }
 
 export const MESSAGE_FEEDBACK_HEADING = {
@@ -696,6 +737,11 @@ export function attachmentFeedback(
      * which comment carried a tag ("Tagged Pi"). Absent: tags are not named.
      */
     tagNames?: (ids: readonly string[]) => string[];
+    /**
+     * The names of the thread's prototypes (prototypes.ts `prototypeNames`): a comment on one is filed under the
+     * option it shows ("Prototype of "B · Total first": proto/b.html"), not only its address. Absent: by address.
+     */
+    prototypeNames?: PrototypeNames;
   } = {},
 ): string {
   if (records.length === 0) return '';
@@ -704,7 +750,7 @@ export function attachmentFeedback(
   const groups = new Map<string, { annotations: Annotation[]; markdown?: string; blocks: Block[]; video?: { durationMs?: number } }>();
   for (const record of records) {
     // Comments on a guided review's diff go in their own section, after the files'; a message's text has its own, before them.
-    if (record.guide || record.message) continue;
+    if (record.guide || record.message || record.live) continue;
     const attachment = attachments.find((a) => a.id === record.attachment_id) ?? attachments.find((a) => a.path === record.path);
     const sent = record.version !== 'current';
     if (!attachment) {
@@ -720,7 +766,9 @@ export function attachmentFeedback(
     if (attachment.ref !== undefined) inlineImages = true;
     const mine = attachment.ref !== undefined && options.personMessageIds?.has(attachment.message_id) === true;
     const sentLabel = attachment.captured === 'on_open' ? SENT_VERSION_SUFFIX.firstSaw : mine ? SENT_VERSION_SUFFIX.mine : SENT_VERSION_SUFFIX.yours;
-    const label = `${exportFileLabel(attachment, projectRoot, attachments, mine)}${sent ? sentLabel : ''}`;
+    const fileLabel = `${exportFileLabel(attachment, projectRoot, attachments, mine)}${sent ? sentLabel : ''}`;
+    const prototype = options.prototypeNames?.attachments.get(attachment.id);
+    const label = prototype ? `${prototype}: ${fileLabel}` : fileLabel;
     let group = groups.get(label);
     if (!group) {
       const text = texts.get(`${attachment.id}\0${record.version}`) ?? '';
@@ -729,7 +777,8 @@ export function attachmentFeedback(
       group = {
         annotations: [],
         blocks: kind === 'code' ? [] : attachmentBlocks(kind, text, attachment.name),
-        ...(kind === 'video' ? { video: { durationMs: attachment.duration_ms } } : {}),
+        // A video's or a recording's comments are at moments.
+        ...(kind === 'video' || kind === 'audio' ? { video: { durationMs: attachment.duration_ms } } : {}),
       };
       groups.set(label, group);
     }
@@ -740,7 +789,7 @@ export function attachmentFeedback(
   for (const group of groups.values()) {
     const code = codeCommentBlocks(group.annotations);
     if (code.length > 0) group.blocks = [...group.blocks, ...code];
-    // A video's comments go by the moment they are at, each with its "At 1:42 (102.4 s of 7:41)" line.
+    // A video's (and a recording's) comments go by the moment they are at, each with its "At 1:42 (102.4 s of 7:41)" line.
     // Export copies only: the exporter orders same-block entries by offset, and prints `exportLocation`.
     if (group.video) {
       const durationMs = group.video.durationMs;
@@ -765,5 +814,5 @@ export function attachmentFeedback(
   }
   const entries = new Map([...groups].map(([label, group]) => [label, { annotations: group.annotations, globalAttachments: [], blocks: group.blocks }]));
   const files = records.some(isFileComment) ? exportLinkedDocAnnotations(entries, inlineImages ? ATTACHMENT_AND_IMAGE_FEEDBACK_HEADING : ATTACHMENT_FEEDBACK_HEADING).trim() : '';
-  return [messages, files, guideFeedback(records)].filter(Boolean).join('\n\n');
+  return [messages, files, liveSiteFeedback(records, options.prototypeNames), guideFeedback(records)].filter(Boolean).join('\n\n');
 }

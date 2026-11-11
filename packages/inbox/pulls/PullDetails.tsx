@@ -12,6 +12,7 @@ import { Tip } from '../components/Tip';
 import { relativeTime, relativeWords } from '../relativeTime';
 import { forgeBody } from './descriptionLinks';
 import { ForgeMarkdown, PullDescription } from './PullDescription';
+import { Face } from './Face';
 
 /**
  * The details of one PR, read again when `stamp` moves or `retry` asks (the server keeps them a minute); a failure says
@@ -57,9 +58,8 @@ function useReached(at: number | null): boolean {
 
 const REVIEW_WORDS: Record<InboxPullReviewState, string> = { approved: 'Approved', changes: 'Changes requested', commented: 'Commented', waiting: 'Waiting' };
 const REVIEW_ORDER: InboxPullReviewState[] = ['changes', 'approved', 'commented', 'waiting'];
-const DELETED = 'A deleted account';
-const initial = (login: string) => (login.includes('/') ? login.split('/')[1]! : login).replace(/\[bot\]$/, '').slice(0, 1).toUpperCase();
-const shortName = (login: string) => login.replace(/\[bot\]$/, '');
+export const DELETED = 'A deleted account';
+export const shortName = (login: string) => login.replace(/\[bot\]$/, '');
 const checkName = (check: InboxPullCheck) => (check.workflow ? `${check.workflow} / ${check.name}` : check.name);
 /** A bot that only commented says nothing about where the review stands: it follows the people who were asked. */
 const quietBot = (r: InboxPullReviewer) => !!r.bot && r.state === 'commented';
@@ -78,42 +78,6 @@ export function reviewWords(all: readonly InboxPullReviewer[]) {
   if (reviewers.some((r) => r.state === 'changes')) return 'Changes requested';
   const approved = reviewers.filter((r) => r.state === 'approved').length;
   return approved ? `${approved} approved` : reviewers.some((r) => r.state === 'commented') ? 'Commented' : 'Waiting';
-}
-
-/**
- * A person's picture, round: the initial while it loads and when it cannot, a grey person for a deleted account. An app
- * or a team is a soft square, as on the forge; a team has no picture to ask for.
- */
-function Face({ login, host, size, bot, team, state }: { login: string; host: string; size: number; bot?: boolean; team?: boolean; state?: InboxPullReviewState }) {
-  const [shown, setShown] = useState(false);
-  const [failed, setFailed] = useState(false);
-  const isTeam = team || login.includes('/');
-  const square = bot || isTeam || login.endsWith('[bot]');
-  return (
-    <span className="ib-prd-face" data-square={square ? '' : undefined} data-gone={login ? undefined : ''} style={{ width: size, height: size, fontSize: Math.round(size * 0.42) }} aria-hidden="true">
-      <span className="ib-prd-pic">
-        {!login ? <Icon name="user" size={Math.round(size * 0.6)} /> : !shown && initial(login)}
-        {login && !isTeam && !failed && (
-          <img
-            src={inboxApi.pullAvatarUrl(host, login)}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            referrerPolicy="no-referrer"
-            draggable={false}
-            data-shown={shown ? '' : undefined}
-            onLoad={(event) => (event.currentTarget.naturalWidth > 1 ? setShown(true) : setFailed(true))}
-            onError={() => setFailed(true)}
-          />
-        )}
-      </span>
-      {state && state !== 'waiting' && (
-        <span className="ib-prd-pip" data-state={state}>
-          <Icon name={state === 'approved' ? 'check' : state === 'changes' ? 'x' : 'comment'} size={8} />
-        </span>
-      )}
-    </span>
-  );
 }
 
 const CheckMark = ({ state, quiet }: { state: InboxPullCheckState; quiet?: boolean }) =>
@@ -139,6 +103,57 @@ export function DetailsStatus({ data }: { data: InboxPullDetailsAnswer | null })
         </span>
       )}
     </>
+  );
+}
+
+/**
+ * Whether the bar keeps its Details button beside the PR's title. The title opens the details either way (the owner's
+ * suggestion); with no button, the title carries the button's status (the checks' dot and the people's comments). The
+ * owner chose the title only (approval "inbox-review-details-panel", addendum "title only").
+ */
+export const DETAILS_BUTTON: boolean = false;
+
+/** The bar's Details button, while `DETAILS_BUTTON` keeps it. */
+export function DetailsButton({ open, data, onToggle }: { open: boolean; data: InboxPullDetailsAnswer | null; onToggle: (event: React.MouseEvent<HTMLElement>) => void }) {
+  if (!DETAILS_BUTTON) return null;
+  return (
+    <Tip content="Description, comments, checks and reviewers">
+      <button type="button" className={`ib-prp-dbtn${open ? ' ib-on' : ''}`} aria-expanded={open} onClick={onToggle} data-pull-details-button="">
+        Details
+        <DetailsStatus data={data} />
+      </button>
+    </Tip>
+  );
+}
+
+/**
+ * The bar's title as the way to the details: `name` is its visible words, the button's name starts with them and says
+ * what a click does, and so does the last line of its tip. With no Details button, the status rides at its end.
+ */
+export function DetailsTitle({ name, tip, open, data, onToggle, className, children, ...rest }: {
+  name: string;
+  tip: ReactNode;
+  open: boolean;
+  data: InboxPullDetailsAnswer | null;
+  onToggle: (event: React.MouseEvent<HTMLElement>) => void;
+  className: string;
+  children: ReactNode;
+  [data: `data-${string}`]: string;
+}) {
+  return (
+    <Tip
+      content={
+        <span className="ib-tip-proj">
+          {tip}
+          <span className="ib-tip-sub" data-pull-details-hint="">{open ? 'Click to close Details' : 'Click for Details: description, comments, checks and reviewers'}</span>
+        </span>
+      }
+    >
+      <button type="button" className={`${className} ib-dtitle${open ? ' ib-on' : ''}`} aria-expanded={open} aria-label={`${name}, opens details`} onClick={onToggle} data-pull-details-title="" {...rest}>
+        {children}
+        {!DETAILS_BUTTON && <DetailsStatus data={data} />}
+      </button>
+    </Tip>
   );
 }
 
@@ -330,7 +345,7 @@ function CommentCard({ comment, layer, onFile }: { comment: InboxPullDetailComme
   );
 }
 
-export function PullDetails({ layer, description, headSha, data, failed, heldUntil = null, onRetry, forge, panel, phone, inDiff, onClose, onFile, top, keys, headless = false }: {
+export function PullDetails({ layer, description, headSha, data, failed, heldUntil = null, onRetry, forge, panel, phone, inDiff, onClose, onFile, top, keys, descriptionUnread = false, headless = false }: {
   layer: InboxPull;
   description: string | null | undefined;
   headSha?: string | null;
@@ -349,6 +364,8 @@ export function PullDetails({ layer, description, headSha, data, failed, heldUnt
   /** The phone's sheet: the stack above the details. */
   top?: ReactNode;
   keys?: Record<string, unknown>;
+  /** The description has no other source than the details' read (the full review), and it failed: whether there is one is not known. */
+  descriptionUnread?: boolean;
   /** Laid in a page that already names the author, the branches and the forge (the launchpad): no head of its own, no Close. */
   headless?: boolean;
 }) {
@@ -389,14 +406,14 @@ export function PullDetails({ layer, description, headSha, data, failed, heldUnt
       <button type="button" className="ib-prd-more" onClick={onRetry}>Try again</button>
     </p>
   );
-  const reading = words ? <PullDescription markdown={words} layer={layer} headSha={headSha} /> : data || failed ? <p className="ib-prd-none">No description.</p> : null;
+  const reading = words ? <PullDescription markdown={words} layer={layer} headSha={headSha} /> : data || (failed && !descriptionUnread) ? <p className="ib-prd-none">No description.</p> : null;
   // Held, Try again waits for the time it names: before it, a click could only be refused again.
   const canRetry = useReached(heldUntil);
   const failedNote = failed && (
     <p className="ib-prd-none" role="status" data-pull-details-failed={heldUntil ? 'held' : ''}>
       {heldUntil
         ? `${layer.host} asked to slow down.${canRetry ? '' : ` Try again after ${new Date(heldUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`}`
-        : `${forge} did not answer about the reviewers and checks.`}{' '}
+        : `${forge} did not answer about the ${descriptionUnread ? 'description, ' : ''}reviewers and checks.`}{' '}
       {canRetry && <button type="button" className="ib-prd-more" onClick={onRetry}>Try again</button>}
     </p>
   );

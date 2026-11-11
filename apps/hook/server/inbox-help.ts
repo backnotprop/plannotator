@@ -21,6 +21,7 @@
  * the platform.
  */
 
+import { INBOX_ROWS_HELP_SECTION } from "@plannotator/core/inbox-types";
 import { INBOX_CARD_ACTION_ON, INBOX_CARD_INITIATIVE_FIELD, INBOX_CARD_INITIATIVE_RULE, INBOX_CODEX_QUEUE_MIN_VERSION, INBOX_QWEN_WAKE_MIN_VERSION, INBOX_SECTIONS, INBOX_THREAD_NAME_MAX, inboxToolCostText, type InboxSectionId } from "@plannotator/core/inbox-types";
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
 import { INBOX_SET_ASIDE_HEADING } from "@plannotator/core/inbox-questions";
@@ -28,17 +29,17 @@ import { INBOX_SNOOZE_MAX_DAYS } from "@plannotator/core/inbox-snooze";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_ACTIONS_HEADING } from "@plannotator/core/inbox-actions";
 import { HARNESSES, harnessPanel, shellLine, type ConnectContext, type Harness } from "@plannotator/inbox/harnesses";
 import { join } from "node:path";
-import { INBOX_CONTRACT_EXAMPLE, INBOX_MCP_TOOLS, inboxServedTools } from "@plannotator/server/inbox-mcp";
+import { INBOX_CONTRACT_EXAMPLE, INBOX_MCP_TOOLS, INBOX_TRADEOFFS_EXAMPLE, inboxServedTools } from "@plannotator/server/inbox-mcp";
 import { INBOX_BODY_CUT_BYTES, INBOX_EARLIER_PERSON_BYTES, INBOX_THREAD_WINDOW, sizeText } from "@plannotator/server/inbox-mcp-read";
 import { INBOX_AGENT_SEARCH_LIMIT } from "@plannotator/server/inbox-mcp-search";
 import { INBOX_TOOL_DEFAULTS, INBOX_TOOL_HOSTS } from "@plannotator/shared/config";
-import { INBOX_STEPS_LEAD } from "@plannotator/shared/inbox/connection";
-import { INBOX_REVIEW_FIELD_DESCRIPTION } from "@plannotator/core/inbox-review";
+import { INBOX_PULLS_FIELD_DESCRIPTION, INBOX_STEPS_LEAD, INBOX_STEPS_START_WAKE_LINE } from "@plannotator/shared/inbox/connection";
+import { INBOX_REVIEW_FIELD_DESCRIPTION, INBOX_WALKTHROUGH_FIELD_DESCRIPTION } from "@plannotator/core/inbox-review";
 import { INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_FILLED_ARGUMENTS, INBOX_FOLLOW_THROUGH_RULE, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_SUBAGENT_RULE, INBOX_TAGGED_INSTRUCTION, INBOX_THREAD_RULE, INBOX_TOOL_NAME, inboxReaskInstruction } from "@plannotator/shared/inbox/connection";
 import { INBOX_CALL_ACTIONS, INBOX_COMMAND_USAGE } from "./cli";
 import { createAgentEnvironment, displayPath, type AgentEnvironment } from "@plannotator/server/inbox-agents";
 import { noteTarget } from "@plannotator/server/inbox-agent-notes";
-import { INBOX_AGENT_LABELS, INBOX_NOTE_AGENT_IDS } from "@plannotator/core/inbox-types";
+import { INBOX_AGENT_LABELS, INBOX_NOTE_AGENT_IDS, INBOX_NOTE_AUTO_AGENT_IDS } from "@plannotator/core/inbox-types";
 
 export type InboxMcpToolName = (typeof INBOX_MCP_TOOLS)[number];
 
@@ -98,7 +99,7 @@ export const INBOX_HELP_CODE_EXAMPLES = ["run.sh", "build.mjs", "app.ts", "main.
 /** One block per MCP tool, in INBOX_MCP_TOOLS order. */
 export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
   send_message: {
-    args: ["body", "subject", "thread", "reply_to", "supersedes", "done", "attachments", "idempotency_key"],
+    args: ["body", "subject", "thread", "reply_to", "supersedes", "done", "attachments", "pulls", "idempotency_key"],
     lines: [
       "Post a markdown message to the person. `body` is required; question blocks in it render as answerable cards (see \"Asking the reviewer questions\").",
       "- `subject`: used when the message starts a thread; one line of plain text (a line break or leaked tool-call text such as `</subject>` is refused with `validation_error`). Default: the first question's prompt, else the first line.",
@@ -107,6 +108,7 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
       "- `supersedes`: earlier questions of the thread this message lands in that no longer apply, so the person can no longer answer them: `\"<message id>/<key>\"` for one question (read_thread gives each question's `key`) or `\"<message id>\"` for every open question of that message. With exactly one question in this message, it replaces them; otherwise they read \"No longer applies\". To name the replacement exactly, write a `Replaces:` line in the new block instead (see \"Only in the Inbox\"). A pick the person saved on a superseded question is never sent. An id that names no open question of the thread refuses the whole send with `invalid_supersedes: …`, which lists the thread's open questions. The result's `superseded` lists what it superseded. Withdraw your own questions that are still open (read_thread state `open` or `picked`; a sent, skipped or closed one is refused) this way as the thread moves on, so they stop keeping the thread at the top of the person's list.",
       "- `done`: your own action items (`:::action` blocks, see \"Action items only the person can do\") in the thread this message lands in that you saw done yourself, e.g. the deployment you were watching is Ready: `\"<message id>/<key>\"` (the key starts with `a-`; read_thread gives it) or `\"<message id>\"` for every open action item of that message. The card then says you saw it done; nothing is sent to the person. An id that names no open action item of the thread refuses the whole send with `invalid_done: …`, which lists the thread's open action items. The result's `done` lists what it marked. Never mark done what you did not see happen.",
       `- \`attachments\`: files to show the person beside your message, e.g. \`["docs/plan.md", "proto/admin.html", "/tmp/demo.mp4"]\`: absolute (anywhere you can read) or relative to \`project_path\`. ${INBOX_ATTACHMENTS_PICTURES_LINE} Any regular file, of any size. Markdown, plain text, config and data files, Mermaid and Graphviz sources and HTML open in Plannotator's viewers; images (PNG, JPEG, GIF, WebP, SVG, AVIF, BMP, ICO) show below the message; videos (MP4, MOV, WebM) play beside it, and the person comments at moments (each comment comes back with its time, \`At 1:42 (102.4 s of 7:41)\`, and the path of the paused frame, which you can read); source code, scripts (${INBOX_HELP_CODE_EXAMPLES.map(code).join(", ")} and the like) and any other text open as code with line comments (text over 16 MB is offered as a download); PDFs and every other file are offered as a download. The kind is read from the bytes, so an image, video or PDF needs no particular name. Folders and \`.env\` files are refused, and one refused file refuses the whole send. The Inbox keeps the version you sent and shows the file as it is now; the person's annotations, including comments on images and code lines, come back in their reply. Each attachment in the result has a \`kind\` (\`markdown\`, \`text\`, \`html\`, \`mermaid\`, \`graphviz\`, \`code\`, \`image\`, \`video\`, \`pdf\`, \`file\`); treat a kind you do not know as \`file\`.`,
+      `- \`pulls\`: ${INBOX_PULLS_FIELD_DESCRIPTION}`,
       "- `idempotency_key`: any unique string. Sending again with the same key returns the first message instead of posting twice; the same key with another body, thread, `reply_to`, `supersedes` or `done` is refused.",
       `- Pictures: ${INBOX_PICTURES_RULE}`,
       "- Images in `body` (`![alt](path)`, `<img src=\"path\">`) show in the message from anywhere you can read: a path relative to `project_path`, or absolute (`/tmp/shot.png` works). PNG, JPEG, GIF, WebP, SVG, AVIF, BMP and ICO, up to 10 MB and 50 megapixels. Not shown: a dotenv-named file; anything in a hidden folder of a home folder (`~/.ssh`, `~/.config`, `~/.cache`) or of `/` (`/.x`) outside your project and the folder you send from, even when the project is the home folder itself (any other hidden folder shows, `.walkthrough/` or `../.ops/` say, as an attachment from it would); and web images (`https://…`, `//host/…`). The message is still sent, and the result's `images_not_shown` (`[{ ref, reason, not_yet? }]`, at most 10, with `images_not_shown_more` counting the rest, and a line in the text) names each image that will not show; copy it to a plain folder and link that path, or attach it with `attachments`. An image not written yet (`not_yet: true`) shows once the file exists. The person's own replies show images from the project only.",
@@ -122,7 +124,7 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
       "- First the thread's subject, name, project, who wrote how many messages, and every question still waiting on the person (open, or picked and not sent): its `<message id>/<key>`, `Q<n>` (the number the reply's \"Answers to your questions\" uses), state, prompt and choices.",
       `- Then the messages, oldest first: the newest \`limit\` (default ${INBOX_THREAD_WINDOW}) in full; the person's earlier messages in full, newest first, while they total ${sizeText(INBOX_EARLIER_PERSON_BYTES)} or less (each without its answers section, whose answers are on the questions); every other earlier message as one line: id, author, time, first words, size, and each of its questions with its prompt as \`Q1 q-… ("prompt") sent: "…"\`, \`open\`, \`picked, not sent\`, \`closed\` or \`replaced by <message id>/<key>\`. Answers are quoted whole as JSON strings, so a long free-text answer or note keeps every line. A body over ${sizeText(INBOX_BODY_CUT_BYTES)} is cut, with a marker naming the \`expand\` call for the rest; the person's newest message is always whole. A person's message addressed to one session says \`to you\` or \`to another session (…)\`. No question's state is ever left out: with \`after\`, a question of an older message is listed only when its state changed since that cursor (open and picked ones are always in the header).`,
       "- `expand`: message ids of the thread to show in full, exactly as sent. `before`: only messages before this message id or cursor (read further back). `after`: only messages after this message id or cursor; pass the `cursor` a read returned to get only what is new since then. `format: \"full\"` returns every message as its full record instead (large; for scripts). With both \`thread_id\` and \`message_id\`, the message must be in that thread.",
-      "- A message the person marked 👍 Looks good carries `ack: { label, at }` (see \"Where replies go\").",
+      "- A message the person reacted to carries `ack`, with `reaction: { emoji, label }`: a quick label from the person.",
       "- A reply of the person's that tags agents with `@` carries `to` (the session it goes to anyway) and `tagged: [{ agent, session, you }]`; its line reads `to you` or `to another session (…)`, then `tagged you, Pi (pi-0193)`. `you: true` (and `tagged_you: true` with `format: \"full\"`) means the person tagged you (see \"Where replies go\").",
       "- The structured result keeps the records' field names: `thread.messages` (the messages in full: `id`, `author.kind`, `created_at`, `reply_to`, `body`, `questions[]` with `key`, `q`, `state`, `answer`, `attachments[]` with `name`, `kind`, `size`, `path`, `ack`, `guide.title`), `thread.earlier` (the one-line messages), `thread.open_questions`, `window` and `cursor`.",
       "Without an id, list this project's threads, newest activity first, and every thread in any project the person tagged you in that you have not taken yet (`tagged_you: true` on its row; its line says \"the person tagged you here\"): only the ones you sent in unless `asked_by` is `\"anyone\"`, only open ones unless `include_resolved`, up to `limit` (default 20). Each row is short: `thread_id`, `subject`, `thread_name`, `section` (where it sits in the person's list), `message_count`, `questions: { open, picked, prompt }`, `last_author` (`agent` or `person`), `last_at`, `last_person_at` and `last_person_message_id` (the person's last message, null when they wrote none; the Inbox's own notes, such as the set-aside note, do not count), `unread` (the person wrote something in it for you that no agent has read yet: a reply no agent has read with read_thread, or a message addressed to you that your wake has not delivered yet; read_thread does not deliver it; after a reply you may have missed, read those threads) and, on a resolved thread (with `include_resolved`, or one an agent wrote in after the archive), `resolved_at`. Read a thread by its id for its messages.",
@@ -145,6 +147,13 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
     lines: [
       `Only when the person asks. Snoozes a thread until \`until\` (ISO 8601 with zone, within ${INBOX_SNOOZE_MAX_DAYS} days); it then returns by itself. \`null\` ends it. Sends nothing.`,
       "- A linked machine's thread works the same, by its thread id. If that machine is away, it applies when it is back. One too old answers `machine_needs_update`.",
+    ],
+  },
+  // A thread's PRs (approval "inbox-pr-binding"): always on.
+  thread_pulls: {
+    args: ["thread_id", "add", "remove"],
+    lines: [
+      "`thread_pulls`: A thread's pull/merge requests. `thread_id`; `add` and `remove`, lists of `owner/repo#123`, `group/sub/project!45` or PR URLs. Neither lists them. You own your thread's list: add a PR when you open or take on one for this work (or pass `pulls` on send_message), and remove one when it stops being part of the work; merged ones stay. The person can add and remove too; read_thread shows who did, and your next reply in the thread says what they changed. From a shell: `plannotator inbox pulls ls|add|rm <thread> [<ref>...]`.",
     ],
   },
   get_guide_brief: {
@@ -182,6 +191,7 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
       "- `thread_id`: the thread (or a message id in it), from send_message's result. `steps`: the whole list, `[{ \"step\": \"Replay the failures in staging\", \"status\": \"doing\", \"note\": \"38 of 40 recovered\" }, ...]`; `[]` clears it. At most 12 steps, 80 characters per step and per note, one line each; past that nothing is written (`validation_error` naming the step).",
       "- The list is your session's own in that thread; another session's list there is its own. send_message takes the same `steps`, so a message and its list go together.",
       "- A reply in that thread wakes you with one line, \"Your checklist here: 3 of 6 done; doing: X. If you're still working on this, keep it current.\" Read_thread shows the lists. From a shell: `plannotator inbox steps <thread> --json '<list>'`.",
+      `- No list of yours in a thread yet: a reply that answers your questions there wakes you with one line, "${INBOX_STEPS_START_WAKE_LINE}"`,
       "- The person turns steps on and off (Settings → Capabilities in the Inbox). Off, the Inbox lists no `steps`, and a call answers `steps_off` and writes nothing.",
     ],
   },
@@ -275,14 +285,14 @@ function toolBlock(name: InboxMcpToolName, steps = false, codeReview = false): s
   const guide = TOOL_GUIDE[name];
   // send_message's `steps` field exists only while steps are on.
   const withSteps = steps && name === "send_message";
-  // submit_guide's `review` field exists only while code review is on.
+  // submit_guide's `review` and `walkthrough` fields exist only while code review is on (the tool's own words, as served).
   const withReview = codeReview && name === "submit_guide";
-  const extra = [...(withSteps ? ["steps"] : []), ...(withReview ? ["review"] : [])];
+  const extra = [...(withSteps ? ["steps"] : []), ...(withReview ? ["review", "walkthrough"] : [])];
   const args = guide.args.length > 0 ? [`Arguments: ${[...guide.args, ...extra].map(code).join(", ")}.`, ""] : [];
   const lines = [
     ...guide.lines,
     ...(withSteps ? ["- `steps`: your steps in the thread this message lands in, sent with it (see steps)."] : []),
-    ...(withReview ? [`- \`review\`: ${INBOX_REVIEW_FIELD_DESCRIPTION}`] : []),
+    ...(withReview ? [`- \`review\`: ${INBOX_REVIEW_FIELD_DESCRIPTION}`, `- \`walkthrough\`: ${INBOX_WALKTHROUGH_FIELD_DESCRIPTION}`] : []),
   ];
   return [`### ${name}`, "", ...args, ...lines, ""];
 }
@@ -368,7 +378,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     "Set up the connection for the host you run in:",
     "",
-    `- **Claude Code** with the Plannotator plugin: nothing else to do. Check \`claude plugin list\` for \`plannotator@plannotator\`; if it is missing, run \`claude plugin marketplace add backnotprop/plannotator\` and \`claude plugin install plannotator@plannotator\`. The \`${INBOX_TOOL_NAME}\` tool appears after Claude Code restarts (\`claude --continue\` returns to this conversation). It needs Claude Code 2.1.287 or later, on macOS or Linux, in an interactive session (not \`claude -p\`).`,
+    `- **Claude Code** with the Plannotator plugin: nothing else to do. Check \`claude plugin list\` for \`plannotator@plannotator\`; if it is missing, run \`claude plugin marketplace add backnotprop/plannotator\` and \`claude plugin install plannotator@plannotator\`. The \`${INBOX_TOOL_NAME}\` tool appears after Claude Code restarts (\`claude --continue\` returns to this conversation). It needs Claude Code 2.1.287 or later, in an interactive session (not \`claude -p\`).`,
     `- **Pi** with the Plannotator extension (\`pi install npm:@plannotator/pi-extension\` if it is missing), or **OpenCode** with the Plannotator plugin (\`@plannotator/opencode@latest\` in opencode.json: \`"plugin": [...]\` on OpenCode 1, \`"plugins": [{ "package": ... }]\` on OpenCode 2): the inbox tool is off by default there. Turn it on for your host by merging ${code(`{ "inboxTool": { "pi": true } }`)} (or \`"opencode"\`) into ${code(configPath)}, keeping its other keys, or with the switch in the Inbox's Settings. Then start a new Pi session (or \`/reload\`), or restart OpenCode. Pi and OpenCode send the tool with every request: ${inboxToolCostText("pi")} each (the size measured on both; the token count depends on the model), so tell the person before you turn it on.`,
     `- **DeepSeek Harness** with Plannotator's plugin (\`dsh plugin --profile <profile> add @plannotator/dsh\` if it is missing; the person runs it): the inbox tool is off by default. Turn it on by merging ${code(`{ "inboxTool": { "dsh": true } }`)} into ${code(configPath)}, keeping its other keys, or with the switch in the Inbox's Settings. The tool appears only once the Inbox has run on this computer (\`inbox/inbox.json\` in the data folder); if it never has, the person starts it once with ${code(`${self} inbox --background`)}. It applies when DeepSeek Harness next starts, never in a running one, so tell the person to restart it. DeepSeek Harness sends the tool with every request too, so tell the person before you turn it on. Over MCP the Inbox cannot tell DeepSeek Harness sessions apart, so use the plugin, not the stdio server.`,
     `- **Cline** with Plannotator's plugin (\`cline plugin install npm:@plannotator/cline\` if it is missing; the person runs it): the inbox tool is off by default. Turn it on by merging ${code(`{ "inboxTool": { "cline": true } }`)} into ${code(configPath)}, keeping its other keys, or with the switch in the Inbox's Settings. The tool appears only once the Inbox has run on this computer; if it never has, the person starts it once with ${code(`${self} inbox --background`)}. It applies to Cline sessions started after that, never to a running one. Cline sends the tool with every request too, so tell the person before you turn it on. The plugin works in the Cline CLI, Kanban, the desktop app and the VS Code extension's new version; the extension's Legacy version loads no plugins, so there register the stdio server.`,
@@ -392,13 +402,13 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     "1. `reply_to` (a message id): that message's thread, as a reply. Take the id from the Inbox (the wake's `(<reply id>)`, a read_thread result), never from memory or an earlier summary. " + INBOX_REPLY_TO_CHECK,
     `2. \`thread\` (a name, 1 to ${INBOX_THREAD_NAME_MAX} characters, one line): the newest open thread of that name in this project, from any session. With none open, a new thread under that name. Names compare without case, spacing or invisible characters.`,
-    "3. Neither: your session's own thread, the newest unnamed thread your session started in this project while it is open, else a new one. Without a session id, every message starts a thread.",
+    "3. Neither: a new thread. To add to a thread, reply_to its latest message, or use the same `thread` name.",
     "",
-    "Resolved means done: the next message starts a new thread, while `reply_to` still reaches a resolved thread. A thread keeps its first message's subject. Use `thread` to keep separate work apart, or to join another session's thread. A thread the person started takes the name an agent gives it (send_message, \"Name a thread the person started\"); from then on a send with that name joins it. A name another open thread of the project already has is refused, so naming never moves another thread's sends into this one.",
+    "Resolved means done: a send with a resolved thread's name starts a new thread, while `reply_to` still reaches it. A thread keeps its first message's subject. Use `thread` to keep one stream of work together, across sessions. A thread the person started takes the name an agent gives it (send_message, \"Name a thread the person started\"); from then on a send with that name joins it. A name another open thread of the project already has is refused, so naming never moves another thread's sends into this one.",
     "",
     "## Where replies go",
     "",
-    `- With the \`${INBOX_TOOL_NAME}\` tool in Claude Code, Pi, OpenCode 2, DeepSeek Harness or Cline, the person's reply arrives in your session by itself as a new message once the session is idle, starting with the line \`Plannotator Inbox: <title> (<reply id>)\`. The title is the thread's short name, or \`a reply\` when it has none; what is not a plain reply in a thread you already have (a new thread, a tag, a hand-off, a 👍, a Re-ask) shows the thread's subject. End your turn instead of waiting. When the person presses Send now while you work (not in Cline, where it waits for idle), it arrives in the turn you are in, at your next step: answer it before you go on. To answer, send_message with \`reply_to\` set to that id. The person can also write to a live session first; it arrives the same way. Its \`[Thread <thread id>…]\` line names the thread. Every such message ends with one closing line, \`[for context: read_thread (opt: set limit) or search · help: plannotator inbox --help]\` (a 👍 Looks good ends with \`[thread <thread id>]\` alone): read_thread with that \`thread_id\` shows the whole thread.`,
+    `- With the \`${INBOX_TOOL_NAME}\` tool in Claude Code, Pi, OpenCode 2, DeepSeek Harness or Cline, the person's reply arrives in your session by itself as a new message once the session is idle, starting with the line \`Plannotator Inbox: <title> (<reply id>)\`. The title is the thread's short name, or \`a reply\` when it has none; what is not a plain reply in a thread you already have (a new thread, a tag, a hand-off, a reaction, a Re-ask) shows the thread's subject. End your turn instead of waiting. When the person presses Send now while you work (not in Cline, where it waits for idle), it arrives in the turn you are in, at your next step: answer it before you go on. To answer, send_message with \`reply_to\` set to that id. The person can also write to a live session first; it arrives the same way. Its \`[Thread <thread id>…]\` line names the thread. Every such message ends with one closing line, \`[for context: read_thread (opt: set limit) or search · help: plannotator inbox --help]\` (a reaction ends with \`[thread <thread id>]\` alone): read_thread with that \`thread_id\` shows the whole thread.`,
     "- The person can start a new thread with your session from the Inbox: an idea or a request of their own, not an answer to anything you asked, and it may have nothing to do with your current work. It arrives the same way, and its second line says so. Say how you will handle it before you start, and answer with `reply_to` set to the id on its first line, so your answer lands in that thread; name this thread on that reply with `thread` (a few words). Files they attached are listed under their words as `Attached: <name> (<path>)`; open them by path.",
     `- Replies come back to the session that sent the message: send with your \`${INBOX_TOOL_NAME}\` tool; inside Claude Code or Pi, a command your session runs also carries the session's identity.`,
     `- In Codex ${INBOX_CODEX_QUEUE_MIN_VERSION.replace(/\.0$/, "")} or later (the TUI, the Codex app, the IDE extension), through the stdio server, the person's reply arrives in your thread by itself too: the Inbox puts it into your thread with \`codex queue\`, and it starts a new turn once the turn you are in ends (at once when the thread is idle; a closed thread gets it when it is resumed). It starts with the same \`Plannotator Inbox: <title> (<reply id>)\` line and names your tools as you see them (send_message, read_thread). When send_message says the reply arrives by itself, end your turn instead of waiting. It never arrives in the middle of a turn (no Send now). A \`codex exec\` run is not woken (it ends after its turn): there, read the thread later with read_thread.`,
@@ -412,7 +422,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "- The person answers in one reply per session, even when the answers are on several of your messages: then \"Answers to your questions\" has a `### Your message <id>` heading per message. Questions they did not answer stay open, and the reply says how many after their words: `You have N other questions open in this thread. They stay open; the person will answer them in the Inbox. Don't re-ask them.` Do not ask them again.",
     "- A question is skipped only when the person chose to: a skip on its card comes back as `Skipped`, \"Skip them\" in the reply box as `Skipped by the person`. Do not wait on either; ask again if you still need it.",
     "- A reply that answers none of them (the person only wrote back, or sent annotations) leaves them all open and says so after their words: `No questions answered yet; all N are still open. Don't re-ask them; the person will answer in the Inbox.` Do not ask them again: the answers come in a later reply.",
-    "- The person may mark your latest message 👍 Looks good: they read it and need nothing more. About ten seconds later (after the person's Undo window) it reaches you: with a connection that wakes you, as one short message, `Plannotator Inbox: <subject> (<id>)` and then `The person marked your message 👍 Looks good (<message id>). No reply needed unless you have a question.`; otherwise read_thread shows `ack: { label, at }` on that message. Do not answer it; go on, and use `reply_to` only if you have something new for them. Only a message with no open question takes it, so it never answers a question.",
+    "- The person may react to your latest message with an emoji, a quick label. It reaches you about ten seconds later, and read_thread shows it on that message.",
     `- The person may press Re-ask: you get one message (with a wake: \`Plannotator Inbox: <subject> (<id>)\`, then \`${inboxReaskInstruction("both")}\`, which names only what the note lists) listing your questions and action items still open in the thread by id. Check each against where the work is now and send ONE message with \`reply_to\` that id: the ones still needed, asked again with the context the person needs today and a \`Replaces: <id>\` line in each block; the ids of those that no longer apply in \`supersedes\`, with a line on why. An action item still needed goes back as a \`:::action\` block with its \`Replaces: <id>\` line; one you saw done goes in \`done\`. Answers the person had picked come with it under "Answers to your questions": don't ask those again. Until you do, the old questions stay open and the thread waits on you.`,
     `- The person may mark a thread read without answering: its waiting questions and action items close unanswered, and you get one message from them that starts \`${INBOX_SET_ASIDE_HEADING}\` and lists them (questions as \`- Q1.\`, action items as \`- A1.\`). Do not wait on those; ask again if you must.`,
     `- When the person marks one of your action items Done or Can't do it, it comes with their next reply, together with their words and answers: its first line says it (\`Did 1 action item.\`, or joined to the answers' line: \`Answered 1 question, did 1 action item.\`), and a section \`## ${INBOX_ACTIONS_HEADING}\` after everything else has \`### A1. <what to do>\` and \`Done, 3:12 PM.\` (and \`Note: …\` when they added one) or \`Can't do it: <their reason>\`; one you marked done yourself meanwhile reads \`You saw it done, 3:14 PM.\` with their note. Until they send, read_thread says it is in their reply draft, not sent yet. A last \`Still open: …\` line names what of that message still waits on them (don't ask those again). Go on with the work it unblocks; on Can't do it, find another way or ask.`,
@@ -456,6 +466,20 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     INBOX_CONTRACT_EXAMPLE,
     "```",
     "",
+    "### Trade-offs and prototypes",
+    "",
+    "Lines indented under a `- [ ]` choice (a plain `- Label` bullet would take them into its label), each optional, each read once. Write them only when they help the person pick:",
+    "",
+    "- `Pros: <item>; <item>` and `Cons: <item>; <item>`: what the option gives and what it costs, items split on `;`. The card keeps them in a Trade-offs line under Why that opens into a table, one row per option, Pros and Cons side by side. Give them for every option or for none.",
+    "- `Prototype: <page>`: a page the person tries before picking that option; leave it off an option with nothing to show. \"Try prototype\" on the card opens it full window; they step between the options' pages and press Pick. The page is either an HTML file you attach in the same send (send_message's `attachments`, its path written as there; it shows as sent), or the address of an app running on this computer (`http://localhost:5173/checkout?v=b`): the send is refused, naming the question and option, when nothing answers there, so start it first and keep it running until they answer. Their comments on a page come back in the reply under that option's name.",
+    "- One `Prototype: <page>` line at the block's own indent instead: one page that shows every option.",
+    "",
+    "```markdown",
+    INBOX_TRADEOFFS_EXAMPLE,
+    "```",
+    "",
+    "Here `proto/checkout-b.html` is in `attachments`, and the app runs on port 5173.",
+    "",
     "### Action items only the person can do",
     "",
     INBOX_ACTION_GUIDE,
@@ -478,7 +502,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     "## A note in each agent's instructions",
     "",
-    "Plannotator can add a short note about the Inbox to an agent's instructions, so it sends decisions and finished work here while the person is away. Only with the person's yes: show them this list, then run `plannotator inbox --notes <ids>` with only the agents they agreed to (comma-separated). A written note never overwrites a note the person edited, and the Inbox's Settings and `plannotator uninstall` remove it; Cursor's note is copied by hand instead, and Plannotator cannot see or remove that copy. On this computer:",
+    `Plannotator adds a short note about the Inbox to an agent's instructions, so it sends decisions and finished work here while the person is away. The Inbox adds it by itself for ${words(INBOX_NOTE_AUTO_AGENT_IDS.map((id) => INBOX_AGENT_LABELS[id]))}: don't ask about those. For ${words(INBOX_NOTE_AGENT_IDS.filter((id) => !INBOX_NOTE_AUTO_AGENT_IDS.includes(id)).map((id) => INBOX_AGENT_LABELS[id]))}, only with the person's yes: show them those rows, then run \`plannotator inbox --notes <ids>\` with only the agents they agreed to (comma-separated). A written note never overwrites a note the person edited, and the Inbox's Settings and \`plannotator uninstall\` remove it; Cursor's note is copied by hand instead, and Plannotator cannot see or remove that copy. On this computer:`,
     "",
     ...noteLines,
     "",
@@ -498,6 +522,8 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "4. Tell the person what you combined, and that you can undo it. Their window shows no notice of your combine: the project just leaves the sidebar.",
     "",
     "`undo` takes the id of the project that went in, listed under \"Combined into it\", not the one that stayed. It works at any time, from any session, and brings back that project with whatever went into it. It gives back the project's name, its cards and its threads, the ones started since the combine too. A message or a card that joined the other project's thread stays with that thread. After an undo, the project is not suggested back into the project it left, or into whatever that project has gone into. Combining never crosses machines.",
+    "",
+    ...INBOX_ROWS_HELP_SECTION,
     "",
     "## Scripting the Inbox",
     "",

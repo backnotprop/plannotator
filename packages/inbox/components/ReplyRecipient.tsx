@@ -1,8 +1,9 @@
 /**
  * Who gets the reply (approval "inbox-reply-recipient", option E "Under the
- * box, right"): in a thread with more than one agent, a pill at the right end
- * of Send's row, "to [tile] Claude Code (plannotator) ⌄". On a phone it sits
- * after Cancel and shows the folder alone.
+ * box, right"): in a thread with more than one agent, a pill in the box's own
+ * row, at the right of what goes with the reply, "to [tile] Claude Code
+ * (plannotator) ⌄" (approval "inbox-reply-box", T6). A computer only: a phone's
+ * is PhoneReplyRecipient.tsx, in the row with a bottom sheet.
  *
  * Tap it for the thread's agents (live first, ended last), the chosen ones
  * ticked. Tap a name: only that agent. Tap a circle: that agent too ("2
@@ -13,13 +14,13 @@
  *
  * The rules are replyRecipients.ts; ThreadPane owns the choice and Send.
  */
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { HostMark, Icon } from '../icons';
 import { canAddRecipient, type RecipientRow } from '../replyRecipients';
 import { namesList } from '../tags';
 import { TagStack } from './TagPicker';
 import { Tip } from './Tip';
+import { markRecipientList } from '../pageMarks';
 
 function Face({ tile, full, short, ended }: { tile: ReactNode; full: string; short: string; ended: boolean }) {
   return (
@@ -52,8 +53,6 @@ export function ReplyRecipient({
   onOnly,
   onToggle,
   onTagAnother,
-  phone,
-  section,
 }: {
   /** Every agent the list offers, live first, ended last. */
   rows: readonly RecipientRow[];
@@ -64,9 +63,6 @@ export function ReplyRecipient({
   onOnly: (row: RecipientRow) => void;
   onToggle: (row: RecipientRow) => void;
   onTagAnother: () => void;
-  phone: boolean;
-  /** The thread's pane: on a phone the list is drawn in it, over the foot and above the keyboard. */
-  section: HTMLElement | null;
 }) {
   const listId = useRef(`ib-rpick-${Math.random().toString(36).slice(2)}`).current;
   const chosenIds = chosen.map((r) => r.session);
@@ -95,24 +91,9 @@ export function ReplyRecipient({
     };
   }, [open, onOpen]);
 
-  // On a phone the keyboard leaves little room and the foot clips what is inside it: the list sits over the box,
-  // from just above Send's row (the pill stays in sight, a tap on it closes the list) up to the header, never behind it.
-  const [spot, setSpot] = useState<CSSProperties | undefined>(undefined);
-  useLayoutEffect(() => {
-    if (!open || !phone || !section) {
-      setSpot(undefined);
-      return;
-    }
-    const row = section.querySelector('[data-reply-row] .ib-footbtns')?.getBoundingClientRect();
-    const head = section.querySelector('.ib-phead')?.getBoundingClientRect();
-    if (!row || !head) return;
-    const top = Math.round(row.top - 6);
-    setSpot({ position: 'fixed', left: 12, right: 12, bottom: 'auto', top, width: 'auto', maxWidth: 'none', margin: 0, transform: 'translateY(-100%)', maxHeight: Math.max(120, top - head.bottom - 8) });
-  }, [open, phone, section]);
-
   const tile = one ? (
     <span className="ib-atile">
-      <HostMark host={one.host} />
+      <HostMark host={one.host} agent={one.session} />
     </span>
   ) : (
     <TagStack participants={chosen} />
@@ -127,7 +108,7 @@ export function ReplyRecipient({
       aria-label={`To ${names}${ended ? ', ended' : ''}. Change who gets this reply`}
       aria-expanded={open}
       aria-controls={open ? listId : undefined}
-      // The press must not take focus from the reply field: on a phone the keyboard stays up.
+      // The press must not take focus from the reply field.
       onMouseDown={(event) => event.preventDefault()}
       onClick={() => onOpen(!open)}
     >
@@ -136,7 +117,7 @@ export function ReplyRecipient({
   );
 
   const list = open ? (
-    <div className="ib-tg-menu ib-rpick" id={listId} data-recipient-list="" role="group" aria-label="Who gets this reply" style={spot} onMouseDown={(event) => event.preventDefault()}>
+    <div ref={markRecipientList} className="ib-tg-menu ib-rpick" id={listId} data-recipient-list="" role="group" aria-label="Who gets this reply" onMouseDown={(event) => event.preventDefault()}>
       {rows.map((row) => {
         const on = chosenIds.includes(row.session);
         const quiet = QUIET[row.state];
@@ -144,7 +125,7 @@ export function ReplyRecipient({
           <div key={row.session} className="ib-rpick-row" data-recipient-row={row.session} data-on={on ? '' : undefined}>
             <button type="button" className="ib-rpick-name" disabled={row.alone === false} onClick={() => onOnly(row)}>
               <span className="ib-atile">
-                <HostMark host={row.host} />
+                <HostMark host={row.host} agent={row.session} />
               </span>
               <span className="ib-rpick-l" dir="auto">
                 {row.label}
@@ -177,10 +158,9 @@ export function ReplyRecipient({
   const pill = (
     <span className="ib-rto-wrap">
       {chosen.length > 1 && !open ? <Tip content={names}>{button}</Tip> : button}
-      {phone && list && section ? createPortal(list, section) : list}
+      {list}
     </span>
   );
-  if (phone) return pill;
   // A wide window: every name stacked under the pill, so the Draft words beside it never move when it changes.
   return (
     <span className="ib-rto-slot">

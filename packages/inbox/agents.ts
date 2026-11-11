@@ -1,17 +1,22 @@
 /**
- * What the agent-note dialog and Settings → Agents show, from
- * `GET /api/inbox/agents` (the approved "inbox-agent-awareness" design, and
- * "inbox-agent-note-dialog", which asks once per agent in a dialog). Pure.
+ * What the agent-note dialog, the connect line above the list and Settings →
+ * Agents show, from `GET /api/inbox/agents` (the approved
+ * "inbox-agent-awareness" design; "inbox-agent-note-dialog", which asked once
+ * per agent in a dialog; and "inbox-agent-note-auto", which writes the note by
+ * itself for the agents proven to load it, so the dialog asks only about the
+ * others). Pure.
  */
 import {
   INBOX_AGENT_LABELS,
   INBOX_NOTE_AGENT_IDS,
+  INBOX_NOTE_AUTO_AGENT_IDS,
   inboxElsewhereText,
   type InboxAgentId,
   type InboxAgentRow,
   type InboxAgentsModel,
   type InboxConnectReport,
   type InboxNoteAgentId,
+  type InboxNoteAutoAdd,
 } from '@plannotator/core/inbox-types';
 
 /** Agents that can take a note now: found, reaching the Inbox, no note yet, a file to put it in, and not failed this run. */
@@ -30,13 +35,16 @@ export function notesAskedOf(model: InboxAgentsModel): readonly InboxNoteAgentId
 
 /**
  * Who the dialog asks about: the candidates not asked yet (each agent is
- * asked once), Claude Code last as in the approved dialog ("Add to Codex,
- * Gemini CLI and Claude Code"). None with PLANNOTATOR_INBOX_NOTES=0.
+ * asked once) whose note is not written by itself (the Inbox writes it for
+ * the agents proven to load it, INBOX_NOTE_AUTO_AGENT_IDS; Qwen Code and
+ * Cursor are still asked), Claude Code last as in the approved dialog ("Add
+ * to Codex, Gemini CLI and Claude Code"). None with PLANNOTATOR_INBOX_NOTES=0.
  */
 export function noteQuestionRows(model: InboxAgentsModel): InboxAgentRow[] {
   if (model.notes_env_off) return [];
   const asked = new Set<string>(notesAskedOf(model));
-  const rows = noteCandidates(model).filter((row) => !asked.has(row.id));
+  const auto = new Set<string>(INBOX_NOTE_AUTO_AGENT_IDS);
+  const rows = noteCandidates(model).filter((row) => !asked.has(row.id) && !auto.has(row.id));
   return [...rows.filter((row) => row.id !== 'claude-code'), ...rows.filter((row) => row.id === 'claude-code')];
 }
 
@@ -45,7 +53,7 @@ export function noteQuestionOpen(model: InboxAgentsModel): boolean {
   return noteQuestionRows(model).length > 0;
 }
 
-/** The last run's news the person has not seen yet: the dialog's band. */
+/** The last run's news the person has not seen yet: the connect line's first lines. */
 export function cardReport(model: InboxAgentsModel): InboxConnectReport | null {
   const report = model.last_report;
   if (!report || report.seen || report.skipped) return null;
@@ -58,6 +66,34 @@ export function cardReport(model: InboxAgentsModel): InboxConnectReport | null {
     (report.trust_failed?.length ?? 0) +
     (report.elsewhere?.length ?? 0);
   return news > 0 ? report : null;
+}
+
+/**
+ * What the connect line above the list says, or null for nothing: the last
+ * run's news not seen yet (`cardReport`) and the notes the Inbox wrote by
+ * itself that it has not said (`notes_auto`).
+ */
+export function connectLineNews(model: InboxAgentsModel): { report: InboxConnectReport | null; notes: InboxNoteAutoAdd[] } | null {
+  const report = cardReport(model);
+  const notes = model.notes_auto ?? [];
+  return report || notes.length > 0 ? { report, notes } : null;
+}
+
+/**
+ * The note line, "Added the Inbox note to Claude Code's instructions.", in
+ * parts: the names (each path is its tooltip), and the files for a screen
+ * reader (`files`, read before the full stop).
+ */
+export function notesAddedParts(notes: readonly InboxNoteAutoAdd[]): {
+  before: string;
+  names: { agent: InboxNoteAgentId; label: string; path: string }[];
+  after: string;
+  files: string;
+} {
+  const names = notes.map((note) => ({ agent: note.agent, label: INBOX_AGENT_LABELS[note.agent], path: note.path }));
+  return names.length === 1
+    ? { before: 'Added the Inbox note to ', names, after: "'s instructions", files: names[0]!.path }
+    : { before: 'Added the Inbox note to the instructions of ', names, after: '', files: names.map((name) => `${name.label}: ${name.path}`).join('; ') };
 }
 
 /** The band's lines (option A of the approved dialog): what was connected, who needs a person, what failed, whose entry is someone else's. */

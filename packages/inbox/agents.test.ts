@@ -1,6 +1,8 @@
 /**
- * Who the agent-note dialog asks about (agents.ts): each agent once, Claude
- * Code like the rest (last, as the approved dialog lists it), nobody with
+ * Who the agent-note dialog asks about (agents.ts): each agent once, never an
+ * agent whose note is written by itself (Claude Code, Codex, Gemini CLI, Pi,
+ * OpenCode: approval "inbox-agent-note-auto"; Qwen Code and Cursor are still
+ * asked), nobody with
  * PLANNOTATOR_INBOX_NOTES=0, and an Inbox of 0.28.18 or older (no
  * `notes_asked`) read as "asked once in all". Plus the primary's label and
  * the middle cut of a path.
@@ -23,7 +25,15 @@ function row(id: InboxAgentRow['id'], over: Partial<InboxAgentRow> = {}): InboxA
 
 function model(over: Partial<InboxAgentsModel> = {}): InboxAgentsModel {
   return {
-    agents: [row('claude-code'), row('codex'), row('gemini'), row('pi', { reach: { kind: 'tool', on: false, state: 'off', path: null, locked: false, reason: null } }), row('cursor', { note: null })],
+    agents: [
+      row('claude-code'),
+      row('codex'),
+      row('gemini'),
+      row('qwen'),
+      row('pi', { reach: { kind: 'tool', on: false, state: 'off', path: null, locked: false, reason: null } }),
+      row('cursor', { note: { agent: 'cursor', path: null, target: null, state: 'manual', create: false, created: false, reason: null } }),
+      row('opencode', { note: null }),
+    ],
     last_report: null,
     connecting: false,
     connect_env_off: false,
@@ -37,20 +47,21 @@ function model(over: Partial<InboxAgentsModel> = {}): InboxAgentsModel {
 
 const ids = (m: InboxAgentsModel) => noteQuestionRows(m).map((r) => r.id);
 
-test('every candidate not asked yet, Claude Code last; not reaching, no file, or failed this run: not a candidate', () => {
-  expect(ids(model())).toEqual(['codex', 'gemini', 'claude-code']);
-  const failed = model({ last_report: { at: '', first: true, added: [], already: [], failed: [{ agent: 'gemini', reason: 'x', path: null }], foreign: [], manual: [], unfinished: [], claude_code: false } });
-  expect(ids(failed)).toEqual(['codex', 'claude-code']);
+test('every candidate not asked yet whose note is not written by itself; not reaching, no file, or failed this run: not a candidate', () => {
+  // Claude Code, Codex and Gemini CLI are candidates too, but their notes are written by themselves.
+  expect(ids(model())).toEqual(['qwen', 'cursor']);
+  const failed = model({ last_report: { at: '', first: true, added: [], already: [], failed: [{ agent: 'qwen', reason: 'x', path: null }], foreign: [], manual: [], unfinished: [], claude_code: false } });
+  expect(ids(failed)).toEqual(['cursor']);
 });
 
 test('each agent is asked once: an agent asked before is left out, one that connects later is asked alone', () => {
-  expect(ids(model({ notes_offered: true, notes_asked: ['claude-code', 'codex'] }))).toEqual(['gemini']);
-  expect(ids(model({ notes_offered: true, notes_asked: ['claude-code', 'codex', 'gemini'] }))).toEqual([]);
+  expect(ids(model({ notes_offered: true, notes_asked: ['qwen'] }))).toEqual(['cursor']);
+  expect(ids(model({ notes_offered: true, notes_asked: ['qwen', 'cursor'] }))).toEqual([]);
 });
 
-test('an Inbox of 0.28.18 or older (no notes_asked): answered means nobody is asked; never answered means everyone', () => {
+test('an Inbox of 0.28.18 or older (no notes_asked): answered means nobody is asked; never answered means everyone not written by itself', () => {
   expect(ids(model({ notes_asked: undefined, notes_offered: true }))).toEqual([]);
-  expect(ids(model({ notes_asked: undefined, notes_offered: false }))).toEqual(['codex', 'gemini', 'claude-code']);
+  expect(ids(model({ notes_asked: undefined, notes_offered: false }))).toEqual(['qwen', 'cursor']);
 });
 
 test('PLANNOTATOR_INBOX_NOTES=0: nobody is asked', () => {
