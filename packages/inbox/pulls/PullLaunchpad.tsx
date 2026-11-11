@@ -23,6 +23,15 @@ import { PullDetails, usePullDetails } from './PullDetails';
 import { checksWords, inboxPullLabel, linkAgentName } from './model';
 import { forgeName } from './labels';
 
+/**
+ * The diff door's words, the approved sentence with the PR's file count: "All 70 files with your comments, Viewed and
+ * Approve." One file reads "The one file …"; a count the forge did not give (0) reads "All files …".
+ */
+export function diffWords(files: number): string {
+  const which = files > 1 ? `All ${formatCount(files)} files` : files === 1 ? 'The one file' : 'All files';
+  return `${which} with your comments, Viewed and Approve.`;
+}
+
 /** The Start button, as the stack page's hand-off gives it. Null: no review thread can start now (one at a time). */
 export interface LaunchpadStart {
   /** `again`: the last review thread's agent ended. */
@@ -265,7 +274,7 @@ export function PullLaunchpad({
                 </div>
               ) : null}
             </Door>
-            <Door kind="diff" icon={<Icon name="code" size={18} />} title="The diff" sub={<>Every file, with your comments, Viewed and Approve.</>}>
+            <Door kind="diff" icon={<Icon name="code" size={18} />} title="The diff" sub={diffWords(pr.files)}>
               <div className="ib-lp-go">
                 <button type="button" className="ib-btn" onClick={onDiff} data-launch-go="diff" data-pulls-open-diff="">
                   Open the diff

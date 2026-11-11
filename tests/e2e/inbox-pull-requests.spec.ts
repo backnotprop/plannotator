@@ -815,6 +815,12 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   await expect(jun).toHaveAttribute('data-face-state', 'shown');
   expect(new URL((await jun.locator('img').getAttribute('src'))!, world.url).pathname).toBe('/api/inbox/pulls/avatar');
   await page.mouse.move(0, 0);
+  // A single PR's tile opens its launchpad in Reviews (the owner, 2026-11-11), not the PR view; its × gives the board back.
+  await page.locator('[data-prs-page] [data-pr-tile="github.com/northwind/web-app#869"]').click();
+  await expect(page.locator('[data-pulls-stack][data-launchpad]')).toHaveAttribute('data-pulls-stack', 'github.com/northwind/web-app#869');
+  await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toBe('#reviews&stack=github.com/northwind/web-app#869');
+  await page.locator('[data-launchpad] .ib-pr-bar [aria-label="Close"]').click();
+  await expect(page.locator('[data-prs-page] [data-pr-tile]').first()).toBeVisible();
   const fold = list.locator('[data-reviews-fold="not_reviewed"]');
   await expect(fold).toHaveAttribute('aria-expanded', 'false');
   await expect(list.locator('[data-pulls-group="not_reviewed"] [data-pulls-row]')).toHaveCount(0);

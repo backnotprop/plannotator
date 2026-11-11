@@ -133,7 +133,7 @@ import { useSystemProjects } from './system/projects';
 import { systemDropped, systemEscapeTo, systemHashOf, systemKept, systemRouteOf } from './system/route';
 import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
 import { connectLineNews, noteQuestionRows } from './agents';
-import type { InboxAgentRow, InboxAgentsModel, InboxTourChange, InboxTourState } from '@plannotator/core/inbox-types';
+import type { InboxAgentRow, InboxAgentsModel, InboxPull, InboxPullStack, InboxTourChange, InboxTourState } from '@plannotator/core/inbox-types';
 import { SettingsPage } from './components/Settings';
 import { createStepsBus } from './steps/useThreadSteps';
 import { threadBoardCard } from './steps/model';
@@ -211,7 +211,7 @@ import { PullsPage, ReviewsOff } from './pulls/PullsPage';
 import { PullReview } from './pulls/PullReview';
 import { usePulls } from './pulls/usePulls';
 import { SheetPage, type SheetView } from './prs/SheetPage';
-import { sheetModel } from './prs/sheetModel';
+import { sheetModel, tileOpens } from './prs/sheetModel';
 import { StackPage } from './prs/StackPage';
 import { useSheetPulls } from './prs/useSheetPulls';
 import { inboxPullIsOpen, inboxPullStacks } from '@plannotator/core/inbox-types';
@@ -6642,7 +6642,7 @@ function Inbox() {
           phone={phone}
           view={paneView}
           onView={setPaneView}
-          onOpenPull={(pull, stack) => go({ page: 'prs', project: null, thread: null, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'reviews' })}
+          onOpenPull={(pull, stack) => go(boardPull(pull, stack, { page: 'prs', project: null, thread: null, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'reviews' }))}
           onOpenStack={(stack) => go({ page: 'prs', project: null, thread: null, stack: stack.id, layer: null })}
           onMerged={sheetPulls.refresh}
         />
@@ -6654,6 +6654,11 @@ function Inbox() {
   const refreshBoard = () => {
     void refreshCards();
     void refreshList(false);
+  };
+  /** A board tile's click: a single open PR Reviews lists opens its launchpad; anything else `view`, the PR view. */
+  const boardPull = (pull: InboxPull, stack: InboxPullStack, view: Route): Route => {
+    const opens = tileOpens(pull, stack, pulls.model);
+    return opens === 'pull' ? view : { page: 'reviews', project: null, thread: null, stack: opens.launchpad, layer: null };
   };
   /** Where the board is: its own page on a phone, Reviews' right pane on a desktop. */
   const prsHome = (from: Route): Route => (phone ? { page: 'prs', project: null, thread: null, prsView: from.prsView } : { page: 'reviews', project: null, thread: null });
@@ -6929,7 +6934,7 @@ function Inbox() {
         view={route.prsView ?? 'open'}
         onView={(prsView) => writeRoute({ ...route, prsView }, { replace: true })}
         onBack={() => close({ page: 'reviews', project: null, thread: null })}
-        onOpenPull={(pull, stack) => go({ ...route, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'sheet' })}
+        onOpenPull={(pull, stack) => go(boardPull(pull, stack, { ...route, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'sheet' }))}
         onOpenStack={(stack) => go({ ...route, stack: stack.id, layer: null })}
         onMerged={sheetPulls.refresh}
       />

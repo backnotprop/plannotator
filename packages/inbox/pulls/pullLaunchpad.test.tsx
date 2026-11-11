@@ -13,6 +13,8 @@
  *    while System does not (both are off in 0.29), or the grid keeping an empty slot for a door that is not there;
  *  - a Reviews row about one open PR opening anything but its launchpad, also once an agent reviewed it (the owner's
  *    routing answer, 2026-11-09); a local review, a thread of a stack of several, losing its way to the thread;
+ *  - the diff card losing the approved words with the PR's file count ("All 70 files with your comments, Viewed and
+ *    Approve."), or reading "All 1 files" / "All 0 files";
  *  - the details panel drawing its own head (author, branches, Close) under the page's;
  *  - a PR pane covering the list (stack.ts) with no way back to it but Close, unlike a covering thread's ‹ Inbox;
  *  - a phone's bar keeping `‹ Reviews` whole when the PR's number and repository have no room (a thread's
@@ -429,4 +431,14 @@ test.skipIf(!hasDom)("a Reviews row about one open PR opens its launchpad, also 
   await click(row('thr_review'));
   await click(row('thr_stack'));
   expect(opened).toEqual([`stack ${one.id}`, 'thread thr_stack']);
+});
+
+test.skipIf(!hasDom)('the diff card says the approved words with the file count: All N files, the one file, or all files when the count is unknown', async () => {
+  const { diffWords } = await import('./PullLaunchpad');
+  mount(single.key, answer());
+  await settle();
+  expect($('[data-launch-door="diff"] .ib-lp-sub')!.textContent).toBe('All 2 files with your comments, Viewed and Approve.');
+  expect(diffWords(70)).toBe('All 70 files with your comments, Viewed and Approve.');
+  expect(diffWords(1)).toBe('The one file with your comments, Viewed and Approve.');
+  expect(diffWords(0)).toBe('All files with your comments, Viewed and Approve.');
 });
