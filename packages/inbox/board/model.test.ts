@@ -1,17 +1,3 @@
-/**
- * The Board page's rules (approval "inbox-board", step 2; columns v2), pure:
- * the lanes' order with a sent card on top of Todo, the header's counts, a card's
- * second line, the unread rule for one visit, the opened card's foot and
- * column menu, the age and the live state of a link. What regresses: a lane
- * out of the v2 order, "You: …" leaking out of In review, a card
- * staying bold after the person opened it, a Start offered on a card already
- * sent, or a merged PR shown as open. The project filter: another project's
- * card leaking into the lanes or counts, the menu offering a project with no
- * card (or dropping the picked one), New card ignoring the filter. The
- * card's right-click menu: its words drifting from the Move menu's, a menu on
- * a dropped card, a toast for a lane-to-lane move, or an Undo that sends a
- * card somewhere other than where it was.
- */
 import { expect, test } from 'bun:test';
 import type { InboxAuthor, InboxCardWire, InboxInitiative } from '@plannotator/core/inbox-types';
 import { boardCounts, boardFilterHash, boardInitiativeOf, cardsInInitiative, initiativeCounts, liveInitiatives, newCardInitiative, boardLanes, boardViewOf, boardProjects, cardAge, cardsInProject, newCardProject, cardFoot, cardLine, cardMenuItems, cardMenuToast, cardMessageBody, cardUndoStillApplies, cardShowsUnread, columnChoices, historyWords, messageKey, refState, sentTo, shortRef, unseenDrops, waitingThread, youLinkLabel, youThread, type CardMenuItem } from './model';
@@ -54,7 +40,6 @@ test('the five lanes in order, only In review on the person; a card the person s
   expect(lanes[1].cards.map((c) => c.id)).toEqual(['sent', 'a']);
   expect(lanes[0].cards.map((c) => c.id)).toEqual(['d']);
   expect(sentTo(sent)).toBe('Claude Code');
-  // Once the agent moves it, it is just a card.
   expect(sentTo({ ...sent, column: 'in_progress', moved_at: '2026-10-20T12:00:00.000Z' })).toBeNull();
 });
 
@@ -65,7 +50,6 @@ test('the Done lane holds the last seven days from when a card moved to Done; ol
       card('fresh', { column: 'done', moved_at: '2026-10-30T11:00:00.000Z' }),
       card('six', { column: 'done', moved_at: '2026-10-24T13:00:00.000Z' }),
       card('eight', { column: 'done', moved_at: '2026-10-22T11:00:00.000Z' }),
-      // Made long ago, done yesterday: the move counts, not when it was made.
       card('old-made', { column: 'done', created_at: '2026-09-01T10:00:00.000Z', moved_at: '2026-10-29T12:00:00.000Z' }),
       card('live', { column: 'in_progress', moved_at: '2026-09-01T10:00:00.000Z' }),
       card('gone', { column: 'dropped', moved_at: '2026-10-30T11:00:00.000Z' }),
@@ -74,7 +58,6 @@ test('the Done lane holds the last seven days from when a card moved to Done; ol
   );
   expect(lanes.find((lane) => lane.column === 'done')!.cards.map((c) => c.id)).toEqual(['fresh', 'six', 'old-made']);
   expect(lanes.flatMap((lane) => lane.cards).map((c) => c.id)).not.toContain('gone');
-  // Exactly seven days on is out.
   expect(boardLanes([card('edge', { column: 'done', moved_at: '2026-10-23T12:00:00.000Z' })], now).at(-1)!.cards).toEqual([]);
 });
 
@@ -84,9 +67,7 @@ test('"Waiting on you" comes from a linked thread the Inbox lists as waiting on 
   expect(waitingThread(card('a', { column: 'in_progress', threads: ['msg_quiet', 'msg_wait'] }), rowOf)).toBe('msg_wait');
   expect(waitingThread(card('b', { column: 'todo', threads: ['msg_stop'] }), rowOf)).toBe('msg_stop');
   expect(waitingThread(card('c', { column: 'backlog', threads: ['msg_hold'] }), rowOf)).toBe('msg_hold');
-  // Nothing waiting, a thread the window has no row for: none.
   expect(waitingThread(card('d', { column: 'in_progress', threads: ['msg_new', 'msg_quiet', 'msg_gone'] }), rowOf)).toBeNull();
-  // In review has its own "You: …"; Done and Cancelled are over.
   for (const column of ['in_review', 'done', 'dropped'] as const) expect(waitingThread(card('e', { column, threads: ['msg_wait'] }), rowOf)).toBeNull();
 });
 
@@ -103,7 +84,6 @@ test('the second line: "You: …" only in In review; the agent’s word elsewher
 });
 
 test('unread: an agent wrote in a line after the look the visit began with, and the person has not opened or moved it', () => {
-  // By seq, not by clock: two writes in one millisecond are told apart.
   const late = card('late', { heard_seq: 12 });
   const sameMs = card('same', { heard_seq: 11 });
   const early = card('early', { heard_seq: 9 });
@@ -114,7 +94,6 @@ test('unread: an agent wrote in a line after the look the visit began with, and 
   expect(cardShowsUnread(early, look, new Set())).toBe(false);
   expect(cardShowsUnread(mine, look, new Set())).toBe(false);
   expect(cardShowsUnread(late, look, new Set(['late']))).toBe(false);
-  // Never looked: every card an agent wrote is unread.
   expect(cardShowsUnread(early, null, new Set())).toBe(true);
 });
 
@@ -132,7 +111,6 @@ test('history reads like the mock: short refs, and a Start in the card’s own t
   expect(historyWords({ at: 'x', by: CLAUDE, kind: 'linked_ref', ref: 'acme/widgets#2018', ref_kind: 'pr' })).toMatchObject({ before: 'Linked ', bold: '#2018', after: '' });
   expect(historyWords({ at: 'x', by: PERSON, kind: 'sent', to: CLAUDE, thread_id: 'msg_1', existing_thread: true }).after).toBe(' in the card’s thread');
   expect(historyWords({ at: 'x', by: PERSON, kind: 'sent', to: CLAUDE, thread_id: 'msg_1', existing_thread: false }).after).toBe(' in a new thread');
-  // The Inbox's own move to Done says so, naming the PRs that merged.
   expect(historyWords({ at: 'x', by: PERSON, kind: 'auto_shipped', prs: ['https://github.com/acme/widgets/pull/12'] })).toMatchObject({ before: 'Done automatically: ', bold: '#12', after: ' merged' });
   expect(historyWords({ at: 'x', by: PERSON, kind: 'auto_shipped', prs: ['https://github.com/acme/widgets/pull/12', 'https://gitlab.com/g/p/-/merge_requests/3'] }).bold).toBe('#12, !3');
 });
@@ -157,12 +135,10 @@ test('the opened card’s foot: Send for a card nobody was asked about, Start fo
   expect(columnChoices(card('x')).map((c) => c.column)).toEqual(['backlog', 'todo', 'in_progress', 'in_review', 'done']);
 });
 
-/** A card menu as its groups of labels, the card's own column marked with "*". */
 const menuWords = (groups: CardMenuItem[][]) => groups.map((group) => group.map((item) => (item.kind === 'column' && item.current ? `${item.label}*` : item.label)));
 
 test('a card’s right-click menu: Open thread when linked, the Move menu’s words in its order with the card’s column checked, then Cancel…', () => {
-  // The words and order are the approved ones (approval "inbox-board-card-menu", layout A), pinned on purpose:
-  // the same as the opened card's Move menu, so a drift in either place fails here.
+  // Pinned on purpose: same words and order as the opened card's Move menu.
   expect(menuWords(cardMenuItems(card('x', { column: 'in_progress' }), 'msg_1'))).toEqual([
     ['Open thread'],
     ['Backlog', 'Todo', 'In progress*', 'In review'],
@@ -170,23 +146,17 @@ test('a card’s right-click menu: Open thread when linked, the Move menu’s wo
     ['Cancel…'],
   ]);
   expect(cardMenuItems(card('x', { column: 'in_progress' }), 'msg_1')[0]).toEqual([{ kind: 'thread', threadId: 'msg_1', label: 'Open thread' }]);
-  // No linked thread: no Open thread (the click opens the card).
   expect(menuWords(cardMenuItems(card('x'), null))[0]).toEqual(['Backlog*', 'Todo', 'In progress', 'In review']);
-  // A card in Done (the Done page): the same menu, Done checked.
   expect(menuWords(cardMenuItems(card('x', { column: 'done' }), null))[1]).toEqual(['Done*']);
-  // A cancelled card has no menu (its row has Restore).
   expect(cardMenuItems(card('x', { column: 'dropped', aside_from: 'in_progress' }), 'msg_1')).toEqual([]);
 });
 
 test('the toast after a menu move: only when the card leaves the lanes, and its Undo puts it back where it was', () => {
   const building = card('x', { title: 'Slack bridge', column: 'in_progress' });
-  // Done: Undo moves it back to the lane it came from (a restore is only for a cancelled card).
   expect(cardMenuToast(building, { ...building, column: 'done' })).toEqual({ lead: 'Done', detail: '“Slack bridge”', undo: { op: 'move', column: 'in_progress' } });
   expect(cardMenuToast(building, { ...building, column: 'dropped', aside_from: 'in_progress' })).toEqual({ lead: 'Cancelled', detail: '“Slack bridge”', undo: { op: 'restore' } });
-  // A done card cancelled: Undo restores it to Done (the store kept it as where it was).
   const shipped = card('z', { column: 'done' });
   expect(cardMenuToast(shipped, { ...shipped, column: 'dropped', aside_from: 'done' })?.undo).toEqual({ op: 'restore' });
-  // The card is seen moving: lane to lane, back into a lane, or no move at all, no toast.
   expect(cardMenuToast(building, { ...building, column: 'in_review' })).toBeNull();
   expect(cardMenuToast(building, { ...building, column: 'backlog' })).toBeNull();
   expect(cardMenuToast(shipped, { ...shipped, column: 'in_progress' })).toBeNull();
@@ -195,13 +165,9 @@ test('the toast after a menu move: only when the card leaves the lanes, and its 
 
 test('a toast’s Undo runs only while the card is still where the menu put it', () => {
   const shipped = card('x', { column: 'done', moved_at: '2026-10-20T12:00:00.000Z' });
-  // An agent only said something (no move): Undo still applies.
   expect(cardUndoStillApplies(shipped, card('x', { column: 'done', moved_at: shipped.moved_at, heard_at: '2026-10-20T12:05:00.000Z' }))).toBe(true);
-  // An agent moved it on (Done to In review): Undo must not pull it to its old lane.
   expect(cardUndoStillApplies(shipped, { ...shipped, column: 'in_review', moved_at: '2026-10-20T12:01:00.000Z' })).toBe(false);
-  // Moved away and back to the same column since: a move happened, so the toast's move is not the last word.
   expect(cardUndoStillApplies(shipped, { ...shipped, moved_at: '2026-10-20T12:02:00.000Z' })).toBe(false);
-  // Gone from the window's cards.
   expect(cardUndoStillApplies(shipped, null)).toBe(false);
 });
 
@@ -228,18 +194,12 @@ test('"You: …" goes to the thread where the person makes the call: the sent th
   };
   const rowOf = (id: string) => rows[id] ?? null;
   const sent = { at: '2026-10-19T09:00:00.000Z', to: CLAUDE, thread_id: 'msg_sent' };
-  // Sent first, even when another linked thread spoke later.
   expect(youThread(card('a', { threads: ['msg_new', 'msg_sent'], sent }), rowOf)).toBe('msg_sent');
-  // Else the linked thread with the latest message, whatever order they were linked in.
   expect(youThread(card('b', { threads: ['msg_new', 'msg_old'] }), rowOf)).toBe('msg_new');
-  // Threads the list does not hold: the later-linked one.
   expect(youThread(card('c', { threads: ['msg_x', 'msg_y'] }), rowOf)).toBe('msg_y');
-  // A sent thread that is no longer linked (the wire drops a thread that is gone) is passed over, even when the list still holds it.
   expect(youThread(card('d', { threads: ['msg_old'], sent: { ...sent, thread_id: 'msg_gone' } }), rowOf)).toBe('msg_old');
   expect(youThread(card('d2', { threads: ['msg_old'], sent: { ...sent, thread_id: 'msg_new' } }), rowOf)).toBe('msg_old');
-  // No thread: none (the card opens instead).
   expect(youThread(card('e'), rowOf)).toBeNull();
-  // The link's name holds its visible words as shown, case and all (WCAG 2.5.3: a voice user says what they see).
   for (const you of ['Merge #14', 'PR #14: look', 'Pick one of three dialogs']) expect(youLinkLabel(you).startsWith(`You: ${you}`)).toBe(true);
 });
 
@@ -253,7 +213,6 @@ test("the project filter keeps only that project's cards, in every column; none 
   ];
   expect(cardsInProject(cards, null)).toBe(cards);
   expect(cardsInProject(cards, 'prj_a').map((c) => c.id)).toEqual(['a1', 'a2', 'a3']);
-  // The counts and the drops read the filtered cards.
   expect(boardCounts(cardsInProject(cards, 'prj_a'))).toEqual({ done: 1, dropped: 0 });
   expect(unseenDrops(cardsInProject(cards, 'prj_a'))).toEqual([]);
   expect(unseenDrops(cardsInProject(cards, 'prj_b')).map((c) => c.id)).toEqual(['b2']);
@@ -264,7 +223,6 @@ test("the Project menu offers the projects with a card, in the sidebar's order, 
   const projects = [{ id: 'prj_c' }, { id: 'prj_a' }, { id: 'prj_none' }, { id: 'prj_b' }];
   const cards = [card('b', { project_id: 'prj_b' }), card('a', { project_id: 'prj_a', column: 'done' }), card('c', { project_id: 'prj_c', column: 'dropped' })];
   expect(boardProjects(cards, projects, null).map((p) => p.id)).toEqual(['prj_c', 'prj_a', 'prj_b']);
-  // Picked with no card left: still listed, so the menu shows what is checked.
   expect(boardProjects(cards, projects, 'prj_none').map((p) => p.id)).toEqual(['prj_c', 'prj_a', 'prj_none', 'prj_b']);
 });
 
@@ -273,7 +231,6 @@ test('New card goes in the filtered project, else the card heard from last, else
   const cards = [card('a', { project_id: 'prj_a', heard_at: '2026-10-20T10:00:00.000Z' }), card('b', { project_id: 'prj_b', heard_at: '2026-10-21T10:00:00.000Z' })];
   expect(newCardProject('prj_a', projects, cards)).toBe('prj_a');
   expect(newCardProject(null, projects, cards)).toBe('prj_b');
-  // A filter naming no known project is not a place to put a card.
   expect(newCardProject('prj_gone', projects, cards)).toBe('prj_b');
   expect(newCardProject(null, projects, [])).toBe('prj_a');
   expect(newCardProject(null, [], [])).toBeNull();
@@ -287,7 +244,6 @@ test('an older Board link still opens: #board=icebox is the Cancelled list, #boa
   expect(boardViewOf(null)).toBe('lanes');
 });
 
-// The Board's initiatives (approval "board-initiatives").
 const SHAPE = 'ini_01JX0000000000000000000001';
 const MEMORY = 'ini_01JX0000000000000000000002';
 const GONE = 'ini_01JX0000000000000000000003';
@@ -300,7 +256,6 @@ test('the filter counts each live initiative and No initiative; a card in a dele
   expect(live.map((i) => i.name)).toEqual(['Shape', 'Memory']);
   const cards = [card('a', { initiative: SHAPE }), card('b', { initiative: SHAPE }), card('c', { initiative: null }), card('d'), card('e', { initiative: GONE })];
   expect(Object.fromEntries(initiativeCounts(cards, live))).toEqual({ none: 3, [SHAPE]: 2, [MEMORY]: 0 });
-  // The counts follow what they are given: the Board passes the picked project's lane cards.
   const other = [...cards, card('x', { project_id: 'prj_2', initiative: MEMORY })];
   expect(Object.fromEntries(initiativeCounts(cardsInProject(other, 'prj_2'), live))).toEqual({ none: 0, [SHAPE]: 0, [MEMORY]: 1 });
 });
@@ -311,7 +266,6 @@ test('the initiative filter narrows what the project filter left: one initiative
   expect(cardsInInitiative(cardsInProject(cards, 'prj_1'), SHAPE).map((c) => c.id)).toEqual(['a']);
   expect(cardsInInitiative(cards, 'none').map((c) => c.id)).toEqual(['c']);
   expect(cardsInInitiative(cards, null)).toBe(cards);
-  // A card whose initiative was deleted is in none, as it counts there (the window may hold it a moment before the server's null).
   const gone = [...cards, card('e', { initiative: GONE })];
   const live = liveInitiatives([initiative(SHAPE, 'Shape'), initiative(MEMORY, 'Memory'), initiative(GONE, 'Gone', true)]);
   expect(cardsInInitiative(gone, 'none', live).map((c) => c.id)).toEqual(['c', 'e']);
@@ -323,15 +277,12 @@ test('the address: #board&project=…&initiative=…, `none` kept, a stale or ba
   expect(boardFilterHash({ project: null, initiative: 'none' })).toBe('&initiative=none');
   expect(boardFilterHash({})).toBe('');
   const live = [initiative(SHAPE, 'Shape')];
-  // Round trip through the hash the window writes and reads.
   const params = new URLSearchParams(`board${boardFilterHash({ project: 'prj_1', initiative: SHAPE })}`);
   expect(boardInitiativeOf(params.get('initiative'), live)).toBe(SHAPE);
   expect(params.get('project')).toBe('prj_1');
   expect(boardInitiativeOf('none', live)).toBe('none');
   expect(boardInitiativeOf('none', null)).toBe('none');
-  // Before the cards load, an id filters as it stands (a filtered link never flashes every card).
   expect(boardInitiativeOf(MEMORY, null)).toBe(MEMORY);
-  // Loaded: one the Inbox does not hold (deleted, a stale link) is no filter.
   expect(boardInitiativeOf(MEMORY, live)).toBeNull();
   expect(boardInitiativeOf('shape', live)).toBeNull();
   expect(boardInitiativeOf(null, live)).toBeNull();
