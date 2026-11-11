@@ -75,6 +75,19 @@ export function writeAgentCliStubs(dir: string): string {
   return dir;
 }
 
+/**
+ * A stand-in `claude` in `dir` (made if missing) that answers `claude agents --json` with no sessions and refuses
+ * everything else. For a spec whose Claude Code session runs a plugin too old to send its name (below 0.28.50): the
+ * Inbox then asks Claude Code for the name (packages/server/inbox-claude-names.ts), as it would for a real old plugin.
+ * Put `dir` first on the Inbox's PATH; every other agent CLI still meets the runner's stubs. Returns `dir`.
+ */
+export function claudeListingNoSessions(dir: string): string {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'claude'), `#!/bin/sh\nif [ "$1" = agents ]; then echo '[]'; exit 0; fi\nexit 127\n`);
+  chmodSync(join(dir, 'claude'), 0o755);
+  return dir;
+}
+
 /** Every call a stub in `dir` recorded, one `<name> <args>` line each. */
 export function agentCliCalls(dir: string): string[] {
   const file = join(dir, LOG);

@@ -29,6 +29,7 @@ import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { refuseRealDataDir } from '../helpers/real-data-dir';
+import { claudeListingNoSessions } from './agent-cli-stubs';
 import { markTourDecided } from '../helpers/tour-decided';
 import { mp4 } from '../helpers/video-fixtures';
 
@@ -52,7 +53,8 @@ export interface ParitySeed {
 export function parityEnv(home: string, dataDir: string): Record<string, string> {
   refuseRealDataDir(dataDir, 'parityEnv');
   return {
-    PATH: process.env.PATH ?? '/usr/bin:/bin',
+    // A session on plugin 0.28.23 sends no name, so the Inbox asks Claude Code for one: a stand-in answers.
+    PATH: `${claudeListingNoSessions(join(home, 'fake-bin'))}:${process.env.PATH ?? '/usr/bin:/bin'}`,
     HOME: home,
     TMPDIR: process.env.TMPDIR ?? '/tmp',
     PLANNOTATOR_DATA_DIR: dataDir,
