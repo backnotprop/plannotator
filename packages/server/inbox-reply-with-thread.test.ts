@@ -37,6 +37,13 @@ async function setup() {
   const result = (await client.callTool({ name: "send_message", arguments: { project_path: project, body: ASK } })) as { isError?: boolean; content: { text: string }[]; structuredContent: Json };
   if (result.isError) throw new Error(result.content[0]!.text);
   const origin = `http://127.0.0.1:${server.port}`;
+  // The project's repo resolved (known to be none), so the read and the Send's answer cannot differ by a resolve that
+  // lands between them (`repo_known`).
+  for (let i = 0; i < 200; i++) {
+    const read = (await (await fetch(`${origin}/api/inbox/threads/${result.structuredContent.thread_id}`)).json()) as Json;
+    if (read.thread.project.repo_known) break;
+    await Bun.sleep(25);
+  }
   const post = (path: string, body: Json) =>
     fetch(`${origin}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, serverSession: server.serverSession }) });
   return { origin, sent: result.structuredContent, post };
