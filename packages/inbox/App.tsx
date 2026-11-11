@@ -7869,6 +7869,7 @@ function Inbox() {
         phone={phone}
         currentProject={route.page === 'inbox' ? route.project : null}
         projects={projects}
+        projectLabels={anyMachineLinked ? projectNames : undefined}
         onClose={closeSearch}
         onOpenResult={openSearchResult}
         actions={paletteActions}

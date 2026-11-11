@@ -1074,9 +1074,9 @@ export class InboxSearchIndex {
       const limit = Math.min(INBOX_SEARCH_LIMIT_MAX, query.limit ?? (query.group ? INBOX_SEARCH_LIMIT_MAX : terms.length === 0 ? INBOX_SEARCH_BROWSE_LIMIT : INBOX_SEARCH_CAPS[id]));
       const offset = query.group ? Math.max(0, query.offset ?? 0) : 0;
       const rows: InboxSearchRow[] = [];
-      for (const { doc } of topOf(list, offset + limit).slice(offset, offset + limit)) {
+      for (const { doc, score } of topOf(list, offset + limit).slice(offset, offset + limit)) {
         const row = this.row(this.docs[doc]!, terms, labels);
-        if (row) rows.push(row);
+        if (row) rows.push({ ...row, score });
       }
       answer[id] = rows;
     }

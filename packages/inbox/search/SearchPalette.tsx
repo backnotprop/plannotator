@@ -80,6 +80,11 @@ export interface SearchPaletteProps {
   currentProject: string | null;
   /** The projects for the Project chip, with their names as the person reads them. */
   projects: readonly { id: string; name: string; root: string; display_name?: unknown }[];
+  /**
+   * The list's project names, given while machines are linked: another machine's project reads as the list reads it
+   * ("billing-svc · MacBook"), in its rows and the Project chip. Absent: the palette names the projects itself.
+   */
+  projectLabels?: ReadonlyMap<string, string>;
   /** `opened`: a result opened here (focus goes to it); `dismissed`: focus goes back to what opened the palette. */
   onClose: (reason: 'dismissed' | 'opened') => void;
   /** Open a result in this tab: the window writes the hash (a new history entry) and lands on the message. */
@@ -438,7 +443,7 @@ function keepInputFocus(event: ReactMouseEvent): void {
 }
 
 export default function SearchPalette(props: SearchPaletteProps) {
-  const { open, phone, currentProject, projects, onClose, onOpenResult, actions, onAction, shapes } = props;
+  const { open, phone, currentProject, projects, projectLabels, onClose, onOpenResult, actions, onAction, shapes } = props;
   const dialogRef = useRef<HTMLDialogElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   /** An IME composition is under way in the input (its Escape is not the palette's). */
@@ -469,7 +474,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
   const sort = useSearchSort();
   const [fades, setFades] = useState({ top: false, bottom: false });
 
-  const names = useMemo(() => projectNames(projects), [projects]);
+  const names = useMemo(() => projectLabels ?? projectNames(projects), [projectLabels, projects]);
   const projectName = useCallback((id: string) => names.get(id) ?? id, [names]);
   const projectNameRef = useRef(projectName);
   projectNameRef.current = projectName;
@@ -1075,7 +1080,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
             const row = option.row;
             return (
               <div key={`${row.type}-${row.id}`} className="ib-sp-row" {...common} data-result={row.type} data-result-id={row.id}>
-                <ResultContent row={row} phone={phone} projectName={projectName(row.project.id)} terms={answered?.model.terms ?? NO_TERMS} />
+                <ResultContent row={row} phone={phone} projectName={names.get(row.project.id) ?? row.project.name} terms={answered?.model.terms ?? NO_TERMS} />
               </div>
             );
           })}

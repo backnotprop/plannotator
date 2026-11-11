@@ -1389,7 +1389,15 @@ export async function searchInbox(request: SearchRequest, signal?: AbortSignal):
   if (request.limit) query.set('limit', String(request.limit));
   if (request.current) query.set('current', request.current);
   if (request.sort === 'newest') query.set('sort', 'newest');
-  return readJson<SearchModel>(await fetch(inboxUrl(`/search?${query}`), { headers: { Accept: 'application/json' }, cache: 'no-store', signal }));
+  // The merged view (once the list named this Inbox): the linked machines' threads, messages, files and Recent too.
+  if (selfMachineId()) query.set('machines', '1');
+  const model = await readJson<SearchModel>(await fetch(inboxUrl(`/search?${query}`), { headers: { Accept: 'application/json' }, cache: 'no-store', signal }));
+  // Another machine's row says `project.machine`: its ids route there, as a merged list row's do.
+  for (const row of [...Object.values(model.groups ?? {}).flat(), ...(model.recent ?? [])]) {
+    if (!row?.project.machine) continue;
+    rememberMachine([row.id, row.project.id, 'thread_id' in row ? row.thread_id : '', 'message_id' in row ? row.message_id : ''], row.project.machine);
+  }
+  return model;
 }
 
 /** Remember a search the person opened a result from (the last 6), or forget them all. */

@@ -5700,8 +5700,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ error: "Not found", code: "not_found" }, 404);
       }
 
-      // Search: a read route (and the recent searches the window writes on opening a result).
-      const searched = await search.handle(req, url);
+      // Search: a read route (and the recent searches the window writes on opening a result). In the merged view
+      // (`machines=1`) it asks the linked machines online too, through the forward; a machine's door refuses `machines`.
+      const searched = await search.handle(req, url, {
+        online: () => machines.machinesView().filter((machine) => !machine.self && machine.state === "online").map((machine) => machine.id),
+        projectOwner: (projectId) => machines.projectOwner(projectId),
+        forward: (forwarded, target) => machines.route(forwarded, target, via),
+      });
       if (searched) return searched;
       // The composers' skill picker and the SKILL.md a Send pastes in (inbox-skills.ts): read routes.
       const skills = inboxSkillsRoute(req, url, { codeReview: codeReviewOn(), shape: shapeOn() });
