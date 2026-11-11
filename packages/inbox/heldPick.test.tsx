@@ -251,7 +251,8 @@ test.skipIf(!hasDom)('a held pick counts as saved: a Send of the words goes, nev
   const reply = [...el.querySelectorAll('section.ib-pane .ib-pfoot button')].find((b) => b.textContent?.trim() === 'Reply') as HTMLButtonElement;
   await act(async () => reply.click());
   await settle();
-  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  // The reply's field, not a question card's Other field (a textarea too).
+  const text = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
   act(() => {
     setter.call(text, 'Pin it, as held.');
@@ -265,8 +266,8 @@ test.skipIf(!hasDom)('a held pick counts as saved: a Send of the words goes, nev
 
 test.skipIf(!hasDom)('an answer typed behind a held pick: only its newest words are held next, and a refusal of them unpicks them', async () => {
   const el = await render();
-  const field = el.querySelector<HTMLInputElement>('input[aria-label^="Other answer"]')!;
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+  const field = el.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Other answer"]')!;
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
   const type = (words: string) =>
     act(() => {
       setter.call(field, words);

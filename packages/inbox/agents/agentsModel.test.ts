@@ -5,13 +5,15 @@
  * What this catches: an agent filed under the wrong machine (or a linked machine's caption lost when it has no agent,
  * which takes its filter away), an ended agent listed again ("N ended today" was dropped), an agent opening another
  * machine's thread with the same session, a row named by its session id instead of words, and a hover card that
- * invents a fact the window does not have.
+ * invents a fact the window does not have. The list's agent filter (a click on an agent): a thread of the agent's
+ * left out (only its newest kept), another agent's or another machine's thread let in, a continued conversation
+ * split, or a branch that is a row of its own swallowed.
  */
 import { expect, test } from 'bun:test';
 import type { InboxAgent, InboxAgentsGroup, InboxListRow } from '@plannotator/core/inbox-types';
 import type { MachineView } from '../api';
 import { machinesModel } from '../machines';
-import { agentFacts, agentRowName, agentsGroups, agentThread } from './model';
+import { agentFacts, agentListFilter, agentRowName, agentsGroups, agentThread, filterAgentRows } from './model';
 
 const SELF = 'ibx_01K0000000000000000000000S';
 const MAC = 'ibx_01K0000000000000000000000M';
@@ -131,4 +133,58 @@ test('two rows stay two: a branch that works in its own thread, and two agents t
   const shared = [row('msg_t', 'ses_one', { participants: [{ session: 'ses_one' }, { session: 'ses_two' }] as InboxListRow['participants'] })];
   const two = agentsGroups([group([agent('ses_one'), agent('ses_two')])], machinesModel(null), shared);
   expect(two[0]!.agents.map((e) => [e.agent.id, e.thread?.id])).toEqual([['ses_one', 'msg_t'], ['ses_two', 'msg_t']]);
+});
+
+const ids = (sections: ReturnType<typeof filterAgentRows>) => sections.flatMap((section) => section.threads.map((r) => r.thread_id));
+const listOf = (rows: InboxListRow[]) => [{ id: 'waiting', threads: rows.slice(0, 1) }, { id: 'quiet', threads: rows.slice(1) }] as unknown as Parameters<typeof filterAgentRows>[0];
+
+test("an agent's filter lists every thread of its, not only the one its row would open, on its machine only", () => {
+  const machines = machinesModel([view(SELF, 'Studio'), view(MAC, 'MacBook')]);
+  const rows = [
+    row('t_wrote', 'ses_a', { waiting_on_person: true }),
+    row('t_newest', 'ses_a', { last_at: '2026-11-09T11:00:00.000Z' }),
+    // Addressed to it by the person, and one it took part in.
+    row('t_to', 'x', { author: { kind: 'person' }, addressee: { host: 'claude-code', session: 'ses_a' } } as Partial<InboxListRow>),
+    row('t_with', 'ses_b', { participants: [{ session: 'ses_b' }, { session: 'ses_a' }] as InboxListRow['participants'] }),
+    row('t_b', 'ses_b'),
+    // The same session id on another machine is another agent.
+    row('t_mac', 'ses_a', { machine: MAC }),
+  ];
+  const filter = agentListFilter('ses_a', [group([agent('ses_a'), agent('ses_b')], SELF), group([], MAC)], machines, rows);
+  expect(filter.machine).toBe(SELF);
+  expect(ids(filterAgentRows(listOf(rows), filter, SELF))).toEqual(['t_wrote', 't_newest', 't_to', 't_with']);
+  // Its name is its row's name (the thread its row opens).
+  expect(filter.name).toBe('Subject t_wrote');
+  // The sections stay, an emptied one included, as a machine's filter leaves them.
+  const none = filterAgentRows(listOf([row('t_b', 'ses_b')]), filter, SELF);
+  expect(none.map((section) => [section.id, section.threads.length])).toEqual([['waiting', 0], ['quiet', 0]]);
+  // No filter: the list as it is, untouched.
+  const all = listOf(rows);
+  expect(filterAgentRows(all, null, SELF) === all).toBe(true);
+});
+
+test("an agent's filter follows its row: a continued conversation is one agent, a branch that is its own row keeps its threads", () => {
+  const flat = machinesModel(null);
+  // The new session continues the old, which still polls, and both are in one thread: one row, so one filter.
+  const one = [row('t_shared', 'ses_old', { participants: [{ session: 'ses_old' }, { session: 'ses_new' }] as InboxListRow['participants'] }), row('t_before', 'ses_old'), row('t_after', 'ses_new')];
+  const merged = agentListFilter('ses_new', [group([agent('ses_old'), agent('ses_new', { continues: ['ses_old'] })])], flat, one);
+  expect(ids(filterAgentRows(listOf(one), merged, null))).toEqual(['t_shared', 't_before', 't_after']);
+  // The old session gone (no longer polls): its threads are still the conversation's.
+  const gone = agentListFilter('ses_new', [group([agent('ses_new', { continues: ['ses_old'] })])], flat, one);
+  expect(ids(filterAgentRows(listOf(one), gone, null))).toEqual(['t_shared', 't_before', 't_after']);
+  // A branch in its own thread is a row of its own: each filter keeps to its own.
+  const branch = [row('msg_a', 'ses_old'), row('msg_b', 'ses_new')];
+  const groups = [group([agent('ses_old'), agent('ses_new', { continues: ['ses_old'] })])];
+  expect(ids(filterAgentRows(listOf(branch), agentListFilter('ses_new', groups, flat, branch), null))).toEqual(['msg_b']);
+  expect(ids(filterAgentRows(listOf(branch), agentListFilter('ses_old', groups, flat, branch), null))).toEqual(['msg_a']);
+});
+
+test("a launched agent's filter has its launch's thread before it writes; an agent the list no longer names is matched by its session", () => {
+  const flat = machinesModel(null);
+  const rows = [row('t_launch', 'nobody', { subject: 'Invoice retries' }), row('t_other', 'ses_x')];
+  const launched = agentListFilter('lch_1', [group([agent('lch_1', { session: 'launch:lch_1', launch: { id: 'lch_1', thread_id: 't_launch' } })])], flat, rows);
+  expect([launched.name, ids(filterAgentRows(listOf(rows), launched, null))]).toEqual(['Invoice retries', ['t_launch']]);
+  // A link from before: the agent ended and is not listed.
+  const ended = agentListFilter('ses_x', [group([])], flat, rows);
+  expect(ids(filterAgentRows(listOf(rows), ended, null))).toEqual(['t_other']);
 });

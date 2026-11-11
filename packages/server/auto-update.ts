@@ -520,6 +520,12 @@ export interface InstallerLaunch {
   flags: InstallFlagId[];
   /** Who runs `update-prepare` (POSIX). Default: this process (updatePrepareInvocation). Tests point it at a source entry. */
   prepare?: { binary: string; entry: string };
+  /**
+   * Folders to add after this process's PATH (POSIX only): the Inbox's last
+   * login-shell PATH, so an Inbox started without the person's shell setup
+   * still lets the installer find `claude` and nvm's `node`.
+   */
+  extraPath?: readonly string[];
 }
 
 export interface AutoUpdateDeps {
@@ -988,14 +994,29 @@ export function updatePrepareInvocation(main: string = typeof Bun !== "undefined
   return { binary: process.execPath, entry: compiled ? "" : main };
 }
 
+/**
+ * The installer's PATH: `base`, then each folder of `extra` it lacks, in
+ * order. Unchanged on Windows (no login shell to add) and when there is
+ * nothing to add.
+ */
+export function installerPathWith(base: string | undefined, extra: readonly string[] = [], platform: NodeJS.Platform = process.platform): string | undefined {
+  if (platform === "win32" || extra.length === 0) return base;
+  const folders = (base ?? "").split(":").filter(Boolean);
+  for (const folder of extra) if (folder && !folders.includes(folder)) folders.push(folder);
+  return folders.join(":");
+}
+
 function installerEnv(launch: InstallerLaunch): { file: string; args: string[]; env: NodeJS.ProcessEnv } {
   const { file, args, env: commandEnv } = installerCommand(launch.platform, launch.flags);
   const prepare = launch.prepare ?? updatePrepareInvocation();
+  const path = installerPathWith(process.env.PATH, launch.extraPath, launch.platform);
   return {
     file,
     args,
     env: {
       ...process.env,
+      // Set only when it adds folders: Windows keeps its own PATH key untouched.
+      ...(path !== process.env.PATH && { PATH: path }),
       PLANNOTATOR_UPDATE_VERSION: launch.version,
       PLANNOTATOR_UPDATE_RESULT: launch.resultPath,
       PLANNOTATOR_UPDATE_LOCK: launch.lockPath,

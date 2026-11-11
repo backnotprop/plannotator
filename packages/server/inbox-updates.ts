@@ -202,6 +202,12 @@ export interface InboxUpdatesOptions {
   /** The fetch the release notes' images go through (inbox-whats-new-images.ts). Default: global fetch. */
   fetchImage?: typeof fetch;
   launchInstaller?: (launch: InstallerLaunch) => void;
+  /**
+   * Folders the installer gets after this process's PATH (the last login
+   * shell's, from the launcher), so an Inbox started without the person's
+   * shell setup still finds `claude` and nvm's `node` on Update now.
+   */
+  installerPath?: () => readonly string[];
   isManaged?: () => boolean;
   listSessions?: () => SessionInfo[];
   probeVersion?: (binaryPath: string) => Promise<string | null>;
@@ -687,7 +693,7 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
       now,
       platform: process.platform,
       isManaged,
-      launchInstaller: options.launchInstaller ?? defaultLaunchInstaller,
+      launchInstaller: (launch) => (options.launchInstaller ?? defaultLaunchInstaller)({ ...launch, extraPath: options.installerPath?.() ?? [] }),
     });
     refresh();
     return outcome;

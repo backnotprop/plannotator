@@ -169,6 +169,8 @@ When adding or modifying server endpoints, both implementations must be updated.
 claude --plugin-dir ./apps/hook
 ```
 
+**The installers' binary download** (`scripts/install.sh` `download_release_binary`, `install.ps1` `Invoke-ResumableDownload`, `install.cmd` `:DownloadBinary`; keep the three in step) continues where a dropped or stalled connection stopped, instead of starting the ~200 MB binary again from zero. Each attempt asks the github.com URL again (it redirects to a signed URL that expires within the hour, so a redirected URL is never reused) and, after the first, asks only for the rest of the file (`curl -C -`, an HTTP Range request on PowerShell). curl's own `--retry` is not used for the binary: it throws away the bytes of the attempt it retries. Bounds: at most 30 attempts, at most 4 in a row that add no bytes, 2 s apart, 6 hours in all; a stall (below 1 byte/s for 60 s, or 60 s without data on PowerShell) ends an attempt and the next continues. A server that answers a Range with the whole file gets the file again from zero; after an HTTP/2 error (curl 92) the attempts go over HTTP/1.1. The SHA-256 check (the release's `.sha256`, or `PLANNOTATOR_EXPECTED_SHA256` from the updater) still covers the whole file before the atomic swap, and a failed download removes its partial file. `install.ps1` uses `HttpWebRequest` (what `Invoke-WebRequest` uses on Windows PowerShell 5.1, so the same proxy and TLS settings) and, if that gives up, runs its earlier `Invoke-WebRequest` download (4 attempts, no progress bar) as a last resort. The `.sha256` keeps its own short download (120 s, curl's `--retry 3`). Tests: `scripts/install-download.test.ts` (a local server that redirects, cuts, stalls, ignores the Range or sends the wrong bytes; install.sh with the real curl, install.ps1 under pwsh, and on Windows under Windows PowerShell 5.1, install.cmd under cmd.exe) and the `#2788` block of `scripts/install.test.ts`.
+
 ## Requirements
 
 - Bun runtime (>= 1.4.4 to compile binaries; `scripts/require-bun.ts` checks it)
@@ -302,7 +304,7 @@ These are the flags `.github/workflows/release.yml` compiles with; without the `
 
 **Patched dependency.** `patches/@opencode-ai%2Fsdk@1.19.3.patch` (root `patchedDependencies`) makes the SDK's SSE abort handler catch `reader.cancel()`. On Bun 1.4 that promise rejects once the aborted fetch has errored the body, and the unhandled rejection ends the process: every OpenCode Ask AI answer or Stop aborts the event stream. `packages/ai/providers/opencode-sdk.test.ts` ("through the real client") fails without it. A new SDK version needs the patch carried over (`bun patch @opencode-ai/sdk`) until upstream catches the promise.
 
-**Partial-diff compatibility patch (#2264).** `patches/@pierre%2Fdiffs@1.5.2.patch` lets `FileDiff.loadFilesIfNecessary()` return without hydrating when no `loadDiffFiles` callback is configured. Plannotator already loads and validates full contents through `/api/file-content`; a missing or stale response must leave a readable partial diff, not crash either review surface when `expandUnchanged` is enabled. Pierre still hides expansion controls for partial diffs without a loader, and `prepareForEditing()` still rejects incomplete content. Carry this patch forward when upgrading `@pierre/diffs` until upstream supports externally hydrated partial diffs without throwing.
+**Partial-diff compatibility patch (#2264).** `patches/@pierre%2Fdiffs@1.6.4.patch` lets `FileDiff.loadFilesIfNecessary()` return without hydrating when no `loadDiffFiles` callback is configured. Plannotator already loads and validates full contents through `/api/file-content`; a missing or stale response must leave a readable partial diff, not crash either review surface when `expandUnchanged` is enabled. Pierre still hides expansion controls for partial diffs without a loader, and `prepareForEditing()` still rejects incomplete content. Carry this patch forward when upgrading `@pierre/diffs` until upstream supports externally hydrated partial diffs without throwing.
 
 **Release versions:** a release bumps 10 version files together, `apps/dsh-plugin/package.json` (`@plannotator/dsh`) and `apps/cline-plugin/package.json` (`@plannotator/cline`) among them; `scripts/check-release-version.mjs` lists them and fails on a mismatch. The full procedure is [`.agents/skills/release/SKILL.md`](../../.agents/skills/release/SKILL.md). `bun run build` also builds the DeepSeek Harness plugin (`build:dsh`) and the Cline plugin (`build:cline`), whose type checks and tests run in the release workflow's `test` job with everything else.
 
@@ -315,6 +317,19 @@ Running only `build:opencode` will copy stale HTML files.
 `apps/marketing/` is the plannotator.ai website — landing page, documentation, and blog. Built with Astro 5 (static output, zero client JS except a theme toggle island). Docs are markdown files in `src/content/docs/`, blog posts in `src/content/blog/`, both using Astro content collections. Tailwind CSS v4 via `@tailwindcss/vite`. Deploys to S3/CloudFront via GitHub Actions on push to main.
 
 The `/docs/reference/keyboard-shortcuts` page is auto-generated from the shortcut registry at build time — see the Keyboard Shortcuts section above. Editing the markdown body has no effect; update the scope files instead.
+
+### Videos
+
+The site's videos are not in the repository, so a plugin update that copies the repo stays small. They live in the `plannotator-marketing` S3 bucket under `assets/` and are served at `https://plannotator.ai/assets/<name>` (the same URLs as when they shipped from `public/assets/`; the in-app announcements and the README link to them). The marketing deploy's `aws s3 sync … --delete` has `--exclude "assets/*.mp4" --exclude "assets/*.webm"`, so it neither uploads nor deletes them. Pages link to them with `videoUrl('<name>')` from `src/lib/media.ts`, an absolute URL, so `bun run dev` plays the production files. Posters (small jpgs) stay in `public/assets/`. `apps/marketing/media.test.ts` fails when a video is put back in `public/`, a page links one by a relative path, or the sync loses its excludes.
+
+To add or replace a video, someone with AWS access uploads it with an explicit content type (`video/webm` for `.webm`), then checks the public URL:
+
+```bash
+aws s3 cp ./my-demo.mp4 s3://plannotator-marketing/assets/my-demo.mp4 --content-type video/mp4
+curl -sI https://plannotator.ai/assets/my-demo.mp4   # 200, content-type video/mp4, the file's size
+```
+
+A new name needs no CloudFront invalidation. To replace a file in place, prefer a new name (for example `my-demo-v2.mp4`) and update the page; overwriting the same key needs `aws cloudfront create-invalidation --distribution-id E284ON0A27O2H6 --paths "/assets/my-demo.mp4"`, and browsers that cached the old file can keep it for a while. Upload before merging the page that links it.
 
 ## Test plugin locally
 
