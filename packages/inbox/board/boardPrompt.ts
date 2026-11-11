@@ -1,18 +1,6 @@
-/**
- * The Board's prompt (approval "inbox-board", intro amendment: the prompt in
- * `intro-mock/board-prompt.md`; columns v2: work an agent was asked to do and
- * has not started goes in Todo, only a hand-over in In review). The first-visit dialog's Copy prompt and the
- * empty Board's "Copy prompt" copy it; the person pastes it into an agent,
- * which fills the Board with the work in flight it knows about.
- *
- * Every op and argument it names is the `card` action's as built
- * (packages/server/inbox-mcp-cards.ts); packages/server/inbox-board-prompt.test.ts checks that.
- */
-
 import { INBOX_CARD_INITIATIVE_RULE } from '@plannotator/core/inbox-types';
 import { connectCommand } from '../connectPrompt';
 
-/** The prompt, naming this computer's `plannotator` (`mcpCommand` from the settings, or null before they load). */
 export function boardPrompt(mcpCommand: readonly string[] | null | undefined): string {
   const p = connectCommand(mcpCommand) ?? 'plannotator';
   return `Fill my Plannotator Board with the work in flight that you know about.

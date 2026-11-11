@@ -9,46 +9,26 @@ import { CardInitiativeItems } from './BoardFilter';
 
 export interface CardMenuProps {
   className: string;
-  /** Finds a card by its id (the menu is one for the whole Board body). */
   cardOf: (id: string) => InboxCardWire | null;
   rowOf: (threadId: string) => InboxListRow | null;
-  /** The card whose menu is open (its hover look and a muted fill), or null when it closes. */
   onTarget: (id: string | null) => void;
-  /** A lane or Done picked (never the card's own column). */
   onColumn: (card: InboxCardWire, column: InboxCardColumn) => void;
   onRestore: (card: InboxCardWire) => void;
-  /** Drop…: the card opens with its reason field open and focused. */
   onDrop: (card: InboxCardWire) => void;
   onOpenThread: (card: InboxCardWire, threadId: string) => void;
-  /** The live initiatives (approval "board-initiatives"): an Initiative submenu above Cancel… once one exists. */
   initiatives?: readonly InboxInitiative[];
   onInitiative?: (card: InboxCardWire, initiative: string | null) => void;
   children: ReactNode;
 }
 
-/** The card a `contextmenu` (or a key) at this target names: its own button (the title, `data-card-open`). */
 function cardButtonOf(target: EventTarget | null): HTMLElement | null {
   if (!(target instanceof Element)) return null;
   return target.closest('.ib-bcard[data-card-id]')?.querySelector<HTMLElement>('[data-card-open]') ?? null;
 }
 
-/** The list a card sits in (a lane, the Done or Cancelled list, a phone's group) and its heading. */
 const LIST = '[data-lane], .ib-blist';
 const LIST_HEADING = '.ib-lane-h, .ib-blist-h, .ib-bgroup-h button';
 
-/**
- * A Board card's right-click menu (approval "inbox-board-card-menu", layout
- * A): one menu for the Board's body (`.ib-bmain`, the trigger), aimed at the
- * card the right-click (or the context-menu key, or Shift+F10, on a focused
- * card) lands on. Its items are `cardMenuItems`: Open thread, the opened
- * card's Move menu word for word (or Restore on a Cancelled card), Cancel…. Anywhere
- * else on the body (empty lane space, a lane heading, the Dropped list, the
- * opened card) the browser's own menu shows; a touch never opens it. The
- * trigger's rules are the thread rows' (`useContextMenuTrigger`). Escape,
- * Tab or a move put focus on the card's own button in the lane it is in now;
- * a card that left the lanes hands focus to the card now in its slot, else
- * that list's heading. The look is the project menu's (`.ib-pm`).
- */
 export function CardMenu(props: CardMenuProps) {
   const body = useRef<HTMLDivElement>(null);
   const [portal, setPortal] = useState<HTMLElement | null>(null);
@@ -62,7 +42,6 @@ export function CardMenu(props: CardMenuProps) {
   const menu = useContextMenuTrigger({
     itemOf: cardButtonOf,
     idOf: (button) => button.closest('[data-card-id]')?.getAttribute('data-card-id') ?? null,
-    // A dropped card has no menu (its row has Restore); one dropped while its menu is open closes it.
     has: (id) => {
       const card = props.cardOf(id);
       return card !== null && cardMenuItems(card, null).length > 0;
@@ -70,7 +49,6 @@ export function CardMenu(props: CardMenuProps) {
     buttonFor: (id) => cardEl(id)?.querySelector<HTMLElement>('[data-card-open]') ?? null,
     slotOf,
     stateOf: (id) => props.cardOf(id)?.column ?? '',
-    // A card moved to another lane is drawn again there: focus goes with it.
     followMoves: true,
     onTarget: props.onTarget,
   });
@@ -80,7 +58,6 @@ export function CardMenu(props: CardMenuProps) {
     if (!card) return;
     switch (item.kind) {
       case 'thread':
-        // The thread opens in the Inbox view: focus is its.
         menu.keepFocus();
         props.onOpenThread(card, item.threadId);
         return;
@@ -93,7 +70,6 @@ export function CardMenu(props: CardMenuProps) {
         props.onRestore(card);
         return;
       case 'drop':
-        // The opened card's reason field takes focus.
         menu.keepFocus();
         props.onDrop(card);
         return;
@@ -116,7 +92,6 @@ export function CardMenu(props: CardMenuProps) {
       {item.current && <Icon name="check" size={15} className="ib-pmi-check" />}
     </Menu.RadioItem>
   );
-  // The column groups (the lanes, then Done) are one choice: one radio group, a line inside it.
   const columnGroups = groups.filter((group) => group[0]?.kind === 'column');
   const firstColumns = groups.findIndex((group) => group[0]?.kind === 'column');
   return (
@@ -130,7 +105,6 @@ export function CardMenu(props: CardMenuProps) {
             {card &&
               groups.map((group, index) => {
                 if (group[0]?.kind === 'column' && index !== firstColumns) return null;
-                // The Initiative submenu: its own group, just above Cancel….
                 const initiativeGroup = group[0]?.kind === 'drop' && props.onInitiative && (props.initiatives?.length ?? 0) > 0 && (
                   <>
                     <Menu.Separator className="ib-pm-sep" />
@@ -161,7 +135,6 @@ export function CardMenu(props: CardMenuProps) {
                       <Menu.RadioGroup
                         value={card.column}
                         onValueChange={(value: InboxCardColumn) => {
-                          // The card's own column does nothing (as the Move menu).
                           if (value === card.column) return;
                           const item = columnGroups.flat().find((choice) => choice.kind === 'column' && choice.column === value);
                           if (item) pick(item);

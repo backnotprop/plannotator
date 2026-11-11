@@ -4,13 +4,8 @@ import { HostMark, Icon } from '../icons';
 import { Modal } from '../components/Updates';
 import { boardPrompt } from './boardPrompt';
 
-/** How long "Copied" shows on Copy prompt. */
 export const BOARD_PROMPT_COPIED_MS = 2000;
 
-/**
- * Copy the Board prompt: `state` says "Copied" for 2 s (or that it failed);
- * the caller's live region says it once.
- */
 export function useCopyBoardPrompt(mcpCommand: readonly string[] | null | undefined) {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const [copiedOnce, setCopiedOnce] = useState(false);
@@ -28,18 +23,6 @@ export function useCopyBoardPrompt(mcpCommand: readonly string[] | null | undefi
   return { state, copiedOnce, copy };
 }
 
-/**
- * The Board's first-visit dialog (approval "inbox-board", intro amendment, as
- * mocked): a small animated board (a card walks through the stages; under
- * reduced motion it rests in In review), "Your Board", one line, the quiet
- * line about the prompt, Copy prompt (check and "Copied" for 2 s; "Not now"
- * becomes "Done") and Not now. The Inbox's Modal shell, as the sound dialog.
- * Shown once per machine; the header's "?" opens it again.
- *
- * `onTurnOn`: the reveal's offer (the owner, 2026-11-04: reveals are opt-in), shown while the Board is still off. The
- * same picture, title and first line, without the prompt line, and "Not now" and "Turn it on" in place of Copy prompt:
- * Turn it on is the only way this dialog turns the Board on; Not now, Escape and a click outside leave it off.
- */
 export function BoardIntro({ mcpCommand, phone, onClose, onTurnOn }: { mcpCommand: readonly string[] | null | undefined; phone: boolean; onClose: () => void; onTurnOn?: () => void }) {
   const { state, copiedOnce, copy } = useCopyBoardPrompt(mcpCommand);
   if (onTurnOn) {
@@ -80,7 +63,6 @@ export function BoardIntro({ mcpCommand, phone, onClose, onTurnOn }: { mcpComman
   );
 }
 
-/** The title and lines. `prompt`: the line about Copy prompt, only where that button is (never in the offer). */
 function BoardIntroText({ prompt }: { prompt: boolean }) {
   return (
     <div className="ib-bi-text">
@@ -100,7 +82,6 @@ const LANES: { col: string; cards: { host: string | null; you?: boolean; w: [num
 ];
 const NAMES: Record<string, string> = { backlog: 'Backlog', todo: 'Todo', in_progress: 'In progress', in_review: 'In review', done: 'Done' };
 
-/** The picture: a small board, one card walking through its stages. Decoration only (aria-hidden). */
 function BoardIntroArt() {
   const card = (c: { host: string | null; you?: boolean; w: [number, number] }, extra = '') => (
     <div className={`ib-bi-c${c.you ? ' ib-bi-you' : ''}${extra}`}>

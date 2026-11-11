@@ -5,34 +5,20 @@ import { Icon } from '../icons';
 import { Tip, isTextCut } from '../components/Tip';
 
 export interface ProjectFilterProps {
-  /** The projects offered (`boardProjects`: those with a card, in the sidebar's order). */
   projects: readonly ProjectFolder[];
-  /** Names as the person reads them (`projectNames`: a second "api" gets its parent folder). */
   names: ReadonlyMap<string, string>;
-  /** The project the Board shows, or null for all of them. */
   value: string | null;
   phone: boolean;
   onChange: (project: string | null) => void;
 }
 
-/**
- * The Board's Project filter: the search palette's Project chip, in the
- * Board's header. "All projects", or the project's name with × to clear it
- * (no "in": the owner, 2026-10-28; search's chip keeps its own words); the
- * menu is the Board's own (Base UI Menu, `.ib-pm`, as the opened card's
- * column menu), one choice, so radio items with the picked one checked.
- * Base UI carries the keys: arrows, Home/End, type-ahead, Escape and Tab
- * close, focus back to the chip. No shortcut of its own.
- */
 export function ProjectFilter({ projects, names, value, phone, onChange }: ProjectFilterProps) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
-  // The menu is drawn inside the window's root, so the window's styles (and theme) reach it; inside a modal, in the
-  // modal (the top layer would cover a menu outside it).
+  // Drawn inside the window's root so its styles reach it; inside a modal, in the modal (the top layer would cover a menu outside it).
   const [portal, setPortal] = useState<HTMLElement | null>(null);
   useEffect(() => setPortal(trigger.current?.closest<HTMLElement>('dialog, .pn-inbox') ?? null), []);
   const name = value ? (names.get(value) ?? null) : null;
-  // The name is unknown only while the projects load (App drops a filter on a project it does not know).
   const label = value ? (name ?? 'Project') : 'All projects';
   const clear = value && (
     <button
@@ -42,7 +28,6 @@ export function ProjectFilter({ projects, names, value, phone, onChange }: Proje
       data-board-project-clear=""
       onClick={() => {
         onChange(null);
-        // Back on the chip; when the chip goes with the filter (one project left), on the Board's heading.
         requestAnimationFrame(() => (trigger.current ?? document.querySelector<HTMLElement>('.ib-bpage .ib-bhead h1'))?.focus());
       }}
     >
