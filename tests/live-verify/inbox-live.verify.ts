@@ -285,8 +285,10 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
       const bps = prof ? (prof.mbit * 1_000_000) / 8 : -1;
       return { offline, latency: latency ?? prof?.latency ?? 0, downloadThroughput: bps, uploadThroughput: bps };
     };
+    // Every page gets the throttle, unthrottled on loopback: its `offline` cuts the open event stream too, where the
+    // context's own offline leaves it up (a window that draws records in place then misses nothing, and LV-16's drop
+    // would not hold).
     const throttle = async (p: Page) => {
-      if (!PROFILES[PROFILE]) return;
       const cdp = await p.context().newCDPSession(p);
       cdps.set(p, cdp);
       await cdp.send('Network.enable');

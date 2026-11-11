@@ -111,13 +111,18 @@ async function watchLoading(p: Page) {
 export async function runHotel(d: HotelDeps): Promise<void> {
   const { A, log, check, get, post, threads: T } = d;
   const outAt = trackRequests(A);
+  const t0 = Date.now();
+  const moments: Record<string, number> = {};
+  const mark = (name: string) => (moments[name] = Date.now() - t0);
   await watchLoading(A);
   await A.evaluate(() => ((window as any).__hwNoReload = 1));
   const stop = await hotelLink(A, d);
   try {
     // A thread opened on the bad link (its wait shows), and back to the list and in again.
     await d.openThread(A, T.open);
+    mark('openedFirst');
     await d.openThread(A, T.hotel);
+    mark('openedHotel');
     await A.waitForTimeout(1500);
     const pane = d.paneSel(T.hotel);
     const other = `${pane} input[aria-label^="Other answer"]`;
@@ -139,6 +144,7 @@ export async function runHotel(d: HotelDeps): Promise<void> {
     // ---- The drop, mid-typing: the agent writes twice, another window marks a row read and archives one. ----
     log('hotel: link down');
     const droppedAt = Date.now();
+    mark('down');
     await d.setLink(A, true);
     await d.agentSend(T.hotel, 'Written while your link was down (one).');
     await reply.click();
@@ -153,6 +159,7 @@ export async function runHotel(d: HotelDeps): Promise<void> {
     await A.waitForTimeout(Math.max(0, HOTEL.dropMs - (Date.now() - droppedAt)));
     await d.setLink(A, false);
     const back = Date.now();
+    mark('up');
     log('hotel: link back');
     if (hasOther) await A.keyboard.type(others[2]!, { delay: 40 });
     await reply.click();
@@ -221,7 +228,7 @@ export async function runHotel(d: HotelDeps): Promise<void> {
     await check('HW-1', `Hotel WiFi: no spinner or "Loading…" stays up more than ${LOADING_DEADLINE_MS} ms after its request ended`, async () => ({
       pass: stuck.length === 0,
       ms: longest,
-      detail: { framesWithMarks: frames.length, framesWithNothingOut: stuck.length, marks: [...new Set(stuck.flatMap((f) => f.marks))].slice(0, 8) },
+      detail: { framesWithMarks: frames.length, framesWithNothingOut: stuck.length, marks: [...new Set(stuck.flatMap((f) => f.marks))].slice(0, 8), stuckAt: stuck.slice(0, 3).map((f) => f.t - t0), moments },
     }));
   } finally {
     await stop();
