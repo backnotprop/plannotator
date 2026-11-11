@@ -38,6 +38,8 @@
     "./favicon-style": "./favicon-style.ts",
     "./forge-refs": "./forge-refs.ts",
     "./forge-ref-card": "./forge-ref-card.ts",
+    "./problem": "./problem.ts",
+    "./problem-words": "./problem-words.ts",
     "./feedback-templates": "./feedback-templates.ts",
     "./goal-setup": "./goal-setup.ts",
     "./question-block": "./question-block.ts",

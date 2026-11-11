@@ -10,6 +10,7 @@
  */
 
 import { classifyForgeHost, type ForgePlatform } from "./forge-refs";
+import type { Problem } from "./problem";
 
 export type { ForgePlatform } from "./forge-refs";
 
@@ -183,7 +184,11 @@ export type ForgeRefCardError =
 
 export type ForgeRefCardResult =
   | { ok: true; data: ForgeRefCardData; fetchedAt: number }
-  | { ok: false; error: ForgeRefCardError; fetchedAt: number };
+  /**
+   * `problem` (newer servers): the tool's state in the one table's words (problem-words.ts); `error` stays the older
+   * code every window reads.
+   */
+  | { ok: false; error: ForgeRefCardError; problem?: Problem; fetchedAt: number };
 
 export const FORGE_REF_BODY_MAX = 4000;
 export const FORGE_REF_COMMENT_MAX = 600;
