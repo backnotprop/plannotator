@@ -519,7 +519,6 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
 
 // --- Line gutter + fold row (optional seams) ---
 
-/** "11–12", or "14" for one line; null when the side has no lines. */
 /** The words the person has selected inside `element`, for Ctrl+C once its
  *  composer has the focus; undefined when the selection is elsewhere or empty. */
 function selectedWordsIn(element: HTMLElement): string | undefined {
@@ -530,6 +529,7 @@ function selectedWordsIn(element: HTMLElement): string | undefined {
   return text.trim() ? text : undefined;
 }
 
+/** "11–12", or "14" for one line; null when the side has no lines. */
 function rangeLabel(start?: number, end?: number): string | null {
   if (start === undefined) return null;
   return end !== undefined && end !== start ? `${start}–${end}` : `${start}`;

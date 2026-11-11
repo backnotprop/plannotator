@@ -7,8 +7,12 @@
  * textarea, or on the page outside it) the copy carries nothing; Comment mode
  * (composer with no toolbar) carries nothing; the toolbar stage stops copying;
  * the copy grows an html part (rich text is the toolbar's Copy button alone,
- * the owner's call on #2191); or text the person selected in the textarea is
- * overwritten by the highlight.
+ * the owner's call on #2191); text the person selected in the textarea is
+ * overwritten by the highlight; another field on the page (an Inbox reply
+ * box) loses its own copy while a composer with words in it stays open; a
+ * copy with no highlight (or after the composer closed) takes the clipboard;
+ * or an Inbox thread message (text comments, answer-only, click-a-word off)
+ * stops copying.
  */
 import { afterEach, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -39,7 +43,10 @@ afterEach(async () => {
 
 const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 20)); });
 
-async function mount(mode: EditorMode = 'selection') {
+/** The Inbox's thread message: text comments on, answer-only, no click-a-word (Thread.tsx). */
+const INBOX_MESSAGE = { textComments: true, answerOnly: true, clickAWord: false, maxWidth: null } as const;
+
+async function mount(mode: EditorMode = 'selection', extra: Record<string, unknown> = {}) {
   const Viewer = viewerModule!.Viewer;
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -57,6 +64,7 @@ async function mount(mode: EditorMode = 'selection') {
         taterMode={false}
         stickyActions={false}
         disableCodePathValidation
+        {...extra}
       />,
     );
   });
@@ -149,4 +157,50 @@ test.skipIf(!hasDom)('with rich copy on, the composer-stage copy is still plain 
   const el = await mount();
   const area = await openComposerFromToolbar(el);
   expect(copyAt(area)).toEqual({ prevented: true, plain: SELECTED, html: undefined });
+});
+
+test.skipIf(!hasDom)('with no highlight, Ctrl+C is the browser\'s own', async () => {
+  await mount();
+  expect(copyAt(document.body)).toMatchObject({ prevented: false, plain: undefined });
+});
+
+test.skipIf(!hasDom)('after the composer closes, Ctrl+C no longer copies the old highlight', async () => {
+  const el = await mount();
+  const area = await openComposerFromToolbar(el);
+  await act(async () => {
+    area.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  });
+  await settle();
+  expect(document.querySelector('[data-comment-popover]')).toBeNull();
+  expect(copyAt(document.body)).toMatchObject({ prevented: false, plain: undefined });
+});
+
+test.skipIf(!hasDom)('a field elsewhere on the page keeps its own copy while a composer with words stays open', async () => {
+  const el = await mount();
+  const area = await openComposerFromToolbar(el);
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(area, 'Why three?');
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  const reply = document.createElement('textarea');
+  document.body.appendChild(reply);
+  reply.focus();
+  expect(copyAt(reply)).toMatchObject({ prevented: false, plain: undefined });
+  // Back in the composer, a caret after the typed words still copies the highlight.
+  area.focus();
+  area.setSelectionRange(10, 10);
+  expect(copyAt(area)).toMatchObject({ prevented: true, plain: SELECTED });
+});
+
+test.skipIf(!hasDom)('an Inbox thread message (click-a-word off): toolbar and composer stages copy the highlighted text', async () => {
+  const el = await mount('selection', INBOX_MESSAGE);
+  await select(el);
+  expect(copyAt(document.body)).toMatchObject({ prevented: true, plain: SELECTED });
+  const comment = document.querySelector<HTMLButtonElement>('.annotation-toolbar button.text-annotation-comment');
+  expect(comment).not.toBeNull();
+  await act(async () => comment!.click());
+  await settle();
+  const area = document.querySelector<HTMLTextAreaElement>('[data-comment-popover] textarea')!;
+  area.focus();
+  expect(copyAt(area)).toMatchObject({ prevented: true, plain: SELECTED });
 });

@@ -4,11 +4,12 @@
  *
  * Failures to catch: the person's own selection (text selected in a field, or
  * anywhere in the page) loses to the highlight, a caret-only field (the empty
- * composer) copies nothing, another handler's copy is overwritten, or the
- * copy grows an html part (rich text is the toolbar button's alone, #2191).
+ * composer) copies nothing, a field that is not the composer (a reply box)
+ * loses its own copy, another handler's copy is overwritten, or the copy
+ * grows an html part (rich text is the toolbar button's alone, #2191).
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { writeHighlightCopy } from './highlightCopy';
+import { HIGHLIGHT_COMPOSER_ATTR, writeHighlightCopy } from './highlightCopy';
 
 const hasDom = typeof document !== 'undefined';
 
@@ -28,10 +29,18 @@ function copyAt(target: EventTarget, prevented = false) {
   return { event, data };
 }
 
-function textarea(value: string, start: number, end: number) {
+/** A field in the comment composer (CommentPopover's root), or, with `parent`, elsewhere. */
+function textarea(value: string, start: number, end: number, parent?: HTMLElement) {
   const area = document.createElement('textarea');
   area.value = value;
-  document.body.appendChild(area);
+  if (parent) {
+    parent.appendChild(area);
+  } else {
+    const composer = document.createElement('div');
+    composer.setAttribute('data-comment-popover', 'true');
+    composer.appendChild(area);
+    document.body.appendChild(composer);
+  }
   area.focus();
   area.setSelectionRange(start, end);
   return area;
@@ -75,5 +84,39 @@ describe.if(hasDom)('writeHighlightCopy', () => {
     const { event, data } = copyAt(document.body, true);
     expect(writeHighlightCopy(event, 'two, four and eight')).toBe(false);
     expect(data.size).toBe(0);
+  });
+
+  test('a field outside the composer keeps its own copy, even with only a caret', () => {
+    const { event, data } = copyAt(textarea('A reply', 7, 7, document.body));
+    expect(writeHighlightCopy(event, 'two, four and eight')).toBe(false);
+    expect(event.defaultPrevented).toBe(false);
+    expect(data.size).toBe(0);
+  });
+
+  test('an editable region outside the composer keeps its own copy', () => {
+    const editor = document.createElement('div');
+    editor.contentEditable = 'true';
+    editor.textContent = 'notes';
+    document.body.appendChild(editor);
+    const { event } = copyAt(editor);
+    expect(writeHighlightCopy(event, 'two, four and eight')).toBe(false);
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  test('a field in a composer that carries the composer attribute copies the highlight', () => {
+    const composer = document.createElement('div');
+    composer.setAttribute(HIGHLIGHT_COMPOSER_ATTR, '');
+    document.body.appendChild(composer);
+    const { event, data } = copyAt(textarea('', 0, 0, composer));
+    expect(writeHighlightCopy(event, 'return 4;')).toBe(true);
+    expect(data.get('text/plain')).toBe('return 4;');
+  });
+
+  test('a button in the page (no field, no selection) copies the highlight', () => {
+    const button = document.createElement('button');
+    document.body.appendChild(button);
+    const { event, data } = copyAt(button);
+    expect(writeHighlightCopy(event, 'two, four and eight')).toBe(true);
+    expect(data.get('text/plain')).toBe('two, four and eight');
   });
 });

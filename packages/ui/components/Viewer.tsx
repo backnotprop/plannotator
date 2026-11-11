@@ -94,7 +94,6 @@ import { usePinpoint } from '../hooks/usePinpoint';
 import { useClickWord } from '../hooks/useClickWord';
 import { getClickAWord } from '../utils/clickAWordPolicy';
 import { useAnnotationHighlighter, type AnnotationRestoreReport, type CommentDraftShelf } from '../hooks/useAnnotationHighlighter';
-import { useHighlightCopy } from '../utils/highlightCopy';
 import { getVisibleCommentDrafts } from '../utils/commentCardPolicy';
 import { shelveCommentDraft, shelvedCommentDrafts } from '../utils/commentDraftShelf';
 import { CommentDraftBadges } from './CommentDraftBadges';
@@ -1519,17 +1518,9 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     return () => window.clearTimeout(timer);
   }, [blocks, locationHash, scrollToAnchor, scrollViewport]);
 
-  // Use the native copy event so clipboard writes are synchronous (Safari
-  // rejects the async navigator.clipboard API outside the user-gesture window).
-  // web-highlighter clears the DOM selection on mouseup, so the browser has
-  // nothing to copy by the time Cmd+C fires — we inject the captured text
-  // here, while the toolbar is up and while the selection's composer is open
-  // (its textarea has the focus then). The person's own selection, in a field
-  // or in the page (an Inbox action item's text), always copies natively.
-  useHighlightCopy(
-    toolbarState?.selectionText
-      || (hookCommentPopover && !hostComposes ? hookCommentPopover.selectedText ?? hookCommentPopover.contextText : null),
-  );
+  // Ctrl+C / Cmd+C with the toolbar up or the selection's composer open is
+  // `useAnnotationHighlighter`'s (`utils/highlightCopy`): the native copy
+  // event, so the clipboard write stays synchronous inside the key press.
 
   // `ViewerHandle.reopenComment`: a comment being written that the host kept
   // when its file closed, back in its composer. A global comment opens the
