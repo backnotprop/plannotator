@@ -201,7 +201,9 @@ test('the list: no new section; the action item sits in Stopped on you and its r
   const { page, threads } = world;
   await page.goto(world.url);
   const stopped = page.locator('section[aria-label="Stopped on you"], .ib-group').filter({ hasText: 'Stopped on you' }).first();
-  await expect(stopped).toContainText('Approve the production deploy on Vercel');
+  // The row's grey line is the message's first words (approval "inbox-row-latest-preview"); the action item is in its pill.
+  await expect(row(page, threads.vercel)).toContainText('Release 4.2 is built and every check passed.');
+  await expect(stopped.locator(`[data-thread-id="${threads.vercel}"]`)).toHaveCount(1);
   // The open action items' pill and the open questions' count (approval "inbox-row-action-icon"), named in words: a
   // blocked row's marks say its state first (approval "inbox-question-mark", #2929).
   for (const [id, actions, questions] of [[threads.vercel, 1, 0], [threads.npm, 1, 1], [threads.staging, 3, 0]] as const) {

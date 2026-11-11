@@ -1568,6 +1568,7 @@ function Inbox() {
   const refreshList = useCallback(async (adopt: boolean, slide = false, refresh?: { light?: boolean; keepOpen?: boolean }) => {
     try {
       const next = await inboxApi.list();
+      const failedBefore = listReadFailure.current !== null;
       listReadFailure.current = null;
       // A read that lands after a newer one (a slow answer on a bad network, a catch-up's): the newer list stays.
       // Only an older cursor of the same Inbox run counts; an equal one may carry a delivery, a draft or a pin.
@@ -1581,8 +1582,14 @@ function Inbox() {
       // Nothing new (listSame.ts): the list held stays, and nothing is drawn again. A row's own state shows in place
       // as before (an own write's row put back by the read, the open thread's row).
       if (!adopt && held && firstList.current!.done && sameListModel(held, next, { cursor: routeRef.current.page === 'settings' })) {
-        setShown((current) => (current === null || !hasRows(current) ? current : refreshHeldRows(current, listGroups(held), heldOpen())));
-        setLoadError(null);
+        // Only what moved is set. A set that changes nothing still draws the whole window once whenever the window's
+        // last draw came from its own state (React draws it again to find out), so a read with nothing new drew it
+        // now and then.
+        const drawn = shownRef.current;
+        if (drawn !== null && hasRows(drawn) && refreshHeldRows(drawn, listGroups(held), heldOpen()) !== drawn) {
+          setShown((current) => (current === null || !hasRows(current) ? current : refreshHeldRows(current, listGroups(held), heldOpen())));
+        }
+        if (failedBefore) setLoadError(null);
         retryMissingThread();
         listTidyRead.current?.();
         return held;
