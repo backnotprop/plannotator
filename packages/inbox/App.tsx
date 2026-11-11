@@ -244,6 +244,7 @@ import { openThemeSettings, useThemeChooser } from './themeChooser';
 import { CardChip } from './board/CardChip';
 import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, liveInitiatives, newCardProject, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
+import { useComposerOpener } from './compose/openComposer';
 import { COMPOSE_CLONE_EVENT, composeActions, composeTargets, hostLabel, lastLaunchAgent, launchHistory, projectCanStart, projectPlusOn, SCRATCH_PICK, type ComposeAction, type ComposeCloneRequest } from './compose/model';
 import { machineLaunchesKept } from './compose/useMachineLaunches';
 import { reviewBoxPulls } from './compose/reviewBox';
@@ -6570,6 +6571,7 @@ function Inbox() {
   // Remote launch: where the person last started an agent on each machine, from the merged list's launched rows.
   // The rows the window has: where the sidebar's Agents section finds each agent's thread, and the last agent started.
   const composeLastAgent = useMemo(() => lastLaunchAgent(windowRows), [windowRows]);
+  useComposerOpener(openCompose, composeLastAgent);
   // "+" on project rows (F1-F7): on while launch is on and this is no guest's page. This computer's launch block says
   // which rows can start anything (agents, the folder still there): read when "+" comes on, when the tab is shown, and
   // when the projects change; never on a timer.

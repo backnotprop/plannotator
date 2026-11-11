@@ -28,12 +28,12 @@ import { agentLabel, decisionRowOf, ownWordsTime, type DecisionFate } from "./de
  */
 export type DecisionExportState = "decided" | "picked_unsent" | "answered_in_words" | "open" | "skipped" | "set_aside" | "archived" | "replaced";
 
-/** The quiet groups after the decisions, in this order. */
-export const DECISION_EXPORT_OTHER_STATES: readonly Exclude<DecisionExportState, "decided">[] = ["open", "picked_unsent", "answered_in_words", "skipped", "set_aside", "archived", "replaced"];
+/** The quiet groups after the decisions, in this order: drafts (picked, not sent) first, so D-numbers follow the decisions, drafts, then the rest, as the posts list them. */
+export const DECISION_EXPORT_OTHER_STATES: readonly Exclude<DecisionExportState, "decided">[] = ["picked_unsent", "open", "answered_in_words", "skipped", "set_aside", "archived", "replaced"];
 
 /** A group's heading in both documents. */
 export const DECISION_EXPORT_STATE_TITLES: Readonly<Record<Exclude<DecisionExportState, "decided">, string>> = {
-  picked_unsent: "Picked, not sent",
+  picked_unsent: "Draft, not sent to the agent",
   answered_in_words: "Answered in words",
   open: "Still open",
   skipped: "Skipped",
@@ -401,7 +401,7 @@ export function decisionOtherDetail(item: DecisionExportItem): string | null {
   if (item.answer && !item.answer.sent && !item.answer.skipped) {
     const line = decisionAnswerLine(item, null);
     const note = item.answer.note ? ` (note: ${oneLine(item.answer.note)})` : "";
-    if (line || note) return `Picked: ${line || "—"}${note}`;
+    if (line || note) return `Draft: ${line || "—"}${note}`;
   }
   if (item.state === "skipped" && item.answer?.note) return `Note: ${oneLine(item.answer.note)}`;
   if (item.state === "open" || item.state === "answered_in_words") {
