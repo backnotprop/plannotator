@@ -3084,3 +3084,10 @@ Pinned by `components/Viewer.clickAWord.test.tsx`, `hooks/useClickWord.test.tsx`
 - **The answer's text.** `QuestionAnswer.other` may hold line breaks (it always could from decision mode's textarea). core's `formatQuestionAnswerLines` (and so `formatQuestionAnswersSection` and ui's `exportAnnotations`) now quotes a multi-line Other under `Answer: Other:` as `> line` lines, indented two spaces under its `- Other:` bullet when there are several picks, the way a multi-line note is quoted. A one-line Other prints byte for byte as before. `formatQuestionAnswerText` (`Annotation.text`) and the panel row stay one line.
 
 Pinned by `components/blocks/QuestionBlock.test.tsx` ("an Other answer of several lines") and core's `question-block.test.ts`.
+
+## `InlineImageTagsContext`: an `<img>` tag inside a line renders as a picture (unreleased; additive, opt-in, no core change)
+
+An `<img>` tag inside a table cell or a sentence is not an HTML block, so `InlineMarkdown` printed it as text. GitHub writes every resized screenshot that way, and PR authors put before/after pairs in tables.
+
+- **New context `InlineImageTagsContext`** (`components/ImageResolverContext`, default `false`). With it `true` and an image resolver, an inline `<img>` goes through the resolver as `![alt](src)` does: `src` resolved, `unavailable` is the quiet chip. Only `src`, `alt`, `width` and `height` (whole numbers) are read; nothing else of the tag reaches the page.
+- **A host that provides nothing sees no change.** The Plannotator Inbox turns it on for a PR's text.
