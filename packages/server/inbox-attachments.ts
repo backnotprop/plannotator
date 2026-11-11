@@ -607,8 +607,6 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       });
     }
 
-    // A picture added to a comment, before the Send that makes it an attachment: the person's own pending upload,
-    // shown back by its id in the comment box and on the comment's card (`inboxCommentPicture`).
     const uploadImage = /^\/api\/inbox\/uploads\/(upl_[0-9A-HJKMNP-TV-Z]{26})\/image$/.exec(path);
     if (uploadImage) {
       if (req.method !== "GET" && req.method !== "HEAD") return json({ error: "Use GET." }, 405);
@@ -623,7 +621,6 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
           "Content-Type": contentType,
           "Content-Security-Policy": INBOX_MESSAGE_IMAGE_CSP,
           "Content-Length": String(file.size),
-          // The bytes of an upload never change.
           "Cache-Control": "private, max-age=31536000, immutable",
         },
       });

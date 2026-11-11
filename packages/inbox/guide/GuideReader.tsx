@@ -313,7 +313,7 @@ function Reader({
     // The review app's general comment: no file and no lines (its '' / 0 / 0 sentinels).
     void wiring
       .onSave({ id: newCommentId(), type: 'comment', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0, side: 'new', text: trimmed, ...(images?.length ? { images } : {}), ...signed(), createdAt: Date.now() })
-      // Refused (too long, the thread resolved elsewhere, offline): the words and pictures wait in the composer for the next open.
+      // Refused (too long, the thread resolved elsewhere, offline): the words wait in the composer for the next open.
       .then((saved) => {
         if (!saved) restoreCommentDraft(draftKey, text, images);
       });
@@ -586,7 +586,6 @@ function Reader({
           anchorEl={globalAnchor}
           contextText=""
           isGlobal
-          // Its pictures ride the reply as attachments, named under its words (commentPictures.tsx).
           allowImages={pictures}
           // The words typed survive a close (Escape, a click outside) and a refused save, one draft per message.
           draftKey={globalDraftKey}

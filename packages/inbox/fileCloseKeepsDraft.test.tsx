@@ -930,8 +930,6 @@ test.skipIf(!hasDom)('an image comment saved as its file closes is a comment, ne
   expect(row()!.value).toBe('');
 });
 
-// What would regress: a picture button where nothing takes the picture (the tour and the phone app's surface have no
-// CommentPictures above them: no uploads), or none on a thread's file, where the picture rides the reply.
 const pictureButton = () => document.querySelector('[data-comment-popover] button[aria-label="Attachments"]');
 test.skipIf(!hasDom)('a file\'s comment box offers no picture button where nothing can upload it (the tour)', async () => {
   serve();
@@ -950,7 +948,6 @@ test.skipIf(!hasDom)('a file\'s comment box in a thread offers the picture butto
   await commentOnPhrase('Partial refunds stay out of v1.');
   expect(pictureButton()).not.toBeNull();
   await act(async () => (pictureButton() as HTMLButtonElement).click());
-  // The picture is uploaded to the Inbox or not at all: a path typed here would name a file the agent's reply cannot carry.
   expect(document.querySelector('input[placeholder="Paste path or URL..."]')).toBeNull();
   expect(document.body.textContent).toContain('Drop image or click to browse');
 });

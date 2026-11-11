@@ -55,7 +55,6 @@ export function verdictReply(
 ): { words: string; feedback?: string; annotation_ids?: string[]; uploads?: string[] } {
   const carried = plan.withComments ? records : [];
   const words = [inboxReviewVerdictWords(plan.verdict, title, carried.length), note?.trim() ?? ''].filter((part) => part !== '').join('\n\n');
-  // A global comment's pictures go as the reply's attachments (commentPictures.tsx).
   const uploads = commentPictureUploads(carried);
   return carried.length > 0 ? { words, feedback: guideFeedback(carried), annotation_ids: carried.map((r) => r.id), ...(uploads.length > 0 ? { uploads } : {}) } : { words };
 }

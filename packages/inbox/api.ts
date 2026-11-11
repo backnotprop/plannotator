@@ -930,7 +930,6 @@ export function idsIn(value: unknown, out: Set<string> = new Set(), depth = 0, o
   for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
     if (typeof item === 'string') {
       if (ROUTED_ID_KEYS.has(key) && /^[A-Za-z0-9_-]{16,80}$/.test(item) && !item.startsWith('ibx_')) out.add(item);
-      // A comment's picture (`<upl id>/<file>`): its upload is on the machine the comment is.
       else if (key === 'path') {
         const picture = inboxCommentPicture(item);
         if (picture) out.add(picture.upload_id);

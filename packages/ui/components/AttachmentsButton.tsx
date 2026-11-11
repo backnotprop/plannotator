@@ -6,7 +6,6 @@ import type { ImageAttachment } from '../types';
 import { modKey } from '../utils/platform';
 import { CommentUploadContext, getUploadTransport } from '../utils/upload';
 
-/** The file a host upload carries: named after the picture (`login-mockup.png`), its extension from its type. */
 export function pictureFileName(name: string, file: File): string {
   const types: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/avif': 'avif', 'image/svg+xml': 'svg' };
   const ext = types[file.type] ?? /\.([a-z0-9]{1,5})$/i.exec(file.name)?.[1]?.toLowerCase() ?? 'png';
@@ -15,11 +14,9 @@ export function pictureFileName(name: string, file: File): string {
   return `${base}.${ext}`;
 }
 
-/** A picture on its way through a host's upload (CommentUploadContext), or one that failed. */
 interface PendingPicture {
   file: File;
   name: string;
-  /** The picture it replaces (a re-edit), removed once the new one is in. */
   replaces: string | null;
   progress: number;
   error: string | null;
@@ -69,7 +66,6 @@ interface AttachmentsButtonProps {
   /** Hide the "Images" label (icon-only). When images.length > 0 the
    *  numeric badge still shows so the user can see the count. */
   hideLabel?: boolean;
-  /** Under a host's CommentUploadContext: a picture is uploading or failed (true), or none is (false). */
   onPendingChange?: (pending: boolean) => void;
 }
 
@@ -153,7 +149,6 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
     setIsOpen(false); // Close popover when annotator opens
   };
 
-  /** Through the host's transport: named after the picture, with progress; a failure stays, with Retry. */
   const uploadThroughHost = (transport: NonNullable<typeof hostUpload>, picture: Omit<PendingPicture, 'progress' | 'error'>) => {
     pendingAbort.current?.abort();
     const abort = new AbortController();
@@ -501,7 +496,7 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
           initialName={annotatorInitialName}
           onAccept={handleAnnotatorAccept}
           onClose={handleAnnotatorClose}
-          // Under a host's upload the picture's own bytes go when nothing is drawn: no fetch of its blob: URL.
+          // The Inbox's connect-src refuses a fetch of the blob: URL.
           sourceBlob={hostUpload ? annotatorImage?.file : undefined}
         />,
         document.body

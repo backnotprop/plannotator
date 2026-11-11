@@ -740,7 +740,7 @@ const GUIDE_COMMENT_TYPES: ReadonlySet<unknown> = new Set(["comment", "suggestio
  * export and the windows read, and nothing else (a field the client adds is
  * dropped; one of the wrong kind is refused, so a bad value can never break a
  * Send). A global comment (`general`) is words only: no suggestion, no quoted
- * lines, no token; its pictures are the caller's (`commentPictures`). The caller sets the location fields.
+ * lines, no token, no images. The caller sets the location fields.
  */
 function guideCommentFields(fields: Record<string, unknown>, scope: "line" | "general"): Record<string, unknown> {
   const refuse = (field: string, what: string): never => {
@@ -5644,7 +5644,6 @@ export class InboxStore {
     }
     const text = fields.text;
     const images = this.commentPictures(fields.images);
-    // Words, or pictures alone (as in Annotate).
     if (!(images && (text === undefined || text === "")) && (typeof text !== "string" || text.trim() === "" || text.length > INBOX_MESSAGE_COMMENT_TEXT_MAX)) {
       throw new InboxError("validation_error", `annotation.text: the comment (1 to ${INBOX_MESSAGE_COMMENT_TEXT_MAX} characters).`, { field: "annotation.text" });
     }
@@ -5715,12 +5714,11 @@ export class InboxStore {
     // A deletion's words are the ones selected; it may carry none of its own.
     const text = fields.text;
     const noText = text === undefined || text === null || text === "";
-    // A comment may be its pictures alone, as in Annotate.
     const pictured = Array.isArray(fields.images) && fields.images.length > 0;
     if (!((deletion || pictured) && noText) && (typeof text !== "string" || text.trim() === "" || text.length > INBOX_MESSAGE_COMMENT_TEXT_MAX)) {
       throw new InboxError("validation_error", `annotation.text: the comment (1 to ${INBOX_MESSAGE_COMMENT_TEXT_MAX} characters).`, { field: "annotation.text" });
     }
-    // A comment on a message's words is words and its pictures (checked): no element or page it points at, no reply thread.
+    // A comment on a message's words points at no element or page and starts no reply thread.
     const images = this.commentPictures(fields.images);
     for (const field of ["elementContext", "pageUrl", "inReplyTo"] as const) {
       const value = fields[field];
@@ -6148,7 +6146,6 @@ export class InboxStore {
     return out;
   }
 
-  /** The uploads the pictures of comments waiting for a Send name: kept as a draft's files are. A removed comment's go with the sweep. */
   commentPictureUploadIds(): Set<string> {
     const out = new Set<string>();
     for (const record of this.annotations.values()) {
@@ -6158,10 +6155,6 @@ export class InboxStore {
     return out;
   }
 
-  /**
-   * A comment's pictures (`annotation.images`), checked: each a pending image upload of this Inbox
-   * (`inboxCommentPicture`) with a name, at most INBOX_COMMENT_PICTURES_MAX. Undefined when there are none.
-   */
   private commentPictures(images: unknown): { path: string; name: string }[] | undefined {
     if (images === undefined || images === null || (Array.isArray(images) && images.length === 0)) return undefined;
     const field = "annotation.images";

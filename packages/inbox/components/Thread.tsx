@@ -4824,7 +4824,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           ...(own.length > 0 ? { annotation_ids: own.map((r) => r.id) } : {}),
           // From the floating box, the file on screen rides the reply that carries the words (the server drops it when a comment on that file already names it).
           ...(last && options.stayFull && file && fileAttachment ? { viewing: replyViewingOf(fileAttachment, file, current.messages) } : {}),
-          // The pasted files ride the reply that carries the words, and each comment's pictures the reply carrying it, as attachments.
+          // The pasted files ride the reply that carries the words, as attachments.
           ...(files.length > 0 ? { uploads: files } : {}),
           ...(tags.length > 0 ? { tags } : {}),
           // The reply that carries the box's words: their draft goes with the Send (that draft, or one holding

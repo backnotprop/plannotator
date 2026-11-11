@@ -236,8 +236,6 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // A pending pasted-text upload's words (approval "inbox-paste-attachment"), read only: a linked machine's
   // window puts a long paste back in a reply to this machine's thread, as it uploaded it here.
   { method: "GET", route: /^uploads\/([^/]+)\/text$/, window: (m) => `/api/inbox/uploads/${m[1]}/text` },
-  // A comment's picture before its Send (a pending image upload), read only: a linked machine's window shows the
-  // picture it added to a comment on this machine's thread.
   { method: "GET", route: /^uploads\/([^/]+)\/image$/, window: (m) => `/api/inbox/uploads/${m[1]}/image` },
   // A launched agent's Stop, Try again, Trust folder and Delete from a linked machine's window (remote launch). Open in
   // Terminal and the launch settings never cross: they are this computer's.

@@ -272,26 +272,15 @@ export const INBOX_MESSAGE_COMMENT_QUOTE_MAX = 20_000;
 /** The longest comment on a message's text, in characters. */
 export const INBOX_MESSAGE_COMMENT_TEXT_MAX = 10_000;
 
-/**
- * A picture added to a comment (the comment box's picture button, as in
- * Annotate): one of the person's pending uploads, the reply box's own
- * (`POST /api/inbox/uploads`). The comment's `images` entry names it as
- * `{ path: "<upl id>/<file name>", name }`; the Send that carries the comment
- * carries the upload too, so the picture becomes one of the reply's
- * attachments, and the feedback names its file beside the comment.
- */
 const COMMENT_PICTURE_PATH_RE = /^(upl_[0-9A-HJKMNP-TV-Z]{26})\/([^/\\]{1,255})$/;
 
-/** The most pictures one comment takes. */
 export const INBOX_COMMENT_PICTURES_MAX = 10;
 
-/** The upload and file name a comment picture's path names, or null for any other path (a drawing, an old record). */
 export function inboxCommentPicture(path: unknown): { upload_id: string; file: string } | null {
   const match = typeof path === "string" ? COMMENT_PICTURE_PATH_RE.exec(path) : null;
   return match ? { upload_id: match[1]!, file: match[2]! } : null;
 }
 
-/** The uploads an annotation's pictures name, in order. */
 export function inboxCommentPictureUploads(annotation: { images?: unknown } | null | undefined): string[] {
   const images = annotation?.images;
   if (!Array.isArray(images)) return [];

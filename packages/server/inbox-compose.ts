@@ -423,7 +423,6 @@ export function createInboxCompose(options: {
       const keep = inboxDraftUploadIds(store.dir);
       // A reply draft's files (long pastes too) are kept as a compose draft's files are, at any age.
       for (const id of store.replyDraftUploadIds()) keep.add(id);
-      // A comment's pictures wait with it: kept while it waits, swept as any upload once it is removed.
       for (const id of store.commentPictureUploadIds()) keep.add(id);
       sweepInboxUploads(store.dir, { keep, usedBlobs: store.usedBlobs(), now: now().getTime() });
     } catch {

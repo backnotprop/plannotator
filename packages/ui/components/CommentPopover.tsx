@@ -394,7 +394,6 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   const initialDraft = draftKey ? draftStore.get(draftKey) : undefined;
   const [text, setText] = useState(initialDraft?.text ?? initialText);
   const [images, setImages] = useState<ImageAttachment[]>(allowImages ? initialDraft?.images ?? [] : []);
-  /** A picture still uploading, or one that failed (only under a host's CommentUploadContext): the comment waits for it. */
   const [picturesPending, setPicturesPending] = useState(false);
   const [position, setPosition] = useState<CommentPopoverPosition | null>(null);
   // Direction of an open popover that has scrolled out of view, or null when on-screen.

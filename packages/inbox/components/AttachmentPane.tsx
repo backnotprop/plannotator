@@ -2651,7 +2651,6 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               // A phone's comment goes in the composer's card (HtmlPageComment.tsx), and a selection made with a finger counts.
               onHostDraft={phoneHtml && hasComposer ? htmlComment.onHostDraft : undefined}
               touchSelection={phoneHtml && hasComposer}
-              // A picture rides the comment to the reply as an attachment (commentPictures.tsx; the owner, 2026-11-11).
               allowCommentImages={pictures}
               // Desktop size scales the page down: what the page measures converts through it.
               frameScale={fitted ? fitScale : undefined}

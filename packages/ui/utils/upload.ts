@@ -23,11 +23,7 @@ export interface UploadResult {
 }
 
 export interface UploadTransport {
-  /**
-   * Upload one image file and resolve to its stored reference. `options` is
-   * passed only by a comment box under `CommentUploadContext` (below): its
-   * progress and a way to stop it.
-   */
+  /** Upload one image file and resolve to its stored reference. */
   upload(file: File, options?: UploadOptions): Promise<UploadResult>;
 }
 
@@ -66,12 +62,5 @@ export function getUploadTransport(): UploadTransport {
   return uploadTransport;
 }
 
-/**
- * Optional, per subtree: the transport the comment boxes under it upload
- * their pictures with (a host whose uploads go to a different place per
- * document, with progress). Under one, the picture button uploads only
- * through it (no typed path or URL), names the file after the picture, shows
- * the upload's progress, and says when it fails, with Retry; the comment
- * waits for it. Absent (Plannotator's apps): the button is as it was.
- */
+/** A per-subtree transport for comment pictures; see README "Comment picture uploads per subtree". */
 export const CommentUploadContext = createContext<UploadTransport | null>(null);

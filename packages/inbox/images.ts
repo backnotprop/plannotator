@@ -87,7 +87,6 @@ export const inboxImageSrcResolver: ImageSrcResolver = (path, base) => {
   // Inbox's data dir, shown back by its file name only.
   const markup = inboxMarkupUrl(path);
   if (markup) return markup;
-  // A picture added to a comment, before its Send: the person's own upload, by its id (commentPictures.tsx).
   const picture = commentPictureUrl(path);
   if (picture) return picture;
   // A drawing the person made in the tour (kept in memory only): never for a real message's body, and only while the tour holds it.
