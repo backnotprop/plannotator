@@ -54,7 +54,13 @@ function stubFetch(answer: (call: Call) => Response | Promise<Response>): Call[]
 }
 
 function render(
-  overrides: { onCopyPrompt?: (draft: string) => void; onAction?: (kind: FeedbackFaqAction) => void; simpleListOn?: boolean; onClose?: () => void } = {},
+  overrides: {
+    onCopyPrompt?: (draft: string) => void;
+    onAction?: (kind: FeedbackFaqAction) => void;
+    simpleListOn?: boolean;
+    hiddenAnswers?: readonly string[];
+    onClose?: () => void;
+  } = {},
 ) {
   const host = document.createElement('div');
   host.className = 'pn-inbox';
@@ -71,6 +77,7 @@ function render(
         onCopyPrompt={overrides.onCopyPrompt ?? (() => {})}
         onAction={overrides.onAction ?? (() => {})}
         simpleListOn={overrides.simpleListOn}
+        hiddenAnswers={overrides.hiddenAnswers}
         onClose={overrides.onClose ?? (() => {})}
       />,
     ),
@@ -90,6 +97,8 @@ function render(
     form: () => q<HTMLFormElement>('.ib-fbk-form')!,
     questions: () => q<HTMLElement>('[data-feedback-questions]')!,
     item: (id: string) => q<HTMLElement>(`[data-feedback-faq="${id}"]`)!,
+    related: () => q<HTMLElement>('[data-feedback-related]')!,
+    known: () => q<HTMLElement>('[data-feedback-known]'),
   };
 }
 
@@ -99,6 +108,16 @@ function type(el: HTMLTextAreaElement | HTMLInputElement, value: string) {
   act(() => {
     Object.getOwnPropertyDescriptor(proto, 'value')!.set!.call(el, value);
     el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+/** Past the search's pause after typing (FeedbackDialog's SEARCH_PAUSE_MS), and the search's answer. */
+async function searched() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 320));
+  });
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 }
 
@@ -350,6 +369,51 @@ describe.skipIf(!hasDom)('the Feedback dialog', () => {
     expect(action.textContent).toBe('Simple list is on');
   });
 
+  test('a known answer is the first line of "These might help": Fixed in its release, its words linked, its action handed to the window', async () => {
+    const calls = stubFetch(() => Response.json({ ok: true }));
+    const actions: FeedbackFaqAction[] = [];
+    const dialog = render({ onAction: (kind) => actions.push(kind) });
+    type(dialog.box(), 'list moves too much');
+    await searched();
+    const line = dialog.known()!;
+    expect(line.dataset.feedbackKnown).toBe('list-moves');
+    expect(dialog.related().querySelector<HTMLElement>('li')).toBe(line);
+    expect(dialog.related().textContent).toContain('These might help');
+    expect(line.textContent).toBe('Fixed in 0.28.52: the list holds still now · Use Simple list');
+    expect(line.querySelector('.ib-fbk-lead')!.textContent).toBe('Fixed');
+    expect(line.querySelector('a')!.getAttribute('href')).toBe('https://github.com/backnotprop/plannotator/releases/tag/v0.28.52');
+    await press(line.querySelector<HTMLButtonElement>('[data-feedback-known-action]')!);
+    expect(actions).toEqual(['simple-list']);
+
+    // A feature and an experimental switch: no "Fixed", an Experimental lead, and the action that opens their Settings.
+    type(dialog.box(), 'can agents start themselves');
+    await searched();
+    expect(dialog.known()!.textContent).toBe('New message can start Claude Code or Pi for you · Open Settings → Agents');
+    type(dialog.box(), 'the agents are way too verbose');
+    await searched();
+    expect(dialog.known()!.textContent).toBe('Experimental: Bro mode has agents write to you in plain words · Open Settings → Capabilities');
+    await press(dialog.known()!.querySelector<HTMLButtonElement>('[data-feedback-known-action]')!);
+    expect(actions).toEqual(['simple-list', 'settings-experimental']);
+
+    // Unrelated words: no known line.
+    type(dialog.box(), 'the agent moves files around in my repo');
+    await searched();
+    expect(dialog.known()).toBeNull();
+    // Nothing typed went anywhere: the matching runs in the window.
+    expect(calls).toHaveLength(0);
+  });
+
+  test('a known answer says when Simple list is already on, and an answer this Inbox hides never shows', async () => {
+    const on = render({ simpleListOn: true, hiddenAnswers: ['start-agents'] });
+    type(on.box(), 'the list keeps jumping');
+    await searched();
+    expect(on.known()!.textContent).toBe('Fixed in 0.28.52: the list holds still now · Simple list is on');
+    expect(on.known()!.querySelector('button')).toBeNull();
+    type(on.box(), 'can agents start themselves');
+    await searched();
+    expect(on.known()).toBeNull();
+  });
+
   test('the arrow keys move between the tabs, and Tab wraps past the panel that is not shown', async () => {
     const dialog = render();
     const list = dialog.host.querySelector<HTMLElement>('[role="tablist"]')!;
@@ -465,7 +529,8 @@ describe.skipIf(!hasDom)('the sidebar row', () => {
     const host = sidebar(() => (opened += 1));
     const row = host.querySelector<HTMLButtonElement>('[data-feedback-nav]')!;
     expect(row.closest('.ib-side-foot')).not.toBeNull();
-    expect(row.nextElementSibling?.classList.contains('ib-setrow')).toBe(true);
+    // Each sidebar item sits in a `display: contents` wrapper (`.ib-side-item`), so the rows are the wrappers' children.
+    expect(row.closest('.ib-side-item')?.nextElementSibling?.querySelector(':scope > .ib-setrow')).not.toBeNull();
     expect(row.getAttribute('aria-haspopup')).toBe('dialog');
     await act(async () => row.click());
     expect(opened).toBe(1);

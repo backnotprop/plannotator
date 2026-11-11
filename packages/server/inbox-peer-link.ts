@@ -21,7 +21,8 @@
  *   reached the machine (rule 15).
  */
 
-import type { InboxListRow } from "@plannotator/core/inbox-types";
+import type { InboxAgentsGroup, InboxListRow } from "@plannotator/core/inbox-types";
+import { inboxPeerAgentsGroup } from "./inbox-agents-list";
 import type { InboxLinkRecord } from "./inbox-links";
 import { MACHINE_WINDOW_HEADER, type InboxOutbox, type OutboxAnswer, type OutboxEntry } from "./inbox-outbox";
 import type { InboxPeerTransport } from "./inbox-transport";
@@ -61,6 +62,8 @@ export interface PeerList {
   projects: Record<string, unknown>[];
   /** Its Inbox keeps snoozes (its list says `snoozes: true`; an older one says nothing): only then is Snooze offered on its rows. */
   snoozes: boolean;
+  /** Its agents (its list's `agents`, capped, with `machine`; inbox-agents-list.ts); null from an older Inbox. */
+  agents: InboxAgentsGroup | null;
 }
 
 /** A linked machine's update, picked by name: a version that reads as one, and nothing it could point at (no URL, no command). */
@@ -92,8 +95,11 @@ export interface PeerLinkOptions {
   onChange: () => void;
   /** That machine's snoozes changed and its list was read again: the windows read theirs. */
   onSnoozes?: () => void;
-  /** That machine's live sessions moved its rows (a delivery, "Session ended") and its list was read again: the windows read theirs. `sessions`: a session ended or came back there. */
-  onDeliveries?: (change: { sessions: boolean }) => void;
+  /**
+   * That machine's live sessions moved its rows (a delivery, "Session ended") and its list was read again: the windows
+   * read theirs. `sessions`: a session ended or came back there; `agents`: its Agents section moved.
+   */
+  onDeliveries?: (change: { sessions: boolean; agents: boolean }) => void;
   /** That machine removed this one (401 device_revoked): the owner of the link cleans up. */
   onRevoked: () => void;
   timings?: Partial<PeerLinkTimings>;
@@ -140,6 +146,8 @@ export class PeerLink {
   version: string | null = null;
   /** Its health's `launch_from_machines` (remote launch): agents can start there (true), launch is off (false), or its Inbox is too old to say (null). */
   launch: boolean | null = null;
+  /** Its health's `message_deletions`: its store takes a Delete on a message's words. False until it answered, and for an older Inbox. */
+  messageDeletions = false;
   list: PeerList | null = null;
   /** That machine's own update answer (its health and its status frames), and whether its door takes `update`. */
   farUpdate: FarUpdate | null = null;
@@ -166,6 +174,7 @@ export class PeerLink {
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private deliveriesTimer: ReturnType<typeof setTimeout> | null = null;
   private deliveriesSessions = false;
+  private deliveriesAgents = false;
   private flushDelay = 0;
   private readonly t: PeerLinkTimings;
 
@@ -207,14 +216,16 @@ export class PeerLink {
   }
 
   /** That machine's live sessions moved: one read of its list for all that moved in `deliveriesMs`, at its end. */
-  private deliveriesMoved(sessions: boolean): void {
+  private deliveriesMoved(sessions: boolean, agents: boolean): void {
     this.deliveriesSessions ||= sessions;
+    this.deliveriesAgents ||= agents;
     if (this.deliveriesTimer) return;
     this.deliveriesTimer = setTimeout(() => {
       this.deliveriesTimer = null;
-      const moved = this.deliveriesSessions;
+      const moved = { sessions: this.deliveriesSessions, agents: this.deliveriesAgents };
       this.deliveriesSessions = false;
-      void this.refreshList().then(() => this.options.onDeliveries?.({ sessions: moved }));
+      this.deliveriesAgents = false;
+      void this.refreshList().then(() => this.options.onDeliveries?.(moved));
     }, this.t.deliveriesMs);
     (this.deliveriesTimer as { unref?: () => void }).unref?.();
   }
@@ -286,6 +297,7 @@ export class PeerLink {
       this.agentAsked = null;
     }
     this.launch = typeof body.launch_from_machines === "number" ? body.launch_from_machines >= 1 : null;
+    this.messageDeletions = typeof body.message_deletions === "number" && body.message_deletions >= 1;
     if (body.inbox_id !== this.id) return "a different Inbox answers at this address";
     if (typeof body.machine_links !== "number" || body.machine_links < MACHINE_LINKS_PROTOCOL) {
       this.setState("needs_update", `Update Plannotator on ${this.options.link.name} (it runs ${this.version ?? "an older version"}).`);
@@ -366,7 +378,8 @@ export class PeerLink {
             // The list's cursor does not move, so the windows are told apart from a list that changes it.
             void this.refreshList().then(() => this.options.onSnoozes?.());
           } else if (parsed.event === "deliveries") {
-            this.deliveriesMoved((JSON.parse(parsed.data) as Json).sessions === true);
+            const change = JSON.parse(parsed.data) as Json;
+            this.deliveriesMoved(change.sessions === true, change.agents === true);
           }
         }
       }
@@ -416,6 +429,7 @@ export class PeerLink {
       rows: rows.map((row: InboxListRow) => ({ ...row, machine: this.id })),
       projects: projects.map((project: Json) => ({ ...project, machine: this.id })),
       snoozes: list.snoozes === true,
+      agents: inboxPeerAgentsGroup(list.agents, this.id),
     };
     this.options.onChange();
     return true;

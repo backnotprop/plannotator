@@ -114,10 +114,10 @@ export function pickerRows(shown: readonly ComposeGroup[], all: readonly Compose
  * first-run screen) names its session; focus then starts in the message.
  * A draft saved with nobody in To opens the same way as a plain one.
  */
-export function composeOpening(request: { draft?: Pick<InboxDraft, 'to'> | null; session?: string | null; start?: unknown }): { chosen: string | null; focus: 'to' | 'message' } {
+export function composeOpening(request: { draft?: Pick<InboxDraft, 'to'> | null; session?: string | null; start?: unknown; launch?: unknown }): { chosen: string | null; focus: 'to' | 'message' } {
   const chosen = request.draft ? (request.draft.to?.session ?? null) : (request.session ?? null);
-  // "+" on a project row (F3): To is filled, so the cursor starts in the message.
-  return { chosen, focus: chosen || request.start ? 'message' : 'to' };
+  // "+" on a project row (F3), and Agents' Add agent: To is filled, so the cursor starts in the message.
+  return { chosen, focus: chosen || request.start || request.launch ? 'message' : 'to' };
 }
 
 /** "started 2:41 PM": when the session started, without its host. */
@@ -528,8 +528,8 @@ export interface LaunchGroup {
   last: string | null;
   /** "New scratch folder" there. */
   scratch: { root: string } | null;
-  /** The agent can't start there: one disabled row in place of its projects. */
-  notice: { line: string; command: string | null } | null;
+  /** The agent can't start there: one disabled row in place of its projects; `fix`, what to do there, under its line. */
+  notice: { line: string; command: string | null; fix: string | null } | null;
 }
 
 /** Where the person last started an agent, per machine id: when, and in which project (from the merged list). */
@@ -603,7 +603,7 @@ export function launchGroups(input: {
   const groupOf = (machine: string | null, name: string, isSelf: boolean, asleep: boolean, block: InboxComposeLaunch | undefined, home: string | null, words: string | null): LaunchGroup | null => {
     const quiet = isSelf ? 'this computer' : asleep ? 'asleep' : null;
     const base = { machine, name, self: isSelf, asleep, quiet, home, projects: [] as MachineLaunchProject[], last: null, scratch: null, notice: null };
-    if (words) return { ...base, notice: { line: words, command: null } };
+    if (words) return { ...base, notice: { line: words, command: null, fix: null } };
     if (!block || !agent) return null;
     if (block.agents.some((a) => a.agent === agent)) {
       const seen = history.get((isSelf ? self.id : machine) ?? '');
@@ -614,7 +614,9 @@ export function launchGroups(input: {
     const not = block.not_ready?.find((n) => n.agent === agent);
     if (!not) return null;
     const said = inboxLaunchNotReadyWords({ agent: not.name, code: not.code, machine: isSelf ? null : name, overSsh: not.over_ssh === true });
-    return { ...base, notice: { line: said.line, command: said.command } };
+    // Signed out: what to do there goes under the line (the check can be wrong, and the fix says how to read it again).
+    // The other reasons keep their one line (a missing plugin has its command to copy).
+    return { ...base, notice: { line: said.line, command: said.command, fix: not.code === 'signed_out' ? said.fix : null } };
   };
   const mine = groupOf(null, self.name ?? 'This computer', true, false, self.launch, self.home, null);
   const linked = input.machines.filter((m) => !m.self && m.state !== 'revoked');

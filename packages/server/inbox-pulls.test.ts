@@ -442,6 +442,48 @@ describe("off", () => {
   });
 });
 
+describe("merge (the Pull requests page)", () => {
+  const KEY = "github.com/northwind/billing-svc#412";
+  const SHA = "412".padStart(40, "a");
+  const merge = (base: string, fields: Record<string, unknown>, headers: Record<string, string> = {}) =>
+    fetch(`${base}/api/inbox/pulls/merge`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(fields) });
+  const puts = (w: { forge: Forge }) => w.forge.calls.filter((c) => c.args.includes("PUT"));
+
+  test("Code review off: refused before anything runs", async () => {
+    const w = await world();
+    const before = w.forge.calls.length;
+    const res = await merge(w.base, { key: KEY, head_sha: SHA, confirmed: true });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("code_review_off");
+    expect(w.forge.calls.length).toBe(before);
+  });
+
+  test("never merges without the second click, from another site, or for a PR the list does not name", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Working.", "retries");
+    expect((await w.pulls()).status).toBe(200);
+    const unconfirmed = await merge(w.base, { key: KEY, head_sha: SHA });
+    expect(unconfirmed.status).toBe(409);
+    expect(((await unconfirmed.json()) as { code: string }).code).toBe("merge_unconfirmed");
+    expect((await merge(w.base, { key: KEY, head_sha: SHA, confirmed: true }, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect((await merge(w.base, { key: KEY, head_sha: "nope", confirmed: true })).status).toBe(422);
+    expect((await merge(w.base, { key: "github.com/northwind/billing-svc#999", head_sha: SHA, confirmed: true })).status).toBe(404);
+    expect(puts(w)).toEqual([]);
+  });
+
+  test("the forge is asked again first: an answer that doesn't say it can merge merges nothing", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Working.", "retries");
+    expect((await w.pulls()).status).toBe(200);
+    // This fake answers the merge check with a patch, not GitHub's PR: no verdict, so no merge.
+    const res = await merge(w.base, { key: KEY, head_sha: SHA, confirmed: true });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("pull_merge_unknown");
+    expect(w.forge.calls.some((c) => c.args.includes("repos/northwind/billing-svc/pulls/412"))).toBe(true);
+    expect(puts(w)).toEqual([]);
+  });
+});
+
 describe("on", () => {
   test("one query to the signed-in host, with --hostname; only the projects' repositories; links by URL", async () => {
     const w = await world({ codeReview: true });
@@ -1205,6 +1247,38 @@ describe("the worst case (break-ui on #2590)", () => {
     expect(JSON.stringify(listed)).not.toContain("avatars.githubusercontent.com");
     expect(pulls.avatarUrls("github.com")).toEqual({ dana: "https://avatars.githubusercontent.com/u/1", tomas: "https://avatars.githubusercontent.com/u/2" });
     expect(pulls.avatarUrls("gitlab.com")).toEqual({});
+  });
+
+  test("reviewers' and approvers' pictures come in the same read; only the people a listed PR names may be asked for", async () => {
+    // GitLab: who approved and who was asked, each with a picture; a reviewer the forge gave no picture is left out.
+    const gl = parseGitlabPulls(
+      JSON.stringify({
+        data: {
+          currentUser: {
+            username: "dana",
+            requested: { nodes: [GL_MR(6, { approvedBy: { nodes: [{ username: "lena-v", avatarUrl: "/uploads/-/system/user/avatar/3/l.png" }] }, reviewers: { nodes: [{ username: "nina-k", avatarUrl: "https://gitlab.example.org/n.png" }, { username: "kai" }] } })] },
+            authored: { nodes: [] },
+            merged: { nodes: [] },
+          },
+        },
+      }),
+      "gitlab.example.org",
+    )!;
+    expect(gl.avatars).toEqual({ "lena-v": "https://gitlab.example.org/uploads/-/system/user/avatar/3/l.png", "nina-k": "https://gitlab.example.org/n.png" });
+    // GitHub: a requested user and an approver have pictures; a team has none to ask for.
+    const reviewed = ghPull(3, {
+      author: { login: "tomas", avatarUrl: "https://avatars.githubusercontent.com/u/2" },
+      reviewRequests: { nodes: [{ requestedReviewer: { __typename: "User", login: "nina-k", avatarUrl: "https://avatars.githubusercontent.com/u/5" } }, { requestedReviewer: { __typename: "Team", slug: "platform" } }] },
+      latestReviews: { nodes: [{ state: "APPROVED", author: { login: "lena-v", avatarUrl: "https://avatars.githubusercontent.com/u/6" } }] },
+    });
+    const outside = ghPull(9, { reviewRequests: { nodes: [{ requestedReviewer: { __typename: "User", login: "outsider", avatarUrl: "https://avatars.githubusercontent.com/u/9" } }] }, repository: { nameWithOwner: "elsewhere/thing" } });
+    const pulls = createInboxPulls({ run: forge(answerOf([reviewed, outside])).run });
+    const listed = await pulls.list(repos);
+    expect(JSON.stringify(listed)).not.toContain("avatars.githubusercontent.com");
+    const urls = pulls.avatarUrls("github.com");
+    expect(urls).toMatchObject({ tomas: "https://avatars.githubusercontent.com/u/2", "nina-k": "https://avatars.githubusercontent.com/u/5", "lena-v": "https://avatars.githubusercontent.com/u/6" });
+    expect(urls.outsider).toBeUndefined();
+    expect(urls.platform).toBeUndefined();
   });
 
   test("a conflicting PR says so (GitHub `mergeable`, GitLab `conflicts`); an unknown one says nothing", () => {

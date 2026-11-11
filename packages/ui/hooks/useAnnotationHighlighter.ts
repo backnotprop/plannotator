@@ -10,6 +10,7 @@ import Highlighter from '@plannotator/web-highlighter';
 import type { Annotation, EditorMode, HostDraft, ImageAttachment } from '../types';
 import { metaWithBelowTitle, metaWithoutBelowTitle, snapRangeOutOfBelowTitle } from '../utils/belowTitleSlot';
 import { AnnotationType } from '../types';
+import { caretAtPoint, type CaretPosition } from '../utils/caretAtPoint';
 import type { QuickLabel } from '../utils/quickLabels';
 import {
   dropEmptyNodes,
@@ -240,6 +241,16 @@ const escapeAttrValue = (value: string): string => {
 // web-highlighter 0.8.x accepts only class, ID, and tag exclusions.
 const ANNOTATION_EXCLUDED_SELECTOR = '.annotation-exclude';
 
+/** Everything the highlighter's painter skips (its `exceptSelectors`). */
+const PAINT_SKIPPED_SELECTORS = [
+  '.annotation-toolbar',
+  'button',
+  '.math-annotatable',
+  '.katex',
+  ANNOTATION_EXCLUDED_SELECTOR,
+];
+const PAINT_SKIPPED_SELECTOR = PAINT_SKIPPED_SELECTORS.join(',');
+
 const isAnnotationExcludedTextNode = (node: Node): boolean =>
   Boolean(node.parentElement?.closest(ANNOTATION_EXCLUDED_SELECTOR));
 
@@ -294,6 +305,27 @@ const boundaryResolves = (node: Node, offset: number): boolean => {
 const isSerializableRange = (range: Range): boolean =>
   boundaryResolves(range.startContainer, range.startOffset)
   && boundaryResolves(range.endContainer, range.endOffset);
+
+/**
+ * Whether a range that reaches outside `container` carries words from there.
+ *
+ * web-highlighter does not check containment. A drag that starts in a panel
+ * AFTER the document and ends in the document is, in document order, a range
+ * from the release point to the panel: the painter never meets its end and
+ * paints to the end of the document, and the quote ends with the panel's
+ * words. One that starts BEFORE the document paints only its last text node.
+ * Neither is a selection of the document.
+ *
+ * Not plain containment: a triple-click on the LAST block ends at offset 0 of
+ * the element after the document, so its common ancestor is outside too, yet
+ * every word in it is the document's and it highlights correctly.
+ */
+const carriesTextFromOutside = (container: HTMLElement, range: Range): boolean => {
+  const inside = range.cloneRange();
+  if (!container.contains(inside.startContainer)) inside.setStart(container, 0);
+  if (!container.contains(inside.endContainer)) inside.setEnd(container, container.childNodes.length);
+  return compactText(inside.toString()) !== compactText(range.toString());
+};
 
 /**
  * One line per page load: a highlighter failure is degraded UX (the selection
@@ -535,6 +567,93 @@ const snapRangeStartPastExcluded = (range: Range): boolean => {
     return true;
   }
   return false;
+};
+
+/** The outermost element around `node`, inside `container`, that the painter skips. */
+const paintSkippedAncestor = (container: Element, node: Node | null): Element | null => {
+  let skipped: Element | null = null;
+  let element = node?.nodeType === Node.ELEMENT_NODE ? (node as Element) : node?.parentElement ?? null;
+  while (element && element !== container && container.contains(element)) {
+    if (element.matches(PAINT_SKIPPED_SELECTOR)) skipped = element;
+    element = element.parentElement;
+  }
+  return skipped;
+};
+
+/**
+ * Move a range's end off any element the painter skips, back onto the end of
+ * the last text before it that can be painted. The end-side twin of
+ * {@link snapRangeStartPastExcluded}.
+ *
+ * web-highlighter stops painting when its walk MEETS the end node, and the
+ * walk never enters a skipped element (`painter/dom.ts` skips it before the
+ * "are we at the end node" check). An end inside one (a release on a button in
+ * the text, a code block's Copy button, a formula, an alert's hidden type
+ * word) or right at one (an element boundary whose next child is skipped) is
+ * therefore never met, and every text node from the start to the end of the
+ * document is painted. Pulling the end back changes nothing that could have
+ * been painted, and takes the half-selected chrome out of the quote.
+ *
+ * A range wholly inside one skipped element is left alone, and so is one with
+ * no paintable text between its start and that element. Returns whether the
+ * range was changed.
+ */
+const snapRangeEndBeforeSkipped = (container: Element, range: Range): boolean => {
+  const { endContainer, endOffset } = range;
+  // An element boundary addresses the child at its offset (`formatDomNode`).
+  const endNode = endContainer.nodeType === Node.ELEMENT_NODE
+    ? endContainer.childNodes[endOffset] ?? endContainer
+    : endContainer;
+  if (!container.contains(endNode)) return false;
+  const skipped = paintSkippedAncestor(container, endNode);
+  if (!skipped || skipped.contains(range.commonAncestorContainer)) return false;
+
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  let last: Text | null = null;
+  let node: Node | null;
+  while ((node = walker.nextNode())) {
+    if (skipped.contains(node)) break;
+    if (!(skipped.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_PRECEDING)) break;
+    const text = node as Text;
+    if (!text.length || paintSkippedAncestor(container, text)) continue;
+    last = text;
+  }
+  if (!last) return false;
+  // Never before the range's own start.
+  if (range.comparePoint(last, last.length) !== 0) return false;
+  if (last === range.startContainer && range.startOffset >= last.length) return false;
+  range.setEnd(last, last.length);
+  return true;
+};
+
+/**
+ * How much bigger than the last one a selection inside the document may be for
+ * a release outside to still trust it: four times, plus a couple of thousand
+ * characters. A real drag grows a selection by lines; a browser running it on
+ * to the document's last words grows it by the document.
+ */
+const selectionRanAway = (length: number, last: number): boolean => length > last * 4 + 2000;
+
+/** Pointer travel, in CSS px, under which a press and its release are a click, not a drag. */
+const DRAG_SLOP_PX = 4;
+
+/** A press on these is theirs (a click, a native drag, typing), never the start of a text selection to repair. */
+const NOT_A_TEXT_PRESS = 'a, button, input, textarea, select, label, summary, img, svg, canvas, video, [role="button"], [draggable="true"], [contenteditable]:not([contenteditable="false"])';
+
+/** The text position under a point, when it is text of `container` that can be painted. */
+const textCaretAt = (container: Element, x: number, y: number): CaretPosition | null => {
+  const caret = caretAtPoint(x, y);
+  if (!caret || caret.node.nodeType !== Node.TEXT_NODE || !container.contains(caret.node)) return null;
+  if (paintSkippedAncestor(container, caret.node)) return null;
+  return caret;
+};
+
+/** A press on an element's own scrollbar: its point lies outside the element's content box. */
+const isScrollbarPress = (event: MouseEvent): boolean => {
+  const target = event.target instanceof HTMLElement ? event.target : null;
+  if (!target || target.clientWidth === 0) return false;
+  if (target.scrollWidth <= target.clientWidth && target.scrollHeight <= target.clientHeight) return false;
+  return event.offsetX >= target.clientWidth || event.offsetY >= target.clientHeight;
 };
 
 /** A resolved restore boundary: web-highlighter's own `DomNode` shape. */
@@ -1615,13 +1734,7 @@ export function useAnnotationHighlighter({
 
     const highlighter = new Highlighter({
       $root: containerRef.current,
-      exceptSelectors: [
-        '.annotation-toolbar',
-        'button',
-        '.math-annotatable',
-        '.katex',
-        ANNOTATION_EXCLUDED_SELECTOR,
-      ],
+      exceptSelectors: PAINT_SKIPPED_SELECTORS,
       wrapTag: 'mark',
       style: { className: 'annotation-highlight' },
     });
@@ -1657,6 +1770,9 @@ export function useAnnotationHighlighter({
       return [start, end];
     });
 
+    /** The selection string of a drag let go outside the document, while its highlight is made. */
+    let releasedOutsideQuote: string | null = null;
+
     highlighter.on(Highlighter.event.CREATE, ({ sources, type }: { sources: any[]; type?: string }) => {
       if (type === 'from-store') return;
       // Store positions as if a host's `belowTitle` slot were not there, so
@@ -1675,6 +1791,10 @@ export function useAnnotationHighlighter({
           // Repair the quote before anything reads it: the popover preview,
           // the comment draft key, and the annotation's own `originalText` all
           // come from `source.text`.
+          // A selection let go outside the document was painted from its
+          // range; its quote is the selection's own string, as for one let go
+          // inside.
+          if (releasedOutsideQuote !== null) source.text = releasedOutsideQuote;
           source.text = quoteWithoutExcludedText(
             pendingRangeRunsRef.current,
             source.text,
@@ -1825,11 +1945,16 @@ export function useAnnotationHighlighter({
       }
       if (!container.contains(range.commonAncestorContainer)) {
         pendingRangeRunsRef.current = null;
+        // Collapsed for the same reason as the blank quote above: the
+        // library's handler paints whatever selection it finds, and then
+        // removes it either way.
+        if (carriesTextFromOutside(container, range)) selection.removeAllRanges();
         return;
       }
       const snappedOutOfSlot = snapRangeOutOfBelowTitle(container, range);
       const snappedPastExcluded = snapRangeStartPastExcluded(range);
-      if (snappedOutOfSlot || snappedPastExcluded) {
+      const snappedBeforeSkipped = snapRangeEndBeforeSkipped(container, range);
+      if (snappedOutOfSlot || snappedPastExcluded || snappedBeforeSkipped) {
         selection.removeAllRanges();
         selection.addRange(range);
       }
@@ -1839,6 +1964,238 @@ export function useAnnotationHighlighter({
     const container = containerRef.current;
     container.addEventListener('mouseup', handlePointerEndCapture, true);
     container.addEventListener('touchend', handlePointerEndCapture, true);
+
+    // A drag that starts in the document and is let go OUTSIDE it (left of the
+    // text, below the card, over a panel, outside the window). The library
+    // hears a release on its root only, so the selection used to stay on
+    // screen with no highlight. A press in the document is followed to its
+    // release anywhere; a release inside is the library's, as always, and one
+    // outside commits a selection here: the same checks and snaps as the
+    // guard above, then the library's `fromRange` (the same CREATE event), then
+    // the selection removed as the library's own handler does.
+    //
+    // WHICH selection: never more than the person saw selected in the document.
+    // With the pointer over something else on the page (a panel after the
+    // document or before it, off the side of the window) the browser runs its
+    // selection on to the END or the START of the document and into that other
+    // thing. Committing that highlighted, or in redline deleted, the rest of
+    // the document in one drag. So every selection that lies wholly inside the
+    // document during the press is remembered (`seenInside`); a release
+    // outside commits the browser's selection only while it too lies wholly
+    // inside and has not suddenly grown many times over, and otherwise the
+    // last one remembered. With none remembered, nothing is made and the
+    // selection is left as it is.
+    // The press itself: where it started and whether the pointer ever went a drag's distance from there.
+    let pressed: { x: number; y: number; moved: boolean; plain: boolean } | null = null;
+    //
+    // Off to the SIDE of the document (left or right of its box) even a
+    // selection wholly inside it is not trusted: with nothing selectable
+    // beside the document the browser's runaway selection ends on the
+    // document's own first or last words. There the highlight is what was
+    // selected while the pointer was still over the document
+    // (`seenUnderPointer`), stretched at most to the edge of the line the
+    // pointer is level with (a caret looked up just inside the document's box),
+    // and in redline not stretched at all. Above or below the document the
+    // browser's selection grows as the page scrolls, and is trusted as said.
+    type SeenSelection = { anchorNode: Node; anchorOffset: number; focusNode: Node; focusOffset: number; length: number };
+    let seenInside: SeenSelection | null = null;
+    let seenUnderPointer: SeenSelection | null = null;
+    let pointerOverDocument = true;
+    /** Where the pointer last was with the button down, for a release the page never hears. */
+    let lastPressPoint: { x: number; y: number } | null = null;
+    const stillThere = (seen: SeenSelection) =>
+      seen.anchorNode.isConnected && seen.focusNode.isConnected
+      && seen.anchorOffset <= (seen.anchorNode.nodeValue?.length ?? seen.anchorNode.childNodes.length)
+      && seen.focusOffset <= (seen.focusNode.nodeValue?.length ?? seen.focusNode.childNodes.length);
+    const noteSelectionInside = () => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || selection.rangeCount === 0) return;
+      const { anchorNode, focusNode } = selection;
+      if (!anchorNode || !focusNode || !container.contains(anchorNode) || !container.contains(focusNode)) return;
+      const length = selection.getRangeAt(0).toString().length;
+      if (seenInside && selectionRanAway(length, seenInside.length)) return;
+      const seen = { anchorNode, anchorOffset: selection.anchorOffset, focusNode, focusOffset: selection.focusOffset, length };
+      seenInside = seen;
+      if (pointerOverDocument) seenUnderPointer = seen;
+    };
+    /** At most this many characters past what was selected under the pointer: the rest of a line or two. */
+    const LINE_EDGE_STRETCH = 400;
+    const commitReleasedOutside = (seen: SeenSelection | null, underPointer: SeenSelection | null, at: { x: number; y: number } | null) => {
+      const selection = window.getSelection();
+      if (disposed || !listening || !selection || selection.isCollapsed || selection.rangeCount === 0) return;
+      const box = container.getBoundingClientRect();
+      if (at && (at.x < box.left || at.x > box.right)) {
+        // Off to the side.
+        if (!underPointer || !stillThere(underPointer)) return;
+        const { anchorNode, anchorOffset, focusNode, focusOffset, length } = underPointer;
+        const edge = (pendingModeOverrideRef.current ?? modeRef.current) === 'redline' ? null : textCaretAt(
+          container,
+          Math.min(Math.max(at.x, box.left + 1), box.right - 1),
+          Math.min(Math.max(at.y, Math.max(box.top, 0) + 1), Math.min(box.bottom, window.innerHeight) - 1),
+        );
+        if (edge) {
+          selection.setBaseAndExtent(anchorNode, anchorOffset, edge.node, edge.offset);
+          const stretched = selection.rangeCount > 0 ? selection.getRangeAt(0).toString().length : 0;
+          if (stretched < length || stretched > length + LINE_EDGE_STRETCH) selection.setBaseAndExtent(anchorNode, anchorOffset, focusNode, focusOffset);
+        } else {
+          selection.setBaseAndExtent(anchorNode, anchorOffset, focusNode, focusOffset);
+        }
+        if (selection.isCollapsed || selection.rangeCount === 0) return;
+      } else {
+        const live = selection.getRangeAt(0);
+        const liveInside = container.contains(live.startContainer) && container.contains(live.endContainer);
+        if (!liveInside || (seen && selectionRanAway(live.toString().length, seen.length))) {
+          if (!seen || !stillThere(seen)) return;
+          selection.setBaseAndExtent(seen.anchorNode, seen.anchorOffset, seen.focusNode, seen.focusOffset);
+          if (selection.isCollapsed || selection.rangeCount === 0) return;
+        }
+      }
+      const range = selection.getRangeAt(0).cloneRange();
+      if (rangeInsideExcluded(container, range)) return;
+      snapRangeOutOfBelowTitle(container, range);
+      snapRangeStartPastExcluded(range);
+      snapRangeEndBeforeSkipped(container, range);
+      // Nothing to quote, or a shape the library cannot serialize (#881): the
+      // selection stays the person's, as before.
+      if (range.collapsed || isBlankQuote(range.toString()) || !isSerializableRange(range)) return;
+      selection.removeAllRanges();
+      selection.addRange(range.cloneRange());
+      releasedOutsideQuote = selection.toString() || null;
+      pendingRangeRunsRef.current = rangeTextPieces(range);
+      try {
+        if (highlighter.fromRange(range)) window.getSelection()?.removeAllRanges();
+      } catch (error) {
+        pendingRangeRunsRef.current = null;
+        warnHighlighterFailure('painting a selection released outside the document', error);
+      } finally {
+        releasedOutsideQuote = null;
+      }
+    };
+
+    // The same press, for a drag the browser leaves as a moving caret.
+    // Chromium does that after a press at some fractional x positions (a
+    // trackpad, a Retina screen): the caret follows the pointer, nothing is
+    // selected, and the release finds nothing to highlight. Once a real drag
+    // (past DRAG_SLOP_PX) has shown a collapsed selection on two moves in a
+    // row while the pointer is over other text than the press, the selection
+    // is set from the press to the pointer here, and the browser's own move
+    // handling is cancelled so it does not put its caret back. A drag the
+    // browser IS selecting is never touched, and a click never becomes one.
+    let caretDrag: {
+      x0: number;
+      y0: number;
+      anchor: CaretPosition;
+      moved: boolean;
+      caretMoves: number;
+      driving: boolean;
+    } | null = null;
+    const driveCaretDrag = (x: number, y: number) => {
+      const selection = window.getSelection();
+      const focus = textCaretAt(container, x, y);
+      if (!caretDrag || !selection || !focus || !caretDrag.anchor.node.isConnected) return;
+      selection.setBaseAndExtent(caretDrag.anchor.node, caretDrag.anchor.offset, focus.node, focus.offset);
+    };
+    const followCaretDrag = (event: MouseEvent) => {
+      const drag = caretDrag;
+      if (!drag || !listening) return;
+      if (!drag.moved && Math.hypot(event.clientX - drag.x0, event.clientY - drag.y0) >= DRAG_SLOP_PX) drag.moved = true;
+      if (!drag.moved) return;
+      if (!drag.driving) {
+        // The selection read here is the one the browser made of the move before.
+        const selection = window.getSelection();
+        const collapsed = !selection || selection.rangeCount === 0 || selection.isCollapsed;
+        const focus = textCaretAt(container, event.clientX, event.clientY);
+        const elsewhere = !!focus && (focus.node !== drag.anchor.node || focus.offset !== drag.anchor.offset);
+        drag.caretMoves = collapsed && elsewhere ? drag.caretMoves + 1 : 0;
+        if (drag.caretMoves < 2) return;
+        drag.driving = true;
+      }
+      driveCaretDrag(event.clientX, event.clientY);
+      event.preventDefault();
+    };
+
+    const endPress = () => {
+      caretDrag = null;
+      seenInside = null;
+      seenUnderPointer = null;
+      pointerOverDocument = true;
+      lastPressPoint = null;
+      pressed = null;
+      document.removeEventListener('mouseup', handlePressRelease, true);
+      document.removeEventListener('mousemove', handlePressMove, true);
+      document.removeEventListener('selectionchange', noteSelectionInside);
+    };
+    const handlePressRelease = (event: MouseEvent) => {
+      if (event.button !== 0) return;
+      // Once more, where the pointer was let go, before anything reads the selection.
+      if (caretDrag?.driving && listening) driveCaretDrag(event.clientX, event.clientY);
+      noteSelectionInside();
+      const seen = seenInside;
+      const underPointer = seenUnderPointer;
+      const at = { x: event.clientX, y: event.clientY };
+      const press = pressed;
+      endPress();
+      // A click with a wobble is not a drag: the pointer never went a drag's
+      // distance from the press, and the browser selected a letter or two.
+      // Collapsed here, before the library's handler reads it, it makes
+      // nothing (it used to make a one-letter highlight, often with no toolbar).
+      const selection = window.getSelection();
+      if (press?.plain && !press.moved && selection && !selection.isCollapsed && selection.toString().length <= 2
+        && container.contains(selection.anchorNode) && container.contains(selection.focusNode)) {
+        selection.removeAllRanges();
+        return;
+      }
+      if (event.target instanceof Node && container.contains(event.target)) return;
+      // After every other listener of this release, like the library's own
+      // handler for a release inside: as the event ends its way up, or on the
+      // next task when something stopped it.
+      let done = false;
+      const commit = () => {
+        if (done) return;
+        done = true;
+        window.removeEventListener('mouseup', commit);
+        commitReleasedOutside(seen, underPointer, at);
+      };
+      window.addEventListener('mouseup', commit);
+      window.setTimeout(commit, 0);
+    };
+    // A release the page never hears (over a frame): the first move with the
+    // button up ends the drag.
+    const handlePressMove = (event: MouseEvent) => {
+      if (event.buttons & 1) {
+        if (pressed && !pressed.moved && Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) >= DRAG_SLOP_PX) pressed.moved = true;
+        // The selection read at this move is the one the browser made of the move before.
+        noteSelectionInside();
+        pointerOverDocument = event.target instanceof Node && container.contains(event.target);
+        lastPressPoint = { x: event.clientX, y: event.clientY };
+        followCaretDrag(event);
+        return;
+      }
+      noteSelectionInside();
+      const seen = seenInside;
+      const underPointer = seenUnderPointer;
+      const at = lastPressPoint;
+      endPress();
+      commitReleasedOutside(seen, underPointer, at);
+    };
+    const handlePressStart = (event: MouseEvent) => {
+      // The main button only; Ctrl+click is the context menu on a Mac.
+      if (event.button !== 0 || event.ctrlKey) return;
+      endPress();
+      document.addEventListener('mouseup', handlePressRelease, true);
+      document.addEventListener('mousemove', handlePressMove, true);
+      document.addEventListener('selectionchange', noteSelectionInside);
+      // Multi-clicks and Shift+click select without moving: only a single plain press can be a wobbling click.
+      pressed = { x: event.clientX, y: event.clientY, moved: false, plain: event.detail <= 1 && !event.shiftKey };
+      // A single plain press on text: multi-clicks, modified presses, controls,
+      // links and scrollbars keep the browser's own handling.
+      const target = event.target instanceof Element ? event.target : null;
+      if (event.detail > 1 || event.shiftKey || event.altKey || event.metaKey) return;
+      if (!target || target.closest(NOT_A_TEXT_PRESS) || isScrollbarPress(event)) return;
+      const anchor = textCaretAt(container, event.clientX, event.clientY);
+      if (anchor) caretDrag = { x0: event.clientX, y0: event.clientY, anchor, moved: false, caretMoves: 0, driving: false };
+    };
+    container.addEventListener('mousedown', handlePressStart, true);
 
     // On a touch screen a host that composes takes the selection when the
     // person chooses its Comment (takeSelection); the library painting it at
@@ -1956,6 +2313,7 @@ export function useAnnotationHighlighter({
       if (isBlankQuote(sel.toString()) || !isSerializableRange(range)) return false;
       snapRangeOutOfBelowTitle(containerRef.current, range);
       snapRangeStartPastExcluded(range);
+      snapRangeEndBeforeSkipped(containerRef.current, range);
       pendingRangeRunsRef.current = rangeTextPieces(range);
       try {
         highlighter.fromRange(range);
@@ -1995,6 +2353,8 @@ export function useAnnotationHighlighter({
       containerRef.current?.removeEventListener('mouseup', handleMathMouseUp, true);
       container.removeEventListener('mouseup', handlePointerEndCapture, true);
       container.removeEventListener('touchend', handlePointerEndCapture, true);
+      container.removeEventListener('mousedown', handlePressStart, true);
+      endPress();
       disposed = true;
       highlighter.dispose();
     };
@@ -2017,6 +2377,7 @@ export function useAnnotationHighlighter({
     const painted = range.cloneRange();
     snapRangeOutOfBelowTitle(container, painted);
     snapRangeStartPastExcluded(painted);
+    snapRangeEndBeforeSkipped(container, painted);
     pendingRangeRunsRef.current = rangeTextPieces(painted);
 
     const selection = window.getSelection();

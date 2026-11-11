@@ -1,9 +1,10 @@
 /**
  * Thread steps in the window (approval "inbox-thread-steps", 2026-11-03; the
  * marks are "inbox-checklist-spinners-2026-11-07", mock 1 "today's layout with
- * spinners", its 11:25Z addendum): what the foot's button, its popover or
- * sheet, the list row, the Board's lane card and its opened card draw from a
- * thread's lists. Pure: no DOM, no fetch.
+ * spinners", its 11:25Z addendum): what the foot's button and its popover or
+ * sheet draw from a thread's lists. The checklist lives only in its thread
+ * (owner, 2026-11-09): no list row or Board card shows it. Pure: no DOM, no
+ * fetch.
  *
  * One list per agent session (the server's read, latest first). A cleared
  * list (no steps) shows nothing. Done of total counts every step but dropped
@@ -21,36 +22,9 @@ export function shownStepLists(lists: readonly InboxStepsWire[]): InboxStepsWire
   return lists.filter((list) => list.steps.length > 0);
 }
 
-/**
- * A Board card's lists (approval part 4: "the thread is one Board card; its steps are inside it"): the lists of
- * every thread the card links (the cards read's `steps`), the latest written first. The lane card's mark is the
- * first one's.
- */
-export function cardStepLists(threads: readonly string[], steps: Readonly<Record<string, readonly InboxStepsWire[]>> | undefined): InboxStepsWire[] {
-  if (!steps) return [];
-  const lists = threads.flatMap((id) => shownStepLists(steps[id] ?? []));
-  return lists.sort((a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0));
-}
-
-/**
- * The opened Board card's lists, said the way its head says the session: once the head reads "ended" (the Board's
- * rule, not live), the card agent's own lists read ended too (the grey dashed mark, "· as of 2:40 PM"), so one card
- * never shows an ended agent beside a list still turning. Another session's list, or any other head, as served.
- */
-export function stepsAsCardHeadSays<T extends Pick<InboxStepsWire, 'presence' | 'agent'>>(lists: readonly T[], session: string | null, state: string | null): T[] {
-  if (state !== 'ended' || !session) return [...lists];
-  return lists.map((list) => (list.agent.session === session && list.presence !== 'ended' ? { ...list, presence: 'ended' } : list));
-}
-
 /** The Board card the checklist head's Board icon opens: the first card (the Board's order) that links the thread, not a cancelled one. */
 export function threadBoardCard<T extends { threads: readonly string[]; column: string }>(cards: readonly T[], threadId: string): T | null {
   return cards.find((card) => card.column !== 'dropped' && card.threads.includes(threadId)) ?? null;
-}
-
-/** The lane card's mark, read aloud and on hover: "3 of 6 steps done" (no count on the card itself). */
-export function stepsDoneWords(list: Pick<InboxStepsWire, 'steps'>): string {
-  const { done, total } = stepsCount(list);
-  return `${done} of ${total} steps done`;
 }
 
 /**
@@ -151,7 +125,7 @@ export function pieGeometry(done: number, total: number, size: number): { c: num
 
 /**
  * The person answered in the thread since a time (`inboxPersonAnsweredSince` over the thread's messages: a reply of
- * theirs or a 👍 Looks good). Where the window has no thread (the Board, the intro's picture), nobody answered.
+ * theirs or a 👍 Looks good). Where the window has no thread (the intro's picture), nobody answered.
  */
 export type StepsAnsweredSince = (since: string) => boolean;
 const nobodyAnswered: StepsAnsweredSince = () => false;
@@ -159,7 +133,7 @@ const nobodyAnswered: StepsAnsweredSince = () => false;
 /**
  * A list still waits on the person, by the server's rule for the row's `steps_waiting` (`inboxStepsWaitOnPerson`): a
  * step is `waiting`, its session has not ended (an ended session never updates its list), and the person has not
- * answered since the list was last written. The foot's button, the Board card's words and the row agree by it.
+ * answered since the list was last written. The foot's button, its name and its list agree by it.
  */
 export function stepsListWaits(list: Pick<InboxStepsWire, 'steps' | 'presence' | 'updated_at'>, answeredSince: StepsAnsweredSince = nobodyAnswered): boolean {
   return list.presence !== 'ended' && list.steps.some((step) => step.status === 'waiting') && !answeredSince(list.updated_at);
@@ -189,17 +163,6 @@ export function stepsButtonSig(lists: readonly InboxStepsWire[], answeredSince: 
   const shown = stepsButtonList(lists, answeredSince);
   if (!shown) return '';
   return [shown.id, stepsCount(shown).text, stepsButtonMark(shown, answeredSince) ?? 'pie', shown.presence === 'ended' ? 'asof' : '', lists.length].join(':');
-}
-
-/**
- * The words for a list that waits on the person, read aloud and on hover: "Checklist: 2 of 4 steps done; waiting on
- * you: Pick the window", from the first list that still waits (`stepsListWaits`: never an ended session's). The lane
- * card's mark; null when nothing waits.
- */
-export function stepsWaitWords(lists: readonly Pick<InboxStepsWire, 'steps' | 'presence' | 'updated_at'>[], answeredSince: StepsAnsweredSince = nobodyAnswered): string | null {
-  const list = lists.find((one) => stepsListWaits(one, answeredSince));
-  const step = list?.steps.find((one) => one.status === 'waiting');
-  return list && step ? `Checklist: ${stepsDoneWords(list)}; waiting on you: ${step.step}` : null;
 }
 
 /** The waiting step the button's name adds ("; waiting on you: Pick the window"), while its list waits; else "". */

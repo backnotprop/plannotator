@@ -211,6 +211,10 @@ test.beforeAll(async () => {
       inboxSound: { dialogShownFor: '0.0.0-dev' },
       inboxListIntro: { shownAt: past, version: 2 },
       inboxVoiceIntro: { shownAt: past },
+      // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
+      favicon: 'glass',
+      // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
+      inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' },
       inboxSnoozeIntro: { shownAt: past },
       inboxBoardIntro: { shownAt: past },
       inboxReveals: { lastShownAt: past },
@@ -264,9 +268,9 @@ test.beforeAll(async () => {
   const d1 = await send({ agent_session: S.docs, reply_to: r1.reply.id, body: 'Documented in docs/webhooks.md: 5 tries with backoff 2 s, 10 s, 60 s, 5 min, 30 min, then the dead-letter queue.' });
   await send({ agent_session: S.auth, reply_to: r1.reply.id, body: 'No. Token refresh writes to its own table and never goes through `ledger-writes`.' });
   await send({ agent_session: S.stripe, reply_to: d1.message_id, body: 'Thanks both. I turned on the dead-letter alert and linked the doc from the runbook.' });
-  // T2: the unnamed session's own thread.
+  // T2: a thread the unnamed session starts.
   const t2 = await send({ agent_session: S.plain, subject: 'Lint config cleanup', body: 'I removed the three unused ESLint plugins. `bun run lint` is clean.' });
-  // T4: the named Pi session's own thread, one message (its head is the open one, with no fold button).
+  // T4: a thread the named Pi session starts, one message (its head is the open one, with no fold button).
   const t4 = await send({ agent_host: 'pi', agent_name: 'Pi', agent_session: S.pi, subject: 'CSV export columns', body: 'The billing CSV export now writes `amount_cents` and `currency` as two columns. Old reports still parse.' });
   // T3: the person writes to a session that stops before it takes the message.
   const t3 = await post<{ thread_id: string }>('/api/inbox/messages', {

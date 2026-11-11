@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkNewHomeFolder, isHomeItself, listHomeFolders, makeHomeFolder, resolveHomeFolder } from "./inbox-home-folders";
+import { checkNewHomeFolder, isHomeItself, listHomeFolders, makeHomeFolder, resolveHomeFolder, shownParent, type FolderPlaces } from "./inbox-home-folders";
 
 // A made-up home with a code folder, a hidden folder, a file, and links in and out of home.
 const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-home-folders-")));
@@ -36,9 +36,15 @@ describe("folders under home, by name only", () => {
     expect(listHomeFolders(home, "~/work")).toEqual({ path: "~/work", exists: false, state: "missing", folders: [], nearest: { path: "~", folders: ["code", "srv", "x"] } });
   });
 
-  test("never outside home: .., an absolute path elsewhere, a link out of home", () => {
-    for (const typed of ["~/..", "~/code/../../elsewhere", "/etc", outside, "~/away", "~/away/secrets", "~/code/out-link", "code"]) {
+  test("never a path that steps out, or isn't a full one: .., a bare name", () => {
+    for (const typed of ["~/..", "~/code/../../elsewhere", "code", "/Volumes/../etc"]) {
       expect([typed, listHomeFolders(home, typed)]).toEqual([typed, { refused: "outside" }]);
+    }
+  });
+
+  test("never a system folder, typed or through a link (the temp folder is one, on macOS and Linux)", () => {
+    for (const typed of ["/etc", "/usr/local", outside, "~/away", "~/away/secrets", "~/code/out-link"]) {
+      expect([typed, listHomeFolders(home, typed)]).toEqual([typed, { refused: "system" }]);
     }
   });
 
@@ -67,12 +73,12 @@ describe("folders under home, by name only", () => {
       expect([typed, resolveHomeFolder(home, typed)]).toEqual([typed, { ok: false, refused: "hidden" }]);
       expect([typed, listHomeFolders(home, typed)]).toEqual([typed, { refused: "hidden" }]);
     }
-    for (const typed of ["~/code/out-link/nope", "~/away/nope/deeper"]) {
-      expect([typed, resolveHomeFolder(home, typed)]).toEqual([typed, { ok: false, refused: "outside" }]);
-      expect([typed, listHomeFolders(home, typed)]).toEqual([typed, { refused: "outside" }]);
+    for (const typed of ["~/code/out-link/nope", "~/away/nope/deeper", "/usr/nope"]) {
+      expect([typed, resolveHomeFolder(home, typed)]).toEqual([typed, { ok: false, refused: "system" }]);
+      expect([typed, listHomeFolders(home, typed)]).toEqual([typed, { refused: "system" }]);
     }
     // In a folder that is there and is neither: still just not there.
-    expect(resolveHomeFolder(home, "~/code/srv-link/nope")).toEqual({ ok: true, exists: false, state: "missing", real: null, shown: "~/code/srv-link/nope" });
+    expect(resolveHomeFolder(home, "~/code/srv-link/nope")).toEqual({ ok: true, exists: false, state: "missing", real: null, shown: "~/code/srv-link/nope", start: false });
   });
 
   test("a link back to home is not listed: home is never a folder to start in", () => {
@@ -81,13 +87,13 @@ describe("folders under home, by name only", () => {
 
   test("home itself is listed, and is home (never a folder to start in)", () => {
     const at = resolveHomeFolder(home, "~");
-    expect(at).toMatchObject({ ok: true, exists: true, shown: "~" });
+    expect(at).toMatchObject({ ok: true, exists: true, shown: "~", start: false });
     expect(isHomeItself(home, (at as { real: string }).real)).toBe(true);
     expect(isHomeItself(home, (resolveHomeFolder(home, "~/code") as { real: string }).real)).toBe(false);
   });
 
   test("a full path inside home reads as ~/…; doubled and trailing slashes are fine", () => {
-    expect(resolveHomeFolder(home, join(home, "code", "infra"))).toEqual({ ok: true, exists: true, state: "folder", real: join(home, "code", "infra"), shown: "~/code/infra" });
+    expect(resolveHomeFolder(home, join(home, "code", "infra"))).toEqual({ ok: true, exists: true, state: "folder", real: join(home, "code", "infra"), shown: "~/code/infra", start: true });
     expect(resolveHomeFolder(home, "~//code/infra/")).toMatchObject({ ok: true, exists: true, shown: "~/code/infra" });
   });
 });
@@ -163,5 +169,62 @@ describe("what a typed path is: folder, locked, file, missing", () => {
     expect(() => makeHomeFolder(join(h, "code"), "swapped")).toThrow();
     symlinkSync(states, join(h, "code", "swapped-out"));
     expect(() => makeHomeFolder(join(h, "code"), "swapped-out")).toThrow();
+  });
+});
+
+// Any folder but a system or hidden one (approval "inbox-launch-any-folder"): a folder on another drive. The temp folder
+// is a system folder on this machine, so these tests name their own: a made-up disk whose `Volumes` holds the drives.
+describe("folders on other drives", () => {
+  const disk = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-drives-")));
+  const volumes = join(disk, "Volumes");
+  const users = join(disk, "Users");
+  const me = join(users, "me");
+  const places: FolderPlaces = { system: [join(disk, "System")], open: [], containers: ["/", volumes, users] };
+  for (const dir of ["Studio SSD/footage/day-1", "Studio SSD/renders", "Studio SSD/.Trashes", "Backup", ".hidden-drive/x"]) mkdirSync(join(volumes, dir), { recursive: true });
+  for (const dir of ["code/web", "System/Library"]) mkdirSync(join(dir === "code/web" ? me : disk, dir), { recursive: true });
+  writeFileSync(join(volumes, "Studio SSD", "notes.txt"), "a file");
+  // The boot disk's link in Volumes, and a link on a drive to a system folder.
+  symlinkSync(disk, join(volumes, "Macintosh HD"));
+  symlinkSync(join(disk, "System"), join(volumes, "Studio SSD", "syslink"));
+  afterAll(() => rmSync(disk, { recursive: true, force: true }));
+  const ssd = join(volumes, "Studio SSD");
+
+  test("the drives folder lists each drive, never a hidden one or the boot disk's link, and is never started in", () => {
+    expect(listHomeFolders(me, `${volumes}/`, places)).toEqual({ path: volumes, exists: true, state: "folder", folders: ["Backup", "Studio SSD"], start: false, writable: true });
+  });
+
+  test("a drive's root is started in, shown by its full path; its folders list as in home", () => {
+    expect(resolveHomeFolder(me, ssd, places)).toEqual({ ok: true, exists: true, state: "folder", real: ssd, shown: ssd, start: true });
+    expect(listHomeFolders(me, `${ssd}/`, places)).toEqual({ path: ssd, exists: true, state: "folder", folders: ["footage", "renders"], writable: true });
+    expect(resolveHomeFolder(me, `${ssd}/footage/day-1`, places)).toMatchObject({ ok: true, exists: true, start: true, shown: `${ssd}/footage/day-1` });
+  });
+
+  test("hidden and system folders stay out on a drive too, however they are reached", () => {
+    for (const typed of [`${ssd}/.Trashes`, `${volumes}/.hidden-drive/x`]) expect([typed, resolveHomeFolder(me, typed, places)]).toEqual([typed, { ok: false, refused: "hidden" }]);
+    for (const typed of [join(disk, "System"), `${ssd}/syslink`, `${ssd}/syslink/nope`]) expect([typed, resolveHomeFolder(me, typed, places)]).toEqual([typed, { ok: false, refused: "system" }]);
+  });
+
+  test("a folder above home, home itself, and the top of the disk are listed but never started in", () => {
+    expect(listHomeFolders(me, users, places)).toMatchObject({ exists: true, folders: ["me"], nostart: ["me"], start: false });
+    expect(resolveHomeFolder(me, disk, places)).toMatchObject({ ok: true, exists: true, start: false });
+    expect(resolveHomeFolder(me, `${disk}/Volumes/Macintosh HD`, places)).toMatchObject({ ok: true, start: false });
+    // The disk's top lists its folders but no system one.
+    expect(listHomeFolders(me, disk, places)).toMatchObject({ folders: ["Users", "Volumes"], nostart: ["Users", "Volumes"], start: false });
+  });
+
+  test("a path that isn't there on a drive offers the nearest folder that is; a missing drive offers the drives", () => {
+    expect(listHomeFolders(me, `${ssd}/footge/x`, places)).toMatchObject({ exists: false, state: "missing", nearest: { path: ssd, folders: ["footage", "renders"] } });
+    expect(listHomeFolders(me, `${volumes}/Archive/old-site`, places)).toMatchObject({ exists: false, state: "missing", nearest: { path: volumes, folders: ["Backup", "Studio SSD"] } });
+  });
+
+  test("Create on a drive: the last folder, in a folder that is there", () => {
+    expect(checkNewHomeFolder(me, `${ssd}/grade`, places)).toEqual({ ok: true, real: null, parent: ssd, name: "grade", shown: `${ssd}/grade` });
+    expect(checkNewHomeFolder(me, `${ssd}/notes.txt`, places)).toMatchObject({ ok: false, code: "folder_unavailable" });
+    expect(checkNewHomeFolder(me, `${ssd}/.cache`, places)).toMatchObject({ ok: false, message: "Hidden folders can't be picked. Nothing was sent." });
+    expect(checkNewHomeFolder(me, `${disk}/System/x`, places)).toMatchObject({ ok: false, message: "System folders can't be picked. Nothing was sent." });
+  });
+
+  test("a shown path's parent: in home and out", () => {
+    expect([shownParent("~/code/x"), shownParent("~/x"), shownParent("/Volumes/A/b"), shownParent("/Volumes")]).toEqual(["~/code", "~", "/Volumes/A", "/"]);
   });
 });

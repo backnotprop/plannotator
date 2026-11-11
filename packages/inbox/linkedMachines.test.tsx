@@ -2,8 +2,8 @@
  * Linked machines in the window (docs/agent-guides/inbox-machines.md), on the
  * window's own components: a row from another machine reads its machine where
  * it reads its project ("billing-svc · MacBook"); an asleep machine's rows are
- * greyed under one "MacBook asleep since …" line; the sidebar lists Machines
- * as a filter beside Projects; the list's ⋯ menu offers "Hide offline
+ * greyed under one "MacBook asleep since …" line; the sidebar's Agents section
+ * names each machine, a filter beside Projects; the list's ⋯ menu offers "Hide offline
  * machines"; Settings → Machines lists each machine with its state and
  * version, Unlink asks twice, and the link form sends a pasted link or an
  * address and six digits. With no machine linked none of it is drawn.
@@ -24,6 +24,7 @@ const { MachinesSection } = (hasDom ? await import('./components/Machines') : {}
 const { ThreadWait } = (hasDom ? await import('./components/ThreadWait') : {}) as typeof import('./components/ThreadWait');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { machinesModel, machineProjectNames } = await import('./machines');
+const { setInboxAgents } = await import('./agentsList');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 
 const SELF = `ibx_01K${'0'.repeat(22)}S`;
@@ -108,6 +109,7 @@ afterEach(() => {
   host = null;
   document.body.innerHTML = '';
   globalThis.fetch = savedFetch;
+  setInboxAgents(null);
   resetStorageBackend();
 });
 
@@ -163,7 +165,7 @@ async function menuHasHideOffline(): Promise<boolean> {
   return found;
 }
 
-test.skipIf(!hasDom)('never linked: no machine label, no away line, no greyed row, no "Hide offline machines", no Machines section', async () => {
+test.skipIf(!hasDom)('never linked: no machine label, no away line, no greyed row, no "Hide offline machines", no machine in the sidebar', async () => {
   // A never-linked Inbox's merged list names this machine alone.
   list([machine(SELF, 'Studio', 'online')], [OWN]);
   expect(label('msg_own')).toBe('billing-svc');
@@ -175,7 +177,7 @@ test.skipIf(!hasDom)('never linked: no machine label, no away line, no greyed ro
   host?.remove();
   host = null;
   mount(<Sidebar {...sidebarProps({ machines: machinesModel([machine(SELF, 'Studio', 'online')]) })} />);
-  expect(document.querySelector('[data-sidebar-section="machines"]')).toBeNull();
+  expect(document.querySelector('[data-sidebar-section="agents"]')).toBeNull();
   expect(document.querySelector('[data-machine]')).toBeNull();
   expect(document.querySelector('[data-sidebar-section="projects"]')).not.toBeNull();
 });
@@ -230,6 +232,10 @@ function sidebarProps(over: Partial<SidebarProps> = {}): SidebarProps {
   } as SidebarProps;
 }
 
+/** An agent running on each of the two machines: a machine's name shows in the sidebar only while agents show from more than one. */
+const anAgent = (id: string) => ({ id, session: id, host: 'claude-code', project: { id: 'prj_a', name: 'web-app' }, state: 'idle' as const, waiting: 0, live: true, started_at: '2026-11-09T09:14:00.000Z', last_seen_at: '2026-11-09T09:46:00.000Z' });
+const agentsOnBoth = () => act(() => setInboxAgents([{ machine: SELF, agents: [anAgent('ses_s1')], total: 1, ended_today: 0 }, { machine: MAC, agents: [anAgent('ses_m1')], total: 1, ended_today: 0 }]));
+
 test.skipIf(!hasDom)('the word beside a machine that is behind shows only on a page that offers updates: a tailnet guest gets none, in the sidebar or on its Settings row', () => {
   const update = { phase: 'behind' as const, target: '0.28.49', from: '0.28.39', can_update: true, self_update: true };
   const list = [machine(SELF, 'Studio', 'online'), machine(MAC, 'MacBook', 'online', { update })];
@@ -240,6 +246,12 @@ test.skipIf(!hasDom)('the word beside a machine that is behind shows only on a p
     root = null;
     host = null;
   };
+  // No agent on it: the machine is not named in the sidebar, so its word is not there either (it is in Settings).
+  mount(<Sidebar {...sidebarProps({ machines: model, onMachineUpdate: noop })} />);
+  expect(host!.querySelector('[data-machine]')).toBeNull();
+  expect(host!.querySelector('.ib-mthing')).toBeNull();
+  fresh();
+  agentsOnBoth();
   mount(<Sidebar {...sidebarProps({ machines: model, onMachineUpdate: noop })} />);
   expect(host!.querySelector('.ib-mthing')?.textContent).toBe('Update');
   fresh();
@@ -257,12 +269,14 @@ test.skipIf(!hasDom)('the word beside a machine that is behind shows only on a p
   expect(host!.textContent).not.toContain('is out');
 });
 
-test.skipIf(!hasDom)('the sidebar lists Machines before Projects, this machine first; a machine is a filter, marked while shown; an asleep one reads quiet', () => {
+test.skipIf(!hasDom)("the sidebar's Agents names the machines before Projects, this machine first; a machine is a filter, marked while shown; an asleep one reads quiet", () => {
   const picked: string[] = [];
   const model = machinesModel([machine(SELF, 'Studio', 'online'), machine(MAC, 'MacBook', 'offline')]);
+  agentsOnBoth();
   mount(<Sidebar {...sidebarProps({ machines: model, machineCounts: new Map([[SELF, 1], [MAC, 2]]), onMachine: (id) => picked.push(id) })} />);
   const headers = [...document.querySelectorAll('[data-sidebar-section]')].map((h) => h.getAttribute('data-sidebar-section'));
-  expect(headers.indexOf('machines')).toBeLessThan(headers.indexOf('projects'));
+  expect(headers.indexOf('agents')).toBeGreaterThanOrEqual(0);
+  expect(headers.indexOf('agents')).toBeLessThan(headers.indexOf('projects'));
   const rows = [...document.querySelectorAll<HTMLButtonElement>('[data-machine]')];
   expect(rows.map((r) => r.querySelector('.ib-name')!.textContent)).toEqual(['Studio', 'MacBook']);
   expect(rows[1]!.hasAttribute('data-away')).toBe(true);

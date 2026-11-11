@@ -48,7 +48,16 @@ const MINI_BLOCK: InboxComposeLaunch = {
 
 /** Each machine's folders under its home, by `~/…` path. */
 const TREES: Record<string, Record<string, string[]>> = {
-  self: { '~': ['code', 'Documents', 'notes'], '~/code': ['notes-local', 'web-app'], '~/code/notes-local': [], '~/code/web-app': ['src'], '~/Documents': ['Archive'], '~/Documents/Archive': ['2024'] },
+  self: {
+    '~': ['code', 'Documents', 'notes'],
+    '~/code': ['notes-local', 'web-app'],
+    '~/code/notes-local': [],
+    '~/code/web-app': ['src'],
+    '~/Documents': ['Archive'],
+    '~/Documents/Archive': ['2024'],
+    '/Volumes/Studio SSD': ['footage', 'renders'],
+    '/Volumes/Studio SSD/footage': ['day-1'],
+  },
   [MINI]: { '~': ['code'], '~/code': ['billing-api', 'billing-reports', 'billing-svc', 'infra'], '~/code/billing-api': [], '~/code/billing-svc': ['src'] },
 };
 
@@ -62,6 +71,10 @@ const UNWRITABLE = new Set(['~/Documents/Archive']);
 /** Holds a folder read until released (a slow machine). */
 let slow: { path: string; release: Promise<void> } | null = null;
 let sent: ComposeSent[] = [];
+/** This computer's launch block as the sessions read answers it. */
+let here: InboxComposeLaunch = HERE;
+/** Paths whose drive doesn't answer (the server's `504 folder_slow`). */
+let slowDrive: string | null = null;
 
 /** A folder read: the machine (`self` or its id) and the path asked for, or null for any other request. */
 function folderRead(path: string): { machine: string; at: string } | null {
@@ -79,6 +92,8 @@ beforeEach(() => {
   saved = [];
   slow = null;
   machines = [SELF_VIEW];
+  here = HERE;
+  slowDrive = null;
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
@@ -97,17 +112,18 @@ beforeEach(() => {
     if (read) {
       if (slow && slow.path === read.at) await slow.release;
       if (read.at.split('/').some((s) => s.startsWith('.'))) return Response.json({ error: "Hidden folders aren't listed.", code: 'folder_hidden' }, { status: 422 });
+      if (slowDrive && read.at.startsWith(slowDrive)) return Response.json({ error: 'Backup isn\'t responding.', code: 'folder_slow', drive: 'Backup' }, { status: 504 });
       const tree = TREES[read.machine] ?? {};
       const folders = tree[read.at];
       if (folders) return Response.json({ path: read.at, exists: true, state: 'folder', folders, writable: !UNWRITABLE.has(read.at) });
       // As the server: the nearest folder above a path that isn't there, and its folders.
       let up = read.at;
-      while (up !== '~' && !tree[up]) up = up.slice(0, up.lastIndexOf('/')) || '~';
+      while (up !== '~' && up !== '/' && !tree[up]) up = up.slice(0, up.lastIndexOf('/')) || (up.startsWith('/') ? '/' : '~');
       return Response.json({ path: read.at, exists: false, folders: [], ...(tree[up] ? { nearest: { path: up, folders: tree[up] } } : {}) });
     }
     if (path.startsWith('/api/inbox/machines')) return Response.json({ self: SELF, machines });
     if (path.startsWith(`/api/inbox/m/${MINI}/sessions`)) return Response.json({ serverSession: 't', home: '/Users/mini', projects: [], launch: MINI_BLOCK });
-    if (path.startsWith('/api/inbox/sessions')) return Response.json({ serverSession: 's', home: '/Users/me', projects: [], launch: HERE });
+    if (path.startsWith('/api/inbox/sessions')) return Response.json({ serverSession: 's', home: '/Users/me', projects: [], launch: here });
     if (path.startsWith('/api/inbox/skills')) return Response.json({ skills: [] });
     return Response.json({});
   }) as typeof fetch;
@@ -462,8 +478,8 @@ test.skipIf(!hasDom)('D8, D9: a kept draft keeps the Create pick; reopened, it c
   await until(() => inDialog('[data-home-folder-create]') !== null, 'the Create row');
   key(pathField(), 'Enter');
   type(inDialog('textarea') as HTMLTextAreaElement, 'Add a pricing page.');
+  // One Escape keeps it (approval "inbox-compose-escape-keeps"): no question.
   key(inDialog('textarea')!, 'Escape');
-  act(() => inDialog('[data-compose-keep]')!.click());
   await until(() => saved.length === 1, 'the draft saved');
   const start = saved[0]!.body.start;
   expect(start).toEqual({ agent: AGENT, machine: null, folder: '~/code/pricing-page', name: 'pricing-page', create: true });
@@ -511,4 +527,78 @@ test.skipIf(!hasDom)('G3 (q-5e334740): Tab on a highlighted folder fills it in a
   await until(() => inDialog('[data-home-folder-create]')?.getAttribute('aria-selected') === 'true', 'the Create row');
   expect(tab().defaultPrevented).toBe(false);
   expect(pathField().value).toBe('~/code/nope');
+});
+
+// Any folder but a system or hidden one (approval "inbox-launch-any-folder"): the drives this computer has mounted.
+test.skipIf(!hasDom)('drives: a row each after "Another folder…", opening the browser at the drive; an unplugged project says so; a slow drive says it and offers Try again', async () => {
+  here = {
+    ...HERE,
+    projects: [
+      ...HERE.projects,
+      { id: 'prj_old', name: 'old-site', root: '/Volumes/Archive/old-site', exists: false },
+      { id: 'prj_tools', name: 'footage-tools', root: '/Volumes/Studio SSD/clients/footage-tools', exists: true },
+    ],
+    drives: [
+      { path: '/Volumes/Backup', name: 'Backup', network: true },
+      { path: '/Volumes/Studio SSD', name: 'Studio SSD' },
+    ],
+    finder: true,
+  };
+  slowDrive = '/Volumes/Backup';
+  await open();
+  await startAndOpenMenu();
+  // The unplugged drive's project: struck through, with its drive's name.
+  const old = inDialog('[data-compose-folder-option="prj_old"]')!;
+  expect(old.textContent).toContain("old-site · Archive isn't connected");
+  expect(old.textContent).toContain('Connect it to start here');
+  // It explains itself and can't be picked: a click, or Enter on the keys, leaves the menu as it is.
+  expect(old.getAttribute('aria-disabled')).toBe('true');
+  act(() => old.click());
+  expect(inDialog('[data-compose-folder-option="prj_old"]')).not.toBeNull();
+  expect(inDialog('[data-compose-note="folder-missing"]')).toBeNull();
+  // A folder on a drive reads by the drive's name, not a cut path.
+  expect(inDialog('[data-compose-folder-option="prj_tools"] [data-folder-drive-path]')!.textContent!.replace(/\u00a0/g, ' ')).toBe('Studio SSD › clients › footage-tools');
+  expect(all('[data-compose-folder-drive]').map((r) => r.textContent)).toEqual(['Backup… · network drive/Volumes/Backup', 'Studio SSD…/Volumes/Studio SSD']);
+  // Not this computer's own window (no `localWindow`): no Finder.
+  act(() => inDialog('[data-compose-folder-drive="/Volumes/Studio SSD"]')!.click());
+  expect(pathField().value).toBe('/Volumes/Studio SSD/');
+  await until(() => inDialog('[data-home-folder-start]') !== null, "the drive's Start row");
+  expect(inDialog('[data-home-folder-start]')!.getAttribute('data-home-folder-start')).toBe('/Volumes/Studio SSD');
+  expect(shownFolders()).toEqual(['footage', 'renders']);
+  expect(all('[data-home-folders-place]').map((b) => `${b.textContent}${b.getAttribute('aria-checked') === 'true' ? ' (on)' : ''}`)).toEqual(['Home', 'Backup', 'Studio SSD (on)']);
+  expect(inDialog('[data-home-folders-finder]')).toBeNull();
+
+  // The network drive doesn't answer: one calm line and Try again, which asks the drive again at once.
+  act(() => inDialog('[data-home-folders-place="/Volumes/Backup"]')!.click());
+  await until(() => inDialog('[data-home-folders-note="slow"]') !== null, 'the slow line');
+  expect(inDialog('[data-home-folders-note="slow"]')!.textContent).toBe("Backup isn't responding. Try again");
+  // The places row says so, and going back there says it at once, without asking the drive again.
+  await until(() => inDialog('[data-home-folders-place="/Volumes/Backup"]')!.hasAttribute('data-quiet'), 'Backup marked');
+  expect(inDialog('[data-home-folders-place="/Volumes/Backup"]')!.textContent).toBe("Backup · isn't responding");
+  act(() => inDialog('[data-home-folders-place="/Volumes/Studio SSD"]')!.click());
+  await until(() => shownFolders().includes('footage'), "the drive's folders");
+  const asked = requests.filter((r) => r.path.includes(encodeURIComponent('/Volumes/Backup'))).length;
+  act(() => inDialog('[data-home-folders-place="/Volumes/Backup"]')!.click());
+  expect(inDialog('[data-home-folders-note="slow"]')!.textContent).toBe("Backup isn't responding. Try again");
+  await new Promise((r) => setTimeout(r, 300));
+  expect(requests.filter((r) => r.path.includes(encodeURIComponent('/Volumes/Backup'))).length).toBe(asked);
+  slowDrive = null;
+  TREES.self!['/Volumes/Backup'] = ['jobs'];
+  act(() => inDialog('[data-home-folders-retry]')!.click());
+  await until(() => shownFolders().join() === 'jobs', "Backup's folders after Try again");
+  expect(requests.some((r) => r.path.includes('fresh=1'))).toBe(true);
+  expect(inDialog('[data-home-folders-place="/Volumes/Backup"]')!.hasAttribute('data-quiet')).toBe(false);
+
+  // Back on the drive, into a folder and Send: the folder is named by its full path.
+  act(() => inDialog('[data-home-folders-place="/Volumes/Studio SSD"]')!.click());
+  await until(() => shownFolders().includes('footage'), "the drive's folders");
+  act(() => inDialog('[data-home-folder-option="footage"]')!.click());
+  await until(() => inDialog('[data-home-folder-start="/Volumes/Studio SSD/footage"]') !== null, 'Start in footage');
+  act(() => inDialog('[data-home-folder-start="/Volumes/Studio SSD/footage"]')!.click());
+  type(inDialog('textarea') as HTMLTextAreaElement, 'Grade the second pass.');
+  act(() => inDialog('[data-compose-send]')!.click());
+  await until(() => requests.some((r) => r.method === 'POST' && r.path === '/api/inbox/messages'), 'the Send');
+  const send = requests.find((r) => r.method === 'POST' && r.path === '/api/inbox/messages')!;
+  expect((send.body!.to as { launch: { folder: string } }).launch.folder).toBe('/Volumes/Studio SSD/footage');
+  delete TREES.self!['/Volumes/Backup'];
 });

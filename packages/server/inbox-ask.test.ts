@@ -164,9 +164,11 @@ describe("the conversation file", () => {
     const { thread_id } = await agentSends(client, project, "session-a", "Ship it?");
     expect(await conversation(server, thread_id)).toBeNull();
 
-    const response = await ask(server, thread_id, "turn-0001", "Why this region?", { passage: "us-east-1" });
+    const source = '[Quoted from plan.md (/work/plan.md, attached to this thread; the version sent, unchanged), line 4, under "Region".]';
+    const response = await ask(server, thread_id, "turn-0001", "Why this region?", { passage: "us-east-1", source });
     expect(response.status).toBe(200);
-    expect(((await response.json()) as { turn: unknown }).turn).toMatchObject({ id: "turn-0001", session: "session-a", host: "claude-code", question: "Why this region?", passage: "us-east-1" });
+    // A Side's source is kept with the turn, so Ask again sends it to the agent again.
+    expect(((await response.json()) as { turn: unknown }).turn).toMatchObject({ id: "turn-0001", session: "session-a", host: "claude-code", question: "Why this region?", passage: "us-east-1", source });
 
     const file = askFile(dataDir, thread_id);
     expect(statSync(file).mode & 0o777).toBe(0o600);
@@ -256,6 +258,8 @@ describe("the conversation file", () => {
       { turn_id: "turn-0001", question: "   " },
       { turn_id: "turn-0001", question: "x".repeat(INBOX_ASK_TEXT_MAX + 1) },
       { turn_id: "turn-0001", question: "Why?", passage: 7 },
+      { turn_id: "turn-0001", question: "Why?", source: 7 },
+      { turn_id: "turn-0001", question: "Why?", source: "x".repeat(INBOX_ASK_TEXT_MAX + 1) },
     ]) {
       expect((await fromWindow(server, askPath(thread_id), body)).status).toBe(422);
     }

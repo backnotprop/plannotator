@@ -34,8 +34,10 @@
 import { accessSync, constants as fsConstants, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { spawn as spawnChild } from "node:child_process";
-import { basename, isAbsolute, join, resolve, sep } from "node:path";
+import { basename, isAbsolute, join, resolve, sep, win32 } from "node:path";
 import { cutText } from "@plannotator/core/inbox-questions";
+import { killWindowsProcessTree, planAgentJobSpawn } from "@plannotator/ai/providers/command-path";
+import { envPathOf, foldEnvPath } from "./env-path";
 import {
   INBOX_AGENT_IDS,
   INBOX_AGENT_LABELS,
@@ -118,14 +120,39 @@ export function createAgentEnvironmentFor(input: {
   homeDir: string;
   env: Readonly<Record<string, string | undefined>>;
 }): AgentEnvironment {
-  const { env } = input;
+  const { env, platform } = input;
+  // Windows names PATH in any case (`Path`): the lookup reads it by any spelling.
+  const which = (command: string) => Bun.which(command, { PATH: envPathOf(env, platform) ?? "" });
   return {
-    platform: input.platform,
+    platform,
     homeDir: input.homeDir,
     env,
-    which: (command) => Bun.which(command, { PATH: env.PATH ?? "" }),
-    run: (argv, options) => runWithTimeout(argv, options.env ? { ...env, ...options.env } : env, options.timeoutMs, options.signal, options.cwd, options.killGroup ?? true),
+    which,
+    run: (argv, options) => {
+      const runEnv = options.env ? foldEnvPath({ ...env, ...options.env }, platform) : env;
+      const shim = windowsShimOf(argv, platform, which);
+      if (shim && "refused" in shim) return Promise.resolve({ exitCode: 127, timedOut: false, stdout: "", stderr: shim.refused });
+      return spawnRun(shim ? shim.argv : argv, runEnv, options.timeoutMs, options.signal, options.cwd, false, options.killGroup ?? true, shim !== null);
+    },
   };
+}
+
+/**
+ * A Windows `.cmd`/`.bat` CLI (npm's `claude.cmd`): the cmd.exe argv the agent jobs use (`planAgentJobSpawn`, #2372),
+ * since a script can't be spawned without a shell. Null for an `.exe`, any other platform, or a program not found.
+ * Arguments cmd.exe would misread are refused, never passed.
+ */
+export function windowsShimOf(
+  argv: readonly string[],
+  platform: NodeJS.Platform,
+  which: (command: string) => string | null,
+  exists?: (path: string) => boolean,
+): { argv: string[] } | { refused: string } | null {
+  if (platform !== "win32" || !argv[0]) return null;
+  const find = (name: string) => (win32.isAbsolute(name) && (exists ?? existsSync)(name) ? name : which(name));
+  const plan = planAgentJobSpawn([...argv], { which: find, platform, ...(exists ? { exists } : {}) });
+  if (plan.unsafeScript) return { refused: plan.unsafeScript };
+  return plan.verbatim ? { argv: plan.command } : null;
 }
 
 /**
@@ -195,6 +222,8 @@ function spawnRun(
   cwd: string | undefined,
   outlivesThisProcess: boolean,
   killGroup = true,
+  /** Windows: `argv` is a cmd.exe line already quoted (`windowsShimOf`); a kill ends its tree when `killGroup`. */
+  viaCmd = false,
 ): Promise<AgentRunResult> {
   return new Promise((done) => {
     if (signal?.aborted) {
@@ -209,6 +238,7 @@ function spawnRun(
         ...(cwd ? { cwd } : {}),
         detached: process.platform !== "win32",
         windowsHide: true,
+        ...(viaCmd ? { windowsVerbatimArguments: true } : {}),
       });
     } catch (error) {
       done({ exitCode: 127, timedOut: false, stdout: "", stderr: error instanceof Error ? error.message : String(error) });
@@ -227,7 +257,8 @@ function spawnRun(
       if (exited) return;
       try {
         if (killGroup && process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL");
-        else child.kill("SIGKILL");
+        // Through cmd.exe the CLI is cmd.exe's child: its tree ends, not cmd.exe alone.
+        else if (!(viaCmd && killGroup && killWindowsProcessTree(child.pid))) child.kill("SIGKILL");
       } catch {
         try {
           child.kill("SIGKILL");

@@ -40,8 +40,12 @@ export interface ReviewJumpProps {
   current: number | null;
   onChapter: (index: number | null) => void;
   onFile: (path: string) => void;
+  /** False for a walkthrough: its files are code as it is, so a file has no +/- counts. Default true. */
+  counts?: boolean;
   /** Files take Viewed ticks (Code review's review). Off: All files has no "N of M files viewed" foot. Default on. */
   viewedTicks?: boolean;
+  /** False for a walkthrough: it takes no ticks at all, so neither view's menu has an "N of M" foot. Default true. */
+  progress?: boolean;
 }
 
 /** A chapter or file counts as "in view" once its top is this far under the top of the review's scroll. */
@@ -90,7 +94,7 @@ export function jumpProgress({ mode, chapters, files }: Pick<ReviewJumpProps, 'm
     : `${files.filter((file) => file.viewed).length} of ${plural(files.length, 'file')} viewed`;
 }
 
-export function ReviewJump({ mode, chapters, files, current, onChapter, onFile, head, viewedTicks = true }: ReviewJumpProps) {
+export function ReviewJump({ mode, chapters, files, current, onChapter, onFile, head, counts = true, viewedTicks = true, progress = true }: ReviewJumpProps) {
   const [open, setOpen] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const walk = mode === 'walkthrough';
@@ -177,16 +181,18 @@ export function ReviewJump({ mode, chapters, files, current, onChapter, onFile, 
                       </span>
                     </Tip>
                   </span>
-                  <span className="ib-rj-n">
-                    <span className="ib-add">+{formatCount(file.additions)}</span>
-                    {file.deletions > 0 && <span className="ib-del"> -{formatCount(file.deletions)}</span>}
-                  </span>
+                  {counts && (
+                    <span className="ib-rj-n">
+                      <span className="ib-add">+{formatCount(file.additions)}</span>
+                      {file.deletions > 0 && <span className="ib-del"> -{formatCount(file.deletions)}</span>}
+                    </span>
+                  )}
                 </DropdownMenuItem>
               );
             })
           )}
         </div>
-        {(mode === 'walkthrough' || viewedTicks) && (
+        {progress && (mode === 'walkthrough' || viewedTicks) && (
           <p className="ib-rj-foot" aria-live="polite" data-review-progress="">
             {jumpProgress({ mode, chapters, files })}
           </p>

@@ -86,7 +86,8 @@ jobs:
 
       # These render against the REAL @pierre/diffs, because the defects they
       # cover (a stale render cache served across a cacheKey collision; an
-      # empty stub card) only exist inside its renderer. A file in the DOM list,
+      # empty stub card; a line comment whose slot stays empty) only exist inside
+      # its renderer. A file in the DOM list,
       # AllFilesCodeView.lifecycle.test.tsx, calls
       # `mock.module('@pierre/diffs', ...)` with a hunk-less getSingularPatch
       # and `processFile: () => null` — and bun's module mocks are process
@@ -105,6 +106,7 @@ jobs:
           packages/review-editor/components/DiffViewer.headerControls.test.tsx
           packages/review-editor/components/DiffViewer.markdownPreview.test.tsx
           packages/review-editor/components/DiffViewer.changeNavigation.test.tsx
+          packages/review-editor/components/AllFilesCodeView.inlineAnnotation.test.tsx
 
       # The DOM list (tests/dom-test-list.txt) is hand-maintained, and every
       # feature that adds a DOM-gated test file has to remember it — which is

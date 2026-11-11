@@ -21,7 +21,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, use
 import type { InboxReplyDraftRow } from '@plannotator/core/inbox-types';
 import type { ReplyDraftFileRef } from '@plannotator/core/inbox-reply-draft';
 import { ChatWindowStore } from '@plannotator/ui/components/chat';
-import { AuthorMark, HostMark } from '@plannotator/ui/components/inbox-thread/icons';
+import { AuthorMark } from '../icons';
 import { inboxApi } from '../api';
 import { AskSparkle } from '../ask/AskChatMenu';
 import type { AskCorner } from '../ask/useInboxAsk';
@@ -328,30 +328,8 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
   useEffect(() => {
     if (orphan) setOpenId(null);
   }, [orphan]);
-  const askChat = ask.on && ask.threadId !== null && ask.hasChat;
-
+  // Ask has no row in the corner (the owner, 2026-11-09: "I don't want that button at all right now"): Side opens a chat.
   const items: CornerItem[] = [
-    ...(askChat && askMinimized
-      ? [
-          {
-            key: 'ask',
-            kind: 'ask' as const,
-            mark: (
-              <span className="ib-rf-mark">
-                <HostMark host={ask.host} />
-                {ask.unseen && <span className="ib-rf-markdot" aria-hidden="true" />}
-              </span>
-            ),
-            name: `Ask AI · ${ask.subject ?? 'this thread'}`,
-            label: `Ask AI about this thread${ask.unseen ? '. New answer.' : ''}`,
-            onOpen: () => {
-              setMenu(false);
-              if (phone) setOpenId(null);
-              ask.open();
-            },
-          },
-        ]
-      : []),
     ...drafts.map(
       (row): CornerItem => ({
         key: row.thread_id,
@@ -365,8 +343,8 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
     ),
   ];
 
-  // The foot keeps room for the corner while it has something, Ask's window open too, so the row never jumps.
-  const something = askChat || drafts.length > 0;
+  // The foot keeps room for the corner while it has a draft, so the row never jumps.
+  const something = drafts.length > 0;
   const footRoom = !off && room.foot && !room.hidden && something && !(phone && room.boxOpen);
   const reserve = footRoom ? TILE + 12 : 0;
   useLayoutEffect(() => {
@@ -607,6 +585,12 @@ interface CornerRoom {
   hidden: boolean;
 }
 
+/** Inside a `<pre>`: a code fence's own text and highlight spans. */
+function inCodeFence(node: Node): boolean {
+  const element = node.nodeType === 1 ? (node as Element) : node.parentElement;
+  return element?.closest('pre') != null;
+}
+
 /**
  * Level with Send at the foot's right end: the closed row's middle, or T6's row inside an open box. Watched, not
  * polled: the page's changes (a thread opening, the box, full screen), the foot's size and the window's.
@@ -655,7 +639,11 @@ function useCornerRoom(on: boolean, phone: boolean): CornerRoom {
       });
     }
     measure();
-    const changes = new MutationObserver(schedule);
+    // A code fence's highlight (ui's codeHighlight writes off-screen fences' markup in idle time, many a second on
+    // a long thread) moves nothing measured here: it costs no measure, whose queries walk the whole page.
+    const changes = new MutationObserver((records) => {
+      if (records.some((record) => !inCodeFence(record.target))) schedule();
+    });
     const root = document.querySelector('.pn-inbox') ?? document.body;
     changes.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'class', 'data-full-view-bar'] });
     changes.observe(document.documentElement, { attributes: true, attributeFilter: ['data-ib-keyboard'] });

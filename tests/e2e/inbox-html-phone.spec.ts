@@ -298,6 +298,8 @@ for (const phone of [
       await expect(page.locator('[data-fcomp-pillwrap]')).not.toHaveAttribute('inert', /.*/);
       await replyPill(page).tap();
       await expect(composer(page)).toBeVisible();
+      // The card opens on Comment (no reply draft waits), as an image's does.
+      await page.locator('[data-fcomp-mode="reply"]').tap();
       await page.locator('[data-fcomp-field] textarea').fill('Still typing');
       await expect(page.locator('[data-fcomp-field] textarea')).toHaveValue('Still typing');
     });

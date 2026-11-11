@@ -17,7 +17,7 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-test("plannotator annotate sends the annotate ping once its session starts", async () => {
+test("plannotator annotate sends the annotate ping, with the favicon config.json sets, once its session starts", async () => {
   const stubs = stubHookDistHtml();
   cleanups.push(() => removeStubbedHtml(stubs));
   const root = mkdtempSync(join(tmpdir(), "plannotator-cli-ping-"));
@@ -28,6 +28,8 @@ test("plannotator annotate sends the annotate ping once its session starts", asy
   mkdirSync(home, { recursive: true });
   writeFileSync(join(dataDir, "ping.json"), JSON.stringify({ firstWeek: "2026-01-05" }));
   writeFileSync(join(root, "doc.md"), "# Doc\n");
+  // The favicon set in Settings rides the ping: config.json in the data dir.
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ favicon: "glass" }));
 
   const bodies: string[] = [];
   const receiver = Bun.serve({
@@ -78,6 +80,6 @@ test("plannotator annotate sends the annotate ping once its session starts", asy
   };
   const end = Date.now() + 15_000;
   while (!sent().includes("annotate") && Date.now() < end) await Bun.sleep(50);
-  expect(bodies).toEqual(['POST /ping {"version":"0.28.46","age_week":4,"tool":"annotate","first":1}']);
+  expect(bodies).toEqual(['POST /ping {"version":"0.28.46","age_week":4,"tool":"annotate","first":1,"favicon":"glass"}']);
   expect(sent()).toEqual(["annotate"]);
 }, 30_000);

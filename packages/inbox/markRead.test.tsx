@@ -199,7 +199,7 @@ const press = (key: string, target: EventTarget = document.body) =>
   });
 
 function type(el: HTMLElement, words: string) {
-  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  const text = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
   act(() => {
     setter.call(text, words);
@@ -224,7 +224,7 @@ test.skipIf(!hasDom)('the reply box says what a Send does with the questions; af
 
   type(el, 'Redo the design.');
   act(() => button(el, 'Send').click());
-  await until(() => el.querySelector('textarea') === null, 'the Send');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   const reply = posted.find((p) => p.path.endsWith('/reply'))!;
   expect(reply.body).toMatchObject({ words: 'Redo the design.', questions: [] });
   expect((reply.body.skip as unknown[]).length).toBe(2);
@@ -249,7 +249,7 @@ test.skipIf(!hasDom)('words only: Keep open by default; the Send leaves the ques
   type(el, 'Thinking about it.');
   expect(el.querySelector('[data-skip-chip]')?.getAttribute('data-skip-chip')).toBe('keep');
   act(() => button(el, 'Send').click());
-  await until(() => el.querySelector('textarea') === null, 'the Send');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   expect(posted.find((p) => p.path.endsWith('/reply'))!.body.skip).toBeUndefined();
   expect((await questionStates(ids.stopped)).map((q) => q.state)).toEqual(['open', 'open']);
   const mine = await personMessages(ids.stopped);
@@ -271,7 +271,7 @@ test.skipIf(!hasDom)('a pick never turns the default to skip (approval "inbox-ex
   await until(() => el.querySelector('[data-skip-chip]')?.textContent?.includes('1 question stays open') === true, 'the chip counts the other one');
   expect(el.querySelector('[data-skip-chip]')?.getAttribute('data-skip-chip')).toBe('keep');
   act(() => button(el, 'Send').click());
-  await until(() => el.querySelector('textarea') === null, 'the Send');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   const reply = posted.find((p) => p.path.endsWith('/reply'))!;
   expect(reply.body.skip).toBeUndefined();
   expect((await personMessages(ids.stopped))[0]!.body).toContain(
@@ -309,7 +309,7 @@ test.skipIf(!hasDom)('E marks the open thread read; a stopped thread warns with 
   act(() => button(el, 'Reply').click());
   await settle();
   const before = posted.length;
-  press('e', el.querySelector('textarea')!);
+  press('e', el.querySelector('textarea:not([data-question-other])')!);
   await settle();
   expect(posted.length).toBe(before);
   act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
@@ -322,7 +322,7 @@ test.skipIf(!hasDom)('E marks the open thread read; a stopped thread warns with 
   expect((await questionStates(ids.stopped)).map((q) => q.state)).toEqual(['open', 'open']);
 });
 
-test.skipIf(!hasDom)('the header leads with full screen, then Mark read; ⋯ More (which holds Archive) sits beside the close at the right, only the hairline before it', async () => {
+test.skipIf(!hasDom)('the header leads with Mark read (no full-screen button); ⋯ More (which holds Archive) sits beside the close at the right, only the hairline before it', async () => {
   // Owner, 2026-10-16: "the archive button needs to move next to the close button. Mark read should be the furthest."
   // The hairline is approval "inbox-thread-artifacts" (2026-10-23): icons at the right, then | and the close.
   // ⋯ More (the copy menu) after Archive is design record "inbox-copy-message", option B (2026-10-28).
@@ -333,22 +333,18 @@ test.skipIf(!hasDom)('the header leads with full screen, then Mark read; ⋯ Mor
   const markRead = head.querySelector('[data-mark-read]')!;
   const more = head.querySelector('[data-thread-more]')!;
   const close = head.querySelector('button[aria-label="Close the thread"]');
-  // DOM order is the tab order. A desktop beside the list: the thread's full-screen button leads (approval
-  // "inbox-files-tabs", amendment 2026-10-30, B), then its hairline and Mark read; Archive, ⋯ More, the hairline, then
-  // the close last. Node identity as a boolean: a failing toBe on happy-dom nodes runs out of memory.
-  const full = head.querySelector('[data-full-in]');
-  expect(full !== null).toBe(true);
-  expect(buttons[0] === full).toBe(true);
-  expect(full!.getAttribute('aria-label')).toBe('Hide the sidebar and the list');
-  expect(full!.nextElementSibling?.className).toBe('ib-vsep');
-  expect(buttons[1] === markRead).toBe(true);
+  // DOM order is the tab order. A desktop beside the list: Mark read leads (hiding the list is the list column's edge,
+  // not a button here); Archive is in ⋯ More, the hairline, then the close last. Node identity as a boolean: a failing
+  // toBe on happy-dom nodes runs out of memory.
+  expect(head.querySelector('[data-full-in]')).toBeNull();
+  expect(buttons[0] === markRead).toBe(true);
   expect(head.querySelector('[data-archive]')).toBeNull();
   expect(more.previousElementSibling?.getAttribute('aria-label')).not.toBe('Archive the thread');
   expect(close !== null).toBe(true);
   expect(buttons.at(-1) === close).toBe(true);
   expect(more.nextElementSibling?.className).toBe('ib-vsep');
   expect(more.nextElementSibling?.nextElementSibling === close).toBe(true);
-  expect(head.querySelectorAll('.ib-vsep').length).toBe(2);
+  expect(head.querySelectorAll('.ib-vsep').length).toBe(1);
 });
 
 test.skipIf(!hasDom)('the pressed button moves it back; the toast Undo does the same', async () => {
@@ -454,7 +450,7 @@ test.skipIf(!hasDom)("the warning toast's Reply moves the thread back and opens 
   act(() => head().click());
   await until(() => document.querySelector('[data-toast-reply]') !== null, 'the warning toast');
   act(() => (document.querySelector('[data-toast-reply]') as HTMLButtonElement).click());
-  await until(() => el.querySelector('textarea') !== null && head().getAttribute('aria-pressed') === 'false', 'the reply box');
+  await until(() => el.querySelector('textarea:not([data-question-other])') !== null && head().getAttribute('aria-pressed') === 'false', 'the reply box');
   expect(posted.at(-1)!.path).toBe(`/api/inbox/threads/${ids.stopped}/unread`);
   expect((await questionStates(ids.stopped)).map((q) => q.state)).toEqual(['open', 'open']);
 });
@@ -466,7 +462,7 @@ test.skipIf(!hasDom)('session A asked, session B posted a later update: the skip
   act(() => button(el.querySelector('[data-skip-chip]')!, 'Skip it').click());
   type(el, 'Thanks, carry on.');
   act(() => button(el, 'Send').click());
-  await until(() => el.querySelector('textarea') === null, 'the Send');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   const replies = posted.filter((p) => p.path.endsWith('/reply'));
   expect(replies.map((p) => p.path)).toEqual([`/api/inbox/messages/${ids.mixed}/reply`, `/api/inbox/messages/${ids.update}/reply`]);
   expect(replies[0]!.body).toMatchObject({ words: '', skip: [{ key: expect.any(String) }] });
@@ -491,7 +487,7 @@ test.skipIf(!hasDom)('one session asked, then posted a later update: a words-onl
   expect(el.querySelector('[data-skip-chip]')?.textContent).toContain('1 question will be skipped');
   type(el, 'Ship it as it is.');
   act(() => button(el, 'Send').click());
-  await until(() => el.querySelector('textarea') === null, 'the Send');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   const replies = posted.filter((p) => p.path.endsWith('/reply'));
   expect(replies.map((p) => p.path)).toEqual([`/api/inbox/messages/${ids.same}/reply`]);
   expect(replies[0]!.body).toMatchObject({ words: 'Ship it as it is.', questions: [], skip: [{ key: expect.any(String) }] });
@@ -525,7 +521,7 @@ test.skipIf(!hasDom)('one session, words only (Keep open by default): the words 
   expect(el.querySelector('[data-skip-chip]')?.getAttribute('data-skip-chip')).toBe('keep');
   type(el, 'Still deciding.');
   act(() => button(el, 'Send').click());
-  await until(() => el.querySelector('textarea') === null, 'the Send');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   const replies = posted.filter((p) => p.path.endsWith('/reply'));
   expect(replies.map((p) => p.path)).toEqual([`/api/inbox/messages/${ids.sameUpdate}/reply`]);
   expect(replies[0]!.body).toMatchObject({ words: 'Still deciding.', questions: [] });
@@ -545,7 +541,7 @@ test.skipIf(!hasDom)('two sessions, words only (Keep open by default): the words
   expect(el.querySelector('[data-skip-chip]')?.getAttribute('data-skip-chip')).toBe('keep');
   type(el, 'Thanks, carry on.');
   act(() => button(el, 'Send').click());
-  await until(() => el.querySelector('textarea') === null, 'the Send');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   const replies = posted.filter((p) => p.path.endsWith('/reply'));
   expect(replies.map((p) => p.path)).toEqual([`/api/inbox/messages/${ids.update}/reply`]);
   const mine = await personMessages(ids.mixed);

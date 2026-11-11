@@ -39,9 +39,14 @@ configurePlannotatorUI({
   commentCard,                 // true or { pane, foot } (CSS selectors): the comment box is a small card by the words, "Comment" on its button, a chevron that keeps the words; import "@plannotator/ui/comment-card.css" (default false: today's popover)
   visibleCommentDrafts,        // true: a Viewer comment closed with words keeps its highlight and a floating "Draft" badge that reopens it (default false)
   digitHexIssueRefs,           // true: digit-only #123456 / #12345678 link as issue refs (when a ref link can be built), not hex swatches (default false)
+  crossRepoRefsWithoutRepo,    // true | { host }: owner/repo#123 links on github.com, or that host, where InlineMarkdown has no githubRepo (default false: plain text); may be set again, mounted text re-renders
   touchSelectionToolbar,       // true: on a touch screen the selection toolbar goes below the selection (clear of iOS's edit menu), inside the screen, with 44px buttons (default false)
   refCardTransport,            // (href, ref, signal) => card data for an issue / PR / MR link; with one, useRefHoverCards(rootRef) draws hover cards (default: none, no card, no request). refCardRouteTransport(route) builds one over a server route
+  deferOffscreenCodeHighlight, // true: a code fence off screen stays plain until it comes near (highlighted before it shows), the rest in idle time (default false)
+  codeHighlightWorker,         // { html(code, lang, theme) }: with deferOffscreenCodeHighlight, a waiting fence's markup made off the main thread (default: none)
   loadSettingsFromBackend,     // true: re-hydrate settings from your (synchronous) storageBackend after install, applied last
+  pageMarks,                   // true: <body data-pn-popout> while a PopoutDialog is open, <html data-pn-selection-chooser> while the code review's selection chooser shows, so a host's build can key theme.css's / comments.css's html:has(…) / body:has(…) on them (default false)
+  clickAWord,                  // false: a click on a word in the Viewer's Select input method makes nothing, as before (default true: it highlights the word); the Viewer's own clickAWord prop wins
 });
 ```
 
@@ -305,6 +310,24 @@ in 0.42.0 (proven by diffing the mounted `outerHTML` against the base commit).
 - **`AnnotationToolbar` `quickLabels`** (default `true`): `false` hides the Zap
   picker and makes the Alt+digit label shortcuts inert on that toolbar. The
   one-click 👍 is unaffected, and mode state is still yours to clamp.
+- **`AnnotationToolbar` `onSide`** (forwarded by `Viewer` to its text-selection
+  toolbar only, and by `HtmlViewer`): `(text, context) => void`. A "Side"
+  button (two speech bubbles and the word) after the reactions, with a divider
+  before it and the usual one before ×. Pressing it passes the selected text
+  (what Copy reads) and the same context `selectionActions` get (`blockId`,
+  offsets, `element`), and closes the toolbar; what Side opens is yours. Absent renders no
+  button and no extra divider. The Plannotator Inbox uses it for Ask AI.
+- **`AnnotationToolbar` `sideButton`** (forwarded by `Viewer` and
+  `HtmlViewer` beside `onSide`): `{ icon?: ReactNode; label: string }`. Draws
+  the `onSide` button icon-only, as an ordinary toolbar button the size of its
+  neighbours, in the same place between the same dividers: `icon` is its glyph
+  (absent means the package's two speech bubbles) and `label` its tooltip and
+  accessible name. Absent keeps the two bubbles and the word "Side"; ignored
+  without `onSide`. The press is unchanged. The Plannotator Inbox passes the
+  mark of the agent that owns the thread ("Side chat with Claude").
+- **`inbox-thread/icons` `hostHasMark(host)`**: whether `HostMark` draws that
+  host's own mark and not its neutral code glyph, for a place that would rather
+  draw something else than the neutral glyph. `HostMark` renders as before.
 - **`CommentPopover` `mentionSource`** (0.43.2 adds `heading?` above the list
   and an optional `avatar?: { url?, initials?, tint? }` per person, drawn before
   the label; both absent → the 0.43.1 rows): `{ people, emptyNotice?,
@@ -701,7 +724,7 @@ npm install @plannotator/ui @plannotator/core
 - `@plannotator/core` — pure utils + types, zero deps, browser-safe (CI enforces no `node:` imports). Published.
 - `@plannotator/ui` — React components/hooks + theme + `configure()`. Depends on an exact published `@plannotator/core` version. Published.
 - `@plannotator/shared`, `@plannotator/ai` — stay private to the monorepo; `shared` re-exports `core`'s modules via shims so Plannotator's internals are untouched.
-- Currently `@plannotator/ui` 0.62.0 (unreleased; 0.61.0 is published) depends exactly on `@plannotator/core` 0.25.20 (unreleased); the launch-agents stack pins 0.25.21 (unpublished: its three new subpaths, HANDOFF.md). `core` is bumped only when something under `packages/core` changes, so `ui` can advance alone. Keep the published core version exact in `packages/ui/package.json`; do not use a `workspace:` protocol there, because a directly published manifest must remain installable outside this monorepo. Bun still links the matching local workspace during development. When both packages change, publish `core` first, then build and publish the UI tarball. `bun run check:sibling-deps @plannotator/ui` (from the repo root; it reads npm) fails while the pinned core isn't on npm. See HANDOFF.md "Publishing & versioning" for the verification command.
+- Currently `@plannotator/ui` 0.63.0 (unreleased; 0.62.0 is published) depends exactly on `@plannotator/core` 0.25.22 (unreleased; 0.25.21 is published). `core` is bumped only when something under `packages/core` changes, so `ui` can advance alone. Keep the published core version exact in `packages/ui/package.json`; do not use a `workspace:` protocol there, because a directly published manifest must remain installable outside this monorepo. Bun still links the matching local workspace during development. When both packages change, publish `core` first, then build and publish the UI tarball. `bun run check:sibling-deps @plannotator/ui` (from the repo root; it reads npm) fails while the pinned core isn't on npm. See HANDOFF.md "Publishing & versioning" for the verification command.
 
 ## The one rule
 

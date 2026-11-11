@@ -160,6 +160,35 @@ describe("naming a thread the person started", () => {
     expect(store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "ok", reply_to: later.id, thread: "Auth refactor" }).naming?.status).toBe("named");
   });
 
+  test("a compose name another open thread has is refused naming that thread, so compose can send there; never an archived one or another project's", () => {
+    const { store, project } = world();
+    const other = store.ensureProject({ name: "other", root: "/work/other" });
+    const taken = (projectId: string, name: string, key: string): Record<string, unknown> | null => {
+      try {
+        store.startPersonThread({ project_id: projectId, body: "x", to: claude, idempotency_key: key, thread_name: name });
+        return null;
+      } catch (error) {
+        if (!(error instanceof InboxError) || error.code !== "thread_name_taken") throw error;
+        return error.details;
+      }
+    };
+    // A thread the person named in compose, and one an agent named.
+    const { message: mine } = store.startPersonThread({ project_id: project.id, body: "first", to: claude, idempotency_key: "a", thread_name: "Launch notes" });
+    const theirs = store.sendMessage({ project_id: project.id, author: agent("ses_b"), body: "B's work", thread: "Auth refactor" });
+
+    // The same name by the name rule (case, spaces) names the thread that has it.
+    expect(taken(project.id, "launch  NOTES", "b")).toMatchObject({ field: "thread_name", thread_id: mine.thread_id });
+    expect(taken(project.id, "auth refactor", "c")).toMatchObject({ thread_id: theirs.message.thread_id });
+
+    // Another project's thread of that name is not in the way: the Send starts its own thread.
+    expect(taken(other.id, "Launch notes", "d")).toBeNull();
+
+    // An archived thread neither holds the name nor is offered.
+    store.resolveThread(mine.thread_id, true);
+    expect(taken(project.id, "Launch notes", "e")).toBeNull();
+    expect(store.personThreadByKey("e")!.thread_id).not.toBe(mine.thread_id);
+  });
+
   test("a named thread takes later sends with its name, and a replay routes the same", () => {
     const { dir, store, project } = world();
     const { message: root } = store.startPersonThread({ project_id: project.id, body: IDEA, to: claude, idempotency_key: "k" });

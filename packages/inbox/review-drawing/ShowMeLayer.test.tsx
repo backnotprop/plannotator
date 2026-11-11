@@ -148,4 +148,19 @@ describe.skipIf(!hasDom)('Show me over the code review', () => {
     expect(el.querySelector('.shp-drawn-host')).toBeNull();
     expect(el.querySelector('[data-overview-figure]')!.getAttribute('data-overview-figure')).toBe('hidden');
   });
+  test("a chapter's picture is capped at 320px in the drawing's aspect, and Expand opens it full size until Escape", () => {
+    const wide = { ...PICTURE, width: 1200, height: 300 };
+    const el = mount(<figure.ChapterFigure drawn={wide} meta="drawn by Claude Code with the guide" onCode={() => {}} />);
+    const box = el.querySelector<HTMLElement>('.ib-ch-fig-box')!;
+    expect(box.style.maxHeight).toBe('320px');
+    expect(box.style.aspectRatio.replace(/\s/g, '')).toBe('1200/300');
+    // No Hide of its own: the chapter's Diagram header folds it.
+    expect(el.querySelector('[aria-expanded]')).toBeNull();
+    act(() => el.querySelector<HTMLButtonElement>('[data-chapter-figure-expand]')!.click());
+    const pop = document.querySelector('[data-chapter-figure-popout]')!;
+    expect(pop.matches('[data-popover-layer]')).toBe(true);
+    expect(pop.querySelector('.shp-drawn-host')).not.toBeNull();
+    act(() => void window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(document.querySelector('[data-chapter-figure-popout]')).toBeNull();
+  });
 });

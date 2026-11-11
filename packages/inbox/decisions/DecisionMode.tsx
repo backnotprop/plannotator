@@ -1036,6 +1036,8 @@ export function DecisionMode(props: DecisionModeProps) {
             // Each picture by its choice ("B · Quiet hover menu"), not its file's route; a finger swipes through them (approval "inbox-image-swipe").
             images={lightbox.pictures.length > 1 ? lightbox.pictures.map((p) => ({ src: p.src, alt: p.alt ?? p.name, name: p.name })) : undefined}
             swipe
+            // The place opened, not the first picture with that URL: a picture two choices share opens as the one zoomed.
+            at={lightbox.index}
             onClose={() => setLightbox(null)}
           />,
           dialogRef.current ?? document.body,

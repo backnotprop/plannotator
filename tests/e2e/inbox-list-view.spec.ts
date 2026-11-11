@@ -51,7 +51,7 @@ let world: World;
 let news = 0;
 
 /**
- * An agent starts a thread of its own (a session's sends without a thread key go into one thread). The key is the
+ * An agent starts a thread of its own. The key is the
  * subject, so the row reads the subject alone, as a thread the agent did not name.
  */
 function start(agent: SimAgent, project: string, subject: string, body: string): Promise<Record<string, unknown>> {

@@ -211,14 +211,113 @@ function apiPath(url: string): string | null {
 
 let recorder: ReturnType<typeof createDebugRecorder> | null = null;
 
+/** How often a recording window notes its memory (`mem`) and refreshes its alive marker. */
+export const DEBUG_MEMORY_MS = 30_000;
+const ALIVE_KEY = 'plannotator-inbox-debug-alive';
+
+/** What the address has open, ids only: the thread, the file and its view. Anything else in the hash stays out. */
+export function openRoute(hash: string): { thread?: string; file?: string; view?: string } {
+  const params = new URLSearchParams(hash.replace(/^#/, ''));
+  const id = (value: string | null) => (value && /^[A-Za-z0-9_]{1,64}$/.test(value) ? value : undefined);
+  const view = params.get('view');
+  return { thread: id(params.get('thread')), file: id(params.get('file')), view: view === 'full' || view === 'side' ? view : undefined };
+}
+
+/**
+ * The page's memory as the log may hold it, in whole MB: the JS heap in use and its limit where the browser tells
+ * (Chrome's `performance.memory`), and how many images and elements the page holds.
+ */
+export function debugMemory(): { heap?: number; heap_limit?: number; imgs?: number; nodes?: number } {
+  const memory = (globalThis.performance as unknown as { memory?: { usedJSHeapSize: number; jsHeapSizeLimit: number } } | undefined)?.memory;
+  const mb = (bytes: number | undefined) => (typeof bytes === 'number' && Number.isFinite(bytes) ? Math.round(bytes / 1e6) : undefined);
+  const doc = typeof document === 'undefined' ? null : document;
+  return {
+    heap: mb(memory?.usedJSHeapSize),
+    heap_limit: mb(memory?.jsHeapSizeLimit),
+    imgs: doc ? doc.getElementsByTagName('img').length : undefined,
+    nodes: doc ? doc.getElementsByTagName('*').length : undefined,
+  };
+}
+
+type AliveMark = { page: string; at: number; thread?: string; file?: string; view?: string; heap?: number; imgs?: number };
+
+/**
+ * A crash breadcrumb. While a recording page lives, the tab's session storage says so (`mark`); a normal leave
+ * (`pagehide`, a refresh, a closed tab) takes it away (`clear`). A renderer that dies ("Aw, Snap") never hears
+ * `pagehide`, so the next page in the same tab finds the mark (`previous`) and logs `renderer_gone` with what the
+ * dead page had open and how big it had grown. Session storage is the tab's own: another tab never reads it.
+ */
+export function createAliveMarker(env: { storage: Storage | null; page: string; now?: () => number }) {
+  const now = env.now ?? Date.now;
+  return {
+    /** The mark a page that did not leave cleanly left behind, as a `renderer_gone` record's fields; null when none. */
+    previous(): Record<string, unknown> | null {
+      try {
+        const raw = env.storage?.getItem(ALIVE_KEY);
+        if (!raw) return null;
+        const mark = JSON.parse(raw) as AliveMark;
+        if (!mark || typeof mark.page !== 'string' || mark.page === env.page) return null;
+        const discarded = typeof document !== 'undefined' && (document as Document & { wasDiscarded?: boolean }).wasDiscarded === true;
+        return { last_page: mark.page, ms: typeof mark.at === 'number' ? now() - mark.at : undefined, thread: mark.thread, file: mark.file, view: mark.view, heap: mark.heap, imgs: mark.imgs, discarded };
+      } catch {
+        return null;
+      }
+    },
+    mark(route: { thread?: string; file?: string; view?: string }, memory: { heap?: number; imgs?: number } = {}): void {
+      try {
+        const mark: AliveMark = { page: env.page, at: now(), ...route, heap: memory.heap, imgs: memory.imgs };
+        env.storage?.setItem(ALIVE_KEY, JSON.stringify(mark));
+      } catch {
+        // No session storage: no breadcrumb.
+      }
+    },
+    clear(): void {
+      try {
+        env.storage?.removeItem(ALIVE_KEY);
+      } catch {
+        // Nothing to clear.
+      }
+    },
+  };
+}
+
+function aliveStorage(): Storage | null {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
 function listen(active: ReturnType<typeof createDebugRecorder>): void {
   const state = () => ({ state: document.visibilityState, online: navigator.onLine });
   const navigation = performance.getEntriesByType?.('navigation')[0] as PerformanceNavigationTiming | undefined;
   active.note('page_load', { ...state(), protocol: navigation?.nextHopProtocol || undefined });
-  window.addEventListener('pageshow', (event) => active.note('page_show', { ...state(), persisted: event.persisted }));
+  const alive = createAliveMarker({ storage: aliveStorage(), page: active.page });
+  const gone = alive.previous();
+  if (gone) active.note('renderer_gone', gone);
+  const mark = () => alive.mark(openRoute(window.location.hash), debugMemory());
+  mark();
+  window.addEventListener('hashchange', mark);
+  window.addEventListener('pageshow', (event) => {
+    active.note('page_show', { ...state(), persisted: event.persisted });
+    if (event.persisted) mark();
+  });
   window.addEventListener('pagehide', () => {
     active.note('page_hide', { ...state(), open: active.openRequests() });
+    alive.clear();
     active.save();
+  });
+  // Memory every so often: when the tab dies, the last of these says how big it had grown.
+  const sampler = setInterval(() => {
+    if (recorder !== active) return;
+    active.note('mem', debugMemory());
+    mark();
+  }, DEBUG_MEMORY_MS);
+  whenDebugLogStops(() => {
+    clearInterval(sampler);
+    window.removeEventListener('hashchange', mark);
+    alive.clear();
   });
   document.addEventListener('visibilitychange', () => {
     active.note('visibility', state());

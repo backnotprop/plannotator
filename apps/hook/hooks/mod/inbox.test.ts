@@ -318,7 +318,8 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     expect(row?.sent?.checked_at).toBe(delivered.at)
     w.proof(`thread shows: Delivered to Claude Code, ${delivered.at} (reply.delivery ${JSON.stringify(delivered)})`)
 
-    await send(session, w, 'Done: retries reuse the key and the 409 body is logged.')
+    const done = await session.callInbox({ action: 'send_message', body: 'Done: retries reuse the key and the 409 body is logged.', reply_to: replyId }, w.project)
+    if ('deny' in done) throw new Error(done.deny)
     const after = await thread(w, asked.thread_id)
     expect(after.messages.at(-1)?.author).toMatchObject({ kind: 'agent', session: 'session-wake' })
     w.proof('thread shows: Replied (the asking session wrote after the delivered reply)')
@@ -809,7 +810,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     expect(named.messages.map((m) => m.author.kind)).toEqual(['person', 'agent'])
     expect(named.thread_name).toBe('Session chip')
     w.proof(`> plannotator_inbox send_message reply_to ${message.id} thread "Session chip"\nthe thread's name: ${named.thread_name}`)
-    // A thread the person started is no session's default thread.
+    // Without reply_to, the session's next message starts its own thread.
     const own = await send(session, w, 'Unrelated: the export is done.')
     expect(own.thread_id).not.toBe(message.thread_id)
     w.proof('the answer with reply_to landed in the person\'s thread; the session\'s next message without reply_to started its own thread')

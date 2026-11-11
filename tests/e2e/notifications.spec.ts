@@ -179,6 +179,8 @@ const TAG = 'plannotator-inbox';
 let stoppedThread = '';
 /** The Pi agent whose thread is Stopped on you. */
 let piAgent: SimAgent;
+/** The thread Codex started in docs-site, on screen from the "in front" test on. */
+let codexThread = '';
 
 /** The page has read the list the agent's write produced: the held list shows it behind "N new" (or on screen). */
 async function pageSaw(threadId: string): Promise<void> {
@@ -362,10 +364,13 @@ test('Settings shows the status, a test and the reach; after a port change "move
   expect((await calls()).at(-1)).toMatchObject({ title: 'Plannotator Inbox: test notification', tag: 'plannotator-inbox-test' });
   await expect(block.locator('[data-notify-test]')).toContainText("Didn't see it?");
   const main = block.getByRole('switch', { name: 'Desktop notifications' });
-  // On by default, and allowed by the browser: the one notifications switch reads on (the other is the question sound's).
+  // On by default, and allowed by the browser: the one notifications switch reads on.
   await expect(main).toHaveAttribute('aria-checked', 'true');
   await expect(block.getByRole('switch', { name: 'Desktop notifications' })).toHaveCount(1);
-  await expect(block.getByRole('switch')).toHaveCount(2);
+  // The card's other switches are named: the question sound's and the Mark read warning's; no second notifications switch.
+  await expect(block.getByRole('switch', { name: 'Play a sound' })).toHaveCount(1);
+  await expect(block.getByRole('switch', { name: 'Warn before Mark read sets questions aside' })).toHaveCount(1);
+  await expect(block.getByRole('switch')).toHaveCount(3);
   await main.click();
   await expect(main).toHaveAttribute('aria-checked', 'false');
   await expect.poll(() => config().inboxNotifications?.enabled).toBe(false);
@@ -445,7 +450,7 @@ test('with permission, a Stopped thread raises exactly one notification with the
 test('a second item in the same thread replaces the first, and the title follows the thread\'s section', async () => {
   const pi = world.agents.at(-1)!;
   const before = await calls();
-  const next = await pi.send({ project_path: world.billing, body: question('Also cap the retries at the worker?') });
+  const next = await pi.send({ project_path: world.billing, body: question('Also cap the retries at the worker?'), reply_to: stoppedThread });
   expect(next.thread_id).toBe(stoppedThread);
   await expect.poll(async () => (await calls()).length).toBe(before.length + 1);
   await world.page.waitForTimeout(400);
@@ -470,6 +475,7 @@ test('in front: every new thread notifies, a question in the thread open on scre
   // A second new thread within the burst window: one notice for both, on the one tag.
   const codex = await agent('Codex', 'codex');
   const sent = await codex.send({ project_path: world.docs, body: question('Ship the install page?', 'Stopped: the docs deploy waits on this.') });
+  codexThread = sent.thread_id;
   await expect.poll(async () => (await calls()).length).toBe(before + 2);
   expect((await calls()).at(-1)).toMatchObject({ body: 'docs-site', tag: TAG });
   expect((await calls()).at(-1)!.title.startsWith('2 ')).toBe(true);
@@ -482,19 +488,19 @@ test('in front: every new thread notifies, a question in the thread open on scre
   }, sent.thread_id);
   await expect(page.locator('section.ib-pane')).toContainText('Ship the install page?');
   const opened = (await calls()).length;
-  const again = await codex.send({ project_path: world.docs, body: question('And publish the changelog with it?') });
+  const again = await codex.send({ project_path: world.docs, body: question('And publish the changelog with it?'), reply_to: sent.message_id });
   expect(again.thread_id).toBe(sent.thread_id);
   await expect(page.locator('section.ib-pane')).toContainText('And publish the changelog with it?');
   await page.waitForTimeout(600);
   expect((await calls()).length).toBe(opened);
 
   // Plain news in an existing thread never notifies.
-  await piAgent.send({ project_path: world.billing, body: 'Retried the 409 once more; same answer.' });
+  await piAgent.send({ project_path: world.billing, body: 'Retried the 409 once more; same answer.', reply_to: stoppedThread });
   await page.waitForTimeout(800);
   expect((await calls()).length).toBe(opened);
 
   // A question in another thread, with this one open: it notifies.
-  await piAgent.send({ project_path: world.billing, body: question('Should the worker give up after three tries?') });
+  await piAgent.send({ project_path: world.billing, body: question('Should the worker give up after three tries?'), reply_to: stoppedThread });
   await expect.poll(async () => (await calls()).length).toBe(opened + 1);
   expect((await calls()).at(-1)!.tag).toBe(TAG);
 });
@@ -503,11 +509,12 @@ test('a click on the notification focuses the tab and opens the thread', async (
   const { page } = world;
   await setFront(false, false);
   const codex = world.agents.at(-1)!;
-  const sent = await codex.send({ project_path: world.docs, body: question('Move the changelog under docs/?') });
+  const sent = await codex.send({ project_path: world.docs, body: question('Move the changelog under docs/?'), reply_to: codexThread });
+  expect(sent.thread_id).toBe(codexThread);
   await expect.poll(async () => (await calls()).at(-1)?.title).toBe('docs-site: Codex stopped on you');
   await page.evaluate(() => window.__notifications.instances.at(-1)!.dispatchEvent(new Event('click')));
   await expect(page).toHaveURL(new RegExp(`#thread=${sent.thread_id}$`));
-  // The thread this agent opened a moment ago (its session's thread), with the new question in it.
+  // The thread this agent opened a moment ago, with the new question in it.
   await expect(page.locator('section.ib-pane')).toContainText('Move the changelog under docs/?');
   await shot('6.2-click-opened-thread');
 });
@@ -542,10 +549,10 @@ test('a click on a notice about the thread already showing changes the address a
   const threadId = new URLSearchParams((await hashNow()).slice(1)).get('thread')!;
   const pane = page.locator('section.ib-pane');
   const codex = world.agents.at(-1)!;
-  await codex.send({ project_path: world.docs, body: `${Array.from({ length: 80 }, (_, i) => `Line ${i}.`).join('\n\n')}\n\nThe end of the long note.` });
+  await codex.send({ project_path: world.docs, body: `${Array.from({ length: 80 }, (_, i) => `Line ${i}.`).join('\n\n')}\n\nThe end of the long note.`, reply_to: codexThread });
   await expect(pane).toContainText('The end of the long note.');
   const before = (await calls()).length;
-  await codex.send({ project_path: world.docs, body: question('Keep the changelog headings as they are?') });
+  await codex.send({ project_path: world.docs, body: question('Keep the changelog headings as they are?'), reply_to: codexThread });
   await expect.poll(async () => (await calls()).length).toBe(before + 1);
   await expect(pane).toContainText('Keep the changelog headings as they are?');
   await page.waitForTimeout(800);
@@ -641,7 +648,7 @@ test("on a phone's width the click adds no entry: Back goes where it went before
   await expect.poll(hashNow).toBe(open);
   await setFront(false, false);
   const before = (await calls()).length;
-  await world.agents.at(-1)!.send({ project_path: world.docs, body: question('Sort the changelog by date?') });
+  await world.agents.at(-1)!.send({ project_path: world.docs, body: question('Sort the changelog by date?'), reply_to: codexThread });
   await expect.poll(async () => (await calls()).length).toBe(before + 1);
   const entry = await page.evaluate(() => ({ length: history.length, state: history.state }));
   expect((entry.state as { ibFrom?: unknown } | null)?.ibFrom).toBe('');
@@ -735,7 +742,7 @@ test('the Settings switch off raises nothing', async () => {
   // Back on, the next item in that thread notifies: the switch was the only thing holding it.
   await main.click();
   await expect(main).toHaveAttribute('aria-checked', 'true');
-  await codex.send({ project_path: world.billing, body: question('And keep the weekly one?') });
+  await codex.send({ project_path: world.billing, body: question('And keep the weekly one?'), reply_to: off.message_id });
   await expect.poll(async () => (await calls()).length).toBe(before + 1);
   expect((await calls()).at(-1)).toMatchObject({ title: 'billing-svc: Codex stopped on you', tag: TAG });
 });

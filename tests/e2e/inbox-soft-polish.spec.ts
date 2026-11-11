@@ -91,7 +91,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   writeFileSync(join(project, 'docs', 'retry-plan.md'), '# Retry plan\n\nRetry once with the same key.\n');
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const first = await claude.send({ project_path: project, subject: 'Refund worker: retry a 409?', thread: 'refunds', body: ASK, attachments: [`docs/${LONG}`, `docs/${RTL}`, 'docs/retry-plan.md'] });
-  // Each in a thread of its own (one session's plain sends would share its default thread).
+  // Each in a thread of its own, under its own name.
   for (const subject of ['Nightly build is green', 'Ledger ownership', 'Rotate the processor key?', 'Idempotency cache and paging']) {
     await new Promise((r) => setTimeout(r, 15));
     await claude.send({ project_path: project, subject, thread: subject.toLowerCase().replace(/\W+/g, '-').replace(/-$/, ''), body: `${subject}. Details in the runbook.` });

@@ -43,7 +43,10 @@ name: Inbox window e2e
 # measured time (scripts/ci-e2e-shard.ts, tests/e2e/shard-times.json).
 # One of them is the window's memory soak (inbox-memory-soak.spec.ts: a large
 # store, 300 agent messages, the JS heap sampled over raw CDP), so a memory
-# creep or a hung window fails the run on main.
+# creep or a hung window fails the run on main. Another is the heavy-thread
+# budget (inbox-heavy-thread-budget.spec.ts, #2948: 120 open messages with 30
+# full-size screenshots), so pictures loaded at full size, a JS heap or
+# listener count over budget, or a copy of the thread kept per read fails it.
 #
 # On a PR, a run whose own change is the same as an earlier run's (a merge of
 # main to pick up a fix or a quarantine after a red run, or a run cancelled
@@ -306,18 +309,29 @@ jobs:
         with:
           persist-credentials: false
 
+      # Bun's zip and ripgrep's tarball are kept between runs by version and
+      # checksum (in $HOME, the container's /github/home), checked every time,
+      # and on a miss downloaded with the job's token.
+      - name: Restore the Bun and ripgrep downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools/e2e
+          key: e2e-tools-bun-1.4.4-bf8ccbfb2b0b-rg-14.1.1-4cf9f2741e6c
+
       # setup-bun unpacks with `unzip`, which the image lacks; the same release
       # zip setup-bun fetches, checked against its published SHA-256.
       - name: Install Bun 1.4.4
         env:
           BUN_ZIP_SHA256: bf8ccbfb2b0b80159e0f9a6d15c55317add8077534dbc6130a3edb52fccb395c
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
           dir="$RUNNER_TEMP/bun"
-          mkdir -p "$dir"
-          curl -fsSL --retry 5 -o "$dir/bun.zip" https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-x64.zip
-          echo "$BUN_ZIP_SHA256  $dir/bun.zip" | sha256sum -c -
-          python3 -I -m zipfile -e "$dir/bun.zip" "$dir"
+          zip="$HOME/.cache/ci-tools/e2e/bun-linux-x64.zip"
+          mkdir -p "$dir" "$(dirname "$zip")"
+          [ -f "$zip" ] || bash scripts/ci-fetch-release-asset.sh https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-x64.zip "$zip"
+          echo "$BUN_ZIP_SHA256  $zip" | sha256sum -c -
+          python3 -I -m zipfile -e "$zip" "$dir"
           chmod +x "$dir/bun-linux-x64/bun"
           ln -s bun "$dir/bun-linux-x64/bunx"
           echo "$dir/bun-linux-x64" >> "$GITHUB_PATH"
@@ -337,13 +351,15 @@ jobs:
       - name: Install ripgrep
         env:
           RG_SHA256: 4cf9f2741e6c465ffdb7c26f38056a59e2a2544b51f7cc128ef28337eeae4d8e
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
           dir="$RUNNER_TEMP/rg"
-          mkdir -p "$dir"
-          curl -fsSL --retry 5 -o "$dir/rg.tar.gz" https://github.com/BurntSushi/ripgrep/releases/download/14.1.1/ripgrep-14.1.1-x86_64-unknown-linux-musl.tar.gz
-          echo "$RG_SHA256  $dir/rg.tar.gz" | sha256sum -c -
-          tar -xzf "$dir/rg.tar.gz" -C "$dir" --strip-components=1
+          tarball="$HOME/.cache/ci-tools/e2e/ripgrep-14.1.1-x86_64-unknown-linux-musl.tar.gz"
+          mkdir -p "$dir" "$(dirname "$tarball")"
+          [ -f "$tarball" ] || bash scripts/ci-fetch-release-asset.sh https://github.com/BurntSushi/ripgrep/releases/download/14.1.1/ripgrep-14.1.1-x86_64-unknown-linux-musl.tar.gz "$tarball"
+          echo "$RG_SHA256  $tarball" | sha256sum -c -
+          tar -xzf "$tarball" -C "$dir" --strip-components=1
           echo "$dir" >> "$GITHUB_PATH"
           "$dir/rg" --version
 
@@ -460,13 +476,15 @@ jobs:
       - name: Install ripgrep
         env:
           RG_SHA256: 4cf9f2741e6c465ffdb7c26f38056a59e2a2544b51f7cc128ef28337eeae4d8e
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
           dir="$RUNNER_TEMP/rg"
-          mkdir -p "$dir"
-          curl -fsSL --retry 5 -o "$dir/rg.tar.gz" https://github.com/BurntSushi/ripgrep/releases/download/14.1.1/ripgrep-14.1.1-x86_64-unknown-linux-musl.tar.gz
-          echo "$RG_SHA256  $dir/rg.tar.gz" | sha256sum -c -
-          tar -xzf "$dir/rg.tar.gz" -C "$dir" --strip-components=1
+          tarball="$HOME/.cache/ci-tools/e2e/ripgrep-14.1.1-x86_64-unknown-linux-musl.tar.gz"
+          mkdir -p "$dir" "$(dirname "$tarball")"
+          [ -f "$tarball" ] || bash scripts/ci-fetch-release-asset.sh https://github.com/BurntSushi/ripgrep/releases/download/14.1.1/ripgrep-14.1.1-x86_64-unknown-linux-musl.tar.gz "$tarball"
+          echo "$RG_SHA256  $tarball" | sha256sum -c -
+          tar -xzf "$tarball" -C "$dir" --strip-components=1
           echo "$dir" >> "$GITHUB_PATH"
 
       # None when every failed shard died before it could record them: the

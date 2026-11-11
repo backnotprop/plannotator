@@ -104,13 +104,19 @@ function isOpenRow(row: InboxListRow, open: OpenThread | null | undefined): bool
 }
 
 /**
- * The threads in `latest` with agent activity the list on screen does not
- * show: a thread it lacks, or one whose last message is a newer agent
- * message. The person's own picks, replies and looks never count. `open`:
- * the thread the person has open, or just closed until the list settles
- * (design record "inbox-new-in-open-thread", approved 2026-10-12), which is
- * never counted or named here.
+ * The rows of `latest` with agent activity the list on screen does not show:
+ * a thread it lacks, or one whose last message is a newer agent message. The
+ * person's own picks, replies and looks never count. `open`: the thread the
+ * person has open, or just closed until the list settles (design record
+ * "inbox-new-in-open-thread", approved 2026-10-12), which is never news here:
+ * its own row and its pill say what arrived there. In the list's order.
  */
+function newsRows(shown: readonly InboxListSection[], latest: readonly InboxListSection[], openedHere?: ReadonlySet<string>, open?: OpenThread | null): InboxListRow[] {
+  const before = rowsById(shown);
+  return [...rowsById(latest).values()].filter((row) => !isOpenRow(row, open) && hasNewAgentActivity(before.get(row.thread_id), row, openedHere));
+}
+
+/** What "N new" says of the news that waits (`newsRows`): how many threads, and the one project they are in. */
 export function heldNotice(
   shown: readonly InboxListSection[],
   latest: readonly InboxListSection[],
@@ -119,23 +125,31 @@ export function heldNotice(
   /** The window's project names by id (`windowProjectNames`); a project not in it reads its server name. */
   names?: ReadonlyMap<string, string>,
 ): HeldNotice {
-  const before = rowsById(shown);
+  const rows = newsRows(shown, latest, openedHere, open);
+  const count = rows.length;
   // By id: two projects can share a name ("api" at work and at home), and two
   // projects are never "new in api".
   const projects = new Map<string, string>();
-  let count = 0;
-  for (const row of rowsById(latest).values()) {
-    // The thread the person has open (or just closed, until the list settles)
-    // is never news here: its own row and its pill say what arrived there.
-    if (isOpenRow(row, open)) continue;
-    if (!hasNewAgentActivity(before.get(row.thread_id), row, openedHere)) continue;
-    count += 1;
-    projects.set(row.project.id, names?.get(row.project.id) ?? row.project.name);
-  }
+  for (const row of rows) projects.set(row.project.id, names?.get(row.project.id) ?? row.project.name);
   if (count === 0) return { count, text: null };
   if (projects.size !== 1) return { count, text: `${count} new` };
   const project = [...projects.values()][0]!;
   return { count, text: `${count} new in ${project}`, project };
+}
+
+/**
+ * One thread behind "N new", for the list's own pill (listNewPill.ts). `key`
+ * is the thread and when its agent last wrote, so a second message there is a
+ * new key; `lands` is the group Show puts the row in.
+ */
+export interface HeldNews {
+  key: string;
+  lands: InboxListGroupId;
+}
+
+/** The threads "N new" counts (`newsRows`, the same arguments as `heldNotice`), each with where Show lands it. */
+export function heldNews(shown: readonly InboxListSection[], latest: readonly InboxListSection[], openedHere?: ReadonlySet<string>, open?: OpenThread | null): HeldNews[] {
+  return newsRows(shown, latest, openedHere, open).map((row) => ({ key: `${row.thread_id} ${row.snooze_back ?? lastAgentAt(row)}`, lands: groupOf(row) }));
 }
 
 /**
@@ -177,15 +191,23 @@ export function showLandsIn(shown: readonly InboxListSection[], latest: readonly
  */
 export function refreshHeldRows(shown: readonly InboxListSection[], latest: readonly InboxListSection[], open?: OpenThread | null): InboxListSection[] {
   const fresh = rowsById(latest);
-  return shown.map((section) => ({
-    ...section,
-    threads: section.threads.map((row) => {
+  // What did not change stays the same objects: a read that changed no row on screen keeps the list drawn as it is.
+  let changed = false;
+  const sections = shown.map((section) => {
+    let moved = false;
+    const threads = section.threads.map((row) => {
       const next = fresh.get(row.thread_id);
       // The open thread's row always tells its state, in place: bold when an
       // agent message arrives, not bold once it is seen (it never moves).
-      return next && (isOpenRow(next, open) || !hasNewAgentActivity(row, next)) ? next : row;
-    }),
-  }));
+      const take = next && (isOpenRow(next, open) || !hasNewAgentActivity(row, next)) ? next : row;
+      if (take !== row) moved = true;
+      return take;
+    });
+    if (!moved) return section;
+    changed = true;
+    return { ...section, threads };
+  });
+  return changed ? sections : (shown as InboxListSection[]);
 }
 
 /** The list's own order within a section (packages/shared/inbox/list.ts): newest first, ties on the thread id. */

@@ -110,7 +110,7 @@ async function world(options: WorldOptions = {}) {
   if (options.threads) {
     const store = InboxStore.open(dataDir);
     const project = store.ensureProject({ name: "docs", root: join(root, "docs") });
-    // One session's messages make one thread: a session each.
+    // Each message starts its own thread.
     for (let i = 0; i < options.threads; i++) store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: `ses_${i}`, name: "Claude Code" }, body: `Question ${i}?` });
   }
   const codex = options.codex === null ? null : installFakeCodex(root, options.codex ?? CHATGPT);

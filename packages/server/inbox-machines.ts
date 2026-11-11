@@ -24,7 +24,7 @@
  *    (`link-back`, `unlink`).
  */
 
-import { inboxRowArchived, isInboxId, type InboxListRow, type InboxMachineAccountsRead } from "@plannotator/core/inbox-types";
+import { inboxRowArchived, isInboxId, type InboxAgentsGroup, type InboxListRow, type InboxMachineAccountsRead } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxSnoozeRefusal, inboxSnoozeRunning } from "@plannotator/core/inbox-snooze";
@@ -123,7 +123,7 @@ export interface InboxMachinesContext {
 export type MachineLinkTimings = Partial<PeerLinkTimings> & { updatedShownMs?: number; restartBackMs?: number; accountsMs?: number };
 
 /** A frame for the window's event stream: other machines' records and states never share the local seq (design review, change 2). */
-export type MachineFrame = { event: "machine"; data: PeerRecord } | { event: "machines"; data: { machines: MachineView[] } } | { event: "outbox"; data: OutboxView } | { event: "snoozes"; data: Record<string, never> } | { event: "deliveries"; data: { sessions?: boolean } };
+export type MachineFrame = { event: "machine"; data: PeerRecord } | { event: "machines"; data: { machines: MachineView[] } } | { event: "outbox"; data: OutboxView } | { event: "snoozes"; data: Record<string, never> } | { event: "deliveries"; data: { sessions?: boolean; agents?: boolean } };
 
 /** How the window draws a machine's version (approval "inbox-machine-update"). */
 export interface MachineUpdateView {
@@ -265,6 +265,11 @@ export interface MachineView {
    * start agents there"). Null for this Inbox, whose own launch block says.
    */
   launch: boolean | null;
+  /**
+   * Its store takes a Delete on an agent message's words (its health's `message_deletions`). Not: a Delete it refuses
+   * (422) reads "<name> needs an update to delete words". True for this Inbox; false until its health is read, and for an older Inbox.
+   */
+  message_deletions: boolean;
 }
 
 /** An agent's snooze of a linked machine's thread: its answer there, or `held`, the words for a write that waits. */
@@ -441,6 +446,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       list_cursor: null,
       snoozes: true,
       launch: null,
+      message_deletions: true,
     },
     ...links.list().map((link) => {
       const peer = peers.get(link.id);
@@ -460,6 +466,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
         snooze_old: peer?.list ? !peer.list.snoozes : false,
         update: peer ? updateView(peer) : null,
         launch: peer?.launch ?? null,
+        message_deletions: peer?.messageDeletions ?? false,
       } satisfies MachineView;
     }),
   ];
@@ -514,7 +521,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       onChange: machinesChanged,
       // A snooze moves no cursor, so nothing in the machines block changes: the windows are told in a frame of its own.
       onSnoozes: () => emit({ event: "snoozes", data: {} }),
-      onDeliveries: ({ sessions }) => emit({ event: "deliveries", data: sessions ? { sessions: true } : {} }),
+      onDeliveries: ({ sessions, agents }) => emit({ event: "deliveries", data: { ...(sessions ? { sessions: true } : {}), ...(agents ? { agents: true } : {}) } }),
       onRevoked: () => forget(link.id),
     });
     peers.set(link.id, peer);
@@ -1118,6 +1125,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
 
   const rows = (): (InboxListRow & { machine: string })[] => [...peers.values()].flatMap((peer) => peer.list?.rows ?? []);
   const projects = (): Record<string, unknown>[] => [...peers.values()].flatMap((peer) => peer.list?.projects ?? []);
+  /** Each linked machine's agents, as its list last said (kept in memory while it is away, like its rows); none from an older Inbox. */
+  const agents = (): InboxAgentsGroup[] => [...peers.values()].flatMap((peer) => (peer.list?.agents ? [peer.list.agents] : []));
   const projectOwner = (projectId: string): string | null => {
     for (const peer of peers.values()) if (peer.list?.projects.some((p) => p.id === projectId)) return peer.id;
     return null;
@@ -1150,6 +1159,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     machinesView,
     rows,
     projects,
+    agents,
     projectOwner,
     snoozeThread,
     /** The linked machine a device on this Inbox's door belongs to (a launch it starts here records it), or null. */

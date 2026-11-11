@@ -24,11 +24,12 @@
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxAuthor, InboxListRow, InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxAuthor, InboxListRow, InboxMessageWire, InboxProject, InboxReviewRow, InboxThread } from '@plannotator/core/inbox-types';
 import { inboxSnoozeChoices } from '@plannotator/core/inbox-snooze';
 import { fitPhoneHead, SUBJECT_FLOOR } from './headFit';
 import { PHONE_QUERY } from './phone';
 import { sized, tooltipOf, unhover } from './testing/tooltip';
+import { reviewRowTitle, reviewViewOf, type ReviewView } from './pulls/reviewsModel';
 
 const hasDom = typeof document !== 'undefined';
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
@@ -133,7 +134,7 @@ async function settle() {
   }
 }
 
-async function render(state: InboxListRow, phone = false, thread: InboxThread = THREAD, drawn: 'quiet' | 'new' = 'quiet') {
+async function render(state: InboxListRow, phone = false, thread: InboxThread = THREAD, drawn: 'quiet' | 'new' = 'quiet', reviewView: ReviewView | null = null) {
   const savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     if (String(input).includes('/attachments')) return Response.json({ serverSession: 's', attachments: ATTACHMENTS, annotations: [] });
@@ -168,6 +169,7 @@ async function render(state: InboxListRow, phone = false, thread: InboxThread = 
         onArtifacts={() => {}}
         onFull={() => {}}
         phone={phone}
+        reviewView={reviewView}
       />,
     );
   });
@@ -226,7 +228,7 @@ async function openMore() {
 
 test.skipIf(!hasDom)('desktop: the read button and the Snooze clock lead, before the subject; Artifacts, Expand, ⋯ and × stay at the right', async () => {
   await render(OPENED);
-  expect(bar()).toEqual(['Hide the sidebar and the list', '|', 'Mark unread', 'Snooze', 'subject', 'Artifacts', 'Expand', 'More', '|', 'Close the thread']);
+  expect(bar()).toEqual(['Mark unread', 'Snooze', 'subject', 'Artifacts', 'Expand', 'More', '|', 'Close the thread']);
   expect(head().querySelector('[data-header-subject]')!.textContent).toBe('customize row look');
   // The read button is an icon: its words are its name, never drawn text.
   for (const button of head().querySelectorAll('[data-mark-unread], [data-thread-snooze]')) expect(button.textContent).toBe('');
@@ -234,11 +236,11 @@ test.skipIf(!hasDom)('desktop: the read button and the Snooze clock lead, before
   act(() => root!.unmount());
   host!.remove();
   await render(WAITING);
-  expect(bar().slice(2, 5)).toEqual(['Mark read', 'Snooze', 'subject']);
+  expect(bar().slice(0, 3)).toEqual(['Mark read', 'Snooze', 'subject']);
   act(() => root!.unmount());
   host!.remove();
   await render(MARKED);
-  expect(bar().slice(2, 5)).toEqual(['Read', 'Snooze', 'subject']);
+  expect(bar().slice(0, 3)).toEqual(['Read', 'Snooze', 'subject']);
   expect(head().querySelector('[data-mark-read]')!.getAttribute('aria-pressed')).toBe('true');
 });
 
@@ -281,7 +283,7 @@ test.skipIf(!hasDom)('tooltips: the read button says its words, with E for Mark 
 
 test.skipIf(!hasDom)("a phone's ⋯ leads with the read action, then Snooze, a divider, Pin, and the rest", async () => {
   await render(OPENED, true);
-  expect(menuItems(await openMore())).toEqual(['Mark unread', 'Snooze', '—', 'Star thread', '—', 'Copy thread', '—', 'Copy link', 'Copy thread ID', '—', 'Request guided review', '—', 'Archive thread']);
+  expect(menuItems(await openMore())).toEqual(['Mark unread', 'Snooze', '—', 'Star thread', '—', 'Copy thread', '—', 'Copy link', 'Copy thread ID', '—', 'Add a pull request…', '—', 'Request guided review', '—', 'Archive thread']);
   await press(threadMenu()!.querySelector('[data-thread-unread-item]')!);
   expect(calls).toEqual(['mark unread']);
   act(() => root!.unmount());
@@ -532,4 +534,36 @@ test.skipIf(!hasDom)('a name equal to the subject, or one the subject starts wit
     host?.remove();
     for (const undo of restore.splice(0).reverse()) undo();
   }
+});
+
+test.skipIf(!hasDom)("opened from Reviews, a review thread's bar says the review's title once it landed: the row's and the heading's name, not New review's", async () => {
+  // A New review thread: the box named it from the question; the agent's guide then landed with its own title.
+  const guideTitle = 'How a webhook delivery is retried when the subscriber is down';
+  const started = { kind: 'walkthrough', changes: null, branch: null, base: null, ask: 'custom', host: 'claude-code', project_id: PROJECT.id, at: '', name: 'Webhook delivery' };
+  const reviewRow = (review: unknown) =>
+    ({ id: ROOT, thread_id: ROOT, reviewed: true, move: 'on_you', reason: review ? 'review_ready' : 'curating', review, started, link: null, stacks: [], pull_keys: [], landed: [], updated_at: '' }) as unknown as InboxReviewRow;
+  const landed = reviewRow({ thread_id: ROOT, project_id: PROJECT.id, title: guideTitle, walkthrough: true, round: 1, first_review_id: ROOT, latest_review_id: ROOT, source: { kind: 'local' }, agent: null, answered: false, verdict: null });
+  const thread: InboxThread = { ...THREAD, thread_name: 'Webhook delivery', review_started: true } as InboxThread;
+  const view = (row: InboxReviewRow) => reviewViewOf(row, thread, { projectName: PROJECT.name, onWholeThread: () => {}, onOpenStack: () => {} });
+
+  for (const phone of [false, true]) {
+    await render(OPENED, phone, thread, 'quiet', view(landed));
+    const rowTitle = reviewRowTitle(landed, () => '');
+    expect(rowTitle).toBe(guideTitle);
+    expect(title()!.textContent).toBe(rowTitle);
+    expect(heading()!.textContent).toBe(rowTitle);
+    expect(title()!.hasAttribute('data-header-name')).toBe(true);
+    act(() => root?.unmount());
+    host?.remove();
+    for (const undo of restore.splice(0).reverse()) undo();
+  }
+
+  // Still curating: no title yet, so the row, the heading and the bar all keep the thread's name.
+  const curating = reviewRow(null);
+  await render(OPENED, false, thread, 'quiet', view(curating));
+  expect(reviewRowTitle(curating, () => '')).toBe('Webhook delivery');
+  expect(title()!.textContent).toBe('Webhook delivery');
+  expect(heading()!.textContent).toBe('Webhook delivery');
+  // Under the request, a walkthrough being written says so in its own words, not "Curating the review…".
+  expect(document.querySelector('[data-review-curating]')?.textContent).toBe('Writing the walkthrough…');
 });

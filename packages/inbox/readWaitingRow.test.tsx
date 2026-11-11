@@ -10,7 +10,7 @@
  * gives are drawn by InboxList, opening a row is the window's own step
  * (held.ts `markHeldRowLooked`, before the server's look lands) and then the
  * store's look (`markSeen`). The row stops being bold in its group with its
- * badge and open count, and an agent's next message makes it bold again.
+ * state mark and open count, and an agent's next message makes it bold again.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -81,7 +81,9 @@ function look(el: HTMLElement, id: string) {
   return {
     bold: row.classList.contains('ib-u'),
     group: row.dataset.section,
-    badge: row.querySelector('[data-row-badge]')?.textContent ?? null,
+    // Its state mark (approval "inbox-question-mark", #2929): the question mark filled for Stopped (`stop`) or
+    // Holding up work (`hold`), outlined while it only waits (`open`).
+    mark: row.querySelector<HTMLElement>('[data-wait-step]')?.dataset.waitStep ?? null,
     open: row.querySelector<HTMLElement>('[data-open-count]')?.dataset.openCount ?? null,
   };
 }
@@ -91,21 +93,21 @@ describe.if(hasDom)('a thread you have read', () => {
     const { store, send, ids } = seed();
     const shown = inboxListSections(store.listRows());
     let el = draw(shown);
-    expect(look(el, ids.stopped)).toEqual({ bold: true, group: 'stopped', badge: 'Stopped', open: '1' });
-    expect(look(el, ids.holding)).toEqual({ bold: true, group: 'holding', badge: 'Holds up 3', open: '1' });
-    expect(look(el, ids.waiting)).toEqual({ bold: true, group: 'waiting', badge: null, open: '1' });
+    expect(look(el, ids.stopped)).toEqual({ bold: true, group: 'stopped', mark: 'stop', open: '1' });
+    expect(look(el, ids.holding)).toEqual({ bold: true, group: 'holding', mark: 'hold', open: '1' });
+    expect(look(el, ids.waiting)).toEqual({ bold: true, group: 'waiting', mark: 'open', open: '1' });
 
     // Opened: the window draws its look at once, before the server has taken it.
     el = draw(markHeldRowLooked(shown, new Set([ids.waiting])));
-    expect(look(el, ids.waiting)).toEqual({ bold: false, group: 'waiting', badge: null, open: '1' });
+    expect(look(el, ids.waiting)).toEqual({ bold: false, group: 'waiting', mark: 'open', open: '1' });
     expect(look(el, ids.holding)!.bold).toBe(true);
 
     // The look lands for all three: the server's list draws them read, each where it was.
     for (const id of Object.values(ids)) store.markSeen(id);
     el = draw(inboxListSections(store.listRows()));
-    expect(look(el, ids.stopped)).toEqual({ bold: false, group: 'stopped', badge: 'Stopped', open: '1' });
-    expect(look(el, ids.holding)).toEqual({ bold: false, group: 'holding', badge: 'Holds up 3', open: '1' });
-    expect(look(el, ids.waiting)).toEqual({ bold: false, group: 'waiting', badge: null, open: '1' });
+    expect(look(el, ids.stopped)).toEqual({ bold: false, group: 'stopped', mark: 'stop', open: '1' });
+    expect(look(el, ids.holding)).toEqual({ bold: false, group: 'holding', mark: 'hold', open: '1' });
+    expect(look(el, ids.waiting)).toEqual({ bold: false, group: 'waiting', mark: 'open', open: '1' });
     // Read is not answered: the hover action is still Mark read (set the questions aside), never Mark unread.
     expect(el.querySelector(`[data-row="${ids.waiting}"] [data-row-mark-read]`)).not.toBeNull();
     expect(el.querySelector(`[data-row="${ids.waiting}"] [data-row-mark-unread]`)).toBeNull();
@@ -113,7 +115,7 @@ describe.if(hasDom)('a thread you have read', () => {
     // The agent writes again in the Waiting thread: bold again, still in Waiting; the others stay read.
     send('ses_w', 'One more note: the webhook retries for 3 days.', ids.waiting);
     el = draw(inboxListSections(store.listRows()));
-    expect(look(el, ids.waiting)).toEqual({ bold: true, group: 'waiting', badge: null, open: '1' });
+    expect(look(el, ids.waiting)).toEqual({ bold: true, group: 'waiting', mark: 'open', open: '1' });
     expect(look(el, ids.holding)!.bold).toBe(false);
     expect(look(el, ids.stopped)!.bold).toBe(false);
   });

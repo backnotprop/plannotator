@@ -15,10 +15,11 @@
  */
 
 import type { QuestionAnswer, QuestionKind } from "./question-block";
-import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, InboxInlineImage } from "./inbox-attachments";
+import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, InboxInlineImage, InboxLiveSiteRef } from "./inbox-attachments";
 import type { InboxDeliverNowBy, InboxRowDelivery } from "./inbox-delivery";
 import type { InboxCard } from "./inbox-cards";
 import type { InboxSteps } from "./inbox-steps";
+import type { InboxThreadPull, InboxThreadPullsSummary } from "./inbox-thread-pulls";
 import type { InboxInitiative } from "./inbox-initiatives";
 import type { InboxReviewVerdictRecord } from "./inbox-review";
 import type { InboxReviewSource } from "./inbox-reviews";
@@ -50,6 +51,10 @@ export * from "./inbox-pulls";
 export * from "./inbox-pull-risk";
 // Reviews (approval "inbox-reviews-page"): the per-thread review index and whose move, the same way.
 export * from "./inbox-reviews";
+// A thread's PRs (approval "inbox-pr-binding"), the same way.
+export * from "./inbox-thread-pulls";
+// Every word an agent reads about the list's rows ("tell your agent", Settings → Rows): one file, the owner's words.
+export * from "./inbox-rows-words";
 
 /** Every record and line carries this version. Fields are only ever added. */
 export const INBOX_RECORD_VERSION = 1 as const;
@@ -495,8 +500,8 @@ export interface InboxMessage {
   /**
    * The `thread` name the agent sent this message with (send_message's
    * `thread`), else absent or null. On a root it is the thread's name: a
-   * named thread is joined by name across sessions; an unnamed root is its
-   * session's default thread. Added after step 1: older records lack it.
+   * named thread is joined by name across sessions; an unnamed root only by
+   * reply_to. Added after step 1: older records lack it.
    */
   thread_name?: string | null;
   /**
@@ -589,6 +594,12 @@ export interface InboxMessage {
    * on a message whose body shows no local image, and on older records.
    */
   inline_images?: InboxInlineImage[];
+  /**
+   * On an agent's message: the running apps its question choices name as
+   * prototypes (`Prototype: http://localhost:…`), each checked and probed when
+   * it was sent (packages/server/inbox-live.ts). Absent otherwise.
+   */
+  live_sites?: InboxLiveSiteRef[];
   /**
    * On a person's reply: it reached the asking agent's session as a turn
    * through an agent connection (the Claude Code mod), and when. Absent until
@@ -718,7 +729,7 @@ export interface InboxMessage {
   /**
    * On a thread's root the person wrote (compose: "send a new message to a
    * connected agent"): the thread was started by the person, addressed to
-   * one live agent session (`to`), and is no session's default thread. The
+   * one live agent session (`to`). The
    * agent's answer lands in it by `reply_to`. Absent on every other message.
    */
   started_by_person?: true;
@@ -745,6 +756,11 @@ export interface InboxMessage {
    * Absent on every other message.
    */
   decision_ask?: true;
+  /**
+   * On the root of a thread the person started from Settings → Rows' ask box. The body stays as typed; what the agent
+   * receives for this message carries `INBOX_ROWS_ASK_BLOCK` (inbox-rows-words.ts) after it. Absent on every other message.
+   */
+  rows_ask?: true;
   /** On a person's reply sent from full screen's floating box: the file on screen. Rendered for the agent at read time; the body never holds it. */
   viewing?: InboxReplyViewing;
   /**
@@ -1032,11 +1048,33 @@ export interface InboxAddressee {
 
 /**
  * Launch (start an agent from compose): the agents the Inbox can start a
- * session of, one per line: Claude Code (`claude --bg`), Pi (`pi --mode rpc`, owned by the Inbox).
+ * session of, one per line: Claude Code (`claude --bg`), Pi (`pi --mode rpc`, owned by the Inbox), Codex
+ * (`codex app-server`, owned by the Inbox).
  */
 export type InboxLaunchAgent =
   | "claude-code"
-  | "pi";
+  | "pi"
+  | "codex";
+
+/** One Codex usage limit (`account/rateLimits/read`): how much of it is used, its length, and when it resets. */
+export interface InboxCodexLimit {
+  used_percent: number;
+  /** 300 is the 5-hour window, 10080 the weekly one; null when Codex does not say. */
+  window_mins: number | null;
+  /** ISO time, or null. */
+  resets_at: string | null;
+}
+
+/**
+ * Settings → Agents' Codex account line (`GET /api/inbox/codex/account`), read from Codex itself: signed in (with
+ * ChatGPT, its plan as the person reads it and its limits when Codex gave them; an API key; or another provider),
+ * signed out, no `codex` found, or not readable now. Never an email or an id.
+ */
+export type InboxCodexAccount =
+  | { state: "signed_in"; kind: "chatgpt" | "api_key" | "other"; plan: string | null; limits: InboxCodexLimit[] | null }
+  | { state: "signed_out" }
+  | { state: "missing" }
+  | { state: "unknown" };
 
 /** Why a launch did not start (`InboxLaunchRecord.error`): `untrusted` folder, the CLI `missing`, or anything else. */
 export interface InboxLaunchError {
@@ -1214,6 +1252,11 @@ export interface InboxGuideRef {
   /** A review's chapter titles, in order (the card lists them). Only with `review`. */
   chapters?: string[];
   /**
+   * A walkthrough: the code as it is, with nothing changed (submit_guide `walkthrough`, or any guide in a thread the
+   * New review box started as one). Always with `review`; it takes no verdict, and its patch is context lines only.
+   */
+  walkthrough?: true;
+  /**
    * A review's source (Reviews, approval "inbox-reviews-page"): the
    * snapshot's `source` (kind, repo, branch, head, PR) and `review` (base,
    * git ref), each one line. Only with `review`; absent on reviews sent
@@ -1235,6 +1278,17 @@ export interface InboxQuestionChoice {
    * absent from records written before picture choices.
    */
   image?: { alt: string; src: string };
+  /**
+   * Option lines (approval "inbox-question-tradeoffs"), each indented under a
+   * `- [ ]` choice and read at send: `Pros:` and `Cons:` items (split on
+   * `;`), and `Prototype:`, the page that shows this option as written (an
+   * attached HTML file's path, or an `http://` address of an app running on
+   * this computer, checked at send and kept in the message's `live_sites`).
+   * Each is absent when the choice names none, and on older records.
+   */
+  pros?: string[];
+  cons?: string[];
+  prototype?: { target: string; label?: string };
 }
 
 /**
@@ -1252,6 +1306,8 @@ export interface InboxQuestionContract {
   why?: string;
   /** `Reversible: no — <why>`: the answer cannot be taken back. Absent means reversible. */
   reversible?: { value: false; why: string | null };
+  /** `Prototype:` at the block's own indent: one page every option shows (approval "inbox-question-tradeoffs"), as written. */
+  prototype?: { target: string; label?: string };
 }
 
 /** The parsed facts of a question block, kept on its record. */
@@ -1269,6 +1325,25 @@ export interface InboxQuestionFacts extends InboxQuestionContract {
 export interface InboxPicker {
   id: string;
   name: string | null;
+}
+
+/**
+ * Where a question inside an attached Markdown file sits (issue #2828): the
+ * file the message attaches, and the question's key as that file's own cards
+ * compute it (`findQuestionBlocks` over the sent text). The record's `key`
+ * is unique among the message's questions (a body question keeps its key; a
+ * file's question takes the next free `-N` when a body question or an
+ * earlier file has it), and is the one a pick, a supersede and a reply name.
+ * The record's `position` is its place among that file's questions (Q1 is
+ * the file's first card), and `parsed.line` its prompt's line in the file.
+ */
+export interface InboxQuestionAttachment {
+  /** The attachment's `att_` id on the same message. */
+  id: string;
+  /** The file's name, as the message's attachment record names it. */
+  name: string;
+  /** The question's key inside the file (what its card computes). */
+  key: string;
 }
 
 /**
@@ -1336,6 +1411,12 @@ export interface InboxQuestionRecord {
    * item is open, and after it is taken back.
    */
   action_result?: InboxActionResult | null;
+  /**
+   * A question asked inside a Markdown file the message attaches, not in its
+   * body (issue #2828). Absent or null: a question of the body (every record
+   * written before this field).
+   */
+  attachment?: InboxQuestionAttachment | null;
 }
 
 /**
@@ -1480,6 +1561,8 @@ export interface InboxQuestion extends InboxQuestionContract {
   action?: InboxActionFacts | null;
   /** On an action item: what came of it, or null while open. Absent on a question and from an older Inbox. */
   action_result?: InboxActionResult | null;
+  /** A question inside an attached Markdown file (`InboxQuestionRecord.attachment`). Absent: a question of the body, or an older Inbox. */
+  attachment?: InboxQuestionAttachment | null;
 }
 
 /**
@@ -1620,8 +1703,17 @@ export interface InboxListRow extends InboxThreadSummary {
    * machines, packages/server/inbox-machines.ts). Absent on this Inbox's own list.
    */
   machine?: string;
-  /** The thread's name (send_message's `thread`), or null for a session's default thread. */
+  /** The thread's name (send_message's `thread`), or null for an unnamed thread. */
   thread_name: string | null;
+  /**
+   * The row's grey line (approval "inbox-row-latest-preview"): the thread's latest message as plain text, cut near
+   * `INBOX_ROW_PREVIEW_MAX` characters (core inbox-row-preview.ts): the newest unread agent message while one is
+   * unread, else the newest message, the person's own reply as "You: …". Null when there is nothing to show: an
+   * unnamed thread whose latest message is its first (its title already says it), or a message with no words. Only
+   * on the list model the window and the phone read (an agent's list row never carries it). Absent from an older
+   * Inbox: the window then shows the subject under a named thread, as before.
+   */
+  latest_preview?: string | null;
   section: InboxSectionId;
   /**
    * The session this thread would reach has ended, as the thread's own note and the delivery line know it (only a
@@ -1673,6 +1765,13 @@ export interface InboxListRow extends InboxThreadSummary {
    * reads. Absent otherwise, and from an older Inbox.
    */
   steps_waiting?: true;
+  /**
+   * The thread's PRs (approval "inbox-pr-binding"): how many, and the one the
+   * row's mark shows with its last known state. Only on this Inbox's own rows
+   * of the list model the window reads; absent when the thread has none, and
+   * from an older Inbox.
+   */
+  pulls?: InboxThreadPullsSummary;
 
   /**
    * Agent messages after the person's last look (a reply of theirs counts as
@@ -1720,6 +1819,8 @@ export interface InboxListRow extends InboxThreadSummary {
   last_agent_at?: string | null;
   /** A message in the thread carries a guided review: the row's "Guided review" mark. */
   guide: boolean;
+  /** The thread's latest guide is a walkthrough: the same mark says Walkthrough. */
+  guide_walkthrough?: boolean;
   /**
    * On a thread the person started (`started_by_person`): the agent session
    * it is addressed to now (the root's `to`, which "Send to another session"
@@ -1855,7 +1956,7 @@ export interface InboxThread {
    */
   project: InboxProject & { repo?: InboxProjectRepo | null };
   subject: string | null;
-  /** The thread's name, or null for a session's default thread. */
+  /** The thread's name, or null for an unnamed thread. */
   thread_name: string | null;
   resolved_at: string | null;
   /**
@@ -1886,10 +1987,11 @@ export interface InboxThread {
 /**
  * `card`: a Board card (approval "inbox-board"); `steps`: one agent session's
  * steps in a thread (approval "inbox-thread-steps"); `initiative`: a Board
- * initiative (approval "board-initiatives"). A reader that does not know a
- * kind skips its lines.
+ * initiative (approval "board-initiatives"); `thread_pull`: one PR on one
+ * thread (approval "inbox-pr-binding"). A reader that does not know a kind
+ * skips its lines.
  */
-export type InboxRecordKind = "project" | "message" | "question" | "annotation" | "card" | "steps" | "initiative";
+export type InboxRecordKind = "project" | "message" | "question" | "annotation" | "card" | "steps" | "initiative" | "thread_pull";
 
 /** One line of the store: a full snapshot of one record. */
 export type InboxLine =
@@ -1899,7 +2001,8 @@ export type InboxLine =
   | { v: 1; seq: number; at: string; kind: "annotation"; id: string; record: InboxAnnotationRecord }
   | { v: 1; seq: number; at: string; kind: "card"; id: string; record: InboxCard }
   | { v: 1; seq: number; at: string; kind: "steps"; id: string; record: InboxSteps }
-  | { v: 1; seq: number; at: string; kind: "initiative"; id: string; record: InboxInitiative };
+  | { v: 1; seq: number; at: string; kind: "initiative"; id: string; record: InboxInitiative }
+  | { v: 1; seq: number; at: string; kind: "thread_pull"; id: string; record: InboxThreadPull };
 
 // ─────────────────────────────── Health ───────────────────────────────
 
@@ -1934,6 +2037,8 @@ export interface InboxHealth {
   peek?: true;
   /** This Inbox's stable id, which linked machines key on (additive; packages/server/inbox-links.ts). */
   inbox_id?: string;
+  /** The earlier runs of this Inbox's data folder, newest first (additive; packages/shared/inbox/registry.ts `inboxSessionLineage`). */
+  follows?: string[];
   /** The machine-link protocol this Inbox speaks (additive; absent: it cannot link). */
   machine_links?: number;
   /** Additive: this Inbox's door takes `update`, so a linked machine can update it. */
@@ -1944,6 +2049,11 @@ export interface InboxHealth {
   update_no_change?: string | null;
   /** Remote launch: 1 while a linked machine may start agents here, 0 while launch is off. Absent from an older Inbox. */
   launch_from_machines?: number;
+  /**
+   * The store takes a Delete on an agent message's words (`type` "DELETION", approval "inbox-toolbar-delete"; 1).
+   * Absent from an older Inbox, whose store refuses one (422): a linked machine's window says it needs an update.
+   */
+  message_deletions?: number;
   /**
    * The page honours `--pn-window-controls-width` and `-height` on `:root`, for
    * a desktop host that draws the window's buttons over it, and from 2 names
@@ -2231,6 +2341,10 @@ export const INBOX_ROWS_OPTIONS = [
   // Bold thread names (the owner, 2026-11-07: "we should have an option to bold the thread name"), off by default:
   // every thread name in bold, read or not.
   "boldNames",
+  // Pull requests off (approval "inbox-rows-settings-page", 2026-11-10; the owner: "some people might wanna hide the
+  // PRs"), off by default, so a look saved before it shows them as ever: no PR mark at any row's end. The thread's
+  // own PR button stays. No rival.
+  "hidePulls",
 ] as const;
 export type InboxRowsOption = (typeof INBOX_ROWS_OPTIONS)[number];
 
@@ -2660,13 +2774,19 @@ export interface InboxSessionOutdated {
 }
 
 /**
- * The live sessions a reload alone brings up to date, per runtime: the
- * sidebar's "Reload Claude Code N" ("Reload agents N" when more than one
+ * The live sessions a reload brings up to date (for Claude Code, also after
+ * a plugin update: `update_first`), per runtime: the sidebar's "Reload Claude Code N" ("Reload agents N" when more than one
  * runtime has some). Additive beside `restart_claude_code`.
  */
 export interface InboxRestartAgents {
   total: number;
   runtimes: Partial<Record<InboxReloadRuntime, number>>;
+  /**
+   * Of the Claude Code ones, those whose plugin on disk is itself behind this
+   * Inbox (`update_plugin`): the plugin update comes before `/reload-plugins`.
+   * Additive; absent when none.
+   */
+  update_first?: number;
 }
 
 /** One open session as Settings → Agents lists it. */
@@ -2858,18 +2978,33 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline";
  * relaying another agent's report): about +270 bytes on `body`, about +70
  * tokens, estimated, not measured on Pi; 2.6%, inside the 5%, so the
  * constants stay.
+ * A thread's PRs (approval "inbox-pr-binding": the `thread_pulls` action, its
+ * `add` and `remove` fields, send_message's `pulls`, "its PRs" in read_thread's
+ * `thread_id`; no line in the description, which stays 1,938 characters):
+ * +932 bytes for the action and the field, measured on Pi's request shape from
+ * a scratch Inbox's tools/list, with and without them. The entry measured the
+ * same way, with Pi's wrapper: 11,293 bytes (tokens +255 at the entry's ratio,
+ * plus the supersedes example's 13, so 3,058). Board on: 13,268 bytes, 3,634
+ * tokens the same way. Measured before the ref rule above landed with it (about
+ * +270 bytes more, 2.4%), inside the 5%, so the constants stay.
  */
-const INBOX_TOOL_COST_NOW = { bytes: 10248, tokens: 2790 };
+/*
+ * Option lines (INBOX_OPTION_LINES_RULE on send_message's `body`, approval
+ * "inbox-question-tradeoffs"; draft words): +452 bytes on the agent tool's
+ * entry, measured with the default tool list (about +120 tokens, estimated);
+ * added here, on top of the PRs' numbers (merge of both).
+ */
+const INBOX_TOOL_COST_NOW = { bytes: 11745, tokens: 3178 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 12223, tokens: 3366 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 13720, tokens: 3754 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval
  * "inbox-thread-steps"), for the switch's words. Measured on Pi's request
  * shape from a real Inbox, steps on minus steps off (checked within 5% by
- * inbox-steps-agent.test.ts): 854 bytes (the approved text on the field, a short action line); tokens scaled from the entry's bytes per token and stated high. Off, they add nothing.
+ * inbox-steps-agent.test.ts): 901 bytes (the approved text on the field, with its line on when to start one, and a short action line); tokens scaled from the entry's bytes per token and stated high. Off, they add nothing.
  */
-export const INBOX_TOOL_COST_STEPS = { bytes: 854, tokens: 235 } as const;
+export const INBOX_TOOL_COST_STEPS = { bytes: 901, tokens: 248 } as const;
 export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number; tokens: number }>> = {
   pi: INBOX_TOOL_COST_NOW,
   opencode: INBOX_TOOL_COST_NOW,
@@ -3105,6 +3240,61 @@ export interface InboxComposeProject {
   sessions: InboxComposeSession[];
 }
 
+/**
+ * One agent of a machine, as the list model names it for the sidebar's Agents section (`GET /api/inbox/threads`'
+ * `agents`; packages/server/inbox-agents-list.ts). An agent is a live session, a session that owns a thread waiting on
+ * the person (ended or not), a session that ended today, or a session the Inbox launched (a stopped one is idle).
+ */
+export interface InboxAgent {
+  /** Stable while the agent lasts: the launch id for a session the Inbox launched, else the session id. */
+  id: string;
+  /** The session it runs as now (a launch's placeholder `launch:<id>` until it started). */
+  session: string;
+  /**
+   * The session ids its conversation had before (a poll's `continues`, nearest first; additive, absent when none):
+   * the host gave the conversation a new session id. One of them that still polls is listed as its own agent too.
+   */
+  continues?: string[];
+  /** Set when the Inbox launched it: the launch's id and its thread. */
+  launch?: { id: string; thread_id: string };
+  /** `claude-code`, `codex`, `pi`, ... (`InboxAuthor.host`); null when nothing said. */
+  host: string | null;
+  /** Its title as its connection last said it (the To picker's name). Only for this computer's owner; absent when none. */
+  label?: string;
+  /** The project it works in (`id` null for a folder the Inbox has no project for); null when it never said where. */
+  project: { id: string | null; name: string } | null;
+  /**
+   * `waiting`: it owns `waiting` threads in Stopped on you, Holding up work or Waiting on you (whatever else it does);
+   * else `working` (a turn runs, or a launch is starting), `idle` (live, or a launch that is stopped), `ended`.
+   */
+  state: "waiting" | "working" | "idle" | "ended";
+  /** How many of its threads wait on the person (0 when none). */
+  waiting: number;
+  /** Its session is live now (polls, or a launch that a reply starts again); false for an ended one. */
+  live: boolean;
+  /** When it started; null when this Inbox never heard it start (it only owns a waiting thread). */
+  started_at: string | null;
+  /** When this Inbox last heard from it (a poll, a state change, an Inbox tool call, its latest message); null when never. */
+  last_seen_at: string | null;
+}
+
+/** The most agents a list names per machine; `total` says how many there are past that. */
+export const INBOX_AGENTS_LISTED_MAX = 40;
+
+/**
+ * One machine's agents on the list model (`agents`, one group per machine): waiting first (most waiting first),
+ * then working, idle and ended, each the most recently heard first, at most `INBOX_AGENTS_LISTED_MAX`.
+ */
+export interface InboxAgentsGroup {
+  /** The machine (its `ibx_` id), on the merged view (`machines=1`) only. */
+  machine?: string;
+  agents: InboxAgent[];
+  /** Every agent of the machine, those past the cap included. */
+  total: number;
+  /** How many of `total` ended today (each `ended`). */
+  ended_today: number;
+}
+
 /** A press of Trust and start, on `POST /api/inbox/messages`'s `to.launch.trust`: what the person was offered. The press is the consent. */
 export interface InboxLaunchTrust {
   /** The folder the trust lands on. */
@@ -3144,7 +3334,8 @@ export interface InboxComposeLaunch {
    * `INBOX_SCRATCH_PICK`. No entry for a trusted folder, the home folder, the root or a folder above home.
    */
   agents: { agent: InboxLaunchAgent; name: string; scratch_trusted?: boolean; untrusted?: Record<string, InboxLaunchUntrusted> }[];
-  projects: { id: string; name: string; root: string; exists: boolean }[];
+  /** `slow`: the project is on a network drive that isn't answering now (approval "inbox-launch-any-folder"). */
+  projects: { id: string; name: string; root: string; exists: boolean; slow?: true }[];
   /**
    * Additive (remote launch): the agents this machine has a host for but can't start now, and why, so a linked
    * machine's window can say so with this machine's name (`inboxLaunchNotReadyWords`). `over_ssh`: this Inbox was
@@ -3158,6 +3349,13 @@ export interface InboxComposeLaunch {
    * (its real path): the folder last cloned into here, else where most of its projects live, else home. Absent from an older Inbox.
    */
   clone?: { into: string };
+  /**
+   * The drives mounted besides the machine's own disk (approval "inbox-launch-any-folder"): the folder menu's drive
+   * rows and the folder browser's places. `network`: a network drive. Absent from an older Inbox (home only there).
+   */
+  drives?: { path: string; name: string; network?: true }[];
+  /** macOS: this machine's own window may offer "Choose in Finder…". Absent elsewhere and from an older Inbox. */
+  finder?: true;
 }
 
 /**
@@ -3367,3 +3565,168 @@ export interface InboxActivityModel {
 
 /** The longest span `GET /api/inbox/activity` answers. */
 export const INBOX_ACTIVITY_MAX_DAYS = 400;
+
+/* ---------- Agent faces ---------- */
+
+/**
+ * The face each agent's icon shows (the sidebar's Agents picker, approval "inbox-agent-icon-motion"), saved by the
+ * Inbox so every window, the phone's and the iPad's too, draws the same face for the same agent everywhere. An entry
+ * is keyed by the agent's id as the list names it (`InboxAgent.id`) and says every session id that agent was or is
+ * (`sessions`), so a row, which knows only the sessions that wrote in it, finds the face by any of them. Kept in
+ * `inbox/agent-faces.json` (packages/shared/inbox/agent-faces.ts), outside the event log and config.json. Here and
+ * not in a core file of its own: a new core export waits for a core release (packages/ui's package smoke).
+ */
+
+/** The Glass colours, round the hue wheel: Black and Yellow keep the ids they were stored under (`glass`, `yellow`). */
+export const INBOX_GLASS_FACES = ["glass", "glass-red", "glass-orange", "yellow", "glass-green", "glass-teal", "glass-blue", "glass-purple", "glass-pink", "glass-ice"] as const;
+export type InboxGlassFace = (typeof INBOX_GLASS_FACES)[number];
+/** `agent`: the agent's own mark (never stored); then the Glass colours, Transparent and Face (`totman`). */
+export type InboxBuiltInFace = "agent" | InboxGlassFace | "transparent" | "totman";
+/**
+ * A picture the person uploaded ("Your own…" in the picker): `own:` and the SHA-256 of its bytes, in lowercase hex.
+ * The file is the Inbox's (`inbox/agent-icons/<hash>.<ext>`, packages/server/inbox-agent-icons.ts); a window without
+ * it (another machine, a removed picture) draws the agent's own mark. An older Plannotator, whose faces are the
+ * closed built-in list, drops these entries when it reads the file: the file stays `v: 1` so it never refuses it.
+ */
+export type InboxOwnFace = `own:${string}`;
+/**
+ * An icon from a set ("Sets" in the picker): `set:<set>/<icon>`, a built-in set's (packages/inbox/assets/icon-sets)
+ * or one the person fetched into the data folder (`inbox/icon-sets/<set>/`, packages/server/inbox-icon-sets.ts).
+ * Its own id, not a copy into the uploads, so it never counts against INBOX_AGENT_ICONS_KEPT. A window that cannot
+ * load it (a set this machine lacks, an icon a later curation dropped) draws the agent's own mark; an older
+ * Plannotator drops these entries when it reads the file, as it does `own:` ones, and the file stays `v: 1`.
+ */
+export type InboxSetFace = `set:${string}/${string}`;
+export type InboxAgentFace = InboxBuiltInFace | InboxOwnFace | InboxSetFace;
+
+/** Every built-in face, in the picker's order. */
+export const INBOX_AGENT_FACES: readonly InboxBuiltInFace[] = ["agent", ...INBOX_GLASS_FACES, "transparent", "totman"];
+
+/** An uploaded picture's face id: `own:` and 64 lowercase hex digits. */
+export const INBOX_OWN_FACE = /^own:[0-9a-f]{64}$/;
+export const isInboxOwnFace = (value: unknown): value is InboxOwnFace => typeof value === "string" && INBOX_OWN_FACE.test(value);
+/** The picture's hash (its file's name) of an `own:` face. */
+export const inboxOwnFaceHash = (face: InboxOwnFace): string => face.slice(4);
+
+/** A set icon's face id: `set:`, the set's id, `/`, the icon's id (lowercase letters, digits and dashes). */
+export const INBOX_SET_FACE = /^set:([a-z0-9][a-z0-9-]{0,39})\/([a-z0-9][a-z0-9-]{0,79})$/;
+export const isInboxSetFace = (value: unknown): value is InboxSetFace => typeof value === "string" && INBOX_SET_FACE.test(value);
+/** A set face's set and icon ids. */
+export function inboxSetFaceParts(face: InboxSetFace): { set: string; icon: string } {
+  const match = INBOX_SET_FACE.exec(face);
+  return { set: match?.[1] ?? "", icon: match?.[2] ?? "" };
+}
+
+export const isInboxAgentFace = (value: unknown): value is InboxAgentFace =>
+  typeof value === "string" && ((INBOX_AGENT_FACES as readonly string[]).includes(value) || INBOX_OWN_FACE.test(value) || INBOX_SET_FACE.test(value));
+
+/**
+ * A set of icons for agents ("Sets" in the face picker), as `GET /api/inbox/icon-sets` lists it: a built-in one
+ * (embedded in the binary), or a fetchable one (described by a small remote manifest, downloaded on one click into the
+ * data folder by the person's own Inbox, then served like the built-in ones).
+ */
+export interface InboxIconSet {
+  id: string;
+  name: string;
+  count: number;
+  kind: "built-in" | "fetchable";
+  /** Pixel art: drawn with nearest-neighbour scaling at whole multiples of `size` (its native px) only. */
+  pixelated?: boolean;
+  size?: number;
+  /** One colour: drawn in the theme's text colour (as a mask), not as a picture. */
+  mono?: boolean;
+  /** Drawn this much larger inside its tile (the edges cut): for pictures with wide empty margins (1 to 3). */
+  zoom?: number;
+  /** The credit its licence asks for, and whether the Inbox serves a credits file for it (`?credits=1`). */
+  credit?: string;
+  credits?: boolean;
+  licence?: string;
+  /** A fetchable set's download: none yet, under way, done, or stopped short (`have` of `count` kept). */
+  get?: { state: "none" | "getting" | "done" | "failed"; have: number };
+}
+
+/** One icon of a set: its id (the face's `set:<set>/<id>`), its number in the grid, its name and extra search words. */
+export interface InboxIconSetIcon {
+  id: string;
+  n: number;
+  name: string;
+  words?: string[];
+}
+
+/** `GET /api/inbox/icon-sets/<set>`: the set and its icons; for a fetchable set, `have` lists the icons kept so far. */
+export interface InboxIconSetListing extends InboxIconSet {
+  icons: InboxIconSetIcon[];
+  have?: string[];
+}
+
+/** The most agents a person's faces are kept for: the latest choice last, the oldest forgotten past this. */
+export const INBOX_AGENT_FACES_KEPT = 200;
+/** The most session ids one agent's entry keeps (the newest linked last). */
+export const INBOX_AGENT_FACE_SESSIONS_MAX = 16;
+/** The longest agent or session id an entry takes. */
+export const INBOX_AGENT_FACE_ID_MAX = 200;
+
+/** One agent's face. */
+export interface InboxAgentFaceEntry {
+  face: Exclude<InboxAgentFace, "agent">;
+  /** Every session id this agent was or is (never its key itself), oldest first. */
+  sessions: string[];
+}
+
+/** One uploaded picture the Inbox keeps ("Your own…"): its hash, its type (sniffed from the bytes), when it was added (ms). */
+export interface InboxAgentIcon {
+  id: string;
+  type: string;
+  at: number;
+}
+
+/**
+ * `GET /api/inbox/agent-faces`, a write's answer and `event: agent-faces`. `rev` counts the saves (an upload or a
+ * removal counts as one). `icons`: the uploaded pictures, newest first; absent from an Inbox before uploads.
+ */
+export interface InboxAgentFacesWire {
+  faces: Record<string, InboxAgentFaceEntry>;
+  rev: number;
+  icons?: InboxAgentIcon[];
+}
+
+/** The most uploaded pictures kept: past it, the oldest one no agent shows goes. */
+export const INBOX_AGENT_ICONS_KEPT = 60;
+
+/** The uploaded pictures as a wire names them: well-formed entries only, at most the cap. */
+export function readInboxAgentIcons(value: unknown): InboxAgentIcon[] {
+  const out: InboxAgentIcon[] = [];
+  for (const raw of Array.isArray(value) ? value : []) {
+    const icon = raw as Partial<InboxAgentIcon> | null;
+    if (!icon || typeof icon.id !== "string" || !/^[0-9a-f]{64}$/.test(icon.id) || typeof icon.type !== "string" || typeof icon.at !== "number") continue;
+    if (!out.some((kept) => kept.id === icon.id)) out.push({ id: icon.id, type: icon.type, at: icon.at });
+  }
+  return out.slice(0, INBOX_AGENT_ICONS_KEPT * 2);
+}
+
+/** `POST /api/inbox/agent-faces`: one agent's face (`agent`: forget it), or this browser's faces from before (`adopt`). */
+export type InboxAgentFaceChange = { agent: string; sessions?: string[]; face: InboxAgentFace } | { adopt: Record<string, InboxAgentFace> };
+
+const isId = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= INBOX_AGENT_FACE_ID_MAX && value.trim() === value;
+
+/** A list of session ids as an entry keeps it: ids only, no repeat, never `key`, at most the newest MAX. */
+export function cleanInboxFaceSessions(value: unknown, key: string): string[] {
+  const out: string[] = [];
+  for (const item of Array.isArray(value) ? value : []) if (isId(item) && item !== key && !out.includes(item)) out.push(item);
+  return out.slice(-INBOX_AGENT_FACE_SESSIONS_MAX);
+}
+
+/** A faces map as read from a file, a write's answer or an event: entries that do not parse are dropped. */
+export function readInboxAgentFaces(value: unknown): Record<string, InboxAgentFaceEntry> {
+  const out = Object.create(null) as Record<string, InboxAgentFaceEntry>;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return out;
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    const entry = raw as { face?: unknown; sessions?: unknown } | null;
+    if (!isId(key) || !entry || typeof entry !== "object" || !isInboxAgentFace(entry.face) || entry.face === "agent") continue;
+    out[key] = { face: entry.face, sessions: cleanInboxFaceSessions(entry.sessions, key) };
+  }
+  return out;
+}
+
+/** Whether `id` is a key or session an agent face entry may name. */
+export const isInboxAgentFaceId = isId;

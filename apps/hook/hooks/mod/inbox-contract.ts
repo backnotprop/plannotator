@@ -21,6 +21,7 @@ export const INBOX_TOOL_ACTIONS = [
   'search',
   'resolve_message',
   'snooze_thread',
+  'thread_pulls',
   'submit_guide',
   'get_guide_brief',
   'card',
@@ -376,7 +377,7 @@ export const INBOX_TOOL_BOARD_OFF_NOTE = "The Board (cards for work that outlast
  * `inboxSteps`): off, no agent text carries any of it.
  */
 export const INBOX_STEPS_LEAD =
-  "The person's checklist for this thread, only for multi-step work you're both aligned on. High-level steps, a few plain words each; never your own to-do list. The whole list each call. status: todo, doing, done, waiting (on the person), dropped (say why in note). Update each step as it starts and ends; notifies no one."
+  "The person's checklist for this thread, only for multi-step work you're both aligned on. Start one when the person gives the go-ahead on work with several steps. High-level steps, a few plain words each; never your own to-do list. The whole list each call. status: todo, doing, done, waiting (on the person), dropped (say why in note). Update each step as it starts and ends; notifies no one."
 
 /** The agent tool's line for the `steps` action (the owner, 2026-11-07): short, so the description stays under 2,048. */
 export const INBOX_STEPS_ACTION_LINE = "person's checklist for multi-step work you're aligned on (see the steps field)."
@@ -395,6 +396,68 @@ export function inboxStepsWakeLine(steps: { done: number; total: number; doing: 
   return `Your checklist here: ${steps.done} of ${steps.total} done${steps.doing ? `; doing: ${steps.doing}` : ''}. If you're still working on this, keep it current.`
 }
 
+/**
+ * A thread's PRs (approval "inbox-pr-binding", 2026-11-08; the owner's
+ * approved text, word for word). send_message's `pulls` field: through the
+ * MCP server's field, every connection's `plannotator_inbox` tool carries it.
+ */
+export const INBOX_PULLS_FIELD_DESCRIPTION =
+  "Pull/merge requests this thread is responsible for: added to the thread, so the person sees their live state on its row. You own your thread's list. Full refs, any repo: `owner/repo#123`, `group/sub/project!45`, or the URL. Pass it when you open or take on one for this work, not on later messages. Merged ones stay. To remove one that is no longer part of the work, or add without a message: action thread_pulls."
+
+/** The `thread_pulls` tool's description (approved text). The agent tool lists the name only (INBOX_AGENT_ACTIONS_NO_LINE). */
+export const INBOX_THREAD_PULLS_DESCRIPTION =
+  "A thread's pull/merge requests: `add`, `remove`, or neither to list them with live state and who added each. The thread's agent owns the list; the person can change it too."
+
+/** The `thread_pulls` tool's `add` field (approved text). */
+export const INBOX_THREAD_PULLS_ADD_DESCRIPTION = "PRs to add, any number in one call (a whole stack, or related ones), as send_message's `pulls`."
+
+/** The `thread_pulls` tool's `remove` field (approved text). */
+export const INBOX_THREAD_PULLS_REMOVE_DESCRIPTION =
+  'PRs to take off: no longer part of this work (moved elsewhere, abandoned). Not merged ones; they stay. ["all"] takes off every one.'
+
+/**
+ * The wake's one line when the person changed the thread's PRs since the
+ * session last saw them (approved text): "The person changed this thread's
+ * PRs: added northwind/design-tokens#88; removed northwind/web-app#1305."
+ * An edit alone never wakes anyone: the line rides the next wake.
+ */
+export function inboxPullsWakeLine(changes: { added: readonly string[]; removed: readonly string[] }): string {
+  const parts = [
+    ...(changes.added.length > 0 ? [`added ${changes.added.join(', ')}`] : []),
+    ...(changes.removed.length > 0 ? [`removed ${changes.removed.join(', ')}`] : []),
+  ]
+  return `The person changed this thread's PRs: ${parts.join('; ')}.`
+}
+
+/** A command's `pulls_changed` as the wake may print it, or null (absent, empty, or not the Inbox's shape). */
+function wakePullsChanged(value: unknown): { added: string[]; removed: string[] } | null {
+  if (!value || typeof value !== 'object') return null
+  const list = (v: unknown): string[] | null => {
+    if (!Array.isArray(v) || v.length > 20) return null
+    const out: string[] = []
+    for (const item of v) {
+      // One ref each, no control or separator characters: it goes into the session's prompt.
+      if (typeof item !== 'string' || item.length === 0 || item.length > 300 || /[\p{Cc}\p{Zl}\p{Zp}\s,;]/u.test(item)) return null
+      out.push(item)
+    }
+    return out
+  }
+  const { added, removed } = value as Record<string, unknown>
+  const a = list(added ?? [])
+  const r = list(removed ?? [])
+  if (!a || !r || a.length + r.length === 0) return null
+  return { added: a, removed: r }
+}
+
+/**
+ * The wake's one line when the person's reply answers the receiving session's
+ * questions in a thread where that session has no checklist yet, while the
+ * person has the checklist on (the owner, 2026-11-09: "when the person answers
+ * questions"). Never on a plain reply or a 👍; never once the session has a
+ * list there.
+ */
+export const INBOX_STEPS_START_WAKE_LINE = "If these answers start work with several steps, start a checklist here (the steps action). If not, skip it."
+
 /** A command's `steps` as the wake may print it, or null (absent, or not the Inbox's shape). */
 function wakeSteps(value: unknown): { done: number; total: number; doing: string | null } | null {
   if (!value || typeof value !== 'object') return null
@@ -411,7 +474,7 @@ function wakeSteps(value: unknown): { done: number; total: number; doing: string
  * and its field's description say what they do, and a field description does
  * not count toward the 2,048 (the owner: do not grow the main description).
  */
-export const INBOX_AGENT_ACTIONS_NO_LINE: readonly string[] = ['snooze_thread']
+export const INBOX_AGENT_ACTIONS_NO_LINE: readonly string[] = ['snooze_thread', 'thread_pulls']
 
 /**
  * The agent tool's own line for an action whose Inbox lead is long (the
@@ -419,7 +482,7 @@ export const INBOX_AGENT_ACTIONS_NO_LINE: readonly string[] = ['snooze_thread']
  * OpenCode request carries it).
  */
 export const INBOX_AGENT_ACTION_LEADS: Readonly<Record<string, string>> = {
-  send_message: "Message the person (markdown), in your session's open thread (see `thread`).",
+  send_message: "Message the person (markdown); with no reply_to or thread, it starts a new thread.",
   resolve_message: "Archive a message's thread, only when nothing in it is left for the person to read or answer.",
   // What a read shows lives on `thread_id` (a field description does not count toward the 2,048).
   read_thread: 'Read a thread (thread_id); with no id, list your threads (asked_by "anyone": all).',
@@ -436,6 +499,13 @@ export const INBOX_AGENT_ACTION_LEADS: Readonly<Record<string, string>> = {
  * was). Fixed text: the agent tool's `body` field, the MCP server's `body`
  * field and `plannotator inbox --help` carry it whole.
  */
+/**
+ * Option lines (approval "inbox-question-tradeoffs"; DRAFT words, awaiting the owner's OK): `Pros:`, `Cons:` and
+ * `Prototype:` under a `- [ ]` choice, and a question's own `Prototype:` line. On every copy of send_message's body.
+ */
+export const INBOX_OPTION_LINES_RULE =
+  'Indented under a `- [ ]` choice (not a plain bullet), only when it helps the person pick: `Pros: <item>; <item>` and `Cons: <item>; <item>` (the card lines them up across options), and `Prototype: <page>`, a page they try before picking: an HTML file you also attach, or the http://localhost address of an app you are running (the send is refused if it does not answer). One `Prototype:` line at the block\'s own indent is one page for all the options.'
+
 export const INBOX_PICTURES_RULE =
   'Pictures go in the body where you write about them, `![alt](/abs/path.png)`, never only in `attachments`; do not also attach one the body shows. Visual options are picture choices, one picture each, inside the choice (not in the text above the question): `- [ ] A · Label — ![alt](path) what it means`; the label comes back.'
 
@@ -502,6 +572,7 @@ export const INBOX_AGENT_FIELD_DESCRIPTIONS: Readonly<Record<string, Readonly<Re
       INBOX_PICTURES_RULE,
       '',
       'Optional lines after the question; most questions need none of these: `Stakes: <what it affects>` (give one with every Stopped or Holds up), `Shows: ![alt](path)` or `Shows: [name](file)` (the one picture or file it is about), `Why: <why your recommendation>` on its own line, `Reversible: no — <why>` only when it cannot be undone.',
+      INBOX_OPTION_LINES_RULE,
       '',
       'Only for a true blocker the person must go and do outside this chat, that you cannot do yourself (approve a deploy, sign in, touch a security key, merge a PR you cannot merge), write a `:::action` block: first line the order, then why. Each command the person must run goes in the why in its own fenced code block (```), one block per command in the order to run them, so each gets a copy button. Optional: `Where: <url>`, `Stopped:`, `Watching: <what you watch>`. Never for a decision or a question, for what you can do yourself, or as a checklist or status update; most messages need none. Done or Can\'t do it comes back under "Action items you asked for".',
       '',
@@ -510,13 +581,13 @@ export const INBOX_AGENT_FIELD_DESCRIPTIONS: Readonly<Record<string, Readonly<Re
       INBOX_REF_LINK_RULE,
     ].join('\n'),
     reply_to: `A message id: post this as a reply in that message's thread. ${INBOX_REPLY_TO_CHECK}`,
-    thread: "A short thread name, one line, to keep separate work apart: the same name in this project is the same open thread, across sessions. Without it, your messages join your session's open thread. Ignored with reply_to, except when you are asked to name a thread the person started: then it names that thread, once.",
+    thread: "A short thread name, one line: the same name in this project is the same open thread, across sessions. With no thread and no reply_to, the message starts a new thread; to add to a thread, reply_to its latest message or use the same thread name. Ignored with reply_to, except when you are asked to name a thread the person started: then it names that thread, once.",
     supersedes: 'Your own questions in this thread that are still open (read_thread state open or picked) and no longer apply: a newer message replaces them, or the reply settled them in words. "<message id>/<key>" for one, "<message id>" for all of that message\'s, as a list of strings, e.g. ["msg_…/q-…"]; send with reply_to into their thread. With one question in this message it replaces them, otherwise they read "No longer applies".',
     done: 'Your own open action items (`:::action`) in this thread that you saw done yourself, e.g. the deploy you watch is Ready: "<message id>/<key>" (key a-…); send with reply_to into their thread. The card says you saw it done; nothing is sent to the person.',
     attachments: `Files to show the person beside the message, absolute or relative to project_path: a plan, an HTML mock, code, a video, any file. ${INBOX_ATTACHMENTS_PICTURES_LINE} Link one from the body (\`[the mock](mock.html)\`) to open it beside the thread. Their comments on the files come back in the reply. Folders and .env files are refused.`,
   },
   read_thread: {
-    thread_id: 'A thread id. read_thread shows its open questions, the newest messages in full, and earlier ones one line each.',
+    thread_id: 'A thread id. read_thread shows its open questions, its PRs, the newest messages in full, and earlier ones one line each.',
   },
   submit_guide: {
     guide: "The guide in get_guide_brief's output_schema, as an object or its JSON.",
@@ -1238,6 +1309,20 @@ export interface InboxReplyCommand {
    */
   steps?: { done: number; total: number; doing: string | null }
   /**
+   * What the person changed in the thread's PRs since the receiving session
+   * last saw them (approval "inbox-pr-binding"), each PR as an agent writes
+   * it: the wake adds `inboxPullsWakeLine`. Only on a wake for the thread's
+   * owner; absent otherwise, and an older connection ignores it.
+   */
+  pulls_changed?: { added: string[]; removed: string[] }
+  /**
+   * The person's reply answers the receiving session's questions in a thread
+   * where it keeps no checklist, while the person has steps on: the wake adds
+   * INBOX_STEPS_START_WAKE_LINE. Absent otherwise (and always with `steps`);
+   * an older connection ignores it.
+   */
+  steps_start?: true
+  /**
    * What the wake's details line says about the thread (approval
    * "inbox-wake-context"). Absent on a Tidy, a 👍, a hand-off notice and a
    * brand new thread; an older connection ignores it and delivers `body` as
@@ -1376,6 +1461,20 @@ export const INBOX_SEND_NOW_POLL_FIELD = 'send_now'
  * An older Inbox ignores it; an older connection never sends it.
  */
 export const INBOX_HELD_POLL_FIELD = 'held'
+
+/**
+ * The poll field by which a connection says which session ids its
+ * conversation continues, nearest first (a string, or a list of at most 8):
+ * the host gave the conversation a new session id (Claude Code's branch of a
+ * conversation, whose transcript names the session it came from, and its
+ * hand-over to a new session, which the old transcript records). Set by the
+ * host from its own records, never by the model: it is no tool argument.
+ * While a session it names is not live, the Inbox hands this session what
+ * waits for that one (packages/server/inbox-continuations.ts); a session that
+ * still polls keeps its own. An older Inbox ignores it; an older connection
+ * never sends it.
+ */
+export const INBOX_CONTINUES_POLL_FIELD = 'continues'
 
 /**
  * On a poll, the connection's tick goes on polling while a steer waits for the running turn. A connection without it
@@ -1746,6 +1845,8 @@ export function inboxWakeText(
     reask_one?: unknown
     tidy?: boolean
     steps?: unknown
+    pulls_changed?: unknown
+    steps_start?: unknown
     context?: unknown
   },
   now: number = Date.now(),
@@ -1760,9 +1861,13 @@ export function inboxWakeText(
     const thread = wakeThreadId(command.thread_id)
     return `Plannotator Inbox: ${ackSubject} (${command.id})\n${inboxAckLine(command.ack_of, command.ack_reaction)}${thread ? `\n\n[thread ${thread}]` : ''}`
   }
-  // The session's steps in this thread (approval "inbox-thread-steps"), its own paragraph before the closing line.
+  // The session's steps in this thread (approval "inbox-thread-steps"), its own paragraph before the closing line;
+  // with none there yet and the person's answers in this reply, the line that says when to start one.
   const steps = wakeSteps(command.steps)
-  const closing = `${steps ? `\n\n${inboxStepsWakeLine(steps)}` : ''}\n\n${INBOX_WAKE_CLOSING_LINE}`
+  // What the person changed in the thread's PRs (approval "inbox-pr-binding"), its own paragraph too.
+  const pulls = wakePullsChanged(command.pulls_changed)
+  const stepsLine = steps ? inboxStepsWakeLine(steps) : command.steps_start === true ? INBOX_STEPS_START_WAKE_LINE : ''
+  const closing = `${pulls ? `\n\n${inboxPullsWakeLine(pulls)}` : ''}${stepsLine ? `\n\n${stepsLine}` : ''}\n\n${INBOX_WAKE_CLOSING_LINE}`
   const { body, context } = inboxWakeCommand(command)
   const details = inboxWakeDetailsLine(command.thread_id, context, { now, reask: command.reask === true, queued: wording.queued === true })
   const target = details ? inboxWakeReplyingLine((context as { replying_to?: unknown }).replying_to, now) : ''

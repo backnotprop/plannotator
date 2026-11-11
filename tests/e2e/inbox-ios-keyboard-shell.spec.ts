@@ -116,7 +116,7 @@ test.beforeAll(async () => {
     ...Array.from({ length: 6 }, (_, i) => `${i + 7}. ${PARAGRAPH}`),
     [':::question', 'Keep the footer sticky on phones?', '', '- [ ] Yes', '- [ ] No', ':::'].join('\n'),
   ].join('\n\n');
-  // Named threads: without one, both go to the session's default thread, and the question folds behind the newer message.
+  // Named threads, each its own: the question never folds behind a newer message.
   const reply = await agent.send({ project_path: project, subject: 'Checkout: the sticky footer on phones', thread: 'checkout-footer', body }, { wakes: true });
   const actionBody = [
     'The publish failed with E401.',
@@ -321,7 +321,10 @@ test.describe('WebKit as an iPhone 15 (iOS 26 keyboard)', () => {
     const pane = page.locator('section.ib-pane');
     // A drag on what does not scroll would pan the page in Safari: refused.
     expect.soft(await dragRefused(pane.locator('.ib-phead')), 'a drag on the header').toBe(true);
-    expect.soft(await dragRefused(field), 'a drag on a short draft').toBe(true);
+    // A short draft has nothing to scroll, so a drag on it is refused; unless the foot itself has more than the 257 px
+    // leave it room for (the taller reply box under a Draft line), where the drag scrolls the foot, never the page.
+    const footScrolls = await pane.locator('.ib-pfoot').evaluate((el) => el.scrollHeight > el.clientHeight + 1);
+    expect.soft(await dragRefused(field), 'a drag on a short draft').toBe(!footScrolls);
     // What scrolls keeps its drag: the thread, a code line wider than the phone, an overflowing draft.
     expect.soft(await dragRefused(pane.locator('.ib-pbody').first()), 'a drag on the thread').toBe(false);
     // The innermost box a finger lands on: the code's text, inside the block that scrolls.

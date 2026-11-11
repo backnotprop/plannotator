@@ -171,6 +171,21 @@ describe("plannotator guide", () => {
     expect(snap.source.pr?.number).toBe(7);
   });
 
+  test("export --guide keeps a chapter's Mermaid diagram (format version 5) and refuses any other kind", async () => {
+    writeFileSync(join(workDir, "guide.patch"), TWO_FILE_PATCH);
+    const diagram = { kind: "mermaid", source: "flowchart LR\n  a --> b" };
+    writeFileSync(join(workDir, "guide.json"), JSON.stringify({ ...AUTHORED, sections: [{ ...AUTHORED.sections[0], diagram }] }));
+    const res = await runGuideCli(["export", "--guide", "guide.json", "--patch", "guide.patch", "--out", "-"], {}, workDir);
+    expect(res.code).toBe(0);
+    const snap = embeddedSnapshot(res.stdout!);
+    expect(snap.version).toBe(5);
+    expect(snap.guide.sections[0].diagram).toEqual(diagram);
+    writeFileSync(join(workDir, "guide.json"), JSON.stringify({ ...AUTHORED, sections: [{ ...AUTHORED.sections[0], diagram: { kind: "html", source: "<b>x</b>" } }] }));
+    const html = await runGuideCli(["export", "--guide", "guide.json", "--patch", "guide.patch"], {}, workDir);
+    expect(html.code).toBe(1);
+    expect(html.stderr).toContain("sections[0].diagram");
+  });
+
   test("export --guide fails with actionable errors: unknown files (listing the patch's files), duplicates, bad shape, empty patch, usage", async () => {
     writeFileSync(join(workDir, "guide.patch"), TWO_FILE_PATCH);
     const write = (g: unknown) => writeFileSync(join(workDir, "guide.json"), JSON.stringify(g));

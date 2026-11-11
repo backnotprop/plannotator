@@ -65,9 +65,27 @@ Write the file to the repo root as `RELEASE_NOTES_v<VERSION>.md`.
 2. **"Missed recent releases?"** collapsible table — copy from the previous release's notes, then:
    - Add the previous release (the one you're succeeding) as the newest row
    - Keep roughly 10-12 rows; drop the oldest if needed
-   - Each row: version link + comma-separated feature highlights (short phrases)
+   - Each row: version link + comma-separated feature highlights (short phrases). For the previous release's row, use the words of its TL;DR lines (below), joined by commas, without the labels
 
 3. **"What's New in vX.Y.Z"** — the heart of the notes
+   - **TL;DR first.** Directly under the `## What's New in vX.Y.Z` heading, put a `### TL;DR` heading and a list of 3 to 5 lines. The Inbox's What's new page reads this block: it shows it at the top of the release and in its list of releases. GitHub shows it too.
+     ```markdown
+     ## What's New in v0.28.53
+
+     ### TL;DR
+
+     - **New:** Start an agent in a new folder, or from a git URL
+     - **New:** "+" on each project row starts a session there
+     - **Changed:** New message offers the open thread's files
+     - **Off by default:** Bro mode: agents write to you in plain words
+
+     Starting an agent from New message now covers a new folder, …
+     ```
+     - Write each line as `- **Label:** text`. Use only these labels, spelled exactly so: New, Changed, Fixed, Removed, Off by default.
+     - Keep each line extremely terse: 10 words or fewer, no full stop at the end. Say what the user sees, in the user's words, not in code terms.
+     - Put no links, PR numbers or names in the lines. Use `code` only for a setting or a variable that the user types.
+     - Put the biggest change first. Use Removed for something that is gone, and Off by default for a feature the user must turn on.
+     - Put nothing between the `### TL;DR` heading and its list. The opening sentences come after the list.
    - Open with 1-3 sentences summarizing the release theme and scope. Mention how many PRs, how many from external contributors, any first-timers.
    - Each major feature/fix gets its own `###` subsection with:
      - A descriptive heading (not the PR title verbatim — rephrase for clarity)
@@ -148,7 +166,7 @@ After the bump, and with `RELEASE_NOTES_v<VERSION>.md` in the repo root, run:
 bun scripts/feedback-search-index.ts
 ```
 
-It reads public release notes, open issue titles and open and merged PR titles with `gh`, and rewrites `packages/inbox/feedbackSearch.data.json`. If `gh` fails or nothing comes back, the file stays as it is.
+It reads public release notes, open issue titles, fixed closed issue titles (with the release whose notes link their fix) and open and merged PR titles with `gh`, and rewrites `packages/inbox/feedbackSearch.data.json`. If `gh` fails or nothing comes back, the file stays as it is.
 
 ---
 
@@ -293,6 +311,7 @@ Before tagging, verify:
 - [ ] Never `npm deprecate` the current `latest`: npm then picks the newest non-deprecated version for bare and range installs, so everyone silently stays behind. Ship a new version instead
 - [ ] Never reuse a version number once its bump commit is on `main`, even if the tag or publish failed: Claude Code caches plugins by version string, so a second build under the same number never reaches users who fetched the first. Bump again
 - [ ] Release notes drafted and reviewed
+- [ ] The notes start with a `### TL;DR` of 3 to 5 labelled lines, directly under "What's New in vX.Y.Z"
 - [ ] `bun run build:review` succeeded
 - [ ] `bun run build:hook` succeeded
 - [ ] `bun run build:opencode` succeeded

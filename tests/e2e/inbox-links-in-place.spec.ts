@@ -99,7 +99,7 @@ test.beforeAll(async () => {
   mkdirSync(join(alpha, 'docs'));
   writeFileSync(join(alpha, 'docs', 't2.md'), '# T2 file\n\nA file of the second thread.\n');
 
-  // A named thread each: an agent's next message in a project otherwise joins the thread it is in.
+  // A named thread each; a later message joins its thread by reply_to.
   const t2 = await agent.send({ project_path: alpha, subject: 'Second thread', thread: 'second-thread', body: `T2 first message.\n\n${filler(40, 'T2')}` });
   const T2 = t2.thread_id as string;
   const t2b = await agent.send({ project_path: alpha, reply_to: T2, body: 'T2 second message, the target of the link.', attachments: ['docs/t2.md'] });

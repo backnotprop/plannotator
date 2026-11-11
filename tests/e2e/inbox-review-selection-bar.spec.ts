@@ -102,7 +102,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const dataDir = join(root, 'data');
   markTourDecided(dataDir);
   const config = JSON.parse(readFileSync(join(dataDir, 'config.json'), 'utf8')) as Record<string, unknown>;
-  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...config, inboxCodeReview: true }));
+  // Show me in the bar rides Shape's own switch too (approval "code-review-029-shape-off").
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...config, inboxCodeReview: true, inboxShape: true }));
   // Nothing here may reach the real gh, glab or tailscale.
   const trap = join(root, 'trap');
   mkdirSync(trap);
@@ -366,6 +367,13 @@ test('Split: under the side the selection ends on', async () => {
   await setStyle(page, 'split');
 
   await select(page, LONG, 17, 19);
+  // The click left focus on the diff's root (tabindex -1) and the Shift press made it :focus-visible. It draws no
+  // ring: the clipping around the diff left only two lines, one above the file and one below it.
+  const ring = await page.evaluate(() => {
+    const el = document.activeElement as HTMLElement;
+    return { holdsDiff: !!el.querySelector('diffs-container'), focusVisible: el.matches(':focus-visible'), outline: getComputedStyle(el).outlineStyle };
+  });
+  expect(ring).toEqual({ holdsDiff: true, focusVisible: true, outline: 'none' });
   let g = await geometry(page);
   let box = clearOfLines(g);
   expect(Math.abs(box.left - g.codeAdditions!), 'the new side').toBeLessThan(1);
