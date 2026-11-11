@@ -16,6 +16,10 @@
  *    the Inbox, and the next thread's read queued in the browser for good.
  *  - A thread with a linked MR opens too, with the forge still unreachable.
  *  - The stuck glab is ended at its deadline: none is left running.
+ *  - The card says why (the errors system's tool states): a thread's GitHub
+ *    PR with the signed-out gh shows "gh isn't signed in to github.com" and
+ *    the exact command, the hover still answering at once; the stuck glab's
+ *    MR shows that glab didn't answer in 8 seconds.
  *
  * Build the binary first (see inbox.spec.ts). PLANNOTATOR_E2E_BINARY names
  * another binary (an older release, to see the bug). What each step saw lands
@@ -36,12 +40,14 @@ const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo
 
 const MR_A = 'https://gitlab.com/acme/widgets/-/merge_requests/7';
 const MR_B = 'https://gitlab.com/acme/widgets/-/merge_requests/8';
+const PR_GH = 'https://github.com/acme/widgets/pull/9';
 
 interface World {
   root: string;
   url: string;
   glabLog: string;
   mrThreads: string[];
+  ghThread: string;
   plainThreads: string[];
   claude: SimAgent;
 }
@@ -114,7 +120,8 @@ test.beforeAll(async () => {
     const sent = await claude.send({ project_path: project, thread: `mr ${i}`, subject: `Merge request thread ${i + 1}`, body: 'The MR is up.', pulls: [mr] } as never);
     mrThreads.push(sent.thread_id as string);
   }
-  world = { root, url, glabLog, mrThreads, plainThreads, claude };
+  const gh = await claude.send({ project_path: project, thread: 'gh pr', subject: 'GitHub pull request thread', body: 'The PR is up.', pulls: [PR_GH] } as never);
+  world = { root, url, glabLog, mrThreads, ghThread: gh.thread_id as string, plainThreads, claude };
 });
 
 test.afterAll(async () => {
@@ -213,7 +220,26 @@ test('hovering PR markers over a stuck forge never stalls the window, and the st
   save();
   await page.screenshot({ path: join(proofDir, `end-${name}.png`) });
 
+  // Why: the signed-out gh's PR. The hover answers at once with what is known, then says why, with the command.
+  const card = page.locator('[data-pr-popover]');
+  await page.locator(`.ib-lbody [data-thread-id="${world.ghThread}"] [data-pr-mark]`).first().hover();
+  const hoveredAt = Date.now();
+  await expect(card.locator('[data-pr-row], [data-problem]').first()).toBeVisible({ timeout: 3_000 });
+  seen.ghCardMs = Date.now() - hoveredAt;
+  await expect(card.locator('[data-problem="tool.signed_out"] [data-problem-title]')).toHaveText("gh isn't signed in to github.com", { timeout: 5_000 });
+  await expect(card.locator('[data-problem-command]')).toHaveText('gh auth login --hostname github.com');
+  await page.mouse.move(5, 5);
+  await page.waitForTimeout(400);
+  // The stuck glab's MR: its own state, not "try again".
+  await page.locator(`.ib-lbody [data-thread-id="${world.mrThreads[1]}"] [data-pr-mark]`).first().hover();
+  await expect(card.locator('[data-problem="tool.timed_out"] [data-problem-title]')).toHaveText("glab didn't answer in 8 seconds", { timeout: 15_000 });
+  seen.mrProblem = 'tool.timed_out';
+  save();
+  await page.screenshot({ path: join(proofDir, `why-${name}.png`) });
+
   for (const text of cards) expect(text).not.toContain('Loading');
+  // At once: the card's hover delay (400 ms) plus one local read.
+  expect(seen.ghCardMs as number).toBeLessThan(1_500);
   expect(opens.every((ms) => ms !== null)).toBe(true);
   expect(seen.mrOpenMs).not.toBeNull();
   expect(seen.afterReloadOpenMs).not.toBeNull();

@@ -20,6 +20,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxThreadPullWire, InboxThreadPullsAnswer, InboxThreadPullsSummary, InboxThreadPullState } from '@plannotator/core/inbox-types';
 import { inboxThreadPullGroups, inboxThreadPullWire, parseInboxThreadPullRef } from '@plannotator/core/inbox-types';
+import { toolProblem } from '@plannotator/core/problem-words';
 import { pullsMarkWords, threadPullsBus } from './model';
 
 const hasDom = typeof document !== 'undefined';
@@ -346,6 +347,35 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
       expect(popover()!.textContent).toContain('Seven from the forge');
     } finally {
       setRefCardTransport(null);
+    }
+  });
+
+  test("a PR the Inbox could not read: why shows under what is known, Copy copies the exact command, Try again asks again", async () => {
+    const problem = toolProblem('signed_out', { cli: 'glab', host: 'gitlab.example.dev', kind: 'pull' });
+    answer = answerOf([pull('https://gitlab.example.dev/acme/api/-/merge_requests/45', 'open', 'main', 'a', { problem })]);
+    const copied: string[] = [];
+    const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text: string) => void copied.push(text) } });
+    try {
+      render(<ThreadPullsButton threadId={THREAD} summary={undefined} />);
+      await settle();
+      await click(host!.querySelector('[data-pr-button]'));
+      const card = popover()!;
+      // What is known (the row) stays above why.
+      expect(card.querySelector('[data-pr-row]')).not.toBeNull();
+      expect(card.querySelector('[data-problem="tool.signed_out"] [data-problem-title]')!.textContent).toBe(problem.title);
+      await click(card.querySelector('[data-problem-copy]'));
+      expect(copied).toEqual(['glab auth login --hostname gitlab.example.dev']);
+      // A timeout offers Try again, which reads with retry.
+      answer = answerOf([pull('o/r#8', 'open', 'main', 'b', { problem: toolProblem('timed_out', { cli: 'gh', host: 'github.com', kind: 'pull' }) })]);
+      await act(async () => threadPullsBus.emit(THREAD));
+      await settle();
+      reads = [];
+      await click(popover()!.querySelector('[data-problem-retry]'));
+      expect(reads.some((path) => path.endsWith('/pulls?retry=1'))).toBe(true);
+    } finally {
+      if (clipboard) Object.defineProperty(navigator, 'clipboard', clipboard);
+      else delete (navigator as { clipboard?: unknown }).clipboard;
     }
   });
 

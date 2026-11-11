@@ -69,7 +69,7 @@ function world(options: { fixture?: () => ThreadPullFixture | null; gh?: { run: 
     now: () => now,
   });
   const path = (id: string) => `/api/inbox/threads/${id}/pulls`;
-  const get = (id: string, owner = true) => route.route(new Request(`http://x${path(id)}`), path(id), owner);
+  const get = (id: string, owner = true, query = "") => route.route(new Request(`http://x${path(id)}${query}`), path(id), owner);
   const post = (id: string, body: Record<string, unknown>, owner = true) =>
     route.route(new Request(`http://x${path(id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), path(id), owner);
   const agentAdd = (id: string, ...values: string[]) => {
@@ -77,7 +77,7 @@ function world(options: { fixture?: () => ThreadPullFixture | null; gh?: { run: 
     if ("error" in parsed) throw new Error(parsed.error);
     return store.changeThreadPulls({ thread_id: id, add: parsed.refs, by: { kind: "agent", session: "ses_a", host: "claude-code", name: "Claude Code" } });
   };
-  return { store, project, thread, get, post, agentAdd, gh, advance: (ms: number) => (now += ms) };
+  return { store, project, thread, get, post, agentAdd, gh, states, advance: (ms: number) => (now += ms) };
 }
 
 describe("the window's route", () => {
@@ -242,6 +242,53 @@ describe("a forge that never answers", () => {
     await w.get(w.thread);
     await settle();
     expect(heard).toHaveLength(1);
+  });
+});
+
+describe("why a PR could not be read (the card's tool state)", () => {
+  test("signed-out gh: the read answers at once, the windows hear of it, the next read carries the problem (the tool's own words stay here), and Try again reads the held failure again", async () => {
+    // The preload's fake GH_TOKEN would turn this into "the token in GH_TOKEN was refused": this is the plain case.
+    const token = process.env.GH_TOKEN;
+    delete process.env.GH_TOKEN;
+    try {
+      let signedIn = false;
+      const answered = fakeGh({ 3: { state: "OPEN" } });
+      const calls: string[][] = [];
+      // gh's own words, as gh 2.103 says them with no login (verified against the real gh in an empty GH_CONFIG_DIR).
+      const run = async (cli: string, args: string[]) => {
+        calls.push(args);
+        if (args[0] === "auth") return { stdout: "", stderr: "You are not logged into any GitHub hosts. To log in, run: gh auth login", exitCode: 1 };
+        if (!signedIn) return { stdout: "", stderr: "To get started with GitHub CLI, please run:  gh auth login\nAlternatively, populate the GH_TOKEN environment variable with a GitHub API authentication token.", exitCode: 4 };
+        return answered.run(cli, args);
+      };
+      const heard: string[][] = [];
+      const w = world({ gh: { run, calls }, onLiveChange: (ids) => heard.push([...ids]) });
+      w.agentAdd(w.thread, "o/r#3");
+      const first = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
+      expect(first.pulls[0]!.problem).toBeUndefined();
+      await settle();
+      expect(heard).toEqual([[w.thread]]);
+      const body = await (await w.get(w.thread))!.text();
+      const problem = (JSON.parse(body) as InboxThreadPullsAnswer).pulls[0]!.problem!;
+      expect(problem.code).toBe("tool.signed_out");
+      // The exact command the person copies (pinned on purpose: it is what they run).
+      expect(problem.action).toEqual({ kind: "copy_command", value: "gh auth login --hostname github.com" });
+      // What gh printed is kept on the server only.
+      expect(body).not.toContain("populate the GH_TOKEN");
+      expect(w.states.diag("github.com/o/r#3")?.last_line).toContain("populate the GH_TOKEN");
+      // Signed in since: a hover inside the failure hold runs nothing; Try again reads at once and the problem clears.
+      signedIn = true;
+      const ghCalls = () => calls.filter((c) => c[0] === "api").length;
+      const before = ghCalls();
+      await w.get(w.thread);
+      await settle();
+      expect(ghCalls()).toBe(before);
+      const retried = (await (await w.get(w.thread, true, "?retry=1"))!.json()) as InboxThreadPullsAnswer;
+      expect(retried.pulls.map((p) => [p.state, p.problem])).toEqual([["open", undefined]]);
+    } finally {
+      if (token === undefined) delete process.env.GH_TOKEN;
+      else process.env.GH_TOKEN = token;
+    }
   });
 });
 
