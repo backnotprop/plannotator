@@ -1,14 +1,3 @@
-/**
- * Every key sequence up to MAX_KEYS long over the Inbox's main views
- * (keyboard/model.ts), checked for the logic flaws keyboard-only use runs
- * into: a dead end Escape cannot get out of, focus left on the page, a key
- * that acts while the person types or with single keys off, a layer that
- * Escape does not put back exactly, and a model that has drifted from the
- * registry the window's keys are read from.
- *
- * A flaw found here is listed (with the shortest key path to it), never
- * skipped. Known, accepted gaps are in KNOWN, each with its reason.
- */
 import { describe, expect, test } from 'bun:test';
 import { listRegistryShortcuts } from '@plannotator/ui/shortcuts';
 import { inboxShortcutRegistry, isBareBinding } from '../shortcuts';
@@ -19,7 +8,6 @@ const reachable = [...explore(START, MAX_KEYS).values()];
 const fromFullScreenStart = [...explore({ ...START, remembered: 'full' }, MAX_KEYS).values()];
 const all = [...reachable, ...fromFullScreenStart];
 
-/** Single keys the model has that the registry does not list yet, each with why. */
 const HELD: Partial<Record<ModelKey, string>> = {};
 
 const at = (path: ModelKey[]) => (path.length === 0 ? '(start)' : path.join(' → '));
@@ -43,7 +31,6 @@ describe('the keyboard model, every sequence up to ' + MAX_KEYS + ' keys', () =>
     const flaws: string[] = [];
     for (const { state, path } of all) {
       let s = state;
-      // A text field's Escape leaves the field first (one extra press), then each layer takes one.
       for (let n = 0; n <= depth(state) + 1 && depth(s) > 0; n++) {
         const next = press(s, 'Escape');
         if (depth(next) > depth(s)) flaws.push(`${at(path)}: Escape opened a layer`);
@@ -101,7 +88,6 @@ describe('the keyboard model, every sequence up to ' + MAX_KEYS + ' keys', () =>
         const back = press(press(state, 'F'), 'Escape');
         if (JSON.stringify(view(back)) !== JSON.stringify(view(state))) flaws.push(`${at(path)}: F then Escape from beside the thread`);
       }
-      // Shift+O opens the grid; Shift+O again, or Escape, puts the thread back as it was, focus on the Artifacts button.
       if (state.page === 'inbox' && state.thread && state.file === 'none' && !state.artifacts) {
         const opened = press(state, 'Shift+O');
         for (const close of ['Shift+O', 'Escape'] as const) {
@@ -127,8 +113,6 @@ describe('the keyboard model, every sequence up to ' + MAX_KEYS + ' keys', () =>
     expect(missing).toEqual([]);
     // Held keys must still be missing: once one lands in the registry, take it out of HELD.
     for (const key of Object.keys(HELD) as ModelKey[]) expect([key, registry.has(key)]).toEqual([key, false]);
-    // Every registry single key the model leaves out is one that only steps, undoes, archives (the thread stays open,
-    // shown archived), refreshes (a read: view and focus stay) or opens the open-items list (no new view).
     const unmodelled = [...registry].filter((key) => !(MODEL_BARE_KEYS as readonly string[]).includes(key)).sort();
     expect(unmodelled).toEqual(['E', 'K', 'Q', 'Shift+E', 'Shift+K', 'Shift+R', 'Z', '[', ']']);
   });
