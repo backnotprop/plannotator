@@ -22,7 +22,7 @@ import { inboxImageSrcResolver } from './images';
 
 const hasDom = typeof document !== 'undefined';
 const { MessageBody } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
-const { PrototypeWindow, PICK_CLOSE_MS, openingOption } = (hasDom ? await import('./components/PrototypeWindow') : {}) as typeof import('./components/PrototypeWindow');
+const { PrototypeWindow, PICK_CLOSE_MS, openingOption, followPrototypeLink, optionForLink } = (hasDom ? await import('./components/PrototypeWindow') : {}) as typeof import('./components/PrototypeWindow');
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -194,4 +194,58 @@ test.skipIf(!hasDom)('the window opens on the recommended page; ‹ › skip an 
   } finally {
     globalThis.fetch = realFetch;
   }
+});
+
+// A link in a prototype's page works as in a tab (the owner, 2026-11-11: "I should be able to click and navigate").
+// Before, the window's page handed every link to no one: its own switcher (`?variant=2`), a link to another
+// option's page and a link to another site all did nothing.
+test.if(hasDom)('a link in a prototype: the page itself with a query reloads it, or steps to the option at that query; another option steps; another site opens a tab', () => {
+  const dir = '/work/roster/proto';
+  const file = (id: string, name: string) => ({ id, path: `${dir}/${name}`, named_path: null, name, kind: 'html' }) as unknown as import('@plannotator/core/inbox-types').InboxAttachmentState;
+  const files = [file('a1', '1-names.html'), file('a3', '3-unfold.html')];
+  const reloads: Array<[string, string | undefined]> = [];
+  const frame = { reload: (search: string, hash?: string) => (reloads.push([search, hash]), true) };
+  const opened: string[] = [];
+  const steps: string[] = [];
+  // The window's options: 3-unfold.html at ?variant=4 is an option of its own; nothing else of it is.
+  const onOpenPage = (id: string, start: string) => {
+    const option = (id === 'a1' && start === '') || (id === 'a3' && start === '?variant=4#top');
+    if (option) steps.push(`${id}${start}`);
+    return option;
+  };
+  const realOpen = window.open;
+  window.open = ((url: string) => (opened.push(url), null)) as typeof window.open;
+  try {
+    const follow = (href: string) => followPrototypeLink(href, frame, { attachment: files[1]!, html: '<p>page</p>', attachments: files }, onOpenPage);
+    follow('?variant=2&n=3');
+    follow('3-unfold.html?variant=4#top');
+    follow('1-names.html');
+    follow('https://example.com/docs');
+    // Not attached and not an option: the window shows no other file, so nothing moves.
+    follow('2-faces.html');
+    follow('../../etc/passwd');
+    expect(reloads).toEqual([['?variant=2&n=3', '']]);
+    expect(steps).toEqual(['a3?variant=4#top', 'a1']);
+    expect(opened).toEqual(['https://example.com/docs']);
+  } finally {
+    window.open = realOpen;
+  }
+});
+
+// Two options showing one file at different queries (`Prototype: mock.html?variant=1`, `…?variant=2`): a link
+// steps to the option at exactly that query; with no option there, the page itself reloads in place (undefined).
+test.if(hasDom)('optionForLink: the option at that file and query, else the first option of another file', () => {
+  const page = (attachmentId: string, start: string) => ({ kind: 'file' as const, attachmentId, name: 'mock.html', start });
+  const option = (letter: string, p: ReturnType<typeof page> | null) => ({ label: letter, letter, lettered: false, recommended: false, page: p });
+  const options = [option('A', page('m', '?variant=1')), option('B', page('m', '?variant=2')), option('C', null), option('D', page('o', ''))];
+  const steps = [0, 1, 3];
+  expect(optionForLink(options, steps, 'm', '?variant=2', 0)).toBe(1);
+  expect(optionForLink(options, steps, 'm', '?variant=1', 1)).toBe(0);
+  // A query no option has: the page itself reloads with it.
+  expect(optionForLink(options, steps, 'm', '?variant=3', 0)).toBeUndefined();
+  // The page itself by name with nothing after it: stay (a fresh load in place).
+  expect(optionForLink(options, steps, 'm', '', 0)).toBeUndefined();
+  // Another file by name: its first option.
+  expect(optionForLink(options, steps, 'o', '', 0)).toBe(3);
+  expect(optionForLink(options, steps, 'm', '', 3)).toBe(0);
 });

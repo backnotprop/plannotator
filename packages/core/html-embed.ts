@@ -154,6 +154,14 @@ export const EMBED_BOOTSTRAP = `(function () {
   }
   addEventListener("load", send);
   setTimeout(send, 0);
+  // A link to this page with a query (\`?view=2\`) loads it again with that
+  // query, in place: its scripts read it in location.search, as in a tab.
+  // The theme's fragment (as the page was first given it) stays unless the
+  // link names its own.
+  var themeHash = /(?:^#|&)pn=/.test(location.hash) ? location.hash : "";
+  var reload = function (query, hash) {
+    try { location.replace(location.pathname + query + (hash || themeHash)); } catch (e) {}
+  };
   document.addEventListener("click", function (e) {
     var a = e.target && e.target.closest ? e.target.closest("a[href]") : null;
     if (!a || e.defaultPrevented) return;
@@ -161,6 +169,23 @@ export const EMBED_BOOTSTRAP = `(function () {
     if (href.charAt(0) === "#") return;
     e.preventDefault();
     if (/^https?:\\/\\//i.test(href)) post({ kind: "link", url: href });
+    else if (href.charAt(0) === "?" && e.isTrusted) { var at = href.indexOf("#"); reload(at < 0 ? href : href.slice(0, at), at < 0 ? "" : href.slice(at)); }
+  });
+  // A GET form with no address of its own (or only a query) loads this page
+  // again with its fields as the query; the page's own submit handlers run
+  // first, and one that cancels wins. On the window, after them.
+  addEventListener("submit", function (e) {
+    var f = e.target;
+    if (e.defaultPrevented || !f || f.tagName !== "FORM") return;
+    var s = e.submitter || null;
+    var method = ((s && s.getAttribute("formmethod")) || f.getAttribute("method") || "get").toLowerCase();
+    var action = ((s && s.getAttribute("formaction")) || f.getAttribute("action") || "").trim();
+    if (method !== "get" || (action !== "" && action.charAt(0) !== "?")) return;
+    e.preventDefault();
+    var q = new URLSearchParams();
+    try { new FormData(f, s).forEach(function (v, k) { if (typeof v === "string") q.append(k, v); }); }
+    catch (x) { new FormData(f).forEach(function (v, k) { if (typeof v === "string") q.append(k, v); }); }
+    reload("?" + q.toString(), "");
   });
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape" && !e.defaultPrevented) post({ kind: "escape" });

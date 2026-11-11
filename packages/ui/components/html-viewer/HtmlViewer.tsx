@@ -248,8 +248,45 @@ export interface HtmlViewerProps {
    *  (bounded and screened at the trust boundary) for the host to resolve —
    *  see `resolveHtmlLinkIntent`. In-page `#fragment` links are scrolled by
    *  the bridge and never reported. Never fires in live (`src`) sessions,
-   *  which navigate the proxied app for real. */
-  onOpenLink?: (href: string) => void;
+   *  which navigate the proxied app for real.
+   *
+   *  The second argument (`frame`) is for a host that serves the frame
+   *  (`frameUrl`): `frame.reload("?x=1", "#h")` loads the page's OWN served
+   *  document again with that query and fragment, in place (no history
+   *  entry), so the page's scripts read them in `location.search` and
+   *  `location.hash`, as in a tab. A host calls it for a link to the page
+   *  itself (`?variant=2`, `page.html?variant=2`). It answers false and does
+   *  nothing in srcdoc mode, which has no URL to carry a query. Hosts that
+   *  read only `href` are unchanged. */
+  onOpenLink?: (href: string, frame?: HtmlViewerFrame) => void;
+  /**
+   * Opt-in: the page's own navigation works as in a tab, for a person's
+   * click (never in Annotate, where a press pins and a link follows as
+   * before; never in live mode):
+   * - a form's submit button: the frame's sandbox has no `allow-forms`, so
+   *   the browser neither fires `submit` nor submits. The bridge fires
+   *   `submit` itself (the page's own handlers run, and may cancel it), and
+   *   a GET form that was not cancelled is reported through `onOpenLink` as
+   *   its address with the fields as the query (`?q=shoes`, or
+   *   `results.html?q=shoes` for a form with an `action`). Nothing is ever
+   *   posted;
+   * - an in-page `#` link still scrolls in the bridge, and also sets the
+   *   page's own `location.hash` (no history entry) and fires `hashchange`,
+   *   so a page that routes on its hash (tabs, steps) follows it.
+   * Absent → unchanged (a form does nothing; the hash stays).
+   */
+  pageNavigation?: boolean;
+  /**
+   * Opt-in, for a host that serves the frame (`frameUrl`): the query and
+   * fragment the page first loads with (`"?variant=2"`, `"#step-2"`,
+   * `"?variant=2#step-2"`), as a tab opened at `page.html?variant=2` would,
+   * so the page's scripts read them in `location.search` and `location.hash`.
+   * Only the served URL's query and fragment change (`servedFrameReloadUrl`);
+   * anything that is not a query and a fragment is ignored. A new value loads
+   * the page again with it. Srcdoc mode has no URL to carry it: ignored.
+   * Absent → unchanged.
+   */
+  frameStart?: string;
   /** Fragment to scroll to once this document's bridge is ready, for a
    *  linked document opened from a `#`-carrying link. Bare id, no `#`. */
   initialFragment?: string;
@@ -506,6 +543,53 @@ export interface HtmlViewerProps {
 /** What a host's served frame document says when it is no longer kept (`frameUrl`). */
 export const HTML_VIEWER_FRAME_GONE = SERVED_FRAME_GONE;
 
+/** The frame a link was clicked in, as `onOpenLink` hands it to the host. */
+export interface HtmlViewerFrame {
+  /**
+   * Load the page's own served document again with this query (`""` or
+   * `?…`) and fragment (`""` or `#…`), replacing the current entry. False,
+   * and nothing happens, when the frame is not served (srcdoc), not loaded
+   * yet, or the values are not a query and a fragment.
+   */
+  reload(search: string, hash?: string): boolean;
+}
+
+/**
+ * The served frame's own URL with a new query and fragment, or null. Only
+ * the query and fragment change: the result is always the served document's
+ * own path on its own origin, whatever `search` and `hash` hold.
+ */
+export function servedFrameReloadUrl(servedUrl: string | undefined, base: string, search: string, hash = ""): string | null {
+  if (!servedUrl || servedUrl === "about:blank") return null;
+  if (typeof search !== "string" || typeof hash !== "string") return null;
+  if (search !== "" && !search.startsWith("?")) return null;
+  if (hash !== "" && !hash.startsWith("#")) return null;
+  if (search.includes("#") || /[\u0000-\u001f\u007f]/.test(search + hash)) return null;
+  let own: URL;
+  try {
+    own = new URL(servedUrl, base);
+  } catch {
+    return null;
+  }
+  if (own.protocol !== "http:" && own.protocol !== "https:") return null;
+  const next = new URL(own.href);
+  next.search = search;
+  next.hash = hash;
+  return next.origin === own.origin && next.pathname === own.pathname ? next.href : null;
+}
+
+/**
+ * The served frame's first address (`frameStart`): its own URL with the query
+ * and fragment `start` names (`?variant=2`, `#step-2`, both), or the served URL
+ * unchanged when `start` is not a query and a fragment.
+ */
+export function servedFrameStartUrl(servedUrl: string, base: string, start: string): string {
+  const at = start.indexOf("#");
+  const search = at < 0 ? start : start.slice(0, at);
+  const hash = at < 0 ? "" : start.slice(at);
+  return servedFrameReloadUrl(servedUrl, base, search === "?" ? "" : search, hash === "#" ? "" : hash) ?? servedUrl;
+}
+
 /**
  * Render arbitrary HTML in a sandbox and adapt its validated bridge messages
  * to the same annotation controls used by the Markdown viewer.
@@ -572,6 +656,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       sandbox = HTML_VIEWER_SANDBOX,
       allowCommentImages = true,
       frameUrl,
+      pageNavigation = false,
+      frameStart,
     },
     ref,
   ) => {
@@ -708,6 +794,11 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     }, [servesFrame, srcdoc, frameAsk]);
     const servesFrameRef = useRef(servesFrame);
     servesFrameRef.current = servesFrame;
+    // The frame's address: the served document, with the query and fragment it starts at (`frameStart`).
+    const frameSrc = useMemo(
+      () => (servedUrl && frameStart && typeof window !== "undefined" ? servedFrameStartUrl(servedUrl, window.location.href, frameStart) : servedUrl),
+      [servedUrl, frameStart],
+    );
 
     // Error state for the bridgeScriptUrl path only: the inline path never
     // sets it (no timer, and a version mismatch there can only be a forged
@@ -849,6 +940,32 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       );
     }, [deliverUnanchored]);
 
+    // A link the bridge handed over, with the frame it was clicked in: a host
+    // serving the frame can load the page's own document again with a new
+    // query (`HtmlViewerFrame.reload`), in place, so no history entry is added
+    // (setting the frame's `src` would push one). Read through refs: the
+    // served URL is the one the frame was last given.
+    const onOpenLinkRef = useRef(onOpenLink);
+    onOpenLinkRef.current = onOpenLink;
+    const servedUrlRef = useRef<string | undefined>(servedUrl);
+    servedUrlRef.current = servedUrl;
+    const openLinkWithFrame = useCallback((href: string) => {
+      const frame: HtmlViewerFrame = {
+        reload: (search, hash = "") => {
+          const target = servesFrameRef.current ? servedFrameReloadUrl(servedUrlRef.current, window.location.href, search, hash) : null;
+          const win = iframeRef.current?.contentWindow;
+          if (!target || !win) return false;
+          try {
+            win.location.replace(target);
+            return true;
+          } catch {
+            return false;
+          }
+        },
+      };
+      onOpenLinkRef.current?.(href, frame);
+    }, []);
+
     const hook = useHtmlAnnotation({
       iframeRef,
       enabled: !readOnly,
@@ -860,7 +977,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       onResize: handleResize,
       live: liveSession,
       onPageChange,
-      onLinkClick: onOpenLink,
+      onLinkClick: onOpenLink ? openLinkWithFrame : undefined,
       onBridgePointer: handleBridgePointer,
       onUnanchoredChange: handleBridgeUnanchored,
       maxAdditionalTargets,
@@ -1264,6 +1381,12 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       );
     }, [iframeReadyVersion, annotateModeActive]);
 
+    // The page's forms and in-page links work as in a tab (`pageNavigation`).
+    useEffect(() => {
+      if (iframeReadyVersion === 0 || !pageNavigation || liveMode) return;
+      postToBridge({ type: `${PREFIX}set-page-navigation`, active: true });
+    }, [iframeReadyVersion, pageNavigation, liveMode]);
+
     // A native host decides link navigations itself (`hostNavigates`).
     useEffect(() => {
       if (iframeReadyVersion === 0 || !hostNavigates) return;
@@ -1604,7 +1727,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               {...(src
                 ? { src, ...(liveSandbox ? { sandbox: liveSandbox } : {}) }
                 : servesFrame
-                  ? { src: servedUrl, sandbox: srcdocSandbox(sandbox, hostNavigates) }
+                  ? { src: frameSrc, sandbox: srcdocSandbox(sandbox, hostNavigates) }
                   : { srcDoc: srcdoc, sandbox: srcdocSandbox(sandbox, hostNavigates) })}
               style={{
                 width: "100%",

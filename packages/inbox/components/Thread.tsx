@@ -46,7 +46,7 @@ import { OpenInCodeHover, OpenInCodeSpans, type OpenInSurface } from './OpenIn';
 import { stepsOf } from '../stepping';
 import { choiceLetters, optionOf, optionSetAddress, optionSetId, optionSetOf, parseOptionSetId } from '../optionSets';
 import { PrototypeWindow, TryPrototypeTab, openingOption, type PrototypeOption } from './PrototypeWindow';
-import { prototypeNames, prototypePageCount, questionPrototypePages } from '../prototypes';
+import { prototypeNames, prototypePageCount, prototypeStart, questionPrototypePages } from '../prototypes';
 import { artifactKey, artifactOfFile, newestViewableFile, openArtifactKey, threadArtifacts } from '../artifacts';
 import { ArtifactsView } from './ArtifactsView';
 import { ArtifactsBar, ThreadLinksView, ThreadViewSwitch } from './ThreadLinksView';
@@ -490,8 +490,11 @@ export function MessageBody({
   openInFiles?: boolean;
   /** The project's git `origin` (the thread payload's `project.repo`): bare `#123` refs link into it. */
   repo?: InboxProjectRepo | null;
-  /** A link in the body to one of this message's attachments was followed. */
-  onOpenAttachment: (attachment: InboxAttachment) => void;
+  /**
+   * A link in the body to one of this message's attachments was followed. `start`: an HTML page's query and
+   * fragment from the link (`mock.html?variant=2` → `?variant=2`), which the page opens with.
+   */
+  onOpenAttachment: (attachment: InboxAttachment, start?: string) => void;
   /** An image the body shows was clicked (or pressed): its captured file (`inline_images`) opens in the viewer. */
   onOpenInlineImage?: (image: InboxInlineImage) => void;
   /**
@@ -898,7 +901,7 @@ export function MessageBody({
         kind: 'open',
         title: openAttachmentTitle(attachmentDisplayPath(attachment, projectRoot)),
         href: attachmentDeepLink(message.thread_id, attachment.id),
-        open: () => openRef.current(attachment),
+        open: () => openRef.current(attachment, attachment.kind === 'html' ? prototypeStart(href) || undefined : undefined),
       };
     },
     [message.attachments, message.base_path, message.thread_id, message.id, projectRoot, replyFileList, openInFiles],
@@ -2918,6 +2921,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   /** Bumped when the person opens a file, so focus moves into its pane. */
   const [paneFocus, setPaneFocus] = useState(0);
   const paneRef = useRef<AttachmentPaneHandle>(null);
+  /** An HTML page opened by a link that named a query or fragment (`mock.html?variant=2`): the page opens with it. */
+  const [pageStart, setPageStart] = useState<{ id: string; start: string } | null>(null);
   /**
    * The thread's artifacts (artifacts.ts): one list, read by the Artifacts view
    * (newest first) and by the viewer's stepping and its peek (thread order, the
@@ -6873,7 +6878,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   openInFiles={codeReview}
                   {...(codeReview && isAgent && hasReview ? { contextNotes: noteChips(message.id) } : {})}
                   repo={thread.project.repo ?? null}
-                  onOpenAttachment={openFromMessage}
+                  onOpenAttachment={(attachment, start) => openFromMessage(attachment, null, start ? () => setPageStart({ id: attachment.id, start }) : undefined)}
                   onOpenInlineImage={(image) => openFromMessage(image)}
                   onOpenOptionSet={(key, image, choice) => openOptionSet(message.id, key, image, choice)}
                   onTryPrototype={isAgent ? (key) => setProto({ messageId: message.id, key }) : undefined}
@@ -7535,6 +7540,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     {openAttachment && (
       <AttachmentPane
         ref={paneRef}
+        pageStart={pageStart}
         attachment={openAttachment}
         pin={{ threadId: thread.thread_id, key: openArtifactKey(artifactList, openAttachment.id) }}
         attachments={allFiles}

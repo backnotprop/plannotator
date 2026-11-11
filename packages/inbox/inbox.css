@@ -2339,6 +2339,9 @@ p.ib-acct-line { margin: 0 0 6px 28px; font-size: var(--ib-fs-13, 13px); }
 .ib-contents-phone .ib-contents-list { padding: 0 6px 16px; }
 .ib-contents-phone nav button { min-height: 44px; font-size: var(--ib-fs-15, 15px); padding-top: 10px; padding-bottom: 10px; }
 .ib-htmlframe { position: absolute; inset: 0; }
+/* Full screen: an HTML page stops above the tools' control in its bottom right corner (AttachmentPane, `--ib-pageclear`),
+   so the page's own controls there are never under it. */
+.ib-view.ib-fullview .ib-htmlframe { bottom: var(--ib-pageclear, 0px); }
 /* An HTML page on a phone, part B "Fit the page" (pageSize.ts): one small icon in the page's top right corner (the
    owner's pick: "Just the icon no words"), a phone at Phone size, a laptop at Desktop size. It floats like the other
    tools and gathers with them. Desktop size lays the page out at a laptop's width and scales it to the phone's; pinch
@@ -2378,7 +2381,7 @@ p.ib-acct-line { margin: 0 0 6px 28px; font-size: var(--ib-fs-13, 13px); }
 :root.light .ib-view.ib-fullview .ib-linkband { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); }
 .ib-view.ib-fullview.ib-phone .ib-linkband { top: calc(10px + env(safe-area-inset-top)); left: 10px; right: 10px; max-width: none; }
 /* The page starts below the floating band, so nothing at its top is hidden under it. */
-.ib-view.ib-fullview .ib-linkedframe { margin-top: calc(var(--ib-linkband-h, 40px) + 20px); }
+.ib-view.ib-fullview .ib-linkedframe { margin-top: calc(var(--ib-linkband-h, 40px) + 20px); margin-bottom: var(--ib-pageclear, 0px); }
 .ib-view.ib-fullview.ib-phone .ib-linkedframe { margin-top: calc(var(--ib-linkband-h, 80px) + 16px + env(safe-area-inset-top)); }
 .pn-inbox .ib-view.ib-phone .ib-linkband .ib-btn, .pn-inbox .ib-view.ib-phone .ib-linkband-tab { min-height: 44px; display: inline-flex; align-items: center; }
 /* Why a link opened nothing: a note at the foot of the page for a moment (also said in the pane's live region). */

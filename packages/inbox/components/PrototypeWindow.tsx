@@ -13,6 +13,16 @@
  *   records, grouped by page in the export. A page that does not open (a
  *   guest login over the tailnet, say) is the server's words in one line.
  *
+ * A file's page opens with its `Prototype:` line's query and fragment
+ * (`proto/a.html?variant=2#step-2`), as a tab opens that address, so several
+ * options can show one file at different variants (each its own page).
+ * A link in a file's page works as in a tab: one to the page itself with a
+ * query (`?variant=2`, a GET form's fields) loads it again with that query, or
+ * steps to the option that shows the page at that query; one to another
+ * option's page steps to that option; one to another site
+ * opens a new tab; an in-page `#` link scrolls (the bridge). Anything else
+ * stays put (the window shows no other file).
+ *
  * The window opens on Interact, with Annotate one click away. Its bottom row
  * (‹ option › Pick) is the window's own, under the page: never drawn over it
  * and never put into it. ‹ › step through the options that have a page only
@@ -23,11 +33,13 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { HtmlViewer, LiveSiteViewer } from '@plannotator/ui/components/html-viewer';
+import { HtmlViewer, LiveSiteViewer, type HtmlViewerFrame } from '@plannotator/ui/components/html-viewer';
+import { htmlAssetRouteFromDocument } from '@plannotator/ui/utils/htmlLinkNavigation';
 import type { Annotation } from '@plannotator/ui/types';
 import type { InboxAnnotationRecord, InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { InboxApiError, inboxApi, type AttachmentView, type LiveSiteWire } from '../api';
 import { annotationOf } from '../attachments';
+import { folderOf, resolveInboxHtmlLink } from '../htmlLinks';
 import { useInboxFileSource } from '../fileSource';
 import { Icon } from '../icons';
 import { LIVE_FRAME_SANDBOX, type PrototypePage } from '../prototypes';
@@ -64,8 +76,24 @@ function shortUrl(url: string): string {
   return url.replace(/^https?:\/\//, '').replace(/\/$/, '');
 }
 
+/** One frame per page: a file at another query (`a.html?variant=2`) is another page, loaded fresh. */
 function pageKey(page: PrototypePage): string {
-  return page.kind === 'app' ? `app:${page.siteId}` : `file:${page.attachmentId}`;
+  return page.kind === 'app' ? `app:${page.siteId}` : `file:${page.attachmentId}${page.start}`;
+}
+
+/**
+ * The option a link in a page steps to, or undefined: the option showing that file at that query and fragment,
+ * else (a link with no query or fragment of its own, to another file) the first option showing that file.
+ */
+export function optionForLink(options: readonly PrototypeOption[], steps: readonly number[], attachmentId: string, start: string, from: number): number | undefined {
+  const shows = (i: number) => {
+    const page = options[i]!.page;
+    return page?.kind === 'file' && page.attachmentId === attachmentId ? page : null;
+  };
+  const exact = steps.find((i) => shows(i)?.start === start);
+  if (exact !== undefined) return exact;
+  if (start !== '' || shows(from)) return undefined;
+  return steps.find((i) => shows(i) !== null);
 }
 
 export function PrototypeWindow(props: {
@@ -184,6 +212,15 @@ export function PrototypeWindow(props: {
           <FilePage
             key={pageKey(page)}
             attachment={attachment}
+            attachments={props.attachments}
+            start={page.start}
+            onOpenPage={(attachmentId, start) => {
+              const to = optionForLink(options, pages, attachmentId, start, at);
+              if (to === undefined || to === at) return false;
+              setAt(to);
+              setJustPicked(false);
+              return true;
+            }}
             title={`Prototype ${option.label}`}
             armed={armed}
             setArmed={setArmed}
@@ -336,8 +373,42 @@ function AppPage(props: PageProps & { threadId: string; siteId: string; url: str
   );
 }
 
+/**
+ * What a link in a prototype's page does (the page's bridge hands it over): the page itself with a query loads again
+ * with it, another option's page steps to that option, another site opens a new tab. Anything else stays put.
+ */
+export function followPrototypeLink(
+  href: string,
+  frame: HtmlViewerFrame | undefined,
+  page: { attachment: Pick<InboxAttachmentState, 'id' | 'path'>; html: string | null; attachments: readonly InboxAttachmentState[] },
+  onOpenPage: (attachmentId: string, start: string) => boolean,
+): void {
+  const link = resolveInboxHtmlLink(href, {
+    folder: folderOf(page.attachment.path),
+    baseDir: folderOf(page.attachment.path),
+    attachments: page.attachments,
+    assetRoute: htmlAssetRouteFromDocument(page.html),
+    serverOrigin: window.location.origin,
+    selfPath: page.attachment.path,
+  });
+  // The page itself at another option's query (`?variant=2` where option B is `a.html?variant=2`) steps to that
+  // option; else it loads again with the query, in place.
+  if (link.kind === 'self') {
+    if (!onOpenPage(page.attachment.id, `${link.search === '?' ? '' : link.search}${link.hash}`)) frame?.reload(link.search, link.hash);
+  } else if (link.kind === 'external') window.open(link.url, '_blank', 'noopener,noreferrer');
+  else if (link.kind === 'attachment') onOpenPage(link.id, `${link.search ?? ''}${link.hash ? `#${link.hash}` : ''}`);
+}
+
 /** An HTML file the message attached, at the version that was sent, in the file viewer's own HTML frame. */
-function FilePage(props: PageProps & { attachment: InboxAttachmentState }) {
+function FilePage(
+  props: PageProps & {
+    attachment: InboxAttachmentState;
+    attachments: readonly InboxAttachmentState[];
+    /** The query and fragment the page opens with (its `Prototype:` line's), `""` for none. */
+    start: string;
+    onOpenPage: (attachmentId: string, start: string) => boolean;
+  },
+) {
   const { attachment } = props;
   const source = useInboxFileSource();
   const [view, setView] = useState<AttachmentView | null>(null);
@@ -394,6 +465,10 @@ function FilePage(props: PageProps & { attachment: InboxAttachmentState }) {
       onAnnotateModeExit={() => props.setArmed(false)}
       onAnnotateModeToggle={() => props.setArmed((v) => !v)}
       allowCommentImages={false}
+      // Links and forms work as in a tab (followPrototypeLink).
+      onOpenLink={(href, frame) => followPrototypeLink(href, frame, { attachment, html: view.html, attachments: props.attachments }, props.onOpenPage)}
+      pageNavigation
+      frameStart={props.start || undefined}
       fullViewport
       hideControls
     />
