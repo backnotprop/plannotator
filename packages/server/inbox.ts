@@ -231,8 +231,7 @@ import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest, isWindowRequest } from "./in
 import { createInboxLaunch } from "./inbox-launch";
 import { createInboxCodexAccount } from "./inbox-codex-account";
 import type { LaunchHost, LaunchHostContext } from "./inbox-launch-host";
-import { createLoginEnv, launchPlainEnv } from "./inbox-launch-env";
-import { createInboxClaudeNames, pluginTooOldForNames } from "./inbox-claude-names";
+import { createLoginEnv } from "./inbox-launch-env";
 import { inboxNamesShown, inboxSessionsShown } from "./inbox-session-names";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
 import { createInboxAsk } from "./inbox-ask";
@@ -1438,9 +1437,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           (await qwenWake.wakes(host, session, meta)) ||
           (await t3Wake.wakes(host, session)),
         bridgePolls: (host, session) => BRIDGE_WAKING_HOSTS.has(host) && live.pollsNow(host, session),
-        // Another session's name as the window's rows show it: the person's rename, else its generated title, else
-        // Claude Code's own name for it (inbox-session-names.ts). read_thread, steps, cards and PRs name sessions by it.
-        sessionName: (session) => live.labelOf(session) ?? live.titleOf(session) ?? claudeNames.of(session),
+        sessionName: (session) => live.labelOf(session) ?? live.titleOf(session),
         // The Board: the card tool is listed and served only while the person has it on.
         boardOn,
         // Thread steps: the steps tool and field are listed and served only while the person has them on.
@@ -4288,17 +4285,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     isGuest,
   });
   launchReady = true;
-  // Claude Code's own name for each live session (inbox-claude-names.ts): list rows only, on the plain env launch uses.
-  const claudeNames = createInboxClaudeNames({
-    environment: () => createAgentEnvironmentFor({ platform: process.platform, homeDir: process.env.PLANNOTATOR_TEST_SANDBOX ? join(dataDir, "agents-home") : homedir(), env: launchPlainEnv(launchOwnEnv(), [...launch.loginPath(), ...(process.env.PLANNOTATOR_TEST_SANDBOX ? [] : [join(homedir(), ".local", "bin"), join(homedir(), ".claude", "local")])]) }),
-    // A window is open and a live Claude Code session, on a plugin too old to send names, has no name or title.
-    wanted: () => {
-      if (deliveryListeners.size === 0) return false;
-      const titled = live.titles();
-      return live.agentSessions(live.clock()).some((entry) => entry.live && (entry.host === "claude-code" || entry.host === "claude") && !entry.label && !Object.hasOwn(titled, entry.session) && pluginTooOldForNames(live.pluginVersionOf(entry.session)));
-    },
-    onChange: live.titlesChanged,
-  });
   // No login-shell read at start: the launch module reads it the first time New message asks (`warmLogin`).
 
   // Compose: a new thread the person starts with a live agent, drafts and uploads (packages/server/inbox-compose.ts).
@@ -4857,14 +4843,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const merged = url.searchParams.get("machines") === "1";
         const snoozedMode = snoozedModeOf(url);
         const rows = perfPhase("rows", () => listModel(projectFilter, archivedMode, merged, snoozedMode));
-        // `session_labels` (additive, issue #2450): each session's label by id, for the rows' agents and a message's
-        // author. `session_titles` (additive, option A of 2026-11-10): a name for a session with none, for list rows
-        // only: the host's generated title, else Claude Code's own name for it (inbox-claude-names.ts). Display only,
-        // never stored. On the merged view, each linked machine's names too (its list carries them). Whoever sees a
-        // row sees its name (inbox-session-names.ts): a tailnet guest gets the names of the sessions its answer
-        // carries, and none of a session it is not shown.
+        // A guest gets only the names of sessions its own answer shows.
         const labels = merged ? { ...machines.sessionNames().labels, ...live.labels() } : live.labels();
-        const titles = { ...(merged ? machines.sessionNames().titles : {}), ...claudeNames.all(), ...live.titles() };
+        const titles = { ...(merged ? machines.sessionNames().titles : {}), ...live.titles() };
         const shown = ownerOrLocal(req, via) ? null : inboxSessionsShown(rows);
         const model = { ...rows, session_labels: shown ? inboxNamesShown(labels, shown) : labels, session_titles: shown ? inboxNamesShown(titles, shown) : titles };
         // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts); the rest of
@@ -6892,7 +6873,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     snoozes.stop();
     clearInterval(restartWatch);
     clearInterval(deliveryWatch);
-    claudeNames.stop();
     clearInterval(autoSendWatch);
     unsubscribeWaits();
     launch.stop();

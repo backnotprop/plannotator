@@ -29,7 +29,6 @@ import { INBOX_BRIDGE_EVENT_PATH, INBOX_BRIDGE_POLL_PATH, INBOX_SEND_NOW_POLL_FI
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { inboxScratch, rememberInboxOf, removeInboxScratch, stopScratchInbox } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
-import { claudeListingNoSessions } from './agent-cli-stubs';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -204,10 +203,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     join(root, '.claude', 'plugins', 'installed_plugins.json'),
     JSON.stringify({ version: 2, plugins: { 'plannotator@plannotator': [{ scope: 'user', installPath: pluginFolder('0.28.25'), version: '0.28.25', installedAt: '2026-10-04T22:07:24.658Z', lastUpdated: '2026-10-17T05:27:07.299Z' }] } }),
   );
-  // The session on plugin 0.28.21 sends no name, so the Inbox asks Claude Code for one: a stand-in answers.
-  const fakeBin = claudeListingNoSessions(join(root, 'fake-bin'));
   const env = {
-    PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+    PATH: process.env.PATH ?? '',
     HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,

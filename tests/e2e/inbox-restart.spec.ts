@@ -32,7 +32,6 @@ import { INBOX_BRIDGE_POLL_PATH } from '../../packages/shared/inbox/connection';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
-import { claudeListingNoSessions } from './agent-cli-stubs';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -163,10 +162,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   // Claude Code's plugin registry, in the scratch HOME: plugin 0.28.25 installed.
   const pluginFolder = (version: string) => join(root, '.claude', 'plugins', 'cache', 'plannotator', 'plannotator', version);
   writePluginRegistry(root, pluginFolder('0.28.25'), '0.28.25');
-  // Sessions on plugin 0.28.23 send no name, so the Inbox asks Claude Code for one: a stand-in answers.
-  const fakeBin = claudeListingNoSessions(join(root, 'fake-bin'));
   const env = {
-    PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
+    PATH: process.env.PATH ?? '',
     HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
