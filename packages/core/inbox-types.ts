@@ -1705,6 +1705,15 @@ export interface InboxListRow extends InboxThreadSummary {
   machine?: string;
   /** The thread's name (send_message's `thread`), or null for an unnamed thread. */
   thread_name: string | null;
+  /**
+   * The row's grey line (approval "inbox-row-latest-preview"): the thread's latest message as plain text, cut near
+   * `INBOX_ROW_PREVIEW_MAX` characters (core inbox-row-preview.ts): the newest unread agent message while one is
+   * unread, else the newest message, the person's own reply as "You: …". Null when there is nothing to show: an
+   * unnamed thread whose latest message is its first (its title already says it), or a message with no words. Only
+   * on the list model the window and the phone read (an agent's list row never carries it). Absent from an older
+   * Inbox: the window then shows the subject under a named thread, as before.
+   */
+  latest_preview?: string | null;
   section: InboxSectionId;
   /**
    * The session this thread would reach has ended, as the thread's own note and the delivery line know it (only a
