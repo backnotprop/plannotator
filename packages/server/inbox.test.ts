@@ -45,7 +45,8 @@ function gitProject(root: string, name = "api"): string {
 }
 
 async function start(dataDir: string, options: Parameters<typeof startInboxServer>[0] = {}): Promise<InboxServer> {
-  const server = await startInboxServer({ dataDir, ...options });
+  // On the JSONL files (`sqlite: false`): this test reads the record files or reopens the store on them.
+  const server = await startInboxServer({ sqlite: false, dataDir, ...options });
   servers.push(server);
   return server;
 }

@@ -39,7 +39,8 @@ async function setup() {
   const project = join(root, "ledger");
   mkdirSync(project, { recursive: true });
   const dataDir = join(root, "data");
-  const server = await startInboxServer({ dataDir });
+  // On the JSONL files (`sqlite: false`): this test reads the record files or reopens the store on them.
+  const server = await startInboxServer({ sqlite: false, dataDir });
   servers.push(server);
   const client = new Client({ name: "inbox-label-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
