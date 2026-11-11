@@ -5,6 +5,7 @@ on:
   pull_request:
     branches:
       - main
+      - ci/comments-only-lane
   push:
     branches:
       - main
