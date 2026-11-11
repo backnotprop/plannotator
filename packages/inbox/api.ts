@@ -869,6 +869,9 @@ export interface LanState {
   error: string | null;
 }
 
+/** Where Post decisions puts a thread's decisions: the PR's description (default), a comment, or a short section plus the comment. */
+export type DecisionsPostTo = 'description' | 'comment' | 'both';
+
 export class InboxApiError extends Error {
   constructor(
     readonly status: number,
@@ -1562,6 +1565,15 @@ export const inboxApi = {
   /** The person adds or removes a thread's PRs (the popover). `remove: ['all']` takes off every one. */
   changeThreadPulls: async (threadId: string, change: { add?: string[]; remove?: string[] }): Promise<InboxThreadPullsAnswer> =>
     threadPullsOf(await post<unknown>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/pulls`), change)),
+  /**
+   * Post decisions (Export decisions › Post on a pull request, and the PR card's row): the thread's decisions as one
+   * comment on one of its PRs, edited in place on a later post. `pull`: the PR as the thread writes it (`ref`).
+   */
+  postThreadDecisions: (threadId: string, pull: string, tz: string) =>
+    post<{ ok: true; action: 'created' | 'updated'; destination: DecisionsPostTo; ref: string; url: string; fallback?: 'no_permission' | 'too_long' }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/decisions/post`), { pull, tz }),
+  /** Where Post decisions puts them (config.json `inboxDecisionsPostTo`): the Post group's "Where to post". */
+  decisionsPostTo: async (): Promise<DecisionsPostTo> => (await get<{ post_to: DecisionsPostTo }>(inboxUrl('/settings/decisions-post'))).post_to,
+  saveDecisionsPostTo: async (postTo: DecisionsPostTo): Promise<DecisionsPostTo> => (await post<{ post_to: DecisionsPostTo }>(inboxUrl('/settings/decisions-post'), { post_to: postTo })).post_to,
   /**
    * The person looked at the thread. `throughSeq`: the seq of the newest
    * message the window showed; the look stops there, so a message that landed
