@@ -119,7 +119,12 @@ export function useThreadPulls(
   };
 }
 
-/** The card's open state and its pointer rules: a hover rests REF_CARD_DELAY_MS, leaving closes after REF_CARD_CLOSE_MS. */
+/**
+ * The card's open state and its pointer rules: a hover rests REF_CARD_DELAY_MS; once open, the card closes
+ * REF_CARD_CLOSE_MS after the pointer MOVES off both the mark and the card, or leaves the window. A leave the pointer
+ * did not make (the list shifted the row from under a resting pointer: a banner or a line drawn above it) closes
+ * nothing: nothing closes under the person.
+ */
 function usePopover() {
   const [open, setOpen] = useState<{ anchor: HTMLElement; sheet: boolean; pinned: boolean } | null>(null);
   const openTimer = useRef<number | null>(null);
@@ -134,6 +139,34 @@ function usePopover() {
     if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
     closeTimer.current = window.setTimeout(() => setOpen((now) => (now && !now.pinned && !now.sheet ? null : now)), REF_CARD_CLOSE_MS);
   };
+  const keep = () => {
+    if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
+    closeTimer.current = null;
+  };
+  // While a hover card is open, where the pointer moves decides: over the mark or the card keeps it, anywhere else
+  // closes it; leaving the window closes it too.
+  const hovering = !!open && !open.pinned && !open.sheet;
+  const anchor = open?.anchor ?? null;
+  useEffect(() => {
+    if (!hovering || !anchor) return;
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerType === 'touch') return;
+      const t = e.target instanceof Element ? e.target : null;
+      if (t && (anchor.contains(t) || t.closest('[data-pr-popover]'))) keep();
+      else if (closeTimer.current === null) scheduleClose();
+    };
+    const onOut = (e: PointerEvent) => {
+      if (e.pointerType !== 'touch' && e.relatedTarget === null) scheduleClose();
+    };
+    window.addEventListener('pointermove', onMove, { passive: true });
+    document.documentElement.addEventListener('pointerout', onOut);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      document.documentElement.removeEventListener('pointerout', onOut);
+    };
+    // scheduleClose and keep only touch refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hovering, anchor]);
   const hover = {
     onPointerEnter: (e: React.PointerEvent<HTMLElement>) => {
       if (e.pointerType === 'touch' || coarse()) return;
@@ -143,18 +176,14 @@ function usePopover() {
     },
     onPointerLeave: (e: React.PointerEvent<HTMLElement>) => {
       if (e.pointerType === 'touch' || coarse()) return;
+      // Not open yet: the hover did not rest, nothing opens. Open: the pointer's next move decides (above).
       if (openTimer.current !== null) window.clearTimeout(openTimer.current);
       openTimer.current = null;
-      scheduleClose();
     },
   };
   const cardHover = {
-    onPointerEnter: () => {
-      if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
-    },
-    onPointerLeave: (e: React.PointerEvent<HTMLElement>) => {
-      if (e.pointerType !== 'touch') scheduleClose();
-    },
+    onPointerEnter: keep,
+    onPointerLeave: () => undefined,
   };
   const close = () => {
     clear();

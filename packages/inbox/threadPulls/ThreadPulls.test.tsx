@@ -168,7 +168,13 @@ describe.skipIf(!hasDom)('the row mark', () => {
     expect(popover()).not.toBeNull();
     expect(reads).toHaveLength(1);
     expect(popover()!.querySelector('[aria-busy="true"]')!.textContent).toBe('Loading…');
-    await hover('pointerout');
+    // The list shifted the row from under the resting pointer (a banner drawn above it): the mark gets a pointerout
+    // the pointer never made. The card stays: nothing closes under the person.
+    await act(async () => mark.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', relatedTarget: host })));
+    await wait(300);
+    expect(popover()).not.toBeNull();
+    // The pointer moves off the mark and the card: the hover ended.
+    await act(async () => document.body.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse' })));
     await wait(300);
     expect(popover()).toBeNull();
     // The card closed: its read is aborted, so it holds no connection.
