@@ -8,7 +8,7 @@ import type { InboxEvent } from '../../api';
 import { threadOfRecord } from '../../openThreadReads';
 import { threadDrawReady } from '../../threadDrawReady';
 import { changeThread, heldThread, isThreadStale, staleThread, staleThreads } from '../queries/thread';
-import { applyRecord } from './record';
+import { applyRecord, recordMovesFiles } from './record';
 
 /**
  * What the record did to the cache: `applied` (its thread drawn anew from it), `none` (held, and nothing it shows
@@ -16,11 +16,26 @@ import { applyRecord } from './record';
  * stale now), `unheld` (not held, or held stale: the next read brings it whole), `any` (it may change any thread:
  * all are stale).
  */
-export type StreamOutcome = { threadId: string; kind: 'applied' | 'none' | 'reread' | 'unheld' } | { threadId: null; kind: 'any' };
+export type StreamOutcome = { threadId: string; kind: 'applied' | 'none' | 'reread' | 'unheld'; files?: boolean } | { threadId: null; kind: 'any' };
+
+/**
+ * How often a record fell back to a read (by kind and why), since the window opened: `reread` (its thread: the
+ * applier has no in-place case for what it says) and `any` (every held thread: a project's, or one not placed). A
+ * fallback is correct, only slower; these show what the applier still does not take in place.
+ */
+const fallbacks = new Map<string, number>();
+export function applierFallbacks(): Record<string, number> {
+  return Object.fromEntries(fallbacks);
+}
+const fellBack = (event: InboxEvent | null, why: 'reread' | 'any') => {
+  const key = `${event?.kind ?? 'unplaced'}:${why}`;
+  fallbacks.set(key, (fallbacks.get(key) ?? 0) + 1);
+};
 
 export function applyStreamRecord(client: QueryClient, event: InboxEvent | null): StreamOutcome {
   const threadId = event ? threadOfRecord(event) : null;
   if (!event || threadId === null) {
+    fellBack(event, 'any');
     staleThreads(client);
     return { threadId: null, kind: 'any' };
   }
@@ -28,8 +43,13 @@ export function applyStreamRecord(client: QueryClient, event: InboxEvent | null)
   // Not held, or held stale (it missed records): the next read brings it whole.
   if (!held || isThreadStale(client, threadId)) return { threadId, kind: 'unheld' };
   const outcome = applyRecord(held, event);
-  if (outcome.kind === 'reread') staleThread(client, threadId);
-  if (outcome.kind !== 'applied') return { threadId, kind: outcome.kind };
+  // Its files read apart (record.ts `recordMovesFiles`), on what is held before the record.
+  const files = recordMovesFiles(held, event);
+  if (outcome.kind === 'reread') {
+    fellBack(event, 'reread');
+    staleThread(client, threadId);
+  }
+  if (outcome.kind !== 'applied') return { threadId, kind: outcome.kind, files };
   // A message's code fences and math load their grammar first (#2593): it draws highlighted, never plain first.
   // Applied on what is held then: another record or a read may have landed meanwhile (`applied` keeps the order).
   const ready = event.kind === 'message' ? threadDrawReady(outcome.model.thread) : null;
@@ -42,5 +62,5 @@ export function applyStreamRecord(client: QueryClient, event: InboxEvent | null)
   };
   if (ready) void ready.then(write, write);
   else write();
-  return { threadId, kind: 'applied' };
+  return { threadId, kind: 'applied', files };
 }

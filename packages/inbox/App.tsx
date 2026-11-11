@@ -2231,11 +2231,11 @@ function Inbox() {
      */
     /** When the last record was heard (debug log on only, perfMarks.ts), for pn:record-refresh. */
     let heard: ReturnType<typeof perfStart> = null;
-    const readAfterRecord = (event: InboxEvent | null, how: { own?: string; now?: boolean; applied?: boolean } = {}) => {
+    const readAfterRecord = (event: InboxEvent | null, how: { own?: string; now?: boolean; applied?: boolean; files?: boolean } = {}) => {
       // Every answer this window's saves brought back so far is covered by the read about to start (ownSaves.ts).
       if (how.now) ownSaves.readsStarted();
       if (how.own) noteOwnRecord(batch, how.own);
-      else noteRecord(batch, event, how.applied);
+      else noteRecord(batch, event, how.applied, how.files);
       heard = perfStart();
       pause.ask(how.now === true);
     };
@@ -2264,6 +2264,7 @@ function Inbox() {
           });
           if (read === 'thread') threadRead = refreshThread(open);
           else {
+            if (read === 'files') filesSignal.emit();
             // Gone from the list this read brought (deleted elsewhere, which no record says): read it, as before.
             void listRead.then((next) => {
               if (routeRef.current.thread === open && !listsThread(next, open)) void refreshThread(open);
@@ -2431,7 +2432,7 @@ function Inbox() {
             emitFloaterEvent('record', null);
             return;
           }
-          readAfterRecord(event, own ? { own } : { applied });
+          readAfterRecord(event, own ? { own } : { applied, files: stream.kind !== 'any' && stream.files === true });
           // A floating draft's window reads its thread again (a new message, a hand-off).
           emitFloaterEvent('record', null);
         },

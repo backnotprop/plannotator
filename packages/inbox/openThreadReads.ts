@@ -31,11 +31,19 @@
  * decisions and the drafts, which show the pick too. The thread is read as
  * before when the list has no row for it or it is another machine's.
  *
+ * A launched thread is read on every record too: its run line ("Starting
+ * Pi again…") moves with no record of its own.
+ *
  * A read the records do not need is replaced by what it did besides: once
  * the list read lands, the thread is read after all when that list no longer
- * has it (it was deleted elsewhere: no record says so). Its files are read
- * only when a record changed a message's files (the pane decides,
- * data/queries/files.ts), and when the window comes back into focus.
+ * has it (it was deleted elsewhere: no record says so). Its files (and the
+ * comments waiting for a Send, which ride with them) are read when a record
+ * can have moved them (`files`, data/apply/record.ts `recordMovesFiles`): a
+ * comment added, edited or removed anywhere, or the agent at work (a new
+ * message, its read of the person's reply), so a file it edited or deleted on
+ * disk shows, as when every record read the thread. A message that brings files
+ * has the pane read them by itself (data/queries/files.ts), and so does the
+ * window coming back into focus. A look, Mark read, an archive or a pick reads none.
  */
 import { INBOX_REPO_TTL_MS, type InboxListRow, type InboxListSection } from '@plannotator/core/inbox-types';
 import type { InboxEvent } from './api';
@@ -56,10 +64,12 @@ export interface RecordBatch {
   applied: Set<string>;
   /** The threads of records that only echo this window's own question saves (not in `threads` for them alone). */
   own: Set<string>;
+  /** The threads of records that can change their files or waiting comments (see the header). */
+  files: Set<string>;
 }
 
 export function newRecordBatch(): RecordBatch {
-  return { any: false, threads: new Set(), applied: new Set(), own: new Set() };
+  return { any: false, threads: new Set(), applied: new Set(), own: new Set(), files: new Set() };
 }
 
 /** Note a record of this window's own question save, already drawn from the save's answer. */
@@ -74,13 +84,15 @@ export function onlyOwnRecords(batch: RecordBatch): boolean {
 
 /**
  * Note one record in the batch. `null`: a malformed frame, or a read owed with no record (a pick save's). `applied`:
- * the cache took it into the held thread in place.
+ * the cache took it into the held thread in place. `files`: it can have moved the thread's files or waiting comments
+ * (data/apply/record.ts `recordMovesFiles`).
  */
-export function noteRecord(batch: RecordBatch, event: InboxEvent | null, applied = false): void {
+export function noteRecord(batch: RecordBatch, event: InboxEvent | null, applied = false, files = false): void {
   const threadId = event ? threadOfRecord(event) : null;
   if (threadId === null) batch.any = true;
   else if (applied) batch.applied.add(threadId);
   else batch.threads.add(threadId);
+  if (threadId !== null && files) batch.files.add(threadId);
 }
 
 /** The one thread a record can change, or null when it can change any (or cannot be placed). */
@@ -94,10 +106,21 @@ export function threadOfRecord(event: InboxEvent): string | null {
       return id(event.thread_id);
     case 'annotation':
       return id(event.annotation?.thread_id);
-    default:
-      // A project (a rename, a combine, a label any thread's header reads), a card (the window hands those to the
-      // Board before this), or a kind this build does not know.
+    case 'steps':
+    case 'thread_pull':
+      return id(event.thread_id);
+    // A project (a rename, a combine, a label any thread's header reads), a Board card or initiative (the window
+    // hands those to the Board before this): any thread.
+    case 'project':
+    case 'card':
+    case 'initiative':
       return null;
+    default: {
+      // A kind this build does not know (a newer Inbox's): any thread. A kind added without a decision fails here.
+      const unknown: never = event;
+      void unknown;
+      return null;
+    }
   }
 }
 
@@ -106,8 +129,8 @@ export interface OpenThreadState {
   threadId: string;
   /** On another machine (`machineOf`). */
   remote: boolean;
-  /** Its last read that landed, or null (none yet since it opened). */
-  loaded: { thread_id: string; project: { repo?: unknown; repo_known?: true } } | null;
+  /** Its last read that landed, or null (none yet since it opened). A root with `launch`: started from the Inbox. */
+  loaded: { thread_id: string; project: { repo?: unknown; repo_known?: true }; messages?: readonly { launch?: unknown }[] } | null;
   /** When that read landed (ms, the window's clock), and now. */
   loadedAt: number;
   now: number;
@@ -118,19 +141,21 @@ export interface OpenThreadState {
 }
 
 /**
- * `thread`: read the open thread again. `none`: no read of it, only the list check (see the header); its files are
- * read by the pane when a record changed a message's files (data/queries/files.ts `sameThreadFiles`).
+ * `thread`: read the open thread again (its files with it). `files`: only its files, then the list check. `none`:
+ * only the list check (see the header).
  */
-export type OpenThreadRead = 'thread' | 'none';
+export type OpenThreadRead = 'thread' | 'files' | 'none';
 
 export function openThreadRead(batch: RecordBatch, open: OpenThreadState): OpenThreadRead {
   if (batch.any || batch.threads.has(open.threadId)) return 'thread';
   if (onlyOwnRecords(batch) && batch.own.has(open.threadId)) return open.remote || !open.listed ? 'thread' : 'none';
   if (open.remote || !open.settled || !open.listed) return 'thread';
+  // Started from the Inbox: its run line moves with no record.
+  if (open.loaded?.messages?.[0]?.launch) return 'thread';
   if (open.loaded?.thread_id !== open.threadId) return 'thread';
   // Not known yet (an older Inbox never says it knows): the next read may bring it.
   if (open.loaded.project.repo == null && open.loaded.project.repo_known !== true) return 'thread';
   // The server refreshes a repo only when a read asks for it after this long: read, as every record did before.
   if (open.now - open.loadedAt > INBOX_REPO_TTL_MS) return 'thread';
-  return 'none';
+  return batch.files.has(open.threadId) ? 'files' : 'none';
 }
