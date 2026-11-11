@@ -130,7 +130,9 @@ export function decisionPostTally(doc: DecisionExportV1): string {
 function banner(platform: DecisionPostPlatform): string {
   // GitLab's sanitizer keeps no <picture>/<source> (nor an <img>'s width): the light banner alone, as a Markdown image.
   if (platform === "gitlab") return `![${DECISION_POST_BANNER.alt}](${DECISION_POST_BANNER.light})`;
-  const img = `<img alt="${DECISION_POST_BANNER.alt}" src="${DECISION_POST_BANNER.light}" width="1200">`;
+  // No width or height: a banner that fails to load (the site not deployed yet, a proxy refusing it) leaves only its
+  // alt text on one line, never an empty block the size of the picture.
+  const img = `<img alt="${DECISION_POST_BANNER.alt}" src="${DECISION_POST_BANNER.light}">`;
   return `<picture><source media="(prefers-color-scheme: dark)" srcset="${DECISION_POST_BANNER.dark}">${img}</picture>`;
 }
 
@@ -157,7 +159,9 @@ function folded(doc: DecisionExportV1, item: DecisionExportItem, level: Level, w
   const out = [`<details><summary>D${item.n} · <b>${html(item.prompt)}</b> ${html(clip(answerOf(item), 60))}</summary>`, ""];
   for (const c of item.choices) {
     const label = mdInline(c.label);
-    let line = `- [${c.chosen ? "x" : " "}] ${c.chosen ? `**${label}**` : label}`;
+    // Never task-list syntax (`- [x]`): in a PR description GitHub counts those as the PR's tasks ("N of M tasks") and
+    // makes them clickable checkboxes that edit the text. The chosen option is "✓" and bold, read as plain text too.
+    let line = c.chosen ? `- ✓ **${label}**` : `- ${label}`;
     if (c.description) line += ` · ${mdInline(c.description)}`;
     if (c.image) line += ` · _(picture: ${mdInline(c.image.alt)})_`;
     if (c.prototype) line += ` · prototype: ${mdInline(c.prototype)}`;
@@ -167,7 +171,7 @@ function folded(doc: DecisionExportV1, item: DecisionExportItem, level: Level, w
     if (signs.length) line += `<br><sub>${signs.join(" &nbsp; ")}</sub>`;
     out.push(line);
   }
-  for (const own of [item.answer?.other, item.answer?.text]) if (own) out.push(`- [x] **${mdInline(own)}** · own answer`);
+  for (const own of [item.answer?.other, item.answer?.text]) if (own) out.push(`- ✓ **${mdInline(own)}** · own answer`);
   out.push("");
   const verdict = decisionVerdict(item);
   if (verdict) out.push(mdInline(verdict.sentence), "");

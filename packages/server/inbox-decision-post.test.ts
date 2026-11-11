@@ -181,6 +181,8 @@ test("GitHub: the first post creates one comment starting with the marker; the n
   const [comment] = forge.comments("acme/notes#12");
   expect(comment!.body.split("\n")[0]).toBe(`<!-- plannotator-decisions v1 thread=${world.thread} -->`);
   expect(comment!.body).toContain('<picture><source media="(prefers-color-scheme: dark)" srcset="https://plannotator.ai/assets/decisions/v1/banner-dark.png">');
+  // No task-list items (GitHub would make them clickable and count them as tasks).
+  expect(comment!.body).not.toMatch(/^\s*[-*+]\s+\[[ xX]\]/m);
 
   const second = await postThreadDecisions(world.store, world.thread, { pull: "https://github.com/acme/notes/pull/12", tz: "UTC" }, { runtime: forge.runtime, version: "test", destination: "comment" });
   expect(second.body).toMatchObject({ action: "updated", url: (first.body as { url: string }).url });
@@ -350,6 +352,9 @@ test("by default the decisions go in the description: read raw, a plain heading 
   ]);
   expect(section).toContain("<picture>");
   expect(section).toContain("<details>");
+  // No task-list items: in a description GitHub counts them as the PR's tasks ("N of M tasks") and makes them clickable.
+  expect(text).not.toMatch(/^\s*[-*+]\s+\[[ xX]\]/m);
+  expect(section).toContain("- ✓ **Local only**");
   expect(text).not.toContain("PRIVATE-UNSENT-NOTE");
 });
 

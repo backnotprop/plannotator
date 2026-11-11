@@ -121,6 +121,29 @@ test("the description section: plain lines before any HTML; past its room the fo
   expect(renderDecisionSection(d, { platform: "gitlab" })).not.toContain("<picture>");
 });
 
+test("no task-list item anywhere in what is posted (GitHub would count them as the PR's tasks and make them clickable)", () => {
+  const d = doc([item(1), item(2, { kind: "multi", answer: { selected: ["A"], other: "Own words", text: null, note: null, skipped: false, sent: true } })], [item(3, { state: "open", answer: null })]);
+  for (const platform of ["github", "gitlab"] as const) {
+    for (const body of [renderDecisionComment(d, { platform }), renderDecisionSection(d, { platform })!, renderDecisionSummary(d, { commentUrl: "https://github.com/a/b/pull/1#issuecomment-1" })]) {
+      expect(body).not.toMatch(/^\s*[-*+]\s+\[[ xX]\]/m);
+      const tokens = marked.lexer(body);
+      const items = tokens.flatMap((t) => (t.type === "list" ? (t as { items: { task: boolean }[] }).items : []));
+      expect(items.some((i) => i.task)).toBe(false);
+    }
+  }
+  // The chosen option still reads as chosen: a check and bold.
+  expect(renderDecisionComment(d, { platform: "github" })).toContain("- ✓ **A**");
+});
+
+test("the banner never sizes an empty block: the comment opens with it after the marker, with alt text and no width", () => {
+  const body = renderDecisionComment(doc([item(1)]), { platform: "github" });
+  const [marker, banner] = body.split("\n");
+  expect(marker).toBe("<!-- plannotator-decisions v1 thread=msg_THREAD -->");
+  expect(banner).toStartWith("<picture>");
+  expect(banner).toContain('alt="Decisions, from Plannotator"');
+  expect(banner).not.toMatch(/\b(?:width|height)=/);
+});
+
 const SECTION = { start: "<!-- s -->", end: "<!-- e -->", body: () => "decisions" };
 
 test("the splice keeps every byte outside the markers, adds after a blank line, and refuses a section with no end", () => {
