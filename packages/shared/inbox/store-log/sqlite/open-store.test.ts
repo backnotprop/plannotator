@@ -15,7 +15,7 @@ import { INBOX_PROJECTS_DIR, MESSAGES_FILE } from "../../schema";
 import { InboxStore } from "../../store";
 import { everyRead } from "../reads";
 import { writeInboxWorld } from "../world";
-import { JSONL_ENTRIES } from "./move-files";
+import { JSONL_ENTRIES, jsonlEntriesPresent } from "./move-files";
 import { openInboxStore, resolveInboxSqlite } from "./open-store";
 import { INBOX_RETURN_PARTIAL, returnToJsonl } from "./return-to-files";
 import { INBOX_DB_FILE } from "./sqlite-log";
@@ -47,12 +47,13 @@ function tree(dir: string): Record<string, string> {
   return out;
 }
 
-test("the switch reads PLANNOTATOR_INBOX_SQLITE first, then config's inboxSqlite; off by default", () => {
-  expect(resolveInboxSqlite({}, {})).toBe(false);
+test("the switch reads PLANNOTATOR_INBOX_SQLITE first, then config's inboxSqlite; unset by default", () => {
+  expect(resolveInboxSqlite({}, {})).toBeNull();
   expect(resolveInboxSqlite({ inboxSqlite: true }, {})).toBe(true);
+  expect(resolveInboxSqlite({ inboxSqlite: false }, {})).toBe(false);
   expect(resolveInboxSqlite({ inboxSqlite: true }, { PLANNOTATOR_INBOX_SQLITE: "0" })).toBe(false);
-  expect(resolveInboxSqlite({}, { PLANNOTATOR_INBOX_SQLITE: "on" })).toBe(true);
-  expect(resolveInboxSqlite({ inboxSqlite: "yes" }, { PLANNOTATOR_INBOX_SQLITE: "maybe" })).toBe(false);
+  expect(resolveInboxSqlite({ inboxSqlite: false }, { PLANNOTATOR_INBOX_SQLITE: "on" })).toBe(true);
+  expect(resolveInboxSqlite({ inboxSqlite: "yes" }, { PLANNOTATOR_INBOX_SQLITE: "maybe" })).toBeNull();
 });
 
 test("off, with no database: today's store, and not one byte on disk changes", async () => {
@@ -140,7 +141,7 @@ test("a way back whose files would read differently never happens: the database 
   expect(back).toMatchObject({ status: "kept_db", reason: "mismatch" });
   expect(existsSync(join(inbox, INBOX_DB_FILE))).toBe(true);
   expect(existsSync(join(inbox, INBOX_RETURN_PARTIAL))).toBe(false);
-  for (const entry of JSONL_ENTRIES) expect(existsSync(join(inbox, entry))).toBe(false);
+  expect(jsonlEntriesPresent(inbox)).toEqual([]);
   // Nothing was lost meanwhile: the database still serves the same, and a later way back goes through.
   const off = await openInboxStore(dataDir, { sqlite: false, now });
   expect(off.moved).toMatchObject({ status: "returned" });

@@ -480,8 +480,8 @@ export interface InboxServerOptions {
   feedbackUrl?: string;
   /** Tests: the debug log on or off. Default: `PLANNOTATOR_INBOX_DEBUG=1` or the config's `inboxDebug`. */
   debug?: boolean;
-  /** Tests: the SQLite switch. Default: `PLANNOTATOR_INBOX_SQLITE` or the config's `inboxSqlite` (off). */
-  sqlite?: boolean;
+  /** Tests: the SQLite switch (`null`: unset, new installs only). Default: `PLANNOTATOR_INBOX_SQLITE` or the config's `inboxSqlite` (unset). */
+  sqlite?: boolean | null;
   /** Tests: how long a window's record outlives its last event stream (default `WINDOW_GRACE_MS`). */
   windowGraceMs?: number;
   /** Tests: the clock (epoch ms) send_message's "not read since" line reads (packages/server/inbox-session-reads.ts). Default: the wall clock. */
@@ -996,7 +996,7 @@ const INBOX_SNOOZE_WRITE = /^\/api\/inbox\/(?:m\/[^/]+\/)?threads\/[^/]+\/snooze
  * Whether an Inbox ran on this machine before this start, from evidence that
  * predates it (read before this start writes the version, the store or the
  * registry): the version an earlier Inbox recorded (0.28.12 and later), the
- * registry every Inbox writes, a project in the store, or a setting the Inbox
+ * registry every Inbox writes, a project in the store (or its database), or a setting the Inbox
  * page wrote. Builds 0.28.7 to 0.28.11 recorded no version, so the version
  * alone would call their people fresh.
  */
@@ -1008,6 +1008,7 @@ export function inboxUsedBefore(dataDir: string): boolean {
   try {
     if (readdirSync(join(dataDir, "inbox", "projects")).length > 0) return true;
   } catch {}
+  if (existsSync(join(dataDir, "inbox", "inbox.db"))) return true;
   const config = loadConfig();
   return config.inboxNotifications !== undefined || config.inboxTool !== undefined;
 }
@@ -1049,9 +1050,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     previousInboxVersion = readUpdateState(dataDir).inboxVersion ?? null;
   } catch {}
   const storeLoadStarted = performance.now();
-  // The SQLite switch (off for everyone): with it off and no inbox.db, this is today's InboxStore.open, nothing more.
+  // The SQLite switch: unset, a new install starts on SQLite and every other Inbox stays as it is; off with no
+  // inbox.db, this is today's InboxStore.open, nothing more.
   const opened = await openInboxStore(dataDir, {
-    sqlite: options.sqlite ?? resolveInboxSqlite(loadConfig(), process.env),
+    sqlite: options.sqlite !== undefined ? options.sqlite : resolveInboxSqlite(loadConfig(), process.env),
     now: options.storeNow,
     onSlow: () => process.stderr.write(`${INBOX_UPGRADING_LINE}\n`),
     importStep: inboxImportDelayFromEnv(process.env),
@@ -6598,7 +6600,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           let messages = 0;
           const threadIds = store.threadIds();
           for (const id of threadIds) messages += store.threadMessageIds(id).length;
-          debugLog.note("store_load", { ms: Math.round(storeLoadMs), threads: threadIds.length, messages, log: opened.log });
+          debugLog.note("store_load", { ms: Math.round(storeLoadMs), threads: threadIds.length, messages, log: opened.log, why: opened.why });
           if (opened.moved) debugLog.note("store_move", storeMoveNote(opened.moved));
         }
         return handleMarkingSnoozes(req, via);

@@ -9,12 +9,18 @@ import { Database } from "bun:sqlite";
 import { chmodSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { INBOX_PROJECTS_DIR, INITIATIVES_FILE, SEQ_FLOOR_FILE } from "../../schema";
+import { isSqliteMarker } from "./files-marker";
 
 /** The database while the import writes it: renamed to `inbox.db` once checked; a leftover is a crash's, removed. */
 export const INBOX_DB_IMPORTING = "inbox.db.importing";
 
 /** The entries of today's record files under `inbox/`: what the import reads and then moves into the backup. */
 export const JSONL_ENTRIES = [INBOX_PROJECTS_DIR, INITIATIVES_FILE, SEQ_FLOOR_FILE];
+
+/** The record entries in place under `inboxDir`; the note an Inbox on SQLite leaves as `projects` is not one (`files-marker.ts`). */
+export function jsonlEntriesPresent(inboxDir: string): string[] {
+  return JSONL_ENTRIES.filter((entry) => existsSync(join(inboxDir, entry)) && !(entry === INBOX_PROJECTS_DIR && isSqliteMarker(inboxDir)));
+}
 
 /** A backup folder's name: `backup-<date>-<what>`, then `-2`, `-3` when one of that day is already there. */
 export function freeBackupName(inboxDir: string, at: Date, what: "jsonl" | "sqlite"): string {
@@ -41,9 +47,8 @@ export function fsyncPath(path: string): void {
 /** Move what is still in place into the backup folder, read-only; each entry one rename, so it can run again. */
 export function moveIntoBackup(inboxDir: string, name: string, moved?: () => void): void {
   const backup = join(inboxDir, name);
-  for (const entry of JSONL_ENTRIES) {
+  for (const entry of jsonlEntriesPresent(inboxDir)) {
     const from = join(inboxDir, entry);
-    if (!existsSync(from)) continue;
     // Made only when something moves: a backup the person removed is never made again, empty, at the next start.
     mkdirSync(backup, { recursive: true, mode: 0o700 });
     renameSync(from, join(backup, entry));

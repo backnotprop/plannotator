@@ -142,7 +142,7 @@ export function detachedInboxEnv(env: Readonly<Record<string, string | undefined
 }
 
 /**
- * Wait for the Inbox to answer as running; null on timeout. With the SQLite switch on (off for everyone), an Inbox
+ * Wait for the Inbox to answer as running; null on timeout. With the SQLite switch on (only then do files move), an Inbox
  * still moving its records into SQLite is waited for past the usual 20 s, for as long as the move runs (up to
  * `INBOX_UPGRADE_WAIT_MAX_MS`) and the usual wait again after it (the start goes on once the move is done), and
  * past 2 s the move is said once on stderr: the window cannot, the server is not listening yet.
@@ -153,7 +153,7 @@ function waitUntilRunning(dataDir: string): Promise<InboxRegistryEntry | null> {
   const sqlite = resolveInboxSqlite(loadConfig(), process.env);
   let movedAt = 0;
   const upgrading = () => {
-    if (!sqlite || Date.now() - started >= INBOX_UPGRADE_WAIT_MAX_MS) return false;
+    if (sqlite !== true || Date.now() - started >= INBOX_UPGRADE_WAIT_MAX_MS) return false;
     if (!inboxUpgradeRunning(dataDir)) return false;
     movedAt = Date.now();
     return true;

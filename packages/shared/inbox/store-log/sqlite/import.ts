@@ -30,7 +30,7 @@ import type { InboxStoreDigest } from "./digest";
 import { loadImportRows } from "./import-load";
 import { ImportRows } from "./import-rows";
 import { INBOX_IMPORT_SLOW_MS } from "./move-words";
-import { bytesUnder, freeBackupName, fsyncPath, INBOX_DB_IMPORTING, JSONL_ENTRIES, moveIntoBackup, readMeta, removeDb, removeSidecars } from "./move-files";
+import { bytesUnder, freeBackupName, fsyncPath, INBOX_DB_IMPORTING, JSONL_ENTRIES, jsonlEntriesPresent, moveIntoBackup, readMeta, removeDb, removeSidecars } from "./move-files";
 import { INBOX_DB_FILE, keepSeqFloor, openInboxDb, sqliteInboxLog } from "./sqlite-log";
 import { clearStaleUpgradeMarker, clearUpgradeMarker, markUpgradeRunning } from "./upgrade-marker";
 
@@ -91,7 +91,7 @@ export async function importJsonlInbox(dataDir: string, options: InboxImportOpti
     return { status: "already" };
   }
   removeDb(join(inboxDir, INBOX_DB_IMPORTING));
-  const present = JSONL_ENTRIES.filter((entry) => existsSync(join(inboxDir, entry)));
+  const present = jsonlEntriesPresent(inboxDir);
   if (present.length === 0) return { status: "empty" };
 
   const size = present.reduce((sum, entry) => sum + bytesUnder(join(inboxDir, entry)), 0);

@@ -20,6 +20,7 @@ import { inboxDir as inboxDirOf } from "../../schema";
 import { jsonlInboxLog } from "../jsonl-log";
 import { checkDigests } from "./check";
 import { exportInboxDb } from "./export";
+import { removeSqliteMarker } from "./files-marker";
 import { freeBackupName, fsyncPath, JSONL_ENTRIES, moveIntoBackup, readMeta, readOnly } from "./move-files";
 import { INBOX_DB_FILE, sqliteInboxLog } from "./sqlite-log";
 
@@ -77,6 +78,8 @@ export function returnToJsonl(dataDir: string, options: InboxReturnOptions = {})
     }
   }
   // Past the mark: whatever stops this, the next start (switch on or off) finishes it from here.
+  // The note an older Plannotator stops at (`files-marker.ts`) goes first: the folder of records takes its place.
+  removeSqliteMarker(inboxDir);
   for (const entry of JSONL_ENTRIES) {
     const from = join(partial, entry);
     if (!existsSync(from) || existsSync(join(inboxDir, entry))) continue;

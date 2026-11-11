@@ -21,7 +21,8 @@ import { everyRead } from "../reads";
 import { seeded, writeInboxWorld } from "../world";
 import { writeOldShapeInbox } from "./fixtures/old-shapes";
 import { importJsonlInbox } from "./import";
-import { INBOX_DB_IMPORTING, JSONL_ENTRIES } from "./move-files";
+import { INBOX_DB_IMPORTING, jsonlEntriesPresent } from "./move-files";
+import { isSqliteMarker } from "./files-marker";
 import { openInboxStore } from "./open-store";
 import { INBOX_DB_FILE, sqliteInboxLog } from "./sqlite-log";
 
@@ -48,7 +49,8 @@ function recordFiles(inbox: string): Record<string, string> {
     }
   };
   const homes = [inbox, ...readdirSync(inbox).filter((n) => /^backup-.*-jsonl/.test(n)).map((n) => join(inbox, n))];
-  for (const home of homes) for (const entry of JSONL_ENTRIES) if (existsSync(join(home, entry))) walk(join(home, entry), entry);
+  // The note an Inbox on SQLite leaves as `projects` is not a record file (`files-marker.ts`).
+  for (const home of homes) for (const entry of jsonlEntriesPresent(home)) walk(join(home, entry), entry);
   return out;
 }
 
@@ -127,7 +129,9 @@ describe("a crash while moving into SQLite", () => {
     // The next start with the switch on: the move finishes (or runs again), and serves the same.
     expect(await restart(dataDir, now, true)).toEqual(before);
     expect(recordFiles(inbox)).toEqual(originals);
-    for (const entry of JSONL_ENTRIES) expect(existsSync(join(inbox, entry))).toBe(false);
+    // No record in place; the note an older Plannotator stops at stands instead.
+    expect(jsonlEntriesPresent(inbox)).toEqual([]);
+    expect(isSqliteMarker(inbox)).toBe(true);
     noHalfDatabase(inbox);
     return run;
   }
