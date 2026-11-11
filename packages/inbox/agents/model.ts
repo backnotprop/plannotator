@@ -3,7 +3,7 @@
  * Pure: what each machine's group holds, each agent's name, the thread its row opens and the facts its hover card
  * says, from data the window already has (the list's `agents`, its rows and the linked machines). No read of its own.
  */
-import { INBOX_HOST_NAMES, type InboxAgent, type InboxAgentsGroup, type InboxListRow } from '@plannotator/core/inbox-types';
+import { INBOX_HOST_NAMES, type InboxAgent, type InboxAgentsGroup, type InboxListRow, type InboxListSection } from '@plannotator/core/inbox-types';
 import { whenTime } from '../format';
 import type { MachineView } from '../api';
 import { awayLine, isAway, type MachinesModel } from '../machines';
@@ -44,7 +44,7 @@ function rowOf(row: InboxListRow, sessions: readonly string[]): boolean {
  */
 export function agentThread(agent: InboxAgent, machine: string | null, self: string | null, rows: readonly InboxListRow[], others?: ReadonlySet<string>): AgentEntry['thread'] {
   const mine = (row: InboxListRow) => (row.machine ?? self ?? null) === (machine ?? self ?? null);
-  const sessions = [agent.session, ...(agent.continues ?? []).filter((old) => !others?.has(old))];
+  const sessions = agentSessions(agent, others);
   if (agent.launch) {
     const row = rows.find((r) => r.thread_id === agent.launch!.thread_id && mine(r));
     return { id: agent.launch.thread_id, subject: row ? rowName(row) : '' };
@@ -57,6 +57,11 @@ export function agentThread(agent: InboxAgent, machine: string | null, self: str
     else if ((row.last_agent_at ?? row.last_at) > (best.last_agent_at ?? best.last_at)) best = row;
   }
   return best ? { id: best.thread_id, subject: rowName(best) } : null;
+}
+
+/** An agent's sessions: the one it runs as and those its conversation had before, but for the ones in `others` (listed as agents of their own). */
+function agentSessions(agent: InboxAgent, others?: ReadonlySet<string>): string[] {
+  return [agent.session, ...(agent.continues ?? []).filter((old) => !others?.has(old))];
 }
 
 /** An agent's name on its row: its title, else its thread's name, else its project, else its host. */
@@ -76,24 +81,82 @@ export function agentRowName(agent: InboxAgent, thread: AgentEntry['thread']): s
  * stay two rows.
  */
 export function agentsGroups(groups: readonly InboxAgentsGroup[] | null, machines: MachinesModel, rows: readonly InboxListRow[]): AgentsGroup[] {
+  return sectionGroups(groups, machines).map(({ group, machine, view }) => ({ machine: view, agents: groupEntries(group, machine, machines.self, rows).shown }));
+}
+
+/** Each group the section draws: one flat group of this Inbox's agents with no machine linked, else one per machine. */
+function sectionGroups(groups: readonly InboxAgentsGroup[] | null, machines: MachinesModel): { group: InboxAgentsGroup | undefined; machine: string | null; view: MachineView | null }[] {
   const self = machines.self;
-  const entries = (group: InboxAgentsGroup | undefined, machine: string | null): AgentEntry[] => {
-    const listed = (group?.agents ?? []).filter((agent) => agent.state !== 'ended');
-    const sessions = new Set(listed.map((agent) => agent.session));
-    const all = listed.map((agent) => {
-      const thread = agentThread(agent, machine, self, rows, sessions);
-      return { agent, machine, name: agentRowName(agent, thread), thread };
-    });
-    return all.filter((entry) => !all.some((later) => later !== entry && !!entry.thread && later.thread?.id === entry.thread.id && (later.agent.continues ?? []).includes(entry.agent.session) && !(entry.agent.continues ?? []).includes(later.agent.session)));
-  };
-  if (machines.all.length === 0) {
-    const own = groups?.find((g) => !g.machine || g.machine === self);
-    return [{ machine: null, agents: entries(own, null) }];
-  }
-  return machines.all.map((machine) => {
-    const group = groups?.find((g) => (g.machine ?? self) === machine.id);
-    return { machine, agents: entries(group, machine.id) };
+  if (machines.all.length === 0) return [{ group: groups?.find((g) => !g.machine || g.machine === self), machine: null, view: null }];
+  return machines.all.map((view) => ({ group: groups?.find((g) => (g.machine ?? self) === view.id), machine: view.id, view }));
+}
+
+/** `entry` is the older session of `later`'s conversation and opens the same thread: one row, `later`'s. */
+const drawnAs = (entry: AgentEntry, later: AgentEntry) =>
+  later !== entry && !!entry.thread && later.thread?.id === entry.thread.id && (later.agent.continues ?? []).includes(entry.agent.session) && !(entry.agent.continues ?? []).includes(later.agent.session);
+
+/** One machine's listed agents (`all`, the ended left out) and the rows drawn for them (`shown`, one per conversation). */
+function groupEntries(group: InboxAgentsGroup | undefined, machine: string | null, self: string | null, rows: readonly InboxListRow[]): { all: AgentEntry[]; shown: AgentEntry[]; others: Set<string> } {
+  const listed = (group?.agents ?? []).filter((agent) => agent.state !== 'ended');
+  const others = new Set(listed.map((agent) => agent.session));
+  const all = listed.map((agent) => {
+    const thread = agentThread(agent, machine, self, rows, others);
+    return { agent, machine, name: agentRowName(agent, thread), thread };
   });
+  return { all, shown: all.filter((entry) => !all.some((later) => drawnAs(entry, later))), others };
+}
+
+/**
+ * The list's agent filter (a click on an agent in the sidebar, `#agent=<id>`): the threads its row stands for. Its
+ * sessions (`agentSessions`: the one it runs as and the ones its conversation had before, but for one listed as an
+ * agent of its own), and those of every older session drawn as this same row (`drawnAs`), on its machine; its
+ * launch's thread too. `machine` undefined: an agent the list no longer names (ended, or a link from before), matched
+ * by its id as a session on any machine.
+ */
+export interface AgentListFilter {
+  id: string;
+  /** Its row's name, the list's title while the filter is on. */
+  name: string;
+  machine?: string | null;
+  sessions: readonly string[];
+  /** Threads its launches opened (a launch's thread is its own before its agent writes there). */
+  launches: readonly string[];
+}
+
+export function agentListFilter(id: string, groups: readonly InboxAgentsGroup[] | null, machines: MachinesModel, rows: readonly InboxListRow[]): AgentListFilter {
+  const self = machines.self;
+  for (const { group, machine } of sectionGroups(groups, machines)) {
+    if (!group?.agents.some((agent) => agent.id === id)) continue;
+    const { all, shown, others } = groupEntries(group, machine, self, rows);
+    const entry = shown.find((e) => e.agent.id === id);
+    if (!entry) {
+      // Ended (not listed), or an older session drawn as another row: its own sessions.
+      const agent = group.agents.find((a) => a.id === id)!;
+      const thread = agentThread(agent, machine, self, rows, others);
+      return { id, name: agentRowName(agent, thread), machine, sessions: agentSessions(agent, others), launches: agent.launch ? [agent.launch.thread_id] : [] };
+    }
+    const one = [entry, ...all.filter((older) => drawnAs(older, entry))];
+    return {
+      id,
+      name: entry.name,
+      machine,
+      sessions: [...new Set(one.flatMap((e) => agentSessions(e.agent, others)))],
+      launches: one.flatMap((e) => (e.agent.launch ? [e.agent.launch.thread_id] : [])),
+    };
+  }
+  return { id, name: agentHostName(null), sessions: [id], launches: [] };
+}
+
+/** Whether a list row is one of the filter's agent's threads (`rowOf`, as its row finds its thread). */
+export function agentRowOf(row: InboxListRow, filter: AgentListFilter, self: string | null): boolean {
+  if (filter.machine !== undefined && (row.machine ?? self ?? null) !== (filter.machine ?? self ?? null)) return false;
+  return filter.launches.includes(row.thread_id) || rowOf(row, filter.sessions);
+}
+
+/** The list one agent's filter shows. The sections stay, empty ones included, as a machine's filter leaves them. */
+export function filterAgentRows(sections: readonly InboxListSection[], filter: AgentListFilter | null, self: string | null): InboxListSection[] {
+  if (!filter) return sections as InboxListSection[];
+  return sections.map((section) => ({ ...section, threads: section.threads.filter((row) => agentRowOf(row, filter, self)) }));
 }
 
 /** What an agent's hover card says, line by line; a fact the window does not have is left out. */

@@ -264,7 +264,7 @@ function typeWords(text: HTMLTextAreaElement, words: string) {
 test.skipIf(!hasDom)('the stale guard: a pick replaced while the person writes stops Send once, says why, and Esc keeps editing', async () => {
   const el = await render(before());
   act(() => button(el, 'Edit draft').click());
-  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  const text = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
   // The person types; then the agent replaces question 1.
   typeWords(text, 'Leaning this way for now.');
   act(() => root!.render(pane(after('replace'))));
@@ -289,7 +289,7 @@ test.skipIf(!hasDom)('the stale guard: a pick replaced while the person writes s
   act(() => guard.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
   await settle();
   expect(el.querySelector('[data-stale-guard]')).toBeNull();
-  expect((el.querySelector('textarea') as HTMLTextAreaElement).value).toBe(text.value);
+  expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).value).toBe(text.value);
   expect(document.activeElement?.textContent).toBe('Send');
 
   // Once per replacement: Send now goes, with the words only (no pick).
@@ -307,7 +307,7 @@ test.skipIf(!hasDom)('the stale guard: a pick replaced while the person writes s
 test.skipIf(!hasDom)('Answer the new question keeps the draft and goes to the new card', async () => {
   const el = await render(before());
   act(() => button(el, 'Edit draft').click());
-  typeWords(el.querySelector('textarea') as HTMLTextAreaElement, 'Leaning this way for now.');
+  typeWords(el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement, 'Leaning this way for now.');
   act(() => root!.render(pane(after('replace'))));
   await settle();
   act(() => button(el, 'Send').click());
@@ -318,7 +318,7 @@ test.skipIf(!hasDom)('Answer the new question keeps the draft and goes to the ne
   const thread = after('replace');
   expect(el.querySelector('[data-stale-guard]')).toBeNull();
   expect(document.activeElement).toBe(card(el, M2, thread.messages[1]!.questions![0]!.key));
-  expect((el.querySelector('textarea') as HTMLTextAreaElement).value).not.toBe('');
+  expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).value).not.toBe('');
   expect(posted.filter((p) => p.path.endsWith('/reply'))).toEqual([]);
 });
 

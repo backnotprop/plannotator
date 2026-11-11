@@ -223,7 +223,7 @@ function button(el: ParentNode, text: string): HTMLButtonElement {
 }
 
 function type(el: HTMLElement, words: string) {
-  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  const text = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
   act(() => {
     setter.call(text, words);
@@ -255,8 +255,8 @@ test.skipIf(!hasDom)('typed words are saved while typing, and come back in the b
   leave();
 
   const again = await renderApp(`#thread=${world.waiting}`);
-  await until(() => (again.querySelector('textarea') as HTMLTextAreaElement | null)?.value === 'Pagefind, but index the changelog too', 'the words back');
-  expect(document.activeElement).not.toBe(again.querySelector('textarea'));
+  await until(() => (again.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement | null)?.value === 'Pagefind, but index the changelog too', 'the words back');
+  expect(document.activeElement).not.toBe(again.querySelector('textarea:not([data-question-other])'));
 });
 
 test.skipIf(!hasDom)('the reply box is a message, not a comment: "Enter saves a comment" leaves its Enter a new line (#1934)', async () => {
@@ -267,7 +267,7 @@ test.skipIf(!hasDom)('the reply box is a message, not a comment: "Enter saves a 
     act(() => button(el, 'Reply').click());
     await settle();
     type(el, 'Pagefind');
-    const box = el.querySelector('textarea') as HTMLTextAreaElement;
+    const box = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
     const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
     act(() => {
       box.dispatchEvent(enter);
@@ -275,7 +275,7 @@ test.skipIf(!hasDom)('the reply box is a message, not a comment: "Enter saves a 
     await settle();
     expect(enter.defaultPrevented).toBe(false);
     expect(posted.some((p) => p.path.endsWith('/reply'))).toBe(false);
-    expect(el.querySelector('textarea')).not.toBeNull();
+    expect(el.querySelector('textarea:not([data-question-other])')).not.toBeNull();
   } finally {
     configStore.set('enterSavesComment', false);
   }
@@ -305,7 +305,7 @@ test.skipIf(!hasDom)('closing the box keeps the words: the foot says "Draft · Y
   button(el, 'Send');
   act(() => button(el, 'Edit draft').click());
   await settle();
-  expect((el.querySelector('textarea') as HTMLTextAreaElement).value).toBe('Pagefind.');
+  expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).value).toBe('Pagefind.');
 });
 
 test.skipIf(!hasDom)('Discard drops the draft, here and on the server', async () => {
@@ -316,7 +316,7 @@ test.skipIf(!hasDom)('Discard drops the draft, here and on the server', async ()
   type(el, 'Never mind this.');
   await until(() => el.querySelector('[data-reply-discard]') !== null, 'the bin');
   act(() => (el.querySelector('[data-reply-discard]') as HTMLButtonElement).click());
-  await until(() => el.querySelector('textarea') === null, 'the box closed');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the box closed');
   await until(async () => (await serverDraft(world.waiting)) === null, 'the draft gone');
   button(el, 'Reply');
   expect(el.querySelector('[data-draft-foot]')).toBeNull();
@@ -330,7 +330,7 @@ test.skipIf(!hasDom)('the Send that carries the words clears the draft (clear_dr
   type(el, 'Pagefind, thanks.');
   await until(async () => (await serverDraft(world.waiting)) !== null, 'the draft saved');
   act(() => button(el, 'Send').click());
-  await until(() => el.querySelector('textarea') === null, 'the Send');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   const reply = posted.filter((p) => p.path.endsWith('/reply')).at(-1)!;
   // The draft the words were saved as, by its updated_at: the server clears that draft only.
   expect(reply.body).toMatchObject({ words: 'Pagefind, thanks.' });
@@ -347,7 +347,7 @@ test.skipIf(!hasDom)('a Send pressed before the pause in typing, whose answer is
   replyDelay = 800;
   type(el, 'Sent quickly.');
   act(() => button(el, 'Send').click());
-  await until(() => el.querySelector('textarea') === null, 'the Send');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   const reply = posted.filter((p) => p.path.endsWith('/reply')).at(-1)!;
   expect(reply.body.words).toBe('Sent quickly.');
   // Past any save the typing scheduled: the server holds no draft, and the window shows none.
@@ -394,7 +394,7 @@ test.skipIf(!hasDom)('an `event: drafts` for the open thread reads its draft aga
   await settle();
   act(() => button(el, 'Edit draft').click());
   await settle();
-  expect((el.querySelector('textarea') as HTMLTextAreaElement).value).toBe('Newer words.');
+  expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).value).toBe('Newer words.');
 });
 
 test.skipIf(!hasDom)('the list says "Draft" ("Draft · Your reply", "Draft · 1 pick" in full); the Drafts row counts them and its page lists them above the messages', async () => {
@@ -444,11 +444,11 @@ test.skipIf(!hasDom)('typing during a slow Send never brings back a draft holdin
   replyDelay = 1500;
   act(() => button(el, 'Send').click());
   await until(() => posted.some((p) => p.path.endsWith('/reply')), 'the reply posted');
-  expect((el.querySelector('textarea') as HTMLTextAreaElement).readOnly).toBe(true);
+  expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).readOnly).toBe(true);
   type(el, 'First words. And more.');
   // The box keeps the words the Send carries.
-  expect((el.querySelector('textarea') as HTMLTextAreaElement).value).toBe('First words.');
-  await until(() => el.querySelector('textarea') === null, 'the Send');
+  expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).value).toBe('First words.');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   await settle(200);
   expect(await serverDraft(world.waiting)).toBeNull();
   // No save went after the reply.
@@ -459,7 +459,7 @@ test.skipIf(!hasDom)('typing during a slow Send never brings back a draft holdin
   const again = await renderApp(`#thread=${world.waiting}`);
   await until(() => [...again.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Reply'), 'the foot');
   await settle();
-  expect(again.querySelector('textarea')).toBeNull();
+  expect(again.querySelector('textarea:not([data-question-other])')).toBeNull();
   expect(again.querySelector('[data-draft-foot]')).toBeNull();
 });
 
@@ -476,7 +476,7 @@ test.skipIf(!hasDom)('a Send that fails gives the thread back: the words are sav
     return real(input, init);
   }) as typeof fetch;
   act(() => button(el, 'Send').click());
-  await until(() => !(el.querySelector('textarea') as HTMLTextAreaElement).readOnly && el.textContent!.includes('down'), 'the failure');
+  await until(() => !(el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).readOnly && el.textContent!.includes('down'), 'the failure');
   globalThis.fetch = real;
   type(el, 'Kept after a failure, edited.');
   await until(async () => (await serverDraft(world.waiting))?.body === 'Kept after a failure, edited.', 'saved again after the failure');
@@ -504,7 +504,7 @@ test.skipIf(!hasDom)('another window sent the words: this window\'s next save is
   type(el, 'First words. And more, still.');
   await settle(200);
   expect(await serverDraft(world.waiting)).toBeNull();
-  expect((el.querySelector('textarea') as HTMLTextAreaElement).value).toBe('First words. And more, still.');
+  expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).value).toBe('First words. And more, still.');
   // Keep mine: the person's choice saves them.
   act(() => (el.querySelector('[data-draft-keep-mine]') as HTMLButtonElement).click());
   await until(async () => (await serverDraft(world.waiting))?.body === 'First words. And more, still.', 'kept on purpose');
@@ -523,7 +523,7 @@ async function openWithSaved(words: string) {
   await settle();
   return { el, saved: (await serverDraft(world.waiting))! };
 }
-const box = (el: HTMLElement) => el.querySelector('textarea') as HTMLTextAreaElement | null;
+const box = (el: HTMLElement) => el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement | null;
 const liveText = (el: HTMLElement) => [...el.querySelectorAll('[aria-live]')].map((n) => n.textContent).join(' ');
 
 test.skipIf(!hasDom)('event: drafts, sent elsewhere: a box with no edits closes, and the sent words never come back', async () => {

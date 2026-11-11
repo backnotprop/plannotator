@@ -205,7 +205,7 @@ function button(el: HTMLElement, text: string): HTMLButtonElement {
 async function writeReply(el: HTMLElement, words = WORDS) {
   act(() => button(el, 'Reply').click());
   await settle();
-  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  const text = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
   act(() => {
     setter.call(text, words);
@@ -313,7 +313,7 @@ test.skipIf(!hasDom)('Esc closes the pill\'s list with the words kept; Send pres
   await settle();
   expect(esc.defaultPrevented).toBe(true);
   expect(pillList(el)).toBeNull();
-  expect((el.querySelector('textarea') as HTMLTextAreaElement).value).toBe(WORDS);
+  expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).value).toBe(WORDS);
   act(() => button(el, 'Send').click());
   await settle();
   await settle();
@@ -363,7 +363,7 @@ test.skipIf(!hasDom)('picks with no text: Send from the foot opens the box with 
   await settle();
   await settle();
   expect(el.querySelector('[data-route-choice]')).toBeNull();
-  expect(el.querySelector('textarea')).not.toBeNull();
+  expect(el.querySelector('textarea:not([data-question-other])')).not.toBeNull();
   expect(pillList(el)).not.toBeNull();
   expect(replies()).toEqual([]);
   // The asker's answer follows the agent picked.
@@ -545,7 +545,7 @@ test.skipIf(!hasDom)("a pick on ended A's question and words for live B: A's ans
   // The pick waits in the draft: the foot opens it with Edit draft.
   act(() => button(el, 'Edit draft').click());
   await settle();
-  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  const text = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
   act(() => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(text, 'And keep the logs bucket.');
     text.dispatchEvent(new Event('input', { bubbles: true }));
@@ -572,7 +572,7 @@ test.skipIf(!hasDom)("a pick on ended A's question, words for live B, Send befor
   const release = () => holdAsker!.held.splice(0).forEach((go) => go());
   act(() => button(el, 'Edit draft').click());
   await settle();
-  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  const text = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
   act(() => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(text, 'And keep the logs bucket.');
     text.dispatchEvent(new Event('input', { bubbles: true }));
@@ -603,7 +603,7 @@ test.skipIf(!hasDom)("a pick on A's question, words for B, both live, Send press
   holdAsker = { session: 'ses_asker', held: [] };
   act(() => button(el, 'Edit draft').click());
   await settle();
-  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  const text = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
   act(() => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(text, 'And keep the logs bucket.');
     text.dispatchEvent(new Event('input', { bubbles: true }));
@@ -630,7 +630,7 @@ test.skipIf(!hasDom)("a pick on A's question, words for B, both live, Send press
 
 // A Send that waited for the ended check went on with what the press saw. Both cases below hold A's read, as above.
 async function typeInBox(el: HTMLElement, words: string) {
-  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  const text = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
   act(() => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(text, words);
     text.dispatchEvent(new Event('input', { bubbles: true }));
@@ -728,7 +728,7 @@ test.skipIf(!hasDom)('ended, another live: Send to another session and Archive s
 
   act(() => button(el, 'Send to another session').click());
   await settle();
-  expect(el.querySelector('textarea')).not.toBeNull();
+  expect(el.querySelector('textarea:not([data-question-other])')).not.toBeNull();
   expect(pillList(el)).not.toBeNull();
   expect(pillRows(el).map((r) => r[0])).toContain('ses_other');
 
@@ -1067,7 +1067,7 @@ test.skipIf(!hasDom)("a launched thread: a pick on the stopped launched session'
   const el = await render(launchedThread(true), null, stoppedRun);
   act(() => button(el, 'Edit draft').click());
   await settle();
-  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  const text = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
   act(() => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(text, 'And keep the logs bucket.');
     text.dispatchEvent(new Event('input', { bubbles: true }));
