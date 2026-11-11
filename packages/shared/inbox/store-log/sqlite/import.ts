@@ -43,7 +43,8 @@ export type InboxImportOutcome =
   | { status: "already" }
   /** No files to move: a new Inbox starts on the database. */
   | { status: "empty" }
-  | { status: "imported"; lines: number; ms: number; backup: string; phases: InboxImportPhases }
+  /** `apart`: the files' side and the integrity check ran in the second process (`checkFilesCommand`), not here. */
+  | { status: "imported"; lines: number; ms: number; backup: string; phases: InboxImportPhases; apart: boolean }
   /** The files keep serving: not enough disk, a check that differed, or a failure while writing. */
   | { status: "kept_files"; reason: "disk" | "mismatch" | "failed"; detail: string };
 
@@ -119,6 +120,7 @@ export async function importJsonlInbox(dataDir: string, options: InboxImportOpti
   let flushing: Promise<void> | null = null;
   let second: FilesCheckProcess | null = null;
   let lineCount = 0;
+  let apart = false;
   // Starters wait for the move while this names a live process (`upgrade-marker.ts`).
   markUpgradeRunning(inboxDir);
   try {
@@ -161,15 +163,20 @@ export async function importJsonlInbox(dataDir: string, options: InboxImportOpti
       // The files' side is the second process's: the lines read here are let go before the database's side is read.
       contents = null;
       lines = null;
+      apart = true;
       const asked = await second.integrity(importing).catch(() => null);
       const dbSide = digestOf(dataDir, now, { log: (dir) => sqliteInboxLog(dir, INBOX_DB_IMPORTING) });
       lap("checkDb");
       // A second process that failed: its half done here.
-      const integrity = asked ? await asked.answer.catch(() => integrityOf(importing)) : integrityOf(importing);
+      const here = () => {
+        apart = false;
+        return null;
+      };
+      const integrity = (asked ? await asked.answer.catch(here) : here()) ?? integrityOf(importing);
       if (integrity !== "ok") throw new Error(`integrity_check: ${integrity}`);
       lap("integrity");
       step("integrity");
-      const filesSide = await second.digest().catch(() => filesDigest(dataDir, now));
+      const filesSide = (await second.digest().catch(here)) ?? filesDigest(dataDir, now);
       lap("checkFiles");
       check = { same: filesSide.sha256 === dbSide.sha256, a: filesSide, b: dbSide };
     } else {
@@ -222,7 +229,7 @@ export async function importJsonlInbox(dataDir: string, options: InboxImportOpti
     step("renamed");
     moveIntoBackup(inboxDir, backup, () => step("backup-entry"));
     lap("finish");
-    return { status: "imported", lines: lineCount, ms: Math.round(performance.now() - started), backup, phases };
+    return { status: "imported", lines: lineCount, ms: Math.round(performance.now() - started), backup, phases, apart };
   } catch (error) {
     // A flush still running holds the file open: let it end before the file goes.
     await flushing?.catch(() => {});

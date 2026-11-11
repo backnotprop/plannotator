@@ -2,7 +2,8 @@ name: Windows
 
 # The Windows jobs: the uninstall lifecycle, the Qwen Code installer steps, the
 # code review diagram engine build, the Claude Code mod's Windows shells, the
-# Pi extension's Node runtime, and install.cmd / install.ps1 end to end. They
+# Pi extension's Node runtime, install.cmd / install.ps1 end to end, and the
+# Inbox on SQLite on the compiled binary (also on Linux and macOS). They
 # are part of the full tier: on a PR they run only once it has the `ci:full`
 # label (adding the label starts them on the current head; every later push
 # runs them again). The nightly run on main and manual runs always run them.
@@ -719,13 +720,21 @@ jobs:
             ipconfig /flushdns | Out-Null
           }
 
+  # The Inbox on SQLite, proven on the compiled binary on Windows, Linux and
+  # macOS (inbox-sqlite-binary.yml says what). Here, so the release's run of
+  # this workflow on main requires it green before a tag.
+  inbox-sqlite-binary:
+    name: Inbox on SQLite
+    if: github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'ci:full') && (github.event.action != 'labeled' || github.event.label.name == 'ci:full'))
+    uses: ./.github/workflows/inbox-sqlite-binary.yml
+
   # The merge script merges a PR only when every `Full CI (all green)` check on
   # its head succeeded. A skipped job counts as passed elsewhere, so this job
   # passes only when every job above ran and succeeded (the Qwen Code jobs and
   # the diagram engine build may skip when their gate found nothing for them).
   full-ci:
     name: Full CI (all green)
-    needs: [uninstall-windows, claude-code-mod-windows, qwen-gate, qwen-installers-windows, diagram-engine-gate, diagram-engine-windows, pi-extension-ai-runtime-windows, install-cmd-windows, install-ps1-windows]
+    needs: [uninstall-windows, claude-code-mod-windows, qwen-gate, qwen-installers-windows, diagram-engine-gate, diagram-engine-windows, pi-extension-ai-runtime-windows, install-cmd-windows, install-ps1-windows, inbox-sqlite-binary]
     if: ${{ !cancelled() && github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'ci:full') && (github.event.action != 'labeled' || github.event.label.name == 'ci:full') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5

@@ -86,15 +86,25 @@ export interface OpenInboxStoreOptions {
 }
 
 /**
- * Test-only, under the test sandbox only: `PLANNOTATOR_INBOX_IMPORT_DELAY_MS` holds a move this long once it has read
- * the files, so a real start can be seen outlasting a starter's wait. Anywhere else, nothing.
+ * Test-only, under the test sandbox only (`PLANNOTATOR_TEST_SANDBOX`), for proofs on a real start of the compiled
+ * binary (`scripts/inbox-sqlite-binary-proof.ts`). Anywhere else, nothing.
+ * - `PLANNOTATOR_INBOX_IMPORT_DELAY_MS`: hold a move this long once it has read the files, so a real start can be
+ *   seen outlasting a starter's wait.
+ * - `PLANNOTATOR_INBOX_IMPORT_STOP_AT=<step>[:<n>]`: the process kills itself, hard (SIGKILL; on Windows the same
+ *   call is TerminateProcess), the n-th time the move reaches `<step>` (`InboxImportStep`): a crash at an exact point.
  */
 export function inboxImportDelayFromEnv(env: Record<string, string | undefined>): ((name: InboxImportStep) => void) | undefined {
-  const raw = env.PLANNOTATOR_TEST_SANDBOX ? env.PLANNOTATOR_INBOX_IMPORT_DELAY_MS?.trim() : undefined;
+  if (!env.PLANNOTATOR_TEST_SANDBOX) return undefined;
+  const raw = env.PLANNOTATOR_INBOX_IMPORT_DELAY_MS?.trim();
   const ms = raw && /^\d+$/.test(raw) ? Number(raw) : 0;
-  if (!Number.isSafeInteger(ms) || ms <= 0) return undefined;
+  const delay = Number.isSafeInteger(ms) && ms > 0 ? ms : 0;
+  const [stopAt, nth] = (env.PLANNOTATOR_INBOX_IMPORT_STOP_AT?.trim() ?? "").split(":");
+  const stopNth = nth && /^\d+$/.test(nth) ? Number(nth) : 1;
+  if (!delay && !stopAt) return undefined;
+  let seen = 0;
   return (name) => {
-    if (name === "read") Bun.sleepSync(ms);
+    if (delay && name === "read") Bun.sleepSync(delay);
+    if (stopAt && name === stopAt && ++seen === stopNth) process.kill(process.pid, "SIGKILL");
   };
 }
 

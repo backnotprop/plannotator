@@ -16,7 +16,7 @@ import { InboxStore } from "../../store";
 import { everyRead } from "../reads";
 import { writeInboxWorld } from "../world";
 import { JSONL_ENTRIES, jsonlEntriesPresent } from "./move-files";
-import { openInboxStore, resolveInboxSqlite } from "./open-store";
+import { inboxImportDelayFromEnv, openInboxStore, resolveInboxSqlite } from "./open-store";
 import { INBOX_RETURN_PARTIAL, returnToJsonl } from "./return-to-files";
 import { INBOX_DB_FILE } from "./sqlite-log";
 
@@ -54,6 +54,12 @@ test("the switch reads PLANNOTATOR_INBOX_SQLITE first, then config's inboxSqlite
   expect(resolveInboxSqlite({ inboxSqlite: true }, { PLANNOTATOR_INBOX_SQLITE: "0" })).toBe(false);
   expect(resolveInboxSqlite({ inboxSqlite: false }, { PLANNOTATOR_INBOX_SQLITE: "on" })).toBe(true);
   expect(resolveInboxSqlite({ inboxSqlite: "yes" }, { PLANNOTATOR_INBOX_SQLITE: "maybe" })).toBeNull();
+});
+
+test("the move's test knobs (a hold, a hard stop) do nothing outside the test sandbox", () => {
+  const knobs = { PLANNOTATOR_INBOX_IMPORT_DELAY_MS: "8000", PLANNOTATOR_INBOX_IMPORT_STOP_AT: "load" };
+  expect(inboxImportDelayFromEnv(knobs)).toBeUndefined();
+  expect(inboxImportDelayFromEnv({ ...knobs, PLANNOTATOR_TEST_SANDBOX: "1" })).toBeFunction();
 });
 
 test("off, with no database: today's store, and not one byte on disk changes", async () => {
