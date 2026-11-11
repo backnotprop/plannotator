@@ -56,7 +56,19 @@ export interface UniqueMix {
   kind: "ids" | "words";
 }
 
-export function seedInboxSearchWorld(dataDir: string, shape: SeedShape = WORST_CASE, seed = 1, unique: UniqueMix = { share: 0, kind: "ids" }): { store: InboxStore; textChars: number; threadIds: string[] } {
+/**
+ * How each thread ends, in place of the default (one message in eight asks a question; 60 % of threads seen, 25 %
+ * archived, at random). The live verifier's `wide` store (scripts/inbox-live-verify-seed.ts) puts every thread in a
+ * chosen section this way.
+ */
+export interface ThreadPlan {
+  /** The question block (`:::question` … `:::`) message `m` of `count` in thread `t` ends with, or null. */
+  question(t: number, m: number, count: number): string | null;
+  /** After the thread's messages: seen, read, replied to, archived… `last` is its newest message. */
+  finish(store: InboxStore, root: string, last: string, t: number): void;
+}
+
+export function seedInboxSearchWorld(dataDir: string, shape: SeedShape = WORST_CASE, seed = 1, unique: UniqueMix = { share: 0, kind: "ids" }, plan?: ThreadPlan): { store: InboxStore; textChars: number; threadIds: string[] } {
   refuseRealDataDir(dataDir, "scripts/inbox-large-store.ts");
   const random = rng(seed);
   const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)]!;
@@ -137,10 +149,12 @@ export function seedInboxSearchWorld(dataDir: string, shape: SeedShape = WORST_C
     const author: Extract<InboxAuthor, { kind: "agent" }> = { kind: "agent", host: pick(["claude-code", "pi", "opencode", "codex"]), session: `ses_${t}`, name: null };
     const count = Math.max(1, Math.round((shape.messages / shape.threads) * (0.4 + random() * 1.2)));
     let root: string | null = null;
+    let last: string | null = null;
     for (let m = 0; m < count && (m === 0 || sent < shape.messages); m++) {
       // One message in a thousand is huge (a pasted log: up to ~120 KB).
       const target = random() < 0.001 ? 120_000 : Math.round(perMessage * (0.3 + random() * 1.4));
-      const text = body(target, random() < 0.12);
+      const asked = plan ? plan.question(t, m, count) : null;
+      const text = plan ? (asked ? `${body(target, false)}\n\n${asked}` : body(target, false)) : body(target, random() < 0.12);
       textChars += text.length;
       const attachments: InboxAttachment[] | undefined =
         random() < 0.05
@@ -156,10 +170,15 @@ export function seedInboxSearchWorld(dataDir: string, shape: SeedShape = WORST_C
         ...(attachments ? { attachments } : {}),
       }).message;
       sent += 1;
+      last = message.id;
       if (!root) {
         root = message.id;
         threadIds.push(root);
       }
+    }
+    if (plan) {
+      plan.finish(store, root!, last!, t);
+      continue;
     }
     if (random() < 0.6) store.markSeen(root!);
     if (random() < 0.25) store.resolveThread(root!, true);

@@ -13,8 +13,10 @@
  * an Inbox on a port it picks (refuses 49606 and 59812), stopped only through the scratch helpers. Run it through
  * `bun scripts/inbox-live-verify.ts run`, never directly: that script makes the sandbox and merges the results.
  *
- * Env: LIVE_SIZE small|10k|100k · LIVE_PROFILE local|throttled|hotel (hotel: only the hotel WiFi checks, hotel.ts) · LIVE_RUNS (samples per stat) · LIVE_OUT (json path)
- *      · LIVE_QUERY (appended to the page address, e.g. `?data=db`) · LIVE_LOG (progress lines)
+ * Env: LIVE_SIZE small|10k|100k|wide · LIVE_PROFILE local|throttled|hotel (hotel: the hotel WiFi checks, hotel.ts, and
+ *      LV-24..27) · LIVE_RUNS (samples per stat) · LIVE_OUT (json path) · LIVE_QUERY (appended to the page address,
+ *      e.g. `?data=db`) · LIVE_LOG (progress lines) · LIVE_CPU_PROFILE (a directory: a CPU profile of the list window C
+ *      over the first agent-message probe is written there, for spike work)
  */
 import { chromium, test, type Browser, type BrowserContext, type Page, type Request } from '@playwright/test';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -22,28 +24,27 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { cpus, totalmem, release, platform, arch, loadavg } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { seedInboxSearchWorld } from '../../scripts/inbox-large-store';
+import { LIVE_SIZES, seedLiveWorld, type LiveSize } from '../../scripts/inbox-live-verify-seed';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from '../e2e/inbox-scratch';
-import { HOTEL, runHotel } from './hotel';
+import { runDeepChecks } from './deep';
+import { eventSplit, pageBytes, type EventSplit } from './windowCost';
+import { HOTEL, hotelLink, runHotel } from './hotel';
 import { LinkProxy } from './linkProxy';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
-const SIZE = (process.env.LIVE_SIZE ?? 'small') as keyof typeof SIZES;
+const SIZE = (process.env.LIVE_SIZE ?? 'small') as LiveSize;
 const PROFILE = (process.env.LIVE_PROFILE ?? 'local') as keyof typeof PROFILES;
 const RUNS = Math.max(1, Number(process.env.LIVE_RUNS ?? 5));
 /** Appended to the page address, e.g. `?data=db` for the TanStack DB prototype's window (`proto/inbox-tanstack-db`). */
 const QUERY = process.env.LIVE_QUERY ?? '';
 const OUT = resolve(process.env.LIVE_OUT ?? join(repo, `.local/live-verify/${SIZE}-${PROFILE}.json`));
 
-/** Store sizes: the seeded history the live checks run on top of. */
-const SIZES = {
-  small: { threads: 40, messages: 400, projects: 4, textBytes: 1 * 1024 * 1024 },
-  '10k': { threads: 300, messages: 10_000, projects: 12, textBytes: 18 * 1024 * 1024 },
-  '100k': { threads: 3000, messages: 100_000, projects: 40, textBytes: 120 * 1024 * 1024 },
-} as const;
+/** Store sizes: the seeded history the live checks run on top of (scripts/inbox-live-verify-seed.ts). */
+const SIZES = LIVE_SIZES;
+if (!(SIZE in SIZES)) throw new Error(`LIVE_SIZE: one of ${Object.keys(SIZES).join(', ')}`);
 /**
  * Links: loopback, or Chromium's throttle (40 ms each way, 10 Mbit) on every page, as a remote tailnet device, or hotel
  * WiFi (hotel.ts: 400 ms with jitter, 1 Mbit, 3 % loss, one drop), which runs only its own three checks.
@@ -219,8 +220,8 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
   let linkProxy: LinkProxy | null = null;
   try {
     let t = Date.now();
-    seedInboxSearchWorld(dataDir, SIZES[SIZE]);
-    out.setup = { seedMs: Date.now() - t };
+    const world = seedLiveWorld(dataDir, SIZE);
+    out.setup = { seedMs: Date.now() - t, sections: world.sections };
     const env: Record<string, string> = {
       PATH: process.env.PATH ?? '',
       HOME: root,
@@ -272,7 +273,7 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
       return r.thread_id as string;
     };
     if (PROFILE === 'hotel') await newThread('hotel', QUESTIONS('hotel'));
-    for (const k of ['open', 'rowc', 'pins2', 'arch', 'read', 'pins', 'snooze', 'resolve', 'race', 'scroll', 'type', 'held', 'sent']) await newThread(k, k === 'race' || k === 'held' ? QUESTIONS(k) : `Hello from ${k}.`);
+    for (const k of ['open', 'rowc', 'pins2', 'arch', 'read', 'pins', 'snooze', 'resolve', 'race', 'scroll', 'type', 'held', 'sent', 'snz']) await newThread(k, k === 'race' || k === 'held' ? QUESTIONS(k) : `Hello from ${k}.`);
     for (let i = 0; i < RUNS; i++) await newThread(`pick${i}`, QUESTIONS(`pick${i}`));
     for (let i = 0; i < Math.min(RUNS, 3); i++) await newThread(`draft${i}`, `Draft target ${i}.`);
     for (let i = 0; i < 14; i++) await ag.send({ project_path: project, reply_to: T.scroll!, body: `Long message ${i}.\n\n${'A paragraph of text that takes room. '.repeat(30)}` });
@@ -351,6 +352,12 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
       await p.goto(`${p === dropping ? proxied : base}/${QUERY}`, { waitUntil: 'commit', timeout: 300_000 });
       await p.waitForSelector('.ib-lbody [data-thread-id]', { timeout: 300_000 });
     };
+    /** A cold tab's bytes until its list painted: everything (page, scripts, reads), and the API reads alone. */
+    const addFirstPaintBytes = async (bytes: ReturnType<typeof pageBytes>) => {
+      const b = await bytes.until(Date.now());
+      add('firstPaintBytes', 'bytes', b.all);
+      add('firstPaintApiBytes', 'bytes', b.api);
+    };
     const openThread = async (p: Page, id: string) => {
       await p.evaluate((id) => (location.hash = `#thread=${encodeURIComponent(id)}`), id);
       await p.waitForSelector(`${paneSel(id)} [data-message-article]`, { timeout: 60_000 });
@@ -364,6 +371,25 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
       const n = await p.$('[data-inbox-notice]');
       if (n) await n.click().catch(() => {});
       await pause(300);
+    };
+    const deepDeps = {
+      A,
+      log,
+      check,
+      add,
+      get,
+      post,
+      listPath: LIST,
+      newThread,
+      threads: { snz: T.snz!, long: world.longThread },
+      arm,
+      landed,
+      traffic,
+      aName: 'A',
+      rowSel,
+      paneSel,
+      toList,
+      showNews,
     };
     const rowOrder = (p: Page) => p.evaluate(() => [...document.querySelectorAll('.ib-lbody [data-thread-id]')].map((e) => e.getAttribute('data-thread-id')));
     const markCards = (p: Page, id: string) =>
@@ -379,8 +405,10 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
     if (PROFILE === 'hotel') {
       // Hotel WiFi: one desktop page, its three checks (hotel.ts); the other checks' budgets are for good links.
       t = Date.now();
+      const bytesA = pageBytes(A);
       await go(A);
       add('firstListPaint', 'ms', Date.now() - t);
+      await addFirstPaintBytes(bytesA);
       await runHotel({
         A,
         base,
@@ -397,21 +425,35 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
         paneSel,
         rowSel,
       });
+      // LV-24..27 on the same bad link (jitter and loss again), on A alone: a link opens in place (a reload would
+      // fetch the whole page again over 1 Mbit).
+      const stop = await hotelLink(A, { setLatency }, 9);
+      try {
+        await runDeepChecks({ ...deepDeps, L: A, C: A, freshLoad: null, budgetMs: 10_000, longOpenMs: 15_000 });
+      } finally {
+        await stop();
+      }
     } else {
       log('setup done; first paint and thread open');
       // ---- First paint and thread open (stats only) ----
       for (const [n, p] of Object.entries(pages)) {
         t = Date.now();
+        const bytes = pageBytes(p);
         await go(p);
-        if (n === 'A') add('firstListPaint', 'ms', Date.now() - t);
+        if (n === 'A') {
+          add('firstListPaint', 'ms', Date.now() - t);
+          await addFirstPaintBytes(bytes);
+        }
       }
       for (let i = 1; i < RUNS; i++) {
         const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
         const p = await ctx.newPage();
         await throttle(p);
         t = Date.now();
+        const bytes = pageBytes(p);
         await go(p);
         add('firstListPaint', 'ms', Date.now() - t);
+        await addFirstPaintBytes(bytes);
         await ctx.close();
       }
       for (let i = 0; i < RUNS; i++) {
@@ -454,8 +496,14 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
         await pause(1500);
       }
       // Requests and bytes one agent message costs: every window's reads in the 2.5 s after it (A, B and P show that thread; C lists it).
+      // Where one event's time goes in the list window C (and A, the thread beside its list): main-thread work while
+      // the record is applied and the list read lands (spike X1, plan B6's "list commit ms per event").
+      const splits: EventSplit[] = [];
       for (let i = 0; i < RUNS; i++) {
         await pause(1500);
+        const cpu = i === 0 ? process.env.LIVE_CPU_PROFILE : undefined;
+        const probeC = await eventSplit(C, cdps.get(C)!, cpu ? join(cpu, `${SIZE}-${PROFILE}-C.cpuprofile`) : undefined);
+        const probeA = await eventSplit(A, cdps.get(A)!);
         const t0 = Date.now();
         await ag.send({ project_path: project, reply_to: T.open!, body: `Cost probe ${i}.` });
         await pause(2500);
@@ -463,7 +511,14 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
         add('requestsPerAgentMsg_4windows', 'count', tr.count);
         add('bytesPerAgentMsg_4windows', 'bytes', tr.bytes);
         if (i === 0) out.trafficExample = tr;
+        const c = await probeC.end(t0);
+        const a = await probeA.end(t0);
+        splits.push({ ...c, window: 'C' }, { ...a, window: 'A' });
+        add('listCommitMsPerEvent', 'ms', c.longTaskMs);
+        add('listBusyMsPerEvent', 'ms', c.taskMs);
+        add('listReadWaitMsPerEvent', 'ms', c.listReads.reduce((n, r) => n + r.waitMs, 0));
       }
+      out.eventSplit = splits;
       log('stats: new threads');
       // New unread thread → the tab count of a list window (C), and the held notice.
       for (let i = 0; i < RUNS; i++) {
@@ -951,6 +1006,31 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
         }
       });
 
+      // LV-24..27 last, so the rows Quiet draws once opened (every one of them today) weigh on no earlier number. D is
+      // a desktop of its own (its own context: Quiet's open state is a cookie), on the list.
+      log('deep checks');
+      const deepCtx = await browser.newContext({ viewport: { width: 1440, height: 900 }, bypassCSP: true });
+      const D = await deepCtx.newPage();
+      D.setDefaultTimeout(15_000);
+      D.on('pageerror', (e) => errors.push(`D: ${e.message.slice(0, 200)}`));
+      traffic.attach(D, 'D');
+      await throttle(D);
+      await go(D);
+      try {
+        await runDeepChecks({
+          ...deepDeps,
+          L: D,
+          C,
+          freshLoad: async (p, hash) => {
+            await p.goto('about:blank');
+            await p.goto(`${base}/${QUERY}${hash}`, { waitUntil: 'commit', timeout: 300_000 });
+          },
+          budgetMs: BUDGET_MS,
+          longOpenMs: PROFILE === 'local' ? 5000 : 15_000,
+        });
+      } finally {
+        await deepCtx.close();
+      }
     }
     out.memory.rssEndMB = rssMB(pid);
     out.errors = errors;
