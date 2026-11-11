@@ -1787,7 +1787,7 @@ export const inboxApi = {
    * restarted under this tab (whose serverSession is new) so the count of
    * windows that may notify is right again.
    */
-  reportWindow: async (report: { window: string; permission: Exclude<InboxWindowPermission, 'unknown'>; origin: string; served_by?: string | null }) =>
+  reportWindow: async (report: { window: string; permission: Exclude<InboxWindowPermission, 'unknown'>; origin: string; served_by?: string | null; used?: boolean }) =>
     readJson<{ notify_reach: InboxNotifyReach }>(
       await fetch(inboxUrl('/window'), {
         method: 'POST',
@@ -2366,6 +2366,8 @@ export interface InboxEventHandlers {
   onPins?: () => void;
   /** The pinned artifacts changed (`event: artifact-pins`, approval "inbox-artifact-stars"); never called by an older Inbox. */
   onArtifactPins?: () => void;
+  /** Show a thread (`event: show`, `plannotator inbox --open <thread>`): only the window named moves; never called by an older Inbox. */
+  onShow?: (threadId: string, windowId: string) => void;
   /** A snooze changed or ran out (`event: snoozes`, approval "inbox-snooze"), here or on a linked machine; never called by an older Inbox. */
   onSnoozes?: () => void;
   /** A read of these threads' PRs changed their checks or review (`event: thread-pulls`, no record); never called by an older Inbox. */
@@ -2420,7 +2422,7 @@ export interface InboxEventWindow {
 
 /** The event stream's named frames, as they arrive (and as the tab that holds the shared stream passes them on). */
 // `heartbeat`: a window's stream beats every 10 s (packages/server/inbox.ts); heard by liveStream.ts, handled by nothing.
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'artifact-pins', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'artifact-pins', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -2509,6 +2511,14 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'artifact-pins':
       handlers.onArtifactPins?.();
+      return;
+    case 'show':
+      try {
+        const data = JSON.parse(frame.data) as { thread_id?: unknown; window?: unknown };
+        if (typeof data.thread_id === 'string' && typeof data.window === 'string') handlers.onShow?.(data.thread_id, data.window);
+      } catch {
+        // A malformed frame changes nothing.
+      }
       return;
     case 'snoozes':
       handlers.onSnoozes?.();

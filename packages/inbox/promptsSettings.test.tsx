@@ -58,8 +58,9 @@ function server(start: InboxPromptsSettings) {
   globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body));
     sent.push(body.prompts);
-    const inbox = body.prompts.inbox;
+    const inbox = body.prompts.inbox ?? {};
     const clean = (value: string | null) => (value === null || value.trim() === '' ? null : value);
+    if ('guide' in body.prompts) state.guide = { text: clean(body.prompts.guide), max: 2000 };
     if ('reminder' in inbox) state.reminder.shared = clean(inbox.reminder);
     for (const [agent, entry] of Object.entries(inbox.runtimes ?? {})) state.reminder.runtimes[agent as InboxPromptHost] = clean((entry as { reminder: string | null }).reminder);
     return new Response(JSON.stringify({ prompts: structuredClone(state) }), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -298,9 +299,43 @@ test.skipIf(!hasDom)('config.json is named with the home folder as ~, the full p
   expect(await tooltipOf(outside)).toBeNull();
 });
 
+test.skipIf(!hasDom)('Guided reviews: Default with only Edit; Save writes `guide` and shows it as Custom; Reset to default deletes it', async () => {
+  const start: InboxPromptsSettings = { ...model(), guide: { text: null, max: 2000 } };
+  const sent = server(start);
+  const el = mount(start);
+  const row = q(el, '[data-prompt-slot="guide"]')!;
+  expect(q(row, '.ib-chip')?.textContent).toBe('Default');
+  expect(q(row, '[data-prompt-text="guide"], [data-prompt-reset]')).toBeNull();
+  await click(q(row, '[data-prompt-edit="guide"]'));
+  const box = q<HTMLTextAreaElement>(el, '[data-prompt-field="guide"]')!;
+  expect(box.value).toBe('');
+  expect(document.activeElement).toBe(box);
+  type(box, 'Start with the riskiest change.');
+  await click(q(el, '[data-prompt-save="guide"]'));
+  expect(sent).toEqual([{ guide: 'Start with the riskiest change.' }]);
+  expect(q(row, '.ib-chip')?.textContent).toBe('Custom');
+  expect(q(row, '[data-prompt-text="guide"]')?.textContent).toBe('Start with the riskiest change.');
+  // The reminder is untouched: the phone's list still reads Custom for the page.
+  expect(q(el, '[data-prompt-slot="shared"] .ib-chip')?.textContent).toBe('Default');
+  expect(promptsSummary({ ...model(), guide: { text: 'x', max: 2000 } })).toBe('Custom');
+  // Past the cap Save is refused.
+  await click(q(row, '[data-prompt-edit="guide"]'));
+  type(q<HTMLTextAreaElement>(el, '[data-prompt-field="guide"]')!, 'a'.repeat(2001));
+  expect(q<HTMLButtonElement>(el, '[data-prompt-save="guide"]')!.disabled).toBe(true);
+  expect(q(el, '[data-prompt-count]')?.textContent).toBe('2,001 / 2,000');
+  await click(q(el, '[data-prompt-cancel="guide"]'));
+  await click(q(row, '[data-prompt-reset="guide"]'));
+  expect(sent.at(-1)).toEqual({ guide: null });
+  expect(q(row, '.ib-chip')?.textContent).toBe('Default');
+});
+
 test.skipIf(!hasDom)('through the tailnet: read-only, no Edit anywhere', () => {
   const el = mount(model({ editable: false, shared: 'Mine.', runtimes: { 'claude-code': null, pi: 'Pi.', opencode: null } }));
   expect(el.querySelectorAll('[data-prompt-edit], [data-prompt-reset], [data-prompt-use-shared]')).toHaveLength(0);
   expect(el.textContent).toContain('Change it on this computer.');
   expect(q(el, '[data-prompt-text="pi"]')?.textContent).toBe('Pi.');
+  // Guided reviews too: shown, never editable.
+  act(() => root!.render(<PromptsSection prompts={{ ...model({ editable: false }), guide: { text: 'Mine.', max: 2000 } }} />));
+  expect(q(el, '[data-prompt-text="guide"]')?.textContent).toBe('Mine.');
+  expect(el.querySelectorAll('[data-prompt-edit], [data-prompt-reset]')).toHaveLength(0);
 });

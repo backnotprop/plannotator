@@ -226,112 +226,71 @@ async function openMore() {
   return threadMenu()!;
 }
 
-test.skipIf(!hasDom)('desktop: the read button and the Snooze clock lead, before the subject; Artifacts, Expand, ⋯ and × stay at the right', async () => {
-  await render(OPENED);
-  expect(bar()).toEqual(['Mark unread', 'Snooze', 'subject', 'Artifacts', 'Expand', 'More', '|', 'Close the thread']);
-  expect(head().querySelector('[data-header-subject]')!.textContent).toBe('customize row look');
-  // The read button is an icon: its words are its name, never drawn text.
-  for (const button of head().querySelectorAll('[data-mark-unread], [data-thread-snooze]')) expect(button.textContent).toBe('');
-  // The other states take the same slot.
-  act(() => root!.unmount());
-  host!.remove();
-  await render(WAITING);
-  expect(bar().slice(0, 3)).toEqual(['Mark read', 'Snooze', 'subject']);
-  act(() => root!.unmount());
-  host!.remove();
-  await render(MARKED);
-  expect(bar().slice(0, 3)).toEqual(['Read', 'Snooze', 'subject']);
-  expect(head().querySelector('[data-mark-read]')!.getAttribute('aria-pressed')).toBe('true');
-});
-
-test.skipIf(!hasDom)('desktop ⋯ no longer repeats Snooze (the clock has it); a phone bar has neither the read button nor the clock', async () => {
-  await render(WAITING);
-  expect(menuItems(await openMore())).not.toContain('Snooze');
-  act(() => root!.unmount());
-  host!.remove();
+test.skipIf(!hasDom)('the bar has no read button and no Snooze clock (desktop and phone): the subject comes first, then Artifacts, Expand, ⋯ (and × off a phone)', async () => {
+  for (const state of [OPENED, WAITING, MARKED]) {
+    await render(state);
+    expect(bar()).toEqual(['subject', 'Artifacts', 'Expand', 'More', '|', 'Close the thread']);
+    act(() => root!.unmount());
+    host!.remove();
+  }
   await render(OPENED, true);
   expect(bar()).toEqual(['‹ Inbox', 'subject', 'Artifacts', 'Expand', 'More']);
-  expect(head().querySelector('[data-mark-read], [data-mark-unread], [data-thread-snooze]')).toBeNull();
+  expect(head().querySelector('.ib-readbtn, [data-mark-read], [data-mark-unread], [data-thread-snooze]')).toBeNull();
 });
 
-test.skipIf(!hasDom)('tooltips: the read button says its words, with E for Mark read; the clock says Snooze', async () => {
+test.skipIf(!hasDom)('desktop ⋯: Mark read names E and Snooze names H for a screen reader (the keys did not move)', async () => {
   await render(WAITING);
-  const markRead = head().querySelector('[data-mark-read]')!;
-  // A button that can be disabled hangs its tooltip on a wrapper the pointer reaches (Tip's `.ib-tipwrap`).
-  const tip = await tooltipOf(markRead.closest('[data-tip-wrap]') ?? markRead);
-  expect(tip).toContain('Mark read');
-  // E, from the registry (the keycap), with the key named for a screen reader too.
-  expect(document.querySelector('[data-shortcut-hint="inbox-thread.markRead"] kbd')?.textContent).toBe('E');
-  expect(markRead.getAttribute('aria-keyshortcuts')).toBe('E');
-  unhover(markRead.closest('[data-tip-wrap]') ?? markRead);
-  // The clock: Snooze, with H (approval "inbox-keyboard-keys-2026-11-07") from the registry, named for a screen reader too.
-  expect(await tooltipOf(head().querySelector('[data-thread-snooze]')!)).toBe('SnoozeH');
-  expect(head().querySelector('[data-thread-snooze]')!.getAttribute('aria-keyshortcuts')).toBe('H');
-  act(() => root!.unmount());
-  host!.remove();
-  await render(OPENED);
-  expect(await tooltipOf(head().querySelector('[data-mark-unread]')!)).toBe('Mark unread');
-  act(() => root!.unmount());
-  host!.remove();
-  await render(MARKED);
-  const read = head().querySelector('[data-mark-read]')!;
-  // The pressed Read says what a click does (as on main): it moves the thread back to the top.
-  const readTip = await tooltipOf(read.closest('[data-tip-wrap]') ?? read);
-  expect(readTip).toContain('Read');
-  expect(readTip).toContain('Move it back to the top');
-});
-
-test.skipIf(!hasDom)("a phone's ⋯ leads with the read action, then Snooze, a divider, Pin, and the rest", async () => {
-  await render(OPENED, true);
-  expect(menuItems(await openMore())).toEqual(['Mark unread', 'Snooze', '—', 'Star thread', '—', 'Copy thread', '—', 'Copy link', 'Copy thread ID', '—', 'Add a pull request…', '—', 'Request guided review', '—', 'Archive thread']);
-  await press(threadMenu()!.querySelector('[data-thread-unread-item]')!);
-  expect(calls).toEqual(['mark unread']);
-  act(() => root!.unmount());
-  host!.remove();
-  calls.length = 0;
-  await render(WAITING, true);
-  expect(menuItems(await openMore()).slice(0, 3)).toEqual(['Mark read', 'Snooze', '—']);
-  await press(threadMenu()!.querySelector('[data-thread-read-item]')!);
-  expect(calls).toEqual(['mark read']);
-});
-
-// Parity with the desktop's read button, state by state: a phone has no read button in its bar, no row menu and no E,
-// so its ⋯ sheet is the only place these are.
-test.skipIf(!hasDom)("a phone's ⋯ offers every read action the desktop has: Move back to the top when marked read, Mark read and Mark unread on a seen update held in New", async () => {
-  // Marked read: the desktop's pressed Read moves it back (and its ⋯ offers Mark unread).
-  await render(MARKED, true);
-  expect(menuItems(await openMore()).slice(0, 4)).toEqual(['Move back to the top', 'Mark unread', 'Snooze', '—']);
-  await press(threadMenu()!.querySelector('[data-thread-move-back-item]')!);
-  expect(calls).toEqual(['move back']);
-  act(() => root!.unmount());
-  host!.remove();
-  calls.length = 0;
-  // A seen update the list still holds in New: the desktop's button is Mark unread, and Mark read is its E and row menu.
-  const held = row({ section: 'quiet' });
-  await render(held, false, THREAD, 'new');
-  expect(head().querySelector('[data-mark-unread]')).not.toBeNull();
-  act(() => root!.unmount());
-  host!.remove();
-  await render(held, true, THREAD, 'new');
-  expect(menuItems(await openMore()).slice(0, 4)).toEqual(['Mark read', 'Mark unread', 'Snooze', '—']);
-  await press(threadMenu()!.querySelector('[data-thread-read-item]')!);
-  expect(calls).toEqual(['mark read']);
-});
-
-test.skipIf(!hasDom)("a phone's Snooze swaps the sheet for ‹ Snooze until and its times; ‹ goes back to the sheet", async () => {
-  await render(OPENED, true);
   const menu = await openMore();
-  await press(menu.querySelector('[data-thread-snooze-item]')!);
-  await until(() => !!threadMenu()?.querySelector('[data-snooze-back]'), 'the times');
-  // The times come from the menu's own rule: Later today is gone from 6 PM, and a choice on the time of one above it is dropped.
-  const labels = inboxSnoozeChoices(new Date()).map((choice) => choice.label);
-  expect(menuItems(threadMenu()!)).toEqual(['Snooze until', ...labels.map((label) => expect.stringContaining(label)), '—', 'Pick a time…'] as never);
-  // The sheet keeps the thread's subject as its title.
-  expect(threadMenu()!.querySelector('.ib-pm-title')?.textContent).toBe(SUBJECT);
-  await press(threadMenu()!.querySelector('[data-snooze-back]')!);
-  await until(() => !!threadMenu()?.querySelector('[data-thread-snooze-item]'), 'the sheet again');
-  expect(menuItems(threadMenu()!)[0]).toBe('Mark unread');
+  expect(menu.querySelector('[data-thread-read-item]')!.getAttribute('aria-keyshortcuts')).toBe('E');
+  expect(menu.querySelector('[data-thread-snooze-item]')!.getAttribute('aria-keyshortcuts')).toBe('H');
 });
+
+for (const phone of [false, true]) {
+  const where = phone ? "a phone's ⋯" : 'the desktop ⋯';
+
+  test.skipIf(!hasDom)(`${where} leads with the read action, then Snooze, a divider, Pin, and the rest`, async () => {
+    await render(OPENED, phone);
+    expect(menuItems(await openMore())).toEqual(['Mark unread', 'Snooze', '—', 'Star thread', '—', 'Copy thread', '—', 'Copy link', 'Copy thread ID', '—', 'Add a pull request…', '—', 'Request guided review', '—', 'Archive thread']);
+    await press(threadMenu()!.querySelector('[data-thread-unread-item]')!);
+    expect(calls).toEqual(['mark unread']);
+    act(() => root!.unmount());
+    host!.remove();
+    calls.length = 0;
+    await render(WAITING, phone);
+    expect(menuItems(await openMore()).slice(0, 3)).toEqual(['Mark read', 'Snooze', '—']);
+    await press(threadMenu()!.querySelector('[data-thread-read-item]')!);
+    expect(calls).toEqual(['mark read']);
+  });
+
+  test.skipIf(!hasDom)(`${where} offers every read action: Move back to the top when marked read, Mark read and Mark unread on a seen update held in New`, async () => {
+    await render(MARKED, phone);
+    expect(menuItems(await openMore()).slice(0, 4)).toEqual(['Move back to the top', 'Mark unread', 'Snooze', '—']);
+    await press(threadMenu()!.querySelector('[data-thread-move-back-item]')!);
+    expect(calls).toEqual(['move back']);
+    act(() => root!.unmount());
+    host!.remove();
+    calls.length = 0;
+    await render(row({ section: 'quiet' }), phone, THREAD, 'new');
+    expect(menuItems(await openMore()).slice(0, 4)).toEqual(['Mark read', 'Mark unread', 'Snooze', '—']);
+    await press(threadMenu()!.querySelector('[data-thread-read-item]')!);
+    expect(calls).toEqual(['mark read']);
+  });
+
+  test.skipIf(!hasDom)(`${where}: Snooze swaps the menu for ‹ Snooze until and its times; ‹ goes back to the menu`, async () => {
+    await render(OPENED, phone);
+    const menu = await openMore();
+    await press(menu.querySelector('[data-thread-snooze-item]')!);
+    await until(() => !!threadMenu()?.querySelector('[data-snooze-back]'), 'the times');
+    // The times come from the menu's own rule: Later today is gone from 6 PM, and a choice on the time of one above it is dropped.
+    const labels = inboxSnoozeChoices(new Date()).map((choice) => choice.label);
+    expect(menuItems(threadMenu()!)).toEqual(['Snooze until', ...labels.map((label) => expect.stringContaining(label)), '—', 'Pick a time…'] as never);
+    // A phone's sheet keeps the thread's subject as its title.
+    expect(threadMenu()!.querySelector('.ib-pm-title')?.textContent ?? null).toBe(phone ? SUBJECT : null);
+    await press(threadMenu()!.querySelector('[data-snooze-back]')!);
+    await until(() => !!threadMenu()?.querySelector('[data-thread-snooze-item]'), 'the menu again');
+    expect(menuItems(threadMenu()!)[0]).toBe('Mark unread');
+  });
+}
 
 test.skipIf(!hasDom)('"Snoozed until" shows while the time is ahead, never for a time gone by (an archived thread keeps its snooze until a look)', async () => {
   const at = '2026-10-20T18:00:00.000Z';
@@ -344,60 +303,53 @@ test.skipIf(!hasDom)('"Snoozed until" shows while the time is ahead, never for a
   expect(host!.querySelector('[data-unsnooze]')).toBeNull();
 });
 
-test.skipIf(!hasDom)("desktop: the clock opens the times, titled Snooze until; a time snoozes; Pick a time's lists snooze too", async () => {
+async function openTimes() {
+  const menu = await openMore();
+  await press(menu.querySelector('[data-thread-snooze-item]')!);
+  await until(() => !!threadMenu()?.querySelector('[data-snooze-choice]'), 'the times');
+  return threadMenu()!;
+}
+
+test.skipIf(!hasDom)("desktop: ⋯ › Snooze's times snooze; Pick a time's lists snooze too", async () => {
   await render(OPENED);
-  const clock = head().querySelector('[data-thread-snooze]')!;
-  const snoozeMenu = () => document.querySelector<HTMLElement>('[data-thread-snooze-menu]');
-  await press(clock);
-  await until(() => !!snoozeMenu(), 'the times');
-  expect(snoozeMenu()!.querySelector('[data-snooze-title]')?.textContent).toBe('Snooze until');
-  // Nothing to go back to: the times are this menu.
-  expect(snoozeMenu()!.querySelector('[data-snooze-back]')).toBeNull();
-  expect([...snoozeMenu()!.querySelectorAll('[data-snooze-choice]')].map((el) => el.getAttribute('data-snooze-choice'))).toHaveLength(inboxSnoozeChoices(new Date()).length);
-  await press(snoozeMenu()!.querySelector('[data-snooze-choice]')!);
+  const times = await openTimes();
+  expect([...times.querySelectorAll('[data-snooze-choice]')]).toHaveLength(inboxSnoozeChoices(new Date()).length);
+  await press(times.querySelector('[data-snooze-choice]')!);
   expect(snoozed).toHaveLength(1);
   expect(Number.isNaN(Date.parse(snoozed[0]!))).toBe(false);
-  await until(() => !snoozeMenu(), 'the menu to close');
-  // Pick a time, as today: its two lists, ‹ Pick a time back to the times, and its Snooze.
-  await press(clock);
-  await until(() => !!snoozeMenu(), 'the times again');
-  await press(snoozeMenu()!.querySelector('[data-snooze-pick-time]')!);
-  await until(() => !!snoozeMenu()?.querySelector('[data-snooze-picker]'), 'the picker');
-  await press(snoozeMenu()!.querySelector('[data-snooze-back]')!);
-  await until(() => !!snoozeMenu()?.querySelector('[data-snooze-choice]'), 'the times after ‹');
-  await press(snoozeMenu()!.querySelector('[data-snooze-pick-time]')!);
-  await until(() => !!snoozeMenu()?.querySelector('[data-snooze-picker]'), 'the picker again');
-  await press(snoozeMenu()!.querySelector('[data-snooze-go]')!);
+  await until(() => !threadMenu(), 'the menu to close');
+  // Pick a time, as before: its two lists, ‹ Pick a time back to the times, and its Snooze.
+  await openTimes();
+  await press(threadMenu()!.querySelector('[data-snooze-pick-time]')!);
+  await until(() => !!threadMenu()?.querySelector('[data-snooze-picker]'), 'the picker');
+  await press(threadMenu()!.querySelector('[data-snooze-back]')!);
+  await until(() => !!threadMenu()?.querySelector('[data-snooze-choice]'), 'the times after ‹');
+  await press(threadMenu()!.querySelector('[data-snooze-pick-time]')!);
+  await until(() => !!threadMenu()?.querySelector('[data-snooze-picker]'), 'the picker again');
+  await press(threadMenu()!.querySelector('[data-snooze-go]')!);
   expect(snoozed).toHaveLength(2);
   expect(Date.parse(snoozed[1]!)).toBeGreaterThan(Date.now());
 });
 
-test.skipIf(!hasDom)('desktop: a Snooze from the clock leaves the read button as it was; Escape closes the clock menu, never the thread', async () => {
-  const snoozeMenu = () => document.querySelector<HTMLElement>('[data-thread-snooze-menu]');
-  for (const [state, name, pressed] of [[WAITING, 'Mark read', 'false'], [MARKED, 'Read', 'true']] as const) {
+test.skipIf(!hasDom)('desktop: a Snooze leaves the read action as it was; Escape closes the menu, never the thread', async () => {
+  for (const [state, first] of [[WAITING, 'Mark read'], [MARKED, 'Move back to the top']] as const) {
     await render(state);
-    await press(head().querySelector('[data-thread-snooze]')!);
-    await until(() => !!snoozeMenu(), 'the times');
-    await press(snoozeMenu()!.querySelector('[data-snooze-choice]')!);
-    await until(() => !snoozeMenu(), 'the menu to close');
-    const read = head().querySelector('[data-mark-read]')!;
-    expect(read.getAttribute('aria-label')).toBe(name);
-    expect(read.getAttribute('aria-pressed')).toBe(pressed);
+    await press((await openTimes()).querySelector('[data-snooze-choice]')!);
+    await until(() => !threadMenu(), 'the menu to close');
+    expect(menuItems(await openMore())[0]).toBe(first);
     act(() => root!.unmount());
     host!.remove();
     for (const undo of restore.splice(0).reverse()) undo();
   }
   expect(snoozed).toHaveLength(2);
   await render(WAITING);
-  await press(head().querySelector('[data-thread-snooze]')!);
-  await until(() => !!snoozeMenu(), 'the times again');
-  const target = (document.activeElement && snoozeMenu()!.contains(document.activeElement) ? document.activeElement : snoozeMenu())!;
+  const times = await openTimes();
+  const target = (document.activeElement && times.contains(document.activeElement) ? document.activeElement : times)!;
   act(() => {
     target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
   });
-  await until(() => !snoozeMenu(), 'Escape to close the menu');
+  await until(() => !threadMenu(), 'Escape to close the menu');
   expect(calls).not.toContain('close');
-  expect(head().querySelector('[data-thread-snooze]')).not.toBeNull();
   expect(snoozed).toHaveLength(2);
 });
 
