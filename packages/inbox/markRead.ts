@@ -8,7 +8,8 @@
  * once not to wait on them. It comes back when an agent writes again.
  */
 
-import { inboxRowOffersMarkRead, inboxRowWaitsOnPerson, type InboxListRow, type InboxListGroupId } from '@plannotator/core/inbox-types';
+import { summarizeInboxQuestions } from '@plannotator/core/inbox-questions';
+import { inboxRowOffersMarkRead, inboxRowWaitsOnPerson, type InboxListRow, type InboxListGroupId, type InboxThread } from '@plannotator/core/inbox-types';
 import { agentName, plural, shortAgentName } from './format';
 
 /** How long the Undo toast stays (the server's set-aside note waits a little longer). */
@@ -121,8 +122,21 @@ export function setAsideCount(
   return out;
 }
 
+/** What Mark read would set aside: the list's row, or for a thread the list has no row for, the open thread's own questions. */
+export function setAsideOf(row: InboxListRow | undefined, open: Pick<InboxThread, 'messages'> | null): SetAsideCount {
+  if (row) return setAsideCount([row]);
+  if (!open) return setAsideCount([]);
+  const asked = open.messages.filter((m) => m.author.kind === 'agent').flatMap((m) => [...(m.questions ?? []), ...(m.actions ?? [])]);
+  return setAsideCount([{ questions: summarizeInboxQuestions(asked) }]);
+}
+
 /** The person's answer to the warning: Cancel, or go on (and, with `never`, stop asking). */
 export type SetAsideAnswer = { go: false } | { go: true; never: boolean };
+
+/** Whether the warning asks before this Mark read: the person has it on and something would be set aside. */
+export function warnsBeforeRead(count: SetAsideCount, warnOn: boolean): boolean {
+  return warnOn && count.questions + count.actions > 0;
+}
 
 /**
  * Whether a Mark read goes ahead: straight on when nothing would be set aside or the person turned the warning off;
@@ -134,7 +148,7 @@ export async function confirmSetAside(
   ask: (count: SetAsideCount) => Promise<SetAsideAnswer>,
   turnOff: () => void,
 ): Promise<boolean> {
-  if (!warnOn || count.questions + count.actions === 0) return true;
+  if (!warnsBeforeRead(count, warnOn)) return true;
   const answer = await ask(count);
   if (!answer.go) return false;
   if (answer.never) turnOff();

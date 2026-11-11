@@ -177,9 +177,8 @@ import { StalePageNotice } from './components/StalePageNotice';
 import { InboxToast, type InboxToastModel, toastSpeech } from './components/Toast';
 import { errorToast } from './toastError';
 import { pictureFromFile } from './projectPictures';
-import { canToggleRead, confirmSetAside, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, offersRowMarkRead, seenHeldInNew, setAsideCount, type SetAsideAnswer, type SetAsideCount } from './markRead';
+import { canToggleRead, confirmSetAside, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, offersRowMarkRead, seenHeldInNew, setAsideCount, setAsideOf, type SetAsideAnswer, type SetAsideCount, warnsBeforeRead } from './markRead';
 import { MarkReadWarning } from './components/MarkReadWarning';
-import { summarizeInboxQuestions } from '@plannotator/core/inbox-questions';
 import { threadLink, type RowMenuAction } from './rowMenu';
 import { movePin, unpinnedWhere } from './pins';
 import { noteStarred } from './starPop';
@@ -3593,14 +3592,6 @@ function Inbox() {
       () => void toggleMarkReadWarning(false),
     );
 
-  /** What Mark read would set aside on a thread the list has no row for (the open thread's own questions). */
-  const openThreadSetAside = (threadId: string): SetAsideCount => {
-    const open = thread?.thread_id === threadId ? thread : null;
-    if (!open) return setAsideCount([]);
-    const asked = open.messages.filter((m) => m.author.kind === 'agent').flatMap((m) => [...(m.questions ?? []), ...(m.actions ?? [])]);
-    return setAsideCount([{ questions: summarizeInboxQuestions(asked) }]);
-  };
-
   /**
    * Mark read, or move it back (the pressed button, `E` again, Undo). The
    * thread leaves the top for Quiet with its waiting questions closed; Undo
@@ -3615,19 +3606,23 @@ function Inbox() {
     if (!read) await rowWrites.pendingRead(threadId);
     const listAtPress = read ? shownRef.current : null;
     // Mark read is drawn now (rowActions.ts), even while a look on its way is waited for below; Move back waits for
-    // its answer. A press that turns out to write nothing takes the drawn row away again.
+    // its answer. A press that turns out to write nothing takes the drawn row away again. One the warning will ask
+    // about is drawn only once the person goes on (never read behind the question; Cancel leaves it as it was).
     const drawnRow = read ? shownRowOf(shownRef.current, threadId) : null;
     let drawing: RowDrawing | null = null;
     const unpatch = () => drawing?.done();
     const undraw = () => {
-      drawing?.failed();
+      if (!drawing) return;
+      drawing.failed();
       if (drawnRow) setShown((current) => (current ? replaceHeldRow(current, drawnRow) : current));
     };
-    if (read) {
+    const draw = () => {
+      if (drawing) return;
       const patch = readRowPatch(new Date().toISOString());
       drawing = rowWrites.draw(threadId, { patch });
       setShown((current) => (current ? patchShownRow(current, threadId, patch) : current));
-    }
+    };
+    if (read && !warnsBeforeRead(setAsideOf(rowOf(threadId), thread?.thread_id === threadId ? thread : null), settings?.mark_read_warning?.on === true)) draw();
     // A look this tab sent and the server has not taken yet: decide on what it gives (a seen update held in New
     // moves locally), whether Mark read came before the look landed or after. Never longer than
     // MARK_READ_LOOK_WAIT_MS: a look that stalls leaves the thread New on the server, so Mark read writes.
@@ -3646,7 +3641,8 @@ function Inbox() {
       }
     }
     // Questions this Mark read would close unanswered (and tell the agent about): the warning asks first.
-    if (read && !(await warnSetAside(before ? setAsideCount([before]) : openThreadSetAside(threadId), false))) return;
+    if (read && !(await warnSetAside(setAsideOf(before, thread?.thread_id === threadId ? thread : null), false))) return undraw();
+    if (read) draw();
     // The list holds still, a thread open or not (approval "inbox-list-view", R7): the row stays where it is, not
     // bold, and moves to Quiet when the list next settles.
     const open = routeRef.current.thread;
