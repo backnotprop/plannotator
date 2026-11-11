@@ -3,8 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { NO_BROWSER } from '../helpers/no-browser';
-import { inboxScratch, removeInboxScratch } from './inbox-scratch';
+import { inboxScratch, removeInboxScratch, scratchEnv } from './inbox-scratch';
 
 test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 
@@ -40,8 +39,8 @@ async function traceHorizontalDrag(page: Page, positions: number[], afterMove: (
 for (const containment of ['native', 'fallback'] as const) {
   test(`a mobile navigator owns scrolling with ${containment} containment`, async ({ page }) => {
     const root = inboxScratch('plannotator-navigation-scroll-');
-    const dataDir = join(root, 'data');
-    mkdirSync(dataDir);
+    const scratch = scratchEnv(root);
+    mkdirSync(scratch.PLANNOTATOR_DATA_DIR);
     const doc = join(root, 'long.md');
     writeFileSync(doc, '# Navigation\n\n' + Array.from({ length: 70 }, (_, i) =>
       `## Section ${i + 1}\n\n${'Text for a long document. '.repeat(50)}\n\n`,
@@ -53,8 +52,8 @@ for (const containment of ['native', 'fallback'] as const) {
     try {
       child = spawn(binary, ['annotate', doc], {
         cwd: root, stdio: 'ignore',
-        env: { ...process.env, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_TEST_SANDBOX: '1',
-          PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_READY_FILE: ready, PLANNOTATOR_REMOTE: '0',
+        env: { ...process.env, ...scratch, PLANNOTATOR_TEST_SANDBOX: '1',
+          PLANNOTATOR_READY_FILE: ready, PLANNOTATOR_REMOTE: '0',
           PLANNOTATOR_UPDATE_CHECK: '0', PLANNOTATOR_INBOX_CONNECT: '0' },
       });
       await expect.poll(() => existsSync(ready) ? readFileSync(ready, 'utf8') : '').toContain('"url"');
