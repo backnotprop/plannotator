@@ -6,6 +6,8 @@ export const inboxKeys = {
   all: ['inbox'] as const,
   /** The list, as its last read brought it, with the stream's records applied since (`apply/list.ts`). */
   list: () => ['inbox', 'list'] as const,
+  /** New message's drafts and the threads holding unsent work (queries/drafts.ts). */
+  drafts: () => ['inbox', 'drafts'] as const,
   /** Every held thread (a stream gap marks them all stale through this prefix). */
   threads: () => ['inbox', 'thread'] as const,
   /** One thread as its read brought it, with the stream's records applied since (`apply/record.ts`). */

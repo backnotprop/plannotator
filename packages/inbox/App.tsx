@@ -27,6 +27,7 @@ import { createInboxQueryClient } from './data/client';
 import { dropThread, heldThread, pruneThreads, putThread, readThread, showableThread, staleThreads, useHeldThread } from './data/queries/thread';
 import { sameThreadFiles } from './data/queries/files';
 import { putList, readList, takeListRead, useListModel } from './data/queries/list';
+import { changeDrafts, heldReplyDrafts, readDrafts, useDrafts } from './data/queries/drafts';
 import { applyListRecord } from './data/apply/list';
 import { createRecordPause } from './data/apply/recordPause';
 import { createLookPoster } from './data/actions/seen';
@@ -43,7 +44,7 @@ import { storage } from '@plannotator/ui/utils/storage';
 import { setSidebarSectionOpen } from './sidebarSections';
 import type { SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
 import { reloadSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
-import type { InboxCardWire, InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxReplyDraftRow, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxCardWire, InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import { DecisionMode } from './decisions/DecisionMode';
 import { DecisionPill, decideEntryShown } from './decisions/entry';
 import { threadDecisions } from './decisions/model';
@@ -1307,12 +1308,9 @@ function Inbox() {
   const machineAskCompose = useRef<{ request: ComposeRequest; machine: string } | null>(null);
   /** Where focus goes once compose closes or a draft row goes: the opener, else `focusFallback(next)`. */
   const pendingFocus = useRef<{ opener: HTMLElement | null; next: string | null } | null>(null);
-  const [drafts, setDrafts] = useState<DraftView[] | null>(null);
-  /** Open threads holding unsent work (approval "inbox-reply-drafts"): the Drafts row counts them, its page lists them. */
-  const [replyDrafts, setReplyDrafts] = useState<InboxReplyDraftRow[]>([]);
-  /** The reply drafts as last read, for the reads that run outside a render (draftsReads.ts). */
-  const replyDraftsRef = useRef(replyDrafts);
-  replyDraftsRef.current = replyDrafts;
+  /** New message's drafts, and open threads holding unsent work (approval "inbox-reply-drafts"): data/queries/drafts.ts. */
+  const { drafts, replies: replyDrafts } = useDrafts();
+  const setDrafts = useCallback((change: (drafts: DraftView[]) => DraftView[]) => changeDrafts(queryClient, change), [queryClient]);
   /**
    * The open thread's reply draft and its files read again (signal.ts): a draft saved or discarded (`event: drafts`),
    * records that need only the files, a re-read of the thread. Signals draw nothing: a read that brings nothing new
@@ -1956,15 +1954,12 @@ function Inbox() {
 
   const refreshDrafts = useCallback(async () => {
     try {
-      const next = await inboxApi.drafts();
-      // A read that brought nothing new keeps the drafts drawn (listSame.ts `keepSame`): nothing is drawn again.
-      setDrafts((current) => keepSame(current, next.drafts));
-      setReplyDrafts((current) => keepSame(current, next.replies ?? []));
+      await readDrafts(queryClient);
       setDraftsError(null);
     } catch (cause) {
       setDraftsError(cause instanceof Error ? cause.message : String(cause));
     }
-  }, []);
+  }, [queryClient]);
   useEffect(() => {
     void refreshDrafts();
   }, [refreshDrafts]);
@@ -2281,12 +2276,12 @@ function Inbox() {
         // the drafts (draftsReads.ts): of a thread holding unsent work now, or after them (the list read says), or not
         // placed, or when the list read's rows holding unsent work are not the reply drafts shown (a deleted thread or
         // project, which no record says). The Drafts page, which shows each draft's session too, reads after every record, as before.
-        const holding = new Set([...replyDraftsRef.current.map((row) => row.thread_id), ...unsentThreads(latestRef.current)]);
+        const holding = new Set([...heldReplyDrafts(queryClient).map((row) => row.thread_id), ...unsentThreads(latestRef.current)]);
         if (routeRef.current.page === 'drafts' || draftsReadOwed(records, holding)) void refreshDrafts();
         else
           void listRead.then((next) => {
             // A failed list read says nothing: the drafts are read, as before.
-            if (!next || draftsReadOwed(records, unsentThreads(next)) || replyDraftsDiffer(replyDraftsRef.current, next)) void refreshDrafts();
+            if (!next || draftsReadOwed(records, unsentThreads(next)) || replyDraftsDiffer(heldReplyDrafts(queryClient), next)) void refreshDrafts();
           });
         return listRead;
     }, RECORD_PAUSE_MS);
@@ -3137,7 +3132,7 @@ function Inbox() {
   const composeSent = (sent: ComposeSent) => {
     // A draft sent leaves the list now; focus goes to the next one.
     const next = sent.draftId ? draftNeighbour(sent.draftId) : null;
-    if (sent.draftId) setDrafts((current) => (current ?? []).filter((d) => d.id !== sent.draftId));
+    if (sent.draftId) setDrafts((current) => current.filter((d) => d.id !== sent.draftId));
     closeCompose(next);
     // The list holds still, a thread open or none (a write never brings in what waits behind "N new"; approval
     // "inbox-list-view", R7), but the thread the person just started is their own action: it goes into Sent now
@@ -3174,7 +3169,7 @@ function Inbox() {
   };
   /** "Send to that thread": compose's message went into the open thread that had the typed name; that thread opens. */
   const composeJoined = (joined: ComposeJoined) => {
-    if (joined.draftId) setDrafts((current) => (current ?? []).filter((d) => d.id !== joined.draftId));
+    if (joined.draftId) setDrafts((current) => current.filter((d) => d.id !== joined.draftId));
     closeCompose(joined.draftId ? draftNeighbour(joined.draftId) : null);
     void refreshList(false);
     if (joined.draftId) void refreshDrafts();
@@ -3187,7 +3182,7 @@ function Inbox() {
    * has not left (`POST /api/inbox/outbox/:key/cancel`) and puts its words back in Drafts.
    */
   const composeHeld = (held: ComposeHeld) => {
-    if (held.draftId) setDrafts((current) => (current ?? []).filter((d) => d.id !== held.draftId));
+    if (held.draftId) setDrafts((current) => current.filter((d) => d.id !== held.draftId));
     closeCompose(held.draftId ? draftNeighbour(held.draftId) : null);
     if (held.draftId) void refreshDrafts();
     const { toast: heldToast, ms } = heldLaunchToast(held, showToast, dismissToast, () => void refreshDrafts());
@@ -3203,7 +3198,7 @@ function Inbox() {
     // What opened compose: a reopened draft hands focus back to it when it closes again.
     const opener = composeOpener.current;
     closeCompose();
-    setDrafts((current) => [draft, ...(current ?? []).filter((d) => d.id !== draft.id)]);
+    setDrafts((current) => [draft, ...current.filter((d) => d.id !== draft.id)]);
     void refreshDrafts();
     showToast({
       icon: 'check',
@@ -3230,7 +3225,7 @@ function Inbox() {
         return;
       }
     }
-    setDrafts((current) => (current ?? []).filter((d) => d.id !== draft.id));
+    setDrafts((current) => current.filter((d) => d.id !== draft.id));
     // The row held focus (its delete button): the next row takes it.
     if (hadFocus) pendingFocus.current = { opener: null, next };
     void refreshDrafts();
