@@ -7604,7 +7604,6 @@ function Inbox() {
         <MarkReadWarning
           count={readWarning.count}
           bulk={readWarning.bulk}
-          offerNever={settings?.guest !== true}
           onAnswer={(answer) => {
             setReadWarning(null);
             readWarning.answer(answer);

@@ -306,7 +306,7 @@ function GeneralSection({
   onToggleMarkReadWarning,
 }: {
   onToggleCookieHost?: (next: boolean) => void;
-  /** The Mark read warning's switch (absent for a tailnet guest, or from an Inbox without it: no row). */
+  /** The Mark read warning's switch (absent from an Inbox without it: no row). */
   onToggleMarkReadWarning?: (next: boolean) => void;
   onTakeTour?: () => void;
   updateRow?: ReactNode;
@@ -1215,7 +1215,7 @@ export function SettingsPage(props: SettingsPageProps) {
             onToggleCookieHost={props.onToggleCookieHost}
             onTakeTour={props.onTakeTour}
             updateRow={props.updateRow}
-            onToggleMarkReadWarning={settings.guest ? undefined : props.onToggleMarkReadWarning}
+            onToggleMarkReadWarning={props.onToggleMarkReadWarning}
           />
         );
         break;

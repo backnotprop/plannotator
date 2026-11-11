@@ -5510,10 +5510,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.steps !== undefined && !owner) return localOnly();
         // Bro mode too (a line in what every agent here reads): the owner's to change.
         if (body.bro !== undefined && !owner) return localOnly();
-        // Floating reply drafts: the owner's (a guest's window never floats one).
-        if (body.float_drafts !== undefined && !owner) return localOnly();
-        // The Mark read warning: the owner's (a guest's warning offers no "Don't show this again").
-        if (body.mark_read_warning !== undefined && !owner) return localOnly();
         // Code review too (submit_guide's `review` field, the review skills): the owner's to change.
         if (body.code_review !== undefined && !owner) return localOnly();
         // Shape too (the shape skill, the routes): the owner's to change.
