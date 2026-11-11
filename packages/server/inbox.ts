@@ -229,7 +229,8 @@ import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest, isWindowRequest } from "./in
 import { createInboxLaunch } from "./inbox-launch";
 import { createInboxCodexAccount } from "./inbox-codex-account";
 import type { LaunchHost, LaunchHostContext } from "./inbox-launch-host";
-import { createLoginEnv } from "./inbox-launch-env";
+import { createLoginEnv, launchPlainEnv } from "./inbox-launch-env";
+import { createInboxClaudeNames } from "./inbox-claude-names";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
 import { createInboxAsk } from "./inbox-ask";
 import type { InboxAskTimes } from "./inbox-ask-live";
@@ -4242,6 +4243,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     isGuest,
   });
   launchReady = true;
+  // Claude Code's own name for each live session (inbox-claude-names.ts): list rows only, on the plain env launch uses.
+  const claudeNames = createInboxClaudeNames({
+    environment: () => createAgentEnvironmentFor({ platform: process.platform, homeDir: process.env.PLANNOTATOR_TEST_SANDBOX ? join(dataDir, "agents-home") : homedir(), env: launchPlainEnv(launchOwnEnv(), [...launch.loginPath(), ...(process.env.PLANNOTATOR_TEST_SANDBOX ? [] : [join(homedir(), ".local", "bin"), join(homedir(), ".claude", "local")])]) }),
+    wanted: () => deliveryListeners.size > 0 && live.agentSessions(live.clock()).some((entry) => entry.live && (entry.host === "claude-code" || entry.host === "claude")),
+    onChange: live.titlesChanged,
+  });
   // No login-shell read at start: the launch module reads it the first time New message asks (`warmLogin`).
 
   // Compose: a new thread the person starts with a live agent, drafts and uploads (packages/server/inbox-compose.ts).
@@ -4777,7 +4784,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // `session_labels` (additive, issue #2450): each session's label by id, for the rows' agents and a message's
         // author. Display only, never stored; this computer's owner only, so a tailnet guest reads the list as before.
         // `agents`' labels too (inbox-agents-list.ts): the owner's alone.
-        const model = ownerOrLocal(req, via) ? { ...rows, session_labels: live.labels() } : { ...rows, agents: inboxAgentsWithoutLabels(rows.agents) };
+        // `session_titles` (additive, option A of 2026-11-10): a name for a session with none, for list rows only: the
+        // host's generated title, else Claude Code's own name for it (inbox-claude-names.ts). The owner's alone.
+        const model = ownerOrLocal(req, via) ? { ...rows, session_labels: live.labels(), session_titles: { ...claudeNames.all(), ...live.titles() } } : { ...rows, agents: inboxAgentsWithoutLabels(rows.agents) };
         // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts); the rest of
         // the model, the labels too, goes as it is now. Without it, as before.
         const since = url.searchParams.get("since");
@@ -6756,6 +6765,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     snoozes.stop();
     clearInterval(restartWatch);
     clearInterval(deliveryWatch);
+    claudeNames.stop();
     clearInterval(autoSendWatch);
     unsubscribeWaits();
     launch.stop();

@@ -235,8 +235,10 @@ describe("who sees them", () => {
       expect(owner.session_labels).toEqual(local.session_labels);
       expect(JSON.stringify(guest)).not.toMatch(/Fix login redirect|Docs pass|Billing cleanup/);
       expect(guest.session_labels).toBeUndefined();
+      // The rows' names for unnamed sessions (option A) are the owner's too.
+      expect(guest.session_titles).toBeUndefined();
       // The rest of the guest's answer is the owner's, labels aside.
-      const strip = (model: Json) => JSON.parse(JSON.stringify(model, (key, value) => (key === "label" || key === "session_labels" ? undefined : value)));
+      const strip = (model: Json) => JSON.parse(JSON.stringify(model, (key, value) => (key === "label" || key === "session_labels" || key === "session_titles" ? undefined : value)));
       expect(Object.keys(strip(guest)).sort()).toEqual(Object.keys(strip(owner)).sort());
     }
   });

@@ -33,6 +33,8 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }))
 const SESSION = '3f6c2a1e-6b1d-4c55-9a3e-0d1c2b3a4f5e'
 const line = (record: unknown) => `${JSON.stringify(record)}\n`
 const title = (customTitle: string, sessionId = SESSION) => line({ type: 'custom-title', customTitle, sessionId })
+/** Claude Code's generated title for a session, as its transcripts carry it (`{"type":"ai-title","aiTitle":…}`). */
+const aiTitle = (text: string, sessionId = SESSION) => line({ type: 'ai-title', aiTitle: text, sessionId })
 const chatter = (text: string) => line({ type: 'user', sessionId: SESSION, message: { role: 'user', content: text } })
 
 let fileCount = 0
@@ -124,6 +126,31 @@ describe('the title in the transcript', () => {
     expect(await titles.read()).toBeNull()
     appendFileSync(path, whole.slice(20))
     expect(await titles.read()).toBe('Half written')
+  })
+
+  // Option A (2026-11-10): a session the person never named shows Claude Code's generated title in list rows. The
+  // failures: the generated title taken as the person's name (it would show everywhere a name does), the person's
+  // name hidden behind it, a later generated title not following, or another session's taken.
+  test("the generated title is kept apart from the name: read() keeps the person's name, a later one follows", async () => {
+    const path = transcript(chatter('hello') + aiTitle('Plannotator usage reference') + aiTitle('Not mine', 'another-session'))
+    const { host } = realHost()
+    const titles = new TranscriptTitle(host, SESSION, async () => [path])
+    expect(await titles.read()).toBeNull()
+    expect(titles.generatedTitle()).toBe('Plannotator usage reference')
+
+    appendFileSync(path, title('release 0.28.61') + aiTitle('Release notes draft'))
+    expect(await titles.read()).toBe('release 0.28.61')
+    expect(titles.generatedTitle()).toBe('Release notes draft')
+  })
+
+  test('the generated title survives twenty name lines after it in one read, and the name is not lost to it', async () => {
+    let text = chatter('hello') + aiTitle('Early title')
+    for (let i = 0; i < 25; i += 1) text += title(`name ${i}`)
+    const path = transcript(text)
+    const { host } = realHost()
+    const titles = new TranscriptTitle(host, SESSION, async () => [path])
+    expect(await titles.read()).toBe('name 24')
+    expect(titles.generatedTitle()).toBe('Early title')
   })
 
   test('an empty title says the session has none', async () => {
@@ -332,10 +359,12 @@ function engineOn(configDir: string, folder: string) {
   const store = new Map<string, unknown>()
   const timers = new Set<() => void>()
   const polls: unknown[] = []
+  const titles: unknown[] = []
   let clock = 1_000_000
   const env: Record<string, string> = { HOME: '/home/me', PLANNOTATOR_DATA_DIR: DATA, CLAUDE_CONFIG_DIR: configDir }
   return {
     polls,
+    titles,
     store,
     tick: async (n: number) => {
       for (let i = 0; i < n; i += 1) {
@@ -388,7 +417,11 @@ function engineOn(configDir: string, folder: string) {
       },
       http: {
         fetch: async (url: string, init: { body?: string }) => {
-          if (url.endsWith('/api/inbox/bridge/poll')) polls.push((JSON.parse(init.body ?? '{}') as { label?: unknown }).label)
+          if (url.endsWith('/api/inbox/bridge/poll')) {
+            const body = JSON.parse(init.body ?? '{}') as { label?: unknown; title?: unknown }
+            polls.push(body.label)
+            titles.push(body.title)
+          }
           return { status: 200, ok: true, text: JSON.stringify({ commands: [] }) }
         },
       },
@@ -421,6 +454,28 @@ describe('from the transcript to a poll body', () => {
     appendFileSync(path, title('Renamed in Claude Code'))
     await world.tick(3)
     expect(world.polls.at(-1)).toBe('Renamed in Claude Code')
+    await on.only('session.end')(world.$, {}, (e: unknown) => e)
+  })
+
+  test('an unnamed session sends no name and its generated title apart; a rename then takes the name', async () => {
+    const configDir = join(scratch, 'claude-config-ai')
+    const folder = '/home/me/src/ai-title'
+    const projectDir = join(configDir, 'projects', claudeProjectSlug(folder)!)
+    mkdirSync(projectDir, { recursive: true })
+    const path = join(projectDir, `${SESSION}.jsonl`)
+    writeFileSync(path, chatter('hello') + aiTitle('Plannotator usage reference'))
+
+    const on = await freshHooks('ai-title-wired')
+    const world = engineOn(configDir, folder)
+    await on.only('session.start')(world.$, { isInteractive: true }, async () => ({ cwd: folder }))
+    await world.tick(3)
+    expect(world.polls.at(-1)).toBe('')
+    expect(world.titles.at(-1)).toBe('Plannotator usage reference')
+
+    appendFileSync(path, title('release 0.28.61'))
+    await world.tick(3)
+    expect(world.polls.at(-1)).toBe('release 0.28.61')
+    expect(world.titles.at(-1)).toBe('Plannotator usage reference')
     await on.only('session.end')(world.$, {}, (e: unknown) => e)
   })
 

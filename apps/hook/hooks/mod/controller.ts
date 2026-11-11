@@ -321,6 +321,8 @@ export interface SessionInfo {
   root?: () => Promise<string>
   /** The name the person gave the session, read for each Inbox poll (`InboxLinkOptions.label`). */
   label?: () => string | Promise<string>
+  /** The title Claude Code generated for the session, read for each Inbox poll (`InboxLinkOptions.title`). */
+  title?: () => string | Promise<string>
   /** The session ids this conversation continues, read for each Inbox poll (`InboxLinkOptions.continues`). */
   continues?: () => Promise<readonly string[]>
   /**
@@ -418,6 +420,7 @@ export class PlannotatorMod {
           ...(session.cwd ? { cwd: session.cwd } : {}),
           ...(session.root ? { root: session.root } : {}),
           ...(session.label ? { label: session.label } : {}),
+          ...(session.title ? { title: session.title } : {}),
           ...(session.continues ? { continues: session.continues } : {}),
           instanceId: this.instanceId,
           turns: this.turns,

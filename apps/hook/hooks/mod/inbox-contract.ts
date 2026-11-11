@@ -1477,6 +1477,17 @@ export const INBOX_HELD_POLL_FIELD = 'held'
 export const INBOX_CONTINUES_POLL_FIELD = 'continues'
 
 /**
+ * The poll field by which a connection says the title its host generated for
+ * the session (Claude Code's `ai-title`, a summary of the first prompt), apart
+ * from `label`, the name the person gave. The Inbox's list rows show it for a
+ * session the person never named (option A, 2026-11-10); every other place
+ * reads `label` alone. Sent on every poll; empty or absent clears it. Display
+ * only, cleaned like `label`. An older Inbox ignores it; an older connection
+ * never sends it.
+ */
+export const INBOX_TITLE_POLL_FIELD = 'title'
+
+/**
  * On a poll, the connection's tick goes on polling while a steer waits for the running turn. A connection without it
  * (from before that) stops polling until the steer goes in, so the Inbox counts a session it handed one as there.
  * An older Inbox ignores it.

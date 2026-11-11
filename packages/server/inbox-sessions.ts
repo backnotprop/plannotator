@@ -38,7 +38,7 @@ import { homedir } from "node:os";
 import { basename } from "node:path";
 import { INBOX_AUTO_SEND_AFTER_MS, INBOX_TAGS_MAX, type InboxHostSessions, type InboxMessage, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
-import { INBOX_ASK_POLL_FIELD, INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_CONTINUES_POLL_FIELD, INBOX_HELD_POLL_FIELD, INBOX_RELOAD_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD } from "@plannotator/shared/inbox/connection";
+import { INBOX_ASK_POLL_FIELD, INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_CONTINUES_POLL_FIELD, INBOX_HELD_POLL_FIELD, INBOX_RELOAD_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD, INBOX_TITLE_POLL_FIELD } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { graphemesOf, inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -168,6 +168,8 @@ interface SeenSession {
   tags: boolean;
   /** The title its latest poll sent (`label`, cleaned). Display only: nothing routes on it, and no MCP call reaches it. */
   label?: string | null;
+  /** The title its host generated, as its latest poll sent it (INBOX_TITLE_POLL_FIELD, cleaned as `label`). Display only: list rows. */
+  title?: string | null;
   /** Its poll said it can answer Ask AI live (`ask`). */
   ask?: boolean;
   /** The working folder its poll named (`project_path`), as sent; null when it sent none. */
@@ -502,6 +504,17 @@ export function createInboxLiveSessions(options: {
     for (const [session, entry] of sessions) if (entry.label) out[session] = entry.label;
     return out;
   };
+  /**
+   * Every session's generated title as its latest poll sent it (INBOX_TITLE_POLL_FIELD), kept as `labels` are:
+   * live sessions and those that ended while this Inbox ran, in memory only, for this computer's owner only.
+   */
+  const titles = (): Record<string, string> => {
+    const out = Object.create(null) as Record<string, string>;
+    for (const [session, entry] of sessions) if (entry.title) out[session] = entry.title;
+    return out;
+  };
+  /** Something outside the polls changed what `titles` reads (inbox-claude-names.ts): the windows read the rows again. */
+  const titlesChanged = () => void (labelChanges += 1);
   /** One session's label (`labels`); null when it has none. */
   const labelOf = (session: string): string | null => sessions.get(session)?.label ?? null;
   /** Bumped each time a poll changes a label: the windows read the rows again (`event: deliveries`, `labels`). */
@@ -539,6 +552,10 @@ export function createInboxLiveSessions(options: {
     const label = cleanInboxSessionLabel(body.label);
     if ((entry.label ?? null) !== label) labelChanges += 1;
     entry.label = label;
+    // The host's generated title (additive): list rows show it for a session with no name. A change says `labels` too.
+    const title = cleanInboxSessionLabel(body[INBOX_TITLE_POLL_FIELD]);
+    if ((entry.title ?? null) !== title) labelChanges += 1;
+    entry.title = title;
     entry.ask = body[INBOX_ASK_POLL_FIELD] === true;
     // What the session loaded (additive poll fields; an older connection sends neither).
     entry.plugin = parseLoadedPlugin(body.plugin);
@@ -1391,6 +1408,8 @@ export function createInboxLiveSessions(options: {
     tagTargets,
     wakesTagged,
     labels,
+    titles,
+    titlesChanged,
     labelOf,
     labelVersion,
   };
