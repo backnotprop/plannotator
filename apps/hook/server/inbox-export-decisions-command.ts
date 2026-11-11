@@ -6,7 +6,8 @@
  * does. No export or forge logic lives here.
  *
  * stdout: the file (no --out), or with --out nothing; with --pr one line, "Decisions posted on <ref>: <url>" (or
- * updated). A refusal goes to stderr as `<code>: <message>` and exits 1; bad usage exits 2.
+ * updated; "… as a comment instead (why)" when the description could not take them). Where they go is the person's
+ * setting, read by the Inbox. A refusal goes to stderr as `<code>: <message>` and exits 1; bad usage exits 2.
  */
 
 import { writeFileSync } from "node:fs";
@@ -21,8 +22,9 @@ export const INBOX_EXPORT_DECISIONS_USAGE = [
   "  plannotator inbox export-decisions --thread <id> --pr <ref>",
   "",
   "A thread's decisions as Markdown (default) or HTML, on stdout or into --out.",
-  "--pr posts them on one of the thread's pull requests as one comment, and edits",
-  "that same comment when run again. <ref>: owner/repo#123, group/project!45 or the URL.",
+  "--pr puts them on one of the thread's pull requests (in its description, or as a",
+  "comment: the person's choice) and updates them in place when run again.",
+  "<ref>: owner/repo#123, group/project!45 or the URL.",
 ].join("\n");
 
 /** One request never waits longer: a wedged Inbox (or a slow forge) must not hang the agent. */
@@ -113,8 +115,9 @@ export async function runInboxExportDecisionsCommand(argv: readonly string[], de
     return refused(body.code ?? `http_${response.status}`, body.error ?? `The Inbox answered ${response.status}.`);
   }
   if (parsed.pr) {
-    const answer = JSON.parse(text) as { action: "created" | "updated"; ref: string; url: string };
-    await out(`Decisions ${answer.action === "updated" ? "updated" : "posted"} on ${answer.ref}: ${answer.url}\n`);
+    const answer = JSON.parse(text) as { action: "created" | "updated"; ref: string; url: string; fallback?: "no_permission" | "too_long" };
+    const instead = answer.fallback ? ` as a comment instead (${answer.fallback === "no_permission" ? "you can't edit its description" : "too long for its description"})` : "";
+    await out(`Decisions ${answer.action === "updated" ? "updated" : "posted"} on ${answer.ref}${instead}: ${answer.url}\n`);
     return 0;
   }
   if (parsed.out) {

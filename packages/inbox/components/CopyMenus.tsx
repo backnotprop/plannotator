@@ -11,7 +11,8 @@ import { useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { copyAuthor, copyMarkdown, messageMarkdown, threadMarkdown } from '../copyMarkdown';
 import { plural, shortAgentName, whenTime } from '../format';
 import { Icon } from '../icons';
-import { decisionExportUrl, threadHasQuestionCards } from '../decisionExport';
+import { DECISIONS_POST_TO_WORDS, decisionExportUrl, threadHasQuestionCards } from '../decisionExport';
+import { inboxApi, type DecisionsPostTo } from '../api';
 import { RefMarkIcon } from '../board/RefMark';
 import { useThreadPulls } from '../threadPulls/ThreadPulls';
 import { Tip } from './Tip';
@@ -286,6 +287,22 @@ export function ThreadMore(
   // The thread's PRs for the Post group: read while the menu is open (the PR button keeps them current otherwise).
   const { answer: pullsAnswer } = useThreadPulls(thread.thread_id, open && exportOffered && !!postDecisions);
   const linked = pullsAnswer?.pulls ?? [];
+  // Where to post (config.json `inboxDecisionsPostTo`): read when the menu opens, saved on a pick.
+  const [postTo, setPostTo] = useState<DecisionsPostTo | null>(null);
+  const postOffered = open && exportOffered && !!postDecisions;
+  useEffect(() => {
+    if (!postOffered) return;
+    let live = true;
+    inboxApi
+      .decisionsPostTo()
+      .then((value) => live && setPostTo(value))
+      .catch(() => {
+        // An older Inbox (no setting): no "Where to post" group.
+      });
+    return () => {
+      live = false;
+    };
+  }, [postOffered]);
   // Back from the times: focus goes to Snooze again, not to the item now at its old index.
   const backed = useRef(false);
   const popup = useRef<HTMLDivElement>(null);
@@ -322,6 +339,30 @@ export function ThreadMore(
           </Menu.Item>
         )}
       </Menu.Group>
+      {postTo && (
+        <>
+          <Menu.Separator className="ib-pm-sep" />
+          <Menu.Group>
+            <Menu.GroupLabel className="ib-pm-glabel">Where to post</Menu.GroupLabel>
+            <Menu.RadioGroup
+              value={postTo}
+              onValueChange={(next: DecisionsPostTo) => {
+                if (next === postTo) return;
+                const was = postTo;
+                setPostTo(next);
+                inboxApi.saveDecisionsPostTo(next).catch(() => setPostTo(was));
+              }}
+            >
+              {DECISIONS_POST_TO_WORDS.map(({ value, label }) => (
+                <Menu.RadioItem key={value} value={value} closeOnClick={false} className="ib-pmi" label={label} data-decision-post-to={value}>
+                  {postTo === value ? <Icon name="check" size={15} /> : <span className="ib-pmi-slot" aria-hidden="true" />}
+                  {label}
+                </Menu.RadioItem>
+              ))}
+            </Menu.RadioGroup>
+          </Menu.Group>
+        </>
+      )}
     </>
   );
   const downloads = (

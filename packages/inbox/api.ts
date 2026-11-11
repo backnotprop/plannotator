@@ -867,6 +867,9 @@ export interface LanState {
   error: string | null;
 }
 
+/** Where Post decisions puts a thread's decisions: the PR's description (default), a comment, or a short section plus the comment. */
+export type DecisionsPostTo = 'description' | 'comment' | 'both';
+
 export class InboxApiError extends Error {
   constructor(
     readonly status: number,
@@ -1563,7 +1566,10 @@ export const inboxApi = {
    * comment on one of its PRs, edited in place on a later post. `pull`: the PR as the thread writes it (`ref`).
    */
   postThreadDecisions: (threadId: string, pull: string, tz: string) =>
-    post<{ ok: true; action: 'created' | 'updated'; ref: string; url: string }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/decisions/post`), { pull, tz }),
+    post<{ ok: true; action: 'created' | 'updated'; destination: DecisionsPostTo; ref: string; url: string; fallback?: 'no_permission' | 'too_long' }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/decisions/post`), { pull, tz }),
+  /** Where Post decisions puts them (config.json `inboxDecisionsPostTo`): the Post group's "Where to post". */
+  decisionsPostTo: async (): Promise<DecisionsPostTo> => (await get<{ post_to: DecisionsPostTo }>(inboxUrl('/settings/decisions-post'))).post_to,
+  saveDecisionsPostTo: async (postTo: DecisionsPostTo): Promise<DecisionsPostTo> => (await post<{ post_to: DecisionsPostTo }>(inboxUrl('/settings/decisions-post'), { post_to: postTo })).post_to,
   /**
    * The person looked at the thread. `throughSeq`: the seq of the newest
    * message the window showed; the look stops there, so a message that landed

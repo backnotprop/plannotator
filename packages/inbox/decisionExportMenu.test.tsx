@@ -24,10 +24,15 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 
 let savedFetch: typeof fetch | null = null;
+let postToSaves: string[] = [];
 /** The thread's PRs as the Inbox answers them, while a test stubs fetch. */
 function stubPulls(refs: string[]) {
   savedFetch = globalThis.fetch;
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input) === '/api/inbox/settings/decisions-post') {
+      if (init?.method === 'POST') postToSaves.push(JSON.parse(String(init.body)).post_to);
+      return Response.json({ post_to: init?.method === 'POST' ? postToSaves.at(-1) : 'description' });
+    }
     const pulls = refs.map((ref) => {
       const parsed = parseInboxThreadPullRef(ref) as { key: string; url: string };
       return inboxThreadPullWire({ id: `${THREAD_ID}:${parsed.key}`, project_id: 'prj_1', thread_id: THREAD_ID, pull: parsed.key, url: parsed.url, added_by: { kind: 'person' }, added_at: '2026-11-10T10:00:00.000Z', state: 'open', title: null, base: null, head: null, read_at: null });
@@ -41,6 +46,7 @@ afterEach(() => {
   if (!hasDom) return;
   if (savedFetch) globalThis.fetch = savedFetch;
   savedFetch = null;
+  postToSaves = [];
   act(() => root?.unmount());
   host?.remove();
   root = null;
@@ -156,6 +162,24 @@ describe.skipIf(!hasDom)('Export decisions in ⋯ More', () => {
     expect(sub.querySelector('[data-decision-post-add]')).toBeNull();
     await press(rows[1]!);
     expect(posted).toEqual(['group/app!45']);
+  });
+
+  test('Where to post: the stored choice is checked (the description by default), and a pick saves it without closing the menu', async () => {
+    stubPulls(['acme/notes#12']);
+    frame(<ThreadMore thread={thread(['single'])} linkOf={() => ''} phone={false} postDecisions={{ post: () => {}, addPullThenPost: () => {} }} />);
+    const sub = await openExportSubmenu(await openMore());
+    await until(() => !!sub.querySelector('[data-decision-post-to]'), 'Where to post');
+    const choices = () => [...sub.querySelectorAll<HTMLElement>('[data-decision-post-to]')].map((el) => [el.getAttribute('data-decision-post-to'), el.getAttribute('aria-checked')]);
+    expect(choices()).toEqual([
+      ['description', 'true'],
+      ['comment', 'false'],
+      ['both', 'false'],
+    ]);
+    await press(sub.querySelector<HTMLElement>('[data-decision-post-to="comment"]')!);
+    await until(() => postToSaves.length === 1, 'the save');
+    expect(postToSaves).toEqual(['comment']);
+    expect(choices()[1]).toEqual(['comment', 'true']);
+    expect(document.querySelector('[data-thread-export-menu]')).not.toBeNull();
   });
 
   test('Post on a pull request with none linked: Add a pull request… starts the add-then-post', async () => {

@@ -11814,6 +11814,8 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-prpop-post { margin: 7px 2px 0 0; font-weight: 500; color: var(--muted-foreground); }
 .ib-prpop-post:hover:not(:disabled) { color: var(--foreground); }
 .ib-prpop-post1 { align-self: flex-start; }
+/* Export decisions › Where to post: the unchecked choices keep the check's room. */
+.ib-pmi-slot { flex: none; width: 15px; height: 15px; }
 .ib-prpop-rm1:hover:not(:disabled) { background: var(--muted); color: var(--foreground); }
 .ib-prpop-undo { display: flex; align-items: center; gap: 8px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .ib-prpop-err { font-size: var(--ib-fs-12, 12px); line-height: 1.4; color: var(--ib-ref-closed); }

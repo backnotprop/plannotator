@@ -4,7 +4,7 @@
  * question records the thread shows; this window only links to them.
  */
 import type { InboxThread } from '@plannotator/core/inbox-types';
-import { inboxApi } from './api';
+import { inboxApi, type DecisionsPostTo } from './api';
 import type { InboxToastModel } from './components/Toast';
 import { inboxUrl, machineOf } from './inboxUrl';
 
@@ -34,18 +34,32 @@ export function decisionExportUrl(threadId: string, format: DecisionExportDownlo
 }
 
 /**
- * Post decisions (step 2): the thread's decisions as one comment on `ref`, one of its PRs, edited in place when
- * posted again. One click, no dialog; the toast says where it went with Open, or what to do when it did not go.
+ * Post decisions (step 2): the thread's decisions on `ref`, one of its PRs, where the person's setting says (the
+ * description by default), edited in place when posted again. One click, no dialog; the toast says where it went with
+ * Open, that it went as a comment instead (and why), or what to do when it did not go.
  */
 export async function postDecisions(threadId: string, ref: string, onToast?: (toast: Omit<InboxToastModel, 'id'>) => void): Promise<void> {
   try {
     const answer = await inboxApi.postThreadDecisions(threadId, ref, readerZone());
-    onToast?.({
-      icon: 'check',
-      lead: `Decisions ${answer.action === 'updated' ? 'updated' : 'posted'} on ${answer.ref}`,
-      ...(answer.url.startsWith('https://') ? { action: { label: 'Open', onPress: () => void window.open(answer.url, '_blank', 'noopener,noreferrer') } } : {}),
-    });
+    const open = answer.url.startsWith('https://') ? { action: { label: 'Open', onPress: () => void window.open(answer.url, '_blank', 'noopener,noreferrer') } } : {};
+    if (answer.fallback) {
+      onToast?.({
+        icon: 'check',
+        lead: `Decisions posted on ${answer.ref} as a comment instead`,
+        detail: answer.fallback === 'no_permission' ? "You can't edit its description." : 'Too long for its description.',
+        ...open,
+      });
+      return;
+    }
+    onToast?.({ icon: 'check', lead: `Decisions ${answer.action === 'updated' ? 'updated' : 'posted'} on ${answer.ref}`, ...open });
   } catch (cause) {
     onToast?.({ icon: 'warn', lead: cause instanceof Error && cause.message ? cause.message : `Couldn't post on ${ref}. Try again.`, wrap: true });
   }
 }
+
+/** The Post group's "Where to post": its words, in the order shown. */
+export const DECISIONS_POST_TO_WORDS: readonly { value: DecisionsPostTo; label: string }[] = [
+  { value: 'description', label: 'In the description' },
+  { value: 'comment', label: 'As a comment' },
+  { value: 'both', label: 'Short in the description, full in a comment' },
+];
