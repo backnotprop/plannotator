@@ -7805,6 +7805,7 @@ dialog.ib-dlg.ib-thc[open] { animation: ib-thc-in 240ms cubic-bezier(0.23, 1, 0.
 /* Settings → Prompts (design of record .product/approved/inbox-prompts-page/, #2194): the Inbox reminder, shared and per agent, then the plan, review and annotate prompts folded, read-only. */
 .pm-shared { padding: 14px 16px; }
 .pm-head { display: flex; align-items: center; gap: 8px; min-height: 28px; margin-bottom: 8px; }
+.pm-head:last-child { margin-bottom: 0; }
 .pm-sp { flex: 1; }
 .pn-inbox .ib-chip.pm-custom { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
 .pm-text { margin: 0; font-family: var(--font-sans); font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.6; color: var(--foreground); white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px 12px; border-radius: var(--ib-rl-sm-s, 8px); background: color-mix(in oklch, var(--foreground) 5%, transparent); border: 1px solid transparent; }
