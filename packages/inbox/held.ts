@@ -525,3 +525,14 @@ export function waitingCount(sections: readonly InboxListSection[], projectId?: 
   }
   return n;
 }
+
+/**
+ * The rows on screen once a list read or a record brought `latest`: nothing on screen yet, the whole list; adopted
+ * (an action, Show), the whole list, the open thread's row kept where it is (`keep`); else held, each row's own
+ * state following at once and the rows `gone` (archived or deleted elsewhere) left out.
+ */
+export function shownAfter(shown: InboxListSection[] | null, latest: InboxListSection[], how: { adopt: boolean; keep: string | null; open: OpenThread | null; gone: ReadonlySet<string> }): InboxListSection[] {
+  if (shown === null || !hasRows(shown)) return latest;
+  if (how.adopt) return how.keep ? adoptKeepingOpen(shown, latest, how.keep) : latest;
+  return withoutRows(refreshHeldRows(shown, latest, how.open), how.gone);
+}

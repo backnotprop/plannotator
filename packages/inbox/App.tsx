@@ -26,6 +26,10 @@ import { QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { createInboxQueryClient } from './data/client';
 import { dropThread, heldThread, pruneThreads, putThread, readThread, showableThread, staleThreads, useHeldThread } from './data/queries/thread';
 import { sameThreadFiles } from './data/queries/files';
+import { putList, readList, takeListRead, useListModel } from './data/queries/list';
+import { applyListRecord } from './data/apply/list';
+import { createRecordPause } from './data/apply/recordPause';
+import { createLookPoster } from './data/actions/seen';
 import { applyStreamRecord } from './data/apply/stream';
 import { useRowWrites, type RowDrawing } from './data/actions/rows';
 import { keepSavedQuestions } from './data/actions/picks';
@@ -71,7 +75,7 @@ import { listsThread, newRecordBatch, noteOwnRecord, noteRecord, openThreadRead 
 import { archivedRowPatch, patchShownRow, patchedRow, readRowPatch, shownRowOf, withPinPatches } from './rowActions';
 import { createOwnSaves } from './ownSaves';
 import { createSignal } from './signal';
-import { keepSame, sameListModel } from './listSame';
+import { keepSame } from './listSame';
 import { draftsReadOwed, replyDraftsDiffer, unsentThreads } from './draftsReads';
 import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, rowSnoozes, snoozeBlockedBy, threadAwayLine, threadOutbox } from './machines';
 import { ASK_AGENT_TO_UPDATE, ASK_AGENT_TO_UPDATE_THREAD, MachineUpdateDialog } from './components/MachineUpdate';
@@ -80,7 +84,7 @@ import { flatRows, readListView, useListView, type ListSort } from './listView';
 import { useShowLight, type ListEdge } from './showLight';
 import { appliedFilter, filterListSections, localDay, pickCount, useListFilter } from './listFilter';
 import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
-import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNews as heldNewsOf, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, goneRows, hasRows, withoutRows, settleOwn, settlesOnBack, settleThread, showBroughtIn, showLandsIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
+import { addOwnThreads, drawnSection, filterSections, heldNews as heldNewsOf, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, goneRows, hasRows, settleOwn, settlesOnBack, settleThread, showBroughtIn, showLandsIn, snoozeChangedRows, shownAfter, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
 import { deliveriesReadList } from './rowDelivery';
 import { inboxAgentsWatched, setInboxAgents, useAgentListFilter } from './agentsList';
@@ -371,6 +375,8 @@ const SEEN_RETRIES = 5;
 const SEEN_RETRY_MS = 1000;
 /** How long a look that landed waits for its record (written before the look answers) to bring the list read. */
 const LOOK_RECORD_WAIT_MS = 250;
+/** Records this close together share one read, started this long after the last of them. */
+const RECORD_PAUSE_MS = 80;
 /** The What's new page asks again this often while the server fetches the notes (its request gives up after 10 s). */
 const WHATS_NEW_RETRIES = 15;
 const WHATS_NEW_RETRY_MS = 1000;
@@ -888,7 +894,9 @@ function Inbox() {
     setSidebarOpen(next);
     storage.setItem(SIDEBAR_OPEN_COOKIE, String(next));
   }, []);
-  const [latest, setLatest] = useState<ListModel | null>(null);
+  const queryClient = useQueryClient();
+  /** The list as the cache holds it (data/queries/list.ts): its last read, with what records said since. */
+  const latest = useListModel(queryClient);
   /**
    * Linked machines (docs/agent-guides/inbox-machines.md): every machine and its state, from the merged list and
    * the stream's `machines` frames. Nothing draws from it while no machine is linked (machines.ts).
@@ -1045,7 +1053,6 @@ function Inbox() {
    * place since. Its own list row (an archived thread has none in the list) and a launched thread's run line (null
    * while the agent rests) come with it.
    */
-  const queryClient = useQueryClient();
   const openHeld = useHeldThread(route.thread ?? null);
   const thread = openHeld?.thread ?? null;
   const threadRow = openHeld?.row ?? null;
@@ -1597,23 +1604,40 @@ function Inbox() {
    * Read the list; `adopt` puts it on screen (an action, Show, or nothing on
    * screen yet), sliding the rows to their places when `slide` says so.
    */
+  /**
+   * A record the list took in place (data/apply/list.ts: an archive, a rename): held at once, and the rows on screen
+   * follow it as a list read's would (an archived row leaves with the settle's slide). The list read after the
+   * record still comes, and brings the rest.
+   */
+  const takeRecordList = useCallback(
+    (event: InboxEvent) => {
+      const held = latestRef.current;
+      const next = held ? applyListRecord(held, event) : null;
+      if (!next) return;
+      latestRef.current = next;
+      putList(queryClient, next);
+      const groups = listGroups(next);
+      const gone = goneRows(shownRef.current, groups, routeRef.current.thread);
+      if (gone.size > 0) armSlide();
+      setShown((current) => shownAfter(current, groups, { adopt: false, keep: null, open: heldOpen(), gone }));
+    },
+    [armSlide, queryClient],
+  );
   const refreshList = useCallback(async (adopt: boolean, slide = false, refresh?: { light?: boolean; keepOpen?: boolean }) => {
     try {
-      const next = await inboxApi.list();
+      const next = await readList();
       const failedBefore = listReadFailure.current !== null;
       listReadFailure.current = null;
-      // A read that lands after a newer one (a slow answer on a bad network, a catch-up's): the newer list stays.
-      // Only an older cursor of the same Inbox run counts; an equal one may carry a delivery, a draft or a pin.
       const held = latestRef.current;
-      // The newest cursor taken (a read with nothing new keeps the list held, and that list's older cursor).
-      const newest = held && listCursor.current?.session === held.serverSession ? Math.max(listCursor.current.cursor, held.cursor) : held?.cursor;
-      if (held && next.serverSession === held.serverSession && next.cursor < newest!) return held;
+      const taken = takeListRead(held, next, listCursor.current, { firstDone: firstList.current!.done, adopt, settings: routeRef.current.page === 'settings' });
+      // A read that lands after a newer one (a slow answer on a bad network, a catch-up's): the newer list stays.
+      if (taken === 'older') return held;
       listCursor.current = { session: next.serverSession, cursor: next.cursor };
       // Each machine's agents (agentsList.ts): their own store, so a read that moved only them never draws the list.
       setInboxAgents(next.agents);
       // Nothing new (listSame.ts): the list held stays, and nothing is drawn again. A row's own state shows in place
       // as before (an own write's row put back by the read, the open thread's row).
-      if (!adopt && held && firstList.current!.done && sameListModel(held, next, { cursor: routeRef.current.page === 'settings' })) {
+      if (taken === 'same' && held) {
         // Only what moved is set. A set that changes nothing still draws the whole window once whenever the window's
         // last draw came from its own state (React draws it again to find out), so a read with nothing new drew it
         // now and then.
@@ -1631,7 +1655,7 @@ function Inbox() {
       setPageSession(next.serverSession);
       // Before the render: what waits on this read (Mark read after a look, markRead) reads the rows it brought.
       latestRef.current = next;
-      setLatest(next);
+      putList(queryClient, next);
       // The sessions' labels (issue #2450): every row's agents and the open thread's authors read them.
       setSessionLabels(next.session_labels);
       if (!firstList.current!.done) {
@@ -1660,15 +1684,7 @@ function Inbox() {
       // Archived or deleted elsewhere: the row leaves at once, with the settle's slide (held.ts `goneRows`).
       const gone = adopt ? new Set<string>() : goneRows(shownRef.current, groups, routeRef.current.thread);
       if (gone.size > 0) armSlide();
-      setShown((current) =>
-        current === null || !hasRows(current)
-          ? groups
-          : adopt
-            ? keep
-              ? adoptKeepingOpen(current, groups, keep)
-              : groups
-            : withoutRows(refreshHeldRows(current, groups, heldOpen()), gone),
-      );
+      setShown((current) => shownAfter(current, groups, { adopt, keep, open: heldOpen(), gone }));
       if (adopt) sortedWhole(keep);
       setLoadError(null);
       return next;
@@ -1697,17 +1713,9 @@ function Inbox() {
     setShown((current) => (current ? moving.reduce((list, threadId) => settleThread(list, groups, threadId), current) : current));
   }, [refreshList, flushNotifications, refreshDecisions, armSlide]);
 
-  /**
-   * Seen on sight (seenOnSight.ts): messages that arrived in the open thread
-   * have been on screen; record the look up to `through` (never past it) and
-   * let the row unbold in place. `look.through` rises only once the server
-   * took the look; a look that failed is sent again (a few times, waiting
-   * longer each time) unless a later one covers it.
-   */
+  /** Seen on sight (data/actions/seen.ts): `look.through` rises only once the server took the look. */
   const lookRef = useRef(look);
   lookRef.current = look;
-  /** Per thread, the furthest look on its way to the server. */
-  const seenPosting = useRef(new Map<string, number>());
   /**
    * Per thread, the looks this tab has sent (the open look, seen on sight) and
    * the list read after each, until they land. Mark read waits for them, so it
@@ -1727,58 +1735,38 @@ function Inbox() {
     look.then(done, done);
   }, []);
   /**
-   * The list read of the records that come after a look (the look's own record among them), started at once; it
-   * resolves with that read (null: it failed), or undefined when no record came within `ms`. Set by the stream's
-   * effect below.
+   * The list read of the records that come after a look (its own record among them), started at once (null: it
+   * failed), or undefined when none came within `ms` (data/apply/recordPause.ts). Set by the stream's effect below.
    */
   const recordRead = useRef<(ms: number) => Promise<ListModel | null | undefined>>(() => Promise.resolve(undefined));
-  const seenRetries = useRef(new Set<ReturnType<typeof setTimeout>>());
-  useEffect(() => {
-    const retries = seenRetries.current;
-    return () => {
-      for (const timer of retries) clearTimeout(timer);
-      retries.clear();
-    };
-  }, []);
+  const lookPoster = useMemo(
+    () =>
+      createLookPoster({
+        retries: SEEN_RETRIES,
+        retryMs: SEEN_RETRY_MS,
+        track: trackLook,
+        landed: (threadId, through) => {
+          const now = lookRef.current;
+          if (now && now.threadId === threadId && (now.through === null || now.through < through)) {
+            const next = { ...now, through };
+            lookRef.current = next;
+            setLook(next);
+          }
+          // The look's record brings a list read to every window: this one's is the look's too (one read, not two).
+          // No record (the look changed nothing, or the stream is down): the list is read here.
+          return recordRead.current(LOOK_RECORD_WAIT_MS).then((read) => (read === undefined ? refreshList(false) : read));
+        },
+      }),
+    [refreshList, trackLook],
+  );
+  useEffect(() => () => lookPoster.stop(), [lookPoster]);
   const seenOnSight = useCallback(
     (threadId: string, through: number) => {
       const current = lookRef.current;
       if (!current || current.threadId !== threadId || (current.through !== null && current.through >= through)) return;
-      if ((seenPosting.current.get(threadId) ?? -1) >= through) return;
-      seenPosting.current.set(threadId, through);
-      const attempt = (tries: number) => {
-        const look = inboxApi
-          .seen(threadId, through)
-          .then(() => {
-            if (seenPosting.current.get(threadId) === through) seenPosting.current.delete(threadId);
-            const now = lookRef.current;
-            if (now && now.threadId === threadId && (now.through === null || now.through < through)) {
-              const next = { ...now, through };
-              lookRef.current = next;
-              setLook(next);
-            }
-            // The look's record brings a list read to every window: this one's is the look's too (one read, not
-            // two). No record (the look changed nothing, or the stream is down): the list is read here.
-            return recordRead.current(LOOK_RECORD_WAIT_MS).then((read) => (read === undefined ? refreshList(false) : read));
-          })
-          .catch(() => {
-            // A later look on its way covers this one.
-            if (seenPosting.current.get(threadId) !== through) return;
-            if (tries >= SEEN_RETRIES) {
-              seenPosting.current.delete(threadId);
-              return;
-            }
-            const timer = setTimeout(() => {
-              seenRetries.current.delete(timer);
-              attempt(tries + 1);
-            }, SEEN_RETRY_MS * 2 ** tries);
-            seenRetries.current.add(timer);
-          });
-        trackLook(threadId, look);
-      };
-      attempt(0);
+      lookPoster.post(threadId, through);
     },
-    [refreshList, trackLook],
+    [lookPoster],
   );
 
   /** `given`: a read that came with another answer (a Send's `thread_read`): drawn as a read of the thread, none sent. */
@@ -2215,7 +2203,6 @@ function Inbox() {
   // First read, then the event stream keeps the counts, the open thread and the notice live.
   useEffect(() => {
     let unsubscribe = () => {};
-    let timer: ReturnType<typeof setTimeout> | null = null;
     let draftsTimer: ReturnType<typeof setTimeout> | null = null;
     /**
      * One list read for the events of a short pause that only move rows (pins, deliveries, a draft saved), however
@@ -2247,16 +2234,18 @@ function Inbox() {
      * the drafts, never the open thread or its files, which the pane drew from the save's answer. `now`: read at
      * once, the records still waiting their pause too (a run of saves that just ended: its reads were held already).
      */
+    /** When the last record was heard (debug log on only, perfMarks.ts), for pn:record-refresh. */
+    let heard: ReturnType<typeof perfStart> = null;
     const readAfterRecord = (event: InboxEvent | null, how: { own?: string; now?: boolean; applied?: boolean } = {}) => {
       // Every answer this window's saves brought back so far is covered by the read about to start (ownSaves.ts).
       if (how.now) ownSaves.readsStarted();
       if (how.own) noteOwnRecord(batch, how.own);
       else noteRecord(batch, event, how.applied);
-      if (timer) clearTimeout(timer);
-      // Debug log on only (perfMarks.ts): when the event was heard, for pn:record-refresh.
-      const heard = perfStart();
-      const readNow = (): Promise<ListModel | null> => {
-        timer = null;
+      heard = perfStart();
+      pause.ask(how.now === true);
+    };
+    /** One read for the records of a pause (data/apply/recordPause.ts); a look of this window joins it. */
+    const pause = createRecordPause((): Promise<ListModel | null> => {
         const records = batch;
         batch = newRecordBatch();
         // This read starts after every event that asked for one meanwhile: it is theirs too.
@@ -2300,46 +2289,8 @@ function Inbox() {
             if (!next || draftsReadOwed(records, unsentThreads(next)) || replyDraftsDiffer(replyDraftsRef.current, next)) void refreshDrafts();
           });
         return listRead;
-      };
-      // A look of this window waits for this read (`recordRead`): it starts now, for both.
-      const waiting = lookWaiters.splice(0);
-      if (how.now || waiting.length > 0) {
-        const listRead = readNow();
-        for (const resolve of waiting) resolve(listRead);
-      } else {
-        timer = setTimeout(readNow, 80);
-        flushRecordRead = () => {
-          if (timer) clearTimeout(timer);
-          return readNow();
-        };
-      }
-    };
-    /** The records' read waiting its pause, started now (null: none waits). */
-    let flushRecordRead: (() => Promise<ListModel | null>) | null = null;
-    /** Looks of this window waiting for the next records' read (`recordRead`). */
-    const lookWaiters: ((read: Promise<ListModel | null>) => void)[] = [];
-    // A look that landed: its record (or another's) is on its way, and its read is the look's list read too. One
-    // already waiting starts now; else the next one to come starts at once; none within `ms` (the look changed
-    // nothing, or the stream is down): null, and the look reads the list itself.
-    recordRead.current = (ms) => {
-      if (timer && flushRecordRead) {
-        const flush = flushRecordRead;
-        flushRecordRead = null;
-        return flush();
-      }
-      return new Promise<ListModel | null | undefined>((resolve) => {
-        const take = (read: Promise<ListModel | null>) => {
-          clearTimeout(giveUp);
-          resolve(read);
-        };
-        const giveUp = setTimeout(() => {
-          const at = lookWaiters.indexOf(take);
-          if (at >= 0) lookWaiters.splice(at, 1);
-          resolve(undefined);
-        }, ms);
-        lookWaiters.push(take);
-      });
-    };
+    }, RECORD_PAUSE_MS);
+    recordRead.current = pause.afterLook;
     /** The question record's thread, when this window's own save explains it (ownSaves.ts); null: news. */
     const ownEcho = (event: InboxEvent): string | null =>
       event.kind === 'question' && typeof event.thread_id === 'string' && event.thread_id !== '' && ownSaves.explains(event.question) ? event.thread_id : null;
@@ -2457,6 +2408,7 @@ function Inbox() {
           // cannot carry. One the window cannot place, or a project's, marks every held thread stale.
           const stream = applyStreamRecord(queryClient, event);
           const applied = stream.kind === 'applied' || stream.kind === 'none';
+          if (event) takeRecordList(event);
           // Any other record may be a message that tags a thread (the person's own send too): the next `#`
           // preview reads the cards again, whatever the 5 s guard says.
           cardsReadAt.current = 0;
@@ -2663,14 +2615,13 @@ function Inbox() {
     return () => {
       cancelled = true;
       recordRead.current = () => Promise.resolve(undefined);
-      for (const resolve of lookWaiters.splice(0)) resolve(Promise.resolve(null));
+      pause.stop();
       pickSaves.current.read = () => {};
       pickSaves.current.readOwn = () => {};
       pickSaves.current.readHeld = () => {};
       if (firstListTimer) clearTimeout(firstListTimer);
       discardPreparedInboxEvents();
       unsubscribe();
-      if (timer) clearTimeout(timer);
       if (eventListTimer) clearTimeout(eventListTimer);
       if (draftsTimer) clearTimeout(draftsTimer);
       if (cardsTimer) clearTimeout(cardsTimer);
@@ -2678,7 +2629,7 @@ function Inbox() {
       if (machinesTimer) clearTimeout(machinesTimer);
       if (machineThreadTimer) clearTimeout(machineThreadTimer);
     };
-  }, [refreshList, refreshSnoozes, refreshSettings, refreshThread, refreshDrafts, refreshCards, refreshDecisions, observeEvent, flushNotifications, setNotifyReach, windowReport, reportWindow, queryClient]);
+  }, [refreshList, refreshSnoozes, refreshSettings, refreshThread, refreshDrafts, refreshCards, refreshDecisions, observeEvent, flushNotifications, setNotifyReach, windowReport, reportWindow, queryClient, takeRecordList]);
 
   // Opening a thread: read it, record the look, and update its row in place.
   // While any thread is open the list holds still (settle.ts): the look

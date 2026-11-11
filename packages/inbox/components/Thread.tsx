@@ -2446,8 +2446,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   );
 
   // Attachments (step 2): the files as they are now, and the annotations that ride the next Send.
-  // Read again when a message's files change (a record or a read brought them); a real read that did not change them
-  // says so itself (App's filesSignal). A pick, a look or a message with no file reads nothing.
+  // Read again when a message's files change; a real read that did not change them says so (App's filesSignal).
   const filesRevision = useRef(thread);
   if (!sameThreadFiles(filesRevision.current, thread)) filesRevision.current = thread;
   const { model: files, load: reloadFiles, patch: patchRecords } = useThreadAttachments(thread.thread_id, filesRevision.current, filesChanged, filesSignal);
