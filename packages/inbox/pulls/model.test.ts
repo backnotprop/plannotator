@@ -1,22 +1,3 @@
-/**
- * The Pull requests page's words and choices under the worst case (break-ui on #2590). What regresses:
- *  - with several agents on one stack, a verdict on a layer reaching an agent that never linked it (below its own);
- *  - a stack named by the thread of an agent that linked only a layer higher up;
- *  - a failed or partial read saying "Nothing open in your projects", or dropping its PRs without a word;
- *  - gh not installed told as "signed out"; a host's PRs past the search's cap left out without a count;
- *  - a long chain drawn as a row of marks past its line; a fork's second layer read as "After";
- *  - in a forked stack, a verdict routed by the layers' order in the list instead of the layer it sits on;
- *  - a Whole stack verdict sent to one agent over another agent's layers;
- *  - one layer headed "Landing order"; a branch no PR has claimed to have "no open pull request", or an ordinary
- *    trunk (`next`, `canary`) losing "Lands next";
- *  - a self-hosted forge's host blamed on one CLI by its name;
- *  - the agent drawn top left instead of on the row's third line;
- *  - two repositories of one name in the list told apart by nothing;
- *  - initials that read as "PR" or "MR" on this page;
- *  - a rail of files that share their name and last folder, each row the same text;
- *  - a PR in two views or none, a stack split by a view, the menu's counts not following the view and the project,
- *    the on-you count following the view, an assigned PR not on the person.
- */
 import { describe, expect, test } from 'bun:test';
 import { inboxPullStacks, type InboxPull, type InboxPullLink, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import { inboxPullItems } from '@plannotator/core/inbox-types';
@@ -64,7 +45,6 @@ const link = (thread: string, fields: Partial<InboxPullLink> = {}): InboxPullLin
   ...fields,
 });
 
-/** A chain of `n` layers on main: #1 at the bottom. */
 const chain = (n: number) => Array.from({ length: n }, (_, i) => pr({ number: i + 1, head: `l${i + 1}`, base: i === 0 ? 'main' : `l${i}` }));
 
 const answer = (fields: Partial<InboxPullsAnswer>): InboxPullsAnswer => ({ fetched_at: null, hosts: [], pulls: [], links: {}, projects: {}, cards: {}, ...fields });
@@ -72,7 +52,6 @@ const answer = (fields: Partial<InboxPullsAnswer>): InboxPullsAnswer => ({ fetch
 describe('several agents on one stack (#2)', () => {
   const layers = chain(4);
   const [stack] = inboxPullStacks(layers);
-  // Claude opened the stack at #1; Codex linked only #3, higher up.
   const links = { [layers[0]!.key]: link('claude'), [layers[2]!.key]: link('codex') };
 
   test("the stack is Claude's (the bottom's); each agent's verdicts are its own layers and the ones above them, never below", () => {
@@ -86,7 +65,6 @@ describe('several agents on one stack (#2)', () => {
   test('a layer under the only linked one, with two agents on the stack, goes to neither', () => {
     const upper = { [layers[2]!.key]: link('codex'), [layers[3]!.key]: link('cursor') };
     expect(layerVerdictLink(layers[0]!, stack!, upper)).toBeNull();
-    // One agent only: the whole stack is its.
     expect(layerVerdictLink(layers[0]!, stack!, { [layers[2]!.key]: link('codex') })!.thread_id).toBe('codex');
   });
 
@@ -96,7 +74,6 @@ describe('several agents on one stack (#2)', () => {
   });
 
   test("a fork: a layer on A takes A's agent, never a sibling's that comes before it in the list", () => {
-    // A on main (Claude), B on A (Codex), C on A (no link).
     const a = pr({ number: 1, head: 'a', base: 'main' });
     const b = pr({ number: 2, head: 'b', base: 'a' });
     const c = pr({ number: 3, head: 'c', base: 'a' });
@@ -106,7 +83,6 @@ describe('several agents on one stack (#2)', () => {
   });
 
   test("a fork: a layer on B takes B's agent, though its cousin C (another agent) comes just before it in the list", () => {
-    // A on main, B on A (Claude), C on A (Codex), D on B (no link).
     const a = pr({ number: 1, head: 'a', base: 'main' });
     const b = pr({ number: 2, head: 'b', base: 'a' });
     const c = pr({ number: 3, head: 'c', base: 'a' });
@@ -119,12 +95,9 @@ describe('several agents on one stack (#2)', () => {
   });
 
   test("a Whole stack verdict goes to the stack's one review thread, its lowest linked layer's, whoever linked a layer above", () => {
-    // Claude on #1, Codex on #3: the stack up to #4 covers both agents' layers, and goes to Claude's thread.
     expect(stackVerdictLink(layers[3]!, stack!, links)!.thread_id).toBe('claude');
     expect(stackVerdictLink(layers[1]!, stack!, links)!.thread_id).toBe('claude');
-    // Only a higher layer linked: the stack's thread is that one.
     expect(stackVerdictLink(layers[0]!, stack!, { [layers[2]!.key]: link('codex') })!.thread_id).toBe('codex');
-    // A teammate's layer takes no verdict here; a teammate's linked layer is not the person's stack thread.
     const theirs = { ...layers[0]!, mine: false };
     const [mixed] = inboxPullStacks([theirs, ...layers.slice(1)]);
     expect(stackVerdictLink(theirs, mixed!, links)).toBeNull();
@@ -138,7 +111,6 @@ describe("the agent on the row's third line (the owner on #2608)", () => {
     const [item] = inboxPullItems(inboxPullStacks([one]), () => true);
     expect(rowLine(item!, link('t', { via: 'owner' }))).toBe('#48201 · Review thread with Claude Code · checks running');
     expect(rowMeta(item!, link('t', { via: 'owner' })).agent).toMatchObject({ host: 'claude-code', name: 'Claude Code', words: 'Review thread with Claude Code' });
-    // The agent's own thread named the PR: the same words (no "opened it").
     expect(rowLine(item!, link('t'))).toBe('#48201 · Review thread with Claude Code · checks running');
     const ended = link('t', { via: 'owner', agent: { host: 'opencode', session: 's', name: null, ended: true } });
     expect(rowLine(item!, ended)).toBe('#48201 · OpenCode ended · checks running');
@@ -187,7 +159,6 @@ describe('what the list says when it could not read everything (#5, #6, #8, #26)
     expect(pullsEmptyWords(none).kind).toBe('unread');
     const kept = answer({ hosts: [{ cli: 'gh', host: 'github.com', login: 'dana', others_error: 'rate_limited', others_last_read: '2026-11-03T09:00:00.000Z' }] });
     expect(pullsNotices(kept).map((n) => n.line)).toEqual(['GitHub asked to slow down; showing its last read.']);
-    // The host's own read failed too: said once, as the host's.
     const both = answer({ hosts: [{ cli: 'gh', host: 'github.com', login: null, error: 'unavailable', others_error: 'unavailable' }] });
     expect(pullsNotices(both).map((n) => n.key)).toEqual(['unavailable:false']);
   });
@@ -198,7 +169,6 @@ describe('what the list says when it could not read everything (#5, #6, #8, #26)
     expect(pullsNotices(cut, 'others')).toHaveLength(2);
     expect(pullsNotices(cut, 'mine')).toEqual([]);
     expect(pullsNotices(cut, 'review')).toEqual([]);
-    // The person's own searches cut: every view says so.
     const own = answer({ hosts: [{ cli: 'gh', host: 'github.com', login: 'dana', capped: { shown: 50, total: 80 } }] });
     expect(pullsNotices(own, 'mine').map((n) => n.key)).toEqual(['capped:github.com']);
   });
@@ -230,7 +200,6 @@ describe('stack shapes (#11, #16, #20, #22)', () => {
   });
 
   test('"Layer N of M" counts a layer\'s own line of the stack: a fork\'s sibling, listed before it, is not under it', () => {
-    // #9100 on main; #9101 and #9102 both on #9100; #9103 on #9102. The list order puts #9101 before #9102.
     const base = pr({ number: 9100, head: 'eu-migration', base: 'main' });
     const a = pr({ number: 9101, head: 'eu-a', base: 'eu-migration' });
     const b = pr({ number: 9102, head: 'eu-b', base: 'eu-migration' });
@@ -241,7 +210,6 @@ describe('stack shapes (#11, #16, #20, #22)', () => {
     expect(layerPosition(stack!, a.key)).toEqual({ at: 2, of: 2 });
     expect(layerPosition(stack!, b.key)).toEqual({ at: 2, of: 3 });
     expect(layerPosition(stack!, c.key)).toEqual({ at: 3, of: 3 });
-    // A merged layer between is passed through, never counted.
     const merged = pr({ number: 9104, head: 'eu-d', base: 'eu-c', state: 'merged', merged_at: '2026-11-03T09:00:00.000Z' });
     const top = pr({ number: 9105, head: 'eu-e', base: 'eu-d' });
     const [long] = inboxPullStacks([base, b, c, merged, top]);
@@ -256,17 +224,14 @@ describe('stack shapes (#11, #16, #20, #22)', () => {
   });
 
   test('a base no PR has is named, never claimed to have no open pull request; any trunk keeps "Lands next"', () => {
-    // #78 (closed, never read) had dr/route53 as its head: #79 says only what it is based on.
     const lone = pr({ number: 79, head: 'dr/failover', base: 'dr/route53', default_branch: 'main' });
     const [alone] = inboxPullStacks([lone]);
     expect(layerBaseWords(lone, alone!)).toBe('Based on dr/route53');
-    // A single PR into its repository's default branch, or one whose default the forge did not say: nothing.
     for (const base of ['next', 'canary', 'stable', 'v2', 'gh-pages']) {
       const into = pr({ number: 5, head: 'x', base, default_branch: base });
       expect([base, layerBaseWords(into, inboxPullStacks([into])[0]!)]).toEqual([base, null]);
       const unknown = pr({ number: 5, head: 'x', base });
       expect([base, layerBaseWords(unknown, inboxPullStacks([unknown])[0]!)]).toEqual([base, null]);
-      // A two-layer stack on that trunk: the bottom lands next, based on it.
       const low = pr({ number: 6, head: 'l', base });
       const up = pr({ number: 7, head: 'u', base: 'l' });
       const [two] = inboxPullStacks([low, up]);
@@ -304,9 +269,6 @@ describe('names in the list (#14, #27)', () => {
 describe('the views and the project (approval "pr-list-filters")', () => {
   const W = 'northwind/web-app';
   const B = 'northwind/billing-svc';
-  // dana's own two-layer stack in web-app with a teammate's layer on top; jun's PR asked of dana; mei's PR assigned to
-  // dana; tomas's PR asked of no one; a draft of mei's; a merged one of mei's; and in billing-svc, dana's own and one
-  // asked of her.
   const pulls = [
     pr({ repo: W, number: 1, head: 'a' }),
     pr({ repo: W, number: 2, head: 'b', base: 'a', author: 'tomas', mine: false }),
@@ -335,7 +297,6 @@ describe('the views and the project (approval "pr-list-filters")', () => {
     expect(numbers('all')).toEqual(['1+2', '3', '4', '5', '6', '8', '9']);
     expect(numbers('mine')).toEqual(['1+2', '8']);
     expect(numbers('review')).toEqual(['3', '4', '9']);
-    // tomas's layer on dana's stack puts the whole stack in Others too; mei's merged #7 is in no view.
     expect(numbers('others')).toEqual(['1+2', '5', '6']);
   });
 
@@ -351,7 +312,6 @@ describe('the views and the project (approval "pr-list-filters")', () => {
   });
 
   test('on you follows the project, not the view: an assigned PR is on the person', () => {
-    // On you: #3 (requested), #4 (assigned), #9 (requested).
     expect(pullGroups(model, null).on_you.map((i) => i.focus.number).sort()).toEqual([3, 4, 9]);
     expect(pullGroups(model, 'prj_web').on_you.map((i) => i.focus.number).sort()).toEqual([3, 4]);
     const assigned = pullGroups(model, null).on_you.find((i) => i.focus.number === 4)!;

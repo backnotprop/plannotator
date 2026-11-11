@@ -1,10 +1,3 @@
-/**
- * The PR page's file rail. What regresses: a row losing its +/- (the size of each change is what the rail is read
- * for), a folder losing its sums, and a long path cut where it tells rows apart (its end) rather than in its middle.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. Where a name gives way on screen is the
- * e2e spec's (`inbox-pull-requests.spec.ts`, "the rail: a long path gives way in its middle").
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -56,14 +49,11 @@ test.if(hasDom)('a row holds the whole path, cut only where it may give way: the
   expect(row.querySelector('.ib-prp-fname')!.textContent).toBe(path);
   expect(row.querySelector('.ib-prp-dir .ib-prp-keep')!.textContent).toBe('/render-worker-reads-own-source/');
   expect(row.querySelector('.ib-prp-base .ib-prp-keep')!.textContent).toBe('.test.ts');
-  // A last folder too long for the row on its own keeps its end too: it gives way in its own middle.
   expect(row.querySelector('.ib-prp-dir .ib-prp-end')!.textContent).toBe('-source/');
-  // Nothing on the row fades or reads right to left.
   expect(row.querySelector('[class*="ib-rv-name"]')).toBeNull();
 });
 
 test.if(hasDom)('middleCut keeps the end that tells rows apart', () => {
-  // The slash stays with the end, so a cut folder still reads as a path ("crates/c…/src/").
   expect(middleCut('crates/core-api/src/')).toEqual(['crates/core-api', '/src/']);
   expect(middleCut('bundler/crates')).toEqual(['bundler', '/crates']);
   expect(middleCut('shared_chunk_ids.rs')).toEqual(['shared_chunk', '_ids.rs']);

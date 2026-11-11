@@ -1,18 +1,3 @@
-/**
- * PR risk ranking in the window. What regresses:
- *  - the filter hiding what it should keep (a stack's high layer, a row in the folded group), or hiding a row with a
- *    layer not ranked without a word, or High losing a row it can't place (failed, or not ranked yet) for good;
- *  - a save during the model read leaving the agent on the person's own, possibly expensive, default;
- *  - a merged layer's old judgment deciding a stack;
- *  - the filter closing the stack open beside the list;
- *  - a tap on a mark opening the row instead of showing the sentence;
- *  - a local review (no PR to rank) shown or counted under the filter, or a thread's row not judged by the PRs it owns;
- *  - a fold under the filter that does nothing, or that changes the folds saved for All;
- *  - an empty filter hiding that a host could not be read;
- *  - the dialog losing the person's words when a save fails, or keeping the last agent's model after a switch;
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -60,7 +45,6 @@ function pull(number: number, fields: Partial<InboxPull> = {}): InboxPull {
 const LIST: InboxPullsAnswer = {
   fetched_at: '2026-11-03T10:00:00.000Z',
   hosts: [{ cli: 'gh', host: 'github.com', login: 'dana' }],
-  // #4 waits on others, in the folded group: mine, and its review is someone else's.
   pulls: [pull(1), pull(2), pull(3), pull(4, { mine: true, requested: false, author: 'dana', reviewers: ['jun'] }), pull(5), pull(6, { base: 'b5' }), pull(7, { state: 'merged', merged_at: '2026-11-02T10:00:00.000Z', head: 'b7' }), pull(8, { base: 'b7' })],
   links: {},
   projects: {},
@@ -82,7 +66,6 @@ const JUDGED: InboxPullRiskAnswer = {
     [key(4)]: { level: 'high', why: 'It changes invoices.' },
     [key(5)]: { level: 'low', why: 'It moves files.' },
     [key(6)]: { level: 'high', why: 'It changes permissions.' },
-    // A stale judgment of a merged layer can't decide #8's stack.
     [key(7)]: { level: 'high', why: 'Old.' },
     [key(8)]: { level: 'low', why: 'A small fix.' },
   },
@@ -167,7 +150,6 @@ test.skipIf(!hasDom)('High keeps the high rows, also from the folded group, and 
 });
 
 test.skipIf(!hasDom)('a stack with a layer not ranked: Low is not something it can say, High hides it and counts it, high still shows', async () => {
-  // #5 and #6 are one stack. #5 low with #6 not ranked: #6 could be anything.
   const low = { ...JUDGED.judgments };
   delete low[key(6)];
   spy('pullRisk', async () => ({ ...JUDGED, judgments: low }));
@@ -183,7 +165,6 @@ test.skipIf(!hasDom)('a stack with a layer not ranked: Low is not something it c
   if (root) await act(async () => root!.unmount());
   document.body.innerHTML = '';
 
-  // The other way round: #6 high and #5 not ranked is on screen, so nothing is hidden to count.
   const high = { ...JUDGED.judgments };
   delete high[key(5)];
   spy('pullRisk', async () => ({ ...JUDGED, judgments: high }));
@@ -196,7 +177,6 @@ test.skipIf(!hasDom)('a PR that failed to rank says so with the reason, never Lo
   const reason = 'prompt is too long: 2500000 tokens > 200000 maximum';
   const judgments = { ...JUDGED.judgments };
   delete judgments[key(3)];
-  // #5 and #6 are one stack: Low on one layer and a failure on the other is no Low.
   delete judgments[key(6)];
   spy('pullRisk', async () => ({ ...JUDGED, judgments, failed: { [key(3)]: reason, [key(6)]: reason } }));
   await mount(page(key(3)));
@@ -215,28 +195,24 @@ test.skipIf(!hasDom)('a PR that failed to rank says so with the reason, never Lo
   expect(shown).toContain(key(3));
   expect(shown).toContain(key(6));
   expect(shown).not.toContain(key(1));
-  // Ranked first: a failed row can't push a high one down.
   expect(shown.indexOf(key(2))).toBeLessThan(shown.indexOf(key(3)));
-  // On screen, so not counted as hidden; and that is High's line only.
   expect(document.querySelectorAll('[data-pulls-risk-not-judged], [data-pulls-risk-not-ranked]').length).toBe(0);
 });
 
 test.skipIf(!hasDom)('High hides what failed and what is not ranked yet behind one quiet count, and a click shows them as rows', async () => {
   window.localStorage.setItem('plannotator-inbox-pr-risk-filter', 'high');
   const judgments = { ...JUDGED.judgments };
-  delete judgments[key(1)]; // not ranked yet (a run still going counts)
-  delete judgments[key(3)]; // failed
-  delete judgments[key(6)]; // #5 low, #6 failed: the stack can't be said to be Low
+  delete judgments[key(1)];
+  delete judgments[key(3)];
+  delete judgments[key(6)];
   const reason = 'prompt is too long: 2500000 tokens > 200000 maximum';
   spy('pullRisk', async () => ({ ...JUDGED, judgments, failed: { [key(3)]: reason, [key(6)]: reason }, pending: 1 }));
   await mount(page());
   expect(shownRows().sort()).toEqual([key(2), key(4)].sort());
   const toggle = document.querySelector<HTMLButtonElement>('[data-pulls-risk-not-ranked-toggle]')!;
   expect(toggle.textContent).toBe('3 not ranked');
-  // One line, not two.
   expect(document.querySelectorAll('[data-pulls-risk-not-judged]').length).toBe(0);
   expect(toggle.getAttribute('aria-expanded')).toBe('false');
-  // Last in the list, after every group.
   expect(document.querySelector('[data-pulls-risk-not-ranked]')!.nextElementSibling).toBeNull();
   await act(async () => toggle.click());
   expect(shownRows().sort()).toEqual([key(1), key(2), key(3), key(4), key(6)].sort());
@@ -312,7 +288,6 @@ test.skipIf(!hasDom)('a tap on a mark, on a touch screen, shows the sentence ins
   expect(opened).toEqual([key(2)]);
 });
 
-/** Pick from one of the dialog's two lists, as a person does: the button, then the entry. */
 const pick = async (list: 'agent' | 'model', label: string) => {
   const holder = document.querySelector(`[data-pull-risk-${list}]`)!;
   await act(async () => holder.querySelector('button')!.click());
@@ -405,9 +380,7 @@ test.skipIf(!hasDom)('outside the Risk dialog the picker keeps its own ways: Esc
   expect(heading().className).toContain('uppercase');
   await act(async () => button.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
   expect(reached).toEqual(['Escape']);
-  // Still open: on the button, Escape has never closed it.
   expect(heading()).toBeDefined();
-  // In the filter box Enter is the page's to handle, as it always was.
   const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
   await act(async () => document.querySelector('input')!.dispatchEvent(enter));
   expect(enter.defaultPrevented).toBe(false);
@@ -519,7 +492,6 @@ const review = (thread: string): InboxReviewThread =>
     updated_at: '2026-11-03T11:00:00.000Z',
   }) as InboxReviewThread;
 
-/** The list with #2 owned by a review thread, and a local review that owns no PR. */
 function withThreads() {
   const state = pullsStateOf(LIST);
   const rows = state.reviews!.rows;
@@ -555,7 +527,6 @@ test.skipIf(!hasDom)('under the filter a folded group starts open, and a click f
   window.localStorage.setItem('plannotator-inbox-pr-risk-filter', 'high');
   spy('pullRisk', async () => JUDGED);
   await mount(page());
-  // #4 is the person's own, nobody's review: Open, not reviewed.
   const fold = () => document.querySelector<HTMLButtonElement>('[data-reviews-fold="not_reviewed"]')!;
   expect(fold().getAttribute('aria-expanded')).toBe('true');
   expect(shownRows()).toContain(key(4));
@@ -583,7 +554,6 @@ test.skipIf(!hasDom)("a filter's folds come back when it is picked again, after 
   expect(fold().getAttribute('aria-expanded')).toBe('false');
   await pick('medium');
   expect(fold().getAttribute('aria-expanded')).toBe('true');
-  // A fold under Medium is Medium's own, and High keeps what was folded under it.
   await act(async () => fold().click());
   await pick('high');
   expect(fold().getAttribute('aria-expanded')).toBe('false');

@@ -1,9 +1,3 @@
-/**
- * A person's small picture (`Face`). What regresses: a picture the browser already holds (a second look within the
- * day) loads before the component's effects run; a state reset in an effect then left the face on its initial for good.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act, useLayoutEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -27,7 +21,6 @@ afterEach(() => {
   host.remove();
 });
 
-/** The picture arrives as a held one does: once it is in the page, before any effect of the face has run. */
 function LoadsAtOnce() {
   useLayoutEffect(() => {
     const img = host.querySelector('img')!;
@@ -49,10 +42,8 @@ test.skipIf(!hasDom)('a picture that loads before the effects run stays shown (G
   });
   const face = host.querySelector('[data-face="jun"]')!;
   expect(face.getAttribute('data-face-state')).toBe('shown');
-  // Read through the Inbox's own route, by the forge's host: never the forge's address.
   const src = new URL(face.querySelector('img')!.getAttribute('src')!, 'http://inbox.test');
   expect(src.pathname).toBe('/api/inbox/pulls/avatar');
   expect(src.searchParams.get('host')).toBe('gitlab.example.org');
-  // Shown: the CSS initial is gone, so nothing sits under the picture.
   expect(face.querySelector('.ib-prd-pic')!.hasAttribute('data-initial')).toBe(false);
 });

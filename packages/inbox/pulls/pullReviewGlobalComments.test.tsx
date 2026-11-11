@@ -1,24 +1,9 @@
-/**
- * "Review layer by layer" with global comments (a comment on the whole review, `scope: 'general'`), with the Inbox's
- * doors stubbed at `fetch`, the diff reader stubbed to hand out its comment seam, and the real review-app dialog.
- * What regresses:
- *
- *  - the agent's reply losing the Global comments section, or putting it after the files';
- *  - a global comment posted from This layer missing the review body;
- *  - a global comment posted from Whole stack marked as a full-stack line comment: listed under "Cannot post inline"
- *    and never posted, then cleared with the line comments that did not go either;
- *  - a new push dropping the global comments with the line comments;
- *  - choosing a global comment in a narrow window not opening the comments sheet.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxPull, InboxPullLink, InboxPullsAnswer } from '@plannotator/core/inbox-types';
 
 const hasDom = typeof document !== 'undefined';
-/** The reader's comment seam as the review last gave it. */
 let reader: { onShowGlobalComment?: (id: string) => void; draftScope: string } | undefined;
 if (hasDom) {
   mock.module('#guide-reader', () => ({
@@ -35,7 +20,6 @@ if (hasDom) {
 const { PullReview } = (hasDom ? await import('./PullReview') : {}) as typeof import('./PullReview');
 
 const SHA = 'a'.repeat(40);
-/** The head the diff door answers with. */
 let diffHead = SHA;
 const PUSHED = '2026-11-03T09:00:00.000Z';
 const STORE = 'plannotator-inbox-pull-review:';
@@ -80,9 +64,7 @@ const link: InboxPullLink = {
   last: { message_id: LAST, preview: 'The stack is up.', at: PUSHED },
   guide: null,
 };
-/** The person's stack, its thread tied to the bottom layer (no head read: the agent's verdict alone). */
 const own = [pull(412, { head: 'retry/schedule' }), pull(413, { head: 'retry/backoff', base: 'retry/schedule' })];
-/** A teammate's stack, posted to GitHub (no agent here). */
 const theirs = [
   pull(880, { repo: 'northwind/web-app', mine: false, author: 'tomas', head: 'rtl', head_sha: SHA }),
   pull(881, { repo: 'northwind/web-app', mine: false, author: 'tomas', head: 'rtl-2', base: 'rtl', head_sha: SHA }),
@@ -160,7 +142,6 @@ function mount(node: React.ReactNode) {
   });
 }
 
-/** The review of one layer; `push` moves the layer to a new head commit, as the list and the diff read it again. */
 let push: (head: string) => void = () => {};
 function Review({ layer, scope }: { layer: InboxPull; scope: 'layer' | 'stack' }) {
   const [answer, setAnswer] = useState(model);
@@ -222,11 +203,9 @@ test.skipIf(!hasDom)('post from Whole stack: the global comment goes in the body
   await settle();
   await act(async () => el('[data-review-posts] [data-decision-primary]').click());
   await settle();
-  // Only the line comment is offered to copy: its lines map to no single PR's diff.
   const dialog = el('[role="dialog"]').textContent ?? '';
   expect(dialog).toContain('Cannot post inline (1)');
   expect(dialog).toContain('1 finding from full-stack view');
-  // No main comment typed: the global comment alone is enough to post.
   await act(async () => dialogButton('Post Comments').click());
   await settle();
   const sent = posted.filter((p) => p.path.endsWith('/pulls/review'));
@@ -234,7 +213,6 @@ test.skipIf(!hasDom)('post from Whole stack: the global comment goes in the body
   expect(String(sent[0]!.body.body)).toContain(GLOBAL.text);
   expect(String(sent[0]!.body.body)).not.toContain(LINE.text);
   expect(sent[0]!.body.fileComments ?? []).toEqual([]);
-  // Only what went is cleared: the line comment is still the person's.
   expect(kept(storeKey(theirs[1]!, 'stack'))).toEqual([LINE.id]);
   expect(commentCount()).toBe('Comments, 1');
 });
@@ -252,7 +230,6 @@ test.skipIf(!hasDom)('a new push keeps the global comments and the line comments
   expect(kept(storeKey(own[0]!, 'layer', later))).toHaveLength(2);
   expect(commentCount()).toBe('Comments, 2');
   expect(el('[data-review-decision] [data-decision-primary]').textContent).toContain('Send Feedback');
-  // The unsaved words of a global comment are kept under the same name across the push.
   expect(reader!.draftScope).toBe(draftScope);
 });
 

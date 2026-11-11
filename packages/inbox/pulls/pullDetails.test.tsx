@@ -1,9 +1,3 @@
-/**
- * The details' checks on the numbers a real project has. What regresses: a hundred green rows pushing the labels out of
- * the column, skipped checks counted as passed, and what needs eyes hidden behind the line.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -71,7 +65,6 @@ test.if(hasDom)('a failure says how it failed, on its one line; many running fol
   act(() => line()!.click());
   expect(rows()).toBe(136);
   expect(host.querySelectorAll('[data-pull-details-check]')[2]!.getAttribute('data-pull-details-check')).toBe('pending');
-  // A few running stay on the column.
   act(() => root.render(<CheckRows key="few" checks={[...many(3, 'pending'), ...many(40, 'pass')]} />));
   expect(rows()).toBe(3);
   expect(line()!.textContent).toBe('40 passed');
@@ -97,10 +90,8 @@ test.if(hasDom)("a bot that only commented neither leads the reviewers nor says 
   const waiting = [{ login: 'ana', state: 'waiting' as const }, { login: 'kim', state: 'waiting' as const }];
   expect(byState([bot, ...waiting]).map((r) => r.login)).toEqual(['ana', 'kim', 'acme-deploy-bot']);
   expect(reviewWords([bot, ...waiting])).toBe('Waiting');
-  // Alone, it is what there is; and a person's comment still counts.
   expect(reviewWords([bot])).toBe('Commented');
   expect(reviewWords([{ login: 'ana', state: 'commented' }, ...waiting])).toBe('Commented');
-  // A bot that asks for changes is heard.
   expect(reviewWords([{ ...bot, state: 'changes' }, ...waiting])).toBe('Changes requested');
 });
 
@@ -124,7 +115,6 @@ test.if(hasDom)('held by the forge: it says so and until when, and Try again wai
   expect(again.textContent).toBe('Try again');
   act(() => again.click());
   expect(asked).toBe(1);
-  // Not held: the forge did not answer, and Try again is there.
   panel(null);
   expect(host.querySelector('[data-pull-details-failed]')!.textContent).toBe('GitHub did not answer about the reviewers and checks. Try again');
 });
@@ -135,7 +125,6 @@ test.if(hasDom)('a failed read where the description has no other source (the fu
   draw(true);
   expect(host.textContent).not.toContain('No description.');
   expect(host.querySelector('[data-pull-details-failed]')!.textContent).toBe('GitHub did not answer about the description, reviewers and checks. Try again');
-  // The PR page, whose description comes with the diff: an empty one there is none.
   draw(false);
   expect(host.textContent).toContain('No description.');
 });
@@ -163,7 +152,6 @@ test.if(hasDom)('the details are read again when the PR moves (a new head), and 
     answer = async () => {
       throw new InboxApiError(429, 'pull_details_held', 'github.com asked to slow down.', null, 1_234);
     };
-    // Another PR, held: no answer shown yet, so the hold is what it says.
     await act(async () => root.render(<Probe stamp="c\u0000t3" pr="github.com/acme/web#8" />));
     expect(asked.length).toBe(3);
     expect(seen[seen.length - 1]!.held).toBe(1_234);
@@ -180,7 +168,6 @@ test.if(hasDom)('a check name cut in its middle keeps more of its end, so two th
   expect(linux.startsWith('Run changed')).toBe(true);
   expect(linux.endsWith('(linux, 1/5)')).toBe(true);
   expect(Array.from(linux.replace('…', '')).length).toBeLessThanOrEqual(40);
-  // Short enough, it is whole; never half of a character.
   expect(cutMiddle('lint', 40)).toBe('lint');
   expect(cutMiddle('🎉'.repeat(30), 10)).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/);
 });

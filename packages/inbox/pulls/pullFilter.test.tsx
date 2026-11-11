@@ -1,18 +1,3 @@
-/**
- * The Pull requests list's filter (approval "pr-list-filters", round 7 take B "One filter button"), in the window, with
- * the view and the project held the way App holds them (the address). What regresses:
- *  - the filter shown before the first answer, or anything but "Reviews" and the mark in the head (a project's name, the
- *    on-you count: the head must never grow);
- *  - a pick not narrowing the rows, the mark not saying it is narrowed, or the picks not named once over the list;
- *    × or Clear filters clearing one and not the other, or in two steps;
- *  - the menu's counts not following the other choice; project rows for a single project; Clear filters at rest;
- *  - a project gone from the list kept as a filter (an empty list naming no project);
- *  - a stack the address names but the view leaves out opening a blank pane;
- *  - a view with nothing in it saying "Nothing open in your projects", or a failed read said as an empty view;
- *  - the phone's menu not a bottom sheet.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -59,8 +44,6 @@ function pull(number: number, fields: Partial<InboxPull> = {}): InboxPull {
   };
 }
 
-// web-app: dana's own (#1, waiting on review), jun's asking her (#2, on you), mei's assigned to her (#3, on you),
-// tomas's (#4, others). billing-svc: dana's own (#5), jun's asking her (#6, on you).
 const MODEL: InboxPullsAnswer = {
   fetched_at: '2026-11-03T09:30:00.000Z',
   hosts: [{ cli: 'gh', host: 'github.com', login: 'dana' }],
@@ -130,13 +113,11 @@ async function press(target: HTMLElement) {
 
 const $ = (selector: string) => document.querySelector<HTMLElement>(selector);
 const $$ = (selector: string) => [...document.querySelectorAll<HTMLElement>(selector)];
-/** The rows shown, the folded ones opened. */
 const rowNumbers = () =>
   $$('[data-pulls-row]')
     .map((r) => Number(r.getAttribute('data-pulls-row')!.split('#')[1]))
     .sort((a, b) => a - b);
 
-/** The page with its view and project held the way App holds them: each pick is drawn again. */
 function draw(over: Partial<PullsPageProps> = {}) {
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -183,7 +164,6 @@ async function openWaiting() {
   }
 }
 
-/** The menu's rows: what each says, its count, and whether it is the chosen one. */
 const menuRows = (selector: string) =>
   $$(`[data-pulls-filter-menu] ${selector}`).map((row) => ({
     label: row.querySelector('.ib-pmi-l')!.textContent,
@@ -227,7 +207,6 @@ test.if(hasDom)('the menu: views and projects with counts and a tick; a pick nar
     { label: 'web-app', n: '4', on: false },
     { label: 'billing-svc', n: '2', on: false },
   ]);
-  // Nothing narrowed: nothing to clear.
   expect($('[data-pulls-filter-clear-item]')).toBeNull();
 
   await act(async () => $('[data-pulls-filter="review"]')!.click());
@@ -240,10 +219,8 @@ test.if(hasDom)('the menu: views and projects with counts and a tick; a pick nar
   expect(trigger.getAttribute('aria-label')).toBe('Filter: To review');
   expect($('[data-pulls-scope-view]')!.textContent).toBe('To review');
   expect($('[data-pulls-scope-project]')).toBeNull();
-  // The head never grows: still only "Reviews".
   expect($('[data-pulls-list] .ib-lhead')!.textContent).toBe('Reviews');
 
-  // The projects' counts follow the view.
   await press(trigger);
   expect(menuRows('[data-pulls-filter-project-option]').map((r) => r.n)).toEqual(['3', '2', '1']);
   await act(async () => $('[data-pulls-filter-project-option="prj_web"]')!.click());
@@ -252,7 +229,6 @@ test.if(hasDom)('the menu: views and projects with counts and a tick; a pick nar
   expect(rowNumbers()).toEqual([2, 3]);
   expect($('[data-pulls-scope-project]')!.textContent).toBe('web-app');
   expect(trigger.getAttribute('aria-label')).toBe('Filter: To review, web-app');
-  // The views' counts follow the project; both picked rows are the checked ones.
   await press(trigger);
   expect(menuRows('[data-pulls-filter]').map((r) => r.n)).toEqual(['4', '1', '2', '1']);
   expect($$('[data-pulls-filter-menu] [aria-checked="true"]').map((r) => r.getAttribute('data-pulls-filter') ?? r.getAttribute('data-pulls-filter-project-option'))).toEqual(['review', 'prj_web']);
@@ -340,7 +316,6 @@ test.if(hasDom)('Others failing or on its way: Mine and To review still say what
     ['others', theirs({ cli: 'gh', host: 'github.com', login: 'dana', others_pending: true }), 'reading'],
     ['all', theirs({ cli: 'gh', host: 'github.com', login: 'dana', others_pending: true }), 'reading'],
   ];
-  // The person's own read failed while Others is on its way: the failure is said at once, never "Reading…".
   const ownFailed = theirs({ cli: 'gh', host: 'github.com', login: 'dana', error: 'unavailable', others_pending: true });
   for (const filter of ['all', 'others'] as const) {
     draw({ filter, state: pullsStateOf(ownFailed) });

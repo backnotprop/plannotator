@@ -1,14 +1,7 @@
-/**
- * Where other people's threads go on the PR page's diff. What regresses: a thread on a line this diff shows drawn
- * anywhere else; a thread whose line moved dropped from the page (it goes to the top of its file, saying why); a thread
- * on the whole file put on a line, or its band out of time order; a whole stack's diff drawing a base-side thread on a line of another base; a push or a count of
- * threads folding threads; a file's open threads miscounted; a long thread cut without saying how much.
- */
 import { describe, expect, test } from 'bun:test';
 import type { InboxPullDetailComment, InboxPullThread } from '@plannotator/core/inbox-types';
 import { fileThreadKey, foldedWhy, patchLines, placeThreads, shownComments, threadKey } from './threadPlaces';
 
-// src/a.ts: line 3 changes; the hunk shows new lines 1-5 and old lines 1-5. src/gone.ts is deleted (old lines 1-2).
 const files = [
   { path: 'src/a.ts', patch: 'diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,5 +1,5 @@\n one\n two\n-three\n+THREE\n four\n five\n' },
   { path: 'src/gone.ts', patch: 'diff --git a/src/gone.ts b/src/gone.ts\ndeleted file mode 100644\n--- a/src/gone.ts\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-x\n-y\n' },
@@ -54,12 +47,9 @@ describe('placing', () => {
     const { placed, onFiles: bands, open } = placeThreads(threads, files, 'layer');
     expect(placed.map((p) => p.thread.id)).toEqual(['on-line']);
     expect(bands.map(({ thread: t, side }) => [t.id, t.file, side])).toEqual([['earlier', 'src/a.ts', 'new'], ['later', 'src/a.ts', 'new'], ['gone', 'src/gone.ts', 'old']]);
-    // The resolved one is drawn but not counted.
     expect(open.get('src/a.ts')).toBe(2);
     expect(open.get('src/gone.ts')).toBe(1);
-    // An outdated one with no line is about lines a push moved: the top of its file, as before.
     expect(onFiles([thread('o', { line: null, outdated: true })])).toEqual([]);
-    // In Whole stack too, and never for a file this diff does not change.
     expect(onFiles([thread('s', { line: null })], 'stack')).toEqual([['s', 'src/a.ts', 'new']]);
     expect(onFiles([thread('x', { file: 'src/other.ts', line: null })])).toEqual([]);
   });
