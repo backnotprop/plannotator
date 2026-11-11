@@ -1,9 +1,3 @@
-/**
- * A board's review in the Inbox (approval "shape-whats-changed"). What regresses if these fail:
- * - the board links to an older review in its thread, or to a plain guide that is no review;
- * - a review place does not survive the address (a reload, Back) or lands somewhere else;
- * - a file the review does not change, or a step it does not have, opens the review anyway (at its top).
- */
 import { expect, test } from 'bun:test';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
@@ -27,7 +21,6 @@ test("the board's review is its thread's newest review, never a plain guide", ()
 });
 
 test('a place in the review survives the address', () => {
-  // A context note's removed lines (`side: 'old'`) keep their side: their numbers are the old side's.
   const places: ReviewAt[] = [{ path: 'src/a b.ts', line: 42 }, { path: 'src/a.ts', line: 3, side: 'old' }, { path: 'src/kettle.ts' }, { step: 3 }, { files: true }];
   for (const at of places) {
     const params = new URLSearchParams('thread=msg_1&guide=msg_2');
@@ -43,7 +36,6 @@ test('open goes to the review at a file it changes or a step it has, and answers
   let reads = 0;
   const read = async () => (reads++, { snapshot });
   const review = shapeReview(msg('msg_review', guide(true)), (id, at) => went.push([id, at]), read);
-  // Its steps are the review's chapters: the board draws no "Guide step 3" for a two-chapter review.
   expect([review.label, review.files, review.additions, review.deletions, review.steps]).toEqual(['#12', 2, 2, 2, 2]);
   expect(await review.open({ path: 'src/kettle.ts', line: 7 })).toBe(true);
   expect(await review.open({ path: 'src/elsewhere.ts', line: 1 })).toBe(false);
@@ -52,7 +44,6 @@ test('open goes to the review at a file it changes or a step it has, and answers
   expect(await review.open({})).toBe(true);
   expect(await review.open({ files: true })).toBe(true);
   expect(went).toEqual([['msg_review', { path: 'src/kettle.ts', line: 7 }], ['msg_review', { step: 2 }], ['msg_review', null], ['msg_review', { files: true }]]);
-  // The review's files are read once.
   expect(reads).toBe(1);
 });
 
@@ -63,7 +54,6 @@ test("a stack badge's narrowing survives the address with its place, and a forge
     writeShapeReviewAt(params, at);
     expect(shapeReviewAtOf(new URLSearchParams(params.toString()))).toEqual(at);
   }
-  // No place, no narrowing: All files stays All files.
   const files = new URLSearchParams('thread=msg_1&guide=msg_2');
   writeShapeReviewAt(files, { files: true, narrow });
   expect(files.has('narrow')).toBe(false);
@@ -74,7 +64,6 @@ test("a stack badge's narrowing survives the address with its place, and a forge
   const badLink = shapeReviewAtOf(new URLSearchParams({ step: '3', narrow: JSON.stringify({ ...narrow, url: 'javascript:alert(1)' }) }));
   expect(badLink?.narrow?.pr).toBe(2547);
   expect(badLink?.narrow?.url).toBeUndefined();
-  // The hue becomes a CSS value: only a number of degrees from 0 up to 360 is kept, as a whole number below 360.
   for (const hue of ['0;background:url(x)', '72', 999, -1, 360, null, Number.NaN]) {
     const at = shapeReviewAtOf(new URLSearchParams({ step: '3', narrow: JSON.stringify({ ...narrow, hue }) }));
     expect(at?.narrow?.pr).toBe(2547);

@@ -1,8 +1,3 @@
-/**
- * Where the board a thread's Show me made opens when it lands. What regresses if these fail: the person moved to
- * another thread while the agent drew, and the new board opens over that thread (its Thread tab and Add to reply
- * then belong to the wrong thread).
- */
 import { expect, test } from 'bun:test';
 import { showMeBoardOpensIn } from './showMeOpensIn';
 

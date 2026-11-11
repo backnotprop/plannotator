@@ -1,10 +1,3 @@
-/**
- * The focus when a Show me's new board opens (boardFocus.ts). What regresses if these fail: the new board's title
- * loses the focus to the page as the board draws again while it settles (a keyboard or a screen reader is left on
- * nothing), or the title takes the focus back from where the person moved it.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { focusBoardTitle } from './boardFocus';
 
@@ -31,7 +24,6 @@ test.skipIf(!hasDom)('the new board drawn again as it settles: the focus goes ba
   const section = layer('b2', 'About the lock');
   await frames();
   expect(document.activeElement?.textContent).toBe('About the lock');
-  // The board draws its title again: the old one leaves with the focus.
   section.innerHTML = '<h1>About the lock</h1><button>Close</button>';
   expect(document.activeElement === document.body || document.activeElement === null).toBe(true);
   await frames();
