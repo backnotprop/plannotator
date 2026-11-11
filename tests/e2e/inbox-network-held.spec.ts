@@ -13,7 +13,9 @@
  *    land as one reply, nothing left spinning;
  *  - a Mark read the Inbox refuses puts the row back and shows the Inbox's own error;
  *  - two windows picking different answers on one question 50 ms apart end on the same answer, the later one, with
- *    no raw "changed since you read it" error (pickConflict.ts holds that rule).
+ *    no raw "changed since you read it" error (pickConflict.ts holds that rule);
+ *  - a long thread that receives messages while the person types a reply on a poor link keeps every key, the caret
+ *    and the reply box where they were, and draws each new message (each one draws only its own body: stage 3).
  */
 
 import { expect, test, type BrowserContext, type Page, type Request } from '@playwright/test';
@@ -33,6 +35,9 @@ const BODY = (topic: string) =>
 let url = '';
 let claude: SimAgent;
 const T: string[] = [];
+let project = '';
+/** A long thread: its first message, then many updates and a few replies of the person's. */
+let long = '';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -45,9 +50,16 @@ test.beforeAll(async () => {
   url = started.stdout.trim().replace(/\/$/, '');
   await fetch(`${url}/api/inbox/settings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ notifications: { dismissed: true } }) });
   claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
-  const project = scratchProject(join(root, 'src'), 'billing');
+  project = scratchProject(join(root, 'src'), 'billing');
   for (const topic of ['invoices', 'refunds', 'credits', 'taxes', 'payouts', 'disputes', 'plans', 'coupons']) {
     T.push((await claude.send({ project_path: project, subject: `Billing ${topic}`, thread: `billing-${topic}`, body: BODY(topic) }, { wakes: true })).thread_id as string);
+  }
+  long = (await claude.send({ project_path: project, subject: 'Billing ledger', thread: 'billing-ledger', body: 'The ledger rewrite starts now.' }, { wakes: true })).thread_id as string;
+  for (let i = 1; i <= 80; i++) {
+    const sent = await claude.send({ project_path: project, thread: 'billing-ledger', body: `Ledger update ${i}.\n\n- one point\n- another with \`code\`\n\n${'Some prose that takes a line or two. '.repeat(4)}` }, { wakes: true });
+    if (i % 20 === 0) {
+      await fetch(`${url}/api/inbox/messages/${sent.message_id}/reply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idempotency_key: `ledger-${i}`, words: `Noted ${i}.`, questions: [] }) });
+    }
   }
 });
 
@@ -277,4 +289,71 @@ test('two windows pick different answers on one question 50 ms apart: both end o
   expect(thread.thread.messages[0]!.questions![1]!.answer?.selected).toEqual(['No']);
   await a.close();
   await b.close();
+});
+
+test('a long thread receiving messages while the person types a reply on a poor link: every key kept, nothing moves, nothing stuck', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await context.newPage();
+  // A poor link: every read and write takes 700 ms (the live stream itself is not held).
+  await page.route('**/api/inbox/**', async (route) => {
+    if (new URL(route.request().url()).pathname.startsWith('/api/inbox/events')) return route.fallback();
+    await new Promise((done) => setTimeout(done, 700));
+    return route.fallback();
+  });
+  await page.goto(`${url}/#thread=${encodeURIComponent(long)}`);
+  const p = pane(long);
+  const articles = page.locator(`${p} [data-message-article]`);
+  await expect(articles.first()).toBeVisible({ timeout: 30_000 });
+  await page.waitForTimeout(1500);
+  // Much of the thread open, as a person reading it back has it: the middle fold shown, 40 folded lines opened.
+  for (const all of await page.locator(`${p} [data-fold-all]`).all()) await all.click();
+  const folded = page.locator(`${p} article[data-folded] [data-fold-head]`);
+  for (let i = 0; i < 40 && (await folded.count()) > 0; i++) await folded.first().click();
+  await page.locator(`${p} .ib-pfoot`).getByRole('button', { name: /^(Reply|Edit)/ }).first().click();
+  const box = page.locator(`${p} .ib-rbox textarea`);
+  await expect(box).toBeFocused();
+  const before = await articles.count();
+  // Reading an earlier message, halfway up: what is on screen must not move as messages land below it.
+  const anchor = await page.evaluate((sel) => {
+    const body = document.querySelector<HTMLElement>(`${sel} .ib-pbody`)!;
+    body.scrollTop = Math.round((body.scrollHeight - body.clientHeight) / 2);
+    const view = body.getBoundingClientRect();
+    const near = [...body.querySelectorAll<HTMLElement>('[data-message-article]')].find((a) => a.getBoundingClientRect().top >= view.top);
+    return { id: near?.getAttribute('data-message-article') ?? null, below: body.scrollHeight - body.scrollTop - body.clientHeight };
+  }, p).then((at) => {
+    // Well above the end: an arrival there is not followed into view (seenOnSight.ts AT_END_PX).
+    expect(at.below).toBeGreaterThan(200);
+    return at.id;
+  });
+  expect(anchor).not.toBeNull();
+  await page.waitForTimeout(300);
+  const anchorTop = () => page.locator(`${p} [data-message-article="${anchor}"]`).evaluate((el) => Math.round(el.getBoundingClientRect().top));
+  const boxTop = () => box.evaluate((el) => Math.round(el.getBoundingClientRect().top));
+  await box.focus();
+  const [top0, anchor0] = [await boxTop(), await anchorTop()];
+
+  // Five agent messages land while 80 keys are typed.
+  const words = 'Keep the ledger totals on the right and move the export button into the header.';
+  const arrivals = (async () => {
+    for (let i = 1; i <= 5; i++) {
+      await new Promise((done) => setTimeout(done, 450));
+      await claude.send({ project_path: project, thread: 'billing-ledger', body: `Live update ${i} while you type.` }, { wakes: true });
+    }
+  })();
+  await page.keyboard.type(words, { delay: 35 });
+  await arrivals;
+
+  // Every key is in the box, the caret at its end, focus and the box where they were.
+  await expect(box).toHaveValue(words);
+  await expect(box).toBeFocused();
+  expect(await box.evaluate((el: HTMLTextAreaElement) => el.selectionStart === el.value.length)).toBe(true);
+  expect(Math.abs((await boxTop()) - top0)).toBeLessThanOrEqual(1);
+  // Each new message is drawn below, and what the person was reading did not move.
+  await expect(articles).toHaveCount(before + 5, { timeout: 20_000 });
+  await expect(page.locator(`${p} [data-message-article]`, { hasText: 'Live update 5 while you type.' })).toHaveCount(1);
+  expect(Math.abs((await anchorTop()) - anchor0)).toBeLessThanOrEqual(1);
+  await expect(page.locator(`${p} [aria-busy="true"]`)).toHaveCount(0);
+  await expect(box).toHaveValue(words);
+  await expect(box).toBeFocused();
+  await context.close();
 });
