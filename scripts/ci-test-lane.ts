@@ -26,7 +26,6 @@ import { join, resolve } from 'node:path';
 
 export const repoRoot = resolve(import.meta.dir, '..');
 
-/** Files that run on their own, one lane per entry, one process per file. */
 export const HEAVY_LANES: Readonly<Record<string, readonly string[]>> = {
   'heavy-mod': ['apps/hook/hooks/mod/inbox.test.ts'],
   'heavy-agents': ['apps/opencode-plugin/inbox-v2-wake.test.ts', 'apps/pi-extension/inbox.test.ts'],
