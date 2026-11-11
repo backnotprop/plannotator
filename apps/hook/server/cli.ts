@@ -580,8 +580,10 @@ export const INBOX_COMMAND_USAGE = [
   "  plannotator inbox projects undo <project id> [--json]",
   INBOX_ROWS_USAGE_LINE,
   "  plannotator inbox export --jsonl <folder> [--json]",
+  "  plannotator inbox icon set <file> --request <id> [--json]",
   "  plannotator inbox call [--session <id>] <action> [<json> | -]",
   "  plannotator inbox pulls ls|add|rm [--session <id>] <thread> [<ref>... | --all]",
+  "  plannotator inbox export-decisions --thread <id> [--format md|html] [--out <file>] [--pr <ref>]",
   "  plannotator inbox link --offer [--tailscale] | link <code> | link --list",
   "  plannotator inbox unlink <machine>",
   "  plannotator inbox --notes <ids>",
@@ -620,10 +622,15 @@ export const INBOX_COMMAND_USAGE = [
   "  plannotator inbox export        Write the whole Inbox into a new folder as JSONL files,",
   "                                  when the person asks for a copy of it (see",
   "                                  'plannotator inbox export --help').",
+  "  plannotator inbox icon set      Hand back an animated agent icon, only when an Inbox",
+  "                                  message asked you to (its request id starts ia_).",
   "  plannotator inbox call          Run one Inbox action from a script: JSON in, one JSON",
   "                                  result on stdout. See 'Scripting the Inbox'.",
   "  plannotator inbox pulls         A thread's PRs: list them, add or remove some",
   "                                  (owner/repo#123, group/project!45 or the URL).",
+  "  plannotator inbox export-decisions",
+  "                                  A thread's decisions as a file; --pr puts them on",
+  "                                  one of its PRs, updated in place when run again.",
   ...INBOX_LINK_USAGE,
   "  plannotator inbox --notes <ids> Add the Inbox note to these agents' instructions",
   "                                  files (claude-code, codex, gemini, qwen, pi,",
@@ -891,8 +898,8 @@ export function isSubcommandHelpInvocation(args: string[]): string | null {
   if (!sub) return null;
   const canonical = SUBCOMMAND_HELP_ALIASES[sub] ?? sub;
   if (!(canonical in SUBCOMMAND_HELP)) return null;
-  // `inbox projects --help` (and rows, export) is that command's own usage, not the whole guide.
-  if (canonical === "inbox" && (args[1] === "projects" || args[1] === "rows" || args[1] === "export")) return null;
+  // `inbox projects --help` (and rows, export, icon) is that command's own usage, not the whole guide.
+  if (canonical === "inbox" && (args[1] === "projects" || args[1] === "rows" || args[1] === "export" || args[1] === "icon")) return null;
   return hasHelpFlag(args.slice(1)) ? canonical : null;
 }
 

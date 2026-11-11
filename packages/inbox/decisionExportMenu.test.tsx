@@ -4,8 +4,9 @@
  * What regresses: the item showing on a thread with no question cards (most threads; action items are not questions),
  * or missing on one that has them; leaving its place right after Add a pull request…, or hiding when the thread has no linked PR to add from; a download that is not a plain link to
  * the thread's own route (relative, so it works over the tailnet or a tunnel; through the forward for a linked
- * machine's thread); anything about pull requests in the menu (not in this version); the phone sheet not swapping to
- * its sub-view and back.
+ * machine's thread); the phone sheet not swapping to its sub-view and back. Post decisions (step 2): the "Post on a
+ * pull request" group missing where posting is offered, or shown where it is not (a guest, another machine's thread);
+ * a row that posts on another PR than its own; with no PR, Add a pull request… not leading to the add-then-post.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -14,6 +15,7 @@ import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxThread } from '@plannotator/core/inbox-types';
 import { rememberMachine, resetMachineRoutes } from './inboxUrl';
+import { inboxThreadPullWire, parseInboxThreadPullRef } from '@plannotator/core/inbox-types';
 
 const hasDom = typeof document !== 'undefined';
 const { ThreadMore } = (hasDom ? await import('./components/CopyMenus') : {}) as typeof import('./components/CopyMenus');
@@ -21,8 +23,30 @@ const { ThreadMore } = (hasDom ? await import('./components/CopyMenus') : {}) as
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 
+let savedFetch: typeof fetch | null = null;
+let postToSaves: string[] = [];
+/** The thread's PRs as the Inbox answers them, while a test stubs fetch. */
+function stubPulls(refs: string[]) {
+  savedFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input) === '/api/inbox/settings/decisions-post') {
+      if (init?.method === 'POST') postToSaves.push(JSON.parse(String(init.body)).post_to);
+      return Response.json({ post_to: init?.method === 'POST' ? postToSaves.at(-1) : 'description' });
+    }
+    const pulls = refs.map((ref) => {
+      const parsed = parseInboxThreadPullRef(ref) as { key: string; url: string };
+      return inboxThreadPullWire({ id: `${THREAD_ID}:${parsed.key}`, project_id: 'prj_1', thread_id: THREAD_ID, pull: parsed.key, url: parsed.url, added_by: { kind: 'person' }, added_at: '2026-11-10T10:00:00.000Z', state: 'open', title: null, base: null, head: null, read_at: null });
+    });
+    expect(String(input)).toBe(`/api/inbox/threads/${THREAD_ID}/pulls`);
+    return Response.json({ pulls, groups: [{ kind: 'related', pulls: pulls.map((p) => p.pull) }], removed: [] });
+  }) as typeof fetch;
+}
+
 afterEach(() => {
   if (!hasDom) return;
+  if (savedFetch) globalThis.fetch = savedFetch;
+  savedFetch = null;
+  postToSaves = [];
   act(() => root?.unmount());
   host?.remove();
   root = null;
@@ -112,7 +136,7 @@ describe.skipIf(!hasDom)('Export decisions in ⋯ More', () => {
     }
   });
 
-  test('desktop: right after Add a pull request…, a submenu of two plain download links, nothing about pull requests', async () => {
+  test('desktop: right after Add a pull request…, a submenu of two plain download links, and no Post group where posting is not offered', async () => {
     frame(<ThreadMore thread={thread(['single', 'action'])} linkOf={() => ''} phone={false} addPull={() => {}} />);
     const menu = await openMore();
     const keys = itemKeys(menu);
@@ -122,8 +146,66 @@ describe.skipIf(!hasDom)('Export decisions in ⋯ More', () => {
     expect(links.map((l) => l.getAttribute('data-decision-export'))).toEqual(['md', 'html']);
     expectDownload(links[0]!, 'md');
     expectDownload(links[1]!, 'html');
-    // No PR posting in this version: the submenu holds the two downloads only.
+    // Posting not offered (no postDecisions: a guest, another machine's thread): the two downloads only.
     expect(sub.querySelectorAll('[role="menuitem"]').length).toBe(2);
+  });
+
+  test('Post on a pull request: one row per PR on the thread, each posting on its own PR', async () => {
+    stubPulls(['acme/notes#12', 'group/app!45']);
+    const posted: string[] = [];
+    frame(<ThreadMore thread={thread(['single'])} linkOf={() => ''} phone={false} addPull={() => {}} postDecisions={{ post: (ref) => posted.push(ref), addPullThenPost: () => posted.push('add') }} />);
+    const sub = await openExportSubmenu(await openMore());
+    await until(() => !!sub.querySelector('[data-decision-post]'), 'the PR rows');
+    expect(sub.querySelector('.ib-pm-glabel')!.textContent).toBe('Post on a pull request');
+    const rows = [...sub.querySelectorAll<HTMLElement>('[data-decision-post]')];
+    expect(rows.map((r) => r.textContent)).toEqual(['acme/notes#12', 'group/app!45']);
+    expect(sub.querySelector('[data-decision-post-add]')).toBeNull();
+    await press(rows[1]!);
+    expect(posted).toEqual(['group/app!45']);
+  });
+
+  test('Where to post: the stored choice is checked (the description by default), and a pick saves it without closing the menu', async () => {
+    stubPulls(['acme/notes#12']);
+    frame(<ThreadMore thread={thread(['single'])} linkOf={() => ''} phone={false} postDecisions={{ post: () => {}, addPullThenPost: () => {} }} />);
+    const sub = await openExportSubmenu(await openMore());
+    await until(() => !!sub.querySelector('[data-decision-post-to]'), 'Where to post');
+    const choices = () => [...sub.querySelectorAll<HTMLElement>('[data-decision-post-to]')].map((el) => [el.getAttribute('data-decision-post-to'), el.getAttribute('aria-checked')]);
+    expect(choices()).toEqual([
+      ['description', 'true'],
+      ['comment', 'false'],
+      ['both', 'false'],
+    ]);
+    await press(sub.querySelector<HTMLElement>('[data-decision-post-to="comment"]')!);
+    await until(() => postToSaves.length === 1, 'the save');
+    expect(postToSaves).toEqual(['comment']);
+    expect(choices()[1]).toEqual(['comment', 'true']);
+    expect(document.querySelector('[data-thread-export-menu]')).not.toBeNull();
+    // One group with the PR rows (the owner: "should be a part of the PR section"): no divider between them.
+    const group = sub.querySelector('[data-decision-post="acme/notes#12"]')!.closest('[role="group"]')!;
+    expect(group.contains(sub.querySelector('[data-decision-post-to="both"]'))).toBe(true);
+    const between = [...group.querySelectorAll('[role="separator"]')];
+    expect(between).toEqual([]);
+  });
+
+  test('Post on a pull request with none linked: Add a pull request… starts the add-then-post', async () => {
+    stubPulls([]);
+    const posted: string[] = [];
+    frame(<ThreadMore thread={thread(['single'])} linkOf={() => ''} phone={false} addPull={() => {}} postDecisions={{ post: (ref) => posted.push(ref), addPullThenPost: () => posted.push('add') }} />);
+    const sub = await openExportSubmenu(await openMore());
+    await until(() => !!sub.querySelector('[data-decision-post-add]'), 'Add a pull request…');
+    expect(sub.querySelector('[data-decision-post]')).toBeNull();
+    await press(sub.querySelector<HTMLElement>('[data-decision-post-add]')!);
+    expect(posted).toEqual(['add']);
+  });
+
+  test('phone: the sub-view carries the Post group under the downloads', async () => {
+    stubPulls(['acme/notes#12']);
+    frame(<ThreadMore thread={thread(['single'])} linkOf={() => ''} phone postDecisions={{ post: () => {}, addPullThenPost: () => {} }} />);
+    const menu = await openMore();
+    await press(menu.querySelector<HTMLElement>('[data-thread-export-item]')!);
+    await until(() => !!menu.querySelector('[data-decision-post="acme/notes#12"]'), 'the PR row in the sheet');
+    const order = [...menu.querySelectorAll('[data-decision-export], [data-decision-post]')].map((el) => el.getAttribute('data-decision-export') ?? el.getAttribute('data-decision-post'));
+    expect(order).toEqual(['md', 'html', 'acme/notes#12']);
   });
 
   test('shown without Add a pull request… too (no PR offered): in its own group after Copy thread ID', async () => {

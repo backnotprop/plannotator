@@ -253,6 +253,7 @@ import { isShapeAnimateHelp, SHAPE_ANIMATE_HELP } from "@plannotator/core/shape-
 import { runInboxCallCommand } from "./inbox-call-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
 import { runInboxPullsCommand } from "./inbox-pulls-command";
+import { runInboxExportDecisionsCommand } from "./inbox-export-decisions-command";
 import { runFeedbackCommand } from "./feedback-command";
 import { formatInboxHelp } from "./inbox-help";
 import { writeWholeToStdout } from "./write-whole-stdout";
@@ -477,6 +478,20 @@ if (isReviewDrawCommand(rawArgs, () => {
         env: process.env,
         askAiChild: isAskAiChild(process.env),
         ensureRunning: () => ensureInboxRunning(pullsDataDir),
+      }),
+    );
+  }
+}
+// `plannotator inbox export-decisions --thread <id> [--format md|html] [--out <file>] [--pr <ref>]`: a thread's
+// decisions as a file, or posted on one of its PRs (inbox-export-decisions-command.ts).
+{
+  const args = rawArgs;
+  if (args[0] === "inbox" && args[1] === "export-decisions") {
+    const exportDataDir = getPlannotatorDataDir();
+    process.exit(
+      await runInboxExportDecisionsCommand(args.slice(2), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        ensureRunning: () => ensureInboxRunning(exportDataDir),
       }),
     );
   }

@@ -542,6 +542,13 @@ export interface PlannotatorConfig {
    */
   inboxFloatDrafts?: boolean;
   /**
+   * Where the Inbox's Post decisions puts a thread's decisions on a pull request (design brief "export-decisions" step
+   * 2; the owner, 2026-11-10: the description by default): `description` (a marked section of the PR's description),
+   * `comment` (one comment), `both` (a short section in the description that links to the full comment). Unset: the
+   * description. Written by the Post group's "Where" in Export decisions (`POST /api/inbox/settings/decisions-post`).
+   */
+  inboxDecisionsPostTo?: "description" | "comment" | "both";
+  /**
    * The warning before a Mark read that sets questions aside (the owner's ask, 2026-11-10). On unless false: false
    * once the person ticked "Don't show this again" in it. Written by the warning and by Settings → General → When an
    * agent asks you (`POST /api/inbox/settings` `{ mark_read_warning: { on } }`), read on every request.

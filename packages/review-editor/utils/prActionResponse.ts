@@ -160,6 +160,7 @@ export function parsePRReviewSubmissionPartial(
     ...(approvalError !== undefined ? { approvalError } : {}),
     ...(reviewBodyError !== undefined ? { reviewBodyError } : {}),
     ...(recoveryFile !== undefined ? { recoveryFile } : {}),
+    ...(value.postedAs === 'comment' ? { postedAs: 'comment' as const } : {}),
     retry,
   };
 }
@@ -178,7 +179,9 @@ export function parsePRActionSuccess(value: unknown): PRActionSuccess | null {
 
   let submission: PRReviewSubmissionResult;
   if (value.submission.status === 'complete') {
-    submission = { status: 'complete' };
+    submission = value.submission.postedAs === 'comment'
+      ? { status: 'complete', postedAs: 'comment' }
+      : { status: 'complete' };
   } else if (value.submission.status === 'partial') {
     const partial = parsePRReviewSubmissionPartial(value.submission);
     if (!partial) return null;

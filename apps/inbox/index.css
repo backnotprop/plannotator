@@ -49,6 +49,7 @@
 @import "../../packages/inbox/permissionCard.css";
 /* The sidebar's Agents section and the animated agent marks (packages/inbox/agents/). */
 @import "../../packages/inbox/agents/agents.css";
+@import "../../packages/inbox/agents/iconDialog.css";
 /* A phone's composer card and its picker sheet (components/BottomSheet.tsx, PhoneReplyRecipient.tsx, compose/PhoneToSheet.tsx). */
 @import "../../packages/inbox/phoneComposer.css";
 
