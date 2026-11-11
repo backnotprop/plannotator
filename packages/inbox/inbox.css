@@ -3311,10 +3311,6 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 .ib-phsubj[data-on] { opacity: 1; }
 /* The title's words, as wide as they are (at most the box): its tooltip's anchor, so the tip opens under the words. */
 .ib-phsubj-t { display: inline-block; max-width: 100%; vertical-align: top; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* The read button, an icon (approval "inbox-thread-header"): pressed while the thread is marked read, as Artifacts is
-   pressed over its grid; dimmed when nothing here waits on the person. */
-.pn-inbox .ib-iconbtn.ib-readbtn[aria-pressed="true"] { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
-.pn-inbox .ib-iconbtn.ib-readbtn:disabled { opacity: 0.45; background: none; }
 .pn-inbox .ib-ptool { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px; border-radius: 7px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; }
 .pn-inbox .ib-ptool:hover { background: var(--muted); color: var(--foreground); }
 @media (prefers-reduced-motion: reduce) {
@@ -10115,8 +10111,6 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .pn-inbox .ib-mthing[data-kind='updating'], .pn-inbox .ib-mthing[data-kind='restarting'], .pn-inbox .ib-mthing[data-kind='failed'], .pn-inbox .ib-mthing[data-kind='not_back'], .pn-inbox .ib-mthing[data-kind='updated'] { color: var(--muted-foreground); font-weight: 450; }
 .pn-inbox .ib-mthing .ib-spin { width: 10px; height: 10px; border-width: 1.5px; }
 .ib-zneeds { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
-.pn-inbox .ib-snooze-blocked { opacity: 0.55; }
-.pn-inbox .ib-snooze-blocked:hover { opacity: 1; }
 .ib-dlg h2.ib-mh2 { display: flex; align-items: center; gap: 8px; }
 .ib-mdone { display: inline-flex; align-items: center; gap: 4px; font-size: var(--ib-fs-12-5, 12.5px); }
 /* An older machine's Update dialog: the ask to an agent there, and the commands folded under it as the fallback. */

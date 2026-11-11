@@ -579,20 +579,18 @@ test('desktop: a seen update held in New keeps Mark read; it moves the row to Qu
   const before = await rowsOf(page);
   const first = before[0]!;
   const row = page.locator(`.ib-lbody [data-thread-id="${first}"]`);
-  const header = page.locator('section.ib-pane [data-mark-read]');
-  const headerUnread = page.locator('section.ib-pane [data-mark-unread]');
   const more = page.locator('section.ib-pane [data-thread-more]');
   const quietCount = page.locator('[data-section-id="quiet"] .ib-n');
   await openWithKeyboard(page, first);
   expect(await sectionOf(page, first)).toBe('new');
   await page.locator(`.ib-lbody [data-row="${first}"]`).hover();
   await shot(page, 'seen-held-01-opened');
-  // Read by opening it: the header says Mark unread in Mark read's place, as the row does.
-  await expect(headerUnread).toBeEnabled();
-  await expect(header).toHaveCount(0);
+  // Read by opening it: the header's ⋯ offers Mark unread, as the row does.
+  await more.click();
+  await expect(page.locator('[data-thread-menu] [data-thread-unread-item]')).toBeVisible();
+  await page.keyboard.press('Escape');
   await expect(page.locator(`.ib-lbody [data-row="${first}"] [data-row-mark-unread]`)).toBeVisible();
   await expect(page.locator(`.ib-lbody [data-row="${first}"] [data-row-mark-read]`)).toHaveCount(0);
-  const markUnreadBox = (await headerUnread.boundingBox())!;
   const moreBox = (await more.boundingBox())!;
 
   // E: the row moves to Quiet now, the toast says so with Undo; nothing in the header moves.
@@ -602,16 +600,13 @@ test('desktop: a seen update held in New keeps Mark read; it moves the row to Qu
   await expect(quietCount).toHaveText('1');
   await expect(page.locator('[data-inbox-toast]')).toContainText('Moved to Quiet');
   await expect(page.locator('[data-toast-undo]')).toBeVisible();
-  await expect(headerUnread).toBeEnabled();
-  expect(await headerUnread.boundingBox()).toEqual(markUnreadBox);
   expect(await more.boundingBox()).toEqual(moreBox);
   await shot(page, 'seen-held-02-moved');
   // Undo: back between the same neighbours.
   await page.locator('[data-toast-undo]').click();
   await expect.poll(() => sectionOf(page, first)).toBe('new');
   expect(await rowsOf(page)).toEqual(before);
-  await expect(headerUnread).toBeEnabled();
-  expect(await headerUnread.boundingBox()).toEqual(markUnreadBox);
+  expect(await more.boundingBox()).toEqual(moreBox);
   await shot(page, 'seen-held-03-undone');
 
   // E, then Z.
