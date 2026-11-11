@@ -1,35 +1,17 @@
 /**
- * Plannotator Inbox store: per-project append-only JSONL under
- * `${dataDir}/inbox/`, read whole at start and kept in memory.
+ * Plannotator Inbox store: the record log (`store-log/log.ts`; today per-project
+ * append-only JSONL under `${dataDir}/inbox/`, `store-log/jsonl-log.ts`), read
+ * whole at start and kept in memory.
  *
- * One writer: the Inbox server process. Every change appends ONE line, a full
- * snapshot of the record, in a single append-mode write; the in-memory view is
- * updated from that same line and every subscriber is told, in seq order. A
- * line that does not parse is skipped on read (a torn last line after a
- * crash); before the first append to a file whose last line is torn, a newline
- * is appended first so the fragment stays its own unreadable line and the new
- * line stays whole.
+ * One writer: the Inbox server process. Every change is ONE line, a full
+ * snapshot of the record, persisted through the log; the in-memory view is
+ * updated from that same line and every subscriber is told, in seq order.
  *
  * The rules (picks, Send, idempotency) live here so the window's API and the
  * MCP tools share them. See schema.ts for the layout.
  */
 
-import {
-  appendFileSync,
-  chmodSync,
-  closeSync,
-  existsSync,
-  fstatSync,
-  mkdirSync,
-  openSync,
-  readdirSync,
-  readFileSync,
-  readSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-  statSync,
-} from "node:fs";
+import { appendFileSync, chmodSync, closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { inboxDecisionExcerpt, orderInboxDecisions, type InboxDecisionCandidate } from "./decisions";
 import {
@@ -227,22 +209,9 @@ import {
 import type { InboxReviewVerdictRecord } from "@plannotator/core/inbox-review";
 import { INBOX_ATTACHMENT_FEEDBACK_TITLE, INBOX_GUIDE_FEEDBACK_TITLE, INBOX_MESSAGE_FEEDBACK_TITLE } from "@plannotator/core/inbox-review";
 import { codeFenceCloseIndex } from "@plannotator/core/markdown-structure";
-import {
-  ANNOTATIONS_FILE,
-  CARDS_FILE,
-  INITIATIVES_FILE,
-  LEGACY_DECISIONS_FILE,
-  INBOX_PROJECTS_DIR,
-  SEQ_FLOOR_FILE,
-  STEPS_FILE,
-  PULLS_FILE,
-  InboxError,
-  inboxDir,
-  MESSAGES_FILE,
-  parseInboxLine,
-  PROJECT_FILE,
-  QUESTIONS_FILE,
-} from "./schema";
+import { InboxError, inboxDir } from "./schema";
+import type { InboxLog, InboxLogFactory } from "./store-log/log";
+import { jsonlInboxLog } from "./store-log/jsonl-log";
 
 /** The local person, the only picker on a local Inbox. */
 export const INBOX_PERSON: InboxPicker = { id: "person", name: null };
@@ -649,31 +618,6 @@ export const INBOX_SUPERSEDES_MAX = 100;
 export { inboxProjectKey };
 
 /**
- * The highest seq in an older store's decisions.jsonl (Decisions were removed
- * in 2026-10; the file is kept on disk and its records are never read), or 0.
- * Read leniently: only each line's `seq` counts.
- */
-function legacySeqFloor(path: string): number {
-  let text: string;
-  try {
-    text = readFileSync(path, "utf8");
-  } catch {
-    return 0;
-  }
-  let high = 0;
-  for (const raw of text.split("\n")) {
-    if (!raw.trim()) continue;
-    try {
-      const seq = (JSON.parse(raw) as { seq?: unknown }).seq;
-      if (typeof seq === "number" && Number.isSafeInteger(seq) && seq > high) high = seq;
-    } catch {
-      // A torn line: skipped, as the store skips one.
-    }
-  }
-  return high;
-}
-
-/**
  * What a list row's delivery (`InboxListRow.delivery`) reads about the live
  * agent sessions, which the store does not hold: the server passes its live
  * sessions (packages/server/inbox-sessions.ts). Both answer from memory.
@@ -931,7 +875,6 @@ export class InboxStore {
   private readonly tagThreads = new Map<string, { latest: Map<string, number>; order: string[] }>();
   /** A guided review's files by its snapshot's sha256 (a blob never changes). */
   private readonly guideFileSets = new Map<string, ReadonlyMap<string, DiffFile>>();
-  private readonly tornFiles = new Set<string>();
   private readonly listeners = new Set<InboxListener>();
   /** Told when a thread's reply draft is saved or deleted (no store line is written for it). */
   private readonly replyDraftListeners = new Set<(threadId: string) => void>();
@@ -964,15 +907,18 @@ export class InboxStore {
    */
   private readonly previewLines = new WeakMap<InboxMessage, { asks: string; text: string | null }>();
   private readonly now: () => Date;
+  /** Where the records are kept (`store-log/log.ts`). */
+  private readonly log: InboxLog;
 
-  private constructor(dataDir: string, now: () => Date) {
+  private constructor(dataDir: string, now: () => Date, log: InboxLogFactory) {
     this.dir = inboxDir(dataDir);
     this.now = now;
+    this.log = log(this.dir);
   }
 
-  /** Read the store under `dataDir` (created owner-only when missing). */
-  static open(dataDir: string, options: { now?: () => Date } = {}): InboxStore {
-    const store = new InboxStore(dataDir, options.now ?? (() => new Date()));
+  /** Read the store under `dataDir` (created owner-only when missing). `log`: where records are kept; today's JSONL by default. */
+  static open(dataDir: string, options: { now?: () => Date; log?: InboxLogFactory } = {}): InboxStore {
+    const store = new InboxStore(dataDir, options.now ?? (() => new Date()), options.log ?? jsonlInboxLog);
     store.load();
     return store;
   }
@@ -987,51 +933,17 @@ export class InboxStore {
     } catch {
       // Best effort (Windows, a filesystem without modes).
     }
-    this.seq = Math.max(this.seq, this.readSeqFloor());
+    const { lines, seqFloor } = this.log.read();
+    this.seq = Math.max(this.seq, seqFloor);
     this.replyDrafts.clear();
     this.replyDraftRemovals.clear();
     for (const [threadId, draft] of readInboxReplyDrafts(this.dir)) this.replyDrafts.set(threadId, draft);
-    const projectsDir = join(this.dir, INBOX_PROJECTS_DIR);
-    const lines: InboxLine[] = [];
-    // The Board's initiatives: one file for every project, on the same seq.
-    this.readLines(join(this.dir, INITIATIVES_FILE), lines);
-    if (!existsSync(projectsDir)) {
-      lines.sort((a, b) => a.seq - b.seq);
-      for (const line of lines) this.apply(line);
-      this.loadPins();
-      this.loadArtifactPins();
-      this.loadSnoozes();
-      return;
-    }
-    for (const key of readdirSync(projectsDir)) {
-      const folder = join(projectsDir, key);
-      // Decisions were removed (2026-10): an older store's decisions.jsonl is
-      // left on disk and never applied, but its seqs still count, so a seq is
-      // never handed out twice.
-      this.seq = Math.max(this.seq, legacySeqFloor(join(folder, LEGACY_DECISIONS_FILE)));
-      for (const name of [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE, ANNOTATIONS_FILE, CARDS_FILE, STEPS_FILE, PULLS_FILE]) this.readLines(join(folder, name), lines);
-    }
     lines.sort((a, b) => a.seq - b.seq);
     for (const line of lines) this.apply(line);
     this.repairUnsentAnswers();
     this.loadPins();
     this.loadArtifactPins();
     this.loadSnoozes();
-  }
-
-  /** One store file's lines into `into` (none when it is missing); a torn last line is noted for the next append. */
-  private readLines(path: string, into: InboxLine[]): void {
-    let text: string;
-    try {
-      text = readFileSync(path, "utf8");
-    } catch {
-      return;
-    }
-    if (text.length > 0 && !text.endsWith("\n")) this.tornFiles.add(path);
-    for (const raw of text.split("\n")) {
-      const line = parseInboxLine(raw);
-      if (line) into.push(line);
-    }
   }
 
   /**
@@ -1692,7 +1604,7 @@ export class InboxStore {
       }
       record = { ...rest, merged_into: head };
     }
-    this.write(join(this.projectFolder(project), PROJECT_FILE), {
+    this.write(project, {
       v: INBOX_RECORD_VERSION,
       seq: this.seq + 1,
       at: this.stamp(),
@@ -3817,7 +3729,7 @@ export class InboxStore {
 
   /**
    * What the store takes on disk, per project and per thread, read from the
-   * files themselves (Settings' "Stored on this machine"). A thread's bytes
+   * log and the files themselves (Settings' "Stored on this machine"). A thread's bytes
    * are the lines of its messages and their questions; a project's are its
    * whole folder, so they include the project line and any torn fragment.
    */
@@ -3831,7 +3743,6 @@ export class InboxStore {
     for (const stored of this.allProjects()) {
       const head = this.canonicalProjectId(stored.id);
       const project = head === stored.id ? stored : (this.combinedInto(head).find((member) => member.id === stored.id) ?? stored);
-      const folder = this.projectFolder(project);
       const perThread = new Map<string, number>();
       let bytes = 0;
       const projectBlobs = new Set<string>();
@@ -3844,32 +3755,21 @@ export class InboxStore {
         perThread.set(threadId, threadBytes);
       }
       for (const sha256 of projectBlobs) bytes += blobSizes.get(sha256) ?? 0;
-      for (const name of [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE, LEGACY_DECISIONS_FILE, ANNOTATIONS_FILE, CARDS_FILE, STEPS_FILE, PULLS_FILE]) {
-        let text: string;
-        try {
-          text = readFileSync(join(folder, name), "utf8");
-        } catch {
-          continue;
-        }
-        bytes += Buffer.byteLength(text);
-        total += Buffer.byteLength(text);
-        // The project line, an older store's decisions file and the cards count for the project, not a thread.
-        if (name === PROJECT_FILE || name === LEGACY_DECISIONS_FILE || name === CARDS_FILE) continue;
-        for (const raw of text.split("\n")) {
-          const line = parseInboxLine(raw);
-          if (!line) continue;
-          const messageId =
-            line.kind === "message"
-              ? line.record.id
-              : line.kind === "question" || line.kind === "annotation"
-                ? line.record.message_id
-                : line.kind === "steps" || line.kind === "thread_pull"
-                  ? line.record.thread_id
-                  : null;
-          const threadId = messageId ? this.messages.get(messageId)?.thread_id : undefined;
-          if (!threadId) continue;
-          perThread.set(threadId, (perThread.get(threadId) ?? 0) + Buffer.byteLength(raw) + 1);
-        }
+      const onDisk = this.log.usage(project);
+      bytes += onDisk.bytes;
+      total += onDisk.bytes;
+      for (const { line, bytes: lineBytes } of onDisk.lines) {
+        const messageId =
+          line.kind === "message"
+            ? line.record.id
+            : line.kind === "question" || line.kind === "annotation"
+              ? line.record.message_id
+              : line.kind === "steps" || line.kind === "thread_pull"
+                ? line.record.thread_id
+                : null;
+        const threadId = messageId ? this.messages.get(messageId)?.thread_id : undefined;
+        if (!threadId) continue;
+        perThread.set(threadId, (perThread.get(threadId) ?? 0) + lineBytes);
       }
       const threads = [...perThread.entries()]
         .map(([threadId, threadBytes]) => ({ thread_id: threadId, subject: this.threadSubject(threadId), bytes: threadBytes }))
@@ -3896,17 +3796,13 @@ export class InboxStore {
     return this.now().toISOString();
   }
 
-  private write(file: string, line: InboxLine): void {
-    const prefix = this.tornFiles.has(file) ? "\n" : "";
-    try {
-      appendFileSync(file, `${prefix}${JSON.stringify(line)}\n`, { mode: 0o600 });
-    } catch (error) {
-      // A failed append may have left part of the line (disk full): the next
-      // append starts on a fresh line so it cannot be glued to the fragment.
-      this.tornFiles.add(file);
-      throw error;
-    }
-    this.tornFiles.delete(file);
+  /** Persist one line through the log (`project`: the record's; null for an initiative), then apply it and tell every subscriber. */
+  private write(project: InboxProject | null, line: InboxLine): void {
+    this.log.append(line, project);
+    this.applyAndTell(line);
+  }
+
+  private applyAndTell(line: InboxLine): void {
     this.apply(line);
     for (const listener of this.listeners) {
       try {
@@ -3917,14 +3813,10 @@ export class InboxStore {
     }
   }
 
-  private projectFolder(project: InboxProject): string {
-    return join(this.dir, INBOX_PROJECTS_DIR, project.key);
-  }
-
   private appendMessage(message: InboxMessage, at: string): void {
     const project = this.projectsById.get(message.project_id);
     if (!project) throw new InboxError("project_not_found", `No project ${message.project_id}.`);
-    this.write(join(this.projectFolder(project), MESSAGES_FILE), {
+    this.write(project, {
       v: INBOX_RECORD_VERSION,
       seq: this.seq + 1,
       at,
@@ -3937,7 +3829,7 @@ export class InboxStore {
   private appendQuestion(record: InboxQuestionRecord, at: string): void {
     const project = this.projectsById.get(record.project_id);
     if (!project) throw new InboxError("project_not_found", `No project ${record.project_id}.`);
-    this.write(join(this.projectFolder(project), QUESTIONS_FILE), {
+    this.write(project, {
       v: INBOX_RECORD_VERSION,
       seq: this.seq + 1,
       at,
@@ -3957,7 +3849,7 @@ export class InboxStore {
     // projects (the second project.json would replace the first).
     const taken = new Set([...this.projectsById.values()].map((p) => p.key));
     let key = inboxProjectKey(input.name, input.root);
-    const inUse = (candidate: string) => taken.has(candidate) || existsSync(join(this.dir, INBOX_PROJECTS_DIR, candidate));
+    const inUse = (candidate: string) => taken.has(candidate) || this.log.keyTaken(candidate);
     for (let length = 12; inUse(key) && length <= 64; length += 13) key = inboxProjectKey(input.name, input.root, length);
     if (inUse(key)) key = `${inboxProjectKey(input.name, input.root)}-${inboxId("prj").slice(-6).toLowerCase()}`;
     const project: InboxProject = {
@@ -3967,22 +3859,9 @@ export class InboxStore {
       root: input.root,
       created_at: at,
     };
-    const folder = this.projectFolder(project);
-    mkdirSync(folder, { recursive: true, mode: 0o700 });
     const line: InboxLine = { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "project", id: project.id, record: project };
-    // The first line, written whole: temp file then rename (a rename appends later lines through write()).
-    const path = join(folder, PROJECT_FILE);
-    const temp = `${path}.${process.pid}.tmp`;
-    writeFileSync(temp, `${JSON.stringify(line)}\n`, { mode: 0o600 });
-    renameSync(temp, path);
-    this.apply(line);
-    for (const listener of this.listeners) {
-      try {
-        listener(line);
-      } catch {
-        // see write()
-      }
-    }
+    this.log.createProject(project, line);
+    this.applyAndTell(line);
     return this.labeled(project);
   }
 
@@ -4006,7 +3885,7 @@ export class InboxStore {
     if ((project.display_name ?? null) === displayName) return this.labeled(project);
     const { display_name: _previous, ...rest } = project;
     const record: InboxProject = displayName === null ? rest : { ...rest, display_name: displayName };
-    this.write(join(this.projectFolder(project), PROJECT_FILE), {
+    this.write(project, {
       v: INBOX_RECORD_VERSION,
       seq: this.seq + 1,
       at: this.stamp(),
@@ -5905,7 +5784,7 @@ export class InboxStore {
   private appendAnnotation(record: InboxAnnotationRecord, at: string): void {
     const project = this.projectsById.get(record.project_id);
     if (!project) throw new InboxError("project_not_found", `No project ${record.project_id}.`);
-    this.write(join(this.projectFolder(project), ANNOTATIONS_FILE), {
+    this.write(project, {
       v: INBOX_RECORD_VERSION,
       seq: this.seq + 1,
       at,
@@ -6170,32 +6049,9 @@ export class InboxStore {
     const project = this.projectsById.get(root.project_id);
     if (!project) throw new InboxError("project_not_found", `No project ${root.project_id}.`);
     const messageIds = new Set(this.threadMembers.get(threadId) ?? []);
-    const folder = this.projectFolder(project);
     const markups = this.markupsOf((record) => record.thread_id === threadId);
     this.keepDecisionLines((question) => messageIds.has(question.message_id));
-    this.keepSeqFloor();
-    for (const name of [MESSAGES_FILE, QUESTIONS_FILE, ANNOTATIONS_FILE, STEPS_FILE, PULLS_FILE]) {
-      const path = join(folder, name);
-      let text: string;
-      try {
-        text = readFileSync(path, "utf8");
-      } catch {
-        continue;
-      }
-      const kept = text.split("\n").filter((raw) => {
-        const line = parseInboxLine(raw);
-        if (!line) return false;
-        if (line.kind === "message") return line.record.thread_id !== threadId;
-        if (line.kind === "question") return !messageIds.has(line.record.message_id);
-        if (line.kind === "annotation") return line.record.thread_id !== threadId;
-        if (line.kind === "steps") return line.record.thread_id !== threadId;
-        if (line.kind === "thread_pull") return line.record.thread_id !== threadId;
-        return true;
-      });
-      const temp = `${path}.${process.pid}.tmp`;
-      writeFileSync(temp, kept.length > 0 ? `${kept.join("\n")}\n` : "", { mode: 0o600 });
-      renameSync(temp, path);
-    }
+    this.log.deleteThread(project, threadId, messageIds, this.seq);
     this.reload(markups);
   }
 
@@ -6205,8 +6061,7 @@ export class InboxStore {
     if (!project) throw new InboxError("project_not_found", `No project ${projectId}.`);
     const markups = this.markupsOf((record) => record.project_id === projectId);
     this.keepDecisionLines((question) => question.project_id === projectId);
-    this.keepSeqFloor();
-    rmSync(this.projectFolder(project), { recursive: true, force: true });
+    this.log.deleteProject(project, this.seq);
     this.reload(markups);
   }
 
@@ -6314,7 +6169,6 @@ export class InboxStore {
     this.pullEvents.clear();
     this.initiativesById.clear();
     this.tagThreads.clear();
-    this.tornFiles.clear();
     this.load();
     const used = pendingInboxUploadBlobs(this.dir);
     const attachmentIds = new Set<string>();
@@ -6347,26 +6201,6 @@ export class InboxStore {
       } catch {
         // A listener's failure never fails the deletion.
       }
-    }
-  }
-
-  /**
-   * Keep the highest seq across a deletion: the lines removed may hold it,
-   * and an agent's cursor already past it must never see that number again.
-   */
-  private keepSeqFloor(): void {
-    const path = join(this.dir, SEQ_FLOOR_FILE);
-    const temp = `${path}.${process.pid}.tmp`;
-    writeFileSync(temp, `${JSON.stringify({ seq: this.seq })}\n`, { mode: 0o600 });
-    renameSync(temp, path);
-  }
-
-  private readSeqFloor(): number {
-    try {
-      const value = JSON.parse(readFileSync(join(this.dir, SEQ_FLOOR_FILE), "utf8")) as { seq?: unknown };
-      return typeof value.seq === "number" && Number.isSafeInteger(value.seq) && value.seq > 0 ? value.seq : 0;
-    } catch {
-      return 0;
     }
   }
 
@@ -7331,13 +7165,7 @@ export class InboxStore {
     };
     const project = this.projectsById.get(root.project_id);
     if (!project) throw new InboxError("project_not_found", `No project ${root.project_id}.`);
-    this.write(join(this.projectFolder(project), STEPS_FILE), { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "steps", id: record.id, record });
-    // An older Inbox never reads steps.jsonl: the floor keeps it from handing out this seq again.
-    try {
-      this.keepSeqFloor();
-    } catch {
-      // Best effort: the line is written; only a downgrade would read the floor.
-    }
+    this.write(project, { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "steps", id: record.id, record });
     return { record, changed: true };
   }
 
@@ -7488,7 +7316,6 @@ export class InboxStore {
     }
     const project = this.projectsById.get(root.project_id);
     if (!project) throw new InboxError("project_not_found", `No project ${root.project_id}.`);
-    const file = join(this.projectFolder(project), PULLS_FILE);
     const at = this.now().toISOString();
     const by: InboxThreadPullActor = input.by.kind === "agent" ? { ...input.by, session: input.by.session.trim() } : { kind: "person" };
     const added: InboxThreadPull[] = [];
@@ -7509,22 +7336,14 @@ export class InboxStore {
         head: prev?.head ?? null,
         read_at: prev?.read_at ?? null,
       };
-      this.write(file, { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "thread_pull", id, record });
+      this.write(project, { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "thread_pull", id, record });
       added.push(record);
     }
     const removed: InboxThreadPull[] = [];
     for (const pull of toRemove) {
       const record: InboxThreadPull = { ...pull, removed_by: by, removed_at: at };
-      this.write(file, { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "thread_pull", id: record.id, record });
+      this.write(project, { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "thread_pull", id: record.id, record });
       removed.push(record);
-    }
-    if (added.length > 0 || removed.length > 0) {
-      // An older Inbox never reads pulls.jsonl: the floor keeps it from handing out these seqs again.
-      try {
-        this.keepSeqFloor();
-      } catch {
-        // Best effort: the lines are written; only a downgrade would read the floor.
-      }
     }
     return { thread_id: root.id, added, already, removed, missing, pulls: this.threadPulls(root.id) };
   }
@@ -7547,12 +7366,7 @@ export class InboxStore {
     if (!project) return null;
     const at = this.now().toISOString();
     const record: InboxThreadPull = { ...prev, state: read.state, title, base, head, read_at: at };
-    this.write(join(this.projectFolder(project), PULLS_FILE), { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "thread_pull", id: record.id, record });
-    try {
-      this.keepSeqFloor();
-    } catch {
-      // Best effort, as above.
-    }
+    this.write(project, { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "thread_pull", id: record.id, record });
     return record;
   }
 
@@ -7643,13 +7457,7 @@ export class InboxStore {
   }
 
   private appendInitiative(record: InboxInitiative, at: string): void {
-    this.write(join(this.dir, INITIATIVES_FILE), { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "initiative", id: record.id, record });
-    // An older Inbox never reads initiatives.jsonl: the floor keeps it from handing out this seq again.
-    try {
-      this.keepSeqFloor();
-    } catch {
-      // Best effort: the line is written; only a downgrade would read the floor.
-    }
+    this.write(null, { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "initiative", id: record.id, record });
   }
 
   /** A new initiative, named `name` (the person's; an agent makes one only through a card's `initiative_name`). */
@@ -7822,7 +7630,7 @@ export class InboxStore {
   private appendCard(card: InboxCard, at: string): void {
     const project = this.projectsById.get(card.project_id);
     if (!project) throw new InboxError("project_not_found", `No project ${card.project_id}.`);
-    this.write(join(this.projectFolder(project), CARDS_FILE), {
+    this.write(project, {
       v: INBOX_RECORD_VERSION,
       seq: this.seq + 1,
       at,
@@ -7831,12 +7639,6 @@ export class InboxStore {
       // Every line since v2 says so: a line without it is read through the pre-v2 map (readInboxCardColumns).
       record: { ...card, cols: INBOX_CARD_COLS_VERSION },
     });
-    // An older Inbox never reads cards.jsonl: the floor keeps it from handing out a card's seq again.
-    try {
-      this.keepSeqFloor();
-    } catch {
-      // Best effort: the line is written; only a downgrade would read the floor.
-    }
   }
 
   /** The thread roots `ids` (thread or message ids) name, each in `projectId`. */
@@ -8277,17 +8079,7 @@ export class InboxStore {
     const card = this.cards.get(id);
     if (!card) return [];
     const project = this.projectsById.get(card.project_id);
-    let text = "";
-    try {
-      if (project) text = readFileSync(join(this.projectFolder(project), CARDS_FILE), "utf8");
-    } catch {
-      // No file to read (removed under us): the card as it stands is all there is.
-    }
-    const lines: { seq: number; card: InboxCard }[] = [];
-    for (const raw of text.split("\n")) {
-      const line = parseInboxLine(raw);
-      if (line?.kind === "card" && line.record.id === id) lines.push({ seq: line.seq, card: line.record });
-    }
+    const lines = project ? this.log.cardLines(project, id) : [];
     lines.sort((a, b) => a.seq - b.seq);
     // A line an Inbox from before initiatives wrote has no `initiative`: the card kept its own (as apply reads it).
     for (let i = 0; i < lines.length; i++) {
