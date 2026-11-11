@@ -251,13 +251,19 @@ class SqliteInboxLog implements InboxLog {
   }
 
   /**
-   * Settings → Storage: what the database holds, its pages in use (writes still in the write-ahead log included,
-   * pages a delete freed not), rather than the files' sizes. A Delete then makes the total fall, as on the JSONL
-   * files, instead of rising with the log it writes; and the total does not jump as the log fills and is folded back.
+   * Settings → Storage: what the database holds, the bytes of its rows and indexes (SQLite's `dbstat`; about 0.14 s
+   * at 680 MB, read only when the panel asks), not the files' sizes. A Delete then makes the total fall by what it
+   * removed, as on the JSONL files: counting the files, it rose with the log the delete writes, and counting pages,
+   * a small thread's rows free no whole page. Without `dbstat`, the pages in use.
    */
   stored(): { bytes: number; backups: InboxStoreBackup[] } {
-    const pragma = (name: string) => Number(Object.values(this.sqlite.query(`PRAGMA ${name}`).get() as Record<string, unknown>)[0] ?? 0);
-    const bytes = pragma("page_size") * Math.max(0, pragma("page_count") - pragma("freelist_count"));
+    let bytes: number;
+    try {
+      bytes = Number(this.sqlite.query<{ bytes: number | null }, []>("SELECT sum(payload) AS bytes FROM dbstat").get()?.bytes ?? 0);
+    } catch {
+      const pragma = (name: string) => Number(Object.values(this.sqlite.query(`PRAGMA ${name}`).get() as Record<string, unknown>)[0] ?? 0);
+      bytes = pragma("page_size") * Math.max(0, pragma("page_count") - pragma("freelist_count"));
+    }
     return { bytes, backups: listInboxBackups(this.dir) };
   }
 
