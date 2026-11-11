@@ -1,26 +1,3 @@
-/**
- * Inbox search's palette (the approved "inbox-search" design, SPEC section 3,
- * after Workspaces' ui/command.tsx and search/GlobalSearchPalette.tsx).
- * Loaded lazily (components/SearchHost.tsx), mounted on the first open and
- * kept mounted after, so it never rides the window's first paint.
- *
- * A native modal <dialog> (focus trap, Escape, click outside, focus back to
- * what opened it), pinned to the upper part of the window, a full-screen
- * sheet on a phone. The input is a combobox over one listbox of groups; the
- * keyboard model is the open palette's own (no window shortcut): ↓ ↑ move a
- * highlight that wraps, Enter opens (never during IME composition), ⌘Enter
- * or Ctrl+Enter opens in a new tab, Escape closes a chip's menu, then the
- * palette. The highlight snaps to the first row when the rows change, never
- * while arrowing, and `pointermove` (not enter) moves it. Queries debounce
- * 120 ms, one request in flight, stale answers dropped; the last results stay
- * dimmed while the next are on their way.
- *
- * The Type chip (approval "inbox-search-type-filter", option B) leads the
- * filter row. With All types the request and the groups are what they were
- * before it; a picked type sends `group=<id>` on every query and lists that
- * group alone, 50 at a time. It starts on All types at every open.
- */
-
 import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { INBOX_SEARCH_GROUPS, middleCutInboxName, type InboxSearchGroupId, type InboxSearchRow, type InboxSearchSort } from '@plannotator/core/inbox-search';
 import { inboxApi, saveRecentSearch, searchInbox, type SearchModel } from '../api';
@@ -61,9 +38,7 @@ import {
 } from './model';
 import { readSearchSort, SEARCH_SORT_OPTIONS, setSearchSort, useSearchSort } from './searchSort';
 
-/** How long typing settles before a query goes out. */
 export const SEARCH_DEBOUNCE_MS = 120;
-/** How soon an answer that says the index is still building is asked again. */
 export const SEARCH_INDEXING_RETRY_MS = 350;
 
 export interface SearchLanding {
@@ -74,41 +49,25 @@ export interface SearchLanding {
 
 export interface SearchPaletteProps {
   open: boolean;
-  /** The window's phone layout: a full-screen sheet with Cancel. */
   phone: boolean;
-  /** The project open in the list: its results come first on ties. Search still starts everywhere (owner, 2026-11-06). */
   currentProject: string | null;
-  /** The projects for the Project chip, with their names as the person reads them. */
   projects: readonly { id: string; name: string; root: string; display_name?: unknown }[];
-  /** `opened`: a result opened here (focus goes to it); `dismissed`: focus goes back to what opened the palette. */
   onClose: (reason: 'dismissed' | 'opened') => void;
-  /** Open a result in this tab: the window writes the hash (a new history entry) and lands on the message. */
   onOpenResult: (hash: string, land: SearchLanding | null) => void;
-  /**
-   * Compose's actions for the words typed (the Actions group, above the
-   * results): "New message…", "Message <host> in <project>". Absent: none.
-   */
   actions?: (q: string) => ComposeAction[];
-  /** An action chosen: the palette closes and the window opens compose. */
   onAction?: (action: ComposeAction) => void;
-  /** Shape's boards the words find (the "Shape" group, under the results). Absent: none (Shape off). */
   shapes?: (q: string) => SearchShape[];
 }
 
 type FilterKind = keyof SearchFilters;
-/** A chip and its menu: the three filters, and the Type chip that leads them. */
 type ChipKind = FilterKind | 'type';
 
 interface Answered {
-  /** The query and filters this answer is for. */
   key: string;
   q: string;
   model: SearchModel;
-  /** The filters it was asked with: the "Searched only" line names these, not the chips' newer picks still on their way. */
   filters: SearchFilters;
-  /** The type it was asked for (null: All types). The list draws an answer as its own type, so a pick still on its way never redraws the last answer under the new chip. */
   type: InboxSearchGroupId | null;
-  /** The order it was asked in ("Show all" pages go on in it). */
   sort: InboxSearchSort;
 }
 
@@ -130,17 +89,13 @@ function Marked({ text, marks }: { text: string; marks: readonly [number, number
   );
 }
 
-/** The query's words marked in a field the answer carries no marks for (`termMarks`: the server's rule, the answer's terms). */
 function Words({ text, terms }: { text: string; terms: readonly string[] }) {
   return terms.length > 0 ? <Marked text={text} marks={termMarks(text, terms)} /> : <>{text}</>;
 }
 
-/** No terms (the recent view, filters with no words): one array, so the memoized rows keep their props. */
 const NO_TERMS: readonly string[] = [];
-/** No marks: a field the row's document does not index. */
 const NO_MARKS: readonly [number, number][] = [];
 
-/** A composed secondary line (a project row's): each part apart, user-written parts in <bdi>; it wraps, never cut (the folder is searched). */
 function Secondary({ parts }: { parts: readonly (ReactNode | null | false)[] }) {
   const shown = parts.filter((p): p is ReactNode => p !== null && p !== false && p !== '');
   return (
@@ -155,15 +110,6 @@ function Secondary({ parts }: { parts: readonly (ReactNode | null | false)[] }) 
   );
 }
 
-/**
- * The thread chip (`.ib-key` / `.ib-keyt`, drawn as plain words in the row's
- * face and a "·", approval "inbox-search-calm"): the thread's name, or, for a
- * thread with no name, its subject. Its tooltip and accessible words carry the whole thread:
- * "Thread nightly-deploy: Investigate why…" (always for a named thread, whose
- * subject is not on screen; a subject chip only while it is cut). Its words are
- * shown whole (they wrap inside the chip) with the query's words marked, so a
- * thread found by its name says why.
- */
 function ThreadChip({ chip, terms }: { chip: RowThreadChip; terms: readonly string[] }) {
   const whole = chip.kind === 'name' && chip.subject ? `${chip.text}: ${chip.subject}` : chip.text;
   const named = chip.kind === 'name' && Boolean(chip.subject);
@@ -181,17 +127,6 @@ function ThreadChip({ chip, terms }: { chip: RowThreadChip; terms: readonly stri
   );
 }
 
-/**
- * A result's second line: the thread chip first (where a phone's list row
- * draws it, ahead of what the thread holds), then what the result is (its
- * author or folder), the project, the section, the time, apart
- * by "·" (", " for a screen reader). Nothing is cut: the chip and the project
- * show their whole words and the line wraps after a "·" (a `<wbr>`) when they
- * do not fit, never before one: each part holds the "·" after it (a line never
- * starts with one). The section and the time never break inside. Each user-written part is a `<bdi dir="auto">`.
- * The chip and the project carry marks only on a thread row (`chipTerms`,
- * `projectMarks`): a message, file or guide row was not found by them.
- */
 function MetaLine({ chip, chipTerms, lead, project, projectMarks, section, at }: { chip: RowThreadChip | null; chipTerms: readonly string[]; lead?: ReactNode; project: string; projectMarks: readonly [number, number][]; section?: string | null; at?: string | null }) {
   const parts: { node: ReactNode; className: string }[] = [];
   if (lead) parts.push({ node: lead, className: 'ib-sp-lead' });
@@ -211,7 +146,6 @@ function MetaLine({ chip, chipTerms, lead, project, projectMarks, section, at }:
       {chip && <wbr />}
       {parts.map((part, i) => (
         <Fragment key={i}>
-          {/* A part keeps its "·" (no break between them), and the line may break after it. */}
           <span className={part.className}>
             {part.node}
             {i < parts.length - 1 && (
@@ -230,11 +164,6 @@ function MetaLine({ chip, chipTerms, lead, project, projectMarks, section, at }:
   );
 }
 
-/**
- * The mark a result row starts with (`searchRowMark`): the agent's mark for a
- * message, an outline for what the row is otherwise. Decorative: the row's
- * words say the same, so it is hidden from a screen reader.
- */
 function RowMark({ row }: { row: InboxSearchRow }) {
   const mark = searchRowMark(row);
   return (
@@ -244,7 +173,6 @@ function RowMark({ row }: { row: InboxSearchRow }) {
   );
 }
 
-/** A row's time in its own right-hand column (desktop; a phone keeps it at the end of the meta line). */
 function TimeColumn({ at }: { at: string | null }) {
   if (!at) return null;
   return (
@@ -255,10 +183,6 @@ function TimeColumn({ at }: { at: string | null }) {
   );
 }
 
-/**
- * "Best match | Newest" (approval "inbox-search-sort"): the Inbox's segmented control (`.ib-seg`), native radios in a
- * radiogroup, so Tab reaches the chosen one and the arrows choose. The pick is this browser's (searchSort.ts).
- */
 function SortSwitch({ sort, onChange, name }: { sort: InboxSearchSort; onChange: (sort: InboxSearchSort) => void; name: string }) {
   return (
     <span className="ib-seg ib-sp-sort" role="radiogroup" aria-label="Order results by" data-search-sort={sort}>
@@ -272,7 +196,6 @@ function SortSwitch({ sort, onChange, name }: { sort: InboxSearchSort; onChange:
   );
 }
 
-/** The palette's key footer (desktop): only keys the palette already handles, the new-tab chord in the platform's own modifier. */
 function KeyFooter() {
   return (
     <div className="ib-sp-foot" data-search-keys="" aria-hidden="true">
@@ -292,8 +215,6 @@ function KeyFooter() {
   );
 }
 
-/** A result's mark and lines. Memoized: moving the highlight re-renders the option elements, not what they hold
- *  (the row is the answer's own object, so it stays the same until a new answer lands). */
 const ResultContent = memo(function ResultContent({ row, phone, projectName, terms }: { row: InboxSearchRow; phone: boolean; projectName: string; terms: readonly string[] }) {
   return (
     <>
@@ -305,7 +226,6 @@ const ResultContent = memo(function ResultContent({ row, phone, projectName, ter
 
 function RowBody({ row, phone, projectName, terms }: { row: InboxSearchRow; phone: boolean; projectName: string; terms: readonly string[] }) {
   const chip = rowThreadChip(row);
-  // The time: in its own column on a desktop, at the end of the meta line on a phone (a column would take the title's width).
   const time = row.type === 'project' ? null : searchTime(row.at);
   const metaAt = phone ? time : null;
   switch (row.type) {
@@ -317,7 +237,6 @@ function RowBody({ row, phone, projectName, terms }: { row: InboxSearchRow; phon
             <span className="ib-sp-p" dir="auto">
               <Marked text={row.title} marks={row.title_marks} />
             </span>
-            {/* The thread's document indexes its subject, its name and its project's name: the chip and the project are marked. */}
             <MetaLine chip={chip} chipTerms={terms} project={projectName} projectMarks={projectMarks(projectName, row.project.name, terms)} section={label} at={metaAt} />
           </span>
           {row.archived ? <span className="ib-sp-chip">Archived</span> : row.section === 'stopped' ? <span className="ib-sp-chip ib-sp-warn">Stopped</span> : null}
@@ -332,7 +251,6 @@ function RowBody({ row, phone, projectName, terms }: { row: InboxSearchRow; phon
             <span className="ib-sp-p ib-sp-snip" dir="auto">
               <Marked text={row.snippet.text} marks={row.snippet.marks} />
             </span>
-            {/* A message's document indexes its body, its questions and its agent's name: only the agent is marked. */}
             <MetaLine
               chip={chip}
               chipTerms={NO_TERMS}
@@ -350,7 +268,6 @@ function RowBody({ row, phone, projectName, terms }: { row: InboxSearchRow; phon
               at={metaAt}
             />
           </span>
-          {/* An action item (an Inbox `:::action`, key `a-…`) reads "Action item", not "Question". */}
           {row.question && <span className="ib-sp-chip">{row.question.key.startsWith('a-') ? 'Action item' : 'Question'}</span>}
           {row.question?.replaced && <span className="ib-sp-chip">Replaced</span>}
           {row.archived && <span className="ib-sp-chip">Archived</span>}
@@ -359,19 +276,16 @@ function RowBody({ row, phone, projectName, terms }: { row: InboxSearchRow; phon
       );
     case 'file':
     case 'guide': {
-      // Cut in the middle to fit, unless the cut would take a matched word: then the whole name, wrapped.
       const short = middleCutInboxName(row.name, phone ? 30 : 46, row.name_marks);
       const cut = short.marks.length < row.name_marks.length ? { text: row.name, marks: row.name_marks } : short;
       return (
         <>
           <span className="ib-sp-rs">
-            {/* The name is cut in its middle here (JS): the whole name whenever it is cut, either way. */}
             <Tip content={row.name} when={(trigger) => cut.text !== row.name || isTextCut(trigger)}>
               <span className="ib-sp-p" dir="auto">
                 <Marked text={cut.text} marks={cut.marks} />
               </span>
             </Tip>
-            {/* A file's document indexes its name and its folder; a guide's, its title: neither marks the chip or the project. */}
             <MetaLine
               chip={chip}
               chipTerms={NO_TERMS}
@@ -388,13 +302,11 @@ function RowBody({ row, phone, projectName, terms }: { row: InboxSearchRow; phon
     case 'project':
       return (
         <span className="ib-sp-rs">
-          {/* The folder is the project's whole identity; the name may be cut. */}
           <Tip content={<ProjectTipText name={row.name} root={row.root} />}>
             <span className="ib-sp-p" dir="auto">
               <Marked text={row.name} marks={row.name_marks} />
             </span>
           </Tip>
-          {/* The name's tooltip names the whole folder. */}
           <Secondary
             parts={[
               'Project',
@@ -408,12 +320,6 @@ function RowBody({ row, phone, projectName, terms }: { row: InboxSearchRow; phon
   }
 }
 
-/**
- * "Searched only plannotator. Search everywhere": what a filtered search left
- * out, and the one click that searches everything (every chip back to its
- * start). Under "No matches", and under the results while a filter is set, so
- * a search that started inside a project never misses a thread without saying so.
- */
 function SearchedOnly({ scope, onEverywhere }: { scope: readonly string[]; onEverywhere: () => void }) {
   return (
     <>
@@ -432,7 +338,6 @@ function SearchedOnly({ scope, onEverywhere }: { scope: readonly string[]; onEve
   );
 }
 
-/** A mouse press in the list keeps focus in the input; the click still runs. */
 function keepInputFocus(event: ReactMouseEvent): void {
   event.preventDefault();
 }
@@ -441,7 +346,6 @@ export default function SearchPalette(props: SearchPaletteProps) {
   const { open, phone, currentProject, projects, onClose, onOpenResult, actions, onAction, shapes } = props;
   const dialogRef = useRef<HTMLDialogElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  /** An IME composition is under way in the input (its Escape is not the palette's). */
   const composing = useRef(false);
   const listRef = useRef<HTMLDivElement>(null);
   const filtersRef = useRef<HTMLDivElement>(null);
@@ -457,7 +361,6 @@ export default function SearchPalette(props: SearchPaletteProps) {
   const [expanded, setExpanded] = useState<Partial<Record<InboxSearchGroupId, InboxSearchRow[]>>>({});
   const [hl, setHl] = useState<number | null>(null);
   const [menu, setMenu] = useState<{ kind: ChipKind; hl: number } | null>(null);
-  /** The Type chip's group, or null for All types. Read by `run` through the ref, so a pick is sent at once. */
   const [type, setTypeState] = useState<InboxSearchGroupId | null>(null);
   const typeRef = useRef<InboxSearchGroupId | null>(null);
   const setType = (next: InboxSearchGroupId | null) => {
@@ -465,7 +368,6 @@ export default function SearchPalette(props: SearchPaletteProps) {
     setTypeState(next);
   };
   const [live, setLive] = useState('');
-  /** Best match or Newest: this browser's pick, kept across opens (searchSort.ts). */
   const sort = useSearchSort();
   const [fades, setFades] = useState({ top: false, bottom: false });
 
@@ -474,7 +376,6 @@ export default function SearchPalette(props: SearchPaletteProps) {
   const projectNameRef = useRef(projectName);
   projectNameRef.current = projectName;
 
-  // ── the dialog ──
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
@@ -493,8 +394,6 @@ export default function SearchPalette(props: SearchPaletteProps) {
     }
   }, [open]);
 
-  // Every open starts from an empty query, All types and no filter: everywhere, even with a project open in the list
-  // (the owner, 2026-11-06; that project's results come first on ties, `current`). The person picks a project to narrow.
   useLayoutEffect(() => {
     if (!open) return;
     setQ('');
@@ -508,12 +407,10 @@ export default function SearchPalette(props: SearchPaletteProps) {
     setLive('');
   }, [open]);
 
-  // ── requests ──
   const requestSeq = useRef(0);
   const inflight = useRef<AbortController | null>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** Enter pressed while a newer query was on its way: open its first row once it lands. */
   const openWhenSettled = useRef(false);
 
   const clearTimers = () => {
@@ -532,7 +429,6 @@ export default function SearchPalette(props: SearchPaletteProps) {
       const seq = ++requestSeq.current;
       const nextSort = readSearchSort();
       const key = JSON.stringify([query.trim(), nextFilters, nextType, nextSort]);
-      // A picked type asks for its group alone, the first page ("Show all"'s request); with no words, the request is today's.
       const one = nextType && query.trim() ? { group: nextType, limit: SEARCH_PAGE } : {};
       setPending(true);
       setError(false);
@@ -540,7 +436,6 @@ export default function SearchPalette(props: SearchPaletteProps) {
         .then((model) => {
           if (seq !== requestSeq.current) return;
           if (model.indexing) {
-            // Skeletons and the indexing line until the index is built; ask again.
             setAnswered({ key, q: query.trim(), model, filters: nextFilters, type: nextType, sort: nextSort });
             retryTimer.current = setTimeout(() => run(query, nextFilters, nextType), SEARCH_INDEXING_RETRY_MS);
             return;
@@ -549,7 +444,6 @@ export default function SearchPalette(props: SearchPaletteProps) {
           setExpanded({});
           setAnswered({ key, q: query.trim(), model, filters: nextFilters, type: nextType, sort: nextSort });
           const said = nextType ? typeCountWords(model, query, nextType) : countWords(model, query, filtersSet(nextFilters));
-          // Found inside a filter: the count says so, as the line under the list does ("2 results in 2 groups. Searched only plannotator").
           const only = said && query.trim() && filtersSet(nextFilters) && !said.startsWith('No ') ? scopeWords(nextFilters, projectNameRef.current, nextType).join(', ') : '';
           setLive(only ? `${said}. Searched only ${only}` : said);
         })
@@ -564,7 +458,6 @@ export default function SearchPalette(props: SearchPaletteProps) {
     [currentProject],
   );
 
-  // The first answer of an open: at once.
   useEffect(() => {
     if (!open) return;
     run('', NO_FILTERS);
@@ -573,7 +466,6 @@ export default function SearchPalette(props: SearchPaletteProps) {
       inflight.current?.abort();
       requestSeq.current += 1;
     };
-    // run at the open only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -588,63 +480,49 @@ export default function SearchPalette(props: SearchPaletteProps) {
     setFilters(next);
     run(q, next);
   };
-  /** Best match or Newest: remembered for this browser, and the words asked again in that order. */
   const changeSort = (next: InboxSearchSort) => {
     if (next === sort) return;
     setSearchSort(next);
     run(q, filters);
   };
-  /** "Clear filters" and "Search everywhere": every chip back to its start (All types too), focus back in the input. */
   const clearFilters = () => {
     setType(null);
     changeFilters(NO_FILTERS);
     inputRef.current?.focus();
   };
 
-  // ── options ──
   const groups: SearchGroupView[] = useMemo(() => {
     if (!answered) return [];
-    // A picked type with no words: nothing yet (the recent view is not that type).
     if (answered.type && !answered.q) return [];
-    // While the index builds there are no results yet, but the actions still show.
     const found = answered.model.indexing ? [] : searchGroups(answered.model, expanded);
-    // A picked type lists its group alone, without Actions.
     if (answered.type) return found;
-    // Shape's boards the words find: their own group, under the results.
     const shapeList = shapes && answered.q.trim() ? shapes(answered.q) : [];
     const withShapes = shapeList.length ? [...found, { id: 'shapes' as const, heading: 'Shape', total: null, options: shapeList.map((shape) => ({ kind: 'shape' as const, shape })) }] : found;
     const actionList = actions ? actions(answered.q) : [];
     if (actionList.length === 0) return withShapes;
     const group: SearchGroupView = { id: 'actions', heading: 'Actions', total: null, options: actionList.map((action) => ({ kind: 'action' as const, action })) };
-    // Above everything (Recent searches included) with no words, when nothing
-    // matched, or when the words name an action; below real results otherwise.
     const first = !answered.q.trim() || withShapes.length === 0 || namesActionWord(answered.q);
     return first ? [group, ...withShapes] : [...withShapes, group];
   }, [answered, expanded, actions, shapes]);
   const options = useMemo(() => groups.flatMap((g) => g.options), [groups]);
   const optionsKey = answered?.key ?? '';
-  // The highlight snaps to the first row when the rows change (a new answer), never while arrowing.
   useLayoutEffect(() => {
     setHl(options.length > 0 ? 0 : null);
-    // Only a new answer resets it; expanding a group keeps the row.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [optionsKey]);
   useEffect(() => {
     if (!openWhenSettled.current || pending || !answered || answered.model.indexing) return;
     openWhenSettled.current = false;
     if (options.length > 0) activate(0, false);
-    // activate reads the settled answer.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pending, answered]);
 
   useLayoutEffect(() => {
     if (hl === null) return;
     document.getElementById(optionId(hl))?.scrollIntoView?.({ block: 'nearest' });
-    // optionId is stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hl]);
 
-  // The list's top and bottom fades: only where it overflows, re-measured after every render and on resize.
   const measure = useCallback(() => {
     const list = listRef.current;
     if (!list) return;
@@ -660,14 +538,11 @@ export default function SearchPalette(props: SearchPaletteProps) {
 
   const expand = async (option: Extract<SearchOption, { kind: 'more' }>, index: number) => {
     if (!answered) return;
-    // Focus stays in the input, so the arrows go on from the expanded group.
     inputRef.current?.focus();
-    // A picked type's answer already holds its first page: "Show 50 more" goes on from there.
     const already = expanded[option.group] ?? (answered.type === option.group ? (answered.model.groups?.[option.group] ?? null) : null);
     const offset = already ? already.length : 0;
     try {
       const model = await searchInbox({ q: answered.q, ...filters, current: currentProject, sort: answered.sort, group: option.group, offset, limit: SEARCH_PAGE });
-      // A message that came in since the last page moves the next one down: a row already shown is not shown twice.
       const shown = new Set((already ?? []).map((row) => `${row.type}-${row.id}`));
       const more = (model.groups?.[option.group] ?? []).filter((row) => !shown.has(`${row.type}-${row.id}`));
       setExpanded((current) => ({ ...current, [option.group]: [...(already ?? []), ...more] }));
@@ -713,11 +588,9 @@ export default function SearchPalette(props: SearchPaletteProps) {
     }
     const target = resultTarget(option.row, answered.model.terms ?? []);
     if (newTab) {
-      // A new tab opens the same place; this palette stays open (as Workspaces').
       window.open(`${window.location.pathname}${window.location.search}${target.hash}`, '_blank', 'noopener');
       return;
     }
-    // Recent searches: written only when a result is opened, and only for words.
     if (answered.q && (answered.model.terms ?? []).length > 0) void saveRecentSearch({ q: answered.q }).catch(() => {});
     close('opened');
     onOpenResult(target.hash, target.land);
@@ -733,7 +606,6 @@ export default function SearchPalette(props: SearchPaletteProps) {
     inputRef.current?.focus();
   };
 
-  // ── keys ──
   const onInputKey = (event: ReactKeyboardEvent<HTMLInputElement>) => {
     // While an IME composes, its keys are its own (candidate lists use the arrows, Escape cancels the composition).
     if (event.nativeEvent.isComposing || event.keyCode === 229) return;
@@ -745,11 +617,9 @@ export default function SearchPalette(props: SearchPaletteProps) {
       return;
     }
     if (event.key === 'Enter') {
-      // (An IME's Enter, which commits text, returned above: it never opens a result.)
       event.preventDefault();
       const newTab = event.metaKey || event.ctrlKey;
       if (debounceTimer.current || pending) {
-        // A newer query is still settling: open its first row once it lands.
         if (debounceTimer.current) run(q, filters);
         if (!newTab) openWhenSettled.current = true;
         return;
@@ -759,7 +629,6 @@ export default function SearchPalette(props: SearchPaletteProps) {
   };
 
   const onDialogKey = (event: ReactKeyboardEvent<HTMLDialogElement>) => {
-    // The open palette's keys are its own: nothing reaches the window's shortcuts behind it.
     event.stopPropagation();
     if (event.key === 'Escape') {
       if (event.nativeEvent.isComposing || event.keyCode === 229) return;
@@ -773,7 +642,6 @@ export default function SearchPalette(props: SearchPaletteProps) {
     }
     if (event.key === 'Tab') {
       if (menu) setMenu(null);
-      // A radio group is one stop (the chosen radio), as a browser's own Tab order has it; its arrows choose.
       const items = [...(dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])].filter(
         (el) => el.getClientRects().length > 0 && !(el instanceof HTMLInputElement && el.type === 'radio' && !el.checked),
       );
@@ -784,8 +652,6 @@ export default function SearchPalette(props: SearchPaletteProps) {
     }
   };
 
-  // ── filter chips and their menus ──
-  // A type's count, from the answer's totals, once there are words.
   const typeCount = (id: InboxSearchGroupId): number | null => (answered && answered.q && !answered.model.indexing && answered.model.totals ? answered.model.totals[id] : null);
   const menuOptions = (kind: ChipKind): { value: string | null; label: string; count?: number | null }[] =>
     kind === 'type'
@@ -797,7 +663,6 @@ export default function SearchPalette(props: SearchPaletteProps) {
           : FROM_OPTIONS.map((o) => ({ value: o.value, label: o.label }));
 
   const chipValue = (kind: ChipKind): string | null => (kind === 'type' ? type : filters[kind]);
-  /** Set one chip (null: back to its start) and ask again. */
   const setChip = (kind: ChipKind, value: string | null) => {
     if (kind === 'type') {
       const next = value as InboxSearchGroupId | null;
@@ -838,7 +703,6 @@ export default function SearchPalette(props: SearchPaletteProps) {
       pick(menu.kind, items[menu.hl]!.value);
     }
   };
-  // A click outside an open menu closes it.
   useEffect(() => {
     if (!menu) return;
     const onDown = (event: PointerEvent) => {
@@ -866,7 +730,6 @@ export default function SearchPalette(props: SearchPaletteProps) {
           <span className="ib-sp-fl" dir="auto">
             {label}
           </span>
-          {/* A set filter shows its × instead (approval "inbox-search-calm"); a click still opens its menu. */}
           {!set && <Icon name="chevD" />}
         </button>
       </Tip>
@@ -889,7 +752,6 @@ export default function SearchPalette(props: SearchPaletteProps) {
     if (!menu) return null;
     const items = menuOptions(menu.kind);
     const chipEl = filtersRef.current?.querySelector<HTMLElement>(`[data-chip="${menu.kind}"]`);
-    // Under the chip's own cell (a phone's menu is a sheet at the bottom instead).
     const cell = chipEl?.closest<HTMLElement>('.ib-sp-fcell');
     const left = cell?.offsetLeft ?? 10;
     const top = cell ? cell.offsetTop + cell.offsetHeight + 6 : undefined;
@@ -923,7 +785,6 @@ export default function SearchPalette(props: SearchPaletteProps) {
     );
   })();
 
-  // ── body ──
   const filtered = filtersSet(filters);
   const indexing = answered?.model.indexing === true;
   let index = -1;
@@ -941,7 +802,6 @@ export default function SearchPalette(props: SearchPaletteProps) {
       );
     }
     if (!answered || indexing) {
-      // Nothing settled yet: skeletons (and, while the index builds, the quiet line). Never a spinner in the input.
       if (!answered && !pending) return null;
       return (
         <>
@@ -1086,11 +946,8 @@ export default function SearchPalette(props: SearchPaletteProps) {
   })();
 
   const anyFilter = filtered;
-  // Results found inside a filter (a project the person picked, say): say what was left out, under the list.
-  // The filters the shown answer was asked with: a chip changed since keeps the line true until its own answer lands.
   const scopeShown = Boolean(answered && answered.q && !indexing && !error && filtersSet(answered.filters) && options.length > 0);
   const resultScope = scopeShown ? scopeWords(answered!.filters, projectName, answered!.type) : [];
-  // The order only means something for words: the recent view and filters alone keep their own order.
   const sortSwitch = q.trim() ? <SortSwitch sort={sort} onChange={changeSort} name={`ib-sp-sort-${uid}`} /> : null;
   return (
     <dialog
@@ -1103,15 +960,12 @@ export default function SearchPalette(props: SearchPaletteProps) {
       data-phone={phone ? '' : undefined}
       onKeyDown={onDialogKey}
       onCancel={(event) => {
-        // Escape on a control is handled above (a menu first); this is Escape with focus nowhere in particular.
         event.preventDefault();
-        // An Escape that cancelled an IME composition closes nothing.
         if (composing.current) return;
         if (menu) setMenu(null);
         else close('dismissed');
       }}
       onClick={(event) => {
-        // A click on the backdrop (outside the panel's box) closes it.
         const dialog = dialogRef.current;
         if (!dialog || event.target !== dialog) return;
         const r = dialog.getBoundingClientRect();
@@ -1144,20 +998,16 @@ export default function SearchPalette(props: SearchPaletteProps) {
             composing.current = true;
           }}
           onCompositionEnd={() => {
-            // After the key that ended it (an Escape's cancel event comes first).
             setTimeout(() => {
               composing.current = false;
             }, 0);
           }}
         />
-        {/* The order (approval "inbox-search-calm", filter row "Up"): on a desktop at the search box's end, once there
-            are words, so the filter row below is the filters alone and fits one line. Tab: the box, the order, the filters. */}
         {!phone && sortSwitch}
         <button type="button" className="ib-sp-cancel" data-search-cancel="" onClick={() => close('dismissed')}>
           Cancel
         </button>
       </div>
-      {/* The filters and Clear filters on one line. A phone's filters scroll sideways, the order pinned at the line's end. */}
       <div className="ib-sp-fbar" data-search-filter-bar="">
         <div className="ib-sp-filters" ref={filtersRef}>
           {chip('type')}

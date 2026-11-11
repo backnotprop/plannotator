@@ -1,17 +1,6 @@
-/**
- * Inbox search's landing highlight: the query's words in the one message a
- * search result opened, painted with the CSS Custom Highlight API, so the
- * DOM is never changed (annotations, question cards and the reader's own
- * selection are untouched). Matching is @plannotator/core/inbox-search's, the
- * same tokens the server's index matched. Where the API is missing (an older
- * browser, the DOM tests) nothing is painted and the landing still focuses
- * and rings the message.
- */
-
 import { inboxSearchRanges } from '@plannotator/core/inbox-search';
 import { flushPendingHighlights } from '@plannotator/ui/utils/codeHighlight';
 
-/** The highlight's name in `CSS.highlights` (inbox.css styles `::highlight(ib-search-hit)`). */
 export const SEARCH_HIGHLIGHT = 'ib-search-hit';
 
 interface HighlightRegistry {
@@ -26,7 +15,6 @@ function registry(): { highlights: HighlightRegistry; Highlight: new (...ranges:
   return { highlights: css.highlights, Highlight };
 }
 
-/** The ranges of `terms` in the text under `root`, skipping what `skip` matches (a message's head row, folded or open). */
 export function searchHitRanges(root: Node, terms: readonly string[], skip = '[data-fold-head], [data-open-head], script, style, textarea'): Range[] {
   const out: Range[] = [];
   if (terms.length === 0) return out;
@@ -45,7 +33,6 @@ export function searchHitRanges(root: Node, terms: readonly string[], skip = '[d
   return out;
 }
 
-/** Paint the terms under `root`; returns how many ranges, and the way to clear them. */
 export function highlightSearchHits(root: Node, terms: readonly string[]): { count: number; clear: () => void } {
   // A fence still waiting to be highlighted (off screen) would swap its text nodes later and drop these ranges.
   flushPendingHighlights(root);

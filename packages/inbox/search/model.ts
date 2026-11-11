@@ -1,10 +1,3 @@
-/**
- * Inbox search's palette, the parts with no React: the options it lists (in
- * the approved group order, with "Show all" rows), where each result opens,
- * the filter chips' words, and what the live region says. The palette
- * (SearchPalette.tsx) draws these; the DOM tests read them too.
- */
-
 import type { ComposeAction } from '../compose/model';
 import {
   INBOX_SEARCH_GROUPS,
@@ -25,24 +18,18 @@ export const GROUP_LABELS: Readonly<Record<InboxSearchGroupId, { heading: string
   projects: { heading: 'Projects', noun: 'projects', one: 'project' },
 };
 
-/** One option of the listbox. */
 export type SearchOption =
   | { kind: 'row'; group: InboxSearchGroupId | 'recent'; row: InboxSearchRow }
-  // Compose's actions (the "Actions" group): "New message…" and "Message <host> in <project>".
   | { kind: 'action'; action: ComposeAction }
   | { kind: 'more'; group: InboxSearchGroupId; total: number; shown: number }
   | { kind: 'recent-q'; q: string }
-  // Shape's boards (approval "shape-inbox-placement": the "Shape" group, a small preview, the title, "project · …").
   | { kind: 'shape'; shape: SearchShape };
 
-/** A board the search found by its title or project. */
 export interface SearchShape {
   id: string;
   title: string;
   project: string;
-  /** The right-hand words: "no thread", or when it changed. */
   meta: string;
-  /** The window's hash that opens it. */
   hash: string;
   picture: import('@plannotator/core/shape').ShapeDrawnView | null;
   refs: readonly import('@plannotator/core/shape').ShapeRef[];
@@ -51,7 +38,6 @@ export interface SearchShape {
 export interface SearchGroupView {
   id: InboxSearchGroupId | 'recent' | 'recent-searches' | 'actions' | 'shapes';
   heading: string;
-  /** The group's total when it holds more than it shows (the heading's quiet count). */
   total: number | null;
   options: SearchOption[];
 }
@@ -66,15 +52,8 @@ export const NO_FILTERS: SearchFilters = { project: null, status: null, from: nu
 
 export const filtersSet = (filters: SearchFilters): boolean => Boolean(filters.project || filters.status || filters.from);
 
-/** The rows "Show 50 more" adds at a time, and the most one group shows before it. */
 export const SEARCH_PAGE = 50;
 
-/**
- * The groups as the palette lists them: the recent view (recent searches,
- * then the threads looked at last), or the result groups in their fixed
- * order, each ending with "Show all N …" (or "Show 50 more") while it holds
- * more than it shows. A group with no rows is left out.
- */
 export function searchGroups(
   answer: { groups: Partial<Record<InboxSearchGroupId, InboxSearchRow[]>> | null; totals: Record<InboxSearchGroupId, number> | null; recent: InboxSearchThreadRow[] | null; recent_searches?: string[] } | null,
   expanded: Partial<Record<InboxSearchGroupId, InboxSearchRow[]>> = {},
@@ -102,13 +81,11 @@ export function searchGroups(
 const numbers = new Intl.NumberFormat('en-US');
 export const formatCount = (n: number): string => numbers.format(n);
 
-/** "Show all 23 messages", or, once a group is open, "Show 50 more". */
 export function moreLabel(option: Extract<SearchOption, { kind: 'more' }>): string {
   if (option.shown >= SEARCH_PAGE) return `Show ${formatCount(Math.min(SEARCH_PAGE, option.total - option.shown))} more`;
   return `Show all ${formatCount(option.total)} ${GROUP_LABELS[option.group].noun}`;
 }
 
-/** Where a result opens: the window's hash, and for a message the landing (the query's terms, a question's key). */
 export function resultTarget(row: InboxSearchRow, terms: readonly string[]): { hash: string; land: { messageId: string; terms: string[]; questionKey: string | null } | null } {
   const enc = encodeURIComponent;
   switch (row.type) {
@@ -140,17 +117,12 @@ export const FROM_OPTIONS: readonly { value: InboxSearchFrom | null; label: stri
   { value: 'me', label: 'Me' },
 ];
 
-/** What a set chip reads: "Only in plannotator" (a picked project says so), "Archived", "From me". */
 export function chipText(kind: keyof SearchFilters, filters: SearchFilters, projectName: (id: string) => string): string {
   if (kind === 'project') return filters.project ? `Only in ${projectName(filters.project)}` : 'All projects';
   if (kind === 'status') return STATUS_OPTIONS.find((o) => o.value === filters.status)?.label ?? 'Any status';
   return filters.from === 'me' ? 'From me' : filters.from === 'agent' ? 'From agents' : 'From anyone';
 }
 
-/**
- * Project names as the person reads them: a second project with the same name gets its parent folder ("api · work").
- * A project the person renamed (`display_name`) reads that name as it is.
- */
 export function projectNames(projects: readonly { id: string; name: string; root: string; display_name?: unknown }[]): Map<string, string> {
   const counts = new Map<string, number>();
   for (const p of projects) if (inboxProjectDisplayName(p) === null) counts.set(p.name, (counts.get(p.name) ?? 0) + 1);
@@ -168,7 +140,6 @@ export function projectNames(projects: readonly { id: string; name: string; root
   return out;
 }
 
-/** "Searched only plannotator, Archived", or with a picked type "Searched only files in plannotator": the scope a "No matches" names. */
 export function scopeWords(filters: SearchFilters, projectName: (id: string) => string, type: InboxSearchGroupId | null = null): string[] {
   const out: string[] = [];
   if (type) out.push(filters.project ? `${GROUP_LABELS[type].noun} in ${projectName(filters.project)}` : GROUP_LABELS[type].noun);
@@ -181,7 +152,6 @@ export function scopeWords(filters: SearchFilters, projectName: (id: string) => 
 const SECTION_LABELS = new Map(INBOX_SECTIONS.map((s) => [s.id, s.label] as const));
 export const sectionLabel = (id: InboxSectionId | null): string | null => (id ? (SECTION_LABELS.get(id) ?? null) : null);
 
-/** What the live region says once an answer has landed (never per keystroke). */
 export function countWords(answer: { totals: Record<InboxSearchGroupId, number> | null; recent: unknown; indexing?: boolean } | null, q: string, filtered: boolean): string {
   if (!answer || answer.indexing) return '';
   if (answer.recent) return '';
@@ -193,11 +163,6 @@ export function countWords(answer: { totals: Record<InboxSearchGroupId, number> 
   return `${formatCount(n)} ${n === 1 ? 'result' : 'results'} in ${groups.length} ${groups.length === 1 ? 'group' : 'groups'}`;
 }
 
-/**
- * What the live region says once an answer lands while the Type chip names one
- * group (approval "inbox-search-type-filter"): that group's total, "10 files",
- * from the answer's `totals`. With no words there is nothing to count.
- */
 export function typeCountWords(answer: { totals: Record<InboxSearchGroupId, number> | null; indexing?: boolean } | null, q: string, type: InboxSearchGroupId): string {
   if (!answer || answer.indexing || !answer.totals || !q.trim()) return '';
   const n = answer.totals[type];
@@ -209,7 +174,6 @@ const TIME = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digi
 const DAY = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' });
 const DAY_YEAR = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
-/** A result's time as the mock draws it: "11:42 AM" today, "Oct 9" this year, "Sep 2, 2025" before. */
 export function searchTime(iso: string, now: Date = new Date()): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return '';
@@ -218,7 +182,6 @@ export function searchTime(iso: string, now: Date = new Date()): string {
   return DAY.format(date);
 }
 
-/** Text and marks ([start, length]) as alternating runs, for drawing the matched words in semibold. */
 export function markedRuns(text: string, marks: readonly [number, number][]): { text: string; mark: boolean }[] {
   const out: { text: string; mark: boolean }[] = [];
   let at = 0;
@@ -232,26 +195,12 @@ export function markedRuns(text: string, marks: readonly [number, number][]): { 
   return out;
 }
 
-/**
- * The query's words in a field the answer carries no marks for, as
- * [start, length]: the server's own rule for `title_marks`
- * (@plannotator/core/inbox-search, the last term as a prefix), over the
- * answer's `terms`. The window calls it only for a field the row's own
- * document indexes (a thread row's name and project, a message row's agent, a
- * file row's folder, a project row's folder), so it marks what the index
- * matched, never a word the row was not found by.
- */
+/** Marks only a field the row's own document indexes, so it never marks a word the row was not found by. */
 export function termMarks(text: string, terms: readonly string[]): [number, number][] {
   return inboxSearchRanges(text, terms).map(([start, end]) => [start, end - start]);
 }
 
-/**
- * A thread row's project marks: the words of the name the index holds
- * (`indexed`, the row's `project.name`), placed on the name this window shows
- * (`shown`: a renamed project's own name, or "api · work") only where the shown
- * name holds the indexed one. A project shown as "Cloud app" but found as
- * "plannotator" gets no mark; "api · work" marks "api", never "work".
- */
+/** Placed on the shown name only where it holds the indexed one: "api · work" marks "api", never "work". */
 export function projectMarks(shown: string, indexed: string, terms: readonly string[]): [number, number][] {
   if (terms.length === 0 || !indexed) return [];
   const at = shown.indexOf(indexed);
@@ -259,7 +208,6 @@ export function projectMarks(shown: string, indexed: string, terms: readonly str
   return termMarks(indexed, terms).map(([start, length]) => [at + start, length]);
 }
 
-/** Text as compared for "the row already shows it": a cut's "…" dropped, whitespace as one space, case folded. */
 const sameText = (text: string): string =>
   text
     .replace(/^\s*…|…\s*$/gu, '')
@@ -267,26 +215,14 @@ const sameText = (text: string): string =>
     .trim()
     .toLocaleLowerCase();
 
-/** The shortest first line that counts as showing the thread's subject when it is a piece of it (a word or two is not). */
 const SHOWN_MIN = 12;
 
-/** The thread chip a result row draws: the list's chip (`.ib-key`), on the row's second line. */
 export interface RowThreadChip {
-  /** What the chip says: the thread's name, or its subject when it has none. */
   text: string;
   kind: 'name' | 'subject';
-  /** The thread's subject, for the chip's title and its accessible words. */
   subject: string;
 }
 
-/**
- * The mark a result row starts with: who wrote it or what it is (approval
- * "inbox-search-contrast", option B). A message: its agent's mark (the host,
- * null when unknown or from an older Inbox, which draws the generic agent
- * mark as the list does), or the person's outline for a reply; a thread: a
- * speech bubble; a file: a document; a guided review: a book; a project: a
- * folder. Purely visual: the row's words say the same.
- */
 export type SearchRowMark = { kind: 'agent'; host: string | null } | { kind: 'icon'; icon: 'user' | 'comment' | 'doc' | 'book' | 'folder' };
 
 export function searchRowMark(row: InboxSearchRow): SearchRowMark {
@@ -304,18 +240,6 @@ export function searchRowMark(row: InboxSearchRow): SearchRowMark {
   }
 }
 
-/**
- * The one thread chip a result draws, in the form the list uses for a thread.
- *
- * - A thread row: the list's own rule (`threadChipName`): its name, unless its
- *   subject (the row's first line) already starts with it; no name, no chip.
- * - A message, file or guided review: the thread's name; with no name, the
- *   thread's subject in the chip. That subject chip is left out only when the row's first line is the subject,
- *   begins with it, or is a start of it at least 12 characters long (a message
- *   whose words became the subject); never for a word or two met inside the
- *   text ("Deploy" in "We should deploy tomorrow").
- * - A project: none.
- */
 export function rowThreadChip(row: InboxSearchRow): RowThreadChip | null {
   if (row.type === 'project') return null;
   const subject = row.title ?? null;
