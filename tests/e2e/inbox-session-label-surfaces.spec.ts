@@ -402,42 +402,42 @@ function expectQuietLabels(list: Awaited<ReturnType<typeof authors>>, width: num
   }
 }
 
-test('a thread: each author keeps its agent and adds its session label; the unnamed session thread looks as it did', async ({ browser }) => {
+test("a thread: each author is its session's name (several sessions) or keeps its agent and adds its label (one); the unnamed session thread looks as it did", async ({ browser }) => {
   const { page, errors } = await newPage(browser);
   if (!BASELINE) {
     await page.goto(`${world.url}#thread=${world.ids.t1}`);
     const pane = page.locator('section.ib-pane');
     await expect(pane.locator('h2.ib-subject')).toBeVisible();
-    await expect(pane.locator('[data-session-label]').first()).toBeVisible();
+    await expect(pane.locator('[data-session-name]').first()).toBeVisible();
     const list = await authors(page);
-    // Folded and open heads alike, every agent message: "Claude Code · <label>".
+    // Three sessions wrote here (issue #3108, approval "inbox-thread-session-names"): folded and open heads alike,
+    // every agent message leads with its session's name, its agent the mark beside it.
     expect(list.some((a) => a.folded)).toBe(true);
     expect(list.some((a) => !a.folded)).toBe(true);
     const agents = list.filter((a) => a.text !== 'You');
-    expect(agents.map((a) => a.agent)).toEqual(['Claude Code', 'Claude Code', 'Claude Code', 'Claude Code']);
-    expect(agents.map((a) => a.label)).toEqual([STRIPE, DOCS, 'Migrate auth tok…e store to JWTs', STRIPE]);
-    expect(agents[0]!.text).toBe(`Claude Code · ${STRIPE}`);
+    expect(agents.map((a) => a.text)).toEqual([STRIPE, DOCS, AUTH, STRIPE]);
+    expect(agents.map((a) => a.agent)).toEqual([null, null, null, null]);
     // The person's reply (when drawn: a read thread folds it into "1 earlier message") is still "You", with no label part.
     for (const you of list.filter((a) => a.text === 'You')) expect(you.label).toBeNull();
-    // A screen reader hears both names and the whole label on each fold button.
-    expect(agents[0]!.aria?.startsWith(`Claude Code (${STRIPE}), `), agents[0]!.aria ?? "").toBe(true);
-    expect(agents[2]!.aria?.startsWith(`Claude Code (${AUTH}), `), agents[2]!.aria ?? "").toBe(true);
+    // A screen reader hears the session's name, then its agent, on each fold button.
+    expect(agents[0]!.aria?.startsWith(`${STRIPE}, Claude Code, `), agents[0]!.aria ?? "").toBe(true);
+    expect(agents[2]!.aria?.startsWith(`${AUTH}, Claude Code, `), agents[2]!.aria ?? "").toBe(true);
     expectQuietLabels(list, 1440);
-    // The hover says both, the whole label (the tooltip is ui's Tooltip, no native title).
-    await pane.locator('[data-message-article] .ib-fl-nm[data-session-label]').nth(2).hover();
-    await expect(page.locator('[data-pn-tooltip]').filter({ hasText: `Claude Code · ${AUTH}` })).toBeVisible();
+    // The hover says both, the whole name (the tooltip is ui's Tooltip, no native title).
+    await pane.locator('[data-message-article] .ib-fl-nm[data-session-name]').nth(2).hover();
+    await expect(page.locator('[data-pn-tooltip]').filter({ hasText: `${AUTH} · Claude Code` })).toBeVisible();
     await shot(page, '03-thread-named-authors');
     await page.mouse.move(0, 0);
     // An open head (its fold button under the row): the name takes the pointer for its hover, and a click on it still folds.
     const openArticle = pane.locator('[data-message-article]:not([data-folded])').filter({ has: page.locator('.ib-fl-hit') }).last();
-    const openName = openArticle.locator('.ib-fl-nm[data-session-label]');
+    const openName = openArticle.locator('.ib-fl-nm[data-session-name]');
     const openId = (await openArticle.getAttribute('data-message-article'))!;
     await openName.hover();
-    await expect(page.locator('[data-pn-tooltip]').filter({ hasText: `Claude Code · ${STRIPE}` })).toBeVisible();
+    await expect(page.locator('[data-pn-tooltip]').filter({ hasText: `${STRIPE} · Claude Code` })).toBeVisible();
     await openName.click();
     await expect(pane.locator(`[data-message-article="${openId}"]`)).toHaveAttribute('data-folded', '');
 
-    // A named Pi session: "Pi · <its name>", on a one-message thread's open head (no fold button: the head says it).
+    // A named Pi session alone in its thread: "Pi · <its name>", as before, on a one-message thread's open head (no fold button: the head says it).
     await page.goto(`${world.url}#thread=${world.ids.t4}`);
     await expect(pane.locator('h2.ib-subject')).toHaveText('CSV export columns');
     await expect(pane.locator('[data-session-label]').first()).toBeVisible();
@@ -455,9 +455,9 @@ test('a thread: each author keeps its agent and adds its session label; the unna
       const phonePane = phone.page.locator('section.ib-pane');
       await expect(phonePane.locator('h2.ib-subject')).toBeVisible();
       await expect.poll(async () => Math.round((await phonePane.boundingBox())?.x ?? -1), { timeout: 10_000 }).toBe(0);
-      await expect(phonePane.locator('[data-session-label]').first()).toBeVisible();
+      await expect(phonePane.locator('[data-session-name]').first()).toBeVisible();
       const small = await authors(phone.page);
-      expect(small.filter((a) => a.text !== 'You').map((a) => a.agent)).toEqual(['Claude Code', 'Claude Code', 'Claude Code', 'Claude Code']);
+      expect(small.filter((a) => a.text !== 'You').map((a) => a.text)).toEqual([STRIPE, DOCS, AUTH, STRIPE]);
       expectQuietLabels(small, width);
       await shot(phone.page, `03-thread-named-authors-${name}`);
       await clean(phone.page, phone.errors);

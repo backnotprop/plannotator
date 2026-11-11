@@ -243,3 +243,32 @@ test.skipIf(!hasDom)('with no filter to hand, the names are words', async () => 
   act(() => toggle(el).focus());
   expect(el.querySelectorAll('.ib-ss-item button')).toHaveLength(0);
 });
+
+/** Each message line's author as drawn (the folded lines and the open head). */
+const authors = (el: HTMLElement) => [...el.querySelectorAll('.ib-fl-nm')].map((n) => n.textContent);
+
+test.skipIf(!hasDom)("several sessions: each message leads with its session's name, its agent in the tooltip and what a screen reader hears", async () => {
+  const el = await render(threadOf(author('ses_a'), author('ses_b'), author('ses_c')));
+  // The folded lines, then the open head.
+  expect(authors(el)).toEqual(['Billing refactor', 'Retry worker', 'Ledger export']);
+  // A screen reader hears the agent after the name (the lines' and the open head's buttons say it).
+  const said = [...el.querySelectorAll('[aria-label]')].map((n) => n.getAttribute('aria-label')!);
+  for (const who of ['Billing refactor', 'Retry worker', 'Ledger export']) expect(said.some((l) => l.startsWith(`${who}, Claude Code, `))).toBe(true);
+  expect(el.querySelector('[data-session-label]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('one session: its messages read as before, the agent and the label', async () => {
+  const el = await render(threadOf(author('ses_a'), author('ses_a')));
+  expect(el.querySelector('[data-session-name]')).toBeNull();
+  expect(authors(el).every((a) => a?.startsWith('Claude Code'))).toBe(true);
+});
+
+test.skipIf(!hasDom)('a session added to a thread of several: one quiet line, "You added <its name> · <time>", no icon, no mark', async () => {
+  const thread = threadOf(author('ses_a'), { kind: 'person' }, author('ses_b'));
+  thread.messages[1] = { ...thread.messages[1]!, body: 'Retry worker, look at this.', tags: [{ host: 'claude-code', session: 'ses_b', label: 'Claude Code', wakes: true, joined: true }] };
+  const el = await render(thread);
+  const line = el.querySelector<HTMLElement>('[data-thread-move="added"]')!;
+  expect(line.hasAttribute('data-quiet')).toBe(true);
+  expect(line.textContent).toMatch(/^You added Retry worker · \S/);
+  expect(line.querySelector('svg, .ib-mk')).toBeNull();
+});
