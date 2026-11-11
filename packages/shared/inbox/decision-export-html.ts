@@ -480,3 +480,6 @@ ${restHtml(doc, when)}
 </html>
 `;
 }
+
+/** This design's dates (stamp "Nov 8 14:02", range "Nov 8 to 10, 2026", footer with the zone), for the posted comment. */
+export { dates as decisionExportDesignDates };

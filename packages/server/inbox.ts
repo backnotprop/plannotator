@@ -202,6 +202,8 @@ import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxLiveSites, type InboxLiveBridgeSources, type InboxLiveSites } from "./inbox-live";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
 import { INBOX_DECISION_EXPORT_ROUTE, inboxDecisionExportRoute } from "./inbox-decision-export";
+import { INBOX_DECISION_POST_ROUTE, postThreadDecisions } from "./inbox-decision-post";
+import type { PRMarkedDestination } from "@plannotator/shared/pr-marked";
 import { createInboxAccountsFor, switchTarget } from "./inbox-accounts";
 import { INBOX_ACCOUNT_SWITCHING, INBOX_ACTIVITY_MAX_DAYS, type InboxNoteAutoAdd } from "@plannotator/core/inbox-types";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
@@ -553,6 +555,8 @@ export interface InboxServerOptions {
    * app's providers, `submitPRReview`). Default the Bun command runtime (pr.ts).
    */
   prRuntime?: PRRuntime;
+  /** Tests: where Post decisions puts them (default `DECISION_POST_DESTINATION`, the comment). */
+  decisionPostDestination?: PRMarkedDestination;
   /** Tests: how a person's web link's favicon is fetched (inbox-card-favicons.ts): a scripted fetch and DNS, never the network. */
   cardFavicons?: CardFaviconOptions;
   /** Tests: how a PR author's picture is fetched (inbox-pull-avatars.ts): a scripted fetch and DNS, never the network. */
@@ -5391,6 +5395,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         } catch (error) {
           if (error instanceof DecisionDataAborted) return new Response(null, { status: 499 });
           throw error;
+        }
+      }
+      // Post decisions (the thread's ⋯ More, Export decisions › Post on a pull request, and the PR card's row): the
+      // thread's decisions as one comment on one of its PRs, edited in place on a later post (inbox-decision-post.ts).
+      // A write to the forge as the person's own gh / glab: the review post's guards, the owner only and same origin.
+      {
+        const posting = INBOX_DECISION_POST_ROUTE.exec(path);
+        if (posting) {
+          if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+          if (!ownerOrLocal(req, via)) return localOnly();
+          if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+            return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+          }
+          const body = await readBody(req);
+          if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+          const result = await postThreadDecisions(store, posting[1]!, { pull: body.pull, tz: body.tz }, { runtime: options.prRuntime ?? prCommandRuntime, version, destination: options.decisionPostDestination });
+          return json(result.status === 200 ? { serverSession, ...result.body } : result.body, result.status);
         }
       }
       // Export decisions (the thread's ⋯ More): one thread's decisions as a Markdown, HTML or JSON download. Read only,
