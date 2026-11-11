@@ -373,7 +373,28 @@ describe('buildDecisionSpec platform arm (PR6, §3.4)', () => {
     expect(itemIds(other)).not.toContain('note-with-feedback');
   });
 
-  // A platform without a request-changes review (GitLab) must not promise one:
+  // GitLab accepts requested changes from the MR's author, so only Approve
+  // mutes on your own MR there.
+  it('keeps Request changes live on your own MR where the platform allows it', () => {
+    for (const count of [0, 3]) {
+      const own = buildDecisionSpec({
+        ...platformInput(count, true),
+        platform: { label: 'GitLab', mrLabel: 'MR', selfAuthored: true, requestChangesSupported: true, selfRequestChangesBlocked: false },
+      });
+      const other = buildDecisionSpec({
+        ...platformInput(count, false),
+        platform: { label: 'GitLab', mrLabel: 'MR', selfAuthored: false, requestChangesSupported: true, selfRequestChangesBlocked: false },
+      });
+      expect(itemIds(own)).toEqual(itemIds(other));
+      for (const item of own.items) {
+        expect(!!item.muted).toBe(item.tone === 'success');
+      }
+      const requestRow = own.items.find((item) => item.id === (count === 0 ? 'request-changes' : 'note-with-feedback'));
+      expect(requestRow?.subtitle).not.toContain("can't request changes");
+    }
+  });
+
+  // A platform without a request-changes review must not promise one:
   // both request-changes rows say they post as a comment, and nothing mutes
   // on self-authorship because a comment on your own MR is allowed.
   it('says Request changes posts as a comment where the platform has no such review', () => {
@@ -381,10 +402,10 @@ describe('buildDecisionSpec platform arm (PR6, §3.4)', () => {
       for (const selfAuthored of [false, true]) {
         const spec = buildDecisionSpec({
           ...platformInput(count, selfAuthored),
-          platform: { label: 'GitLab', mrLabel: 'MR', selfAuthored, requestChangesSupported: false },
+          platform: { label: 'Forge', mrLabel: 'MR', selfAuthored, requestChangesSupported: false },
         });
         const row = spec.items.find((item) => item.id === (count === 0 ? 'request-changes' : 'note-with-feedback'));
-        expect(row?.subtitle).toContain('GitLab has no request-changes review');
+        expect(row?.subtitle).toContain('Forge has no request-changes review');
         expect(row?.muted).toBeUndefined();
       }
     }
