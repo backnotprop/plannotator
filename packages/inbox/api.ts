@@ -871,6 +871,9 @@ export interface LanState {
   error: string | null;
 }
 
+/** Where Post decisions puts a thread's decisions: the PR's description (default), a comment, or a short section plus the comment. */
+export type DecisionsPostTo = 'description' | 'comment' | 'both';
+
 export class InboxApiError extends Error {
   constructor(
     readonly status: number,
@@ -1615,6 +1618,15 @@ export const inboxApi = {
   changeThreadPulls: async (threadId: string, change: { add?: string[]; remove?: string[] }): Promise<InboxThreadPullsAnswer> =>
     threadPullsOf(await post<unknown>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/pulls`), change)),
   /**
+   * Post decisions (Export decisions › Post on a pull request, and the PR card's row): the thread's decisions as one
+   * comment on one of its PRs, edited in place on a later post. `pull`: the PR as the thread writes it (`ref`).
+   */
+  postThreadDecisions: (threadId: string, pull: string, tz: string) =>
+    post<{ ok: true; action: 'created' | 'updated'; destination: DecisionsPostTo; ref: string; url: string; fallback?: 'no_permission' | 'too_long' }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/decisions/post`), { pull, tz }),
+  /** Where Post decisions puts them (config.json `inboxDecisionsPostTo`): the Post group's "Where to post". */
+  decisionsPostTo: async (): Promise<DecisionsPostTo> => (await get<{ post_to: DecisionsPostTo }>(inboxUrl('/settings/decisions-post'))).post_to,
+  saveDecisionsPostTo: async (postTo: DecisionsPostTo): Promise<DecisionsPostTo> => (await post<{ post_to: DecisionsPostTo }>(inboxUrl('/settings/decisions-post'), { post_to: postTo })).post_to,
+  /**
    * The person looked at the thread. `throughSeq`: the seq of the newest
    * message the window showed; the look stops there, so a message that landed
    * after the window read the thread stays new (an older Inbox ignores it).
@@ -2098,6 +2110,20 @@ export const inboxApi = {
   agentFaces: () => get<unknown>(inboxUrl('/agent-faces')),
   /** One agent's face (`agent`: its own mark again), or this browser's faces from before (`adopt`); every window hears it (`event: agent-faces`). */
   saveAgentFace: (change: InboxAgentFaceChange) => post<unknown>(inboxUrl('/agent-faces'), change as Record<string, unknown>),
+  /** "Your own…": keep an uploaded picture for agents' icons (a data: URL, as Set picture… sends); answers `{ icon, faces, rev, icons }`. */
+  uploadAgentIcon: (picture: string) => post<{ icon?: { id?: unknown } } & Record<string, unknown>>(inboxUrl('/agent-icons'), { picture }),
+  /** Take an uploaded picture away: the agents showing it go back to their own mark. Answers `{ faces, rev, icons }`. */
+  removeAgentIcon: (id: string) => post<unknown>(inboxUrl('/agent-icons'), { remove: id }),
+  /** "Animate it": a request an agent's hand-back names (`{ request }`), for this agent and the picture it shows. */
+  askIconAnimate: (animate: { icon: string; agent: string; sessions: string[] }) => post<{ request?: unknown }>(inboxUrl('/icon-animate'), { animate }),
+  /** Pictures agents handed back and the originals they replaced (`{ results: [{ icon, result }] }`): "Use the original". */
+  iconAnimateResults: () => get<{ results?: unknown }>(inboxUrl('/icon-animate')),
+  /** The icon sets for agents' icons ("Sets"): built in, then fetchable (`remote`: the pointer is read too; the picker's Sets only). */
+  iconSets: (remote: boolean) => get<{ sets?: unknown }>(inboxUrl('/icon-sets', remote ? 'remote=1' : undefined)),
+  /** One set's icons (a fetchable one's `have`: the icons kept so far). */
+  iconSet: (id: string) => get<unknown>(inboxUrl(`/icon-sets/${encodeURIComponent(id)}`)),
+  /** "Get": download a fetchable set into this Inbox's data folder (a stopped one resumes). */
+  getIconSet: (id: string) => post<{ set?: unknown }>(inboxUrl('/icon-sets'), { get: id }),
   /** Pin one artifact of a thread (its key: an attachment id, or `guide:<message id>`), or unpin it. */
   setArtifactPinned: (threadId: string, key: string, pinned: boolean) => post<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins'), { thread_id: threadId, key, pinned }),
   /** The Artifacts wall: a page of every thread's artifacts, newest first. */
