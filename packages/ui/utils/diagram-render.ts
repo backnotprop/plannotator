@@ -72,6 +72,11 @@ export type DiagramRenderError = {
   /** The engine could not be loaded (as opposed to the source not
    * parsing): the one failure a Retry can change. */
   readonly runtimeUnavailable: boolean;
+  /** A part of the engine loaded on demand (Mermaid's chunk for one diagram
+   * type) did not arrive, after the one automatic re-attempt. Not the
+   * source's fault, and not one a Retry can change in Safari, which keeps a
+   * failed module fetch for the page: the block offers Reload. */
+  readonly chunkFailed?: boolean;
 };
 
 export type DiagramRenderResult =
@@ -474,23 +479,88 @@ async function loadWithRetry<T>(load: () => Promise<T>, delayMs: number): Promis
   }
 }
 
+/**
+ * What a browser says when a lazily imported chunk does not arrive: Chromium,
+ * WebKit (Safari, every iPad browser), Firefox, and Vite's CSS preload. The
+ * last is WebKit's words when the chunk's request was redirected to another
+ * origin: a sign-in proxy in front of the Inbox (Cloudflare Access) whose
+ * session lapsed answers every request with a redirect to its login page.
+ */
+const CHUNK_LOAD_FAILURE =
+  /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|Unable to preload CSS|Cross-origin script load denied/i;
+
+function isChunkLoadFailure(error: unknown): boolean {
+  return CHUNK_LOAD_FAILURE.test(error instanceof Error ? error.message : String(error));
+}
+
+/**
+ * Mermaid loads each diagram type (sequence, flowchart, its ELK layout, ...)
+ * as a chunk of its own on that type's first render, after the runtime
+ * itself has loaded. Such a chunk failing (a dropped request, or a tab older
+ * than the server's build, whose chunk names are gone) is a load failure, not
+ * a fault in the source: it gets one automatic re-attempt (Mermaid keeps no
+ * failed load; Chromium and Firefox fetch again), and if that fails too, the
+ * result says `chunkFailed` and the block shows the source under the quiet
+ * Reload line. Not a Retry: WebKit keeps a failed module fetch that a
+ * modulepreload link started (Vite adds one) for the life of the page, so
+ * only a reload fetches it again.
+ */
 async function renderMermaid(runtime: Mermaid, renderId: string, source: string): Promise<DiagramRenderResult> {
   try {
-    const { svg } = await runtime.render(renderId, source);
-    const svgNode = sanitizeDiagramSvg(svg);
-    if (svgNode === null) {
-      return { ok: false, message: 'The diagram could not be rendered.', line: null, runtimeUnavailable: false };
-    }
-    widenEdgeHitAreas(svgNode);
-    return { ok: true, svgNode, findTarget: MERMAID_FINDER.findTarget };
+    return await renderMermaidOnce(runtime, renderId, source);
   } catch (error) {
-    return {
-      ok: false,
-      message: errorMessage(error, 'Failed to render diagram'),
-      line: errorLine(error),
-      runtimeUnavailable: false,
-    };
+    if (!isChunkLoadFailure(error)) return mermaidFailure(error, false);
   }
+  await wait(getMermaidRetryDelayMs());
+  try {
+    return await renderMermaidOnce(runtime, renderId, source);
+  } catch (error) {
+    return mermaidFailure(error, isChunkLoadFailure(error));
+  }
+}
+
+function mermaidFailure(error: unknown, chunkFailed: boolean): DiagramRenderResult {
+  return {
+    ok: false,
+    message: errorMessage(error, 'Failed to render diagram'),
+    line: chunkFailed ? null : errorLine(error),
+    runtimeUnavailable: false,
+    ...(chunkFailed ? { chunkFailed: true } : {}),
+  };
+}
+
+/**
+ * Mermaid renders into a temporary `<div id="d{id}">` (an `<iframe
+ * id="i{id}">` when sandboxed) that it appends to `document.body`. When the
+ * source does not parse, or a diagram-type chunk does not load (Mermaid
+ * reports both as a parse failure), it draws its own "Syntax error in text"
+ * graphic there and throws WITHOUT removing it; a draw error does the same.
+ * Each render has its own id, so nothing ever removed it: every failed render
+ * left that graphic at the bottom of the page, under the app, one more per
+ * re-render (a theme change). The block shows the failure itself, so the
+ * temporary nodes go after every failed render.
+ */
+function removeMermaidLeftovers(renderId: string): void {
+  if (typeof document === 'undefined') return;
+  document.getElementById(`d${renderId}`)?.remove();
+  document.getElementById(`i${renderId}`)?.remove();
+}
+
+/** One render; a throw (a parse error, a chunk that did not load) is the caller's. */
+async function renderMermaidOnce(runtime: Mermaid, renderId: string, source: string): Promise<DiagramRenderResult> {
+  let svg: string;
+  try {
+    ({ svg } = await runtime.render(renderId, source));
+  } catch (error) {
+    removeMermaidLeftovers(renderId);
+    throw error;
+  }
+  const svgNode = sanitizeDiagramSvg(svg);
+  if (svgNode === null) {
+    return { ok: false, message: 'The diagram could not be rendered.', line: null, runtimeUnavailable: false };
+  }
+  widenEdgeHitAreas(svgNode);
+  return { ok: true, svgNode, findTarget: MERMAID_FINDER.findTarget };
 }
 
 const mermaidRenderer: DiagramRenderer = {

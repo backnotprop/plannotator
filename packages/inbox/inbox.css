@@ -3311,14 +3311,10 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 .ib-phsubj[data-on] { opacity: 1; }
 /* The title's words, as wide as they are (at most the box): its tooltip's anchor, so the tip opens under the words. */
 .ib-phsubj-t { display: inline-block; max-width: 100%; vertical-align: top; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* The read button, an icon (approval "inbox-thread-header"): pressed while the thread is marked read, as Artifacts is
-   pressed over its grid; dimmed when nothing here waits on the person. */
-.pn-inbox .ib-iconbtn.ib-readbtn[aria-pressed="true"] { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
-.pn-inbox .ib-iconbtn.ib-readbtn:disabled { opacity: 0.45; background: none; }
 .pn-inbox .ib-ptool { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px; border-radius: 7px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; }
 .pn-inbox .ib-ptool:hover { background: var(--muted); color: var(--foreground); }
 @media (prefers-reduced-motion: reduce) {
-  .pn-inbox .ib-npill, .ib-phsubj { transition: none; }
+  .pn-inbox .ib-npill, .ib-phsubj, .ib-phead .ib-vsep { transition: none; }
 }
 /* The same pill at the list's edge (ListNewPill.tsx): news came while the list's "N new" line is out of view. Its
    box sits between the header and the rows and takes no room. The pill is 12 px inside the edge the row will land
@@ -3384,6 +3380,10 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 /* ── Mark read, the skip chip and the toast (design record "inbox-mark-read", 2026-10-11) ── */
 /* The header: Archive (icon) | Mark read (labelled), then the thread's own tools. */
 .ib-phead .ib-vsep { width: 1px; height: 18px; background: var(--ib-line); margin: 0 4px; flex: none; }
+/* The divider after the way back shows only with something after it (the owner, 2026-11-11): it fades in and out
+   with the bar's title, and stays hidden when no title follows. No layout shift: it keeps its room. */
+.ib-phead .ib-vsep:has(+ .ib-sp), .ib-phead .ib-vsep:has(+ .ib-phsubj:not([data-on])) { opacity: 0; }
+.ib-phead .ib-vsep:has(+ .ib-phsubj) { transition: opacity 120ms ease-out; }
 .ib-kbd { font-family: var(--font-mono); font-size: var(--ib-fs-11, 11px); color: var(--muted-foreground); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; line-height: 16px; font-weight: 500; }
 /* The line under the subject while the thread is marked read. */
 .ib-readline { display: flex; align-items: flex-start; gap: 9px; margin: -4px 0 14px; padding: 9px 12px; border-radius: 8px; background: var(--ib-band); font-size: var(--ib-fs-13, 13px); line-height: 1.5; }
@@ -7816,6 +7816,7 @@ dialog.ib-dlg.ib-thc[open] { animation: ib-thc-in 240ms cubic-bezier(0.23, 1, 0.
 /* Settings → Prompts (design of record .product/approved/inbox-prompts-page/, #2194): the Inbox reminder, shared and per agent, then the plan, review and annotate prompts folded, read-only. */
 .pm-shared { padding: 14px 16px; }
 .pm-head { display: flex; align-items: center; gap: 8px; min-height: 28px; margin-bottom: 8px; }
+.pm-head:last-child { margin-bottom: 0; }
 .pm-sp { flex: 1; }
 .pn-inbox .ib-chip.pm-custom { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
 .pm-text { margin: 0; font-family: var(--font-sans); font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.6; color: var(--foreground); white-space: pre-wrap; overflow-wrap: anywhere; padding: 10px 12px; border-radius: var(--ib-rl-sm-s, 8px); background: color-mix(in oklch, var(--foreground) 5%, transparent); border: 1px solid transparent; }
@@ -10132,8 +10133,6 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .pn-inbox .ib-mthing[data-kind='updating'], .pn-inbox .ib-mthing[data-kind='restarting'], .pn-inbox .ib-mthing[data-kind='failed'], .pn-inbox .ib-mthing[data-kind='not_back'], .pn-inbox .ib-mthing[data-kind='updated'] { color: var(--muted-foreground); font-weight: 450; }
 .pn-inbox .ib-mthing .ib-spin { width: 10px; height: 10px; border-width: 1.5px; }
 .ib-zneeds { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
-.pn-inbox .ib-snooze-blocked { opacity: 0.55; }
-.pn-inbox .ib-snooze-blocked:hover { opacity: 1; }
 .ib-dlg h2.ib-mh2 { display: flex; align-items: center; gap: 8px; }
 .ib-mdone { display: inline-flex; align-items: center; gap: 4px; font-size: var(--ib-fs-12-5, 12.5px); }
 /* An older machine's Update dialog: the ask to an agent there, and the commands folded under it as the fallback. */

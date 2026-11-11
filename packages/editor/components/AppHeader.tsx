@@ -112,6 +112,8 @@ interface AppHeaderProps {
      *  dismisses the popover since clicks never reach the parent document. */
     dismissOnIframeFocus?: boolean;
   };
+  /** Bumped by Mod+Shift+Enter to open the decision control's note composer. */
+  decisionNoteRequest?: number;
 
   // Callback config (null when no bot callback)
   callbackConfig: CallbackConfig | null;
@@ -221,6 +223,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
   questionProgress,
   annotateDecision,
   planDecision,
+  decisionNoteRequest,
   callbackConfig,
   taterMode,
   mobileSettingsOpen,
@@ -394,6 +397,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
                     busy={isSubmitting || isExiting}
                     isLoading={isSubmitting}
                     dismissOnIframeFocus={annotateDecision.dismissOnIframeFocus}
+                    openNoteRequest={decisionNoteRequest}
                   />
                 )}
               </>
@@ -404,6 +408,7 @@ export const AppHeader = React.memo<AppHeaderProps>(({
                 busy={isSubmitting}
                 isLoading={isSubmitting}
                 menuFooter={planDecision.menuFooter}
+                openNoteRequest={decisionNoteRequest}
               />
             ) : null}
 
