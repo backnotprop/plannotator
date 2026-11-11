@@ -300,8 +300,6 @@ function isPrivateNetworkUrl(url: URL): boolean {
 const GITHUB_REDIRECT_ORIGINS = new Set([
   'https://github.com',
   'https://raw.githubusercontent.com',
-  // A repository file kept in Git LFS: raw.githubusercontent.com hands off here.
-  'https://media.githubusercontent.com',
   'https://user-images.githubusercontent.com',
   'https://private-user-images.githubusercontent.com',
 ]);
@@ -314,6 +312,14 @@ function mayFollowProviderRedirect(currentUrl: URL, nextUrl: URL, metadata: PRMe
   if (nextUrl.protocol !== 'https:' && nextUrl.protocol !== 'http:') return false;
   if (nextUrl.username || nextUrl.password || isPrivateNetworkUrl(nextUrl)) return false;
   if (metadata.platform !== 'github' || providerOrigin(metadata) !== 'https://github.com') return true;
+  if (nextUrl.origin.toLowerCase() === 'https://media.githubusercontent.com') {
+    // Only Git LFS's hand-off for this repository's own file.
+    const [kind, owner, repo] = nextUrl.pathname.split('/').filter(Boolean);
+    return currentUrl.origin.toLowerCase() === 'https://raw.githubusercontent.com'
+      && kind === 'media'
+      && owner?.toLowerCase() === metadata.owner.toLowerCase()
+      && repo?.toLowerCase() === metadata.repo.toLowerCase();
+  }
   return GITHUB_REDIRECT_ORIGINS.has(nextUrl.origin.toLowerCase())
     || (nextUrl.protocol === 'https:' && nextUrl.port === '' && GITHUB_UPLOAD_BUCKET_RE.test(nextUrl.hostname));
 }

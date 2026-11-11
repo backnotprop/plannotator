@@ -835,6 +835,44 @@ describe('fetchPRArtifactContent', () => {
     }
   });
 
+  test('Git LFS media only as raw.githubusercontent.com hands off this repository\'s file, without the token', async () => {
+    const blob = 'https://github.com/acme/widgets/blob/main/assets/demo.png';
+    const lfs = 'https://media.githubusercontent.com/media/acme/widgets/main/assets/demo.png?token=signed';
+    const originalFetch = globalThis.fetch;
+    const seen: Array<[string, string]> = [];
+    globalThis.fetch = async (input, init) => {
+      seen.push([String(input), new Headers(init?.headers).get('authorization') ?? '']);
+      return seen.length === 1
+        ? new Response(null, { status: 302, headers: { location: lfs } })
+        : new Response(Uint8Array.from([137, 80]), { headers: { 'content-type': 'image/png' } });
+    };
+    try {
+      await fetchPRArtifactContent(tokenRuntime, github, context, blob);
+      expect(seen).toEqual([
+        ['https://raw.githubusercontent.com/acme/widgets/main/assets/demo.png', 'Bearer test-token'],
+        [lfs, ''],
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    for (const [from, location] of [
+      ['https://github.com/user-attachments/assets/0f1e2d3c', lfs],
+      [blob, 'https://media.githubusercontent.com/media/other/repo/main/x.png'],
+    ]) {
+      const requested: string[] = [];
+      globalThis.fetch = async (input) => {
+        requested.push(String(input));
+        return new Response(null, { status: 302, headers: { location } });
+      };
+      try {
+        await expect(fetchPRArtifactContent(tokenRuntime, github, { ...context, body: `${context.body}\n![x](${from})` }, from)).rejects.toMatchObject({ status: 403 });
+        expect(requested).toHaveLength(1);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    }
+  });
+
   test('a picture or video request answered with another type is refused', async () => {
     const attachment = 'https://github.com/user-attachments/assets/0f1e2d3c';
     for (const type of ['text/html', 'image/svg+xml', 'application/javascript']) {
