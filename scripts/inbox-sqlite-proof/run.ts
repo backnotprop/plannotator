@@ -48,8 +48,14 @@ function box(name: string): Sandbox {
 }
 
 async function started(s: Sandbox, extra: Record<string, string> = {}, what = "start"): Promise<Running> {
+  const loads = notes(s, "store_load").length;
   const run = await serve(binary, s, extra);
   check(run.ok, `${what}: the Inbox exited (${!run.ok && run.code}):\n${!run.ok && run.stderr}`);
+  // The start's notes are written at its first API request (the health check above) and flushed shortly after.
+  for (let waited = 0; notes(s, "store_load").length === loads; waited += 50) {
+    check(waited < 15_000, `${what}: no store_load note in the debug log`);
+    await Bun.sleep(50);
+  }
   return run;
 }
 
@@ -120,16 +126,28 @@ async function newInstall(): Promise<void> {
   proof("new-install", "this version again serves everything after the older one refused");
 }
 
+/**
+ * A generated Inbox started once on its files, as any Inbox has been: its first start writes what a start writes
+ * (notes setting aside questions older than the wait), so the snapshots taken after it are what a move must keep.
+ */
+async function warm(s: Sandbox): Promise<void> {
+  const files = recordFiles(s.inbox);
+  const run = await started(s, {}, "the first start on files");
+  check(last(s, "store_load").log === "jsonl" && last(s, "store_load").why === "files", `unset over files: ${JSON.stringify(last(s, "store_load"))}`);
+  await stop(binary, s, run);
+  check(!existsSync(join(s.inbox, "inbox.db")) && statSync(join(s.inbox, "projects")).isDirectory(), "the switch unset moved an Inbox on files");
+  // Only appended, as on files today: every record file still starts with exactly what it held.
+  const now = recordFiles(s.inbox);
+  check(Object.entries(files).every(([name, text]) => now[name]?.startsWith(text)), "the switch unset rewrote a record file");
+}
+
 async function importAndBack(): Promise<void> {
   const s = box("import");
   writeJsonlInbox(s.dataDir, 2_000);
+  await warm(s);
+  proof("import", "unset over record files: stays on them, appended to as today");
   const originals = recordFiles(s.inbox);
   const before = filesDigest(s.dataDir);
-  const unset = await started(s, {}, "unset over files");
-  check(last(s, "store_load").log === "jsonl" && last(s, "store_load").why === "files", `unset over files: ${JSON.stringify(last(s, "store_load"))}`);
-  await stop(binary, s, unset);
-  check(!existsSync(join(s.inbox, "inbox.db")) && sameFiles(recordFiles(s.inbox), originals), "the switch unset changed an Inbox on files");
-  proof("import", "unset over record files: stays on them, nothing changes");
 
   const on = await started(s, ON, "the move");
   const move = last(s, "store_move");
@@ -223,6 +241,7 @@ async function starters(): Promise<void> {
 async function kills(randomKills: number): Promise<void> {
   const pristine = box("kills-pristine");
   writeJsonlInbox(pristine.dataDir, 1_000, 12);
+  await warm(pristine);
   const originals = recordFiles(pristine.inbox);
   const before = filesDigest(pristine.dataDir);
   let n = 0;
