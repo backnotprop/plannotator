@@ -594,37 +594,85 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
         return { pass: value === words && focused, detail: { value, focused } };
       });
 
-      await check('LV-21', 'Scrolled up in a long thread, an arriving message does not move the words on screen', async () => {
+      await check('LV-21', 'Scrolled up in a long thread, an arriving message does not move the words on screen; at the end, it is brought into view', async () => {
+        // Two cases. Scrolled up, away from the end: the words on screen stay put. At the end: the window follows the
+        // arrival (Thread.tsx scrolls just far enough to show its first lines), so a move there is right; the check is
+        // that the new message is in view.
         const id = T.scroll!;
+        const pane = paneSel(id);
+        const body = `${pane} .ib-pbody`;
         await openThread(A, id);
         await pause(800);
-        const probe = () =>
-          A.evaluate((sel) => {
-            const pane = document.querySelector(sel)!;
-            const arts = [...pane.querySelectorAll('[data-message-article]')] as HTMLElement[];
-            const target = arts[2]!;
-            target.setAttribute('data-lv-anchor', '');
-            return target.getBoundingClientRect().top;
-          }, paneSel(id));
-        await A.evaluate((sel) => {
-          const arts = [...document.querySelectorAll(`${sel} [data-message-article]`)] as HTMLElement[];
-          arts[2]?.scrollIntoView({ block: 'center' });
-        }, paneSel(id));
+        // Read messages open folded (a run of them behind "Show all", each one a line); unfold them so the thread is longer
+        // than the view and has room to scroll up.
+        for (let i = 0; i < 40; i++) {
+          const opened = await A.evaluate((sel) => {
+            const next = document.querySelector(`${sel} [data-fold-all], ${sel} button.ib-fline[aria-expanded="false"]`) as HTMLElement | null;
+            next?.click();
+            return !!next;
+          }, pane);
+          if (!opened) break;
+          await pause(150);
+        }
         await pause(600);
-        await probe();
-        // Then the person scrolls up a little by hand (a wheel), and the page is left still for 2 s.
-        await A.mouse.move(700, 450);
-        await A.mouse.wheel(0, -200);
+        const fromEnd = () =>
+          A.evaluate((sel) => {
+            const b = document.querySelector(sel) as HTMLElement | null;
+            return b ? Math.round(b.scrollHeight - b.scrollTop - b.clientHeight) : null;
+          }, body);
+        const arrive = async (text: string) => {
+          const n = await A.evaluate(new Function(`return ${msgCount(id)}`) as () => number);
+          await ag.send({ project_path: project, reply_to: id, body: text });
+          await A.waitForFunction(new Function(`return ${msgCount(id)} > ${n}`) as () => boolean, null, { timeout: 15_000 }).catch(() => {});
+          await pause(2000);
+        };
+        // The wheel goes to the thread's own scroller.
+        const box = await A.locator(body).boundingBox();
+        if (!box) return { pass: false, detail: 'no thread body' };
+        await A.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+
+        // 1. Scrolled up by hand (a wheel), away from the end, left still: an arrival below moves nothing on screen.
+        await A.evaluate((sel) => {
+          const b = document.querySelector(sel) as HTMLElement;
+          b.scrollTop = b.scrollHeight;
+        }, body);
+        await pause(600);
+        await A.mouse.wheel(0, -600);
         await pause(2000);
+        const awayFromEnd = await fromEnd();
+        await A.evaluate((sel) => {
+          const b = (document.querySelector(sel) as HTMLElement).getBoundingClientRect();
+          const arts = [...document.querySelectorAll(`${sel} [data-message-article]`)] as HTMLElement[];
+          const mid = b.top + b.height / 2;
+          const inView = arts.find((a) => a.getBoundingClientRect().top <= mid && a.getBoundingClientRect().bottom >= mid) ?? arts[0];
+          document.querySelector('[data-lv-anchor]')?.removeAttribute('data-lv-anchor');
+          inView?.setAttribute('data-lv-anchor', '');
+        }, body);
         const top = () => A.evaluate(() => (document.querySelector('[data-lv-anchor]') as HTMLElement | null)?.getBoundingClientRect().top ?? null);
         const still1 = await top();
         await pause(1000);
         const before = await top();
-        await ag.send({ project_path: project, reply_to: id, body: 'Arrives below while the person reads above.' });
-        await pause(2000);
+        await arrive('Arrives below while the person reads above.');
         const after = await top();
+        // Away from the end means past the window's own "at the end" line (seenOnSight.ts AT_END_PX, 24 px).
+        const away = awayFromEnd !== null && awayFromEnd > 24;
         const steady = still1 !== null && before !== null && Math.abs(still1 - before) < 2;
-        return { pass: steady && after !== null && Math.abs(after - before!) < 2, detail: { still1, before, after, steady } };
+        const upHeld = away && steady && after !== null && Math.abs(after - before!) < 2;
+
+        // 2. At the end: the arrival is brought into view (its first lines inside the thread's box).
+        await A.mouse.wheel(0, 100_000);
+        await pause(1500);
+        const endBefore = await fromEnd();
+        await arrive('Arrives while the person is at the end.');
+        const shown = await A.evaluate((sel) => {
+          const b = (document.querySelector(sel) as HTMLElement).getBoundingClientRect();
+          const arts = [...document.querySelectorAll(`${sel} [data-message-article]`)] as HTMLElement[];
+          const last = arts[arts.length - 1]?.getBoundingClientRect();
+          return last ? { top: Math.round(last.top), viewTop: Math.round(b.top), viewBottom: Math.round(b.bottom) } : null;
+        }, body);
+        const atEnd = endBefore !== null && endBefore <= 24;
+        const followed = atEnd && !!shown && shown.top >= shown.viewTop && shown.top + 24 <= shown.viewBottom;
+        return { pass: upHeld && followed, detail: { up: { awayFromEnd, still1, before, after, steady }, end: { endBefore, shown } } };
       });
 
       await check('LV-20', 'A message that arrives in view in the open thread counts as seen by itself (the server says so)', async () => {
