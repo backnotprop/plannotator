@@ -1,10 +1,7 @@
 /// <reference types="bun-types" />
 /**
- * The move's check, both ways (`import.ts`, `return-to-files.ts`): open the store over each side and compare one
- * SHA-256 of everything it serves (`digest.ts`). Each store opens over a scratch data dir, so its start writes
- * nothing beside the person's records (a start prunes pins and snoozes of threads it does not hold: a side that
- * reads wrong must not take them with it); only the record log points at the real files. Every database a side
- * opened is closed before this returns, so the file can be renamed.
+ * Compares the store as served over two logs. Each store opens over a scratch data dir because a start prunes
+ * pins and snoozes of threads it does not hold: a side that reads wrong must not take them with it.
  */
 import { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -15,7 +12,7 @@ import { InboxStore } from "../../store";
 import type { InboxLog } from "../log";
 import { inboxStoreDigest, type InboxStoreDigest } from "./digest";
 
-/** One side of the check: the log the store reads (`dir` is the real inbox folder). */
+/** `dir` is the real inbox folder. */
 export interface InboxCheckSide {
   log: (dir: string) => InboxLog;
 }
@@ -33,7 +30,6 @@ export function checkDigests(dataDir: string, now: () => Date, a: InboxCheckSide
   return { same: left.sha256 === right.sha256, a: left, b: right };
 }
 
-/** One side's digest: the store over `side`'s log, opened over a scratch data dir. */
 export function digestOf(dataDir: string, now: () => Date, side: InboxCheckSide): InboxStoreDigest {
   const scratch = mkdtempSync(join(tmpdir(), "plannotator-inbox-check-"));
   const real = inboxDir(dataDir);
@@ -58,7 +54,7 @@ export function digestOf(dataDir: string, now: () => Date, side: InboxCheckSide)
 export function integrityOf(file: string): string {
   const db = new Database(file, { readwrite: true, create: false, strict: true });
   try {
-    // The import reads the same file meanwhile: wait out its moment of setting up the write-ahead log.
+    // The import has the file open too: wait out its moment of setting up the write-ahead log.
     db.run("PRAGMA busy_timeout = 5000");
     return db.query<{ integrity_check: string }, []>("PRAGMA integrity_check").get()?.integrity_check ?? "no answer";
   } finally {

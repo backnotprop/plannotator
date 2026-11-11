@@ -1,8 +1,4 @@
-/**
- * drizzle-kit's config for the Inbox schema: `bunx drizzle-kit generate --config
- * packages/shared/inbox/store-log/sqlite/drizzle.config.ts` (from the repo root) writes the next migration
- * under `migrations/`. Then list it in `migrations.ts` and add STRICT to each new table by hand.
- */
+/** Run from the repo root: `bunx drizzle-kit generate --config packages/shared/inbox/store-log/sqlite/drizzle.config.ts`. */
 import { defineConfig } from "drizzle-kit";
 
 export default defineConfig({

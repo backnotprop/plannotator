@@ -1,8 +1,4 @@
-/**
- * The dated backups a move leaves in the inbox folder (`import.ts`: the JSONL files; `return-to-files.ts`: the
- * database), for Settings → Storage: each listed with its size, and removed only by the person's Remove. Nothing
- * else ever removes one. Only a folder whose name is a backup's can be listed or removed.
- */
+/** Only a folder whose name is a backup's can be listed or removed. */
 import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { InboxStoreBackup } from "../log";
@@ -32,7 +28,7 @@ export function listInboxBackups(inboxDir: string): InboxStoreBackup[] {
   return out;
 }
 
-/** Remove the backup `name` (its files are read-only; the folders are the owner's). False: no such backup. */
+/** False: no such backup. */
 export function removeInboxBackup(inboxDir: string, name: string): boolean {
   if (!BACKUP_NAME.test(name)) return false;
   const path = join(inboxDir, name);

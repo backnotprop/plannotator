@@ -1,9 +1,4 @@
-/**
- * The door between the `events` table and the store: a stored row read back as a store line, checked with
- * Zod. The same checks today's JSONL reader makes (`parseInboxLine` in `../../schema.ts`): a numeric `v`, a
- * positive safe-integer `seq`, a string `at`, a known kind, a non-empty id, an object record whose id is the
- * line's. A row that fails is left out, as an unreadable JSONL line is.
- */
+/** Reads an `events` row back as a store line with the checks `parseInboxLine` makes; a row that fails is left out. */
 import { z } from "zod";
 import type { InboxLine, InboxRecordKind } from "@plannotator/core/inbox-types";
 
@@ -28,14 +23,14 @@ export function lineOfRow(row: unknown): InboxLine | null {
   } catch {
     return null;
   }
-  // An object whose id is the line's (checked by hand: a Zod object check copies the whole record, at every start).
+  // Checked by hand: a Zod object check would copy the whole record on every start.
   if (!value || typeof value !== "object" || Array.isArray(value) || (value as { id?: unknown }).id !== checked.data.subject_id) return null;
   const { seq, at, v, kind, subject_id } = checked.data;
-  // The record as parsed, not Zod's copy: its keys keep the order they were written in.
+  // Not Zod's copy: keys keep their written order.
   return { v, seq, at, kind, id: subject_id, record: value } as InboxLine;
 }
 
-/** The bytes the line takes as one JSONL line: what Settings → Storage counts per thread, whichever log keeps it. */
+/** The bytes the line takes as one JSONL line, whichever log keeps it. */
 export function lineBytes(line: InboxLine): number {
   return Buffer.byteLength(JSON.stringify(line)) + 1;
 }

@@ -1,8 +1,4 @@
-/**
- * Test-only: every table of an Inbox database as plain rows in a fixed order, with the ids the writers make up
- * (actors', answers') replaced by what they stand for, so two databases written by different writers compare whole.
- * `omit`: columns left out per table (`{ actors: ["created_at"] }`).
- */
+/** Test-only: every table as plain rows in a fixed order, with made-up actor and answer ids replaced by what they stand for. `omit` leaves columns out per table. */
 import { Database } from "bun:sqlite";
 
 export function tablesOf(file: string, omit: Record<string, readonly string[]> = {}): Record<string, unknown[]> {
@@ -21,8 +17,8 @@ export function tablesOf(file: string, omit: Record<string, readonly string[]> =
     const out: Record<string, unknown[]> = {};
     out.schema = db.query("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name").all();
     for (const { name } of db.query<{ name: string }, []>("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '%drizzle%' AND name NOT LIKE 'sqlite_%' ORDER BY name").all()) {
-      // Rows in the order they were written, the change log's own ids left out (a live write may reuse a removed
-      // one); a message's attachments and tags by key (a live write removes and writes them again on each line).
+      // Event and actor ids are left out (a live write may reuse a removed one); attachments and mentions are ordered
+      // by key because a live write removes and rewrites them on each line.
       const order = name === "attachments" ? "message_id, id" : name === "mentions" ? "message_id, position" : "rowid";
       const rows = db.query<Record<string, unknown>, []>(`SELECT * FROM "${name}" ORDER BY ${order}`).all().map(named);
       const drop = new Set([...(name === "events" || name === "actors" ? ["id"] : []), ...(omit[name] ?? [])]);

@@ -1,14 +1,7 @@
 /**
- * The import's rows, worked out in memory (`import.ts`): every line of a JSONL Inbox, in seq order, gives the same
- * rows `write-line.ts` would leave in the tables after writing them one by one, but each table's final rows are
- * kept here once, so the database is written in one pass (`import-load.ts`) instead of ten statements a line.
- *
- * The rules are the same functions the live writer and the JSONL replay call (`../history.ts`); this file only
- * holds the tables. `import-rows.test.ts` holds it to the live writer row for row, and the import's check holds the
- * result to everything the store serves from the files, so a drift between the two writers can never move anyone.
- *
- * Insert and update follow Drizzle's rules, which the live writer goes through: a value left `undefined` takes
- * the column's default on insert and leaves the column as it was on update.
+ * Each line of a JSONL Inbox, in seq order, gives the rows `write-line.ts` would leave, kept in memory so the
+ * database is written in one pass. Insert and update follow Drizzle: a value left `undefined` takes the column's
+ * default on insert and leaves the column as it was on update.
  */
 import {
   isInboxThreadPullRecord,
@@ -22,10 +15,10 @@ import {
 } from "@plannotator/core/inbox-types";
 import { agentNamesHere, archiveSeqAfter, cardAfter, continuesTyping, firstLineName, firstLineTagKeys, movesAddress, pullEventOf } from "../history";
 
-/** A row as SQLite takes it: column name to value; `undefined` means "not given" (Drizzle's default or keep). */
+/** Column name to value; `undefined` means "not given". */
 export type ImportRow = Record<string, string | number | null | undefined>;
 
-/** One table's rows, by key, in the order they were first inserted (the order a live write leaves them in). */
+/** One table's rows by key, in first-insert order. */
 class Keyed {
   readonly rows = new Map<string, ImportRow>();
   constructor(private readonly defaults: ImportRow = {}) {}
@@ -34,7 +27,6 @@ class Keyed {
     return this.rows.get(key);
   }
 
-  /** INSERT … ON CONFLICT DO UPDATE SET `set`: a value left `undefined` keeps the column. */
   upsert(key: string, values: ImportRow, set: ImportRow): ImportRow {
     const found = this.rows.get(key);
     if (!found) {
@@ -74,20 +66,17 @@ function projectOf(line: InboxLine): string | null {
   return line.record.project_id ?? null;
 }
 
-/** The tables an import writes, filled line by line. */
 export class ImportRows {
   readonly actors = new Keyed();
-  /** The change log, in write order; a typing line written over the one before it leaves a hole (`null`). */
+  /** In write order; a typing line written over the one before it leaves a hole (`null`). */
   readonly events: (ImportRow | null)[] = [];
   readonly projects = new Keyed({ deleted_at: null });
   readonly messages = new Keyed({ reply_to: null, via_actor_id: null, subject: null });
   readonly threads = new Keyed({ thread_name: null, resolved_at: null, resolved_seq: null, readdressed: 0, deleted_at: null });
   readonly readState = new Keyed();
-  /** Per message: its attachments, then its tags (`mentions`), as its latest line has them. */
   readonly attachments = new Map<string, Keyed>();
   readonly mentions = new Map<string, ImportRow[]>();
   readonly questions = new Keyed({ thread_id: null, current_answer_id: null, sent_reply_id: null, asked_by_actor_id: null });
-  /** By question id (one answer per question: the local person's). */
   readonly answers = new Keyed({ via_actor_id: null, answer: null, sent_reply_id: null });
   readonly annotations = new Keyed();
   readonly cards = new Keyed();
@@ -98,9 +87,7 @@ export class ImportRows {
   readonly threadNames: ImportRow[] = [];
   readonly messageTags: ImportRow[] = [];
 
-  /** Each record's latest line written over its row: the record, parsed (the live writer reads it back from `events`). */
   private readonly latest = new Map<string, unknown>();
-  /** Where each `events` row of a question line sits, by `<id>\0<seq>`: a typing line removes the one before it. */
   private readonly questionEvents = new Map<string, number[]>();
   private readonly threadNameKeys = new Set<string>();
 
@@ -137,7 +124,6 @@ export class ImportRows {
     return id;
   }
 
-  /** One line, in seq order: what `writeLine` does to the tables. */
   add(line: InboxLine): void {
     const data = JSON.stringify(line.record);
     const table = this.table(line.kind);
@@ -227,7 +213,7 @@ export class ImportRows {
 
   private nameRow(row: ImportRow): void {
     const key = `${row.root_id}\0${row.seq}`;
-    // The table's primary key: a second name at one seq fails the write as the live insert would.
+    // Fails as the live insert would on the primary key.
     if (this.threadNameKeys.has(key)) throw new Error(`thread_names: ${row.root_id} named twice at seq ${row.seq}`);
     this.threadNameKeys.add(key);
     this.threadNames.push(row);
@@ -285,7 +271,6 @@ export class ImportRows {
     const thread = this.messages.get(q.message_id);
     const existing = this.answers.get(q.id);
     let answerId = (existing?.id as string | undefined) ?? null;
-    // The person's answer: one row, updated in place as they pick; withdrawn when the pick is taken back.
     if (q.answer !== null || existing) {
       const author = personId ?? this.actorOf({ kind: "person" }, at);
       const state = q.answer === null ? "withdrawn" : q.sent_reply_id !== null && q.sent_revision === q.revision ? "sent" : "picked";

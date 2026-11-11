@@ -1,13 +1,4 @@
-/**
- * One store line into the SQLite tables, inside the caller's transaction: its `events` row (the change log, kept
- * as history), then the current row of its record (`messages`, `questions`, the Board's tables…) with the columns
- * a query will need, its thread's list facts, the person's read state, the message's attachments and tags, a
- * question's answer, the actors who wrote them, and the facts that come from the order of lines (`../history.ts`),
- * worked out here against the record's previous row, so a start reads them instead of replaying the log.
- *
- * A line older than its record's current row (an import of out-of-order files) is kept in `events` only, as the
- * store's replay ignores it.
- */
+/** One store line into the tables, inside the caller's transaction. A line older than its record's current row is kept in `events` only, as the store's replay ignores it. */
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { SQLiteBunDatabase } from "drizzle-orm/bun-sqlite";
 import {
@@ -27,7 +18,7 @@ export type InboxDb = SQLiteBunDatabase;
 type Tx = Parameters<Parameters<InboxDb["transaction"]>[0]>[0];
 export type InboxDbWriter = InboxDb | Tx;
 
-/** The actor row for the local person or an agent session, made on first sight. */
+/** Made on first sight. */
 export function actorOf(db: InboxDbWriter, who: InboxAuthor | { kind: "person" }, at: string): string {
   const kind = who.kind === "agent" ? "agent_session" : "person";
   const host = who.kind === "agent" ? (who.host ?? "") : "";
@@ -41,7 +32,6 @@ export function actorOf(db: InboxDbWriter, who: InboxAuthor | { kind: "person" }
   return id;
 }
 
-/** The thread a line belongs to, for a deletion (messages, annotations, steps, PRs carry it on the record). */
 function threadOf(line: InboxLine): string | null {
   switch (line.kind) {
     case "message":
@@ -60,7 +50,6 @@ function projectOf(line: InboxLine): string | null {
   return line.record.project_id;
 }
 
-/** The table that holds a kind's current rows. */
 function tableOf(kind: InboxLine["kind"]) {
   switch (kind) {
     case "project":
@@ -92,11 +81,9 @@ export function writeLine(db: InboxDbWriter, line: InboxLine): void {
   const data = JSON.stringify(line.record);
   const table = tableOf(line.kind);
   const row = db.select({ seq: table.seq }).from(table).where(eq(table.id, line.id)).get();
-  // The record's latest line lives once, in `events`; its current row only points at it by seq.
   const current = row ? { seq: row.seq, record: latestData(db, line.kind, line.id, row.seq) } : undefined;
   const actor = line.kind === "message" ? actorOf(db, line.record.author, line.at) : line.kind === "question" && line.record.picked_by ? actorOf(db, { kind: "person" }, line.at) : null;
-  // Typing goes over the row before it: history keeps each change of choice, never each key. Removed before this
-  // line's row goes in, so a repeated line (the same seq twice) keeps one row, not none.
+  // Typing goes over the row before it. Removed before this line's row goes in, so a repeated line keeps one row, not none.
   if (line.kind === "question" && current && current.seq <= line.seq && continuesTyping(JSON.parse(current.record) as InboxQuestionRecord, line.record)) {
     db.delete(t.events).where(and(eq(t.events.seq, current.seq), eq(t.events.kind, "question"), eq(t.events.subject_id, line.id))).run();
   }
@@ -167,7 +154,7 @@ export function writeLine(db: InboxDbWriter, line: InboxLine): void {
   }
 }
 
-/** The record a current row points at: the last `events` row of that record at its seq (a repeated line is two rows). */
+/** The last `events` row of the record at its seq (a repeated line is two rows). */
 function latestData(db: InboxDbWriter, kind: InboxLine["kind"], id: string, seq: number): string {
   const found = db
     .select({ data: t.events.data })
@@ -187,7 +174,6 @@ function writeMessage(db: InboxDbWriter, m: InboxMessage, prev: InboxMessage | u
     .run();
   const root = m.id === m.thread_id;
   if (!prev) {
-    // A message's first line: the name it gives its thread, and its hashtags, at this seq.
     const named = firstLineName(m);
     if (named) db.insert(t.threadNames).values({ root_id: m.id, seq, project_id: m.project_id, name: named.name, routes: named.routes }).run();
     for (const tag_key of firstLineTagKeys(m)) db.insert(t.messageTags).values({ message_id: m.id, tag_key, thread_id: m.thread_id, project_id: m.project_id, seq }).run();
@@ -237,7 +223,6 @@ function writeQuestion(db: InboxDbWriter, q: InboxQuestionRecord, seq: number, a
   const thread = db.select({ thread_id: t.messages.thread_id }).from(t.messages).where(eq(t.messages.id, q.message_id)).get();
   const existing = db.select({ id: t.answers.id }).from(t.answers).where(eq(t.answers.question_id, q.id)).get();
   let answerId: string | null = existing?.id ?? null;
-  // The person's answer: one row, updated in place as they pick; withdrawn when the pick is taken back.
   if (q.answer !== null || existing) {
     const author = personId ?? actorOf(db, { kind: "person" }, at);
     const state = q.answer === null ? "withdrawn" : q.sent_reply_id !== null && q.sent_revision === q.revision ? "sent" : "picked";

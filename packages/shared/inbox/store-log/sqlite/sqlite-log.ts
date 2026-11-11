@@ -1,14 +1,7 @@
 /// <reference types="bun-types" />
 /**
- * The SQLite record log: the same promises as today's JSONL log (`../log.ts`), kept in `<dataDir>/inbox/inbox.db`
- * with Bun's built-in SQLite and Drizzle. NOT wired to users: nothing opens it unless a caller hands
- * `sqliteInboxLog` to `InboxStore.open` (the tests do). No import from the JSONL files, no flag.
- *
- * Every append is one transaction (the change-log row, the record's current row and the facts its order gives),
- * synchronous, so the store stays the one writer it is today. A start reads current state from the tables
- * (`read`), never the change log. WAL with `synchronous=NORMAL`: a power cut may lose the last
- * commits, never corrupt the file (no worse than today's unsynced appends). Tables are STRICT (a migration
- * edit; Drizzle does not write it), so a wrong type is refused rather than stored.
+ * The SQLite record log, in `<dataDir>/inbox/inbox.db`. WAL with `synchronous=NORMAL`: a power cut may lose the
+ * last commits, never corrupt the file. Tables are STRICT (added by hand to each migration; Drizzle does not write it).
  */
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
@@ -26,45 +19,36 @@ import { type InboxDb, writeLine } from "./write-line";
 
 export const INBOX_DB_FILE = "inbox.db";
 
-/** The kinds whose records the store checks as it places them: a failing one leaves the record before it. */
+/** A record failing its check leaves the one before it serving. */
 const KEPT_CHECKS: Partial<Record<InboxLine["kind"], (record: unknown) => boolean>> = {
   steps: isInboxStepsRecord,
   thread_pull: isInboxThreadPullRecord,
   initiative: isInboxInitiativeRecord,
 };
 
-/** Kinds whose rows belong to a thread (Settings → Storage counts them per thread). */
 const THREAD_KINDS = ["message", "question", "annotation", "steps", "thread_pull"];
 
-/** The SQLite log over `<dir>/<file>` (`file`: the import writes `inbox.db.importing` first). `close()` lets go of the file. */
+/** `file` is not `inbox.db` while an import writes `inbox.db.importing`. */
 export function sqliteInboxLog(dir: string, file: string = INBOX_DB_FILE): InboxLog & { close(): void } {
   return new SqliteInboxLog(dir, file);
 }
 
-/** Open (and bring up to date) the Inbox database `file` in `dir`. */
 export function openInboxDb(dir: string, file: string = INBOX_DB_FILE): { sqlite: Database; db: InboxDb } {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const sqlite = new Database(join(dir, file), { create: true, strict: true });
-  // First: another connection opening the file at the same moment (the import's check in its second process) holds
-  // it for a moment while it sets up the write-ahead log, and every statement below waits that out instead of failing.
+  // First: another connection opening the file (the import's check process) holds it briefly while setting up WAL.
   sqlite.run("PRAGMA busy_timeout = 5000");
-  // 8 KB pages for a new file (an existing one keeps its own): records are a few KB, and the import writes and
-  // checks about a third faster than with 4 KB pages.
+  // Only a new file takes this; records are a few KB and the import is about a third faster than with 4 KB pages.
   sqlite.run("PRAGMA page_size = 8192");
   walMode(sqlite);
   sqlite.run("PRAGMA synchronous = NORMAL");
   const db = drizzle({ client: sqlite });
   migrateInboxDb(db);
-  // Fold a long write-ahead log back into the file before the start's one big read.
   sqlite.run("PRAGMA wal_checkpoint(TRUNCATE)");
   return { sqlite, db };
 }
 
-/**
- * Into WAL. Switching a new file's journal needs it to itself, and SQLite answers "database is locked" at once
- * instead of waiting on the busy timeout when another process is opening the same new file (two Inboxes starting
- * together on a new install): tried again for up to about 5 s.
- */
+/** SQLite does not wait on busy_timeout when switching a new file to WAL while another process opens it: retry for about 5 s. */
 function walMode(sqlite: Database): void {
   for (let attempt = 0; ; attempt++) {
     try {
@@ -98,13 +82,9 @@ class SqliteInboxLog implements InboxLog {
     return { state: this.state(), seqFloor: this.seqFloor() };
   }
 
-  /**
-   * Current state from the tables: each record's latest line (its row, with the time and version of the line that
-   * wrote it), in the order the records began, and the facts kept as they happened. Plain SQL: the one bulk read,
-   * streamed row by row, where Drizzle's row objects would only cost memory.
-   */
+  /** Plain SQL, streamed: Drizzle's row objects would only cost memory on this bulk read. */
   private state(): InboxLogState {
-    // The line that wrote the row: the last one at its seq (a line written twice, a retried append, is two rows).
+    // The last `events` row at the record's seq: a retried append leaves two.
     const latest = (kind: string, table: string, where = "") =>
       `SELECT '${kind}' AS kind, r.id AS subject_id, e.data AS data, r.first_seq AS first_seq, e.seq AS seq, e.at AS at, e.v AS v FROM ${table} r JOIN events e ON e.id = (SELECT max(x.id) FROM events x WHERE x.kind = '${kind}' AND x.subject_id = r.id AND x.seq = r.seq) ${where}`;
     const sql = [
@@ -149,10 +129,7 @@ class SqliteInboxLog implements InboxLog {
     return { records, archiveSeq, readdressed, names, tags, cards, pullEvents, kept: this.keptRecords(records) };
   }
 
-  /**
-   * For each steps list, PR and initiative whose latest line fails its check, the last line before it that passes
-   * (`apply` keeps that one): read from the change log, only for those few records.
-   */
+  /** For each record whose latest line fails its check, the last earlier line that passes. */
   private keptRecords(records: InboxLogState["records"]): Map<string, unknown> {
     const kept = new Map<string, unknown>();
     const history = this.sqlite.query<{ seq: number; at: string; v: number; kind: string; subject_id: string; data: string }, [string, string]>(
@@ -205,7 +182,7 @@ class SqliteInboxLog implements InboxLog {
       tx.delete(t.threadPullEvents).where(eq(t.threadPullEvents.thread_id, threadId)).run();
       tx.delete(t.threadNames).where(eq(t.threadNames.root_id, threadId)).run();
       tx.delete(t.messageTags).where(eq(t.messageTags.thread_id, threadId)).run();
-      // The tombstone: the thread's id and when it went, no words.
+      // The tombstone keeps no words.
       tx.update(t.threads).set({ thread_name: null, resolved_seq: null, readdressed: false, deleted_at: at }).where(eq(t.threads.id, threadId)).run();
     });
   }
@@ -250,12 +227,7 @@ class SqliteInboxLog implements InboxLog {
     return { bytes, lines };
   }
 
-  /**
-   * Settings → Storage: what the database holds, the bytes of its rows and indexes (SQLite's `dbstat`; about 0.14 s
-   * at 680 MB, read only when the panel asks), not the files' sizes. A Delete then makes the total fall by what it
-   * removed, as on the JSONL files: counting the files, it rose with the log the delete writes, and counting pages,
-   * a small thread's rows free no whole page. Without `dbstat`, the pages in use.
-   */
+  /** Row and index bytes via `dbstat`, not file size: a delete must lower the total, which file or page counts would not. Falls back to pages in use. */
   stored(): { bytes: number; backups: InboxStoreBackup[] } {
     let bytes: number;
     try {
@@ -278,7 +250,7 @@ class SqliteInboxLog implements InboxLog {
   }
 }
 
-/** Raise the seq floor to `seq` (never lower it). */
+/** Never lowers it. */
 export function keepSeqFloor(db: Parameters<typeof writeLine>[0], seq: number): void {
   db.insert(t.meta)
     .values({ key: "seq_floor", value: String(seq) })

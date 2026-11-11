@@ -1,15 +1,4 @@
 /// <reference types="bun-types" />
-/**
- * The Inbox database written back as today's JSONL files (design brief "The Inbox on SQLite", section 5: export,
- * no lock-in): every `events` row as the line it was written from, in seq order, into the file today's JSONL log
- * keeps that kind in (`../jsonl-log.ts`), under the project's folder; initiatives in `initiatives.jsonl`; the seq
- * floor in `seq.json`. What the JSONL store reads back from them is what the database serves: `return-to-files.ts`
- * and the tests check that with the import's own check (`digest.ts`), the other way round.
- *
- * A line comes out byte for byte as the JSONL log writes one (`JSON.stringify` of `{ v, seq, at, kind, id, record }`,
- * the record as it was written). A line the database keeps no row for is not written: deleted threads and projects,
- * and the typing a question's history wrote over (the store only ever read the last of those).
- */
 import { Database } from "bun:sqlite";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -27,12 +16,12 @@ const FILE_OF: Record<InboxLine["kind"], string> = {
   initiative: INITIATIVES_FILE,
 };
 
-/** A folder for lines whose project the database does not know (an old, broken record): the reader reads every folder. */
+/** A folder for lines whose project the database does not know; the reader reads every folder. */
 const UNPLACED = "unplaced";
 
-/** Write the database `dbFile` as JSONL files under `outDir` (`projects/`, `initiatives.jsonl`, `seq.json`). Returns the lines written. */
+/** Write the database as JSONL files under `outDir`; each line byte for byte as the JSONL log writes it. Deleted threads and projects have no row, so they are not written. */
 export function exportInboxDb(dbFile: string, outDir: string): { lines: number } {
-  // Read-write, never created: a database in WAL mode with no side files cannot be opened read-only. Nothing is written.
+  // Read-write, never created: a database in WAL mode with no side files cannot be opened read-only.
   const db = new Database(dbFile, { readwrite: true, create: false, strict: true });
   const files = new Map<string, string[]>();
   let lines = 0;
@@ -49,7 +38,7 @@ export function exportInboxDb(dbFile: string, outDir: string): { lines: number }
         row.kind === "initiative"
           ? INITIATIVES_FILE
           : join(INBOX_PROJECTS_DIR, (row.project_id !== null ? keyOf.get(row.project_id) : undefined) ?? fallback, FILE_OF[row.kind]);
-      // `JSON.stringify(line)` as the JSONL log writes it, with the record's own text: no parse and write again.
+      // The record's own text, so the bytes match the JSONL log's.
       const text = `{"v":${JSON.stringify(row.v)},"seq":${row.seq},"at":${JSON.stringify(row.at)},"kind":${JSON.stringify(row.kind)},"id":${JSON.stringify(row.subject_id)},"record":${row.data}}`;
       const list = files.get(path);
       if (list) list.push(text);

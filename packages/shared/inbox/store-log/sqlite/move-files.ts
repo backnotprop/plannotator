@@ -1,27 +1,20 @@
 /// <reference types="bun-types" />
-/**
- * The file moves the import (`import.ts`) and the way back to the files (`return-to-files.ts`) share: the record
- * entries under `inbox/`, the dated backup folders they go into (one rename per entry, so a crash midway is
- * finished by the next start), reading a database's `meta` without opening it for writing, removing a database
- * with its side files, and syncing a file or folder to disk.
- */
 import { Database } from "bun:sqlite";
 import { chmodSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { INBOX_PROJECTS_DIR, INITIATIVES_FILE, SEQ_FLOOR_FILE } from "../../schema";
 
-/** The database while the import writes it: renamed to `inbox.db` once checked; a leftover is a crash's, removed. */
+/** The database while the import writes it; a leftover is a crash's. */
 export const INBOX_DB_IMPORTING = "inbox.db.importing";
 
-/** The entries of today's record files under `inbox/`: what the import reads and then moves into the backup. */
+/** The record entries under `inbox/` that move into a backup. */
 export const JSONL_ENTRIES = [INBOX_PROJECTS_DIR, INITIATIVES_FILE, SEQ_FLOOR_FILE];
 
-/** The record entries in place under `inboxDir`. */
 export function jsonlEntriesPresent(inboxDir: string): string[] {
   return JSONL_ENTRIES.filter((entry) => existsSync(join(inboxDir, entry)));
 }
 
-/** A backup folder's name: `backup-<date>-<what>`, then `-2`, `-3` when one of that day is already there. */
+/** `backup-<date>-<what>`, then `-2`, `-3` when that day's is taken. */
 export function freeBackupName(inboxDir: string, at: Date, what: "jsonl" | "sqlite"): string {
   const base = `backup-${at.toISOString().slice(0, 10)}-${what}`;
   for (let n = 1; ; n++) {
@@ -30,10 +23,7 @@ export function freeBackupName(inboxDir: string, at: Date, what: "jsonl" | "sqli
   }
 }
 
-/**
- * Flush a file or folder to disk; best effort for a folder (not every system opens one). A file is opened for
- * writing: Windows flushes only through a handle that may write (a read-only one fails with EPERM).
- */
+/** Best effort for a folder (not every system opens one). A file is opened for writing: Windows flushes only through a writable handle (read-only fails with EPERM). */
 export function fsyncPath(path: string): void {
   let fd: number | null = null;
   const folder = statSync(path).isDirectory();
@@ -47,7 +37,7 @@ export function fsyncPath(path: string): void {
   }
 }
 
-/** Move what is still in place into the backup folder, read-only; each entry one rename, so it can run again. */
+/** One rename per entry, so a crash midway is finished by running it again. */
 export function moveIntoBackup(inboxDir: string, name: string, moved?: () => void): void {
   const backup = join(inboxDir, name);
   for (const entry of jsonlEntriesPresent(inboxDir)) {
@@ -60,7 +50,7 @@ export function moveIntoBackup(inboxDir: string, name: string, moved?: () => voi
   }
 }
 
-/** Each file read-only; folders stay the owner's, so Settings → Storage's Remove can delete the backup. */
+/** Files read-only; folders stay writable so the backup can be deleted. */
 export function readOnly(path: string): void {
   if (!statSync(path).isDirectory()) return chmodSync(path, 0o400);
   for (const child of readdirSync(path)) readOnly(join(path, child));
@@ -84,10 +74,7 @@ export function readMeta(file: string, key: string): string | null {
   }
 }
 
-/**
- * Windows refuses to remove a file another process still holds open (EBUSY, EPERM), for instance the move's second
- * process in the moment after a crash ended the Inbox, before it notices: retried for up to about 3 s.
- */
+/** Windows refuses to remove a file another process still holds open (EBUSY, EPERM); retried for about 3 s. */
 const RETRY = { force: true, maxRetries: 15, retryDelay: 200 } as const;
 
 export function removeSidecars(file: string): void {

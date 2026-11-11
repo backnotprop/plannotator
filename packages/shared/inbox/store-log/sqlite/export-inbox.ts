@@ -1,11 +1,4 @@
 /// <reference types="bun-types" />
-/**
- * `plannotator inbox export --jsonl <folder>` (design brief "The Inbox on SQLite", section 5: export, no lock-in):
- * the person's Inbox as today's JSONL files, from whichever record keeps it now. With `inbox.db` (the SQLite
- * switch moved it), the database written back line by line (`export.ts`); without it, the JSONL files copied as
- * they are. Either way the folder reads like `<data dir>/inbox`: `projects/<key>/*.jsonl`, `initiatives.jsonl`,
- * `seq.json`. Only reads the Inbox: a running one keeps running, and nothing in it changes.
- */
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { inboxDir } from "../../schema";

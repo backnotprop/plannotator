@@ -1,26 +1,8 @@
 /**
- * The Inbox's SQLite schema (Drizzle; design brief "The Inbox on SQLite", section 2). Not used by anyone yet:
- * only `sqlite-log.ts` opens it, and only when a test hands the store that log.
- *
- * Each record is stored once: its latest line, as written (JSON), is its last `events` row, and the record's
- * current row points at it by `seq` (kind, id and seq find it; of a line written twice, the last row). A read
- * serves exactly what it serves today from that row; the current tables hold only the columns a query needs (by
- * thread, by project, by seq; a message's subject and body for search). Ids are today's
- * prefixed ULIDs. `seq` is the store's one change counter. A deleted thread keeps a tombstone in `threads`
- * (id and `deleted_at`, no words); its messages, questions and the rest are really removed, as today.
- *
- * A start reads current state from these tables, never the change log: each record table has its latest line
- * (`seq`, joined to `events` for its record, time and version) and its first line's seq (`first_seq`, the order the store's maps keep),
- * and what the store works out from the ORDER of lines (`../history.ts`) is kept as it happens: a thread's archive
- * line and moved address (`threads`), the names that route (`thread_names`), first-line hashtags (`message_tags`),
- * a card as the Board reads it and its last real change (`cards`), PR adds and removes (`thread_pull_events`).
- *
- * `events` is the ordered change log: one row per line the store writes (a run of typing on a question is one
- * row, its last), kept as history: a card's History reads it, and later the decision history and what a publish
- * outbox reads. `meta` holds the seq floor (the highest seq ever handed out, kept across a deletion).
- *
- * Changing this file: `bunx drizzle-kit generate` (config `drizzle.config.ts` beside it) writes the next
- * migration under `migrations/`; `migrations.ts` imports each one as text so the compiled binary carries it.
+ * The Inbox's SQLite schema (Drizzle). Each record is stored once: its latest line, as written (JSON), is its last
+ * `events` row, and the record's current row points at it by `seq`.
+ * Change it with `bunx drizzle-kit generate` (config beside it); `migrations.ts` imports each migration as text so
+ * the compiled binary carries it.
  */
 import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
@@ -30,10 +12,7 @@ export const meta = sqliteTable("meta", {
   value: text("value").notNull(),
 });
 
-/**
- * Who did something: the local person (one row), an agent session, later a phone, a linked machine or a
- * person from Workspaces (`external_ref`). `person_id`: the person an agent session or device acts for.
- */
+/** `person_id`: the person an agent session or device acts for. */
 export const actors = sqliteTable(
   "actors",
   {
@@ -49,11 +28,7 @@ export const actors = sqliteTable(
   (t) => [uniqueIndex("actors_identity").on(t.kind, t.host, t.session)],
 );
 
-/**
- * The change log. `seq` is the store's (it hands seqs out, not SQLite) and is not unique here: today's JSONL keeps
- * two lines that share a seq (two writers over one store, before the lock), and this log keeps what that one keeps,
- * so an import never fails on them. A line is found by its seq, kind and id together.
- */
+/** `seq` is not unique: old JSONL can hold two lines with one seq, and an import must keep them. Find a line by seq, kind and id. */
 export const events = sqliteTable(
   "events",
   {
@@ -64,12 +39,11 @@ export const events = sqliteTable(
     kind: text("kind").notNull(),
     subject_id: text("subject_id").notNull(),
     project_id: text("project_id"),
-    /** The thread a deletion removes this row with (messages, annotations, steps, PRs). */
+    /** The thread a deletion removes this row with. */
     thread_id: text("thread_id"),
-    /** A question's message: a deletion removes the questions of the thread's messages. */
+    /** A question's message. */
     message_id: text("message_id"),
     actor_id: text("actor_id"),
-    /** The record as written (JSON). */
     data: text("data").notNull(),
   },
   (t) => [index("events_seq").on(t.seq), index("events_subject").on(t.kind, t.subject_id, t.seq), index("events_project").on(t.project_id), index("events_thread").on(t.thread_id), index("events_message").on(t.message_id)],
@@ -97,9 +71,9 @@ export const threads = sqliteTable(
     project_id: text("project_id").notNull(),
     thread_name: text("thread_name"),
     resolved_at: text("resolved_at"),
-    /** The archive line: the seq of the root line that set the current `resolved_at` (`archiveSeqAfter`). */
+    /** The seq of the root line that set the current `resolved_at` (`archiveSeqAfter`). */
     resolved_seq: integer("resolved_seq"),
-    /** A thread the person started whose address moved ("Send to another session", `movesAddress`). */
+    /** Set when the thread's address moved (`movesAddress`). */
     readdressed: integer("readdressed", { mode: "boolean" }).notNull().default(false),
     first_seq: integer("first_seq").notNull(),
     last_seq: integer("last_seq").notNull(),
@@ -143,7 +117,7 @@ export const attachments = sqliteTable(
   (t) => [primaryKey({ columns: [t.message_id, t.id] }), index("attachments_sha").on(t.sha256)],
 );
 
-/** Who a message tags (today: agent sessions, `InboxMessage.tags`; later people). */
+/** Who a message tags (`InboxMessage.tags`). */
 export const mentions = sqliteTable(
   "mentions",
   {
@@ -156,7 +130,6 @@ export const mentions = sqliteTable(
   (t) => [primaryKey({ columns: [t.message_id, t.position] }), index("mentions_target").on(t.target_actor_id)],
 );
 
-/** A thread's read state, per person (today only the local person, off the root message's fields). */
 export const readState = sqliteTable(
   "read_state",
   {
@@ -191,10 +164,7 @@ export const questions = sqliteTable(
   (t) => [index("questions_message").on(t.message_id), index("questions_thread").on(t.thread_id), index("questions_seq").on(t.seq)],
 );
 
-/**
- * Answers: many per question, each with its author. Today one per question, the local person's
- * (`questions.current_answer_id`), updated in place as they pick; later another person's is another row.
- */
+/** One row per question and author; the local person's is updated in place as they pick. */
 export const answers = sqliteTable(
   "answers",
   {
@@ -213,11 +183,7 @@ export const answers = sqliteTable(
   (t) => [uniqueIndex("answers_author").on(t.question_id, t.author_id), index("answers_seq").on(t.seq)],
 );
 
-/**
- * The Board's cards, initiatives, steps, PRs and the person's annotations: columns, the first and latest seq
- * (the record is the `events` row at that seq). A steps or PR record the store does not read (an old or broken shape) is still kept, as the JSONL
- * keeps its line, so its columns may be empty.
- */
+/** Steps and PR rows of an old or broken shape are still kept, so their columns may be empty. */
 export const cards = sqliteTable(
   "cards",
   {
@@ -225,9 +191,9 @@ export const cards = sqliteTable(
     project_id: text("project_id").notNull(),
     first_seq: integer("first_seq").notNull(),
     seq: integer("seq").notNull(),
-    /** The card as the Board reads it (`cardAfter`: old shapes mapped, fields an older Inbox left out kept). */
+    /** The card as the Board reads it (`cardAfter`). */
     card: text("card").notNull(),
-    /** The seq of the card's last real change (a drop's seen mark is not one): the Board's unread rule. */
+    /** The seq of the card's last real change; a drop's seen mark is not one. */
     heard_seq: integer("heard_seq").notNull(),
   },
   (t) => [index("cards_project").on(t.project_id), index("cards_seq").on(t.seq)],
@@ -251,7 +217,7 @@ export const threadPulls = sqliteTable(
   (t) => [index("thread_pulls_thread").on(t.thread_id), index("thread_pulls_project").on(t.project_id), index("thread_pulls_seq").on(t.seq)],
 );
 
-/** Each PR add or remove (`pullEventOf`), at its line's seq: a thread's PR history. A state line is no event. */
+/** Each PR add or remove (`pullEventOf`); a state line is no event. */
 export const threadPullEvents = sqliteTable(
   "thread_pull_events",
   { id: integer("id").primaryKey(), seq: integer("seq").notNull(), thread_id: text("thread_id").notNull(), project_id: text("project_id").notNull(), event: text("event").notNull() },
@@ -264,11 +230,7 @@ export const annotations = sqliteTable(
   (t) => [index("annotations_thread").on(t.thread_id), index("annotations_seq").on(t.seq)],
 );
 
-/**
- * Thread names, in the order they were taken (`seq`): a root's first-line name (`firstLineName`; an agent's
- * routes, one the person gave only holds the name) and the line where an agent named a thread the person
- * started (`agentNamesHere`, routes). Routing reads them oldest first.
- */
+/** Thread names in the order taken (`seq`), read oldest first by routing; `routes` is false for a name only held. */
 export const threadNames = sqliteTable(
   "thread_names",
   {
@@ -281,7 +243,6 @@ export const threadNames = sqliteTable(
   (t) => [primaryKey({ columns: [t.root_id, t.seq] }), index("thread_names_project").on(t.project_id), index("thread_names_seq").on(t.seq)],
 );
 
-/** The hashtags of each message's first line (`firstLineTagKeys`), at its seq: the Board's `#` tags. */
 export const messageTags = sqliteTable(
   "message_tags",
   {
