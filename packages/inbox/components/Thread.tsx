@@ -100,6 +100,9 @@ import { usePickSave } from '../data/actions/picks';
 import { sameThreadFiles, useThreadAttachments } from '../data/queries/files';
 import { MessageView } from '../parts/MessageView';
 import { useSendReply } from '../data/actions/send';
+import { replyLanded, unconfirmed, UNCONFIRMED_MS, type UnconfirmedSend } from '../data/actions/sendLanded';
+import { personReplies, useDrawSend, useSendsDrawn } from '../data/actions/sendDraw';
+import { SendingReply } from '../parts/SendingReply';
 import { pickComposerMode } from '../fullScreenComposer';
 import { InlineReuseLayer, ReuseContext, sourceOf, type ReuseApi, type ReuseSource } from '../reuse';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, pastedSignature, useComposeFiles, useFileDrop } from '../compose/ComposeFiles';
@@ -1571,40 +1574,6 @@ export function AckPill({
   );
 }
 
-/**
- * Per thread, a Send whose reply carrying the words went out but could not be
- * confirmed (its answer was lost and the thread could not be read: the Inbox
- * may be down): its key, and what it carried. It holds only while the box
- * keeps exactly those unsent words: it goes when any thread read shows the
- * reply landed (the Send is then finished), when the words change or the box
- * empties, when the person leaves the thread, and after 10 minutes. The next
- * Send of those words first reads the thread for that reply: there, the Send
- * is finished and nothing goes again; not there, it is an ordinary new Send.
- */
-interface UnconfirmedSend {
-  key: string;
-  words: string;
-  uploads: string[];
-  comments: string[];
-  picks: string[];
-  at: number;
-}
-const unconfirmed = new Map<string, UnconfirmedSend>();
-const UNCONFIRMED_MS = 10 * 60_000;
-
-/**
- * Whether a reply with this idempotency key is in the thread: 'unknown' when
- * the thread could not be read, 'gone' when the thread no longer exists.
- */
-async function replyLanded(threadId: string, key: string): Promise<'yes' | 'no' | 'unknown' | 'gone'> {
-  try {
-    const read = await inboxApi.thread(threadId);
-    return read.thread.messages.some((m) => m.author.kind === 'person' && m.idempotency_key === key) ? 'yes' : 'no';
-  } catch (cause) {
-    return cause instanceof InboxApiError && cause.status === 404 ? 'gone' : 'unknown';
-  }
-}
-
 const THREAD_GONE_TEXT = 'This thread was deleted, so nothing was sent.';
 
 /**
@@ -1760,6 +1729,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   /** A pick's save and a Send's replies (data/actions): their answers go into the held thread. */
   const pickSave = usePickSave();
   const sendReply = useSendReply();
+  const drawSend = useDrawSend();
+  const sendsDrawn = useSendsDrawn(thread.thread_id, personReplies(thread));
   const [pickQueue] = useState(() =>
     createPickQueue(
       (ids) => {
@@ -4655,6 +4626,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     sendingFromComposer.current = options.stayFull === true;
     sendStarts.current += 1;
     setSending(true);
+    // The words drawn at once (data/actions/sendDraw.ts), until the reply carrying them lands or the Send stops.
+    const drawnWords = (box.open ? boxWords() : (replyDraft.draft?.body ?? '')).trim();
+    const drawing = drawSend({ threadId: thread.thread_id, words: drawnWords, repliesBefore: personReplies(thread) });
+    if (drawnWords !== '') requestAnimationFrame(() => bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight }));
     const sendEnds = replySendStarts(thread.thread_id);
     setError(null);
     /** Replies of this Send that went (or were already there, a retry's replays). */
@@ -4904,6 +4879,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       if (!options.stayFull) setFull(false);
       // The answer brought the thread with the reply in it: drawn now, no read of the thread after it.
       if (!(sentRead && onSentRead && (await onSentRead(sentRead)))) await onChanged();
+      drawing.landed();
       await reloadFiles();
       // The reply and where it is now sit at the foot of the thread.
       requestAnimationFrame(() => {
@@ -4967,6 +4943,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       setError(failed.line);
       setErrorDetails(failed.details ? { for: failed.line, text: failed.details } : null);
     } finally {
+      if (done) drawing.landed();
+      else drawing.stopped();
       // Nothing went (or not all of it): the claim is given back and the box's words are saved again.
       // Unless the reply carrying them may have gone (its POST went out and no clear refusal came back,
       // e.g. the answer was lost): the thread is read, and a reply with its key there means it went.
@@ -7151,6 +7129,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         {reviewView?.curating && <p className="ib-rvcurating" data-review-curating="">{reviewView.curating}</p>}
         {/* Linked machines: what the person sent here that the thread's machine has not taken yet (HeldWrites.tsx). */}
         <HeldWrites entries={outbox} machine={machine} onDismiss={onDismissOutbox} />
+        <SendingReply sends={sendsDrawn} />
         {showNew && !phone && newPill}
         <div className="ib-sr" aria-live="polite" data-fold-live="">
           {announced}

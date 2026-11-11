@@ -14,6 +14,8 @@ export const inboxKeys = {
   rowWrites: () => ['inbox', 'row-write'] as const,
   /** A question's answer saved (the pick queue runs these one at a time per question). */
   pickSave: () => ['inbox', 'pick-save'] as const,
+  /** A Send drawn in its thread while its replies are on their way: its pending mutation is the drawing. */
+  sendDraw: () => ['inbox', 'send-draw'] as const,
   /** A reply sent (one per reply of a Send). */
   send: () => ['inbox', 'send'] as const,
 };
