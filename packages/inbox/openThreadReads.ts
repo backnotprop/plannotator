@@ -12,7 +12,8 @@
  *  - its project (name, label, the project it was combined into): any project
  *    record, of any project (a new project can change another's label);
  *  - its project's repo, which the server learns off the record path: while
- *    it is not known yet, every record reads the thread, as before; and once
+ *    it is not known yet (no repo, and no `repo_known`: a folder with no
+ *    `origin` is known once resolved), every record reads the thread; and once
  *    the last read is older than the repo's freshness (`INBOX_REPO_TTL_MS`),
  *    the next record reads it, as before, so a changed `origin` reaches its links;
  *  - its row (delivery, snooze, unsent work), which the window shows only
@@ -30,10 +31,11 @@
  * decisions and the drafts, which show the pick too. The thread is read as
  * before when the list has no row for it or it is another machine's.
  *
- * A read the records do not need is replaced by what it did besides: the
- * thread's files are read again (a file edited on disk, an image captured on
- * a later read), and once the list read lands, the thread is read after all
- * when that list no longer has it (it was deleted elsewhere: no record says so).
+ * A read the records do not need is replaced by what it did besides: once
+ * the list read lands, the thread is read after all when that list no longer
+ * has it (it was deleted elsewhere: no record says so). Its files are read
+ * only when a record changed a message's files (the pane decides,
+ * data/queries/files.ts), and when the window comes back into focus.
  */
 import { INBOX_REPO_TTL_MS, type InboxListRow, type InboxListSection } from '@plannotator/core/inbox-types';
 import type { InboxEvent } from './api';
@@ -105,7 +107,7 @@ export interface OpenThreadState {
   /** On another machine (`machineOf`). */
   remote: boolean;
   /** Its last read that landed, or null (none yet since it opened). */
-  loaded: { thread_id: string; project: { repo?: unknown } } | null;
+  loaded: { thread_id: string; project: { repo?: unknown; repo_known?: true } } | null;
   /** When that read landed (ms, the window's clock), and now. */
   loadedAt: number;
   now: number;
@@ -116,17 +118,19 @@ export interface OpenThreadState {
 }
 
 /**
- * `thread`: read the open thread again. `files`: only its files, then check the list read (see the header).
- * `none`: the records only echo this window's own saves, which the pane already drew: only the list check.
+ * `thread`: read the open thread again. `none`: no read of it, only the list check (see the header); its files are
+ * read by the pane when a record changed a message's files (data/queries/files.ts `sameThreadFiles`).
  */
-export type OpenThreadRead = 'thread' | 'files' | 'none';
+export type OpenThreadRead = 'thread' | 'none';
 
 export function openThreadRead(batch: RecordBatch, open: OpenThreadState): OpenThreadRead {
   if (batch.any || batch.threads.has(open.threadId)) return 'thread';
   if (onlyOwnRecords(batch) && batch.own.has(open.threadId)) return open.remote || !open.listed ? 'thread' : 'none';
   if (open.remote || !open.settled || !open.listed) return 'thread';
-  if (open.loaded?.thread_id !== open.threadId || open.loaded.project.repo == null) return 'thread';
+  if (open.loaded?.thread_id !== open.threadId) return 'thread';
+  // Not known yet (an older Inbox never says it knows): the next read may bring it.
+  if (open.loaded.project.repo == null && open.loaded.project.repo_known !== true) return 'thread';
   // The server refreshes a repo only when a read asks for it after this long: read, as every record did before.
   if (open.now - open.loadedAt > INBOX_REPO_TTL_MS) return 'thread';
-  return 'files';
+  return 'none';
 }

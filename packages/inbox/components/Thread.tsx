@@ -97,7 +97,7 @@ import { authorWithLabel, labelOf, shortLabel, useSessionLabels } from '../sessi
 import { ROW_LABEL_MAX } from './RowAgents';
 import { attachmentImageUrl, readableVersion } from '../attachments';
 import { usePickSave } from '../data/actions/picks';
-import { useThreadAttachments } from '../data/queries/files';
+import { sameThreadFiles, useThreadAttachments } from '../data/queries/files';
 import { MessageView } from '../parts/MessageView';
 import { useSendReply } from '../data/actions/send';
 import { pickComposerMode } from '../fullScreenComposer';
@@ -139,7 +139,7 @@ import type { VoiceLate } from '../voiceSession';
 import type { FullScreenComposerValue } from './FullScreenComposer';
 import { ReplyAnswers, SentAnswers, draftAnswerWords, ReplyActions, type ActionRow, type DraftAnswer } from './ReplyAnswers';
 import { actionSavesPending, actionSavesSettled } from '../actionSaves';
-import { createPickQueue, keepSavedQuestions, onlyQuestionsChanged } from '../pickQueue';
+import { createPickQueue, keepSavedQuestions } from '../pickQueue';
 import { fileGroupName, sentAnswersOf, sentReplyParts, type SentAnswerGroup } from '../sentReply';
 import { SkillsLine } from './SkillsLine';
 import { paintSkillReferences } from '../skillHighlight';
@@ -2446,9 +2446,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   );
 
   // Attachments (step 2): the files as they are now, and the annotations that ride the next Send.
-  // A saved pick moves neither: only a real read of the thread reads them again.
+  // Read again when a message's files change (a record or a read brought them); a real read that did not change them
+  // says so itself (App's filesSignal). A pick, a look or a message with no file reads nothing.
   const filesRevision = useRef(thread);
-  if (!onlyQuestionsChanged(filesRevision.current, thread)) filesRevision.current = thread;
+  if (!sameThreadFiles(filesRevision.current, thread)) filesRevision.current = thread;
   const { model: files, load: reloadFiles, patch: patchRecords } = useThreadAttachments(thread.thread_id, filesRevision.current, filesChanged, filesSignal);
   const attachments: InboxAttachmentState[] = useMemo(() => files?.attachments ?? [], [files]);
   // The images the messages' text shows, captured as files (approval "inbox-image-viewer"): opened, stepped and commented like attachments.

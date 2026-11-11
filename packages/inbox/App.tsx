@@ -25,6 +25,7 @@ import { threadDrawReady } from './threadDrawReady';
 import { QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { createInboxQueryClient } from './data/client';
 import { dropThread, heldThread, pruneThreads, putThread, readThread, showableThread, staleThreads, useHeldThread } from './data/queries/thread';
+import { sameThreadFiles } from './data/queries/files';
 import { applyStreamRecord } from './data/apply/stream';
 import { useRowWrites, type RowDrawing } from './data/actions/rows';
 import { keepSavedQuestions } from './data/actions/picks';
@@ -70,7 +71,6 @@ import { listsThread, newRecordBatch, noteOwnRecord, noteRecord, openThreadRead 
 import { archivedRowPatch, patchShownRow, patchedRow, readRowPatch, shownRowOf, withPinPatches } from './rowActions';
 import { createOwnSaves } from './ownSaves';
 import { createSignal } from './signal';
-import { onlyQuestionsChanged } from './pickQueue';
 import { keepSame, sameListModel } from './listSame';
 import { draftsReadOwed, replyDraftsDiffer, unsentThreads } from './draftsReads';
 import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, rowSnoozes, snoozeBlockedBy, threadAwayLine, threadOutbox } from './machines';
@@ -1797,10 +1797,10 @@ function Inbox() {
         const reread = before?.thread_id === threadId;
         const held = putThread(queryClient, threadId, next);
         const read = held.thread;
-        // Every real read reads the thread's files again too (pickQueue.ts's onlyQuestionsChanged counts on a read's
-        // objects being new): a read that brought nothing new keeps the thread object (and one that changed only
-        // questions keeps the pane's files revision), so it says so here. Any other change reads them by itself.
-        if (reread && onlyQuestionsChanged(before, read)) filesSignal.emit();
+        // Every real read reads the thread's files again too (a file edited on disk, an image captured since): the
+        // pane reads them by itself when the read changed a message's files (data/queries/files.ts), so a read that
+        // did not says so here.
+        if (reread && sameThreadFiles(before, read)) filesSignal.emit();
         threadLoaded.current = read;
         threadLoadedAt.current = Date.now();
         wakeThreadRetry.current?.();
@@ -2270,9 +2270,6 @@ function Inbox() {
           });
           if (read === 'thread') threadRead = refreshThread(open);
           else {
-            // What a read that brought nothing new did besides: the thread's files are read again. Not for an echo
-            // of the window's own saves alone: a pick moves no file.
-            if (read === 'files') filesSignal.emit();
             // Gone from the list this read brought (deleted elsewhere, which no record says): read it, as before.
             void listRead.then((next) => {
               if (routeRef.current.thread === open && !listsThread(next, open)) void refreshThread(open);
