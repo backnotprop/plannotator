@@ -7864,7 +7864,8 @@ dialog.ib-dlg.ar-ed { width: 500px; }
 .ib-bi-text .pm-err { font-size: var(--ib-fs-12-5, 12.5px); }
 @media (pointer: coarse) {
   .pn-inbox .ar-chip, .pn-inbox .ar-seg button { min-height: 38px; }
-  .pn-inbox .ar-area { font-size: 16px; }
+  /* Never under 16 px on a touch screen: iOS zooms the page into a smaller field. */
+  .pn-inbox .ar-area { font-size: max(16px, var(--ib-fs-16, 16px)); }
 }
 /* "Set the rules" (RulesIntro.tsx): the Board's frame; the picture is an agent's message shaped by two rules. */
 .ib-ri-stage { display: flex; flex-direction: column; gap: 10px; width: 400px; max-width: 100%; margin: 0 auto; transition: opacity 400ms ease-out; }
