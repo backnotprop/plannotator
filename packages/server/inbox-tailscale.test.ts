@@ -17,7 +17,7 @@ import { describeTailscaleFailure, type TailscaleRunner } from "@plannotator/sha
 import { writeReleaseNotes } from "@plannotator/shared/update-check";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { fetchReleaseImagesFor } from "./inbox-whats-new-images";
-import { takeDownInboxTailscale } from "./inbox-tailscale";
+import { takeDownInboxTailscale, type InboxTailscaleTimers } from "./inbox-tailscale";
 import { inboxLiveSiteId } from "./inbox-live";
 
 type Json = Record<string, any>;
@@ -69,6 +69,7 @@ function fakeTailscale(options: { tagged?: boolean } = {}) {
       if (down.status) return fail;
       return ok(
         JSON.stringify({
+          BackendState: "Running",
           Self: { DNSName: `${MAGIC}.`, UserID: 42, ...(self.tagged ? { Tags: ["tag:server"] } : {}) },
           User: { "42": { ID: 42, LoginName: self.tagged ? "tagged-devices" : OWNER, DisplayName: "Ramos" } },
         }),
@@ -487,6 +488,63 @@ describe("Inbox over your tailnet", () => {
     expect(registryOf(dataDir).tailscale).toMatchObject({ url: null, error: state.error });
     const settings = (await (await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/settings`)).json()) as Json;
     expect(settings.tailscale.error).toBe(state.error);
+  });
+
+  test("published by itself once Tailscale is back: every window's stream hears the new state, an agent's stream nothing", async () => {
+    const dataDir = world({ inboxTailscale: true });
+    const ts = fakeTailscale();
+    ts.down.status = true;
+    // The retry's clock, driven here (INBOX_TAILSCALE_REPUBLISH).
+    const pending: (() => void)[] = [];
+    const timers: InboxTailscaleTimers = { set: (fn) => pending.push(fn), clear: () => void pending.splice(0) };
+    const inbox = await start(dataDir, ts.run, { tailscaleTimers: timers });
+    expect(inbox.tailscale.state().url).toBeNull();
+    expect(inbox.tailscale.retrying()).toBe(true);
+
+    const frames = (response: Response) => {
+      const seen: Json[] = [];
+      const said = { hello: false };
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      const done = (async () => {
+        for (;;) {
+          const { value, done } = await reader.read().catch(() => ({ value: undefined, done: true }));
+          if (done) return;
+          buffer += decoder.decode(value, { stream: true });
+          let cut: number;
+          while ((cut = buffer.indexOf("\n\n")) >= 0) {
+            const block = buffer.slice(0, cut);
+            buffer = buffer.slice(cut + 2);
+            const event = /^event: (.+)$/m.exec(block)?.[1];
+            if (event === "hello") said.hello = true;
+            if (event === "tailscale") seen.push(JSON.parse(/^data: (.*)$/m.exec(block)![1]!) as Json);
+          }
+        }
+      })();
+      return { seen, said, stop: async () => (await reader.cancel().catch(() => {}), await done) };
+    };
+    const until = async (ready: () => boolean) => {
+      const end = Date.now() + 5_000;
+      while (!ready()) {
+        if (Date.now() > end) throw new Error("timed out waiting for the event stream");
+        await Bun.sleep(5);
+      }
+    };
+    const window = frames(await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/events?window=ts-window`, { headers: { "Sec-Fetch-Site": "same-origin" } }));
+    const agent = frames(await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/events`));
+    await until(() => window.said.hello && agent.said.hello);
+
+    ts.down.status = false;
+    for (const fn of pending.splice(0)) fn();
+    await until(() => window.seen.length >= 1);
+    const url = `https://${MAGIC}:${inbox.port}/`;
+    expect(window.seen[0]!.tailscale).toMatchObject({ on: true, url, error: null });
+    expect(inbox.tailscale.retrying()).toBe(false);
+    const settings = (await (await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/settings`)).json()) as Json;
+    expect(settings.tailscale.url).toBe(url);
+    expect(agent.seen).toHaveLength(0);
+    await Promise.all([window.stop(), agent.stop()]);
   });
 
   test("a mapping someone else made on the Inbox's port is never replaced", async () => {

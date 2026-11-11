@@ -955,11 +955,11 @@ const ReviewApp: React.FC = () => {
 
   // Derived: Platform mode is active when destination is platform AND we have PR/MR metadata
   const platformMode = reviewDestination === 'platform' && !!prMetadata;
-  // The viewer authored this PR/MR — forges refuse self-approval, so every
-  // platform approve path mutes (never disappears) on this flag.
+  // The viewer authored this PR/MR on a forge that always refuses
+  // self-approval (GitHub): every approve path mutes (never disappears) on it.
   const prCapabilities = prMetadata ? getPRPlatformCapabilities(prMetadata) : null;
-  // Only platforms that refuse a self-review mute approve / request changes
-  // (Bitbucket Cloud lets an author approve their own PR).
+  // GitLab and Bitbucket let an author approve; a project that forbids it
+  // refuses, and the submission dialog shows the forge's answer.
   const isOwnPR = !!platformUser && prMetadata?.author === platformUser && prCapabilities?.selfReviewBlocked !== false;
 
   // Platform-aware labels

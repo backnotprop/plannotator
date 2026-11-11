@@ -207,15 +207,8 @@ async function heightOf(toast: Locator): Promise<number> {
 
 const pane = (page: Page) => page.locator('section.ib-pane');
 const toastOf = (page: Page) => page.locator('[data-inbox-toast]');
-/** Mark read: the header's button; on a phone, the first item of the ⋯ sheet (approval "inbox-thread-header"). */
-async function pressMarkRead(page: Page, phone: boolean): Promise<void> {
-  if (!phone) {
-    const read = page.locator('[data-mark-read]');
-    await expect(read).toHaveAttribute('aria-pressed', 'false');
-    await read.click();
-    return;
-  }
-  await expect(pane(page).locator('.ib-phead [data-mark-read]')).toHaveCount(0);
+/** Mark read: the first item of the header's ⋯ menu (a phone's sheet), desktop and phone alike. */
+async function pressMarkRead(page: Page, _phone: boolean): Promise<void> {
   await pane(page).locator('[data-thread-more]').click();
   await page.locator('[data-thread-menu] [data-thread-read-item]').click();
 }
@@ -353,9 +346,8 @@ test('a touch tablet (768, coarse pointer): the desktop toast, no key hint, 44 p
   try {
     await openThread(page, world.threads.stopped, /Fix flaky tests/);
     expect(await page.evaluate(() => matchMedia('(pointer: coarse) and (hover: none)').matches)).toBe(true);
-    const read = page.locator('[data-mark-read]');
-    await expect(read).toHaveAttribute('aria-pressed', 'false');
-    await read.click();
+    await pane(page).locator('[data-thread-more]').tap();
+    await page.locator('[data-thread-menu] [data-thread-read-item]').tap();
     const toast = toastOf(page);
     await expectFits(page, toast, 'tablet Mark read');
     await expect(toast).not.toHaveClass(/ib-toast-phone/);
