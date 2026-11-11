@@ -202,6 +202,9 @@ import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxLiveSites, type InboxLiveBridgeSources, type InboxLiveSites } from "./inbox-live";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
+import { INBOX_DECISION_EXPORT_ROUTE, inboxDecisionExportRoute } from "./inbox-decision-export";
+import { INBOX_DECISION_POST_ROUTE, postThreadDecisions } from "./inbox-decision-post";
+import { DECISION_POST_DESTINATIONS, decisionPostDestinationOf } from "@plannotator/shared/inbox/decision-post";
 import { createInboxAccountsFor, switchTarget } from "./inbox-accounts";
 import { INBOX_ACCOUNT_SWITCHING, INBOX_ACTIVITY_MAX_DAYS, type InboxNoteAutoAdd } from "@plannotator/core/inbox-types";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
@@ -234,6 +237,13 @@ import { createInboxReplyDrafts } from "./inbox-reply-drafts";
 import { createInboxAsk } from "./inbox-ask";
 import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
+import { createInboxAgentFaces } from "./inbox-agent-faces";
+import { createAgentIcons, createInboxAgentIcons, INBOX_AGENT_ICONS_DIR } from "./inbox-agent-icons";
+import { createInboxIconAnimate } from "./inbox-icon-animate";
+import { createBuiltInIconSets, createInboxIconSets } from "./inbox-icon-sets";
+import { createIconSetFetcher, iconSetsPointer, INBOX_ICON_SETS_DIR } from "./inbox-icon-set-fetch";
+import { createInboxAgentFacesFile } from "@plannotator/shared/inbox/agent-faces";
+import type { InboxAgentFacesWire } from "@plannotator/core/inbox-types";
 import { createInboxArtifactPins } from "./inbox-artifact-pins";
 import { createInboxSnoozes } from "./inbox-snooze";
 import { inboxRowAsOf, inboxRowSnoozed, inboxSplitSnoozed } from "@plannotator/core/inbox-snooze";
@@ -305,6 +315,7 @@ import { INBOX_WHATS_NEW_IMAGE_PATH, whatsNewImageRoute } from "./inbox-whats-ne
 const INBOX_WHATS_NEW_RELEASES_PATH = "/api/inbox/whats-new/releases";
 import { inboxCanonicalBaseUrl, inboxCanonicalRedirect } from "./inbox-canonical";
 import { createInboxWindows, parseWindowId, parseWindowOrigin, parseWindowPermission } from "./inbox-windows";
+import { inboxAppIconResponse } from "./inbox-app-icons";
 import { handleInboxTourRequest } from "./inbox-tour";
 import { createBunShapeRoutes } from "./shape-routes";
 import { shapeCodeRoot } from "@plannotator/shared/shape/store";
@@ -1140,16 +1151,31 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const pinListeners = new Set<() => void>();
   /** The pinned artifacts changed (inbox-artifact-pins.ts): the windows' streams say `event: artifact-pins`. */
   const artifactPinListeners = new Set<() => void>();
+  /** `plannotator inbox --open <thread>`: the thread, and the window (inbox-windows.ts `lastUsed`) that shows it. */
+  const showListeners = new Set<(threadId: string, windowId: string) => void>();
   /** A snooze changed or ran out (inbox-snooze.ts): the streams of windows and linked machines say `event: snoozes`. */
   const snoozeListeners = new Set<() => void>();
+  /**
+   * A read of a thread's PRs changed what only the reader keeps (checks, the review verdict; inbox-thread-pulls.ts),
+   * which writes no record: the windows' streams say `event: thread-pulls` and each reads those threads' PRs again.
+   */
+  const threadPullLiveListeners = new Set<(threadIds: readonly string[]) => void>();
   /** How the list's rows look was saved (config.json `inboxRows`): the windows' streams say `event: rows`. */
   const rowsListeners = new Set<(rows: readonly InboxRowsOption[], rev: number, last: { prev: readonly InboxRowsOption[] | null; by: InboxRowsBy | null }) => void>();
   /** The sidebar's layout was saved (config.json `inboxSidebar`): the windows' streams say `event: sidebar`. */
   const sidebarListeners = new Set<(sidebar: InboxSidebarLayout, rev: number) => void>();
+  /** An agent icon's face was saved (inbox/agent-faces.json): the windows' streams say `event: agent-faces`. */
+  const agentFaceListeners = new Set<(wire: InboxAgentFacesWire) => void>();
+  // The pictures uploaded for agents' icons ("Your own…", inbox-agent-icons.ts): every faces wire carries them.
+  const agentIconFiles = createAgentIcons({ dir: join(inboxDir(dataDir), INBOX_AGENT_ICONS_DIR) });
+  const agentFacesFile = createInboxAgentFacesFile(inboxDir(dataDir), (wire) => {
+    const withIcons = { ...wire, icons: agentIconFiles.list() };
+    for (const listener of agentFaceListeners) listener(withIcons);
+  });
   /** The reaction tray's saved emoji changed (config.json `inboxReactions`): the windows' streams say `event: reactions`. */
   const reactionsListeners = new Set<(reactions: readonly InboxReaction[], rev: number) => void>();
   /** A capability switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. `changed`: held until the next big release (heldSwitch). */
-  const capabilityListeners = new Set<(changed?: "code_review" | "shape" | "float_drafts") => void>();
+  const capabilityListeners = new Set<(changed?: "code_review" | "shape" | "float_drafts" | "mark_read_warning") => void>();
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
   const windows = createInboxWindows({ graceMs: options.windowGraceMs });
   /** Event streams open now (health's `event_streams`): Inbox tabs of one origin share one. */
@@ -1171,6 +1197,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       lastDailyPingCheck = at;
       scheduleDailyPing({ version, dataDir, tool: "inbox" });
     },
+    // Update now's installer also gets the last login shell's PATH (claude, nvm's node), once launch has read it.
+    installerPath: () => (launchReady ? launch.loginPath() : []),
     ...options.updates,
     onChange: () => {
       for (const listener of statusListeners) listener();
@@ -1203,6 +1231,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     refCards,
     ...(options.refRunner ? { run: options.refRunner } : {}),
     fixture: options.threadPullFixture ?? threadPullFixtureFromEnv(),
+    onLiveChange: (threadIds) => {
+      for (const listener of threadPullLiveListeners) listener(threadIds);
+    },
   });
   // Pull requests (inbox-pulls.ts): read only while the page is open and Code review is on; the route refuses first otherwise.
   // The project roots whose origin the Pull requests list has waited for once.
@@ -2800,6 +2831,26 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
+   * The warning before a Mark read that sets questions aside (the owner's ask, 2026-11-10): on unless the person
+   * ticked "Don't show this again" (config.json `inboxMarkReadWarning: false`). A window preference: nothing an agent
+   * reads changes. `event: capabilities` names it only when it was the change, so every other window stops (or
+   * starts) asking at once, and a frame stays as it was for everyone else.
+   */
+  const markReadWarningOn = () => loadConfig().inboxMarkReadWarning !== false;
+  const saveMarkReadWarning = (input: unknown, validateOnly = false) => {
+    if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
+      throw new InboxError("validation_error", "mark_read_warning: { on: boolean }.", { field: "mark_read_warning" });
+    }
+    const on = (input as { on: boolean }).on;
+    if (validateOnly) return { on: markReadWarningOn() };
+    const was = markReadWarningOn();
+    saveConfig({ inboxMarkReadWarning: on });
+    if (markReadWarningOn() !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    if (was !== on) for (const listener of capabilityListeners) listener("mark_read_warning");
+    return { on };
+  };
+
+  /**
    * Code review in the Inbox (approval "inbox-code-review-direction",
    * 2026-11-03): on only when the person turned it on (config.json
    * `inboxCodeReview`). Off or unset, agents get nothing of it (no
@@ -3342,6 +3393,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     bro: { on: broOn() },
     /** Floating reply drafts (config.json `inboxFloatDrafts`): off unless the person turned it on. */
     float_drafts: { on: floatDraftsOn() },
+    /** The warning before a Mark read that sets questions aside (config.json `inboxMarkReadWarning`): on unless turned off. */
+    mark_read_warning: { on: markReadWarningOn() },
     /** Code review (config.json `inboxCodeReview`) and Shape (`inboxShape`): off unless the person turned them on. Held until the next big release: absent while off. */
     ...heldSwitch("code_review", codeReviewOn()),
     ...heldSwitch("shape", shapeOn()),
@@ -3500,16 +3553,26 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The pinned artifacts changed (any window's, a phone's, or a deletion): the window reads them again. Windows only.
         const onArtifactPins = () => send(`event: artifact-pins\ndata: {}\n\n`);
         if (windowId) artifactPinListeners.add(onArtifactPins);
+        // Show a thread (`plannotator inbox --open <thread>`): every tab hears it, only the window it names moves. This computer's windows only.
+        const onShow = (threadId: string, target: string) => send(`event: show\ndata: ${JSON.stringify({ thread_id: threadId, window: target })}\n\n`);
+        if (windowId && via === "local") showListeners.add(onShow);
         // A snooze changed or ran out: the list is read again. Windows, and a linked machine that asks (`snoozes=1`:
         // a snooze writes no record, so its copy of this machine's rows would not move). The phone's door hears nothing new.
         const onSnoozes = () => send(`event: snoozes\ndata: {}\n\n`);
         if (windowId || url.searchParams.get("snoozes") === "1") snoozeListeners.add(onSnoozes);
+        // A thread's PRs read behind the window's answer changed their checks or review: those threads' PRs are read
+        // again. Windows only (additive; a window that predates it skips the frame).
+        const onThreadPullsLive = (threadIds: readonly string[]) => send(`event: thread-pulls\ndata: ${JSON.stringify({ thread_ids: threadIds })}\n\n`);
+        if (windowId) threadPullLiveListeners.add(onThreadPullsLive);
         // How the rows look was saved (any window's, a phone's too): every window takes it at once. Windows only.
         const onRows = (rows: readonly InboxRowsOption[], rev: number, last: { prev: readonly InboxRowsOption[] | null; by: InboxRowsBy | null }) => send(`event: rows\ndata: ${JSON.stringify({ rows, rev, prev: last.prev, by: last.by })}\n\n`);
         if (windowId) rowsListeners.add(onRows);
         // The sidebar's layout was saved (any window's, a phone's too): every window takes it at once. Windows only.
         const onSidebar = (sidebar: InboxSidebarLayout, rev: number) => send(`event: sidebar\ndata: ${JSON.stringify({ sidebar, rev })}\n\n`);
         if (windowId) sidebarListeners.add(onSidebar);
+        // An agent icon's face was saved (any window's, a phone's too): every window draws it at once. Windows only.
+        const onAgentFaces = (wire: InboxAgentFacesWire) => send(`event: agent-faces\ndata: ${JSON.stringify(wire)}\n\n`);
+        if (windowId) agentFaceListeners.add(onAgentFaces);
         // The tray's saved emoji changed (any window's, a phone's too): every window takes the list at once. Windows only.
         const onReactions = (reactions: readonly InboxReaction[], rev: number) => send(`event: reactions\ndata: ${JSON.stringify({ reactions, rev })}\n\n`);
         if (windowId) reactionsListeners.add(onReactions);
@@ -3528,10 +3591,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           }
         };
         syncShapes();
-        const onCapabilities = (changed?: "code_review" | "shape" | "float_drafts") => {
+        const onCapabilities = (changed?: "code_review" | "shape" | "float_drafts" | "mark_read_warning") => {
           syncShapes();
           const floats = floatDraftsOn();
-          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...heldSwitch("code_review", codeReviewOn(), changed === "code_review"), ...heldSwitch("shape", shapeOn(), changed === "shape"), ...systemWire(), ...chapterDiagramsWire() };
+          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), ...heldSwitch("code_review", codeReviewOn(), changed === "code_review"), ...heldSwitch("shape", shapeOn(), changed === "shape"), ...systemWire(), ...chapterDiagramsWire() };
           send(`event: capabilities\ndata: ${JSON.stringify(frame)}\n\n`);
         };
         if (windowId) capabilityListeners.add(onCapabilities);
@@ -3571,9 +3634,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           askListeners.delete(onAsk);
           pinListeners.delete(onPins);
           artifactPinListeners.delete(onArtifactPins);
+          showListeners.delete(onShow);
           snoozeListeners.delete(onSnoozes);
+          threadPullLiveListeners.delete(onThreadPullsLive);
           rowsListeners.delete(onRows);
           sidebarListeners.delete(onSidebar);
+          agentFaceListeners.delete(onAgentFaces);
           reactionsListeners.delete(onReactions);
           capabilityListeners.delete(onCapabilities);
           stopShapes?.();
@@ -4022,6 +4088,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A Qwen Code session too, until its registry record goes (inbox-qwen-wake.ts).
     wakeOnlyStatus: (session) => codexWake.status(session) ?? qwenWake.status(session) ?? t3Wake.status(session),
     uncertainItemsOf: (session) => [...codexWake.uncertainItems(session), ...qwenWake.uncertainItems(session), ...t3Wake.uncertainItems(session)],
+    // A session that is an agent with a face (its conversation's earlier id, its launch): its threads show that face too.
+    onPoll: (session, continues) =>
+      agentFacesFile.link(session, () => [
+        ...continues,
+        ...launch
+          .agents()
+          .filter((agent) => agent.session === session)
+          .map((agent) => agent.launch_id),
+      ]),
   });
 
   // Shape (approval "shape-inbox-placement"): the boards' routes and event feed, mounted only while boards are on.
@@ -4315,6 +4390,34 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const pins = createInboxPins({ store, serverSession, readBody: (req) => readBody(req), json });
   // Pinned artifacts and the Artifacts wall (packages/server/inbox-artifact-pins.ts).
   const artifactPins = createInboxArtifactPins({ store, serverSession, readBody: (req) => readBody(req), json });
+  // Agent icons' faces (packages/server/inbox-agent-faces.ts).
+  // "Animate it": an agent hands an animated picture back for the one icon it was asked about (inbox-icon-animate.ts).
+  const iconAnimate = createInboxIconAnimate({
+    inboxDir: inboxDir(dataDir),
+    icons: agentIconFiles,
+    faces: agentFacesFile,
+    serverSession,
+    localOnly: () => localOnly(),
+    readBody: (req) => readBody(req),
+    json,
+    touch: () => void agentFacesFile.touch(),
+  });
+  const agentIcons = createInboxAgentIcons({
+    icons: agentIconFiles,
+    faces: agentFacesFile,
+    serverSession,
+    localOnly: () => localOnly(),
+    readBody: (req) => readBody(req),
+    json,
+    kept: () => iconAnimate.kept(),
+  });
+  const agentFaces = createInboxAgentFaces({ file: agentFacesFile, serverSession, readBody: (req) => readBody(req), json, icons: () => agentIconFiles.list() });
+  // Icon sets for agents' icons ("Sets": built in, or fetched into the data folder on one click; inbox-icon-sets.ts).
+  const builtInIconSets = createBuiltInIconSets();
+  const iconSetFetcher = createIconSetFetcher({ dir: join(inboxDir(dataDir), INBOX_ICON_SETS_DIR), pointer: iconSetsPointer(), builtIn: builtInIconSets.ids });
+  // A download a stop cut short goes on (only one the person started; nothing is asked otherwise).
+  iconSetFetcher.resume();
+  const iconSets = createInboxIconSets({ builtIn: builtInIconSets, fetcher: iconSetFetcher, serverSession, localOnly: () => localOnly(), readBody: (req) => readBody(req), json });
   // Snoozes: threads out of the list until a time (packages/server/inbox-snooze.ts).
   const snoozes = createInboxSnoozes({
     store,
@@ -4690,6 +4793,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (path === "/api/inbox/control/connect") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         return json({ connect: await connectAgents() });
+      }
+      // `plannotator inbox --open <thread>`: the window on this computer the person used last shows the thread,
+      // as a row click would. `shown: false`: no window is open, and the caller opens one at the thread.
+      if (path === "/api/inbox/control/show") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = (await req.json().catch(() => null)) as { thread?: unknown } | null;
+        const ref = typeof body?.thread === "string" ? body.thread.trim() : "";
+        // A thread id, or any message's id (its thread).
+        const threadId = ref ? (store.message(ref)?.thread_id ?? null) : null;
+        if (!threadId || !store.thread(threadId)) return json({ error: `No thread ${ref || "named"} in this Inbox.`, code: "thread_unknown" }, 404);
+        const target = windows.lastUsed();
+        if (target) for (const listener of showListeners) listener(threadId, target);
+        return json({ shown: target !== null, thread: threadId });
       }
       // `plannotator inbox link`: offer, link, unlink and list linked machines (inbox-machines.ts).
       if (path.startsWith("/api/inbox/control/machines")) {
@@ -5230,7 +5346,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.served_by !== undefined && body.served_by !== null && !servedBy) {
           throw new InboxError("validation_error", "served_by: 8 to 64 letters, digits, - or _.", { field: "served_by" });
         }
-        windows.report(windowId, { permission, origin: parseWindowOrigin(body.origin), via, servedBy });
+        // `used` (additive): the window got focus, so `plannotator inbox --open <thread>` moves this one.
+        windows.report(windowId, { permission, origin: parseWindowOrigin(body.origin), via, servedBy, used: body.used === true });
         return json({ notify_reach: windows.reach(notificationsState().enabled) });
       }
       if (path === "/api/inbox/restart") {
@@ -5372,7 +5489,50 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           throw error;
         }
       }
+      // Post decisions (the thread's ⋯ More, Export decisions › Post on a pull request, and the PR card's row): the
+      // thread's decisions as one comment on one of its PRs, edited in place on a later post (inbox-decision-post.ts).
+      // A write to the forge as the person's own gh / glab: the review post's guards, the owner only and same origin.
+      {
+        const posting = INBOX_DECISION_POST_ROUTE.exec(path);
+        if (posting) {
+          if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+          if (!ownerOrLocal(req, via)) return localOnly();
+          if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+            return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+          }
+          const body = await readBody(req);
+          if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+          const result = await postThreadDecisions(store, posting[1]!, { pull: body.pull, tz: body.tz }, { runtime: options.prRuntime ?? prCommandRuntime, version, destination: loadConfig().inboxDecisionsPostTo });
+          return json(result.status === 200 ? { serverSession, ...result.body } : result.body, result.status);
+        }
+      }
+      // Export decisions (the thread's ⋯ More): one thread's decisions as a Markdown, HTML or JSON download. Read only,
+      // the same origin as the thread's own read; the phone door carries it (inbox-decision-export.ts).
+      if (INBOX_DECISION_EXPORT_ROUTE.test(path)) {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        return (await inboxDecisionExportRoute(url, store, { version }))!;
+      }
       // Settings → Storage's sizes walk every file in the store, so only that panel asks for them, when it is shown.
+      // Where Post decisions puts them (config.json `inboxDecisionsPostTo`; the Post group's "Where" in Export decisions):
+      // read by any window that may post, changed by the owner only, like the post itself.
+      if (path === "/api/inbox/settings/decisions-post") {
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (req.method === "GET") return json({ serverSession, post_to: decisionPostDestinationOf(loadConfig().inboxDecisionsPostTo) });
+        if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        if (!DECISION_POST_DESTINATIONS.includes(body.post_to as never)) throw new InboxError("validation_error", "post_to: description, comment or both.", { field: "post_to" });
+        saveConfig({ inboxDecisionsPostTo: body.post_to as "description" | "comment" | "both" });
+        const saved = decisionPostDestinationOf(loadConfig().inboxDecisionsPostTo);
+        if (saved !== body.post_to) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+        return json({ serverSession, post_to: saved });
+      }
       if (path === "/api/inbox/settings/storage") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         return json(perfPhase("disk", () => store.diskUsage()));
@@ -5410,6 +5570,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.steps === undefined &&
           body.bro === undefined &&
           body.float_drafts === undefined &&
+          body.mark_read_warning === undefined &&
           body.code_review === undefined &&
           body.shape === undefined &&
           body.system === undefined &&
@@ -5418,7 +5579,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.voice === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, steps, bro, float_drafts, code_review, shape, system, chapter_diagrams, voice, update_check, auto_update or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, steps, bro, float_drafts, mark_read_warning, code_review, shape, system, chapter_diagrams, voice, update_check, auto_update or cookie_host is required.");
         }
         const owner = ownerOrLocal(req, via);
         // The Board changes what agents on this computer are offered (the card tool): the owner's to change.
@@ -5429,6 +5590,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.bro !== undefined && !owner) return localOnly();
         // Floating reply drafts: the owner's (a guest's window never floats one).
         if (body.float_drafts !== undefined && !owner) return localOnly();
+        // The Mark read warning: the owner's (a guest's warning offers no "Don't show this again").
+        if (body.mark_read_warning !== undefined && !owner) return localOnly();
         // Code review too (submit_guide's `review` field, the review skills): the owner's to change.
         if (body.code_review !== undefined && !owner) return localOnly();
         // Shape too (the shape skill, the routes): the owner's to change.
@@ -5484,6 +5647,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.steps !== undefined) saveSteps(body.steps, true);
         if (body.bro !== undefined) saveBro(body.bro, true);
         if (body.float_drafts !== undefined) saveFloatDrafts(body.float_drafts, true);
+        if (body.mark_read_warning !== undefined) saveMarkReadWarning(body.mark_read_warning, true);
         if (body.code_review !== undefined) saveCodeReview(body.code_review, true);
         if (body.shape !== undefined) saveShape(body.shape, true);
         if (body.chapter_diagrams !== undefined) saveChapterDiagrams(body.chapter_diagrams, true);
@@ -5515,6 +5679,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const steps = body.steps === undefined ? { on: stepsOn() } : saveSteps(body.steps);
         const bro = body.bro === undefined ? { on: broOn() } : saveBro(body.bro);
         const floatDrafts = body.float_drafts === undefined ? { on: floatDraftsOn() } : saveFloatDrafts(body.float_drafts);
+        const markReadWarning = body.mark_read_warning === undefined ? { on: markReadWarningOn() } : saveMarkReadWarning(body.mark_read_warning);
         const codeReview = body.code_review === undefined ? { on: codeReviewOn() } : saveCodeReview(body.code_review);
         const shape = body.shape === undefined ? { on: shapeOn() } : saveShape(body.shape);
         const systemAnswer = system.answer(body);
@@ -5522,7 +5687,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const chapterDiagrams = body.chapter_diagrams === undefined ? chapterDiagramsWire() : { chapter_diagrams: saveChapterDiagrams(body.chapter_diagrams) };
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, float_drafts: floatDrafts, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, ...chapterDiagrams, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, float_drafts: floatDrafts, mark_read_warning: markReadWarning, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, ...chapterDiagrams, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.
       if (path.startsWith("/api/inbox/voice/")) {
@@ -5709,6 +5874,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Pinned artifacts and the Artifacts wall (approval "inbox-artifact-stars").
       const artifactPinned = await artifactPins.route(req, url);
       if (artifactPinned) return artifactPinned;
+      // Agent icons' faces: the face each agent shows in every window.
+      const faced = await agentFaces.route(req, url);
+      if (faced) return faced;
+      // The pictures uploaded for agents' icons ("Your own…"): this computer's windows and the owner's.
+      const iconed = await agentIcons.route(req, url, ownerOrLocal(req, via));
+      if (iconed) return iconed;
+      const animated = await iconAnimate.route(req, url, ownerOrLocal(req, via));
+      if (animated) return animated;
+      // Icon sets for agents' icons ("Sets"): built-in ones to any window, fetched ones and downloads to the owner's.
+      const setIconed = await iconSets.route(req, url, ownerOrLocal(req, via));
+      if (setIconed) return setIconed;
       // Snooze and Unsnooze (approval "inbox-snooze").
       const snoozed = await snoozes.route(req, url);
       if (snoozed) return snoozed;
@@ -6429,6 +6605,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The window's scripts, by exact name from the pack (404 for any other), compressed over the tailnet as the page is.
       if (path.startsWith(PACKED_ASSET_ROUTE_PREFIX)) return packedAppResponse(windowApp, req, path, via === "tailnet");
       if ((path === "/favicon.png" || path === "/favicon.ico") && req.method === "GET") return handleFavicon(path);
+      // The installed app's manifest and icons (inbox-app-icons.ts), of the same favicon style.
+      if (req.method === "GET") {
+        const appIcon = inboxAppIconResponse(path, faviconState());
+        if (appIcon) return appIcon;
+      }
 
       // A running local site in a thread (inbox-live.ts): local only, since the proxy relays the
       // person's signed-in dev app; another site's page is refused, reads included.

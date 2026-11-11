@@ -34,17 +34,21 @@ export function inboxLaunchNotReadyWords(input: { agent: string; code: InboxLaun
       };
     case "tool_off":
       return { line: `${agent} isn't ready ${on}: Plannotator's Inbox tool is off for it there`, fix: null, command: null };
-    case "signed_out":
+    case "signed_out": {
+      // The check can read "signed out" when it is not: an Inbox started where macOS keeps the login locked (an SSH
+      // start not seen as one, a process started from one). A restart from that machine's own Terminal reads it again.
+      const restart = `In Terminal ${on} itself, run \`plannotator inbox restart\``;
       return {
         line: `${agent} isn't signed in ${on}`,
         // Codex keeps its login in its own home (`codex login`), not the macOS keychain an SSH start can't open.
         fix: agent === "Codex"
-          ? `Run \`codex login\` ${on}, then try again.`
+          ? `Run \`codex login\` ${on}, then try again. Already signed in there? ${restart}.`
           : input.overSsh
-          ? `Plannotator ${on} was started over SSH, and macOS keeps the login locked for SSH. Start Plannotator again from Terminal ${on} itself, then try again.`
-          : `Run \`claude\` ${on} once to sign in, then try again.`,
+          ? `Plannotator ${on} was started over SSH, and macOS keeps the login locked for SSH. ${restart}, then try again.`
+          : `Run \`claude\` ${on} once to sign in, then try again. Already signed in there? ${restart}.`,
         command: null,
       };
+    }
     case "unknown":
       return { line: `${agent} can't start ${on} right now`, fix: null, command: null };
   }

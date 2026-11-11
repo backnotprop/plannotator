@@ -119,8 +119,13 @@ exists in every state; composer rows open `DecisionNoteDialog`. Platform (PR) mo
 same ghost-X + `DecisionControl` shape from `buildDecisionSpec`'s platform arm, with **no
 composer items ever**: every menu action opens the existing `ReviewSubmissionDialog` (per-target
 state, retry, "leave PR open" toggle — whose general-comment textarea is the only note field on
-that side), and the self-approval mute is preserved — muted primary/items with the "You can't
-approve your own {PR/MR}" reason.
+that side), and the self-approval mute is preserved on GitHub only (`selfReviewBlocked`) — muted
+primary/items with the "You can't approve your own PR" reason. GitLab and Bitbucket leave Approve
+live on your own PR/MR and let the forge decide: GitLab accepts an author's approval unless the
+project forbids it, and then answers 401; `submitGlMRReview` turns that into "GitLab refused the
+approval (<GitLab's message>) …". A refused decision with nothing else posted is thrown (like
+Bitbucket), so the dialog shows it as a plain failure and the review stays open with no retry
+locked to Approve; after comments landed it is a `partial` whose retry is the decision alone.
 
 **Request changes is a real review event (#1611).** `PRReviewAction` (`packages/shared/pr-types.ts`)
 is `'approve' | 'comment' | 'request_changes'`, carried end to end: `resolvePlatformDecisionAction`
@@ -131,9 +136,15 @@ Request changes, while the primary `Post Comments` keeps the plain comment flow 
 else is `400`, never a silent COMMENT), and `submitGhPRReview` maps it to `REQUEST_CHANGES` on the
 single create-review call AND on the pending-review → `/events` submit path (#1600), with the
 same `See inline comments.` placeholder COMMENT gets when the body is empty (GitHub requires a
-body on both). GitLab has no request-changes review: `request_changes` posts exactly what
-`comment` posts, the menu subtitles say so (`requestChangesSupported: false` on the spec's
-platform input), and the dialog's Request changes option is disabled with that reason. GitHub
+body on both). GitLab posts the note and discussions first, then in one GraphQL request appends you as a reviewer (`mergeRequestSetReviewers`, `APPEND`) and sets the reviewer state with
+the `mergeRequestRequestChanges` GraphQL mutation (a failure there is a `partial` whose retry is
+`request_changes` alone). GitLab before 18.9 has no `mergeRequestRequestChanges` and rejects the
+whole request with an `undefinedField` error on it, so nothing changes there: the review stays the
+plain comment it already posted and the result carries `postedAs: "comment"`, which the review
+app's agent status line and the Inbox's posted words follow ("Review posted on GitLab"). Any other
+error is still a failure. A platform without a request-changes decision sets
+`requestChangesSupported: false` on the spec's platform input. The menu subtitles then say it
+posts as a comment, and the dialog's Request changes option is disabled with that reason. GitHub
 refuses REQUEST_CHANGES on your own PR like APPROVE, so with `requestChangesSupported: true` and
 `selfAuthored` the empty-state `Request changes…` mutes with its own reason and a live
 `Comment…` row (`note-with-feedback`, compact id `comment`) keeps the state from being a dead
@@ -298,9 +309,10 @@ registered on the CAPTURE phase and swallows `Mod+Enter`, so a keystroke aimed
 at the announcement cannot approve a plan or post a review behind it.
 
 **Media is hosted, not bundled.** The two demos (`tui-herdr-full-demo` and
-`tui-herdr-lite-demo`, mp4 + webm + poster jpg each, ~23MB together) live in
-`apps/marketing/public/assets/` and are served from
-`https://plannotator.ai/assets/` once the marketing deploy syncs them, the same
+`tui-herdr-lite-demo`, mp4 + webm + poster jpg each, ~23MB together) are served from
+`https://plannotator.ai/assets/` (the videos are uploaded there by hand, see
+[Marketing Site videos](project-and-development.md#videos); the posters ship from
+`apps/marketing/public/assets/`), the same
 precedent as `GuideIntroDialog`'s hero image (the Edit Mode recording is small
 enough to inline; these are not). The `<video>` is `muted playsInline loop`
 with `preload="auto"`, mp4 first in source order, and `autoPlay` unless
@@ -373,7 +385,7 @@ sees terminal tools first and this one on the next load; behind every chain dial
 history-shortcut guard defer behind it like they do behind terminal tools.
 
 **Media:** real footage, hosted like the terminal-tools demos:
-`apps/marketing/public/assets/ask-this-session-demo.{mp4,webm}` + `ask-this-session-poster.jpg`
+`https://plannotator.ai/assets/ask-this-session-demo.{mp4,webm}` + `ask-this-session-poster.jpg`
 (1280x800, ~35 s). Recorded from a real Claude Code 2.1.289 session (real plugin and mod, real
 compiled CLI, real review app) whose model calls went to a scripted local stand-in for the
 Messages API, so the question, the Read tool call and the streamed answer are real traffic with
@@ -393,7 +405,7 @@ it). Unlike the other announcements it is built on the shared dialog (`component
 UI: modal, focus trapped and restored), with the same capture-phase keydown that swallows
 `Mod+Enter` and keeps Escape from the App's own handlers (`data-inbox-announcement-dialog`).
 
-**Media:** the marketing page's own film, `apps/marketing/public/assets/inbox-film.mp4`
+**Media:** the marketing page's own film, `https://plannotator.ai/assets/inbox-film.mp4`
 (1920x1080, ~14 MB, voice-led) and `inbox-film-poster.jpg` (~120 KB), from
 `https://plannotator.ai/assets/` like the other announcements' footage (no CSP is involved; see
 the terminal-tools section). It never autoplays and is `preload="none"`, so opening the panel loads
@@ -476,9 +488,24 @@ Client side (`packages/review-editor`, `packages/ui/utils/codeAnnotationAnchor.t
 
 The Dock's **Paths** view (`CallFlowTreeView` in `packages/review-editor/components/CallFlowTreeView.tsx`, header in `dock/panels/ReviewCallFlowPanel.tsx`, styles under "Call-flow Dock + file-header Lens" in `packages/review-editor/index.css`) is the approved "Cards" look (`.product/approved/review-callflow-cards/`, not in this repo). The header is the title plus one summary line ("14 new · 1 removed · 4 files · 2 entries"), then a legend with the hollow "unchanged" marker and the click hint. Each entry point is a card whose header shows "Entry", the entry name and a quiet "N changed" count. A row leads with the called name: `splitCallFlowSignature` (`utils/callFlowPresentation.ts`) splits a call label into a muted receiver, the name, and the more muted arguments, and the arguments truncate before the receiver (the name never does). Branch rows keep their plain label. The status is a dot: green for new, red for removed (with the name struck through), a hollow ring for unchanged context. The dot is `aria-hidden`; the row's comment button carries a visually hidden "New: " or "Removed: " so a screen reader reads the status with the call. Rounded tree lines join each caller's dot to its children; their geometry comes from the `--call-flow-*` variables on `.call-flow-trees` (indent, base, toggle, marker cell, row height), so change the variables and never the line rules. Every mode must keep `indent >= toggle + marker cell / 2`, or a child's toggle cell starts left of its caller's line and the elbow collapses: the compact Lens shrinks the toggle and marker cells (12px) with its 19px indent, and a coarse pointer keeps the 14px toggle cell and grows only the button's touch area (`button.call-flow-expand::after`, 44px over the indent and the marker cell, which takes no pointer events). `CallFlowTreeView.geometry.test.ts` resolves the variables for every Dock/Lens, fine/coarse and wide/narrow combination and fails when an elbow would collapse. `file:line` is one chip: strong (`call-flow-node-location-cross-file`) where the call moves into a file other than its caller's (the nearest calling step that has a file; an entry's first step always counts), faint where it stays in the same file. The full path is in the chip's title and accessible name. The Lens (`CallFlowFileBadge`) renders the same component with `compact`. Commenting (click, Enter, Shift-click to add steps), jump to `file:line`, the source preview, search (matches are found on the whole label and marked across the receiver/name split), collapse and focus rings are unchanged. Light and dark come only from theme tokens. The summary items are spaced by CSS gap, with a visually hidden ", " between them for screen readers. Known gaps: the chip shows only the file name, so two files with the same name in different directories look alike (the title and accessible name carry the full path), and a search that matches only a directory finds the row but marks nothing in it. Tests: `CallFlowTreeView.interaction.test.tsx` ("CallFlowTreeView cards"), `CallFlowTreeView.geometry.test.ts`, `CallFlowTreeView.test.ts`, `utils/callFlowPresentation.test.ts`.
 
+### Call tree (Call flow, phase 1)
+
+One function's calls as a tree, one call per row (`CallTree` in `packages/review-editor/components/callTree/CallTree.tsx`, styles in `callTree.css` beside it, imported by `index.css`). It is fed by one versioned document, `CallTreeDoc` (`plannotator.callTree/1`, `packages/core/call-tree.ts`, re-exported as `@plannotator/shared/call-tree`), and callbacks only (`onOpen`, `onAnnotateTargets`, `onBack`, `loadNodeSource`); it reads no review state, so a Guided Review chapter or the Inbox review can mount it as it is. A node is CallDiff's `CallFlowNode` plus an optional `provenance: "agent"` and `notes` (each with its own `provenance`); words with an agent provenance are drawn with a pencil mark. Nothing writes them yet (agent notes are phase 2).
+
+- **Where:** the Call flow tab opens on the Call tree (the owner's decision once the tree had search); its switch is Call tree | Paths | Raw, and Paths (the approved cards) is unchanged. The choice lasts while the panel is mounted, as the Paths/Raw choice did; there is no setting. Each hunk Call flow can draw a tree for gets a "Call tree" entry just above its first change, in All changes and the single-file diff (a `HostLineNote` from `App.tsx`, drawn by both diff views). It opens the tab on the tree rooted at the function around the hunk, with the caller trail ("from a › b"); Escape returns to the hunk, Close shows the tab's own trees. Hunks with no tree get no entry. No endpoint: `/api/call-flow` and `/api/semantic-diff` are re-read in the browser.
+- **Re-rooting** (`findCallTreeRoot`): with `sem`'s innermost changed entity around the hunk's first change (`utils/callTreeHunks.ts`), the shallowest call to that name whose own calls are written in its range (or an entry written there); without sem, the shallowest node whose calls are written in the hunk, lifted out of a call's arguments (CallDiff nests a call written in an options object or callback under the call it is passed to). Removed calls are matched on the old side.
+- **Rows** (`buildCallTreeRows`, iterative, so deep trees never hit a recursion limit): tree lines; the file:line on the right, only `:line` when the call stays in its caller's file; a red or green band only where a call's own line changed (a wholly new subtree bands its top row and keeps dots below, never the all-green look the owner rejected); "↑ above" for a call already drawn with the same calls below it, not expanded again; unchanged branches fold by default with "N calls"; "Changes only" keeps the root and the paths to changes. Hover is a grey band with the name underlined; the current row shows "⏎ open".
+- **Keys** (scope `review-call-tree` in `callTree.shortcuts.ts`, in the shortcut help): ↑/↓ move, ←/→ fold and unfold (or move to the caller / first call), Enter opens the line, C comments, Escape goes back. They are bound to the tree element and stop there, so the file tree's arrows and All files' `C` never see them. Enter opening (not commenting) is the owner's decision of 2026-11-10; the Paths cards keep click-to-comment.
+- **Open and comment:** a row opens like a Paths location when its line is in the patch (`openDiffFile` + the line selection), else the file's whole-file view (kept in Back); a removed call outside the patch does not open. A comment goes through `onAddCallFlowAnnotation` with `annotationTargetForCallFlowNode`, so it lands on the row's file line (old side for a removed call) exactly like a Paths card comment.
+- **Search** (`CallTreeList`, which the tab mounts for both its own trees and a hunk's tree): the Paths view's search, reused rather than rebuilt: `CallFlowSearchControls` (same field, "Search call paths", "Find calls or files", the `n/m` count, Enter / Shift+Enter, Escape), `useCallFlowFindShortcut` (Cmd/Ctrl+F while the Dock panel is active) and Paths' match rule (`callTreeNodeMatches`: trimmed, any case, in the label or the file path) and marks (`searchRanges` / `highlightSlice`, across the receiver/name split and in the location). No new key. One field searches every tree of the tab; matches are numbered across them and next / previous moves the current row of the tree holding the match. `buildCallTreeRows({ query })` keeps matching rows and their callers, all open (so a match in a folded branch shows), no repeats, and intersects with Changes only; a tree with no match keeps only its root. Folds made while searching are kept apart and dropped with the search, so clearing it gives back the person's folds. The trees get the query through `useDeferredValue` and rows compare what they draw (`sameRow`), so the field answers each key in a frame on 3,041 rows (the tree follows in about 64 ms; arrows and next match stay one frame).
+- **Source preview:** the file:line keeps the Paths view's preview (next section): the same hook, window and loader.
+- **Size:** 3,041 unfolded rows mount in about 85 ms in Chromium and an arrow move takes one frame, so rows are not virtualized.
+
+Tests: `packages/core/call-tree.test.ts` (incl. "search rows"), `utils/callTreeHunks.test.ts`, `components/callTree/CallTree.test.tsx` (incl. "CallTree search", which also checks the count equals the Paths search's for the same query), `dock/panels/ReviewCallFlowPanel.callTree.test.tsx`.
+
 ### Source previews on hover (Call Flow, Semantic Changes)
 
-In the Semantic Changes panel, resting the pointer on (or focusing) an entity row opens its source: the entity's line range on the side it lives on (`lineSelectionForChange`; the old file for a deletion), through `SemanticDiffChangeRow` in `packages/review-editor/dock/panels/semanticDiffShared.tsx`. In the Call Flow Dock panel, resting the pointer on (or focusing) a step's `file:line` location opens a floating source window: the step's lines marked, three lines of context around them, syntax highlighted. The window is `CodeSnippetPreview` (`packages/ui/components/CodeSnippetPreview.tsx`) with the dwell/close timing of `useHoverPreview` (`packages/ui/hooks/useHoverPreview.ts`, 150 ms to open, 200 ms grace to move into the window), the same pair plan / annotate code-file links use (`CodeFileLink` in `InlineMarkdown.tsx`). Both read through `createReviewFileSourceLoader` (`packages/review-editor/hooks/useReviewFileSource.ts`; Call Flow adapts it per step in `useCallFlowNodeSource.ts`) over `/api/file-content`, bound to the review's base and snapshot, so a PR or since-base review previews the reviewed source rather than the working tree; a `removed` step shows the old side, and a renamed file asks with its `oldPath`. One request per file is shared by its rows; a failed one (a stale snapshot) is forgotten so a later hover asks again. Nothing loads before the dwell, a static patch review (`contextExpansionAvailable === false`) gets no loader and no preview, and the window closes on any scroll since it is placed once. The per-file Lens (`CallFlowFileBadge`) and the file header's semantic popover (`SemanticFileBadge`) pass no loader on purpose: each is itself a hover popover, and a second, portalled one would read as the pointer leaving it. Tests: `packages/review-editor/components/CallFlowTreeView.sourcePreview.test.tsx`, `packages/review-editor/dock/panels/semanticDiffShared.sourcePreview.test.tsx`.
+In the Semantic Changes panel, resting the pointer on (or focusing) an entity row opens its source: the entity's line range on the side it lives on (`lineSelectionForChange`; the old file for a deletion), through `SemanticDiffChangeRow` in `packages/review-editor/dock/panels/semanticDiffShared.tsx`. In the Call Flow Dock panel, resting the pointer on (or focusing) a step's `file:line` location opens a floating source window: the step's lines marked, three lines of context around them, syntax highlighted; the Call tree view's file:line does the same. The window is `CodeSnippetPreview` (`packages/ui/components/CodeSnippetPreview.tsx`) with the dwell/close timing of `useHoverPreview` (`packages/ui/hooks/useHoverPreview.ts`, 150 ms to open, 200 ms grace to move into the window), the same pair plan / annotate code-file links use (`CodeFileLink` in `InlineMarkdown.tsx`). Both read through `createReviewFileSourceLoader` (`packages/review-editor/hooks/useReviewFileSource.ts`; Call Flow adapts it per step in `useCallFlowNodeSource.ts`) over `/api/file-content`, bound to the review's base and snapshot, so a PR or since-base review previews the reviewed source rather than the working tree; a `removed` step shows the old side, and a renamed file asks with its `oldPath`. One request per file is shared by its rows; a failed one (a stale snapshot) is forgotten so a later hover asks again. Nothing loads before the dwell, a static patch review (`contextExpansionAvailable === false`) gets no loader and no preview, and the window closes on any scroll since it is placed once. The per-file Lens (`CallFlowFileBadge`) and the file header's semantic popover (`SemanticFileBadge`) pass no loader on purpose: each is itself a hover popover, and a second, portalled one would read as the pointer leaving it. Tests: `packages/review-editor/components/CallFlowTreeView.sourcePreview.test.tsx`, `packages/review-editor/components/callTree/CallTree.test.tsx` ("CallTree source preview"), `packages/review-editor/dock/panels/semanticDiffShared.sourcePreview.test.tsx`.
 
 ### Call flow runtime: the CallDiff pin
 

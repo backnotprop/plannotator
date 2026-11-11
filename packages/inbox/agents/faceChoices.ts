@@ -3,14 +3,21 @@
  * mascot). The picker (FaceFan.tsx) offers all of them; a click on the mark steps through the first cycle, as before.
  */
 
-/** The Glass colours, round the hue wheel: Black and Yellow keep the ids they were stored under (`glass`, `yellow`). */
-export const GLASS_FACES = ['glass', 'glass-red', 'glass-orange', 'yellow', 'glass-green', 'glass-teal', 'glass-blue', 'glass-purple', 'glass-pink', 'glass-ice'] as const;
-export type GlassFace = (typeof GLASS_FACES)[number];
-export type AgentFace = 'agent' | GlassFace | 'transparent' | 'totman';
-export type OurFace = Exclude<AgentFace, 'agent'>;
+// The face ids are the Inbox's (core inbox-types.ts, "Agent faces": the server keeps each agent's face).
+import { INBOX_AGENT_FACES, INBOX_GLASS_FACES, isInboxAgentFace, isInboxOwnFace, type InboxAgentFace, type InboxBuiltInFace, type InboxGlassFace, type InboxOwnFace } from '@plannotator/core/inbox-types';
 
-/** Every face, in the picker's order. */
-export const AGENT_FACES: readonly AgentFace[] = ['agent', ...GLASS_FACES, 'transparent', 'totman'];
+/** The Glass colours, round the hue wheel: Black and Yellow keep the ids they were stored under (`glass`, `yellow`). */
+export const GLASS_FACES = INBOX_GLASS_FACES;
+export type GlassFace = InboxGlassFace;
+/** A face: the agent's own mark, one of ours, or a picture the person uploaded (`own:<hash>`, "Your own…"). */
+export type AgentFace = InboxAgentFace;
+/** Our faces: the built-in pictures (faceArt.ts). */
+export type OurFace = Exclude<InboxBuiltInFace, 'agent'>;
+export type OwnFace = InboxOwnFace;
+export const isOwnFace = isInboxOwnFace;
+
+/** Every built-in face, in the picker's order. */
+export const AGENT_FACES: readonly InboxBuiltInFace[] = INBOX_AGENT_FACES;
 
 /** The click cycle (the owner, 2026-11-09): each stays until the next click. */
 export const AGENT_FACE_CYCLE: readonly AgentFace[] = ['agent', 'glass', 'yellow', 'transparent', 'totman'];
@@ -21,7 +28,7 @@ export function nextAgentFace(face: AgentFace): AgentFace {
   return at < 0 ? 'transparent' : AGENT_FACE_CYCLE[(at + 1) % AGENT_FACE_CYCLE.length]!;
 }
 
-export const isAgentFace = (value: unknown): value is AgentFace => typeof value === 'string' && (AGENT_FACES as readonly string[]).includes(value);
+export const isAgentFace = isInboxAgentFace;
 
 /** Each of our faces' name (a picker choice's accessible name). */
 export const FACE_LABELS: Readonly<Record<OurFace, string>> = {

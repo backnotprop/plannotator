@@ -151,6 +151,7 @@ export function PhoneToSheet({
                 key={option.key}
                 id={optionId(i)}
                 host={target.host}
+                agent={target.session}
                 // A session with a title leads with it and names its agent under it; one without is its agent.
                 title={target.label ?? agent}
                 detail={[target.label ? agent : null, target.project.name, time].filter(Boolean).join(' · ')}

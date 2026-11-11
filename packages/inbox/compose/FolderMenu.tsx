@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { parseInboxGitUrl, type InboxGitRepo } from '@plannotator/core/inbox-git-url';
+import { inboxPermissionCodeSpans } from '@plannotator/core/inbox-permission';
 import { inboxApi, type CloneReach, type CloneTargetAnswer } from '../api';
 import { Icon } from '../icons';
 import { tildePath } from '../format';
@@ -74,8 +75,8 @@ export interface FolderGroup {
   /** The project the person last started an agent in there: "· you started it here last". */
   last: string | null;
   scratch: ScratchRow | null;
-  /** The agent can't start there: one disabled line instead of its projects. */
-  notice: { line: string; command: string | null } | null;
+  /** The agent can't start there: one disabled line instead of its projects, with what to do there (`fix`) under it. */
+  notice: { line: string; command: string | null; fix?: string | null } | null;
   /** That machine is asleep: its folder browser reads nothing. */
   asleep?: boolean;
   /** Where that machine clones a repo with no setting (`~/…`, from its launch block), for its row while it can't be asked. */
@@ -571,9 +572,25 @@ export function FolderMenu({
                 </div>
               )}
               {g.notice && (
-                <div className="ib-cp-opt ib-cp-fopt ib-cp-fnotice" role="option" aria-selected={false} aria-disabled="true" data-compose-folder-notice={group.machine ?? 'self'}>
+                <div
+                  className="ib-cp-opt ib-cp-fopt ib-cp-fnotice"
+                  role="option"
+                  aria-selected={false}
+                  aria-disabled="true"
+                  // The line names the row; what to do there is its description (read after it).
+                  aria-labelledby={`${uid}-notice-${gi}`}
+                  aria-describedby={g.notice.fix ? `${uid}-fix-${gi}` : undefined}
+                  data-compose-folder-notice={group.machine ?? 'self'}
+                >
                   <Icon name="info" size={15} />
-                  <span className="ib-cp-op">{g.notice.line}</span>
+                  <span className="ib-cp-op">
+                    <span id={`${uid}-notice-${gi}`}>{g.notice.line}</span>
+                    {g.notice.fix && (
+                      <span className="ib-cp-ffix" id={`${uid}-fix-${gi}`} data-compose-folder-fix="">
+                        {inboxPermissionCodeSpans(g.notice.fix).map((part, i) => (part.code ? <code key={i}>{part.text}</code> : <Fragment key={i}>{part.text}</Fragment>))}
+                      </span>
+                    )}
+                  </span>
                   {g.notice.command && (
                     <button
                       type="button"

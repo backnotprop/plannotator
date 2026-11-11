@@ -75,9 +75,9 @@ export function PhoneReplyRecipient({
       {!first ? (
         <AgentPill {...control} label="Choose an agent" ask />
       ) : chosen.length === 1 ? (
-        <AgentPill {...control} host={first.host} label={null} detail={ended ? 'ended' : null} />
+        <AgentPill {...control} host={first.host} agent={first.session} label={null} detail={ended ? 'ended' : null} />
       ) : (
-        <AgentMark {...control} host={first.host} count={chosen.length} />
+        <AgentMark {...control} host={first.host} agent={first.session} count={chosen.length} />
       )}
       <BottomSheet open={open} onClose={() => onOpen(false)} title={TITLE} host={section} attrs={{ 'data-recipient-list': '' }}>
         <div className="ib-sheet-list" role="listbox" aria-label={TITLE} aria-multiselectable>
@@ -88,6 +88,7 @@ export function PhoneReplyRecipient({
               <SheetRow
                 key={row.session}
                 host={row.host}
+                agent={row.session}
                 title={title ?? row.label}
                 detail={[title ? agentName(row.host) : null, QUIET[row.state] ?? folderOf(row.session)].filter(Boolean).join(' · ')}
                 selected={on}

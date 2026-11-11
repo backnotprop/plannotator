@@ -1033,7 +1033,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
               return (
                 <div key={action.kind !== 'message' ? `action-${action.kind}` : `action-${action.target.session}`} className="ib-sp-row" {...common} data-compose-action={action.kind}>
                   <span className="ib-sp-mark" aria-hidden="true">
-                    {action.kind !== 'message' ? <Icon name={action.kind === 'new' ? 'compose' : 'code'} className="ib-sp-mk" /> : <HostMark host={action.target.host} />}
+                    {action.kind !== 'message' ? <Icon name={action.kind === 'new' ? 'compose' : 'code'} className="ib-sp-mk" /> : <HostMark host={action.target.host} agent={action.target.session} />}
                   </span>
                   <span className="ib-sp-rs">
                     <span className="ib-sp-p">{actionLabel(action)}</span>

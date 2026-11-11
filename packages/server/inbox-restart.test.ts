@@ -12,7 +12,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, utimesSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import type { InboxAgentsModel } from "@plannotator/core/inbox-types";
+import type { InboxAgentsModel, InboxRestartAgents } from "@plannotator/core/inbox-types";
 import { INBOX_BRIDGE_POLL_PATH, INBOX_SEND_NOW_POLL_FIELD, INBOX_WAKES_META_KEY } from "@plannotator/shared/inbox/connection";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createAgentEnvironmentFor } from "./inbox-agents";
@@ -289,12 +289,13 @@ async function world(options: { inboxVersion: string; installed: { version: stri
   const project = join(home, "code", "billing-api");
   mkdirSync(project, { recursive: true });
   const installPath = (version: string) => join(pluginsDir, "cache", "plannotator", "plannotator", version);
-  if (options.installed) {
+  /** Install a plugin version as Claude Code's plugin update does: its folder, then the registry's user record. */
+  const install = (installed: { version: string; lastUpdated?: string }) => {
     // The install folder, written when the registry says it was (a real install's plugin.json).
-    const pluginJson = join(installPath(options.installed.version), ".claude-plugin", "plugin.json");
+    const pluginJson = join(installPath(installed.version), ".claude-plugin", "plugin.json");
     mkdirSync(join(pluginJson, ".."), { recursive: true });
-    writeFileSync(pluginJson, JSON.stringify({ name: "plannotator", version: options.installed.version }));
-    const at = new Date(options.installed.lastUpdated ?? "2026-10-17T05:27:07.299Z");
+    writeFileSync(pluginJson, JSON.stringify({ name: "plannotator", version: installed.version }));
+    const at = new Date(installed.lastUpdated ?? "2026-10-17T05:27:07.299Z");
     utimesSync(pluginJson, at, at);
     writeFileSync(
       join(pluginsDir, "installed_plugins.json"),
@@ -304,16 +305,17 @@ async function world(options: { inboxVersion: string; installed: { version: stri
           "plannotator@plannotator": [
             {
               scope: "user",
-              installPath: installPath(options.installed.version),
-              version: options.installed.version,
+              installPath: installPath(installed.version),
+              version: installed.version,
               installedAt: "2026-10-04T22:07:24.658Z",
-              lastUpdated: options.installed.lastUpdated ?? "2026-10-17T05:27:07.299Z",
+              lastUpdated: installed.lastUpdated ?? "2026-10-17T05:27:07.299Z",
             },
           ],
         },
       }),
     );
-  }
+  };
+  if (options.installed) install(options.installed);
   const agentEnvironment = createAgentEnvironmentFor({ platform: process.platform, homeDir: home, env: { HOME: home, CLAUDE_CONFIG_DIR: claudeDir, PATH: "" } });
   const server = await startInboxServer({
     dataDir: join(root, "data"),
@@ -326,7 +328,7 @@ async function world(options: { inboxVersion: string; installed: { version: stri
   const client = new Client({ name: "inbox-restart-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
   clients.push(client);
-  return { server, client, project, installPath };
+  return { server, client, project, installPath, install };
 }
 
 const base = (server: InboxServer) => `http://127.0.0.1:${server.port}`;
@@ -357,7 +359,8 @@ async function connection(server: InboxServer, threadId: string, session: string
 }
 
 const agents = async (server: InboxServer) => (await (await fetch(`${base(server)}/api/inbox/agents`)).json()) as InboxAgentsModel;
-const list = async (server: InboxServer) => (await (await fetch(`${base(server)}/api/inbox/threads?archived=exclude`)).json()) as { restart_claude_code?: number };
+const list = async (server: InboxServer) =>
+  (await (await fetch(`${base(server)}/api/inbox/threads?archived=exclude`)).json()) as { restart_claude_code?: number; restart_agents?: InboxRestartAgents };
 
 describe("over a real Inbox", () => {
   test("a busy session on an older plugin: its connection says outdated (with the engine); Settings and the sidebar count it; up to date it clears", async () => {
@@ -403,14 +406,33 @@ describe("over a real Inbox", () => {
     expect((await connection(server, thread.thread_id, "ses-same"))!.outdated).toEqual({ loaded: "0.28.25", installed: "0.28.25", fix: "restart" });
   });
 
-  test("the installed plugin is behind this Inbox: update the plugin (the command), and no restart in the sidebar", async () => {
-    const { server, client, project, installPath } = await world({ inboxVersion: "0.28.25", installed: { version: "0.28.23" } });
+  test("the installed plugin is behind this Inbox: the sidebar counts it with the update first; after the update, a reload; after the reload, nothing", async () => {
+    const { server, client, project, installPath, install } = await world({ inboxVersion: "0.28.25", installed: { version: "0.28.23" } });
     const thread = await asked(client, project, "ses-behind");
-    await poll(server, "ses-behind", { project_path: project, busy: true, plugin: { version: "0.28.23", root: installPath("0.28.23"), loaded_at: Date.now() } });
+    const loaded = { version: "0.28.23", root: installPath("0.28.23"), loaded_at: Date.parse("2026-10-17T06:00:00Z") };
+    await poll(server, "ses-behind", { project_path: project, busy: true, plugin: loaded });
     expect((await connection(server, thread.thread_id, "ses-behind"))!.outdated).toMatchObject({ loaded: "0.28.23", installed: "0.28.23", fix: "update_plugin", update_command: CLAUDE_PLUGIN_UPDATE_COMMAND });
     const cc = (await agents(server)).sessions?.["claude-code"];
     expect(cc?.update_command).toBe("claude plugin marketplace update plannotator && claude plugin update plannotator@plannotator --scope user");
-    expect((await list(server)).restart_claude_code).toBe(0);
+    // The sidebar's "Reload Claude Code 1", whose Settings → Agents shows the update command, then /reload-plugins.
+    expect(await list(server)).toMatchObject({ restart_claude_code: 1, restart_agents: { total: 1, runtimes: { "claude-code": 1 }, update_first: 1 } });
+    // The person runs the two commands: Claude Code installs 0.28.25. Now a reload alone (auto-reload's offer too).
+    install({ version: "0.28.25", lastUpdated: new Date().toISOString() });
+    await Bun.sleep(2_200); // the registry is read at most every 2 s
+    await poll(server, "ses-behind", { project_path: project, busy: true, plugin: loaded });
+    expect((await connection(server, thread.thread_id, "ses-behind"))!.outdated).toMatchObject({ installed: "0.28.25", fix: "restart" });
+    expect((await list(server)).restart_agents).toEqual({ total: 1, runtimes: { "claude-code": 1 } });
+    // /reload-plugins: the session loads 0.28.25 and the row goes away by itself.
+    await poll(server, "ses-behind", { project_path: project, busy: true, plugin: { version: "0.28.25", root: installPath("0.28.25"), loaded_at: Date.now() } });
+    expect((await connection(server, thread.thread_id, "ses-behind"))!.outdated).toBeNull();
+    expect(await list(server)).toMatchObject({ restart_claude_code: 0, restart_agents: { total: 0, runtimes: {} } });
+  });
+
+  test("a session on the current plugin, installed and loaded: the sidebar counts nothing", async () => {
+    const { server, project, installPath } = await world({ inboxVersion: "0.28.25", installed: { version: "0.28.25" } });
+    await poll(server, "ses-fine", { project_path: project, busy: false, plugin: { version: "0.28.25", root: installPath("0.28.25"), loaded_at: Date.now() } });
+    expect((await agents(server)).sessions?.["claude-code"]).toMatchObject({ running: 1, outdated: 0 });
+    expect(await list(server)).toMatchObject({ restart_claude_code: 0, restart_agents: { total: 0, runtimes: {} } });
   });
 
   test("Pi reports its extension version; behind the Inbox it needs an update", async () => {

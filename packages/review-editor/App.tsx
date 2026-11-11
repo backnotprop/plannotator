@@ -120,6 +120,11 @@ import { useCallFlowInstall } from './hooks/useCallFlowInstall';
 import { useCallFlowAutoInstall } from './hooks/useCallFlowAutoInstall';
 import { extractLinesFromPatch, isLineRangeInPatch } from './utils/patchParser';
 import { resolveCallFlowAnnotationPlacement } from './utils/callFlowAnnotations';
+import { callTreeHunkTargets as callTreeHunkTargetsFor, type CallTreeHunkTarget } from './utils/callTreeHunks';
+import { CallTreeHunkEntry } from './components/callTree/CallTreeHunkEntry';
+import { selectionForCallFlowNode } from './components/CallFlowTreeView';
+import { useSemanticDiffChanges } from './hooks/useFileSemanticChanges';
+import type { HostLineNote } from './components/hostLineNotes';
 import {
   shouldHandleReviewSearchShortcut,
   isTypingTarget,
@@ -210,6 +215,7 @@ import {
 import {
   buildContextualAIHandlers,
   ReviewStateProvider,
+  type CallTreeRequest,
   type LineAnnotationComposeRequest,
   type ReviewState,
 } from './dock/ReviewStateContext';
@@ -949,11 +955,11 @@ const ReviewApp: React.FC = () => {
 
   // Derived: Platform mode is active when destination is platform AND we have PR/MR metadata
   const platformMode = reviewDestination === 'platform' && !!prMetadata;
-  // The viewer authored this PR/MR — forges refuse self-approval, so every
-  // platform approve path mutes (never disappears) on this flag.
+  // The viewer authored this PR/MR on a forge that always refuses
+  // self-approval (GitHub): every approve path mutes (never disappears) on it.
   const prCapabilities = prMetadata ? getPRPlatformCapabilities(prMetadata) : null;
-  // Only platforms that refuse a self-review mute approve / request changes
-  // (Bitbucket Cloud lets an author approve their own PR).
+  // GitLab and Bitbucket let an author approve; a project that forbids it
+  // refuses, and the submission dialog shows the forge's answer.
   const isOwnPR = !!platformUser && prMetadata?.author === platformUser && prCapabilities?.selfReviewBlocked !== false;
 
   // Platform-aware labels
@@ -961,14 +967,13 @@ const ReviewApp: React.FC = () => {
   const mrLabel = prMetadata ? getMRLabel(prMetadata) : 'PR';
   const mrNumberLabel = prMetadata ? getMRNumberLabel(prMetadata) : '';
   const displayRepo = prMetadata ? getDisplayRepo(prMetadata) : '';
-  // #1611: GitHub has a REQUEST_CHANGES review (refused on your own PR, like
-  // approve) and Bitbucket a request-changes decision; GitLab has none, so
-  // Request changes posts as a comment there.
   const requestChangesSupported = prCapabilities?.requestChanges === true;
+  // GitHub refuses request changes on your own PR, like approve. GitLab accepts it.
+  const selfRequestChangesBlocked = prCapabilities?.selfRequestChangesBlocked !== false;
   const requestChangesUnavailableReason = !requestChangesSupported
     ? `${platformLabel} has no request-changes review; this posts as a comment.`
-    : isOwnPR
-      ? `You can't request changes on your own pull request on ${platformLabel}.`
+    : isOwnPR && selfRequestChangesBlocked
+      ? `You can't request changes on your own ${mrLabel === 'MR' ? 'merge request' : 'pull request'} on ${platformLabel}.`
       : undefined;
   const appVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0';
   // The server's update advert (the machine's once-a-day check): the Options
@@ -3104,6 +3109,69 @@ const ReviewApp: React.FC = () => {
     return true;
   }, [files, identity, withPRContext, addCodeAnnotationsWithHistory]);
 
+  // --- Call tree (phase 1): a "Call tree" entry on each hunk Call flow can draw
+  // a tree for, opening that tree in the Call flow tab, rooted at the function
+  // around the hunk (sem's range when known). No server change: the existing
+  // analysis and sem output are re-read here.
+  const callTreeSemChanges = useSemanticDiffChanges(
+    diffData?.rawPatch ?? '',
+    semanticDiffUsable && callFlowAnalysis.status === 'ready',
+  );
+  const callTreeHunkTargets = useMemo(() => {
+    if (callFlowAnalysis.status !== 'ready') return [];
+    const { data } = callFlowAnalysis;
+    return callTreeHunkTargetsFor(files, data.trees, callTreeSemChanges, { from: data.from, to: data.to });
+  }, [callFlowAnalysis, files, callTreeSemChanges]);
+  const [callTreeRequest, setCallTreeRequest] = useState<CallTreeRequest | null>(null);
+  const callTreeTokenRef = useRef(0);
+  const callTreeFromAllFilesRef = useRef(false);
+  const openCallTreeForHunk = useCallback((target: CallTreeHunkTarget) => {
+    callTreeTokenRef.current += 1;
+    callTreeFromAllFilesRef.current = isAllFilesActiveRef.current;
+    setCallTreeRequest({
+      doc: target.doc,
+      origin: { filePath: target.filePath, line: target.hunk.firstChange.line, side: target.hunk.firstChange.side },
+      token: callTreeTokenRef.current,
+    });
+    openCallFlowPanel();
+  }, [openCallFlowPanel]);
+  const callTreeHunkNotes = useMemo<HostLineNote[]>(() => callTreeHunkTargets.map((target) => ({
+    id: `call-tree:${target.filePath}:${target.hunk.index}`,
+    filePath: target.filePath,
+    line: target.hunk.anchor.line,
+    side: target.hunk.anchor.side,
+    key: `${target.doc.rootPath}|${target.doc.title}`,
+    render: () => <CallTreeHunkEntry title={target.doc.title} onOpen={() => openCallTreeForHunk(target)} />,
+  })), [callTreeHunkTargets, openCallTreeForHunk]);
+  const clearCallTreeRequest = useCallback(() => setCallTreeRequest(null), []);
+  // A new analysis (another snapshot, a retry) draws new trees: drop a tree cut from the old one.
+  useEffect(() => setCallTreeRequest(null), [callFlowAnalysis]);
+  const returnFromCallTree = useCallback(() => {
+    const origin = callTreeRequest?.origin;
+    if (!origin) return;
+    if (callTreeFromAllFilesRef.current && dockApi?.getPanel(REVIEW_ALL_FILES_PANEL_ID)) {
+      dockApi.getPanel(REVIEW_ALL_FILES_PANEL_ID)?.api.setActive();
+      return;
+    }
+    handleScrollToAILines(origin.filePath, origin.line, origin.line, origin.side);
+  }, [callTreeRequest, dockApi, handleScrollToAILines]);
+  // Opening a Call tree row: the same open as the Call flow cards when the
+  // line is in the patch; any other line of the new side opens the file's
+  // whole-file view (recorded for Back). A removed call outside the patch has
+  // no new-side line to show.
+  const openCallTreeNode = useCallback((node: CallFlowNode) => {
+    if (!node.file || !node.line) return;
+    if (isCallFlowNodeInPatch(node)) {
+      openDiffFile(node.file);
+      handleLineSelection(selectionForCallFlowNode(node));
+      return;
+    }
+    if (node.status === 'removed') return;
+    const origin = currentNavLocation();
+    const flipped = goToNavLocation({ path: node.file, line: node.line });
+    setNavHistory((history) => pushNavJump(history, origin && flipped ? { ...origin, restoreView: flipped } : origin));
+  }, [currentNavLocation, goToNavLocation, handleLineSelection, isCallFlowNodeInPatch, openDiffFile]);
+
   // Sink for the experimental edit-to-suggestion flow: a completed edit
   // session delivers one hunk per contiguous changed region, each becoming a
   // normal suggestion annotation (same shape SuggestionModal produces —
@@ -4732,6 +4800,11 @@ const ReviewApp: React.FC = () => {
     isCallFlowActive,
     openCallFlowPanel,
     callFlowInstall,
+    callTreeHunkNotes,
+    callTreeRequest,
+    openCallTreeNode,
+    returnFromCallTree,
+    clearCallTreeRequest,
     openTourPanel: handleOpenTour,
     openGuide: handleOpenGuide,
     onCodeNavRequest: canUseLiveWorkspaceActions ? handleCodeNavRequest : undefined,
@@ -4767,6 +4840,7 @@ const ReviewApp: React.FC = () => {
     handleOpenTour, handleOpenGuide, isAllFilesActive, allFilesOrder, allFilesAllCollapsed, onToggleAllFilesCollapsed, registerAllFilesCollapseToggle, commitInfo, isSemanticDiffActive, semanticDiffUsable,
     handleSemanticDiffUnavailable, handleSemanticDiffLoadError, handleSemanticDiffLoadSuccess, handleAddAnnotationForFile,
     callFlowAvailable, callFlowAdvert, callFlowAnalysis, retryCallFlowAnalysis, isCallFlowNodeInPatch, isCallFlowActive, openCallFlowPanel, callFlowInstall,
+    callTreeHunkNotes, callTreeRequest, openCallTreeNode, returnFromCallTree, clearCallTreeRequest,
     editSuggestionsEnabled, handleAddSuggestionsForFile, handleAddEditorCommentForFile,
     handleCodeNavRequest, codeNav.result, codeNav.isLoading, codeNav.activeSymbol,
     tokenHoverEnabled, handleTokenHoverEnter, tokenHover.onTokenHoverLeave,
@@ -5236,7 +5310,8 @@ const ReviewApp: React.FC = () => {
       const prLinks = openUrls.join(', ');
       const statusMessage = action === 'approve'
         ? `${mrLabel === 'MR' ? 'Merge request' : 'Pull request'} approved on ${platformLabel}${prLinks ? ': ' + prLinks : ''}`
-        : action === 'request_changes' && getPRPlatformCapabilities(prMetadata).requestChanges
+        // What went, not the button pressed: an older GitLab posts a request for changes as a comment.
+        : action === 'request_changes' && attempt.postedAs !== 'comment'
           ? `Changes requested on ${platformLabel}${prLinks ? ': ' + prLinks : ''}`
           : `${mrLabel === 'MR' ? 'Merge request' : 'Pull request'} reviewed on ${platformLabel}${prLinks ? ': ' + prLinks : ''}`;
       await flushReviewProgress();
@@ -5357,8 +5432,8 @@ const ReviewApp: React.FC = () => {
     count: totalAnnotationCount,
     hasFeedback: totalAnnotationCount > 0,
     approvalNotesSupported: false, // ignored by the platform arm
-    platform: { label: platformLabel, mrLabel, selfAuthored: isOwnPR, requestChangesSupported },
-  }), [totalAnnotationCount, platformLabel, mrLabel, isOwnPR, requestChangesSupported]);
+    platform: { label: platformLabel, mrLabel, selfAuthored: isOwnPR, requestChangesSupported, selfRequestChangesBlocked },
+  }), [totalAnnotationCount, platformLabel, mrLabel, isOwnPR, requestChangesSupported, selfRequestChangesBlocked]);
 
   const runPlatformDecisionAction = useCallback((id: DecisionActionId) => {
     if (submitted || busyWithPlatformDecision) return;

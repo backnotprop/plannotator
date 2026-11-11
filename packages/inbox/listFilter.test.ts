@@ -6,10 +6,10 @@
  * midnight, at the 7th or 30th day back, or at a range's last day; an agent missed when the thread has several or was
  * started by the person; a project's page that still applies the Project picks; Smart groups reordered or renamed by
  * the filter; a menu count that applies its own group; a cookie that keeps junk or breaks the list; a Pull request
- * pick that reads the wrong state, treats a removed PR as one, or leaks into the list while the group is off.
+ * pick that reads the wrong state, treats a removed PR as one, or puts a PR not read yet under a state (or under No PR).
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
+import { inboxThreadPullsSummary, type InboxListRow, type InboxListSection, type InboxThreadPull, type InboxThreadPullState } from '@plannotator/core/inbox-types';
 import {
   LIST_FILTER_COOKIE,
   NO_LIST_FILTER,
@@ -20,8 +20,8 @@ import {
   pickCount,
   resetListFilterForTests,
   rowMatches,
+  rowPullMatches,
   rowPullStates,
-  setListFilterPullsForTests,
   writeListFilter,
   type ListFilter,
 } from './listFilter';
@@ -78,9 +78,7 @@ describe('which rows a set of picks keeps', () => {
   for (const [name, filter, ids] of cases) test(name, () => expect(kept(filter)).toEqual(ids));
 });
 
-describe('the Pull request group (on, as it ships with PR linking)', () => {
-  beforeEach(() => setListFilterPullsForTests(true));
-  afterEach(() => setListFilterPullsForTests(null));
+describe('the Pull request group', () => {
   const cases: Array<[string, Partial<ListFilter>, string[]]> = [
     ['Open: the threads whose PR is open', { pulls: ['open'] }, ['billingToday']],
     ['Draft is not Open', { pulls: ['draft'] }, ['webLateYesterday']],
@@ -106,14 +104,36 @@ describe('the Pull request group (on, as it ships with PR linking)', () => {
   });
 });
 
-test('while the group is off a remembered Pull request pick neither narrows the list nor counts', () => {
-  setListFilterPullsForTests(false);
-  try {
-    expect(kept({ pulls: ['open'] })).toEqual(ALL.map((r) => r.thread_id));
-    expect(pickCount({ ...NO_LIST_FILTER, pulls: ['open'] })).toBe(0);
-  } finally {
-    setListFilterPullsForTests(null);
-  }
+test('a PR not read yet is kept by Has a PR alone: by no state, and never by No PR', () => {
+  expect(rowPullStates(ROWS.mixed)).toEqual(['unknown']);
+  expect((['open', 'draft', 'merged', 'closed', 'any', 'none'] as const).filter((pick) => rowPullMatches(ROWS.mixed, pick))).toEqual(['any']);
+  expect(kept({ pulls: ['open', 'draft', 'merged', 'closed', 'none'] })).not.toContain('mixed');
+});
+
+test('the row summary the server builds is what the picks read: the PR still in play, else the one not read, else the last', () => {
+  const pull = (n: number, state: InboxThreadPullState): InboxThreadPull => ({
+    id: `thr:github.com/o/r#${n}`,
+    project_id: 'prj',
+    thread_id: 'thr',
+    pull: `github.com/o/r#${n}`,
+    url: `https://github.com/o/r/pull/${n}`,
+    added_by: { kind: 'person' },
+    added_at: new Date(2026, 10, 1, n).toISOString(),
+    state,
+    title: null,
+    base: null,
+    head: null,
+    read_at: null,
+  });
+  const picksOf = (pulls: InboxThreadPull[]) => {
+    const r = { pulls: inboxThreadPullsSummary(pulls) };
+    return (['open', 'draft', 'merged', 'closed', 'any', 'none'] as const).filter((pick) => rowPullMatches(r, pick));
+  };
+  expect(picksOf([])).toEqual(['none']);
+  expect(picksOf([pull(1, 'merged'), pull(2, 'draft')])).toEqual(['draft', 'any']);
+  expect(picksOf([pull(1, 'merged'), pull(2, 'unknown')])).toEqual(['any']);
+  expect(picksOf([pull(1, 'merged'), pull(2, 'closed')])).toEqual(['closed', 'any']);
+  expect(picksOf([pull(1, 'open')])).toEqual(['open', 'any']);
 });
 
 test('a project\'s page sets its Project picks aside, and the badge counts what applies', () => {

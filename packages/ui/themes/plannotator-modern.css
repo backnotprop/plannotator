@@ -2,7 +2,8 @@
    (https://www.boardui.com, https://github.com/BoardUI/boardui).
 
    Dark is the PaulMillr palette (themes/paulmillr.css: "PaulMillr — terminal color scheme"),
-   every color as that theme has it but its blue, which is the light half's blue. The fonts stay Modern's.
+   every color as that theme has it but its blue, which is the light half's blue, and the greys of its quiet
+   surfaces (muted, input, popover, border), which PaulMillr draws in its card's grey. The fonts stay Modern's.
 
    Light, set on our tokens: BoardUI's secondary surface is the ground, its full surface the
    card, its tertiary surface muted. Values are BoardUI's unless a comment says not.
@@ -35,26 +36,34 @@
    SOFTWARE. */
 .theme-plannotator-modern {
   /* Dark is the PaulMillr palette (see the header): the colors below are themes/paulmillr.css's, value for value,
-     but for the blue. utils/modernDarkPalette.test.ts fails when the two drift. */
+     but for the blue and four greys (muted, input, popover, border). utils/modernDarkPalette.test.ts fails when the
+     two drift. */
   --background: #000000;
   --foreground: #f2f2f2;
   --card: #2a2a2a;
   --card-foreground: #f2f2f2;
-  --popover: #2a2a2a;
+  /* Not PaulMillr's #2a2a2a (its card): a menu or popover is a step above the card it opens on, as in
+     Plannotator's dark (oklch L +0.07 here, +0.06 there). */
+  --popover: #3c3c3c;
   --popover-foreground: #f2f2f2;
   /* Not PaulMillr's #396bd7: the blue of the light half below, so the theme has one blue. */
   --primary: oklch(0.515 0.245 263);
   --primary-foreground: #ffffff;
   --secondary: #414141;
   --secondary-foreground: #f2f2f2;
-  --muted: #2a2a2a;
+  /* Not PaulMillr's #2a2a2a, its card: every quiet fill is muted over the card (the list's section bands, quiet
+     and foot buttons, hovers, chips, inline code, table rows), so with the two equal none of them showed. One step
+     above the card (oklch L +0.05; Plannotator's dark is +0.04, Graphite's +0.06). utils/modernDarkSurfaces.test.ts. */
+  --muted: #373737;
   --muted-foreground: #bbbbbb;
   --accent: #66ccff;
   --accent-foreground: #000000;
   --destructive: #ff0000;
   --destructive-foreground: #ffffff;
-  --border: #414141;
-  --input: #2a2a2a;
+  /* Not PaulMillr's #414141: the step above the card Plannotator's dark has (oklch L +0.13; it was +0.09), so a
+     line at part strength still shows on the card. The input is the muted surface, as there. */
+  --border: #4c4c4c;
+  --input: #373737;
   /* The primary, as PaulMillr's ring is its primary. */
   --ring: oklch(0.515 0.245 263);
   --success: #79ff0f;

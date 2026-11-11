@@ -29,6 +29,7 @@ import {
   InboxLink,
   inboxRegistryPathOf,
   TRANSCRIPT_CONTINUED_IN_CHAIN_MAX,
+  TRANSCRIPT_CONTINUED_IN_LOOK_AGAIN_MS,
   TRANSCRIPT_CONTINUED_IN_LOOKS_MAX,
   TRANSCRIPT_CONTINUED_IN_RETRY_MS,
   TRANSCRIPT_FORKED_FROM_RETRY_MS,
@@ -192,7 +193,7 @@ describe('the sessions whose transcripts say they were continued in this one', (
     expect(transcriptContinuedLineOf(long, 's0')).toEqual(Array.from({ length: TRANSCRIPT_CONTINUED_IN_CHAIN_MAX }, (_, i) => `s${i + 1}`))
   })
 
-  test('a missing, cut, garbled or stale last record hands nothing over', async () => {
+  test('a missing, cut or garbled record, and another session\'s, hand nothing over; looked for a few times at once, then now and then', async () => {
     const whole = handover(A, B)
     const dir = project({
       // No record at all.
@@ -206,20 +207,65 @@ describe('the sessions whose transcripts say they were continued in this one', (
       '77777777-aaaa-4aaa-8aaa-000000000002': line({ type: 'continued-in', sessionId: '../../etc', continuedInSessionId: B }),
       // A message that quotes such a record: inside a string the quotes are escaped.
       '77777777-aaaa-4aaa-8aaa-000000000003': reply(STRANGER, `the row was ${whole}`) ,
-      // The person went back to the old session: a real turn follows the record.
-      '77777777-aaaa-4aaa-8aaa-000000000004': handover(STRANGER, B) + turn(STRANGER, 'Back here.') + reply(STRANGER, 'Welcome back.'),
       // Another session's hand-over.
       '77777777-aaaa-4aaa-8aaa-000000000005': handover(STRANGER, C),
       [B]: compacted(B),
     })
     const { found, state } = finder(dir, B)
     expect(await found.read()).toEqual([])
-    // Looked for again a few times (the record is written just after the new session starts), then no more.
-    for (let i = 0; i < TRANSCRIPT_CONTINUED_IN_LOOKS_MAX + 3; i += 1) {
-      state.now += TRANSCRIPT_CONTINUED_IN_RETRY_MS * 2 ** 10
+    // Looked for again a few times (the record is written just after the new session starts)...
+    for (let i = 1; i < TRANSCRIPT_CONTINUED_IN_LOOKS_MAX; i += 1) {
+      state.now += TRANSCRIPT_CONTINUED_IN_RETRY_MS * 2 ** (i - 1)
       expect(await found.read()).toEqual([])
     }
     expect(state.runs).toBe(TRANSCRIPT_CONTINUED_IN_LOOKS_MAX)
+    // ...then only every TRANSCRIPT_CONTINUED_IN_LOOK_AGAIN_MS, however often the session polls.
+    for (let i = 0; i < 50; i += 1) {
+      state.now += 1_000
+      expect(await found.read()).toEqual([])
+    }
+    expect(state.runs).toBe(TRANSCRIPT_CONTINUED_IN_LOOKS_MAX)
+    state.now += TRANSCRIPT_CONTINUED_IN_LOOK_AGAIN_MS
+    expect(await found.read()).toEqual([])
+    expect(state.runs).toBe(TRANSCRIPT_CONTINUED_IN_LOOKS_MAX + 1)
+    // A record that turns up long after the session started is found at the next of those looks.
+    writeFileSync(join(dir, `${A}.jsonl`), turn(A, 'One.') + handover(A, B))
+    state.now += TRANSCRIPT_CONTINUED_IN_LOOK_AGAIN_MS
+    expect(await found.read()).toEqual([A])
+  })
+
+  // An old transcript may go on growing after the hand-over (bookkeeping rows, or the person going back to it):
+  // the record was looked for only in its last 8 KB, and one conversation could then be listed as two agents.
+  test('a record deep in a large transcript is found', async () => {
+    const later = (line({ type: 'system', subtype: 'informational', sessionId: A, content: 'x'.repeat(4_000) })).repeat(3_000)
+    expect(later.length).toBeGreaterThan(12_000_000)
+    const dir = project({ [A]: turn(A, 'One.') + reply(A, 'Two.') + handover(A, B) + later, [B]: compacted(B) })
+    expect(await finder(dir, B).found.read()).toEqual([A])
+  })
+
+  test('real turns after the record do not undo it: whether the old session still goes on is the Inbox\'s to judge', async () => {
+    const dir = project({ [A]: turn(A, 'One.') + handover(A, B) + turn(A, 'Back here.') + reply(A, 'Welcome back.'), [B]: compacted(B) })
+    expect(await finder(dir, B).found.read()).toEqual([A])
+  })
+
+  test('a line of three is followed through a middle session that went on after its hand-over', async () => {
+    const D = '88888888-dddd-4ddd-8ddd-dddddddddddd'
+    const dir = project({
+      [A]: turn(A, 'One.') + handover(A, B),
+      [B]: compacted(B) + handover(B, C) + turn(B, 'Still here.') + reply(B, 'Yes.'),
+      [C]: compacted(C) + reply(C, 'Three.') + handover(C, D),
+      [D]: compacted(D),
+    })
+    expect(await finder(dir, D).found.read()).toEqual([C, B, A])
+  })
+
+  test('a session handed over twice names both; two sessions that just share a folder continue nothing', async () => {
+    const dir = project({ [A]: turn(A, 'One.') + handover(A, B) + turn(A, 'Back.') + reply(A, 'Yes.') + handover(A, C), [B]: compacted(B), [C]: compacted(C) })
+    expect(await finder(dir, B).found.read()).toEqual([A])
+    expect(await finder(dir, C).found.read()).toEqual([A])
+    const two = project({ [A]: turn(A, 'One.') + reply(A, 'Two.'), [B]: turn(B, 'Other window.') + reply(B, 'Yes.') })
+    expect(await finder(two, A).found.read()).toEqual([])
+    expect(await finder(two, B).found.read()).toEqual([])
   })
 
   test('a record written after the first look is found on a later one, never on every poll', async () => {

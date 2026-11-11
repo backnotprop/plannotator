@@ -15,7 +15,7 @@ import { Icon, type IconName } from '../icons';
 import { pinnedState } from '../pins';
 import { starPopping } from '../starPop';
 import type { MachinesModel } from '../machines';
-import { AgentsSection } from '../agents/AgentsSection';
+import { AgentsSection, GogglesMark } from '../agents/AgentsSection';
 import { useInboxAgents } from '../agentsList';
 import { useSidebarSections, type SidebarSection } from '../sidebarSections';
 import { useSidebar } from '../shell/sidebar';
@@ -68,6 +68,8 @@ export interface SidebarProps {
   projectId: string | null;
   /** The machine the list shows (a machine's filter, its caption in Agents), or null for every machine. */
   machineId?: string | null;
+  /** The agent the list shows (an agent's filter, its row in Agents, `#agent=<id>`) and its row's name, or null. */
+  agentFilter?: { id: string; name: string } | null;
   /**
    * Linked machines (machines.ts): in the Agents section above Projects, each machine's agents under its name, this
    * machine first; a machine's name is a filter of the list as a project is.
@@ -80,13 +82,14 @@ export interface SidebarProps {
   onMachineUpdate?: (machineId: string) => void;
   /**
    * The Agents section (approval "inbox-agents-section", agents/AgentsSection.tsx): shown while the list names agents
-   * (`agents`, agentsList.ts) or a machine is linked. `agentRows`: the window's rows, where an agent's thread is
-   * found; `onOpenAgentThread` opens it; `onMessageAgent`: New message to a live agent with no thread here.
+   * (`agents`, agentsList.ts) or a machine is linked. `agentRows`: the window's rows, where an agent's threads are
+   * found; `onAgentFilter` shows one agent's threads (null: everything again); `onMessageAgent`: New message to a
+   * live agent with no thread here.
    * `onAddAgent`: New message with a new session chosen (absent: no + button). `onAddMachine`: Settings → Machines
    * (absent on an Inbox that cannot link).
    */
   agentRows?: readonly InboxListRow[];
-  onOpenAgentThread?: (threadId: string) => void;
+  onAgentFilter?: (agentId: string | null) => void;
   onMessageAgent?: (session: string, opener: HTMLElement) => void;
   onAddAgent?: (opener: HTMLElement) => void;
   onAddMachine?: () => void;
@@ -304,7 +307,7 @@ export function Sidebar(props: SidebarProps) {
     next?.focus({ preventScroll: true });
   });
   const inboxRef = useRef<HTMLButtonElement>(null);
-  const inboxRefreshes = props.refreshes === true && props.page === 'inbox' && props.projectId === null && !props.machineId;
+  const inboxRefreshes = props.refreshes === true && props.page === 'inbox' && props.projectId === null && !props.machineId && !props.agentFilter;
   const spinOf = (scope: string | null) => (props.refreshSpin && props.refreshSpin.scope === scope ? props.refreshSpin.key : null);
   const refreshHintId = useId();
   const pinnedLabelId = useId();
@@ -365,16 +368,18 @@ export function Sidebar(props: SidebarProps) {
   };
   /**
    * A phone's sheet (approval "inbox-phone-sidebar-sheet", Sheet 1): what narrows the list, in words, with Clear.
-   * A project by the name its row has; a machine by its own name. Nothing while the list shows everything.
+   * A project by the name its row has; a machine by its own name; an agent by its row's name. Nothing while the list
+   * shows everything.
    */
-  const showingOnly = ((): { kind: 'project' | 'machine'; name: string } | null => {
+  const showingOnly = ((): { kind: 'project' | 'machine' | 'agent'; name: string } | null => {
     if (!phone || props.page !== 'inbox') return null;
     if (props.projectId) {
       const name = shown.find((project) => project.id === props.projectId)?.name ?? props.projectNames?.get(props.projectId) ?? props.projects.find((project) => project.id === props.projectId)?.name;
       return name ? { kind: 'project', name } : null;
     }
     const machine = props.machineId ? machineList.find((m) => m.id === props.machineId) : undefined;
-    return machine ? { kind: 'machine', name: machine.name } : null;
+    if (machine) return { kind: 'machine', name: machine.name };
+    return props.agentFilter ? { kind: 'agent', name: props.agentFilter.name } : null;
   })();
   // A phone's sheet: a section heading that has stuck to the top of the scroll takes a hairline, so rows read as passing under it.
   useLayoutEffect(() => {
@@ -493,9 +498,9 @@ export function Sidebar(props: SidebarProps) {
         <button
           ref={inboxRef}
           type="button"
-          className={`ib-nav ib-nav-inbox${props.page === 'inbox' && props.projectId === null && !props.machineId ? ' ib-on' : ''}`}
+          className={`ib-nav ib-nav-inbox${props.page === 'inbox' && props.projectId === null && !props.machineId && !props.agentFilter ? ' ib-on' : ''}`}
           onClick={pick(props.onInbox)}
-          aria-current={props.page === 'inbox' && props.projectId === null && !props.machineId ? 'page' : undefined}
+          aria-current={props.page === 'inbox' && props.projectId === null && !props.machineId && !props.agentFilter ? 'page' : undefined}
           aria-describedby={inboxRefreshes ? refreshHintId : undefined}
           data-refreshes={inboxRefreshes ? '' : undefined}
           data-refreshing={spinOf(null) != null ? '' : undefined}
@@ -667,7 +672,7 @@ export function Sidebar(props: SidebarProps) {
           <div className="ib-sheet-now-t">
             <span className="ib-sheet-now-l">Showing only</span>
             <span className="ib-sheet-now-n">
-              <Icon name={showingOnly.kind === 'project' ? 'folder' : 'laptop'} />
+              {showingOnly.kind === 'agent' ? <GogglesMark /> : <Icon name={showingOnly.kind === 'project' ? 'folder' : 'laptop'} />}
               <bdi dir="auto">{showingOnly.name}</bdi>
             </span>
           </div>
@@ -727,7 +732,7 @@ export function Sidebar(props: SidebarProps) {
             machines={props.machines ?? NO_MACHINES}
             rows={props.agentRows ?? NO_ROWS}
             machineId={props.machineId ?? null}
-            openThreadId={props.openThreadId ?? null}
+            agentId={props.agentFilter?.id ?? null}
             page={props.page}
             closed={agentsClosed}
             onToggle={() => sections.toggle('agents')}
@@ -747,7 +752,7 @@ export function Sidebar(props: SidebarProps) {
             )}
             onMachine={props.onMachine}
             onMachineUpdate={props.onMachineUpdate}
-            onOpenThread={(threadId) => props.onOpenAgentThread?.(threadId)}
+            onAgentFilter={(agentId) => props.onAgentFilter?.(agentId)}
             onMessageAgent={(session, opener) => props.onMessageAgent?.(session, opener)}
             onAddAgent={(opener) => (props.onAddAgent ?? props.onCompose)?.(opener)}
             onAddMachine={props.onAddMachine}
@@ -992,13 +997,15 @@ function ProjectSortToggle({ sort, announce }: { sort: ProjectSort; announce?: (
  * "Reload Claude Code N" (owner approval "restart-warning"), generalized to
  * every runtime (owner approval "reload-hosts"): the sessions still on the
  * Plannotator from before an update. One runtime names itself ("Reload Pi",
- * "Restart Oh My Pi"); more than one reads "Reload agents". A real button
+ * "Restart Oh My Pi"); more than one reads "Reload agents". Claude Code
+ * sessions whose plugin on disk is behind count too (`update_first`): the
+ * Settings → Agents it opens leads with the update command. A real button
  * named by its words and count; what it does is in its description. Opens
  * Settings → Agents, which lists them.
  */
 function RestartSessionsRow({ agents, onOpen }: { agents: InboxRestartAgents; onOpen: () => void }) {
   return (
-    <button type="button" className="ib-nav ib-quiet ib-rw-restart" data-restart-sidebar={agents.total} onClick={onOpen}>
+    <button type="button" className="ib-nav ib-quiet ib-rw-restart" data-restart-sidebar={agents.total} data-restart-update={agents.update_first || undefined} onClick={onOpen}>
       <Icon name="refresh" />
       <span className="ib-rw-label">{restartAgentsLabel(agents)}</span>
       <span className="ib-n">{formatCount(agents.total)}</span>

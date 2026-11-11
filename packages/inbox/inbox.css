@@ -432,6 +432,9 @@ button.ib-mut { border-radius: 6px; }
 .ib-mk > svg, .ib-mk > img { width: var(--ib-mark-16); height: var(--ib-mark-16); display: block; }
 .ib-mk.ib-big { width: var(--ib-mark-30); height: var(--ib-mark-30); border-radius: var(--ib-mark-30-r); background: var(--muted); }
 .ib-mk.ib-big > svg, .ib-mk.ib-big > img { width: var(--ib-mark-30-g); height: var(--ib-mark-30-g); }
+/* An agent's chosen face (icons.tsx FaceMark): a still picture in exactly the plain mark's box (its tile and size rules are the mark's). */
+.ib-mk.ib-face > img.ib-face-l, :root.light .ib-mk.ib-face > img.ib-face-d { display: none; }
+:root.light .ib-mk.ib-face > img.ib-face-l { display: block; }
 /* Side in the selection bar (ask/sideButton.tsx): the thread agent's mark is the button's glyph. A block, as the
    other buttons' glyphs are: an inline box would sit on a text line and make the button taller than its neighbours.
    On a touch bar ui's theme.css draws every glyph at 20 px and sizes the mark's box; the last rule sizes the mark in it. */
@@ -848,6 +851,10 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-opt small { display: block; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); }
 .ib-acts-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; flex-wrap: wrap; }
 .ib-acts-row .ib-left { margin-right: auto; }
+/* The warning before a Mark read that sets questions aside (components/MarkReadWarning.tsx): a short dialog, narrower. */
+.pn-inbox dialog.ib-dlg.ib-readwarn, dialog.ib-dlg.ib-readwarn { width: min(440px, calc(100vw - 24px)); }
+.ib-readwarn .ib-sum { margin-top: 8px; }
+.ib-readwarn .ib-readwarn-never { margin: 12px -8px 0; }
 
 /* What's new: the release notes in the main pane, read-only (design of record
    .product/approved/inbox-whats-new-tldr/, round 2; the bar from inbox-whats-new-header, variant Toolbar):
@@ -3671,6 +3678,9 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   :is(.ib-body, .ib-docscroll) [data-question-option] > input { width: 20px; height: 20px; margin-top: 0; }
   :is(.ib-body, .ib-docscroll) [data-question-part="choice"] { font-size: var(--ib-fs-15, 15px); }
   :is(.ib-body, .ib-docscroll) [data-question-key] input[type="text"] { min-height: 40px; }
+  /* The Other field (a textarea that grows with its lines): one line is 40 px with its words in the middle, as the
+     one-line field drew them; each further line adds a line. */
+  :is(.ib-body, .ib-docscroll) [data-question-key] textarea[data-question-other] { min-height: 40px; padding-top: calc((39px - 1lh) / 2); padding-bottom: calc((39px - 1lh) / 2); }
   :is(.ib-body, .ib-docscroll) [data-question-key] > [data-pinpoint-ignore]:last-child > button, :is(.ib-body, .ib-docscroll) [data-question-key] > [data-pinpoint-ignore]:last-child > div > button { min-height: 44px; padding-left: 10px; padding-right: 10px; font-size: var(--ib-fs-14, 14px); }
   /* The footer on a touch phone: the buttons and the status never fit one row, so the status leads on its own
      line and the buttons follow it in reading order (one that does not fit goes to the next line, below). A
@@ -8763,7 +8773,7 @@ dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: aut
 .ib-lk-roomy .ib-lbody > .ib-group > .ib-rw { contain-intrinsic-size: auto none auto 60px; }
 .ib-lk-roomy .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 88px; }
 .ib-lk-roomy .ib-lbody > .ib-group > .ib-mrow { contain-intrinsic-size: auto none auto 70px; }
-/* The same for Subject preview "2 lines" (a second preview line: 18 px beside a thread, 19 px on a phone, each at
+/* The same for "Grey line under the name" 2 lines (a second preview line: 18 px beside a thread, 19 px on a phone, each at
    line-height 1.35) and First line "Thread name" (2 px more beside a thread; a phone's row keeps its height; compact
    rows keep theirs). Each density with each. */
 .ib-lk-pv2 .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 102px; }
@@ -8784,7 +8794,7 @@ dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: aut
 .ib-lk-roomy.ib-lk-dot .ib-nrow.ib-u::after { top: 21px; }
 .ib-lk-dot .ib-row.ib-u::after { top: calc(50% - 3px); }
 .ib-lk-dot .ib-mrow.ib-u::after { left: 6px; top: 20px; }
-/* Subject preview "2 lines": the preview wraps to two lines, then "…" (three-line and phone rows). */
+/* "Grey line under the name" 2 lines: the preview wraps to two lines, then "…" (three-line and phone rows). */
 .ib-lk-pv2 :is(.ib-nrow .ib-l3, .ib-m3) > .ib-pv { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; white-space: normal; }
 /* With the preview on two lines, the open counts, pin, badge and book sit on its first line, as on a one-line
    preview, not halfway between its lines (the line centres its parts): each is a line of the preview's height,
@@ -8861,7 +8871,7 @@ dialog.ib-rl .ib-rl-card .ib-listcol.ib-rl-list { position: relative; inset: aut
 .ib-lk-tbelow.ib-lk-tfirst.ib-lk-noagents.ib-noproj.ib-lk-pv2:not(.ib-lk-compact) .ib-lbody > .ib-group > .ib-rw:has(> .ib-nrow) { contain-intrinsic-size: auto none auto 104px; }
 /* Show → Bold thread names (.ib-lk-bold): every row's name in bold, read or not; Sent and Quiet keep their colour. */
 .ib-lk-bold :is(.ib-row, .ib-nrow) .ib-title, .ib-lk-bold .ib-mrow .ib-m2 { font-weight: 600; }
-/* With Subject preview off too, the row is two lines (InboxList's `twoLines`): line 3's guided review mark, pin,
+/* With the grey line None too, the row is two lines (InboxList's `twoLines`): line 3's guided review mark, pin,
    badge, snooze return and count sit at line 2's right end (`.ib-lend`), after the agents and the project. They are
    never cut: the project gives way with "…" first. */
 :is(.ib-nrow .ib-l2-lead, .ib-m1-lead):has(> .ib-lend) { gap: 8px; }
@@ -10898,6 +10908,11 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
 .ib-cp-picker .ib-cp-opt.ib-cp-fnotice { display: flex; align-items: center; gap: 8px; color: var(--muted-foreground); }
 .ib-cp-picker .ib-cp-opt.ib-cp-fnotice > svg.ib-ic { flex: none; color: var(--muted-foreground); }
 .ib-cp-picker .ib-cp-fnotice .ib-cp-op { flex: 1 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.4; color: var(--muted-foreground); }
+/* What to do there, under the line (a signed-out agent: sign in, or restart Plannotator from that machine's Terminal). */
+.ib-cp-picker .ib-cp-fnotice:has(.ib-cp-ffix) { align-items: flex-start; }
+.ib-cp-picker .ib-cp-fnotice:has(.ib-cp-ffix) > svg.ib-ic { margin-top: 2px; }
+.ib-cp-picker .ib-cp-ffix { display: block; margin-top: 2px; font-size: var(--ib-fs-13, 13px); }
+.ib-cp-picker .ib-cp-ffix code { font-family: var(--font-mono); font-size: 0.92em; color: var(--foreground); white-space: nowrap; }
 .pn-inbox .ib-cp-fcopy { flex: none; font-size: var(--ib-fs-13, 13px); }
 .ib-cp-asleep { display: flex; gap: 10px; align-items: flex-start; margin: 0; padding: 10px 16px; font-size: var(--ib-fs-13, 13px); line-height: 1.5; color: var(--muted-foreground); flex: none; }
 .ib-cp-asleep > svg { flex: none; margin-top: 2px; }
@@ -11802,6 +11817,18 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-prpop-tbtn:hover:not(:disabled) { background: color-mix(in oklch, var(--muted) 70%, var(--foreground) 8%); }
 .ib-prpop-tbtn:disabled { opacity: 0.5; }
 .ib-prpop-rm1 { align-self: flex-start; background: none; color: var(--muted-foreground); padding: 0 4px; }
+/* Post decisions (export-decisions step 2): a quiet button on each PR's row, and above the edit for one PR. */
+.ib-prpop-post { margin: 7px 2px 0 0; font-weight: 500; color: var(--muted-foreground); }
+.ib-prpop-post:hover:not(:disabled) { color: var(--foreground); }
+.ib-prpop-post1 { align-self: flex-start; }
+/* Export decisions › Post on a pull request: Where to post is part of the PR group (no divider), a quiet sub-choice
+   indented under the PR rows' text; the unchecked choices keep the check's room. */
+.ib-pm-sublabel { padding: 6px 8px 2px 31px; font-size: var(--ib-fs-11-5, 11.5px); font-weight: 500; color: var(--muted-foreground); cursor: default; user-select: none; }
+.ib-pmi.ib-pmi-sub { padding-left: 31px; height: 26px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-pmi.ib-pmi-sub[data-checked] { color: var(--foreground); }
+.ib-pmi-slot { flex: none; width: 13px; height: 13px; }
+.ib-pm-pos[data-phone] .ib-pm-sublabel { padding: 8px 12px 2px 42px; font-size: var(--ib-fs-13, 13px); }
+.ib-pm-pos[data-phone] .ib-pmi.ib-pmi-sub { height: 40px; padding-left: 42px; gap: 8px; font-size: var(--ib-fs-15, 15px); }
 .ib-prpop-rm1:hover:not(:disabled) { background: var(--muted); color: var(--foreground); }
 .ib-prpop-undo { display: flex; align-items: center; gap: 8px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .ib-prpop-err { font-size: var(--ib-fs-12, 12px); line-height: 1.4; color: var(--ib-ref-closed); }

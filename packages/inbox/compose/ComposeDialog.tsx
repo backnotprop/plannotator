@@ -145,6 +145,10 @@ export interface ComposeRequest {
    * agent the person started last when it can start (`agent`), else the first. Nothing to start: To stays empty.
    */
   launch?: { agent: string | null } | null;
+  /** Files the message starts with, uploaded as picked ones are (compose/openComposer.ts). */
+  files?: readonly File[];
+  /** To opens on its own list at once: the person picks a running agent or a new session (compose/openComposer.ts). */
+  pickTo?: boolean;
 }
 
 /** What the chip says when another open thread of the project has the typed name. */
@@ -386,6 +390,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     if (reuseStarted.current) return;
     reuseStarted.current = true;
     for (const source of request.reuse ?? []) files.addExisting(source);
+    if (request.files?.length) files.add(request.files);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   // `machine`: the linked machine the project is on (remote launch); null for this computer. `folder`: a folder under
@@ -638,7 +643,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     } else if (model && chosen && lastTarget.current?.session === chosen) setLost(lastTarget.current);
   }, [target, model, chosen]);
 
-  const [picker, setPicker] = useState(false);
+  const [picker, setPicker] = useState(!!request.pickTo);
   const [error, setError] = useState<string | null>(null);
   // What is wrong with the name the person typed (409 `thread_name_taken`, or not a valid name): said on the chip until it changes.
   const [nameError, setNameError] = useState<string | null>(null);
@@ -1329,13 +1334,13 @@ export function ComposeDialog(props: ComposeDialogProps) {
             </>
           ) : target ? (
             <>
-              <HostMark host={target.host} />
+              <HostMark host={target.host} agent={target.session} />
               <b>{hostLabel(target.host)}</b>
               <SessionDetail name={target.project.name} root={target.project.root} label={target.label} />
             </>
           ) : endedNote ? (
             <>
-              <HostMark host={endedNote.host} />
+              <HostMark host={endedNote.host} agent={endedNote.session} />
               <s>{hostLabel(endedNote.host)}</s>
               {endedNote.project_name ? (
                 <SessionDetail name={endedNote.project_name} root={endedNote.project_root} suffix="ended" />
@@ -1371,6 +1376,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     <AgentPill
       buttonRef={toRef}
       host={start ? start.agent : target ? target.host : endedNote ? endedNote.host : undefined}
+      agent={start ? null : (target?.session ?? endedNote?.session ?? null)}
       // A new session: the agent's name alone; the line over the row says "New <agent> session in <folder>".
       label={start ? start.name : target ? (target.label ?? hostLabel(target.host)) : endedNote ? hostLabel(endedNote.host) : model ? 'Choose an agent' : 'Looking for live agents…'}
       detail={endedNote && !target && !start ? 'ended' : null}

@@ -7,8 +7,10 @@
  * The list is read again on `event: deliveries` with `agents` only while something reads this store
  * (`inboxAgentsWatched`), so the frames cost nothing until the section draws.
  */
-import { useEffect, useState } from 'react';
-import type { InboxAgent, InboxAgentsGroup } from '@plannotator/core/inbox-types';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { InboxAgent, InboxAgentsGroup, InboxListRow } from '@plannotator/core/inbox-types';
+import { agentListFilter, type AgentListFilter } from './agents/model';
+import type { MachinesModel } from './machines';
 
 const STATES = new Set<InboxAgent['state']>(['waiting', 'working', 'idle', 'ended']);
 
@@ -42,6 +44,17 @@ export function setInboxAgents(next: unknown): void {
   current = clean === null ? null : Object.freeze(clean);
   currentJson = json;
   for (const listener of listeners) listener();
+  for (const listener of quiet) listener();
+}
+
+const quiet = new Set<() => void>();
+/**
+ * Hear each change without counting as something that draws the agents (`inboxAgentsWatched` stays as it is): the
+ * agent icons' faces (agents/agentFaces.ts) find an agent's sessions here, and must not make every list read carry them.
+ */
+export function onInboxAgentsSet(listener: () => void): () => void {
+  quiet.add(listener);
+  return () => quiet.delete(listener);
 }
 
 /** Hear each change (the hook's subscription; while one is held, `inboxAgentsWatched`). */
@@ -69,6 +82,51 @@ export function useInboxAgents(): readonly InboxAgentsGroup[] | null {
     return subscribeInboxAgents(read);
   }, []);
   return groups;
+}
+
+/**
+ * Who each agent is, never what moves on every read (its state but ended, its last poll, its counts): what the
+ * list's agent filter and its title read (agents/model.ts `agentListFilter`).
+ */
+const whoKey = (groups: readonly InboxAgentsGroup[] | null): string =>
+  JSON.stringify((groups ?? []).map((g) => [g.machine ?? null, g.agents.map((a) => [a.id, a.session, a.continues ?? null, a.launch?.thread_id ?? null, a.label ?? null, a.project?.name ?? null, a.host, a.state === 'ended'])]));
+
+/**
+ * The agents while `on` (the list is filtered to one agent; null otherwise), drawn again only when who they are
+ * changes (`whoKey`), never for a poll: the window (App) reads this, and must not draw the list on every list read.
+ * Heard through `onInboxAgentsSet`, so it does not make `event: deliveries` with `agents` read the list again.
+ */
+function useInboxAgentsWho(on: boolean): readonly InboxAgentsGroup[] | null {
+  const [groups, setGroups] = useState<readonly InboxAgentsGroup[] | null>(() => (on ? current : null));
+  useEffect(() => {
+    if (!on) {
+      setGroups(null);
+      return;
+    }
+    let key: string | null = null;
+    const read = () => {
+      const next = whoKey(current);
+      if (next === key) return;
+      key = next;
+      setGroups(current);
+    };
+    read();
+    return onInboxAgentsSet(read);
+  }, [on]);
+  return on ? groups : null;
+}
+
+/**
+ * The list's agent filter for `id` (`#agent=<id>`; null: none), the same object until what it matches or its name
+ * changes, so a list read that brings nothing of the agent's never draws the list's rows again.
+ */
+export function useAgentListFilter(id: string | null, machines: MachinesModel, rows: readonly InboxListRow[]): AgentListFilter | null {
+  const groups = useInboxAgentsWho(id !== null);
+  const next = useMemo(() => (id ? agentListFilter(id, groups, machines, rows) : null), [id, groups, machines, rows]);
+  const kept = useRef<{ key: string; filter: AgentListFilter | null }>({ key: 'null', filter: null });
+  const key = JSON.stringify(next);
+  if (key !== kept.current.key) kept.current = { key, filter: next };
+  return kept.current.filter;
 }
 
 /** Something draws the agents: `event: deliveries` with `agents` reads the list again. */

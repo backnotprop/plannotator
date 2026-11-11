@@ -23,7 +23,9 @@ export interface FenceGrammars {
 const pierreGrammars: FenceGrammars = {
   attached: () => AttachedLanguages,
   resolved: (name) => ResolvedLanguages.get(name) as FenceLanguage | undefined,
-  theme: (name) => getResolvedThemes([name as never]) as FenceMarkupRequest['themes'],
+  // Pierre resolves a theme as its own DiffsTheme (since 1.6); the worker's Shiki loads the TextMate theme inside
+  // it, under the name the page asks for.
+  theme: (name) => getResolvedThemes([name as never]).flatMap((theme) => (theme.textmate ? [{ ...theme.textmate, name }] : [])),
 };
 
 export function createInboxCodeHighlightWorker(start: () => Promise<Worker>, grammars: FenceGrammars = pierreGrammars): CodeHighlightWorker {

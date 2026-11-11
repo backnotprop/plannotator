@@ -93,7 +93,7 @@ export function ReplyRecipient({
 
   const tile = one ? (
     <span className="ib-atile">
-      <HostMark host={one.host} />
+      <HostMark host={one.host} agent={one.session} />
     </span>
   ) : (
     <TagStack participants={chosen} />
@@ -125,7 +125,7 @@ export function ReplyRecipient({
           <div key={row.session} className="ib-rpick-row" data-recipient-row={row.session} data-on={on ? '' : undefined}>
             <button type="button" className="ib-rpick-name" disabled={row.alone === false} onClick={() => onOnly(row)}>
               <span className="ib-atile">
-                <HostMark host={row.host} />
+                <HostMark host={row.host} agent={row.session} />
               </span>
               <span className="ib-rpick-l" dir="auto">
                 {row.label}

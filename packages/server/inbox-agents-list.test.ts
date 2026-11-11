@@ -170,6 +170,17 @@ describe("one conversation under two session ids (a poll's `continues`) is one a
     expect(group.agents.filter((agent) => agent.state !== "ended").map((agent) => [agent.id, agent.state])).toEqual([["ses-old", "waiting"]]);
   });
 
+  test("a line of three (A to B to C): only the session at its live end is listed, with every waiting thread of the line", async () => {
+    const { live, clock } = liveSessions();
+    await poll(live, "ses-a", { busy: false });
+    await poll(live, "ses-b", { busy: false, continues: ["ses-a"] });
+    clock.t += 31_000;
+    await poll(live, "ses-c", { busy: false, continues: ["ses-b", "ses-a"] });
+    const group = listed(live, clock, { waits: [wait("ses-a", "msg_a"), wait("ses-b", "msg_b")] });
+    expect(group.agents.map((agent) => [agent.id, agent.state, agent.waiting, agent.continues])).toEqual([["ses-c", "waiting", 2, ["ses-b", "ses-a"]]]);
+    expect(group.total).toBe(1);
+  });
+
   test("an old id that still polls keeps its own row, and the continuing one names it; the windows are told when the claim arrives", async () => {
     const { live, clock } = liveSessions();
     await poll(live, "ses-old", { busy: false });
