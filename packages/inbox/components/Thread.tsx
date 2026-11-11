@@ -67,7 +67,7 @@ import { GuideCard } from './GuideCard';
 import { ReviewCard, type ReviewOutcome } from './ReviewCard';
 import { reviewOpenPlan, type ReviewView } from '../pulls/reviewsModel';
 import { inboxThreadHadReview } from '@plannotator/core/inbox-review';
-import { MessageMenu, ThreadMore, ThreadSnooze, type CopyMenuHost, type ThreadMoreLaunch } from './CopyMenus';
+import { MessageMenu, ThreadMore, type CopyMenuHost, type ThreadMoreLaunch } from './CopyMenus';
 import { RunLine } from './RunLine';
 import { PermissionCard } from './PermissionCard';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
@@ -3572,7 +3572,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     return null;
   };
   const [openItemsRequest, setOpenItemsRequest] = useState(0);
-  // H (approval "inbox-keyboard-keys-2026-11-07", item 3): opens the header clock's menu; it never snoozes by itself.
+  // H (approval "inbox-keyboard-keys-2026-11-07", item 3): opens the header ⋯ menu at Snooze's times; it never snoozes by itself.
   const [snoozeRequest, setSnoozeRequest] = useState(0);
   const readKeysOn = !one && !artifactsOn;
   const readKeyAllowed = (event: KeyboardEvent) => {
@@ -3738,7 +3738,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             const target = keyTarget(event);
             if (target?.closest('[data-thread-id]') && keyboardFocused(target)) return false;
           } else if (origin !== 'thread') return false;
-          const clock = sectionRef.current?.querySelector<HTMLElement>('[data-thread-snooze]');
+          const clock = sectionRef.current?.querySelector<HTMLElement>('[data-thread-more][data-snooze-key]');
           return !!clock && clock.getAttribute('aria-expanded') !== 'true' && clock.getClientRects().length > 0;
         },
         handle: () => setSnoozeRequest((n) => n + 1),
@@ -5942,7 +5942,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const markUnreadOffered = markReadOffered && readAt === null && onMarkUnread !== undefined && canMarkUnread(row!);
   // The header's ⋯ More offers it where that button does not: a thread marked read, and a phone, whose bar has no read
   // button (approval "inbox-thread-header": its ⋯ sheet leads with the read actions).
-  const markUnreadInMenu = markReadOffered && onMarkUnread !== undefined && canMarkUnread(row!) && (phone || !markUnreadOffered);
+  const markUnreadInMenu = markReadOffered && onMarkUnread !== undefined && canMarkUnread(row!);
   const closedByRead = thread.messages.flatMap((m) => (m.questions ?? []).filter((q) => q.state === 'closed' && q.set_aside_at));
 
   const openAttachment = file ? allFiles.find((a) => a.id === file.id) ?? null : null;
@@ -6063,64 +6063,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         }
       });
   };
-  // The read button (approval "inbox-thread-header", 2026-11-02): one icon before the subject, its words in its
-  // tooltip ("Mark read / quiet" with E, "Mark unread", "Read" while marked read) and as its name. A phone has none in its bar:
-  // the ⋯ sheet leads with the read action instead (`phoneMarkRead`, `markUnreadInMenu`).
-  const markReadAria = useShortcutAria({ scope: inboxThreadShortcuts, action: 'markRead' });
-  const markReadButton = phone ? null : markUnreadOffered ? (
-    <Tip content="Mark unread">
-      <button
-        type="button"
-        className="ib-iconbtn ib-readbtn"
-        data-mark-unread=""
-        aria-label="Mark unread"
-        onClick={(event) => {
-          // A double-click on Mark read: this button took its place after the first click. The second is not meant for it.
-          if (event.detail > 1) return;
-          onMarkUnread!();
-        }}
-      >
-        <Icon name="mail" size={17} />
-      </button>
-    </Tip>
-  ) : markReadOffered ? (
-    <Tip
-      content={
-        readAt !== null ? (
-          <span className="flex flex-col gap-1">
-            <span>Read</span>
-            <span className="text-muted-foreground">Move it back to the top</span>
-          </span>
-        ) : markReadEnabled ? (
-          withShortcut('Mark read / quiet', { scope: inboxThreadShortcuts, action: 'markRead' })
-        ) : (
-          <span className="flex flex-col gap-1">
-            <span>Mark read</span>
-            <span className="text-muted-foreground">Nothing here waits on you</span>
-          </span>
-        )
-      }
-    >
-      <button
-        type="button"
-        className="ib-iconbtn ib-readbtn"
-        data-mark-read=""
-        aria-label={readAt !== null ? 'Read' : 'Mark read'}
-        aria-pressed={readAt !== null}
-        aria-keyshortcuts={readAt === null && markReadEnabled ? markReadAria : undefined}
-        disabled={!markReadEnabled}
-        onClick={() => onMarkRead!(readAt === null)}
-      >
-        <Icon name="mailOpen" size={17} />
-      </button>
-    </Tip>
-  ) : null;
-  // A phone's ⋯ sheet offers every read action a desktop has (its bar has no read button, and a phone has no row menu
-  // and no E): Mark read whenever it can be done (a seen update the list still holds in New included, where a desktop
-  // reaches it by E or the row menu; never disabled there: the sheet lists what can be done), Move back to the top on
-  // a thread marked read (the pressed Read's click), and Mark unread (`markUnreadInMenu`).
-  const phoneMarkRead = phone && markReadOffered && readAt === null && markReadEnabled ? () => onMarkRead!(true) : undefined;
-  const phoneMoveBack = phone && markReadOffered && readAt !== null ? () => onMarkRead!(false) : undefined;
+  // The ⋯ menu leads with the read actions (the owner, 2026-11-11: no read or Snooze icon in the bar, the title gets
+  // the room): Mark read whenever it can be done (never disabled: the menu lists what can be done), Move back to the
+  // top on a thread marked read, and Mark unread (`markUnreadInMenu`).
+  const menuMarkRead = markReadOffered && readAt === null && markReadEnabled ? () => onMarkRead!(true) : undefined;
+  const menuMoveBack = markReadOffered && readAt !== null ? () => onMarkRead!(false) : undefined;
   // A thread's PRs: on this machine's own threads, for the person (a linked machine's and a tailnet guest's have none).
   const pullsOffered = !machine && !guest;
   const [addingPull, setAddingPull] = useState(false);
@@ -6291,14 +6238,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             )}
           </>
         )}
-        {/* The bar (approval "inbox-thread-header", 2026-11-02): the read button and the Snooze clock, as icons, lead
-            before the subject; everything at the right is an icon with a tooltip (approval "inbox-thread-artifacts"):
-            Artifacts, Expand / Fold all, ⋯ More (Archive is in its menu), then the close. A phone has ‹ Inbox, the
-            subject, Artifacts, Expand and ⋯: its read action and Snooze lead the ⋯ sheet. */}
+        {/* The bar: the subject first, then icons with tooltips (approval "inbox-thread-artifacts"): Artifacts,
+            Expand / Fold all, ⋯ More (its read actions and Snooze lead it; Archive is in it), then the close. */}
         {phone && artifactsOn ? null : (
           <>
-            {markReadButton}
-            {!phone && snoozeProps && <ThreadSnooze snooze={snoozeProps} openRequest={snoozeRequest} />}
             {one && !artifactsOn && !barName ? (
               <span className="ib-sp" />
             ) : (
@@ -6368,12 +6311,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             <ThreadMore
               {...copyHost}
               pin={onPin ? { pinned: pinShown, onToggle: togglePin } : undefined}
-              markRead={phoneMarkRead}
-              moveBack={phoneMoveBack}
+              markRead={menuMarkRead}
+              moveBack={menuMoveBack}
               markUnread={markUnreadInMenu ? onMarkUnread : undefined}
               archive={{ archived, onToggle: () => void resolve(!archived) }}
               launch={launchMenu}
               snooze={snoozeProps}
+              snoozeRequest={snoozeRequest}
               requestGuide={guideOffered ? () => void requestGuide() : undefined}
               addPull={pullsOffered && !artifactsOn ? () => setAddingPull(true) : undefined}
               postDecisions={
