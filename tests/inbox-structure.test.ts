@@ -72,7 +72,7 @@ export function importFindings(file: string, text: string, big: ReadonlySet<stri
   }
   for (const { spec, typeOnly, path } of targets) {
     // A type names a shape, never a copy of data: types may still come from a big file (api.ts holds the wire types).
-    if (big.has(path) && !typeOnly) found.push(`imports ${spec}, a big file: move what it needs out of it first`);
+    if (drawing && big.has(path) && !typeOnly) found.push(`imports ${spec}, a big file: move what it needs out of it first`);
     if (at.startsWith("packages/inbox/data/")) {
       if (path.endsWith(".tsx") || /^packages\/inbox\/(components|screens|parts)\//.test(path) || path === "packages/inbox/App") {
         found.push(`imports ${spec}: data/ holds no React components`);

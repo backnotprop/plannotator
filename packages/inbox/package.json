@@ -22,6 +22,7 @@
     "@plannotator/review-editor": "workspace:*",
     "@plannotator/system": "workspace:*",
     "@plannotator/ui": "workspace:*",
+    "@tanstack/react-query": "^5.105.3",
     "motion": "^14.4.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
