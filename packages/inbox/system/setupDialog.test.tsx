@@ -1,15 +1,3 @@
-/**
- * System → Set up a project (system/SetupDialog.tsx through system/SetupHost.tsx), the server calls stubbed.
- * What regresses: anything of System shown while System or Code review is off; a setup that needs typing beyond
- * extra repos and doc sites; a step that loses what was chosen or typed; a repo or doc site that does not parse
- * saved, or one typed and not yet added dropped; Draw it offered with no agent to start, or Copy prompt offered
- * beside it; a Copy prompt whose copy does not start in the click; a Cancel that saves; a removed chip dropping
- * focus to the page instead of the next chip (or its field when none is left); an agent the Inbox launches itself
- * (Claude Code, Pi, OpenCode) not offered; Draw it for an agent the Inbox cannot start here; a Pi or OpenCode save
- * whose recommended model is not in the `provider/model` form those agents take.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -115,7 +103,6 @@ function type(el: HTMLInputElement | null, value: string) {
   });
 }
 
-/** Enter in a field: its form submits. */
 function submit(el: HTMLInputElement | null) {
   act(() => {
     el!.form!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
@@ -143,13 +130,11 @@ describe.skipIf(!hasDom)('System setup', () => {
     expect(ui.q<HTMLInputElement>('[data-system-project="prj_app"] input')!.checked).toBe(true);
     await press(ui.btn('next'));
     expect(ui.step()).toBe(2);
-    // The project's own repo is there already, and cannot be removed.
     expect(ui.q('[data-system-own]')?.textContent).toContain('acme/app');
     expect(ui.q('[data-system-own] button')).toBeNull();
     await press(ui.btn('next'));
     expect(ui.step()).toBe(3);
     expect(ui.current()).toContain('Keep it current');
-    // An agent the Inbox can start: Draw it, and no Copy prompt beside it.
     expect(ui.btn('copy')).toBeNull();
     await press(ui.btn('draw'));
     expect(ui.saves).toEqual([{ project_id: 'prj_app', repos: [], docs: [], agent: 'claude', model: 'claude-opus-5-5' }]);
@@ -172,7 +157,6 @@ describe.skipIf(!hasDom)('System setup', () => {
     expect(ui.q('[data-system-repo-error]')).toBeNull();
     submit(repo());
     expect(ui.q('[data-system-repo="github.com/acme/brand"]')).not.toBeNull();
-    // The project's own repo again adds nothing.
     type(repo(), 'acme/app');
     submit(repo());
     expect(document.querySelectorAll('[data-system-repo]').length).toBe(1);
@@ -186,11 +170,9 @@ describe.skipIf(!hasDom)('System setup', () => {
     type(doc(), 'help.example.com');
     submit(doc());
     expect(ui.q('[data-system-doc="https://help.example.com/"]')).not.toBeNull();
-    // Typed, not added: Next takes it.
     type(repo(), 'gitlab.com/group/tools');
     await press(ui.btn('next'));
     expect(ui.step()).toBe(3);
-    // Back keeps every choice.
     await press(ui.btn('back'));
     expect(document.querySelectorAll('[data-system-repo]').length).toBe(2);
     await press(ui.btn('next'));
@@ -206,7 +188,6 @@ describe.skipIf(!hasDom)('System setup', () => {
     await press(ui.q('[data-system-doc="https://help.example.com/"] button'));
     expect(ui.q('[data-system-doc]')).toBeNull();
     await press(ui.btn('next'));
-    // Its saved model (the agent's own default) is the one chosen.
     expect(ui.q<HTMLInputElement>('[data-system-model=""] input')!.checked).toBe(true);
     await press(ui.btn('draw'));
     expect(ui.saves).toEqual([{ project_id: 'prj_docs', repos: ['github.com/acme/brand'], docs: [], agent: 'claude', model: null }]);
@@ -215,7 +196,6 @@ describe.skipIf(!hasDom)('System setup', () => {
   test('removing a chip moves focus to the chip after it, or to its field when none is left', async () => {
     const ui = await open(mount(), 'prj_docs');
     await press(ui.btn('next'));
-    // Repos: brand, then tools; remove brand (focus to tools' remove), then tools (focus to the add button).
     await press(ui.btn('add-repo'));
     type(ui.q<HTMLInputElement>('[data-system-repo-input]'), 'acme/tools');
     submit(ui.q<HTMLInputElement>('[data-system-repo-input]'));
@@ -224,7 +204,6 @@ describe.skipIf(!hasDom)('System setup', () => {
     expect(document.activeElement).toBe(ui.q('[data-system-repo="github.com/acme/tools"] button'));
     await press(ui.q('[data-system-repo="github.com/acme/tools"] button'));
     expect(document.activeElement).toBe(ui.q('[data-system-repo-input]'));
-    // Doc sites: the last one removed, focus to the doc field.
     await press(ui.q('[data-system-doc="https://help.example.com/"] button'));
     expect(document.activeElement).toBe(ui.q('[data-system-doc-input]'));
     expect(document.activeElement).not.toBe(document.body);
@@ -236,14 +215,11 @@ describe.skipIf(!hasDom)('System setup', () => {
     await press(ui.btn('next'));
     expect([...document.querySelectorAll('[data-system-agent]')].map((row) => row.getAttribute('data-system-agent'))).toEqual(['claude', 'pi', 'opencode']);
     expect(ui.btn('draw')).not.toBeNull();
-    // Pi: not startable here, so Copy prompt; the recommended model follows the pick, in Pi's provider/model form.
     await press(ui.q('[data-system-agent="pi"] input'));
     expect(ui.btn('draw')).toBeNull();
     expect(ui.btn('copy')).not.toBeNull();
-    // The line above the agents names the one picked, and where to paste the prompt.
     expect(ui.q('[data-system-how]')?.textContent).toBe("The Inbox can't start Pi yet. Copy the prompt and paste it into Pi in app. Redraws use Pi too.");
     expect(ui.q<HTMLInputElement>('[data-system-model="anthropic/claude-opus-5-5"] input')!.checked).toBe(true);
-    // The agent's own default stays the default across a pick.
     await press(ui.q('[data-system-model=""] input'));
     await press(ui.q('[data-system-agent="opencode"] input'));
     expect(ui.q<HTMLInputElement>('[data-system-model=""] input')!.checked).toBe(true);
