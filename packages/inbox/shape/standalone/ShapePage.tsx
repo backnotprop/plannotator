@@ -1,19 +1,3 @@
-/**
- * The standalone Shape page (approvals "shape-living-board" decision 6 and
- * "shape-landing-grid": "standalone, under a small Plannotator header"). What
- * `plannotator shape open` shows a person who does not use the Plannotator
- * Inbox: the grid of boards (the Inbox's ShapeGrid), then a board (the
- * Inbox's ShapeBoard over this page's host). Esc or Back returns to the grid.
- *
- * Every state is a URL: the grid is `/`, a board `#shape=shp_…` (with
- * `&view=` and `&panel=` as the board moves). No keys of its own: Esc is the
- * board's (approved for Shape), and the page closes the board on an Esc the
- * board did not use, as the Inbox does.
- *
- * One event stream per page (`/api/shapes/events`): a change re-reads the
- * list and tells the open board. Shape off (config `inboxShape`): the routes
- * answer 404 and the page says Shape is off.
- */
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { shapeViewNow, type ShapeViewId } from '@plannotator/core/shape';
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
@@ -33,11 +17,9 @@ export interface ShapeRoute {
   panel: ShapePanelTab | null;
 }
 
-/** The page's state from its address: `#shape=shp_…&view=how&panel=ask`, else the grid. */
 export function parseShapeHash(hash: string): ShapeRoute {
   const params = new URLSearchParams(hash.replace(/^#/, ''));
   const shape = params.get('shape');
-  // A saved link to an old `view=know` or `view=reqs`: `know`, which the board opens as its Shape view.
   const view = shapeViewNow(params.get('view')) as ShapeViewId | null;
   const panel = params.get('panel') as ShapePanelTab | null;
   return {
@@ -55,7 +37,6 @@ export function shapeHash(route: ShapeRoute): string {
   return `#${params.toString()}`;
 }
 
-/** The grid's card for a board. */
 export function shapePageItem(s: ShapeSummaryWire): ShapeGridItem {
   return {
     id: s.id,
@@ -69,7 +50,6 @@ export function shapePageItem(s: ShapeSummaryWire): ShapeGridItem {
   };
 }
 
-/** "8 boards", "1 board". */
 export function boardCount(n: number): string {
   return n === 1 ? '1 board' : `${n} boards`;
 }
@@ -87,9 +67,7 @@ function SearchIcon() {
 
 export interface ShapePageProps {
   api: ShapePageApi;
-  /** The page's event stream (tests pass a stand-in). */
   openEvents?: () => EventSource;
-  /** The window (tests pass happy-dom's). */
   win?: Window;
 }
 
@@ -101,7 +79,6 @@ export function ShapePage({ api, openEvents, win = window }: ShapePageProps) {
   const listeners = useRef(new Set<(ids: string[]) => void>());
   const reading = useRef<AbortController | null>(null);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** The board was opened from this page's grid (Back returns there); else it was the address the page opened at. */
   const openedHere = useRef(false);
   const lastOpened = useRef<string | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -132,7 +109,6 @@ export function ShapePage({ api, openEvents, win = window }: ShapePageProps) {
       });
   }, [api]);
 
-  // Who serves the page (its serverSession), then the boards and the one event stream.
   useEffect(() => {
     let stream: EventSource | null = null;
     let closed = false;
@@ -151,9 +127,7 @@ export function ShapePage({ api, openEvents, win = window }: ShapePageProps) {
           try {
             const data = JSON.parse((event as MessageEvent<string>).data) as { ids?: unknown };
             if (Array.isArray(data.ids)) ids = data.ids.filter((x): x is string => typeof x === 'string');
-          } catch {
-            // an empty list: read everything again
-          }
+          } catch {}
           for (const listener of listeners.current) listener(ids);
           if (refreshTimer.current) clearTimeout(refreshTimer.current);
           refreshTimer.current = setTimeout(refresh, 60);
@@ -170,7 +144,6 @@ export function ShapePage({ api, openEvents, win = window }: ShapePageProps) {
     };
   }, [api, refresh, openEvents]);
 
-  // Back and Forward: the address is the state.
   useEffect(() => {
     const follow = () => setRoute(parseShapeHash(win.location.hash));
     win.addEventListener('popstate', follow);
@@ -202,7 +175,6 @@ export function ShapePage({ api, openEvents, win = window }: ShapePageProps) {
     setRoute({ shape: null, view: null, panel: null });
   }, [win]);
 
-  // Esc the board did not use closes it (the board marks the Esc it uses, in its capture listener).
   useEffect(() => {
     if (!route.shape) return;
     const onKey = (e: KeyboardEvent) => {
@@ -214,7 +186,6 @@ export function ShapePage({ api, openEvents, win = window }: ShapePageProps) {
     return () => win.removeEventListener('keydown', onKey);
   }, [route.shape, close, win]);
 
-  // Back on the grid: focus the card that was open, else the heading.
   useEffect(() => {
     if (route.shape) return;
     const id = lastOpened.current;
@@ -236,7 +207,6 @@ export function ShapePage({ api, openEvents, win = window }: ShapePageProps) {
   );
 
   const items = useMemo(() => (shapes ?? []).filter((s) => s.state === 'active').map(shapePageItem), [shapes]);
-  /** The count and Find show once there is a board to count or find. */
   const hasBoards = status === 'on' && items.length > 0;
   const boardOpen = status === 'on' && !!route.shape;
 
