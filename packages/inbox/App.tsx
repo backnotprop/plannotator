@@ -111,7 +111,7 @@ import { Sidebar } from './components/Sidebar';
 import { UsagePeek } from './components/Usage';
 import { ActivityChart } from './components/ActivityChart';
 import { AccountsProvider, useAccounts } from './useAccounts';
-import { InitiativeTagsContext, type InitiativeTags } from './hashtags';
+import { InitiativeTagsContext, LiveInitiativesContext, type InitiativeTags } from './hashtags';
 import { SidebarShell } from './shell/SidebarShell';
 import { InboxList } from './components/InboxList';
 import { useTidy } from './components/Tidy';
@@ -7481,6 +7481,7 @@ function Inbox() {
 
   return (
     <InitiativeTagsContext.Provider value={initiativeTags}>
+    <LiveInitiativesContext.Provider value={tagInitiatives}>
     <SideButtonContext.Provider value={ask.sideButton}>
     <div
       ref={rootRef}
@@ -8217,6 +8218,7 @@ function Inbox() {
       )}
     </div>
     </SideButtonContext.Provider>
+    </LiveInitiativesContext.Provider>
     </InitiativeTagsContext.Provider>
   );
 }

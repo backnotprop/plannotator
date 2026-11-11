@@ -282,6 +282,7 @@ packages/inbox/skillReferences.test.tsx
 packages/inbox/skillListRoom.test.tsx
 packages/inbox/messageComments.test.tsx
 packages/inbox/messageDelete.test.tsx
+packages/inbox/messageRedraws.test.tsx
 packages/inbox/linkedMessageDelete.test.tsx
 packages/inbox/messageArming.test.tsx
 packages/inbox/feedbackDialog.test.tsx

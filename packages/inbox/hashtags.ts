@@ -50,6 +50,13 @@ const NONE: InitiativeTags = { initiatives: [], counts: new Map(), cards: [], ro
 /** App provides the Board's initiatives (read with the cards while the Board is on; off, `#` is plain text). */
 export const InitiativeTagsContext = createContext<InitiativeTags>(NONE);
 export const useInitiativeTags = () => useContext(InitiativeTagsContext);
+/**
+ * Only the live initiatives, for what draws tag links (every message body): the list's rows and the cards change the
+ * tags above on each read, and a body that read them would draw again with every message that arrives. App provides
+ * the same array while the initiatives' ids and names stay.
+ */
+export const LiveInitiativesContext = createContext<readonly InboxInitiative[]>(NONE.initiatives);
+export const useLiveInitiatives = () => useContext(LiveInitiativesContext);
 
 /** The list's rows, shaped as the skill list's (the menu is reused as is; inbox.css swaps the icon and drops the source). */
 export function hashtagRows(initiatives: readonly InboxInitiative[], counts: ReadonlyMap<string, number>): SkillCatalogEntry[] {

@@ -191,7 +191,8 @@ import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { StepsButton } from '../steps/StepsButton';
 import { stepsButtonSig, stepsWaitTarget } from '../steps/model';
 import { useThreadSteps, type StepsSubscribe } from '../steps/useThreadSteps';
-import { linkHashtags, useInitiativeTags } from '../hashtags';
+import { linkHashtags, useLiveInitiatives } from '../hashtags';
+import { keepEqualByKey } from '../thread/keepEqual';
 import type { Signal } from '../signal';
 import { replyWordsCount, withFreeName, withoutReplyWords, type ShapeReplyPart } from '../shape/addToReply';
 import { replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, tookOverReply, wordsMessage, type SendTarget, type SentContents } from '../sendTargets';
@@ -536,7 +537,7 @@ export function MessageBody({
   const replyFileList = ownReply ? replyFiles?.files : undefined;
   const replyPeople = ownReply ? replyFiles?.personMessageIds : undefined;
   // `#Shape` naming a live initiative links to the Board filtered to it (approval "board-hashtags"; display only).
-  const { initiatives: tagInitiatives } = useInitiativeTags();
+  const tagInitiatives = useLiveInitiatives();
   const linkFiles = useCallback(
     (text: string) =>
       linkHashtags(
@@ -2428,7 +2429,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const allFiles: InboxAttachmentState[] = useMemo(() => [...attachments, ...inlineImages], [attachments, inlineImages]);
   const records = files?.annotations ?? [];
   /** The person's own messages: their images are named "image in my … message" in the feedback (replyFileLinks.ts). */
-  const personMessageIds = useMemo(() => new Set(thread.messages.filter((m) => m.author.kind === 'person').map((m) => m.id)), [thread.messages]);
+  // Keyed on the ids, so the set stays the same object while they stay: each of the person's message bodies reads it.
+  const personIdsKey = thread.messages
+    .filter((m) => m.author.kind === 'person')
+    .map((m) => m.id)
+    .join(' ');
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the ids, on purpose
+  const personMessageIds = useMemo(() => new Set(personIdsKey ? personIdsKey.split(' ') : []), [personIdsKey]);
   // Code review: `/review-recheck` is offered (and matched at Send) only once a review happened in this thread.
   const reviewHappened = useMemo(() => inboxThreadHadReview(thread.messages), [thread.messages]);
   const skillFilter = useMemo(() => inboxSkillFilter(reviewHappened), [reviewHappened]);
@@ -4191,6 +4198,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
 
   // The action items each of the person's messages carried (its reply, or the report the timed path sent):
   // listed under its words as "You did 1 action item" (approval "inbox-action-items-in-reply").
+  // Each reply's rows stay the same array while they are equal: a message arriving redraws no reply's body.
+  const heldSentActions = useRef<ReadonlyMap<string, ActionRow[]> | null>(null);
   const sentActionsByReply = useMemo(() => {
     const out = new Map<string, ActionRow[]>();
     for (const m of thread.messages) {
@@ -4204,13 +4213,14 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         ]);
       }
     }
-    return out;
+    return (heldSentActions.current = keepEqualByKey(heldSentActions.current, out));
   }, [thread.messages]);
 
   // The person's own sent replies are drawn in their words, with the answers they carried as a
   // short list read from the questions (sentReply.ts): never the agent-facing answers section.
   // Its times read "8:22 PM" today and "Nov 1, 8:22 PM" after midnight: a new day builds it again.
   const day = new Date().toDateString();
+  const heldSentAnswers = useRef<ReadonlyMap<string, SentAnswerGroup[]> | null>(null);
   const sentAnswersByReply = useMemo(() => {
     const out = new Map<string, SentAnswerGroup[]>();
     for (const m of thread.messages) {
@@ -4218,7 +4228,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       const groups = sentAnswersOf(m, thread.messages, (asked) => `${agentName(asked.author)}'s message, ${whenTime(asked.created_at)}`);
       if (groups.length > 0) out.set(m.id, groups);
     }
-    return out;
+    return (heldSentAnswers.current = keepEqualByKey(heldSentAnswers.current, out));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `day` is the key, not an input.
   }, [thread.messages, day]);
 
@@ -6180,6 +6190,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     onToast,
     linkOf: linkOf ?? ((messageId) => threadLink(thread.thread_id, null, window.location.origin, messageId)),
   };
+  const newestCopyHost = useRef(copyHost);
+  newestCopyHost.current = copyHost;
 
   // The one thing every reuse button in this pane calls. Stable between changes of what it shows, so the buttons and the
   // pictures' layer (which measures) draw only when a file comes or goes.
@@ -6823,10 +6835,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             >
               <ArmScope arms={arms} id={message.id}>
               <MessageView
-                data={{ message, copy: [thread, phone], head: [one, isNew, revealed, time, fullWhen, name, nameSaid, authorLabel, nameTip, multiAgent ? headFolder(message, thread, taggable) : thread.project.name], to: [toLabel, ended, tagNames], files: [fileCount, filesOpen, fileCount > 0 ? changedCount(messageFiles) : 0], live: liveMessage(message) }}
+                data={{ message, copy: [thread.thread_id, thread.subject, phone], head: [one, isNew, revealed, time, fullWhen, name, nameSaid, authorLabel, nameTip, multiAgent ? headFolder(message, thread, taggable) : thread.project.name], to: [toLabel, ended, tagNames], files: [fileCount, filesOpen, fileCount > 0 ? changedCount(messageFiles) : 0], live: liveMessage(message) }}
                 draw={() => (
               <MessageMenu
                 {...copyHost}
+                newest={newestCopyHost}
                 message={message}
                 head={(more) => (
                   <div className="ib-fline ib-is-open" data-open-head="" data-revealed={revealed ? '' : undefined}>
