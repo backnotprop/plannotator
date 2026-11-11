@@ -117,7 +117,7 @@ async function openOwn(page: Page, agentId: string): Promise<Locator> {
   await expect(place).toBeVisible();
   await expect(place).toHaveAttribute('aria-label', 'Your own…');
   await place.click();
-  const panel = page.locator('.am-own[data-open]');
+  const panel = page.locator('dialog[data-dialog="agent-icon"][open]');
   await expect(panel).toBeVisible();
   return panel;
 }
@@ -127,7 +127,7 @@ async function upload(page: Page, agentId: string, file: string): Promise<void> 
   const chooser = page.waitForEvent('filechooser');
   await panel.locator('.am-own-up').click();
   await (await chooser).setFiles(file);
-  await expect(page.locator('.am-own[data-open]')).toHaveCount(0);
+  await expect(page.locator('dialog[data-dialog="agent-icon"][open]')).toHaveCount(0);
   await expect(sidebarMark(page, agentId).locator('[data-agent-mark]')).toHaveAttribute('data-face', /^own:[0-9a-f]{64}$/);
   // The sidebar's picture takes the mark's box exactly, whatever its own size (a wide one once spilled over the rows
   // below and opened their pickers).
@@ -222,10 +222,10 @@ test('"Your own…" takes a file, a drop and a paste; each shows on its agent ev
   await page.locator('.am-fan[data-open] [data-face-choice="own"]').focus();
   await shot(page, 'picker-your-own-light');
   await page.keyboard.press('Enter');
-  await expect(page.locator('.am-own[data-open]')).toBeVisible();
+  await expect(page.locator('dialog[data-dialog="agent-icon"][open]')).toBeVisible();
   await shot(page, 'panel-empty-light');
   await page.keyboard.press('Escape');
-  await expect(page.locator('.am-own[data-open]')).toHaveCount(0);
+  await expect(page.locator('dialog[data-dialog="agent-icon"][open]')).toHaveCount(0);
 
   // "+" and a file.
   const order = ids.map((id, i) => ({ id, key: AGENTS[i]!.key }));
@@ -273,7 +273,7 @@ test('"Your own…" takes a file, a drop and a paste; each shows on its agent ev
   await shot(page, 'panel-pictures-dark');
   await page.emulateMedia({ colorScheme: 'light' });
   await page.keyboard.press('Escape');
-  await expect(page.locator('.am-own[data-open]')).toHaveCount(0);
+  await expect(page.locator('dialog[data-dialog="agent-icon"][open]')).toHaveCount(0);
   await page.mouse.move(1000, 850);
   await shot(page, 'list-light');
   await page.emulateMedia({ colorScheme: 'dark' });

@@ -39,6 +39,7 @@
  */
 import type { AgentFace, OurFace } from './faceChoices';
 import { ownIconSrc } from './ownIcons';
+import { setArtStyle, setFaceDrawing } from './iconSets';
 import { AGENT_RIGS, CLAUDE_RAY_ANGLES, type AgentRigKind } from './rigs';
 
 export { AGENT_FACES, nextAgentFace, type AgentFace } from './faceChoices';
@@ -1029,12 +1030,55 @@ function ownFaceEl(icon: Icon, f: HTMLElement, face: AgentFace): void {
   f.append(body);
 }
 
+/**
+ * An icon from a set ("Sets"), moved as a whole like our faces and built with the DOM, never as markup: an `<img>` of
+ * its address (pixel art nearest-neighbour at whole multiples, agents.css), or a mask in the theme's text colour for a
+ * one-colour set, with a hidden image of the same address that says when it does not load. One that does not load
+ * shows the agent's own mark.
+ */
+function setFaceEl(icon: Icon, f: HTMLElement, face: AgentFace): void {
+  const drawing = setFaceDrawing(face);
+  if (!drawing) return;
+  const body = document.createElement('span');
+  body.className = 'am-p am-fb';
+  body.dataset.p = 'body';
+  const x = document.createElement('span');
+  x.className = 'am-x am-fb am-setart';
+  if (drawing.look?.pixelated) x.dataset.pixel = '';
+  for (const [name, value] of Object.entries(setArtStyle(drawing.look, drawing.src))) x.style.setProperty(name, value);
+  const img = document.createElement('img');
+  img.alt = '';
+  img.draggable = false;
+  img.decoding = 'async';
+  img.dataset.set = face;
+  img.src = drawing.src;
+  if (drawing.look?.mono) {
+    x.dataset.mono = '';
+    const mono = document.createElement('span');
+    mono.className = 'am-set-mono';
+    x.append(mono);
+    img.hidden = true;
+  }
+  img.addEventListener('error', () => {
+    if (icons.get(icon.el) !== icon) return;
+    if (icon.face === face) showFace(icon, 'agent', false);
+    if (icon.face !== face && icon.faces.get(face) === f) {
+      f.remove();
+      icon.faces.delete(face);
+    }
+  });
+  x.append(img);
+  body.append(x);
+  f.append(body);
+}
+
 function faceEl(icon: Icon, face: AgentFace): HTMLElement {
   const known = icon.faces.get(face);
   if (known) return known;
   const f = document.createElement('span');
-  f.className = face.startsWith('own:') ? 'am-face am-f-own' : `am-face am-f-${face}`;
+  f.className = face.startsWith('own:') ? 'am-face am-f-own' : face.startsWith('set:') ? 'am-face am-f-set' : `am-face am-f-${face}`;
   if (face.startsWith('own:')) ownFaceEl(icon, f, face);
+  else if (face.startsWith('set:')) setFaceEl(icon, f, face);
   // Our art is a picture moved as a whole; `faceArt` holds markup from our own assets only.
   else if (face !== 'agent') f.innerHTML = `<span class="am-p am-fb" data-p="body"><span class="am-x am-fb">${faceArt?.[face as OurFace] ?? ''}</span></span>`;
   f.hidden = true;
@@ -1095,7 +1139,7 @@ export function mountAgentMark(el: HTMLElement, options: { rig: AgentRigKind | n
   screenWatch()?.observe(el);
   watchPointer();
   onMoved();
-  if (options.face !== 'agent' && (faceArt || options.face.startsWith('own:'))) showFace(icon, options.face, false);
+  if (options.face !== 'agent' && (faceArt || options.face.startsWith('own:') || options.face.startsWith('set:'))) showFace(icon, options.face, false);
   return plainOf(icon);
 }
 
@@ -1103,7 +1147,7 @@ export function mountAgentMark(el: HTMLElement, options: { rig: AgentRigKind | n
 export function showAgentFace(el: HTMLElement, face: AgentFace, withMotion = true): void {
   const icon = icons.get(el);
   if (!icon || icon.face === face) return;
-  if (face !== 'agent' && !face.startsWith('own:') && !faceArt) return;
+  if (face !== 'agent' && !face.startsWith('own:') && !face.startsWith('set:') && !faceArt) return;
   showFace(icon, face, withMotion);
 }
 

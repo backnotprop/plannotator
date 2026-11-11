@@ -2057,6 +2057,12 @@ export const inboxApi = {
   uploadAgentIcon: (picture: string) => post<{ icon?: { id?: unknown } } & Record<string, unknown>>(inboxUrl('/agent-icons'), { picture }),
   /** Take an uploaded picture away: the agents showing it go back to their own mark. Answers `{ faces, rev, icons }`. */
   removeAgentIcon: (id: string) => post<unknown>(inboxUrl('/agent-icons'), { remove: id }),
+  /** The icon sets for agents' icons ("Sets"): built in, then fetchable (`remote`: the pointer is read too; the picker's Sets only). */
+  iconSets: (remote: boolean) => get<{ sets?: unknown }>(inboxUrl('/icon-sets', remote ? 'remote=1' : undefined)),
+  /** One set's icons (a fetchable one's `have`: the icons kept so far). */
+  iconSet: (id: string) => get<unknown>(inboxUrl(`/icon-sets/${encodeURIComponent(id)}`)),
+  /** "Get": download a fetchable set into this Inbox's data folder (a stopped one resumes). */
+  getIconSet: (id: string) => post<{ set?: unknown }>(inboxUrl('/icon-sets'), { get: id }),
   /** Pin one artifact of a thread (its key: an attachment id, or `guide:<message id>`), or unpin it. */
   setArtifactPinned: (threadId: string, key: string, pinned: boolean) => post<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins'), { thread_id: threadId, key, pinned }),
   /** The Artifacts wall: a page of every thread's artifacts, newest first. */

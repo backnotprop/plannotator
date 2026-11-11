@@ -166,7 +166,7 @@
 .am-fan[data-still] .am-fan-i, .am-fan[data-still][data-starting-style] .am-fan-i, .am-fan[data-still][data-ending-style] .am-fan-i { transform: translate(var(--x), var(--y)); transition: opacity 120ms linear; }
 .am-fan[data-still] .am-fan-i:hover { transform: translate(var(--x), var(--y)); }
 
-/* ---------- "Your own…": an uploaded picture (ownIcons.ts, OwnIconPanel.tsx) ----------
+/* ---------- "Your own…": an uploaded picture (ownIcons.ts, OwnIconsBody.tsx) ----------
    Shown as uploaded, only scaled to fit: its own shape and transparency, no crop, no tile colour behind it and no
    rounded mask. It takes the mark's whole tile (the tile's box is unchanged, so no row changes size), and a wide or
    tall picture sits letterboxed in it with clear room either side. */
@@ -186,28 +186,48 @@
 .am-fan-f > img.am-own-art { object-fit: contain; }
 .am-fan[data-touch] .am-own-add { width: 24px; height: 24px; border-radius: 8px; }
 
-/* The panel: the uploaded pictures, "+" first; a picture can be dropped on it or pasted while it is open. */
-.am-own-pos { z-index: 81; outline: none; }
-.am-own { width: max-content; max-width: min(268px, calc(100vw - 16px)); padding: 10px; border-radius: 12px; background: var(--popover); color: var(--popover-foreground); box-shadow: 0 10px 24px -8px color-mix(in oklch, #000 26%, transparent), 0 0 0 0.5px color-mix(in oklch, var(--foreground) 16%, transparent); outline: none; transition: opacity 120ms linear, transform 120ms cubic-bezier(0.2, 0.9, 0.3, 1); transform-origin: var(--transform-origin); }
-.am-own[data-starting-style], .am-own[data-ending-style] { opacity: 0; transform: scale(0.96); }
-.am-own[data-over] { box-shadow: 0 10px 24px -8px color-mix(in oklch, #000 26%, transparent), 0 0 0 1.5px var(--primary); }
-.am-own-t { font-size: var(--ib-fs-12, 12px); font-weight: 600; color: var(--muted-foreground); padding: 0 2px 8px; }
-.am-own-g { display: grid; grid-template-columns: repeat(6, 36px); gap: 6px; }
-.am-own-c { position: relative; display: block; }
-.am-own-i { width: 36px; height: 36px; padding: 4px; border: 0; border-radius: 9px; background: none; display: grid; place-items: center; cursor: pointer; color: var(--muted-foreground); -webkit-tap-highlight-color: transparent; }
-.am-own-i:hover, .am-own-i:focus-visible { background: var(--ib-side-hover, var(--muted)); }
-.am-own-i > img { display: block; width: 28px; height: 28px; object-fit: contain; }
-.am-own-i[aria-checked="true"]::after { content: ""; position: absolute; left: calc(50% - 2px); bottom: -3px; width: 4px; height: 4px; border-radius: 50%; background: color-mix(in oklch, var(--foreground) 72%, transparent); }
-.am-own-up:disabled { opacity: 0.5; cursor: progress; }
-/* ×: on hover or focus with a pointer, always on a touch screen (no hover there). */
-.am-own-x { position: absolute; right: -4px; top: -4px; width: 16px; height: 16px; padding: 0; border: 0; border-radius: 50%; display: grid; place-items: center; background: var(--foreground); color: var(--background); cursor: pointer; opacity: 0; transition: opacity 100ms linear; }
-.am-own-x > svg { width: 8px; height: 8px; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; fill: none; }
-.am-own-c:hover > .am-own-x, .am-own-c:focus-within > .am-own-x, .am-own[data-touch] .am-own-x { opacity: 1; }
-.am-own-h { padding: 8px 2px 0; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); max-width: 246px; }
-.am-own[data-touch] .am-own-g { grid-template-columns: repeat(5, 44px); gap: 8px; }
-.am-own[data-touch] .am-own-i { width: 44px; height: 44px; }
-.am-own[data-touch] .am-own-i > img { width: 34px; height: 34px; }
-.am-own[data-touch] .am-own-x { width: 22px; height: 22px; right: -6px; top: -6px; }
-@media (prefers-reduced-motion: reduce) {
-  .am-own, .am-own[data-starting-style], .am-own[data-ending-style] { transform: none; }
+/* ---------- "Sets": an icon from a set (iconSets.ts, SetsBody.tsx) ----------
+   It takes the mark's whole tile, as an uploaded picture does (the same box: no row changes size). Pixel art is drawn
+   nearest-neighbour at a whole multiple of its native size in device pixels only (`--set-px`, the screen's
+   `--ib-dpr`): the largest that fits the box, or half its native size where even one does not fit. A one-colour icon
+   is a mask filled with the theme's text colour. */
+:root { --ib-dpr: 1; }
+@media (min-resolution: 2dppx) { :root { --ib-dpr: 2; } }
+@media (min-resolution: 3dppx) { :root { --ib-dpr: 3; } }
+:root .ib-mk.ib-face.ib-set { background: none; }
+:root .ib-mk.ib-face.ib-set > img { width: 100%; height: 100%; object-fit: contain; }
+:root .ib-mk.ib-face.ib-set > img[hidden] { display: none; }
+:root :is(.ib-atile, .ib-bc-who) > .ib-mk.ib-face.ib-set { width: 100%; height: 100%; }
+:root :is(.ib-atile, .ib-draft-mk, .ib-bc-who):has(> .ib-mk.ib-set) { background: none; }
+:root .ib-mk.ib-face.ib-set[data-pixel] > img, .am-setart[data-pixel] > img, .am-sets-art[data-pixel] > img {
+  --set-step: calc(var(--set-px, 16px) / var(--ib-dpr));
+  /* The largest whole multiple that fits, else exactly a half or a quarter of the native size. */
+  width: max(round(down, 100%, var(--set-step)), round(down, min(100%, calc(var(--set-step) / 2)), calc(var(--set-step) / 2)), round(down, min(100%, calc(var(--set-step) / 4)), calc(var(--set-step) / 4)));
+  height: auto;
+  aspect-ratio: 1;
+  image-rendering: pixelated;
 }
+/* A set with wide empty margins (`zoom`): drawn larger, its edges cut by its own box. */
+.ib-mk.ib-set, .am-setart, .am-sets-art { overflow: hidden; }
+:is(.ib-mk.ib-set, .am-setart, .am-sets-art) > img { scale: var(--set-zoom, 1); }
+.ib-set-mono, .am-set-mono, .am-sets-mono { display: block; width: 100%; height: 100%; background-color: var(--foreground); -webkit-mask: var(--set-src) center / contain no-repeat; mask: var(--set-src) center / contain no-repeat; }
+/* The sidebar's: the mark's box exactly. */
+.am-f-set > .am-fb, .am-f-set .am-setart { width: var(--am); height: var(--am); }
+.am-setart { display: grid; place-items: center; }
+.am-setart > img { width: 100%; height: 100%; object-fit: contain; }
+.am-setart > img[hidden] { display: none; }
+
+/* The fan's place after "Your own…": a little grid of four, or the agent's set icon. */
+.am-sets-add { display: grid; grid-template-columns: 7px 7px; gap: 2px; }
+.am-sets-add > i { width: 7px; height: 7px; border-radius: 2px; background: color-mix(in oklch, var(--foreground) 55%, transparent); }
+.am-sets-add > i:nth-child(2), .am-sets-add > i:nth-child(3) { background: color-mix(in oklch, var(--foreground) 30%, transparent); }
+.am-fan[data-touch] .am-sets-add { grid-template-columns: 10px 10px; }
+.am-fan[data-touch] .am-sets-add > i { width: 10px; height: 10px; }
+.am-fan-f > .am-sets-art { width: 22px; height: 22px; }
+
+/* A set icon in a small box of its own (the fan's place, the dialog's grid). */
+.am-sets-art { width: 32px; height: 32px; display: grid; place-items: center; flex: none; }
+.am-sets-art > img { width: 100%; height: 100%; object-fit: contain; }
+.am-sets-art > img:not([src]) { visibility: hidden; }
+.am-sets-art[data-mono] { width: 28px; height: 28px; margin: 2px; }
+.am-sets-art[data-mono]:not([style*="--set-src"]) > .am-sets-mono { visibility: hidden; }
