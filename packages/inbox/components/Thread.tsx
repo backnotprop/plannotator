@@ -2,7 +2,7 @@ import { perfInteraction, perfKeystroke } from '../perfMarks';
 import { ThreadPullsButton } from '../threadPulls/ThreadPulls';
 import { LetterMark, ProjectMark, showsProjects, showsThreads, useRowMarks } from '../letterMarks';
 import { inboxUrl, machineOf, selfMachineId } from '../inboxUrl';
-import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeInView, placeLayoutKey, placeSelector, placeShown, restorePlace, type ThreadPlace } from '../threadPlace';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
@@ -58,9 +58,11 @@ import type { InboxToastModel } from './Toast';
 import { AnnotationsChip, AnnotationsList, type AnnotationsListProps, type CommentEdit, type CommentsListAt } from './AnnotationsChip';
 import { agentName, clockTime, dayWords, formatCount, fullTime, plural, shortAgentName, whenTime } from '../format';
 import { inboxRowSnoozed, inboxSnoozeWhen } from '@plannotator/core/inbox-snooze';
-import { foldSnippet, holdingsOf, isDelivered, isPersonLook, isPersonReply, lastNonNote, lookBoundary, newSinceLook, planFolds, snippetText, type FoldSnippet, type Holding } from '../folding';
+import { foldSnippet, holdingsOf, isDelivered, isPersonLook, isPersonReply, lastNonNote, lookBoundary, newSinceLook, planFolds, snippetText } from '../folding';
 import { highlightSearchHits } from '../search/highlight';
 import { AuthorMark, Icon } from '../icons';
+import { createCountStore, NewPill } from '../parts/NewPill';
+import { HoldingChips, SnippetText } from '../parts/FoldLine';
 import { PILL_BAND_PX, atEnd, followBy, lookThrough, measureFirstLines, unseenArrivals, useSeenOnSight } from '../seenOnSight';
 import { GuideCard } from './GuideCard';
 import { ReviewCard, type ReviewOutcome } from './ReviewCard';
@@ -96,6 +98,7 @@ import { ROW_LABEL_MAX } from './RowAgents';
 import { attachmentImageUrl, readableVersion } from '../attachments';
 import { usePickSave } from '../data/actions/picks';
 import { useThreadAttachments } from '../data/queries/files';
+import { MessageView } from '../parts/MessageView';
 import { useSendReply } from '../data/actions/send';
 import { pickComposerMode } from '../fullScreenComposer';
 import { InlineReuseLayer, ReuseContext, sourceOf, type ReuseApi, type ReuseSource } from '../reuse';
@@ -268,81 +271,6 @@ function newBelow(body: HTMLElement, passed: Set<string>, mark: boolean): HTMLEl
   const arrivals = below('[data-message-article][data-arrival]:not([data-sighted])');
   const atOpen = below('[data-message-article][data-new]:not([data-arrival]):not([data-sighted])');
   return arrivals.length > 0 ? arrivals : atOpen;
-}
-
-/** A number that changes often, read by one small component (useSyncExternalStore) so a change redraws only that component. */
-interface CountStore {
-  get: () => number;
-  set: (next: number) => void;
-  subscribe: (listener: () => void) => () => void;
-}
-
-function createCountStore(): CountStore {
-  let value = 0;
-  const listeners = new Set<() => void>();
-  return {
-    get: () => value,
-    set: (next) => {
-      if (next === value) return;
-      value = next;
-      for (const listener of listeners) listener();
-    },
-    subscribe: (listener) => {
-      listeners.add(listener);
-      return () => void listeners.delete(listener);
-    },
-  };
-}
-
-/**
- * The "↓ N new" pill. Its count changes on most scroll steps past new messages; it reads it from `count` so that
- * only this button redraws then, not the thread. `onDrawn` runs after each of its draws (the phone's foot row
- * places the pill by its width, which its count changes).
- */
-function NewPill({ count, onJump, onDrawn }: { count: CountStore; onJump: (below: boolean) => void; onDrawn?: () => void }) {
-  const n = useSyncExternalStore(count.subscribe, count.get, count.get);
-  useLayoutEffect(() => {
-    onDrawn?.();
-  });
-  return (
-    <button type="button" className="ib-npill" data-new-pill="" data-off={n > 0 ? undefined : ''} tabIndex={n > 0 ? 0 : -1} aria-hidden={n === 0} onClick={() => onJump(true)}>
-      <Icon name="arrowDown" size={15} />
-      {Math.max(1, n)} new
-    </button>
-  );
-}
-
-/** A folded line's snippet: the message's first words, or the person's answers. */
-function SnippetText({ snippet }: { snippet: FoldSnippet }) {
-  if (snippet.kind === 'words') return <>{snippet.text}</>;
-  return (
-    <>
-      {snippet.parts.map((part, index) => (
-        <span key={index} className="ib-fl-ans">
-          {index > 0 && <span className="ib-fl-sep"> · </span>}
-          {part.prompt} <span className="ib-fl-arr">→</span> <b>{part.answer}</b>
-        </span>
-      ))}
-    </>
-  );
-}
-
-/** What a folded line says a message holds. */
-function HoldingChips({ holdings }: { holdings: Holding[] }) {
-  if (holdings.length === 0) return <span className="ib-fl-chips" />;
-  return (
-    <span className="ib-fl-chips" data-holdings="">
-      {holdings.map((h) => (
-        <span key={h.kind} className={`ib-fl-chip${h.kind === 'open' || h.kind === 'todo' ? ' ib-fl-open' : h.kind === 'picks' ? ' ib-fl-pick' : ''}`} data-holding={h.kind}>
-          {h.kind === 'answered' || h.kind === 'delivered' ? <Icon name="check" size={14} /> : null}
-          {h.kind === 'files' ? <Icon name="clip" size={14} /> : null}
-          {h.kind === 'annotations' ? <Icon name="doc" size={14} /> : null}
-          {h.kind === 'guide' ? <Icon name="book" size={14} /> : null}
-          {h.text}
-        </span>
-      ))}
-    </span>
-  );
 }
 
 /** A wire message's question states, for the shared asking rule. */
@@ -6264,6 +6192,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   );
 
   // The copy menus (CopyMenus.tsx): the header's ⋯ and each open message's.
+  /** The newest of what a message's handlers call: a message that did not draw again still reaches these (parts/MessageView.tsx). */
+  const newest = { openFromReply, jumpTo, noteChips, openFromMessage, openOptionSet, pick, markAction, saveMessageComment, noteUnanchored, repaintHits, openListAt, onSide, toggleMessage, replyToMessage, setHeaderOpen, closeHeaderOnEscape };
+  const acts = useRef(newest);
+  acts.current = newest;
   const copyHost: CopyMenuHost = {
     thread,
     phone,
@@ -6831,12 +6763,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             const replacement = q ? replacementOf(thread.messages, q) : null;
             if (!q || !replacement) return undefined;
             const answer = pending.has(`${message.id}/${key}`) ? (pending.get(`${message.id}/${key}`) ?? null) : q.answer;
-            return <ReplacedQuestionCard question={q} number={number} total={questions.length} replacement={replacement} answer={answer} onJump={jumpTo} refRepo={threadRefRepo} />;
+            return <ReplacedQuestionCard question={q} number={number} total={questions.length} replacement={replacement} answer={answer} onJump={(target) => acts.current.jumpTo(target)} refRepo={threadRefRepo} />;
           };
           const replacesLine = (key: string) => {
             const q = questions.find((x) => x.key === key);
             const old = q ? replacedBy(thread.messages, q) : [];
-            return old.length > 0 ? <ReplacesLine old={old} onJump={jumpTo} /> : null;
+            return old.length > 0 ? <ReplacesLine old={old} onJump={(target) => acts.current.jumpTo(target)} /> : null;
           };
           // An agent message with files says so in its header (design record
           // "inbox-attachments-header", variant Count): a count in the "to you"
@@ -6853,8 +6785,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 changed={changedCount(messageFiles)}
                 open={filesOpen}
                 controls={bandId}
-                onToggle={() => setHeaderOpen(message.id, !filesOpen)}
-                onKeyDown={closeHeaderOnEscape(message.id)}
+                onToggle={() => acts.current.setHeaderOpen(message.id, !filesOpen)}
+                onKeyDown={(event) => acts.current.closeHeaderOnEscape(message.id)(event)}
               />
             ) : null;
           // The open message's head is the folded line (design record
@@ -6871,14 +6803,17 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           // A hand-off's stop notice to the former owner is not a tag the person typed (approval "inbox-tag-handoff").
           const sentTags = messageTags(message).filter((t) => !t.handed_away);
           const ownerOfSent = message.to ?? (askedBy(message)?.author.kind === 'agent' ? askedBy(message)!.author : null);
+          const toLabel = isAgent ? 'you' : message.to ? toName(message, message.to) : recipientName(askedBy(message));
+          const ended = isAgent && askerEnded && message.id === asking?.message.id;
+          const tagNames = sentTags.map((t) => tagName(t, ownerOfSent && 'host' in ownerOfSent ? ownerOfSent.host : null, ownerOfSent && 'session' in ownerOfSent ? ownerOfSent.session : null)).join(', ');
           const toWords = (
             <>
-              to {isAgent ? 'you' : message.to ? toName(message, message.to) : recipientName(askedBy(message))}
-              {isAgent && askerEnded && message.id === asking?.message.id && <SessionEndedMark />}
+              to {toLabel}
+              {ended && <SessionEndedMark />}
               {sentTags.length > 0 && (
                 <span data-tagged-names="">
                   {' · tagged '}
-                  {sentTags.map((t) => tagName(t, ownerOfSent && 'host' in ownerOfSent ? ownerOfSent.host : null, ownerOfSent && 'session' in ownerOfSent ? ownerOfSent.session : null)).join(', ')}
+                  {tagNames}
                 </span>
               )}
               {/* Sent with compose's Board chip on (approval "inbox-compose-board-chip"): a quiet mark, never the agent's block. */}
@@ -6909,6 +6844,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               ref={arms.ref(message.id)}
             >
               <ArmScope arms={arms} id={message.id}>
+              <MessageView
+                data={{ message, copy: [thread, phone], head: [one, isNew, revealed, time, fullWhen, name, nameSaid, authorLabel, nameTip, multiAgent ? headFolder(message, thread, taggable) : thread.project.name], to: [toLabel, ended, tagNames], files: [fileCount, filesOpen, fileCount > 0 ? changedCount(messageFiles) : 0], live: liveMessage(message) }}
+                draw={() => (
               <MessageMenu
                 {...copyHost}
                 message={message}
@@ -6921,7 +6859,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                         data-fold-head=""
                         aria-expanded={true}
                         aria-label={foldLabel}
-                        onClick={() => toggleMessage(message.id)}
+                        onClick={() => acts.current.toggleMessage(message.id)}
                       />
                     )}
                     <span className="ib-a11y-skip" aria-hidden={hide}>
@@ -6935,7 +6873,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     </span>
                     <Tip content={authorLabel ? nameTip : one ? name : null} cut={!authorLabel}>
                       {authorLabel ? (
-                        labelledAuthorName({ agent: name, label: authorLabel, open: true, hidden: hide, onFold: one ? undefined : () => toggleMessage(message.id) })
+                        labelledAuthorName({ agent: name, label: authorLabel, open: true, hidden: hide, onFold: one ? undefined : () => acts.current.toggleMessage(message.id) })
                       ) : (
                         <span className="ib-fl-nm ib-who" aria-hidden={hide}>
                           <bdi>{name}</bdi>
@@ -6960,7 +6898,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                       </Tip>
                       {isAgent && liveMessage(message) && (
                         <Tip content="Reply">
-                          <button type="button" className="ib-mut" onClick={() => replyToMessage(message)} aria-label="Reply">
+                          <button type="button" className="ib-mut" onClick={() => acts.current.replyToMessage(message)} aria-label="Reply">
                             <Icon name="reply" size={15} />
                           </button>
                         </Tip>
@@ -6968,6 +6906,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                       {more}
                     </span>
                   </div>
+                )}
+              />
                 )}
               />
               <div className="ib-msg" data-revealed={revealed ? '' : undefined}>
@@ -6998,56 +6938,63 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 ) : (
                 <>
                 {reviewView?.asked && message.id === thread.messages[0]?.id && <p className="ib-rvasked" data-review-asked="">{reviewView.asked}</p>}
-                <MessageBody
-                  message={message}
-                  sentAnswers={message.author.kind === 'person' ? (sentAnswersByReply.get(message.id) ?? NO_SENT_ANSWERS) : undefined}
-                  sentActions={message.author.kind === 'person' ? sentActionsByReply.get(message.id) : undefined}
-                  replyFiles={message.author.kind === 'person' ? { files: allFiles, personMessageIds, onOpen: openFromReply } : undefined}
-                  onJumpQuestion={jumpTo}
-                  projectRoot={thread.project.root}
-                  openInFiles={codeReview}
-                  {...(codeReview && isAgent && hasReview ? { contextNotes: noteChips(message.id) } : {})}
-                  repo={thread.project.repo ?? null}
-                  onOpenAttachment={openFromMessage}
-                  onOpenInlineImage={(image) => openFromMessage(image)}
-                  onOpenOptionSet={(key, image, choice) => openOptionSet(message.id, key, image, choice)}
-                  onTryPrototype={isAgent ? (key) => setProto({ messageId: message.id, key }) : undefined}
-                  readOnly={!isAgent || !liveMessage(message) || questions.length === 0 || allSent}
-                  answers={answersOf(message)}
-                  onPick={(key, answer) => pick(message.id, key, answer)}
-                  footerFor={footerFor(message)}
-                  renderReplacedCard={replacedCard}
-                  renderReplacesLine={replacesLine}
-                  renderActions={
-                    isAgent && (message.actions?.length ?? 0) > 0
-                      ? {
-                          recordFor: (block) => actionForBlock(message.body, message.actions, block),
-                          render: (records) => (
-                            <ActionChecklist
-                              actions={records}
-                              agent={name}
-                              refRepo={threadRefRepo}
-                              readOnly={!liveMessage(message)}
-                              onMark={(action, mark) => markAction(message.id, action.key, mark)}
-                            />
-                          ),
-                        }
-                      : undefined
-                  }
-                  comments={
-                    isAgent && liveMessage(message)
-                      ? {
-                          annotations: messageComments.get(message.id) ?? NO_ANNOTATIONS,
-                          onSave: (annotation) => saveMessageComment(message.id, annotation),
-                          onUnanchored: noteUnanchored,
-                          onPainted: () => repaintHits(message.id),
-                          onOpen: openListAt,
-                          openId: commentsList?.at ?? null,
-                          revealed: revealedComment,
-                          onSide,
-                        }
-                      : undefined
-                  }
+                {/* The body draws again only when what it draws from changed (parts/MessageView.tsx); its handlers call the pane's newest. */}
+                <MessageView
+                  data={{
+                    message,
+                    answers: answersOf(message),
+                    footers: questions.map((q) => footerFor(message)(q.key)),
+                    replaced: questions.map((q) => [replacementOf(thread.messages, q), pending.get(`${message.id}/${q.key}`), replacedBy(thread.messages, q)]),
+                    readOnly: !isAgent || !liveMessage(message) || questions.length === 0 || allSent,
+                    sent: message.author.kind === 'person' ? [sentAnswersByReply.get(message.id), sentActionsByReply.get(message.id), allFiles, personMessageIds] : null,
+                    thread: [thread.project.root, thread.project.repo ?? null, codeReview, codeReview && isAgent && hasReview ? (reviewOfNote.get(message.id) ?? null) : undefined, threadRefRepo, name],
+                    comments: isAgent && liveMessage(message) ? [messageComments.get(message.id) ?? NO_ANNOTATIONS, commentsList?.at ?? null, revealedComment] : null,
+                  }}
+                  draw={() => (
+                    <MessageBody
+                      message={message}
+                      sentAnswers={message.author.kind === 'person' ? (sentAnswersByReply.get(message.id) ?? NO_SENT_ANSWERS) : undefined}
+                      sentActions={message.author.kind === 'person' ? sentActionsByReply.get(message.id) : undefined}
+                      replyFiles={message.author.kind === 'person' ? { files: allFiles, personMessageIds, onOpen: (file, version) => acts.current.openFromReply(file, version) } : undefined}
+                      onJumpQuestion={(target) => acts.current.jumpTo(target)}
+                      projectRoot={thread.project.root}
+                      openInFiles={codeReview}
+                      {...(codeReview && isAgent && hasReview ? { contextNotes: reviewOfNote.has(message.id) ? { onOpen: (note: InboxNoteBlock) => acts.current.noteChips(message.id).onOpen?.(note) } : {} } : {})}
+                      repo={thread.project.repo ?? null}
+                      onOpenAttachment={(attachment) => acts.current.openFromMessage(attachment)}
+                      onOpenInlineImage={(image) => acts.current.openFromMessage(image)}
+                      onOpenOptionSet={(key, image, choice) => acts.current.openOptionSet(message.id, key, image, choice)}
+                      onTryPrototype={isAgent ? (key) => setProto({ messageId: message.id, key }) : undefined}
+                      readOnly={!isAgent || !liveMessage(message) || questions.length === 0 || allSent}
+                      answers={answersOf(message)}
+                      onPick={(key, answer) => acts.current.pick(message.id, key, answer)}
+                      footerFor={footerFor(message)}
+                      renderReplacedCard={replacedCard}
+                      renderReplacesLine={replacesLine}
+                      renderActions={
+                        isAgent && (message.actions?.length ?? 0) > 0
+                          ? {
+                              recordFor: (block) => actionForBlock(message.body, message.actions, block),
+                              render: (records) => <ActionChecklist actions={records} agent={name} refRepo={threadRefRepo} readOnly={!liveMessage(message)} onMark={(action, mark) => acts.current.markAction(message.id, action.key, mark)} />,
+                            }
+                          : undefined
+                      }
+                      comments={
+                        isAgent && liveMessage(message)
+                          ? {
+                              annotations: messageComments.get(message.id) ?? NO_ANNOTATIONS,
+                              onSave: (annotation) => acts.current.saveMessageComment(message.id, annotation),
+                              onUnanchored: (report) => acts.current.noteUnanchored(report),
+                              onPainted: () => acts.current.repaintHits(message.id),
+                              onOpen: (id) => acts.current.openListAt(id),
+                              openId: commentsList?.at ?? null,
+                              revealed: revealedComment,
+                              onSide: onSide ? (...args: Parameters<NonNullable<typeof onSide>>) => acts.current.onSide?.(...args) : undefined,
+                            }
+                          : undefined
+                      }
+                    />
+                  )}
                 />
                 </>
                 )}
