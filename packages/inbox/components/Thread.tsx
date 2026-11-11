@@ -1419,8 +1419,8 @@ export interface ThreadPaneProps {
    */
   remote?: boolean | null;
   /**
-   * A tailnet guest's page (`tailnetGuest(settings)`): a launched agent's ⋯ has
-   * no Stop or Delete, as the server answers both `owner_only`.
+   * A tailnet guest's page (`tailnetGuest(settings)`): no thread PRs (they run this computer's `gh`), and the
+   * run line offers no Try again (starting an agent is the owner's).
    */
   guest?: boolean;
   /**
@@ -1779,13 +1779,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           copyAttach: attach
             ? () => void copyTextToClipboard(attach).then((ok) => onToast?.(ok ? { icon: 'check', lead: 'Copied', detail: 'the attach command' } : { icon: 'warn', lead: 'Not copied' }))
             : null,
-          // A resting agent (no line) still runs in the background: Stop is offered then too. Never to a tailnet guest.
+          // A resting agent (no line) still runs in the background: Stop is offered then too.
           stop:
-            !guest && launched.session_ref && (runLine === null || runLine.state === 'working' || runLine.state === 'waiting_terminal' || runLine.state === 'starting')
+            launched.session_ref && (runLine === null || runLine.state === 'working' || runLine.state === 'waiting_terminal' || runLine.state === 'starting')
               ? () => void launchAct(() => inboxApi.launchStop(launched.id, machine?.id ?? null))
               : null,
-          // Not on a phone (PLAN: the phone shows Copy and Stop only): deleting a session is for the computer it runs on.
-          remove: phone || guest ? null : () => setConfirmDelete(true),
+          // On a phone too (owner ruling 2026-11-11: one person, the same app on every device).
+          remove: () => setConfirmDelete(true),
         }
       : null;
   // Archived (resolved). What an agent wrote after the archive line behaves as
@@ -6668,7 +6668,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               before.push(
                 <article className="ib-message pc-item" key={message.id} data-author="agent" data-message-article={message.id}>
                   <div data-message-id={message.id}>
-                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} arrived={arrivedAfterOpen(message.id)} followUp={permFollowUp(message)} terminal={launchMenu ? { open: openTerminal, copyAttach: launchMenu.copyAttach } : null} fullUsed={permFullUsed(message)} guest={guest} machine={machine} onChanged={onChanged} />
+                    <PermissionCard message={message} time={time} run={runLine ?? null} phone={phone} newest={message.id === newestId} arrived={arrivedAfterOpen(message.id)} followUp={permFollowUp(message)} terminal={launchMenu ? { open: openTerminal, copyAttach: launchMenu.copyAttach } : null} fullUsed={permFullUsed(message)} machine={machine} onChanged={onChanged} />
                   </div>
                 </article>,
               );

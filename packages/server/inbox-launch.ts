@@ -987,7 +987,7 @@ ${result.text}`);
       const ended = launch.clone.ended_at ?? null;
       const newest = store
         .pendingReplies(root.to.session, { tags: true })
-        .filter((reply) => !reply.by_guest && reply.id !== root.id && ended !== null && reply.created_at > ended)
+        .filter((reply) => reply.id !== root.id && ended !== null && reply.created_at > ended)
         .at(-1);
       if (newest && memo.cloneFor !== newest.id) {
         memo.cloneFor = newest.id;
@@ -1009,11 +1009,8 @@ ${result.text}`);
     const memo = memoOf(launch);
     if (liveOf(host, root, memo)) return;
     if (now() - memo.startedAt < INBOX_RUN_START_GRACE_MS) return;
-    // A tailnet guest's reply waits for the session as any reply does; only the owner's (or this computer's) starts it again.
-    const newest = store
-      .pendingReplies(root.to.session, { tags: true })
-      .filter((reply) => !reply.by_guest)
-      .at(-1);
+    // Anyone's reply starts it again: this computer's, the owner's over the tailnet, or a login the allow list let in.
+    const newest = store.pendingReplies(root.to.session, { tags: true }).at(-1);
     // Once per reply: one that did not take waits for Try again or the person's next reply.
     if (!newest || memo.respawn?.for === newest.id || memo.heldReply === newest.id) return;
     respawn(root, host, newest.id);
@@ -1259,8 +1256,6 @@ ${result.text}`);
     if (door && !door.window) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
     switch (match[2]) {
       case "stop": {
-        // Stop ends the owner's agent: never a guest's to do, as starting one isn't.
-        if (options.isGuest?.(req, via)) throw new InboxError("owner_only", "Only this computer's owner can stop an agent from this Inbox.");
         // Cancel during a clone (E1, E7): git is stopped, and the partly cloned folder goes.
         const cloning = clones.get(launch.id);
         if (cloning) {
@@ -1318,8 +1313,6 @@ ${result.text}`);
         return json({ ok: true, command });
       }
       case "delete": {
-        // Delete stops and removes the owner's agent: never a guest's to do.
-        if (options.isGuest?.(req, via)) throw new InboxError("owner_only", "Only this computer's owner can delete an agent from this Inbox.");
         // A Delete under way (a double click): the same answer, once it is done.
         const under = deleting.get(launch.id);
         if (under) return json(await under);

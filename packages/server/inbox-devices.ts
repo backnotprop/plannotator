@@ -161,6 +161,13 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "GET", route: /^health$/, window: () => "/api/inbox/health" },
   { method: "GET", route: /^threads$/, window: () => "/api/inbox/threads" },
   { method: "GET", route: /^projects$/, window: () => "/api/inbox/projects" },
+  // What's new (public release notes, read only): the release list, a release's notes and their saved images, so a
+  // phone reads them as the window does (owner ruling 2026-11-11: one person, the same app on every device).
+  { method: "GET", route: /^whats-new$/, window: () => "/api/inbox/whats-new" },
+  { method: "GET", route: /^whats-new\/releases$/, window: () => "/api/inbox/whats-new/releases" },
+  { method: "GET", route: /^whats-new\/image$/, window: () => "/api/inbox/whats-new/image" },
+  // A project's picture (a logo, read only): a linked machine's window shows that machine's project rows with it.
+  { method: "GET", route: /^projects\/([^/]+)\/picture$/, window: (m) => `/api/inbox/projects/${m[1]}/picture` },
   // The archived threads (Settings' Archived block), read only; before threads/:id, which would also match it.
   { method: "GET", route: /^threads\/archived$/, window: () => "/api/inbox/threads/archived" },
   { method: "GET", route: /^threads\/([^/]+)$/, window: (m) => `/api/inbox/threads/${m[1]}` },
