@@ -1,18 +1,3 @@
-/**
- * Replaced questions (design record, not in this repo; direction A "Quiet").
- *
- * An agent can supersede an earlier question of its thread (send_message's
- * `supersedes`, or a `Replaces:` line in a newer block). The old card then
- * keeps what the person needs and loses every control: the tag "Replaced"
- * (or "No longer applies" when nothing replaces it), the dimmed prompt, the
- * row naming what replaced it, and the person's own pick marked "Not sent".
- * Its context and options fold behind "Show the old options". The newer card
- * says what it replaces under its prompt. Links between the two use the
- * prompts (numbering restarts in every message) and land with a brief ring.
- *
- * Pure presentation: the thread decides what to draw (Thread.tsx).
- */
-
 import { useEffect, useId, useRef, useState } from 'react';
 import { InlineMarkdown } from '@plannotator/ui/components/InlineMarkdown';
 import { QuestionContext } from '@plannotator/ui/components/blocks/QuestionContext';
@@ -22,18 +7,13 @@ import { agentName, whenTime } from '../format';
 import { plainLabel } from '../folding';
 import { Icon } from '../icons';
 
-/** What replaced a question, read from its thread. */
 export interface Replacement {
-  /** The question that replaces it, or null ("No longer applies"). */
   by: InboxQuestion | null;
-  /** The agent message that superseded it. */
   message: Pick<InboxMessageWire, 'id' | 'created_at'> & { author: InboxAuthor };
 }
 
-/** Where a jump lands: a question's card, an action item's checklist row, or a message. */
 export type JumpTarget = { kind: 'question' | 'action'; messageId: string; key: string } | { kind: 'message'; messageId: string };
 
-/** The answer's words, as the card's "Your pick" shows them; a picked label as its plain words (`plainLabel`). */
 export function pickWords(answer: QuestionAnswer): string {
   if (answer.skipped) return 'Skipped';
   const parts = answer.selected.map(plainLabel);
@@ -42,7 +22,6 @@ export function pickWords(answer: QuestionAnswer): string {
   return parts.join(', ');
 }
 
-/** A question's replacement in its thread, or null while it stands. */
 export function replacementOf(messages: readonly InboxMessageWire[], question: InboxQuestion): Replacement | null {
   const by = question.superseded_by;
   if (!by) return null;
@@ -52,7 +31,6 @@ export function replacementOf(messages: readonly InboxMessageWire[], question: I
   return { by: replacing, message };
 }
 
-/** The questions of the thread that `question` replaces (they name it as their replacement). */
 export function replacedBy(messages: readonly InboxMessageWire[], question: InboxQuestion): InboxQuestion[] {
   const out: InboxQuestion[] = [];
   for (const message of messages) {
@@ -63,7 +41,6 @@ export function replacedBy(messages: readonly InboxMessageWire[], question: Inbo
   return out;
 }
 
-/** A link to another card or message: the prompt (or words), with an arrow saying which way it is. */
 function JumpLink({ children, arrow, onJump, label }: { children: React.ReactNode; arrow: '↑' | '↓'; onJump: () => void; label?: string }) {
   // An inline element with the button role, not a <button>: a button lays out
   // as one box, so a long prompt broke the sentence around it and left its
@@ -89,7 +66,6 @@ function JumpLink({ children, arrow, onJump, label }: { children: React.ReactNod
   );
 }
 
-/** "Replaced" or "No longer applies": one neutral tag, never a warning or success colour. */
 export function ReplacedTag({ replaced }: { replaced: boolean }) {
   return (
     <span className="ib-tag ib-t-repl" data-replaced-tag="">
@@ -99,7 +75,6 @@ export function ReplacedTag({ replaced }: { replaced: boolean }) {
   );
 }
 
-/** The old card, direction A "Quiet". */
 export function ReplacedQuestionCard({
   question,
   number,
@@ -113,10 +88,8 @@ export function ReplacedQuestionCard({
   number: number;
   total: number;
   replacement: Replacement;
-  /** The pick saved on it (never sent), or null. */
   answer: QuestionAnswer | null;
   onJump: (target: JumpTarget) => void;
-  /** The thread's repo, so `#123` refs in the old prompt and choices link as in the message. */
   refRepo?: { display: string; host?: string } | null;
 }) {
   const id = useId();
@@ -207,7 +180,6 @@ export function ReplacedQuestionCard({
   );
 }
 
-/** The newer card's line under its prompt: "Replaces <old prompt ↑>. Your pick there was not sent." */
 export function ReplacesLine({ old, onJump }: { old: readonly InboxQuestion[]; onJump: (target: JumpTarget) => void }) {
   if (old.length === 0) return null;
   const dropped = old.filter((q) => q.answer !== null).length;
@@ -230,16 +202,10 @@ export function ReplacesLine({ old, onJump }: { old: readonly InboxQuestion[]; o
   );
 }
 
-/** "Question 1" (its number in its own message), or "question 1" mid-sentence. */
 function questionName(question: InboxQuestion, capital = true): string {
   return `${capital ? 'Question' : 'question'} ${question.position + 1}`;
 }
 
-/**
- * Above the reply box while the person writes: a pick of theirs was replaced
- * since the thread opened. "Claude Code replaced question 1 at 11:05 AM. Your
- * pick on it won't be sent. See the new question."
- */
 export function ChangedNotice({
   questions,
   thread,
@@ -276,13 +242,6 @@ export function ChangedNotice({
   );
 }
 
-/**
- * The stale guard, in place of the reply's actions at Send: a pick the person
- * made was replaced before it went. Nothing is sent until they choose:
- * answer the new question (the draft stays), send the rest only, or keep
- * editing. Esc is Keep editing; focus moves into the panel. Shown once per
- * replacement (Thread.tsx).
- */
 export function StaleGuard({
   ref,
   questions,
@@ -297,11 +256,8 @@ export function StaleGuard({
   ref?: React.Ref<HTMLDivElement>;
   questions: readonly InboxQuestion[];
   thread: { messages: readonly InboxMessageWire[] };
-  /** The person's words in the reply box. */
   words: string;
-  /** Picks that still go. */
   otherPicks: number;
-  /** Annotations that still go. */
   annotations: number;
   onAnswerNew: (target: JumpTarget) => void;
   onSendAnyway: () => void;

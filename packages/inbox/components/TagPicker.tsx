@@ -1,37 +1,17 @@
-/**
- * The `@` picker and the notes under a composer that tags agents (approval
- * "inbox-tag-agents", Lines variant). The picker is a listbox of the live
- * sessions grouped by agent (the owner first, "Owns this thread"), then the
- * agents that read the Inbox only ("Reads the Inbox, not woken"). It follows
- * the skill picker's rules, driven by ui's `useMentionAutocomplete`: nothing
- * is active until arrowed onto, so Enter, Tab and Mod+Enter keep their
- * meaning; Escape closes it before the reply box. `@` is a composer trigger,
- * never a shortcut.
- *
- * TagNotes: "Goes to" with a chip per recipient, and one heads-up per tag
- * that does not own the thread (a different one for an agent that can't be
- * woken). Plain text, linked to the field by `aria-describedby`; they never
- * block Send.
- */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import type { MentionMenuState } from '@plannotator/ui/hooks/useMentionAutocomplete';
 import { inboxApi, type TaggableModel } from '../api';
 import type { RecipientConnection } from '../deliveryLine';
 
-/** How often an open reply box reads who can be tagged, so a session that started or stopped shows. */
 const TAGGABLE_REFRESH_MS = 10_000;
 
-/** Who the person can tag in this thread, read while `enabled` (the reply box or a comment is open). */
 export function useTaggable(threadId: string, enabled: boolean) {
   const [model, setModel] = useState<TaggableModel | null>(null);
   const load = useCallback(async () => {
     try {
       const next = await inboxApi.taggable(threadId);
-      // Only a well-formed answer: an older Inbox (or a stub) leaves nobody to tag.
       setModel(next && Array.isArray(next.sessions) ? next : null);
-    } catch {
-      // An older Inbox, or a failed read: nobody to tag; `@` stays text.
-    }
+    } catch {}
   }, [threadId]);
   useEffect(() => {
     if (!enabled) return;
@@ -42,11 +22,6 @@ export function useTaggable(threadId: string, enabled: boolean) {
   return model;
 }
 
-/**
- * How each tagged session of the person's last reply is connected now (the
- * sessions route's `recipients`), read every few seconds while any of them
- * still waits: each line's "Queued", "Sending" and its own Send now.
- */
 export function useTagConnections(threadId: string, sessions: readonly string[], enabled: boolean) {
   const key = sessions.join(',');
   const [connections, setConnections] = useState<Record<string, RecipientConnection | null>>({});
@@ -55,9 +30,7 @@ export function useTagConnections(threadId: string, sessions: readonly string[],
     try {
       const model = await inboxApi.sessions(threadId, null, key.split(','));
       setConnections(model.recipients ?? {});
-    } catch {
-      // Unknown: the lines read "Queued … as its next turn".
-    }
+    } catch {}
   }, [threadId, key]);
   useEffect(() => {
     if (!enabled || !key) return;
@@ -72,16 +45,10 @@ import { HostMark, Icon } from '../icons';
 import { TAG_READERS_GROUP, TAG_UPDATE_WORDS, tagHeadsUp, tagModeLine, type TagOption } from '../tags';
 import type { TagMode } from '../api';
 
-/**
- * An iPhone with the keyboard up (`data-ib-keyboard-pin`): the thread's foot is a short box that scrolls, and the
- * picker drawn above the field opened behind the header, cut off (approval "inbox-reply-recipient", "fix with it").
- * There it is placed on the screen instead: as wide as the field, above it up to the header, never past it; with no
- * room above the field, over the box from its row (Send's) up. Elsewhere it keeps its place in the page.
- */
+/** iPhone with the keyboard up (`data-ib-keyboard-pin`): the thread's foot is a short scrolling box and a picker drawn above the field opened behind the header, so it is placed on the screen instead. */
 function useKeyboardSpot(): { ref: RefObject<HTMLDivElement | null>; style: CSSProperties | undefined } {
   const ref = useRef<HTMLDivElement | null>(null);
   const [style, setStyle] = useState<CSSProperties | undefined>(undefined);
-  // Every commit (the field grows as the person types); the equality guard converges.
   useLayoutEffect(() => {
     const menu = ref.current;
     const foot = menu?.closest('.ib-pfoot');
@@ -91,8 +58,7 @@ function useKeyboardSpot(): { ref: RefObject<HTMLDivElement | null>; style: CSSP
       return;
     }
     const headBottom = foot.closest('.ib-pane')?.querySelector('.ib-phead')?.getBoundingClientRect().bottom ?? 0;
-    // Room above the field: there. With the keyboard leaving ~257 px the field starts under the header, so the list
-    // covers the box instead, from just above the box's row (Send's) up to the header (as the recipient list does).
+    // With the keyboard up (~257 px left) the field starts under the header, so the list covers the box instead.
     const above = Math.round(field.top - 10);
     const row = foot.querySelector('[data-reply-row]')?.getBoundingClientRect();
     const top = above - headBottom - 8 >= 120 || !row ? above : Math.round(row.top - 6);
@@ -171,14 +137,6 @@ export function TagPicker({
   );
 }
 
-/**
- * Several agents on one thread (Lines): their marks overlapping, the first
- * agent first. Decorative: the words beside it (or the row's label) name them.
- * At most four marks; more read as "+N". (A list row draws its agents its
- * own way: `RowAgents` on a wide row, approval "list-rows-mail-icons", and
- * `RowAgentTiles`, one tile per agent, on a three-line or phone row, approval
- * "inbox-list-row-v2".)
- */
 export function TagStack({ participants }: { participants: readonly { host: string | null; session: string }[] }) {
   const shown = participants.slice(0, 4);
   const more = participants.length - shown.length;
@@ -192,7 +150,6 @@ export function TagStack({ participants }: { participants: readonly { host: stri
   );
 }
 
-/** "Goes to" and the heads-ups, for the tags a draft still carries. Nothing while it tags no one. */
 export function TagNotes({
   id,
   tagged,
@@ -201,7 +158,6 @@ export function TagNotes({
 }: {
   id?: string;
   tagged: readonly TagOption[];
-  /** The session the reply goes to anyway, when known. */
   owner: TagOption | null;
   where?: 'reply' | 'comment';
 }) {
@@ -234,14 +190,6 @@ export function TagNotes({
   );
 }
 
-/**
- * The reply box's one line once it tags agents that do not own the thread
- * (approval "inbox-tag-handoff", A2), in place of "Goes to" and the
- * heads-ups: what Send does with them, and the links that switch it ("Asks
- * Claude Code (herdr) · Add instead · Hand off instead"). Plain buttons in
- * the tab order after the field; no shortcut. The words are a polite live
- * region, so a switch is heard.
- */
 export function TagModeNote({ id, tagged, mode, onMode }: { id?: string; tagged: readonly TagOption[]; mode: TagMode; onMode: (mode: TagMode) => void }) {
   const line = tagModeLine(tagged, mode);
   if (!line) return null;

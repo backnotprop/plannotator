@@ -1,12 +1,3 @@
-/**
- * What's new's TL;DR ledger and releases panel (design of record
- * .product/approved/inbox-whats-new-tldr/, round 2): the ledger between two
- * hairlines with a fixed label column and status dots; the panel's Latest
- * card (compact, its version, date and "You have this" only, while the latest
- * release is open; full otherwise) and its
- * earlier releases, each a link to `#whats-new=<version>`; the same list in a
- * bottom sheet where the panel does not fit (a phone, a window under 1100 px).
- */
 import { useEffect, useRef, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import type { TldrLine, WhatsNewRelease, WhatsNewReleasesModel } from '../api';
 import { formatCount } from '../format';
@@ -16,14 +7,12 @@ import { Modal } from './Updates';
 
 const RELEASES_URL = 'https://github.com/backnotprop/plannotator/releases';
 
-/** "Nov 8", from an ISO date. */
 export function shortDate(iso: string | null | undefined): string | null {
   if (!iso) return null;
   const date = new Date(iso);
   return Number.isNaN(date.getTime()) ? null : new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(date);
 }
 
-/** A TL;DR line's words, its `code` in the mono face. */
 export function TldrText({ text }: { text: string }) {
   return (
     <>
@@ -36,7 +25,6 @@ function Dot({ kind }: { kind: string }) {
   return <i className={`ib-wn-dot ib-wn-d-${kind}`} aria-hidden="true" />;
 }
 
-/** The ledger: "TL;DR", then each line's label (with its dot) in a fixed column and its words on one edge. */
 export function TldrLedger({ lines }: { lines: TldrLine[] }) {
   return (
     <section className="ib-wn-tldr" aria-labelledby="ib-wn-tldr-h" data-whats-new-tldr="">
@@ -61,11 +49,6 @@ export function TldrLedger({ lines }: { lines: TldrLine[] }) {
   );
 }
 
-/**
- * While the notes load or can't be fetched: the line the newest saved release
- * list gives this release, marked where it comes from; placeholder bars when
- * there is none and the notes are still on their way; nothing otherwise.
- */
 export function KnownLine({ row, loading }: { row: WhatsNewRelease | null; loading: boolean }) {
   if (row && row.tldr.length > 0) return <TldrLedger lines={row.tldr} />;
   if (row?.listed) {
@@ -92,7 +75,6 @@ export function KnownLine({ row, loading }: { row: WhatsNewRelease | null; loadi
   );
 }
 
-/** A row's words under its version: two TL;DR lines, or its fallback clamped to two lines. */
 function RowWords({ row }: { row: WhatsNewRelease }) {
   const words = releaseWords(row);
   if (words.kind === 'tldr') {
@@ -129,13 +111,10 @@ function VersionLine({ row, current }: { row: WhatsNewRelease; current: string }
 
 export interface ReleasesListProps {
   releases: WhatsNewReleasesModel;
-  /** The release the page shows (the row with the fill). */
   showing: string | null;
-  /** A plain click on a row: the page switches to it (Cmd-click and the like open the link itself). */
   onOpen: (version: string) => void;
 }
 
-/** The Latest card and the earlier releases, shared by the panel and the sheet. */
 function ReleasesList({ releases, showing, onOpen }: ReleasesListProps) {
   const [top, ...rest] = releases.releases;
   if (!top) return null;
@@ -206,12 +185,7 @@ function ReleasesList({ releases, showing, onOpen }: ReleasesListProps) {
   );
 }
 
-/**
- * Scroll a list, and only the list, so the row of `version` sits in its
- * middle (the panel follows the page's release; "N releases in between" takes
- * it to your row). Never `scrollIntoView`: that also scrolls the page under
- * the sticky panel. Returns the row, or null when the list has none.
- */
+/** Scrolls only the list, never `scrollIntoView` (that also scrolls the page under the sticky panel). */
 export function centerRow(scroller: HTMLElement | null, version: string | null, smooth = false): HTMLElement | null {
   if (!scroller || !version) return null;
   const row = scroller.querySelector<HTMLElement>(`[data-whats-new-release="${CSS.escape(version)}"]`);
@@ -224,7 +198,6 @@ export function centerRow(scroller: HTMLElement | null, version: string | null, 
   return row;
 }
 
-/** The panel beside the notes: an inspector column with its own scroll, its heading on the version's baseline. */
 export function ReleasesPanel(props: ReleasesListProps & { scrollRef?: RefObject<HTMLDivElement | null> }) {
   const own = useRef<HTMLDivElement>(null);
   const scroller = props.scrollRef ?? own;
@@ -242,7 +215,6 @@ export function ReleasesPanel(props: ReleasesListProps & { scrollRef?: RefObject
   );
 }
 
-/** The same list in a bottom sheet: the version picker in the bar opens it; a row, ×, Escape or the dimmed page close it. */
 export function ReleasesSheet(props: ReleasesListProps & { onClose: () => void; focusVersion: string | null }) {
   const scroller = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -274,7 +246,6 @@ export function ReleasesSheet(props: ReleasesListProps & { onClose: () => void; 
   );
 }
 
-/** The notes could not be had: why, with Try again (GitHub out of reach) and the release on GitHub. */
 export function NotesMissing({
   version,
   unreachable,

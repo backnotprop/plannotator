@@ -21,7 +21,6 @@ export function CopyButton({ text }: { text: string }) {
   );
 }
 
-/** A code box with Copy, under its file path when it has one. */
 export function CodeBox({ text, label }: { text: string; label?: string }) {
   return (
     <>
@@ -81,7 +80,6 @@ export interface ConnectPickerProps {
   icons?: boolean;
 }
 
-/** Tabs per harness, then the one verified way to add the Inbox there and one note (Workspaces' ConnectAgentSheet shape). */
 export function ConnectPicker({ harnesses, initial, context, compact, icons }: ConnectPickerProps) {
   const [selected, setSelected] = useState<HarnessId>(initial);
   const harness = harnesses.find((h) => h.id === selected) ?? harnesses[0]!;

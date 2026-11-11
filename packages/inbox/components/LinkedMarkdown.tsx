@@ -11,7 +11,6 @@ import { inboxMarkdownImageBase } from '../images';
 const noop = () => {};
 const NO_ANNOTATIONS: [] = [];
 
-/** Sibling documents are read-only: annotations belong to attached files. */
 export function LinkedMarkdown({ page, attachmentId, onOpenLink }: {
   page: LinkedPageView & { html: null; text: string; relative: string; hash: string };
   attachmentId: string;
@@ -20,7 +19,6 @@ export function LinkedMarkdown({ page, attachmentId, onOpenLink }: {
   const [viewport, setViewport] = useState<HTMLDivElement | null>(null);
   const viewer = useRef<ViewerHandle>(null);
   const blocks = useMemo(() => attachmentBlocks('markdown', page.text, page.name), [page.text, page.name]);
-  // Its own images, relative to its folder and only those it references (the attachment's markdown-image route).
   const imageBaseDir = inboxMarkdownImageBase(attachmentId, 'current', page.relative);
   const resolveImage = useCallback<ImageResolver>(
     (src) => ({ kind: 'src', src: /^(https?:|data:|blob:)/i.test(src) ? src : getImageSrc(src, imageBaseDir) }),

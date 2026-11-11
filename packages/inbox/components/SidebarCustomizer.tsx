@@ -1,19 +1,3 @@
-/**
- * Customize sidebar (approval "inbox-sidebar-customize", 2026-11-08, take B "the panel"): a small panel beside the
- * sidebar (a bottom sheet on a phone) that lists the sidebar's items in two groups, Top and Bottom, as they stand.
- * Each row: a grip, the item's icon and name, and a switch (a lock for Inbox and Settings, which never hide). The
- * logo heads Top and the keyboard and light/dark buttons sit under Settings: they hide, they do not move. Between
- * the groups, a fixed band says where Starred and Projects scroll, and under it Agents, which scrolls with them:
- * it hides, it does not move.
- *
- * Moving: drag a grip (within a group or across), or press it (a click, Enter, Space) for Move up, Move down and
- * Move to top / bottom; no arrow keys, no new shortcut. "Start from" applies Default, All at top or Minimal ("Custom"
- * when none). "Reset to default" and Done at the foot; Escape and × close it too. Every change shows in the sidebar
- * at once and is saved for the person (sidebarLayout.ts).
- *
- * Opened from the sidebar's right-click menu and from Settings → General → Sidebar. Focus lands on its title and
- * goes back to what opened it.
- */
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import {
@@ -55,7 +39,6 @@ function Grip() {
   );
 }
 
-/** An item's icon; Agents draws the section's own goggles. */
 function ItemIcon({ item }: { item: InboxSidebarItem }) {
   return item === 'agents' ? <GogglesMark /> : <Icon name={SIDEBAR_ITEM_ICON[item]} />;
 }
@@ -63,7 +46,6 @@ function ItemIcon({ item }: { item: InboxSidebarItem }) {
 type Drop = { stack: InboxSidebarStack; index: number };
 type Drag = { item: InboxSidebarItem; y: number; dy: number; drop: Drop | null };
 
-/** Where a drag at `y` lands: the group under it, and the place among that group's rows (counted without the dragged one). */
 function dropAt(root: HTMLElement | null, layout: InboxSidebarLayout, item: InboxSidebarItem, y: number): Drop | null {
   for (const zone of root?.querySelectorAll<HTMLElement>('[data-sbc-zone]') ?? []) {
     const box = zone.getBoundingClientRect();
@@ -86,7 +68,6 @@ export function SidebarCustomizer({
   onOpen,
 }: {
   drawn: ReadonlySet<InboxSidebarItem>;
-  /** A machine is linked: the sidebar draws Agents even on an Inbox whose list names none. */
   machines?: boolean;
   onOpen?: () => void;
 }) {
@@ -105,7 +86,6 @@ export function SidebarCustomizer({
     const right = side?.getBoundingClientRect().right ?? 0;
     setLeft(Math.round(right > 0 ? right + 10 : 12));
     title.current?.focus({ preventScroll: true });
-    // The sidebar may slide open (onOpen): place the panel beside it once it has.
     const later = window.setTimeout(() => {
       const now = document.querySelector('.ib-side')?.getBoundingClientRect().right ?? 0;
       if (now > 0) setLeft(Math.round(now + 10));
@@ -115,7 +95,6 @@ export function SidebarCustomizer({
   useEffect(() => {
     if (!open) return;
     const key = (event: KeyboardEvent) => {
-      // A grip's own menu takes its Escape first.
       if (event.key !== 'Escape' || event.defaultPrevented || document.querySelector('[data-sbc-move-menu]')) return;
       event.preventDefault();
       close();
@@ -275,13 +254,11 @@ function ShowSwitch({ item, layout }: { item: InboxSidebarItem; layout: InboxSid
   );
 }
 
-/** Agents, while the sidebar draws the section (as Sidebar.tsx decides: the list names agents, or a machine is linked). */
 function AgentsRow({ layout, machines }: { layout: InboxSidebarLayout; machines: boolean }) {
   const agents = useInboxAgents();
   return agents !== null || machines ? <FixedRow item="agents" layout={layout} /> : null;
 }
 
-/** The logo (heads Top), Agents (between the groups) and the Settings row's buttons: they hide, they do not move. */
 function FixedRow({ item, layout, sub }: { item: InboxSidebarItem; layout: InboxSidebarLayout; sub?: boolean }) {
   return (
     <div className={`ib-sbc-row${sub ? ' ib-sbc-sub' : ' ib-sbc-fixed'}`} data-off={inboxSidebarShown(layout, item) ? undefined : ''} data-sbc-fixed={item}>
@@ -337,7 +314,6 @@ function ItemRow({
               pointerPress.current = false;
               return;
             }
-            // Enter, Space or a tap.
             setMenu(true);
           }}
         >

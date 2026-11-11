@@ -1,25 +1,3 @@
-/**
- * Settings → Activity: this Inbox's threads hour by hour (activityChart.ts has
- * the pure half). One row per thread in the order threads began, a mark for
- * each hour with messages, the day labels on top. Self-contained, so moving it
- * out of Settings is one render elsewhere: give it the projects, the project
- * to start on and what opening a thread does.
- *
- * Two sizes (the owner, 2026-11-08: "a slimmer preview and click to expand
- * fullscreen … like a light box"). Settings shows a slim preview: the range
- * packed into the width, the rows as thin lines, one picture with no
- * scrolling sideways. A click on it (or Expand) opens the full screen in the
- * window's modal (`Modal`, Updates.tsx: Escape, × or a click on the backdrop
- * closes it), with the range, the project, the full-size chart, hover and
- * click to open a thread (on touch, a first tap shows the tooltip and a
- * second opens). Mouse and touch only: the chart takes no keys (the owner,
- * 2026-11-08: "No keys, mouse and touch only").
- *
- * Drawn as one SVG with a handful of paths whatever the thread count (every
- * mark of a kind in one path) plus one hit test on the pointer, so hundreds of
- * threads and thousands of hours stay a few nodes. Colours are the theme's:
- * the accent mixed toward the page's surface (inbox.css, `.ib-activity`).
- */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent } from 'react';
 import type { InboxActivityModel } from '@plannotator/core/inbox-types';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
@@ -55,19 +33,13 @@ import {
 } from '../activityChart';
 
 export interface ActivityChartProps {
-  /** Projects the filter offers (this Inbox's own). */
   projects: readonly ProjectFolder[];
-  /** Names as the person reads them. */
   names: ReadonlyMap<string, string>;
-  /** The project to start on (the list's filter when Settings opened), or null for every project. */
   project: string | null;
   phone: boolean;
-  /** Read again when this changes (the store's cursor), a moment later so a burst of messages is one read. */
   refreshKey?: number | null;
   onOpenThread: (threadId: string, projectId: string | null) => void;
-  /** Tests: the clock. */
   now?: () => Date;
-  /** Tests and dev comparison: the look (else `?activity-look=dots` in the address, else blend). */
   look?: ActivityLook;
 }
 
@@ -102,7 +74,6 @@ function factsOf(row: ActivityRow, k: number, fromMs: number, days: readonly Act
   };
 }
 
-/** The width (and height) an element has, kept as it changes. */
 function useBox<T extends HTMLElement>(): [React.RefObject<T | null>, { width: number; height: number }] {
   const ref = useRef<T>(null);
   const [box, setBox] = useState({ width: 0, height: 0 });
@@ -126,13 +97,10 @@ interface PlotProps {
   model: InboxActivityModel;
   look: ActivityLook;
   width: number;
-  /** Full screen: the height the rows may share. */
   height?: number;
-  /** Full screen: open a thread from a mark. */
   onOpen?: (row: ActivityRow) => void;
 }
 
-/** The chart at one size: the day labels and one SVG. Full screen adds the hover band, ring, tooltip and click. */
 function ActivityPlot({ size, rows, days, model, look, width, height, onOpen }: PlotProps) {
   const from = Date.parse(model.from);
   const layout = useMemo(() => activityLayout(width, model.hour_count, rows.length, look, size, height), [width, model.hour_count, rows.length, look, size, height]);
@@ -146,17 +114,14 @@ function ActivityPlot({ size, rows, days, model, look, width, height, onOpen }: 
   const svg = useRef<SVGSVGElement>(null);
   const tip = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState<{ at: ActivityAt; x: number; y: number } | null>(null);
-  /** A tap showed this mark's tooltip; tapping it again opens the thread. */
   const pinned = useRef<ActivityAt | null>(null);
   const pointerKind = useRef<string>('mouse');
   const interactive = size === 'full' && !!onOpen;
 
-  // Render time (paths + commit), for the perf note and the real-size check: `data-activity-render-ms`.
   useLayoutEffect(() => {
     if (plot.current) plot.current.dataset.activityRenderMs = (performance.now() - started.current).toFixed(1);
   }, [paths]);
 
-  // A chart wider than the space opens at the latest hour.
   useLayoutEffect(() => {
     const el = scroller.current;
     if (el && layout.scrolls) el.scrollLeft = el.scrollWidth;
@@ -169,7 +134,6 @@ function ActivityPlot({ size, rows, days, model, look, width, height, onOpen }: 
 
   const facts = hover && rows[hover.at.row] ? factsOf(rows[hover.at.row]!, hover.at.k, from, days) : null;
 
-  // The tooltip beside the pointer, kept inside the window.
   useLayoutEffect(() => {
     const el = tip.current;
     if (!el || !hover) return;
@@ -204,7 +168,6 @@ function ActivityPlot({ size, rows, days, model, look, width, height, onOpen }: 
       setHover(null);
       return;
     }
-    // On a touch screen the first tap shows the tooltip; a second tap on the same mark opens it.
     if (pointerKind.current !== 'mouse') {
       const was = pinned.current;
       if (!was || was.row !== at.row || was.k !== at.k) {
@@ -224,8 +187,6 @@ function ActivityPlot({ size, rows, days, model, look, width, height, onOpen }: 
       <div className="ib-activity-scroll" ref={scroller} data-scrolls={layout.scrolls ? '' : undefined} onScroll={() => setHover(null)}>
         <div className="ib-activity-days" style={{ width: layout.width, height: layout.top, marginBottom: -layout.top }} aria-hidden="true">
           {days.map((day, i) => {
-            // A narrow day (2 weeks or more on a small screen, 30 days anywhere): the weekday's letter and the day's
-            // number, the month only on the first day and on the 1st.
             const narrow = day.hours * layout.cell < (size === 'preview' ? 76 : 64);
             const withMonth = !narrow || i === 0 || day.date.getDate() === 1;
             return (
@@ -310,8 +271,7 @@ function ActivityKey({ look }: { look: ActivityLook }) {
 
 export function ActivityChart({ projects, names, project: startProject, phone, refreshKey = null, onOpenThread, now = () => new Date(), look: lookProp }: ActivityChartProps) {
   const look = useMemo<ActivityLook>(() => lookProp ?? activityLookOf(typeof location === 'undefined' ? '' : location.search), [lookProp]);
-  // The list's project, unless it is not one of this Inbox's own (a linked machine's, in the merged view: this
-  // store cannot read it), then every project. Checked again once the projects arrive.
+  // A linked machine's project cannot be read by this store: fall back to every project.
   const ownProject = (id: string | null) => (id && (projects.length === 0 || projects.some((p) => p.id === id)) ? id : null);
   const [project, setProject] = useState<string | null>(() => ownProject(startProject));
   useEffect(() => {
@@ -319,8 +279,6 @@ export function ActivityChart({ projects, names, project: startProject, phone, r
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projects, project]);
   const [range, setRange] = useState<ActivityRange>(() => defaultActivityRange(phone));
-  // The last answer, with the range and project it was read for (the words above it describe what is drawn, not
-  // a pick still being read).
   const [read, setRead] = useState<{ model: InboxActivityModel; range: ActivityRange; project: string | null } | null>(null);
   const model = read?.model ?? null;
   const [error, setError] = useState<string | null>(null);
@@ -331,8 +289,7 @@ export function ActivityChart({ projects, names, project: startProject, phone, r
   const { colorTheme, resolvedMode } = useTheme();
   const [ink, setInk] = useState<ActivityInk | null>(null);
 
-  // The ink for this palette (activityInk.ts), read again when the palette or its mode changes, after the theme's
-  // classes are on the page (the provider applies them after this component's effects).
+  // Read after the theme's classes are on the page (the provider applies them after this component's effects).
   useEffect(() => {
     const el = section.current;
     if (!el || typeof requestAnimationFrame === 'undefined') return;
@@ -340,7 +297,6 @@ export function ActivityChart({ projects, names, project: startProject, phone, r
     return () => cancelAnimationFrame(frame);
   }, [colorTheme, resolvedMode, look]);
 
-  // A live change reads again a moment later (a burst of messages is one read).
   const firstKey = useRef(refreshKey);
   useEffect(() => {
     if (refreshKey === firstKey.current) return;
@@ -377,8 +333,6 @@ export function ActivityChart({ projects, names, project: startProject, phone, r
   const summary = read && rows.length > 0 ? `${plural(rows.length, 'thread')}, ${plural(total, 'message')} ${rangeWords(read.range)}` : '';
   const inkStyle = ink ? (activityInkStyle(ink) as CSSProperties) : undefined;
 
-  // An empty answer names the way out it has: a longer range (the full screen offers it) or another project, or
-  // coming back later (the owner's words, 2026-11-08).
   const longest = phone ? 7 : ACTIVITY_RANGES[ACTIVITY_RANGES.length - 1]!;
   const ways = [read && read.range < longest ? 'a longer range' : null, projects.length > 1 || shownProject ? 'another project' : null].filter(Boolean).join(' or ');
   const emptyNote = (inFull: boolean) =>
@@ -414,7 +368,7 @@ export function ActivityChart({ projects, names, project: startProject, phone, r
         {failed ||
           empty ||
           (model && previewSize.width > 0 ? (
-            // The whole preview opens the full screen; Expand above is the same, for a keyboard or a screen reader.
+            // Expand above opens the same, for keyboard and screen reader.
             <div className="ib-activity-preview" data-activity-preview="" onClick={() => setOpen(true)} title="Open full screen">
               <ActivityPlot size="preview" rows={rows} days={days} model={model} look={look} width={previewSize.width} />
             </div>
@@ -423,7 +377,6 @@ export function ActivityChart({ projects, names, project: startProject, phone, r
           ))}
       </div>
       {model && rows.length > 0 && <ActivityKey look={look} />}
-      {/* Open once a read has answered, empty or failed too: the range and project are in there, the way out. */}
       {open && (model || error) && (
         <ActivityFull
           onClose={() => setOpen(false)}
@@ -470,7 +423,6 @@ interface FullProps {
   onOpen: (row: ActivityRow) => void;
 }
 
-/** The full screen: the window's modal, sized to the window, with the range, the project and the full chart. */
 function ActivityFull({ onClose, inkStyle, look, phone, range, onRange, project, onProject, projects, names, model, rows, days, summary, note, onOpen }: FullProps) {
   const [body, size] = useBox<HTMLDivElement>();
   return (

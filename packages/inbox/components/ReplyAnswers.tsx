@@ -6,27 +6,17 @@ import { pickWords, type JumpTarget } from './ReplacedQuestion';
 import { Tip } from './Tip';
 import { sentAnswersHeading, type SentAnswer, type SentAnswerGroup } from '../sentReply';
 
-/** One answer the reply carries: a pick saved (or being saved) on a card. */
 export interface DraftAnswer {
-  /** `<message id>/<key>`. */
   id: string;
   messageId: string;
   key: string;
-  /** The question's number in its message (Q1, Q2…), as the reply's answers section numbers it. */
   number: number;
   prompt: string;
-  /** The answer's words: the pick, Other, the text, a note. */
   answer: string;
-  /** The asking message as a group heading shows it ("Claude Code's message, 2:58 PM"): used when answers span several messages. */
   messageName: string;
-  /**
-   * The attached file the question was asked in (issue #2828), absent for the message's body: its answers are a
-   * group of their own ("plan.md in Claude Code's message, 2:58 PM", `messageName`), as the file numbers its own cards.
-   */
   fileId?: string;
 }
 
-/** The answer's words as the reply box lists them: the card's "Your pick" words, then a note. */
 export function draftAnswerWords(answer: QuestionAnswer): string {
   const words = pickWords(answer);
   const note = answer.note?.trim();
@@ -34,20 +24,9 @@ export function draftAnswerWords(answer: QuestionAnswer): string {
   return words ? `${words} · Note: ${note}` : `Note: ${note}`;
 }
 
-/**
- * What the reply carries besides the words (the owner: "When i edit a reply,
- * and then add new answers... do they get added to the reply? Because I dont
- * see them"): every answer picked on the cards, listed live inside the reply
- * box, one row each ("Q2 Should overdue invoices sort to the top? → Yes").
- * A pick made while the box is open shows at once. A row takes the person to
- * its card. The answers are never written into the words: the Send carries
- * them under "Answers to your questions".
- */
 export function ReplyAnswers({ answers, onJump }: { answers: readonly DraftAnswer[]; onJump: (target: JumpTarget) => void }) {
   const headingId = useId();
-  // Answers to several messages go as one reply each, and each message numbers its own
-  // questions (Q1 twice): the rows are grouped under the message they answer.
-  // A file's questions (issue #2828) are a group of their own in their message's reply.
+  // Each message numbers its own questions (Q1 twice), so rows are grouped under the message they answer.
   const groups: { id: string; messageId: string; name: string; rows: DraftAnswer[] }[] = [];
   for (const a of answers) {
     const last = groups.at(-1);
@@ -56,7 +35,6 @@ export function ReplyAnswers({ answers, onJump }: { answers: readonly DraftAnswe
     else groups.push({ id, messageId: a.messageId, name: a.messageName, rows: [a] });
   }
   const several = groups.length > 1;
-  // One reply per asking message: a message's file is in the same reply.
   const where = new Set(groups.map((g) => g.messageId)).size > 1 ? 'your replies' : 'this reply';
   const heading = answers.length === 1 ? `Your answer goes with ${where}` : `Your ${plural(answers.length, 'answer')} go with ${where}`;
   const row = (a: DraftAnswer) => (
@@ -100,14 +78,6 @@ export function ReplyAnswers({ answers, onJump }: { answers: readonly DraftAnswe
   );
 }
 
-/**
- * The answers a sent reply carried, under the person's own words (display
- * only: the agent got them as "Answers to your questions" in the body). One
- * row each, "Q1 <prompt> → <answer>", a skip marked as one; grouped under the
- * message that asked when the reply answered several. A row takes the person
- * to its card. The prompt and answer are cut with an ellipsis and shown whole
- * in a tooltip.
- */
 export function SentAnswers({ groups, onJump }: { groups: readonly SentAnswerGroup[]; onJump?: (target: JumpTarget) => void }) {
   const headingId = useId();
   if (groups.length === 0) return null;
@@ -169,25 +139,13 @@ export function SentAnswers({ groups, onJump }: { groups: readonly SentAnswerGro
   );
 }
 
-/**
- * The action items a reply carries (their Done or Can't do it waits in the
- * draft) or carried (sent), one row each, approval
- * "inbox-action-items-in-reply": "A1 Approve the production deploy on Vercel
- * → Done · Note: …". The rows use the answers' own look. `sent`: the person's
- * sent message ("You did 1 action item"); else the reply box ("Your action
- * item goes with this reply"). One the agent saw done itself carries the
- * person's note: "Seen done · Note: …" (a Can't do it they had marked: "Seen
- * done · Your reason: …"); the heading counts it by the person's mark.
- */
 export interface ActionRow {
   id: string;
   messageId: string;
   number: number;
   prompt: string;
-  /** The person's mark. */
   outcome: 'done' | 'cant';
   note: string | null;
-  /** The agent saw it done itself; the person's note is what goes. */
   seen?: boolean;
 }
 

@@ -1,16 +1,3 @@
-/**
- * The review card (code review in the Inbox, approval
- * "inbox-code-review-direction", concept A take B): drawn in place of the
- * guided-review tile on an agent's message whose guide is a review, while the
- * person has Settings → Capabilities → Code review on. Off, the same message
- * shows today's tile and opens today's guide pane.
- *
- * It names the change (title, files, lines, how many chapters) and holds
- * one button: Start review, which opens the full-window review. Once the
- * person gave a verdict it shows the outcome ("Approved 3:31 PM",
- * "Changes requested · 3 comments") and the button reads Open review.
- */
-
 import type { InboxGuideRef } from '@plannotator/core/inbox-types';
 import { inboxReviewTitleLine, type InboxReviewVerdictRecord } from '@plannotator/core/inbox-review';
 import { formatCount, plural, whenTime } from '@plannotator/core/inbox-format';
@@ -18,11 +5,9 @@ import { Icon } from '../icons';
 
 export interface ReviewOutcome {
   verdict: InboxReviewVerdictRecord;
-  /** When the verdict reply was sent. */
   at: string;
 }
 
-/** The card's status words: who it waits on, or the verdict. */
 export function reviewOutcomeWords(outcome: ReviewOutcome | null): string {
   if (!outcome) return 'Waiting on you';
   const { verdict, comments } = outcome.verdict;
@@ -30,7 +15,6 @@ export function reviewOutcomeWords(outcome: ReviewOutcome | null): string {
   return comments > 0 ? `Changes requested · ${plural(comments, 'comment')}` : 'Changes requested';
 }
 
-/** `verdict: false`: a review of a teammate's pull request (`InboxThread.pull_theirs`) or a walkthrough, which waits on no verdict. */
 export function ReviewCard({ guide, outcome, verdict = true, onOpen, onInReviews }: { guide: InboxGuideRef; outcome: ReviewOutcome | null; verdict?: boolean; onOpen: () => void; onInReviews?: () => void }) {
   const chapters = guide.chapters?.length ?? 0;
   return (

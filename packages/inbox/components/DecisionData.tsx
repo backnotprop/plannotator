@@ -1,9 +1,3 @@
-/**
- * Decision data (approval `.product/approved/decision-data/`, 2026-11-05): Ask on top, Insights below. Since
- * 2026-11-08 (approval "settings-storage-activity") it sits in Settings -> Activity, under the hour-by-hour chart.
- * Short labels and numbers, one chart in the product's accent, two tables, a CSV. Only Settings -> Activity mounts
- * this, and this mount is the only thing that asks the server to count. Ask never waits on the count.
- */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { DecisionDataSummary, DecisionGroup, DecisionTrend } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
@@ -59,19 +53,16 @@ export function waitWords(milliseconds: number): string {
 const percent = (part: number, of: number) => `${Math.round((part / of) * 100)}%`;
 const dayLabel = (at: number | string) => new Date(typeof at === 'string' ? `${at}T12:00:00` : at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
-/** Round numbers for the axis, halves that stay whole. */
 export function axisTop(most: number): number {
   for (const top of [2, 4, 6, 10, 20, 40]) if (most <= top) return top;
   return Math.ceil(most / 20) * 20;
 }
 
-/** Every how many days a date label fits. Past a few years the steps keep growing, so labels never run together. */
 export function labelStep(band: number): number {
   const needed = 54 / Math.max(0.01, band);
   return [1, 2, 7, 14, 28].find((step) => step >= needed) ?? Math.ceil(needed / 28) * 28;
 }
 
-/** Columns: one series, 2 px gap, 4 px rounded data-end, square at the baseline. */
 function DayColumns({ days, since, until, height }: { days: DecisionDataSummary['days']; since: number; until: number; height: number }) {
   const [ref, width] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
@@ -318,7 +309,6 @@ interface Insight {
   value: ReactNode;
 }
 
-/** A line shows only when it has enough behind it. */
 export function insightsOf(model: DecisionDataSummary): Insight[] {
   const out: Insight[] = [];
   const share = (part: number, of: number) => (of > 0 ? part / of : 0);

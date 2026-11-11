@@ -8,9 +8,7 @@ import { Modal } from './Updates';
 import { isTextCut, Tip } from './Tip';
 
 export interface AgentNoteDialogProps {
-  /** The agents asked about (fixed when the dialog opens): the candidates not asked yet. */
   rows: InboxAgentRow[];
-  /** The exact block a note writes (Show the note). */
   noteText: string;
   onModel: (next: InboxAgentsModel) => void;
   onClosed: () => void;
@@ -18,19 +16,6 @@ export interface AgentNoteDialogProps {
 
 type RowStatus = { kind: 'busy' } | { kind: 'done'; result: InboxNoteResult };
 
-/**
- * The note in each agent's instructions, asked once per agent in a one-time
- * dialog (the approved "inbox-agent-note-dialog" design, Checklist). Since
- * "inbox-agent-note-auto" the Inbox writes the note by itself for the agents
- * proven to load it, so this asks only about the others (Qwen Code, Cursor's
- * copy by hand); its "Connected …" band moved to the line above the list
- * (ConnectLine). One row per agent, all ticked; with one
- * agent no checkbox. The primary names who it adds to ("Don't add a note"
- * with nothing ticked: never disabled, never an error). Results show in the
- * same rows. Not now, Escape and the backdrop answer for these agents only;
- * nothing is written without the person's yes. On the sound dialog's shell,
- * no entrance motion.
- */
 export function AgentNoteDialog({ rows, noteText, onModel, onClosed }: AgentNoteDialogProps) {
   const id = useId();
   const doneRef = useRef<HTMLButtonElement>(null);
@@ -48,8 +33,7 @@ export function AgentNoteDialog({ rows, noteText, onModel, onClosed }: AgentNote
   }, [phase, focusDone]);
 
   const single = rows.length === 1;
-  // Agents whose note is copied by hand (Cursor keeps its rules in the app): nothing is written for them, and
-  // their copy never carries the marker lines, which promise a removal that never happens there.
+  // Cursor's note is copied by hand: nothing is written, and the copy omits the marker lines, which promise a removal that never happens there.
   const handRows = rows.filter(noteCopiedByHand);
   const handOnly = handRows.length === rows.length;
   const handNames = joinNames(handRows.map((row) => row.label));
@@ -69,7 +53,6 @@ export function AgentNoteDialog({ rows, noteText, onModel, onClosed }: AgentNote
     closed.current = true;
     onClosed();
   };
-  /** Not now, Don't add a note, Escape, the backdrop: nothing is written; these agents are not asked again. */
   const decline = () => {
     if (busy) return;
     close();
@@ -347,7 +330,6 @@ function RowMain({ row, failure, onRetry }: { row: InboxAgentRow; failure?: stri
   );
 }
 
-/** A path on one line, cut in the middle; each folder name its own bidi isolate; the whole path in the DOM and in a tooltip while it is cut. */
 function NotePath({ path }: { path: string }) {
   const { head, tail } = splitPath(path);
   const segments = (part: string) =>
@@ -371,7 +353,6 @@ function NotePath({ path }: { path: string }) {
   );
 }
 
-/** The note, its marker lines muted. */
 function NoteText({ text }: { text: string }) {
   const lines = text.split('\n');
   return (
@@ -386,7 +367,6 @@ function NoteText({ text }: { text: string }) {
   );
 }
 
-/** Focus after the dialog when nothing focusable opened it: the page's heading. */
 function pageHeading(): HTMLElement | null {
   const heading = document.querySelector<HTMLElement>('.ib-main h1');
   if (heading && !heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1');

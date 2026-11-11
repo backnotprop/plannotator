@@ -1,14 +1,3 @@
-/**
- * The Artifacts wall (approval "inbox-artifact-stars", the Wall; the word is
- * Pin): every thread's artifacts on one page, newest first, by day, a dense
- * picture wall with the name on hover. The sidebar's Artifacts row opens it on
- * All (`#artifacts`); Pinned (`#artifacts=pinned`) shows the pinned ones.
- * Type chips (Images, Pages, Documents, Other files), two sizes (Smaller,
- * Larger), and the filter menu's "Show archived" (archived threads are out by
- * default). One server read per page (`GET /api/inbox/artifacts`); more load as
- * the person nears the end. A tile opens what its card in the thread opens.
- */
-
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { INBOX_ARTIFACTS_PAGE, INBOX_ARTIFACTS_PAGE_MAX, type InboxArtifactRow, type InboxArtifactsPage, type InboxArtifactType } from '@plannotator/core/inbox-artifact-pins';
@@ -41,7 +30,6 @@ function readSize(): WallSize {
   }
 }
 
-/** A row of the Wall as a tile of the thread's grid draws it. */
 export function wallArtifact(row: InboxArtifactRow): Artifact {
   const origin = originOf({ id: row.message_id, author: row.author, created_at: row.at });
   if (row.attachment) return { type: 'file', ...origin, attachment: row.attachment, inline: row.inline, alsoIds: [] };
@@ -52,7 +40,6 @@ function nameOf(row: InboxArtifactRow): string {
   return row.attachment ? row.attachment.name : (row.guide?.title ?? 'Guided review');
 }
 
-/** "Today", "Yesterday", "Nov 5": the day a row's message came. */
 function dayOf(iso: string): string {
   const words = dayWords(iso);
   return words.charAt(0).toUpperCase() + words.slice(1);
@@ -87,7 +74,6 @@ function WallTile({ row, onOpen }: { row: InboxArtifactRow; onOpen: (row: InboxA
   );
 }
 
-/** The list-filter glyph, as the Board's filter draws it. */
 function FilterGlyph({ size }: { size: number }) {
   return (
     <svg className="ib-ic" viewBox="0 0 24 24" style={{ width: size, height: size }} aria-hidden="true" focusable="false">
@@ -125,12 +111,10 @@ function WallFilterMenu({ archived, onArchived, phone }: { archived: boolean; on
 }
 
 export interface ArtifactsWallProps {
-  /** `#artifacts=pinned`: only the pinned ones. */
   pinned: boolean;
   onPinned: (pinned: boolean) => void;
   onOpen: (row: InboxArtifactRow) => void;
   phone: boolean;
-  /** Tests: the page read (inboxApi.artifacts). */
   read?: typeof inboxApi.artifacts;
 }
 
@@ -145,7 +129,6 @@ export function ArtifactsWall({ pinned, onPinned, onOpen, phone, read = inboxApi
   const reads = useRef(0);
   const { pins } = useArtifactPins();
 
-  // The first page (and as many rows as are shown, after a pin changes): a filter change starts again.
   const load = useCallback(
     (limit: number) => {
       const at = ++reads.current;
@@ -165,7 +148,6 @@ export function ArtifactsWall({ pinned, onPinned, onOpen, phone, read = inboxApi
     setPage(null);
     load(INBOX_ARTIFACTS_PAGE);
   }, [load]);
-  // A pin changed (here, another window, a phone): the counts and the Pinned list follow.
   const firstPins = useRef(true);
   useEffect(() => {
     if (firstPins.current) {
@@ -174,7 +156,6 @@ export function ArtifactsWall({ pinned, onPinned, onOpen, phone, read = inboxApi
     }
     const timer = setTimeout(() => load(loaded.current), 120);
     return () => clearTimeout(timer);
-    // `pins` is the trigger; `load` is read fresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pins]);
 
@@ -193,7 +174,6 @@ export function ArtifactsWall({ pinned, onPinned, onOpen, phone, read = inboxApi
     );
   }, [page, more, read, pinned, type, archived]);
 
-  // More load as the end comes near.
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = end.current;
@@ -207,9 +187,7 @@ export function ArtifactsWall({ pinned, onPinned, onOpen, phone, read = inboxApi
     setSize(next);
     try {
       localStorage.setItem(SIZE_KEY, next);
-    } catch {
-      // Private mode: the size holds for this page.
-    }
+    } catch {}
   };
 
   const days: { day: string; rows: InboxArtifactRow[] }[] = [];

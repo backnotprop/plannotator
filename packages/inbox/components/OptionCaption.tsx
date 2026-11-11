@@ -2,21 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import type { OptionSetChoice, OptionSet } from '../optionSets';
 import { Icon } from '../icons';
 
-/**
- * The card over a question's picture choices in full screen (approval
- * "inbox-option-card-lean", 2026-11-01): one row, the choice on screen. Its
- * letter, its name, "Recommended" in plain text when it is, and, off a phone,
- * ‹ Previous and Next › (they do what `[` and `]` do, and stay put, marked
- * disabled, at the ends). The count stays in the toolbar's pill; the question,
- * the dots and the end note are gone (the live region still says "Last option"
- * and where the other files are: `optionAnnouncement`). A phone swipes instead
- * of showing arrows. It is always one height, so the picture fits clear above
- * it (`--ib-optcap-h`), and one width for the whole set (the widest name, up to
- * the card's cap), so the arrows stay under a still mouse from one step to the
- * next. The card passes every pointer to the picture except the arrows: a long
- * name's full text comes from a hover tip drawn from the pointer's place, and a
- * wheel or pinch over an arrow is handed on to the picture.
- */
 export function OptionCaption({ set, index, phone = false, onStep }: { set: OptionSet; index: number; phone?: boolean; onStep?: (dir: 1 | -1) => void }) {
   const choice = set.choices[index];
   const card = useRef<HTMLDivElement>(null);
@@ -112,7 +97,6 @@ export function OptionCaption({ set, index, phone = false, onStep }: { set: Opti
       {!phone && arrow(-1, prev)}
       <div className="ib-optcap-body">
         <div className="ib-optcap-main">{row(choice, false)}</div>
-        {/* Every name of the set, unseen, in the same cell: the widest sets the card's width, so it is one width on every step. */}
         {set.choices.map((c) => (
           <div key={c.choice} className="ib-optcap-size" aria-hidden="true">
             {row(c, true)}

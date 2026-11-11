@@ -5,7 +5,6 @@ import { lightScope, PreviewList, type ListIntroGroup } from './ListLookIntro';
 import { Modal } from './Updates';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 
-/** The dialog's words, as the owner approved them (2026-11-05). */
 export const LIST_VIEW_INTRO_WORDS = {
   title: 'Which view do you prefer?',
   note: 'You can change this any time in the ⋮ menu.',
@@ -18,25 +17,18 @@ export const LIST_VIEW_INTRO_WORDS = {
 } as const;
 
 export interface ListViewIntroProps {
-  /** The person's list as the groups draw it (Quiet folded: its band only), for the Smart groups picture. */
   groups: readonly ListIntroGroup[];
-  /** The same threads as the Simple list draws them, newest first, for its picture. */
   flat: readonly { row: InboxListRow; drawn: InboxListGroupId }[];
   look: ListLook;
   projectNames?: ReadonlyMap<string, string>;
   awayMachines?: ReadonlySet<string>;
   phone: boolean;
-  /** The view the list draws now: its choice is marked "In use". */
   current: ListView;
-  /** Smart groups: the groups stay. */
   onSmart: () => void;
-  /** Escape or a click outside: the current view stays (the line counts it as Not now). Without it, `onSmart`. */
   onDismiss?: () => void;
-  /** Simple list: the list switches at once, remembered as the ⋮ menu's choice. */
   onSimple: () => void;
 }
 
-/** A small picture of the person's own list, drawn by the real rows, light for everyone (as the list options dialog's). */
 function Thumb({ groups, flat, look, projectNames, awayMachines }: Pick<ListViewIntroProps, 'look' | 'projectNames' | 'awayMachines'> & { groups: readonly ListIntroGroup[]; flat?: ListViewIntroProps['flat'] }) {
   const { lightTheme } = useTheme();
   return (
@@ -48,14 +40,6 @@ function Thumb({ groups, flat, look, projectNames, awayMachines }: Pick<ListView
   );
 }
 
-/**
- * The List view's one-time choice (the owner, 2026-11-05: "smart groups versus simple list … we recommend the smart
- * groups, but you could also treat it like a simple email list"): two columns side by side, each a small picture of
- * the person's own list, its name, one line and a button. Smart groups is marked "Recommended" and its button is the
- * primary one (the owner's pick); the view the list draws now is marked "In use". One click picks either and closes
- * it; Escape and a click outside keep the current view. Focus starts on the question (Tab reaches Smart groups first).
- * No keyboard shortcut.
- */
 export function ListViewIntro({ groups, flat, look, projectNames, awayMachines, phone, current, onSmart, onDismiss, onSimple }: ListViewIntroProps) {
   const words = LIST_VIEW_INTRO_WORDS;
   const thumbs = { look, projectNames, awayMachines };

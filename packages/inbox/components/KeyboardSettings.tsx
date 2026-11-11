@@ -1,9 +1,3 @@
-/**
- * Settings → General → Keyboard (approval "inbox-keyboard-shortcuts"): the
- * two keyboard settings, both on by default, kept in this window's cookies
- * (shortcuts/prefs.ts). Not on a touch phone, where single keys are off (`isTouchPhone`); a narrow desktop window
- * keeps its keys, so it keeps the setting too.
- */
 import { formatShortcutBindingText, getShortcutPlatform } from '@plannotator/ui/shortcuts';
 import { useTouchPhone } from '../phone';
 import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';

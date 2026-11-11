@@ -1,12 +1,3 @@
-/**
- * Settings → Rows' ask box (approval "inbox-rows-settings-page"): one quiet line under "Your list", "Or tell your
- * agent how you want your rows…". On focus the agent picker and Send appear. Send starts a thread to a running agent
- * on this computer, marked `rows_ask`, so the agent also receives how to change the rows (core
- * `INBOX_ROWS_ASK_BLOCK`), and the person stays on the page: "Sent to <agent>. Open thread", then the agent's own
- * line as it replies. The change itself arrives as any rows save does, and the page says who made it, with Undo
- * (RowsSettings.tsx). With no agent running there is nothing to send to: Copy keeps the words. No example chips (the
- * owner: "quiet that down").
- */
 import { useEffect, useRef, useState } from 'react';
 import { INBOX_HOST_NAMES } from '@plannotator/core/inbox-types';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
@@ -16,7 +7,6 @@ import { useComposeSessions } from '../compose/useComposeSessions';
 import { HostMark, Icon } from '../icons';
 import { newUuid } from '../uuid';
 
-/** How often the sent thread is read for the agent's line, and for how long. */
 const REPLY_POLL_MS = 2500;
 const REPLY_WAIT_MS = 5 * 60_000;
 
@@ -24,17 +14,14 @@ interface Sent {
   thread: string;
   host: string;
   name: string;
-  /** The agent's newest line in the thread, once it has replied. */
   reply: string | null;
 }
 
-/** A message's first line, short enough for the page. */
 function firstLine(body: string): string {
   const line = body.split('\n').find((part) => part.trim() !== '') ?? '';
   return line.length > 220 ? `${line.slice(0, 217)}…` : line;
 }
 
-/** `replyPollMs`: tests only, how often the sent thread is read. */
 export function RowsAsk({ replyPollMs = REPLY_POLL_MS }: { replyPollMs?: number } = {}) {
   const { model, load } = useComposeSessions(true);
   const [text, setText] = useState('');
@@ -50,12 +37,10 @@ export function RowsAsk({ replyPollMs = REPLY_POLL_MS }: { replyPollMs?: number 
   const sessions = model
     ? model.projects.flatMap((group) => group.sessions.map((session) => ({ host: session.host, session: session.session, name: INBOX_HOST_NAMES[session.host] ?? 'An agent', project: group.project.name, label: session.label ?? null })))
     : null;
-  // Sessions come and go while this is open: the choice holds by its session, and falls to the most recent.
   const agent = sessions ? (sessions.find((session) => session.session === chosen) ?? sessions[0] ?? null) : null;
   const ask = text.trim();
   const shown = open || ask !== '' || busy;
 
-  // The agent's line: the sent thread is read until it has replied, then for its newest line while the page is open.
   const thread = sent?.thread ?? null;
   useEffect(() => {
     if (!thread) return;
@@ -66,9 +51,7 @@ export function RowsAsk({ replyPollMs = REPLY_POLL_MS }: { replyPollMs?: number 
         const answer = await inboxApi.thread(thread);
         const last = [...answer.thread.messages].reverse().find((message) => message.author.kind === 'agent');
         if (!gone && last) setSent((now) => (now && now.thread === thread ? { ...now, reply: firstLine(last.body) } : now));
-      } catch {
-        // Not read this time: the next read tries again.
-      }
+      } catch {}
     };
     const timer = setInterval(() => {
       if (Date.now() - started > REPLY_WAIT_MS) clearInterval(timer);
@@ -98,7 +81,6 @@ export function RowsAsk({ replyPollMs = REPLY_POLL_MS }: { replyPollMs?: number 
       setText('');
       sendKey.current = newUuid();
     } catch (cause) {
-      // The agent went while this was open: nothing was sent, and the box reads the sessions there are now.
       if (cause instanceof InboxApiError && cause.code === 'session_not_live') await load();
       else setError(cause instanceof InboxApiError && cause.code !== 'project_unresolved' ? cause.message : 'The message was not sent. Send again to retry.');
     } finally {

@@ -3,7 +3,6 @@ import { FAVICON_STYLE_CHOICES, faviconDataUrl, faviconPngDataUrl, type FaviconS
 import { previewFavicon } from '../faviconChoice';
 import { Modal } from './Updates';
 
-/** The dialog's words, as the owner approved them (2026-11-09, "Ship it as shown"). Pinned on purpose: no body line. */
 export const TAB_ICON_CHOICE_WORDS = {
   title: 'Which favicon do you prefer?',
   note: 'You can change this in Settings.',
@@ -12,25 +11,12 @@ export const TAB_ICON_CHOICE_WORDS = {
 
 export interface TabIconChoiceProps {
   phone: boolean;
-  /** The favicon in use now (config.json `favicon`, Glass while unset): its choice is tagged "In use". */
   current: FaviconStyle;
-  /** The tab's count, as its title shows it: "(2) Plannotator Inbox". */
   title: string;
-  /** The primary button: save this pick, as Settings does. */
   onUse: (style: FaviconStyle) => void;
-  /** Escape or a click outside: the tab's own icon is back, nothing saved. */
   onDismiss: () => void;
 }
 
-/**
- * "Which favicon do you prefer?" (the owner approved the mock, 2026-11-09: "Ship it as shown"): Code
- * review's `.ib-cro` shell, its picture the browser's own tab strip at real size (this tab, a plan review tab and a code
- * review tab), then the three choices in Settings' order (Glass, Yellow, Face), each large and at tab size. A choice shows on
- * this tab at once and saves nothing (`previewFavicon`); the one primary button follows the pick ("Keep Glass", "Use
- * Yellow", "Use Face") and saves it. Escape and a click outside put back the icon the tab loaded with. Every way out is final.
- * Focus starts on the question; Tab reaches the choices (native radios: arrows move between them), then the button. No
- * keyboard shortcut.
- */
 export function TabIconChoice({ phone, current, title, onUse, onDismiss }: TabIconChoiceProps) {
   const words = TAB_ICON_CHOICE_WORDS;
   const [picked, setPicked] = useState<FaviconStyle>(current);
@@ -66,7 +52,6 @@ export function TabIconChoice({ phone, current, title, onUse, onDismiss }: TabIc
         </span>
       </div>
       <div className="ib-cro-body">
-        {/* Focus starts on the question, not on a choice. */}
         <h2 id="ib-tic-title" tabIndex={-1}>
           {words.title}
         </h2>
@@ -97,7 +82,6 @@ export function TabIconChoice({ phone, current, title, onUse, onDismiss }: TabIc
   );
 }
 
-/** The large pictures (tabIconArt.ts), in their own script; null until it is in (or if it never loads). */
 function useTabIconArt(): Readonly<Record<FaviconStyle, string>> | null {
   const [art, setArt] = useState<Readonly<Record<FaviconStyle, string>> | null>(null);
   useEffect(() => {
@@ -113,7 +97,6 @@ function useTabIconArt(): Readonly<Record<FaviconStyle, string>> | null {
   return art;
 }
 
-/** This tab's own icon as the browser shows it (tabCount.ts draws the count's badge over the pick): the strip mirrors it. */
 function useDocumentIcon(): string | null {
   return useSyncExternalStore(
     (changed) => {

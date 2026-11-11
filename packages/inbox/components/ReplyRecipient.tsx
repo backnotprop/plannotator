@@ -1,19 +1,3 @@
-/**
- * Who gets the reply (approval "inbox-reply-recipient", option E "Under the
- * box, right"): in a thread with more than one agent, a pill in the box's own
- * row, at the right of what goes with the reply, "to [tile] Claude Code
- * (plannotator) ⌄" (approval "inbox-reply-box", T6). A computer only: a phone's
- * is PhoneReplyRecipient.tsx, in the row with a bottom sheet.
- *
- * Tap it for the thread's agents (live first, ended last), the chosen ones
- * ticked. Tap a name: only that agent. Tap a circle: that agent too ("2
- * agents", the names on hover). An ended agent, or one on an older
- * Plannotator, can't be a second recipient. The last row, "Tag another
- * agent", types a real `@`. The list is the `@` list's box and tiles, not its
- * code (that one follows the caret and only adds).
- *
- * The rules are replyRecipients.ts; ThreadPane owns the choice and Send.
- */
 import { useEffect, useRef, type ReactNode } from 'react';
 import { HostMark, Icon } from '../icons';
 import { canAddRecipient, type RecipientRow } from '../replyRecipients';
@@ -54,9 +38,7 @@ export function ReplyRecipient({
   onToggle,
   onTagAnother,
 }: {
-  /** Every agent the list offers, live first, ended last. */
   rows: readonly RecipientRow[];
-  /** Who gets the reply now, the one it answers first (a typed `@` included). */
   chosen: readonly RecipientRow[];
   open: boolean;
   onOpen: (open: boolean) => void;
@@ -70,7 +52,6 @@ export function ReplyRecipient({
   const names = namesList(chosen.map((r) => r.label));
   const ended = one?.state === 'ended';
 
-  // A press outside the pill and its list closes the list; so does Escape, before anything else hears it.
   useEffect(() => {
     if (!open) return;
     const press = (event: PointerEvent) => {
@@ -161,7 +142,6 @@ export function ReplyRecipient({
       {list}
     </span>
   );
-  // A wide window: every name stacked under the pill, so the Draft words beside it never move when it changes.
   return (
     <span className="ib-rto-slot">
       {rows.map((row) => (

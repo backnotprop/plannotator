@@ -1,12 +1,3 @@
-/**
- * A diagram file's face in the Artifacts grid: the real diagram, rendered by
- * Plannotator's engine (the same renderer slot the viewer uses, so its
- * palette and mode follow the window's) and drawn small, inert. The tile is
- * the control; nothing in the drawing takes a pointer or focus. While the
- * engine renders, and if the source does not parse, the tile keeps its
- * typed face.
- */
-
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { DiagramKind } from '@plannotator/core/diagram-anchor';
 import { useConfigValue } from '@plannotator/ui/config';

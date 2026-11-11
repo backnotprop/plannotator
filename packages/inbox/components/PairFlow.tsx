@@ -18,10 +18,8 @@ import {
 import { qrModules } from '../qr';
 import { isTextCut, Tip } from './Tip';
 
-/** How often the code's screen looks for the phone that scanned it, and for what reached the door. */
 const PAIRED_POLL_MS = 2000;
 
-/** The pairing link as a QR code: black on white whatever the theme, so every camera reads it. */
 function QrCode({ link }: { link: string }) {
   const path = useMemo(() => qrModules(link), [link]);
   return (
@@ -78,26 +76,16 @@ export interface PairFlowProps {
   lan: LanState | null;
   tailnet: TailnetState | null;
   busy: boolean;
-  /** The switches' last refusal (a way that could not be turned on), in the Inbox's words. */
   error: string | null;
   onSwitchLan: (on: boolean) => Promise<unknown>;
   onSwitchTailnet: (on: boolean) => Promise<unknown>;
-  /** Read the ways again (after Check again). */
   onRefreshWays: () => void;
   readDevices: () => Promise<PairedDevice[]>;
-  /** Done (step 3) or Cancel: back to Devices. */
   onClose: (paired: boolean) => void;
 }
 
 type Step = 'reach' | 'scan' | 'paired';
 
-/**
- * Pair a phone, inline in Devices (design of record
- * `.product/approved/inbox-settings-tabs/`, section 4): always starts at
- * step 1 (owner, decision 3), "How will your phone reach this computer?",
- * then the code, then Paired. The code is shown only once a way is switched
- * on; the checks beside each way never hold the person in step 1 (pairing.ts).
- */
 export function PairFlow({ lan, tailnet, busy, error, onSwitchLan, onSwitchTailnet, onRefreshWays, readDevices, onClose }: PairFlowProps) {
   const [step, setStep] = useState<Step>('reach');
   const [checks, setChecks] = useState<PairingChecks | null>(null);
@@ -109,9 +97,7 @@ export function PairFlow({ lan, tailnet, busy, error, onSwitchLan, onSwitchTailn
   const [making, setMaking] = useState(false);
   const [flowError, setFlowError] = useState<string | null>(null);
   const [paired, setPaired] = useState<{ name: string; via: PairingAttempt['via'] | null } | null>(null);
-  /** "Show the code" pressed with no way on: say so beside the button (the gate). */
   const [needWay, setNeedWay] = useState(false);
-  /** Another window made a newer code: this one is closed. */
   const [replaced, setReplaced] = useState(false);
   const known = useRef<Set<string> | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -179,14 +165,12 @@ export function PairFlow({ lan, tailnet, busy, error, onSwitchLan, onSwitchTailn
     void makeCode();
   };
 
-  // While the code shows: the countdown, what reached the door, and the phone that redeems it.
   useEffect(() => {
     if (step !== 'scan' || !offer) return;
     const tick = setInterval(() => setNow(Date.now()), 1000);
     const poll = async () => {
       try {
         const [list, read] = await Promise.all([readDevices(), inboxApi.pairingOffer().catch(() => null)]);
-        // The Inbox keeps one offer: another window's New code replaces this one. Its state and attempts are not ours.
         if (read) setReplaced(read.offer !== null && read.offer.expires_at !== offer.offer.expires_at);
         if (read) setView(read.offer && read.offer.expires_at === offer.offer.expires_at ? read.offer : null);
         const fresh = list.find((d) => !known.current?.has(d.id));
@@ -195,9 +179,7 @@ export function PairFlow({ lan, tailnet, busy, error, onSwitchLan, onSwitchTailn
           setPaired({ name: fresh.name, via: read?.offer ? pairedVia(read.offer.attempts) : null });
           setStep('paired');
         }
-      } catch {
-        // The next poll tries again.
-      }
+      } catch {}
     };
     const timer = setInterval(() => void poll(), PAIRED_POLL_MS);
     return () => {
@@ -228,7 +210,6 @@ export function PairFlow({ lan, tailnet, busy, error, onSwitchLan, onSwitchTailn
     const address = state?.address ?? null;
     const working = isOn && address !== null && !state?.error;
     const title = isWifi ? 'This Wi-Fi' : 'Tailscale';
-    // A switch changes what the checks can see (the mapping on 8443, the listener): read them again after it.
     const switchWay = async (next: boolean) => {
       await (isWifi ? onSwitchLan : onSwitchTailnet)(next);
       void runChecks(true);
@@ -429,7 +410,6 @@ export function PairFlow({ lan, tailnet, busy, error, onSwitchLan, onSwitchTailn
                     </span>
                   </div>
                 )}
-                {/* Only with an address to reach: never the heading over an empty list. */}
                 {!expired && (lanAddress || tailnetAddress) && (
                   <div className="ib-before">
                     <h5>Before you scan, on your phone</h5>

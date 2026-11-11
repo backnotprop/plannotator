@@ -1,9 +1,3 @@
-/**
- * Settings -> Decision data's Ask (approval `.product/approved/decision-data/`, 2026-11-05). The box sends the same
- * New message Compose sends, to a running agent, marked `decision_ask`, so the agent also receives how to answer
- * (`INBOX_DECISION_ASK_BLOCK`). The answer comes back as an ordinary thread. With no agent running there is nothing to
- * ask: it says so, and Copy keeps the question for later.
- */
 import { useRef, useState } from 'react';
 import { INBOX_HOST_NAMES } from '@plannotator/core/inbox-types';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
@@ -34,7 +28,6 @@ export function DecisionAsk() {
         })),
       )
     : null;
-  // Sessions come and go while this is open: the choice holds by its session, and falls to the most recent.
   const agent = sessions ? (sessions.find((session) => session.session === chosen) ?? sessions[0] ?? null) : null;
   const question = text.trim();
 
@@ -60,7 +53,6 @@ export function DecisionAsk() {
       });
       window.location.hash = `thread=${sent.thread_id}`;
     } catch (cause) {
-      // The agent went while this was open: nothing was sent, and the box reads the sessions there are now.
       if (cause instanceof InboxApiError && cause.code === 'session_not_live') await load();
       else setError(cause instanceof InboxApiError && cause.code !== 'project_unresolved' ? cause.message : 'The message was not sent. Send again to retry.');
     } finally {

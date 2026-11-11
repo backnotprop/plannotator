@@ -1,26 +1,3 @@
-/**
- * A comment on an HTML page on a phone (approval "inbox-html-attachments-phone"):
- * instead of the dimmed box over the page, a pin or a text selection opens the
- * full-screen composer's card on its Comment tab, as an image's does, and the
- * page stays in sight above it. `HtmlViewer` hands the draft over (`onHostDraft`,
- * as the iPhone app's surface does); this holds it until it is saved or dropped.
- *
- * The card reads: what the comment is on, Parent and Child to move a pin to the
- * element around it or back in (`stepPin`), the field and Comment. The field is
- * the reply's (`InboxComposerField`: `@` tags and `/` skills), inside
- * `data-image-composer`, so the pane's Escape rungs treat it as they treat an
- * image's comment row. Words typed when the file closes wait as its draft
- * (`kept`), and come back on the same pin or words when it opens again
- * (`expectWords`, then the page's own draft).
- *
- * Focus lands in the field for a pin. A selection leaves it in the page, where
- * the person may still be dragging its handles; moving it would end them.
- *
- * Words outlive their target: a new pin or a Parent keeps them, and a tap on the
- * page that clears a selection closes the card only while it holds none. A
- * selection lost to focus leaving the frame leaves the card as it is: the bridge
- * does not report that one, and the quote is in the draft.
- */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useConfigValue } from '@plannotator/ui/config';
 import type { ViewerHandle } from '@plannotator/ui/components/Viewer';
@@ -36,35 +13,23 @@ import { FullScreenCommentBin } from './FullScreenComposer';
 import { TagNotes } from './TagPicker';
 
 export interface HtmlPageCommentOptions {
-  /** The card can open: a phone's full screen on a page that takes comments. Off, any open draft goes. */
   enabled: boolean;
-  /** What the draft belongs to: another file drops it (the pane kept typed words as that file's draft first). */
   fileKey: string;
   threadId: string | null;
-  /** The file's name, for the field's label. */
   name: string;
   viewer: RefObject<ViewerHandle | null>;
-  /** The agents a comment can tag: the reply's. */
   tags?: InboxComposerTags;
   onSave: (annotation: Annotation) => Promise<boolean>;
-  /** How much of the frame the card covers, for the pin to clear it. */
   covered: () => number;
-  /** The comment was saved or dropped from the card: focus goes back to the pane, with what to say. */
   onDone: (saying: string | null) => void;
 }
 
 export interface HtmlPageComment {
-  /** A draft is open: the card shows it, and it stays while the window is zoomed. */
   open: boolean;
-  /** For `HtmlViewer`. */
   onHostDraft: (draft: HostDraft | null) => void;
-  /** The card for a pin or a selection, or null: the Comment tab shows the page's own row (`HtmlPageCommentRow`). */
   card: ReactNode | null;
-  /** For the composer's minimize: a comment with no words yet is dropped. */
   onMinimized: () => void;
-  /** The comment being written, as the file closes (its words as `text`, what it is on), or null: none has words. */
   kept: () => Annotation | null;
-  /** The next draft the page hands over (a kept comment put back on its pin or words) opens holding these words. */
   expectWords: (text: string) => void;
 }
 
@@ -77,11 +42,8 @@ export function useHtmlPageComment({ enabled, fileKey, threadId, name, viewer, t
   const draftRef = useRef(draft);
   draftRef.current = draft;
   const mentions = useRef<readonly string[]>([]);
-  /** Puts back the card's tab and fold as the comment found them. */
   const restore = useRef<(() => void) | null>(null);
-  /** Parent or Child was pressed: the next draft is the same comment, focus stays where it is. */
   const stepping = useRef(false);
-  /** Words a kept comment had, for the draft the page hands over next (`expectWords`). */
   const expected = useRef<string | null>(null);
 
   const drop = useCallback(() => {
@@ -95,7 +57,6 @@ export function useHtmlPageComment({ enabled, fileKey, threadId, name, viewer, t
   const onHostDraft = useCallback(
     (next: HostDraft | null) => {
       if (next === null) {
-        // The selection went away while words wait for it: the quote is in the draft, so they can still be saved.
         if (wordsRef.current.trim() === '') drop();
         return;
       }
@@ -125,7 +86,6 @@ export function useHtmlPageComment({ enabled, fileKey, threadId, name, viewer, t
     if (!draftRef.current || wordsRef.current.trim() !== '') return;
     draftRef.current.cancel();
     drop();
-    // Minimize asked for the pill, whatever the card was before the comment.
     if (threadId && !composerMinimized(threadId, true)) setComposerMinimized(threadId, true);
   }, [threadId, drop]);
 
@@ -144,10 +104,8 @@ export function useHtmlPageComment({ enabled, fileKey, threadId, name, viewer, t
     onDone('Comment saved.');
   };
 
-  // Another file or version, or the card can no longer open (a linked page came over the file).
   useEffect(() => drop, [enabled, fileKey, drop]);
 
-  // The pinned element stays in sight above the card, and above the keyboard when it comes up.
   const pinned = draft?.intent === 'compose' ? draft.annotation.id : null;
   useEffect(() => {
     if (!pinned) return;
@@ -159,7 +117,6 @@ export function useHtmlPageComment({ enabled, fileKey, threadId, name, viewer, t
       cancelAnimationFrame(frame);
       viewport?.removeEventListener('resize', reveal);
     };
-    // `covered` reads the page as it is drawn.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pinned, viewer]);
 
@@ -220,14 +177,12 @@ function HtmlCommentCard({
   const enterSavesComment = useConfigValue('enterSavesComment');
   const fieldRef = useRef<HTMLTextAreaElement | null>(null);
   const pin = draft.intent === 'compose';
-  // The words it is on, as the approved card reads; an element with none (a picture) has its kind.
   const target = shortLabel(draft.annotation.originalText) || draft.label || '';
 
   useEffect(() => {
     const wasStep = stepping.current;
     stepping.current = false;
     if (!pin || wasStep) return;
-    // Zoomed, the card can be out of the view: the browser brings it in.
     fieldRef.current?.focus({ preventScroll: !isWindowPinched() });
   }, [draft.annotation.id, pin, stepping]);
 
@@ -276,23 +231,12 @@ function HtmlCommentCard({
   );
 }
 
-/** Where a page row's words wait while the row is off screen and the file still open (a linked page over it). */
 export type PageCommentParking = { current: { key: string; text: string } | null };
 
-/** A fresh id for a comment on the whole page. */
 function pageCommentId(): string {
   return typeof crypto.randomUUID === 'function' ? `ann-page-${crypto.randomUUID()}` : `ann-page-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-/**
- * The page's own comment row: the full-screen composer's Comment tab on an HTML page, as an image's row is on an
- * image. A comment here is on the whole page: a general comment (`GLOBAL_COMMENT`, as the HTML viewer's own "Add
- * global comment" makes in annotate), kept on the attachment and sent with the reply ("General feedback about the
- * document"). A comment on an element or on words is the page's pin or selection, as before.
- *
- * Its words are a row draft (`useRowDraft`): they wait as the file's draft when it closes, and come back with it.
- * `parking` keeps them while the row is off screen with the file still open (a linked page over it).
- */
 export function HtmlPageCommentRow({
   fileKey,
   name,
@@ -301,19 +245,14 @@ export function HtmlPageCommentRow({
   hidden = false,
   onSave,
 }: {
-  /** The file and version the row is for: its parked words are only ever its own. */
   fileKey: string;
-  /** The file's name, for the field's label. */
   name: string;
-  /** The agents a comment can tag: the reply's. */
   tags?: InboxComposerTags;
   parking: PageCommentParking;
-  /** A pin's or a selection's card is in the tab (a phone's): the row stays drawn, hidden, its words kept. */
   hidden?: boolean;
   onSave: (annotation: Annotation) => Promise<boolean>;
 }) {
   const enterSavesComment = useConfigValue('enterSavesComment');
-  /** The words as a save took them: the file closing before the save answers keeps no draft of them. */
   const sentWords = useRef<string | null>(null);
   const wordsRef = useRef('');
   const waiting = useRowDraft(() => (sentWords.current === wordsRef.current ? null : { kind: 'row', text: wordsRef.current, markup: null }));
@@ -321,7 +260,6 @@ export function HtmlPageCommentRow({
   wordsRef.current = words;
   const [saving, setSaving] = useState(false);
   const mentions = useRef<readonly string[]>([]);
-  // Off screen with the file still open: the words wait here, and the row takes them back when it is drawn again.
   useLayoutEffect(() => {
     parking.current = null;
     return () => {

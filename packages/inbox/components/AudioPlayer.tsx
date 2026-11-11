@@ -1,33 +1,13 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
 import { formatInboxVideoTime } from '@plannotator/core/inbox-types';
 
-/**
- * A recording's player bar (the owner's ask, 2026-11-09: "the ability to like
- * annotate an audio file"): the waveform to scrub, drawn from the decoded
- * recording's peaks, or a plain bar when that is not cheap. The rest of the
- * player (play, the time, the comments' rail, the comment row) is the video
- * view's (VideoAttachmentView.tsx), so a recording takes comments at moments
- * exactly as a film does.
- */
-
 /** A recording larger than this draws the plain bar: decoding it whole would cost too much memory. */
 export const AUDIO_PEAKS_MAX_BYTES = 12 * 1024 * 1024;
 
-/** The waveform's bars. */
 export const AUDIO_PEAK_BARS = 160;
 
-/**
- * The rate the recording is decoded at for its peaks: low, so a 12 MB file's
- * samples stay a few tens of MB while they are read (the waveform only needs
- * its loudness, not its sound).
- */
 const PEAK_SAMPLE_RATE = 8000;
 
-/**
- * The loudness of each of `bars` equal slices of the recording, 0 to 1: the
- * loudest sample of the slice over every channel, against the loudest of all,
- * eased so quiet speech still shows. Silence is a thin line, never nothing.
- */
 export function audioPeaksOf(channels: readonly Float32Array[], bars = AUDIO_PEAK_BARS): number[] {
   const length = channels[0]?.length ?? 0;
   if (length === 0 || bars <= 0) return [];
@@ -48,15 +28,9 @@ export function audioPeaksOf(channels: readonly Float32Array[], bars = AUDIO_PEA
   return raw.map((peak) => (loudest > 0 ? Math.max(0.04, Math.pow(peak / loudest, 0.7)) : 0.04));
 }
 
-/** Peaks already read, by the recording's URL: stepping back to a file draws its waveform at once. */
 const peaksCache = new Map<string, number[]>();
 const PEAKS_CACHE_MAX = 24;
 
-/**
- * The waveform's peaks of the recording at `url`, or null while they are read
- * and whenever they cannot be (too large, no Web Audio, a format the browser
- * decodes only by streaming): the bar is then plain.
- */
 export function useAudioPeaks(url: string, size: number): number[] | null {
   const [peaks, setPeaks] = useState<number[] | null>(() => peaksCache.get(url) ?? null);
   useEffect(() => {
@@ -85,9 +59,7 @@ export function useAudioPeaks(url: string, size: number): number[] | null {
         if (peaksCache.size >= PEAKS_CACHE_MAX) peaksCache.delete(peaksCache.keys().next().value!);
         peaksCache.set(url, next);
         setPeaks(next);
-      } catch {
-        // Not decoded here (aborted, a format Web Audio does not take): the plain bar stays.
-      }
+      } catch {}
     })();
     return () => {
       cancelled = true;
@@ -97,7 +69,6 @@ export function useAudioPeaks(url: string, size: number): number[] | null {
   return peaks;
 }
 
-/** The bars, centred on the line, as one SVG stretched to the bar's box. */
 function Bars({ peaks }: { peaks: readonly number[] }) {
   return (
     <svg className="ib-audbars" viewBox={`0 0 ${peaks.length} 100`} preserveAspectRatio="none" aria-hidden="true" focusable="false">
@@ -109,15 +80,8 @@ function Bars({ peaks }: { peaks: readonly number[] }) {
   );
 }
 
-/** How far a key moves the playhead. */
 const KEY_STEP_SECONDS = 5;
 
-/**
- * The bar to scrub: a slider over the waveform (or the plain line), the part
- * played drawn in the primary colour, the playhead. A press or a drag seeks
- * there (playing on if it was playing); ← → move 5 s and Home / End go to the
- * ends while it has focus, as a native player's bar does.
- */
 export function AudioScrub({
   name,
   peaks,
@@ -130,11 +94,9 @@ export function AudioScrub({
   name: string;
   peaks: readonly number[] | null;
   current: number;
-  /** The length in seconds, or null while it is not known (the bar does not seek yet). */
   span: number | null;
   onSeek: (time: number) => void;
   onFocusChange: (focused: boolean) => void;
-  /** Drawn over the bar (the playhead, the marker of the comment being written). */
   children?: ReactNode;
 }) {
   const box = useRef<HTMLDivElement>(null);

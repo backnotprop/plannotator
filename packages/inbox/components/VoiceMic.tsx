@@ -1,12 +1,3 @@
-/**
- * The microphone in the shared composer. `VoiceFoot`: the status and the button, placed by each host in its own
- * toolbar as it places the paperclip; nothing at all when voice is off, or with Phones only on anything but a touch
- * screen. `VoiceNote`: the line under the text, for what needs words or a choice. `voicePaint`: what the mirror layer
- * adds at the caret (the caret that follows the level, or the dim marker), never in the value.
- *
- * The level reaches the screen by direct writes from `subscribeMeter`, so a hold re-renders nothing but the one line
- * that shows its seconds.
- */
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { ComposerMirrorPaint } from '@plannotator/ui/components/ComposerTokenTextarea';
 import { Icon } from '../icons';
@@ -16,7 +7,6 @@ import { watchVoiceMisses } from '../voiceMiss';
 import { voicePressProps } from '../voicePress';
 import { VOICE_BARS, type VoiceSession, type VoiceTrouble, type VoiceView } from '../voiceSession';
 
-/** The last bars of the level, written straight to the DOM on every tick. */
 function Bars({ session, count }: { session: VoiceSession; count: number }) {
   const box = useRef<HTMLSpanElement>(null);
   useEffect(() => {
@@ -43,7 +33,6 @@ function Bars({ session, count }: { session: VoiceSession; count: number }) {
   );
 }
 
-/** The status: re-renders when its words change, which is once a second at most. */
 function VoiceStatus({ voice, phone }: { voice: VoiceHandle; phone: boolean }) {
   const { session, view } = voice;
   const line = () => voiceLine(view, session.meter(), phone);
@@ -69,14 +58,11 @@ function MicButton({ voice, phone, block }: { voice: VoiceHandle; phone: boolean
   const live = view.phase === 'opening' || view.phase === 'listening';
   const tapped = view.phase === 'listening' && view.mode === 'tap';
   const button = useRef<HTMLButtonElement>(null);
-  // The debug log's near misses (voiceMiss.ts): listened for only while live, and only with the debug log on.
   useEffect(() => {
     if (!live || !button.current) return;
     return watchVoiceMisses(button.current, () => session.view());
   }, [live, session]);
   const iconSize = phone ? 19 : 16;
-  // Opening shows from the press itself: lit, with the spinner, so a tap never looks like it did nothing. Its words
-  // follow on the status line a moment later (VOICE_OPENING_SLOW_MS).
   const opening = view.phase === 'opening';
   const label = block ? 'Dictate: not available here' : view.phase === 'sending' ? 'Transcribing' : opening ? 'Opening the microphone' : tapped ? 'Stop dictating' : live ? 'Dictating' : 'Dictate: hold to talk, or tap';
   return (
@@ -95,7 +81,6 @@ function MicButton({ voice, phone, block }: { voice: VoiceHandle; phone: boolean
   );
 }
 
-/** `children` sit between the status and the mic: the status grows to their left, so they stay put when it comes. */
 export function VoiceFoot({ voice, phone, children }: { voice: VoiceHandle; phone: boolean; children?: ReactNode }) {
   const shown = useVoiceShown();
   const block = useVoiceBlock(shown);
@@ -112,10 +97,6 @@ export function VoiceFoot({ voice, phone, children }: { voice: VoiceHandle; phon
   );
 }
 
-/**
- * The mic alone, for a host that keeps the status in a place of its own in its row (`VoiceStatusLine`): the reply box,
- * where the mic never moves while a take runs (approval "inbox-reply-box", T6).
- */
 export function VoiceMicButton({ voice, phone }: { voice: VoiceHandle; phone: boolean }) {
   const shown = useVoiceShown();
   const block = useVoiceBlock(shown);
@@ -130,14 +111,12 @@ export function VoiceMicButton({ voice, phone }: { voice: VoiceHandle; phone: bo
   );
 }
 
-/** The status alone (Listening, the level, the time, Cancel; then Transcribing), for `VoiceMicButton`'s host. Nothing while idle. */
 export function VoiceStatusLine({ voice, phone }: { voice: VoiceHandle; phone: boolean }) {
   const shown = useVoiceShown();
   if (!shown) return null;
   return <VoiceStatus voice={voice} phone={phone} />;
 }
 
-/** The foot in a host with no toolbar of its own. */
 export function VoiceFootRow({ voice, phone }: { voice: VoiceHandle; phone: boolean }) {
   const shown = useVoiceShown();
   if (!shown) return null;
@@ -207,11 +186,6 @@ function blockNote(block: VoiceBlock, api: boolean, where: string): Note {
 
 type ShownNote = { note: Note; kept: boolean; settings: boolean };
 
-/**
- * The line under the words for what needs words or a choice. `glide` (the reply box): a note that goes is drawn as it
- * was, without its buttons, for its closing motion (160 ms, inbox.css), so it never leaves in one frame; under reduced
- * motion it goes at once. Elsewhere it goes at once, as before.
- */
 export function VoiceNote({ voice, glide = false }: { voice: VoiceHandle; glide?: boolean }) {
   const settings = useVoiceSettings();
   const shown = useVoiceShown();
@@ -231,7 +205,6 @@ export function VoiceNote({ voice, glide = false }: { voice: VoiceHandle; glide?
     if (!glide || !last.current) return;
     setLeaving(last.current);
     last.current = null;
-    // The note's identity is what it is about (a re-render draws a new element for the same words).
   }, [note ? (view.trouble ?? block ?? '') : null, view.kept, glide]);
   useEffect(() => {
     if (!leaving) return;
@@ -239,13 +212,12 @@ export function VoiceNote({ voice, glide = false }: { voice: VoiceHandle; glide?
     return () => clearTimeout(timer);
   }, [leaving]);
   if (!note) {
-    // The render that drops the note already draws it leaving (the effect that keeps it runs after the paint).
+    // The render that drops the note already draws it leaving; the effect that keeps it runs after the paint.
     const going = glide ? (leaving ?? last.current) : null;
     if (!going) return null;
     return (
       <div className={`ib-vnote ib-vnote-leaving${going.note.tone === 'error' ? ' ib-verr' : ''}`} aria-hidden="true" data-voice-note-leaving="">
         <span className="ib-vnote-t">{going.note.text}</span>
-        {/* Its buttons' words, not buttons: the same height as it goes, and nothing to press on the way out. */}
         {(going.kept || going.settings) && (
           <span className="ib-vnote-a">
             {going.kept && (
@@ -286,7 +258,6 @@ export function VoiceNote({ voice, glide = false }: { voice: VoiceHandle; glide?
   );
 }
 
-/** The caret that follows the level. Still under reduced motion. */
 function VoiceCaret({ session }: { session: VoiceSession }) {
   const caret = useRef<HTMLSpanElement>(null);
   useEffect(() => {
@@ -298,9 +269,7 @@ function VoiceCaret({ session }: { session: VoiceSession }) {
   return <span className="ib-vcaret" ref={caret} />;
 }
 
-/** The dim marker reads as text, so it says its word only where nothing follows on the line. */
 function Marker({ wide }: { wide: boolean }) {
-  // Between words there's no room for a word: the caret stays, still, where they will land.
   if (!wide) return <span className="ib-vcaret ib-vstill" />;
   return (
     <span className="ib-vph">
@@ -319,7 +288,6 @@ export function voicePaint(view: VoiceView, session: VoiceSession, value: string
   return undefined;
 }
 
-/** The field hides its own caret and placeholder: the painted caret stands in. */
 export function voiceHidesCaret(view: VoiceView): boolean {
   return view.phase === 'listening' || view.phase === 'sending';
 }

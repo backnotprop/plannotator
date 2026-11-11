@@ -1,15 +1,3 @@
-/**
- * The review's chapter list, folded into one control in its top bar (approval "review-deslop", r7).
- *
- * The button says where the person is ("2 of 3 The worker, and the email at the end", a tick once reviewed); the menu
- * under it lists the Overview and every chapter, with the count reviewed at its foot. In All files the same control
- * lists the changed files with their Viewed ticks. Together with Walkthrough | All files beside it, this is what the
- * review's left rail held, so the diffs get the window's width.
- *
- * No new keyboard shortcuts: it is the Inbox's menu (Enter opens it; Tab leaves it; the arrows and Enter pick, as in
- * every menu here), and Escape closes it without leaving the review.
- */
-
 import type React from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
@@ -30,31 +18,21 @@ export interface ReviewJumpFile {
 }
 
 export interface ReviewJumpProps {
-  /** Above the rows (a phone: the title and the mode switch, which have no room in its bar). */
   head?: React.ReactNode;
   mode: 'walkthrough' | 'files';
   chapters: readonly ReviewJumpChapter[];
-  /** In the order the review draws them. */
   files: readonly ReviewJumpFile[];
-  /** Walkthrough: the chapter in view (null: the overview, above the first). All files: the file in view. */
   current: number | null;
   onChapter: (index: number | null) => void;
   onFile: (path: string) => void;
-  /** False for a walkthrough: its files are code as it is, so a file has no +/- counts. Default true. */
   counts?: boolean;
-  /** Files take Viewed ticks (Code review's review). Off: All files has no "N of M files viewed" foot. Default on. */
   viewedTicks?: boolean;
-  /** False for a walkthrough: it takes no ticks at all, so neither view's menu has an "N of M" foot. Default true. */
   progress?: boolean;
 }
 
 /** A chapter or file counts as "in view" once its top is this far under the top of the review's scroll. */
 const IN_VIEW_LINE = 72;
 
-/**
- * The chapter whose top has passed the top of the review's scroll; null while the overview is still there. A card
- * past the chapters ("Everything else") is no chapter of the menu's: the last chapter stays named.
- */
 export function chapterInView(body: HTMLElement, chapterCount: number): number | null {
   const line = body.getBoundingClientRect().top + IN_VIEW_LINE;
   let at: number | null = null;
@@ -65,7 +43,6 @@ export function chapterInView(body: HTMLElement, chapterCount: number): number |
   return at;
 }
 
-/** The file whose top has passed the top of the review's scroll: its path, or null above the first. */
 export function fileInView(body: HTMLElement): string | null {
   const line = body.getBoundingClientRect().top + IN_VIEW_LINE;
   let at: string | null = null;
@@ -75,7 +52,6 @@ export function fileInView(body: HTMLElement): string | null {
   return at;
 }
 
-/** Where the person is, for the button and for a phone's list: "2 of 3" and the name. */
 export function jumpPlace({ mode, chapters, files, current }: Pick<ReviewJumpProps, 'mode' | 'chapters' | 'files' | 'current'>): { lead: string; name: string; done: boolean } {
   if (mode === 'walkthrough') {
     const chapter = current === null ? undefined : chapters[current];
@@ -87,7 +63,6 @@ export function jumpPlace({ mode, chapters, files, current }: Pick<ReviewJumpPro
   return { lead: `${index + 1} of ${files.length}`, name: file.path.slice(file.path.lastIndexOf('/') + 1), done: file.viewed };
 }
 
-/** The menu's foot: how far the review has come, in the rail's words. */
 export function jumpProgress({ mode, chapters, files }: Pick<ReviewJumpProps, 'mode' | 'chapters' | 'files'>): string {
   return mode === 'walkthrough'
     ? `${chapters.filter((chapter) => chapter.reviewed).length} of ${plural(chapters.length, 'chapter')} reviewed`
@@ -100,7 +75,6 @@ export function ReviewJump({ mode, chapters, files, current, onChapter, onFile, 
   const walk = mode === 'walkthrough';
   const { lead, name, done } = jumpPlace({ mode, chapters, files, current });
 
-  // Many chapters: the menu opens with the one in view in view.
   useEffect(() => {
     if (!open) return;
     const frame = requestAnimationFrame(() => listRef.current?.querySelector('[data-on]')?.scrollIntoView?.({ block: 'nearest' }));

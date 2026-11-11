@@ -1,27 +1,3 @@
-/**
- * The person's reaction tray on an agent's message (approval "inbox-reaction-tray", the owner's design).
- *
- * The thread foot's 👍 Looks good is unchanged to one click: it marks the message, or takes the mark back.
- * Resting the pointer on it (a moment), holding it on a touch screen, or the keyboard's "More reactions"
- * button after it opens the tray above it: 👍, the person's saved emoji, then free + slots, then …. There is
- * always one free + until INBOX_SAVED_REACTIONS_MAX emoji are saved (two while none is). A + saves an emoji
- * (the picker, a little spring, then a light name field: Enter or a click away keeps what was typed, Escape
- * skips it). The row under that field is the tray itself: the emoji just saved reacts from it at once, with the
- * name typed or none, so a phone never has to name it, close and hold again. … reacts once with any emoji;
- * nothing is saved. On a phone, holding Reply opens the tray too (Thread.tsx, `openRequest`). A right-click or a hold on a saved emoji, or the pen
- * the arrow keys reach at the tray's end, edits it (its name, another emoji, Remove).
- *
- * No words on the tray (a name is a tooltip) and no toast: the picked emoji flies from where it was pressed
- * to the line under the message, or, when that line is out of sight, lifts a little at the button; the thread
- * never scrolls to chase it (`flyReaction`). Reduced motion: no flight, the line just appears. The reaction is the 👍's
- * ack (POST /api/inbox/messages/:id/ack, its Undo window); the agent gets the emoji it ends on, with its name,
- * and the emoji is shown on the message (the ack's `reaction`). Once sent the tray leaves the message (Thread.tsx
- * `ackSent`); the emoji stays shown under it.
- *
- * Keyboard (standard menu behaviour, no new Inbox shortcut): Tab reaches "More reactions" after the 👍;
- * Enter opens the tray; Left and Right move along it; Enter picks; Escape closes the tray, the picker and the
- * fields, and gives focus back.
- */
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { Popover } from '@base-ui/react/popover';
@@ -40,17 +16,14 @@ const LONG_PRESS_MS = 380;
 
 const capFirst = (t: string) => (t ? t[0]!.toUpperCase() + t.slice(1) : t);
 
-/** An emoji's own name ("unicorn"), for the words a screen reader hears. */
 export function emojiName(emoji: string): string {
   return emojiRow(emoji)[1];
 }
 
-/** What the window says for a reaction: its name, else "Reacted with unicorn". */
 export function reactionSpeech(reaction: InboxReaction): string {
   return reaction.label || `Reacted with ${emojiName(reaction.emoji)}`;
 }
 
-/** Two reactions are the same emoji with the same name (null is 👍 Looks good). */
 export function sameReaction(a: InboxReaction | null, b: InboxReaction | null): boolean {
   return (a?.emoji ?? null) === (b?.emoji ?? null) && (a?.label ?? '') === (b?.label ?? '');
 }
@@ -58,36 +31,23 @@ export function sameReaction(a: InboxReaction | null, b: InboxReaction | null): 
 const reduced = () => globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
 
 let flight: { el: HTMLElement; raf: number } | null = null;
-const easeOut = (t: number) => 1 - Math.pow(1 - t, 4); // close to cubic-bezier(0.23, 1, 0.32, 1)
-const easeInOut = (t: number) => (t < 0.5 ? 8 * t ** 4 : 1 - Math.pow(-2 * t + 2, 4) / 2); // close to cubic-bezier(0.77, 0, 0.175, 1)
-/** 0 to 1 from `start`; a frame stamped before the flight began (rAF's stamp is the frame's start) counts as 0. */
+const easeOut = (t: number) => 1 - Math.pow(1 - t, 4);
+const easeInOut = (t: number) => (t < 0.5 ? 8 * t ** 4 : 1 - Math.pow(-2 * t + 2, 4) / 2);
 const progress = (now: number, start: number, ms: number) => Math.min(1, Math.max(0, (now - start) / ms));
 
-/** The sent moment's timings (ms). */
 export const FLIGHT_LAND_MS = 520;
-/** The emoji's spot under the message is out of sight: a short lift at the button, no travel. */
 export const FLIGHT_STAY_MS = 260;
-/** The thread keeping its end in view as the line under the last message draws (only when it was at its end). */
 export const KEEP_END_MS = 240;
-/** How long the thread waits for the line to draw before it stops keeping its end. */
 const KEEP_END_WAIT_MS = 600;
-/** The band of the thread an emoji may land in: never at its very edge, under its header or the foot. */
 const LAND_MARGIN = 12;
 
 let keeping: { stop: () => void } | null = null;
 
-/**
- * The person was at the thread's end when they reacted: the line drawn under the message grows the thread, and
- * the thread stays at its end, eased there once (KEEP_END_MS, the strong ease-out). Read against the end every
- * frame, so the read line arriving above (the browser holds what is in view through it) moves nothing. The
- * person's own wheel, touch, pointer or key stops it. Reduced motion: the end at once.
- */
 function keepEnd(body: HTMLElement): void {
   keeping?.stop();
   if (typeof requestAnimationFrame !== 'function') return;
   const startedAt = performance.now();
   const gapAt = (b: HTMLElement) => b.scrollHeight - b.clientHeight - b.scrollTop;
-  // A thread a few px short of its end (atEnd allows AT_END_PX) keeps that much: only the growth is followed.
   const before = Math.max(0, gapAt(body));
   let begun = -1;
   let from = 0;
@@ -107,7 +67,6 @@ function keepEnd(body: HTMLElement): void {
     const end = body.scrollHeight - body.clientHeight;
     const gap = gapAt(body) - before;
     if (begun < 0 || gap > last + 1) {
-      // The line drew (or grew again, a wrap): ease the rest of the way from here.
       if (gap <= 1) {
         if (now - startedAt > KEEP_END_WAIT_MS) return stop();
         raf = requestAnimationFrame(frame);
@@ -130,22 +89,9 @@ function keepEnd(body: HTMLElement): void {
   raf = requestAnimationFrame(frame);
 }
 
-/**
- * The sent moment: the emoji leaves where it was pressed and lands on the line under the message it answers,
- * so the person sees where the reaction went. 520 ms, pointer-events none, never blocks.
- *
- * The thread never scrolls to chase it. The emoji lands only where the person can see: the line, read again
- * every frame, held inside the thread's visible band, so a line drawn lower than expected, or pushed under the
- * foot, is never followed past the bar. When the person was at the thread's end, the thread stays at its end
- * (keepEnd) and the emoji lands on the line as it settles. When the line's spot is out of sight (a long message
- * that runs past the foot, read from higher up), there is no travel: the emoji lifts a little at the button and
- * fades (260 ms), and the line under the message is simply there. A new flight cancels the one in the air.
- * Reduced motion: no flight at all; the thread still keeps its end, at once.
- */
 export function flyReaction(from: Element | null, emoji: string, messageId: string): void {
   const message = document.querySelector<HTMLElement>(`.ib-pbody [data-message-id="${CSS.escape(messageId)}"]`);
   const scroller = message?.closest<HTMLElement>('.ib-pbody') ?? null;
-  // Read before the line is drawn: the person's place, not the one the line makes.
   const wasAtEnd = !!scroller && scroller.scrollHeight > 0 && atEnd(scroller);
   if (scroller && wasAtEnd) keepEnd(scroller);
   if (reduced() || typeof requestAnimationFrame !== 'function') return;
@@ -172,7 +118,6 @@ export function flyReaction(from: Element | null, emoji: string, messageId: stri
       y = c.top + c.height / 2;
     } else if (body) {
       const b = body.getBoundingClientRect();
-      // The line sits 12 px under the message; its emoji 18 px in.
       x = b.left + 18;
       y = b.bottom + 25;
     } else return null;
@@ -180,7 +125,6 @@ export function flyReaction(from: Element | null, emoji: string, messageId: stri
     return { x, y, inView: !!view && y >= view.top && y <= view.bottom };
   };
   const first = target();
-  // The thread keeping its end brings the line into view as the emoji travels; otherwise it must be in view now.
   const land = !!first && (wasAtEnd || first.inView);
   if (flight) {
     cancelAnimationFrame(flight.raf);
@@ -207,17 +151,14 @@ export function flyReaction(from: Element | null, emoji: string, messageId: stri
     let opacity = 1;
     if (land) {
       const to = target() ?? first!;
-      // Never past the thread's visible band: a line below the bar (or under the foot) is not chased there.
       const view = band();
       const toY = view ? Math.min(view.bottom, Math.max(view.top, to.y)) : to.y;
       landed = to.inView;
-      // x eases in and out, y decelerates: it lifts first, then drifts over to the line.
       x = x0 + (to.x - x0) * easeInOut(t);
       y = y0 + (toY - y0) * easeOut(t);
       scale = t < 0.55 ? 1 + 0.45 * easeOut(t / 0.55) : 1.45 - 0.6 * easeOut((t - 0.55) / 0.45);
       opacity = t > 0.92 ? 1 - (t - 0.92) / 0.08 : 1;
     } else {
-      // A short lift where it was pressed: it rises, grows a little and is gone. Never downward.
       y = y0 - 20 * easeOut(t);
       scale = 1 + 0.3 * easeOut(t);
       opacity = t < 0.35 ? 1 : 1 - (t - 0.35) / 0.65;
@@ -231,7 +172,6 @@ export function flyReaction(from: Element | null, emoji: string, messageId: stri
     }
     el.remove();
     if (flight === mine) flight = null;
-    // The landing: the line's emoji takes the hit, only where the person can see it.
     if (land && landed) {
       document
         .querySelector<HTMLElement>(`[data-ack-for="${CSS.escape(messageId)}"] .ib-ackemoji`)
@@ -241,13 +181,11 @@ export function flyReaction(from: Element | null, emoji: string, messageId: stri
   frame(start);
 }
 
-/** The message a reaction was last sent to, and when: only its line under the message fades in (Thread.tsx AckPill). */
 let lastReacted: { id: string; at: number } | null = null;
 export function justReacted(messageId: string): boolean {
   return !!lastReacted && lastReacted.id === messageId && Date.now() - lastReacted.at < 2000;
 }
 
-/** The button's own emoji answers the press at once. */
 function popEmoji(el: Element | null | undefined) {
   if (!el || reduced()) return;
   el.animate?.([{ transform: 'scale(1)' }, { transform: 'scale(0.82)', offset: 0.35 }, { transform: 'scale(1.16)', offset: 0.7 }, { transform: 'scale(1)' }], { duration: 260, easing: 'cubic-bezier(0.23, 1, 0.32, 1)' });
@@ -256,17 +194,10 @@ function popEmoji(el: Element | null | undefined) {
 export interface ReactionTrayProps {
   messageId: string;
   agent: string;
-  /** The message carries the person's mark (the ack). */
   on: boolean;
-  /** The mark's emoji when it is one from the tray; null for 👍 Looks good. */
   current: InboxReaction | null;
   phone: boolean;
-  /**
-   * Mark the message with `reaction` (null: 👍 Looks good), or take the mark back (`on` false, `reaction` the one taken
-   * back). `was`: only when the message already had the mark, the reaction it had (null: 👍): only the emoji changes.
-   */
   onAck: (on: boolean, reaction: InboxReaction | null, was?: InboxReaction | null) => void;
-  /** Opens the tray when it changes (a hold on Reply, on a phone); 0 or unchanged does nothing. */
   openRequest?: number;
 }
 
@@ -281,7 +212,6 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
   const [editing, setEditing] = useState<number | null>(null);
   const [fresh, setFresh] = useState<number | null>(null);
   const [said, setSaid] = useState('');
-  // Back after a name was kept: the tray is simply there again (no fade, no stagger), where the field's row was.
   const [instant, setInstant] = useState(false);
   const mainRef = useRef<HTMLButtonElement>(null);
   // The tray, the picker and the fields are drawn inside the window's root, so its styles, theme and text size reach them.
@@ -291,16 +221,12 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
   const held = useRef(false);
   const heldAt = useRef(0);
   const reopenedAt = useRef(0);
-  // The tray is closing to open the picker or a field: focus goes there, not back to "More reactions".
   const handOff = useRef(false);
-  // A hold on a saved emoji (touch) edits it; the click that ends the hold is swallowed.
   const savedHeld = useRef(false);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const lastSaved = useRef<number | null>(null);
-  // What the picker was last opened for: read as it closes, after its state is already gone.
   const pickerKind = useRef<PickerFor['kind']>('once');
-  // A pick that goes on to a field (the name field, the editor): the closing picker gives focus to nobody.
   const toField = useRef(false);
   // Between the tray closing and the picker or a field opening (a frame, or the picker's exit): busy, so a pointer
   // crossing the 👍 then does not open the tray over the field, nor a leave close the one coming back.
@@ -328,10 +254,6 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
     setInstant(instantly);
     setOpen(true);
   };
-  /**
-   * The tray back after the picker or the name field: no close timer left from a pointer that left the 👍 meanwhile,
-   * and no hand-off, so Escape gives focus back to "More reactions" as after any open.
-   */
   const reopenNow = (instantly: boolean) => {
     clear();
     between.current = false;
@@ -360,11 +282,9 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
     popEmoji(mainRef.current?.querySelector('.ib-ack-emoji'));
     lastReacted = { id: messageId, at: Date.now() };
     flyReaction(from, reaction?.emoji ?? '👍', messageId);
-    // Already marked: only the emoji changes (Z puts the one it had back).
     onAck(true, reaction, on ? current : undefined);
   };
 
-  // Hover (a fine pointer only) opens after a short rest; leaving the button and the tray closes it.
   const busy = () => picker !== null || naming !== null || editing !== null || between.current;
   const enter = (e: ReactPointerEvent) => {
     if (phone || e.pointerType !== 'mouse' || busy()) return;
@@ -374,7 +294,6 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
     if (phone || e.pointerType !== 'mouse' || busy()) return;
     later(HOVER_CLOSE_MS, () => setOpen(false));
   };
-  // Touch: a hold opens the tray, and the click that follows the hold is swallowed.
   const down = (e: ReactPointerEvent) => {
     if (e.pointerType === 'mouse') return;
     held.current = false;
@@ -388,7 +307,6 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
   const up = () => {
     if (!open) clear();
   };
-  // A hold elsewhere (Reply, on a phone) opens the tray as a hold on the 👍 does: the release does not close it.
   const seenRequest = useRef(openRequest);
   useEffect(() => {
     if (openRequest === seenRequest.current) return;
@@ -403,7 +321,6 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
     handOff.current = true;
     clear();
     setOpen(false);
-    // After the tray has closed (and not given focus back to its trigger): the picker takes it.
     pickerKind.current = next.kind;
     toField.current = false;
     handTo('frame', () => setPicker(next));
@@ -421,7 +338,6 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
     const cell = document.querySelector(`.ib-emo [data-emo="${CSS.escape(row[0])}"]`);
     if (what.kind === 'once') {
       rememberEmoji(row[0]);
-      // A saved emoji keeps its name; 👍 is Looks good; any other is the emoji alone.
       const known = savedReactions().find((r) => r.emoji === row[0]);
       send(row[0] === '👍' ? null : (known ?? { emoji: row[0] }), cell);
       return;
@@ -435,7 +351,6 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
       return;
     }
     setPicker(null);
-    // 👍 is already the tray's first: nothing to save.
     const at = row[0] === '👍' ? -1 : addSavedReaction(row[0]);
     if (at < 0) {
       toField.current = false;
@@ -497,9 +412,7 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
           open={open}
           onOpenChange={(next, details) => {
             const reason = details?.reason;
-            // The press or focus that ends a hold does not close the tray it opened; Escape always does.
             if (!next && (reason === 'outside-press' || reason === 'focus-out') && Date.now() - heldAt.current < 700) return;
-            // Brought back after a save, the tray is not closed by the focus the closing field lets go of.
             if (!next && reason === 'focus-out' && Date.now() - reopenedAt.current < 300) return;
             if (next) {
               handOff.current = false;
@@ -510,7 +423,6 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
           modal={false}
           orientation="horizontal"
         >
-          {/* With a mouse, resting on the 👍 opens the tray; a tooltip racing it would cover it. */}
           {!phone && !on ? (
             main
           ) : (
@@ -531,7 +443,6 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
                 data-instant={instant ? '' : undefined}
                 aria-label="Reactions"
                 style={{ ['--n' as string]: cells }}
-                // A pick with the pointer, or a hand-off to the picker or a field, does not move focus to the hidden "More reactions".
                 finalFocus={(type) => !handOff.current && type === 'keyboard'}
                 onPointerEnter={(e) => !phone && e.pointerType === 'mouse' && clear()}
                 onPointerLeave={leave}
@@ -563,7 +474,6 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
                         aria-label={`${r.emoji} ${name}`}
                         onFocus={() => (lastSaved.current = i)}
                         onMouseEnter={() => (lastSaved.current = i)}
-                        // Right-click (a mouse) or a hold (touch): edit this one.
                         onContextMenu={(e) => {
                           e.preventDefault();
                           openEditor(i);
@@ -624,8 +534,6 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
                     </span>
                   </Menu.Item>
                 </div>
-                {/* The keyboard's way to edit a saved emoji (a Mac has no context-menu key): it shows only when the
-                    arrows land on it (Left from 👍 wraps to it), beside the tray; the pointer never meets it. */}
                 {saved.length > 0 && (
                   <Menu.Item
                     className="ib-react-kedit"
@@ -670,11 +578,9 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
         onClose={(how) => {
           setNaming(null);
           setFresh(null);
-          // Enter: the tray is back in the same moment, its row where the field's row was (no gap, nothing fades in).
           if (how === 'enter') reopenNow(true);
           else handOff.current = false;
         }}
-        // The row under the field is the tray: an emoji reacts at once (the name typed is already kept), + and … go on.
         onReact={(what, from) => {
           setNaming(null);
           setFresh(null);
@@ -707,15 +613,12 @@ export function ReactionTray({ messageId, agent, on, current, phone, onAck, open
   );
 }
 
-/** What a press in the name field's row does: 👍, a saved emoji (its index), a free +, or …. */
 type RowPress = 'looks-good' | number | 'add' | 'any';
 
-/** The tray's row as it is now, drawn under a field (not a menu: nothing in it is picked). */
 function TrayRow({ highlight, fresh, onPick, onPress }: { highlight: number | null; fresh?: number | null; onPick?: (index: number) => void; onPress?: (what: RowPress, from: Element | null) => void }) {
   const saved = useSavedReactions();
   const free = freeSlots(saved.length);
   if (onPress) {
-    // Under the name field: the tray itself, each cell a button (the same names as the tray's own cells).
     const cell = (what: RowPress, label: string, fresh: boolean, child: ReactNode, key: string) => (
       <button
         key={key}
@@ -797,16 +700,8 @@ function TrayRow({ highlight, fresh, onPick, onPress }: { highlight: number | nu
   );
 }
 
-/**
- * Right after a save: a light name field over the tray (optional). The row under it is the tray as it now is,
- * the new emoji springing in, and it works: a press there reacts at once (or goes on to + or …), keeping what was
- * typed, so the new emoji is usable without naming it or opening the tray again. Enter keeps the name (or none)
- * and brings the tray back; a click or tap away keeps what was typed; only Escape skips it. A phone waits for a
- * tap on the field (no keyboard popping up for an optional name). Closing, it keeps its words and row while it fades.
- */
 function NameField({ container, index, fresh, anchor, phone, onClose, onReact }: { container: HTMLElement | null; index: number | null; fresh: number | null; anchor: RefObject<HTMLButtonElement | null>; phone: boolean; onClose: (how: 'enter' | 'escape' | 'dismiss') => void; onReact: (what: RowPress, from: Element | null) => void }) {
   const saved = useSavedReactions();
-  // The last emoji it named: drawn while the field fades out, so it never empties before it goes.
   const last = useRef<number | null>(null);
   if (index !== null) last.current = index;
   const shown = index ?? last.current;
@@ -820,7 +715,6 @@ function NameField({ container, index, fresh, anchor, phone, onClose, onReact }:
   const close = (how: 'enter' | 'escape' | 'dismiss') => {
     if (index === null) return;
     closing.current = how;
-    // Enter keeps the name (or takes it away); a click away keeps only words typed; Escape keeps nothing.
     if (how === 'enter' || (how === 'dismiss' && text.trim())) nameSavedReaction(index, text);
     onClose(how);
   };
@@ -861,7 +755,6 @@ function NameField({ container, index, fresh, anchor, phone, onClose, onReact }:
                   fresh={fresh}
                   onPress={(what, from) => {
                     if (index === null) return;
-                    // The name typed so far goes with it; nothing typed leaves it unnamed.
                     if (text.trim()) nameSavedReaction(index, text);
                     closing.current = 'dismiss';
                     onReact(what, from);
@@ -876,11 +769,6 @@ function NameField({ container, index, fresh, anchor, phone, onClose, onReact }:
   );
 }
 
-/**
- * A saved emoji's editor (a right-click or a hold on it, or the keyboard's pen): its name, another emoji, or
- * Remove. Enter or Done keeps the name; Escape closes it as it was. The row under it switches which one is
- * edited.
- */
 function SavedEditor({
   container,
   index,
@@ -902,7 +790,6 @@ function SavedEditor({
   const r = index === null ? null : saved[index];
   const [text, setText] = useState('');
   const nameRef = useRef<HTMLInputElement>(null);
-  // How it closed decides where focus goes: with keys back to the 👍; with the pointer, nowhere.
   const byKeys = useRef(false);
   useEffect(() => setText(r?.label ?? ''), [index, r?.emoji]); // eslint-disable-line react-hooks/exhaustive-deps -- a fresh field per saved emoji
   const keep = () => {

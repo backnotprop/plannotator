@@ -1,7 +1,3 @@
-/**
- * One row of a phone's bottom sheet (BottomSheet.tsx): an agent's mark (or an icon), a title, a quiet line under it,
- * and what is at its end (a check, a circle to add it). 56 px tall; the chosen row wears a fill, never a border.
- */
 import type { ReactNode } from 'react';
 import { HostMark } from '../icons';
 
@@ -22,19 +18,14 @@ export function SheetRow({
   attrs,
 }: {
   id?: string;
-  /** The agent whose mark leads the row. */
   host?: string | null;
-  /** Its session: the mark shows the face chosen for it. */
   agent?: string | null;
-  /** In the mark's place, for a row that is not an agent. */
   lead?: ReactNode;
   title: string;
   detail?: string | null;
   end?: ReactNode;
   selected?: boolean;
-  /** The row the arrow keys are on. */
   highlighted?: boolean;
-  /** A quieter row ("Tag another agent"). */
   quiet?: boolean;
   disabled?: boolean;
   onClick?: () => void;
@@ -73,5 +64,4 @@ export function SheetRow({
   );
 }
 
-/** The hairline between a sheet's groups. */
 export const SheetLine = () => <div className="ib-sheet-line" aria-hidden="true" />;

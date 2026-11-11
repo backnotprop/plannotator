@@ -3,13 +3,6 @@ import type { AskKind, TabSlept } from '../notify';
 import { addressOf, browserName } from '../notifyStatus';
 import { Icon } from '../icons';
 
-/**
- * One line above the list: the icon, the words, the actions. The line is a
- * size container (inbox.css): beside an open thread the list is a 380 px
- * column, so the actions go on their own row under the words, lined up with
- * them, instead of squeezing the words into a narrow column between the icon
- * and the buttons. Only a wide line puts them side by side.
- */
 function AskShell({
   className,
   icon,
@@ -36,16 +29,6 @@ function AskShell({
   );
 }
 
-/**
- * The line at the top of the list (record 6.1), in words that say why. It
- * stays on every load until it is resolved (askKind in notify.ts):
- * - `ask`: Turn on raises the browser's own prompt.
- * - `moved`: notifications were allowed at another address of this computer
- *   (the Inbox changed port, or was opened at 127.0.0.1), and this address has
- *   none. Drawn prominently: notifications are silently off until Allow.
- * - `blocked`: the browser blocked this address; a quiet line pointing at
- *   Settings, where the steps are.
- */
 export function NotificationAsk({
   kind,
   onTurnOn,
@@ -58,13 +41,9 @@ export function NotificationAsk({
   kind: AskKind;
   onTurnOn: () => void;
   onNotNow: () => void;
-  /** Settings → General, where the blocked steps are. */
   onSettings?: () => void;
-  /** The address notifications were allowed at (`moved`). */
   movedFrom?: string | null;
-  /** The question sound is on (sound.ts): a fresh install learns it here, not from a dialog. */
   soundOn?: boolean;
-  /** Drawn on the first-run screen, before any agent wrote: the words speak of the first question. */
   firstRun?: boolean;
 }) {
   const browser = browserName();
@@ -137,10 +116,6 @@ export function NotificationAsk({
   );
 }
 
-/**
- * The browser put this tab to sleep in the background, so it could not
- * notify (notify.ts `TabSlept`). Said once, with how to keep it awake.
- */
 export function TabSleptLine({ slept, onDismiss }: { slept: Exclude<TabSlept, null>; onDismiss: () => void }) {
   const chrome = browserName() === 'Chrome' || browserName() === 'Edge';
   return (

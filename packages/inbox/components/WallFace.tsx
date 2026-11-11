@@ -1,21 +1,3 @@
-/**
- * A picture of one artifact on the Artifacts wall (ArtifactsWall.tsx; the owner's round 2: "the height needs to be
- * figured out where they're the same height", and documents should look like documents). Every face fills one 4:3
- * stage on a quiet backdrop; what it draws is fitted whole and centred, never cropped mid-content:
- *
- * - a picture or a video: the whole frame, contained;
- * - an HTML page: the page drawn small on a landscape sheet (a frame that runs no script);
- * - a diagram: drawn small on a landscape sheet;
- * - Markdown and text: a small rendered page (the title in heading type, a few lines of body);
- * - a PDF: a page card with its name and page count (the Inbox has no PDF renderer, and adds none);
- * - code: a few highlighted lines on the code background;
- * - CSV: a small table;
- * - a guided review: its own face on a sheet;
- * - any other file: a file card with its type.
- *
- * The name and the type sit under the stage, the same way for every kind (`wallTypeLabel`, wallFaceText.ts).
- */
-
 import { useEffect, useState } from 'react';
 import { getFiletypeFromFileName } from '@pierre/diffs';
 import { ensureHighlight, highlightToHtml } from '@plannotator/ui/utils/codeHighlight';
@@ -31,12 +13,9 @@ import { ArtifactDiagramFace } from './ArtifactDiagramFace';
 import { GuideFace, PageFrame, previewOf, typeMark, typedIcon } from './ArtifactsView';
 import type { GuideArtifact } from '../artifacts';
 
-/** Text previews are read up to this size; a larger file keeps its card. */
 const TEXT_MAX = 256 * 1024;
-/** A PDF's pages are counted from its bytes up to this size. */
 const PDF_COUNT_MAX = 4 * 1024 * 1024;
 
-/** The file's first lines, read once the tile is near (shared with the thread grid's cache). */
 function useText(attachment: InboxAttachmentState | null, near: boolean, wanted: boolean): { text: string; html: string | null } | null {
   const source = useInboxFileSource();
   const [preview, setPreview] = useState<{ text: string; html: string | null } | null>(null);
@@ -57,7 +36,6 @@ function useText(attachment: InboxAttachmentState | null, near: boolean, wanted:
 
 const pageCounts = new Map<string, Promise<number | null>>();
 
-/** The PDF's page count, read once the tile is near (PDFs up to 4 MB); null until then, or when it cannot be told. */
 export function usePdfPages(attachment: InboxAttachmentState | null, near: boolean): number | null {
   const source = useInboxFileSource();
   const [pages, setPages] = useState<number | null>(null);
@@ -178,7 +156,6 @@ function TableSheet({ text, tab }: { text: string; tab: boolean }) {
   );
 }
 
-/** The face of one Wall artifact, inside its 4:3 stage. */
 export function WallFace({ row, near, guide, pages }: { row: InboxArtifactRow; near: boolean; guide: GuideArtifact | null; pages: number | null }) {
   const source = useInboxFileSource();
   const attachment = row.attachment;
@@ -213,7 +190,6 @@ export function WallFace({ row, near, guide, pages }: { row: InboxArtifactRow; n
     );
   }
   if (kind === 'audio') {
-    // A recording: its note and type, and the play mark with its length (as a film's).
     return (
       <>
         <FileCard attachment={attachment} />

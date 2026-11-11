@@ -5,7 +5,6 @@ import { HostMark, Icon } from '../icons';
 import { accountsFailure, useAccounts, type AccountsView, type MachineAccounts } from '../useAccounts';
 import { FAILURE_TEXT, accountMeters, isHigh, isStale, rowName, shownPct, type Meter } from './Accounts';
 
-/** Usage shows where `cswap` is: the read says so once it answers, and `installed` (the settings' look at PATH) until then. */
 function hasUsage(view: AccountsView | null, installed: boolean): boolean {
   if (view === null || view.state === 'unreachable') return installed;
   return view.state === 'accounts' || view.state === 'failed';
@@ -13,14 +12,12 @@ function hasUsage(view: AccountsView | null, installed: boolean): boolean {
 
 const loginExpired = (account: InboxAccount) => account.usageStatus === 'relogin_required';
 
-/** The highest limit at 90% or more, if this reading can still be trusted. */
 function nearLimit(account: InboxAccount | undefined): Meter | null {
   if (!account || isStale(account) || loginExpired(account)) return null;
   const high = accountMeters(account).filter((meter) => isHigh(meter.window));
   return high.reduce<Meter | null>((top, meter) => (top && shownPct(top.window) >= shownPct(meter.window) ? top : meter), null);
 }
 
-/** Other machines stay out of the peek until the account one is using nears a limit. One that does not answer has nothing to say. */
 function nearMachines(machines: MachineAccounts[]) {
   return machines.flatMap(({ id, name, read }) => {
     const meter = read?.state === 'accounts' ? nearLimit(read.accounts.find((account) => account.active)) : null;
@@ -28,7 +25,6 @@ function nearMachines(machines: MachineAccounts[]) {
   });
 }
 
-/** The sidebar's row: plain, until the account in use nears a limit. No `cswap`, no row. */
 export function UsageRow({ installed, open, onOpen }: { installed: boolean; open: boolean; onOpen: (row: HTMLElement) => void }) {
   const { view } = useAccounts();
   if (!hasUsage(view, installed)) return null;
@@ -72,14 +68,12 @@ function UsageLine({ meter, muted }: { meter: Meter; muted: boolean }) {
   );
 }
 
-/** What the block says beside the name, when it has no limits to draw or they cannot be trusted. */
 function sideNote(account: InboxAccount, meters: Meter[]): string | null {
   if (loginExpired(account)) return 'Login expired';
   if (account.usageStatus === 'api_key') return 'API key';
   return meters.length === 0 ? 'No reading yet' : null;
 }
 
-/** The peek's one block. All of it opens Settings → Accounts: that is where anything gets done. */
 function UsageBlock({ name, note, meters, muted, onOpen }: { name: string; note?: string | null; meters?: Meter[]; muted?: boolean; onOpen: () => void }) {
   const lines = meters ?? [];
   return (
@@ -101,7 +95,6 @@ function UsageBlock({ name, note, meters, muted, onOpen }: { name: string; note?
   );
 }
 
-/** Another machine at 90% or more: its name and that limit. It opens the same place. */
 function NearMachine({ name, meter, onOpen }: { name: string; meter: Meter; onOpen: () => void }) {
   const figure = `${meter.label} ${shownPct(meter.window)}`;
   return (
@@ -139,11 +132,6 @@ function ThisMachine({ onOpen }: { onOpen: () => void }) {
   );
 }
 
-/**
- * The Usage row's peek (approval "accounts-page"): read-only, the account in
- * use and its limits, then any other machine at 90% or more. On a phone the
- * same content is the Inbox's bottom sheet. `anchor` is the row; null is closed.
- */
 export function UsagePeek({ anchor, phone, onClose, onSettings }: { anchor: HTMLElement | null; phone: boolean; onClose: () => void; onSettings: () => void }) {
   const { view, machines } = useAccounts();
   const near = nearMachines(machines);
@@ -151,10 +139,8 @@ export function UsagePeek({ anchor, phone, onClose, onSettings }: { anchor: HTML
   // Where the row was as it opened: the peek stays put when the row goes (the hover sidebar slides away).
   const placedAt = useMemo(() => anchor?.getBoundingClientRect() ?? null, [anchor]);
   const grown = `${view === null} ${near.length}`;
-  // A new reference places it again at its new size, and an answer that grows it changes nothing else: its focus stays.
   const place = useMemo(() => (placedAt ? { getBoundingClientRect: () => placedAt } : undefined), [placedAt, grown]);
   const open = anchor !== null && hasUsage(view, true);
-  // The read took `cswap` away while it was open, and the row with it.
   useEffect(() => {
     if (anchor !== null && !open) onClose();
   }, [anchor, open, onClose]);
@@ -171,7 +157,6 @@ export function UsagePeek({ anchor, phone, onClose, onSettings }: { anchor: HTML
     >
       <Popover.Portal container={document.querySelector<HTMLElement>('.pn-inbox') ?? undefined}>
         {phone && <Popover.Backdrop className="ib-pm-scrim" />}
-        {/* Stays put when the row goes: the hover sidebar slides away, and a phone's closes. */}
         <Popover.Positioner className="ib-tidy-pos" anchor={place} side="right" align="end" sideOffset={14} disableAnchorTracking data-phone={phone ? '' : undefined}>
           <Popover.Popup
             className="ib-tidy ib-usage"
@@ -183,7 +168,6 @@ export function UsagePeek({ anchor, phone, onClose, onSettings }: { anchor: HTML
               if (phone || event.key !== 'Tab') return;
               const popup = event.currentTarget;
               const blocks = popup.querySelectorAll('button');
-              // The popup itself holds focus after a click on its padding: it is the first stop going back.
               const leaving = event.shiftKey ? event.target === popup || event.target === blocks[0] : event.target === blocks[blocks.length - 1];
               if (!leaving) return;
               event.preventDefault();

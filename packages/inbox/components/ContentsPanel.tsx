@@ -6,27 +6,17 @@ import { Icon } from '../icons';
 import { peekSheetHost } from './AttachmentStepper';
 import { Tip } from './Tip';
 
-/**
- * The Contents button over an open document, when ui's contents rail is not on screen (contents.ts):
- * - `show`: the rail fits but was hidden; the button shows it again;
- * - `sheet`: the rail does not fit (a gutter under 68 px, a pane under 480 px), has not measured yet, or the
- *   window is a phone; the button opens the rail's headings (ui's DocumentContents) as a sheet over the window.
- */
 export type ContentsButtonMode = 'show' | 'sheet';
 
 interface Props {
   mode: ContentsButtonMode;
   blocks: Block[];
   annotations: Annotation[];
-  /** The document's scroll element (`.ib-docscroll`). */
   scrollViewport: HTMLElement | null;
-  /** `show`: put the rail back. */
   onShow: () => void;
-  /** The window is phone-sized: the sheet's rows are 44 px touch targets in readable type. */
   phone?: boolean;
 }
 
-/** The way to an open document's Contents when the rail is not on screen. */
 export function ContentsPanel(props: Props) {
   if (props.mode === 'sheet') return <ContentsSheet {...props} />;
   return (
@@ -38,7 +28,6 @@ export function ContentsPanel(props: Props) {
   );
 }
 
-/** The open rail panel's Hide (ui's `panelAction`): the rail goes, a Contents button over the file brings it back. */
 export function ContentsHide({ onHide }: { onHide: () => void }) {
   return (
     <Tip content="Hide contents">
@@ -49,14 +38,8 @@ export function ContentsHide({ onHide }: { onHide: () => void }) {
   );
 }
 
-/** What can take focus inside the sheet, in order: Tab wraps among these while it is open. */
 const SHEET_FOCUSABLE = 'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
 
-/**
- * A button over the file opens the list as a sheet over the window; a pick scrolls there and closes it.
- * The sheet is modal while open: Tab wraps inside it, and Escape closes it first wherever focus is (before
- * full screen's Escape ladder sees the key). Focus goes back to the Contents button.
- */
 function ContentsSheet(props: Props) {
   const [open, setOpen] = useState(false);
   const openRef = useRef<HTMLButtonElement>(null);
@@ -70,7 +53,7 @@ function ContentsSheet(props: Props) {
   }, [open]);
   useEffect(() => {
     if (!open) return;
-    // The window's capture phase runs before the pane's ladder and the shortcut scopes (AnnotationsChip's way).
+    // Capture phase: runs before the pane's Escape ladder and the shortcut scopes.
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         if (event.defaultPrevented) return;
