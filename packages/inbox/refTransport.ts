@@ -1,10 +1,4 @@
-/**
- * The Inbox's transport for issue, PR and MR hover cards and the Links side's
- * states (`/api/inbox/ref`). A window the route refuses (a phone through the
- * device door, where the route is not on the allowlist) asks once, not once a
- * row: until the route has answered, one request runs at a time, and the first
- * refusal (401, 403, 404) stops every ask for the life of the page.
- */
+/** A refusal (401, 403, 404) stops every ask for the life of the page. */
 
 import type { RefCardTransport } from '@plannotator/ui/utils/refCard';
 import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';

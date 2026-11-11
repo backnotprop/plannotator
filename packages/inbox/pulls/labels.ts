@@ -12,11 +12,7 @@ export function hostName(host: string): string {
   return host === 'github.com' ? 'GitHub' : host === 'gitlab.com' ? 'GitLab' : host;
 }
 
-/**
- * A person's initials, drawn while their picture loads or when it cannot: two words give two letters ("mara-lee" →
- * "ML"), one gives one ("priya" → "P"); never a pair that reads as "pull request" or "merge request" on this page
- * ("PR", "MR"): the first letter alone then.
- */
+/** Never a pair that reads as "PR" or "MR": the first letter alone then. */
 export function initials(login: string): string {
   const parts = login.split(/[-_. ]+/).filter(Boolean);
   const two = ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase();

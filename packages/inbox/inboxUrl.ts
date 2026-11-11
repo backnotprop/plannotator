@@ -1,10 +1,6 @@
 let selfMachine: string | null = null;
 const owners = new Map<string, string>();
-/**
- * Ids this Inbox's own answers named (its list rows, archived rows, pins, thread reads, its own events). They are
- * local for good: no linked machine's row, answer or frame can claim one. The server refuses to forward a route to
- * an id its store holds as well (`id_is_local`), whatever this map says.
- */
+/** Ids this Inbox's own answers named are local for good: no linked machine's answer can claim one. */
 const local = new Set<string>();
 const contested = new Set<string>();
 

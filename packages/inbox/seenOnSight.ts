@@ -84,11 +84,7 @@ function dialogOpen(): boolean {
   return typeof document !== 'undefined' && document.querySelector('dialog[open]') !== null;
 }
 
-/**
- * How far the article is drawn from where it sits: the entrance animation of
- * an arrival (`data-arrived`, a 6 px rise) moves it while it runs, and where
- * it sits is what counts.
- */
+/** Measured from where the article sits: the arrival animation (`data-arrived`, a 6 px rise) moves it while it runs. */
 function entranceShift(article: HTMLElement): number {
   if (!article.hasAttribute('data-arrived') || typeof window === 'undefined' || typeof window.getComputedStyle !== 'function') return 0;
   const transform = window.getComputedStyle(article).transform;

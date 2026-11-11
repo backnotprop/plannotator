@@ -571,13 +571,7 @@ export function dragHasFiles(event: ReactDragEvent): boolean {
   return [...event.dataTransfer.types].includes('Files');
 }
 
-/**
- * A drag that started on the page itself (an image in a message dragged a
- * little): `dragstart` fires only for those, never for files from the system,
- * and `dragend` ends it. Some browsers give such a drag a `Files` type, so the
- * drop targets below ignore it. One pair of document listeners for every
- * target on the page.
- */
+/** `dragstart` fires only for drags that start on the page, never for system files. Some browsers give such a drag a `Files` type, so the drop targets ignore it. */
 let pageDrag = false;
 let pageDragWatchers = 0;
 const onPageDragStart = () => {

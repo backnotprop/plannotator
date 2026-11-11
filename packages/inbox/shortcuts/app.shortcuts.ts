@@ -1,12 +1,7 @@
 import { defineShortcutScope, type ShortcutDefinition } from '@plannotator/ui/shortcuts';
 import { INBOX_SHORTCUT_EXTRAS, type InboxShortcutExtras } from './extras';
 
-/**
- * The window's own keys (App.tsx): the shortcut map, the sidebar, leaving a
- * focused page, and (an extra) going to the Inbox, the Board or Settings.
- * `?` is matched by its character (`event.key`), so it is Shift+/ on a US
- * keyboard and Shift+, on a French one.
- */
+/** `?` is matched by its character (`event.key`): Shift+/ on a US keyboard, Shift+, on a French one. */
 export type InboxAppAction = 'openMap' | 'goInbox' | 'goBoard' | 'goPulls' | 'goDrafts' | 'goSettings' | 'compose' | 'refresh' | 'toggleSidebar' | 'leavePage';
 
 export function buildInboxAppShortcuts(extras: InboxShortcutExtras = INBOX_SHORTCUT_EXTRAS) {

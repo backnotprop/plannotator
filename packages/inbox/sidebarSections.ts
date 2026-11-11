@@ -1,11 +1,4 @@
-/**
- * Pinned and Projects open and close like folders (owner's pick, direction C
- * "The section is the folder", 2026-10-29). Which ones are closed is this
- * browser's own choice, kept like the sidebar's open state and width: a
- * cookie through `storage`, so it survives a restart on another port and a
- * phone and the Mac decide separately. No cookie: both open. Not a server
- * setting, never synced.
- */
+/** Which sections are closed is this browser's own choice, kept in a cookie like the sidebar's open state: never a server setting, never synced. */
 import { useState, useSyncExternalStore } from 'react';
 import { storage } from '@plannotator/ui/utils/storage';
 

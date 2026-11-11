@@ -1,22 +1,6 @@
 /**
- * A thread, an attachment or a diff is drawn once its code and math can be
- * drawn finished (#2593).
- *
- * The window's scripts are code-split (build/pack-inbox.ts): Pierre's
- * highlighter, each Shiki grammar and KaTeX are chunks the Inbox serves on
- * first use. Inlined, they were there before the first thread opened, so a
- * fence painted highlighted and math painted typeset at once. Split, ui's
- * CodeBlock and math components would paint plain code or TeX source first and
- * swap the finished markup in when the chunk lands, and Pierre's file and diff
- * views would paint their lines plain first. So a read waits for what it needs,
- * then draws: no plain frame, as before. Something with no code or math is not
- * held up, and a language or KaTeX already loaded costs nothing.
- *
- * A chunk that fails is asked for again on the next open (the Inbox may be
- * back), unless the Inbox answers 404 for it: the tab is older than the
- * Inbox's build, and only Reload brings it. A chunk that stalls holds a read at most DRAW_READY_CAP_MS once: later
- * opens draw at once while it is still on its way, and ui swaps the finished
- * markup in when it lands.
+ * Pierre's highlighter, each Shiki grammar and KaTeX are chunks served on first use; a read waits for what it needs so no plain frame paints first.
+ * A chunk that fails is asked for again on the next open, unless the Inbox answers 404 (the tab is older than the Inbox's build: only Reload helps). A chunk that stalls holds a read at most DRAW_READY_CAP_MS.
  */
 
 import type { InboxThread } from '@plannotator/core/inbox-types';
@@ -30,11 +14,7 @@ import { getMathRenderer, loadMathRenderer } from '@plannotator/ui/utils/math';
 import { isGraphvizLanguage, isMermaidLanguage } from '@plannotator/ui/components/diagramLanguages';
 import { DEFAULT_SYNTAX_THEME, resolveFenceTheme } from '@plannotator/ui/utils/syntaxTheme';
 
-/**
- * A safety cap, never reached in use (a grammar arrives in a few ms over loopback, ~100 ms over a tailnet):
- * a chunk that never answers must not keep a thread closed. Past it the thread draws, and ui swaps the
- * finished markup in when the chunk lands.
- */
+/** A safety cap, never reached in use: a chunk that never answers must not keep a thread closed. */
 export const DRAW_READY_CAP_MS = 4000;
 let capMs = DRAW_READY_CAP_MS;
 export function __setDrawReadyCapForTests(ms: number | undefined): void {

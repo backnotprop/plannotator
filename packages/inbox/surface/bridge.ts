@@ -1,16 +1,4 @@
-/**
- * The surface's end of the bridge (adr/implementation/inbox-mobile.md,
- * section 5; the shapes are `@plannotator/core/inbox-types`'s Surface*).
- *
- * In: the shell calls `window.plannotatorSurface.receive(message)`. Out, on
- * iOS: `window.webkit.messageHandlers.plannotatorSurface.postMessage(message)`;
- * on Android, where `window.webkit` is absent:
- * `window.plannotatorShell.postMessage(JSON.stringify(message))` (section 10;
- * the web message listener takes strings). Nothing else reaches the shell: an agent's HTML runs in HtmlViewer's
- * sandboxed srcdoc frame (an opaque origin), so it can neither call
- * `receive` on this window nor be relayed here, and the shell takes messages
- * from the main frame only.
- */
+/** An agent's HTML runs in HtmlViewer's sandboxed srcdoc frame (opaque origin), so it can neither call `receive` nor be relayed here; the shell takes messages from the main frame only. */
 
 import { INBOX_SURFACE_BRIDGE_VERSION, readSurfaceShellMessage, type SurfaceMessage, type SurfaceShellMessage } from '@plannotator/core/inbox-types';
 

@@ -13,12 +13,7 @@ export function copyAuthor(message: InboxMessageWire): string {
   return message.author.kind === 'agent' ? agentName(message.author) : 'You';
 }
 
-/**
- * "Oct 28, 2026, 7:34 PM" in the computer's own time. The day and the time
- * are formatted apart and joined here: ICU versions join them differently
- * ("…, 2026, 7:34 PM" or "… 2026 at 7:34 PM"). Plain spaces: ICU's narrow
- * one before PM pastes oddly.
- */
+/** Day and time are formatted apart: ICU versions join them differently. Plain spaces: ICU's narrow one before PM pastes oddly. */
 export function copyTime(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return '';
@@ -78,11 +73,7 @@ function actionLines(number: number, parsed: ReturnType<typeof parseInboxActionB
 
 const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim();
 
-/**
- * Text as one Markdown code span, CommonMark's way: a backslash does not
- * escape inside one, so the fence is a run of backticks longer than any run
- * in the text, padded with a space when the text starts or ends with one.
- */
+/** The fence is a backtick run longer than any in the text: a backslash does not escape in a CommonMark code span. */
 export function codeSpan(text: string): string {
   const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
   const fence = '`'.repeat(longest + 1);
@@ -167,13 +158,7 @@ export function markdownClipboardHtml(markdown: string): string {
   }
 }
 
-/**
- * Put Markdown on the clipboard: the text as plain text, drawn as rich text
- * beside it. A promise (the row menu reads the thread first) goes to the
- * clipboard as one item with promised parts, so the write starts inside the
- * click, as Safari requires. False when nothing was copied (the read failed,
- * or the clipboard refused).
- */
+/** A promise goes to the clipboard as one item with promised parts, so the write starts inside the click, as Safari requires. */
 export async function copyMarkdown(markdown: string | Promise<string>): Promise<boolean> {
   if (typeof markdown === 'string') return (await copyRichTextToClipboard(markdownClipboardHtml(markdown), markdown)) !== false;
   if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {

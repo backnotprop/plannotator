@@ -1,14 +1,4 @@
-/**
- * Our faces in the agent marks' picker and click cycle (approval "inbox-agent-icon-motion"): the Glass colours are
- * vectors (glassArt.ts, Black and Yellow redrawing the tab icon's Glass and Yellow), Face is the tab icon dialog's
- * picture (tabIconArt.ts), and Transparent is the yellow glass set's goggles with no tile: on light the ink-frame mark
- * (mark/mark-clean-transparent.svg), on dark the yellow-frame pixel mark (pixel/fav-48-transparent.svg), each framed
- * to the goggles (only the viewBox changed). Both Transparent builds are drawn and the theme shows one (inbox
- * agents.css), so a switch of light and dark needs no redraw.
- *
- * In its own script: the Inbox window splits at every dynamic import, so these bytes load on the first click or the
- * first look at the picker.
- */
+/** Both Transparent builds are drawn and the theme shows one, so a light/dark switch needs no redraw. Its own script: the window splits at every dynamic import, so these bytes load on first use. */
 import { TAB_ICON_ART } from '../tabIconArt';
 import transparentLight from '../assets/agent-marks/transparent-light.svg';
 import transparentDark from '../assets/agent-marks/transparent-dark.svg';

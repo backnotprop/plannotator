@@ -1,14 +1,4 @@
-/**
- * The Inbox on a phone (reached over the tailnet with `plannotator inbox
- * --tailscale`): one screen at a time, list, then thread, then file, like a
- * mail app. A phone is a narrow window, or a short touch screen under 1024 px
- * wide (a phone in
- * landscape is wider than the narrow break but only about 400 px tall; a short
- * iPad or Stage Manager window, wider than that, keeps the two panes).
- *
- * The same query is spelled out in inbox.css (a media query cannot read a
- * constant): keep the two equal.
- */
+/** A phone is a narrow window, or a short touch screen under 1024 px wide. The same query is spelled out in inbox.css: keep the two equal. */
 
 import { useSyncExternalStore } from 'react';
 
@@ -66,24 +56,8 @@ export function usePhone(): boolean {
 }
 
 /**
- * What the window does for one reading of the visual viewport: the height to
- * shrink to while the keyboard covers the bottom (null: the full window), and
- * whether to undo iOS's pan to the focused field. Pinch-zoom also shrinks the
- * visual viewport, by its scale: a zoomed page is the person reading closer,
- * never a keyboard, so it is left alone (no shrink, and no scroll back that
- * would yank the zoomed view to the corner).
- *
- * `layoutHeight` is the window's full height without the keyboard:
- * `document.documentElement.clientHeight`, never `window.innerHeight`. On iOS
- * 26 Safari, once it has panned the page to the field, `innerHeight` reads the
- * visual viewport's height (the owner's probe: 257 with the keyboard up, while
- * clientHeight stayed 660), so a keyboard measured against it read as none:
- * the window went back to its full height and the whole page panned under the
- * keyboard.
- *
- * A browser that resizes the layout for the keyboard covers nothing, so a phone
- * window shorter than `FOLD_BELOW` counts too: New message's head, Thread and
- * foot would leave its words no room (and at 200 px push Send off the screen).
+ * `layoutHeight` is `document.documentElement.clientHeight`, never `window.innerHeight`: on iOS 26 Safari, once it has panned the page to the field, `innerHeight` reads the visual viewport's height, so a keyboard measured against it read as none.
+ * Pinch-zoom also shrinks the visual viewport: a zoomed page is left alone.
  */
 export function keyboardLayout(
   vv: { height: number; offsetTop: number; scale: number },
@@ -156,28 +130,8 @@ function pagePanGuard(): { on: () => void; off: () => void } {
 }
 
 /**
- * Keeps `--ib-vvh` on the document element equal to the visual viewport's
- * height while a phone's keyboard is up (`data-ib-keyboard`), so the window
- * shrinks to the part the keyboard leaves and the reply box sits on top of the
- * keyboard, and undoes a pan of the page. `--ib-kbd-inset` is what the keyboard
- * covers (`keyboardInset`), for New message's sheet.
- *
- * On iOS (`isIOSWebKit`) it also pins the page, since Safari pans the whole
- * page under the keyboard: `data-ib-keyboard-pin` on the root makes html no
- * taller than the visible part and lets the reply foot shrink and scroll with
- * Send kept at its bottom (inbox.css); `tight` (under 400 px left: an iPhone in
- * portrait leaves ~257, on its side ~140) also closes the thread's padding and
- * caps the reply's words. A drag on something that does not scroll is refused.
- * Android keeps what it had: Chrome resizes only the visual viewport and pans
- * nothing it is not asked to.
- *
- * The state is read again on every visual viewport change, the window's
- * resize and scroll, a rotation, a return to the tab, and a field taking or
- * losing focus, so a keyboard that closed while the tab was away never leaves
- * the page pinned. Each of those is read once more `RECHECK_MS` later: WebKit
- * can report `clientHeight` after the event (after a rotation, say), and a
- * stale height read as a keyboard would leave the page clipped and the reply
- * foot hidden with no keyboard open. Returns the cleanup.
+ * Each read is repeated `RECHECK_MS` later: WebKit can report `clientHeight` after the event (after a rotation), and a stale height read as a keyboard would leave the page clipped.
+ * On iOS the page is pinned, since Safari pans the whole page under the keyboard.
  */
 const RECHECK_MS = 300;
 

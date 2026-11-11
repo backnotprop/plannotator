@@ -1,8 +1,4 @@
-/**
- * Page marks replace `:has()` rules anchored on `html`, `body` or `.pn-inbox`: Chromium re-checks those on every DOM change under them (about 40 ms per change on a long thread).
- * inbox.css keeps the `:has()` rules for other apps; the build rewrites them to the marks (build/inbox-page-marks.ts).
- * A ref callback holds each mark in the same commit as its element, before paint.
- */
+/** Page marks replace `:has()` rules anchored on `html`, `body` or `.pn-inbox`: Chromium re-checks those on every DOM change (about 40 ms per change on a long thread). */
 import { holdPageMark, holdPageMarkAbove } from '@plannotator/ui/utils/pageMarks';
 
 export function markInboxPage(el: HTMLElement | null): (() => void) | undefined {

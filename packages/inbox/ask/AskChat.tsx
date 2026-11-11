@@ -102,12 +102,7 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, s
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusRequest, canFocus]);
 
-  /**
-   * A note's button goes away when the turn moves on, and focus would fall to
-   * the page, where the Inbox's keys take it for the thread's: Mod+Enter would
-   * send the reply draft. On a touch phone the transcript takes it, so the
-   * keyboard stays down. Send and Stop need none of this: they are one button.
-   */
+  /** A note's button goes away when the turn moves on and focus would fall to the page, where Mod+Enter would send the reply draft. On a touch phone the transcript takes it, so the keyboard stays down. */
   const keepFocusHere = () => {
     if (document.activeElement === composerRef.current) return;
     (isTouchPhone() ? paneRef.current : composerRef.current)?.focus({ preventScroll: true });

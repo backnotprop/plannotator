@@ -23,11 +23,6 @@ function newId(): string {
   return typeof crypto.randomUUID === 'function' ? `ann-vid-${crypto.randomUUID()}` : `ann-vid-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-/**
- * The frame a `<video>` shows now, as a JPEG at its own size, or null (no
- * frame decoded yet, no canvas, or a frame the browser will not hand over).
- * The film comes from the Inbox's own origin, so the canvas is never tainted.
- */
 export function captureVideoFrame(video: HTMLVideoElement | null, quality = 0.85): Promise<Blob | null> {
   if (!video || !video.videoWidth || !video.videoHeight) return Promise.resolve(null);
   try {

@@ -1,9 +1,4 @@
-/**
- * ↑ ↓ Home End in the list (approval "inbox-keyboard-shortcuts"): focus moves
- * between the list's stops (each row, and each group's header) and never
- * opens a thread; Enter does. Tab order is unchanged (no roving tabindex: the
- * rows keep their own actions, design "Tab stays").
- */
+/** Moves focus between the list's stops and never opens a thread; Enter does. Tab order is unchanged (no roving tabindex). */
 export type ListMove = 'next' | 'previous' | 'first' | 'last';
 
 export function listMoveIndex(count: number, index: number, move: ListMove): number | null {

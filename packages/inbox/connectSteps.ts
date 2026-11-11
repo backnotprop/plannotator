@@ -11,18 +11,6 @@ export function isPluginHost(id: string): id is PluginHost {
 
 export const PLUGIN_WORD: Readonly<Record<PluginHost, 'plugin' | 'extension'>> = { 'claude-code': 'plugin', pi: 'extension', opencode: 'plugin' };
 
-/**
- * How one agent stands:
- *  - ready: Plannotator's plugin is installed and its Inbox tool is on.
- *  - tool-off: the plugin is installed, its Inbox tool is off (`locked` when PLANNOTATOR_INBOX_TOOL decides,
- *    `chosenOff` when config.json turns it off by name: both are left alone, never offered as a step).
- *  - mcp-only: a plugin host without the plugin, connected through MCP (replies don't wake it).
- *  - missing: a plugin host without the plugin, not connected.
- *  - mcp: another agent, connected through MCP.
- *  - connect: another agent the window can connect in one click (its `mcp add`, or one JSON key).
- *  - manual: another agent only a person can connect (`reason` says why).
- *  - absent: a plugin host not on this computer.
- */
 export type ConnectState = 'ready' | 'tool-off' | 'mcp-only' | 'missing' | 'mcp' | 'connect' | 'manual' | 'absent';
 
 export interface ConnectRow {

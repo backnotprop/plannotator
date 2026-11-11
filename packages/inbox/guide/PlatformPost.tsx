@@ -1,14 +1,6 @@
 /**
- * Post to GitHub/GitLab from the Inbox (the owner's answer C on #2590: the person chooses at the end where a review
- * goes). This is the review app's PR-mode posting, reused whole: `buildReviewSubmission` (inline comments, file-level
- * comments on GitHub, the review body's file-scoped and "Comments outside the diff" sections), `buildPlatformReviewBody`,
- * `submitPlatformReviewTargets` (retry-safe target states, the partial result and its narrowed retry) and
- * `ReviewSubmissionDialog` (the same dialog, its Comment / Request changes choice,
- * the partial and blocked notices). Only the request goes elsewhere: to the Inbox's `POST /api/inbox/pulls/review`.
- *
- * Reached as `#platform-post` (package.json `imports`). It imports review-editor, which does not compile under the
- * window's strict settings, so it is checked with the guide reader (tsconfig.guide.json) and the window reads its
- * shape from platform-post-module.d.ts.
+ * Reuses the review app's PR-mode posting; only the request goes to the Inbox's `POST /api/inbox/pulls/review`.
+ * It imports review-editor, which does not compile under the window's strict settings, so it is checked with the guide reader (tsconfig.guide.json).
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CodeAnnotation } from '@plannotator/ui/types';

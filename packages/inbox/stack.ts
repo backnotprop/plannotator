@@ -23,14 +23,7 @@ function same(a: Stack, b: Stack): boolean {
   return a.thread === b.thread && a.file === b.file;
 }
 
-/**
- * The room the list and its pane will share once the docked sidebar has
- * settled: the window less the sidebar's width when it is opening or open
- * (shell/sidebar.tsx: `.ib-sb[data-state]` is the target, `.ib-sb-inner`
- * holds the accepted width). Read from the target, not from `.ib-main` as it
- * animates, so closing a file (which reopens the sidebar) stacks at once
- * instead of drawing the thread squeezed beside the list for the spring.
- */
+/** Read from the sidebar's target (`.ib-sb[data-state]`), not from `.ib-main` as it animates, so closing a file stacks at once instead of drawing the thread squeezed for the spring. */
 function mainWidthOf(root: HTMLElement): number {
   const sidebar = root.querySelector<HTMLElement>('.ib-sb');
   const open = sidebar?.dataset.state === 'expanded';

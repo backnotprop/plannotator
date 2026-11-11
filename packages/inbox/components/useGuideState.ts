@@ -16,11 +16,7 @@ export function useGuideState(thread: InboxThread, message: InboxMessageWire) {
   const [scrollTarget, setScrollTarget] = useState<{ id: string; token: number } | null>(null);
   const archiveSeq = thread.archive_seq ?? null;
   const readOnly = thread.resolved_at !== null && !(archiveSeq !== null && (message.seq ?? 0) > archiveSeq);
-  /**
-   * Bumped by every local save or removal: a read of the thread's annotations
-   * that started before it answers with the store as it was, and must not put
-   * back a comment just removed or drop one just saved.
-   */
+  /** Bumped by every local save or removal: a read that started before it must not put back a removed comment or drop a saved one. */
   const localWrites = useRef(0);
 
   useEffect(() => {

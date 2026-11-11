@@ -38,12 +38,7 @@ export function encodeWav(chunks: readonly Float32Array[], rate: number): Blob {
   return new Blob([header, out.buffer], { type: 'audio/wav' });
 }
 
-/**
- * Is this voice? The floor is the quietest thing heard this clip, and it follows the room up slowly. A dip between
- * syllables resets it, so a clip that opens on speech still finds the floor. The gate sits 10 dB above it, inside
- * fixed limits: below -52 dB is never voice, above -30 dB always is. Digital zero is the stream starting up, not the
- * room, so it never pins the floor. The values come from synthetic clips, not a real room.
- */
+/** The gate sits 10 dB above the quietest thing heard this clip, inside fixed limits (below -52 dB never voice, above -30 dB always). Digital zero is the stream starting up, so it never pins the floor. Values come from synthetic clips, not a real room. */
 export function createVoiceGate(): (db: number) => { level: number; voice: boolean } {
   let floor: number | null = null;
   return (db) => {

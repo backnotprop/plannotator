@@ -17,11 +17,7 @@ interface Edges {
   bottom: number;
 }
 
-/**
- * The card's box after `corner` is dragged by (dx, dy) from `from`: that corner moves, the opposite one stays. Never
- * under `min`, never past `margin` inside the view. The width stays even, so the card's centre (what its transform
- * moves) lands on a whole pixel and the fixed edge does not shimmer.
- */
+/** The width stays even so the centre lands on a whole pixel and the fixed edge does not shimmer. */
 export function resizeBox(from: Edges, corner: Corner, dx: number, dy: number, min: Size, view: { width: number; height: number }, margin = DRAG_MARGIN): Edges {
   const next = { ...from };
   const hold = (value: number, low: number, high: number) => Math.max(low, Math.min(high, value));

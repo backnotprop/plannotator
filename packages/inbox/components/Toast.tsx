@@ -11,10 +11,7 @@ export type InboxToastIcon = 'check' | 'warn' | 'archive' | 'mute' | 'thumb' | '
 export interface InboxToastModel {
   id: number;
   icon: InboxToastIcon;
-  /**
-   * Kept but never drawn (a reaction from the 👍's tray, approval "inbox-reaction-tray": the emoji flying to the
-   * message is the confirmation, no toast): `Z` still undoes it and the live region still says it.
-   */
+  /** Kept but never drawn: `Z` still undoes it and the live region still says it. */
   hidden?: boolean;
   lead: string;
   phoneLead?: string;

@@ -1,19 +1,6 @@
 /**
- * A long thread draws its far messages' tooltips and menus as plain controls (#2948, heavy thread).
- *
- * Every open message carries about five tooltips and two menus (its ⋯ and the head line's right-click menu), plus
- * an "Open in…" menu per attached file. Each is a Base UI root of 50 to 200 hooks, mounted whether or not anyone
- * points at it: on a thread of 245 open messages they held about 100 of the window's 160 MB of JS heap. A message
- * is "armed" while it is near the view (within one view's height of it, `ARM_MARGIN`), and is reached by the pointer
- * or focus: then its tooltips and menus are the real ones. A message far from the view (past `DISARM_MARGIN`) is
- * disarmed again, unless focus or an open menu is inside it, so the cost stays with the few messages near the view
- * however far the person scrolls. Disarmed, every control is still drawn, the same element with the same text,
- * label and size (ui's `TooltipArmed`; CopyMenus.tsx and OpenIn.tsx draw their ⋯ plain): nothing a person or the
- * browser's find sees changes, and the thread reads the same.
- *
- * Arming mounts a new copy of a trigger. Focus that lands in a disarmed message (Tab past a very tall message) is
- * put back on the same control once it is armed. A browser with no IntersectionObserver arms everything, as before;
- * a message whose box meets the view's (with the margin) when it is first drawn is armed at once.
+ * A long thread draws far messages' tooltips and menus as plain controls: each is a Base UI root of 50 to 200 hooks, and 245 open messages held about 100 of 160 MB of heap. A message is armed while near the view (`ARM_MARGIN`) or reached, and disarmed past `DISARM_MARGIN` unless focus or an open menu is inside it.
+ * Arming mounts a new copy of a trigger: focus that landed in a disarmed message is put back on the same control once armed.
  */
 import { createContext, useContext, useLayoutEffect, useMemo, useSyncExternalStore, type ReactNode } from 'react';
 import { TooltipArmed } from '@plannotator/ui/components/Tooltip';

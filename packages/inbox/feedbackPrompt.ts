@@ -1,20 +1,4 @@
-/**
- * The Feedback dialog's "Prompt your agent to send feedback": the one place
- * its text lives. Pasted into any agent on this computer, it has the agent ask
- * the person for their feedback, show them the exact text and send it with
- * `plannotator feedback --stdin` only after they say yes. The text goes on
- * stdin in a quoted heredoc ending in FEEDBACK_HEREDOC_END (bash, zsh, sh), or
- * a single-quoted here-string with UTF-8 output (PowerShell), so no shell
- * expands `$VAR`, backticks or `$(…)` in it, and never in double quotes.
- * apps/hook/server/feedback-command.test.ts runs the bash form below, as
- * copied, through bash.
- *
- * The command always reads `plannotator feedback …`; when the settings name
- * this computer's installed binary (`mcp_command` is `<…/plannotator> inbox
- * mcp`), the prompt adds it as the fallback for an agent whose PATH lacks it.
- * A source run's `bun <script>` is never named: it is no command an installed
- * user has.
- */
+/** The text goes on stdin in a quoted heredoc (bash, zsh, sh) or a single-quoted here-string (PowerShell) so no shell expands it. apps/hook/server/feedback-command.test.ts runs the bash form. */
 
 import { FEEDBACK_HEREDOC_END } from '@plannotator/core/product-feedback';
 import { connectCommand } from './connectPrompt';
