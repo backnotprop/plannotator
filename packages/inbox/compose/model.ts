@@ -342,7 +342,7 @@ export function composeActions(query: string, targets: readonly ComposeTarget[],
   // "New review…" (Settings → Capabilities → Code review): "review", "pull", and "new" as New message's own.
   if (reviews && words.some((word) => callsReview(word) || word === 'new')) out.push({ kind: 'review' });
   const named = targets.filter((target) => {
-    const hay = `${hostLabel(target.host)} ${target.host} ${target.project.name}`.toLowerCase();
+    const hay = `${hostLabel(target.host)} ${target.host} ${target.label ?? ''} ${target.project.name}`.toLowerCase();
     return words.every((word) => hay.includes(word) || callsAction(word));
   });
   // Only when a word names the session (not the action words alone).
@@ -351,8 +351,13 @@ export function composeActions(query: string, targets: readonly ComposeTarget[],
   return out;
 }
 
+/** "Message Claude Code · release 0.28.61 in plannotator": the agent first, then the session's name, as the To menu names it. */
 export const actionLabel = (action: ComposeAction): string =>
-  action.kind === 'new' ? 'New message…' : action.kind === 'review' ? 'New review…' : `Message ${hostLabel(action.target.host)} in ${action.target.project.name}`;
+  action.kind === 'new'
+    ? 'New message…'
+    : action.kind === 'review'
+      ? 'New review…'
+      : `Message ${hostLabel(action.target.host)}${action.target.label ? ` · ${action.target.label}` : ''} in ${action.target.project.name}`;
 
 // ── Launch: start a new session from To (behind `inboxLaunch.enabled`, on unless false; docs/agent-guides/inbox-launch.md) ──
 
