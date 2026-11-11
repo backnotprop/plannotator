@@ -307,6 +307,71 @@ Write-Line ('end:' + $offset + ':' + $last)
 exit 0`,
 
   /**
+   * Prints the first `"forkedFrom":{"sessionId":"<id>"` in the first `argv[1]`
+   * bytes of the transcript `argv[0]`, or nothing (no such row, no file).
+   */
+  'transcript-forked-from': String.raw`$path = $argv[0]
+$length = [int]$argv[1]
+try {
+  $file = [IO.File]::Open($path, 'Open', 'Read', 'ReadWrite, Delete')
+  $buffer = New-Object byte[] $length
+  $got = 0
+  while ($got -lt $length) {
+    $read = $file.Read($buffer, $got, $length - $got)
+    if ($read -le 0) { break }
+    $got += $read
+  }
+  $file.Close()
+} catch {
+  exit 0
+}
+$text = [Text.Encoding]::UTF8.GetString($buffer, 0, $got)
+$found = [regex]::Match($text, '"forkedFrom":\{"sessionId":"[A-Za-z0-9._-]*"')
+if ($found.Success) { Write-Line $found.Value }
+exit 0`,
+
+  /**
+   * For each `.jsonl` file in the folder `argv[0]` (the `argv[2]` most recently
+   * written), looks in its last `argv[1]` bytes and prints its last 4
+   * `continued-in` lines (each cut to 1,024 characters), whatever follows
+   * them; at most 400 lines, nothing for a folder that is not there. A file is
+   * read a line at a time, never held whole.
+   */
+  'transcript-continued-in': String.raw`$length = [int64]$argv[1]
+$most = [int]$argv[2]
+try {
+  $paths = @([IO.Directory]::GetFiles($argv[0], '*.jsonl') | Sort-Object { [IO.File]::GetLastWriteTimeUtc($_) } -Descending | Select-Object -First $most)
+} catch { exit 0 }
+$shown = 0
+foreach ($path in $paths) {
+  if ($shown -ge 400) { break }
+  $found = New-Object 'System.Collections.Generic.List[string]'
+  try {
+    $file = [IO.File]::Open($path, 'Open', 'Read', 'ReadWrite, Delete')
+    try {
+      $take = [Math]::Min($length, $file.Length)
+      $null = $file.Seek(-$take, 'End')
+      $reader = New-Object IO.StreamReader($file, [Text.Encoding]::UTF8)
+      while ($null -ne ($line = $reader.ReadLine())) {
+        if ($line.Contains('"type":"continued-in"')) {
+          $found.Add($line.Substring(0, [Math]::Min($line.Length, 1024)))
+          if ($found.Count -gt 4) { $found.RemoveAt(0) }
+        }
+      }
+    } finally {
+      $file.Close()
+    }
+  } catch {
+    continue
+  }
+  foreach ($line in $found) {
+    Write-Line $line
+    $shown += 1
+  }
+}
+exit 0`,
+
+  /**
    * Claims the Inbox message directory `argv[0]` for claimant `argv[1]`, with
    * the same exit codes and the same CreateNew claim on its `by` file as
    * `claim` above.

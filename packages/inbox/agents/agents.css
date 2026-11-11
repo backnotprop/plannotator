@@ -1,38 +1,39 @@
 /* The sidebar's Agents section (approval "inbox-agents-section", APPROVED STATE 2026-11-09; AgentsSection.tsx) and
    the animated agent marks (approval "inbox-agent-icon-motion"; motion.ts). Theme tokens only. */
 
-/* ---------- the panel: an inset rounded panel in the sidebar's menu fill, in place of Machines ---------- */
-.pn-inbox .ib-sbagents { margin: 12px -2px 0; padding: 6px 2px 8px; border-radius: 12px; background: var(--ib-side-menu); }
-.pn-inbox .ib-sbagents > .ib-secrow { margin-top: 0; }
+/* ---------- the section: straight on the sidebar's ground, like Projects, with no panel behind it (the owner,
+   2026-11-09: "I like it without background"). Closed, its heading alone and nothing under it. ---------- */
 /* The heading's goggles: one filled shape in the heading's grey (currentColor), both themes. */
 .pn-inbox .ib-side-sec > svg.ib-ic.ib-agents-mk { fill: currentColor; stroke: none; overflow: visible; }
-/* Add agent and Add machine: the heading's quiet icon buttons, always shown (not only on hover), the chevron's place kept. */
-.pn-inbox .ib-sbagents .ib-agents-add { opacity: 1; }
-.pn-inbox .ib-sbagents .ib-agents-add[data-agents-add="agent"] { right: 50px; }
-.pn-inbox .ib-sbagents .ib-agents-add[data-agents-add="machine"] { right: 24px; }
-.pn-inbox .ib-sbagents [data-one-add] .ib-agents-add[data-agents-add="agent"] { right: 24px; }
-.pn-inbox .ib-sbagents .ib-agents-add:hover { background: var(--card); color: var(--foreground); }
-.pn-inbox .ib-sbagents .ib-side-sec { padding-right: 9px; }
-.pn-inbox .ib-agents-body { margin-top: 8px; }
+/* Add agent and Add machine: the heading's quiet icon buttons, always shown while the section is open (not only on
+   hover), the chevron's place kept. */
+.pn-inbox .ib-agentsec .ib-agents-add { opacity: 1; }
+.pn-inbox .ib-agentsec .ib-agents-add[data-agents-add="agent"] { right: 50px; }
+.pn-inbox .ib-agentsec .ib-agents-add[data-agents-add="machine"] { right: 24px; }
+.pn-inbox .ib-agentsec [data-one-add] .ib-agents-add[data-agents-add="agent"] { right: 24px; }
+.pn-inbox .ib-agents-body { margin-top: 2px; }
 .pn-inbox .ib-agents-body[data-closed] { margin-top: 0; }
 .pn-inbox .ib-agents-group + .ib-agents-group { margin-top: 10px; }
-.pn-inbox .ib-agents-body[data-closed] .ib-agents-group + .ib-agents-group { margin-top: 0; }
 
 /* A machine: a small quiet grey caption, flush left, no icon. Still the machine's filter (its old Machines row). */
 .pn-inbox .ib-agents-cap .ib-proj { height: 30px; padding-left: 9px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .pn-inbox .ib-agents-cap .ib-proj.ib-on { color: var(--ib-cur-fg); }
-/* An agent: a 24 px mark and its name, a small step in under its machine. */
+/* An agent: a 24 px mark and its name, a small step in under its machine's caption; with no captions (one machine), flush. */
+.pn-inbox .ib-sbagent { position: relative; }
 .pn-inbox .ib-sbagent .ib-proj { height: 36px; gap: 10px; padding-left: 17px; padding-right: 10px; }
 .pn-inbox .ib-agents-body[data-flat] .ib-sbagent .ib-proj { padding-left: 9px; }
 .pn-inbox .ib-sbagent .ib-proj .ib-name { min-width: 0; }
-/* Inside the panel a hovered row fills with the card, so it still shows on the panel's own fill (a fill, never an outline). */
-@media (hover: hover) {
-  .pn-inbox .ib-sbagents :is(.ib-sbagent, .ib-mside) > .ib-proj:hover:not(.ib-on) { background: var(--card); }
-}
-/* The one spacing rule of the sidebar's sections, for the panel as one block: 2 px under a closed section with no row
-   left, and the next header 2 px under the panel while it is closed with no row left. */
-.pn-inbox .ib-sidescroll > [data-closed]:empty + .ib-sbagents { margin-top: 2px; }
-.pn-inbox .ib-sidescroll > .ib-sbagents:has(> .ib-agents-body[data-closed]:empty) + :is(.ib-side-sec, .ib-secrow) { margin-top: 2px; }
+/* The mark is its own button (AgentMark.tsx), over its place in the row: a 28 px target round the 24 px mark. Over
+   it, or with its picker open, the row fills as on its own hover. */
+.pn-inbox .ib-sbagent .am-slot { flex: none; width: var(--ib-mark-24); height: var(--ib-mark-24); }
+.pn-inbox .ib-sbagent .am-btn { position: absolute; left: 15px; top: calc(50% - 14px); width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--ib-rl-sm-s, 7px); background: none; display: grid; place-items: center; cursor: pointer; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; touch-action: manipulation; }
+.pn-inbox .ib-agents-body[data-flat] .ib-sbagent .am-btn { left: 7px; }
+.pn-inbox .ib-sbagent .am-btn:focus-visible { outline-offset: -2px; }
+.pn-inbox .ib-sbagent:is(:has(> .am-btn:hover), :has(> .am-btn[data-fan-open])) .ib-proj:not(.ib-on) { background: var(--ib-side-hover); }
+/* The one spacing rule of the sidebar's sections, for a section that is one block: its heading 2 px under a closed
+   section with no row left, and the next heading 2 px under it while it is closed (closed, it draws no row at all). */
+.pn-inbox .ib-sidescroll > [data-closed]:empty + .ib-agentsec > .ib-secrow { margin-top: 2px; }
+.pn-inbox .ib-sidescroll > .ib-agentsec[data-closed] + :is(.ib-side-sec, .ib-secrow) { margin-top: 2px; }
 .pn-inbox .ib-agents-empty { padding: 2px 9px 4px; }
 
 /* The hover card: who, where and when, calm. */
@@ -47,21 +48,19 @@
 
 /* Phone: 44 px rows and targets, the heading's buttons beside the chevron's box. */
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  .pn-inbox .ib-sbagents { margin-top: 8px; }
-  /* First in the list (nothing starred above it): 2 px under the menu's last row, as the approved phone mock shows it. */
-  .pn-inbox .ib-sidescroll > .ib-sbagents:first-child { margin-top: 2px; }
-  .pn-inbox .ib-sbagents .ib-side-sec { padding-right: 0; }
   .pn-inbox .ib-side-sec > svg.ib-ic.ib-agents-mk { width: 18px; height: 18px; }
-  .pn-inbox .ib-sbagents .ib-agents-add[data-agents-add="agent"] { right: 88px; }
-  .pn-inbox .ib-sbagents .ib-agents-add[data-agents-add="machine"] { right: 44px; }
-  .pn-inbox .ib-sbagents [data-one-add] .ib-agents-add[data-agents-add="agent"] { right: 44px; }
+  .pn-inbox .ib-agentsec .ib-agents-add[data-agents-add="agent"] { right: 88px; }
+  .pn-inbox .ib-agentsec .ib-agents-add[data-agents-add="machine"] { right: 44px; }
+  .pn-inbox .ib-agentsec [data-one-add] .ib-agents-add[data-agents-add="agent"] { right: 44px; }
   .pn-inbox .ib-agents-cap .ib-proj, .pn-inbox .ib-sbagent .ib-proj { height: 44px; }
   .pn-inbox .ib-agents-cap .ib-proj { font-size: var(--ib-fs-13, 13px); }
   .pn-inbox .ib-sbagent .ib-proj { font-size: var(--ib-fs-15, 15px); }
 }
 
-/* ---------- the animated agent mark (motion.ts): 24 px, no tile ---------- */
+/* ---------- the animated agent mark (motion.ts): 24 px, no tile, always alive ---------- */
 .pn-inbox .am { --am: var(--ib-mark-24); position: relative; display: inline-grid; place-items: center; flex: none; width: var(--am); height: var(--am); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+/* The layer that leans toward the pointer, around the mark's feet. */
+.am-look { grid-area: 1 / 1; display: grid; place-items: center; width: var(--am); height: var(--am); transform-origin: 50% 90%; will-change: transform; }
 .am-card { grid-area: 1 / 1; position: relative; width: var(--am); height: var(--am); display: grid; place-items: center; transform-style: preserve-3d; }
 .am-face { grid-area: 1 / 1; position: absolute; inset: 0; display: grid; place-items: center; backface-visibility: hidden; }
 .am-face[hidden] { display: none; }
@@ -71,14 +70,97 @@
 .am-glyph { width: var(--am); height: var(--am); display: block; overflow: visible; }
 /* A rig: every part an HTML layer the size of the glyph, holding its own small svg. */
 .am-rig { position: relative; }
-.am-rig .am-p, .am-rig .am-x, .am-rig .am-spin { position: absolute; inset: 0; display: block; }
+.am-rig .am-p, .am-rig .am-x, .am-rig .am-spin, .am-rig .am-e { position: absolute; inset: 0; display: block; }
 .am-l { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-/* The gesture layer is promoted up front, so a fidget never lays out or repaints the row. */
-.am-rig .am-x, .am-fb.am-x { will-change: transform; }
+/* The gesture layer and the eyes (the layer inside it that looks toward the pointer) are promoted up front, so a
+   gesture or a look never lays out or repaints the row. */
+.am-rig .am-x, .am-fb.am-x, .am-rig .am-e { will-change: transform; }
 /* Our faces (the favicon art) move as a whole. */
 .am-fb { display: block; width: 100%; height: 100%; transform-origin: 50% 97%; }
+/* A host with no rig: its plain mark, drawn in the same moving layer. */
+.am-fb.am-plain { display: grid; place-items: center; }
+.am-plain > .ib-mk, .am-plain > .ib-mk > svg, .am-plain > .ib-mk > img { width: var(--ib-mark-20); height: var(--ib-mark-20); }
 .am-art { display: block; width: 100%; height: 100%; }
 /* Transparent: the ink-frame mark on light, the yellow-frame pixel mark on dark. */
 .am-art-l { display: none; }
 :root.light .am-art-l { display: block; }
 :root.light .am-art-d { display: none; }
+
+/* ---------- the face picker (FaceFan.tsx): a half-circle fan of faces round the mark, an overlay ---------- */
+/* The positioner sits at the mark's centre with no size; each choice is placed from there (fanLayout.ts). */
+.am-fan-pos { z-index: 81; outline: none; }
+/* The popup's own fade (Base UI waits for it) comes last, once the plate and the choices are gone. */
+.am-fan { position: relative; width: 0; height: 0; outline: none; transition: opacity 30ms linear 150ms; }
+.am-fan[data-ending-style] { opacity: 0; }
+.am-fan-g { position: absolute; left: 0; top: 0; width: 0; height: 0; }
+/* The dial: a half disc of frosted glass behind the choices (the owner, 2026-11-09: glass, the faces resting on it),
+   from the mark out past the farthest one, open round the mark itself (so the mark stays in view). It takes presses
+   between the choices, so a near miss never opens the row beneath. The glass is the theme's surface, translucent over a
+   blur of what is behind, lit along the top, with a hairline rim. One blurred layer (the plate), none per choice;
+   nothing above the plate is a filter or a fade while it shows (either would stop the blur): its shadow is a sibling's
+   box-shadow, and the open and close fade the plate itself. */
+.am-fan {
+  --gl-hi: color-mix(in oklch, var(--foreground) 20%, transparent);
+  --gl-rim: color-mix(in oklch, var(--foreground) 16%, transparent);
+  --gl-tint: 74%;
+}
+:root.light .am-fan {
+  --gl-hi: color-mix(in oklch, #fff 92%, transparent);
+  --gl-rim: color-mix(in oklch, var(--foreground) 12%, transparent);
+}
+.am-fan-dial { --o: 18px; position: absolute; left: calc(var(--o) * -1); top: calc(var(--r) * -1); width: calc(var(--r) + var(--o)); height: calc(var(--r) * 2); transform-origin: var(--o) 50%; transform: rotate(var(--a)); transition: transform 180ms cubic-bezier(0.2, 0.9, 0.3, 1); }
+.am-fan-shade, .am-fan-edge { position: absolute; inset: 0; }
+.am-fan-plate { --hole: 21px; display: block; width: 100%; height: 100%; border-radius: 14px var(--r) var(--r) 14px / 14px var(--r) var(--r) 14px; transition: opacity 120ms linear; }
+/* Its shadow: outside the plate only (a box-shadow is never drawn under its box), so none shows through the glass. */
+.am-fan-plate[data-shade] { box-shadow: 0 10px 24px -8px color-mix(in oklch, #000 26%, transparent), 0 1px 3px color-mix(in oklch, #000 10%, transparent); }
+.am-fan-edge > .am-fan-plate {
+  background:
+    radial-gradient(circle at var(--o) 50%, transparent calc(var(--hole) + 0.25px), var(--gl-hi) calc(var(--hole) + 0.75px), transparent calc(var(--hole) + 2px)),
+    color-mix(in oklch, var(--popover) var(--gl-tint), transparent);
+  box-shadow: inset 0 1px 0 var(--gl-hi), inset 0 0 0 0.5px var(--gl-rim);
+  -webkit-backdrop-filter: blur(14px) saturate(1.35);
+  backdrop-filter: blur(14px) saturate(1.35);
+  -webkit-mask: radial-gradient(circle at var(--o) 50%, transparent var(--hole), #000 calc(var(--hole) + 1px));
+  mask: radial-gradient(circle at var(--o) 50%, transparent var(--hole), #000 calc(var(--hole) + 1px));
+}
+/* No blur to be had (an engine without backdrop-filter, or reduced transparency asked for): the solid surface. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  :root .am-fan { --gl-tint: 100%; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  :root .am-fan { --gl-tint: 100%; }
+  :root .am-fan-edge > .am-fan-plate { -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
+.am-fan[data-starting-style] .am-fan-dial, .am-fan[data-ending-style] .am-fan-dial { transform: rotate(var(--a)) scale(0.4); }
+.am-fan[data-ending-style] .am-fan-dial { transition: transform 150ms cubic-bezier(0.4, 0, 1, 1) 30ms; }
+.am-fan[data-starting-style] .am-fan-plate, .am-fan[data-ending-style] .am-fan-plate { opacity: 0; }
+.am-fan[data-ending-style] .am-fan-plate { transition: opacity 120ms linear 50ms; }
+.am-fan[data-still] .am-fan-dial, .am-fan[data-still][data-starting-style] .am-fan-dial, .am-fan[data-still][data-ending-style] .am-fan-dial { transform: rotate(var(--a)); transition: none; }
+/* A choice: a 28 px target (4 px or more apart) holding the face at 22 px, resting on the glass with the faintest
+   contact shadow and nothing behind it. It springs out along its arc from the mark, one after another (the whole fan
+   in about 220 ms), and folds back the other way on close. A hover lifts it (a grow, a longer shadow); the face shown
+   has a dot under it. */
+.am-fan-i { position: absolute; left: -14px; top: -14px; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 9px; display: grid; place-items: center; color: var(--muted-foreground); background: none; cursor: pointer; transform: translate(var(--x), var(--y)); transition: transform 160ms cubic-bezier(0.3, 1.4, 0.6, 1) var(--d), opacity 100ms linear var(--d); -webkit-tap-highlight-color: transparent; }
+.am-fan[data-starting-style] .am-fan-i { transform: translate(0, 0) scale(0.4); opacity: 0; }
+.am-fan[data-ending-style] .am-fan-i { transform: translate(0, 0) scale(0.4); opacity: 0; transition: transform 140ms cubic-bezier(0.4, 0, 1, 1) var(--dr), opacity 120ms linear var(--dr); }
+/* While they travel out, a choice passing under the pointer does not take its hover. */
+.am-fan[data-opening] .am-fan-i { pointer-events: none; }
+.am-fan-i:hover { transform: translate(var(--x), var(--y)) scale(1.12); }
+.am-fan-i[aria-checked="true"]::after { content: ""; position: absolute; left: calc(50% - 2px); bottom: -1.5px; width: 4px; height: 4px; border-radius: 50%; background: color-mix(in oklch, var(--foreground) 72%, transparent); }
+.am-fan-i:focus-visible { outline-offset: 1px; }
+.am-fan-f { width: 22px; height: 22px; display: grid; place-items: center; pointer-events: none; filter: drop-shadow(0 1px 1px color-mix(in oklch, #000 24%, transparent)); transition: filter 140ms; }
+.am-fan-i:hover .am-fan-f { filter: drop-shadow(0 3px 4px color-mix(in oklch, #000 28%, transparent)); }
+.am-fan-f > img { display: block; width: 22px; height: 22px; }
+.am-fan-f > img.am-art-l { display: none; }
+:root.light .am-fan-f > img.am-art-l { display: block; }
+:root.light .am-fan-f > img.am-art-d { display: none; }
+.am-fan-f > .ib-mk, .am-fan-f > .ib-mk > svg, .am-fan-f > .ib-mk > img { width: var(--ib-mark-20); height: var(--ib-mark-20); }
+/* A finger's fan (a long press): 40 px targets holding the face at 30 px. */
+.am-fan[data-touch] .am-fan-i { left: -20px; top: -20px; width: 40px; height: 40px; border-radius: 12px; }
+.am-fan[data-touch] .am-fan-i[aria-checked="true"]::after { bottom: 0; }
+.am-fan[data-touch] .am-fan-f, .am-fan[data-touch] .am-fan-f > img { width: 30px; height: 30px; }
+.am-fan[data-touch] .am-fan-dial { --o: 24px; }
+.am-fan[data-touch] .am-fan-plate { --hole: 25px; }
+/* Reduced motion: no travel, a plain fade. */
+.am-fan[data-still] .am-fan-i, .am-fan[data-still][data-starting-style] .am-fan-i, .am-fan[data-still][data-ending-style] .am-fan-i { transform: translate(var(--x), var(--y)); transition: opacity 120ms linear; }
+.am-fan[data-still] .am-fan-i:hover { transform: translate(var(--x), var(--y)); }

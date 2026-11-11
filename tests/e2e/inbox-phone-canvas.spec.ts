@@ -154,6 +154,9 @@ for (const engine of ENGINES) {
       for (const scheme of ['dark', 'light', 'dark'] as const) {
         // The Inbox follows the system scheme by default: this is a live theme switch.
         await page.emulateMedia({ colorScheme: scheme });
+        // The page takes the scheme a moment after the system does (the root's `light` class): the canvas already
+        // equals the foot before that, in the old colours, so the colour is read only once the switch has landed.
+        await expect(page.locator('html')).toHaveClass(scheme === 'light' ? /(^|\s)light(\s|$)/ : /^(?!.*(^|\s)light(\s|$))/);
         await expectCanvasIs(page, 'section.ib-pane .ib-pfoot', scheme);
         seen.add((await paints(page, 'section.ib-pane .ib-pfoot')).surface);
       }

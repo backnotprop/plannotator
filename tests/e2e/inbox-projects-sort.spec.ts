@@ -181,7 +181,7 @@ test('desktop: the default is the order they came in, and the icon goes A to Z, 
   await expect(toggle(nav)).toHaveCount(1);
 });
 
-test('a phone: the sheet always shows it, a 44 px target beside the chevron, and a tap keeps the sheet open', async () => {
+test("a phone: the sheet always shows it, a 44 px target beside the heading's fold area, and a tap keeps the sheet open", async () => {
   const { page, url } = world;
   // A browser that has not chosen, as a phone decides on its own.
   await page.context().clearCookies({ name: SORT_COOKIE });
@@ -194,10 +194,19 @@ test('a phone: the sheet always shows it, a 44 px target beside the chevron, and
   await expect(toggle(sheet)).toBeVisible();
   await expect(names(sheet)).toHaveText(ADDED);
   await expect(toggle(sheet)).toHaveCSS('opacity', '1');
-  const box = (await toggle(sheet).boundingBox())!;
+  // The sheet slides in 8 px on a spring. Two boxes read on different frames of that slide are not
+  // comparable (the later one sits further right), so wait for the sheet to rest, then read both at once.
+  await expect.poll(async () => (await sheet.boundingBox())?.x).toBe(0);
+  const [box, fold] = await sheet.evaluate((node) => {
+    const rect = (selector: string) => {
+      const r = node.querySelector(selector)!.getBoundingClientRect();
+      return { x: r.x, width: r.width, height: r.height };
+    };
+    return [rect('[data-projects-sort]'), rect('[data-sidebar-section="projects"]')];
+  });
   expect([box.width, box.height]).toEqual([44, 44]);
-  const chevron = (await header(sheet).locator('.ib-side-sec-chev').boundingBox())!;
-  expect(box.x + box.width).toBeLessThanOrEqual(chevron.x);
+  // Beside the heading, never over it (approval "inbox-phone-sidebar-sheet"): a tap on the heading only folds the section.
+  expect(box.x).toBeGreaterThanOrEqual(fold.x + fold.width);
   await away();
   await shot(page, 'phone-1-default');
 

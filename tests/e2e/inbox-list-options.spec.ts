@@ -578,7 +578,7 @@ test('the ⋮ menu: plain checkboxes on one edge with "Customize rows…", which
       await page.locator('[data-customize-rows]').click();
       await expect(page).toHaveURL(/#settings\/rows$/);
       await expect(page.getByRole('heading', { name: 'Rows', level: 1 })).toBeVisible();
-      await expect(page.locator('[data-rows-control="density"] input[value="compact"]')).toBeChecked();
+      await expect(page.locator('[data-rows-control="spacing"] input[value="compact"]')).toBeChecked();
     } finally {
       await context.close();
     }
@@ -597,7 +597,7 @@ test('Settings → Rows: a choice shows in another window at once, is saved for 
     await expect(list.locator(`.ib-row[data-thread-id="${threads.ledger}"]`)).toBeVisible();
     expect(await lookClasses(list)).toEqual([]);
 
-    await settings.locator('[data-rows-control="density"] label', { hasText: 'Roomy' }).click();
+    await settings.locator('[data-rows-control="spacing"] label', { hasText: 'Roomy' }).click();
     await settings.locator('.ib-rws-presets button', { hasText: 'Detailed' }).click();
     // Another browser (another cookie jar), no reload: the Detailed look.
     // Detailed has no subject pill since approval "inbox-rows-dialog" (round 7b).

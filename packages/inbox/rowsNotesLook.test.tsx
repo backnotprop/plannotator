@@ -189,8 +189,8 @@ describe('the options in the look', () => {
     expect(inboxRowsCanonical(['compact', 'timeBelow', 'dividers', 'statusMark', 'boldNames'])).toEqual(['compact', 'timeBelow', 'dividers', 'statusMark', 'boldNames']);
   });
 
-  test.if(hasDom)('no preset turns one on (presets come later), so picking a preset turns them off', () => {
-    for (const preset of ROWS_PRESETS) expect([preset.look.timeBelow, preset.look.dividers, preset.look.statusMark, preset.look.boldNames]).toEqual([false, false, false, false]);
+  test.if(hasDom)('Minimal, Balanced and Detailed turn none on, so picking one turns them off; only Dense (approval "inbox-rows-settings-page") has lines and one mark', () => {
+    expect(Object.fromEntries(ROWS_PRESETS.map((preset) => [preset.id, (['timeBelow', 'dividers', 'statusMark', 'boldNames'] as const).filter((key) => preset.look[key])]))).toEqual({ balanced: [], dense: ['dividers', 'statusMark'], minimal: [], detailed: [] });
   });
 });
 

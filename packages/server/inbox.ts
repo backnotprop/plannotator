@@ -39,8 +39,9 @@
  * No CORS headers anywhere, so another site cannot read an answer.
  */
 
+import { inboxRowsBy, type InboxRowsBy } from "@plannotator/core/inbox-types";
 import { inboxDiffOptionsOf, inboxDiffOptionsSaved, parseInboxDiffOptionsChange } from "./inbox-diff-options";
-import { listIntroAtStart, listIntroDue } from "./inbox-list-intro";
+import { listIntroAtStart, listIntroDue, listIntroLookPicked } from "./inbox-list-intro";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -93,6 +94,7 @@ import {
   inboxRowsRead,
   inboxRowsSaved,
   INBOX_ROWS_DEFAULTS_VERSION,
+  INBOX_ROWS_DEFAULT,
   type InboxRowsOption,
   type InboxHealth,
   type InboxLine,
@@ -177,6 +179,8 @@ import {
   inboxRegistryPath,
   isOwnDataDir,
   probeInboxData,
+  inboxHome,
+  inboxSessionLineage,
   readInboxRegistry,
   writeInboxRegistry,
   type InboxRegistryEntry,
@@ -197,6 +201,7 @@ import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxLiveSites, type InboxLiveBridgeSources, type InboxLiveSites } from "./inbox-live";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
+import { INBOX_DECISION_EXPORT_ROUTE, inboxDecisionExportRoute } from "./inbox-decision-export";
 import { createInboxAccountsFor, switchTarget } from "./inbox-accounts";
 import { INBOX_ACCOUNT_SWITCHING, INBOX_ACTIVITY_MAX_DAYS, type InboxNoteAutoAdd } from "@plannotator/core/inbox-types";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
@@ -229,6 +234,9 @@ import { createInboxReplyDrafts } from "./inbox-reply-drafts";
 import { createInboxAsk } from "./inbox-ask";
 import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
+import { createInboxAgentFaces } from "./inbox-agent-faces";
+import { createInboxAgentFacesFile } from "@plannotator/shared/inbox/agent-faces";
+import type { InboxAgentFacesWire } from "@plannotator/core/inbox-types";
 import { createInboxArtifactPins } from "./inbox-artifact-pins";
 import { createInboxSnoozes } from "./inbox-snooze";
 import { inboxRowAsOf, inboxRowSnoozed, inboxSplitSnoozed } from "@plannotator/core/inbox-snooze";
@@ -237,7 +245,6 @@ import { changedFileOf } from "./inbox-pull-diff-files";
 import { snoozeIntroDue, snoozeIntroFirstUse, type SnoozeIntroSaved } from "./inbox-snooze-intro";
 import {
   INBOX_REVEALS,
-  revealAfterShowLoad,
   revealAgentNoteAgents,
   revealAgentNoteNew,
   revealAhead,
@@ -249,11 +256,10 @@ import {
   revealMayClaim,
   revealNext,
   revealNotNowAllowed,
-  revealSeeLoad,
+  revealAgainAt,
   revealStamp,
   revealStampNotNow,
   type RevealId,
-  type RevealLoads,
   type RevealState,
 } from "@plannotator/shared/inbox/reveals";
 import { launchTipClaim, launchTipDue, launchTipLaunched, type LaunchTipState } from "@plannotator/shared/inbox/launch-tip";
@@ -268,6 +274,7 @@ import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
 import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
 import { createCardFavicons, type CardFaviconOptions } from "./inbox-card-favicons";
 import { DEFAULT_FAVICON_STYLE, isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
+import { themeChooserLook, themeChooserOpen } from "@plannotator/shared/inbox/theme-chooser";
 import { createCardMarks } from "./inbox-card-marks";
 import { validateFilePath } from "@plannotator/shared/review-core";
 import { createInboxPulls, InboxPullsError, linkInboxPulls, pullCards, threadAgent, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
@@ -1118,6 +1125,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const phonesOn = options.phones ?? resolveInboxPhones(loadConfig());
   const hostGuard = createRequestHostGuard({ localOnly: true });
   const previous = readInboxRegistry(dataDir);
+  // The store is open, so the folder exists: its identity, and the earlier runs of this same folder (registry.ts).
+  const home = inboxHome(dataDir);
+  const follows = inboxSessionLineage(previous, home);
   let port = 0;
   let baseUrl = "";
   let portChanged = false;
@@ -1136,9 +1146,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** A snooze changed or ran out (inbox-snooze.ts): the streams of windows and linked machines say `event: snoozes`. */
   const snoozeListeners = new Set<() => void>();
   /** How the list's rows look was saved (config.json `inboxRows`): the windows' streams say `event: rows`. */
-  const rowsListeners = new Set<(rows: readonly InboxRowsOption[], rev: number) => void>();
+  const rowsListeners = new Set<(rows: readonly InboxRowsOption[], rev: number, last: { prev: readonly InboxRowsOption[] | null; by: InboxRowsBy | null }) => void>();
   /** The sidebar's layout was saved (config.json `inboxSidebar`): the windows' streams say `event: sidebar`. */
   const sidebarListeners = new Set<(sidebar: InboxSidebarLayout, rev: number) => void>();
+  /** An agent icon's face was saved (inbox/agent-faces.json): the windows' streams say `event: agent-faces`. */
+  const agentFaceListeners = new Set<(wire: InboxAgentFacesWire) => void>();
+  const agentFacesFile = createInboxAgentFacesFile(inboxDir(dataDir), (wire) => {
+    for (const listener of agentFaceListeners) listener(wire);
+  });
   /** The reaction tray's saved emoji changed (config.json `inboxReactions`): the windows' streams say `event: reactions`. */
   const reactionsListeners = new Set<(reactions: readonly InboxReaction[], rev: number) => void>();
   /** A capability switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. `changed`: held until the next big release (heldSwitch). */
@@ -1164,6 +1179,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       lastDailyPingCheck = at;
       scheduleDailyPing({ version, dataDir, tool: "inbox" });
     },
+    // Update now's installer also gets the last login shell's PATH (claude, nvm's node), once launch has read it.
+    installerPath: () => (launchReady ? launch.loginPath() : []),
     ...options.updates,
     onChange: () => {
       for (const listener of statusListeners) listener();
@@ -1430,6 +1447,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     app: INBOX_APP_ID,
     version,
     serverSession,
+    // Additive: the earlier runs of this data folder (registry.ts `inboxSessionLineage`). A window that loaded from
+    // one of them, on this version, takes this run's session and keeps writing (packages/inbox/sessionAdopt.ts).
+    ...(follows.length > 0 ? { follows } : {}),
     pid: process.pid,
     update: updates.current(),
     notify_reach: windows.reach(notificationsState().enabled),
@@ -1679,6 +1699,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       },
       projectById,
       lastHeardOf: live.lastHeardOf,
+      continuedBy: live.continuedBy,
+      continuesOf: live.continuesOf,
       labels: true,
     });
   };
@@ -2194,6 +2216,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * the Inbox holds in the next plan review too, and one made there holds
    * here. null: never chosen (the cookies, else the OS, decide).
    */
+  /** Set once the "themes" dialog's record exists (below): a theme saved from the Inbox is looked at again. */
+  let themeChooserNoteTheme: () => void = () => {};
   const themeState = (): ThemeConfig | null => {
     const theme = loadConfig().theme;
     return theme && typeof theme === "object" ? theme : null;
@@ -2231,6 +2255,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (!saved || Object.entries(next).some(([key, value]) => saved[key as keyof ThemeConfig] !== value)) {
       throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     }
+    // A palette picked: the "themes" dialog is no longer needed (shared/inbox/theme-chooser.ts).
+    themeChooserNoteTheme();
     return saved;
   };
 
@@ -2347,18 +2373,33 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return { rows: inboxRowsSaved(inboxRowsRead(config.inboxRows), config.inboxRowsDefaults), rev: typeof rev === "number" && Number.isSafeInteger(rev) && rev > 0 ? rev : 0 };
   };
 
-  const saveRows = (input: unknown, validateOnly = false): { rows: InboxRowsOption[]; rev: number } => {
+  /** The look before the last save and who made that save, for Undo and "<agent> changed" (core inbox-rows-words.ts). */
+  const rowsLast = (): { prev: InboxRowsOption[] | null; by: InboxRowsBy | null } => {
+    const config = loadConfig();
+    return { prev: inboxRowsRead(config.inboxRowsPrev), by: inboxRowsBy(config.inboxRowsBy) };
+  };
+  const saveRows = (input: unknown, validateOnly = false, by: InboxRowsBy | null = null): { rows: InboxRowsOption[]; rev: number } => {
     const rows = inboxRowsList(input);
     if (!rows) throw new InboxError("validation_error", `rows: a list of row options (${INBOX_ROWS_OPTIONS.join(", ")}).`, { field: "rows" });
-    const rev = rowsState().rev + 1;
+    const before = rowsState();
+    const rev = before.rev + 1;
     if (validateOnly) return { rows, rev };
-    saveConfig({ inboxRows: rows, inboxRowsRev: rev, inboxRowsDefaults: INBOX_ROWS_DEFAULTS_VERSION });
+    // The look before this save is kept (as the windows read it: never saved is the defaults), so one Undo puts it back.
+    const prev = before.rows ?? [...INBOX_ROWS_DEFAULT];
+    saveConfig({ inboxRows: rows, inboxRowsRev: rev, inboxRowsDefaults: INBOX_ROWS_DEFAULTS_VERSION, inboxRowsPrev: prev, inboxRowsBy: by });
     const saved = rowsState();
     if (saved.rev !== rev || saved.rows?.join() !== rows.join()) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
-    for (const listener of rowsListeners) listener(rows, rev);
+    for (const listener of rowsListeners) listener(rows, rev, { prev, by });
     return { rows, rev };
   };
-  const rowsWire = (state: { rows: InboxRowsOption[] | null; rev: number }) => ({ rows: state.rows, rows_rev: state.rev });
+  /** Undo the last save: the look before it is saved again (so a second undo is a redo). Null: nothing to put back. */
+  const undoRows = (by: InboxRowsBy | null): { rows: InboxRowsOption[]; rev: number; prev: InboxRowsOption[] } | null => {
+    const { prev } = rowsLast();
+    const now = rowsState().rows;
+    if (!prev || prev.join() === (now ?? []).join()) return null;
+    return { ...saveRows(prev, false, by), prev: now ?? [...INBOX_ROWS_DEFAULT] };
+  };
+  const rowsWire = (state: { rows: InboxRowsOption[] | null; rev: number }) => ({ rows: state.rows, rows_rev: state.rev, rows_prev: rowsLast().prev, rows_by: rowsLast().by });
 
   /**
    * The sidebar's layout (config.json `inboxSidebar`, approval "inbox-sidebar-customize"): which items show, their
@@ -2464,7 +2505,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    */
   const claimSoundDialog = (via: RequestVia, load: string | null = null): boolean => {
     if (via !== "local" || !soundState().dialog_due) return false;
-    // The line of one-time dialogs (shared/inbox/reveals.ts): one a day, never on the load after one, a day apart.
+    // The line of one-time dialogs (shared/inbox/reveals.ts): 40 minutes apart, on any load.
     if (!lineFree("spaced", load)) return false;
     const { dialogDueFor, ...rest } = savedSound();
     saveConfig({ inboxSound: { ...rest, dialogShownFor: dialogDueFor }, ...lineStamp(new Date().toISOString(), true, load) });
@@ -2493,7 +2534,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * "inbox-rows-dialog"), is due once for everyone, fresh installs and those who saw version 1 included. The page
    * waits for a list of five threads or more.
    */
-  const listIntroState = () => ({ due: listIntroDue(loadConfig().inboxListIntro) });
+  const listIntroState = () => {
+    const config = loadConfig();
+    // Never for someone who already picked a look (the owner, 2026-11-09: "Yes, skip it for them"), read live as the
+    // tab icon's favicon is: a pick before its moment drops it, and it no longer holds the dialogs behind it.
+    return { due: listIntroDue(config.inboxListIntro) && !listIntroLookPicked(config) };
+  };
   const listIntroMinThreads = INBOX_REVEALS.find((entry) => entry.id === "list_intro")?.minThreads ?? 0;
   /** Due, with the threads the dialog waits for: what holds the dialogs after it back. */
   const listIntroWaits = () => listIntroState().due && store.threadIds().length >= listIntroMinThreads;
@@ -2517,6 +2563,28 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const tabIconUndecided = () => {
     const config = loadConfig();
     return typeof config.inboxReveals?.tab_icon?.dueAt === "string" && !isFaviconStyle(config.favicon);
+  };
+
+  /**
+   * The "themes" dialog (approval "inbox-theme-chooser"; `theme_chooser` in shared/inbox/reveals.ts, who it is for in
+   * shared/inbox/theme-chooser.ts): decided at the first release start of the version that ships it, as the tab icon's
+   * is. Someone on the default theme gets it due (config.json `inboxThemeChooser.dueAt`), a fresh install too, from its
+   * first day. Anyone on another theme is marked as not needing it (`notNeededAt`), then or at
+   * any later look (each start, a theme saved from the Inbox, a claim), and going back to the default theme never
+   * brings it up. A dev build decides nothing.
+   */
+  const themeChooserLookNow = () => {
+    if (normalizeStableVersion(version) === null) return;
+    const config = loadConfig();
+    const next = themeChooserLook(config.inboxThemeChooser, config.theme, new Date().toISOString());
+    if (next) saveConfig({ inboxThemeChooser: next });
+  };
+  themeChooserLookNow();
+  themeChooserNoteTheme = themeChooserLookNow;
+  /** Due, never marked as not needed, and on the default theme now (read live: a theme picked anywhere drops it). */
+  const themeChooserUndecided = () => {
+    const config = loadConfig();
+    return themeChooserOpen(config.inboxThemeChooser, config.theme);
   };
   /**
    * The page that is about to show the dialog claims it: only the first claim ever gets `show: true`, so two tabs
@@ -2879,6 +2947,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // The tab icon dialog (an update-day dialog): due since the release start and no favicon chosen, read live, so a
     // pick in Settings (here, plan review or code review) before its moment drops it.
     tab_icon: tabIconUndecided,
+    // The "themes" dialog: due since the release start and still on the default theme, read live. Never while the tab
+    // icon dialog is still due (the owner, 2026-11-10: "it can't compete with the favicon one… The favicon one should
+    // come first"): closed until that one is shown or a favicon is chosen, so patience cannot let it pass.
+    theme_chooser: () => themeChooserUndecided() && !(tabIconUndecided() && !lineOfferSaved("tab_icon")?.shownAt),
   };
   type LineOfferSaved = { shownAt?: string; key?: string };
   const lineOfferSaved = (id: RevealId): LineOfferSaved | undefined => (loadConfig().inboxReveals as Record<string, LineOfferSaved | undefined> | undefined)?.[id];
@@ -2925,8 +2997,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
   /** Voice's who (inbox-voice.ts), read once the voice module exists. */
   let voiceIntroOpen: () => boolean = () => false;
-  /** The page loads seen, each with the one first seen before it (never a dialog on the load right after one). */
-  let pageLoads: RevealLoads = {};
   const revealState = (now: Date, load: string | null = null): RevealState => {
     const snooze = snoozeIntroSaved();
     const config = loadConfig();
@@ -2953,7 +3023,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       lastShownAt: revealLastShown([reveals?.lastShownAt, snooze?.shownAt, shown(config.inboxListIntro), shown(config.inboxListIntro?.before), shown(config.inboxVoiceIntro), config.inboxBoardIntro?.shownAt]),
       dayShownAt: reveals?.dayShownAt ?? null,
       notNowAt: reveals?.notNowAt ?? null,
-      afterShowLoad: revealAfterShowLoad(reveals?.shownLoad, pageLoads, load),
       // Read only while an entry that asks for heavy use is still open (a walk of every thread; a release build).
       heavy: snoozeIntroRelease && INBOX_REVEALS.some((entry) => entry.heavyUse && entry.enabled && open[entry.id] === true) && revealHeavyUse(seenAgentMessages(), now),
       // Roots in the store. The onboarding tour's threads live in the window only (tour/content), never here.
@@ -2961,7 +3030,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       open,
       waitingSince: reveals?.waitingSince,
       // The star ask's show (aside): the grill-me tip (`lastResort`) never goes on its day.
-      asideShownAt: reveals?.star?.shownAt ?? null,
+      // The grill-me tip's too: the gap counts from either (`revealGapFree`).
+      asideShownAt: revealLastShown([reveals?.star?.shownAt, reveals?.grill_me_tip?.shownAt]),
+      // The tips outside the line (the Sidebar tip, the Launch tip): they start the gap too.
+      tipShownAt: revealLastShown([reveals?.sidebar_tip?.shownAt, reveals?.launch_tip?.shownAt]),
     };
     // The grill-me tip (reveals.ts `lastResort`): its gap (a walk of the store) is read only while it is unshown, in a
     // release build, and the line has nothing else for this moment; otherwise it could not be claimed anyway.
@@ -2973,10 +3045,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     snoozeIntroRelease ? { inboxReveals: revealStamp(loadConfig().inboxReveals, at, { spaced, load }) } : {};
   /** The line's own rules hold for this page load (`setup`: the agent note, which keeps no spacing). A dev build: free. */
   const lineFree = (kind: "setup" | "spaced", load: string | null): boolean => revealLineFree(kind, revealState(new Date(), load), new Date());
-  /** A page load is seen (its first settings read): the line learns which load came after which. */
-  const seeLoad = (load: string | null) => {
-    pageLoads = revealSeeLoad(pageLoads, load) ?? pageLoads;
-  };
   /**
    * The dialog this page may arm, or null. The owner's pages only (this computer, their phone over the tailnet, an
    * allowed login on a tagged machine), never a guest's. The first time an entry is next is kept, for the patience
@@ -3003,7 +3071,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * with Copy prompt; someone who saw it before (its `inboxBoardIntro.shownAt`) does not see it again. `show`: the page
    * draws the dialog. `key` (the page's own, kept with the stamp): the same page's retry after a lost answer gets
    * `show: true` again, without a write, while the feature is still undecided; any other key, window or device does not.
-   * `agent_note`: the agent note (a setup dialog), on this computer only: the line's day and load rules, no spacing.
+   * `agent_note`: the agent note (a setup dialog), on this computer only: the line's gap, not an offer's Not now.
    */
   const claimReveal = (
     id: RevealId | "agent_note",
@@ -3019,6 +3087,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (!undecided || !owner || !snoozeIntroRelease) return false;
     if (key && lineOfferSaved(id)?.key === key) return undecided();
     const now = new Date();
+    // A theme picked elsewhere (plan review, code review) since the last look: marked now, so the claim is refused for good.
+    if (id === "theme_chooser") themeChooserLookNow();
     if (!revealMayClaim(id, revealState(now, load), now) || !undecided()) return false;
     const at = now.toISOString();
     // An `aside` card (the grill-me tip) stamps only its own record: no other dialog's day moves.
@@ -3049,8 +3119,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       key,
     );
   /**
-   * The agent note (approval "inbox-one-time-dialogs": setup): never on the load after a dialog, never on a day that had
-   * one; it stamps the day, not the spacing. Once for each agent (`agents`, the ones it would ask about): a note left
+   * The agent note (approval "inbox-one-time-dialogs": setup): never within the gap of another dialog. It stamps
+   * `dayShownAt`, which the gap reads, not the line's `lastShownAt`. Once for each agent (`agents`, the ones it would ask about): a note left
    * unanswered is not shown again for the same agents, so it never takes another day (`revealAgentNoteNew`). A dev
    * build keeps no line: always yes.
    */
@@ -3065,9 +3135,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
   /**
    * The Launch tip (approval "launch-tip"; packages/shared/inbox/launch-tip.ts): the owner's, while Launch is on and no
-   * agent was ever started here, until it was shown once. Outside the line: its claim stamps only
-   * `inboxReveals.launch_tip`, never the line's day or spacing, and it waits for neither.
+   * agent was ever started here, until it was shown once. Outside the line's order: its claim stamps only
+   * `inboxReveals.launch_tip`. Since the gap replaced the one-a-day rule (2026-11-09) it keeps the gap as the Sidebar
+   * tip does (`tipFree`): never within 40 minutes of a dialog or the other tip, and no dialog within 40 minutes of it.
    */
+  /** A tip outside the line may show now: no dialog or tip within the gap (a release build; a dev build keeps none). */
+  const tipFree = (): boolean => lineFree("setup", null);
   /** An agent was started from this Inbox: kept in `inboxReveals.launch_tip.launchedAt`, so deleting that thread never brings the tip back. */
   const keepLaunchedOnce = () => {
     const kept = launchTipLaunched(loadConfig().inboxReveals?.launch_tip, new Date().toISOString());
@@ -3087,14 +3160,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const at = new Date().toISOString();
     const claim = launchTipClaim(launchTipState(owner), key, at);
     if (!claim.save) return claim.show;
+    if (!tipFree()) return false;
     saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, launch_tip: claim.save } });
     // Not written (a read-only data dir): showing it anyway would show it on every New message.
     return loadConfig().inboxReveals?.launch_tip?.shownAt === at;
   };
   /**
    * The Sidebar tip (packages/shared/inbox/sidebar-tip.ts): the owner's, a day or more after first use, while no
-   * sidebar layout was ever saved, until it was shown once. Outside the line, as the Launch tip: its claim stamps only
-   * `inboxReveals.sidebar_tip`.
+   * sidebar layout was ever saved, until it was shown once. Outside the line's order, as the Launch tip: its claim
+   * stamps only `inboxReveals.sidebar_tip`, and it keeps the gap both ways (`tipFree`; `revealState` `tipShownAt`).
    */
   const sidebarTipState = (owner: boolean): SidebarTipState => {
     const config = loadConfig();
@@ -3110,6 +3184,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const at = new Date().toISOString();
     const claim = sidebarTipClaim(sidebarTipState(owner), key, at);
     if (!claim.save) return claim.show;
+    // Inside the gap after a dialog or the other tip: not now (nothing is spent; a later moment asks again).
+    if (!tipFree()) return false;
     saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, sidebar_tip: claim.save } });
     // Not written (a read-only data dir): showing it anyway would show it on every load.
     return loadConfig().inboxReveals?.sidebar_tip?.shownAt === at;
@@ -3118,6 +3194,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * What a settings read reports of the line (`reveal`), from one read of its state (one walk of the threads for heavy
    * use): the dialog this page may arm, the `ahead` offers it may also arm at their moment, and the agent note's `setup`.
    */
+  const againIn = (at: number | null, now: Date): number | null => (at === null ? null : at - now.getTime());
   const lineReport = (owner: boolean, via: RequestVia, load: string | null) => {
     const now = new Date();
     const state = revealState(now, load);
@@ -3129,10 +3206,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       aside: owner && snoozeIntroRelease ? revealAsideNow(state, now) : [],
       setup: via === "local" && revealLineFree("setup", state, now),
       line: snoozeIntroRelease,
+      // How long until a date can change the line (reveals.ts `revealAgainAt`: the gap's end, a Not now's, a tenure),
+      // null when none can: a page left loaded asks again once, then, and keeps no other timer for the line.
+      // With `next` waiting from this read on (`revealNow` has just kept it), so the end of its patience is named too.
+      again_in:
+        owner && snoozeIntroRelease
+          ? againIn(revealAgainAt(next && !state.waitingSince?.[next] ? { ...state, waitingSince: { ...state.waitingSince, [next]: now.toISOString() } } : state, now), now)
+          : null,
       // The Launch tip (outside the line): compose may claim it at the first plain New message.
-      launch_tip: launchTipDue(launchTipState(owner)),
+      launch_tip: launchTipDue(launchTipState(owner)) && revealLineFree("setup", state, now),
       // The Sidebar tip (outside the line): the page may claim it at a calm moment beside the open sidebar.
-      sidebar_tip: sidebarTipDue(sidebarTipState(owner), now.toISOString()),
+      sidebar_tip: sidebarTipDue(sidebarTipState(owner), now.toISOString()) && revealLineFree("setup", state, now),
     };
   };
   /** An offer closed with Not now (Escape, a click outside): the next dialog waits three days. A release build, the owner. */
@@ -3226,7 +3310,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     snooze_intro: { due: !guest && line.next === "snooze" },
     /**
      * The line of one-time dialogs (shared/inbox/reveals.ts): the one this page may arm, or null (never for a guest);
-     * `setup`: the agent note may show on this load (the line's day and load rules; a dev build: always). `line`: this
+     * `setup`: the agent note may show on this load (the line's gap; a dev build: always). `line`: this
      * Inbox keeps the line (a release build): the update-day dialogs show only when they are `next`.
      */
     reveal: line,
@@ -3429,11 +3513,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const onSnoozes = () => send(`event: snoozes\ndata: {}\n\n`);
         if (windowId || url.searchParams.get("snoozes") === "1") snoozeListeners.add(onSnoozes);
         // How the rows look was saved (any window's, a phone's too): every window takes it at once. Windows only.
-        const onRows = (rows: readonly InboxRowsOption[], rev: number) => send(`event: rows\ndata: ${JSON.stringify({ rows, rev })}\n\n`);
+        const onRows = (rows: readonly InboxRowsOption[], rev: number, last: { prev: readonly InboxRowsOption[] | null; by: InboxRowsBy | null }) => send(`event: rows\ndata: ${JSON.stringify({ rows, rev, prev: last.prev, by: last.by })}\n\n`);
         if (windowId) rowsListeners.add(onRows);
         // The sidebar's layout was saved (any window's, a phone's too): every window takes it at once. Windows only.
         const onSidebar = (sidebar: InboxSidebarLayout, rev: number) => send(`event: sidebar\ndata: ${JSON.stringify({ sidebar, rev })}\n\n`);
         if (windowId) sidebarListeners.add(onSidebar);
+        // An agent icon's face was saved (any window's, a phone's too): every window draws it at once. Windows only.
+        const onAgentFaces = (wire: InboxAgentFacesWire) => send(`event: agent-faces\ndata: ${JSON.stringify(wire)}\n\n`);
+        if (windowId) agentFaceListeners.add(onAgentFaces);
         // The tray's saved emoji changed (any window's, a phone's too): every window takes the list at once. Windows only.
         const onReactions = (reactions: readonly InboxReaction[], rev: number) => send(`event: reactions\ndata: ${JSON.stringify({ reactions, rev })}\n\n`);
         if (windowId) reactionsListeners.add(onReactions);
@@ -3498,6 +3585,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           snoozeListeners.delete(onSnoozes);
           rowsListeners.delete(onRows);
           sidebarListeners.delete(onSidebar);
+          agentFaceListeners.delete(onAgentFaces);
           reactionsListeners.delete(onReactions);
           capabilityListeners.delete(onCapabilities);
           stopShapes?.();
@@ -3748,11 +3836,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A busy session that can take an item mid-turn: what has waited long enough goes in now.
     const steer = live.deliveryConnectionOf(session);
     if (sendNow && steer?.busy === true && steer.send_now) autoSendFor(session, tags);
+    // What waits for this session, and for the sessions its conversation continues that no longer poll
+    // (`continues`, inbox-continuations.ts): each worded for the session it waits for.
     const commands = () => {
-      const list = store
-        .pendingReplies(session, { tags })
-        .filter((reply) => !withdrawnTidy(reply))
-        .map((reply) => replyCommand(reply, sendNow, session));
+      const list = live
+        .pendingOf(session, { tags })
+        .filter((item) => !withdrawnTidy(item.message))
+        .map((item) => replyCommand(item.message, sendNow, item.as));
       // Handed an item for the running turn: an older connection does not poll again until it goes in.
       if (body[INBOX_STEER_POLLS_POLL_FIELD] !== true && list.some((command) => command.now === true)) live.steerHanded(session);
       return list;
@@ -3781,7 +3871,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       };
       const timer = setTimeout(finish, waitMs);
       const unsubscribe = store.subscribe((line) => {
-        if (line.kind === "message" && line.record.author.kind === "person" && store.pendingReplies(session, { tags }).length > 0) finish();
+        if (line.kind === "message" && line.record.author.kind === "person" && live.pendingOf(session, { tags }).length > 0) finish();
       });
       const stopAskWaits = ask.onWaits((waiting) => {
         if (waiting === session) finish();
@@ -3805,10 +3895,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       live.stateChanged(session, host, body);
       return json({ ok: true });
     }
+    // An item this session took for a session its conversation continues is recorded for that one, the session
+    // the thread knows (`continues`, inbox-continuations.ts).
+    const acting = typeof body.id === "string" ? live.actingFor(session, body.id) : session;
     // Send now could not go into the running turn: the reply reads as queued again and waits for idle.
     if (body.type === "send_now_failed" && typeof body.id === "string") {
       live.steerDone(session);
-      store.clearDeliverNow(body.id, session);
+      store.clearDeliverNow(body.id, acting);
       return json({ ok: true });
     }
     if (body.type !== "delivered" || typeof body.id !== "string") {
@@ -3819,11 +3912,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // turn to end (the session was seen idle after the mark: its own Ask question held the turn).
     const marked = store.message(body.id);
     const markedAt = marked
-      ? marked.tags?.find((tag) => tag.session === session && tag.deliver_now_by === "auto")?.deliver_now_at ??
+      ? marked.tags?.find((tag) => tag.session === acting && tag.deliver_now_by === "auto")?.deliver_now_at ??
         (marked.deliver_now_by === "auto" ? marked.deliver_now_at : null)
       : null;
     const intoTurn = markedAt ? live.deliveredIntoTurn(session, markedAt) : undefined;
-    const reply = store.recordDelivery(body.id, { host, session, ...(intoTurn !== undefined ? { intoTurn } : {}) });
+    const reply = store.recordDelivery(body.id, { host, session: acting, ...(intoTurn !== undefined ? { intoTurn } : {}) });
     return json({ ok: true, delivery: reply.delivery });
   };
 
@@ -3941,6 +4034,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A Qwen Code session too, until its registry record goes (inbox-qwen-wake.ts).
     wakeOnlyStatus: (session) => codexWake.status(session) ?? qwenWake.status(session) ?? t3Wake.status(session),
     uncertainItemsOf: (session) => [...codexWake.uncertainItems(session), ...qwenWake.uncertainItems(session), ...t3Wake.uncertainItems(session)],
+    // A session that is an agent with a face (its conversation's earlier id, its launch): its threads show that face too.
+    onPoll: (session, continues) =>
+      agentFacesFile.link(session, () => [
+        ...continues,
+        ...launch
+          .agents()
+          .filter((agent) => agent.session === session)
+          .map((agent) => agent.launch_id),
+      ]),
   });
 
   // Shape (approval "shape-inbox-placement"): the boards' routes and event feed, mounted only while boards are on.
@@ -4008,7 +4110,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // (`deliver_now_by: "auto"`); the mark is a store line, which answers the session's held poll with `now: true`.
   const autoSendFor = (session: string, tags: boolean) => {
     try {
-      store.autoSendDue(session, { afterMs: live.autoSendAfterMs, tags, clockOf: (id) => live.waitClockOf(session, id) });
+      // Its own items, and those of the sessions its conversation continues: their clocks run under this session.
+      for (const owed of [session, ...live.inheritedBy(session)]) {
+        store.autoSendDue(owed, { afterMs: live.autoSendAfterMs, tags, clockOf: (id) => live.waitClockOf(session, id) });
+      }
     } catch (error) {
       process.stderr.write(`Inbox: a reply did not go in by itself: ${error instanceof Error ? error.message : String(error)}\n`);
     }
@@ -4231,6 +4336,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const pins = createInboxPins({ store, serverSession, readBody: (req) => readBody(req), json });
   // Pinned artifacts and the Artifacts wall (packages/server/inbox-artifact-pins.ts).
   const artifactPins = createInboxArtifactPins({ store, serverSession, readBody: (req) => readBody(req), json });
+  // Agent icons' faces (packages/server/inbox-agent-faces.ts).
+  const agentFaces = createInboxAgentFaces({ file: agentFacesFile, serverSession, readBody: (req) => readBody(req), json });
   // Snoozes: threads out of the list until a time (packages/server/inbox-snooze.ts).
   const snoozes = createInboxSnoozes({
     store,
@@ -5286,6 +5393,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           throw error;
         }
       }
+      // Export decisions (the thread's ⋯ More): one thread's decisions as a Markdown, HTML or JSON download. Read only,
+      // the same origin as the thread's own read; the phone door carries it (inbox-decision-export.ts).
+      if (INBOX_DECISION_EXPORT_ROUTE.test(path)) {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        return (await inboxDecisionExportRoute(url, store, { version }))!;
+      }
       // Settings → Storage's sizes walk every file in the store, so only that panel asks for them, when it is shown.
       if (path === "/api/inbox/settings/storage") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
@@ -5294,9 +5410,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (path === "/api/inbox/settings") {
         if (req.method === "GET") {
           const guest = !ownerOrLocal(req, via);
-          // The page's load id (api.ts): the line never shows a dialog on the load right after one that did.
+          // The page's load id (api.ts): kept with a claim's stamp as a record (`inboxReveals.shownLoad`).
           const load = guest ? null : revealLoadId(req.headers.get("x-plannotator-load"));
-          seeLoad(load);
           return json(settingsModel(via, guest, url.searchParams.get("store") !== "0", load));
         }
         if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
@@ -5314,6 +5429,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.reactions === undefined &&
           body.reaction_change === undefined &&
           body.rows === undefined &&
+          body.rows_undo === undefined &&
           body.sidebar === undefined &&
           body.diff_style === undefined &&
           body.diff_options === undefined &&
@@ -5416,7 +5532,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const textSize = body.text_size === undefined ? textSizeState() : saveTextSize(body.text_size);
         const favicon = body.favicon === undefined ? faviconState() : saveFavicon(body.favicon);
         const reactions = reactionsWire(reactionsChange ? saveReactions(body) : reactionsState());
-        const rows = rowsWire(body.rows === undefined ? rowsState() : saveRows(body.rows));
+        // `rows_by`: an agent's command says who it is (`plannotator inbox rows set`). `rows_undo`: the look before the last
+        // save, put back (with no `rows`); with nothing to put back the answer says `rows_undone: false`.
+        const rowsBy = inboxRowsBy(body.rows_by);
+        const rowsUndone = body.rows === undefined && body.rows_undo === true ? undoRows(rowsBy) : null;
+        const rows = { ...rowsWire(rowsUndone ?? (body.rows === undefined ? rowsState() : saveRows(body.rows, false, rowsBy))), ...(body.rows_undo === true ? { rows_undone: rowsUndone !== null } : {}) };
         const sidebar = sidebarWire(body.sidebar === undefined ? sidebarState() : saveSidebar(body.sidebar));
         const diffOptions = diffOptionsChange ? saveDiffOptions(body) : diffOptionsState();
         const experimental = body.experimental === undefined ? experimentalState() : saveExperimental(body.experimental);
@@ -5619,6 +5739,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Pinned artifacts and the Artifacts wall (approval "inbox-artifact-stars").
       const artifactPinned = await artifactPins.route(req, url);
       if (artifactPinned) return artifactPinned;
+      // Agent icons' faces: the face each agent shows in every window.
+      const faced = await agentFaces.route(req, url);
+      if (faced) return faced;
       // Snooze and Unsnooze (approval "inbox-snooze").
       const snoozed = await snoozes.route(req, url);
       if (snoozed) return snoozed;
@@ -6472,6 +6595,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     token,
     serverSession,
     startedAt: new Date().toISOString(),
+    // The runs this one follows, and the folder it is written in: a window left open across the restart keeps writing.
+    ...(follows.length > 0 ? { follows } : {}),
+    ...(home ? { home } : {}),
     ...(previous?.tailnet ? { tailnet: previous.tailnet } : {}),
     ...(previous?.lan ? { lan: previous.lan } : {}),
     // The mapping the last run made (its ports), so this start re-points or takes down its own.

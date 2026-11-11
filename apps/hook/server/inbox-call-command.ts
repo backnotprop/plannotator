@@ -278,6 +278,9 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
       // A malformed list (never from this Inbox) prints no advice; the result below still does.
     }
   }
+  // A quiet hint (send_message's `hint`): the result text's last line, on stderr too.
+  const hint = result?.structuredContent?.hint;
+  if (typeof hint === "string" && hint) err(`${hint}\n`);
   await out(`${JSON.stringify(result?.structuredContent ?? { text: words })}\n`);
   return 0;
 }

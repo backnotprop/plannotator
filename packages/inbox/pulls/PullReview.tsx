@@ -76,6 +76,8 @@ import { RiskMark } from './RiskMark';
 import { ContextNotesProvider, useContextNotes } from '../contextNotes/ContextNotes';
 import { placesWord, riskNotes, takeRiskPlaces } from '../contextNotes/model';
 import { usePullRisk } from './usePullRisk';
+import { Named } from './Face';
+import { person, wordsText, type Words } from './words';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
 /** The file rail's width: dragged and kept. */
@@ -835,11 +837,12 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const noun = pullNounWord(layer.platform);
   const wholeTip = `Whole stack: ${diff && scope === 'stack' ? `${diff.base}…${diff.head}` : `${stack.base} up to ${label}`}`;
 
-  const readOnlyWords = layer.mine ? 'No review thread yet' : layer.author ? `by ${layer.author}` : 'by a deleted account';
+  const readOnlyParts: Words = layer.mine ? ['No review thread yet'] : layer.author ? ['by ', person(layer.author)] : ['by a deleted account'];
+  const readOnlyWords = wordsText(readOnlyParts);
   const readOnlyNote = !canDecide && !posted && !diffError && (
     <Tip cut content={readOnlyWords}>
       <p className="ib-prr-note" data-pull-review-readonly={layer.mine ? 'unlinked' : 'teammate'}>
-        {readOnlyWords}
+        <Named words={readOnlyParts} host={layer.host} />
       </p>
     </Tip>
   );

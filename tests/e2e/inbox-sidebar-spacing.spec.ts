@@ -3,8 +3,8 @@
  * real Chromium against the compiled binary under a temp HOME and data dir: a
  * header sits 2 px under a closed section with no row left and 12 px (8 on a
  * phone) under rows, a closed section's kept row included, and rows sit directly
- * under their header. Agents is an inset panel, so its own paddings add to that
- * (6 px above its header, 8 px under its rows and below the panel). The row around the Projects header is exactly that header,
+ * under their header. Agents is a section like the others (no panel), its rows 2 px under its header.
+ * The row around the Projects header is exactly that header,
  * so the gap above it is no hover.
  *
  * A real pin. Machines come from the list's answer, the one field stood in for:
@@ -35,7 +35,7 @@ interface World {
 }
 let world: World;
 
-/** The sections top to bottom, as one line: `Pin -2- Ag -0- rows -12- Proj`. Agents' rows are its machines' groups. */
+/** The sections top to bottom, as one line: `Pin -2- Ag -0- rows -12- Proj`. Agents' rows are its groups, or its empty line. */
 const layout = (page: Page, scope: string) =>
   page.evaluate((selector) => {
     const root = document.querySelector(selector)!;
@@ -130,16 +130,19 @@ test.afterAll(async () => {
   }
 });
 
-// Agents is an inset panel (approval "inbox-agents-section"): its header sits inside the panel's 6 px top padding and
-// its rows 8 px under the header; below the panel, its 8 px bottom padding before the next header's own gap.
-for (const [device, phone, set] of [['desktop', false, 12], ['phone', true, 8]] as const) {
+// Agents is a section like the others, straight on the sidebar's ground (the owner, 2026-11-09: no panel behind it):
+// its header keeps the sections' gaps, and its rows sit 2 px under it. No agent runs here, so its one row is its
+// empty line (a machine with no agent shows nothing).
+// A phone's sheet (approval "inbox-phone-sidebar-sheet"): every heading sits 8 px under what is above it, closed or open
+// (a 44 px heading every 52 px), since each heading is a sticky row of its own there.
+for (const [device, phone, set, shut] of [['desktop', false, 12, 2], ['phone', true, 8, 8]] as const) {
   test(`${device}: closed headers sit evenly, and rows stay with their header and set off the next`, async () => {
     const { page } = world;
-    expect(await layout(page, await open(['pinned', 'agents'], phone))).toBe('Pin -8- Ag -10- Proj -0- rows');
-    expect(await layout(page, await open(['pinned', 'agents', 'projects'], phone))).toBe('Pin -8- Ag -10- Proj');
-    expect(await layout(page, await open([], phone))).toBe(`Pin -0- rows -${set + 6}- Ag -8- rows -${set + 8}- Proj -0- rows`);
-    expect(await layout(page, await open(['pinned'], phone))).toBe(`Pin -8- Ag -8- rows -${set + 8}- Proj -0- rows`);
-    expect(await layout(page, await open(['agents'], phone))).toBe(`Pin -0- rows -${set + 6}- Ag -10- Proj -0- rows`);
+    expect(await layout(page, await open(['pinned', 'agents'], phone))).toBe(`Pin -${shut}- Ag -${shut}- Proj -0- rows`);
+    expect(await layout(page, await open(['pinned', 'agents', 'projects'], phone))).toBe(`Pin -${shut}- Ag -${shut}- Proj`);
+    expect(await layout(page, await open([], phone))).toBe(`Pin -0- rows -${set}- Ag -2- rows -${set}- Proj -0- rows`);
+    expect(await layout(page, await open(['pinned'], phone))).toBe(`Pin -${shut}- Ag -2- rows -${set}- Proj -0- rows`);
+    expect(await layout(page, await open(['agents'], phone))).toBe(`Pin -0- rows -${set}- Ag -${shut}- Proj -0- rows`);
   });
 }
 
@@ -147,7 +150,7 @@ test("a closed section's kept row sets off the next header, like any rows", asyn
   const { page, thread } = world;
   const scope = await open(['pinned', 'agents'], false, `#thread=${thread}`);
   await expect(page.locator(`${scope} .ib-pins > *`)).toHaveCount(1);
-  expect(await layout(page, scope)).toBe('Pin -0- rows -18- Ag -10- Proj -0- rows');
+  expect(await layout(page, scope)).toBe('Pin -0- rows -12- Ag -2- Proj -0- rows');
 });
 
 test('the gap above Projects is no hover: the row around its header is exactly the header', async () => {

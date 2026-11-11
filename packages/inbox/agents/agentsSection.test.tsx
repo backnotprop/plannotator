@@ -199,7 +199,7 @@ function sidebarProps(over: Partial<SidebarProps> = {}): SidebarProps {
   } as SidebarProps;
 }
 
-const three = () => machinesModel([view(SELF, 'Studio'), view(MAC, 'MacBook'), view(MINI, 'Mini', { state: 'offline' })]);
+const three = () => machinesModel([view(SELF, 'Studio'), view(MAC, 'MacBook', { state: 'offline' }), view(MINI, 'Mini')]);
 const surface = () => document.querySelector<HTMLElement>('[data-agents-surface]');
 const names = (scope: ParentNode) => [...scope.querySelectorAll('.ib-name')].map((el) => el.textContent);
 const mark = (id: string) => document.querySelector<HTMLElement>(`[data-agent-mark="${id}"]`)!;
@@ -214,13 +214,14 @@ test.skipIf(!hasDom)("Agents takes Machines' place above Projects: each machine 
   expect(headers.indexOf('agents')).toBeLessThan(headers.indexOf('projects'));
   expect(document.querySelector('[data-sidebar-section="agents"]')!.textContent).toBe('Agents');
   const groups = [...surface()!.querySelectorAll<HTMLElement>('[data-agents-machine]')];
-  expect(groups.map((g) => g.querySelector('[data-machine] .ib-name')!.textContent)).toEqual(['Studio', 'MacBook', 'Mini']);
-  expect(groups.map((g) => [...g.querySelectorAll('[data-sidebar-agent]')].map((r) => r.getAttribute('data-sidebar-agent')))).toEqual([['ses_s1', 'ses_s2'], ['ses_m1'], []]);
+  // Mini has no agent: it shows nothing, no caption and no empty line.
+  expect(groups.map((g) => g.querySelector('[data-machine] .ib-name')!.textContent)).toEqual(['Studio', 'MacBook']);
+  expect(groups.map((g) => [...g.querySelectorAll('[data-sidebar-agent]')].map((r) => r.getAttribute('data-sidebar-agent')))).toEqual([['ses_s1', 'ses_s2'], ['ses_m1']]);
   expect(names(groups[0]!.querySelector('[data-sidebar-agent]')!)).toEqual(['Fix login redirect']);
   // Each caption is quiet (the grey of a quiet row) and an asleep machine says so to a screen reader; none counts.
   for (const caption of surface()!.querySelectorAll('[data-machine]')) expect(caption.classList.contains('ib-proj-quiet')).toBe(true);
-  expect(surface()!.querySelector(`[data-machine="${MINI}"]`)!.hasAttribute('data-away')).toBe(true);
-  expect(surface()!.querySelector(`[data-machine="${MINI}"]`)!.textContent).toContain('Mini asleep since');
+  expect(surface()!.querySelector(`[data-machine="${MAC}"]`)!.hasAttribute('data-away')).toBe(true);
+  expect(surface()!.querySelector(`[data-machine="${MAC}"]`)!.textContent).toContain('MacBook asleep since');
   expect(surface()!.querySelector('.ib-n')).toBeNull();
   // A caption is still the machine's filter, marked while shown.
   act(() => surface()!.querySelector<HTMLButtonElement>(`[data-machine="${MAC}"]`)!.click());
@@ -279,6 +280,105 @@ test.skipIf(!hasDom)('Add agent and Add machine are always-shown buttons with th
   expect(surface()!.querySelectorAll('[data-agents-add]')).toHaveLength(1);
 });
 
+test.skipIf(!hasDom)("a starred thread that is also an agent's thread shows under Starred and under Agents, both rows opening it", () => {
+  // The phone sheet's mock listed such a thread under Starred only; the owner did not approve that (approval
+  // "inbox-phone-sidebar-sheet", NOT approved): Agents stays a list of every agent.
+  setInboxAgents([group([agent('ses_s1'), agent('ses_s2')])]);
+  const starred = { ...threadRow('thr_star', 'ses_s1', 'Starred and running'), project: { id: 'prj_bill', name: 'billing-svc' }, section: 'waiting', unread: false, unseen: 0, read_at: null, resolved_at: null, questions: { open: 2, holds_up: [] } } as unknown as InboxListRow;
+  const opened: string[] = [];
+  mount(<Sidebar {...sidebarProps({ pins: [starred], agentRows: [starred, threadRow('thr_other', 'ses_s2', 'Only running')], onOpenPin: (row) => opened.push(`pin:${row.thread_id}`), onOpenAgentThread: (id) => opened.push(`agent:${id}`) })} />);
+  expect(document.querySelectorAll('[data-pinned-row="thr_star"]')).toHaveLength(1);
+  expect(names(surface()!)).toEqual(['Starred and running', 'Only running']);
+  act(() => document.querySelector<HTMLElement>('[data-pinned-row="thr_star"]')!.click());
+  act(() => surface()!.querySelector<HTMLElement>('[data-sidebar-agent="ses_s1"] .ib-proj')!.click());
+  expect(opened).toEqual(['pin:thr_star', 'agent:thr_star']);
+});
+
+test.skipIf(!hasDom)('closed, Agents is its heading alone, whatever is open: no row for the open thread, no machine name, no Add buttons; only a press on the heading opens it', async () => {
+  // Which sections are closed is kept through Plannotator's storage (cookies in the app); a map stands in for them.
+  const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
+  const stored = new Map<string, string>();
+  setStorageBackend({ getItem: (key) => stored.get(key) ?? null, setItem: (key, value) => void stored.set(key, value), removeItem: (key) => void stored.delete(key) });
+  try {
+    await closedAgents();
+  } finally {
+    resetStorageBackend();
+  }
+});
+
+async function closedAgents() {
+  const both = (state: InboxAgent['state'] = 'idle') => [group([agent('ses_s1', { state }), agent('ses_s2')], SELF), group([agent('ses_m1')], MAC)];
+  setInboxAgents(both());
+  const rowsOf = [threadRow('thr_1', 'ses_s1', 'Invoice retries')];
+  const props = (over: Partial<SidebarProps> = {}) => sidebarProps({ machines: three(), agentRows: rowsOf, onAddAgent: noop, onAddMachine: noop, ...over });
+  mount(<Sidebar {...props()} />);
+  const header = () => document.querySelector<HTMLButtonElement>('[data-sidebar-section="agents"]')!;
+  const state = () => ({
+    open: header().getAttribute('aria-expanded'),
+    buttons: [...surface()!.querySelectorAll('[data-agents-add]')].map((b) => b.getAttribute('data-agents-add')),
+    rows: [...surface()!.querySelectorAll('[data-sidebar-agent]')].map((r) => r.getAttribute('data-sidebar-agent')),
+    captions: surface()!.querySelectorAll('[data-machine]').length,
+    under: surface()!.querySelector('[data-agents-section]')!.childElementCount,
+  });
+  const shut = { open: 'false', buttons: [], rows: [], captions: 0, under: 0 };
+  expect(state()).toEqual({ open: 'true', buttons: ['agent', 'machine'], rows: ['ses_s1', 'ses_s2', 'ses_m1'], captions: 2, under: 2 });
+  act(() => header().click());
+  expect(state()).toEqual(shut);
+  expect(surface()!.querySelector('[data-sidebar-section="agents"] .ib-agents-mk')).not.toBeNull();
+  // The thread of a listed agent opens (the person is replying in it): still the heading alone.
+  mount(<Sidebar {...props({ openThreadId: 'thr_1' })} />);
+  expect(state()).toEqual(shut);
+  // That machine's list is shown: no machine name either.
+  mount(<Sidebar {...props({ openThreadId: 'thr_1', machineId: MAC })} />);
+  expect(state()).toEqual(shut);
+  // An agent starts, and an agent's state changes (it now waits on the person): closed stays closed.
+  act(() => setInboxAgents([...both('waiting'), group([agent('ses_n1')], MINI)]));
+  expect(state()).toEqual(shut);
+  // Every agent gone: no empty line under a closed heading.
+  act(() => setInboxAgents([group([], SELF)]));
+  expect(state()).toEqual(shut);
+  // A new draw (a reload's) is still closed.
+  act(() => setInboxAgents(both()));
+  unmountAll();
+  mount(<Sidebar {...props({ openThreadId: 'thr_1' })} />);
+  expect(state()).toEqual(shut);
+  // The person presses the heading: everything is back, the open thread's agent marked.
+  act(() => header().click());
+  expect(state()).toEqual({ open: 'true', buttons: ['agent', 'machine'], rows: ['ses_s1', 'ses_s2', 'ses_m1'], captions: 2, under: 2 });
+  expect(surface()!.querySelector('[data-sidebar-agent="ses_s1"] .ib-proj')!.getAttribute('aria-current')).toBe('page');
+}
+
+test.skipIf(!hasDom)("a machine's name shows only while agents show from more than one machine, and a machine with no agent shows nothing", () => {
+  const captions = () => [...surface()!.querySelectorAll('[data-machine] .ib-name')].map((el) => el.textContent);
+  const rows = () => [...surface()!.querySelectorAll('[data-sidebar-agent]')].map((r) => r.getAttribute('data-sidebar-agent'));
+  const flush = () => surface()!.querySelector('[data-agents-section]')!.hasAttribute('data-flat');
+  const draw = (groups: InboxAgentsGroup[], machineId: string | null = null) => {
+    act(() => setInboxAgents(groups));
+    mount(<Sidebar {...sidebarProps({ machines: three(), machineId })} />);
+  };
+  // One machine has agents, the two others none: no caption at all, the agents alone and flush.
+  draw([group([agent('ses_s1'), agent('ses_s2')], SELF), group([], MAC), group([], MINI)]);
+  expect([captions(), rows(), flush()]).toEqual([[], ['ses_s1', 'ses_s2'], true]);
+  expect(surface()!.querySelectorAll('[data-agents-machine]')).toHaveLength(1);
+  // The agents all on another machine than this one: still one machine, still no caption.
+  draw([group([], SELF), group([agent('ses_m1')], MAC)]);
+  expect([captions(), rows(), flush()]).toEqual([[], ['ses_m1'], true]);
+  // Not even for the machine the list is filtered to.
+  draw([group([], SELF), group([agent('ses_m1')], MAC)], MAC);
+  expect(captions()).toEqual([]);
+  // Two machines with agents: both named, their agents a step in; the third, empty, is not there.
+  draw([group([agent('ses_s1')], SELF), group([agent('ses_m1')], MAC), group([], MINI)]);
+  expect([captions(), rows(), flush()]).toEqual([['Studio', 'MacBook'], ['ses_s1', 'ses_m1'], false]);
+  // An ended agent is not an agent on show: its machine counts as empty.
+  draw([group([agent('ses_s1')], SELF), group([agent('ses_m2', { state: 'ended', live: false })], MAC)]);
+  expect([captions(), rows()]).toEqual([[], ['ses_s1']]);
+  // Every machine empty: the one empty line, once, and no caption.
+  draw([group([], SELF), group([], MAC), group([], MINI)]);
+  expect(captions()).toEqual([]);
+  expect(surface()!.querySelectorAll('.ib-agents-empty')).toHaveLength(1);
+  expect(surface()!.textContent).toContain('Agents show here while they run.');
+});
+
 const HERE: InboxComposeLaunch = {
   agents: [
     { agent: 'claude-code', name: 'Claude Code' },
@@ -314,7 +414,7 @@ test.skipIf(!hasDom)('Add agent opens New message with "New … session" chosen:
   expect(inDialog('[data-compose-to]')!.textContent).toContain('New Claude Code session');
 });
 
-const ART = { glass: '<i data-art="glass"></i>', yellow: '<i data-art="yellow"></i>', transparent: '<i data-art="transparent"></i>', totman: '<i data-art="totman"></i>' };
+const ART = Object.fromEntries((motion.AGENT_FACES ?? []).filter((face) => face !== 'agent').map((face) => [face, `<i data-art="${face}"></i>`])) as Parameters<typeof motion.setAgentFaceArt>[0];
 
 test.skipIf(!hasDom)('a click on a mark shows the next face (agent, Glass, Yellow, Transparent, Face, agent), never opens the row, and the face is kept until the next click', async () => {
   motion.setAgentFaceArt(ART);
@@ -342,7 +442,7 @@ test.skipIf(!hasDom)('a click on a mark shows the next face (agent, Glass, Yello
     seen.push(mark('ses_s1').dataset.face!);
   }
   expect(seen).toEqual(['glass', 'yellow', 'transparent', 'totman', 'agent']);
-  expect(window.localStorage.getItem(faces.AGENT_FACES_KEY)).toBe('{}');
+  expect(JSON.parse(window.localStorage.getItem(faces.AGENT_FACES_PAINT_KEY)!).faces).toEqual({});
   expect(opened).toEqual([]);
 });
 
@@ -371,7 +471,8 @@ test.skipIf(!hasDom)('reduced motion: every mark holds still (no loop, no spin, 
 test.skipIf(!hasDom)('perf: off screen a mark pauses everything and starts no fidget; back on screen it plays; a hidden face stops; unmount cancels all', async () => {
   motion.setAgentFaceArt(ART);
   motion.agentMotionOptions.clock = 200;
-  setInboxAgents([group([agent('ses_c', { state: 'working' })], SELF)]);
+  // Codex: a mark with loops of its own (Claude is still between its rare gestures).
+  setInboxAgents([group([agent('ses_c', { host: 'codex', state: 'working' })], SELF)]);
   mount(<Sidebar {...sidebarProps({ machines: three() })} />);
   await wait(20);
   const el = mark('ses_c');

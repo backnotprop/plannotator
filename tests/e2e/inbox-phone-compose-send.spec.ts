@@ -1,6 +1,7 @@
 /**
- * New message on a phone (approval .product/approved/inbox-phone-compose-send, option C): Send sits at the bottom right
- * on the row with attachments and mic, and with the keyboard up the head folds to one line, To in the top bar.
+ * New message on a phone (approval .product/approved/inbox-phone-compose-send, option C; the row and To are approval
+ * "inbox-phone-composer-picker"): Send sits at the bottom right on the row with attachments, Skills, To and the mic.
+ * The words and that row are one card that ends 8 px above the keyboard; the head keeps its title with the keyboard up.
  *
  * The keyboard cannot exist in a headless browser, so it is a stand-in: WebKit replays the owner's iOS 26 readings
  * (the visual viewport loses the keyboard, `innerHeight` follows it, `clientHeight` does not), Chromium the Android
@@ -10,14 +11,15 @@
  * Proved here, against the compiled binary under a temp PLANNOTATOR_DATA_DIR (PLANNOTATOR_INBOX_CONNECT=0, no browser),
  * at 320 and 390 px in WebKit and Chromium:
  *
- * - One Send, in the foot, on screen and on top at its own centre with the keyboard up or down, at least 12 px from the
+ * - One Send, in the foot, on screen and on top at its own centre with the keyboard up or down, the row's 8 px from the
  *   buttons on its left; a tap on it with the keyboard up sends.
- * - To is on screen in every state, in the top bar's line with the keyboard up, clear of Cancel and Save draft.
- * - No gap: the message field runs to the foot, and the foot to the keyboard (or the sheet's bottom).
+ * - To is on screen in every state, in the foot's row, clear of the buttons on both its sides; the top bar keeps its
+ *   title between Cancel and Save draft with the keyboard up.
+ * - No gap: the message field runs to the foot, and the card to 8 px over the keyboard (or the sheet's bottom).
  * - The notes and tiles step aside for the words, but a refused file does not; the Thread row always stays.
  * - Save draft is at the top right only while nothing can be sent. Delete draft is off the sheet and on the Drafts page.
- * - A draft to an ended session keeps To's chevron clear of Save draft and says "ended" whole.
- * - Under the fold's threshold Send still stays on screen: a strip of 78 px, and a browser that resizes the layout.
+ * - A draft to an ended session keeps To's chevron in To and says "ended" whole.
+ * - Under the keyboard's threshold Send still stays on screen: a strip of 78 px, and a browser that resizes the layout.
  * - While dictating the row stays one row with the clip and mic where they were.
  * - Chromium at 1440 x 900: none of it applies.
  *
@@ -46,7 +48,7 @@ const SIZES = [
   { width: 390, height: 660, keyboard: 403 },
   { width: 320, height: 568, keyboard: 353 },
 ] as const;
-/** Dictating, the status has the least room here: Send still carries its word. */
+/** Dictating, the status has the least room here (Send is the round arrow at every width). */
 const TIGHT = [
   { width: 360, height: 640, keyboard: 383 },
   { width: 375, height: 667, keyboard: 410 },
@@ -176,11 +178,12 @@ async function openCompose(page: Page, pick = true): Promise<void> {
   await page.goto(world.url);
   await page.locator('.ib-lhead [data-open-compose]').click();
   const sheet = sheetOf(page);
-  await expect(sheet.locator('.ib-cp-tobtn')).not.toHaveAttribute('data-loading', /.*/);
+  // A phone's To: the pill in the foot's row. It opens the sheet, and a row of the sheet picks.
+  await expect(sheet.locator('[data-compose-to]')).not.toHaveAttribute('data-loading', /.*/);
   if (!pick) return;
-  await sheet.locator('.ib-cp-tobtn').click();
-  await sheet.locator(`[data-compose-session="${SESSION}"]`).click();
-  await expect(sheet.locator(`.ib-cp-tobtn[data-compose-to="${SESSION}"]`)).toBeVisible();
+  await sheet.locator('[data-compose-to]').click();
+  await sheet.locator(`[data-compose-to-sheet] [data-compose-session="${SESSION}"]`).click();
+  await expect(sheet.locator(`.ib-cp-foot [data-compose-to="${SESSION}"]`)).toBeVisible();
 }
 
 /** The worst draft, kept once in this Inbox: two files, a long thread name, a long message. */
@@ -202,7 +205,7 @@ async function openWorstDraft(page: Page): Promise<void> {
   }
   await page.goto(`${world.url}#drafts`);
   await page.locator('[data-draft-id]', { hasText: /Line 1|Keep the checkout total/ }).locator('.ib-draft-open').click();
-  await expect(sheetOf(page).locator(`.ib-cp-tobtn[data-compose-to="${SESSION}"]`)).toBeVisible();
+  await expect(sheetOf(page).locator(`.ib-cp-foot [data-compose-to="${SESSION}"]`)).toBeVisible();
   await expect(sheetOf(page).locator('[data-compose-saved]')).toBeVisible();
   await expect(sheetOf(page).locator('[data-voice-mic]')).toBeVisible();
 }
@@ -221,13 +224,16 @@ interface Layout {
   sendOnTop: boolean;
   sheet: Box;
   bar: Box;
+  title: Box | null;
   cancel: Box | null;
   to: Box | null;
   chevron: Box | null;
+  card: Box;
   thread: Box | null;
   text: Box | null;
   foot: Box;
   clip: Box | null;
+  skills: Box | null;
   mic: Box | null;
   count: Box | null;
   saved: Box | null;
@@ -254,13 +260,17 @@ async function read(page: Page): Promise<Layout> {
       sendOnTop: !!hit?.closest('[data-compose-send]'),
       sheet: rect('dialog')!,
       bar: rect('.ib-cp-bar')!,
+      title: rect('.ib-cp-bar h2'),
       cancel: rect('[data-compose-cancel]'),
-      to: rect('.ib-cp-tobtn, .ib-cp-none-to'),
-      chevron: rect('.ib-cp-tobtn > svg.ib-ic'),
+      // A phone's To is the pill in the foot's row ("No agent is running" is a span there).
+      to: rect('.ib-cp-foot [data-compose-to]'),
+      chevron: rect('.ib-cp-foot [data-compose-to] > svg.ib-apill-c'),
+      card: rect('[data-compose-pcard]')!,
       thread: rect('.ib-cp-thread'),
       text: rect('[data-compose-text] textarea'),
       foot: rect('.ib-cp-foot')!,
       clip: rect('.ib-cp-clip'),
+      skills: rect('[data-compose-skills]'),
       mic: rect('[data-voice-mic]'),
       count: rect('[data-compose-file-count]'),
       saved: rect('[data-compose-saved]'),
@@ -270,44 +280,62 @@ async function read(page: Page): Promise<Layout> {
   }) as Promise<Layout>;
 }
 
-/** One Send, on the foot's one row, in reach, and at least 12 px from what is on its left. */
+/** One Send, on the foot's one row, in reach, and the row's 8 px from what is on its left. */
 function sendInReach(l: Layout, name: string): void {
   expect(l.sends, `${name}: one Send`).toBe(1);
   expect(l.send, `${name}: Send is drawn`).toBeTruthy();
   expect(l.sendOnTop, `${name}: nothing covers Send`).toBe(true);
   expect(l.send.bottom, `${name}: Send ends above the keyboard`).toBeLessThanOrEqual(l.seen + 0.5);
   expect(l.send.right, `${name}: Send is on screen`).toBeLessThanOrEqual(l.width);
-  expect(l.send.bottom - l.send.top, `${name}: Send is 44 px tall`).toBeGreaterThanOrEqual(43.5);
+  // 36 px to the eye; its `::after` makes it 44 px to the touch (phoneComposer.css).
+  expect(l.send.bottom - l.send.top, `${name}: Send is 36 px tall`).toBeGreaterThanOrEqual(35.5);
   expect(l.foot.bottom - l.foot.top, `${name}: the foot is one row`).toBeLessThanOrEqual(56);
-  const left = Math.max(...[l.clip, l.count, l.mic, l.saved].map((part) => part?.right ?? 0));
-  expect(l.send.left - left, `${name}: Send's gap from the left-hand buttons`).toBeGreaterThanOrEqual(11.5);
+  const left = Math.max(...[l.clip, l.skills, l.to, l.count, l.mic, l.saved].map((part) => part?.right ?? 0));
+  expect(l.send.left - left, `${name}: Send's gap from the left-hand buttons`).toBeGreaterThanOrEqual(7.5);
 }
 
-/** To is on screen, whatever else steps aside. */
+/** To is on screen, in the foot's row, clear of the buttons on both its sides, whatever else steps aside. */
 function toOnScreen(l: Layout, name: string): void {
   expect(l.to, `${name}: To is drawn`).toBeTruthy();
-  expect(l.to!.top, `${name}: To starts on screen`).toBeGreaterThanOrEqual(-0.5);
-  expect(l.to!.bottom, `${name}: To ends above the foot`).toBeLessThanOrEqual(l.foot.top + 0.5);
+  expect(l.to!.left, `${name}: To starts on screen`).toBeGreaterThanOrEqual(-0.5);
   expect(l.to!.right, `${name}: To ends on screen`).toBeLessThanOrEqual(l.width);
-}
-
-/** The head is one line: To shares it with Cancel and Save draft, and overlaps neither. */
-function headFolded(l: Layout, name: string): void {
-  toOnScreen(l, name);
-  expect(l.to!.top, `${name}: To is on the top bar's line`).toBeGreaterThanOrEqual(l.bar.top - 0.5);
-  expect(l.to!.bottom, `${name}: To is on the top bar's line`).toBeLessThanOrEqual(l.bar.bottom + 0.5);
-  expect(l.to!.left, `${name}: To clears Cancel`).toBeGreaterThanOrEqual(l.cancel!.right - 0.5);
-  if (l.save) expect(l.to!.right, `${name}: To clears Save draft`).toBeLessThanOrEqual(l.save.left + 0.5);
-  // The button's box can stay clear while what it holds runs out of it: the chevron is what would land on Save draft.
+  expect(l.to!.top, `${name}: To is on the foot's row`).toBeGreaterThanOrEqual(l.foot.top - 0.5);
+  expect(l.to!.bottom, `${name}: To is on the foot's row`).toBeLessThanOrEqual(l.foot.bottom + 0.5);
+  expect(l.to!.bottom, `${name}: To ends above the keyboard`).toBeLessThanOrEqual(l.seen + 0.5);
+  const before = Math.max(...[l.clip, l.count, l.skills].map((part) => part?.right ?? 0));
+  expect(l.to!.left, `${name}: To clears the buttons on its left`).toBeGreaterThanOrEqual(before - 0.5);
+  const after = Math.min(...[l.saved, l.mic, l.send].map((part) => part?.left ?? Infinity));
+  expect(l.to!.right, `${name}: To clears what is on its right`).toBeLessThanOrEqual(after + 0.5);
+  // The button's box can stay clear while what it holds runs out of it: the chevron is what would land on its neighbour.
   if (l.chevron) expect(l.chevron.right, `${name}: the chevron stays in To`).toBeLessThanOrEqual(l.to!.right + 0.5);
-  if (l.chevron && l.save) expect(l.chevron.right, `${name}: the chevron clears Save draft`).toBeLessThanOrEqual(l.save.left + 0.5);
 }
 
-/** The owner's gap: the field runs to the foot, the foot to the keyboard or the sheet's bottom. */
+/**
+ * The keyboard is up and the head does not fold: the top bar keeps its title, between Cancel and Save draft, and To
+ * stays in the foot's row.
+ */
+function headWhole(l: Layout, name: string): void {
+  toOnScreen(l, name);
+  expect(l.title, `${name}: the title stays with the keyboard up`).toBeTruthy();
+  expect(l.title!.top, `${name}: the title is on the top bar's line`).toBeGreaterThanOrEqual(l.bar.top - 0.5);
+  expect(l.title!.bottom, `${name}: the title is on the top bar's line`).toBeLessThanOrEqual(l.bar.bottom + 0.5);
+  expect(l.title!.left, `${name}: the title clears Cancel`).toBeGreaterThanOrEqual(l.cancel!.right - 0.5);
+  if (l.save) expect(l.title!.right, `${name}: the title clears Save draft`).toBeLessThanOrEqual(l.save.left + 0.5);
+  if (l.save) expect(l.save.bottom, `${name}: Save draft is on the top bar's line`).toBeLessThanOrEqual(l.bar.bottom + 0.5);
+  expect(l.bar.bottom, `${name}: the top bar is over the card`).toBeLessThanOrEqual(l.card.top + 0.5);
+}
+
+/**
+ * The owner's gap: the field runs to the foot, and the foot is the end of the card, which stops 8 px over the keyboard
+ * or the sheet's bottom (the sheet's own box runs on under the keyboard).
+ */
 function noGap(l: Layout, name: string): void {
   expect(l.text, `${name}: the field is drawn`).toBeTruthy();
   expect(l.foot.top - l.text!.bottom, `${name}: the gap under the field`).toBeLessThanOrEqual(12);
-  expect(Math.abs(Math.min(l.seen, l.sheet.bottom) - l.foot.bottom), `${name}: the gap under the foot`).toBeLessThanOrEqual(1);
+  // The card's own 1 px border is all that is under the foot.
+  expect(l.card.bottom - l.foot.bottom, `${name}: the foot ends the card`).toBeLessThanOrEqual(1.5);
+  expect(l.card.bottom - l.foot.bottom, `${name}: the foot is inside the card`).toBeGreaterThanOrEqual(-0.5);
+  expect(Math.abs(Math.min(l.seen, l.sheet.bottom) - 8 - l.card.bottom), `${name}: the card ends 8 px over the keyboard`).toBeLessThanOrEqual(1);
 }
 
 /** A picture of the whole window, with a grey box for the stand-in. In the dialog: a modal dialog is the top layer. */
@@ -362,7 +390,7 @@ for (const engine of ENGINES) {
     for (const size of SIZES) {
       const at = `${size.width} px`;
 
-      test(`${at}: Send at the bottom right, the head folds with the keyboard up, no gap, and a tap sends`, async () => {
+      test(`${at}: Send at the bottom right, To in its row, the head keeps its title with the keyboard up, no gap, and a tap sends`, async () => {
         const page = await phone(size);
         await openCompose(page);
         const sheet = sheetOf(page);
@@ -374,7 +402,9 @@ for (const engine of ENGINES) {
         sendInReach(closed, 'keyboard closed');
         noGap(closed, 'keyboard closed');
         toOnScreen(closed, 'keyboard closed');
-        expect(closed.to!.top, 'To is under the top bar').toBeGreaterThanOrEqual(closed.bar.bottom - 0.5);
+        // No To line under the top bar: To is the pill in the foot's row.
+        await expect(sheet.locator('.ib-cp-head [data-compose-to]')).toHaveCount(0);
+        await expect(sheet.locator('[data-compose-to]')).toHaveCount(1);
         expect(closed.thread, 'Thread is drawn').toBeTruthy();
         await expect(sheet.locator('.ib-cp-bar h2')).toBeVisible();
         await expect(sheet.locator('.ib-cp-bar [data-compose-send]')).toHaveCount(0);
@@ -383,11 +413,12 @@ for (const engine of ENGINES) {
         await keyboardUp(page, engine.up, size.keyboard);
         const open = await read(page);
         sendInReach(open, 'keyboard open');
-        headFolded(open, 'keyboard open');
+        headWhole(open, 'keyboard open');
+        await expect(sheet.locator('.ib-cp-bar h2')).toBeVisible();
         noGap(open, 'keyboard open');
         // Thread stays with the keyboard up (the owner, 2026-11-02: hiding it lost the subject line).
         expect(open.thread, 'Thread stays').toBeTruthy();
-        expect(open.thread!.top, 'Thread is under the folded head').toBeGreaterThanOrEqual(open.bar.bottom - 0.5);
+        expect(open.thread!.top, 'Thread is under the head').toBeGreaterThanOrEqual(open.bar.bottom - 0.5);
         expect(open.thread!.bottom, 'Thread is over the foot').toBeLessThanOrEqual(open.foot.top + 0.5);
         await shot(page, `${engine.name}-${size.width}-keyboard-open`, true);
 
@@ -396,7 +427,7 @@ for (const engine of ENGINES) {
         const again = await read(page);
         noGap(again, 'keyboard closed again');
         expect(again.thread, 'Thread is back').toBeTruthy();
-        expect(again.to!.top, 'To is back under the top bar').toBeGreaterThanOrEqual(again.bar.bottom - 0.5);
+        toOnScreen(again, 'keyboard closed again');
 
         // A finger on Send, with the keyboard up: it goes.
         await keyboardUp(page, engine.up, size.keyboard);
@@ -423,7 +454,7 @@ for (const engine of ENGINES) {
         await keyboardUp(page, engine.up, size.keyboard);
         const open = await read(page);
         sendInReach(open, 'draft, keyboard open');
-        headFolded(open, 'draft, keyboard open');
+        headWhole(open, 'draft, keyboard open');
         await expect(sheet.locator('[data-compose-file]').first()).toBeHidden();
         await expect(sheet.locator('[data-compose-file-count]')).toHaveText('2 attached');
         await shot(page, `${engine.name}-${size.width}-worst-keyboard-open`, true);
@@ -438,7 +469,7 @@ for (const engine of ENGINES) {
         await page.context().close();
       });
 
-      test(`${at}: nothing can be sent: Save draft at the top right beside To, and the status for a screen reader only`, async () => {
+      test(`${at}: nothing can be sent: Save draft at the top right, To in the row, and the status for a screen reader only`, async () => {
         const page = await phone(size);
         await openCompose(page, false);
         const sheet = sheetOf(page);
@@ -457,11 +488,11 @@ for (const engine of ENGINES) {
         await keyboardUp(page, engine.up, size.keyboard);
         const open = await read(page);
         sendInReach(open, 'nobody in To');
-        headFolded(open, 'nobody in To');
+        headWhole(open, 'nobody in To');
 
         // A pick: Save draft goes, Send can.
-        await sheet.locator('.ib-cp-tobtn').tap();
-        await sheet.locator(`[data-compose-session="${SESSION}"]`).tap();
+        await sheet.locator('[data-compose-to]').tap();
+        await sheet.locator(`[data-compose-to-sheet] [data-compose-session="${SESSION}"]`).tap();
         await expect(sheet.locator('[data-compose-save]')).toHaveCount(0);
         await expect(sheet.locator('[data-compose-send]')).not.toHaveAttribute('aria-disabled', /.*/);
         await page.context().close();
@@ -484,12 +515,12 @@ for (const engine of ENGINES) {
         await expect(sheet.locator('[data-compose-to="none"]')).toHaveText('No agent is running');
         const open = await read(page);
         sendInReach(open, 'no agent, keyboard open');
-        headFolded(open, 'no agent, keyboard open');
+        headWhole(open, 'no agent, keyboard open');
         noGap(open, 'no agent, keyboard open');
         await page.context().close();
       });
 
-      test(`${at}: a draft to an ended session, Save draft beside To: To keeps its chevron and says "ended" whole`, async () => {
+      test(`${at}: a draft to an ended session, Save draft in the top bar: To keeps its chevron and says "ended" whole`, async () => {
         const page = await phone(size);
         const words = `To an ended session, ${engine.name} ${size.width}`;
         await openCompose(page);
@@ -503,7 +534,7 @@ for (const engine of ENGINES) {
         await page.route('**/api/inbox/sessions*', (route) => route.fulfill({ json: { projects: [] } }));
         await page.goto(`${world.url}#drafts`);
         await page.locator('[data-draft-id]', { hasText: words }).locator('.ib-draft-open').click();
-        const to = sheet.locator('.ib-cp-tobtn[data-compose-to="ended"]');
+        const to = sheet.locator('.ib-cp-foot [data-compose-to="ended"]');
         await expect(to).toBeVisible();
         await expect(sheet.locator('[data-compose-note="ended"]')).toBeVisible();
         await field.focus();
@@ -515,13 +546,17 @@ for (const engine of ENGINES) {
         await expect(sheet.locator('[data-compose-note="ended"]')).toBeHidden();
         const open = await read(page);
         sendInReach(open, 'ended, keyboard open');
-        headFolded(open, 'ended, keyboard open');
-        const detail = to.locator('[data-compose-detail]');
-        await expect(detail).toHaveText('· ended', { useInnerText: true });
+        headWhole(open, 'ended, keyboard open');
+        // The pill: the agent's mark, its name struck (not under 360 px), then "ended" whole, then the chevron.
+        const detail = to.locator('.ib-apill-d');
+        await expect(detail).toHaveText('ended', { useInnerText: true });
         const ended = await detail.evaluate((el) => ({ whole: el.scrollWidth <= el.clientWidth, right: el.getBoundingClientRect().right }));
         expect(ended.whole, '"ended" is not cut').toBe(true);
         expect(ended.right, '"ended" stops short of the chevron').toBeLessThanOrEqual(open.chevron!.left + 0.5);
+        // The narrowest phones: a struck letter says nothing. The mark says who, the button's name the rest.
         if (size.width === 320) await expect(to.locator('s'), 'no sliver of a name at 320').toBeHidden();
+        else await expect(to.locator('s')).toBeVisible();
+        await expect(to.locator('.ib-apill-m')).toBeVisible();
         await expect(to).toHaveAttribute('aria-label', /ended/);
         await shot(page, `${engine.name}-${size.width}-ended-keyboard-open`, true);
 
@@ -530,7 +565,7 @@ for (const engine of ENGINES) {
         await page.context().close();
       });
 
-      test(`${at}: a strip too small to fold for (a hardware keyboard's bar): the sheet ends above it with Send in reach`, async () => {
+      test(`${at}: a strip too small to count as a keyboard (a hardware keyboard's bar): the card ends above it with Send in reach`, async () => {
         const page = await phone(size);
         await openCompose(page);
         const sheet = sheetOf(page);
@@ -538,20 +573,28 @@ for (const engine of ENGINES) {
         await field.focus();
         await field.fill(MESSAGE);
         await engine.up(page, 78);
-        await expect.poll(async () => (await sheet.boundingBox())!.height).toBe(size.height - 78);
+        // The sheet keeps the whole window and pads its bottom by the strip: its card ends 8 px over it.
+        const card = sheet.locator('[data-compose-pcard]');
+        const cardBottom = async () => {
+          const box = (await card.boundingBox())!;
+          return Math.round(box.y + box.height);
+        };
+        await expect.poll(cardBottom).toBe(size.height - 78 - 8);
+        expect((await sheet.boundingBox())!.height, 'the sheet covers the window').toBe(size.height);
         await expect(root(page)).not.toHaveAttribute('data-ib-keyboard', /.*/);
         const strip = await read(page);
         sendInReach(strip, 'a strip');
         toOnScreen(strip, 'a strip');
-        expect(strip.thread, 'nothing folds for a strip').toBeTruthy();
+        noGap(strip, 'a strip');
+        expect(strip.thread, 'nothing steps aside for a strip').toBeTruthy();
 
         await keyboardDown(page);
-        await expect.poll(async () => (await sheet.boundingBox())!.height).toBe(size.height);
+        await expect.poll(cardBottom).toBe(size.height - 8);
         await page.context().close();
       });
     }
 
-    test('844 x 200, a browser that resizes the layout for the keyboard: the head folds with Send in reach', async () => {
+    test('844 x 200, a browser that resizes the layout for the keyboard: the head keeps its title with To and Send in reach', async () => {
       const page = await phone({ width: 844, height: 390, keyboard: 0 });
       await openCompose(page);
       const sheet = sheetOf(page);
@@ -562,7 +605,7 @@ for (const engine of ENGINES) {
       await expect(root(page)).toHaveAttribute('data-ib-keyboard', '');
       const short = await read(page);
       sendInReach(short, 'a short window');
-      headFolded(short, 'a short window');
+      headWhole(short, 'a short window');
       await page.setViewportSize({ width: 844, height: 390 });
       await expect(root(page)).not.toHaveAttribute('data-ib-keyboard', /.*/);
       await expect(sheet.locator('.ib-cp-thread')).toBeVisible();
@@ -586,7 +629,7 @@ for (const engine of ENGINES) {
       await expect(error).toBeVisible();
       const l = await read(page);
       sendInReach(l, 'a failed send');
-      headFolded(l, 'a failed send');
+      headWhole(l, 'a failed send');
       const box = (await error.boundingBox())!;
       expect(box.y, 'the error is under the head').toBeGreaterThanOrEqual(l.bar.bottom - 0.5);
       expect(box.y + box.height, 'the error is over the foot').toBeLessThanOrEqual(l.foot.top + 0.5);
@@ -622,7 +665,7 @@ for (const engine of ENGINES) {
         await expect(line).toBeHidden();
         const open = await read(page);
         sendInReach(open, 'a card, keyboard open');
-        headFolded(open, 'a card, keyboard open');
+        headWhole(open, 'a card, keyboard open');
         await keyboardDown(page);
         await expect(line).toBeVisible();
         await page.context().close();
@@ -655,12 +698,21 @@ for (const engine of ENGINES) {
       const typing = await read(page);
       expect(typing.thread, 'the chip keeps its row while it has focus').toBeTruthy();
       sendInReach(typing, 'typing the name');
-      headFolded(typing, 'typing the name');
+      headWhole(typing, 'typing the name');
       await chip.fill(name);
       await field.focus();
       await expect(sheet.locator('.ib-cp-thread')).toBeVisible();
       await sheet.locator('.ib-cp-foot [data-compose-send]').tap();
       await expect(sheet.locator('[data-compose-thread-name-error]')).toBeVisible();
+      // The thread that has the name, as a pill, and the way through: one line, inside the sheet, whatever the name's length.
+      const pill = sheet.locator('[data-compose-thread-pill]');
+      const join = sheet.locator('[data-compose-thread-name-join]');
+      await expect(pill).toBeVisible();
+      await expect(join).toBeVisible();
+      const pillBox = (await pill.boundingBox())!;
+      const joinBox = (await join.boundingBox())!;
+      expect(pillBox.height, 'the pill never wraps').toBeLessThanOrEqual(30);
+      expect(joinBox.x + joinBox.width, 'Send to that thread stays on screen').toBeLessThanOrEqual(size.width);
       const refused = await read(page);
       sendInReach(refused, 'a name refused');
       toOnScreen(refused, 'a name refused');
@@ -688,7 +740,8 @@ for (const engine of ENGINES) {
           expect(line.x + line.width, 'the status stops short of Send').toBeLessThanOrEqual(after.send.left + 0.5);
           const send = sheetOf(page).getByRole('button', { name: 'Send' });
           await expect(send).toBeDisabled();
-          if (size.width === 320) expect(after.send.right - after.send.left, 'the bare arrow').toBeLessThanOrEqual(44.5);
+          // The round arrow at every width, its word kept as its name.
+          expect(after.send.right - after.send.left, 'the bare arrow').toBeLessThanOrEqual(36.5);
           await sheetOf(page).locator('[data-voice-cancel]').click();
           await expect(page.locator('[data-voice-line]')).toHaveCount(0);
           await page.context().close();

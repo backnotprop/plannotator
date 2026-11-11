@@ -53,6 +53,8 @@ export * from "./inbox-pull-risk";
 export * from "./inbox-reviews";
 // A thread's PRs (approval "inbox-pr-binding"), the same way.
 export * from "./inbox-thread-pulls";
+// Every word an agent reads about the list's rows ("tell your agent", Settings → Rows): one file, the owner's words.
+export * from "./inbox-rows-words";
 
 /** Every record and line carries this version. Fields are only ever added. */
 export const INBOX_RECORD_VERSION = 1 as const;
@@ -754,6 +756,11 @@ export interface InboxMessage {
    * Absent on every other message.
    */
   decision_ask?: true;
+  /**
+   * On the root of a thread the person started from Settings → Rows' ask box. The body stays as typed; what the agent
+   * receives for this message carries `INBOX_ROWS_ASK_BLOCK` (inbox-rows-words.ts) after it. Absent on every other message.
+   */
+  rows_ask?: true;
   /** On a person's reply sent from full screen's floating box: the file on screen. Rendered for the agent at read time; the body never holds it. */
   viewing?: InboxReplyViewing;
   /**
@@ -2030,6 +2037,8 @@ export interface InboxHealth {
   peek?: true;
   /** This Inbox's stable id, which linked machines key on (additive; packages/server/inbox-links.ts). */
   inbox_id?: string;
+  /** The earlier runs of this Inbox's data folder, newest first (additive; packages/shared/inbox/registry.ts `inboxSessionLineage`). */
+  follows?: string[];
   /** The machine-link protocol this Inbox speaks (additive; absent: it cannot link). */
   machine_links?: number;
   /** Additive: this Inbox's door takes `update`, so a linked machine can update it. */
@@ -2332,6 +2341,10 @@ export const INBOX_ROWS_OPTIONS = [
   // Bold thread names (the owner, 2026-11-07: "we should have an option to bold the thread name"), off by default:
   // every thread name in bold, read or not.
   "boldNames",
+  // Pull requests off (approval "inbox-rows-settings-page", 2026-11-10; the owner: "some people might wanna hide the
+  // PRs"), off by default, so a look saved before it shows them as ever: no PR mark at any row's end. The thread's
+  // own PR button stays. No rival.
+  "hidePulls",
 ] as const;
 export type InboxRowsOption = (typeof INBOX_ROWS_OPTIONS)[number];
 
@@ -2761,13 +2774,19 @@ export interface InboxSessionOutdated {
 }
 
 /**
- * The live sessions a reload alone brings up to date, per runtime: the
- * sidebar's "Reload Claude Code N" ("Reload agents N" when more than one
+ * The live sessions a reload brings up to date (for Claude Code, also after
+ * a plugin update: `update_first`), per runtime: the sidebar's "Reload Claude Code N" ("Reload agents N" when more than one
  * runtime has some). Additive beside `restart_claude_code`.
  */
 export interface InboxRestartAgents {
   total: number;
   runtimes: Partial<Record<InboxReloadRuntime, number>>;
+  /**
+   * Of the Claude Code ones, those whose plugin on disk is itself behind this
+   * Inbox (`update_plugin`): the plugin update comes before `/reload-plugins`.
+   * Additive; absent when none.
+   */
+  update_first?: number;
 }
 
 /** One open session as Settings → Agents lists it. */
@@ -3231,6 +3250,11 @@ export interface InboxAgent {
   id: string;
   /** The session it runs as now (a launch's placeholder `launch:<id>` until it started). */
   session: string;
+  /**
+   * The session ids its conversation had before (a poll's `continues`, nearest first; additive, absent when none):
+   * the host gave the conversation a new session id. One of them that still polls is listed as its own agent too.
+   */
+  continues?: string[];
   /** Set when the Inbox launched it: the launch's id and its thread. */
   launch?: { id: string; thread_id: string };
   /** `claude-code`, `codex`, `pi`, ... (`InboxAuthor.host`); null when nothing said. */
@@ -3541,3 +3565,72 @@ export interface InboxActivityModel {
 
 /** The longest span `GET /api/inbox/activity` answers. */
 export const INBOX_ACTIVITY_MAX_DAYS = 400;
+
+/* ---------- Agent faces ---------- */
+
+/**
+ * The face each agent's icon shows (the sidebar's Agents picker, approval "inbox-agent-icon-motion"), saved by the
+ * Inbox so every window, the phone's and the iPad's too, draws the same face for the same agent everywhere. An entry
+ * is keyed by the agent's id as the list names it (`InboxAgent.id`) and says every session id that agent was or is
+ * (`sessions`), so a row, which knows only the sessions that wrote in it, finds the face by any of them. Kept in
+ * `inbox/agent-faces.json` (packages/shared/inbox/agent-faces.ts), outside the event log and config.json. Here and
+ * not in a core file of its own: a new core export waits for a core release (packages/ui's package smoke).
+ */
+
+/** The Glass colours, round the hue wheel: Black and Yellow keep the ids they were stored under (`glass`, `yellow`). */
+export const INBOX_GLASS_FACES = ["glass", "glass-red", "glass-orange", "yellow", "glass-green", "glass-teal", "glass-blue", "glass-purple", "glass-pink", "glass-ice"] as const;
+export type InboxGlassFace = (typeof INBOX_GLASS_FACES)[number];
+/** `agent`: the agent's own mark (never stored); then the Glass colours, Transparent and Face (`totman`). */
+export type InboxAgentFace = "agent" | InboxGlassFace | "transparent" | "totman";
+
+/** Every face, in the picker's order. */
+export const INBOX_AGENT_FACES: readonly InboxAgentFace[] = ["agent", ...INBOX_GLASS_FACES, "transparent", "totman"];
+
+export const isInboxAgentFace = (value: unknown): value is InboxAgentFace => typeof value === "string" && (INBOX_AGENT_FACES as readonly string[]).includes(value);
+
+/** The most agents a person's faces are kept for: the latest choice last, the oldest forgotten past this. */
+export const INBOX_AGENT_FACES_KEPT = 200;
+/** The most session ids one agent's entry keeps (the newest linked last). */
+export const INBOX_AGENT_FACE_SESSIONS_MAX = 16;
+/** The longest agent or session id an entry takes. */
+export const INBOX_AGENT_FACE_ID_MAX = 200;
+
+/** One agent's face. */
+export interface InboxAgentFaceEntry {
+  face: Exclude<InboxAgentFace, "agent">;
+  /** Every session id this agent was or is (never its key itself), oldest first. */
+  sessions: string[];
+}
+
+/** `GET /api/inbox/agent-faces`, a write's answer and `event: agent-faces`. `rev` counts the saves. */
+export interface InboxAgentFacesWire {
+  faces: Record<string, InboxAgentFaceEntry>;
+  rev: number;
+}
+
+/** `POST /api/inbox/agent-faces`: one agent's face (`agent`: forget it), or this browser's faces from before (`adopt`). */
+export type InboxAgentFaceChange = { agent: string; sessions?: string[]; face: InboxAgentFace } | { adopt: Record<string, InboxAgentFace> };
+
+const isId = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= INBOX_AGENT_FACE_ID_MAX && value.trim() === value;
+
+/** A list of session ids as an entry keeps it: ids only, no repeat, never `key`, at most the newest MAX. */
+export function cleanInboxFaceSessions(value: unknown, key: string): string[] {
+  const out: string[] = [];
+  for (const item of Array.isArray(value) ? value : []) if (isId(item) && item !== key && !out.includes(item)) out.push(item);
+  return out.slice(-INBOX_AGENT_FACE_SESSIONS_MAX);
+}
+
+/** A faces map as read from a file, a write's answer or an event: entries that do not parse are dropped. */
+export function readInboxAgentFaces(value: unknown): Record<string, InboxAgentFaceEntry> {
+  const out = Object.create(null) as Record<string, InboxAgentFaceEntry>;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return out;
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    const entry = raw as { face?: unknown; sessions?: unknown } | null;
+    if (!isId(key) || !entry || typeof entry !== "object" || !isInboxAgentFace(entry.face) || entry.face === "agent") continue;
+    out[key] = { face: entry.face, sessions: cleanInboxFaceSessions(entry.sessions, key) };
+  }
+  return out;
+}
+
+/** Whether `id` is a key or session an agent face entry may name. */
+export const isInboxAgentFaceId = isId;

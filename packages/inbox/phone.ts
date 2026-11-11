@@ -118,6 +118,18 @@ export function stripHeight(vv: { height: number; scale: number }, layoutHeight:
 }
 
 /**
+ * How much of the layout viewport's bottom the keyboard (or a hardware keyboard's bar) covers, in px: the layout
+ * height less what the visual viewport shows. New message's sheet on a phone covers the whole layout viewport and
+ * pads its own bottom by this (`--ib-kbd-inset`, phoneComposer.css), so its row with Send ends at the keyboard's top
+ * and what iOS shows below the visual viewport while the keyboard moves is the sheet's own ground, never the
+ * dialog's backdrop. 0: nothing covered, not a phone, or a pinch-zoom.
+ */
+export function keyboardInset(vv: { height: number; scale: number }, layoutHeight: number, phone: boolean): number {
+  const left = stripHeight(vv, layoutHeight, phone);
+  return left === null ? 0 : layoutHeight - left;
+}
+
+/**
  * iOS or iPadOS, where every browser is WebKit and Safari pans the whole page
  * under the keyboard whatever the page's own overflow says: an iPhone, iPad or
  * iPod user agent, or iPadOS's desktop-class one (it names itself a Mac, but a
@@ -189,7 +201,8 @@ function pagePanGuard(): { on: () => void; off: () => void } {
  * Keeps `--ib-vvh` on the document element equal to the visual viewport's
  * height while a phone's keyboard is up (`data-ib-keyboard`), so the window
  * shrinks to the part the keyboard leaves and the reply box sits on top of the
- * keyboard, and undoes a pan of the page.
+ * keyboard, and undoes a pan of the page. `--ib-kbd-inset` is what the keyboard
+ * covers (`keyboardInset`), for New message's sheet.
  *
  * On iOS (`isIOSWebKit`) it also pins the page, since Safari pans the whole
  * page under the keyboard: `data-ib-keyboard-pin` on the root makes html no
@@ -236,6 +249,9 @@ export function trackKeyboard(): () => void {
     const strip = stripHeight(vv, root.clientHeight, isPhone());
     if (strip !== null) root.style.setProperty('--ib-cp-vvh', `${strip}px`);
     else root.style.removeProperty('--ib-cp-vvh');
+    const inset = keyboardInset(vv, root.clientHeight, isPhone());
+    if (inset > 0) root.style.setProperty('--ib-kbd-inset', `${inset}px`);
+    else root.style.removeProperty('--ib-kbd-inset');
     if (layout.height !== null) {
       root.style.setProperty('--ib-vvh', `${layout.height}px`);
       root.dataset.ibKeyboard = '';
@@ -285,6 +301,7 @@ export function trackKeyboard(): () => void {
     pin(null);
     root.style.removeProperty('--ib-vvh');
     root.style.removeProperty('--ib-cp-vvh');
+    root.style.removeProperty('--ib-kbd-inset');
     delete root.dataset.ibKeyboard;
   };
 }

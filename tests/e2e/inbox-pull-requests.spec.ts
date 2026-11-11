@@ -525,7 +525,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
             ghPull(billingRepo, 413, { title: 'Jitter on the retry backoff', headRefName: 'retry/backoff', baseRefName: 'retry/schedule', updatedAt: ago(8), ...stats(layer413) }),
             ghPull(billingRepo, 414, { title: 'Dunning emails for the last attempts', headRefName: 'retry/dunning', baseRefName: 'retry/backoff', isDraft: true, updatedAt: ago(7), ...stats(layer414), commits: { nodes: [{ commit: { statusCheckRollup: { state: 'PENDING' } } }] } }),
             ghPull(webRepo, 872, { title: 'Upgrade to Vite 8', headRefName: 'codex/vite-8', reviewDecision: 'APPROVED', latestReviews: { nodes: [{ state: 'APPROVED', author: { login: 'priya' } }] }, updatedAt: ago(52), ...stats(vite) }),
-            ghPull(webRepo, 869, { title: 'Fall back to English for missing strings', headRefName: 'locale-fallback', reviewRequests: { nodes: [{ requestedReviewer: { login: 'jun' } }] }, updatedAt: ago(180), ...stats(locale) }),
+            ghPull(webRepo, 869, { title: 'Fall back to English for missing strings', headRefName: 'locale-fallback', reviewRequests: { nodes: [{ requestedReviewer: { login: 'jun', avatarUrl: avatarOf('jun') } }] }, updatedAt: ago(180), ...stats(locale) }),
           ],
         },
         merged: { nodes: [ghPull(billingRepo, 411, { title: 'Idempotency keys on the charge client', state: 'MERGED', headRefName: 'retry/charge-client', mergedAt: ago(26 * 60), updatedAt: ago(26 * 60) })] },
@@ -801,6 +801,19 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   const onYou = list.locator('[data-pulls-group="on_you"] [data-pulls-row]');
   await expect(onYou).toHaveCount(2);
   await expect(list.locator('[data-pulls-group="on_you"] [data-pulls-row="github.com/northwind/web-app#880"]')).toContainText("Review requested · tomas's PR");
+  // A face by every name, but not twice in a row: tomas is pictured at the row's left, so his name in the words has none.
+  const asked = list.locator('[data-pulls-row="github.com/northwind/web-app#880"] [data-reviews-status]');
+  await expect(asked).toHaveText("Review requested · tomas's PR");
+  await expect(asked.locator('[data-person="tomas"]')).toHaveCount(1);
+  await expect(asked.locator('[data-face]')).toHaveCount(0);
+  // The board's popover: who it waits on, with their picture, read through the Inbox's own route like the authors'.
+  await page.locator('[data-prs-page] [data-pr-tile="github.com/northwind/web-app#869"]').hover();
+  const waits = page.locator('[data-pr-pop="github.com/northwind/web-app#869"] .ib-prpop-status');
+  await expect(waits).toHaveText('Waits on jun');
+  const jun = waits.locator('[data-person="jun"] [data-face="jun"]');
+  await expect(jun).toHaveAttribute('data-face-state', 'shown');
+  expect(new URL((await jun.locator('img').getAttribute('src'))!, world.url).pathname).toBe('/api/inbox/pulls/avatar');
+  await page.mouse.move(0, 0);
   const fold = list.locator('[data-reviews-fold="not_reviewed"]');
   await expect(fold).toHaveAttribute('aria-expanded', 'false');
   await expect(list.locator('[data-pulls-group="not_reviewed"] [data-pulls-row]')).toHaveCount(0);
@@ -910,7 +923,7 @@ async function phoneShot(browser: Browser, row: string, name: string, schemes: r
     }
     // Nothing scrolls sideways, and each control is a full touch target.
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-    for (const box of await page.locator(PHONE_TARGETS).evaluateAll((els) => els.map((el) => el.getBoundingClientRect()))) {
+    for (const box of await page.locator(PHONE_TARGETS).evaluateAll(touchTargets)) {
       expect(box.right).toBeLessThanOrEqual(390);
       expect(box.height).toBeGreaterThanOrEqual(44);
     }
@@ -923,6 +936,16 @@ async function phoneShot(browser: Browser, row: string, name: string, schemes: r
 
 /** The stack view's controls a phone must make full touch targets: the one button, Open the diff, and in New review the choices and Start. */
 const PHONE_TARGETS = '[data-pulls-primary], [data-pulls-open-diff], .ib-cp-choice input, [data-compose-send]';
+
+/**
+ * Each target's right edge and its height to the touch: its own box, or its `::after` hit area where that is taller
+ * (New review's Start on a phone is 36 px to the eye and 44 px or more to the touch).
+ */
+const touchTargets = (els: Element[]) =>
+  els.map((el) => {
+    const box = el.getBoundingClientRect();
+    return { right: box.right, height: Math.max(box.height, parseFloat(getComputedStyle(el, '::after').height) || 0) };
+  });
 
 test('a PR with no review thread: Review with an agent, the New review box, "on the way", the guided review arriving, Open review thread, and Open the diff in each', async ({ browser }) => {
   const { page } = world;
@@ -2537,6 +2560,8 @@ test('the flat PR view: quiet words on the controls\' row, the comments column\'
     const note = review.locator('[data-pull-review-readonly]');
     await expect(note).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await expect(note).toHaveText('by tomas');
+    // With his face by his name (the owner, q-331c0466).
+    await expect(note.locator('[data-person="tomas"] [data-face="tomas"]')).toHaveCount(1);
     // The bar has it beside the title while there is room. Short of room (800 wide, the diff controls in the bar too) it
     // gives way before the title does: the title's tip names the author as well.
     for (const width of [1040, 1280, 1440]) {
@@ -2634,7 +2659,7 @@ test('a phone at 390 px: the list, a stack, a layer review; and off, no row', as
     const box = page.locator('[data-review-box]');
     await expect(box.locator('[data-review-pick]')).toContainText('RTL layout');
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-    for (const target of await page.locator(PHONE_TARGETS).evaluateAll((els) => els.map((el) => el.getBoundingClientRect()))) {
+    for (const target of await page.locator(PHONE_TARGETS).evaluateAll(touchTargets)) {
       expect(target.right).toBeLessThanOrEqual(390);
       expect(target.height).toBeGreaterThanOrEqual(44);
     }
@@ -3490,7 +3515,7 @@ test('New review, a pull request link: what was found and how it was read, a rep
   await shot(page, 'l-box-link');
   await page.setViewportSize({ width: 390, height: 844 });
   await shot(page, 'l-box-link-phone');
-  // No labels: the toggle takes its row, slim, as tall as the row below, with room for a third choice at 320 too.
+  // No labels: the toggle takes its row, slim, as tall as the box's other rows, with room for a third choice at 320 too.
   await box.locator('[data-review-choices="kind"]').evaluate((group) => {
     const third = group.lastElementChild!.cloneNode(true) as HTMLElement;
     third.lastChild!.textContent = 'Walkthrough';
@@ -3505,10 +3530,13 @@ test('New review, a pull request link: what was found and how it was read, a rep
       const row = group.parentElement!;
       const toggle = group.getBoundingClientRect();
       const rect = row.getBoundingClientRect();
-      return { height: rect.height, inside: toggle.right <= rect.right, toRow: row.parentElement!.querySelector('.ib-cp-to:not(.ib-cp-rvrow)')?.getBoundingClientRect().height ?? 0 };
+      // A phone draws no To line (To is the pill in the foot's row): the rows to be as tall as are the box's other rows.
+      const others = [...row.parentElement!.querySelectorAll('.ib-cp-rvrow')].filter((other) => other !== row).map((other) => other.getBoundingClientRect().height);
+      return { height: rect.height, inside: toggle.right <= rect.right, otherRow: Math.min(...others), toLines: row.parentElement!.querySelectorAll('.ib-cp-to:not(.ib-cp-rvrow)').length };
     });
     expect(fit.inside).toBe(true);
-    expect(fit.height).toBeLessThanOrEqual(fit.toRow + 1);
+    expect(fit.toLines).toBe(0);
+    expect(fit.height).toBeLessThanOrEqual(fit.otherRow + 1);
   }
   await box.locator('[data-try-third]').evaluate((third) => third.remove());
   // One chosen, at each size.

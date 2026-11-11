@@ -23,6 +23,7 @@ import { setRichCopyEnabled } from './utils/richCopyPolicy';
 import { setCommentCardEnabled, setVisibleCommentDrafts, type CommentCardLayout } from './utils/commentCardPolicy';
 import { setTouchSelectionToolbar } from './utils/touchToolbarPlacement';
 import { setPageMarks } from './utils/pageMarks';
+import { setClickAWord } from './utils/clickAWordPolicy';
 import { setCrossRepoRefsWithoutRepo, setDigitHexIssueRefs, type CrossRepoRefsWithoutRepo } from './components/InlineMarkdown';
 import { setRefCardTransport, type RefCardTransport } from './utils/refCard';
 
@@ -204,6 +205,15 @@ export interface PlannotatorUIConfig {
    */
   pageMarks?: boolean;
   /**
+   * Click a word: in the Viewer's Select input method one click on a word
+   * highlights it (after 300 ms, so double and triple click stay the
+   * browser's), through the same path as a drag over that word
+   * (`hooks/useClickWord`, `utils/clickAWordPolicy`). Default: true. False: a
+   * click on text makes nothing, as before. A Viewer's own `clickAWord` prop
+   * wins over this. Read when a Viewer mounts.
+   */
+  clickAWord?: boolean;
+  /**
    * Fetch an issue / PR / MR hover card's data (`components/RefHoverCard`).
    * Default: none, so no card is drawn and nothing is requested. The
    * Plannotator Inbox passes one over its `/api/inbox/ref` route.
@@ -260,6 +270,7 @@ export function configurePlannotatorUI(config: PlannotatorUIConfig): void {
   if (config.visibleCommentDrafts !== undefined) setVisibleCommentDrafts(config.visibleCommentDrafts);
   if (config.touchSelectionToolbar !== undefined) setTouchSelectionToolbar(config.touchSelectionToolbar);
   if (config.pageMarks !== undefined) setPageMarks(config.pageMarks);
+  if (config.clickAWord !== undefined) setClickAWord(config.clickAWord);
   if (config.refCardTransport) setRefCardTransport(config.refCardTransport);
   if (config.deferOffscreenCodeHighlight !== undefined) setDeferOffscreenCodeHighlight(config.deferOffscreenCodeHighlight);
   if (config.codeHighlightWorker) setCodeHighlightWorker(config.codeHighlightWorker);

@@ -4,8 +4,9 @@
  * (components/TabIconChoice.tsx) and this tab's real icon link (tabCount.ts `useTabCount`, faviconChoice.ts), as App
  * wires them.
  *
- * What regresses: the dialog opening without the line (`reveal.next` not `tab_icon`), before the page is a minute old,
- * at once rather than at a calm moment, over something typed or open, or going around the line's claim; a choice
+ * What regresses: the dialog opening without the line (`reveal.next` not `tab_icon`), before the page is 15 s old, over
+ * something typed or open, or going around the line's claim; the dialog waiting for a thread read and left, for the
+ * line's 60 s, or for a page left still (the owner, 2026-11-10: "Fifteen seconds after the inbox opens"); a choice
  * saving anything (it only shows on this tab); the primary button not following the pick, or not saving the pick
  * through Settings' own write (`POST /api/inbox/settings { favicon }`), Keep Glass included; Escape or a click outside
  * saving anything, sending a Not now, or leaving the tried icon on the tab; the dialog showing again on the same load;
@@ -38,7 +39,9 @@ let stamped = false;
 beforeEach(() => {
   if (!hasDom) return;
   savedTimes = { ...reveal.REVEAL_TIMES };
-  Object.assign(reveal.REVEAL_TIMES, TIMES);
+  // The dialog's own page age is `soonPageAgeMs` (15 s in the product, shrunk here); the line's 60 s is set out of reach,
+  // so a dialog that still waited for it would never open in these tests.
+  Object.assign(reveal.REVEAL_TIMES, TIMES, { soonPageAgeMs: TIMES.pageAgeMs, pageAgeMs: 600_000 });
   favicon.resetInboxFaviconForTests();
   document.head.innerHTML = `<link rel="icon" href="${LOADED}">`;
   savedFetch = globalThis.fetch;
@@ -88,11 +91,10 @@ interface State {
   due: boolean;
   held: boolean;
   thread: string | null;
-  idle: boolean;
 }
 
 /** The line has it next; the person is reading a thread. */
-const READING: State = { due: true, held: false, thread: 'thr_a', idle: false };
+const READING: State = { due: true, held: false, thread: 'thr_a' };
 
 function Harness({ state }: { state: State }) {
   useTabCount(0, favicon.useInboxFaviconHref(), favicon.useInboxFaviconBadgeHref());
@@ -104,11 +106,10 @@ function Harness({ state }: { state: State }) {
     firstRun: false,
     thread: state.thread,
     rows: [],
-    clear: state.thread === null || state.idle,
+    clear: true,
     place: state.thread ?? '',
     heldBack: () => state.held,
     toast: false,
-    idle: state.idle,
   });
   return (
     <>
@@ -145,45 +146,50 @@ function mount(state: State) {
   };
 }
 
-/** The page a minute old (shrunk), then back on the list from the thread: the dialog opens. */
+/** The page 15 s old (shrunk), a thread open: the dialog opens by itself. */
 async function opened() {
   const set = mount(READING);
-  await wait(TIMES.pageAgeMs + 20);
-  set({ thread: null });
   await until(() => dialog() !== null);
   expect(dialog()).not.toBeNull();
   return set;
 }
 
 describe.skipIf(!hasDom)('the tab icon dialog', () => {
-  test('at the calm moment only: never at once nor while the page is young; back on the list, one tab_icon claim through the line', async () => {
-    const set = mount(READING);
-    await wait(TIMES.settledMs * 3);
-    // Reading a thread: no moment yet.
-    expect(claims()).toHaveLength(0);
-    // Back on the list while the page is still young: the moment fails the gate and is dropped.
-    set({ thread: null });
-    await wait(TIMES.settledMs * 3);
-    expect(claims()).toHaveLength(0);
-    expect(dialog()).toBeNull();
-    await wait(TIMES.pageAgeMs);
-    // Read again and left, something typed: it waits.
-    set({ thread: 'thr_b', held: true });
-    set({ thread: null });
-    await wait(TIMES.settledMs * 3);
-    expect(claims()).toHaveLength(0);
-    set({ held: false });
-    await until(() => dialog() !== null);
-    expect(claims().map((c) => c.body)).toEqual([{ id: 'tab_icon', key: expect.any(String) }]);
-    expect(saves()).toHaveLength(0);
+  test('15 s into the page, with no thread left and no stillness: never while the page is younger; something typed makes it wait, not give up', async () => {
+    const set = mount({ ...READING, held: true });
+    // A person looking around: the pointer never rests, the whole time.
+    const moving = setInterval(() => window.dispatchEvent(new Event('pointermove')), 15);
+    try {
+      await wait(TIMES.pageAgeMs / 2);
+      expect(claims()).toHaveLength(0);
+      expect(dialog()).toBeNull();
+      // Old enough now, but something is typed: it waits (several moments come and go).
+      await wait(TIMES.pageAgeMs + TIMES.settledMs * 6);
+      expect(claims()).toHaveLength(0);
+      set({ held: false });
+      await until(() => dialog() !== null);
+      expect(dialog()).not.toBeNull();
+      expect(claims().map((c) => c.body)).toEqual([{ id: 'tab_icon', key: expect.any(String) }]);
+      expect(saves()).toHaveLength(0);
+    } finally {
+      clearInterval(moving);
+    }
   });
 
-  test('the page idle is a moment too, over the thread kept open', async () => {
-    const set = mount(READING);
-    await wait(TIMES.pageAgeMs + 20);
-    set({ idle: true });
-    await until(() => dialog() !== null);
-    expect(claims()).toHaveLength(1);
+  test('a hidden tab is no moment: it opens once the tab is in front', async () => {
+    const visibility = Object.getOwnPropertyDescriptor(document, 'visibilityState');
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    try {
+      mount(READING);
+      await wait(TIMES.pageAgeMs + TIMES.settledMs * 6);
+      expect(claims()).toHaveLength(0);
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+      await until(() => dialog() !== null);
+      expect(claims()).toHaveLength(1);
+    } finally {
+      if (visibility) Object.defineProperty(document, 'visibilityState', visibility);
+      else delete (document as unknown as { visibilityState?: string }).visibilityState;
+    }
   });
 
   test('not next for this load: never claimed, never shown', async () => {

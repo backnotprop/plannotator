@@ -776,6 +776,53 @@ detached servers) inherits it; `registerCliSession` records it as
 as this session (the `plannotator_inbox` tool's author, so the reply wakes it).
 The tag follows `/clear` and an in-process resume: `currentMod` sets it again
 for the new id, at the latest on the next `turn.start`.
+A branched conversation has a new session id, and the Inbox routes a reply by
+session id, so the branch's link says which session it continues on every poll
+(`continues`, `INBOX_CONTINUES_POLL_FIELD`): `TranscriptForkedFrom` reads it
+once per session in a process from the branch's own transcript, where Claude
+Code writes `"forkedFrom":{"sessionId":…,"messageUuid":…}` on every row it
+copies (read in the 2.1.321 binary's branch code; one `/bin/sh` or PowerShell
+call over the file's first 8 MB, the transcript found as the title's is, looked
+for again after 2 s doubling to 60 s while it is not there). The Inbox then
+hands the branch what waits for the old id once that id no longer polls
+("A conversation that goes on under a new session id" in
+`inbox-notifications-and-agents.md`). A `--resume` or `--continue` that keeps
+its id, and `/clear` (a new conversation), name nothing. Not checked on a live
+Claude Code: whether `--fork-session` writes the same rows.
+A conversation handed over to a new session is the other case, and the one the
+report was: the new transcript has no `forkedFrom`. Claude Code instead ends
+the OLD transcript with
+`{"type":"continued-in","sessionId":<old>,"continuedInSessionId":<new>}` (read
+in the 2.1.321 binary, where it is written when a conversation is moved to a
+background session, which starts in another process from the old transcript;
+seen in a real transcript about 2.5 minutes after a manual `/compact`, among
+`/model` and `/login`, and which of the person's actions led to it is not
+known). So the new session looks for the transcript that names it:
+`TranscriptContinuedIn` looks through the transcripts in its own project folder
+(one `/bin/sh` or PowerShell call for the folder; only the records come back)
+and follows the records back, nearest first, up to 8 sessions (A handed to B
+handed to C: C says `[B, A]`); a session is named once, so records that point
+at each other end the line. A record counts wherever it is and whatever follows
+it (a report of 2026-11-10: a conversation still listed as two agents; before,
+only a record in a transcript's last 8 KB with no `user` or `assistant` row
+after it counted, as Claude Code itself reads it). Whether the old session
+still goes on is the Inbox's to judge: one that still polls keeps its own. A cut
+or broken record is nothing. The work is capped: the last 64 MB of each
+transcript (`TRANSCRIPT_CONTINUED_IN_READ_BYTES`), streamed through `grep` a
+line at a time and never held whole, the 200 most recently written transcripts
+of a folder (`TRANSCRIPT_CONTINUED_IN_FILES_MAX`), each file's last 4 records,
+and 20 s a look (`TRANSCRIPT_CONTINUED_IN_TIMEOUT_MS`; a look that runs out
+finds nothing). Looked for at the session's first poll in a process and, while
+nothing is found, 5 more times over about a minute (the record is written just
+after the new session starts), then once every 10 minutes
+(`TRANSCRIPT_CONTINUED_IN_LOOK_AGAIN_MS`); once found, kept for the session in
+that process; never at delivery. A session that was already running gets the
+new read without a restart: after an update the Inbox reloads its module
+("Plannotator reloads itself after an update"), and the new module looks at
+its first poll. The poll
+sends both cases' ids in the one `continues` list. Not checked: a hand-over
+whose new transcript is in another project folder (a worktree move) is not
+found.
 Beside it, `exportSessionProject` (`controller.ts`) sets
 `PLANNOTATOR_SESSION_PROJECT=claude-code:<session id>:<folder>`, the folder
 the session's `plannotator_inbox` tool files under (`InboxLink.projectFolder()`,

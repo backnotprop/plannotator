@@ -7,8 +7,9 @@
  *
  * Who: the owner's pages (never a tailnet guest's), on an Inbox whose sidebar was never customized (no layout was ever
  * saved: config.json `inboxSidebarRev` counts the saves, so a layout set back to the default still counts), a day or
- * more after the person's first use, until it was shown once. It stands outside the line of one-time dialogs
- * (reveals.ts): it is not a dialog, so it neither waits for the line's day nor stamps it. The claim stamps only
+ * more after the person's first use, until it was shown once. It stands outside the order of the line of one-time
+ * dialogs (reveals.ts), but keeps its 40-minute gap both ways (the server: `tipFree`, `RevealState.tipShownAt`): it
+ * never shows within the gap of a dialog, and no dialog follows it within the gap. The claim stamps only
  * config.json `inboxReveals.sidebar_tip`, when it shows (every way out is final), with the page's key so that page's
  * retry after a lost answer is shown it again and no other window is.
  */

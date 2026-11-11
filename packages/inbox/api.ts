@@ -5,6 +5,7 @@
  * writing into a store it did not read.
  */
 
+import { readHello, type RestartHello } from './sessionAdopt';
 import type { InboxSidebarLayout } from '@plannotator/core/inbox-sidebar';
 import type { DecisionDataSummary, InboxAgentsGroup } from '@plannotator/core/inbox-types';
 import type { FaviconStyle } from '@plannotator/core/favicon';
@@ -14,6 +15,7 @@ import type { SystemDrawingAnswer, SystemProjectsAnswer, SystemPullsAnswer } fro
 import type { SystemModel } from '@plannotator/system';
 import type { ShapeDrawnView, ShapeNote, ShapeRecord, ShapeRef, ShapeVersion } from '@plannotator/core/shape';
 import type { InboxArtifactPin, InboxArtifactsPage, InboxArtifactType } from '@plannotator/core/inbox-artifact-pins';
+import type { InboxAgentFaceChange } from '@plannotator/core/inbox-types';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
@@ -100,15 +102,15 @@ import { newUuid } from './uuid';
  * A dialog of the line of one-time dialogs, as the Inbox names it (the queue: packages/shared/inbox/reveals.ts, server
  * side): the update-day dialogs, then the offers. A registered dialog (Bro mode, List view) adds its id here.
  */
-export type InboxRevealId = 'code_review' | 'sound' | 'list_intro' | 'voice' | 'tab_icon' | 'snooze' | 'bro' | 'grill_me_tip' | 'board' | 'steps' | 'star' | 'list_view';
+export type InboxRevealId = 'theme_chooser' | 'code_review' | 'sound' | 'list_intro' | 'voice' | 'tab_icon' | 'snooze' | 'bro' | 'grill_me_tip' | 'board' | 'steps' | 'star' | 'list_view';
 /** What the line claims (`POST /api/inbox/reveal`): every offer, and the tab icon, the one update-day dialog claimed through the line. */
 export type InboxRevealOfferId = Exclude<InboxRevealId, 'sound' | 'list_intro' | 'voice'>;
 /** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, the agent note, the Launch tip or the Sidebar tip (both outside the line). */
 export type InboxRevealClaimId = InboxRevealOfferId | 'agent_note' | 'launch_tip' | 'sidebar_tip';
 
 /**
- * This page load's id, sent with every read and write (`X-Plannotator-Load`): the line of one-time dialogs never shows
- * one on the load right after the load that showed the last (packages/shared/inbox/reveals.ts).
+ * This page load's id, sent with every read and write (`X-Plannotator-Load`): the Inbox keeps it with a one-time
+ * dialog's stamp, as a record (packages/shared/inbox/reveals.ts; the page-load rule it once served ended 2026-11-09).
  */
 const pageLoad = newUuid();
 
@@ -561,7 +563,7 @@ export interface SettingsModel {
    * the open sidebar (outside the line; absent from an older Inbox: it never shows). The whole field is absent from an
    * older Inbox.
    */
-  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[]; launch_tip?: boolean; sidebar_tip?: boolean };
+  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[]; launch_tip?: boolean; sidebar_tip?: boolean; /** ms until a date can change the line, or null (reveals.ts `revealAgainAt`). */ again_in?: number | null };
   /** Voice dictation (config.json inboxVoice). Absent from an Inbox that predates it. */
   voice?: InboxVoiceSettings;
   /** Settings → About: update notices and automatic updates (`env`: the env var decides). Absent from an older Inbox. */
@@ -874,6 +876,8 @@ export class InboxApiError extends Error {
     readonly field: string | null = null,
     /** When a held read may be asked again (ms since the epoch), when the answer says. */
     readonly retryAt: number | null = null,
+    /** `thread_name_taken`: the one open thread that has the name, when the answer names it. */
+    readonly threadId: string | null = null,
   ) {
     super(message);
     this.name = 'InboxApiError';
@@ -889,6 +893,7 @@ async function readJson<T>(response: Response): Promise<T> {
       typeof body.error === 'string' ? body.error : `The Inbox answered ${response.status}.`,
       typeof body.field === 'string' ? body.field : null,
       typeof body.retry_at === 'number' ? body.retry_at : null,
+      typeof body.thread_id === 'string' ? body.thread_id : null,
     );
   }
   return body as T;
@@ -1316,6 +1321,8 @@ export interface StartThreadInput {
   review?: { kind: 'local'; changes: InboxReviewChanges; branch: string | null; base: string | null; ask: 'guide' | 'custom' } | { kind: 'link'; url: string; title: string; mine: boolean; ask: 'guide' | 'custom' } | { kind: 'walkthrough' };
   /** Asked from Settings -> Decision data: the agent also receives how to answer it. */
   decision_ask?: true;
+  /** Settings → Rows' ask box: the agent also receives how to change the rows. */
+  rows_ask?: true;
 }
 
 /** A file this Inbox already holds, as a pending upload (never another machine's: a thread there offers no reuse). No bytes travel. */
@@ -2026,6 +2033,10 @@ export const inboxApi = {
   seeDrops: (ids: readonly string[]) => post<{ cards: InboxCardWire[] }>(inboxUrl('/cards/dropped/seen'), { cards: [...ids] }),
   /** Every pinned artifact (approval "inbox-artifact-stars"; not the sidebar's thread pins), in pin order. This machine's threads only. */
   artifactPins: () => get<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins')),
+  /** The face each agent's icon shows (inbox/agent-faces.json, agents/agentFaces.ts). This window's Inbox only. */
+  agentFaces: () => get<unknown>(inboxUrl('/agent-faces')),
+  /** One agent's face (`agent`: its own mark again), or this browser's faces from before (`adopt`); every window hears it (`event: agent-faces`). */
+  saveAgentFace: (change: InboxAgentFaceChange) => post<unknown>(inboxUrl('/agent-faces'), change as Record<string, unknown>),
   /** Pin one artifact of a thread (its key: an attachment id, or `guide:<message id>`), or unpin it. */
   setArtifactPinned: (threadId: string, key: string, pinned: boolean) => post<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins'), { thread_id: threadId, key, pinned }),
   /** The Artifacts wall: a page of every thread's artifacts, newest first. */
@@ -2284,7 +2295,7 @@ export interface InboxEventHandlers {
    * With a shared stream (sharedEvents.ts) also called when the tab whose
    * stream serves this one changes, so the report names it (`served_by`).
    */
-  onConnect?: () => void;
+  onConnect?: (hello?: RestartHello) => void;
   /**
    * A reply draft was saved or discarded (`event: drafts`, approval "inbox-reply-drafts"), or a compose draft saved,
    * deleted or sent (`{ compose: true }`: null); never called by an older Inbox.
@@ -2299,9 +2310,12 @@ export interface InboxEventHandlers {
   /** A snooze changed or ran out (`event: snoozes`, approval "inbox-snooze"), here or on a linked machine; never called by an older Inbox. */
   onSnoozes?: () => void;
   /** How the list's rows look was saved, here or in another window (`event: rows`, approval "inbox-customize-rows"). */
-  onRows?: (rows: unknown, rev: unknown) => void;
+  /** `last`: the look before this save and, for an agent's command, who made it (`prev`, `by`; absent from an older Inbox). */
+  onRows?: (rows: unknown, rev: unknown, last: { prev: unknown; by: unknown }) => void;
   /** The sidebar's layout was saved, here or in another window (`event: sidebar`, approval "inbox-sidebar-customize"). */
   onSidebar?: (sidebar: unknown, rev: unknown) => void;
+  /** An agent icon's face was saved (`{ faces, rev }`, unparsed). */
+  onAgentFaces?: (data: unknown) => void;
   /** The tray's saved emoji changed, here or in another window (`event: reactions`, approval "inbox-reaction-tray"). */
   onReactions?: (reactions: unknown, rev: unknown) => void;
   /** A capability switch was saved, here or in another window (`event: capabilities`: the Board, thread steps, ...); never called by an older Inbox. */
@@ -2343,7 +2357,7 @@ export interface InboxEventWindow {
 
 /** The event stream's named frames, as they arrive (and as the tab that holds the shared stream passes them on). */
 // `heartbeat`: a window's stream beats every 10 s (packages/server/inbox.ts); heard by liveStream.ts, handled by nothing.
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'artifact-pins', 'snoozes', 'rows', 'sidebar', 'reactions', 'capabilities', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'artifact-pins', 'snoozes', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -2384,7 +2398,8 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       // Only proof the stream is alive: no read, nothing to show.
       return;
     case 'hello':
-      handlers.onConnect?.();
+      // The run that answers and its cursor: a page that lived through a restart reads them (sessionAdopt.ts).
+      handlers.onConnect?.(readHello(frame.data) ?? undefined);
       return;
     case 'reach':
       try {
@@ -2437,8 +2452,8 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'rows':
       try {
-        const data = JSON.parse(frame.data) as { rows?: unknown; rev?: unknown };
-        handlers.onRows?.(data.rows, data.rev);
+        const data = JSON.parse(frame.data) as { rows?: unknown; rev?: unknown; prev?: unknown; by?: unknown };
+        handlers.onRows?.(data.rows, data.rev, { prev: data.prev, by: data.by });
       } catch {
         // A malformed frame changes nothing.
       }
@@ -2447,6 +2462,13 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       try {
         const data = JSON.parse(frame.data) as { sidebar?: unknown; rev?: unknown };
         handlers.onSidebar?.(data.sidebar, data.rev);
+      } catch {
+        // A malformed frame changes nothing.
+      }
+      return;
+    case 'agent-faces':
+      try {
+        handlers.onAgentFaces?.(JSON.parse(frame.data));
       } catch {
         // A malformed frame changes nothing.
       }

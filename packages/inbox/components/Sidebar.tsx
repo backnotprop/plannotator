@@ -27,6 +27,7 @@ import { selfMachineId } from '../inboxUrl';
 import { ProjectRow } from './ProjectRow';
 import { newSessionTip } from '../compose/model';
 import { PinnedRow, type PinnedAction } from './PinnedRow';
+import { useStarredAbove } from '../starredPills';
 import { useInboxTheme } from '../theme';
 import { TaterMark } from './TaterMark';
 import { ProjectTip } from './ProjectRow';
@@ -256,6 +257,8 @@ export function Sidebar(props: SidebarProps) {
   const pins = props.pins ?? [];
   // Pinned and Projects close like folders; closed, a section still shows where the person is (the open pinned thread, the project the list shows).
   const sections = useSidebarSections(props.rememberSections !== false);
+  // "Keep starred above the list" (starredPills.ts): on, the starred threads are the list's pills and no section here.
+  const [starredAbove] = useStarredAbove(props.rememberSections !== false);
   const pinnedClosed = sections.closed('pinned');
   const projectsClosed = sections.closed('projects');
   const pinOn = (row: InboxListRow) => props.page === 'inbox' && props.openThreadId === row.thread_id;
@@ -263,7 +266,7 @@ export function Sidebar(props: SidebarProps) {
   // A snoozed pin stays pinned but waits with the rest of its snooze, so it is no count here.
   const pinsWaiting = pinnedClosed ? pins.filter((row) => !inboxRowSnoozed(row) && ['stop', 'hold', 'wait'].includes(pinnedState(row).kind)).length : 0;
   // One scroll area holds Pinned and Projects (no limit on pins: a long Pinned section scrolls with the projects).
-  const [projsRef, moreProjects] = useMoreBelow<HTMLDivElement>(`${shown.length}:${pins.length}:${pinnedClosed}:${projectsClosed}`);
+  const [projsRef, moreProjects] = useMoreBelow<HTMLDivElement>(`${shown.length}:${pins.length}:${pinnedClosed}:${projectsClosed}:${starredAbove}`);
   /**
    * After a pin's menu acted: Move up or down keeps focus on that row's ⋯ in its new place; Unpin moves it to
    * the next pinned row's ⋯ on screen, else the first project on screen, else the Pinned header, else Inbox (never the page).
@@ -314,7 +317,7 @@ export function Sidebar(props: SidebarProps) {
   const agentsClosed = sections.closed('agents');
   // Agents shows while the list names agents (an Inbox from before them names none) or a machine is linked.
   const agentsRead = useInboxAgents();
-  const agentsShown = agentsRead !== null || machineList.length > 0;
+  const agentsDrawn = agentsRead !== null || machineList.length > 0;
   /** The project a menu action ran on: once its row is gone (Archive all hid it), focus goes to Inbox, never the page. */
   const actedOn = useRef<string | null>(null);
   /** A project combined from its rename field: its row goes, and focus lands on the ⋯ of the project it went into. */
@@ -335,7 +338,8 @@ export function Sidebar(props: SidebarProps) {
    * The section that last held keyboard focus in this sidebar. A closed section's one row (the open pinned
    * thread, the project the list shows) goes when it stops being current (Escape closed the thread, Back left
    * the project): focus then moves to that section's header, never the page. Runs after Unpin's and Archive
-   * all's own fallbacks, which move focus first.
+   * all's own fallbacks, which move focus first. Agents keeps no row while closed: focus that was in it goes to its
+   * header the same way.
    */
   const asideRef = useRef<HTMLElement>(null);
   const focusedIn = useRef<SidebarSection | null>(null);
@@ -359,6 +363,44 @@ export function Sidebar(props: SidebarProps) {
     setOpenMobile(false);
     go();
   };
+  /**
+   * A phone's sheet (approval "inbox-phone-sidebar-sheet", Sheet 1): what narrows the list, in words, with Clear.
+   * A project by the name its row has; a machine by its own name. Nothing while the list shows everything.
+   */
+  const showingOnly = ((): { kind: 'project' | 'machine'; name: string } | null => {
+    if (!phone || props.page !== 'inbox') return null;
+    if (props.projectId) {
+      const name = shown.find((project) => project.id === props.projectId)?.name ?? props.projectNames?.get(props.projectId) ?? props.projects.find((project) => project.id === props.projectId)?.name;
+      return name ? { kind: 'project', name } : null;
+    }
+    const machine = props.machineId ? machineList.find((m) => m.id === props.machineId) : undefined;
+    return machine ? { kind: 'machine', name: machine.name } : null;
+  })();
+  // A phone's sheet: a section heading that has stuck to the top of the scroll takes a hairline, so rows read as passing under it.
+  useLayoutEffect(() => {
+    const scroll = projsRef.current;
+    if (!phone || !scroll) return;
+    const read = () => {
+      const top = scroll.getBoundingClientRect().top;
+      for (const head of scroll.querySelectorAll<HTMLElement>('.ib-secrow')) {
+        const section = head.parentElement?.getBoundingClientRect();
+        const stuck = scroll.scrollTop > 0 && head.getBoundingClientRect().top - top <= 1 && (section ? section.bottom - top > head.offsetHeight + 2 : true);
+        head.toggleAttribute('data-stuck', stuck);
+      }
+    };
+    read();
+    scroll.addEventListener('scroll', read, { passive: true });
+    return () => scroll.removeEventListener('scroll', read);
+  });
+  /** On a phone each section is one block (its heading sticks while its own rows pass under it); elsewhere the rows stay as they were. */
+  const sheetSection = (name: SidebarSection, children: ReactNode): ReactNode =>
+    phone ? (
+      <div className="ib-sheet-sec" data-sheet-section={name}>
+        {children}
+      </div>
+    ) : (
+      children
+    );
   // The person's layout (approval "inbox-sidebar-customize"; core inbox-sidebar.ts): which items show, their order,
   // top or bottom. The onboarding tour's sidebar always draws the default.
   const layout = useSidebarLayout(props.rememberSections !== false);
@@ -375,9 +417,12 @@ export function Sidebar(props: SidebarProps) {
     artifacts: Boolean(props.onArtifacts),
     shortcuts: Boolean(props.onShortcuts),
     copyPrompt: props.connectPrompt !== false,
+    agents: agentsDrawn,
     phone,
   });
   const shows = (item: InboxSidebarItem) => drawn.has(item) && inboxSidebarShown(layout, item);
+  // Hidden in Customize sidebar (the owner, 2026-11-09): the whole section goes, heading and all. Agents keep running.
+  const agentsShown = shows('agents');
   const menu = useSidebarMenu(asideRef, props.rememberSections !== false);
   const searchButton = (
     <button
@@ -413,6 +458,14 @@ export function Sidebar(props: SidebarProps) {
   );
   const keysShown = shows('shortcuts');
   const themeShown = shows('theme');
+  const feedbackButton = (
+    <button type="button" className="ib-nav" aria-haspopup="dialog" data-feedback-nav="" onClick={pick(() => props.onFeedback?.())}>
+      <Icon name="comment" />
+      Feedback
+    </button>
+  );
+  // A phone's sheet (approval "inbox-phone-sidebar-sheet"): Settings, Feedback and light/dark share one foot row.
+  const footJoined = phone && shows('feedback') && shows('settings') && layout.bottom.includes('feedback') && layout.bottom.includes('settings');
   /** One item's row. `list` is its stack as drawn: Search and New message share a row while side by side, as by default. */
   const itemRow = (item: InboxSidebarItem, list: readonly InboxSidebarItem[], at: number): ReactNode => {
     switch (item) {
@@ -545,18 +598,14 @@ export function Sidebar(props: SidebarProps) {
       case 'copy-prompt':
         return <CopyConnectPrompt mcpCommand={props.mcpCommand ?? null} />;
       case 'feedback':
-        return (
-          <button type="button" className="ib-nav" aria-haspopup="dialog" data-feedback-nav="" onClick={pick(() => props.onFeedback?.())}>
-            <Icon name="comment" />
-            Feedback
-          </button>
-        );
+        // A phone's sheet: Feedback rides the Settings row while both are at the bottom (one foot row).
+        return footJoined ? null : feedbackButton;
       case 'usage':
         return <UsageRow installed={props.usageInstalled ?? false} open={props.usageOpen ?? false} onOpen={(row) => pick(() => props.onUsage?.(row))()} />;
       case 'settings':
         // Two controls side by side, never one inside the other: the row opens Settings, the icons open the shortcut map and flip light and dark.
         return (
-          <div className="ib-setrow" data-keys={keysShown ? '' : undefined} data-theme={themeShown ? '' : undefined}>
+          <div className="ib-setrow" data-keys={keysShown ? '' : undefined} data-theme={themeShown ? '' : undefined} data-sheet-foot={footJoined ? '' : undefined}>
             <button
               type="button"
               className={`ib-nav${props.page === 'settings' ? ' ib-on' : ''}${keysShown && themeShown ? ' ib-has-keys' : ''}`}
@@ -566,6 +615,7 @@ export function Sidebar(props: SidebarProps) {
               <Icon name="settings" />
               Settings
             </button>
+            {footJoined && feedbackButton}
             {keysShown && props.onShortcuts && <KeysButton onPress={props.onShortcuts} />}
             {themeShown && <ThemeToggle />}
           </div>
@@ -587,22 +637,52 @@ export function Sidebar(props: SidebarProps) {
     });
   };
   const bottom = layout.bottom.filter(shows);
+  const brand = shows('logo') && (
+    <div className="ib-brand" data-sidebar-item="logo">
+      <TaterMark />
+      <b>Plannotator</b>
+      <span>Inbox</span>
+    </div>
+  );
+  /** A phone's sheet: Starred's heading in a row of its own, as Agents' and Projects' are, so all three stick alike. */
+  const sheetHeading = (heading: ReactNode): ReactNode => (phone ? <div className="ib-secrow">{heading}</div> : heading);
   // The notices (Update, What's new, Can't check, Reload agents) are not items: they head the bottom area, under the
   // Copy prompt pill when it leads it, as before.
   const noticesAfter = bottom[0] === 'copy-prompt' ? 1 : 0;
   return (
     <aside ref={asideRef} className="ib-side" aria-label="Inbox navigation" onContextMenu={menu.onContextMenu} onTouchStart={menu.onTouchStart}>
-      {shows('logo') && (
-      <div className="ib-brand" data-sidebar-item="logo">
-        <TaterMark />
-        <b>Plannotator</b>
-        <span>Inbox</span>
-      </div>
+      {phone ? (
+        // A phone's sheet: the mark, and a close button (the only way out at a width the sheet fills).
+        <div className="ib-sheet-head">
+          {brand}
+          <button type="button" className="ib-sheet-close" aria-label="Close" data-sheet-close="" onClick={() => setOpenMobile(false)}>
+            <Icon name="x" />
+          </button>
+        </div>
+      ) : (
+        brand
       )}
-      {stack(layout.top)}
+      {showingOnly && (
+        <div className="ib-sheet-now" data-sheet-showing={showingOnly.kind}>
+          <div className="ib-sheet-now-t">
+            <span className="ib-sheet-now-l">Showing only</span>
+            <span className="ib-sheet-now-n">
+              <Icon name={showingOnly.kind === 'project' ? 'folder' : 'laptop'} />
+              <bdi dir="auto">{showingOnly.name}</bdi>
+            </span>
+          </div>
+          <button type="button" className="ib-sheet-now-c" aria-label="Clear: show everything" data-sheet-clear="" onClick={pick(props.onInbox)}>
+            Clear
+          </button>
+        </div>
+      )}
+      {!phone && stack(layout.top)}
       <div className="ib-sidescroll" ref={projsRef} data-more={moreProjects ? '' : undefined}>
-        {pins.length > 0 && (
+        {/* A phone's sheet has one scroll: the places scroll with the sections. */}
+        {phone && stack(layout.top)}
+        {pins.length > 0 && !starredAbove && sheetSection('pinned',
           <>
+            {sheetHeading(
             <SectionHeader
               section="pinned"
               id={pinnedLabelId}
@@ -613,8 +693,10 @@ export function Sidebar(props: SidebarProps) {
               pop={starPopping()}
               open={!pinnedClosed}
               count={pinsWaiting}
+              total={phone ? pins.length : undefined}
               onToggle={() => sections.toggle('pinned')}
-            />
+            />,
+            )}
             <section className="ib-pins" id={pinnedBodyId} aria-labelledby={pinnedLabelId} data-pinned-section="" data-closed={pinnedClosed ? '' : undefined}>
               {pins.map((row, index) => (pinnedClosed && !pinOn(row) ? null : (
                 <PinnedRow
@@ -638,7 +720,7 @@ export function Sidebar(props: SidebarProps) {
                 />
               )))}
             </section>
-          </>
+          </>,
         )}
         {agentsShown && (
           <AgentsSection
@@ -672,6 +754,8 @@ export function Sidebar(props: SidebarProps) {
             pick={pick}
           />
         )}
+        {sheetSection('projects',
+        <>
         {/* Two controls side by side, never one inside the other: the header opens and closes, the icon changes the order. */}
         <div className="ib-secrow">
           <SectionHeader
@@ -682,6 +766,7 @@ export function Sidebar(props: SidebarProps) {
             icon={projectsClosed ? 'folder' : 'folderOpen'}
             open={!projectsClosed}
             count={0}
+            total={phone && shown.length > 0 ? shown.length : undefined}
             onToggle={() => sections.toggle('projects')}
           />
           {!projectsClosed && shown.length > 1 && <ProjectSortToggle sort={projectSort} announce={props.announce} />}
@@ -781,6 +866,8 @@ export function Sidebar(props: SidebarProps) {
             })
           )}
         </div>
+        </>,
+        )}
       </div>
       <div className="ib-side-foot" data-held={props.footHeld ? '' : undefined}>
         {stack(bottom.slice(0, noticesAfter))}
@@ -824,6 +911,8 @@ function SectionHeader(props: {
   pop?: boolean;
   open: boolean;
   count: number;
+  /** A phone's sheet: how many rows the section holds, beside its name, and the waiting count in words. Absent: neither. */
+  total?: number;
   onToggle: () => void;
 }) {
   return (
@@ -838,11 +927,23 @@ function SectionHeader(props: {
     >
       {props.iconNode ?? (props.icon && <Icon name={props.icon} className={[props.iconClass, props.pop ? 'ib-star-pop' : ''].filter(Boolean).join(' ') || undefined} />)}
       <span className="ib-side-sec-l">{props.label}</span>
+      {props.total !== undefined && (
+        <span className="ib-side-sec-c" data-section-total="">
+          {formatCount(props.total)}
+        </span>
+      )}
       <span className="ib-side-sec-tail">
         {props.count > 0 && (
           <span className="ib-n">
             {formatCount(props.count)}
-            <span className="ib-sr"> waiting on you</span>
+            {props.total !== undefined ? (
+              <>
+                {' waiting'}
+                <span className="ib-sr"> on you</span>
+              </>
+            ) : (
+              <span className="ib-sr"> waiting on you</span>
+            )}
           </span>
         )}
         <Icon name="chevR" className="ib-side-sec-chev" />
@@ -891,13 +992,15 @@ function ProjectSortToggle({ sort, announce }: { sort: ProjectSort; announce?: (
  * "Reload Claude Code N" (owner approval "restart-warning"), generalized to
  * every runtime (owner approval "reload-hosts"): the sessions still on the
  * Plannotator from before an update. One runtime names itself ("Reload Pi",
- * "Restart Oh My Pi"); more than one reads "Reload agents". A real button
+ * "Restart Oh My Pi"); more than one reads "Reload agents". Claude Code
+ * sessions whose plugin on disk is behind count too (`update_first`): the
+ * Settings → Agents it opens leads with the update command. A real button
  * named by its words and count; what it does is in its description. Opens
  * Settings → Agents, which lists them.
  */
 function RestartSessionsRow({ agents, onOpen }: { agents: InboxRestartAgents; onOpen: () => void }) {
   return (
-    <button type="button" className="ib-nav ib-quiet ib-rw-restart" data-restart-sidebar={agents.total} onClick={onOpen}>
+    <button type="button" className="ib-nav ib-quiet ib-rw-restart" data-restart-sidebar={agents.total} data-restart-update={agents.update_first || undefined} onClick={onOpen}>
       <Icon name="refresh" />
       <span className="ib-rw-label">{restartAgentsLabel(agents)}</span>
       <span className="ib-n">{formatCount(agents.total)}</span>

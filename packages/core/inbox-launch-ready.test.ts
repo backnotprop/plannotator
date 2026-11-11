@@ -22,6 +22,13 @@ describe("why an agent can't start on a machine, in that machine's name", () => 
     expect(ssh.fix).not.toContain("`claude`");
   });
 
+  test("signed out says how to read the login again from that machine's own Terminal, since the check can be wrong (owner's words)", () => {
+    const fix = (agent: string, overSsh: boolean) => inboxLaunchNotReadyWords({ agent, code: "signed_out", machine: "Mac mini", overSsh }).fix;
+    expect(fix("Claude Code", true)).toBe("Plannotator on Mac mini was started over SSH, and macOS keeps the login locked for SSH. In Terminal on Mac mini itself, run `plannotator inbox restart`, then try again.");
+    expect(fix("Claude Code", false)).toBe("Run `claude` on Mac mini once to sign in, then try again. Already signed in there? In Terminal on Mac mini itself, run `plannotator inbox restart`.");
+    expect(fix("Codex", false)).toBe("Run `codex login` on Mac mini, then try again. Already signed in there? In Terminal on Mac mini itself, run `plannotator inbox restart`.");
+  });
+
   test("the plugin missing comes with the command to run there, in the fix itself too (a refusal has no copy button); nothing else hands one out", () => {
     for (const code of CODES) {
       const words = inboxLaunchNotReadyWords({ agent: "Claude Code", code, machine: "Mac mini" });
@@ -34,7 +41,7 @@ describe("why an agent can't start on a machine, in that machine's name", () => 
   test("a signed-out Codex is told to run codex login, never claude, over SSH too", () => {
     for (const overSsh of [false, true]) {
       const words = inboxLaunchNotReadyWords({ agent: "Codex", code: "signed_out", machine: null, overSsh });
-      expect(words.fix).toBe("Run `codex login` on this computer, then try again.");
+      expect(words.fix).toBe("Run `codex login` on this computer, then try again. Already signed in there? In Terminal on this computer itself, run `plannotator inbox restart`.");
     }
   });
 

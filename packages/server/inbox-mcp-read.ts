@@ -29,6 +29,7 @@
  * text alone; an older one appends this trimmed JSON as well.
  */
 
+import { INBOX_ROWS_ASK_BLOCK } from "@plannotator/core/inbox-types";
 import { INBOX_DECISION_ASK_BLOCK, INBOX_HOST_NAMES, inboxAgentName, inboxBoardRequestBlock, isInboxNote, type InboxMessageWire, type InboxQuestion } from "@plannotator/core/inbox-types";
 import { inboxAnswersSectionEnd } from "@plannotator/core/inbox-questions";
 import { QUESTION_ANSWERS_HEADING, type QuestionAnswer } from "@plannotator/core/question-block";
@@ -141,6 +142,8 @@ export interface AgentMessage {
   board_request?: true;
   /** Asked from Decision data: `messageText` puts `INBOX_DECISION_ASK_BLOCK` after the body; `body` stays the person's words. */
   decision_ask?: true;
+  /** Asked from Settings → Rows: `messageText` puts `INBOX_ROWS_ASK_BLOCK` after the body; `body` stays the person's words. */
+  rows_ask?: true;
   /** With `board_request`: the cards in flight that link this thread already (not done, not dropped), for `messageText`. */
   board_cards?: { id: string; title: string }[];
   /** `inboxViewingLine`, on a reply sent from full screen's floating box. `body` stays the person's words. */
@@ -444,6 +447,7 @@ export function agentMessage(message: InboxMessageWire, form: AgentMessageForm =
     ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller) } : {}),
     ...(message.board_request === true ? { board_request: true as const } : {}),
     ...(message.decision_ask === true ? { decision_ask: true as const } : {}),
+    ...(message.rows_ask === true ? { rows_ask: true as const } : {}),
     ...(inboxViewingLine(message) ? { viewing: inboxViewingLine(message) } : {}),
   };
 }
@@ -729,6 +733,7 @@ export function messageText(message: AgentMessage, context: TranscriptContext): 
     }
   }
   if (message.decision_ask) lines.push("", INBOX_DECISION_ASK_BLOCK);
+  if (message.rows_ask) lines.push("", INBOX_ROWS_ASK_BLOCK);
   return lines.join("\n");
 }
 
