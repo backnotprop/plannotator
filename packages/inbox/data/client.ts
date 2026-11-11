@@ -41,8 +41,10 @@ export function createInboxQueryClient(): QueryClient {
       mutations: { retry: 0, networkMode: 'always' },
     },
   });
-  // The list is held for as long as the window is open: no hook observes it (queries/list.ts hears the cache).
-  client.setQueryDefaults(inboxKeys.list(), { gcTime: Infinity });
+  // The list is held for as long as the window is open: no hook observes it (queries/list.ts hears the cache). Its read
+  // keeps each unchanged row the same object already (listRead.ts), so it is held as read: comparing a 100k-message
+  // list deep on every read cost the other device ~400 ms per change (LV-10 on the runner).
+  client.setQueryDefaults(inboxKeys.list(), { gcTime: Infinity, structuralSharing: false });
   return client;
 }
 
