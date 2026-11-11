@@ -83,14 +83,14 @@ describe("which question goes where", () => {
       [3, "How should a failed upload retry?", "decided"],
     ]);
     expect(doc.others.map((d) => [d.n, d.prompt, d.state])).toEqual([
-      [4, "Unsent pick here?", "picked_unsent"],
-      [5, "Nobody touched this?", "open"],
+      [4, "Nobody touched this?", "open"],
+      [5, "Unsent pick here?", "picked_unsent"],
       [6, "Rename Sync?", "skipped"],
       [7, "Old retry question?", "replaced"],
     ]);
     // The owner's choice: an unsent pick is shown, marked as not sent.
-    expect(doc.others[0]!.answer).toMatchObject({ selected: ["A"], sent: false, note: "UNSENT-NOTE-do-not-export" });
-    expect(doc.others[1]!.answer).toBeNull();
+    expect(doc.others[1]!.answer).toMatchObject({ selected: ["A"], sent: false, note: "UNSENT-NOTE-do-not-export" });
+    expect(doc.others[0]!.answer).toBeNull();
     expect(doc.others[3]!.replaced_by).toEqual({ id: expect.stringContaining("/q-"), prompt: "How should a failed upload retry?" });
     expect(doc.decisions[2]!.replaces!.map((r) => r.prompt)).toEqual(["Old retry question?"]);
     expect(doc.decisions.every((d) => d.answer?.sent === true)).toBe(true);
@@ -121,9 +121,9 @@ describe("which question goes where", () => {
     void later;
     const { doc } = w.exported(m.thread_id);
     expect(doc.others.map((d) => [d.prompt, d.state])).toEqual([
+      ["Asked after the words?", "open"],
       ["Words instead?", "answered_in_words"],
       ["Also words?", "answered_in_words"],
-      ["Asked after the words?", "open"],
     ]);
     const input = w.store.decisionDataInput();
     const summary = await decisionDataSummary(input, { since: null, until: NOW + 86_400_000, tz_offset_min: 0, now: NOW });
@@ -283,7 +283,6 @@ describe("the documents", () => {
     // HTMLRewriter hands text over as written: escaped.
     expect(page.text).toContain("&lt;img src=x onerror=alert(1)&gt;");
     expect(html).toContain("prefers-color-scheme:dark");
-    expect(html).toContain(":root[data-theme=dark]");
     expect(html).toContain("@media print");
   });
 

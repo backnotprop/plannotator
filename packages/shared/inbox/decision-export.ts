@@ -29,7 +29,7 @@ import { agentLabel, decisionRowOf, ownWordsTime, type DecisionFate } from "./de
 export type DecisionExportState = "decided" | "picked_unsent" | "answered_in_words" | "open" | "skipped" | "set_aside" | "archived" | "replaced";
 
 /** The quiet groups after the decisions, in this order. */
-export const DECISION_EXPORT_OTHER_STATES: readonly Exclude<DecisionExportState, "decided">[] = ["picked_unsent", "answered_in_words", "open", "skipped", "set_aside", "archived", "replaced"];
+export const DECISION_EXPORT_OTHER_STATES: readonly Exclude<DecisionExportState, "decided">[] = ["open", "picked_unsent", "answered_in_words", "skipped", "set_aside", "archived", "replaced"];
 
 /** A group's heading in both documents. */
 export const DECISION_EXPORT_STATE_TITLES: Readonly<Record<Exclude<DecisionExportState, "decided">, string>> = {

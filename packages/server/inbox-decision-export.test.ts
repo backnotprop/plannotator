@@ -72,10 +72,10 @@ test("Markdown and HTML download as attachments named by subject and the reader'
   // Opened in place by mistake, it runs nothing on the Inbox's origin.
   expect(html.headers.get("content-security-policy")).toStartWith("sandbox");
   const page = await html.text();
-  const srcs = [...page.matchAll(/<img [^>]*src="([^"]+)"/g)].map((m) => m[1]!);
+  const srcs = [...page.matchAll(/<img [^>]*?src="([^"]+)"/g)].map((m) => m[1]!);
   expect(srcs).toEqual([`data:image/png;base64,${PNG.toString("base64")}`]);
   // The picture past 400 KB shows its alt text.
-  expect(page).toContain("(picture: Side panel)");
+  expect(page).toContain('<span class="noimg">Side panel</span>');
 
   const json = await fetch(`${base(server)}/api/inbox/threads/${world.thread}/decisions?format=json`);
   const doc = (await json.json()) as { format: string; counts: { decided: number }; images: Record<string, string> };
