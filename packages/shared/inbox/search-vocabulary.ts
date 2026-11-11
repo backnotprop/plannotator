@@ -1,53 +1,14 @@
 /**
- * Inbox search's vocabulary and postings, sized for text full of hashes, ids,
- * timestamps and one-off words (the index is packages/shared/inbox/search.ts).
- *
- * A distinct word costs memory however rarely it occurs, so per word there
- * are only a few typed-array slots (about 40 bytes in all) and no object:
- *
- * - **Word text lives in one byte pool.** A plain-ASCII word of up to 254
- *   characters is its bytes in one growing Uint8Array, found by an offset and
- *   a length; only a word with a character outside ASCII (or a longer one)
- *   keeps a JavaScript string.
- * - **ID-like tokens share buckets.** A token that reads as an identifier
- *   (`isIdLikeToken`: 8 or more hex characters with digits and letters, such
- *   as commit hashes and UUID parts; more than 8 digits, such as timestamps;
- *   16 or more characters with 3 or more digits mixed through it, such as
- *   ULIDs and base32 or base64 ids) is not a word of its own. It is posted
- *   once, under one of `ID_BUCKETS` shared ids: an id with a letter (a SHA, a
- *   ULID) by the hash of its first `ID_PREFIX_LENGTH` characters, so its
- *   whole value and every start of 7 characters or more (git's short SHA)
- *   find the same bucket; a number (a timestamp, whose first digits many share)
- *   by the hash of its whole value, and it has no start. The search index
- *   keeps the id's first `ID_PREFIX_KEEP` characters and bits of its hash
- *   beside the bucket id in the document's token stream (`lastHash`,
- *   `lastPrefix`), so a query confirms an id, or a start of it up to 12
- *   characters, from bytes it already holds.
- * - **Postings share one arena.** Each id keeps its first document, its count
- *   and its first block; a word seen in one document has nothing else. Later
- *   documents are delta varints in blocks of one arena, growing from 8 to
- *   1,024 bytes and chained per id; the first block's header also holds the
- *   last block and the last document.
- * - **The last term's prefix** is found through the words sharing its first
- *   two characters (`byPrefix`), then checked byte by byte, instead of a
- *   sorted copy of the vocabulary.
- *
- * Ids: 0 separates fields; words and buckets get ids in the order they are
- * first seen, so the common words, seen first, keep one-byte varints.
+ * Vocabulary and postings sized for text full of hashes, ids and timestamps: a distinct word costs a few typed-array slots and no object.
+ * Word text lives in one byte pool. Id-like tokens share `ID_BUCKETS` buckets (an id with a letter by the hash of its first `ID_PREFIX_LENGTH` characters, so short SHAs find it; a number by its whole value). Postings share one arena as delta varints in chained blocks.
+ * Id 0 separates fields; words get ids in first-seen order, so common words keep one-byte varints.
  */
 
-/**
- * How many shared ids the id-like tokens hash into, for ids with a letter and
- * for numbers each. Enough that a bucket's documents are a small share of an
- * id-dense store (a log holding 8,000 ids touches about 12% of them), so an
- * id query reads few documents; allocated as they are first used.
- */
+/** Shared ids the id-like tokens hash into, per kind. Sized so an id query reads few documents. */
 export const ID_BUCKETS = 1 << 16;
 
-/** An id with a letter is also found by its first this many characters and more (git's short SHA). */
 export const ID_PREFIX_LENGTH = 7;
 
-/** How many of an id's first characters the index keeps beside it, to confirm a start of up to this length without the text. */
 export const ID_PREFIX_KEEP = 12;
 
 /** Arrays grow by half again, not double: the slack is memory too. */
@@ -76,13 +37,7 @@ export function fnvString(text: string): number {
   return h >>> 0;
 }
 
-/**
- * Whether a folded token reads as an identifier rather than a word: 8+ hex
- * characters with both digits and letters (`9fceb02d`, a UUID's parts), more
- * than 8 digits (`1760000000000`), or 16+ letters and digits with 3+ digits
- * that switch between letters and digits 3+ times (`01m4v7jerhr0y3xq…`, not
- * `configuration2026`).
- */
+/** Whether a folded token reads as an identifier rather than a word: 8+ hex characters with digits and letters, more than 8 digits, or 16+ letters and digits with 3+ digits mixed through (not `configuration2026`). */
 export function isIdLikeToken(token: string): boolean {
   for (let i = 0; i < token.length; i++) {
     const c = token.charCodeAt(i);
@@ -91,7 +46,6 @@ export function isIdLikeToken(token: string): boolean {
   return isIdLikeSpan(token, 0, token.length);
 }
 
-/** The same test over a span of ASCII letters and digits (as the tokenizer's ASCII scan hands it; upper case counts as lower). */
 function isIdLikeSpan(text: string, start: number, end: number): boolean {
   const length = end - start;
   if (length < 8) return false;
@@ -112,12 +66,7 @@ function isIdLikeSpan(text: string, start: number, end: number): boolean {
   return length >= 16 && digits >= 3 && switches >= 3;
 }
 
-/**
- * Whether a query's last term may be the start of an id, looked up in the
- * prefix buckets: at least `ID_PREFIX_LENGTH` letters and digits with a
- * letter, and a digit or only hex letters (`9fceb02`, `deadbee`; not
- * `release`, and not a number: numbers are found by their whole value).
- */
+/** Whether a query's last term may start an id: at least `ID_PREFIX_LENGTH` letters and digits with a letter, and a digit or only hex letters. Numbers are found by whole value. */
 export function canPrefixId(term: string): boolean {
   if (term.length < ID_PREFIX_LENGTH) return false;
   let digit = false;
@@ -137,7 +86,6 @@ export function canPrefixId(term: string): boolean {
 /** `length` 0 marks a bucket (no word is empty); `RICH` a word kept as a string. */
 const RICH = 255;
 
-/** Old-table slots moved per new word while the word table grows. */
 const MIGRATE_PER_WORD = 8;
 
 export class Vocabulary {
@@ -151,37 +99,25 @@ export class Vocabulary {
   private length = new Uint8Array(1024);
   private rich: string[] = [];
   private slots = new Int32Array(1 << 16);
-  /** The table before the last growth, while its words move across (`grow`). */
   private old: Int32Array | null = null;
   private oldCursor = 0;
   private words = 0;
-  /** Bucket number -> id (0: not seen yet): numbers by their whole hash, ids with a letter by their first 7 characters'. */
   private buckets = new Int32Array(ID_BUCKETS);
   private prefixBuckets = new Int32Array(ID_BUCKETS);
-  /**
-   * Set by the last `idOfSpan` / `idOfToken`: whether the token was an id, its
-   * whole 32-bit hash, its first `ID_PREFIX_KEEP` characters (lower case;
-   * `lastPrefixLength` 0 for a number, which has no start) and the hash of
-   * its first `ID_PREFIX_LENGTH` (the caller keeps hash bits and the
-   * characters in the token stream).
-   */
+  /** Set by the last `idOfSpan` / `idOfToken` call. */
   lastWasId = false;
   lastHash = 0;
   readonly lastPrefix = new Uint8Array(ID_PREFIX_KEEP);
   lastPrefixLength = 0;
-  /** The id's length (an id of up to `ID_PREFIX_KEEP` characters is kept whole). */
   lastIdLength = 0;
   lastPrefixHash = 0;
-  /** Word ids by their first two UTF-16 units (the first alone for a one-unit word), and how many of each list are used. */
   private byPrefix = new Map<number, Int32Array>();
   private byPrefixUsed = new Map<number, number>();
 
-  /** Distinct words (buckets excluded). */
   count(): number {
     return this.words;
   }
 
-  /** Buckets in use. */
   bucketCount(): number {
     return this.size - 1 - this.words;
   }
@@ -220,17 +156,14 @@ export class Vocabulary {
     return id;
   }
 
-  /** A number's bucket, by the hash of its whole value (-1 when no number has used it). */
   numberBucketOf(hash: number): number {
     return this.bucketId(hash, false);
   }
 
-  /** The bucket of ids with a letter that start with characters whose first 7 hash to `prefixHash` (-1 when none). */
   prefixBucketOf(prefixHash: number): number {
     return this.bucketId(prefixHash, false, this.prefixBuckets);
   }
 
-  /** An id: its bucket (by its first 7 characters, or a number's whole value); its hash and first characters kept for the caller. */
   private idHit(text: string, start: number, end: number, upper: boolean, hash: number, prefixHash: number, letter: boolean): number {
     this.lastWasId = true;
     this.lastHash = hash;
@@ -253,7 +186,6 @@ export class Vocabulary {
     return id;
   }
 
-  /** A folded token's id in one table, or -1. */
   private probeString(table: Int32Array, token: string, h: number): number {
     const mask = table.length - 1;
     for (let i = h & mask; ; i = (i + 1) & mask) {
@@ -285,7 +217,6 @@ export class Vocabulary {
     }
   }
 
-  /** The id of a folded token (its bucket for an id-like one), or -1 for one never seen. */
   idOf(token: string): number {
     const h = fnvString(token);
     if (isIdLikeToken(token)) return /[a-z]/.test(token) ? this.prefixBucketOf(fnvString(token.slice(0, ID_PREFIX_LENGTH))) : this.numberBucketOf(h);
@@ -294,7 +225,6 @@ export class Vocabulary {
     return this.probeString(this.old, token, h);
   }
 
-  /** The id of the ASCII token `text[start, end)` (lower-cased when `upper`), added when new. */
   idOfSpan(text: string, start: number, end: number, upper: boolean): number {
     this.lastWasId = false;
     let h = 0x811c9dc5;
@@ -337,7 +267,6 @@ export class Vocabulary {
     return id;
   }
 
-  /** The id of a folded token, added when new (its bucket for an id-like one). */
   idOfToken(token: string): number {
     this.lastWasId = false;
     if (isIdLikeToken(token)) return this.idHit(token, 0, token.length, false, fnvString(token), fnvString(token.slice(0, ID_PREFIX_LENGTH)), /[a-z]/.test(token));
@@ -358,7 +287,6 @@ export class Vocabulary {
     return id;
   }
 
-  /** Put a new word in slot `slot` and in its prefix list. */
   private placeWord(id: number, slot: number, c0: number, c1: number): void {
     this.slots[slot] = id;
     this.words += 1;
@@ -377,14 +305,7 @@ export class Vocabulary {
     this.byPrefixUsed.set(key, used + 1);
   }
 
-  /**
-   * A table twice the size. The full one stays readable as `old` and moves
-   * across a few slots per new word (`migrate`), so no single insert pays
-   * for a million words (a rehash of 1.4 million took 20 ms, past a build
-   * slice's 8 ms). It is done long before the new table fills: the new
-   * table takes 0.7 of the old size in new words before it grows again, and
-   * every new word moves `MIGRATE_PER_WORD` slots of the old one.
-   */
+  /** Doubles the table. The old one stays readable as `old` and migrates a few slots per new word, so no single insert pays for a full rehash (1.4 million words took 20 ms, past an 8 ms build slice). */
   private grow(): void {
     if (this.old) this.migrate(Infinity);
     this.old = this.slots;
@@ -392,7 +313,6 @@ export class Vocabulary {
     this.slots = new Int32Array(this.slots.length * 2);
   }
 
-  /** Move up to `count` more slots of a growth under way (the end of a build, a slice at a time); true once none is. */
   settleGrowth(count: number): boolean {
     if (this.old) this.migrate(count);
     return this.old === null;
@@ -414,7 +334,6 @@ export class Vocabulary {
     if (end === old.length) this.old = null;
   }
 
-  /** The word's text ("" for a bucket). */
   word(id: number): string {
     const length = this.length[id]!;
     if (length === 0) return "";
@@ -434,7 +353,6 @@ export class Vocabulary {
     return true;
   }
 
-  /** The words a last term matches as a prefix (ids are matched through their buckets by the index, not here). */
   prefixIds(prefix: string): number[] {
     if (prefix.length === 0) return [];
     const out: number[] = [];
@@ -450,7 +368,6 @@ export class Vocabulary {
     return out;
   }
 
-  /** Give back the growth slack (after a build; later growth starts again from the trimmed size). */
   compact(): void {
     this.pool = this.pool.slice(0, this.poolLength);
     this.start = this.start.slice(0, this.size);
@@ -461,7 +378,6 @@ export class Vocabulary {
     }
   }
 
-  /** Bytes held (capacity, not use: the slack is memory too). */
   bytes(): number {
     let prefixes = 0;
     for (const list of this.byPrefix.values()) prefixes += list.byteLength + 96;
@@ -471,11 +387,7 @@ export class Vocabulary {
   }
 }
 
-/**
- * Arena block header. Every block: the next block, its capacity, the bytes
- * used. The first block of an id also: its last block, its last document,
- * its first document and its count.
- */
+/** Block header: next block, capacity, bytes used. An id's first block also holds its last block, last document, first document and count. */
 const HEADER = 24;
 const NEXT = 0;
 const CAPACITY = 4;
@@ -485,14 +397,9 @@ const LAST = 12;
 const FIRST = 16;
 const COUNT = 20;
 
-/** `slot` value of an id with no document. */
 const NONE = -1;
 
-/**
- * Each id's documents, in increasing document order, in one Int32 per id: a
- * single document is the value itself; more are a block of the shared arena
- * (`-2 - offset`), delta varints chained from it.
- */
+/** One Int32 per id: a single document is the value itself; more are `-2 - offset` of an arena block of delta varints. */
 export class Postings {
   private slot = new Int32Array(1024).fill(NONE);
   private size = 0;
@@ -522,7 +429,7 @@ export class Postings {
     return at;
   }
 
-  /** Post `doc` (no smaller than any before) under `id`; a document already last under it is skipped (a word twice in one document). */
+  /** Documents must not decrease; a document already last under `id` is skipped. */
   add(id: number, doc: number): void {
     if (id >= this.slot.length) this.slot = growInt32(this.slot, id + 1, NONE);
     if (id >= this.size) this.size = id + 1;
@@ -569,7 +476,6 @@ export class Postings {
     this.view.setInt32(head + COUNT, this.view.getInt32(head + COUNT, true) + 1, true);
   }
 
-  /** The documents under `id`, in increasing order. */
   list(id: number): Int32Array {
     const n = this.count(id);
     const out = new Int32Array(n);
@@ -606,14 +512,12 @@ export class Postings {
     return out;
   }
 
-  /** Give back the growth slack (after a build; later growth starts again from the trimmed size). */
   compact(): void {
     this.slot = this.slot.slice(0, this.size);
     this.arena = this.arena.slice(0, this.arenaLength);
     this.view = new DataView(this.arena.buffer);
   }
 
-  /** Bytes held (capacity). */
   bytes(): number {
     return this.arena.byteLength + this.slot.byteLength;
   }

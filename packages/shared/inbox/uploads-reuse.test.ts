@@ -1,7 +1,3 @@
-/**
- * A file already in the Inbox, added to a new message (the reuse button): its
- * life on disk, against the real store in a temp folder.
- */
 import { afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { createHash } from "node:crypto";
 import * as realFs from "node:fs";
@@ -72,7 +68,6 @@ test("the current version of a changed file takes one blob, once, and is fixed t
   expect(upload.size).toBe(Buffer.byteLength(V2, "utf8"));
   await inboxUploadFromAttachment(dir, source, "current", { at: AT });
   expect(blobs().length).toBe(before + 1);
-  // The version it sent is still a choice, and the agent changing the file again moves neither.
   const sent = await inboxUploadFromAttachment(dir, source, "sent", { at: AT });
   expect(sent.sha256).toBe(source.sent_sha256);
   writeFileSync(file, "\x89PNG\r\n\x1a\nversion three");
@@ -208,7 +203,6 @@ test("a crash mid-copy leaves only a temp the upload sweep takes: nothing half m
   await onDisk(
     {
       copyFile: (async (_from: string, to: string) => {
-        // The moment a crash would leave behind.
         half = to;
         realFs.writeFileSync(to, "half a fi");
         during = readdirSync(join(dir, "uploads")).sort();
@@ -259,16 +253,12 @@ test("a big changed file's upload keeps the listing's stat name; anything else f
 test("a stale tab gets the bytes it showed, or a refusal: never newer bytes under the same tile", async () => {
   const source = (await agentThread("harbor", "hero")).attachments![0]!;
   writeFileSync(file, V2);
-  // It showed the file before the change: the version sent is those bytes.
   const shownFirst = await inboxUploadFromAttachment(dir, source, "current", { at: AT, sha256: sha(V1) });
   expect(shownFirst.sha256).toBe(sha(V1));
-  // It showed the file as it is now.
   const shownNow = await inboxUploadFromAttachment(dir, source, "current", { at: AT, sha256: sha(V2) });
   expect(shownNow.sha256).toBe(sha(V2));
-  // It showed a change that has been written over: those bytes are nowhere.
   writeFileSync(file, "\x89PNG\r\n\x1a\nversion three");
   await expect(inboxUploadFromAttachment(dir, source, "current", { at: AT, sha256: sha(V2) })).rejects.toThrow("changed since this page showed it");
-  // A big changed file is listed by its stat, not a hash: nothing to hold it to, and it is not refused for that.
   const big = await inboxUploadFromAttachment(dir, source, "current", { at: AT, sha256: "stat:12:34" });
   expect(big.sha256).toBe(sha("\x89PNG\r\n\x1a\nversion three"));
 });

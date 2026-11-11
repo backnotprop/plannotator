@@ -1,15 +1,3 @@
-/**
- * Action items (approval "inbox-next-actions"): the store's rules, on a real store in
- * a temp dir on a clock the test moves. Failures to catch: a Done sent inside
- * its Undo window, or sent twice; an Undo after it went; an action item read as a
- * question by picks, skips or the reply's sections; Mark read leaving one open
- * or closing one already on its way; the agent's `done` reaching another
- * thread, a question, or an action item no longer open; a replay that changes any of
- * it. In the reply (approval "inbox-action-items-in-reply"): a staged Done sent
- * before the person's Send, or left out of it, or its note lost; the row
- * leaving "Stopped on you" while the Done waits; the agent's own done dropping
- * the person's note; a reload losing the staged Done.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -87,7 +75,6 @@ describe("a :::action block becomes an action item record", () => {
     const row = rowOf(store, asked.thread_id);
     expect(row.section).toBe("stopped");
     expect(row.questions).toMatchObject({ open: 2, actions: 1, stopped: true });
-    // The question's own subject: the first question's prompt, never the action item (only an action item and words: the first line).
     expect(row.subject).toBe("Announce it in #releases?");
   });
 
@@ -105,29 +92,23 @@ describe("Done and Can't do it", () => {
     const { store, clock, asked, action } = setup();
     store.markAction(asked.id, action.key, { outcome: "done", note: "Approved." });
     expect(actionOf(store, asked.id)).toMatchObject({ state: "picked", action_result: { outcome: "done", note: "Approved.", by: "person" } });
-    // Inside the window: nothing written, nothing for the agent.
     expect(store.settleActions(UNDO_MS)).toEqual([]);
     expect(store.pendingReplies("ses_a")).toEqual([]);
     expect(store.actionsPending()).toBe(1);
-    // Waits on nobody's Send: the row is not "Answered, not sent".
     expect(rowOf(store, asked.thread_id).answered_not_sent).toBe(false);
     clock.now += UNDO_MS;
     const [reply] = store.settleActions(UNDO_MS);
     expect(reply).toBeDefined();
     expect(reply!).toMatchObject({ author: { kind: "person" }, reply_to: asked.id, action_report: [`${asked.id}/${action.key}`] });
     expect(reply!.body.startsWith("Did 1 action item.\n\n## Action items you asked for\n\n1 of 1 done.\n\n### A1. Approve the production deploy on Vercel\nDone, ")).toBe(true);
-    // The question of the same message still waits on the person: the last line names it.
     expect(reply!.body.endsWith("\nNote: Approved.\n\nStill open: Q1. Announce it in #releases? — the person will answer it in the Inbox; don't ask again.")).toBe(true);
     expect(reply!.body).not.toContain(INBOX_ACTIONS_HEADING.toUpperCase());
     expect(actionOf(store, asked.id)).toMatchObject({ state: "sent", sent_reply_id: reply!.id });
-    // The reply machinery hands it to the asking session, once.
     expect(store.pendingReplies("ses_a").map((m) => m.id)).toEqual([reply!.id]);
     expect(store.settleActions(UNDO_MS)).toEqual([]);
     expect(store.actionsPending()).toBe(0);
-    // Sent: no Undo, no second Done.
     expect(() => store.markAction(asked.id, action.key, { outcome: null })).toThrow(InboxError);
     expect(() => store.markAction(asked.id, action.key, { outcome: "done" })).toThrow(/already sent/);
-    // The question in the same message is still open: the row is in Sent while the reply is the last message.
     expect(rowOf(store, asked.thread_id).section).toBe("waiting");
   });
 
@@ -167,7 +148,6 @@ describe("in the reply draft (approval \"inbox-action-items-in-reply\")", () => 
     expect(store.settleActions(UNDO_MS)).toEqual([]);
     expect(store.actionsPending()).toBe(0);
     expect(store.pendingReplies("ses_a")).toEqual([]);
-    // Q2: the question of the same message answered too, so nothing is open; the Done keeps the row in Stopped on you.
     pickYes(store, asked.id, store.questionsOf(asked.id).find((q) => q.kind !== "action")!);
     const row = rowOf(store, asked.thread_id);
     expect(row.questions.open).toBe(0);
@@ -191,11 +171,9 @@ describe("in the reply draft (approval \"inbox-action-items-in-reply\")", () => 
     const section = reply.body.slice(reply.body.indexOf(`## ${INBOX_ACTIONS_HEADING}`));
     expect(section.startsWith(`## ${INBOX_ACTIONS_HEADING}\n\n1 of 1 done.\n\n### A1. Approve the production deploy on Vercel\nDone, `)).toBe(true);
     expect(section).toContain("\nNote: Promoted at 3:12.");
-    // The section goes after everything else: the answers come before it.
     expect(reply.body.indexOf("## Answers to your questions")).toBeLessThan(reply.body.indexOf(`## ${INBOX_ACTIONS_HEADING}`));
     expect(actionOf(store, asked.id)).toMatchObject({ state: "sent", sent_reply_id: reply.id });
     expect(rowOf(store, asked.thread_id).section).not.toBe("stopped");
-    // Sent once: a second Send naming it carries nothing of it.
     const again = store.sendReply(asked.id, { idempotency_key: "k2", words: "Thanks.", actions: [{ key: action.key }] }).reply;
     expect(again.body).not.toContain(INBOX_ACTIONS_HEADING);
   });
@@ -205,7 +183,6 @@ describe("in the reply draft (approval \"inbox-action-items-in-reply\")", () => 
     store.markAction(asked.id, action.key, { outcome: "cant", note: "I'm not an org owner.", staged: true });
     const { reply } = store.sendReply(asked.id, { idempotency_key: "k1", words: "", actions: [{ key: action.key }] });
     expect(reply.body.startsWith("Couldn't do 1 action item.\n\n")).toBe(true);
-    // The question still open is the reply's own line; the section goes last.
     expect(reply.body.endsWith(`## ${INBOX_ACTIONS_HEADING}\n\n0 of 1 done.\n\n### A1. Approve the production deploy on Vercel\nCan't do it: I'm not an org owner.`)).toBe(true);
 
     const b = setup();
@@ -227,7 +204,6 @@ describe("in the reply draft (approval \"inbox-action-items-in-reply\")", () => 
       state: "closed",
       action_result: { outcome: "done", by: "agent", message_id: seen.message.id, person: { outcome: "done", note: "Promoted from the CLI." } },
     });
-    // The note waits in the draft.
     expect(rowOf(store, asked.thread_id).unsent).toMatchObject({ done: 1 });
     const { reply } = store.sendReply(seen.message.id, { idempotency_key: "k1", words: "", actions: [{ message_id: asked.id, key: action.key }] });
     expect(reply.body).toContain("### A1. Approve the production deploy on Vercel\nYou saw it done, ");
@@ -279,7 +255,6 @@ describe("in the reply draft (approval \"inbox-action-items-in-reply\")", () => 
     });
     expect(actionOf(store, asked.id)).toMatchObject({ state: "superseded", superseded_by: { message_id: next.message.id } });
     expect(rowOf(store, asked.thread_id).unsent?.done ?? 0).toBe(0);
-    // A Send that still names it (a window that has not caught up) has nothing left to send.
     expect(() => store.sendReply(asked.id, { idempotency_key: "k1", words: "", actions: [{ key: action.key }] })).toThrow(
       expect.objectContaining({ code: "nothing_to_send" }),
     );
@@ -289,7 +264,6 @@ describe("in the reply draft (approval \"inbox-action-items-in-reply\")", () => 
     expect(() =>
       timed.store.sendMessage({ project_id: timed.project.id, author: AGENT, reply_to: timed.asked.id, body: "Never mind.", supersedes: [`${timed.asked.id}/${timed.action.key}`] }),
     ).toThrow(/the person already marked it; their answer reaches you in a few seconds/);
-    // The refusal's list agrees with it: the marked item is not offered as open; the question still is.
     let refusal: InboxError | null = null;
     try {
       timed.store.sendMessage({ project_id: timed.project.id, author: AGENT, reply_to: timed.asked.id, body: "Never mind.", supersedes: [`${timed.asked.id}/${timed.action.key}`] });
@@ -308,7 +282,6 @@ describe("in the reply draft (approval \"inbox-action-items-in-reply\")", () => 
     expect(() => store.sendReply(asked.id, { idempotency_key: "k1", words: "", actions: [{ key: action.key }] })).toThrow(
       expect.objectContaining({ code: "nothing_to_send" }),
     );
-    // With nothing named at all it is still the words refusal.
     expect(() => store.sendReply(asked.id, { idempotency_key: "k2", words: "" })).toThrow(expect.objectContaining({ code: "validation_error" }));
   });
 
@@ -329,7 +302,6 @@ describe("in the reply draft (approval \"inbox-action-items-in-reply\")", () => 
     expect(rowOf(store, asked.thread_id).unsent).toMatchObject({ done: 1 });
     expect(rowOf(store, asked.thread_id).unsent?.cant ?? 0).toBe(0);
     const { reply } = store.sendReply(seen.message.id, { idempotency_key: "k1", words: "", actions: [{ message_id: asked.id, key: action.key }] });
-    // The person could not do it: never "Did 1 action item."; the item is done all the same.
     expect(reply.body.startsWith("Couldn't do 1 action item.\n\n")).toBe(true);
     expect(reply.body).not.toContain("Did 1 action item");
     expect(reply.body).toContain("1 of 1 done.");
@@ -355,11 +327,9 @@ describe("in the reply draft (approval \"inbox-action-items-in-reply\")", () => 
       actions: [{ message_id: msg1.id, key: a1.key }],
     });
     const section = reply.body.slice(reply.body.indexOf(`## ${INBOX_ACTIONS_HEADING}`));
-    // msg1's A1 under its message; msg2's own A1 (the replied-to message) still open, unqualified.
     expect(section.startsWith(`## ${INBOX_ACTIONS_HEADING}\n\n### Your message ${msg1.id}\n\n1 of 1 done.\n\n#### A1. Approve deploy\nDone, `)).toBe(true);
     expect(section.endsWith("\n\nStill open: A1. Sign in to npm — the person will do it in the Inbox; don't ask again.")).toBe(true);
 
-    // The other way round: the reply answers msg1 and msg2's A1 is still open: named with msg2.
     const b = open();
     const pb = b.store.ensureProject({ name: "web", root: "/work/web" });
     const m1 = b.store.sendMessage({ project_id: pb.id, author: AGENT, body: ":::action\nApprove deploy\nStopped: the release\n:::" }).message;
@@ -406,10 +376,8 @@ describe("review fixes", () => {
     const row = rowOf(store, asked.thread_id);
     expect(row.unseen).toBe(1);
     expect(row.unread).toBe(true);
-    // The question in the message still waits: Waiting on you. The report still rides `sent` for its delivery.
     expect(row.section).toBe("waiting");
     expect(row.sent?.at).toBe(report!.created_at);
-    // A look (markSeen) is still due: the report did not record one.
     expect(store.markSeen(asked.thread_id).unseen).toBe(0);
   });
 
@@ -468,7 +436,6 @@ describe("review fixes", () => {
     }).message;
     void lone;
     expect(second.store.questionsOf(second.asked.id).find((q) => q.key === second.question.key)!.superseded_by).toEqual({ message_id: lone.id, key: null });
-    // An action item's own Replaces: line reaches only an action item.
     const replacesQuestion = () =>
       second.store.sendMessage({
         project_id: second.project.id,
@@ -488,7 +455,6 @@ describe("review fixes", () => {
       store.sendMessage({ project_id: project.id, author: AGENT, reply_to: asked.id, body: "Never mind the deploy.", supersedes: [`${asked.id}/${action.key}`] }),
     ).toThrow(/the person already marked it; their answer reaches you in a few seconds/);
     expect(store.cursor()).toBe(before);
-    // A message-wide id supersedes the open question and leaves the marked action item alone.
     store.sendMessage({ project_id: project.id, author: AGENT, reply_to: asked.id, body: "Dropping the announcement question.", supersedes: [asked.id] });
     expect(store.questionsOf(asked.id).find((q) => q.key === question.key)!.state).toBe("superseded");
     expect(actionOf(store, asked.id)).toMatchObject({ state: "picked", superseded_by: null });
@@ -521,7 +487,6 @@ describe("Re-ask", () => {
     expect(reply.body).toContain("an action item in a `:::action` block");
     expect(reply.body).toContain("- An action item you saw done yourself: put its id in `done`.");
     expect(reply.body).toContain("Until every id above is replaced, in `supersedes` or in `done`, the old ones stay open for the person.");
-    // While the note waits, the row sits in Sent (rule 2a covers the action item too).
     expect(rowOf(store, asked.thread_id)).toMatchObject({ section: "sent", reask_pending: true });
   });
 
@@ -608,15 +573,12 @@ describe("the agent marks its own action item done", () => {
     const { store, project, asked, action } = setup();
     const other = { ...AGENT, session: "ses_other" };
     const ref = `${asked.id}/${action.key}`;
-    // Before any note it is not theirs.
     expect(() => store.sendMessage({ project_id: project.id, author: other, body: "Ready.", reply_to: asked.id, done: [ref] })).toThrow(/another session's/);
     const { reply } = store.sendReask(asked.id, { idempotency_key: "r1", to: { host: "claude-code", session: "ses_other" } });
     expect(reply.reask).toContain(ref);
-    // A third session is still refused: the note went to ses_other only.
     expect(() =>
       store.sendMessage({ project_id: project.id, author: { ...AGENT, session: "ses_third" }, body: "Ready.", reply_to: reply.id, done: [ref] }),
     ).toThrow(/another session's/);
-    // The message-wide id takes only what the note lists (the action item; the question is not an action item anyway).
     const result = store.sendMessage({ project_id: project.id, author: other, body: "The deployment is Ready.", reply_to: reply.id, done: [asked.id] });
     expect(result.done).toEqual([ref]);
     expect(actionOf(store, asked.id)).toMatchObject({ state: "closed", action_result: { outcome: "done", by: "agent" } });

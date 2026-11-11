@@ -1,12 +1,3 @@
-/**
- * Combining projects (approval "project-combine"): `merged_into` on one more
- * project line, and the group every reader treats as one project. What can
- * regress: an undo that does not give everything back; the same thread name
- * splitting in two across the folders of one project; a retry from the other
- * folder writing twice; a card or a thread hidden from the group; a project that
- * can vanish (a loop, a target that is gone, a half-written line); a folder's
- * files dropping out of the size; a Delete reaching a combined project's threads.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -67,7 +58,6 @@ describe("combine and undo", () => {
     for (const reader of [store, InboxStore.open(dir)]) {
       expect(reader.listProjects().map((p) => p.id)).not.toContain(site.id);
       expect(rowIds(reader, docs.id)).toEqual([inA, inB].sort());
-      // Either id reaches the group: an old link, or the folder's next message.
       expect(rowIds(reader, site.id)).toEqual([inA, inB].sort());
       const row = reader.listRows({ projectId: docs.id }).find((r) => r.thread_id === inB)!;
       expect(row.project).toEqual({ id: docs.id, name: "docs" });
@@ -83,7 +73,6 @@ describe("combine and undo", () => {
     expect(readFileSync(file(store, site.key, "messages.jsonl"), "utf8")).toBe(before);
     expect(lines(store, site.key)).toHaveLength(count + 1);
     expect(store.project(site.id)!.merged_into).toBe(docs.id);
-    // A's own record does not change: it keeps its id, its name, its line.
     expect(lines(store, docs.key)).toHaveLength(1);
   });
 
@@ -119,7 +108,6 @@ describe("combine and undo", () => {
       expect(reader.project(site.id)!.merged_into).toBeUndefined();
       expect(reader.combinedInto(docs.id)).toEqual([]);
     }
-    // Names route per project again: B's "search" is B's, and A gets its own.
     expect(say(store, site.id, "Again.", { thread: "search" }).thread_id).toBe(named.thread_id);
     expect(say(store, docs.id, "Mine.", { thread: "search" }).thread_id).not.toBe(named.thread_id);
   });
@@ -185,7 +173,6 @@ describe("the group", () => {
     const second = say(store, site.id, "From B.", { thread: "release" });
     expect(second.thread_id).toBe(first.thread_id);
     expect(store.listRows({ projectId: docs.id }).filter((row) => row.thread_id === first.thread_id)).toHaveLength(1);
-    // One thread, one folder: deleting the thread must reach all of it.
     expect(second.project_id).toBe(docs.id);
     store.deleteThread(first.thread_id);
     expect(store.message(second.id)).toBeNull();
@@ -196,7 +183,6 @@ describe("the group", () => {
     say(store, docs.id, "Started in A.", { thread: "release" });
     store.combineProject(site.id, docs.id);
     expect(say(store, site.id, "See ./a.png", { thread: "release" }).base_path).toBe(SITE);
-    // From its own folder, nothing to say: the root is the base already.
     expect(say(store, docs.id, "And from A.", { thread: "release" }).base_path).toBeUndefined();
   });
 
@@ -256,7 +242,6 @@ describe("the group", () => {
     expect(retry.replayed).toBe(true);
     expect(retry.message.id).toBe(first.message.id);
     expect(code(() => store.sendMessage({ project_id: docs.id, author: agent(), body: "Different.", idempotency_key: "k1" }))).toBe("idempotency_key_reused");
-    // Undone, the key is per project again.
     store.combineProject(site.id, null);
     expect(store.sendMessage({ project_id: docs.id, author: agent(), body: "Different.", idempotency_key: "k1" }).replayed).toBe(false);
   });
@@ -278,7 +263,6 @@ describe("the group", () => {
     expect(store.createCard({ project_id: docs.id, by: agent(), title: "Hero", idempotency_key: "c1" }).replayed).toBe(true);
     const inA = say(store, docs.id, "In A.");
     expect(store.createCard({ project_id: site.id, by: agent(), title: "Linked", threads: [inA.id] }).card.threads).toEqual([inA.thread_id]);
-    // The record keeps its project, so an undo gives the card back.
     store.combineProject(site.id, null);
     expect(store.cardWire(store.listCards({ projectIds: new Set([site.id]) }).find((c) => c.id === card.id)!).project_id).toBe(site.id);
   });
@@ -287,7 +271,6 @@ describe("the group", () => {
     const { store, docs, site } = open();
     const { message } = store.startPersonThread({ project_id: site.id, body: "Hero copy", to: { host: "codex", session: "ses_x" }, idempotency_key: "k1" });
     store.combineProject(site.id, docs.id);
-    // The window passes the id it shows: the head's.
     const { card } = store.createCard({ project_id: docs.id, by: { kind: "person" }, title: "Hero copy", threads: [message.id] });
     expect(store.cardWire(card).project_id).toBe(docs.id);
     store.combineProject(site.id, null);
@@ -344,7 +327,6 @@ describe("a project can reappear, never vanish", () => {
     store.combineProject(site.id, docs.id);
     expect(store.listProjects().map((p) => p.id)).toEqual([docs.id]);
     expect(store.combinedInto(docs.id).map((p) => p.id).sort()).toEqual([site.id, web.id].sort());
-    // Undo writes one line, and the project keeps what was in it.
     store.combineProject(site.id, null);
     expect(store.listProjects().map((p) => p.id)).toEqual([docs.id, site.id]);
     expect(store.combinedInto(site.id).map((p) => p.id)).toEqual([web.id]);
@@ -467,7 +449,6 @@ describe("disk usage", () => {
     const before = store.diskUsage();
     store.combineProject(site.id, docs.id);
     const after = store.diskUsage();
-    // The project line is all that grew.
     const grew = lines(store, site.key).at(-1)!;
     expect(after.bytes - before.bytes).toBe(Buffer.byteLength(`${JSON.stringify(grew)}\n`));
     const member = after.projects.find((p) => p.id === site.id)!;

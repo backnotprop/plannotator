@@ -1,14 +1,12 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 
-// --- Types ---
-
 export interface ObsidianConfig {
 	vaultPath: string;
 	folder: string;
 	plan: string;
-	filenameFormat?: string; // Custom format string, e.g. '{YYYY}-{MM}-{DD} - {title}'
-	filenameSeparator?: "space" | "dash" | "underscore"; // Replace spaces in filename
+	filenameFormat?: string;
+	filenameSeparator?: "space" | "dash" | "underscore";
 }
 
 export interface BearConfig {
@@ -35,26 +33,16 @@ export interface IntegrationResult {
 	url?: string;
 }
 
-/**
- * Whether an Obsidian folder setting would leave the vault: any `..` segment
- * (either separator) does. The folder is a path INSIDE the vault ("plannotator",
- * "Projects/plans"); `join(vault, "../x")` would otherwise write beside it.
- * A leading separator is harmless (`join` keeps it inside the vault).
- */
+/** A `..` segment (either separator) would leave the vault: the folder is a path inside it. A leading separator is harmless (`join` keeps it inside). */
 export function obsidianFolderEscapesVault(folder: string): boolean {
 	return folder.split(/[\\/]+/).some((segment) => segment.trim() === "..");
 }
 
-/**
- * Detect Obsidian vaults by reading Obsidian's config file
- * Returns array of vault paths found on the system
- */
 export function detectObsidianVaults(): string[] {
 	try {
 		const home = process.env.HOME || process.env.USERPROFILE || "";
 		let configPath: string;
 
-		// Platform-specific config locations
 		if (process.platform === "darwin") {
 			configPath = join(
 				home,
@@ -64,7 +52,6 @@ export function detectObsidianVaults(): string[] {
 			const appData = process.env.APPDATA || join(home, "AppData/Roaming");
 			configPath = join(appData, "obsidian/obsidian.json");
 		} else {
-			// Linux
 			configPath = join(home, ".config/obsidian/obsidian.json");
 		}
 
@@ -79,7 +66,6 @@ export function detectObsidianVaults(): string[] {
 			return [];
 		}
 
-		// Extract vault paths, filter to ones that exist
 		const vaults: string[] = [];
 		for (const vaultId of Object.keys(config.vaults)) {
 			const vault = config.vaults[vaultId];
@@ -94,11 +80,6 @@ export function detectObsidianVaults(): string[] {
 	}
 }
 
-// --- Frontmatter and Filename Generation ---
-
-/**
- * Generate frontmatter for the note
- */
 export function generateFrontmatter(tags: string[]): string {
 	const now = new Date().toISOString();
 	const tagList = tags.map((t) => t.toLowerCase()).join(", ");
@@ -109,49 +90,25 @@ tags: [${tagList}]
 ---`;
 }
 
-/**
- * Extract title from markdown (first H1 heading)
- */
 export function extractTitle(markdown: string): string {
 	const h1Match = markdown.match(
 		/^#\s+(?:Implementation\s+Plan:|Plan:)?\s*(.+)$/im,
 	);
 	if (h1Match) {
-		// Clean up the title for use as filename
 		return h1Match[1]
 			.trim()
-			.replace(/[<>:"/\\|?*(){}\[\]#~`]/g, "") // Remove invalid/problematic filename chars
-			.replace(/\s+/g, " ") // Normalize whitespace
-			.trim() // Re-trim after stripping
-			.slice(0, 50); // Limit length
+			.replace(/[<>:"/\\|?*(){}\[\]#~`]/g, "")
+			.replace(/\s+/g, " ")
+			.trim()
+			.slice(0, 50);
 	}
 	return "Plan";
 }
 
-/** Default filename format matching original behavior */
 export const DEFAULT_FILENAME_FORMAT =
 	"{title} - {Mon} {D}, {YYYY} {h}-{mm}{ampm}";
 
-/**
- * Generate filename from a format string with variable substitution.
- *
- * Supported variables:
- *   {title}  - Plan title from first H1 heading
- *   {YYYY}   - 4-digit year
- *   {MM}     - 2-digit month (01-12)
- *   {DD}     - 2-digit day (01-31)
- *   {Mon}    - Abbreviated month name (Jan, Feb, ...)
- *   {D}      - Day without leading zero
- *   {HH}     - 2-digit hour, 24h (00-23)
- *   {h}      - Hour without leading zero, 12h
- *   {hh}     - 2-digit hour, 12h (01-12)
- *   {mm}     - 2-digit minutes (00-59)
- *   {ss}     - 2-digit seconds (00-59)
- *   {ampm}   - am/pm
- *
- * Default format: '{title} - {Mon} {D}, {YYYY} {h}-{mm}{ampm}'
- * Example output: 'User Authentication - Jan 2, 2026 2-30pm.md'
- */
+/** Filename from a format string. Variables: {title}, {YYYY}, {MM}, {DD}, {Mon}, {D}, {HH}, {h}, {hh}, {mm}, {ss}, {ampm}. */
 export function generateFilename(
 	markdown: string,
 	format?: string,
@@ -200,13 +157,11 @@ export function generateFilename(
 		(match, key) => vars[key] ?? match,
 	);
 
-	// Sanitize: remove characters invalid in filenames
 	let sanitized = result
 		.replace(/[<>:"/\\|?*]/g, "")
 		.replace(/\s+/g, " ")
 		.trim();
 
-	// Apply separator preference (replace spaces with dash or underscore)
 	if (separator === "dash") {
 		sanitized = sanitized.replace(/ /g, "-");
 	} else if (separator === "underscore") {
@@ -215,8 +170,6 @@ export function generateFilename(
 
 	return sanitized.endsWith(".md") ? sanitized : `${sanitized}.md`;
 }
-
-// --- Bear Integration ---
 
 export function stripH1(plan: string): string {
 	return plan.replace(/^#\s+.+\n?/m, "").trimStart();
@@ -246,14 +199,8 @@ export function buildBearContent(
 		: `${body}\n\n${hashtags}`;
 }
 
-// --- Octarine Integration ---
-
-/**
- * Generate YAML frontmatter for an Octarine note.
- * Uses Octarine's property format (list-style tags, Status, Author, Last Edited).
- */
 export function generateOctarineFrontmatter(tags: string[]): string {
-	const now = new Date().toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM
+	const now = new Date().toISOString().slice(0, 16);
 	const tagLines = tags.map((t) => `  - ${t.toLowerCase()}`).join("\n");
 	return `---\ntags:\n${tagLines}\nStatus: Draft\nAuthor: plannotator\nLast Edited: ${now}\n---`;
 }

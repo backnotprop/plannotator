@@ -1,18 +1,9 @@
-/**
- * Decision mode moved the list's "waits on the person" rule into core
- * (`inboxQuestionWaitsForList`, approval "inbox-decision-mode"). The list must
- * count exactly what it counted before: `summarizeInboxQuestions` is checked
- * against a copy of the function as it was before decision mode, over random
- * questions of every state, every known kind, kinds a newer Inbox may write,
- * and orphaned records. And the answering rule (`inboxQuestionWaitsOnPerson`)
- * is the list's rule minus the kinds this build does not know.
- */
 import { describe, expect, test } from "bun:test";
 import fc from "fast-check";
 import { inboxQuestionWaitsForList, inboxQuestionWaitsOnPerson, summarizeInboxQuestions } from "@plannotator/core/inbox-questions";
 import type { InboxQuestion, InboxQuestionSummary } from "@plannotator/core/inbox-types";
 
-/** `summarizeInboxQuestions` as it was on main before decision mode (0a0ac58a3), byte for byte. */
+/** A frozen copy of `summarizeInboxQuestions` from before decision mode, byte for byte. */
 function summarizeBefore(questions: readonly InboxQuestion[]): InboxQuestionSummary {
   let open = 0;
   let picked = 0;

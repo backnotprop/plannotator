@@ -1,8 +1,3 @@
-/**
- * When a reply's wake says to start a checklist (`answersQuestionsOf`; the owner, 2026-11-09: a nudge "when the person
- * answers questions" in a thread with no checklist). What regresses: the line on every plain reply or 👍 (noise the
- * owner ruled out), on a reply that only skips, or on answers to another session's questions.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -43,7 +38,6 @@ describe("a reply answers the session's questions", () => {
     expect(w.store.answersQuestionsOf(reply, "ses_b")).toBe(false);
   });
 
-  // (A 👍 Looks good never gets here: its wake is the ack line alone, `replyCommand` returns before any steps line.)
   test("words alone, the question left open: no", () => {
     const w = world();
     const plain = w.store.sendReply(w.asked.id, { words: "Thanks, looks good.", idempotency_key: w.key() }).reply;

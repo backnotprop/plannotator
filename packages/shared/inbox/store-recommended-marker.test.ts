@@ -1,13 +1,3 @@
-/**
- * A recommendation written into a choice's label (`- [ ] Foo (Recommended)`,
- * no `Recommended:` line) through the Inbox store: the record keeps the
- * recommendation, the card's pick is taken, and a record stored before the
- * parser read the marker still takes the card's (marker-free) label.
- *
- * What regresses if this fails: the reply loses "(your recommendation)", or
- * the window's pick on such a question answers `422 "…" is not one of the
- * question's choices`.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

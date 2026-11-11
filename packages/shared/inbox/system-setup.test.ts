@@ -1,8 +1,3 @@
-/**
- * setup.json on disk. What regresses: a project key that climbs out of `<data dir>/system/` (a write lands
- * elsewhere), a folder made before (by another tool, with a wider mode) left readable by others, or a failed
- * write leaving its temp file beside setup.json.
- */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -26,7 +21,6 @@ test("a key that is not one folder name under system/ is refused, and nothing is
     expect(() => systemSetupPath(dataDir, key)).toThrow();
     expect(() => writeSystemSetup(dataDir, key, SETUP)).toThrow();
   }
-  // Nothing beside the data dir, nor under it.
   expect(readdirSync(root)).toEqual([]);
   expect(systemProjectDir(dataDir, "app-abc123")).toBe(join(dataDir, "system", "app-abc123"));
 });
@@ -42,7 +36,6 @@ test("a project folder made before with a wider mode is made private on save", (
 
 test("a write that fails leaves no temp file behind", () => {
   const dir = join(dataDir, "system", "app-abc123");
-  // setup.json is a folder with something in it: the rename over it fails.
   mkdirSync(join(dir, "setup.json"), { recursive: true });
   writeFileSync(join(dir, "setup.json", "keep"), "");
   expect(() => writeSystemSetup(dataDir, "app-abc123", SETUP)).toThrow();

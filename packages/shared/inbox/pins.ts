@@ -1,15 +1,4 @@
-/**
- * Plannotator Inbox: threads pinned to the window's sidebar (approval
- * "inbox-pinned-threads", .product/approved/inbox-pinned-threads/).
- *
- *   inbox/pins.json   { v: 1, pins: [{ thread_id, pinned_at }] }, in pin order, 0600, written whole (temp, then rename)
- *
- * A file outside the store's JSONL, like reply drafts: a pin is window
- * furniture and must never enter the event log, which agents' cursors, the
- * phone relay and search read. A pin writes no line and takes no seq. There
- * is no limit on pins (the owner's decision), and an archived thread stays
- * pinned; a deleted thread leaves the file.
- */
+/** Threads pinned to the sidebar, in `inbox/pins.json`. Kept outside the store's JSONL: a pin must never enter the event log that agents' cursors, the phone relay and search read. */
 
 import { chmodSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -18,14 +7,12 @@ import { InboxError } from "./schema";
 
 export const INBOX_PINS_FILE = "pins.json";
 
-/** The most thread ids one order may name (a bound on a request body, not a limit on pins). */
 export const INBOX_PIN_ORDER_MAX = 10_000;
 
 function fileOf(inboxDirPath: string): string {
   return join(inboxDirPath, INBOX_PINS_FILE);
 }
 
-/** The pins on disk, in order. A file that does not parse reads as none; a bad or repeated entry is skipped. */
 export function readInboxPins(inboxDirPath: string): InboxPin[] {
   let value: unknown;
   try {
@@ -47,12 +34,7 @@ export function readInboxPins(inboxDirPath: string): InboxPin[] {
   return out;
 }
 
-/**
- * What pins.json holds before a write: nothing, a v1 file, a file this
- * Plannotator cannot read (not JSON, not an object, unreadable), or a newer
- * version's file. readInboxPins reads the last two as no pins, so a write must
- * never simply replace them.
- */
+/** A pins.json this version cannot read (corrupt, or a newer version's) reads as no pins, so a write must never simply replace it. */
 export function inboxPinsFileState(inboxDirPath: string): "missing" | "ok" | "bad" | "newer" {
   let raw: string;
   try {
@@ -72,13 +54,7 @@ export function inboxPinsFileState(inboxDirPath: string): "missing" | "ok" | "ba
   return file.v === 1 && Array.isArray(file.pins) ? "ok" : "bad";
 }
 
-/**
- * Write the pins whole (owner-only). No pins removes the file. A pins.json a
- * newer Plannotator wrote is never written over (refused: its pins come back
- * with that version); one that cannot be read is moved aside first
- * (`pins.json.unreadable-<time>`, kept for the person), since pins.json is the
- * Inbox's own file and refusing would leave pinning broken for good.
- */
+/** A pins.json a newer Plannotator wrote is never overwritten; an unreadable one is moved aside to `pins.json.unreadable-<time>` first. */
 export function writeInboxPins(inboxDirPath: string, pins: readonly InboxPin[]): void {
   const file = fileOf(inboxDirPath);
   const state = inboxPinsFileState(inboxDirPath);
@@ -101,7 +77,6 @@ export function writeInboxPins(inboxDirPath: string, pins: readonly InboxPin[]):
   renameSync(temp, file);
 }
 
-/** The checks on an order (`POST /api/inbox/pins`): a list of distinct thread ids. */
 export function checkInboxPinOrder(value: unknown): string[] {
   if (!Array.isArray(value) || value.length > INBOX_PIN_ORDER_MAX || !value.every((id) => isInboxId("msg", id))) {
     throw new InboxError("validation_error", "order: a list of thread ids (msg_), in the order they show.", { field: "order" });
@@ -110,14 +85,12 @@ export function checkInboxPinOrder(value: unknown): string[] {
   return value as string[];
 }
 
-/** Unpin's Undo (`POST /api/inbox/pins { restore }`): one thread, where it was and when it was pinned. */
 export interface InboxPinRestore {
   thread_id: string;
   index: number;
   pinned_at: string;
 }
 
-/** The checks on a restore: a thread id, a whole index, and an ISO time. */
 export function checkInboxPinRestore(value: unknown): InboxPinRestore {
   const restore = value as { thread_id?: unknown; index?: unknown; pinned_at?: unknown } | null;
   if (

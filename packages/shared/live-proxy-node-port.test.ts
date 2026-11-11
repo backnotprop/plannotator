@@ -1,16 +1,4 @@
-/**
- * PLANNOTATOR_LIVE_PORT on the Node live proxy the Pi extension ships
- * (#2145). The twin of packages/server/live-proxy-port.test.ts for the Bun
- * transport.
- *
- * Like live-proxy-node.test.ts, the proxy runs in a REAL `node` child
- * (live-proxy-node.child.ts): that is its runtime under Pi. A failed start
- * makes the child print { error } and end by itself, which it can only do
- * when the failed start left no listener open.
- *
- * Busy ports are real listeners this file starts and closes; free ports come
- * from the OS.
- */
+/** PLANNOTATOR_LIVE_PORT on the Node live proxy, run in a REAL `node` child (its runtime under Pi). A failed start must leave no listener, or the child cannot end by itself. */
 
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -63,7 +51,6 @@ type Outcome =
   | { kind: "listening"; port: number; stderr: () => Promise<string> }
   | { kind: "failed"; name: string; message: string; exitCode: number | null; stderr: string };
 
-/** Start the proxy in node with PLANNOTATOR_LIVE_PORT set to `livePort`. */
 async function startInNode(livePort: string | undefined): Promise<Outcome> {
   const env: Record<string, string | undefined> = {
     ...process.env,

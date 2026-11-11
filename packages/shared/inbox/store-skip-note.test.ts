@@ -1,11 +1,3 @@
-/**
- * A note on a question card goes to the agent with the Send (the owner: "When
- * I skip a message but add a note, that note needs to go to the reply"). The
- * store's half: a saved Skip plus note, or a note alone, sent with the reply,
- * with "Skip them" and with the default (Keep open, approval "inbox-explicit-skip"). The window's half (sending the
- * note's saved revision even while it is still being saved) is
- * packages/inbox/skipNote.test.tsx.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

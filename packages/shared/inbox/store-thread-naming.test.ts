@@ -1,13 +1,3 @@
-/**
- * Naming a thread the person started (approval "inbox-agent-names-own-thread"):
- * the person may give it a name in compose; otherwise the first reply from the
- * session it is addressed to that carries `thread` names it, once. The name is
- * the thread's chip (`thread_name`), and later sends with that name join it.
- * What can regress: another session renaming it, a second name replacing the
- * first, the person's name being replaced, the subject changing, routing
- * after a replay, an invalid name being stored, a name another open thread
- * has pulling that thread's sends in, and a retry answering differently.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { cpSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -55,17 +45,14 @@ describe("naming a thread the person started", () => {
     expect(store.canNameThread(root.id, "ses_live")).toBe(true);
     expect(store.canNameThread(root.id, "ses_other")).toBe(false);
 
-    // A reply with no name: still nameable, and the result says so.
     const first = store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "On it.", reply_to: root.id });
     expect(first.naming).toEqual({ status: "unnamed" });
     expect(store.canNameThread(root.id, "ses_live")).toBe(true);
 
-    // An invalid name is refused (nothing stored); the thread stays nameable.
     const bad = store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "x", reply_to: root.id, thread: "line\nbreak" });
     expect(bad.naming).toMatchObject({ status: "refused", code: "invalid_thread_name" });
     expect(store.message(root.id)!.thread_name ?? null).toBeNull();
 
-    // The first valid name sets the chip and `named_by`; the bold subject is unchanged.
     const named = store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "Sketch below.", reply_to: root.id, thread: "Kanban board" });
     expect(named.naming).toEqual({ status: "named", name: "Kanban board" });
     const after = store.message(root.id)!;
@@ -75,7 +62,6 @@ describe("naming a thread the person started", () => {
     expect(store.listRow(root.id)!.thread_name).toBe("Kanban board");
     expect(store.canNameThread(root.id, "ses_live")).toBe(false);
 
-    // Once: a later name is ignored, and the result no longer mentions naming.
     const again = store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "More.", reply_to: root.id, thread: "Something else" });
     expect(again.naming).toBeUndefined();
     expect(store.message(root.id)!.thread_name).toBe("Kanban board");
@@ -104,7 +90,6 @@ describe("naming a thread the person started", () => {
     const { message: root } = store.startPersonThread({ project_id: project.id, body: IDEA, to: claude, idempotency_key: "k" });
     store.readdressMessage(root.id, { host: "pi", session: "ses_pi" });
     expect(store.threadNamers(root.id)).toEqual(["ses_pi"]);
-    // The old session replies first (it read the thread): now it may name it too.
     store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "I saw it.", reply_to: root.id });
     expect(store.threadNamers(root.id)).toEqual(["ses_pi", "ses_live"]);
     expect(store.canNameThread(root.id, "ses_third")).toBe(false);
@@ -121,40 +106,32 @@ describe("naming a thread the person started", () => {
     const reply = store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "ok", reply_to: root.id, thread: "Kanban" });
     expect(reply.naming).toBeUndefined();
     expect(store.message(root.id)!.thread_name).toBe("Board");
-    // An invalid name refuses the Send, writing nothing; an empty one is no name.
     expect(code(() => store.startPersonThread({ project_id: project.id, body: "x", to: claude, idempotency_key: "k2", thread_name: "a‮b" }))).toBe("validation_error");
     expect(store.personThreadByKey("k2")).toBeNull();
     const empty = store.startPersonThread({ project_id: project.id, body: "y", to: claude, idempotency_key: "k3", thread_name: "   " });
     expect(empty.message.thread_name ?? null).toBeNull();
-    // A replay with another name is a different Send.
     expect(code(() => store.startPersonThread({ project_id: project.id, body: IDEA, to: claude, idempotency_key: "k", thread_name: "Other" }))).toBe("idempotency_key_reused");
     expect(store.startPersonThread({ project_id: project.id, body: IDEA, to: claude, idempotency_key: "k", thread_name: "Board" }).replayed).toBe(true);
   });
 
   test("a name another open thread has is refused: that thread's sends stay where they are", () => {
     const { store, project } = world();
-    // Session B already posts to an open thread called "Auth refactor".
     const b = store.sendMessage({ project_id: project.id, author: agent("ses_b"), body: "B's work", thread: "Auth refactor" });
     const { message: root } = store.startPersonThread({ project_id: project.id, body: IDEA, to: claude, idempotency_key: "k" });
 
-    // The addressed agent names the person's thread "auth  Refactor": refused, the thread stays unnamed and nameable.
     const refused = store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "ok", reply_to: root.id, thread: "auth  Refactor" });
     expect(refused.naming).toMatchObject({ status: "refused", code: "thread_name_taken" });
     expect(store.message(root.id)!.thread_name ?? null).toBeNull();
     expect(store.canNameThread(root.id, "ses_live")).toBe(true);
 
-    // B's next send still lands in B's own thread.
     expect(store.sendMessage({ project_id: project.id, author: agent("ses_b"), body: "B again", thread: "Auth refactor" }).message.thread_id).toBe(b.message.thread_id);
 
-    // Another name is taken.
     const named = store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "ok", reply_to: root.id, thread: "Kanban board" });
     expect(named.naming).toEqual({ status: "named", name: "Kanban board" });
 
-    // The compose field is refused the same way, writing nothing.
     expect(code(() => store.startPersonThread({ project_id: project.id, body: "x", to: claude, idempotency_key: "k2", thread_name: "AUTH REFACTOR" }))).toBe("thread_name_taken");
     expect(store.personThreadByKey("k2")).toBeNull();
 
-    // A resolved thread does not hold its name.
     store.resolveThread(b.message.thread_id, true);
     const { message: later } = store.startPersonThread({ project_id: project.id, body: "y", to: claude, idempotency_key: "k3" });
     expect(store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "ok", reply_to: later.id, thread: "Auth refactor" }).naming?.status).toBe("named");
@@ -172,18 +149,14 @@ describe("naming a thread the person started", () => {
         return error.details;
       }
     };
-    // A thread the person named in compose, and one an agent named.
     const { message: mine } = store.startPersonThread({ project_id: project.id, body: "first", to: claude, idempotency_key: "a", thread_name: "Launch notes" });
     const theirs = store.sendMessage({ project_id: project.id, author: agent("ses_b"), body: "B's work", thread: "Auth refactor" });
 
-    // The same name by the name rule (case, spaces) names the thread that has it.
     expect(taken(project.id, "launch  NOTES", "b")).toMatchObject({ field: "thread_name", thread_id: mine.thread_id });
     expect(taken(project.id, "auth refactor", "c")).toMatchObject({ thread_id: theirs.message.thread_id });
 
-    // Another project's thread of that name is not in the way: the Send starts its own thread.
     expect(taken(other.id, "Launch notes", "d")).toBeNull();
 
-    // An archived thread neither holds the name nor is offered.
     store.resolveThread(mine.thread_id, true);
     expect(taken(project.id, "Launch notes", "e")).toBeNull();
     expect(store.personThreadByKey("e")!.thread_id).not.toBe(mine.thread_id);
@@ -195,11 +168,9 @@ describe("naming a thread the person started", () => {
     store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "ok", reply_to: root.id, thread: "Board" });
     expect(store.sendMessage({ project_id: project.id, author: agent("ses_b"), body: "joins", thread: "BOARD" }).message.thread_id).toBe(root.id);
 
-    // A name the person typed in compose routes nothing: another session's send with it starts its own thread.
     const { message: named } = store.startPersonThread({ project_id: project.id, body: "another idea", to: claude, idempotency_key: "k2", thread_name: "Relay" });
     expect(store.sendMessage({ project_id: project.id, author: agent("ses_c"), body: "x", thread: "relay" }).message.thread_id).not.toBe(named.id);
 
-    // The store reopened from its files routes the next sends the same.
     const copy = scratch();
     cpSync(dir, copy, { recursive: true });
     const replayed = InboxStore.open(copy);
@@ -225,7 +196,6 @@ describe("naming a thread the person started", () => {
     expect(code(() => store.sendMessage({ ...input, thread: "Other" }))).toBe("idempotency_key_reused");
     expect(code(() => store.sendMessage({ ...input, thread: undefined }))).toBe("idempotency_key_reused");
 
-    // A refusal replays as the refusal, even once the name is free.
     const b = store.sendMessage({ project_id: project.id, author: agent("ses_b"), body: "B", thread: "Auth" });
     const { message: other } = store.startPersonThread({ project_id: project.id, body: "idea", to: claude, idempotency_key: "k2" });
     const taken = { project_id: project.id, author: agent("ses_live"), body: "ok", reply_to: other.id, thread: "Auth", idempotency_key: "r2" };
@@ -259,13 +229,10 @@ describe("compose's suggested name (thread_name_auto)", () => {
     expect(root.thread_name).toBe("Kanban board");
     expect(root.named_by).toMatchObject({ kind: "auto" });
     expect(store.listRow(root.id)!.thread_name).toBe("Kanban board");
-    // A suggestion is not the person's name: the agent may still name it.
     expect(store.canNameThread(root.id, "ses_live")).toBe(true);
 
-    // The suggestion routes nothing (the reviewer's repro: another session's send with it starts its own thread).
     const elsewhere = store.sendMessage({ project_id: project.id, author: agent("ses_other"), body: "elsewhere", thread: "kanban BOARD" });
     expect(elsewhere.message.thread_id).not.toBe(root.id);
-    // That thread now holds the name, so the agent names the person's thread something else.
     store.resolveThread(elsewhere.message.thread_id, true);
 
     const named = store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "Sketch.", reply_to: root.id, thread: "Board columns" });
@@ -274,7 +241,6 @@ describe("compose's suggested name (thread_name_auto)", () => {
     expect(store.message(root.id)!.named_by).toMatchObject({ kind: "agent", session: "ses_live" });
     expect(store.canNameThread(root.id, "ses_live")).toBe(false);
 
-    // The old name no longer reaches the thread; the new one does. A replay of the log agrees.
     for (const s of [store, InboxStore.open(dir)]) {
       const viaOld = s.sendMessage({ project_id: project.id, author: agent("ses_x"), body: `old ${s === store ? 1 : 2}`, thread: "Kanban board" });
       expect(viaOld.message.thread_id).not.toBe(root.id);
@@ -299,7 +265,6 @@ describe("compose's suggested name (thread_name_auto)", () => {
     expect(taken.message.named_by).toBeUndefined();
     const invalid = store.startPersonThread({ project_id: project.id, body: "third", to: claude, idempotency_key: "k3", thread_name: "a\u202eb", thread_name_auto: true });
     expect(invalid.message.thread_name ?? null).toBeNull();
-    // The same name typed by the person is still refused.
     expect(code(() => store.startPersonThread({ project_id: project.id, body: "fourth", to: claude, idempotency_key: "k4", thread_name: "relay BUDGET" }))).toBe("thread_name_taken");
   });
 
@@ -313,20 +278,16 @@ describe("compose's suggested name (thread_name_auto)", () => {
     const third = send("r3", "review WEB-APP: uncommitted on main");
     expect(third.thread_name).toBe(`review WEB-APP: uncommitted on main (3)`);
     expect(third.named_by).toMatchObject({ kind: "auto" });
-    // An archived (resolved) thread frees its number.
     store.resolveThread(third.id, true);
     expect(send("r4", name).thread_name).toBe(`${name} (3)`);
-    // At the 120-character limit the base is cut so the number still fits.
     const long = `Review #869: ${"x".repeat(107)}`;
     expect([...long].length).toBe(120);
     expect(send("l1", long).thread_name).toBe(long);
     const numbered = send("l2", long).thread_name!;
     expect(numbered.endsWith(" (2)")).toBe(true);
     expect([...numbered].length).toBe(120);
-    // A typed name is still refused, and New message's own suggestion is still dropped.
     expect(code(() => store.startPersonThread({ project_id: project.id, body: "typed", to: claude, idempotency_key: "t", thread_name: name, thread_name_numbered: true }))).toBe("thread_name_taken");
     expect(store.startPersonThread({ project_id: project.id, body: "plain", to: claude, idempotency_key: "p", thread_name: name, thread_name_auto: true }).message.thread_name ?? null).toBeNull();
-    // checkPersonThreadName (the trust path's check) agrees: a numbered suggestion never refuses.
     expect(() => store.checkPersonThreadName({ project_id: project.id, thread_name: name, thread_name_auto: true, thread_name_numbered: true })).not.toThrow();
   });
 
@@ -344,13 +305,11 @@ describe("compose's suggested name (thread_name_auto)", () => {
 describe("a retried reply whose `thread` could not name anything", () => {
   test("is the same call: `thread` is compared only where the reply could name the thread", () => {
     const { store, project } = world();
-    // An agent's own thread: a reply's `thread` is ignored there.
     const root = store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: "status" }).message;
     const first = store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: "more", reply_to: root.id, thread: "One", idempotency_key: "r1" });
     const again = store.sendMessage({ project_id: project.id, author: agent("ses_a"), body: "more", reply_to: root.id, thread: "Two", idempotency_key: "r1" });
     expect(again.replayed).toBe(true);
     expect(again.message.id).toBe(first.message.id);
-    // A person's thread already named: the reply could not name it either.
     const { message: person } = store.startPersonThread({ project_id: project.id, body: IDEA, to: claude, idempotency_key: "k", thread_name: "Board" });
     const r = store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "ok", reply_to: person.id, idempotency_key: "r2" });
     expect(store.sendMessage({ project_id: project.id, author: agent("ses_live"), body: "ok", reply_to: person.id, thread: "Other", idempotency_key: "r2" }).message.id).toBe(r.message.id);

@@ -1,19 +1,7 @@
-/**
- * Plannotator Inbox: a question that likely does not ask what the agent
- * meant: a pick-one or pick-several block with no choices, which the person
- * answers in words. The send result (send_message, submit_guide,
- * `plannotator inbox call`) adds a line per such question. Advice only: the
- * send succeeds as it is.
- */
+/** Advice for a question that likely does not ask what the agent meant (a pick block with no choices). Never a refusal. */
 
 import type { InboxQuestionToCheck } from "@plannotator/core/inbox-questions";
 
-/**
- * The send tools' advice for each such question (`inboxQuestionsToCheck`),
- * saying how to send it again in place of this one (`reply_to` the message
- * just sent, `supersedes` its `<message id>/<key>`). Never a refusal. ""
- * when there is none.
- */
 export function questionsToCheckText(messageId: string, list: readonly InboxQuestionToCheck[]): string {
   return list
     .map(

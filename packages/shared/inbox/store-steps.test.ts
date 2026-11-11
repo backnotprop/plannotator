@@ -1,13 +1,3 @@
-/**
- * Thread steps in the store (approval "inbox-thread-steps", 2026-11-03): one
- * list per (thread, agent session), sent whole, on the store's one seq, and
- * silent. The failures these guard: a tick that moves the person's list (a
- * section, a row, unread, a pending reply), a list past the approved limits
- * that gets written, a second session's list overwriting the first's, a done
- * time that resets on every call, a call that changes nothing still writing a
- * line (every write is an event), a list that does not read back after a
- * restart, and a deleted thread whose steps survive it.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -116,7 +106,6 @@ describe("thread steps", () => {
     expect(refusal(() => store.setThreadSteps({ thread_id: thread, agent: AGENT, steps: [{ step: "Ok", status: "dropped", note: long }] })).message).toContain("steps[0].note");
     expect(refusal(() => store.setThreadSteps({ thread_id: thread, agent: AGENT, steps: [{ step: "Ok", status: "blocked" }] })).message).toContain("todo, doing, done, waiting, dropped");
     expect(store.cursor()).toBe(cursor);
-    // At the limits it is written.
     const full = Array.from({ length: INBOX_STEPS_MAX }, (_, i) => ({ step: `${i}`.padEnd(INBOX_STEP_TEXT_MAX, "s"), status: "todo", note: "n".repeat(INBOX_STEP_TEXT_MAX) }));
     expect(store.setThreadSteps({ thread_id: thread, agent: AGENT, steps: full }).changed).toBe(true);
   });
@@ -146,21 +135,15 @@ describe("thread steps", () => {
     reopened.deleteThread(w.thread);
     expect(reopened.threadSteps(w.thread)).toEqual([]);
     expect(readFileSync(file, "utf8")).toBe("");
-    // The deleted line's seq is never handed out again.
     expect(w.open().cursor()).toBeGreaterThanOrEqual(w.store.cursor());
   });
 
-  // Review of #2565, finding 9: an older Inbox never reads steps.jsonl, so only the floor keeps it from handing a
-  // steps line's seq out again. Checked right after the write, before anything else could write the floor.
   test("a steps write raises the seq floor to its own seq", () => {
     const { store, thread, dir } = world();
     store.setThreadSteps({ thread_id: thread, agent: AGENT, steps: PLAN });
     expect(JSON.parse(readFileSync(join(dir, "inbox", SEQ_FLOOR_FILE), "utf8"))).toEqual({ seq: store.cursor() });
   });
 
-  // Review of #2565, finding 8: a stored list with a malformed entry (a hand edit, a torn write) is skipped on
-  // load, so the session's next list is taken instead of failing on it for good; and a clear that finds nothing
-  // names no made-up record.
   test("a malformed stored list never breaks the session's next call; a clear with nothing to clear names no record", () => {
     const w = world();
     const written = w.store.setThreadSteps({ thread_id: w.thread, agent: AGENT, steps: PLAN }).record!;

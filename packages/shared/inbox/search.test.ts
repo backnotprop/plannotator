@@ -1,12 +1,3 @@
-/**
- * Inbox search's index on a real store in a temp dir: what is indexed and
- * where it groups, ranking (phrase, whole word, prefix; title before body;
- * open before archived; the current project wins ties only; newest first),
- * filters (project, status, from), archived labels, non-Latin text, the
- * index following the store's lines (a send, a pick, an archive, a replaced
- * question's subject, a deletion), and a build in slices that
- * yields and survives searches and writes while it runs.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -154,12 +145,10 @@ describe("groups and rows", () => {
     expect(threadIds(answer)).toEqual([root.id]);
     const thread = answer.groups!.threads![0] as InboxSearchThreadRow;
     expect(marked(thread.title, thread.title_marks)).toEqual(["rate", "lim"]);
-    // The message once, from its question (the body has no "rate").
     expect(messageIds(answer)).toEqual([root.id]);
     const message = answer.groups!.messages![0] as InboxSearchMessageRow;
     expect(message.question?.key).toBeTruthy();
     expect(marked(message.snippet.text, message.snippet.marks)).toEqual(["rate", "lim"]);
-    // The agent's host rides along (additive), so the window draws that agent's mark.
     expect(message.author).toEqual({ kind: "agent", name: "Claude Code", host: "claude-code" });
     const file = answer.groups!.files![0] as InboxSearchFileRow;
     expect(file).toMatchObject({ type: "file", name: "relay-rate-limits.md", folder: "implementation", kind: "md", thread_id: root.id });
@@ -202,9 +191,7 @@ describe("groups and rows", () => {
     const answer = search(index, "spread retry");
     const row = answer.groups!.messages!.find((m) => m.id === reply.id) as InboxSearchMessageRow;
     expect(row.author).toEqual({ kind: "me", name: "You", host: null });
-    // The generated line is not the person's words.
     expect(messageIds(search(index, "answered"))).toEqual([]);
-    // The answer is indexed on the question (the agent's message).
     expect(messageIds(search(index, "jitter yes"))).toEqual([root.id]);
   });
 
@@ -258,7 +245,6 @@ describe("groups and rows", () => {
     const index = await built(store);
     const empty = search(index, "");
     expect(empty.groups).toBeNull();
-    // person_seen_seq is the seq the look covered (the brief's "no new storage"): the newer thread first.
     expect(empty.recent!.map((r) => r.id)).toEqual([ids[5], ids[2], ids[0]]);
     const browse = search(index, "", { project: project.id });
     expect(browse.groups!.threads!.map((r) => r.id)).toEqual([...ids].reverse());
@@ -275,7 +261,6 @@ describe("ranking", () => {
     const phrase = store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Notes", thread: "c", body: "The rate limit holds." }).message;
     const index = await built(store);
     expect(messageIds(search(index, "rate limit"))).toEqual([phrase.id, whole.id, prefix.id]);
-    // Title before body inside a tier: a thread whose subject holds both words leads the Threads group.
     store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Rate limit decided", thread: "d", body: "Nothing here." });
     expect(search(index, "rate limit").groups!.threads!.map((t) => t.title)).toEqual(["Rate limit decided"]);
   });
@@ -288,7 +273,6 @@ describe("ranking", () => {
     store.resolveThread(archived.id, true);
     const index = await built(store);
     const answer = search(index, "pagination");
-    // The archived thread is newer, yet ranks after the open one.
     expect(threadIds(answer)).toEqual([old.id, archived.id]);
     expect(answer.groups!.threads!.map((t) => (t as InboxSearchThreadRow).archived)).toEqual([false, true]);
     expect(answer.groups!.messages!.map((m) => (m as InboxSearchMessageRow).archived)).toEqual([false, true]);
@@ -302,9 +286,7 @@ describe("ranking", () => {
     const inB = store.sendMessage({ project_id: b.id, author: CLAUDE, subject: "Notes", thread: "b", body: "The retry budget." }).message;
     const better = store.sendMessage({ project_id: b.id, author: CLAUDE, subject: "Notes", thread: "c", body: "The budget retry." }).message;
     const index = await built(store);
-    // Newest first without a boost.
     expect(messageIds(search(index, "retry budget"))).toEqual([inB.id, inA.id, better.id]);
-    // Alpha's equal match moves above beta's; the phrase still beats the plain match; nothing is hidden.
     expect(messageIds(search(index, "retry budget", { current: a.id }))).toEqual([inA.id, inB.id, better.id]);
   });
 
@@ -314,7 +296,6 @@ describe("ranking", () => {
     const phrase = store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Notes", thread: "a", body: "The rate limit holds." }).message;
     const prefix = store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Notes", thread: "b", body: "The limits of the rate card." }).message;
     const whole = store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Notes", thread: "c", body: "A limit on the rate of retries." }).message;
-    // A thread whose subject matches, then a later reply in the oldest thread: its latest message makes it the newest thread.
     const titled = store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Rate limit decided", thread: "d", body: "Nothing here." }).message;
     const late = store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Notes", thread: "a", body: "Rate cards again." }).message;
     const index = await built(store);
@@ -322,10 +303,8 @@ describe("ranking", () => {
     expect(messageIds(search(index, "rate limit", { sort: "best" }))).toEqual([phrase.id, whole.id, prefix.id]);
     expect(messageIds(search(index, "rate limit", { sort: "newest" }))).toEqual([whole.id, prefix.id, phrase.id]);
     expect(messageIds(search(index, "rate", { sort: "newest" }))).toEqual([late.id, whole.id, prefix.id, phrase.id]);
-    // Threads: by their latest message (thread a's late reply), not by when they started.
     expect(threadIds(search(index, "rate", { sort: "best" }))).toEqual([titled.id]);
     expect(threadIds(search(index, "notes", { sort: "newest" }))).toEqual([phrase.id, whole.id, prefix.id]);
-    // "Show all" pages go on in the same order.
     const page = search(index, "rate", { sort: "newest", group: "messages", offset: 1, limit: 2 });
     expect(messageIds(page)).toEqual([whole.id, prefix.id]);
   });
@@ -374,11 +353,9 @@ describe("identifiers", () => {
     const index = await built(store);
     expect(index.lastBuildStats()!.idBuckets).toBeLessThanOrEqual(2 * ID_BUCKETS);
     for (const { id, message } of ids.filter((_, i) => i % 7 === 0)) expect([id, messageIds(search(index, id))]).toEqual([id, [message]]);
-    // With other words, in either order, and upper or lower case.
     const { id, message } = ids[40]!;
     expect(messageIds(search(index, `commit ${id.toLowerCase()}`))).toEqual([message]);
     expect(messageIds(search(index, `${id} commit`))).toEqual([message]);
-    // A well-formed id that is in no message.
     expect(messageIds(search(index, "9fceb02d0ae598e95dc970b74767f19372d61af8"))).toEqual([]);
   });
 
@@ -395,17 +372,13 @@ describe("identifiers", () => {
     expect(messageIds(search(index, "9fceb02d0ae5"))).toEqual([a.id]);
     expect(messageIds(search(index, "deployed 9fceb02d0ae5"))).toEqual([a.id]);
     expect(messageIds(search(index, full))).toEqual([a.id]);
-    // Longer than the 12 characters kept: the text decides, in the documents whose ids start with the first 12.
     expect(messageIds(search(index, full.slice(0, 20)))).toEqual([a.id]);
     expect(messageIds(search(index, `${full.slice(0, 19)}0`))).toEqual([]);
-    // Fewer than 7 characters, or a start the id does not have.
     expect(messageIds(search(index, "9fceb0"))).toEqual([]);
     expect(messageIds(search(index, "9fceb02x"))).toEqual([]);
     expect(messageIds(search(index, "9fceb02d0ae6"))).toEqual([]);
-    // The whole value ranks above a match on its start.
     const exact = store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Tag", thread: "c", body: "Tagged 9fceb02d0ae5 by hand." }).message;
     expect(messageIds(search(index, "9fceb02d0ae5"))).toEqual([exact.id, a.id]);
-    // The snippet marks the start of the full id.
     const row = search(index, "9fceb02d0ae5").groups!.messages!.find((m) => m.id === a.id) as InboxSearchMessageRow;
     expect(marked(row.snippet.text, row.snippet.marks).map((m) => m.toLowerCase())).toEqual(["9fceb02d0ae5"]);
   });
@@ -443,11 +416,8 @@ describe("identifiers", () => {
     store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Newer", thread: "b", body: "Notes.", attachments: [newer] });
     const index = await built(store);
     const rows = (q: string) => search(index, q).groups!.files!.map((r) => r.id);
-    // idB: both, the title match first even though it is older (a bucket match in the newer one's title used to count).
     expect(rows(idB)).toEqual([older.id, newer.id]);
-    // idA: only the file that holds it.
     expect(rows(idA)).toEqual([newer.id]);
-    // As a phrase: "pin <idB>" is a phrase only in the older one, so it ranks first though older (the newer holds both words apart).
     expect(rows(`pin ${idB}`)).toEqual([older.id, newer.id]);
   });
 
@@ -479,10 +449,8 @@ describe("identifiers", () => {
     expect(search(index, sample).totals!.messages).toBe(1);
     expect(search(index, "1760003000149").totals!.messages).toBe(0);
     expect(search(index, sample.slice(0, 10)).totals!.messages).toBe(1);
-    // Numbers are found by their whole value only.
     expect(search(index, "1760003").totals!.messages).toBe(0);
     expect(reads).toBe(0);
-    // A number is told apart by hash bits only: the one document whose kept hash matches is read to confirm it.
     expect(search(index, "1760003000148").totals!.messages).toBe(1);
     expect(reads).toBe(1);
   });
@@ -512,7 +480,6 @@ describe("filters", () => {
     expect(threadIds(search(w.index, "deploy", { status: "new" }))).toEqual([w.fresh.id]);
     expect(threadIds(search(w.index, "deploy", { status: "quiet" }))).toEqual([w.quiet.id]);
     expect(threadIds(search(w.index, "deploy", { status: "archived" }))).toEqual([w.archived.id]);
-    // Projects have no section: any status hides them.
     expect(search(w.index, "api", { status: "quiet" }).groups!.projects).toEqual([]);
   });
 
@@ -522,14 +489,12 @@ describe("filters", () => {
     expect(messageIds(search(w.index, "deploy", { from: "me" }))).toEqual([w.sentReply.id]);
     const agents = search(w.index, "deploy", { from: "agent" });
     expect(messageIds(agents)).not.toContain(w.sentReply.id);
-    // A thread counts for Me when the person wrote in it.
     expect(threadIds(search(w.index, "deploy", { from: "me" }))).toEqual([w.sent.id]);
   });
 
   test("a filter with Newest: the filtered set, by its latest message", async () => {
     const w = await world();
     const filtered = { project: w.api.id, from: "agent" } as const;
-    // Best match puts the archived thread's message last; Newest puts it first, as the latest.
     expect(messageIds(search(w.index, "deploy", filtered))).toEqual([w.quiet.id, w.waiting.id, w.archived.id]);
     expect(messageIds(search(w.index, "deploy", { ...filtered, sort: "newest" }))).toEqual([w.archived.id, w.quiet.id, w.waiting.id]);
     expect(messageIds(search(w.index, "deploy", { status: "new", sort: "newest" }))).toEqual([w.fresh.id]);
@@ -572,17 +537,14 @@ describe("the index follows the store", () => {
     expect(search(index, "jitter").totals!.messages).toBe(0);
     const root = store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Retry storm", body: `Phones reconnect.${ASK("Spread retries?", ["With jitter", "Without"])}` }).message;
     expect(messageIds(search(index, "jitter"))).toEqual([root.id]);
-    // A pick makes the answer searchable on the question.
     const q = store.questionsOf(root.id)[0]!;
     store.savePicks(root.id, [{ key: q.key, revision: 0, answer: { v: 1, key: q.key, kind: q.kind, prompt: q.prompt, selected: [], text: "spread over five seconds" } as never }]);
     expect(messageIds(search(index, "five seconds"))).toEqual([root.id]);
-    // Archive: the label follows, and Status follows.
     expect(threadIds(search(index, "retry storm", { status: "archived" }))).toEqual([]);
     store.resolveThread(root.id, true);
     const archived = search(index, "retry storm");
     expect((archived.groups!.threads![0] as InboxSearchThreadRow).archived).toBe(true);
     expect(threadIds(search(index, "retry storm", { status: "archived" }))).toEqual([root.id]);
-    // A deletion re-reads the store: the index notices and rebuilds.
     store.deleteThread(root.id);
     expect(index.ready()).toBe(false);
     await index.ensureBuilt();

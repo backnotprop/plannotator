@@ -1,10 +1,3 @@
-/**
- * Hashtags (approval "board-hashtags"): the person's `#Shape` in a thread puts
- * the thread's card in Shape (the last tag wins), and a card an agent makes or
- * links later for that thread starts in it. An agent's tag, a tag naming
- * nothing, and a tag in code change nothing. The store's tag index (in memory,
- * never on disk) follows every write, a rename and a delete.
- */
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -20,7 +13,6 @@ afterEach(() => {
 const AGENT = { kind: "agent", host: "claude-code", session: "ses_a", name: "Claude Code" } as const;
 const PERSON: InboxAuthor = { kind: "person" };
 
-/** Each initiative's tagged threads, latest first (no limit, nothing linked left out). */
 const tagged = (store: InboxStore) => Object.fromEntries(Object.entries(store.initiativeThreads()).map(([id, read]) => [id, read.threads]));
 
 function world() {
@@ -37,14 +29,12 @@ test("the person's #Shape in a reply puts the thread's card in Shape; an agent's
   const { store, project, shape, review } = world();
   const asked = store.sendMessage({ project_id: project.id, author: AGENT, body: "PR is up. #CodeReview" }).message;
   const { card } = store.createCard({ project_id: project.id, by: AGENT, title: "Sign-in fix", threads: [asked.thread_id] });
-  // The agent's own tag: nothing.
   expect(store.cardWire(store.card(card.id)!).initiative).toBeNull();
   store.sendReply(asked.id, { words: "Nice, part of #Nope", idempotency_key: "k1" });
   expect(store.cardWire(store.card(card.id)!).initiative).toBeNull();
   store.sendReply(asked.id, { words: "Ship it, part of #Shape now.", idempotency_key: "k2" });
   expect(store.cardWire(store.card(card.id)!).initiative).toBe(shape.id);
   expect(store.cardHistory(card.id).filter((e) => e.kind === "initiative")).toEqual([{ at: expect.any(String), by: PERSON, kind: "initiative", initiative: shape.id }]);
-  // The last tag wins; `#code-review` names "Code review".
   store.sendReply(asked.id, { words: "Actually #Shape, no: #code-review", idempotency_key: "k3" });
   expect(store.cardWire(store.card(card.id)!).initiative).toBe(review.id);
 });
@@ -55,14 +45,11 @@ test("a card an agent makes later for a thread the person tagged starts in that 
   store.sendReply(asked.id, { words: "Yes, it is #Shape work.", idempotency_key: "k1" });
   const { card } = store.createCard({ project_id: project.id, by: AGENT, title: "Empty states", threads: [asked.thread_id] });
   expect(store.cardWire(card).initiative).toBe(shape.id);
-  // A thread with no tag: none.
   const other = store.sendMessage({ project_id: project.id, author: AGENT, body: "Another thing", thread: "other" }).message;
   const plain = store.createCard({ project_id: project.id, by: AGENT, title: "Other", threads: [other.thread_id] }).card;
   expect(store.cardWire(plain).initiative).toBeNull();
 });
 
-// HOW.md: "A card an agent makes later for that thread starts in Shape too", whatever the agent named. The failures
-// guarded: the agent's name beating the tag, or an initiative made for a name that lost.
 test("at create the person's tag wins over an agent's name or \"\", and no initiative is made for the name", () => {
   const { store, project, shape, review } = world();
   const asked = store.sendMessage({ project_id: project.id, author: AGENT, body: "Take the empty states?" }).message;
@@ -75,12 +62,9 @@ test("at create the person's tag wins over an agent's name or \"\", and no initi
   }
   // Sorted: made in one millisecond, initiatives() orders them by random id.
   expect(store.initiatives().map((i) => i.name).sort()).toEqual(["Code review", "Shape"]);
-  // A name the rules refuse is still refused, not hidden by the tag.
   expect(() => store.createCard({ project_id: project.id, by: AGENT, title: "Long", threads, initiative_name: "x".repeat(41) })).toThrow();
-  // The person's own pick on New card holds.
   const picked = store.createCard({ project_id: project.id, by: PERSON, title: "Mine", threads, initiative: review.id }).card;
   expect(store.cardWire(picked).initiative).toBe(review.id);
-  // A tag whose initiative is gone is no tag: the name holds.
   store.deleteInitiative(shape.id);
   const after = store.createCard({ project_id: project.id, by: AGENT, title: "After", threads, initiative_name: "Billing" }).card;
   expect(store.initiative(store.cardWire(after).initiative!)!.name).toBe("Billing");
@@ -100,7 +84,6 @@ test("after create the last change wins: an agent's say over the tag, the person
   store.sendReply(asked.id, { words: "Back in #Shape please.", idempotency_key: "k2" });
   expect(initiativeOf(card.id)).toBe(shape.id);
 
-  // A say that links a tagged thread places a card in none.
   const later = store.createCard({ project_id: project.id, by: AGENT, title: "Plain" }).card;
   store.updateCard(later.id, { by: AGENT, threads: [asked.thread_id] });
   expect(initiativeOf(later.id)).toBe(shape.id);
@@ -144,13 +127,11 @@ test("the tag index follows each write without a reload, a rename without a rebu
   const { store, project, shape } = world();
   expect(tagged(store)).toEqual({});
   const a = store.sendMessage({ project_id: project.id, author: AGENT, body: "Started on #ShapeV2 notes.", thread: "a" }).message;
-  // No initiative is named ShapeV2 yet: indexed under its key, listed under none.
   expect(tagged(store)).toEqual({});
   store.renameInitiative(shape.id, "Shape v2");
   expect(tagged(store)).toEqual({ [shape.id]: [a.thread_id] });
   const b = store.sendMessage({ project_id: project.id, author: AGENT, body: "More #shape-v2 work", thread: "b" }).message;
   expect(tagged(store)).toEqual({ [shape.id]: [b.thread_id, a.thread_id] });
-  // A newer tag in an older thread moves it first.
   store.sendReply(a.id, { words: "Back to #ShapeV2", idempotency_key: "k1" });
   expect(tagged(store)).toEqual({ [shape.id]: [a.thread_id, b.thread_id] });
   store.deleteThread(b.thread_id);
@@ -166,7 +147,6 @@ test("review fix 3: the read is bounded: the latest few threads no card of it li
   const linked = new Set([latest[0]!, latest[2]!]);
   const read = store.initiativeThreads({ limit: 4, linked: (id) => (id === shape.id ? linked : undefined) });
   expect(read[shape.id]).toEqual({ threads: [latest[1], latest[3], latest[4], latest[5]], total: 28 });
-  // A newer tag moves a thread to the front without a rescan, and the total stays.
   store.sendMessage({ project_id: project.id, author: AGENT, body: "Again #Shape", thread: "t10" });
   expect(store.initiativeThreads({ limit: 2, linked: () => linked })[shape.id]).toEqual({ threads: [ids[10], latest[1]], total: 28 });
 });

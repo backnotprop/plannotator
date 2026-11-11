@@ -1,11 +1,3 @@
-/**
- * The search index's vocabulary and postings (search-vocabulary.ts): which
- * tokens read as ids and share buckets, word lookup from a string and from a
- * span of text, prefixes (two-character lists, one-character and non-ASCII
- * prefixes, growth past a rehash), and postings in the shared arena (a word
- * in one document, in thousands, a word twice in one document) against a
- * plain model.
- */
 import { describe, expect, test } from "bun:test";
 import { canPrefixId, fnvString, ID_BUCKETS, ID_PREFIX_KEEP, ID_PREFIX_LENGTH, isIdLikeToken, Postings, Vocabulary } from "./search-vocabulary";
 
@@ -34,26 +26,20 @@ describe("id-like tokens", () => {
     expect(vocab.idOf(hash)).toBe(fromSpan);
     expect(vocab.count()).toBe(0);
     expect(vocab.bucketCount()).toBe(1);
-    // The caller gets the whole value's hash, its first 12 characters (lower case) and their first 7's hash, to keep beside the bucket.
     expect(vocab.lastWasId).toBe(true);
     expect(vocab.lastHash).toBe(fnvString(hash));
     expect(String.fromCharCode(...vocab.lastPrefix.subarray(0, vocab.lastPrefixLength))).toBe(hash.slice(0, ID_PREFIX_KEEP));
     expect(vocab.lastPrefixHash).toBe(fnvString(hash.slice(0, ID_PREFIX_LENGTH)));
-    // An id with a letter is posted by its first 7 characters: its whole value and its starts share the bucket.
     expect(vocab.prefixBucketOf(fnvString(hash.slice(0, ID_PREFIX_LENGTH)))).toBe(fromSpan);
-    // The same from a string; a word after it is not an id.
     expect(vocab.idOfToken(hash)).toBe(fromSpan);
     expect(vocab.lastPrefixHash).toBe(fnvString(hash.slice(0, ID_PREFIX_LENGTH)));
     vocab.idOfToken("landed");
     expect(vocab.lastWasId).toBe(false);
-    // A number is an id without a start, posted by its whole value: it is found by that only.
     const number = vocab.idOfSpan("at 1760000000123", 3, 16, false);
     expect([vocab.lastWasId, vocab.lastPrefixLength]).toEqual([true, 0]);
     expect(vocab.numberBucketOf(fnvString("1760000000123"))).toBe(number);
-    // Ids are not words: a word prefix never answers them (the index matches them through their buckets).
     expect(vocab.prefixIds("9fceb02")).toEqual([]);
     expect(vocab.prefixIds(hash)).toEqual([]);
-    // Never more buckets than ID_BUCKETS of each kind, however many ids.
     for (let i = 0; i < 200_000; i++) {
       vocab.idOfToken(`${(i * 2654435761 >>> 0).toString(16).padStart(8, "0")}${i}`);
       vocab.idOfToken(String(1_760_000_000_000 + i * 7919));
@@ -92,7 +78,6 @@ describe("words", () => {
     while (words.size < 100_000) {
       const word = Array.from({ length: 2 + Math.floor(random() * 9) }, () => letters[Math.floor(random() * 26)]).join("");
       if (words.has(word)) continue;
-      // A word seen before is found again from a string and from a span, never added twice.
       if (order.length > 0 && words.size % 97 === 0) {
         const earlier = order[Math.floor(random() * order.length)]!;
         expect(vocab.idOfToken(earlier)).toBe(words.get(earlier)!);

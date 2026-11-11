@@ -1,11 +1,3 @@
-/**
- * send_message's warning about a question block that never opened (the
- * owner, 2026-11-02: an agent wrote `:::question {#bar}`, the person saw a
- * question they could not answer, and the result said only `questions: []`).
- * The failures this guards: the warning goes missing for an opener with text
- * after its name, names the wrong line or directive, or nags a correct block,
- * another directive name, or an example inside a code fence.
- */
 import { describe, expect, test } from "bun:test";
 import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
 import { QUESTION_OPENERS_WITH_TEXT_MAX, questionOpenersWithText, questionOpenersWithTextText } from "./question-openers";
@@ -30,7 +22,6 @@ describe("questionOpenersWithText", () => {
       "Why?", // 15
       ":::", // 16
     ].join("\n");
-    // The parser opened none of them: this is the mistake, not a reading of it.
     expect(parseInboxQuestionBlocks(body)).toEqual([]);
     expect(questionOpenersWithText(body)).toEqual([
       { line: 3, directive: ":::question" },
@@ -112,7 +103,6 @@ describe("questionOpenersWithText", () => {
     expect(lines).toHaveLength(QUESTION_OPENERS_WITH_TEXT_MAX + 1);
     expect(lines.filter((line) => line.endsWith("send the question again."))).toHaveLength(QUESTION_OPENERS_WITH_TEXT_MAX);
     expect(lines.at(-1)).toBe("And 2 more lines like these.");
-    // A list already cut to the cap, with the rest counted (what the CLI reads from the result).
     expect(questionOpenersWithTextText(openers.slice(0, QUESTION_OPENERS_WITH_TEXT_MAX), 1).split("\n").at(-1)).toBe("And 1 more line like this.");
   });
 });

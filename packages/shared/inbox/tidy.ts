@@ -1,9 +1,4 @@
-/**
- * Tidy (owner-approved design, 2026-10-28): who the person's Tidy asks, what
- * each session's wake lists, and where a run stands. Read from the store
- * alone; the server says how each session is reached now (`reachOf`). See
- * packages/core/inbox-tidy.ts for the rules and the record.
- */
+/** Tidy: who the person's Tidy asks, what each session's wake lists, and where a run stands. Read from the store alone; the server says how each session is reached (`reachOf`). */
 
 import {
   INBOX_CARD_COLUMN_LABELS,
@@ -34,38 +29,27 @@ import {
 import { inboxSearchReplyText } from "./search";
 import type { InboxStore } from "./store";
 
-/** The columns where a card that has not moved is asked about: the agent's own work (Backlog is not asked for yet; In review waits on the person). */
+/** Columns where an unmoved card is asked about: the agent's own work (not Backlog; In review waits on the person). */
 const TIDY_CARD_COLUMNS: ReadonlySet<InboxCardColumn> = new Set(["todo", "in_progress"]);
 
-/** Where Tidy was pressed: the list (every open thread in scope) or the Board (the agents owning cards in view). */
 export type InboxTidySurface = "list" | "board";
 
 export interface InboxTidyOptions {
-  /** The list's or the Board's project filter; null for every project. */
   projectId: string | null;
   surface: InboxTidySurface;
   now: number;
-  /** How a session is reached now; null when it has ended. */
   reachOf: (session: string) => InboxTidyReach | null;
-  /** The Board is on: its cards count. */
   boardOn: boolean;
-  /**
-   * Thread steps (approval "inbox-thread-steps", part 5): whether a session's list in a thread has gone stale (a step
-   * still doing while the session has been idle 2 h or more, or has ended; the server's `inboxStepsStale`). Absent or
-   * null: the person's switch is off, and Tidy says nothing of steps.
-   */
+  /** Whether a session's steps list in a thread went stale (a step still doing while the session was idle 2 h or more, or ended). Absent or null: the person's switch is off, and Tidy says nothing of steps. */
   stepsStale?: ((record: InboxSteps) => boolean) | null;
 }
 
-/** One item with what its wake lists. */
 interface PlanItem extends InboxTidyItem {
   reply_to: string | null;
   lines: string[];
-  /** The Board cards it lists. */
   cards: string[];
 }
 
-/** A session Tidy can ask, with each item's wake lines (server-side only). */
 export interface InboxTidyPlanAgent extends Omit<InboxTidyAgent, "items"> {
   items: PlanItem[];
 }
@@ -74,7 +58,6 @@ export interface InboxTidyPlanResult {
   agents: InboxTidyPlanAgent[];
 }
 
-/** "45 min", "6 h", "2 days". */
 export function inboxTidyAge(ms: number): string {
   const minutes = Math.max(1, Math.floor(ms / 60_000));
   if (minutes < 60) return `${minutes} min`;
@@ -84,7 +67,6 @@ export function inboxTidyAge(ms: number): string {
   return `${days} days`;
 }
 
-/** The short form the window's Details uses: "6 h", "2 d". */
 function shortAge(ms: number): string {
   const age = inboxTidyAge(ms);
   return age.endsWith(" days") ? `${age.slice(0, -5)} d` : age;
@@ -97,11 +79,7 @@ function oneLine(text: string, max: number): string {
 
 const hostName = (host: string | null | undefined): string => (host ? (INBOX_HOST_NAMES[host] ?? host) : "An agent");
 
-/**
- * Who Tidy would ask in scope, with what each wake lists. A session that
- * ended is not offered; sessions in their cool-down are left out. The
- * person's unsent picks are never listed (theirs to send).
- */
+/** A session that ended is not offered; sessions in their cool-down are left out; the person's unsent picks are never listed. */
 export function inboxTidyPlan(store: InboxStore, options: InboxTidyOptions): InboxTidyPlanResult {
   const { now, projectId } = options;
   const agents = new Map<string, InboxTidyPlanAgent>();
@@ -121,7 +99,6 @@ export function inboxTidyPlan(store: InboxStore, options: InboxTidyOptions): Inb
     return item;
   };
 
-  // The cards in view, and on the Board the sessions and threads Tidy looks at.
   const projectIds = projectId ? new Set([projectId]) : null;
   const cards = options.boardOn ? store.listCards({ projectIds }) : [];
   const boardSessions = new Set<string>();
@@ -136,7 +113,6 @@ export function inboxTidyPlan(store: InboxStore, options: InboxTidyOptions): Inb
   }
   const inScope = (session: string | null) => options.surface === "list" || (session !== null && boardSessions.has(session));
 
-  // A thread's item for a session (created on first use).
   const threadItem = (session: string, host: string | null, name: string, reach: InboxTidyReach, threadId: string, messages: readonly InboxMessage[]) =>
     itemOf(session, host, name, reach, threadId, () => {
       const root = store.message(threadId)!;
@@ -152,7 +128,6 @@ export function inboxTidyPlan(store: InboxStore, options: InboxTidyOptions): Inb
       };
     });
 
-  /** Lists a signal for `session`; a session that cannot be asked (ended) is not offered. */
   const signal = (who: { session: string | null; host: string | null; name: string }, threadId: string, messages: readonly InboxMessage[], reason: string, lines: string[]) => {
     if (!inScope(who.session)) return;
     const reach = who.session ? options.reachOf(who.session) : null;
@@ -170,7 +145,6 @@ export function inboxTidyPlan(store: InboxStore, options: InboxTidyOptions): Inb
     const messages = store.threadMessageIds(threadId).map((id) => store.message(id)!).filter(Boolean);
     const reasked = store.reaskListedIds(threadId);
 
-    // The person wrote last and the session it went to has had it a while without writing back.
     const real = messages.filter((m) => !isInboxNote(m));
     const last = real[real.length - 1];
     if (last && last.author.kind === "person" && now - Date.parse(last.created_at) >= INBOX_TIDY_PERSON_LAST_MS) {
@@ -178,7 +152,6 @@ export function inboxTidyPlan(store: InboxStore, options: InboxTidyOptions): Inb
       if (to) {
         const checked = (root.agent_checked_seq ?? 0) >= (store.messageCursor(last.id) ?? Number.MAX_SAFE_INTEGER);
         const reach = options.reachOf(to.session);
-        // Still on its way to a session a connection wakes: it gets it anyway.
         if (last.delivery || checked || reach !== "wakes") {
           const words = oneLine(inboxSearchReplyText(last.body, last) || last.body, 120);
           signal({ session: to.session, host: to.host, name: hostName(to.host) }, threadId, messages, "you wrote last", [
@@ -188,7 +161,6 @@ export function inboxTidyPlan(store: InboxStore, options: InboxTidyOptions): Inb
       }
     }
 
-    // Open questions and action items of each asking session, old enough.
     const bySession = new Map<string, { who: { session: string | null; host: string | null; name: string }; questions: string[]; actions: string[]; qAge: number; aAge: number }>();
     for (const message of messages) {
       if (message.author.kind !== "agent") continue;
@@ -221,7 +193,6 @@ export function inboxTidyPlan(store: InboxStore, options: InboxTidyOptions): Inb
       for (const line of actions) signal(who, threadId, messages, `action item, ${shortAge(aAge)}`, [`Action item open since ${inboxTidyAge(aAge)} ago: ${line}`]);
     }
 
-    // Thread steps (only while the person's switch is on): a session's step still doing after it went quiet.
     if (options.stepsStale) {
       for (const record of store.threadSteps(threadId)) {
         if (!record.agent.session || !options.stepsStale(record)) continue;
@@ -235,7 +206,6 @@ export function inboxTidyPlan(store: InboxStore, options: InboxTidyOptions): Inb
     }
   }
 
-  // Board cards of a session that have not moved in a while.
   for (const card of cards) {
     if (!TIDY_CARD_COLUMNS.has(card.column) || card.agent?.kind !== "agent" || !card.agent.session) continue;
     const idle = now - Date.parse(card.moved_at);
@@ -289,11 +259,7 @@ function cardLine(card: InboxCard, idle: number): string {
   return `Board card "${oneLine(card.title, 80)}" (${card.id}) is in ${INBOX_CARD_COLUMN_LABELS[card.column]} and hasn't moved in ${inboxTidyAge(idle)}.${said}`;
 }
 
-/**
- * Whether `session` is not asked again now: its last wake is still
- * undelivered (one prompt at a time, whatever happened since), or it was
- * asked within the cool-down and the person has not written to it since.
- */
+/** Not asked again now: the last wake is still undelivered (one prompt at a time), or it was asked within the cool-down and the person has not written to it since. */
 function cooling(store: InboxStore, session: string, now: number): boolean {
   const last = store
     .tidyNotes()
@@ -315,17 +281,10 @@ function cooling(store: InboxStore, session: string, now: number): boolean {
   return true;
 }
 
-/** How a Tidy item's steps line starts (`inboxTidyPlan`), and how the body carries it (`inboxTidyBody`). */
 const TIDY_STEPS_LEAD = "Your steps here: ";
 const TIDY_STEPS_BODY_LINE = `   - ${TIDY_STEPS_LEAD}`;
 
-/**
- * A stored Tidy body as it is handed to an agent while the person has steps
- * off: the body is written when the run starts, so a switch turned off before
- * delivery would still carry the steps lines. Without them: every steps line,
- * then every thread left with nothing listed, renumbered. Any other body is
- * returned as it is (a body with no steps line is byte-equal).
- */
+/** A stored Tidy body handed to an agent while steps are off: the body is written when the run starts, so a switch turned off before delivery would still carry steps lines. Drops every steps line and any thread left with nothing listed (renumbered); any other body is returned as it is. */
 export function inboxTidyBodyStepsOff(body: string): string {
   if (!body.includes(`\n${TIDY_STEPS_BODY_LINE}`)) return body;
   let n = 0;
@@ -341,30 +300,21 @@ export function inboxTidyBodyStepsOff(body: string): string {
     .join("\n\n");
 }
 
-/** Whether a stored Tidy body, its steps lines dropped (`inboxTidyBodyStepsOff`), still lists anything. */
 export function inboxTidyBodyListsAny(body: string): boolean {
   return body.split("\n\n").some((part) => /^\d+\. /.test(part));
 }
 
-/**
- * The host a Tidy wake is recorded delivered to when the Inbox withdrew it
- * itself: the person turned steps off before delivery and the wake listed only
- * steps, so no turn goes out (amendment 2: "turning the switch off stops a Tidy
- * that is already running"). The run reads that session "nothing" to change.
- */
+/** The host a Tidy wake is recorded delivered to when the Inbox withdrew it itself (steps turned off before delivery and the wake listed only steps), so no turn goes out. */
 export const INBOX_TIDY_WITHDRAWN_HOST = "plannotator-inbox";
 
-/** Whether a Tidy body lists steps lines and nothing else (it lists nothing once they are dropped). */
 export function inboxTidyIsStepsOnly(body: string): boolean {
   return body.includes(`\n${TIDY_STEPS_BODY_LINE}`) && !inboxTidyBodyListsAny(inboxTidyBodyStepsOff(body));
 }
 
-/** The undelivered Tidy wakes that list only steps (withdrawn when steps turn off). */
 export function inboxTidyStepsOnlyWakes(store: InboxStore): InboxMessage[] {
   return store.tidyNotes().filter((note) => note.tidy?.wake && note.to && !note.delivery && inboxTidyIsStepsOnly(note.body));
 }
 
-/** The body of a session's Tidy notes: the instruction, what tidying can mean, then the numbered list. */
 export function inboxTidyBody(agent: InboxTidyPlanAgent): string {
   const items = agent.items.map((item, i) => {
     const head =
@@ -377,11 +327,7 @@ export function inboxTidyBody(agent: InboxTidyPlanAgent): string {
   return [INBOX_TIDY_INSTRUCTION, ref ? `${INBOX_TIDY_HOW} ${inboxTidySessionLine(ref)}` : INBOX_TIDY_HOW, ...items].join("\n\n");
 }
 
-/**
- * The thread a session's wake is written in: its first listed thread, else a
- * thread one of its listed cards links, else the last thread it wrote in.
- * Null when it never wrote anywhere (it cannot be asked).
- */
+/** First listed thread, else a thread one of its listed cards links, else the last thread it wrote in. Null when it never wrote anywhere. */
 export function inboxTidyWakeThread(store: InboxStore, agent: InboxTidyPlanAgent): string | null {
   const listed = agent.items.find((i) => i.thread_id !== null)?.thread_id;
   if (listed) return listed;
@@ -393,15 +339,7 @@ export function inboxTidyWakeThread(store: InboxStore, agent: InboxTidyPlanAgent
   return latest?.thread_id ?? null;
 }
 
-/**
- * Where the last run stands (within INBOX_TIDY_RUN_SHOWN_MS), or null. A
- * session "tidied" once it wrote (a message, or a card) after its wake was
- * delivered; "nothing" to change once it went idle after delivery without a
- * write (`idleSince`: its last idle transition, kept through later turns and
- * its end; null when it does not say); "ended" when it ended before delivery,
- * or after it without writing or going idle.
- * `updated` counts only the threads this run sent it a note in.
- */
+/** Where the last run stands (within INBOX_TIDY_RUN_SHOWN_MS), or null. "tidied": the session wrote after its wake was delivered; "nothing": it went idle after delivery without writing (`idleSince`); "ended": it ended before delivery, or after it without writing or going idle. `updated` counts only threads this run sent it a note in. */
 export function inboxTidyRun(
   store: InboxStore,
   options: { now: number; idleSince: (session: string) => number | null; reachOf: (session: string) => InboxTidyReach | null },
@@ -412,13 +350,11 @@ export function inboxTidyRun(
   const runId = lastNote.tidy.id;
   const wakes = notes.filter((m) => m.tidy?.id === runId && m.tidy.wake && m.to);
   const sessions = new Map(wakes.map((m) => [m.to!.session, m]));
-  // The threads this run sent each session a note in.
   const listed = new Map<string, Set<string>>();
   for (const m of notes) {
     if (m.tidy?.id !== runId || !m.to) continue;
     (listed.get(m.to.session) ?? listed.set(m.to.session, new Set()).get(m.to.session)!).add(m.thread_id);
   }
-  // Every thread each session wrote in since its delivery.
   const wrote = new Map<string, Set<string>>();
   for (const threadId of store.threadIds()) {
     for (const id of store.threadMessageIds(threadId)) {

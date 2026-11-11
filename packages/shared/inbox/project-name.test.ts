@@ -1,11 +1,3 @@
-/**
- * The name the Inbox shows for a project is its folder's real name (the
- * stress test of 2026-10-12, rows 1 to 5 and 75). Before, it was the
- * history-folder slug (a-z, 0-9 and hyphens, cut at 30): a Japanese repo read
- * "project", Vietnamese lost its letters, two "api" folders read the same, and
- * a long name ended in a stray hyphen. The slug stays the folder key, and
- * nothing on disk is rewritten.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -31,7 +23,6 @@ describe("inboxProjectLabels", () => {
     expect(labels.get("c")).toBe("dịch-vụ-thanh-toán");
     expect(labels.get("d")).toBe("платёжный-сервис");
     expect(labels.get("e")).toBe(long);
-    // What the slug made of them, for the record: what the window showed before.
     expect(sanitizeTag("請求サービス")).toBeNull();
     expect(sanitizeTag(long)).toBe("northwind-industries-holdings");
   });
@@ -76,7 +67,6 @@ describe("the store reads the real name, without rewriting the project", () => {
     expect(store.thread(sent.message.thread_id)!.project.name).toBe("請求サービス");
     expect(store.listProjects()[0]!.name).toBe("請求サービス");
     expect(store.diskUsage().projects[0]!.name).toBe("請求サービス");
-    // A second "api" relabels the first on the next read; a fresh read of the store does the same.
     const work = store.ensureProject({ name: "api", root: "/Users/me/work/api" });
     expect(work.name).toBe("api");
     store.ensureProject({ name: "api", root: "/Users/me/personal/api" });
@@ -87,7 +77,6 @@ describe("the store reads the real name, without rewriting the project", () => {
   });
 });
 
-// Rename… in the project menu: agents, search and every server read get the person's name as it is.
 describe("inboxProjectLabels with a display_name", () => {
   test("the display_name as it is, no parent added, and it takes no part in the others' clashes", () => {
     const labels = inboxProjectLabels([

@@ -1,14 +1,4 @@
-/**
- * Real-Jujutsu coverage for the Commits panel in a jj session: the history
- * rail (`listJjCommitHistory`), the description card (`getJjCommitDiffInfo`),
- * and the `jj-commit:<commit id>` diff family through the jj provider.
- *
- * Fakes cannot catch what these guard, because each lives in what the real
- * `jj` binary accepts and returns: the template fields, the first-parent
- * revsets, and the merge semantics of `jj diff`.
- *
- * Skipped when `jj` is not installed (CI runners do not ship it).
- */
+/** Real-Jujutsu coverage: fakes cannot catch what these guard, which lives in what the real `jj` accepts and returns (template fields, first-parent revsets, merge semantics of `jj diff`). Skipped when `jj` is not installed. */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -37,8 +27,6 @@ const jjRuntime: ReviewJjRuntime = {
   },
 };
 
-// The git provider is registered only so dispatch is exercised with both
-// families present; nothing here reaches it.
 const unusedGitRuntime: ReviewGitRuntime = {
   async runGit() { return { stdout: "", stderr: "unused", exitCode: 1 }; },
   async readTextFile() { return null; },
@@ -112,7 +100,6 @@ describe("jj Commits rail against a real repository", () => {
     expect(page!.commits.map((c) => c.sha)).toEqual([ids.merge, ids.two, ids.one, ids.base]);
     expect(page!.commits.map((c) => c.subject)).toEqual(["merge", "feature two", "feature one", "base"]);
     expect(page!.commits.map((c) => c.isPastBase)).toEqual([false, false, false, true]);
-    // The blank @ is dropped, so no row is the working copy.
     expect(page!.commits.some((c) => c.isHead)).toBe(false);
     expect(page!.hasMore).toBe(false);
     expect(page!.base).toBe("main");
@@ -134,8 +121,6 @@ describe("jj Commits rail against a real repository", () => {
 
   testIfJj("keeps a blank MERGE working copy: its first-parent diff is not empty", async () => {
     const ids = initWorkspace();
-    // A fresh `jj new A B`: no changes against the auto-merge, no description,
-    // yet diffed against its first parent it carries the other side.
     jj(["new", ids.two, ids.side]);
     const page = await listJjCommitHistory(jjRuntime, "main", workspace);
     expect(page!.commits[0].isHead).toBe(true);
@@ -151,7 +136,6 @@ describe("jj Commits rail against a real repository", () => {
     expect(before).toEndWith(":visible");
     expect((await vcs.runVcsDiff(opened, "main", workspace)).patch).toContain("+first");
 
-    // jj rewrites @ on the next snapshot; the old id still resolves (hidden).
     writeFileSync(join(workspace, "wip.txt"), "second\n");
     const after = await vcs.getVcsDiffFingerprint(opened, "main", workspace);
     expect(after).not.toBe(before);
@@ -160,7 +144,6 @@ describe("jj Commits rail against a real repository", () => {
     expect(refreshed).toBe(`jj-commit:${idOf("@")}`);
     expect(refreshed).not.toBe(opened);
     expect((await vcs.runVcsDiff(refreshed, "main", workspace)).patch).toContain("+second");
-    // A current revision and any other diff type pass through untouched.
     expect(await canonicalizeJjCommitDiffType(jjRuntime, refreshed, workspace)).toBe(refreshed);
     expect(await canonicalizeJjCommitDiffType(jjRuntime, "jj-current", workspace)).toBe("jj-current");
   });
@@ -176,10 +159,8 @@ describe("jj Commits rail against a real repository", () => {
     expect(second!.commits.map((c) => c.isPastBase)).toEqual([false, true]);
     expect(second!.hasMore).toBe(false);
 
-    // `side` is an ancestor of @ but not on the first-parent rail.
     const offRail = await listJjCommitHistory(jjRuntime, "main", workspace, { before: ids.side });
     expect(offRail!.commits).toEqual([]);
-    // Not an id at all: refused before it reaches a revset.
     expect(await listJjCommitHistory(jjRuntime, "main", workspace, { before: "main" })).toBeNull();
   });
 
@@ -223,7 +204,6 @@ describe("jj Commits rail against a real repository", () => {
     const contents = await vcs.getVcsFileContentsForDiff(`jj-commit:${ids.two}`, "main", "one.txt", undefined, workspace);
     expect(contents).toEqual({ oldContent: "one\n", newContent: "one, revised\n" });
 
-    // A revision whose parent is the virtual root has no old side.
     const root = await vcs.getVcsFileContentsForDiff(`jj-commit:${ids.base}`, "main", "base.txt", undefined, workspace);
     expect(root).toEqual({ oldContent: null, newContent: "base\n" });
 

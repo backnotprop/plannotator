@@ -1,10 +1,3 @@
-/**
- * Decision mode's projection in the store (approval "inbox-decision-mode",
- * brief §10): `openDecisions()` lists exactly what waits on the person, in
- * queue order, and it can never disagree with the list's sections or a
- * thread's open-questions list, because all three read core's one rule
- * (`inboxQuestionWaitsOnPerson`).
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -76,13 +69,10 @@ describe("openDecisions", () => {
     expect(picked.question.revision).toBe(1);
     store.sendReply(m1.id, { idempotency_key: "r1", questions: [{ key: q1!.key, revision: 1 }] });
     expect(store.openDecisions().map((d) => d.question.prompt)).toEqual(["Q2?", "Q3?"]);
-    // Replaced by the agent: the old one leaves, its replacement joins.
     store.sendMessage({ project_id: project.id, author: a!, reply_to: m1.id, body: block("Q2, again?"), supersedes: [m1.id] });
     expect(store.openDecisions().map((d) => d.question.prompt).sort()).toEqual(["Q2, again?", "Q3?"]);
-    // Mark read sets the thread's questions aside.
     store.markRead(m1.thread_id, true);
     expect(store.openDecisions().map((d) => d.question.prompt)).toEqual(["Q3?"]);
-    // A Re-ask note that waits takes the thread out (the list puts it in Sent).
     store.sendReask(m2.id, { idempotency_key: "k1" });
     expect(store.openDecisions()).toEqual([]);
     const m3 = store.sendMessage({ project_id: project.id, author: b!, body: block("Q4?"), thread: "other" }).message;
@@ -94,19 +84,15 @@ describe("openDecisions", () => {
   test("a Re-ask note leaves out what it lists, per session and only while that session is there", () => {
     const { store, project } = open();
     const [a, b] = AGENTS;
-    // A asks through a connection that wakes its session (the only kind that can be told ended).
     const m1 = store.sendMessage({ project_id: project.id, author: a!, body: block("A asks?"), wakes: true }).message;
     const m2 = store.sendMessage({ project_id: project.id, author: b!, reply_to: m1.id, body: block("B asks?") }).message;
     expect(store.openDecisions().map((d) => d.question.prompt)).toEqual(["A asks?", "B asks?"]);
-    // The person asks A to ask again: A's question is about to be asked again, B's still waits here.
     store.sendReask(m1.id, { idempotency_key: "k1" });
     expect(store.listRow(m1.thread_id)!.reask_pending).toBe(false);
     expect(store.openDecisions().map((d) => d.question.prompt)).toEqual(["B asks?"]);
-    // Bounded: once A's session has ended (presence, with its grace), nobody will ask again, so its question is back.
     store.setDeliveryPresence({ connection: () => null, askerLive: (session) => session !== a!.session });
     expect(store.openDecisions().map((d) => d.question.prompt).sort()).toEqual(["A asks?", "B asks?"]);
     store.setDeliveryPresence(null);
-    // A writes again: its note no longer waits, and what it still has open comes back.
     store.sendMessage({ project_id: project.id, author: a!, reply_to: m2.id, body: "Looking at it." });
     expect(store.openDecisions().map((d) => d.question.prompt).sort()).toEqual(["A asks?", "B asks?"]);
   });
@@ -114,14 +100,12 @@ describe("openDecisions", () => {
   test("an MCP-only agent's Re-ask note waits until it writes again, whatever presence says", () => {
     const { store, project } = open();
     const [a] = AGENTS;
-    // No `wakes`: an agent that reads the Inbox through MCP. Its session is never told ended.
     const m1 = store.sendMessage({ project_id: project.id, author: a!, body: block("A asks?") }).message;
     store.sendReask(m1.id, { idempotency_key: "k1" });
     expect(store.openDecisions()).toEqual([]);
     store.setDeliveryPresence({ connection: () => null, askerLive: () => false });
     expect(store.openDecisions()).toEqual([]);
     store.setDeliveryPresence(null);
-    // It writes again: the note no longer waits.
     store.sendMessage({ project_id: project.id, author: a!, reply_to: m1.id, body: "Back on it." });
     expect(store.openDecisions().map((d) => d.question.prompt)).toEqual(["A asks?"]);
   });
@@ -132,7 +116,6 @@ describe("openDecisions", () => {
     const m = store.sendMessage({ project_id: project.id, author: a!, body: block("Ship it?") }).message;
     const q0 = store.questionsOf(m.id)[0]!;
     const picked = store.savePicks(m.id, [{ key: q0.key, revision: 0, answer: yes(q0) }])[0]!;
-    // The window read revision 1, then a Send took it (sent_revision 1, revision still 1).
     store.sendReply(m.id, { idempotency_key: "r1", questions: [{ key: q0.key, revision: picked.revision }] });
     expect(store.questionsOf(m.id)[0]!.state).toBe("sent");
     for (const answer of [{ ...yes(q0), selected: ["No"] }, null]) {
@@ -147,7 +130,6 @@ describe("openDecisions", () => {
       expect(store.questionsOf(m.id)[0]!.answer?.selected).toEqual(["Yes"]);
     }
     expect(store.openDecisions()).toHaveLength(0);
-    // Without it (the thread, a phone) a sent question takes a pick again, as the thread-state model has it.
     store.savePicks(m.id, [{ key: q0.key, revision: picked.revision, answer: { ...yes(q0), selected: ["No"] } }]);
     expect(store.questionsOf(m.id)[0]!.state).toBe("picked");
   });
@@ -159,7 +141,6 @@ describe("openDecisions", () => {
     expect(d!.question.kind).toBe("action");
     expect(d!.message.id).toBe(m.id);
     expect(d!.pictures).toEqual({ inline: [], attachments: [] });
-    // Marked done: on its way (its Undo window), it waits on nobody.
     store.markAction(m.id, d!.question.key, { outcome: "done" });
     expect(store.openDecisions()).toEqual([]);
   });
@@ -192,9 +173,7 @@ describe("openDecisions", () => {
       inline_images: ["today.png", "mark.png", "dot.png", "strip.png", "bar.png"].map((ref, n) => image(ref, n)) as never,
     });
     const refs = (prompt: string) => store.openDecisions().find((d) => d.question.prompt === prompt)!.pictures.inline.map((p) => p.ref).sort();
-    // Its own choices' pictures and the message's other images; not Q1's Dot. Mark is Q2's own choice too, so it stays.
     expect(refs("Which variant?")).toEqual(["bar.png", "mark.png", "strip.png", "today.png"]);
-    // Q1 never shows Q2's Strip or Bar.
     expect(refs("Which marker?")).toEqual(["dot.png", "mark.png", "today.png"]);
   });
 
@@ -205,8 +184,6 @@ describe("openDecisions", () => {
     expect(orderInboxDecisions([])).toEqual([]);
   });
 });
-
-// ─────────────────── The Decide count agrees with the list and the popover ───────────────────
 
 type Op =
   | { op: "send"; agent: number; kind: "plain" | "stopped" | "holds" | "action" | "multi"; into: number | null; named: boolean }
@@ -237,16 +214,9 @@ const opArb: fc.Arbitrary<Op> = fc.oneof(
   fc.record({ op: fc.constant("act" as const), at: fc.nat(40) }),
 );
 
-/** What the list says waits on the person: the rows it places in Stopped, Holding and Waiting, plus "Answered, not sent". */
-/**
- * What the list says waits, less what a waiting Re-ask note lists and is still
- * open: the agent is about to ask those again, so decision mode leaves them
- * out (per note, so per session; the list keeps counting them in its row).
- */
 function listCount(store: InboxStore, rows: readonly InboxListRow[]): number {
   let n = 0;
   for (const row of rows) {
-    // Every open question listed (the list puts it in Sent): only what the person picked since waits (for a Send).
     if (row.reask_pending === true) {
       n += row.questions.picked;
       continue;
@@ -259,7 +229,6 @@ function listCount(store: InboxStore, rows: readonly InboxListRow[]): number {
   return n;
 }
 
-/** A thread's open questions a waiting Re-ask note lists. */
 function reaskedOpen(store: InboxStore, threadId: string): Set<string> {
   const listed = store.reaskListedIds(threadId);
   const out = new Set<string>();
@@ -356,10 +325,8 @@ describe("the Decide count", () => {
           picked += decisions.filter((d) => d.question.state === "picked").length;
           const rows = store.listRows();
           expect(decisions.length).toBe(listCount(store, rows));
-          // No decision twice, and each is a waiting question of a live agent message.
           expect(new Set(decisions.map((d) => d.id)).size).toBe(decisions.length);
           for (const d of decisions) expect(inboxQuestionWaitsOnPerson(d.question)).toBe(true);
-          // Per thread: its questions (not action items) are exactly what its "N open questions" list holds.
           for (const row of rows) {
             const thread = store.thread(row.thread_id)!;
             const reasked = reaskedOpen(store, row.thread_id);
@@ -371,7 +338,6 @@ describe("the Decide count", () => {
       }),
       { numRuns: 120 },
     );
-    // The histories reach the states that matter (not only empty Inboxes).
     expect(seen).toBeGreaterThan(100);
     expect(picked).toBeGreaterThan(5);
   });

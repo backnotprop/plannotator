@@ -1,15 +1,3 @@
-/**
- * The Board's cards in the store (approval "inbox-board", step 1; columns v2):
- * the column rules, last heard, an agent's drop waiting for the person,
- * links, idempotency, the one seq counter, the round trip from disk, the
- * read-time migration from the columns before v2, and the automatic ship.
- * The failures these guard: an agent starting work the person parked in
- * Backlog, an old card landing in the wrong lane after the upgrade,
- * a stale "You: …" following a card out of the person's columns, an agent's
- * drop the person never hears of, a "seen" that passes for news from the card,
- * a card line that breaks the event log's counter, and a card that does not
- * read back after a restart or a deletion.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -34,7 +22,6 @@ const AGENT: InboxAuthor = { kind: "agent", host: "claude-code", session: "ses_a
 const OTHER: InboxAuthor = { kind: "agent", host: "pi", session: "ses_b", name: "Pi" };
 const PERSON: InboxAuthor = { kind: "person" };
 
-/** A store whose clock the test moves. */
 function world() {
   const dir = dataDir();
   let now = Date.parse("2026-10-20T12:00:00.000Z");
@@ -81,13 +68,10 @@ describe("cards: create", () => {
 
   test("a default title from a thread's subject drops the bidi controls a title refuses (the agent never wrote them)", () => {
     const { store, project } = world();
-    // A subject the agent sends with bidi controls is refused now; one derived from the body keeps them on disk.
     const sent = store.sendMessage({ project_id: project.id, author: AGENT, body: "Fix \u202eevil\u202c thing\u2066" });
     expect(store.message(sent.message.id)!.subject).toContain("\u202e");
-    // Served as shown (displayInboxSubject): no bidi controls.
     expect(store.threadSubject(sent.message.thread_id)).toBe("Fix evil thing");
     expect(store.createCard({ project_id: project.id, by: AGENT, threads: [sent.message.id] }).card.title).toBe("Fix evil thing");
-    // A title the agent writes itself is still refused, so it learns.
     expect(refusal(() => store.createCard({ project_id: project.id, by: AGENT, title: "Fix \u202eevil" }))).toBe("validation_error");
   });
 
@@ -106,7 +90,6 @@ describe("cards: create", () => {
     const { card } = store.createCard({ project_id: project.id, by: PERSON, title: "Polylane evaluation" });
     expect(card).toMatchObject({ agent: null, column: "backlog", moved_by: PERSON });
     expect(store.createCard({ project_id: project.id, by: PERSON, title: "Old window", column: "icebox" }).card.column).toBe("backlog");
-    // An agent proposing an idea may start one in Backlog; it is the agent's to move.
     const idea = store.createCard({ project_id: project.id, by: AGENT, title: "Idea", column: "backlog" }).card;
     expect(store.updateCard(idea.id, { by: AGENT, column: "in_progress" }).column).toBe("in_progress");
     expect(refusal(() => store.createCard({ project_id: project.id, by: PERSON, title: "x", column: "dropped" }))).toBe("validation_error");
@@ -118,7 +101,6 @@ describe("cards: create", () => {
     expect(refusal(() => store.createCard({ project_id: project.id, by: AGENT, title: "Sheet", column: "in_review" }))).toBe("validation_error");
     const { card } = store.createCard({ project_id: project.id, by: AGENT, title: "Sheet", column: "in_review", you: "pick a face" });
     expect(card.you).toBe("pick a face");
-    // `you` belongs to In review only.
     expect(refusal(() => store.createCard({ project_id: project.id, by: AGENT, title: "Code", column: "in_progress", you: "merge it" }))).toBe("validation_error");
   });
 
@@ -151,7 +133,6 @@ describe("cards: who moves a card (columns v2)", () => {
     const review = store.updateCard(card.id, { by: AGENT, column: "in_review", you: "screenshots before merge" });
     expect(review).toMatchObject({ column: "in_review", you: "screenshots before merge", said: "PR open" });
     const shipped = store.updateCard(card.id, { by: AGENT, column: "done" });
-    // Leaving the person's columns drops their line: it never follows the card back.
     expect(shipped.you).toBeNull();
     expect(store.updateCard(card.id, { by: OTHER, column: "todo", say: "reported broken again" }).column).toBe("todo");
   });
@@ -162,7 +143,6 @@ describe("cards: who moves a card (columns v2)", () => {
     expect(refusal(() => store.updateCard(card.id, { by: AGENT, column: "in_review", say: "sheet sent" }))).toBe("validation_error");
     store.updateCard(card.id, { by: AGENT, column: "in_review", you: "pick a face" });
     expect(refusal(() => store.updateCard(card.id, { by: AGENT, column: "in_progress", you: "x" }))).toBe("validation_error");
-    // A say in place keeps the line; the person moving it there needs none.
     expect(store.updateCard(card.id, { by: AGENT, say: "still waiting" }).you).toBe("pick a face");
     const moved = store.updateCard(card.id, { by: PERSON, column: "in_progress" });
     expect(moved.you).toBeNull();
@@ -189,10 +169,8 @@ describe("cards: who moves a card (columns v2)", () => {
   test("a card the person put in Backlog is theirs to move out (the Icebox's guard); an agent can still say and link", () => {
     const { store, project } = world();
     const { card } = store.createCard({ project_id: project.id, by: AGENT, title: "Triage #1786", column: "in_progress" });
-    // An agent may park its own card in Backlog, and take it out again.
     expect(store.updateCard(card.id, { by: AGENT, column: "backlog" }).moved_by).toEqual(AGENT);
     store.updateCard(card.id, { by: AGENT, column: "in_progress" });
-    // The person parks it: now only they move it out, to a lane or Cancelled.
     expect(store.updateCard(card.id, { by: PERSON, column: "backlog" })).toMatchObject({ column: "backlog", moved_by: PERSON });
     expect(refusal(() => store.updateCard(card.id, { by: AGENT, column: "in_progress" }))).toBe("card_backlog_person_only");
     expect(refusal(() => store.updateCard(card.id, { by: OTHER, column: "dropped", reason: "moot" }))).toBe("card_backlog_person_only");
@@ -201,7 +179,6 @@ describe("cards: who moves a card (columns v2)", () => {
       moved_by: PERSON,
       prs: [{ ref: "backnotprop/plannotator#1786", url: "https://github.com/backnotprop/plannotator/pull/1786" }],
     });
-    // The person's Backlog idea, the same; their send makes it the agent's (Todo).
     const idea = store.createCard({ project_id: project.id, by: PERSON, title: "Polylane" }).card;
     expect(refusal(() => store.updateCard(idea.id, { by: AGENT, column: "todo" }))).toBe("card_backlog_person_only");
     expect(store.updateCard(card.id, { by: PERSON, column: "todo" }).moved_by).toEqual(PERSON);
@@ -215,7 +192,6 @@ describe("cards: who moves a card (columns v2)", () => {
     const dropped = store.updateCard(mine.id, { by: AGENT, column: "dropped", reason: "folded into the Forge move" });
     expect(dropped.dropped).toMatchObject({ by: AGENT, reason: "folded into the Forge move" });
     expect(dropped.aside_from).toBe("in_progress");
-    // An agent may take back its own drop.
     expect(store.updateCard(mine.id, { by: AGENT, column: "in_progress" })).toMatchObject({ column: "in_progress", dropped: null });
 
     const theirs = store.createCard({ project_id: project.id, by: AGENT, title: "Polylane" }).card;
@@ -256,7 +232,6 @@ describe("cards: last heard, and an agent's drop reaching the person", () => {
     advance(3 * 24 * 60 * 60 * 1000);
     const wire = store.cardWire(store.card(card.id)!);
     expect(wire.heard_at).toBe(card.heard_at);
-    // Only `heard_seq` is added on the wire (a store seq, for the Board's unread rule): no amber, no stall flag.
     expect(Object.keys(wire).sort()).toEqual([...Object.keys(card), "heard_seq"].sort());
     expect(readFileSync(join(dir, "inbox", "projects", project.key, "cards.jsonl"), "utf8")).not.toMatch(/amber|stale/);
     const said = store.updateCard(card.id, { by: OTHER, say: "still on it" });
@@ -286,13 +261,10 @@ describe("cards: last heard, and an agent's drop reaching the person", () => {
     expect(seqs).toHaveLength(1);
     const seen = store.card(a.id)!;
     expect(seen.dropped!.seen_at).not.toBeNull();
-    // Looking is not hearing from the card.
     expect(seen.heard_at).toBe(dropA.heard_at);
-    // The other project's drop still waits; looking again writes nothing.
     expect(isInboxCardDropUnseen(store.card(c.id)!)).toBe(true);
     expect(store.markCardDropsSeen(new Set([project.id]))).toEqual([]);
     expect(store.markCardDropsSeen().map((card) => card.id)).toEqual([c.id]);
-    // A drop the agent makes again after a restore waits again.
     store.updateCard(a.id, { by: AGENT, column: "todo" });
     expect(isInboxCardDropUnseen(store.updateCard(a.id, { by: AGENT, column: "dropped", reason: "again" }))).toBe(true);
   });
@@ -313,14 +285,12 @@ describe("cards: on disk", () => {
       .split("\n")
       .map((raw) => parseInboxLine(raw)!);
     expect(cardLines.map((line) => line.kind)).toEqual(["card", "card"]);
-    // An older Inbox never reads cards.jsonl: the floor keeps the counter past the card lines.
     expect(JSON.parse(readFileSync(join(dir, "inbox", "seq.json"), "utf8")).seq).toBeGreaterThanOrEqual(cardLines[1]!.seq);
     const reopened = InboxStore.open(dir);
     expect(reopened.listCards()).toEqual(store.listCards());
     expect(reopened.cursor()).toBe(store.cursor());
     store.deleteThread(sent.message.thread_id);
     expect(store.card(card.id)).not.toBeNull();
-    // The link to the deleted thread is not shown.
     expect(store.cardWire(store.card(card.id)!).threads).toEqual([]);
     expect(store.diskUsage().projects[0]!.bytes).toBeGreaterThan(0);
   });
@@ -329,7 +299,6 @@ describe("cards: on disk", () => {
     const { store, project, dir } = world();
     const file = join(dir, "inbox", "projects", project.key, "cards.jsonl");
     const make = (title: string, by: InboxAuthor) => store.createCard({ project_id: project.id, by, title }).card;
-    // The cards as an Inbox before v2 wrote them: its ids, no `cols`, no `moved_by`.
     const old: [ReturnType<typeof make>, Record<string, unknown>, string, InboxAuthor | null][] = [
       [make("asked of an agent", AGENT), { column: "backlog" }, "todo", AGENT],
       [make("an older rename", AGENT), { column: "asked" }, "todo", AGENT],
@@ -353,15 +322,11 @@ describe("cards: on disk", () => {
     writeFileSync(file, written);
     const reopened = InboxStore.open(dir);
     for (const [card, , column, movedBy] of old) expect(reopened.card(card.id), card.title).toMatchObject({ column, moved_by: movedBy });
-    // Restoring the dropped card goes where its old column reads now (an agent's Backlog card: Todo).
     const dropped = old.at(-1)![0];
     expect(reopened.card(dropped.id)!.aside_from).toBe("todo");
-    // The file is read, never rewritten.
     expect(readFileSync(file, "utf8")).toBe(written);
-    // The iced card is the person's: an agent cannot take it out of Backlog.
     const iced = old[7]![0];
     expect(refusal(() => reopened.updateCard(iced.id, { by: AGENT, column: "in_progress" }))).toBe("card_backlog_person_only");
-    // Its next write is v2, and reads back the same.
     const next = reopened.updateCard(iced.id, { by: PERSON, column: "todo" });
     const last = JSON.parse(readFileSync(file, "utf8").trim().split("\n").at(-1)!);
     expect(last.record).toMatchObject({ cols: 2, column: "todo", moved_by: PERSON });
@@ -390,7 +355,6 @@ describe("cards: on disk", () => {
     expect(reopened.card(cancelled.id)!.aside_from).toBe("done");
     expect(readFileSync(file, "utf8")).toBe(written);
     expect(reopened.updateCard(cancelled.id, { by: PERSON, restore: true }).column).toBe("done");
-    // An agent with the old id moves a card to Done.
     const live = reopened.createCard({ project_id: project.id, by: AGENT, title: "Old agent", column: "in_progress" }).card;
     expect(reopened.updateCard(live.id, { by: AGENT, column: "shipped" as never }).column).toBe("done");
   });
@@ -436,15 +400,12 @@ describe("cards: the Board page's fields (step 2)", () => {
       ["issue", "acme/widgets#11"],
     ]);
     expect(card.prs).toEqual([{ ref: "acme/widgets#12", url: "https://github.com/acme/widgets/pull/12" }]);
-    // An issue-shaped path on a host no forge rule reads is no forge issue: a plain web link. A non-web ref is refused.
     expect(refusal(() => store.updateCard(card.id, { by: AGENT, refs: ["javascript:alert(1)"] }))).toBe("validation_error");
     expect(store.updateCard(card.id, { by: AGENT, refs: ["https://evil.example/o/r/issues/1"] }).refs.at(-1)).toMatchObject({ kind: "link", source: "web" });
-    // A record from step 1 (prs, no refs) reads its PRs as refs.
     const file = join(dir, "inbox", "projects", project.key, "cards.jsonl");
     const lines = readFileSync(file, "utf8").trim().split("\n").map((line) => JSON.parse(line));
     delete lines.at(-1).record.refs;
     writeFileSync(file, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
-    // Linked as `prs` then, so each is the card's own PR (`via: "pr"`).
     expect(InboxStore.open(dir).card(card.id)!.refs).toEqual([{ kind: "pr", source: "github", ref: "acme/widgets#12", url: "https://github.com/acme/widgets/pull/12", via: "pr" }]);
   });
 
@@ -459,7 +420,6 @@ describe("cards: the Board page's fields (step 2)", () => {
     expect(history[0]).toMatchObject({ kind: "moved", by: PERSON });
     expect(history.at(-1)!.kind).toBe("created");
     expect(store.cardHistory("crd_nope")).toEqual([]);
-    // Two writes in one millisecond are two entries; the person seeing a drop is none.
     const quick = store.createCard({ project_id: project.id, by: AGENT, title: "Quick" }).card;
     store.updateCard(quick.id, { by: AGENT, column: "in_progress" });
     store.updateCard(quick.id, { by: AGENT, column: "dropped", reason: "superseded" });
@@ -479,12 +439,9 @@ describe("cards: the Board page's fields (step 2)", () => {
     expect(sent.sent).toMatchObject({ to: { host: "codex", session: "ses_x" }, thread_id: message.thread_id });
     expect(sent.threads).toEqual([message.thread_id]);
     expect(sent.heard_by).toEqual(PERSON);
-    // Sending asks the agent to do it: Todo, moved by the person.
     expect(sent).toMatchObject({ column: "todo", moved_by: PERSON });
-    // Only through the person's addressed message, and only a Backlog or Todo card.
     const agents = store.sendMessage({ project_id: project.id, author: AGENT, body: "hi" });
     expect(refusal(() => store.sendCard(card.id, { thread_id: agents.message.id }))).toBe("validation_error");
-    // The same send again (a retry after a lost answer) writes nothing.
     const lines = store.cardHistory(card.id).length;
     expect(store.sendCard(card.id, { thread_id: message.id })).toEqual(sent);
     expect(store.cardHistory(card.id)).toHaveLength(lines);
@@ -506,7 +463,6 @@ describe("cards: the Board page's fields (step 2)", () => {
     expect(store.cardHistory(made.card.id).map((h) => h.kind)).toEqual(["sent", "created"]);
     const again = store.createCard({ project_id: project.id, by: PERSON, title: "Go", send_thread_id: message.id, idempotency_key: "k" });
     expect(again).toMatchObject({ replayed: true, card: { id: made.card.id } });
-    // A card a key made unsent (the window's card-first Send, interrupted) is sent by the retry.
     const first = store.createCard({ project_id: project.id, by: PERSON, title: "Later", idempotency_key: "k2" }).card;
     const second = store.startPersonThread({ project_id: project.id, body: "Later", to: { host: "pi", session: "ses_p" }, idempotency_key: "m2" });
     const sentNow = store.createCard({ project_id: project.id, by: PERSON, title: "Later", send_thread_id: second.message.id, idempotency_key: "k2" });
@@ -526,7 +482,6 @@ describe("cards: the Board page's fields (step 2)", () => {
     expect(dropped).toBeGreaterThan(seqB);
     store.markCardDropsSeen();
     expect(store.cardWire(store.card(a.id)!).heard_seq).toBe(dropped);
-    // The same after a reload from disk.
     expect(InboxStore.open(store.dir.replace(/\/inbox$/, "")).cardWire(store.card(a.id)!).heard_seq).toBe(dropped);
   });
 });
@@ -538,19 +493,15 @@ describe("cards: to Done by itself (v2, Q3)", () => {
   test("every linked PR merged: Done, once for that PR set; the person moving it back is final for it", () => {
     const { store, project } = world();
     const { card } = store.createCard({ project_id: project.id, by: AGENT, title: "Forge", column: "in_review", you: "merge", prs: [PR1, PR2] });
-    // One PR merged, the other not known merged: nothing.
     expect(store.autoShipCard(card.id, [PR1])).toBeNull();
     expect(store.card(card.id)!.column).toBe("in_review");
     const shipped = store.autoShipCard(card.id, [PR1, PR2])!;
     expect(shipped).toMatchObject({ column: "done", you: null, moved_by: PERSON, heard_by: PERSON, auto_shipped: { prs: [PR1, PR2] } });
     expect(store.cardHistory(card.id)[0]).toMatchObject({ kind: "auto_shipped", prs: [PR1, PR2] });
-    // Already shipped: nothing more.
     expect(store.autoShipCard(card.id, [PR1, PR2])).toBeNull();
-    // The person moves it back: the same PRs never ship it again.
     store.updateCard(card.id, { by: PERSON, column: "in_progress" });
     expect(store.autoShipCard(card.id, [PR1, PR2])).toBeNull();
     expect(store.card(card.id)!.column).toBe("in_progress");
-    // A new PR linked and merged is a new set: it ships again.
     const PR3 = "https://github.com/acme/widgets/pull/14";
     store.updateCard(card.id, { by: AGENT, prs: [PR3] });
     expect(store.autoShipCard(card.id, [PR1, PR2, PR3])!.column).toBe("done");
@@ -571,24 +522,19 @@ describe("cards: to Done by itself (v2, Q3)", () => {
     expect(store.autoShipCard(todo.id, [PR1])!.column).toBe("done");
   });
 
-  // Review of #2522, finding 1: what regresses is a card moved out of Done by the person (or "reported
-  // broken again") that moves itself back to Done on the next Board view.
   test("shipped by hand, then moved back: its PRs never move it to Done again; a PR merged since does", () => {
     const { store, project } = world();
     const byAgent = store.createCard({ project_id: project.id, by: AGENT, title: "Agent ship", column: "in_progress", prs: [PR1] }).card;
     store.updateCard(byAgent.id, { by: AGENT, column: "done" });
-    // Reported broken again: the agent moves it back, as the tool text says.
     store.updateCard(byAgent.id, { by: AGENT, column: "todo" });
     expect(store.autoShipCard(byAgent.id, [PR1])).toBeNull();
     const byPerson = store.createCard({ project_id: project.id, by: AGENT, title: "Person ship", column: "in_review", you: "merge", prs: [PR1] }).card;
     store.updateCard(byPerson.id, { by: PERSON, column: "done" });
     store.updateCard(byPerson.id, { by: PERSON, column: "in_progress" });
     expect(store.autoShipCard(byPerson.id, [PR1])).toBeNull();
-    // Made in Done, moved out: the same.
     const made = store.createCard({ project_id: project.id, by: AGENT, title: "Made done", column: "done", prs: [PR1] }).card;
     store.updateCard(made.id, { by: PERSON, column: "in_progress" });
     expect(store.autoShipCard(made.id, [PR1])).toBeNull();
-    // A fix PR, merged: it moves to Done by itself.
     store.updateCard(byAgent.id, { by: AGENT, prs: [PR2] });
     expect(store.autoShipCard(byAgent.id, [PR1, PR2])!.column).toBe("done");
   });
@@ -606,8 +552,6 @@ describe("cards: to Done by itself (v2, Q3)", () => {
     expect(InboxStore.open(dir).autoShipCard(card.id, [PR1])).toBeNull();
   });
 
-  // Review of #2522, D1: a released Inbox wrote links with no `via` and no `done_prs`. Read as context they
-  // gave an empty list, and an agent re-giving the PR as its own `pr` moved the card back to Done.
   test("a released-format line (links with no via, no done_prs): shipped and moved back, a PR re-given as pr never moves it again", () => {
     const { store, project, dir } = world();
     const card = store.createCard({ project_id: project.id, by: AGENT, title: "Released ship", column: "in_progress", prs: [PR1] }).card;
@@ -623,11 +567,9 @@ describe("cards: to Done by itself (v2, Q3)", () => {
     expect(readFileSync(file, "utf8")).not.toMatch(/done_prs|"via"/);
     const reopened = InboxStore.open(dir);
     expect(reopened.card(card.id)!.done_prs).toEqual([PR1]);
-    // The agent hands it over again, giving the same PR as its own (the tool text's move takes pr).
     reopened.updateCard(card.id, { by: AGENT, column: "in_review", you: "merge", prs: [PR1] });
     expect(reopened.autoShipCard(card.id, [PR1])).toBeNull();
     expect(reopened.card(card.id)!.column).toBe("in_review");
-    // A line in Done keeps a stale list an older Inbox carried along, joined with every PR it links.
     const stale = reopened.createCard({ project_id: project.id, by: AGENT, title: "Stale list", column: "in_progress", prs: [PR2] }).card;
     reopened.updateCard(stale.id, { by: AGENT, column: "done" });
     const all = readFileSync(file, "utf8").trim().split("\n").map((raw) => JSON.parse(raw));
@@ -636,7 +578,6 @@ describe("cards: to Done by itself (v2, Q3)", () => {
     expect(InboxStore.open(dir).card(stale.id)!.done_prs).toEqual([PR1, PR2]);
   });
 
-  // Review of #2522, D2: each writer puts the list in the line it writes (the load only backs up older lines).
   test("every move into Done writes done_prs into its own line: made in Done, moved there, moved there by the Inbox", () => {
     const { store, project, dir } = world();
     const file = join(dir, "inbox", "projects", project.key, "cards.jsonl");
@@ -651,16 +592,13 @@ describe("cards: to Done by itself (v2, Q3)", () => {
     expect(lastLine()).toMatchObject({ column: "done", auto_shipped: { prs: [PR2] }, done_prs: [PR1, PR2] });
   });
 
-  // Review of #2522, finding 2 (the coordinator's call): only the card's own PRs, linked through `pr`, count.
   test("a PR linked through ref is context: merged, it never moves the card; given as the card's pr, it does", () => {
     const { store, project } = world();
     const context = store.createCard({ project_id: project.id, by: AGENT, title: "Follow-up", refs: [PR1] }).card;
     expect(store.autoShipCard(context.id, [PR1])).toBeNull();
     const mixed = store.createCard({ project_id: project.id, by: AGENT, title: "Own PR", column: "in_progress", prs: [PR2], refs: [PR1] }).card;
-    // Its own PR not merged yet: the merged context PR does nothing.
     expect(store.autoShipCard(mixed.id, [PR1])).toBeNull();
     expect(store.autoShipCard(mixed.id, [PR1, PR2])).toMatchObject({ column: "done", auto_shipped: { prs: [PR2] } });
-    // The context PR given later as the card's own: it counts from then on.
     store.updateCard(context.id, { by: AGENT, prs: [PR1] });
     expect(store.autoShipCard(context.id, [PR1])!.column).toBe("done");
   });

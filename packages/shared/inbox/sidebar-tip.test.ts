@@ -1,9 +1,3 @@
-/**
- * The Sidebar tip's rule on the Inbox (sidebar-tip.ts), with no Inbox. What regresses: a guest shown it or stamping
- * it; it shown to someone who already customized the sidebar (also after they set it back to the default); it shown
- * on the person's first day; a second window or the phone shown it after the stamp; the claiming page's retry after a
- * lost answer losing it, or writing again.
- */
 import { describe, expect, test } from "bun:test";
 import { sidebarTipClaim, sidebarTipDue, type SidebarTipState } from "./sidebar-tip";
 
@@ -20,7 +14,6 @@ describe("sidebarTipDue", () => {
     expect(sidebarTipDue({ ...fresh, owner: false }, AT)).toBe(false);
     expect(sidebarTipDue({ ...fresh, customized: true }, AT)).toBe(false);
     expect(sidebarTipDue({ ...fresh, saved: { shownAt: AT } }, AT)).toBe(false);
-    // A key alone (no stamp) is not a show.
     expect(sidebarTipDue({ ...fresh, saved: { key: "page-key-1" } }, AT)).toBe(true);
   });
   test("never on the first day, nor before first use is known; a dev build keeps no first use and asks for none", () => {

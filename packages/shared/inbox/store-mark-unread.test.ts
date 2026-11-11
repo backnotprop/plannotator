@@ -1,12 +1,3 @@
-/**
- * Mark unread (the owner's ask, 2026-10-31: "I need a way to mark a message
- * unread"): the store's rules, proved on a real store in a temp dir, a replay
- * from disk included. The latest agent message is new again, so the row is
- * New and bold; a standing Mark read is left alone, so Move back still
- * reopens what it set aside; a look capped at `through_seq` is the exact Undo;
- * nothing is written to the thread (no note: the agent is not told); nothing
- * is written at all where there is nothing to make unread.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -42,7 +33,6 @@ function setup(dir?: string) {
 
 const rowOf = (store: InboxStore, threadId: string) => store.listRows().find((r) => r.thread_id === threadId)!;
 
-/** A thread with one question, marked read: the question closed, the row in Quiet. */
 function markedRead() {
   const opened = setup();
   const asked = opened.store.sendMessage({ project_id: opened.project.id, author: { ...AGENT, session: "ses_b" }, body: QUESTION }).message;
@@ -62,12 +52,10 @@ describe("Mark unread", () => {
     const { thread: row, wrote } = store.markUnread(first.id);
     expect(wrote).toBe(true);
     expect(row).toMatchObject({ section: "new", unread: true, unseen: 1, read_at: null, sent: null });
-    // Nothing sent: no message written to the thread.
     expect(store.thread(first.id)!.messages).toHaveLength(2);
 
     const again = InboxStore.open(dir);
     expect(rowOf(again, first.id)).toMatchObject({ section: "new", unread: true, unseen: 1 });
-    // The next look reads it again.
     expect(again.markSeen(first.id)).toMatchObject({ section: "quiet", unread: false });
   });
 
@@ -79,12 +67,10 @@ describe("Mark unread", () => {
     expect(store.questionsOf(asked.id).map((q) => [q.state, q.set_aside_at !== null])).toEqual([["closed", true]]);
     expect(store.thread(asked.id)!.messages).toHaveLength(1);
 
-    // The set-aside note still goes after the Undo window: the agent is not left waiting on a closed question.
     clock.now += 10_000;
     const notes = store.tellSetAside(asked.id, 10_000);
     expect(notes).toHaveLength(1);
     expect(notes[0]!.body).toContain(INBOX_SET_ASIDE_HEADING);
-    // The note is not a look: the row stays New and bold.
     expect(rowOf(store, asked.id)).toMatchObject({ section: "new", unread: true });
   });
 
@@ -178,16 +164,13 @@ describe("Mark unread", () => {
 
   test("writes nothing, and says so, where there is nothing to make unread", () => {
     const { store, project, first, update } = setup();
-    // Already new.
     let cursor = store.cursor();
     expect(store.markUnread(first.id)).toMatchObject({ wrote: false, thread: { section: "new", unread: true } });
     expect(store.cursor()).toBe(cursor);
-    // The person's reply after the latest agent message (a reply is a look): Sent stays Sent.
     store.sendReply(update.id, { words: "Looks right.", idempotency_key: "k1", questions: [] });
     cursor = store.cursor();
     expect(store.markUnread(first.id)).toMatchObject({ wrote: false, thread: { section: "sent", unread: false } });
     expect(store.cursor()).toBe(cursor);
-    // A thread the person started, no agent message yet.
     const mine = store.startPersonThread({ project_id: project.id, body: "Can you look at the totals?", to: { host: "claude-code", session: "ses_a" }, idempotency_key: "p1" }).message;
     cursor = store.cursor();
     expect(store.markUnread(mine.id).wrote).toBe(false);

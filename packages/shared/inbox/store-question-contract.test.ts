@@ -1,14 +1,3 @@
-/**
- * The Inbox's question records with the optional contract lines and picture
- * choices (approval "inbox-decision-mode", agent contract lines). On a real
- * store in a temp dir.
- *
- * What regresses if this fails: a record loses `stakes`, `shows`, `why`,
- * `reversible` or a choice's `image` (the card has nothing to draw), the
- * card's plain picture label is refused by the server, the agent gets raw
- * markdown back as its answer, or a record written before picture choices
- * (a label holding `![B](b.png)`) refuses the plain label the card now picks.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -101,11 +90,8 @@ describe("contract lines on the stored record", () => {
   });
 });
 
-// Records origin/main stored before picture choices, frozen from that build's
-// ACTUAL parser output (`parseInboxQuestionBlocks` run in a worktree of
-// origin/main at e36db4209 over the bodies below), not written by hand.
+// Records stored before picture choices, frozen from that build's actual parser output, not written by hand.
 const OLD_RECORDS = {
-  // An image in front of the label: the label kept the markdown.
   imageInLabel: {
     inner: ["Which mock?", "- [ ] ![A](mock-a.png) A", "- [ ] ![B](mock-b.png) B"],
     parsed: {
@@ -121,7 +107,6 @@ const OLD_RECORDS = {
     },
     picks: ["A", "B"],
   },
-  // A dash inside the alt text (` - `, ` — `, ` – `): the label was cut inside the image.
   dashInAlt: {
     inner: [
       "Which drawer?",
