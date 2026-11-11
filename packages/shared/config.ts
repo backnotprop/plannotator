@@ -23,7 +23,6 @@ import {
 } from "fs";
 import { execSync } from "child_process";
 
-import { inboxLaunchTokenOk } from '@plannotator/core/inbox-launch-choice';
 import type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, JjDefaultDiffType, ReviewDefaults, ThemeConfig } from '@plannotator/core/config-types';
 import { isFaviconStyle, type FaviconStyle } from './favicon';
 import { isAnnotateAgentTerminalSide, type AnnotateAgentTerminalSide } from './agent-terminal';
@@ -1393,6 +1392,12 @@ export function resolveDefaultDiffTypeFor(
   return v === 'jj-current' || v === 'jj-last' || v === 'jj-line' || v === 'jj-evolog' || v === 'jj-all' ? v : 'jj-current';
 }
 
+
+/**
+ * A launch model or effort as it may go on argv: `INBOX_LAUNCH_TOKEN` in packages/core/inbox-launch-choice.ts (kept
+ * here too: the Pi extension vendors this file without core). Never a leading "-".
+ */
+const inboxLaunchTokenOk = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:/@[\]-]{0,127}$/.test(value);
 
 /** A hand-edited on/off: false, 0, "false", "0", "off", "no" are off; true, 1, "true", "1", "on", "yes" on; anything else says nothing. */
 function parseLaunchFlag(value: unknown): boolean | undefined {

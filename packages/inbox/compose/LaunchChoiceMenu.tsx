@@ -15,7 +15,7 @@ export function LaunchChoiceButton({ choice, choices, open, onToggle, className 
   return (
     <button
       type="button"
-      className={`${className} ib-cp-choicebtn`}
+      className={`${className} ib-cp-lchbtn`}
       aria-haspopup="true"
       aria-expanded={open}
       aria-label={`Model and ${choices.effort_word.toLowerCase()}: ${words}. Change`}
@@ -46,7 +46,7 @@ export function LaunchChoiceMenu({
     ref.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();
     const onDown = (event: PointerEvent) => {
       const target = event.target as Element | null;
-      if (target && !ref.current?.contains(target) && !target.closest('.ib-cp-choicebtn')) onClose();
+      if (target && !ref.current?.contains(target) && !target.closest('.ib-cp-lchbtn')) onClose();
     };
     document.addEventListener('pointerdown', onDown, true);
     return () => document.removeEventListener('pointerdown', onDown, true);
@@ -59,13 +59,13 @@ export function LaunchChoiceMenu({
   };
   /** Escape and Back: closed, and focus on the button that opened it. */
   const back = () => {
-    const button = ref.current?.ownerDocument.querySelector<HTMLButtonElement>('.ib-cp-choicebtn');
+    const button = ref.current?.ownerDocument.querySelector<HTMLButtonElement>('.ib-cp-lchbtn');
     onClose();
     button?.focus();
   };
   const effortWord = choices.effort_word;
   const column = (field: 'model' | 'effort', caption: string, values: string[], fallback: string | undefined, show: (value: string) => string) => (
-    <div className="ib-cp-list ib-cp-choicecol" role="group" aria-label={caption} data-compose-choice-menu={field}>
+    <div className="ib-cp-list ib-cp-lchcol" role="group" aria-label={caption} data-compose-choice-menu={field}>
       <div className="ib-cp-cap">{caption}</div>
       {[null, ...values].map((value) => {
         const on = (choice[field] ?? null) === value;
@@ -75,7 +75,7 @@ export function LaunchChoiceMenu({
             type="button"
             role="menuitemradio"
             aria-checked={on}
-            className="ib-cp-opt ib-cp-choiceopt"
+            className="ib-cp-opt ib-cp-lchopt"
             data-compose-choice-value={value ?? 'default'}
             onClick={() => {
               const next = { ...choice };
@@ -98,7 +98,7 @@ export function LaunchChoiceMenu({
   );
   const models = launchModelRows(choice, choices);
   return (
-    <div className="ib-cp-picker ib-cp-choice" ref={ref} role="menu" aria-label={`Model and ${effortWord.toLowerCase()}`} data-compose-choices="" data-phone={phone ? '' : undefined} onKeyDown={onKey}>
+    <div className="ib-cp-picker ib-cp-lch" ref={ref} role="menu" aria-label={`Model and ${effortWord.toLowerCase()}`} data-compose-choices="" data-phone={phone ? '' : undefined} onKeyDown={onKey}>
       {phone && (
         <div className="ib-cp-pickhead">
           <button type="button" className="ib-cp-back" onClick={back}>
@@ -108,7 +108,7 @@ export function LaunchChoiceMenu({
           <span>Model and {effortWord.toLowerCase()}</span>
         </div>
       )}
-      <div className="ib-cp-choicecols">
+      <div className="ib-cp-lchcols">
         {models.length > 0 && column('model', 'Model', models, choices.default?.model, shortLaunchModel)}
         {choices.efforts.length > 0 && column('effort', effortWord, choices.efforts, choices.default?.effort, (v) => v)}
       </div>
