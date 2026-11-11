@@ -13,10 +13,6 @@ import { exportReviewFeedback } from '../../utils/exportFeedback';
 import { annotationScope, commentCopyText } from '../../utils/annotationDisplay';
 import { isAgentGeneratedFinding } from '../../utils/explainFinding';
 
-// ---------------------------------------------------------------------------
-// Panel
-// ---------------------------------------------------------------------------
-
 type DetailTab = 'findings' | 'logs';
 
 const SEVERITY_ORDER: Record<string, number> = { important: 0, nit: 1, pre_existing: 2 };
@@ -39,8 +35,6 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
     const cmd = job?.command ?? [];
     const full = cmd.join(' ');
 
-    // Use job.prompt if available (stored explicitly for all providers),
-    // fallback to parsing last command arg (legacy Codex behavior)
     const promptText = job?.prompt || (cmd.length > 0 ? cmd[cmd.length - 1] : '');
     const sep = '\n\n---\n\n';
     const i = promptText.indexOf(sep);
@@ -76,7 +70,6 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
   const displayAnnotations = useMemo(() =>
     Array.from(annotationSnapshot.values()).sort((a, b) => {
       if (a.dismissed !== b.dismissed) return a.dismissed ? 1 : -1;
-      // Sort by severity (important first), then file path, then line
       const sa = SEVERITY_ORDER[a.annotation.severity ?? ''] ?? 3;
       const sb = SEVERITY_ORDER[b.annotation.severity ?? ''] ?? 3;
       if (sa !== sb) return sa - sb;
@@ -88,18 +81,10 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
   const dismissedCount = useMemo(() => displayAnnotations.filter((d) => d.dismissed).length, [displayAnnotations]);
 
   const handleAnnotationClick = useCallback((ann: CodeAnnotation) => {
-    // General comments belong to no file — nothing to open in the diff.
     if (ann.filePath) state.openDiffFile(ann.filePath);
-    // Navigate (select + scroll): clicking a finding should jump the diff to it,
-    // not merely toggle its highlight.
     state.onNavigateToAnnotation(ann.id);
   }, [state.openDiffFile, state.onNavigateToAnnotation]);
 
-  // Copy All uses the diff context snapshotted on the JOB at launch, not the
-  // current UI state — so if the reviewer switches modes/bases after the job
-  // ran, the exported markdown still describes the diff the agent actually
-  // analyzed. Falls back to current UI state only if the job predates the
-  // snapshotting (older jobs without diffContext).
   const copyAllText = useMemo(
     () => {
       if (activeAnnotations.length === 0) return '';
@@ -126,7 +111,7 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-background">
-      {/* ── Header ── */}
+      {}
       <div className="flex-shrink-0 px-8 py-3 border-b border-border/40">
         <div className="flex items-center gap-2">
           <StatusDot status={job.status} />
@@ -139,7 +124,7 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
         {job.cwd && (
           <p className="text-[10px] font-mono text-muted-foreground/50 mt-1 truncate" title={job.cwd}>{job.cwd}</p>
         )}
-        {/* Inline details */}
+        {}
         <div className="flex items-center gap-3 mt-1.5 text-[10px] text-muted-foreground">
           <span>Started {new Date(job.startedAt).toLocaleTimeString()}</span>
           {job.exitCode !== undefined && (
@@ -152,7 +137,7 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
             {job.warning}
           </p>
         )}
-        {/* Prompt disclosures in header */}
+        {}
         {userMessage && (
           <div className="mt-3 space-y-1.5">
             <Disclosure title="Prompt" copyText={userMessage} nested>
@@ -167,7 +152,7 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
         )}
       </div>
 
-      {/* ── Tabs ── */}
+      {}
       <div className="flex-shrink-0 px-8 flex gap-0.5 border-b border-border/40">
         {!isTour && !isGuide && (
           <TabButton active={activeTab === 'findings'} onClick={() => setActiveTab('findings')}>
@@ -185,24 +170,21 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
         </TabButton>
       </div>
 
-      {/* ── Content ── */}
+      {}
       {activeTab === 'findings' ? (
         isTour ? (
-          /* Tour status view — no findings, just status + Open Tour button */
           <ScrollFade>
             <div className="px-8 py-3 space-y-4 max-w-2xl">
               <TourStatusCard summary={job.summary} terminal={terminal} jobId={jobId} />
             </div>
           </ScrollFade>
         ) : isGuide ? (
-          /* Guide status view — no findings, just status + Open guide button */
           <ScrollFade>
             <div className="px-8 py-3 space-y-4 max-w-2xl">
               <GuideStatusCard job={job} terminal={terminal} jobId={jobId} />
             </div>
           </ScrollFade>
         ) : (
-          /* Review findings view */
           <ScrollFade>
           <div className="px-8 py-3 space-y-4 max-w-2xl">
             <VerdictCard summary={job.summary} isCorrect={isCorrect} terminal={terminal} />
@@ -263,10 +245,6 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
     </div>
   );
 };
-
-// ---------------------------------------------------------------------------
-// Subcomponents
-// ---------------------------------------------------------------------------
 
 function VerdictCard({ summary, isCorrect, terminal }: {
   summary: AgentJobInfo['summary'];
@@ -367,9 +345,6 @@ function GuideStatusCard({ job, terminal, jobId }: {
 }) {
   const state = useReviewState();
   const { summary } = job;
-  // Opening only sets activeGuideJobId/guideOpen — it does NOT switch PRs or
-  // worktrees — so a guide from another review context can't meaningfully
-  // open from here.
   const inContext = jobMatchesReviewContext(job, state.prMetadata?.url, state.currentWorktreePath ?? null);
 
   if (summary) {
@@ -444,9 +419,6 @@ function ProviderPill({ provider, engine, model }: { provider: string; engine?: 
     const engineLabel = engine === 'codex' ? 'Codex' : 'Claude';
     label = model && engine !== 'codex' ? `Tour · ${engineLabel} ${model.charAt(0).toUpperCase() + model.slice(1)}` : `Tour · ${engineLabel}`;
   } else if (provider === 'guide') {
-    // Guide's engine union is wider than Tour's (marker engines included) —
-    // only show the model for Claude, mirroring Tour's own "skip it for
-    // engines with verbose/technical model ids" convention.
     const engineLabel = engine === 'codex' ? 'Codex' : engine === 'cursor' ? 'Cursor' : engine === 'opencode' ? 'OpenCode' : engine === 'pi' ? 'Pi' : engine === 'copilot' ? 'Copilot' : 'Claude';
     label = model && engine === 'claude' ? `Guide · ${engineLabel} ${model.charAt(0).toUpperCase() + model.slice(1)}` : `Guide · ${engineLabel}`;
   } else {

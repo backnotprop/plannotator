@@ -38,8 +38,6 @@ function stateWith(
   installStatus: CallFlowInstallStatus,
   startInstall: (languageIds?: readonly CallFlowLanguageId[]) => void = () => {},
 ): ReviewState {
-  // The panel's pre-analysis branches only touch these fields; the partial
-  // cast keeps the harness honest about what the funnel depends on.
   return {
     callFlowAdvert,
     callFlowAvailable: callFlowAdvert.available,

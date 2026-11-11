@@ -1,10 +1,3 @@
-/**
- * DOM-gated: resting the pointer on a Semantic Changes row opens the entity's
- * source (CodeSnippetPreview). Guards: nothing is loaded before the dwell; a
- * deleted entity shows its OLD line range from the old side of the file; a
- * modified entity shows its new range; without a loader (the file-header
- * popover) a hover opens nothing.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

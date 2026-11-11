@@ -207,8 +207,6 @@ export const ReviewCodeNavPanel: React.FC<IDockviewPanelProps> = (props) => {
     }
   }, [allLocations]);
 
-  // A click previews the result here and opens its file in a tab at the line
-  // (approved design record "review-explorer": "A result opens in a tab").
   const handleSelect = useCallback(
     (loc: CodeNavLocation) => {
       setSelectedLocation(loc);

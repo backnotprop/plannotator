@@ -65,7 +65,6 @@ describe('ReviewDockRightActions', () => {
       </ReviewStateProvider>,
     ));
 
-    // One button, no "Split" / "Unified" words: it shows the layout on screen and offers the other.
     const buttons = Array.from(host.querySelectorAll('button'));
     expect(buttons.some((button) => button.textContent === 'Split' || button.textContent === 'Unified')).toBe(false);
     const toggle = host.querySelector<HTMLButtonElement>('[data-diff-layout-toggle]')!;
@@ -74,7 +73,6 @@ describe('ReviewDockRightActions', () => {
     await act(async () => toggle.click());
     expect(onDiffStyleChange).toHaveBeenCalledWith('split');
 
-    // The gear opens the popover: no layout row (the button above has it), and code review's two repository rows.
     const gear = buttons.find((button) => button.title === 'Diff display options')!;
     await act(async () => gear.click());
     const popup = document.querySelector('[data-diff-display-popup]')!;

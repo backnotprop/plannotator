@@ -1,10 +1,3 @@
-/**
- * Review-specific dockview panel type constants and ID factory functions.
- *
- * The "review-" prefix scopes these to the code review context,
- * distinguishing them from any future plan editor panel types.
- */
-
 export const REVIEW_PANEL_TYPES = {
   DIFF: 'review-diff',
   AGENT_JOB_DETAIL: 'review-agent-job-detail',
@@ -45,13 +38,6 @@ export function getReviewDiffPanelFilePath(
   return typeof filePath === 'string' ? filePath : null;
 }
 
-/**
- * Any file of the repository in a tab (approved design record
- * "review-explorer", step 2). One preview tab, replaced by the next file
- * opened with a single click (its title italic); a double click, a comment,
- * or a double click on the tab keeps a file in a tab of its own.
- */
-/** The preview tab's id prefix (`review-file-preview:<n>`); a kept preview keeps its id. */
 export const REVIEW_FILE_PREVIEW_PANEL_ID = 'review-file-preview';
 const REVIEW_FILE_PANEL_PREFIX = 'review-file:';
 
@@ -59,7 +45,6 @@ export const makeReviewFilePanelId = (filePath: string) => `${REVIEW_FILE_PANEL_
 
 export interface ReviewFilePanelParams {
   filePath: string;
-  /** The preview tab: replaced by the next file opened with a single click. */
   preview?: boolean;
 }
 

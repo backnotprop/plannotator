@@ -5,17 +5,8 @@ import { isReviewFilePreviewParams, type ReviewFilePanelParams } from '../review
 import { RepoFileView } from '../../components/RepoFileView';
 import { ReviewDiffBody } from './ReviewDiffPanel';
 
-/**
- * Any file of the repository in a tab (approved design record
- * "review-explorer", step 2): a changed file shows its diff (with Changes |
- * Whole file), any other file is shown whole and read-only, "Not in this
- * review". The preview tab is replaced by the next file opened with a single
- * click; commenting in it keeps it.
- */
 export const ReviewFilePanel: React.FC<IDockviewPanelProps<ReviewFilePanelParams>> = (props) => {
   const state = useReviewState();
-  // dockview hands the first params as props; later ones (the preview tab
-  // retargeted) arrive through onDidParametersChange.
   const readParams = (): ReviewFilePanelParams | undefined => {
     const fromApi = props.api.getParameters<ReviewFilePanelParams>();
     return fromApi?.filePath ? fromApi : props.params;

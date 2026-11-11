@@ -9,17 +9,6 @@ import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea'
 import { getMRLabel } from '@plannotator/shared/pr-types';
 import { getPRDiscussionCount } from './prDiscussion';
 
-/**
- * Combined PR overview — one dock panel that shows the PR summary, checks, and
- * comments together instead of three separate tabs. The left column is the PR
- * summary (description) with the checks embedded at the bottom as a collapsed
- * disclosure; the right column is the full-height comments timeline.
- *
- * Reuses the existing PRSummaryTab / PRChecksTab / PRCommentsTab components and
- * the single shared live PR context state from ReviewStateContext.
- */
-
-/** Region label header shared by the panel's regions, with an optional right-aligned action. */
 function RegionHeader({ children, action }: { children: React.ReactNode; action?: React.ReactNode }) {
   return (
     <div className="flex-shrink-0 flex items-center justify-between gap-2 px-3 py-1.5 border-b border-border/30 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -29,12 +18,6 @@ function RegionHeader({ children, action }: { children: React.ReactNode; action?
   );
 }
 
-/**
- * Collapsed-by-default checks summary embedded at the bottom of the description.
- * The header carries a colored progress label (red failing / amber pending /
- * green passing) so status is visible without expanding; clicking reveals the
- * full checks + merge-status breakdown.
- */
 function ChecksDisclosure({ context }: { context: PRContext }) {
   const [open, setOpen] = useState(false);
 
