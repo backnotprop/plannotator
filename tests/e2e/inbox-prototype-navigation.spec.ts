@@ -18,7 +18,9 @@
  * no entry to the window's history; hover styles apply; a GET form loads the
  * page with its fields; a `#` link fires the page's hashchange; a link to
  * another option's page steps the window to that option. In the attached
- * page's own viewer and in an `html` fence a `?variant=2` link does the same.
+ * page's own viewer and in an `html` fence a `?variant=2` link does the same; in the
+ * viewer's full screen with the tools gathered, the page ends above the corner control,
+ * so its bottom-right switcher stays clickable.
  *
  * Screenshots go to PLANNOTATOR_PROTOTYPE_NAV_SHOTS when it is set.
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
@@ -174,6 +176,26 @@ test("an attached page's ?query link, in the file viewer and in an html fence, l
     await expect(viewer.locator('#title')).toHaveText('Unfold: variant 2');
     await expect(viewer.locator('#search')).toHaveText('?variant=2');
     await shot(page, '4-viewer-variant-2');
+
+    // Hide gathers the tools into the corner control at the bottom right: the page ends above it, so the
+    // switcher there is still the page's to click.
+    await page.locator('[data-full-view-hide]').click();
+    const handle = page.locator('[data-full-view-handle]');
+    await expect(handle).toBeVisible();
+    await expect
+      .poll(async () => {
+        const [frameBox, handleBox] = await Promise.all([page.locator('.ib-htmlframe iframe').boundingBox(), handle.boundingBox()]);
+        return frameBox!.y + frameBox!.height <= handleBox!.y;
+      })
+      .toBe(true);
+    const three = viewer.getByRole('link', { name: '3', exact: true });
+    const at = (await three.boundingBox())!;
+    expect(await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.tagName, [at.x + at.width / 2, at.y + at.height / 2])).toBe('IFRAME');
+    await three.click();
+    await expect(viewer.locator('#title')).toHaveText('Unfold: variant 3');
+    await expect(viewer.locator('#search')).toHaveText('?variant=3');
+    await shot(page, '4b-viewer-gathered');
+    await handle.click();
 
     // The html fence in a message.
     await page.goto(`${url}#thread=${fenceThread}`);

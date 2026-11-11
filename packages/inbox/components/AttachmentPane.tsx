@@ -1780,6 +1780,33 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     setCommentWaits(full && shownToolbar === 'tucked' && !props.readOnly && unsavedComposer(sectionRef.current, savedTextRef.current) !== null);
   }, [full, shownToolbar, props.readOnly]);
   shownToolbarRef.current = shownToolbar;
+  // Full screen floats its tools over the file. The one in the bottom right corner (the gathered tools' corner
+  // control; on a phone the toolbar, there in both states, so a pinch's tuck never resizes the page) would sit on an
+  // HTML page's own controls there (a prototype's "1 2 3 4"). The page stops above it: `--ib-pageclear` is the room
+  // it takes at the view's foot, measured from the control's layout box (not its box on screen, which flies).
+  useLayoutEffect(() => {
+    const section = sectionRef.current;
+    if (!full || kind !== 'html' || !section) return;
+    const place = () => {
+      const dock = section.querySelector<HTMLElement>('[data-full-view-dock]');
+      const control = !dock
+        ? null
+        : phone
+          ? dock.querySelector<HTMLElement>('[data-full-view-bar]')
+          : shownToolbar === 'tucked'
+            ? dock.querySelector<HTMLElement>('[data-full-view-handle]')
+            : null;
+      const clear = dock && control ? Math.max(0, Math.ceil(dock.clientHeight - control.offsetTop) + 8) : 0;
+      section.style.setProperty('--ib-pageclear', `${clear}px`);
+    };
+    place();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
+    observer?.observe(section);
+    return () => {
+      observer?.disconnect();
+      section.style.removeProperty('--ib-pageclear');
+    };
+  }, [full, kind, phone, shownToolbar]);
   // Every way back to showing (the corner control, ⌘⇧X, leaving full screen, a pinch let go) forgets
   // what gathered the tools, once the corner control's press has put focus back: the next » brings focus back to ».
   useEffect(() => {
