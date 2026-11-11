@@ -261,12 +261,12 @@ async function render() {
   return host;
 }
 
-const otherField = (el: HTMLElement) => el.querySelector<HTMLInputElement>('input[aria-label="Other answer to question 1"]')!;
+const otherField = (el: HTMLElement) => el.querySelector<HTMLTextAreaElement>('textarea[aria-label="Other answer to question 1"]')!;
 
 /** One step of a keyboard or a phone's dictation in the first question's "Other…" field. */
 function type(el: HTMLElement, words: string) {
   const field = otherField(el);
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
   act(() => {
     setter.call(field, words);
     field.dispatchEvent(new Event('input', { bubbles: true }));

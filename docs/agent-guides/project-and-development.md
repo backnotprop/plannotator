@@ -316,6 +316,19 @@ Running only `build:opencode` will copy stale HTML files.
 
 The `/docs/reference/keyboard-shortcuts` page is auto-generated from the shortcut registry at build time — see the Keyboard Shortcuts section above. Editing the markdown body has no effect; update the scope files instead.
 
+### Videos
+
+The site's videos are not in the repository, so a plugin update that copies the repo stays small. They live in the `plannotator-marketing` S3 bucket under `assets/` and are served at `https://plannotator.ai/assets/<name>` (the same URLs as when they shipped from `public/assets/`; the in-app announcements and the README link to them). The marketing deploy's `aws s3 sync … --delete` has `--exclude "assets/*.mp4" --exclude "assets/*.webm"`, so it neither uploads nor deletes them. Pages link to them with `videoUrl('<name>')` from `src/lib/media.ts`, an absolute URL, so `bun run dev` plays the production files. Posters (small jpgs) stay in `public/assets/`. `apps/marketing/media.test.ts` fails when a video is put back in `public/`, a page links one by a relative path, or the sync loses its excludes.
+
+To add or replace a video, someone with AWS access uploads it with an explicit content type (`video/webm` for `.webm`), then checks the public URL:
+
+```bash
+aws s3 cp ./my-demo.mp4 s3://plannotator-marketing/assets/my-demo.mp4 --content-type video/mp4
+curl -sI https://plannotator.ai/assets/my-demo.mp4   # 200, content-type video/mp4, the file's size
+```
+
+A new name needs no CloudFront invalidation. To replace a file in place, prefer a new name (for example `my-demo-v2.mp4`) and update the page; overwriting the same key needs `aws cloudfront create-invalidation --distribution-id E284ON0A27O2H6 --paths "/assets/my-demo.mp4"`, and browsers that cached the old file can keep it for a while. Upload before merging the page that links it.
+
 ## Test plugin locally
 
 ```
