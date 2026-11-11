@@ -138,6 +138,7 @@ import { scheduleDailyPing } from "@plannotator/shared/daily-ping";
 import { isLoopbackHostHeader, isLoopbackForwardedFor } from "@plannotator/shared/loopback-host";
 import { prepareAppHtml, prewarmAppHtml } from "@plannotator/shared/app-html";
 import { openPackedApp, packedAppResponse, PACKED_ASSET_ROUTE_PREFIX } from "@plannotator/shared/packed-app";
+import { encodeInboxResponse } from "./inbox-encoding";
 import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/shared/inbox/search";
 import { DecisionDataAborted, decisionDataCsv, decisionDataSummary, readDecisionLines } from "@plannotator/shared/inbox/decision-data";
 import { createInboxSearchRoutes } from "./inbox-search";
@@ -918,21 +919,25 @@ function etagMatches(header: string | null, etag: string): boolean {
 }
 
 /**
- * `/` through the tailnet listener (#2032): the page compressed as remote-mode
- * and `--tailscale` sessions serve theirs (#1617, `packages/shared/app-html.ts`),
- * brotli in practice since serve is HTTPS. The window's own loopback port keeps
- * the uncompressed `no-store` answer: on loopback the transfer is free and the
- * one-time compression pass only delays the first load.
+ * `/` on every listener the browser reaches (the window's loopback port, so a
+ * plain reverse proxy or ssh tunnel in front of it too, and the tailnet
+ * listener, #2032): the page compressed through the shared
+ * `packages/shared/app-html.ts` helper (brotli or gzip on `Accept-Encoding`,
+ * `Vary: Accept-Encoding`), prewarmed in brotli when the Inbox starts so the
+ * first load does not wait on the one-time pass. Loopback once got the page
+ * uncompressed and `no-store`, which left a proxy or tunnel to that port with
+ * the whole 2 MB page on every load.
  *
  * Cache: `private, no-cache` with a weak ETag, not `no-store`. The page is the
- * same bytes until a restart to update swaps the binary, and a phone on cellular
- * opens it many times a day, so a revalidation that answers 304 saves the ~5 MB
- * body; `no-cache` still asks every time, so a new build is never missed. The tag
- * is weak because the br, gzip and identity bodies are one page (one tag fits all
- * three under `Vary: Accept-Encoding`). The data routes stay `no-store`.
- * The listener's checks (owner login, served Host, Sec-Fetch-Site) ran before this.
+ * same bytes until a restart to update swaps the binary, so a revalidation that
+ * answers 304 saves the body on every reload; `no-cache` still asks every time,
+ * so a new build is never missed. The tag is weak because the br, gzip and
+ * identity bodies are one page (one tag fits all three under
+ * `Vary: Accept-Encoding`). The data routes stay `no-store`.
+ * A listener's own checks (on the tailnet: owner login, served Host,
+ * Sec-Fetch-Site) ran before this.
  */
-async function tailnetWindowPage(req: Request, page: string): Promise<Response> {
+async function windowPage(req: Request, page: string): Promise<Response> {
   const etag = windowPageEtag(page);
   const cacheHeaders = { "Cache-Control": "private, no-cache", ETag: etag, Vary: "Accept-Encoding" };
   if (etagMatches(req.headers.get("if-none-match"), etag)) {
@@ -4603,6 +4608,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    */
   const windowApp = openPackedApp(options.htmlContent ?? NOT_BUILT_PAGE);
   const windowEntryScripts = [...windowApp.html.matchAll(/<script type="module"[^>]*\ssrc="(\/assets\/[^"]+)"/g)].map((m) => m[1]!);
+  // Every listener sends the page and its scripts compressed: compress the page, and the entry script it asks
+  // for next, now, off the event loop, so the first load never waits on that one-time pass. Brotli: what
+  // Chromium asks of localhost and of an HTTPS address; gzip (a plain-http address, Safari) is made on first ask.
+  prewarmAppHtml(windowApp.html, "br");
+  for (const entry of windowEntryScripts) windowApp.answer(entry, "GET", "br", true).catch(() => {});
 
   const handle = async (req: Request, via: RequestVia): Promise<Response> => {
     // The tailnet listener checked its own Host (the served MagicDNS name)
@@ -6457,13 +6467,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // A page load (or a refresh) asks for a new release when the answer is
         // over a minute old: fire-and-forget, the button follows on the event stream.
         if (req.method === "GET") updates.nudge();
-        if (via === "tailnet") return tailnetWindowPage(req, page);
-        return new Response(req.method === "HEAD" ? null : page, {
-          headers: { ...WINDOW_PAGE_HEADERS, "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
-        });
+        return windowPage(req, page);
       }
-      // The window's scripts, by exact name from the pack (404 for any other), compressed over the tailnet as the page is.
-      if (path.startsWith(PACKED_ASSET_ROUTE_PREFIX)) return packedAppResponse(windowApp, req, path, via === "tailnet");
+      // The window's scripts, by exact name from the pack (404 for any other), compressed on every listener as the page is.
+      if (path.startsWith(PACKED_ASSET_ROUTE_PREFIX)) return packedAppResponse(windowApp, req, path, true);
       if ((path === "/favicon.png" || path === "/favicon.ico") && req.method === "GET") return handleFavicon(path);
 
       // A running local site in a thread (inbox-live.ts): local only, since the proxy relays the
@@ -6581,9 +6588,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
     return served(req, "local");
   };
+  // What the window's own port answers the browser: the same answers, JSON compressed (inbox-encoding.ts). The
+  // device door calls `fetch` above in process and reads plain bodies, so the encoding sits only here and on the
+  // tailnet listener's dispatch.
+  const loopbackFetch = async (req: Request): Promise<Response> => encodeInboxResponse(req, await fetch(req));
 
   attachmentRoutes = createInboxAttachmentRoutes({ store, serverSession, readBody, streamIdleMs: options.streamIdleMs, scheduleImageCapture: imageCapture.schedule });
-  const started = startOnLoopback(fetch, previous?.port ?? null);
+  const started = startOnLoopback(loopbackFetch, previous?.port ?? null);
   server = started.server;
   portChanged = started.portChanged;
   port = server.port as number;
@@ -6611,12 +6622,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     dataDir,
     port: () => port,
     registry: () => registry,
-    dispatch: async (req) => markPlannotatorResponse(await served(req, "tailnet")),
-    // Compress the page, and the entry script it asks for next, for the tailnet before the first phone asks (#2032).
-    onListen: () => {
-      prewarmAppHtml(windowApp.html, "br");
-      for (const entry of windowEntryScripts) windowApp.answer(entry, "GET", "br", true).catch(() => {});
-    },
+    dispatch: async (req) => markPlannotatorResponse(await encodeInboxResponse(req, await served(req, "tailnet"))),
     tailscale: options.tailscale,
     flag: options.publishTailnet === true,
     maxRequestBodySize: INBOX_MAX_REQUEST_BYTES,
