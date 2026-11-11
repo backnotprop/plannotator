@@ -7,6 +7,7 @@ import { ReviewStateProvider, type ReviewState } from '../dock/ReviewStateContex
 import { ReviewPRArtifactsPanel } from '../dock/panels/ReviewPRArtifactsPanel';
 import { buildPRArtifacts } from '../utils/prArtifacts';
 import { MarkdownBody } from './MarkdownBody';
+import { AnnotatableDescription } from './AnnotatableDescription';
 import { artifactContentProxyUrl } from '../dock/panels/artifactDocument';
 import { mediaArtifact } from '../utils/prMediaTarget';
 
@@ -141,6 +142,28 @@ describe.if(hasDom)('PR text pictures and videos open in Artifacts (DOM)', () =>
     expect(mediaArtifact(img, artifacts, metadata)?.id).toBe(idOf(SHOT));
     img.setAttribute('src', 'https://github.com.evil.example/user-attachments/assets/1111-shot');
     expect(mediaArtifact(img, artifacts, metadata)).toBeNull();
+  });
+
+  test('a screenshot written as an <img> tag in a description table opens its artifact', async () => {
+    const table = ['| Before | After |', '| --- | --- |', `| <img width="560" alt="Before" src="${SHOT}"> | text |`].join('\n');
+    const withTable = { ...context, body: table };
+    const tableArtifacts = buildPRArtifacts(metadata, withTable);
+    const openPRArtifact = mock((_id: string) => {});
+    const host = await render(
+      <ReviewStateProvider value={state({ prContext: withTable, prArtifacts: tableArtifacts, openPRArtifact })}>
+        <AnnotatableDescription markdown={table} />
+      </ReviewStateProvider>,
+    );
+    const shot = host.querySelector<HTMLImageElement>('tbody img')!;
+    expect(shot.getAttribute('data-image-src')).toBe(SHOT);
+    // happy-dom cannot load the proxy's address.
+    await act(async () => {
+      shot.removeAttribute('hidden');
+      shot.removeAttribute('data-image-failed');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    await act(async () => shot.click());
+    expect(openPRArtifact.mock.calls).toEqual([[tableArtifacts.find((a) => a.url === SHOT)!.id]]);
   });
 
   test('the panel opens at the clicked item, un-hides it, and puts focus on its row', async () => {

@@ -1,6 +1,7 @@
 import React, { useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { RenderedMarkdown } from '@plannotator/ui/components/RenderedMarkdown';
+import { InlineImageTagsContext } from '@plannotator/ui/components/ImageResolverContext';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { useAnnotationHighlighter } from '@plannotator/ui/hooks/useAnnotationHighlighter';
 import { proxiesGitHubImages, resolvePRImage } from '../utils/prImage';
@@ -64,13 +65,15 @@ export const AnnotatableDescription = React.memo(function AnnotatableDescription
   return (
     <div ref={containerRef}>
       <PRMediaScope>
-        <RenderedMarkdown
-          markdown={markdown}
-          className={className}
-          resolveImage={proxiedImages ? resolvePRImage : undefined}
-          preserveVideos
-          responsiveImages
-        />
+        <InlineImageTagsContext.Provider value={proxiedImages}>
+          <RenderedMarkdown
+            markdown={markdown}
+            className={className}
+            resolveImage={proxiedImages ? resolvePRImage : undefined}
+            preserveVideos
+            responsiveImages
+          />
+        </InlineImageTagsContext.Provider>
       </PRMediaScope>
 
       {hook.commentPopover &&
