@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { INBOX_BRIDGE_POLL_PATH } from "@plannotator/shared/inbox/connection";
 import { createAgentEnvironmentFor, type AgentEnvironment, type AgentRunResult } from "./inbox-agents";
-import { CLAUDE_NAMES_EVERY_MS, createInboxClaudeNames } from "./inbox-claude-names";
+import { CLAUDE_NAMES_EVERY_MS, createInboxClaudeNames, pluginTooOldForNames } from "./inbox-claude-names";
 import { startInboxServer, type InboxServer } from "./inbox";
 
 const roots: string[] = [];
@@ -67,6 +67,11 @@ function fakeClaude(listing: () => unknown, found = true) {
 }
 
 describe("Claude Code's own names (claude agents --json)", () => {
+  test("asked only for a plugin too old to send names: a current plugin, a dev build or no plugin never costs a run", () => {
+    for (const version of ["0.28.44", "0.28.49", "0.27.9"]) expect(pluginTooOldForNames(version)).toBe(true);
+    for (const version of ["0.28.50", "0.29.0", "1.0.0", "0.0.0-dev", "0.0.0", "0.28.49-beta.1", null]) expect(pluginTooOldForNames(version)).toBe(false);
+  });
+
   test("asked only while wanted, at most once per period and never twice at once; a rename is heard; a gone session keeps its name", async () => {
     let clock = 1_000;
     let wanted = false;

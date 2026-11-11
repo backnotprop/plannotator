@@ -232,7 +232,7 @@ import { createInboxLaunch } from "./inbox-launch";
 import { createInboxCodexAccount } from "./inbox-codex-account";
 import type { LaunchHost, LaunchHostContext } from "./inbox-launch-host";
 import { createLoginEnv, launchPlainEnv } from "./inbox-launch-env";
-import { createInboxClaudeNames } from "./inbox-claude-names";
+import { createInboxClaudeNames, pluginTooOldForNames } from "./inbox-claude-names";
 import { inboxNamesShown, inboxSessionsShown } from "./inbox-session-names";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
 import { createInboxAsk } from "./inbox-ask";
@@ -4291,11 +4291,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // Claude Code's own name for each live session (inbox-claude-names.ts): list rows only, on the plain env launch uses.
   const claudeNames = createInboxClaudeNames({
     environment: () => createAgentEnvironmentFor({ platform: process.platform, homeDir: process.env.PLANNOTATOR_TEST_SANDBOX ? join(dataDir, "agents-home") : homedir(), env: launchPlainEnv(launchOwnEnv(), [...launch.loginPath(), ...(process.env.PLANNOTATOR_TEST_SANDBOX ? [] : [join(homedir(), ".local", "bin"), join(homedir(), ".claude", "local")])]) }),
-    // A window is open and a live Claude Code session has no name or title from its plugin (an old plugin, or no title yet).
+    // A window is open and a live Claude Code session, on a plugin too old to send names, has no name or title.
     wanted: () => {
       if (deliveryListeners.size === 0) return false;
       const titled = live.titles();
-      return live.agentSessions(live.clock()).some((entry) => entry.live && (entry.host === "claude-code" || entry.host === "claude") && !entry.label && !Object.hasOwn(titled, entry.session));
+      return live.agentSessions(live.clock()).some((entry) => entry.live && (entry.host === "claude-code" || entry.host === "claude") && !entry.label && !Object.hasOwn(titled, entry.session) && pluginTooOldForNames(live.pluginVersionOf(entry.session)));
     },
     onChange: live.titlesChanged,
   });

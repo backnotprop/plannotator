@@ -520,6 +520,8 @@ export function createInboxLiveSessions(options: {
   const labelOf = (session: string): string | null => sessions.get(session)?.label ?? null;
   /** One session's generated title (`titles`); null when it has none. */
   const titleOf = (session: string): string | null => sessions.get(session)?.title ?? null;
+  /** The plugin version a session's poll said it loaded; null when it sent none (an MCP-only session, an old connection). */
+  const pluginVersionOf = (session: string): string | null => sessions.get(session)?.plugin?.version ?? null;
   /** Bumped each time a poll changes a label: the windows read the rows again (`event: deliveries`, `labels`). */
   let labelChanges = 0;
   const labelVersion = () => labelChanges;
@@ -1413,6 +1415,7 @@ export function createInboxLiveSessions(options: {
     titlesChanged,
     labelOf,
     titleOf,
+    pluginVersionOf,
     labelVersion,
   };
 }

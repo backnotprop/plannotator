@@ -19,8 +19,11 @@
  *  - Never two at once: a refresh while one runs returns that run.
  *  - It backs off: a run that failed doubles the wait, from CLAUDE_NAMES_EVERY_MS up to CLAUDE_NAMES_BACKOFF_MAX_MS;
  *    one that worked starts it over. With no `claude` found it looks again after CLAUDE_NAMES_MISSING_RETRY_MS.
- *  - It runs only when wanted: a window is open and a live Claude Code session has neither a name nor a title from its
- *    plugin (a current plugin with a named or titled session costs nothing). Otherwise the timer only asks `wanted`.
+ *  - It runs only when wanted: a window is open and a live Claude Code session polls through a plugin too old to send
+ *    the person's name (`pluginTooOldForNames`), with neither a name nor a title. A current plugin sends the rename
+ *    itself, and for a session it has no name for yet Claude Code's own default ("plannotator-3f") says no more than
+ *    the Inbox's ("plannotator-k3"), so a current plugin never costs a run; nor does a session that never polled (MCP
+ *    only). Otherwise the timer only asks `wanted`.
  */
 
 import type { AgentEnvironment } from "./inbox-agents";
@@ -34,6 +37,23 @@ export const CLAUDE_NAMES_BACKOFF_MAX_MS = 5 * 60_000;
 export const CLAUDE_NAMES_RUN_TIMEOUT_MS = 5_000;
 /** The most names kept: one per session this Inbox saw since it started. */
 const NAMES_MAX = 500;
+
+/** The first plugin version that sends the person's name for a session (its poll's `label`). */
+export const PLUGIN_SENDS_NAMES = [0, 28, 50] as const;
+
+/**
+ * A session's plugin is too old to send the person's name: its poll said a release version below PLUGIN_SENDS_NAMES.
+ * A poll that said no version (none, a dev build "0.0.0-dev", a prerelease) is not asked about: only a known old
+ * release is.
+ */
+export function pluginTooOldForNames(version: string | null): boolean {
+  const match = version ? /^(\d+)\.(\d+)\.(\d+)$/.exec(version) : null;
+  if (!match) return false;
+  const parts = match.slice(1).map(Number);
+  if (parts.every((n) => n === 0)) return false;
+  for (let i = 0; i < 3; i += 1) if (parts[i] !== PLUGIN_SENDS_NAMES[i]) return parts[i]! < PLUGIN_SENDS_NAMES[i]!;
+  return false;
+}
 
 /** `claude agents --json`'s `sessionId` → `name`, each name cleaned as a poll's label is. Null when it does not parse. */
 export function claudeAgentNames(stdout: string): Map<string, string> | null {
