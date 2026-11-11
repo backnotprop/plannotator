@@ -37,7 +37,8 @@ function world() {
 }
 
 async function start(dataDir: string): Promise<InboxServer> {
-  const server = await startInboxServer({ dataDir });
+  // On the JSONL files (`sqlite: false`): this test reads or writes the record files themselves.
+  const server = await startInboxServer({ sqlite: false, dataDir });
   servers.push(server);
   return server;
 }

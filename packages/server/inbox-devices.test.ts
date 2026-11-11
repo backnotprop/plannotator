@@ -769,7 +769,8 @@ describe("the device door, on the binary", () => {
     expect(deleted.status).toBe(200);
     const body = (await deleted.json()) as Json;
     expect(body.ok).toBe(true);
-    expect(Object.keys(body.store).sort()).toEqual(["bytes", "dir", "projects"]);
+    // The sizes, as the window's Delete answers them; an Inbox on SQLite adds its database's (and backups') bytes.
+    expect(Object.keys(body.store).filter((key) => key !== "database" && key !== "backups").sort()).toEqual(["bytes", "dir", "projects"]);
     expect((await door(`threads/${threadId}`)).status).toBe(404);
   });
 

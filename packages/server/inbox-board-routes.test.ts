@@ -80,7 +80,8 @@ async function world(options: { readProjectRepo?: (root: string) => Promise<Inbo
     calls.push({ cli, args });
     return ok(merged(12, "vite 8 for the review app"));
   };
-  const server = await startInboxServer({ dataDir, binaryPath: null, refRunner: run, phones: false, board: true, ...options });
+  // On the JSONL files (`sqlite: false`): this test reads or writes the record files themselves.
+  const server = await startInboxServer({ sqlite: false, dataDir, binaryPath: null, refRunner: run, phones: false, board: true, ...options });
   servers.push(server);
   const base = `http://127.0.0.1:${server.port}`;
   const project = server.store.ensureProject({ name: "web", root: join(root, "web") });
@@ -282,7 +283,7 @@ describe("the Board page's routes", () => {
         mkdirSync(dataDir, { recursive: true });
         process.env.PLANNOTATOR_DATA_DIR = dataDir;
         writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true, inboxBoard: board, inboxTailscaleAllow: [GUEST] }));
-        const server = await startInboxServer({ dataDir, binaryPath: null, phones: false, board, cardFavicons, tailscale: scriptedTailscale(MAGIC, OWNER) });
+        const server = await startInboxServer({ sqlite: false, dataDir, binaryPath: null, phones: false, board, cardFavicons, tailscale: scriptedTailscale(MAGIC, OWNER) });
         servers.push(server);
         const project = server.store.ensureProject({ name: "web", root: join(root, "web") });
         const { card } = server.store.createCard({ project_id: project.id, by: { kind: "person" }, title: "Links", refs: ["https://linear.app/acme/issue/ENG-1"] });
