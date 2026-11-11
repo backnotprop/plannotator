@@ -191,7 +191,7 @@ export function SetsBody({ agent, face, onDone }: { agent: AgentFaceRef; face: A
                   onClick={() => choose(icon)}
                 >
                   <span ref={lazy} className="am-sets-art" data-src={src} data-pixel={look?.pixelated ? '' : undefined} data-mono={look?.mono ? '' : undefined} style={setArtStyle(look, null) as CSSProperties}>
-                    {look?.mono ? <span className="am-sets-mono" /> : <img alt="" draggable={false} decoding="async" />}
+                    {look?.mono ? <span className="am-sets-mono" /> : <img alt="" draggable={false} decoding="async" onLoad={(event) => event.currentTarget.parentElement?.setAttribute('data-loaded', '')} />}
                   </span>
                   <span className="am-sets-n">{number}</span>
                 </button>
