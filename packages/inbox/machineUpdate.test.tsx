@@ -9,11 +9,12 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { MachineUpdateDetails, MachineUpdateView, MachineView } from './api';
+import type { InboxThread } from '@plannotator/core/inbox-types';
 
 const hasDom = typeof document !== 'undefined';
 const { ASK_AGENT_TO_UPDATE, ASK_AGENT_TO_UPDATE_THREAD, MachineSidebarWord, MachineUpdateButton, MachineUpdateDialog, UPDATE_BY_HAND, UPDATE_BY_HAND_FULL_PATH, UPDATE_BY_HAND_POWERSHELL } = (hasDom ? await import('./components/MachineUpdate') : {}) as typeof import('./components/MachineUpdate');
 const { MachinesSection } = (hasDom ? await import('./components/Machines') : {}) as typeof import('./components/Machines');
-const { ThreadSnooze } = (hasDom ? await import('./components/CopyMenus') : {}) as typeof import('./components/CopyMenus');
+const { ThreadMore } = (hasDom ? await import('./components/CopyMenus') : {}) as typeof import('./components/CopyMenus');
 const { machineNotice } = await import('./machines');
 
 const MAC = `ibx_01K${'0'.repeat(22)}M`;
@@ -271,8 +272,10 @@ test.skipIf(!hasDom)('Settings: the row has its button for each state that needs
 
 test.skipIf(!hasDom)('Snooze on an older machine stays, and its press opens the dialog instead of a list of times', async () => {
   let pressed = 0;
-  await draw(<ThreadSnooze snooze={{ snoozed: false, onPick: () => {}, onUnsnooze: () => {}, blocked: { name: 'Studio', onPress: () => pressed++ } }} />);
-  await act(async () => document.querySelector<HTMLButtonElement>('[data-snooze-blocked]')!.click());
+  const thread = { thread_id: 'msg_a', subject: 'Which index?', messages: [] } as unknown as InboxThread;
+  await draw(<ThreadMore thread={thread} linkOf={() => ''} phone={false} snooze={{ snoozed: false, onPick: () => {}, onUnsnooze: () => {}, blocked: { name: 'Studio', onPress: () => pressed++ } }} />);
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-thread-more]')!.click());
+  await act(async () => document.querySelector<HTMLElement>('[data-snooze-blocked]')!.click());
   expect(pressed).toBe(1);
   expect(document.querySelector('[data-snooze-choice]')).toBeNull();
 });
