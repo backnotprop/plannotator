@@ -1151,6 +1151,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const artifactPinListeners = new Set<() => void>();
   /** A snooze changed or ran out (inbox-snooze.ts): the streams of windows and linked machines say `event: snoozes`. */
   const snoozeListeners = new Set<() => void>();
+  /**
+   * A read of a thread's PRs changed what only the reader keeps (checks, the review verdict; inbox-thread-pulls.ts),
+   * which writes no record: the windows' streams say `event: thread-pulls` and each reads those threads' PRs again.
+   */
+  const threadPullLiveListeners = new Set<(threadIds: readonly string[]) => void>();
   /** How the list's rows look was saved (config.json `inboxRows`): the windows' streams say `event: rows`. */
   const rowsListeners = new Set<(rows: readonly InboxRowsOption[], rev: number, last: { prev: readonly InboxRowsOption[] | null; by: InboxRowsBy | null }) => void>();
   /** The sidebar's layout was saved (config.json `inboxSidebar`): the windows' streams say `event: sidebar`. */
@@ -1220,6 +1225,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     refCards,
     ...(options.refRunner ? { run: options.refRunner } : {}),
     fixture: options.threadPullFixture ?? threadPullFixtureFromEnv(),
+    onLiveChange: (threadIds) => {
+      for (const listener of threadPullLiveListeners) listener(threadIds);
+    },
   });
   // Pull requests (inbox-pulls.ts): read only while the page is open and Code review is on; the route refuses first otherwise.
   // The project roots whose origin the Pull requests list has waited for once.
@@ -3543,6 +3551,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // a snooze writes no record, so its copy of this machine's rows would not move). The phone's door hears nothing new.
         const onSnoozes = () => send(`event: snoozes\ndata: {}\n\n`);
         if (windowId || url.searchParams.get("snoozes") === "1") snoozeListeners.add(onSnoozes);
+        // A thread's PRs read behind the window's answer changed their checks or review: those threads' PRs are read
+        // again. Windows only (additive; a window that predates it skips the frame).
+        const onThreadPullsLive = (threadIds: readonly string[]) => send(`event: thread-pulls\ndata: ${JSON.stringify({ thread_ids: threadIds })}\n\n`);
+        if (windowId) threadPullLiveListeners.add(onThreadPullsLive);
         // How the rows look was saved (any window's, a phone's too): every window takes it at once. Windows only.
         const onRows = (rows: readonly InboxRowsOption[], rev: number, last: { prev: readonly InboxRowsOption[] | null; by: InboxRowsBy | null }) => send(`event: rows\ndata: ${JSON.stringify({ rows, rev, prev: last.prev, by: last.by })}\n\n`);
         if (windowId) rowsListeners.add(onRows);
@@ -3614,6 +3626,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           pinListeners.delete(onPins);
           artifactPinListeners.delete(onArtifactPins);
           snoozeListeners.delete(onSnoozes);
+          threadPullLiveListeners.delete(onThreadPullsLive);
           rowsListeners.delete(onRows);
           sidebarListeners.delete(onSidebar);
           agentFaceListeners.delete(onAgentFaces);

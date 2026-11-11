@@ -7,8 +7,11 @@
  * showing a merged PR while one is still open; a screen reader hearing
  * nothing of the PRs; the button drawn on a thread with none; a stack shown
  * out of order or mixed with the others; a remove that sends the wrong ref or
- * cannot be undone; a refused add that says nothing; and a change to another
- * thread making this one read again.
+ * cannot be undone; a refused add that says nothing; a change to another
+ * thread making this one read again; and a read nobody waits for any more
+ * left running (a hover that ended, a thread closed: each held one of the
+ * browser's six connections to the Inbox until threads stopped opening), or a
+ * card left on "Loading…" for ever when the read gets no answer.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -60,6 +63,10 @@ let reads: string[] = [];
 let posts: { path: string; body: Record<string, unknown> }[] = [];
 let answer: InboxThreadPullsAnswer = answerOf([]);
 let postAnswer: (body: Record<string, unknown>) => Response = () => Response.json(answer);
+/** How a read answers: at once by default; a test may hold it (never answering) or fail it. */
+let readAnswer: (signal: AbortSignal | null | undefined) => Promise<Response> = async () => Response.json(answer);
+/** Each read's signal, to see whether the window let go of it. */
+let readSignals: (AbortSignal | null | undefined)[] = [];
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -68,6 +75,8 @@ beforeEach(() => {
   posts = [];
   answer = answerOf([]);
   postAnswer = () => Response.json(answer);
+  readAnswer = async () => Response.json(answer);
+  readSignals = [];
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
@@ -76,7 +85,8 @@ beforeEach(() => {
       return postAnswer(posts.at(-1)!.body);
     }
     reads.push(path);
-    return Response.json(answer);
+    readSignals.push(init?.signal);
+    return readAnswer(init?.signal);
   }) as typeof fetch;
   host = document.createElement('div');
   host.className = 'pn-inbox';
@@ -138,6 +148,52 @@ describe.skipIf(!hasDom)('the row mark', () => {
     expect(host!.querySelector('[data-pr-mark] .ib-sr')!.textContent).toBe('3 pull requests, #431 open');
     expect(pullsMarkWords(summary(1, 'merged'), '#12')).toBe('Pull request #12, merged');
     expect(pullsMarkWords(summary(1, 'unknown'), '#12')).toBe('Pull request #12');
+  });
+
+  test('a hover that ends lets go of its read; a read with no answer says so instead of "Loading…" for ever', async () => {
+    // A read that never answers unless the window aborts it (a stuck forge on an Inbox before the fix).
+    readAnswer = (signal) =>
+      new Promise((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+      });
+    render(<RowPullsMark threadId={THREAD} summary={summary(1, 'open')} />);
+    const mark = host!.querySelector('[data-pr-mark]')!;
+    const hover = async (type: 'pointerover' | 'pointerout') => {
+      await act(async () => mark.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerType: 'mouse' })));
+    };
+    const wait = (ms: number) => act(async () => await new Promise((r) => setTimeout(r, ms)));
+    await hover('pointerover');
+    await wait(450);
+    expect(popover()).not.toBeNull();
+    expect(reads).toHaveLength(1);
+    expect(popover()!.querySelector('[aria-busy="true"]')!.textContent).toBe('Loading…');
+    await hover('pointerout');
+    await wait(300);
+    expect(popover()).toBeNull();
+    // The card closed: its read is aborted, so it holds no connection.
+    expect(readSignals[0]?.aborted).toBe(true);
+    // Hovered again, the read fails (the Inbox did not answer): the card says so, plainly.
+    readAnswer = async () => {
+      throw new TypeError('Failed to fetch');
+    };
+    await hover('pointerover');
+    await wait(450);
+    await settle();
+    expect(reads).toHaveLength(2);
+    expect(popover()!.querySelector('[data-pr-failed]')!.textContent).toBe('The Inbox did not answer. Try again in a moment.');
+    expect(popover()!.querySelector('[aria-busy="true"]')).toBeNull();
+    // Once a read answers, what it knows shows (and stays, even if a later read fails).
+    readAnswer = async () => Response.json(answerOf([pull('o/r#1', 'open', 'main', 'a'), pull('o/r#2', 'draft', 'main', 'b')]));
+    await act(async () => threadPullsBus.emit(THREAD));
+    await settle();
+    expect(popover()!.querySelector('[data-pr-failed]')).toBeNull();
+    expect(popover()!.querySelectorAll('[data-pr-row]')).toHaveLength(2);
+    readAnswer = async () => {
+      throw new TypeError('Failed to fetch');
+    };
+    await act(async () => threadPullsBus.emit(THREAD));
+    await settle();
+    expect(popover()!.querySelectorAll('[data-pr-row]')).toHaveLength(2);
   });
 
   test('no PRs, no mark, and no read', async () => {
@@ -338,6 +394,22 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
     } finally {
       setRefCardTransport(null);
     }
+  });
+
+  test("the thread's read is let go of when the thread closes or another opens", async () => {
+    readAnswer = (signal) =>
+      new Promise((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+      });
+    render(<ThreadPullsButton threadId={THREAD} summary={{ count: 1, headline: { key: 'github.com/o/r#1', state: 'open' } }} />);
+    await settle();
+    expect(readSignals).toHaveLength(1);
+    render(<ThreadPullsButton threadId={OTHER} summary={{ count: 1, headline: { key: 'github.com/o/r#2', state: 'open' } }} />);
+    await settle();
+    expect(readSignals[0]?.aborted).toBe(true);
+    expect(readSignals).toHaveLength(2);
+    act(() => root!.render(null));
+    expect(readSignals[1]?.aborted).toBe(true);
   });
 
   test('Escape closes the card and puts focus back on the button', async () => {

@@ -1007,6 +1007,30 @@ export class InboxReadTimeout extends Error {
   }
 }
 
+/**
+ * A signal that aborts when `outer` does or after `ms` (then with InboxReadTimeout as its reason). `done` clears the
+ * timer once the read settled.
+ */
+export function signalWithin(ms: number, outer?: AbortSignal): { signal: AbortSignal; done: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new InboxReadTimeout(ms)), ms);
+  const onAbort = () => controller.abort(outer?.reason);
+  if (outer?.aborted) onAbort();
+  else outer?.addEventListener('abort', onAbort, { once: true });
+  return {
+    signal: controller.signal,
+    done: () => {
+      clearTimeout(timer);
+      outer?.removeEventListener('abort', onAbort);
+    },
+  };
+}
+
+/** A thread's PRs: the Inbox answers at once from what it knows, so a read with no answer by then is a held connection. */
+export const THREAD_PULLS_READ_MS = 10_000;
+/** A hover card's data: the Inbox ends a forge CLI at 8 s, so a read with no answer by then is a held connection. */
+export const REF_CARD_READ_MS = 20_000;
+
 /** A storage read with no answer by then (a held connection on a phone over the tailnet) fails, so Try again or a reopen reads anew. XL counts in about 1.3 s. */
 export const STORAGE_READ_MS = 20_000;
 
@@ -1553,13 +1577,18 @@ export const inboxApi = {
    * lately. A linked machine's thread has none here (its read is not forwarded), and an Inbox older than PRs on
    * threads answers 404: both read as none.
    */
-  threadPulls: async (threadId: string): Promise<InboxThreadPullsAnswer> => {
+  threadPulls: async (threadId: string, signal?: AbortSignal): Promise<InboxThreadPullsAnswer> => {
     if (machineOf(threadId)) return { pulls: [], groups: [], removed: [] };
+    // Aborted when the card closes or a newer read starts, and given up after THREAD_PULLS_READ_MS: an unanswered
+    // read never holds one of the browser's few connections to this Inbox.
+    const within = signalWithin(THREAD_PULLS_READ_MS, signal);
     try {
-      return threadPullsOf(await get<unknown>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/pulls`)));
+      return threadPullsOf(await get<unknown>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/pulls`), within.signal));
     } catch (cause) {
       if (cause instanceof InboxApiError && cause.status === 404) return { pulls: [], groups: [], removed: [] };
       throw cause;
+    } finally {
+      within.done();
     }
   },
   /** The person adds or removes a thread's PRs (the popover). `remove: ['all']` takes off every one. */
@@ -2339,6 +2368,8 @@ export interface InboxEventHandlers {
   onArtifactPins?: () => void;
   /** A snooze changed or ran out (`event: snoozes`, approval "inbox-snooze"), here or on a linked machine; never called by an older Inbox. */
   onSnoozes?: () => void;
+  /** A read of these threads' PRs changed their checks or review (`event: thread-pulls`, no record); never called by an older Inbox. */
+  onThreadPulls?: (threadIds: string[]) => void;
   /** How the list's rows look was saved, here or in another window (`event: rows`, approval "inbox-customize-rows"). */
   /** `last`: the look before this save and, for an agent's command, who made it (`prev`, `by`; absent from an older Inbox). */
   onRows?: (rows: unknown, rev: unknown, last: { prev: unknown; by: unknown }) => void;
@@ -2387,7 +2418,7 @@ export interface InboxEventWindow {
 
 /** The event stream's named frames, as they arrive (and as the tab that holds the shared stream passes them on). */
 // `heartbeat`: a window's stream beats every 10 s (packages/server/inbox.ts); heard by liveStream.ts, handled by nothing.
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'artifact-pins', 'snoozes', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'artifact-pins', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -2479,6 +2510,15 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'snoozes':
       handlers.onSnoozes?.();
+      return;
+    case 'thread-pulls':
+      try {
+        const data = JSON.parse(frame.data) as { thread_ids?: unknown };
+        const ids = Array.isArray(data.thread_ids) ? data.thread_ids.filter((id): id is string => typeof id === 'string') : [];
+        if (ids.length > 0) handlers.onThreadPulls?.(ids);
+      } catch {
+        // A malformed frame changes nothing.
+      }
       return;
     case 'rows':
       try {

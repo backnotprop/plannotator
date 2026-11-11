@@ -133,6 +133,7 @@
   "inbox-project-rename.spec.ts": 13,
   "inbox-projects-sort.spec.ts": 12,
   "inbox-pull-filters.spec.ts": 11,
+  "inbox-pull-marker-hang.spec.ts": 31,
   "inbox-pull-refresh.spec.ts": 28,
   "inbox-pull-requests.spec.ts": 83,
   "inbox-pull-risk.spec.ts": 37,
