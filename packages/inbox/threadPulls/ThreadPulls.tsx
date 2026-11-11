@@ -259,8 +259,17 @@ function OnePull({ pull, sheet, onClose }: { pull: InboxThreadPullWire; sheet: b
   return <PullsList answer={{ pulls: [pull], groups: [{ kind: 'related', pulls: [pull.pull] }], removed: [] }} />;
 }
 
-function PullRow({ pull, oneRepo, onRemove, onPost }: { pull: InboxThreadPullWire; oneRepo: boolean; onRemove?: (pull: InboxThreadPullWire) => void; onPost?: (ref: string) => void }) {
+/**
+ * Decisions post on GitHub and GitLab PRs only: the server refuses a Bitbucket one (`forge_unsupported`), so no Post
+ * decisions button or menu row is offered for it.
+ */
+export function canPostDecisionsOn(pull: Pick<InboxThreadPullWire, 'platform'>): boolean {
+  return pull.platform !== 'bitbucket';
+}
+
+function PullRow({ pull, oneRepo, onRemove, onPost: offeredPost }: { pull: InboxThreadPullWire; oneRepo: boolean; onRemove?: (pull: InboxThreadPullWire) => void; onPost?: (ref: string) => void }) {
   const extras = pullExtras(pull);
+  const onPost = canPostDecisionsOn(pull) ? offeredPost : undefined;
   return (
     <li className="ib-prpop-row" data-pr-row={pull.ref} data-state={pull.state}>
       <a className="ib-prpop-link" href={pull.url} target="_blank" rel="noopener noreferrer">
@@ -406,7 +415,7 @@ export function PullsCard({ threadId, answer, failed = false, onAnswer, sheet, o
         </div>
       )}
       <div className="ib-prpop-edit" data-pr-edit="">
-        {pulls.length === 1 && onPost && (
+        {pulls.length === 1 && onPost && canPostDecisionsOn(pulls[0]!) && (
           <button type="button" className="ib-prpop-tbtn ib-prpop-post1" aria-label={`Post decisions on ${pulls[0]!.ref}`} data-pr-post={pulls[0]!.ref} onClick={() => onPost(pulls[0]!.ref)}>
             Post decisions
           </button>

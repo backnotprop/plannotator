@@ -348,6 +348,25 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
     expect(posted).toEqual(['o/r#1']);
   });
 
+  test('Post decisions is never offered on a Bitbucket PR (the server refuses it): its row has none, the others keep theirs', async () => {
+    const bbUrl = 'https://bitbucket.org/acme/billing/pull-requests/7';
+    answer = answerOf([pull('o/r#1', 'open', 'main', 'a'), pull(bbUrl, 'open', 'main', 'b')]);
+    render(<ThreadPullsButton threadId={THREAD} summary={undefined} onPost={() => undefined} />);
+    await settle();
+    await click(host!.querySelector('[data-pr-button]'));
+    expect(popover()!.querySelector(`[data-pr-row="${bbUrl}"]`)).not.toBeNull();
+    expect([...popover()!.querySelectorAll('[data-pr-post]')].map((b) => b.getAttribute('data-pr-post'))).toEqual(['o/r#1']);
+  });
+
+  test('one PR, a Bitbucket one: no Post decisions button under its card', async () => {
+    answer = answerOf([pull('https://bitbucket.org/acme/billing/pull-requests/7', 'open', 'main', 'b')]);
+    render(<ThreadPullsButton threadId={THREAD} summary={undefined} onPost={() => undefined} />);
+    await settle();
+    await click(host!.querySelector('[data-pr-button]'));
+    expect(popover()!.querySelector('[data-pr-edit]')).not.toBeNull();
+    expect(popover()!.querySelector('[data-pr-post]')).toBeNull();
+  });
+
   test('Post on a pull request with none linked: the card opens on Add, and the PR added gets the post, then the card closes', async () => {
     postAnswer = (body) => {
       answer = answerOf([pull((body.add as string[])[0]!, 'unknown', 'main', 'z')]);
