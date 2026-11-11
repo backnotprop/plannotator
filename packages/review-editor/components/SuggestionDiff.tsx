@@ -1,6 +1,5 @@
 import React from 'react';
 
-/** Renders original vs suggested code as inline diff lines (git-style) */
 export const SuggestionDiff: React.FC<{ original: string; suggested: string }> = ({ original, suggested }) => {
   const oldLines = original.split('\n');
   const newLines = suggested.split('\n');

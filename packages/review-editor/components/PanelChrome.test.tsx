@@ -1,18 +1,3 @@
-/**
- * DOM-gated coverage for the left panel's sticky tools block (approved design
- * record "review-sidebar-aligned").
- *
- * Regressions guarded:
- *  - a setting of the old Tree controls popover (Copy all diffs, Auto-mark
- *    viewed, Group by kind, the Viewed and Git add buttons) no longer reachable
- *    from the "…" menu, or no longer doing what it did;
- *  - Hide viewed and Search in diff losing their one-click toggles or their
- *    pressed state;
- *  - turning the Viewed button off leaving the list silently filtered;
- *  - the progress losing its words ("N of M viewed", "All M viewed", "K staged");
- *  - the hairline under the block showing when nothing is scrolled under it,
- *    or not showing when something is.
- */
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import React, { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -38,7 +23,6 @@ afterEach(async () => {
   if (hasDom) document.body.innerHTML = "";
 });
 
-/** The row with its state held like the app holds it. */
 function Harness({ onCopy, ...rest }: { onCopy?: () => void } & Partial<PanelControlsProps>) {
   const [showViewed, setShowViewed] = useState(true);
   const [showStage, setShowStage] = useState(true);
@@ -169,7 +153,6 @@ describe.skipIf(!hasDom)("PanelControlsRow", () => {
       await act(async () => item.click());
       expect(menuItem(attr)?.getAttribute("aria-checked")).toBe("false");
     }
-    // Viewed button off: no progress words, no eye; Git add button off: no staged count.
     expect(el.querySelector("[data-panel-viewed-controls]")).toBeNull();
     expect(eye(el)).toBeNull();
     expect(el.querySelector("[data-panel-staged-count]")).toBeNull();

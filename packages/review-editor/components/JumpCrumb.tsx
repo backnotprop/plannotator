@@ -11,10 +11,6 @@ function viaLabel(via: JumpCrumbData['via']): string {
   return 'Go to File';
 }
 
-/**
- * Where a jump came from, over the file it opened, with the way back
- * (approved design record "review-explorer", step 3).
- */
 export const JumpCrumb: React.FC<{ crumb: JumpCrumbData; onBack?: () => void; right?: React.ReactNode }> = ({ crumb, onBack, right }) => {
   const back = resolveShortcutBindings(reviewExplorerShortcuts.shortcuts.navigateBack)[0];
   return (

@@ -105,7 +105,6 @@ describe('EditModeAnnouncementDialog', () => {
     expect(video?.hasAttribute('autoplay')).toBe(true);
     expect(video?.hasAttribute('loop')).toBe(true);
     expect(video?.hasAttribute('playsinline')).toBe(true);
-    // React reflects muted via the property, not always the attribute.
     expect((video as HTMLVideoElement).muted).toBe(true);
     expect(document.querySelector('[data-edit-mode-demo-placeholder]')).toBeNull();
   });
@@ -115,8 +114,6 @@ describe('EditModeAnnouncementDialog', () => {
     const onDismiss = mock(() => {});
     await mountDialog({ onEnable, onDismiss });
 
-    // The focused default action must be the consent-neutral one: pressing it
-    // blind keeps the feature off.
     expect(document.activeElement?.textContent).toContain('Done');
 
     await act(async () => buttonWithText('Done').click());

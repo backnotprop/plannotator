@@ -2,11 +2,6 @@ import React from 'react';
 
 export type ChangedFileView = 'changes' | 'whole';
 
-/**
- * Changes | Whole file, in a changed file's header (approved design record
- * "review-explorer", step 2). Changes is the diff; Whole file is the new side,
- * every line, with change bars in the gutter.
- */
 export const FileViewSwitch: React.FC<{
   view: ChangedFileView;
   onSelect: (view: ChangedFileView) => void;

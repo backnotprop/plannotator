@@ -1,8 +1,6 @@
 /**
- * GitHub's wide-diff bar: while a file's code runs past the bottom of its scroll pane, a native scrollbar pinned to
- * the pane's bottom edge mirrors that file's sideways scroll (one per column in split view). Pierre's own bar at the
- * bottom of the code stays; this one shows only while that bar is below the screen, and only for the file in view.
- * It lives inside the pane (a sticky dock at the end of its content), so whatever covers the pane covers it too.
+ * Pierre's own bar at the bottom of the code stays; this one shows only while that bar is below the
+ * screen, and only for the file in view.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -18,7 +16,6 @@ const MIN_CODE_IN_VIEW = 40;
 /** Pierre's room under the last row (its bar and padding): once the last row is on screen, the bar goes, so it never covers it. */
 const CODE_END_ROOM = 8;
 
-/** The element that scrolls `el` up and down: itself, or the nearest ancestor that does. */
 function scrollportOf(el: HTMLElement): HTMLElement | null {
   for (let at: HTMLElement | null = el; at; at = at.parentElement) {
     if (/auto|scroll/.test(getComputedStyle(at).overflowY) && at.scrollHeight > at.clientHeight) return at;
@@ -76,7 +73,6 @@ export function DiffBottomBar({ root }: { root: HTMLElement | null }) {
     window.addEventListener('resize', queue, { passive: true });
     const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(queue);
     resized?.observe(root);
-    // Files mount as they scroll into view, after the scroll that brought them.
     const mounted = new MutationObserver(queue);
     mounted.observe(root, { childList: true, subtree: true });
     return () => {

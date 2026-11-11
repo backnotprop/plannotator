@@ -11,29 +11,8 @@ import {
   type TokenHoverTrigger,
 } from '@plannotator/shared/token-hover';
 
-/**
- * One-time hover card announcement, in the same big-format shell as
- * EditModeAnnouncementDialog and LookAndFeelAnnouncementDialog: a worked
- * example on the left, the decision on the right.
- *
- * LAST in the first-run dialog chain (guide intro, look-and-feel, review
- * setup, edit mode, then this). The App gates rendering through
- * tokenHoverAnnouncementCanShow so the chain dialogs never stack.
- *
- * The example is a TRY-IT: the token in the strip is genuinely hoverable and
- * opens the REAL card through the REAL hook, governed by whichever trigger and
- * delay the radio currently says. Only the answer is a fixture, so the demo
- * never searches the reviewer's repository. Nothing here is a redraw, so it
- * cannot drift from the surface it illustrates.
- *
- * The radio group writes the real setting on selection, so Done and Escape
- * both mean "accept what is selected" and a choice can never be lost by
- * dismissing.
- */
-
 interface TokenHoverAnnouncementDialogProps {
   readonly isOpen: boolean;
-  /** Mark seen and close. Also wired to Escape. */
   readonly onDismiss: () => void;
 }
 
@@ -52,15 +31,6 @@ const TRIGGER_COPY: Record<TokenHoverTrigger, { label: string; description: stri
   },
 };
 
-/**
- * The fixture the example card is rendered from. A realistic
- * CodeNavHoverResponse, nothing more: the card itself decides what to show.
- *
- * Exported so the DOM test can assert the rendered card against the SAME
- * fixture it was built from, which is what pins "the example is the real
- * card" rather than a copy of its markup.
- */
-/** The symbol the try-it demonstrates. Named in the prompt line too. */
 const EXAMPLE_SYMBOL = 'withRetry';
 
 export const EXAMPLE_HOVER: CodeNavHoverResponse = {
@@ -89,10 +59,6 @@ export const EXAMPLE_HOVER: CodeNavHoverResponse = {
   stats: { elapsedMs: 18 },
 };
 
-/**
- * The try-it's request, shaped exactly like one the diff pane would build.
- * Only the resolver is a fixture; everything downstream is the real pipeline.
- */
 const EXAMPLE_REQUEST: CodeNavRequest = {
   symbol: EXAMPLE_SYMBOL,
   filePath: 'src/checkout/order.ts',
@@ -102,18 +68,6 @@ const EXAMPLE_REQUEST: CodeNavRequest = {
   language: 'typescript',
 };
 
-/**
- * The illustration is a TRY-IT, not an exhibit: the token below is genuinely
- * hoverable and opens the REAL card through the REAL hook, so the reviewer
- * feels the actual dwell, the leave grace and the modifier gate before
- * committing to a setting. The only thing that is not real is where the answer comes
- * from, and that is deliberate: a demo must not search the reviewer's
- * repository for a symbol they never asked about.
- *
- * The trigger and delay come from the LIVE setting, so flipping the radio to
- * the hold-modifier option makes the try-it behave that way immediately, and "Off"
- * makes it do nothing, which is the honest preview of that choice.
- */
 function HoverCardTryIt({
   mode,
   delayMs,
@@ -125,7 +79,6 @@ function HoverCardTryIt({
 }) {
   const tokenRef = useRef<HTMLSpanElement>(null);
 
-  // No network, no LRU sharing with the app: this hook instance is its own.
   const resolve = useCallback(async () => EXAMPLE_HOVER, []);
   const tokenHover = useTokenHover('token-hover-announcement', { mode, delayMs, resolve });
 
@@ -139,8 +92,6 @@ function HoverCardTryIt({
 
   return (
     <div
-      // Interactive, so it is labeled rather than hidden. The mock code inside
-      // is decorative and stays hidden; the prompt line carries the meaning.
       role="group"
       aria-label="Try it: a live hover card demo"
       data-token-hover-example
@@ -164,9 +115,7 @@ function HoverCardTryIt({
         <div className="flex gap-3 bg-success/10 px-3">
           <span className="w-5 shrink-0 select-none text-right text-success/60">42</span>
           <span className="truncate text-foreground">
-            {/* The token leads the line on purpose: the card anchors at its
-                left edge and is 400px wide, so a token sitting mid-line would
-                open the card across the radio column beside it. */}
+            {}
             <span className="text-primary/70">await</span>{' '}
             <span
               ref={tokenRef}
@@ -199,12 +148,8 @@ function HoverCardTryIt({
           hover={tokenHover.hover}
           onPointerEnter={tokenHover.onCardEnter}
           onPointerLeave={tokenHover.onCardLeave}
-          // The try-it has no References panel behind it, so the locations
-          // lead nowhere and stay out of the tab order.
           onSelectLocation={() => {}}
           inert
-          // Above the modal this is demonstrated inside; the app's own default
-          // layer sits under it.
           layerClassName="fixed z-[110]"
         />
       )}
@@ -245,11 +190,6 @@ export function TokenHoverAnnouncementDialog({
 
       const dialog = document.querySelector<HTMLElement>('[data-token-hover-announcement-dialog]');
       const focusable = Array.from(
-        // `:not([tabindex="-1"])` has to apply to the BUTTONS too, not just the
-        // [tabindex] arm: the roving radio group parks two unselected options
-        // at -1 and neither belongs in the Tab cycle. (The try-it's card is
-        // not a factor either way — it portals to <body>, so this query never
-        // reaches it; its own locations leave the tab order via `inert`.)
         dialog?.querySelectorAll<HTMLElement>('button:not([disabled]):not([tabindex="-1"]), [href], [tabindex]:not([tabindex="-1"])')
           ?? [],
       );
@@ -275,10 +215,8 @@ export function TokenHoverAnnouncementDialog({
   }, [isOpen]);
 
   /**
-   * Arrow keys move selection within the group, per the WAI-ARIA radiogroup
-   * pattern: both axes are accepted because the group is a vertical list of
-   * horizontally-laid-out rows, and both wrap. Selection follows focus, which
-   * is what makes the group a single Tab stop that still reaches every option.
+   * Arrow keys move selection within the group, per the WAI-ARIA radiogroup pattern: both axes are
+   * accepted because the group is a vertical list of horizontally-laid-out rows, and both wrap.
    */
   const handleOptionKeyDown = (event: React.KeyboardEvent, index: number) => {
     const forward = event.key === 'ArrowDown' || event.key === 'ArrowRight';
@@ -350,10 +288,6 @@ export function TokenHoverAnnouncementDialog({
                     type="button"
                     role="radio"
                     aria-checked={selected}
-                    // Roving tabindex (WAI-ARIA radiogroup): Tab enters and
-                    // leaves the group as one stop, arrows move within it. The
-                    // focus trap's selector excludes [tabindex="-1"] on buttons
-                    // too, so the unselected options stay out of the Tab cycle.
                     tabIndex={selected ? 0 : -1}
                     onKeyDown={(event) => handleOptionKeyDown(event, index)}
                     data-token-hover-trigger-option={value}

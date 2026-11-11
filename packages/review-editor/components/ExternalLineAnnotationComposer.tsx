@@ -28,9 +28,8 @@ interface ExternalLineAnnotationComposerProps {
 }
 
 /**
- * Hosts the ordinary code-review ToolbarHost for a source selection made on a
- * non-diff surface. The resulting annotation follows the exact same draft,
- * sidebar, feedback-export, and hosted-review path as a Pierre line selection.
+ * The resulting annotation follows the exact same draft, sidebar, feedback-export, and
+ * hosted-review path as a Pierre line selection.
  */
 export function ExternalLineAnnotationComposer({
   request,

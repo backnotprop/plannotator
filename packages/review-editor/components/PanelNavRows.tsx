@@ -2,17 +2,6 @@ import React from 'react';
 import { useDiffCountColors } from '../hooks/useDiffCountColors';
 import { CountColumns } from './FileRowBits';
 
-/**
- * Nav rows shared by the left panel's two views (FileTree, SectionsPanel).
- * One source so the rows render identically — same order, same icons, same
- * counts — in both views. They scroll with the list (approved design record
- * "review-sidebar-aligned"): All changes first, then the PR's own pages, then
- * the analysis views.
- */
-
-/** Shared shell for the panel action rows (PR overview, Semantic diff, All
- *  changes): 28 px rows touching, the icon on the panel's content edge and
- *  the label on its label edge; the selected row is a quiet grey fill. */
 export function SidebarActionRow({
   active,
   onClick,
@@ -85,12 +74,6 @@ export function CallFlowRow({
   );
 }
 
-/**
- * Opens every change of the review in one scrolling view. Named "All changes"
- * so it never reads as the "All files" scope (the whole repository) in the
- * header above it. The +/- counts keep 4.5:1 on every surface of the row in
- * every palette (`useDiffCountColors`).
- */
 export function AllChangesRow({
   active,
   onClick,

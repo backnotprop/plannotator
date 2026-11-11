@@ -83,7 +83,6 @@ function paintedDiff(rows: { column?: 'additions' | 'deletions'; line: number; t
     at(gutter, row.left - 41, row.left);
     const text = document.createElement('div');
     text.setAttribute('data-line', String(row.line));
-    // Scrolled sideways: the code's own left has gone under the gutter; the gutter has not moved.
     at(text, row.left - 200, row.left + 400);
     shadow.appendChild(code);
   }
@@ -121,7 +120,6 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
     const ref = mount({ onShowMe: (s) => shown.push(s), onAsk: () => {} });
     act(() => ref.current!.handleLineSelectionEnd({ start: 14, end: 14, side: 'deletions' }));
     expect([...chooser()!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Comment', 'Ask']);
-    // A drag from a new-side line onto a deleted one: one end is old, so no Show me either.
     act(() => ref.current!.handleLineSelectionEnd({ start: 16, end: 14, side: 'additions', endSide: 'deletions' }));
     expect([...chooser()!.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['Comment', 'Ask']);
     act(() => ref.current!.handleLineSelectionEnd({ start: 15, end: 17, side: 'additions', endSide: 'additions' }));
@@ -141,7 +139,6 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
 
     test('under the painted lines, at the start of their code, and not until it has read them', async () => {
       const ref = mount({ onShowMe: () => {} });
-      // Nothing painted yet: unseen, not flashed at the pointer.
       expect(placed().hidden).toBe('hidden');
       paintedDiff([{ line: 16, top: 300, left: 803 }, { line: 18, top: 340, left: 803 }]);
       act(() => ref.current!.handleLineSelectionEnd({ start: 16, end: 18, side: 'additions' }));
@@ -173,7 +170,6 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
       expect(placed()).toMatchObject({ top: '526px', left: '803px' });
     });
 
-    /** The pointer is at this height when the lines are picked. */
     const pickedAt = (ref: React.RefObject<ToolbarHostHandle | null>, y: number) => {
       act(() => window.dispatchEvent(new MouseEvent('mousemove', { clientX: 100, clientY: y })));
       act(() => ref.current!.handleLineSelectionEnd({ start: 17, end: 18, side: 'additions' }));
@@ -231,7 +227,6 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
       mount({ onShowMe: () => {} });
       await frames();
       expect(placed().top).toBe('366px');
-      // The other file now has a line of that number painted, nearer the pointer, and this one has none.
       unpaint(a);
       paintedDiff([{ line: 18, top: 500, left: 40 }]);
       await frames(3);
@@ -304,7 +299,6 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
       Object.defineProperty(scroller, 'scrollHeight', { value: 3000 });
       Object.defineProperty(scroller, 'clientHeight', { value: 722 });
       document.body.appendChild(scroller);
-      // The lines fill the screen from just under the header to its bottom.
       paintedDiff([{ line: 16, top: 50, left: 803 }, { line: 18, top: window.innerHeight - 10, left: 803 }], scroller);
       mount({ onShowMe: () => {} });
       await frames();

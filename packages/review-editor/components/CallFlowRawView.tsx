@@ -16,7 +16,6 @@ import {
   type CallFlowFindShortcutSurface,
 } from '../hooks/useCallFlowFindShortcut';
 
-/** One canonical raw CallDiff slice and its position in the complete response. */
 export interface CallFlowRawSection {
   readonly key: string;
   readonly label?: string;
@@ -28,7 +27,6 @@ interface IndexedRawSection extends CallFlowRawSection {
   readonly lines: ReadonlyArray<{ readonly line: CallFlowRawLine; readonly lineIndex: number }>;
 }
 
-/** Searchable, annotatable raw CallDiff output shared by the Dock and file Lens. */
 export function CallFlowRawView({
   sections,
   onAnnotateTargets,
@@ -44,9 +42,7 @@ export function CallFlowRawView({
   ) => boolean;
   readonly onAnnotationDraftChange?: (active: boolean) => void;
   readonly compact?: boolean;
-  /** True only while this mounted renderer owns the foreground find shortcut. */
   readonly findShortcutActive?: boolean;
-  /** Distinguishes a foreground Lens from a retained Dockview portal. */
   readonly findShortcutSurface?: CallFlowFindShortcutSurface;
 }) {
   const indexedSections = useMemo<IndexedRawSection[]>(() => {

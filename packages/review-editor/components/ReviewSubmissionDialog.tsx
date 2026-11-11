@@ -18,10 +18,6 @@ import {
   DialogTitle,
 } from '@plannotator/ui/components/ui/dialog';
 
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
 export interface SubmissionTarget {
   prUrl: string;
   prNumber: number;
@@ -35,13 +31,10 @@ export interface SubmissionTarget {
     start_line?: number;
     start_side?: 'LEFT' | 'RIGHT';
   }>;
-  /** GitHub only (#1599): file-scoped comments posted as file-level threads.
-   *  On any other platform they stay in `fileScopedBody`. */
   fileLevelComments: PRReviewFileLevelComment[];
   fileScopedBody: string;
   fileCount: number;
   annotationCount: number;
-  /** Comments on lines outside the diff, posted in the review body (with code and a link). */
   outsideDiffCount?: number;
   status: 'pending' | 'success' | 'partial' | 'failed' | 'blocked';
   error?: string;
@@ -59,7 +52,6 @@ export interface ReviewSubmission {
   orphans: OrphanedFindings[];
 }
 
-/** Request body accepted by the review server's platform submission endpoint. */
 export interface PRActionRequest {
   action: PRReviewAction;
   body: string;
@@ -73,17 +65,7 @@ type ReviewPlatform = Platform;
 interface ReviewSubmissionDialogProps {
   isOpen: boolean;
   action: PRReviewAction;
-  /**
-   * #1611: when given (and the dialog is not approving), the dialog offers a
-   * Comment / Request changes choice and reports the pick here. The primary
-   * "Post Comments" opens without it, so that flow is unchanged.
-   */
   onActionChange?: (action: 'comment' | 'request_changes') => void;
-  /**
-   * Why Request changes cannot be chosen (the platform has no such review, or
-   * refuses it on your own PR). Set ⇒ the option renders disabled with this
-   * reason under it.
-   */
   requestChangesUnavailableReason?: string;
   submission: ReviewSubmission;
   generalComment: string;
@@ -96,23 +78,13 @@ interface ReviewSubmissionDialogProps {
   recoveryPersistsRefresh: boolean;
   mrLabel: string;
   platformLabel: string;
-  /** The PR this goes on, when no comment target names it (the Inbox's Post). */
   postingTo?: string;
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-// A line comment posted in the review body instead of inline: outdated (#1590),
-// or stamped on a snapshot the session knows its PR has moved past.
 const inBody = (a: CodeAnnotation, withheld: ReadonlySet<string>) => a.outdated || a.outsideDiff === true || withheld.has(a.id);
 
-/** A link to a file's lines at the PR's head commit (`prBlobPermalink`). */
-/** A link to lines at the PR head the comment was made on (its own PR in a stack). */
 export type ReviewPermalink = (path: string, lineStart: number, lineEnd: number, annotation?: CodeAnnotation) => string | undefined;
 
-/** Most lines of code quoted for one comment outside the diff; the permalink shows the rest. */
 export const OUTSIDE_DIFF_QUOTE_MAX_LINES = 40;
 
 function capQuotedCode(code: string): string {
@@ -121,7 +93,6 @@ function capQuotedCode(code: string): string {
   return `${lines.slice(0, OUTSIDE_DIFF_QUOTE_MAX_LINES).join('\n')}\n…`;
 }
 
-/** The heading of the review body's section for comments on lines outside the diff. */
 export const OUTSIDE_DIFF_BODY_HEADING = 'Comments outside the diff';
 
 function codeFence(code: string): string {
@@ -130,24 +101,15 @@ function codeFence(code: string): string {
   return `${fence}\n${code}\n${fence}`;
 }
 
-/**
- * Comments on lines outside the PR's diff: no platform takes them inline, and
- * a file outside the PR cannot take a file-level comment either, so each goes
- * in the review body with the code it was written on and a link to those
- * lines at the head commit.
- */
 function buildOutsideDiffSection(annotations: CodeAnnotation[], permalink?: ReviewPermalink): string {
   const entries = annotations
     .filter((a) => a.outsideDiff && (a.scope ?? 'line') === 'line' && (a.text || a.suggestedCode))
     .map((a) => {
-      // The link opens the head commit: an old side's line number is not that line there, so it goes unlinked and says its side.
       const oldSide = a.side === 'old';
       const lines = `${a.lineStart === a.lineEnd ? `L${a.lineStart}` : `L${a.lineStart}-L${a.lineEnd}`}${oldSide ? ', old side' : ''}`;
       const link = oldSide ? undefined : permalink?.(a.filePath, a.lineStart, a.lineEnd, a);
       const where = link ? `[${a.filePath} (${lines})](${link})` : `${a.filePath} (${lines})`;
       const code = a.anchorText ?? a.originalCode;
-      // Capped (GitHub refuses a review body over 65,536 characters); the
-      // permalink covers the rest.
       const quoted = code ? `\n\n${codeFence(capQuotedCode(code))}` : '';
       const suggestion = a.suggestedCode ? `\n\nSuggested code:\n${codeFence(a.suggestedCode)}` : '';
       const prefix = formatConventionalPrefix(a.conventionalLabel, a.decorations);
@@ -162,9 +124,6 @@ function buildAnnotationFileComments(
   withheld: ReadonlySet<string>,
 ): SubmissionTarget['fileComments'] {
   return annotations
-    // Outdated comments (#1590) carry line numbers from an earlier version of
-    // the PR; posting them inline would pin them to whatever code sits there
-    // now. They ride the review body instead (buildFileScopedBody).
     .filter(a => (a.scope ?? 'line') === 'line' && !inBody(a, withheld))
     .map(ann => {
       const ccPrefix = formatConventionalPrefix(ann.conventionalLabel, ann.decorations);
@@ -186,26 +145,18 @@ function buildAnnotationFileComments(
     .filter(c => c.body.length > 0);
 }
 
-// File-scoped comments posted as GitHub file-level review threads (#1599). The
-// body is the same text the review body fold uses, minus the path prefix.
 function buildFileLevelComments(annotations: CodeAnnotation[]): PRReviewFileLevelComment[] {
   return annotations
-    // A comment made in a Markdown preview quotes rendered text, not lines:
-    // it always rides the review body (see buildFileScopedBody).
     .filter(a => a.scope === 'file' && !a.markdownPreview)
     .map(a => ({ path: a.filePath, body: `${a.text ?? ''}${formatCallFlowAnnotationTargets(a)}`.trim() }))
     .filter(c => c.path.length > 0 && c.body.length > 0);
 }
 
-// The review-level body: file-scoped comments (prefixed with their path) plus
-// general (review-wide) comments, which belong to no file. Both ride here so
-// neither is dropped from a PR submission. With `fileLevel` (GitHub), file-scoped
-// comments post as file-level threads instead and are left out of the body.
 function buildFileScopedBody(annotations: CodeAnnotation[], withheld: ReadonlySet<string>, fileLevel: boolean, permalink?: ReviewPermalink): string {
   const parts: string[] = [];
   for (const a of annotations) {
     const scope = a.scope ?? 'line';
-    if (a.outsideDiff && scope === 'line') continue; // its own section below
+    if (a.outsideDiff && scope === 'line') continue;
     const callFlowContext = formatCallFlowAnnotationTargets(a);
     if (scope === 'file' && a.markdownPreview && a.text) {
       // Never inline and never a file-level thread: the quote is rendered
@@ -218,10 +169,7 @@ function buildFileScopedBody(annotations: CodeAnnotation[], withheld: ReadonlySe
     } else if (scope === 'line' && inBody(a, withheld) && (a.text || a.suggestedCode || callFlowContext)) {
       const lines = a.lineStart === a.lineEnd ? `L${a.lineStart}` : `L${a.lineStart}-L${a.lineEnd}`;
       const suggestion = a.suggestedCode ? `\n\nSuggested code:\n\`\`\`\n${a.suggestedCode}\n\`\`\`` : '';
-      // The code the comment was written on, so the PR reader can find it
-      // even though the line numbers no longer point there.
       const commentedOn = a.anchorText !== undefined ? `\n\nCommented on:\n\`\`\`\n${a.anchorText}\n\`\`\`` : '';
-      // The Outdated label only for a comment an anchor check marked outdated.
       const label = a.outdated ? `${OUTDATED_ANNOTATION_LABEL} ` : '';
       parts.push(
         `**${a.filePath} (${lines}, ${a.side}):** ${label}${a.text ?? ''}${callFlowContext}${commentedOn}${suggestion}`.trim(),
@@ -246,12 +194,6 @@ function buildFailedCommentsMarkdown(
     .join('\n\n');
 }
 
-/**
- * Build the top-level review body without adding product attribution.
- * GitHub requires a body for COMMENT and REQUEST_CHANGES reviews, so an inline-only review gets a
- * neutral pointer. Approvals and GitLab discussions can remain bodyless.
- */
-/** What a narrowed retry will send, for the partial-submission notice. */
 export function describePartialRetry(partial: PRReviewSubmissionPartial, mrLabel: string): string {
   const { retry } = partial;
   const parts: string[] = [];
@@ -281,17 +223,12 @@ export function buildPlatformReviewBody(
 
   if (parts.length > 0) return parts.join('\n\n');
   const threadCount = target.fileComments.length + (target.fileLevelComments?.length ?? 0);
-  // GitHub requires a body on COMMENT and REQUEST_CHANGES reviews alike.
   if (action !== 'approve' && getPRPlatformCapabilities({ platform }).reviewBodyRequired && threadCount > 0) {
     return 'See inline comments.';
   }
   return '';
 }
 
-/**
- * Build either the original platform request or the exact retry-safe subset
- * returned by the server after a partial GitLab submission.
- */
 export function buildPRActionRequest(
   action: PRReviewAction,
   body: string,
@@ -301,8 +238,6 @@ export function buildPRActionRequest(
     throw new Error('Partial review target is missing its server-authorized retry');
   }
   const retry = target.partial?.retry;
-  // A narrowed retry (GitLab/Bitbucket partial) resends only its own inline
-  // comments, plus the general comment when the server reports it unposted.
   const fileLevelComments = retry ? [] : target.fileLevelComments;
   return {
     action: retry?.action ?? action,
@@ -319,23 +254,14 @@ export function buildReviewSubmission(
   currentPrUrl: string | undefined,
   currentDiffPaths: Set<string>,
   currentPrMeta?: { number: number; title: string; repo: string },
-  /** PR url → snapshot id of the diff last seen for that PR's layer view
-   *  (#1590). When given, a line comment is posted inline only if its
-   *  `anchorSnapshot` equals that snapshot; anything else (outdated, or
-   *  coordinates from a diff we cannot vouch for) goes in the review body. */
   knownSnapshots?: ReadonlyMap<string, string>,
-  /** Target platform. Only platforms with the `fileLevelComments` capability
-   *  (GitHub) post file-scoped comments as file-level
-   *  threads (#1599); anything else folds them into the review body. */
   platform?: ReviewPlatform,
-  /** Links a comment outside the diff to its lines at the head commit. */
   permalink?: ReviewPermalink,
 ): ReviewSubmission {
   const fileLevel = platform !== undefined && getPRPlatformCapabilities({ platform }).fileLevelComments;
   const targets: SubmissionTarget[] = [];
   const orphanAnnotations: { reason: 'full-stack' | 'unmapped'; ann: CodeAnnotation }[] = [];
 
-  // Separate postable (layer) from orphaned (full-stack)
   const layerAnnotations: CodeAnnotation[] = [];
   for (const ann of allAnnotations) {
     if (ann.diffScope === 'full-stack') {
@@ -345,7 +271,6 @@ export function buildReviewSubmission(
     }
   }
 
-  // Group layer annotations by prUrl
   const byPR = new Map<string, CodeAnnotation[]>();
   const hasMultiplePRs = new Set(layerAnnotations.map(a => a.prUrl).filter(Boolean)).size > 1;
 
@@ -360,7 +285,6 @@ export function buildReviewSubmission(
     byPR.set(key, group);
   }
 
-  // Build editor file comments (always attached to the current PR)
   const editorFileComments: SubmissionTarget['fileComments'] = [];
   const editorFiles = new Set<string>();
   if (editorAnnotations.length > 0) {
@@ -382,7 +306,6 @@ export function buildReviewSubmission(
     }
   }
 
-  // Build targets from PR groups
   const currentKey = currentPrUrl ?? '_current';
   let editorCommentsAttached = false;
 
@@ -422,7 +345,6 @@ export function buildReviewSubmission(
     });
   }
 
-  // Editor-only case: no regular annotations but has editor annotations
   if (!editorCommentsAttached && editorFileComments.length > 0) {
     targets.push({
       prUrl: currentPrUrl ?? '',
@@ -438,7 +360,6 @@ export function buildReviewSubmission(
     });
   }
 
-  // Build orphan groups
   const orphans: OrphanedFindings[] = [];
   const fullStackOrphans = orphanAnnotations.filter(o => o.reason === 'full-stack').map(o => o.ann);
   const unmappedOrphans = orphanAnnotations.filter(o => o.reason === 'unmapped').map(o => o.ann);
@@ -460,10 +381,6 @@ export function buildReviewSubmission(
 
   return { targets, orphans };
 }
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
 
 export function ReviewSubmissionDialog({
   isOpen,
@@ -496,11 +413,6 @@ export function ReviewSubmissionDialog({
   const hasBlocked = submission.targets.some(t => t.status === 'blocked');
   const bodyLocked = hasPartial || hasBlocked;
   const isRequestChanges = action === 'request_changes';
-  // #1611: the Comment / Request changes choice. It locks once any target may
-  // have been posted, so a retry (or the rest of a stacked submission) always
-  // carries the event the first attempt used; after a plain failure nothing
-  // was posted, so the reviewer can still switch (e.g. to Comment after
-  // GitHub refused Request changes).
   const showEventChoice = !isApprove && onActionChange !== undefined;
   const eventChoiceLocked = isSubmitting ||
     submission.targets.some(t => t.status === 'success' || t.status === 'partial' || t.status === 'blocked');
@@ -537,9 +449,7 @@ export function ReviewSubmissionDialog({
             : 'Review what will be posted.'}
         </DialogDescription>
 
-        {/* The native radios stay visible, so keyboard focus keeps the
-            browser's own focus ring. No new utility classes here: the
-            guides.show viewer scans this file and pins its CSS. */}
+        {}
         {showEventChoice && (
           <fieldset data-review-event-choice className="mb-3">
             <legend className="sr-only">Review type</legend>
@@ -577,7 +487,7 @@ export function ReviewSubmissionDialog({
           </fieldset>
         )}
 
-        {/* General comment */}
+        {}
         <textarea
           ref={generalCommentRef}
           data-pn-mobile-editable
@@ -604,7 +514,7 @@ export function ReviewSubmissionDialog({
           </p>
         )}
 
-        {/* Targets */}
+        {}
         {submission.targets.length > 0 && (
           <div className="mb-3">
             <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">
@@ -744,7 +654,7 @@ export function ReviewSubmissionDialog({
           </div>
         )}
 
-        {/* Orphaned annotations */}
+        {}
         {totalOrphans > 0 && (
           <div className="mb-3 p-3 rounded-md bg-warning/10 border border-warning/20">
             <div className="text-xs font-medium text-warning uppercase tracking-wide mb-1">
@@ -772,7 +682,7 @@ export function ReviewSubmissionDialog({
           </div>
         )}
 
-        {/* Open PR checkbox */}
+        {}
         <label data-pn-touch-target className="flex items-center gap-2 text-sm text-muted-foreground mb-4 cursor-pointer select-none">
           <input
             type="checkbox"
@@ -785,7 +695,7 @@ export function ReviewSubmissionDialog({
 
         </div>
 
-        {/* Actions */}
+        {}
         <div className="shrink-0 flex justify-end gap-2 border-t border-border/50 bg-card px-4 pb-4 pt-3 sm:px-6 sm:pb-6">
           <button
             data-pn-touch-target

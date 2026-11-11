@@ -4,26 +4,11 @@ import { Ban, MessageSquarePlus, Pencil, Send } from 'lucide-react';
 import { TextShimmer } from '@plannotator/ui/components/TextShimmer';
 import { EDIT_MODE_DEMO_POSTER_SRC, EDIT_MODE_DEMO_VIDEO_SRC } from './editModeDemoMedia';
 
-/**
- * One-time Edit Mode (edit-to-suggest) announcement. Same big-format shell as
- * LookAndFeelAnnouncementDialog, with the Vim-announcement ask: introduce the
- * feature and let the user turn the real setting on now or keep it off.
- * Either action marks the announcement seen; the App owns both callbacks.
- *
- * LAST in the first-run dialog chain (guide intro, look-and-feel, review
- * setup, analysis chooser, then this). The App gates rendering through
- * editModeAnnouncementCanShow so the chain dialogs never stack.
- */
-
 interface EditModeAnnouncementDialogProps {
   readonly isOpen: boolean;
-  /** Persist editSuggestions=true and mark seen. */
   readonly onEnable: () => void;
-  /** Just mark seen. Also wired to Escape. */
   readonly onDismiss: () => void;
-  /** Test seam; defaults to the build-time inlined recording (or null). */
   readonly demoVideoSrc?: string | null;
-  /** Test seam; defaults to the build-time inlined poster still. */
   readonly demoPosterSrc?: string;
 }
 
@@ -52,11 +37,6 @@ function FactRow({ icon, title, description }: FactRowProps) {
   );
 }
 
-/**
- * Static stand-in for the screen recording: a mock split of the all-files
- * diff mid-edit, with the resulting suggestion comment underneath. Replaced
- * wholesale by the <video> once EDIT_MODE_DEMO_VIDEO_SRC is set.
- */
 function EditModeDemoPlaceholder() {
   return (
     <div
@@ -64,7 +44,7 @@ function EditModeDemoPlaceholder() {
       className="flex h-full min-h-[300px] flex-col overflow-hidden rounded-xl border border-border bg-muted/20"
       aria-hidden="true"
     >
-      {/* Mock file header with the Edit entry + session strip */}
+      {}
       <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-3.5 py-2">
         <span className="font-mono text-[11px] font-medium text-foreground/80">src/retry.ts</span>
         <span className="ml-auto inline-flex items-center gap-1 rounded border border-border bg-background/70 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
@@ -80,7 +60,7 @@ function EditModeDemoPlaceholder() {
         <span className="text-[10px] text-muted-foreground">1 change</span>
       </div>
 
-      {/* Mock diff lines with an in-place edit */}
+      {}
       <div className="flex-1 space-y-px px-3.5 py-3 font-mono text-[11px] leading-5">
         <div className="text-muted-foreground/70">
           <span className="mr-3 select-none text-muted-foreground/40">41</span>
@@ -101,7 +81,7 @@ function EditModeDemoPlaceholder() {
         </div>
       </div>
 
-      {/* The resulting suggestion comment */}
+      {}
       <div className="border-t border-border bg-background/60 px-3.5 py-3">
         <div className="rounded-lg border border-primary/25 bg-primary/[0.06] p-2.5">
           <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
@@ -137,7 +117,6 @@ export function EditModeAnnouncementDialog({
   useEffect(() => {
     if (!isOpen) return;
 
-    // A reopened dialog must not remember a previously flipped switch.
     setEnableChoice(false);
     previousFocusRef.current = document.activeElement instanceof HTMLElement
       ? document.activeElement
@@ -218,8 +197,6 @@ export function EditModeAnnouncementDialog({
                 muted
                 playsInline
                 aria-hidden="true"
-                // Recording is 1100x700; matching the aspect ratio means no
-                // cropping and no letterboxing inside the rounded frame.
                 className="aspect-[11/7] w-full rounded-xl border border-border bg-muted/20 object-cover"
               />
             ) : (
@@ -255,10 +232,7 @@ export function EditModeAnnouncementDialog({
           <p className="text-xs text-muted-foreground">
             Change this anytime in Settings → Experimental → Edit Code to Suggest.
           </p>
-          {/* The enable decision is an explicit switch, deliberately separate from the
-              dismiss action: a primary "Turn it on" button reads as a generic continue
-              and gets clicked blind. Done applies whatever the switch says; with the
-              switch untouched it is a plain dismissal. */}
+          {}
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 px-3.5 py-2">
               <span id="edit-mode-enable-label">

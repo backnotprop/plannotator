@@ -29,7 +29,6 @@ const COMMENT = [
   `<img src="${BADGE}" alt="badge">`,
 ].join(' ');
 
-/** The proxy URL, compared absolute (the page may build it relative or absolute). */
 const BASE = "http://review.test";
 const absolute = (value: string | null | undefined) =>
   new URL(value ?? "", typeof location !== "undefined" && location.origin !== "null" ? location.origin : BASE).href;

@@ -50,8 +50,6 @@ const OVERSIZED_STUB = [
   '',
 ].join('\n');
 
-// A genuine binary file: same shape MINUS the marker. It must not pick up the
-// size-cap explanation, which would be a lie about why it has no diff.
 const REAL_BINARY = [
   'diff --git a/assets/logo.png b/assets/logo.png',
   'index 1111111111aa..2222222222bb 100644',
@@ -101,7 +99,6 @@ describe.if(hasDom)('oversized-file stub presentation (DOM)', () => {
   const originalFetch = globalThis.fetch;
 
   async function render(patch: string, filePath: string) {
-    // No expandable content for a stub; keep the lookup inert either way.
     globalThis.fetch = (async () =>
       new Response(JSON.stringify({ oldContent: null, newContent: null }), {
         headers: { 'content-type': 'application/json' },
@@ -132,7 +129,6 @@ describe.if(hasDom)('oversized-file stub presentation (DOM)', () => {
     const notice = el.querySelector(NOTICE_SELECTOR);
     expect(notice).not.toBeNull();
     expect(notice!.textContent).toContain(NOTICE_COPY);
-    // The raw marker is plumbing, never user-facing copy.
     expect(el.textContent).not.toContain(OVERSIZED_REVIEW_STUB_MARKER);
   });
 

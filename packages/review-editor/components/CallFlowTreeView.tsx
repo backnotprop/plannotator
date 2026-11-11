@@ -14,14 +14,12 @@ import { CodeSnippetPreview } from '@plannotator/ui/components/CodeSnippetPrevie
 import { useHoverPreview } from '@plannotator/ui/hooks/useHoverPreview';
 import type { CallFlowNodeSource, CallFlowNodeSourceLoader } from '../hooks/useCallFlowNodeSource';
 
-/** Lines shown above and below a Call Flow step in its source hover preview. */
 export const CALL_FLOW_PREVIEW_CONTEXT_LINES = 3;
 import {
   useCallFlowFindShortcut,
   type CallFlowFindShortcutSurface,
 } from '../hooks/useCallFlowFindShortcut';
 
-/** Map a located CallDiff node to the old/new source range used by code review. */
 export function selectionForCallFlowNode(node: CallFlowNode): SelectedLineRange | null {
   if (!node.line) return null;
   return {
@@ -31,12 +29,10 @@ export function selectionForCallFlowNode(node: CallFlowNode): SelectedLineRange 
   };
 }
 
-/** Return the source range for any located Call Flow step. */
 export function annotationSelectionForCallFlowNode(node: CallFlowNode): SelectedLineRange | null {
   return selectionForCallFlowNode(node);
 }
 
-/** Build the durable source metadata carried by a Call Flow annotation. */
 export function annotationTargetForCallFlowNode(
   node: CallFlowNode,
   entry: string,
@@ -61,7 +57,6 @@ export function annotationTargetForCallFlowNode(
   return target;
 }
 
-/** Case-insensitive, non-overlapping `[start, end)` ranges of `query` in `text`. */
 export function searchRanges(text: string, query: string): Array<readonly [number, number]> {
   const normalizedQuery = query.trim().toLocaleLowerCase();
   if (!normalizedQuery) return [];
@@ -75,7 +70,6 @@ export function searchRanges(text: string, query: string): Array<readonly [numbe
   return ranges;
 }
 
-/** `text.slice(start, end)` with the parts inside `ranges` marked as search matches. */
 export function highlightSlice(
   text: string,
   ranges: ReadonlyArray<readonly [number, number]>,
@@ -102,11 +96,6 @@ function CallFlowSearchText({ text, query }: { readonly text: string; readonly q
   return highlightSlice(text, searchRanges(text, query), 0, text.length);
 }
 
-/**
- * A call label with the called name leading: receiver muted, arguments muted
- * further and truncated first. Search matches are found on the whole label, so
- * a match that spans the receiver and the name is still marked.
- */
 function CallFlowSignature({ label, query }: { readonly label: string; readonly query: string }) {
   const parts = splitCallFlowSignature(label);
   const ranges = searchRanges(label, query);
@@ -125,7 +114,6 @@ function CallFlowSignature({ label, query }: { readonly label: string; readonly 
   );
 }
 
-/** Screen-reader word for a changed step; unchanged context says nothing. */
 function statusAnnouncement(status: CallFlowNode['status']): string | null {
   if (status === 'added') return 'New: ';
   if (status === 'removed') return 'Removed: ';
@@ -138,7 +126,6 @@ interface CallFlowNodeRowProps {
   readonly depth: number;
   readonly treePath: string;
   readonly onOpen: (node: CallFlowNode) => void;
-  /** Loads the source a location's hover preview shows; absent, locations have no preview. */
   readonly loadNodeSource?: CallFlowNodeSourceLoader;
   readonly onAnnotate?: (
     target: CallFlowAnnotationTarget,
@@ -148,16 +135,13 @@ interface CallFlowNodeRowProps {
   readonly selectedTargetKeys: ReadonlySet<string>;
   readonly focusFiles?: ReadonlySet<string>;
   readonly canInteractWithNode?: (node: CallFlowNode) => boolean;
-  /** Nodes visible in the current focused-context projection. */
   readonly changedSubtrees: ReadonlySet<CallFlowNode>;
-  /** Nodes on a path to at least one structured-search result. */
   readonly searchSubtrees: ReadonlySet<CallFlowNode>;
   readonly searchQuery: string;
   readonly currentSearchPath?: string;
   readonly showAllContext: boolean;
   readonly collapsedPaths: ReadonlySet<string>;
   readonly onToggleNode: (treePath: string) => void;
-  /** File of the nearest calling step that has one; a different file here is a file jump. */
   readonly callerFile?: string;
 }
 
@@ -181,10 +165,6 @@ function CallFlowNodeRow({
   onToggleNode,
   callerFile,
 }: CallFlowNodeRowProps) {
-  // Complete CallDiff trees can contain thousands of unchanged context nodes.
-  // Keep every subtree available, but only open paths that lead to an actual
-  // change by default. This preserves the full result without mounting the
-  // entire inferred graph into the DOM up front.
   const expanded = !collapsedPaths.has(treePath);
   const hasChildren = showAllContext
     ? node.children.length > 0
@@ -196,9 +176,6 @@ function CallFlowNodeRow({
   const selected = selectedTargetKeys.has(treePath);
   const focused = node.status !== 'same' && Boolean(node.file && focusFiles?.has(node.file));
   const path = node.file ? splitCallFlowFilePath(node.file) : null;
-  // The location chip is strong where the call moves into another file and
-  // faint where it stays in its caller's file. An entry's first step has no
-  // caller, so it shows the file the path starts in.
   const crossFile = Boolean(node.file && node.file !== callerFile);
   const announcement = statusAnnouncement(node.status);
   const location = node.file ? `${node.file}${node.line ? `:${node.line}` : ''}` : '';
@@ -334,27 +311,18 @@ function CallFlowNodeRow({
 interface CallFlowTreeViewProps {
   readonly trees: readonly CallFlowTree[];
   readonly onOpenNode: (node: CallFlowNode) => void;
-  /** Loads the source shown when a step's file:line is hovered or focused; absent, no preview. */
   readonly loadNodeSource?: CallFlowNodeSourceLoader;
-  /** Commit one source-backed annotation through the native review model. */
   readonly onAnnotateTargets?: (
     targets: readonly CallFlowAnnotationTarget[],
     text: string,
   ) => boolean;
-  /** Changed rows in these files receive the Lens focus treatment. */
   readonly focusFiles?: readonly string[];
-  /** Gate navigation and comments to ranges represented by the active patch. */
   readonly canInteractWithNode?: (node: CallFlowNode) => boolean;
-  /** Notify a containing popover while the multi-target composer is open. */
   readonly onAnnotationDraftChange?: (active: boolean) => void;
   readonly compact?: boolean;
-  /** Entry disclosure used when a new tree result is mounted. */
   readonly defaultExpandedEntries?: 'first' | 'all';
-  /** Amount of unchanged structural context shown before the user asks for all of it. */
   readonly initialContext?: 'changed' | 'nearby' | 'all';
-  /** True only while this mounted renderer owns the foreground find shortcut. */
   readonly findShortcutActive?: boolean;
-  /** Distinguishes a foreground Lens from a retained Dockview portal. */
   readonly findShortcutSurface?: CallFlowFindShortcutSurface;
 }
 
@@ -446,7 +414,6 @@ function CallFlowEntrySection({
   );
 }
 
-/** Shared complete-tree renderer used by both the Dock and the per-file Lens. */
 export function CallFlowTreeView({
   trees,
   onOpenNode,

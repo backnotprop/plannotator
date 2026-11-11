@@ -3,14 +3,9 @@ import React, { useRef, useState, useCallback, useEffect } from 'react';
 interface ScrollFadeProps {
   children: React.ReactNode;
   className?: string;
-  /** Height of the gradient fade in pixels. Default 20. */
   fadeHeight?: number;
 }
 
-/**
- * Wraps a scrollable container with gradient fade indicators at top/bottom.
- * Fades appear only when content overflows in that direction.
- */
 export const ScrollFade: React.FC<ScrollFadeProps> = ({ children, className, fadeHeight = 20 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showTop, setShowTop] = useState(false);

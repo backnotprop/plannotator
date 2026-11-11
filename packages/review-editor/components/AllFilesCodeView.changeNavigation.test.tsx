@@ -29,13 +29,10 @@ const realResolveSyntaxTheme = (await import('@plannotator/ui/utils/syntaxTheme'
 const ROW = 30;
 const FILE = 3000;
 let VIEW = 200;
-/** Space above the first file (the review's leading content). Most tests
- *  start the first change below the middle of the view; one starts at 0. */
 let LEAD = 200;
 
 let scrollTop = 0;
 let lineScrolls: Array<{ id: string; lineNumber: number; side: string }> = [];
-/** Item ids the stand-in leaves out of its rendered window. */
 let notRendered = new Set<string>();
 let collapsedIds = new Set<string>();
 
@@ -175,7 +172,6 @@ function fileOffsetOf(el: Element): number | null {
 const patch = (path: string, body: string[]) =>
   [`diff --git a/${path} b/${path}`, `--- a/${path}`, `+++ b/${path}`, ...body, ''].join('\n');
 
-// Both files change line 2, so a lookup by line number alone finds the wrong one.
 const FILES: DiffFile[] = [
   {
     path: 'a.ts',
@@ -299,10 +295,8 @@ describe.if(hasDom)('AllFilesCodeView change navigation (DOM, real Pierre rows)'
     press('n');
     press('n');
     expect(ids()).toEqual(['a:d2', 'a:d21', 'b:d2', 'c:a2']);
-    // The centred row really is the one named (not file a's line 2).
     expect(scrollTop).toBe(LEAD + 2 * FILE + 1 * ROW - VIEW / 2 + ROW / 2);
 
-    // Past the last change: nothing moves, and the key is left unclaimed.
     expect(press('n').defaultPrevented).toBe(false);
     expect(lineScrolls).toHaveLength(4);
     press('N', { shiftKey: true });
@@ -314,7 +308,6 @@ describe.if(hasDom)('AllFilesCodeView change navigation (DOM, real Pierre rows)'
     LEAD = 0;
     VIEW = 830;
     await mount();
-    // a.ts line 2 (row 1) is on screen, above the middle: N still goes there first.
     press('n');
     press('n');
     expect(ids()).toEqual(['a:d2', 'a:d21']);
@@ -322,7 +315,6 @@ describe.if(hasDom)('AllFilesCodeView change navigation (DOM, real Pierre rows)'
 
   test('collapsed files are skipped; files outside the rendered window are reached', async () => {
     await mount();
-    // Item ids are internal: learn them from one walk.
     press('n');
     press('n');
     press('n');

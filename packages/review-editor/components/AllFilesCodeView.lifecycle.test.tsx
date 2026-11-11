@@ -10,20 +10,6 @@ let scrollTargets: Array<Record<string, unknown>> = [];
 let lastCodeViewProps: Record<string, unknown> | null = null;
 let toolbarSelections: Array<SelectedLineRange | null> = [];
 
-// Captured BEFORE the mocks below replace the specifiers, so this file can put
-// the real modules back when it is done. `mock.module` is process global and
-// bun does not unwind it at file boundaries: without this, every later file in
-// the same run sees this file's stubs — a `getSingularPatch` with no hunks and
-// a `processFile` that returns null. That leaked into
-// DiffViewer.fullContentSwap.test.tsx on the Linux runner (and not on macOS),
-// where it presented as a diff that silently never rendered.
-//
-// The SPREAD is load-bearing, exactly as configure.test.ts documents. A
-// namespace object is a live view of the module record, and `mock.module`
-// rewrites that record in place — so holding `await import(...)` and handing it
-// back later re-installs the STUBS as themselves and restores nothing. Spread
-// snapshots the real export values into a plain object at capture time, before
-// any stub exists.
 const realPierreDiffs = { ...(await import('@pierre/diffs')) };
 const realPierreDiffsReact = { ...(await import('@pierre/diffs/react')) };
 const realResolveSyntaxTheme = (await import('@plannotator/ui/utils/syntaxTheme')).resolveSyntaxTheme;
@@ -93,9 +79,6 @@ mock.module('@pierre/diffs/react', () => ({
     }));
     return <div ref={props.containerRef} className={props.className} />;
   }),
-  // AllFilesCodeView imports EditProvider alongside CodeView/useStableCallback.
-  // mock.module replaces the whole specifier, so every value export the
-  // component reads must be present here or the import throws at load time.
   EditProvider: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
   useStableCallback: <T extends (...args: never[]) => unknown>(callback: T): T => {
     const callbackRef = useRef(callback);
@@ -172,34 +155,18 @@ afterEach(async () => {
   toolbarSelections = [];
 });
 
-// Hand the real @pierre/diffs back to the process. Only the two library
-// specifiers are restored. The sibling-module mocks above are NOT scoped to
-// this file — `mock.module` resolves a relative specifier to an absolute module
-// path, so any later file importing packages/review-editor/workerPool,
-// hooks/usePierreTheme or components/ToolbarHost sees these stubs too. They are
-// left in place because workerPool cannot be captured here at all: it imports
-// the Vite-only `?worker&inline` virtual module, which bun cannot resolve.
-// Files that need the real ones must not share this process — that is what the
-// isolated "diff-renderer DOM tests" step in .github/workflows/test.yml is for.
 afterAll(() => {
   mock.module('@pierre/diffs', () => realPierreDiffs);
   mock.module('@pierre/diffs/react', () => realPierreDiffsReact);
 });
 
-// Guards the capture idiom itself. If the spreads above are ever reduced back
-// to a bare `await import(...)`, the "real" handles become live views of the
-// mocked module records and the afterAll restore silently degrades to a no-op —
-// which is how discardRestoreRender.test.tsx started seeing `processFile()`
-// return null on the runs where the runner walked this file first.
 describe('the @pierre/diffs restore handles', () => {
   test('hold the real exports, not the stubs installed over them', async () => {
     const stubbed = await import('@pierre/diffs');
     const stubbedReact = await import('@pierre/diffs/react');
 
-    // The live namespaces are this file's stubs: `processFile: () => null`.
     expect(stubbed.processFile.length).toBe(0);
 
-    // The captured handles must not have followed them.
     expect(realPierreDiffs.processFile).not.toBe(stubbed.processFile);
     expect(realPierreDiffs.processFile.length).toBe(2);
     expect(realPierreDiffsReact.CodeView).not.toBe(stubbedReact.CodeView);
@@ -238,11 +205,6 @@ describe('AllFilesCodeView guide mount state', () => {
 });
 
 describe('AllFilesCodeView compact-touch line selection', () => {
-  // Stands in for App: a published range comes straight back down as
-  // `pendingSelection`. That loop is load-bearing — CodeView's selection is
-  // controlled, and the reconcile effect clears the highlight whenever
-  // pendingSelection is null, so a statically-null prop would wipe the range
-  // the preserve branch just painted.
   function Harness({ compactTouchLayout, onSelection }: {
     compactTouchLayout: boolean;
     onSelection?: (range: SelectedLineRange | null) => void;
@@ -299,10 +261,6 @@ describe('AllFilesCodeView compact-touch line selection', () => {
 
     expect(observedSelections.at(-1)).toEqual(range);
     expect(toolbarSelections).toEqual([]);
-    // Publishing the range upward is only half of "preserved": CodeView's
-    // selection is controlled here, so the highlight only survives if the range
-    // is also handed back down. Without this the composer would stay shut on a
-    // range nothing paints.
     expect(lastCodeViewProps?.selectedLines).toEqual({ id: item.id, range });
 
     await act(async () => {
@@ -394,11 +352,6 @@ describe('AllFilesCodeView compact-touch line selection', () => {
 });
 
 describe('AllFilesCodeView readOnly (portable guide host)', () => {
-  // The portable Guided Review viewer renders this component with no server
-  // and no review state behind it (decision record D2/D4). These guard the
-  // three things read-only must switch off without changing what the diff
-  // LOOKS like: selection affordances, the window keydown handler, and the
-  // /api/file-content augmentation fetch.
   async function mount(overrides: Partial<React.ComponentProps<typeof AllFilesCodeView>>) {
     // A second mount inside one test replaces the previous tree instead of leaking it.
     if (root) await act(async () => root?.unmount());
@@ -416,7 +369,6 @@ describe('AllFilesCodeView readOnly (portable guide host)', () => {
     expect(options.enableLineSelection).toBe(false);
     expect(options.enableGutterUtility).toBe(false);
 
-    // The default-on half catches an inverted `!readOnly` breaking the in-app reviewer.
     await mount({});
     options = lastCodeViewProps?.options as Record<string, unknown>;
     expect(options.enableLineSelection).toBe(true);

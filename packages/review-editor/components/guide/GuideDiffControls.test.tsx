@@ -3,8 +3,6 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { configStore, useConfigValue } from '@plannotator/ui/config';
 
-// The diff worker is a Vite `?worker&inline` import Bun cannot load; the
-// sibling AllFilesCodeView tests stub the pool the same way.
 mock.module('../../workerPool', () => ({
   useIsWorkerPoolReadyOrDisabled: () => true,
   useWorkerPoolThemeSync: () => {},
@@ -13,11 +11,6 @@ import { ReviewStateProvider, type ReviewState } from '../../dock/ReviewStateCon
 import { DEMO_GUIDE_ID } from '../../demoGuide';
 
 const { GuideScreen } = await import('./GuideScreen');
-
-// The guided review hides the dock, and with it the dock strip's Split/Unified,
-// Collapse all and gear (ReviewDockRightActions). These guard that an open
-// guide draws them in the top bar's slot and that Split/Unified writes the
-// `diffStyle` setting the rest of code review reads.
 
 const hasDom = typeof document !== 'undefined';
 let root: Root | null = null;
@@ -40,7 +33,6 @@ afterEach(async () => {
 
 const file = (path: string) => ({ path, oldPath: path, patch: '', additions: 1, deletions: 0 });
 
-/** Review state as App gives it: the stored `diffStyle`, and a change handler that writes it. */
 function Harness({ compact = false }: { compact?: boolean }) {
   const diffStyle = useConfigValue('diffStyle');
   const state = {
@@ -86,11 +78,8 @@ describe('GuideScreen top-bar diff controls', () => {
 
     const group = bar!.querySelector('[data-guide-diff-controls]')!;
     expect(group).not.toBeNull();
-    // The Inbox's order: Split/Unified, Collapse all, gear.
     const buttons = Array.from(group.querySelectorAll('button'));
     expect(buttons.map((b) => b.getAttribute('aria-label'))).toEqual(['Switch to Split view', 'Collapse all files', 'Diff display options']);
-    // The owner's order: Close · Approve | these | Annotations · Ask AI · Review Agents | ☰. The divider after them
-    // separates them from the tool icons that follow in the bar.
     expect(group.nextElementSibling?.hasAttribute('data-guide-diff-controls-divider')).toBe(true);
 
     const toggle = bar!.querySelector<HTMLButtonElement>('[data-diff-layout-toggle]')!;

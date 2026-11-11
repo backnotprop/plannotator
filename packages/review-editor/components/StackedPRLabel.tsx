@@ -176,7 +176,7 @@ export function StackedPRLabel({
       <Popover.Portal>
         <Popover.Positioner side="bottom" align="start" sideOffset={6} className="z-50">
           <Popover.Popup className="w-[min(20rem,calc(100vw-1rem))] max-h-[calc(var(--pn-viewport-height,100vh)-2rem-var(--pn-safe-top)-var(--pn-safe-bottom))] overflow-y-auto bg-popover text-popover-foreground border border-border rounded shadow-lg origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0">
-          {/* Section 1: Stack Tree */}
+          {}
           <div className="px-3 pt-3 pb-2">
             <div className="flex items-center justify-between mb-2">
               <span className="text-[11px] font-medium text-muted-foreground">
@@ -267,7 +267,7 @@ export function StackedPRLabel({
             <>
           <div className="border-t border-border/50" />
 
-          {/* Section 2: Scope Selector */}
+          {}
           <div className="px-3 py-2">
             <div className="text-[11px] font-medium text-muted-foreground mb-1.5">
               Comparing against
@@ -331,7 +331,7 @@ export function StackedPRLabel({
 
           <div className="border-t border-border/50" />
 
-          {/* Section 3: PR Link */}
+          {}
           <div className="px-3 py-2">
             <a
               href={metadata.url}

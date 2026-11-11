@@ -29,51 +29,27 @@ import {
   utf8ByteLength,
 } from '../utils/markdownPreview';
 
-// Mermaid and Graphviz fences draw as diagrams through the engine the review
-// server serves as separate files, imported only when a preview holds such a
-// fence (ReviewDiagramFence, owner approval "review-diagrams-on-demand"). The
-// review page itself never carries a diagram runtime: the single-file build
-// inlines every dynamic import, so nothing here may import one, even lazily
-// (tests/entry-assets.test.ts). Without the engine they show as code.
-
 export interface MarkdownFilePreviewProps {
   filePath: string;
   oldPath?: string;
   status?: DiffFileStatus;
   patch: string;
-  /** Contents the caller already fetched (the single-file view shares its
-   *  diff's fetch). Absent: the preview fetches them itself (all files). */
   contents?: UseFileContentsResult;
-  /** For the preview's own fetch. */
   reviewBase?: string;
   reviewSnapshotId?: string;
-  /** Snapshot the image route is bound to. */
   imageSnapshotId?: string;
-  /** Whether the server reads images for this review (static patch / P4: no). */
   imagesAvailable?: boolean;
-  /** Every file path in this review: a link to one of them opens it. */
   reviewFilePaths?: ReadonlySet<string>;
   onOpenReviewFile?: (filePath: string) => void;
   variant: 'single' | 'all-files';
-  /** All files: the card's height changed (re-measure the virtualized item). */
   onHeightChange?: () => void;
-  /** The view to show and its setter (the single-file view passes both; in
-   *  All files the file's view comes from review state). */
   view?: MarkdownPreviewView;
   onViewChange?: (view: MarkdownPreviewView) => void;
-  /**
-   * Hold remote images (`https://…`) behind a placeholder until the reviewer
-   * loads them, so opening a preview never tells a third-party server the
-   * reviewer's IP address. Default: on in a PR review (someone else's file),
-   * off otherwise.
-   */
+  /** Default: on in a PR review (someone else's file), off otherwise. */
   holdRemoteImages?: boolean;
-  /** Where the diagram engine is served; default: review state's advert.
-   *  `null` keeps diagram fences as code. */
   diagramEngine?: DiagramEngineUrls | null;
 }
 
-/** A comment made in this preview, as the text highlighter sees it. */
 function toHighlighterAnnotation(ann: CodeAnnotation, view: MarkdownPreviewView): Annotation {
   const anchor = ann.markdownPreview!;
   const sameView = anchor.view === view;
@@ -87,33 +63,21 @@ function toHighlighterAnnotation(ann: CodeAnnotation, view: MarkdownPreviewView)
     originalText: anchor.originalText,
     createdA: ann.createdAt,
     author: ann.author,
-    // Stored positions are only valid in the view they were made in; the
-    // other view finds the quote by its text.
     ...(sameView && anchor.startMeta && anchor.endMeta ? { startMeta: anchor.startMeta, endMeta: anchor.endMeta } : {}),
   };
 }
 
-/** The rendered-diff section a highlight starts in. */
 function diffContextOf(mark: Element | null | undefined): MarkdownPreviewAnchor['diffContext'] {
   const section = mark?.closest('.plan-diff-added, .plan-diff-removed, .plan-diff-modified, .plan-diff-unchanged');
   if (!section) return undefined;
   if (section.classList.contains('plan-diff-removed')) return 'removed';
   if (section.classList.contains('plan-diff-added')) {
-    // The new half of a stacked modified block renders as "added" inside it.
     return section.parentElement?.querySelector(':scope > .plan-diff-removed') ? 'modified' : 'added';
   }
   if (section.classList.contains('plan-diff-modified')) return 'modified';
   return 'unchanged';
 }
 
-/**
- * A Markdown file of the review, rendered. Two views, picked on the file's
- * header menu: Changes, the rendered diff (plan review's clean diff view with
- * this app's block renderer, unchanged runs folded, source lines in a
- * gutter), and Read, the whole new version with no diff marks. Select any
- * text to comment on it, the PR description's experience: the comment is a
- * file comment that carries the quote.
- */
 export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
   filePath,
   oldPath,
@@ -160,8 +124,6 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
   const ready = sides?.kind === 'ready' ? sides : null;
   const isStale = sides?.kind === 'stale' || snapshotStale;
 
-  // Added and deleted files have one side: nothing to compare, so they show
-  // that side whole. Everything else offers both views.
   const singleSide = status === 'added' ? 'new' : status === 'deleted' ? 'old' : null;
   const unchangedRename = !!ready && singleSide === null && ready.old === ready.new;
   const effectiveView: MarkdownPreviewView = singleSide || unchangedRename ? 'whole' : view;
@@ -178,8 +140,6 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
     () => (ready && effectiveView === 'diff' && !tooLarge ? computePlanDiff(ready.old ?? '', ready.new ?? '').blocks : null),
     [ready, effectiveView, tooLarge],
   );
-
-  // --- Links and images -----------------------------------------------------
 
   const docPath = sourcePath ?? filePath;
   const resolveLink = useCallback<LocalLinkResolver>((href) => {
@@ -205,9 +165,6 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
     }
     if (isExternalImageSource(src)) return null;
     if (!canLoadImages) return { kind: 'unavailable', title: 'Images are not shown for this review' };
-    // The patch names the file by its display path (a deletion's is its old
-    // one). The source goes as written: the route normalizes it the same way
-    // it reads the file's references.
     return { kind: 'src', src: markdownPreviewImageUrl({ doc: filePath, side, src, snapshot }) };
   }, [canLoadImages, filePath, snapshot, holdRemote, holdingRemote]);
   const resolveOldImage = useMemo(() => makeImageResolver('old'), [makeImageResolver]);
@@ -231,8 +188,6 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
     [renderBlock],
   );
 
-  // --- Comments -------------------------------------------------------------
-
   const commentsEnabled = !!state?.onAddMarkdownPreviewComment && !!state?.markdownPreview;
   const fileComments = useMemo(
     () => (state?.allAnnotations ?? []).filter((ann) => ann.filePath === filePath && ann.markdownPreview),
@@ -246,7 +201,6 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
   const selectedHere = selectedId && fileComments.some((ann) => ann.id === selectedId) ? selectedId : null;
 
   const containerRef = useRef<HTMLDivElement>(null);
-  // The highlighter (created below) for the new mark of a comment being saved.
   const highlighterRef = useRef<{ current: { getDoms: (id: string) => HTMLElement[] | undefined } | null } | null>(null);
   const [unanchored, setUnanchored] = useState<ReadonlySet<string>>(() => new Set());
   const onRestoreReport = useCallback((report: AnnotationRestoreReport) => {
@@ -289,8 +243,6 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
   });
   highlighterRef.current = hook.highlighterRef as unknown as { current: { getDoms: (id: string) => HTMLElement[] | undefined } | null };
 
-  // Paint highlights off the store: new ones on, deleted ones off. Re-runs
-  // when what is on screen changes (view, contents, a fold opening).
   const [renderEpoch, setRenderEpoch] = useState(0);
   const prevIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
@@ -303,14 +255,11 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
     prevIdsRef.current = ids;
   }, [highlighterAnnotations, wholeText, diffBlocks, renderEpoch, commentsEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // A switch of view remounts the content: the old view's marks are gone.
   useLayoutEffect(() => {
     prevIdsRef.current = new Set();
     setUnanchored(new Set());
   }, [effectiveView]);
 
-  // How many remote images are held on screen (counted from the rendered
-  // placeholders, so folds and both views are counted as shown).
   const [heldRemoteCount, setHeldRemoteCount] = useState(0);
   useEffect(() => {
     const container = containerRef.current;
@@ -320,8 +269,6 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
         .filter((el) => el.getAttribute('title') === REMOTE_IMAGE_HELD_TITLE).length;
     setHeldRemoteCount((current) => (current === count ? current : count));
   });
-
-  // --- Height reporting (all files) -----------------------------------------
 
   const rootRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -337,11 +284,6 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
     return () => observer.disconnect();
   }, [onHeightChange]);
 
-  // --- Clicks inside the document -------------------------------------------
-
-  // Links never navigate the review tab: external ones open a new tab, a file
-  // of this review opens in the review (through the link resolver), anything
-  // else is inert. `#heading` scrolls within the preview.
   const handleClickCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     const target = event.target as Element | null;
     const held = target?.closest?.('[data-image-unavailable]');
@@ -353,7 +295,6 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
       return;
     }
     if (target?.closest?.('[data-plan-diff-fold]')) {
-      // A fold opened or closed: re-anchor highlights once it has rendered.
       requestAnimationFrame(() => setRenderEpoch((n) => n + 1));
       return;
     }
@@ -372,7 +313,7 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
     event.preventDefault();
     if (href.startsWith('#') && href.length > 1) {
       let id = href.slice(1);
-      try { id = decodeURIComponent(id); } catch { /* keep as written */ }
+      try { id = decodeURIComponent(id); } catch { }
       const heading = Array.from(event.currentTarget.querySelectorAll('[id]')).find((el) => el.id === id);
       heading?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
@@ -384,8 +325,6 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
     const href = anchor.getAttribute('href');
     if (href && !/^https?:/i.test(href) && !href.startsWith('//')) event.preventDefault();
   }, []);
-
-  // --- Rendering ------------------------------------------------------------
 
   const wholeBlocks = useMemo(
     () => (ready && effectiveView === 'whole' && !tooLarge ? parseMarkdownToBlocks(wholeText) : null),
@@ -468,8 +407,6 @@ export const MarkdownFilePreview: React.FC<MarkdownFilePreviewProps> = ({
     );
   }
 
-  // The header's status letter and the green or red rail already say "new"
-  // or "deleted"; only a rename with no change needs a word.
   const renamedNote = ready && !tooLarge && unchangedRename
     ? (oldPath ? `Renamed from ${oldPath} · contents unchanged.` : 'Renamed · contents unchanged.')
     : null;

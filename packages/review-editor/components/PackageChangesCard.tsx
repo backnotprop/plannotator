@@ -17,25 +17,16 @@ import {
   type PackageLookupState,
 } from '../hooks/usePackageChanges';
 
-/**
- * Package changes under a package.json or lockfile header: what the diff
- * adds, removes, upgrades and downgrades. The server works the rows out; npm
- * details (downloads, license, release date) appear only after the reviewer
- * allowed the lookup, once, from this card or Settings.
- */
-
 export interface PackageChangesCardProps {
   filePath: string;
   reviewBase?: string;
   reviewSnapshotId?: string;
-  /** Re-measure hook for the virtualized all-files host. */
   onHeightChange?: () => void;
   compactTouchLayout?: boolean;
 }
 
 type SortKey = 'change' | 'name' | 'downloads' | 'released';
 const ROW_CAP = 8;
-/** Indirect rows shown per step: a big lockfile changes thousands. */
 const INDIRECT_STEP = 100;
 /** Weekly downloads: a popularity signal, kept quiet and last. One switch drops the column everywhere. */
 const SHOW_DOWNLOADS = true;
@@ -62,7 +53,6 @@ export function releasedAgo(iso: string, now = Date.now()): string {
   return `${Math.floor(days / 365.25)}y`;
 }
 
-/** Published under 7 days ago: the age many teams wait before installing. */
 export function isFreshRelease(iso: string | null | undefined, now = Date.now()): boolean {
   return !!iso && now - Date.parse(iso) < 7 * 86_400_000;
 }
@@ -115,7 +105,6 @@ function metaFor(lookup: PackageLookupState, change: PackageChange): PackageMeta
   return lookup.byKey.get(packageKey(change.registryName, lookupVersion(change)));
 }
 
-/** The version as shown: the resolved one, else the spec (a git URL, `workspace:*`). */
 function shown(version: string | null, spec: string | null): string {
   return version ?? spec ?? '—';
 }
@@ -153,11 +142,9 @@ const NameTags: React.FC<{ change: PackageChange; meta?: PackageMetadata; withhe
   </>
 );
 
-/** A version; `major` tints it for a step semver calls breaking. */
 const VersionText: React.FC<{ version: string | null; spec: string | null; muted?: boolean; major?: boolean }> = ({ version, spec, muted, major }) => {
   const text = shown(version, spec);
   const cls = `font-mono text-[12px] tabular-nums ${major ? 'text-warning' : muted ? 'text-muted-foreground' : ''}`;
-  // The spec only when it says more than the version.
   const specHint = spec && version && spec !== version ? spec : null;
   if (!specHint && !major) return <span className={cls}>{text}</span>;
   return (
@@ -206,7 +193,6 @@ export const PackageChangesCard: React.FC<PackageChangesCardProps> = ({
       folded={folded}
       lookup={lookup}
       lookupOn={lookupOn}
-      // One click allows the lookup for every card: the count is every name the review would send.
       consent={setting?.lookup !== true && setting?.lookupEnv !== false && names > 0 && data.sendTotal > 0 ? {
         names: data.sendTotal,
         asking,
@@ -227,14 +213,12 @@ interface CardBodyProps {
   folded: boolean;
   lookup: PackageLookupState;
   lookupOn: boolean;
-  /** `names`: how many names the click sends, across the whole review. */
   consent: { names: number; asking: boolean; onAllow: () => void } | null;
   onRetry: () => void;
   onHeightChange?: () => void;
   compactTouchLayout?: boolean;
 }
 
-/** The card itself, separate from its data so tests and hosts can render a known card. */
 export const CardBody: React.FC<CardBodyProps> = ({ card, folded, lookup, lookupOn, consent, onRetry, onHeightChange, compactTouchLayout }) => {
   const [sort, setSort] = useState<SortKey>('change');
   const [showAll, setShowAll] = useState(false);
@@ -260,7 +244,6 @@ export const CardBody: React.FC<CardBodyProps> = ({ card, folded, lookup, lookup
     return [...card.changes].sort((a, b) => value(b) - value(a) || a.name.localeCompare(b.name));
   }, [card.changes, sort, lookup]);
 
-  // Narrow hosts (a phone, a split pane) get stacked rows instead of columns.
   useLayoutEffect(() => {
     const el = rootRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
@@ -333,7 +316,6 @@ export const CardBody: React.FC<CardBodyProps> = ({ card, folded, lookup, lookup
   const downloadsCls = 'px-2 py-1.5 text-right text-[11px] tabular-nums text-muted-foreground/70';
   const metaCells = (c: PackageChange) => {
     const dash = <span className="text-muted-foreground">—</span>;
-    // npm was not asked about this row: one blank span, not a row of dashes.
     if (!c.registryName || !sendable.has(c.registryName)) {
       return <td colSpan={SHOW_DOWNLOADS ? 3 : 2} className="px-2 py-1.5" />;
     }
@@ -353,7 +335,6 @@ export const CardBody: React.FC<CardBodyProps> = ({ card, folded, lookup, lookup
     );
   };
 
-  /** The old version shows only when the version itself changed (not for an addition or a section move). */
   const hasPrevious = (c: PackageChange) => c.kind !== 'added' && c.kind !== 'moved';
 
   const indirectToggle = indirect.length > 0 ? (

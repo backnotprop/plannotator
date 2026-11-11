@@ -15,52 +15,30 @@ import type { CallFlowNodeSource, CallFlowNodeSourceLoader } from '../../hooks/u
 import { annotationTargetForCallFlowNode, CALL_FLOW_PREVIEW_CONTEXT_LINES, highlightSlice, searchRanges } from '../CallFlowTreeView';
 import { useReviewCallTreeShortcuts } from './callTree.shortcuts';
 
-/**
- * The Call tree: one function's calls, one per row, with tree lines and the
- * `file:line` on the right. Fed by one `CallTreeDoc` and callbacks only; it
- * reads no review state, so a Guided Review chapter or the Inbox review can
- * mount it as it is (phase 3).
- */
 export interface CallTreeProps {
   readonly doc: CallTreeDoc;
-  /** Open a row's line (click, Enter). */
   readonly onOpen: (node: CallTreeNode) => void;
-  /** False: the row has nowhere to open (its location is not reachable here). */
   readonly canOpen?: (node: CallTreeNode) => boolean;
-  /** Loads the source a location's hover preview shows (#2322); absent, no preview. */
   readonly loadNodeSource?: CallFlowNodeSourceLoader;
   /** Commit a comment on rows; absent, rows cannot be commented. */
   readonly onAnnotateTargets?: (targets: readonly CallFlowAnnotationTarget[], text: string) => boolean;
-  /** Escape: back to where the tree was opened from. */
   readonly onBack?: () => void;
-  /** Take keyboard focus on mount (a tree opened from a hunk). */
   readonly autoFocus?: boolean;
-  /** Extra controls drawn at the end of the header line. */
   readonly headerAccessory?: React.ReactNode;
-  /**
-   * Search, owned by the host (one field can search several trees, as the
-   * Paths view does): the tree narrows to matching rows and their callers,
-   * all open, and marks the matched text. Empty: no search.
-   */
   readonly searchQuery?: string;
-  /** Which of this tree's matches is the current one (moves the current row there); null for none. */
   readonly activeMatch?: number | null;
-  /** How many rows match the search in this tree as drawn (Changes only included). */
   readonly onMatchCountChange?: (count: number) => void;
 }
 
-/** Text with the search's matches marked, the Paths view's way (same rule, same mark). */
 function Marked({ text, query, start = 0, end = text.length }: { readonly text: string; readonly query: string; readonly start?: number; readonly end?: number }) {
   if (!query) return <>{text.slice(start, end)}</>;
   return <>{highlightSlice(text, searchRanges(text, query), start, end)}</>;
 }
 
-/** The last two path segments: `shapes/note/NoteShapeUtil.tsx` -> `note/NoteShapeUtil.tsx`. */
 export function shortCallTreePath(file: string): string {
   return file.split('/').slice(-2).join('/');
 }
 
-/** `:line` when the call stays in its caller's file, `dir/file:line` when it moves. */
 export function callTreeLocationText(row: Pick<CallTreeRow, 'node' | 'callerFile'>): string {
   const { node } = row;
   if (!node.file || !node.line) return '';
@@ -71,7 +49,6 @@ function RowLabel({ node, query }: { readonly node: CallTreeNode; readonly query
   const label = node.label;
   if (node.kind === 'branch') return <span className="call-tree-branch-label"><Marked text={label} query={query} /></span>;
   const parts = splitCallFlowSignature(label);
-  // Matches are found on the whole label and marked across the receiver/name split, as in Paths.
   const nameStart = parts.receiver.length;
   const restStart = nameStart + parts.name.length;
   return (
@@ -98,11 +75,6 @@ interface RowProps {
   readonly registerRow: (id: string, element: HTMLElement | null) => void;
 }
 
-/**
- * Rows are rebuilt on every fold, filter and keystroke, so compare what a row
- * draws rather than its object: an unchanged row is not drawn again, which
- * keeps typing in the search and moving with the arrows cheap on big trees.
- */
 function sameRow(a: RowProps, b: RowProps): boolean {
   const x = a.row;
   const y = b.row;
@@ -134,7 +106,6 @@ const CallTreeRowView = memo(function CallTreeRowView({
   const { node } = row;
   const location = callTreeLocationText(row);
   const fullLocation = node.file ? `${node.file}${node.line ? `:${node.line}` : ''}` : '';
-  // Dillon Mulroy's source preview (#2322): the same hook, window and loader as the Paths cards.
   const sourcePreview = useHoverPreview<CallFlowNodeSource>(
     () => loadNodeSource?.(node) ?? Promise.resolve(null),
     Boolean(loadNodeSource && node.file && node.line),
@@ -260,7 +231,6 @@ const CallTreeRowView = memo(function CallTreeRowView({
   );
 }, sameRow);
 
-/** The nearest row still drawn for an id that may have been folded away. */
 function nearestDrawn(id: string, drawn: ReadonlySet<string>, fallback: string): string {
   let candidate = id;
   while (candidate && !drawn.has(candidate)) {
@@ -287,8 +257,6 @@ export function CallTree({
   const [folds, setFolds] = useState<ReadonlyMap<string, boolean>>(() => new Map());
   const query = searchQuery.trim();
   const searching = query.length > 0;
-  // Folds made while searching live apart and go with the search, so clearing
-  // it gives back the folds the person had.
   const [searchFolds, setSearchFolds] = useState<ReadonlyMap<string, boolean>>(() => new Map());
   useEffect(() => {
     if (!searching) setSearchFolds(new Map());

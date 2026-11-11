@@ -2,13 +2,6 @@ import React, { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { TextShimmer } from '@plannotator/ui/components/TextShimmer';
 
-/**
- * One-time "Introducing Guided Reviews" announcement — same shell as
- * LookAndFeelAnnouncementDialog. The hero image is CDN-hosted (not bundled),
- * so on load failure the image container hides entirely and an offline user
- * gets a clean text-only dialog instead of a broken-image icon.
- */
-
 interface GuideIntroDialogProps {
   isOpen: boolean;
   onDismiss: () => void;
@@ -22,10 +15,9 @@ export const GuideIntroDialog: React.FC<GuideIntroDialogProps> = ({ isOpen, onDi
 
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-background/90 backdrop-blur-sm p-4">
-      {/* max-h clamp + scrollable body: the hero makes this panel taller
-          than short viewports. */}
+      {}
       <div className="bg-card border border-border rounded-xl w-full max-w-5xl max-h-[calc(100vh-2rem)] shadow-2xl flex flex-col">
-        {/* Header */}
+        {}
         <div className="p-7 border-b border-border">
           <h3 className="font-semibold text-2xl">Introducing Guided Reviews</h3>
         </div>
@@ -50,7 +42,7 @@ export const GuideIntroDialog: React.FC<GuideIntroDialogProps> = ({ isOpen, onDi
             generated on demand by your local agent CLI.
           </p>
 
-          {/* Launch hint: a compact mock of the app header with the Guide pill. */}
+          {}
           <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2">
             <span className="bg-muted rounded-md text-xs font-medium px-2 py-1 select-none">
               <TextShimmer duration={2.5} spread={1.5}>Guide</TextShimmer>
@@ -61,7 +53,7 @@ export const GuideIntroDialog: React.FC<GuideIntroDialogProps> = ({ isOpen, onDi
           </div>
         </div>
 
-        {/* Footer */}
+        {}
         <div className="px-7 py-5 border-t border-border flex justify-end">
           <button
             onClick={onDismiss}

@@ -12,8 +12,6 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { FileHeader } from './FileHeader';
 import { EditSessionHud } from './EditSessionHud';
-// Relative import: the ui package exposes './config' (no ./config/settings
-// subpath), and the registry itself is not re-exported from the barrel.
 import { SETTINGS } from '../../ui/config/settings';
 
 const hasDom = typeof document !== 'undefined';
@@ -43,7 +41,6 @@ afterEach(async () => {
 describe('edit-to-suggestion flag', () => {
   test('the editSuggestions setting defaults OFF', () => {
     expect(SETTINGS.editSuggestions.defaultValue).toBe(false);
-    // Cookie-only while experimental: never synced to server config.
     expect(SETTINGS.editSuggestions.serverKey).toBeUndefined();
   });
 });
@@ -81,8 +78,6 @@ describe.if(hasDom)('FileHeader edit affordance (DOM)', () => {
     const editBtn = el.querySelector<HTMLButtonElement>('[data-testid="edit-session-start"]');
     expect(editBtn).not.toBeNull();
     const buttons = Array.from(el.querySelectorAll('button'));
-    // Viewed and Comment precede Edit; only the OpenInApp file-actions
-    // dropdown may follow it (Edit sits adjacent to the dropdown/chevron).
     const viewedBtn = buttons.find((b) => b.title.includes('viewed'));
     const commentBtn = buttons.find((b) => b.title === 'Add file-scoped comment');
     expect(viewedBtn).not.toBeUndefined();

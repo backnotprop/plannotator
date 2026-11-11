@@ -18,7 +18,6 @@ describe('MarkdownBody', () => {
     expect(html).toContain('<th');
     expect(html).toContain('Scenario');
     expect(html).toContain('Approve');
-    // The old behavior inlined the raw pipes into a paragraph
     expect(html).not.toContain('| Scenario |');
   });
 

@@ -1,4 +1,3 @@
-/** DOM coverage for the flask a test file's diff header carries. */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

@@ -1,23 +1,9 @@
 import React from 'react';
 import { Tooltip } from '@plannotator/ui/components/Tooltip';
 
-/**
- * Shared atoms for file rows — used by both the tree view (FileTreeNode) and
- * the sections view (SectionsPanel), so the two lists render one visual
- * language: same viewed circle, same leading change-type letter, same
- * stage button/dot.
- *
- * The change-type letter is the shared diff-file-tree atom from
- * @plannotator/ui, re-exported so review call sites import one module. The
- * +/- numbers are the review's own `CountColumns` (two aligned columns), not
- * ui's `DiffCounts`.
- */
 export { ChangeTypeLetter } from '@plannotator/ui/components/DiffFileTree';
 export { ViewedControl, CountColumns, countColumnVars } from '@plannotator/ui/components/FileRowAtoms';
 
-/** Staging affordance — plus button on unstaged working files (always
- * visible, brightens on hover), primary dot when staged, spinner mid-flight.
- * Fixed 16px slot. */
 export const StageControl: React.FC<{
   isStaged: boolean;
   isStaging: boolean;
@@ -34,9 +20,6 @@ export const StageControl: React.FC<{
     <Tooltip content="Stage file (git add)" side="bottom">
       <span
         role="button"
-        // tabIndex + key handling: lives INSIDE the row <button> (a real nested
-        // <button> is invalid HTML), so it needs its own focus stop and
-        // Enter/Space activation to be keyboard-operable.
         tabIndex={0}
         onClick={(e) => {
           e.stopPropagation();
@@ -64,18 +47,16 @@ export const StageControl: React.FC<{
   );
 };
 
-/** Committed-file marker — green dot in the stage-slot column (committed rows
- * can't be staged, so the slot is otherwise empty). Mirrors StageControl's
- * primary staged dot: green = already committed, primary = staged. */
+/**
+ * Committed-file marker — green dot in the stage-slot column (committed rows can't be staged, so
+ * the slot is otherwise empty).
+ */
 export const CommittedDot: React.FC = () => (
   <span className="w-4 h-4 flex items-center justify-center flex-shrink-0" title="Committed" aria-label="Committed">
     <span className="w-1.5 h-1.5 rounded-full bg-success" />
   </span>
 );
 
-/** File path that always keeps the filename visible. The directory part
- * absorbs all truncation (ellipsis lands right before the final slash);
- * only a filename that alone exceeds the row truncates at its own end. */
 export const TruncatedPath: React.FC<{ path: string }> = ({ path }) => {
   const slash = path.lastIndexOf('/');
   if (slash === -1) return <span className="truncate">{path}</span>;
@@ -87,7 +68,6 @@ export const TruncatedPath: React.FC<{ path: string }> = ({ path }) => {
   );
 };
 
-/** Comment icon + annotation count, rendered directly after the file path. */
 export const AnnotationBadge: React.FC<{ count: number }> = ({ count }) => {
   if (count <= 0) return null;
   return (
@@ -100,37 +80,17 @@ export const AnnotationBadge: React.FC<{ count: number }> = ({ count }) => {
   );
 };
 
-/** Below this panel width, group headings, folders and files drop their
- *  number columns (and a heading its viewed count), so names keep the room;
- *  All changes keeps its totals. Styles: `[data-compact-rows]` in index.css. */
 export const COMPACT_ROWS_WIDTH = 220;
 export const compactRowsProps = (width: number): { 'data-compact-rows'?: '' } =>
   width < COMPACT_ROWS_WIDTH ? { 'data-compact-rows': '' } : {};
 
-/**
- * A foldable group heading in the left panel lists: the tree's kind blocks
- * (Code / Tests / Generated) and the Git status view's Committed / Changes /
- * Untracked (approved design record "review-sidebar-aligned").
- *
- * Flush: the kind icon sits where a folder's chevron sits (the panel's 16 px
- * content edge) and the label on the folder-name edge (34 px); with no icon
- * the label starts on the content edge. Heavier and darker than folders. The
- * whole 28 px row is the button, so Enter and Space fold it with no new keys.
- * The chevron follows the label: always shown on a folded group; on an open
- * one only on hover or keyboard focus (and always on touch screens), so a
- * folded group looks folded without a hover. Then whatever the caller adds
- * (the numbers). Styles: `.panel-section-heading` in index.css.
- */
 export const PanelSectionHeader: React.FC<{
   label: string;
   collapsed: boolean;
   onToggle: () => void;
   icon?: React.ReactNode;
   children?: React.ReactNode;
-  /** The heading's spoken name, when it should say more than the label
-   *  (what the group holds, its numbers in words). */
   ariaLabel?: string;
-  /** What the group holds, shown on hover and keyboard focus. */
   tooltip?: string;
 }> = ({ label, collapsed, onToggle, icon, children, ariaLabel, tooltip }) => {
   const button = (

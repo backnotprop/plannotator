@@ -25,7 +25,6 @@ async function mount(onAdd: (text: string) => boolean | void, jobId: string) {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
-  // First render mounts the anchor; the second shows the popover.
   await act(async () => root!.render(<Harness onAdd={onAdd} jobId={jobId} />));
   await act(async () => root!.render(<Harness onAdd={onAdd} jobId={jobId} />));
 }

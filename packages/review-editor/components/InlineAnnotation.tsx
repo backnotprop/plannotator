@@ -18,7 +18,6 @@ interface InlineAnnotationProps {
   explainDisabled?: boolean;
 }
 
-/** Renders a single annotation comment inside the diff view */
 export const InlineAnnotation: React.FC<InlineAnnotationProps> = ({
   metadata,
   language,

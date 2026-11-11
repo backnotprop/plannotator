@@ -1,39 +1,28 @@
 import React, { useCallback } from 'react';
 import type { ConventionalLabel, ConventionalDecoration } from '@plannotator/ui/types';
 
-/** Semantic tone — maps to theme CSS variables, not arbitrary hex */
 type SemanticTone = 'danger' | 'warn' | 'success' | 'info' | 'neutral';
 
 export interface LabelDef {
   label: ConventionalLabel;
   display: string;
   tone: SemanticTone;
-  /** Whether the blocking/non-blocking toggle shows in the picker for this label */
   showBlockingToggle: boolean;
   hint: string;
 }
 
 export const CONVENTIONAL_LABELS: LabelDef[] = [
-  // Everyday — the three you reach for on 90%+ of comments
   { label: 'suggestion', display: 'suggestion', tone: 'info',    showBlockingToggle: true,  hint: 'Proposes an improvement' },
   { label: 'nitpick',    display: 'nit',        tone: 'neutral', showBlockingToggle: false, hint: 'Trivial, preference-based' },
   { label: 'question',   display: 'question',   tone: 'info',    showBlockingToggle: true,  hint: 'Seeking clarification' },
-  // High-signal
   { label: 'issue',      display: 'issue',      tone: 'danger',  showBlockingToggle: true,  hint: 'A problem that needs addressing' },
   { label: 'praise',     display: 'praise',     tone: 'success', showBlockingToggle: false, hint: 'Highlight something positive' },
-  // Soft / meta
   { label: 'thought',    display: 'thought',    tone: 'neutral', showBlockingToggle: false, hint: 'An idea, not a request' },
   { label: 'note',       display: 'note',       tone: 'neutral', showBlockingToggle: false, hint: 'Informational, no action needed' },
-  // Process
   { label: 'todo',       display: 'todo',       tone: 'warn',    showBlockingToggle: true,  hint: 'Small, necessary change' },
   { label: 'chore',      display: 'chore',      tone: 'warn',    showBlockingToggle: true,  hint: 'Process task (CI, changelog, etc.)' },
 ];
 
-// ---------------------------------------------------------------------------
-// Picker
-// ---------------------------------------------------------------------------
-
-/** Resolve which labels to show based on user config (null = all defaults; empty array = user cleared all) */
 export function getEnabledLabels(configJson: string | null): LabelDef[] {
   if (!configJson) return CONVENTIONAL_LABELS;
   try {
@@ -59,7 +48,6 @@ interface ConventionalLabelPickerProps {
   decorations: ConventionalDecoration[];
   onSelect: (label: ConventionalLabel | null) => void;
   onDecorationsChange: (decorations: ConventionalDecoration[]) => void;
-  /** Filtered label list from config (defaults to all) */
   enabledLabels?: LabelDef[];
 }
 
@@ -77,7 +65,6 @@ export const ConventionalLabelPicker: React.FC<ConventionalLabelPickerProps> = (
     } else {
       onSelect(label);
       const def = enabledLabels.find(l => l.label === label);
-      // If blocking toggle is enabled for this label, default to non-blocking
       if (def?.showBlockingToggle) {
         onDecorationsChange(['non-blocking']);
       } else {
@@ -113,7 +100,7 @@ export const ConventionalLabelPicker: React.FC<ConventionalLabelPickerProps> = (
           );
         })}
 
-        {/* Blocking toggle — shown when enabled for this label */}
+        {}
         {showToggle && (
           <button
             type="button"
@@ -132,16 +119,11 @@ export const ConventionalLabelPicker: React.FC<ConventionalLabelPickerProps> = (
   );
 };
 
-// ---------------------------------------------------------------------------
-// Badge (inline annotation header)
-// ---------------------------------------------------------------------------
-
 export const ConventionalLabelBadge: React.FC<{
   label: ConventionalLabel;
   decorations?: ConventionalDecoration[];
 }> = ({ label, decorations }) => {
   const def = CONVENTIONAL_LABELS.find(l => l.label === label);
-  // Fall back gracefully for custom labels not in the built-in list
   const tone = def?.tone || 'neutral';
   const display = def?.display || label;
 

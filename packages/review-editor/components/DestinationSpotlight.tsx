@@ -3,26 +3,15 @@ import { createPortal } from 'react-dom';
 import { altKey } from '@plannotator/ui/utils/platform';
 
 interface DestinationSpotlightProps {
-  /** The destination-switcher button to highlight. */
   targetRef: React.RefObject<HTMLElement | null>;
-  /** "GitHub" | "GitLab" — platform-aware label for the copy. */
   platformLabel: string;
-  /** "PR" | "MR" — platform-aware merge-request label. */
   mrLabel: string;
-  /** Uses a visible-viewport bottom surface instead of desktop anchor geometry. */
   compactTouchLayout?: boolean;
   onDismiss: () => void;
 }
 
 const PAD = 6;
 
-/**
- * First-time coachmark for the PR feedback-destination switcher. A driver.js
- * style spotlight built with zero dependencies: a rounded cutout positioned
- * over the target whose oversized box-shadow dims the rest of the screen,
- * plus an anchored card explaining the Agent / platform toggle. Clicking
- * anywhere (or "Got it") dismisses; the caller persists the seen-flag.
- */
 export function DestinationSpotlight({
   targetRef,
   platformLabel,
@@ -32,12 +21,6 @@ export function DestinationSpotlight({
 }: DestinationSpotlightProps) {
   const [rect, setRect] = useState<DOMRect | null>(null);
 
-  // Measure the target after layout; re-measure on resize AND on a short
-  // interval — header siblings (error banners, partial-diff notices) mount
-  // async and shift the button horizontally without any window resize, and
-  // ResizeObserver can't see position-only changes. The overlay is transient
-  // (one-time coachmark), so a 250ms poll is bounded and cheap; setRect with
-  // an unchanged DOMRect still re-renders, but only while the overlay is up.
   useLayoutEffect(() => {
     const measure = () => {
       const el = targetRef.current;
@@ -52,11 +35,6 @@ export function DestinationSpotlight({
     };
   }, [targetRef]);
 
-  // Escape dismisses like every other one-time dialog (capture + stop, so the
-  // topmost overlay is the only thing one Escape closes). Any OTHER
-  // non-modifier keypress means the user has moved on to real work (search,
-  // shortcuts, typing) — dismiss too, but let the event proceed so the
-  // shortcut still fires and its surface never opens under the dim.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -81,7 +59,7 @@ export function DestinationSpotlight({
 
   return createPortal(
     <div data-print-hide className="fixed inset-0 z-[90]" onClick={onDismiss} role="presentation">
-      {/* Cutout: the oversized shadow dims everything except the target. */}
+      {}
       <div
         className="absolute rounded-lg ring-2 ring-primary pointer-events-none"
         style={{
@@ -118,8 +96,6 @@ export function DestinationSpotlight({
           </div>
         </div>
       ) : (
-        /* Card, hung below the target and right-aligned with it (the switcher
-           lives in the header's top-right cluster). */
         <div
           className="absolute w-[320px] max-w-[calc(100vw-24px)] rounded-lg border border-border bg-popover p-4 shadow-xl"
           style={{

@@ -37,10 +37,6 @@ interface CapturedFileDiffProps {
 let lastFileDiffProps: CapturedFileDiffProps | null = null;
 let toolbarSelections: Array<SelectedLineRange | null> = [];
 
-// Spread-captured before the mock replaces the module record — a bare namespace
-// handle would be a live view of the record `mock.module` rewrites, so the
-// afterAll restore would silently re-install this file's stub as itself. Same
-// idiom (and the same reason) as AllFilesCodeView.lifecycle.test.tsx.
 const realPierreDiffsReact = { ...(await import('@pierre/diffs/react')) };
 const realResolveSyntaxTheme = (await import('@plannotator/ui/utils/syntaxTheme')).resolveSyntaxTheme;
 
@@ -55,8 +51,6 @@ mock.module('../hooks/usePierreTheme', () => ({
   usePierreTheme: () => ({ type: 'light', css: '' }),
 }));
 
-// Only FileDiff is replaced; everything else the review-editor graph imports
-// from this specifier stays real.
 mock.module('@pierre/diffs/react', () => ({
   ...realPierreDiffsReact,
   FileDiff: function MockFileDiff(props: CapturedFileDiffProps) {
@@ -99,8 +93,6 @@ const PATCH = [
 const FIRST_DRAG: SelectedLineRange = { start: 2, end: 3, side: 'additions' };
 const SECOND_DRAG: SelectedLineRange = { start: 1, end: 3, side: 'additions' };
 
-/** Stands in for App: mirrors published selections back down as
- *  `pendingSelection`, which is the loop the repaint depends on. */
 function Harness({ compactTouchLayout, onSelection }: {
   compactTouchLayout: boolean;
   onSelection: (range: SelectedLineRange | null) => void;
@@ -232,9 +224,6 @@ describe.if(hasDom)('DiffViewer compact-touch line selection (DOM)', () => {
       pierre().options.onLineSelectionEnd?.(null);
     });
 
-    // The real host clears its toolbar state (and republishes the null
-    // selection) from here; swallowing the null in the preserve branch would
-    // leave the composer open over a range that no longer exists.
     expect(toolbarSelections).toEqual([null]);
   });
 
@@ -246,8 +235,6 @@ describe.if(hasDom)('DiffViewer compact-touch line selection (DOM)', () => {
     });
 
     expect(toolbarSelections).toEqual([FIRST_DRAG]);
-    // Desktop never enters the preserved-range state, so it must not even carry
-    // the controlled-repaint handler.
     expect('onLineSelectionChange' in pierre().options).toBe(false);
   });
 

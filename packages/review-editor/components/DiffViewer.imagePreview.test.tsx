@@ -70,7 +70,6 @@ describe.if(hasDom)('image preview in the single-file view (DOM)', () => {
   let imageRequests: Array<{ url: string; signal?: AbortSignal | null }> = [];
   let intersect: (() => void) | null = null;
 
-  /** An IntersectionObserver the test drives; `autoIntersect` fires on observe. */
   function installObserver(autoIntersect: boolean) {
     globalThis.IntersectionObserver = class {
       private cb: IntersectionObserverCallback;

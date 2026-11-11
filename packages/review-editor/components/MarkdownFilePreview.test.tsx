@@ -24,7 +24,6 @@ import { loadDiagramEngine, __resetDiagramEngineForTests } from '../utils/diagra
 
 const hasDom = typeof document !== 'undefined';
 
-// The highlighter reads `window` at import; load the preview lazily.
 const { MarkdownFilePreview } = hasDom ? await import('./MarkdownFilePreview') : ({} as typeof import('./MarkdownFilePreview'));
 const { ReviewStateProvider } = await import('../dock/ReviewStateContext');
 
@@ -69,8 +68,6 @@ function Harness({ initial = [], oldText = OLD, newText = NEW, patch = PATCH, ho
     snapshotId: 'snap-1',
     imagePreviewAvailable: true,
     openDiffFile: () => {},
-    // The file's view comes from review state (All files); the "not in this
-    // view" action shows the other one on this file only.
     markdownPreview: {
       viewOf: () => (view === 'whole' ? 'read' : 'changes'),
       show: (_path: string, next: string) => setView(next === 'read' ? 'whole' : 'diff'),
@@ -112,7 +109,6 @@ async function settle(ms = 30) {
   await act(async () => { await new Promise((r) => setTimeout(r, ms)); });
 }
 
-/** Select `text` inside the first element whose own text contains it, then release the pointer. */
 async function selectText(container: HTMLElement, text: string) {
   const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
   let node: Text | null;
@@ -220,7 +216,6 @@ describe.if(hasDom)('commenting in a Markdown preview', () => {
     const el = await mount();
     await selectText(el, 'old installer');
     await typeAndSave('Why drop this?');
-    // The old half of a changed section is removed text.
     expect(added[0].anchor.diffContext).toBe('removed');
 
     await act(async () => setViewFromTest!('whole'));
@@ -229,14 +224,12 @@ describe.if(hasDom)('commenting in a Markdown preview', () => {
     const note = el.querySelector('[data-markdown-preview-unanchored]');
     expect(note?.textContent).toContain('1 comment on this file is not in this view');
 
-    // Its action shows the view the comment is in.
     await act(async () => note!.querySelector<HTMLButtonElement>('[data-markdown-preview-show-view]')!.click());
     await settle(60);
     expect(el.querySelector('[data-markdown-preview-view="diff"]')).not.toBeNull();
     expect(marksText(el)).toBe('old installer');
   });
 
-  /** An added Markdown file, previewed whole, under the given review state. */
   async function mountAdded(text: string, stateExtras: Record<string, unknown> = {}) {
     const patch = [
       'diff --git a/docs/guide.md b/docs/guide.md',
@@ -293,12 +286,10 @@ describe.if(hasDom)('commenting in a Markdown preview', () => {
   test('in a PR review, remote images wait behind a placeholder until the reviewer loads them', async () => {
     const el = await mountAdded(REMOTE_DOC, { prMetadata: { url: 'https://github.com/o/r/pull/1' } });
     await settle(30);
-    // Nothing remote is in the page; the repository image still loads through the review route.
     expect(imgSrcs(el)).toEqual(['/api/review-markdown-image?doc=docs%2Fguide.md&side=new&src=img%2Fa.png&snapshot=snap-1']);
     const notice = el.querySelector('[data-markdown-preview-remote-images]');
     expect(notice?.textContent).toContain('2 remote images are not loaded');
 
-    // A click on a placeholder loads them.
     const placeholder = el.querySelector('[data-image-unavailable]') as HTMLElement;
     await act(async () => { placeholder.click(); await new Promise((r) => setTimeout(r, 30)); });
     await settle(30);
@@ -311,8 +302,6 @@ describe.if(hasDom)('commenting in a Markdown preview', () => {
   });
 
   test('slash-less, single-slash and backslash remote sources are held and counted too', async () => {
-    // A browser reads each of these as https://tracker.example/…; a check for
-    // `//` alone let them load at once.
     const doc = [
       '<p><img alt="noslash" src="https:tracker.example/a.png"></p>',
       '',
@@ -396,7 +385,6 @@ describe.if(hasDom)('commenting in a Markdown preview', () => {
   test('with the engine advert, both fences draw through the engine, loaded once', async () => {
     const urls = { engine: '/assets/diagram-engine/engine-preview-ok.js', mermaid: '/m.js', graphviz: '/g.js' };
     let imports = 0;
-    // The engine the server would serve, as the stub the loader hands back.
     await loadDiagramEngine(urls, async () => {
       imports += 1;
       return {
@@ -409,12 +397,10 @@ describe.if(hasDom)('commenting in a Markdown preview', () => {
     expect(drawn).toEqual([['mermaid', 'flowchart LR\n  A --> B'], ['graphviz', 'digraph { a -> b }']]);
     expect(fenceTexts(el)).toEqual([]);
     expect(imports).toBe(1);
-    // The rest of the document is unchanged.
     expect(el.textContent).toContain('Run the new installer from the website.');
   });
 
   test('when the engine does not load, the fences stay code with a note and a Retry', async () => {
-    // No server here: the URL import fails, as it would offline.
     const el = await mountDiagrams({ engine: '/assets/diagram-engine/engine-preview-missing.js', mermaid: '/m.js', graphviz: '/g.js' });
     await settle(120);
     expect(fenceTexts(el)).toEqual(['flowchart LR\n  A --> B', 'digraph { a -> b }']);
@@ -454,9 +440,6 @@ describe.if(hasDom)('commenting in a Markdown preview', () => {
   });
 });
 
-// Picture choices in a question block (approval "inbox-decision-mode"): a PR
-// preview holds their remote pictures like any other, so they are counted in
-// "N remote images are not loaded" and load with the button.
 describe('MarkdownFilePreview: held remote pictures in a question block', () => {
   const PICTURES = [
     '# Guide',

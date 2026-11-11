@@ -5,8 +5,6 @@ import { ConventionalLabelBadge } from './ConventionalLabelPicker';
 import { formatRelativeTime } from '../utils/formatRelativeTime';
 
 interface CommentMetaProps {
-  /** Surface-specific leading element(s): severity dot, scope/file/line badge,
-   *  collapse toggle, etc. Rendered first in the left cluster. */
   leading?: React.ReactNode;
   conventionalLabel?: ConventionalLabel | null;
   decorations?: ConventionalDecoration[];
@@ -16,14 +14,6 @@ interface CommentMetaProps {
   createdAt?: number;
 }
 
-/**
- * The single identity row shared by every comment surface — the inline diff
- * card, the sidebar list, and the file-comment banner. Left cluster: leading
- * badge(s) → conventional label → review-profile/source badge → author. Right:
- * relative time, then any surface-specific actions. Centralizing it keeps author
- * + timestamp + badge styling identical everywhere (they used to be hand-rolled
- * three different ways).
- */
 export const CommentMeta: React.FC<CommentMetaProps> = ({
   leading,
   conventionalLabel,

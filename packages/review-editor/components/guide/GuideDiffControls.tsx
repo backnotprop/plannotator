@@ -4,10 +4,8 @@ import { DiffDisplayOptionsPopover } from '@plannotator/ui/components/DiffDispla
 import type { GuideHostValue } from '@plannotator/guide-viewer/host';
 import { useReviewState } from '../../dock/ReviewStateContext';
 
-/** Fold or open every guide file's diff: what the guide host's `collapseAll` takes. */
 export type GuideCollapseAll = NonNullable<GuideHostValue['collapseAll']>;
 
-/** The next Collapse all: the other way from the last one (fold, before any). */
 export const nextGuideCollapseAll = (was: GuideCollapseAll | null): GuideCollapseAll => ({
   collapsed: !was?.collapsed,
   token: (was?.token ?? 0) + 1,
@@ -15,19 +13,6 @@ export const nextGuideCollapseAll = (was: GuideCollapseAll | null): GuideCollaps
 
 const BUTTON = 'p-1.5 rounded-md transition-colors text-muted-foreground hover:text-foreground hover:bg-muted flex items-center';
 
-/**
- * The diff controls in the top bar while a guided review is open (approval
- * "diff-controls-headers": in a full-window review, Split/Unified sits in the
- * top bar only), after Close and Approve and before the tool icons, with a
- * divider after them (the owner's order: Close · Approve | diff controls |
- * Annotations · Ask AI · Review Agents | Options). The guide hides the dock, and with it the dock strip's
- * controls (ReviewDockRightActions), so the guide draws its own, in the Inbox's
- * order: Split/Unified, Collapse all (more than one file), the Diff display
- * gear. Split/Unified writes the same setting as the dock strip
- * (`onDiffStyleChange`), so the choice holds everywhere. Collapse all folds or
- * opens the guide's file cards and is not remembered. A compact touch layout
- * draws none of these, as in the dock strip.
- */
 export const GuideDiffControls: React.FC<{
   collapseAll: GuideCollapseAll | null;
   onCollapseAll: () => void;

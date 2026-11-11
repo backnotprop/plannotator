@@ -57,8 +57,6 @@ const { DiffViewer } = await import('./DiffViewer');
 
 const hasDom = typeof document !== 'undefined';
 
-// A realistically sized file so there is genuine collapsed context above and
-// below the hunk — the gaps whose chevrons are the user-visible symptom.
 const filler = (n: number, name: string) =>
   Array.from({ length: n }, (_, i) => `const ${name}${i} = ${i};`).join('\n');
 const HEAD = filler(60, 'head');
@@ -71,9 +69,8 @@ const PATCH = [
   'index 0000000..1111111 100644',
   '--- a/calc.ts',
   '+++ b/calc.ts',
-  // `const head58 = 58;` really is line 59 of both contents, so the header,
-  // the context lines and the files agree. Pierre realigns a misaligned header
-  // rather than rejecting it, which makes a wrong one a silent trap.
+  // Pierre realigns a misaligned header rather than rejecting it, which makes a wrong one a silent
+  // trap.
   '@@ -59,7 +59,7 @@',
   ' const head58 = 58;',
   ' const head59 = 59;',
@@ -112,13 +109,7 @@ function renderedLines(host: HTMLElement): string {
   ).join('\n');
 }
 
-/**
- * What Pierre actually painted, for when a wait gives up.
- *
- * A bare "expected true, received false" from a render wait says nothing about
- * WHICH of the several things upstream of the pixels went wrong, and this test
- * has already cost one CI round trip to a mystery. Printed only on failure.
- */
+/** What Pierre actually painted, for when a wait gives up. */
 function renderDiagnostics(host: HTMLElement | null, label: string): string {
   if (host == null) return `${label}: no host`;
   const html = shadowHTML(host);
@@ -135,23 +126,6 @@ function renderDiagnostics(host: HTMLElement | null, label: string): string {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/**
- * Wait for a rendered state, budgeted in SCHEDULER TURNS rather than
- * milliseconds.
- *
- * A wall-clock budget makes the test a stopwatch race against the runner: a
- * cold, contended CI box blows a deadline that a warm laptop clears, which is
- * exactly how the first version of this test flaked. Turns are machine
- * independent — a slower box simply spends longer inside each turn — so this
- * budget never has to be retuned for CI hardware. Every turn is an `act`
- * flushed macrotask boundary, so it also drains microtasks; the states waited
- * on here are at most a two step async chain past a synchronous render, which
- * makes 400 turns a ~100x margin rather than a guess.
- *
- * What is waited on is the completion signal itself, not a proxy for one:
- * Pierre renders expansion chevrons only from a NON-PARTIAL diff, so their
- * presence IS the augmented diff having reached paint.
- */
 const WAIT_TURNS = 400;
 
 async function waitUntil(predicate: () => boolean, turns = WAIT_TURNS): Promise<boolean> {
@@ -298,9 +272,6 @@ describe.if(hasDom)('DiffViewer full-content swap (DOM)', () => {
   test(
     'expansion affordances appear once /api/file-content lands',
     async () => {
-      // The full-content response is held until the partial baseline has been
-      // asserted — with the fix the swap lands within a frame, so an
-      // unthrottled response would race the baseline check.
       let markRequested: (() => void) | null = null;
       const fileContentRequested = new Promise<void>((resolve) => {
         markRequested = resolve;
@@ -323,12 +294,6 @@ describe.if(hasDom)('DiffViewer full-content swap (DOM)', () => {
         return new Response('{}', { headers: { 'content-type': 'application/json' } });
       }) as typeof fetch;
 
-      // Precondition, asserted rather than assumed: the REAL parser and the
-      // REAL augmenter, on these exact fixtures, must produce a non-partial
-      // diff. Bun's `mock.module` is process global and earlier files in the
-      // DOM suite mock this very specifier, so this also fails loudly (and in
-      // milliseconds) if a stale module mock ever reaches this file, instead of
-      // presenting as an inexplicable render that never arrives.
       expect(getSingularPatch(PATCH).isPartial).toBe(true);
       const expected = processFile(PATCH, {
         oldFile: { name: 'calc.ts', contents: OLD_CONTENTS },
@@ -343,15 +308,7 @@ describe.if(hasDom)('DiffViewer full-content swap (DOM)', () => {
         root!.render(view());
       });
 
-      // The gate is still closed here, so the augmented diff cannot exist yet
-      // no matter how slow the box is.
       await fileContentRequested;
-      // Reported, deliberately NOT asserted. The verdict belongs to the swap
-      // below: whether the partial diff had painted first only affects how
-      // strong the "no chevrons yet" observation is, and making it a hard gate
-      // would let a slow or absent FIRST paint mask the result we actually
-      // came for. A tree without the fix still fails, because it never paints
-      // chevrons at any point.
       const painted = await waitUntil(() => shadowHTML(host!).includes('data-separator'));
       if (!painted) console.error(renderDiagnostics(host, 'partial diff never painted'));
       // A partial diff is not expandable, so Pierre draws its gap bars without
@@ -363,19 +320,12 @@ describe.if(hasDom)('DiffViewer full-content swap (DOM)', () => {
         await sleep(0);
       });
 
-      // The augmented full-content diff must reach the PIXELS, not just the
-      // React tree: expansion chevrons in the gap bars. With the fix these
-      // arrive in the first turn or two; without it they never arrive at all.
       const swapped = await waitUntil(() => countExpandButtons(host!) > 0);
       if (!swapped) console.error(renderDiagnostics(host, 'augmented diff never painted'));
       expect(swapped).toBe(true);
 
-      // And the separator now advertises a real expand target, which is what
-      // makes the click live rather than dead.
       expect(shadowHTML(host!)).toContain('data-expand-index');
     },
-    // The only wall-clock bound in this test, and only a backstop: the
-    // assertions themselves are budgeted in scheduler turns.
     180_000,
   );
 });

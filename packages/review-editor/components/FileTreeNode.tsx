@@ -6,37 +6,18 @@ import { ViewedControl, StageControl, AnnotationBadge, CommittedDot, ChangeTypeL
 import { diffFileTreeIndent } from '@plannotator/ui/components/DiffFileTree';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 
-/** The full step of the Changes tree, and the smaller one past the cap. */
 const TREE_STEP = 12;
 const DEEP_TREE_STEP = 4;
 
-/**
- * The Changes tree's indent (approved design record "review-sidebar-aligned"):
- * 12 px a level, level 0 starting on the panel's 16 px content edge (the list
- * sits 8 px in, the row pads 8). A child's chevron then sits under its
- * parent's name. Past `maxIndent` (a narrow panel, a deep tree) each further
- * level steps 4 px: never 0, so a child never lines up with its parent's
- * siblings. A deep name truncates instead; the row's title has the path.
- */
 export function alignedTreeIndent(depth: number, maxIndent = Infinity): number {
   const full = Math.min(depth, Math.floor(maxIndent / TREE_STEP));
   return 8 + full * TREE_STEP + (depth - full) * DEEP_TREE_STEP;
 }
 
-/** How far the Changes tree indents in full steps in a panel `width` px
- *  wide: what is left after a row's controls, its numbers and room for a
- *  short name. */
 export function maxTreeIndent(width: number): number {
   return Math.max(24, width - 200);
 }
 
-/**
- * A folder row of the Changes tree: the chevron on the content edge, the
- * (possibly merged) folder name on the label edge, then the summed counts in
- * the panel's number columns. Our own row rather than ui's
- * `DiffFileTreeFolderRow`, whose fixed padding and counts are the embeddable
- * tree's.
- */
 const FolderRow: React.FC<{ node: TreeNode; isExpanded: boolean; onToggle: () => void; paddingLeft: number }> = ({
   node,
   isExpanded,
@@ -71,8 +52,6 @@ const FolderRow: React.FC<{ node: TreeNode; isExpanded: boolean; onToggle: () =>
 
 interface FileTreeNodeProps {
   node: TreeNode;
-  /** Left padding of a row at a depth. Default: the shared diff tree's
-   *  (All files keeps it); the Changes tree passes `alignedTreeIndent`. */
   indent?: (depth: number) => number;
   expandedFolders: Set<string>;
   onToggleFolder: (path: string) => void;
@@ -83,23 +62,15 @@ interface FileTreeNodeProps {
   onToggleViewed?: (filePath: string) => void;
   showViewedControls?: boolean;
   hideViewedFiles: boolean;
-  /** The viewed files Hide viewed takes out (`useHiddenViewedFiles`); `viewedFiles` when absent. */
   hiddenFiles?: ReadonlySet<string>;
   getAnnotationCount: (filePath: string) => number;
-  /** EFFECTIVE staged set from useGitAdd (sidecar + session overrides).
-   *  REQUIRED and the ONLY staging source surfaces may render from — the
-   *  sidecar's own `staged` flag is a snapshot and must never be ORed in. */
   stagedFiles: Set<string>;
   scrollHighlightIndex?: number;
-  /** Absolute repo root used to build the "Copy full path" menu item. Null in PR-review mode (files aren't on local disk). */
   repoRoot?: string | null;
-  /** Since-base mode extras: sidecar lookup for untracked (U) / staged (dot)
-   * markers and the per-row stage button. Undefined outside since-base. */
   getSectionEntry?: (filePath: string) => { group: 'committed' | 'changes' | 'untracked'; staged: boolean } | undefined;
   onStageFile?: (filePath: string) => void;
   stagingFile?: string | null;
   showStageControls?: boolean;
-  /** Markdown files shown as a rendered preview: an eye after the name. */
   markdownPreviewedPaths?: ReadonlySet<string>;
 }
 
@@ -185,20 +156,14 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
     );
   }
 
-  // File node
   const isActive = node.fileIndex === activeFileIndex;
   const isScrollActive = !isActive && scrollHighlightIndex != null && node.fileIndex === scrollHighlightIndex;
   const isViewed = viewedFiles.has(node.path);
   const isStaged = stagedFiles.has(node.path);
   const annotationCount = getAnnotationCount(node.path);
-  // Since-base mode: sidecar-driven markers (U for untracked, staged dot,
-  // stage button) replace the legacy staged treatment for this row.
   const sectionEntry = getSectionEntry?.(node.path);
   const sinceBaseMode = getSectionEntry != null;
   const isUntracked = sectionEntry?.group === 'untracked';
-  // isStaged comes from the EFFECTIVE set (sidecar + session overrides) —
-  // the sidecar's own snapshot flag must never be ORed back in, or a file
-  // unstaged this session would render staged and invert the next toggle.
   const isStageable = sinceBaseMode && !!onStageFile && sectionEntry != null && sectionEntry.group !== 'committed';
 
   if (hideViewedFiles && hiddenFiles.has(node.path) && !isActive) {
@@ -218,11 +183,7 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
           />
         }
       >
-          {/* Leading rail: [view][add][letter] then name — same anatomy as
-              the sections view rows. The stage control (since-base mode
-              only) and the letter are always shown. The name inherits the
-              row font; the letter and counts stay the small size. The counts
-              sit in the panel's two number columns. */}
+          {}
           <div className="review-file-row-main">
             {showViewedControls && (
               <ViewedControl isViewed={isViewed} onToggle={onToggleViewed ? () => onToggleViewed(node.path) : undefined} forceVisible={isActive} />

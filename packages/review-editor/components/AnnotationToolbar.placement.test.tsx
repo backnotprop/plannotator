@@ -6,9 +6,10 @@ const hasDom = typeof document !== 'undefined';
 const toolbarModule = hasDom ? await import('./AnnotationToolbar') : null;
 const AnnotationToolbar = toolbarModule?.AnnotationToolbar as typeof import('./AnnotationToolbar')['AnnotationToolbar'];
 
-/** Laid-out height of the toolbar. happy-dom does no layout, so we stub the
- * height the component measures: the collapsed composer vs. the same toolbar
- * with the suggested-code section expanded. */
+/**
+ * Laid-out height of the toolbar. happy-dom does no layout, so we stub the height the component
+ * measures: the collapsed composer vs. the same toolbar with the suggested-code section expanded.
+ */
 const COLLAPSED_TOOLBAR_HEIGHT = 236;
 const EXPANDED_TOOLBAR_HEIGHT = 360;
 let toolbarHeight = EXPANDED_TOOLBAR_HEIGHT;
@@ -122,7 +123,6 @@ async function mountToolbar(
   return renderToolbar(positionLeft, askAIMode, overrides);
 }
 
-/** Simulates the pointer drag the toolbar header enables. */
 async function dragToolbarTo(toolbar: HTMLElement, clientY: number): Promise<void> {
   const handle = toolbar.firstElementChild?.firstElementChild;
   if (!handle) throw new Error('annotation toolbar drag handle did not render');
@@ -146,7 +146,6 @@ function toolbarHorizontalEdges(toolbar: HTMLElement): { left: number; right: nu
   return { left: center - width / 2, right: center + width / 2 };
 }
 
-/** Vertical edges as laid out, from the committed top plus the stubbed height. */
 function toolbarVerticalEdges(toolbar: HTMLElement): { top: number; bottom: number } {
   const top = Number.parseFloat(toolbar.style.top);
   return { top, bottom: top + toolbarHeight };
@@ -219,16 +218,12 @@ describe('dragged toolbar placement', () => {
       toolbarHeight = COLLAPSED_TOOLBAR_HEIGHT;
       const toolbar = await mountToolbar(window.innerWidth / 2, false, { positionTop: 100 });
 
-      // Drag the toolbar down to the bottom edge of the viewport; it clamps
-      // flush against it rather than hanging off the edge.
       await dragToolbarTo(toolbar, window.innerHeight - 30);
       expect(toolbarVerticalEdges(toolbar)).toEqual({
         top: window.innerHeight - COLLAPSED_TOOLBAR_HEIGHT,
         bottom: window.innerHeight,
       });
 
-      // Expanding the composer grows the box; it must slide back into bounds
-      // instead of running off the bottom of the viewport.
       toolbarHeight = EXPANDED_TOOLBAR_HEIGHT;
       await renderToolbar(window.innerWidth / 2, false, { positionTop: 100, showSuggestedCode: true });
 

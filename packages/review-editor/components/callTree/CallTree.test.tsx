@@ -1,21 +1,3 @@
-/**
- * DOM-gated behavior of the Call tree component.
- *
- * Regressions guarded:
- *  - Dillon Mulroy's source preview (#2322) not opening on a row's file:line,
- *    or showing the new side for a removed call;
- *  - Enter commenting instead of opening (owner's decision 3, 2026-11-10), or
- *    C not commenting; a row comment not landing on its file line with the
- *    Call flow target the Paths cards attach;
- *  - arrow keys leaking to the file tree's window handler (switching files)
- *    or not moving / folding;
- *  - a folded branch without its count, Changes only keeping unchanged rows,
- *    bands on every row of a new subtree, a repeat expanded again;
- *  - search: clearing it not giving back the folds the person had, marks
- *    missing on the name or the location, the source preview not opening on
- *    a search result, and a count that differs from the Paths view's search
- *    for the same query.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -89,13 +71,10 @@ describe('CallTree rows', () => {
     await mount(<CallTree doc={doc} onOpen={() => {}} />);
     expect(row('elm.getBoundingClientRect()').className).toContain('call-tree-band-removed');
     expect(row('parley.layout').className).toContain('call-tree-band-added');
-    // Under a new call: a dot, not another band.
     expect(row('parley.shape()').className).not.toContain('call-tree-band');
     expect(row('parley.shape()').querySelector('.call-tree-dot-added')).not.toBeNull();
-    // An unchanged branch is folded and says how many calls it holds.
     expect(row('util.getTheme()').getAttribute('aria-expanded')).toBe('false');
     expect(row('util.getTheme()').textContent).toContain('2 calls');
-    // Same-file rows show only :line; a move into another file shows dir/file:line.
     expect(row('getLabelSize').querySelector('.call-tree-location')?.textContent).toBe(':6');
     expect(row('elm.getBoundingClientRect()').querySelector('.call-tree-location')?.textContent).toBe('src/text.ts:8');
   });
@@ -148,7 +127,6 @@ describe('CallTree keyboard', () => {
       expect(row('onBeforeCreate').getAttribute('aria-selected')).toBe('true');
       await key('ArrowDown');
       expect(row('getLabelSize').getAttribute('aria-selected')).toBe('true');
-      // ← folds an open row, then moves to the caller.
       await key('ArrowLeft');
       expect(row('getLabelSize').getAttribute('aria-expanded')).toBe('false');
       expect(host!.textContent).not.toContain('measureHtml');
@@ -216,7 +194,6 @@ describe('CallTree keyboard', () => {
     });
     expect(submissions).toHaveLength(1);
     expect(submissions[0]!.text).toBe('Why measure in wasm?');
-    // A removed call lands on the old side of its own line, like a Paths card comment.
     expect(submissions[0]!.targets[0]).toMatchObject({
       filePath: 'src/text.ts', lineStart: 8, lineEnd: 8, side: 'old', entry: 'onBeforeCreate', label: 'elm.getBoundingClientRect()',
     });
@@ -275,20 +252,17 @@ async function search(text: string) {
 describe('CallTree search', () => {
   test.skipIf(!hasDom)('narrows to matches, opens the folded branch holding one, marks the text, and clearing gives back the person\'s folds', async () => {
     await mount(<CallTreeList trees={[{ key: 'k', doc }]} onOpen={() => {}} />);
-    // The person folds getLabelSize before searching.
     await act(async () => row('getLabelSize').querySelector<HTMLElement>('.call-tree-twist')!.click());
     expect(row('getLabelSize').getAttribute('aria-expanded')).toBe('false');
 
     const input = await search('getTheme');
     expect(host!.querySelector('.call-flow-search-count')?.textContent).toBe('1/1');
-    // util.getTheme() was folded by default; its file theme.ts holds no match, the call does.
     expect(row('util.getTheme()').className).toContain('call-tree-row-match');
     expect(host!.textContent).not.toContain('getLabelSize');
     expect(row('util.getTheme()').querySelector('mark.call-flow-tree-match')?.textContent).toBe('getTheme');
     expect(row('util.getTheme()').getAttribute('aria-selected')).toBe('true');
 
     await search('src/theme');
-    // A file match marks the location and opens the folded branch to the calls in it.
     expect(row('a()').querySelector('.call-tree-location mark')?.textContent).toBe('src/theme');
     expect(host!.querySelector('.call-flow-search-count')?.textContent).toBe('1/2');
 

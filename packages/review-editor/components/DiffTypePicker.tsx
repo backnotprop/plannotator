@@ -10,26 +10,13 @@ interface DiffTypePickerProps {
   onSelect: (diffType: string) => void;
   isLoading?: boolean;
   hasBasePicker: boolean;
-  /** The live active base (picker selection / server echo / --base flag). */
   activeBase?: string | null;
-  /**
-   * Draw the trigger as the caller's own button (the sidebar header's
-   * sentence) instead of the field. The menu and its keyboard are the same.
-   */
   trigger?: PickerTrigger;
 }
 
-/**
- * Long/full hex SHAs display as their 7-char prefix; branch names, tags, and
- * HEAD~N pass through unchanged (mirrors review-core's displayRef).
- */
 export const displayRef = (ref: string): string =>
   /^[0-9a-f]{7,}$/i.test(ref) ? ref.slice(0, 7) : ref;
 
-/**
- * Plain-English explanations shown in a tooltip next to each option.
- * Keep these short — they're hover hints, not docs.
- */
 const OPTION_HINTS: Record<string, string> = {
   'since-base': "Everything since your branch split from the base — committed, uncommitted, and untracked. What a PR would show if you committed it all and pushed.",
   'local-vs-remote': "Your local branch and working tree compared with its remote-tracking branch — committed, uncommitted, and untracked differences from the last fetch.",
@@ -62,15 +49,9 @@ export const DiffTypePicker: React.FC<DiffTypePickerProps> = ({
 }) => {
   const [open, setOpen] = useState(false);
 
-  // When a base picker is wired up, strip branch names from the
-  // base-dependent labels — the branch belongs in the picker.
   const displayLabel = (opt: DiffOption) => {
     if (!hasBasePicker) return opt.label;
     if (opt.id === 'merge-base') return 'Committed changes (PR view)';
-    // getGitContext bakes the since-base label from the DETECTED default at
-    // session start; render it from the live active base instead so the
-    // dropdown agrees with the adjacent base picker after a base switch or a
-    // --base launch.
     if (opt.id === 'since-base' && activeBase) return `All changes since ${displayRef(activeBase)}`;
     return opt.label;
   };
@@ -141,7 +122,7 @@ export const DiffTypePicker: React.FC<DiffTypePickerProps> = ({
                       onPointerUp={(e) => e.stopPropagation()}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      {/* Heroicons information-circle (outline) */}
+                      {}
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
                       </svg>

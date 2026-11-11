@@ -35,33 +35,22 @@ interface AnnotationToolbarProps {
   onSubmit: () => void;
   onDismiss: () => void;
   onCancel: () => void;
-  // Conventional Comments
   conventionalCommentsEnabled: boolean;
   conventionalLabel: ConventionalLabel | null;
   onConventionalLabelChange: (label: ConventionalLabel | null) => void;
   decorations: ConventionalDecoration[];
   onDecorationsChange: (decorations: ConventionalDecoration[]) => void;
   enabledLabels?: LabelDef[];
-  // AI props
   aiAvailable?: boolean;
   onAskAI?: (question: string) => void;
   isAILoading?: boolean;
   onViewAIResponse?: (questionId?: string) => void;
-  /** AI messages that overlap the current line selection */
   aiHistoryMessages?: AIChatEntry[];
-  /**
-   * A host where selected lines can only be asked about (the VS Code Guide
-   * tab: no comments there): the toolbar opens on the Ask box, with no way to
-   * switch to a comment.
-   */
   askOnly?: boolean;
 }
 
-// The 338px border box contains the 320px composer, padding, and border.
 const TOOLBAR_MAX_WIDTH = 338;
-// Gap between the anchor and the toolbar's near edge when it flips above.
 const TOOLBAR_ANCHOR_GAP = 10;
-// Stand-in for the first render only, before the real height is measured.
 const TOOLBAR_ESTIMATED_HEIGHT = 200;
 
 interface ToolbarVerticalPlacement {
@@ -69,16 +58,6 @@ interface ToolbarVerticalPlacement {
   maxHeight: number;
 }
 
-/**
- * Keeps the WHOLE toolbar — submit row included — inside the visible viewport.
- *
- * `anchorTop` is the toolbar's top when it sits below the anchor. When that
- * would push its bottom past the viewport (a selection on the last lines of a
- * file), the toolbar flips above the anchor instead of sliding up, so the
- * submit button stays on screen without scrolling (#1424). A toolbar taller
- * than the viewport has nowhere to go: it is pinned to the top edge and scrolls
- * internally, which is the only case where `maxHeight` actually binds.
- */
 function computeToolbarVerticalPlacement(
   anchorTop: number,
   height: number | null,
@@ -100,7 +79,6 @@ function computeToolbarVerticalPlacement(
   };
 }
 
-/** Floating comment input form that appears after line selection */
 export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   toolbarState,
   toolbarRef,
@@ -142,13 +120,6 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   const handleTabIndent = useTabIndent(setSuggestedCode);
   const { dragPosition, dragHandleProps, wasDragged, reset: resetDrag } = useDraggable(toolbarRef);
 
-  // The clamp below needs the real box height, not a guess: a fixed reserve let
-  // the expanded suggested-code section push the submit row past the viewport
-  // bottom. Measured after every commit because the height changes with the
-  // suggested-code toggle, Ask AI history, and a manual textarea resize;
-  // setState bails out whenever the measurement is unchanged.
-  // scrollHeight is the UNCLAMPED content height, so a maxHeight this effect
-  // already applied can never feed back into the next measurement.
   useLayoutEffect(() => {
     const element = toolbarRef.current;
     if (!element) return;
@@ -156,8 +127,6 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     setToolbarHeight((previous) => (previous === measured ? previous : measured));
   });
 
-  // Dragged toolbars keep the user's chosen position (clamped into bounds);
-  // anchored ones also flip above the anchor when they would not fit below.
   const placement = computeToolbarVerticalPlacement(
     dragPosition ? dragPosition.top : toolbarState.position.top,
     toolbarHeight,
@@ -165,17 +134,15 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
     { flip: !dragPosition },
   );
 
-  // Reset drag when toolbar reopens for a new selection
   useEffect(() => {
     resetDrag();
   }, [toolbarState.range.start, toolbarState.range.end, toolbarState.range.side, resetDrag]);
 
   const handleAskAIClick = () => {
-    // If user already typed text in the comment box, send it directly as an AI question
     if (commentText.trim()) {
       onAskAI?.(commentText.trim());
       setCommentText('');
-      setAskAIMode(true); // Switch to AI mode to show history/preview
+      setAskAIMode(true);
     } else {
       setAskAIMode(true);
     }
@@ -183,20 +150,18 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
 
   const handleAskAISubmit = (question: string) => {
     onAskAI?.(question);
-    // An ask-only host answers somewhere else (a page beside): the toolbar is done.
     if (askOnly) onCancel();
     // Otherwise stay in AI mode so the history updates
   };
 
   const handleAskAIClose = () => {
     setAskAIMode(false);
-    onCancel(); // close the whole toolbar
+    onCancel();
   };
 
   const content = (
     <div
       ref={toolbarRef}
-      // Ctrl+C in its empty fields copies the selected lines (utils/highlightCopy).
       data-highlight-composer=""
       className="review-toolbar"
       style={dragPosition
@@ -298,14 +263,13 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
                 e.stopPropagation();
                 onDismiss();
               } else if (isCommentSubmitKey(e, enterSavesComment)) {
-                // Prevented so a plain Enter (the setting on) adds no newline.
                 e.preventDefault();
                 onSubmit();
               }
             }}
           />
 
-          {/* Optional suggested code section */}
+          {}
           {showSuggestedCode ? (
             <div className="mt-2">
               <div className="flex items-center justify-between mb-1">
@@ -347,7 +311,6 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
                 if (prefill) {
                   setSuggestedCode(selectedOriginalCode);
 
-                  // Focus at the end of the textarea
                   requestAnimationFrame(() => {
                     const ta = suggestedCodeRef.current;
                     if (ta) {
@@ -366,7 +329,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
           )}
 
           <div className="flex items-center gap-2 mt-3">
-            {/* Ask AI button — left side */}
+            {}
             {aiAvailable && !isEditing && (
               <button
                 onClick={handleAskAIClick}
@@ -383,7 +346,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
               </button>
             )}
 
-            {/* Add Comment button — right side */}
+            {}
             <button
               onClick={onSubmit}
               disabled={!commentText.trim() && !suggestedCode.trim()}

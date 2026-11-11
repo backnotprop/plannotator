@@ -180,13 +180,11 @@ describe.if(hasDom)('header control visibility (DOM)', () => {
     await choose('changes');
     await waitFor(() => el.querySelector('.plan-diff-added h1'));
 
-    // The rendered diff: the old heading struck, the new one added.
     expect(el.querySelector('.plan-diff-removed h1')?.textContent).toBe('Old');
     expect(el.querySelector('.plan-diff-added h1')?.textContent).toBe('New');
     expect(el.querySelector('table')).not.toBeNull();
     expect(el.textContent).toContain('Ready');
 
-    // The whole new version, no diff marks; the header menu is the file's only view control.
     await choose('read');
     expect(Array.from(el.querySelectorAll('h1')).map((h) => h.textContent)).toEqual(['New']);
     expect(el.querySelector('.plan-diff-removed, .plan-diff-added')).toBeNull();

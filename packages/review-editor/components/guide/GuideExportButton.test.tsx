@@ -45,10 +45,6 @@ interface StubCall {
   body: unknown;
 }
 
-/**
- * Routes the export-info / share-info preflights and the share create/delete
- * calls; records every call so tests can assert what was (not) sent.
- */
 function stubFetch(routes: {
   exportInfo?: Response | (() => Response);
   shareInfo?: Response | (() => Response);
@@ -125,7 +121,6 @@ describe('GuideExportButton', () => {
     });
     await render('saved:1000-x');
     await click(shareButton());
-    // Opening the dialog uploads nothing.
     expect(calls.filter((c) => c.url.endsWith('/share'))).toHaveLength(0);
     expect(dialog()).not.toBeNull();
     expect(dialog()!.textContent).toContain('346 KB');
@@ -135,13 +130,10 @@ describe('GuideExportButton', () => {
     expect(uploads).toEqual([{ url: '/api/guide/saved%3A1000-x/share', method: 'POST', body: {} }]);
     expect(document.querySelector('[data-testid="guide-share-url"]')?.textContent).toBe('https://guides.show/g/abc#key=k1');
     expect(document.querySelector('[data-testid="guide-share-delete-token"]')?.textContent).toBe('tok-1');
-    // The header control now knows a link exists.
     expect(shareButton()!.textContent).toContain('Share link');
   });
 
   test.skipIf(!hasDom)('a link the server could not record is neither offered for removal nor re-created', async () => {
-    // Guide history off: the upload succeeds but no envelope holds the token,
-    // so the server answers recorded: false and DELETE would 404.
     const calls = stubFetch({
       share: (method) =>
         method === 'POST'
@@ -153,8 +145,6 @@ describe('GuideExportButton', () => {
     await click(document.querySelector('[data-testid="guide-share-create"]'));
     expect(document.querySelector('[data-testid="guide-share-delete-token"]')?.textContent).toBe('tok-1');
     expect(document.querySelector('[data-testid="guide-share-remove"]')).toBeNull();
-    // Close and reopen: the same link and its one-time token are shown again; a
-    // second Create would orphan the first upload, whose token is unrecoverable.
     await click(document.querySelector('[data-testid="guide-share-dialog"] button[data-pn-touch-target]'));
     await click(shareButton());
     expect(document.querySelector('[data-testid="guide-share-delete-token"]')?.textContent).toBe('tok-1');
@@ -204,7 +194,6 @@ describe('GuideExportButton', () => {
     expect(calls.filter((c) => c.url.endsWith('/share'))).toEqual([
       { url: '/api/guide/saved%3A1000-x/share', method: 'DELETE', body: undefined },
     ]);
-    // Back to the create form, and the header control no longer claims a link.
     expect(document.querySelector('[data-testid="guide-share-create"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="guide-share-remove"]')).toBeNull();
     expect(shareButton()!.textContent).toContain('Create share link');

@@ -16,10 +16,8 @@ import {
   type RepoTreeRow,
 } from '../utils/repoTree';
 
-/** Every row has one height, so the list renders only the window on screen. */
 export const REPO_TREE_ROW_HEIGHT = 28;
 const OVERSCAN_ROWS = 12;
-/** Rows drawn before the scroll container has a size (first paint, tests). */
 const UNMEASURED_ROWS = 80;
 
 type ReadyRepoFiles = Extract<RepoFilesState, { status: 'ready' }>;
@@ -27,16 +25,13 @@ type ReadyRepoFiles = Extract<RepoFilesState, { status: 'ready' }>;
 export interface RepoFileTreeProps {
   repo: ReadyRepoFiles;
   loadDir: (dir: string) => void;
-  /** The review's changed files: they keep today's rows, badges and controls. */
   files: DiffFile[];
   activeFileIndex: number;
-  /** A file of the listing open outside the diff (highlighted like the active row). */
   activeRepoPath?: string | null;
   expanded: ReadonlySet<string>;
   onToggleFolder: (path: string) => void;
   onSelectFile: (index: number) => void;
   onDoubleClickFile?: (index: number) => void;
-  /** Opens a file of the listing that is not in the review. Absent: such rows only show. */
   onOpenRepoFile?: (path: string, options: { pin: boolean }) => void;
   viewedFiles: Set<string>;
   onToggleViewed?: (filePath: string) => void;
@@ -50,7 +45,6 @@ export interface RepoFileTreeProps {
   showStageControls?: boolean;
   markdownPreviewedPaths?: ReadonlySet<string>;
   scrollHighlightIndex?: number;
-  /** The scroll container the rows live in (the panel's scroll area). */
   getScrollElement: () => HTMLElement | null;
 }
 
@@ -60,7 +54,6 @@ const ON_DISK_TITLES: Record<RepoOnDiskChange, string> = {
   D: 'Deleted on disk since this diff was taken. Refresh the diff to see it.',
 };
 
-/** The amber dot on a file that changed on disk after the diff was taken. */
 const OnDiskDot: React.FC<{ change: RepoOnDiskChange }> = ({ change }) => (
   <span
     data-repo-on-disk={change}
@@ -70,12 +63,6 @@ const OnDiskDot: React.FC<{ change: RepoOnDiskChange }> = ({ change }) => (
   />
 );
 
-/**
- * The tree's All files: the whole repository at the diff's new side, changed
- * files with today's rows (viewed circle, status letter, +/-, comment badge,
- * staging), everything else muted.
- * Virtualized: only the rows in view are in the DOM.
- */
 export const RepoFileTree: React.FC<RepoFileTreeProps> = ({
   repo,
   loadDir,
@@ -111,7 +98,6 @@ export const RepoFileTree: React.FC<RepoFileTreeProps> = ({
   const index: RepoTreeIndex = useMemo(() => {
     if (repo.paths) return buildRepoTreeIndex(repo.paths, changedPaths);
     let built = emptyLazyRepoTreeIndex();
-    // Parents first, so every folder lands under a loaded parent.
     const dirs = [...repo.dirs.keys()].sort((a, b) => a.split('/').length - b.split('/').length || (a < b ? -1 : 1));
     for (const dir of dirs) built = addRepoDirEntries(built, dir, repo.dirs.get(dir) ?? [], changedPaths);
     return built;
@@ -119,7 +105,6 @@ export const RepoFileTree: React.FC<RepoFileTreeProps> = ({
 
   const rows = useMemo(() => flattenRepoTree(index, expanded), [index, expanded]);
 
-  // Lazy listings: an expanded folder the server has not sent yet is asked for.
   useEffect(() => {
     if (repo.paths) return;
     for (const row of rows) if (row.kind === 'loading') loadDir(row.path);
@@ -132,7 +117,6 @@ export const RepoFileTree: React.FC<RepoFileTreeProps> = ({
   }, [annotations]);
   const getAnnotationCount = useCallback((path: string) => annotationCounts.get(path) ?? 0, [annotationCounts]);
 
-  // --- Virtual window ---------------------------------------------------
   const listRef = useRef<HTMLDivElement>(null);
   const [range, setRange] = useState({ start: 0, end: UNMEASURED_ROWS });
   const measure = useCallback(() => {
@@ -167,9 +151,6 @@ export const RepoFileTree: React.FC<RepoFileTreeProps> = ({
     };
   }, [getScrollElement, measure]);
 
-  // Bring the active file's row into view when it changes (j/k, a click in
-  // the diff, a jump) and when the list first holds it (All files just
-  // chosen), never again on an expand or a live refresh.
   const activePath = activeRepoPath ?? files[activeFileIndex]?.path ?? null;
   const revealedPath = useRef<string | null>(null);
   useLayoutEffect(() => {
@@ -183,12 +164,9 @@ export const RepoFileTree: React.FC<RepoFileTreeProps> = ({
     const listTop = list.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
     const top = listTop + rowIndex * REPO_TREE_ROW_HEIGHT;
     const bottom = top + REPO_TREE_ROW_HEIGHT;
-    // The panel's sticky tools block covers the top of the scroller: a row
-    // under it is not in view.
     const covered = scroller.querySelector<HTMLElement>('[data-review-sticky-tools]')?.offsetHeight ?? 0;
     const viewTop = scroller.scrollTop + covered;
     const viewHeight = scroller.clientHeight - covered;
-    // Out of view: center it in what shows, so the files around it show too.
     if (top < viewTop || bottom > scroller.scrollTop + scroller.clientHeight) {
       scroller.scrollTop = Math.max(0, top - covered - (viewHeight - REPO_TREE_ROW_HEIGHT) / 2);
     }
@@ -335,5 +313,4 @@ export const RepoFileTree: React.FC<RepoFileTreeProps> = ({
   );
 };
 
-/** A path's name, for callers that need it outside the tree. */
 export { baseName as repoBaseName };

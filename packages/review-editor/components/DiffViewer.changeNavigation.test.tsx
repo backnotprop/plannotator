@@ -55,8 +55,6 @@ const NEW_LINES = OLD_LINES.flatMap((line, i) => {
 const OLD_CONTENTS = `${OLD_LINES.join('\n')}\n`;
 const NEW_CONTENTS = `${NEW_LINES.join('\n')}\n`;
 
-// `git diff --no-index -U3` of the two contents: ONE hunk holding two changes
-// (lines 5 and 12), then a second hunk deleting line 31.
 const PATCH = [
   'diff --git a/calc.ts b/calc.ts',
   'index 282a582..8975549 100644',
@@ -93,13 +91,10 @@ const PATCH = [
 
 const ROW = 30;
 const VIEW = 200;
-/** Height of the view in the current test (VIEW unless a test makes it taller). */
 let viewHeight = VIEW;
 
-/** Where the scroll would put a change's first row in the middle of the view. */
 const centered = (unifiedIndex: number) => unifiedIndex * ROW - viewHeight / 2 + ROW / 2;
 
-// The three changes' unified rows (the first row of each run of -/+ lines).
 const FIRST = 4;
 const SECOND = 12;
 const THIRD = 33;
@@ -140,7 +135,6 @@ describe.if(hasDom)('DiffViewer change navigation (DOM, real Pierre)', () => {
       get: () => scrollTop,
       set: () => {},
     });
-    // The diff is far taller than the view: 40 lines of ROW px.
     Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => 40 * ROW + viewHeight });
     Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => viewHeight });
   });
@@ -192,7 +186,6 @@ describe.if(hasDom)('DiffViewer change navigation (DOM, real Pierre)', () => {
         />,
       );
     });
-    // Rows of the last change painted (and, with contents, the expanded diff).
     for (let turn = 0; turn < 400; turn += 1) {
       const rows = findRows(host);
       if (rows.has(THIRD) && (!fullContents || hasExpandButtons(host))) break;
@@ -201,7 +194,6 @@ describe.if(hasDom)('DiffViewer change navigation (DOM, real Pierre)', () => {
       });
     }
     expect(findRows(host).has(THIRD)).toBe(true);
-    // Only a full-content diff can expand, so its chevrons prove the swap landed.
     expect(hasExpandButtons(host)).toBe(fullContents);
     scrolls = [];
   }
@@ -256,7 +248,6 @@ describe.if(hasDom)('DiffViewer change navigation (DOM, real Pierre)', () => {
       press('n');
       expect(scrolls).toEqual([centered(FIRST), centered(SECOND), centered(THIRD)]);
 
-      // Past the last change: nothing moves, and the key is left unclaimed.
       expect(press('n').defaultPrevented).toBe(false);
       expect(scrolls).toHaveLength(3);
 
@@ -269,14 +260,10 @@ describe.if(hasDom)('DiffViewer change navigation (DOM, real Pierre)', () => {
   }
 
   test('a tall view at the top: the first N lands on the first change, even on screen', async () => {
-    // 830 px shows all three changes' neighbourhood start: rows 4 and 12 are
-    // on screen (one above the middle), and the view cannot scroll up.
     viewHeight = 830;
     await mount({ fullContents: false });
     expect(press('n').defaultPrevented).toBe(true);
-    // Centring row 4 would scroll above the top: it stays at 0.
     expect(scrolls).toEqual([0]);
-    // Row 12 cannot be centred either; the walk still goes on from it.
     press('n');
     press('n');
     expect(scrolls).toEqual([0, 0, centered(THIRD)]);
@@ -285,14 +272,13 @@ describe.if(hasDom)('DiffViewer change navigation (DOM, real Pierre)', () => {
   test('at the bottom, the first Shift+N lands on the last change', async () => {
     viewHeight = 830;
     await mount({ fullContents: false });
-    scrollTop = 40 * ROW; // scrolled to the end: the last change is on screen, above the middle
+    scrollTop = 40 * ROW;
     press('N', { shiftKey: true });
     expect(scrolls).toEqual([centered(THIRD)]);
   });
 
   test('after scrolling by hand, N and Shift+N step from the middle of the view', async () => {
     await mount({ fullContents: false });
-    // Reading line at 700: the second change (row 12) is behind, the third ahead.
     scrollTop = 600;
     press('n');
     expect(scrolls).toEqual([centered(THIRD)]);

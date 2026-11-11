@@ -2,11 +2,8 @@ import React, { useSyncExternalStore } from 'react';
 import type { EditSessionDirtyStore } from '../edit/useEditSession';
 
 interface EditSessionHudProps {
-  /** Finish the session; net changes become suggestion annotations. */
   onComplete: () => void;
-  /** Discard the session; no annotations, pristine diff restored. */
   onCancel: () => void;
-  /** Live net change count of the session (see useEditSession.dirtyStore). */
   dirtyStore: EditSessionDirtyStore;
 }
 
@@ -16,14 +13,9 @@ function changeLabel(count: number): string {
 }
 
 /**
- * EXPERIMENTAL edit-to-suggestion session HUD: a slim strip rendered directly
- * below the file header (inside the file card, above the content) while an
- * edit session is active. Carries the session controls and state, so the
- * header itself keeps only the Edit entry button when no session is active.
- *
- * Lives inside Pierre's memoized custom-header slot portal, so it rides the
- * sticky header; the dirty count arrives via an external store subscription
- * because the portal only republishes on updateItem, never on keystrokes.
+ * Lives inside Pierre's memoized custom-header slot portal, so it rides the sticky header; the
+ * dirty count arrives via an external store subscription because the portal only republishes on
+ * updateItem, never on keystrokes.
  */
 export const EditSessionHud: React.FC<EditSessionHudProps> = ({
   onComplete,

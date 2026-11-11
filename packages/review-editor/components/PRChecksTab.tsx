@@ -3,7 +3,6 @@ import type { PRContext, PRCheck } from '@plannotator/shared/pr-types';
 
 interface PRChecksTabProps {
   context: PRContext;
-  /** Drop the standalone outer padding/max-width when embedded inside another padded container. */
   bare?: boolean;
 }
 
@@ -23,7 +22,6 @@ const MERGE_STATUS_STYLES: Record<string, { bg: string; text: string; label: str
 
 function CheckIcon({ check }: { check: PRCheck }) {
   if (check.status !== 'COMPLETED') {
-    // In progress or queued
     return (
       <svg className="w-3.5 h-3.5 text-yellow-500 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -55,7 +53,6 @@ function CheckIcon({ check }: { check: PRCheck }) {
     );
   }
 
-  // Fallback
   return (
     <svg className="w-3.5 h-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
       <circle cx="12" cy="12" r="10" />
@@ -64,7 +61,6 @@ function CheckIcon({ check }: { check: PRCheck }) {
 }
 
 export const PRChecksTab: React.FC<PRChecksTabProps> = ({ context, bare = false }) => {
-  // Group checks by workflow
   const groupedChecks = useMemo(() => {
     const groups = new Map<string, PRCheck[]>();
     for (const check of context.checks) {
@@ -97,14 +93,14 @@ export const PRChecksTab: React.FC<PRChecksTabProps> = ({ context, bare = false 
 
   return (
     <div className={bare ? 'space-y-4' : 'px-8 py-4 space-y-4 max-w-2xl'}>
-      {/* Merge readiness */}
+      {}
       <div className="space-y-2">
         <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           Merge Status
         </h3>
 
         <div className="space-y-1.5">
-          {/* Review decision */}
+          {}
           {decisionStyle && (
             <div className={`flex items-center gap-2 px-2 py-1.5 rounded ${decisionStyle.bg}`}>
               <span className={`text-xs font-medium ${decisionStyle.text}`}>
@@ -113,7 +109,7 @@ export const PRChecksTab: React.FC<PRChecksTabProps> = ({ context, bare = false 
             </div>
           )}
 
-          {/* Merge state */}
+          {}
           <div className={`flex items-center gap-2 px-2 py-1.5 rounded ${mergeStyle.bg}`}>
             <span className={`text-xs font-medium ${mergeStyle.text}`}>
               {mergeableConflict ? 'Has merge conflicts' : mergeStyle.label}
@@ -122,7 +118,7 @@ export const PRChecksTab: React.FC<PRChecksTabProps> = ({ context, bare = false 
         </div>
       </div>
 
-      {/* Check runs */}
+      {}
       {context.checks.length > 0 && (
         <div className="space-y-2">
           <div className="flex items-center justify-between">

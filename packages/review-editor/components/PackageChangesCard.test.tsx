@@ -26,7 +26,6 @@ const CARD: PackageCard = {
 
 interface Call { url: string; body?: unknown }
 
-/** The review has other cards too: one click sends 5 names in all, this card's 1 among them. */
 const REVIEW_TOTAL = 5;
 
 function stubServer(calls: Call[], opts: { lookupFails?: boolean; card?: PackageCard } = {}) {
@@ -55,7 +54,6 @@ async function render() {
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => root?.render(<PackageChangesCard filePath="package.json" reviewSnapshotId="s1" />));
-  // Let the cards fetch settle.
   await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 }
 
@@ -118,13 +116,11 @@ describe('PackageChangesCard', () => {
     const row = (name: string) => Array.from(document.querySelectorAll('[data-package-row]')).find((r) => r.querySelector('.truncate.font-mono')?.textContent === name)!;
     const pg = row('pg').querySelectorAll('td');
     expect([pg[0].textContent, pg[1].textContent]).toEqual(['8.13.1', '8.16.3']);
-    // A breaking step is marked on the new version itself.
     expect(row('@acme/billing').querySelectorAll('td')[1].querySelector('.text-warning')).not.toBeNull();
     expect(pg[1].querySelector('.text-warning')).toBeNull();
     const moved = document.querySelector('[data-package-row="moved"]')!.querySelectorAll('td');
     expect([moved[0].textContent, moved[1].textContent]).toEqual(['—', '4.20.0']);
 
-    // The phone layout keeps the same order on one line.
     restoreWidth?.();
     restoreWidth = null;
     await act(async () => root?.unmount());

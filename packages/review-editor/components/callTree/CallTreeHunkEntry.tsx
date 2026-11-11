@@ -1,11 +1,6 @@
 import React from 'react';
 import { ListTree } from 'lucide-react';
 
-/**
- * The way into a hunk's Call tree, drawn just above the hunk's first change
- * (under its last context line). Only hunks the analysis can draw a tree for
- * get one.
- */
 export function CallTreeHunkEntry({ title, onOpen }: { readonly title: string; readonly onOpen: () => void }) {
   return (
     <div className="call-tree-hunk-entry-line">

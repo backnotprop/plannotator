@@ -47,10 +47,6 @@ async function click(el: HTMLElement): Promise<void> {
 
 beforeEach(() => {
   if (!hasDom) return;
-  // Seed the trigger explicitly rather than relying on the registry default.
-  // configStore is a process-global singleton and loadFromBackend keeps its
-  // in-memory value when the new backend has nothing to say, so an empty map
-  // would inherit whatever the previous test (or test FILE) last set.
   stored = new Map([['plannotator-token-hover-trigger', 'hover']]);
   setStorageBackend({
     getItem: key => stored.get(key) ?? null,
@@ -70,9 +66,6 @@ afterEach(async () => {
   host?.remove();
   host = null;
   resetStorageBackend();
-  // Same reason as tokenHoverAnnouncement.test.ts: the store is a process
-  // global that this file re-resolved against a fake backend, so hand it back
-  // to the real one rather than leaving it holding this file's values.
   configStore.loadFromBackend();
 });
 
@@ -83,10 +76,6 @@ describe.skipIf(!hasDom)('TokenHoverAnnouncementDialog', () => {
   });
 
   test('the try-it is labeled, and its mock code stays out of the reading order', async () => {
-    // It is interactive now, so hiding the whole block would make it
-    // unreachable and unexplained. The region carries the label; the mock code
-    // inside is decorative (read aloud it is a wall of invented identifiers)
-    // and the visible prompt line carries the meaning instead.
     await mount(<TokenHoverAnnouncementDialog isOpen onDismiss={() => {}} />);
     const region = document.querySelector('[data-token-hover-example]')!;
     expect(region.getAttribute('aria-hidden')).toBeNull();
@@ -95,16 +84,11 @@ describe.skipIf(!hasDom)('TokenHoverAnnouncementDialog', () => {
     expect(
       document.querySelector('[data-token-hover-example-code]')!.getAttribute('aria-hidden'),
     ).toBe('true');
-    // The prompt names the token the reviewer is being asked to hover.
     const prompt = document.querySelector('[data-token-hover-tryit-prompt]')!;
     expect(prompt.textContent).toContain('withRetry');
   });
 
   test('hovering the try-it token opens the real card from the fixture', async () => {
-    // This is the whole point of the seam: real dwell, real card component,
-    // fixture answer. If someone reimplements the demo with its own timing or
-    // its own markup, the card either stops matching the product or stops
-    // behaving like it.
     jest.useFakeTimers();
     try {
       await mount(<TokenHoverAnnouncementDialog isOpen onDismiss={() => {}} />);
@@ -113,31 +97,20 @@ describe.skipIf(!hasDom)('TokenHoverAnnouncementDialog', () => {
       await act(async () => {
         token.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }));
       });
-      // Nothing before the dwell elapses.
       expect(document.querySelector('[data-token-hover-card]')).toBeNull();
 
-      // The try-it reads the live `tokenHoverDelay`, which the seeded backend
-      // says nothing about, so the dwell here is the registry default.
       await act(async () => { jest.advanceTimersByTime(DEFAULT_TOKEN_HOVER_DELAY_MS); });
       await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
-      // `data-token-hover-card` is the real component's own marker.
       const card = document.querySelector('[data-token-hover-card]');
       expect(card).not.toBeNull();
       expect(card!.textContent).toContain(EXAMPLE_HOVER.symbol);
       expect(card!.textContent).toContain(EXAMPLE_HOVER.definition!.filePath);
-      // No References panel behind the demo, so its locations are neither
-      // tabbable nor advertised as clickable, and the card is out of the
-      // reading order (it portals to <body>, outside the aria-modal dialog).
       for (const b of card!.querySelectorAll('button')) {
         expect(b.tabIndex).toBe(-1);
         expect(b.className).toContain('cursor-default');
       }
       expect(card!.getAttribute('aria-hidden')).toBe('true');
-      // The card portals to <body> like every other instance, so the dialog it
-      // is demonstrated INSIDE would cover it without an explicit layer. This
-      // is the seam's whole reason for existing: a buried demo card is exactly
-      // the failure a live try-it is supposed to make impossible.
       expect(card!.className).toContain('z-[110]');
     } finally {
       jest.useRealTimers();
@@ -145,8 +118,6 @@ describe.skipIf(!hasDom)('TokenHoverAnnouncementDialog', () => {
   });
 
   test('the try-it obeys the trigger the radio currently says', async () => {
-    // Choosing the hold-modifier option has to be feelable BEFORE committing
-    // to it, which is why the try-it reads the live setting, not a prop.
     jest.useFakeTimers();
     try {
       await mount(<TokenHoverAnnouncementDialog isOpen onDismiss={() => {}} />);
@@ -160,7 +131,6 @@ describe.skipIf(!hasDom)('TokenHoverAnnouncementDialog', () => {
       await act(async () => { await Promise.resolve(); });
       expect(document.querySelector('[data-token-hover-card]')).toBeNull();
 
-      // Modifier down, and the same rest opens it.
       await act(async () => {
         window.dispatchEvent(new KeyboardEvent('keydown', {
           key: modEventKey,
@@ -172,7 +142,6 @@ describe.skipIf(!hasDom)('TokenHoverAnnouncementDialog', () => {
       await act(async () => { await Promise.resolve(); await Promise.resolve(); });
       expect(document.querySelector('[data-token-hover-card]')).not.toBeNull();
 
-      // And Off takes an open card away with it.
       await click(option('off'));
       expect(document.querySelector('[data-token-hover-card]')).toBeNull();
     } finally {
@@ -206,9 +175,6 @@ describe.skipIf(!hasDom)('TokenHoverAnnouncementDialog', () => {
   });
 
   test('arrows move selection within the group, which is one Tab stop', async () => {
-    // WAI-ARIA radiogroup. Without roving tabindex a keyboard user Tabs
-    // through three options to reach Done; without the arrow handler they
-    // cannot change the selection with the keyboard at all.
     await mount(<TokenHoverAnnouncementDialog isOpen onDismiss={() => {}} />);
     expect(option('hover').tabIndex).toBe(0);
     expect(option('modifier').tabIndex).toBe(-1);
@@ -222,7 +188,6 @@ describe.skipIf(!hasDom)('TokenHoverAnnouncementDialog', () => {
     expect(option('modifier').tabIndex).toBe(0);
     expect(option('hover').tabIndex).toBe(-1);
 
-    // Wraps backwards off the first option.
     await act(async () => {
       option('modifier').dispatchEvent(
         new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }),

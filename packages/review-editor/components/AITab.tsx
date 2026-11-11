@@ -24,7 +24,6 @@ interface AITabProps {
   scrollToQuestionId?: string | null;
   onScrollToLines: (filePath: string, lineStart: number, lineEnd: number, side: 'old' | 'new') => void;
   onAskGeneral?: (question: string) => void;
-  /** Stop the in-flight answer. When provided, the input shows a Stop button while streaming. */
   onStop?: () => void;
   permissionRequests?: PendingPermission[];
   onRespondToPermission?: (requestId: string, allow: boolean) => void;
@@ -32,12 +31,8 @@ interface AITabProps {
   aiConfig?: { providerId: string | null; model: string | null; reasoningEffort?: string | null };
   onAIConfigChange?: (config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null }) => void;
   hasAISession?: boolean;
-  /** "Ask this session": the reviewer's choice on a busy answer. */
   onSessionAskAction?: (questionId: string, action: SessionAskAction) => void;
-  /** Optional note on how to get "Ask this session" (askSessionSetupHint). */
   askSessionSetupHint?: string | null;
-  /** Start a new chat: clear the tab so the next question starts a fresh AI
-   *  session (#1981). Absent: no button. */
   onNewChat?: () => void;
 }
 
@@ -74,14 +69,10 @@ export const AITab: React.FC<AITabProps> = ({
   // A session that is never interrupted (T3 Code): Stop only stops listening.
   const listenOnly = hasNonInterruptibleSession(aiProviders);
   const scrollRef = useRef<HTMLDivElement>(null);
-  // File chat groups default to expanded; this tracks the ones the user has
-  // explicitly collapsed (inverted set), so a freshly-shown file's chat is
-  // visible without a click.
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
   const [generalInput, setGeneralInput] = useState('');
   const [highlightFilePath, setHighlightFilePath] = useState<string | null>(null);
 
-  // Group messages by file
   const { fileGroups, generalMessages } = useMemo(() => {
     const grouped = new Map<string, AIChatEntry[]>();
     const general: AIChatEntry[] = [];
@@ -110,7 +101,6 @@ export const AITab: React.FC<AITabProps> = ({
     return { fileGroups, generalMessages: general };
   }, [messages]);
 
-  // Navigating to a file re-expands its group even if the user had collapsed it.
   useEffect(() => {
     if (activeFilePath) {
       setCollapsedFiles(prev => {
@@ -122,7 +112,6 @@ export const AITab: React.FC<AITabProps> = ({
     }
   }, [activeFilePath]);
 
-  // Scroll to specific question and flash-highlight its file group header
   useEffect(() => {
     if (!scrollToQuestionId || !scrollRef.current) return;
 
@@ -146,7 +135,6 @@ export const AITab: React.FC<AITabProps> = ({
     }
   }, [scrollToQuestionId]);
 
-  // Auto-scroll when new messages arrive or the latest response streams in.
   const latestMessage = messages[messages.length - 1];
   const latestResponseText = latestMessage?.response.text ?? '';
   useEffect(() => {
@@ -170,7 +158,6 @@ export const AITab: React.FC<AITabProps> = ({
   const handleNewChat = useCallback(() => {
     if (!onNewChat) return;
     onNewChat();
-    // The button leaves with the messages; keep focus in the tab.
     requestAnimationFrame(() => {
       rootRef.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus();
     });
@@ -182,7 +169,6 @@ export const AITab: React.FC<AITabProps> = ({
     setGeneralInput('');
   };
 
-  // Empty state
   if (messages.length === 0 && !isCreatingSession) {
     return (
       <div ref={rootRef} className="flex flex-col h-full">
@@ -228,7 +214,7 @@ export const AITab: React.FC<AITabProps> = ({
           </div>
         )}
 
-        {/* File-grouped questions */}
+        {}
         {fileGroups.map(({ filePath, messages: fileMessages }) => {
           const isExpanded = !collapsedFiles.has(filePath);
           const basename = filePath.split('/').pop() || filePath;
@@ -261,7 +247,7 @@ export const AITab: React.FC<AITabProps> = ({
           );
         })}
 
-        {/* General questions */}
+        {}
         {generalMessages.length > 0 && (
           <div className="mb-3 mt-2">
             {fileGroups.length > 0 && (
@@ -281,8 +267,7 @@ export const AITab: React.FC<AITabProps> = ({
       </div>
       </OverlayScrollArea>
 
-      {/* Pending permission requests — pinned just above the input/config bar
-          so the user sees them right where they act, not buried in the scroll. */}
+      {}
       {permissionRequests.filter(p => !p.decided).length > 0 && (
         <div className="border-t border-border/50 p-2 space-y-2">
           {permissionRequests.filter(p => !p.decided).map(perm => (
@@ -300,7 +285,7 @@ export const AITab: React.FC<AITabProps> = ({
         </div>
       )}
 
-      {/* Config bar */}
+      {}
       <AIConfigBar
         providers={aiProviders}
         selectedProviderId={aiConfig?.providerId ?? null}
@@ -313,13 +298,12 @@ export const AITab: React.FC<AITabProps> = ({
         setupHint={askSessionSetupHint}
       />
 
-      {/* General question input */}
+      {}
       {onAskGeneral && <GeneralInput value={generalInput} onChange={setGeneralInput} onSubmit={handleGeneralSubmit} disabled={isStreaming} isStreaming={isStreaming} onStop={onStop} observationOnly={listenOnly} />}
     </div>
   );
 };
 
-/** General question input pinned at bottom — textarea grows upward on multi-line */
 const GeneralInput: React.FC<{
   value: string;
   onChange: (v: string) => void;
@@ -335,7 +319,6 @@ const GeneralInput: React.FC<{
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    // Cap at ~6 lines (6 * 16px line-height + padding)
     el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
   }, []);
 
@@ -389,7 +372,6 @@ const GeneralInput: React.FC<{
   );
 };
 
-/** Single Q&A pair — memoized to avoid re-parsing markdown on sibling updates */
 const QAPair = memo<{
   question: AIChatEntry['question'];
   response: AIChatEntry['response'];
@@ -405,7 +387,7 @@ const QAPair = memo<{
 
   return (
     <div data-question-id={question.id} className="flex flex-col gap-1.5">
-      {/* Question */}
+      {}
       <div className="p-2.5 rounded-lg border border-transparent hover:bg-muted/30 transition-colors">
         <div className="flex items-center justify-between mb-1">
           <div className="flex items-center gap-1.5">
@@ -428,7 +410,7 @@ const QAPair = memo<{
         <p className="text-xs text-foreground/80">{question.prompt}</p>
       </div>
 
-      {/* Response */}
+      {}
       <div className="group relative p-2.5 rounded-lg border border-border/50 bg-popover/50 hover:bg-muted/30 transition-colors">
         {response.error ? (
           <>

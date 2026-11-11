@@ -38,9 +38,6 @@ const { DiffViewer } = await import('./DiffViewer');
 
 const hasDom = typeof document !== 'undefined';
 
-// The shape the review core emits for a file it declined to read: rename
-// metadata, no hunks. Before the fix a renamed-and-edited file could land here
-// purely because its size probe could not find the worktree blob.
 const STUB_PATCH = [
   'diff --git a/src/Card.tsx b/src/Panel.tsx',
   'similarity index 94%',
@@ -71,8 +68,6 @@ const TEXT_PATCH = [
   '',
 ].join('\n');
 
-// The same shape PLUS the size-cap marker. The specific notice owns this one,
-// so exactly one explanation must appear on the card.
 const MARKED_OVERSIZED_STUB = [
   'diff --git a/assets/blob.pack b/assets/blob.pack',
   OVERSIZED_REVIEW_STUB_MARKER,
@@ -110,7 +105,6 @@ describe.if(hasDom)('contentless binary card presentation (DOM)', () => {
   const originalFetch = globalThis.fetch;
 
   async function render(patch: string, filePath: string) {
-    // There is no expandable content for these shapes; keep the lookup inert.
     globalThis.fetch = (async () =>
       new Response(JSON.stringify({ oldContent: null, newContent: null }), {
         headers: { 'content-type': 'application/json' },
@@ -155,8 +149,6 @@ describe.if(hasDom)('contentless binary card presentation (DOM)', () => {
   });
 
   test('a marker-carrying stub is explained once, by the specific notice', async () => {
-    // Specific beats general: the size-cap notice knows WHY the body is empty,
-    // so the fallback must stand down rather than stack a second line on it.
     const el = await render(MARKED_OVERSIZED_STUB, 'assets/blob.pack');
     expect(el.querySelectorAll(OVERSIZED_NOTICE_SELECTOR).length).toBe(1);
     expect(el.querySelectorAll(NOTICE_SELECTOR).length).toBe(0);

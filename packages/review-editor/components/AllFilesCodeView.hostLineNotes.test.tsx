@@ -1,14 +1,3 @@
-/**
- * The host's own notes under lines (`hostLineNotes`: the Inbox PR page's threads from the forge). What regresses: notes
- * that arrive after the diff drew never showing (the page reads the forge after the diff); a note drawn below the
- * person's own comment on its line; a note turned into an annotation the review counts; every file drawn again when
- * one file's thread changed; a host that passes no notes seeing any change. And the notes on whole files
- * (`hostFileNotes`): drawn under the file's header, above the person's own comments on the file, never on a line or
- * as an annotation; only the file whose note moved drawn again; a host with none seeing no change.
- *
- * CodeView is a stand-in that keeps the items it is given and records each `updateItem`; `renderAnnotation` is the
- * real one AllFilesCodeView hands it.
- */
 import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act, useCallback, useImperativeHandle, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -33,14 +22,11 @@ mock.module('../hooks/usePierreTheme', () => ({
 
 type Ann = { side: string; lineNumber: number; metadata: { annotationId: string; kind?: string } };
 type Item = { id: string; type: 'diff'; version?: number; annotations: Ann[]; fileDiff: unknown };
-/** The items as CodeView holds them, by id. */
 let items = new Map<string, Item>();
-/** The ids of each `updateItem`, in order. */
 let updates: string[] = [];
 // Called as CodeView does since @pierre/diffs 1.6: (annotation, fileDiff, item).
 let renderAnnotation: (annotation: Ann, fileDiff: unknown, item: Item) => React.ReactNode = () => null;
 let renderCustomHeader: (item: Item) => React.ReactNode = () => null;
-/** The options CodeView was last given. */
 let viewOptions: { itemMetrics?: { diffHeaderHeight?: number } } = {};
 
 mock.module('@pierre/diffs/react', () => ({
@@ -201,13 +187,11 @@ describe.if(hasDom)("the host's notes under lines", () => {
 
 const fileNote = (id: string, filePath: string, key = id): HostFileNote => ({ id, filePath, key, render: () => <b data-file-note={id}>{key}</b> });
 const mineOnFile: CodeAnnotation = { id: 'mine-file', type: 'comment', scope: 'file', filePath: 'a.ts', lineStart: 0, lineEnd: 0, side: 'new', text: 'my words on the file', createdAt: 2 };
-/** The item's header as the slot would draw it, in the DOM. */
 async function header(id: string): Promise<string> {
   const box = document.createElement('div');
   document.body.appendChild(box);
   const slot = createRoot(box);
   await act(async () => slot.render(<>{renderCustomHeader(items.get(id)!)}</>));
-  // Generated ids differ from one drawing to the next.
   const markup = box.innerHTML.replace(/base-ui-[^"]+/g, 'id');
   await act(async () => slot.unmount());
   box.remove();

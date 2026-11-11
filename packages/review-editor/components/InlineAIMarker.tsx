@@ -1,7 +1,6 @@
 /**
- * Small sparkle badge injected into the diff gutter when the user has asked
- * an AI question about specific lines. Rendered inside @pierre/diffs via
- * the DiffViewer's widget slot — clicking it scrolls to the Q&A in the sidebar.
+ * Rendered inside @pierre/diffs via the DiffViewer's widget slot — clicking it scrolls to the Q&A
+ * in the sidebar.
  */
 import React from 'react';
 import { SparklesIcon } from '@plannotator/ui/components/SparklesIcon';

@@ -100,7 +100,6 @@ describe.if(hasDom)('the guide overview diagram in code review', () => {
     const box = await mountGuide(FIXTURE_V2_HTML, urls);
     expect(box?.textContent).toContain('does not draw');
     await mountGuide(FIXTURE_V1_LOCAL, urls);
-    // Nothing asked for the engine: a later load is this test's first import.
     await loadDiagramEngine(urls, async () => {
       imports += 1;
       return { apiVersion: 1, DiagramFence: () => null };

@@ -7,17 +7,11 @@ import { useScrollMemory } from '../hooks/useScrollMemory';
 import { findSymbolLine, type JumpCrumb as JumpCrumbData, type RevealTarget } from '../utils/explorerNavigation';
 import { JumpCrumb } from './JumpCrumb';
 
-/** Code navigation's tokens in a whole-file view (where F12 looks, Cmd+click). */
 export interface FileTokenHandlers {
   onTokenTarget?: (kind: 'enter' | 'leave' | 'click', target: CodeFileTokenTarget) => void;
   onTokenNavigate?: (target: CodeFileTokenTarget) => void;
 }
 
-/**
- * The line a jump lands on in the text shown: code navigation's line, moved
- * to where the symbol is in this revision (`findSymbolLine`), else the top
- * with `missed` set.
- */
 export function useRevealedLine(
   filePath: string,
   content: string | null,
@@ -42,13 +36,11 @@ export const RevealMissedNote: React.FC<{ missed: { symbol: string; line: number
   </div>
 );
 
-/** "at working tree", "at index", "at a1b2c3d". */
 export function revisionPhrase(revision: RepoRevisionInfo | undefined): string | null {
   if (!revision) return null;
   return `at ${revision.label}`;
 }
 
-/** The lines a comment is drawn under in a whole-file view: new side, line scope, not outdated. */
 export function wholeFileAnnotations(annotations: readonly CodeAnnotation[], filePath: string): CodeAnnotation[] {
   return annotations.filter(
     (a) => a.filePath === filePath && (a.scope ?? 'line') === 'line' && a.side === 'new' && !a.outdated,
@@ -64,7 +56,6 @@ export const FileTextState: React.FC<{ children: React.ReactNode }> = ({ childre
 export interface RepoFileViewProps {
   filePath: string;
   snapshotId?: string;
-  /** The preview tab (italic, replaced by the next single click). */
   preview: boolean;
   annotations: readonly CodeAnnotation[];
   selectedAnnotationId: string | null;
@@ -72,22 +63,13 @@ export interface RepoFileViewProps {
   onEditAnnotation: (id: string, text: string | undefined) => void;
   onDeleteAnnotation: (id: string) => void;
   onSelectAnnotation: (id: string | null) => void;
-  /** A jump to a line of this file. */
   revealTarget?: RevealTarget | null;
-  /** The jump that opened this file, shown with the way back. */
   crumb?: JumpCrumbData | null;
   onNavigateBack?: () => void;
   tokens?: FileTokenHandlers;
-  /** How the file is read (default `fetch` of `/api/repo-file`); a host serving it elsewhere maps the URL. */
   fetchImpl?: typeof fetch;
 }
 
-/**
- * A file the review does not change, whole and read-only (approved design
- * record "review-explorer", step 2): its path, "Not in this review" and the
- * revision it was read at, then the file with line and range comments.
- * Comments here are on lines outside the diff (`outsideDiff`).
- */
 export const RepoFileView: React.FC<RepoFileViewProps> = ({
   filePath,
   snapshotId,
@@ -111,7 +93,6 @@ export const RepoFileView: React.FC<RepoFileViewProps> = ({
   const dir = slash === -1 ? '' : filePath.slice(0, slash + 1);
   const name = slash === -1 ? filePath : filePath.slice(slash + 1);
   const revision = text.status === 'ready' || text.status === 'empty' ? text.revision : undefined;
-  // A jump's line wins over where the tab was left.
   const scroll = useScrollMemory(`${snapshotId ?? ''}:${filePath}`, text.status === 'ready' && !revealLine);
 
   return (

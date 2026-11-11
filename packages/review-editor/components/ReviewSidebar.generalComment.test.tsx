@@ -38,9 +38,6 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 let added: string[] = [];
 
-/** First call mounts; later calls re-render the SAME root, so parent state
- *  (the lifted composer draft) survives — exactly the SSE placement-flip
- *  scenario the L2 test drives. */
 let addResult: boolean | void = undefined;
 
 async function renderSidebar(annotations: CodeAnnotation[]): Promise<void> {
@@ -118,7 +115,6 @@ describe.if(hasDom)("review sidebar + General comment", () => {
     await act(async () => commitButton()!.click());
 
     expect(added).toEqual(["Split this into two PRs."]);
-    // Committed → the composer closes and the draft is cleared.
     expect(noteInput()).toBeNull();
   });
 
@@ -129,7 +125,6 @@ describe.if(hasDom)("review sidebar + General comment", () => {
 
     await openComposer();
     await typeNote("overall: needs a migration plan");
-    // Mod+Enter commits too — same field contract as the decision composers.
     await act(async () => {
       noteInput()!.dispatchEvent(
         new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true, cancelable: true }),
@@ -156,23 +151,16 @@ describe.if(hasDom)("review sidebar + General comment", () => {
     await act(async () => commitButton()!.click());
     expect(added).toEqual([]);
     expect(noteInput()).not.toBeNull();
-    // The decision-composer contract: an empty commit is answered by focus,
-    // not a disabled button.
     expect(document.activeElement).toBe(noteInput());
   });
 
   test("a placement flip mid-draft keeps the composer open with its text", async () => {
-    // The SSE scenario: an external annotation lands while the reviewer is
-    // typing in the empty-state composer — totalCount 0→1 unmounts that
-    // instance and mounts the section-header one. The lifted parent state
-    // must carry the draft across; losing it here throws away a half-typed
-    // review-level comment through no action of the reviewer's.
     await renderSidebar([]);
     await openComposer();
     await typeNote("the empty-state draft");
 
     await renderSidebar([LINE_COMMENT]);
-    expect(noteInput()).not.toBeNull(); // still open, now in the General header
+    expect(noteInput()).not.toBeNull();
     expect(noteInput()!.value).toBe("the empty-state draft");
     expect(added).toEqual([]);
   });

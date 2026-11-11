@@ -94,12 +94,8 @@ export const WorktreePicker: React.FC<WorktreePickerProps> = ({
           <Popover.Popup
             className="w-72 bg-popover text-popover-foreground border border-border rounded shadow-lg overflow-hidden origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0"
             initialFocus={() => {
-              // Only override the default focus when the search input is
-              // actually rendered — otherwise arrow keys would bubble out to
-              // the file-tree nav. For short worktree lists, returning null
-              // falls back to Base UI's default focus (the popup's first
-              // tabbable); undefined would mean "do nothing" and leave focus
-              // on the trigger.
+              // Only override the default focus when the search input is actually rendered —
+              // otherwise arrow keys would bubble out to the file-tree nav.
               return searchRef.current;
             }}
           >

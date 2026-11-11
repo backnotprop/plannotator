@@ -8,38 +8,26 @@ import {
 } from '@plannotator/ui/components/ui/dialog';
 import { CopyButton } from '../CopyButton';
 
-/** What `/api/guide/:jobId/share-info` reports about a link that already exists. */
 export interface GuideShareExisting {
   url: string;
   createdAt: string;
 }
 
-/** The one-time response of `POST /api/guide/:jobId/share`. */
 export interface GuideShareCreated {
   id: string;
   url: string;
   deleteToken: string;
   bytes: number;
-  /**
-   * Whether the server wrote the link (and its delete token) to the saved
-   * guide, so Remove link works here later. False when the guide has no
-   * persisted envelope (guide history off): then only the token removes it.
-   */
   recorded: boolean;
 }
 
 interface GuideShareDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  /** Live guide job id or `saved:{id}`. */
   jobId: string;
-  /** Size of the portable export (guide + diff), from `/export-info`. */
   bytes: number;
-  /** Base URL of the share service, from `/share-info`. */
   serviceUrl: string;
-  /** Link the server already remembers for this guide, if any. */
   existing: GuideShareExisting | null;
-  /** Result of a Create earlier in this guide view; owned by the caller so it outlives close/reopen. */
   created: GuideShareCreated | null;
   onCreated: (share: GuideShareCreated) => void;
   onRemoved: () => void;
@@ -72,10 +60,6 @@ function parseCreated(input: unknown): GuideShareCreated | null {
   };
 }
 
-/**
- * Reads the `{ error }` body the review server sends on 403/404/502 so the
- * dialog can show the server's own words; falls back to the status line.
- */
 async function readServerError(res: Response): Promise<string> {
   try {
     const data = (await res.json()) as unknown;
@@ -84,7 +68,6 @@ async function readServerError(res: Response): Promise<string> {
       if (typeof message === 'string' && message.trim()) return message;
     }
   } catch {
-    // Not JSON (or empty). The status line is the best we have.
   }
   return `Request failed (HTTP ${res.status})`;
 }
@@ -101,7 +84,6 @@ interface LinkRowProps {
   mono?: boolean;
 }
 
-/** One labelled value with its own Copy button. */
 function LinkRow({ label, value, testId, mono = true }: LinkRowProps) {
   return (
     <div className="flex flex-col gap-1">
@@ -120,20 +102,6 @@ function LinkRow({ label, value, testId, mono = true }: LinkRowProps) {
   );
 }
 
-/**
- * "Create share link" dialog for a Guided Review. Nothing is uploaded until
- * the user clicks Create: the dialog first states exactly what goes to the
- * share service (the guide plus the diff it describes, at the size the export
- * would be) and that the upload is end-to-end encrypted by default with the
- * key carried in the link fragment. "Allow link previews" opts into storing
- * the guide unencrypted (`{ public: true }`) so the hosted page can carry a
- * title and og: tags. After Create the URL and the delete token are shown,
- * each with Copy; the token is returned by the server exactly once, so this
- * dialog is the only place it can be copied from, and the caller keeps that
- * result so a reopen shows it again instead of a second Create. When the
- * server already remembers a link for this guide the dialog shows it with
- * Remove link.
- */
 export const GuideShareDialog: React.FC<GuideShareDialogProps> = ({
   isOpen,
   onClose,
@@ -149,16 +117,12 @@ export const GuideShareDialog: React.FC<GuideShareDialogProps> = ({
   const [busy, setBusy] = useState<'create' | 'remove' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const encoded = encodeURIComponent(jobId);
-  // An existing link names its own host (it may have been created against a
-  // different share URL than the one configured now); a new upload goes to
-  // the configured one.
   const host = serviceHost(existing && !created ? existing.url : serviceUrl);
 
   useEffect(() => {
     if (!isOpen) return;
     setBusy(null);
     setError(null);
-    // The checkbox describes the link once created, so it only resets with the form.
     if (!created) setPublicPreview(false);
   }, [isOpen, created]);
 

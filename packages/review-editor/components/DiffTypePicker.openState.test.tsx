@@ -38,7 +38,6 @@ afterEach(async () => {
 });
 
 const OPTIONS = [
-  // The baked label getGitContext computed from the detected default.
   { id: 'since-base', label: 'All changes since origin/main' },
   { id: 'uncommitted', label: 'Uncommitted changes' },
 ];
@@ -72,8 +71,6 @@ describe.if(hasDom)('DiffTypePicker since-base label (DOM)', () => {
   });
 
   test('falls back to the baked label without a base picker or live base', async () => {
-    // Without a live base (jj sessions, no picker) the baked label must
-    // survive — an unconditional rewrite would render "since undefined".
     const el = await mount(
       <DiffTypePicker
         options={OPTIONS}

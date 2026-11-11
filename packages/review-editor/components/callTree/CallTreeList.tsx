@@ -15,19 +15,12 @@ export interface CallTreeListItem {
 
 type SharedProps = Pick<CallTreeProps, 'onOpen' | 'canOpen' | 'loadNodeSource' | 'onAnnotateTargets'>;
 
-/**
- * One or more Call trees under one search, the Paths view's search: the same
- * field, words, count, Enter / Shift+Enter, Escape, and Cmd/Ctrl+F while the
- * host surface owns the foreground. Matches are numbered across the trees in
- * order, and next / previous moves the current row of the tree holding it.
- */
 export function CallTreeList({
   trees,
   findShortcutActive = false,
   ...shared
 }: SharedProps & {
   readonly trees: readonly CallTreeListItem[];
-  /** True only while the host surface is in the foreground (the Dock panel is active). */
   readonly findShortcutActive?: boolean;
 }) {
   const [searchOpen, setSearchOpen] = useState(false);
@@ -53,7 +46,6 @@ export function CallTreeList({
     if (total > 0 && currentIndex >= total) setCurrentIndex(total - 1);
   }, [currentIndex, total]);
 
-  // Which tree holds the current match, and its index there.
   const active = useMemo(() => {
     if (!searching || total === 0) return null;
     let remaining = currentIndex;

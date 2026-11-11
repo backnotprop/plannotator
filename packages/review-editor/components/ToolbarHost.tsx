@@ -48,15 +48,12 @@ interface ToolbarHostProps {
     conventionalLabel?: ConventionalLabel | null,
     decorations?: ConventionalDecoration[],
   ) => void;
-  // AI props (optional — DiffViewer and external source-selection bridges wire these)
   aiAvailable?: boolean;
   onAskAI?: (question: string) => void;
   isAILoading?: boolean;
   onViewAIResponse?: (questionId?: string) => void;
   aiHistoryMessages?: AIChatEntry[];
-  /** Selected lines can only be asked about (no comments): the toolbar is the Ask box. */
   askOnly?: boolean;
-  /** A host's choices before the comment box (Comment · Ask · Show me). Absent: the comment box opens at once. */
   selectionActions?: DiffSelectionActions;
 }
 
@@ -93,10 +90,6 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
     chooser: !!selectionActions && !askOnly,
   });
 
-  // A drag over the diff becomes a line range (or a token) and the composer's
-  // textarea takes the focus, so the browser's copy has nothing: Ctrl+C copies
-  // the selected lines' code (the clicked token's text) as plain text. Text
-  // selected in the textarea, or anywhere in the page, still copies natively.
   const selectedCode = toolbar.toolbarState?.tokenSelection?.fullText || toolbar.selectedOriginalCode;
   useHighlightCopy(toolbar.toolbarState ? selectedCode : null);
 
@@ -104,9 +97,6 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
   const conventionalLabelsJson = useConfigValue('conventionalLabels');
   const enabledLabels = useMemo(() => getEnabledLabels(conventionalLabelsJson), [conventionalLabelsJson]);
 
-  // Replaces the parent's `onMouseMove={toolbar.handleMouseMove}` on its scroll
-  // container — the hook only stashes clientX/Y for toolbar placement, so a
-  // window-level listener is functionally equivalent for that purpose.
   const handleMouseMove = toolbar.handleMouseMove;
   useEffect(() => {
     window.addEventListener('mousemove', handleMouseMove);
@@ -183,7 +173,6 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
         toolbarRef={toolbar.toolbarRef}
         position={toolbar.toolbarState.position}
         range={toolbar.toolbarState.range}
-        // A picture is of the code as it is now: Show me only when both ends are on the new side (added or unchanged lines).
         actions={
           toolbar.toolbarState.range.side === 'deletions' || (toolbar.toolbarState.range.endSide ?? toolbar.toolbarState.range.side) === 'deletions'
             ? { ...selectionActions, onShowMe: undefined }

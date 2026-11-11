@@ -190,7 +190,6 @@ describe('ReviewSubmissionDialog submission outcomes', () => {
   });
 });
 
-// #1611: the dialog is where Comment vs Request changes is chosen.
 describe('ReviewSubmissionDialog review event choice', () => {
   const radio = (value: 'comment' | 'request_changes') =>
     document.querySelector<HTMLInputElement>(`[data-review-event-choice] input[value="${value}"]`);
@@ -207,7 +206,6 @@ describe('ReviewSubmissionDialog review event choice', () => {
       onActionChange: (next) => picked.push(next),
     });
     expect(radio('request_changes')?.checked).toBe(true);
-    // Frozen copy (maintainer-approved): the confirm names the event it posts.
     expect(Array.from(document.querySelectorAll('button')).some((b) => b.textContent?.trim() === 'Request Changes')).toBe(true);
     await act(async () => radio('comment')!.click());
     expect(picked).toEqual(['comment']);
@@ -220,7 +218,6 @@ describe('ReviewSubmissionDialog review event choice', () => {
     });
     const option = radio('request_changes')!;
     expect(option.disabled).toBe(true);
-    // Sentinel: the reason is wired to the disabled option, whatever its copy.
     expect(document.getElementById(option.getAttribute('aria-describedby')!)?.textContent).toBe('SENTINEL_REASON');
     expect(radio('comment')?.disabled).toBe(false);
   });

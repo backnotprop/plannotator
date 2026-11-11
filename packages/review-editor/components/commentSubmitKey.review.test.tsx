@@ -55,8 +55,6 @@ function must<T extends Element>(selector: string): T {
   return el;
 }
 
-// --- The line-comment toolbar ---
-
 function Toolbar({ onSubmit, showSuggestedCode = false }: { onSubmit: () => void; showSuggestedCode?: boolean }) {
   const [comment, setComment] = useState('');
   const [code, setCode] = useState('');
@@ -115,8 +113,6 @@ describe('review line comment toolbar: suggested code', () => {
   });
 });
 
-// --- The expanded comment dialog ---
-
 describeCommentSubmitKeys('review expanded comment dialog', async (text) => {
   let saves = 0;
   function Harness() {
@@ -139,8 +135,6 @@ describeCommentSubmitKeys('review expanded comment dialog', async (text) => {
   await typeInto(must<HTMLTextAreaElement>('[role="dialog"] textarea'), text);
   return { field: () => must('[role="dialog"] textarea'), saves: () => saves };
 }, { skip });
-
-// --- A file comment's edit box ---
 
 const FILE_COMMENT: CodeAnnotation = {
   id: 'f1',
@@ -169,8 +163,6 @@ describeCommentSubmitKeys('review file comment edit', async (text) => {
   await typeInto(must<HTMLTextAreaElement>('[data-annotation-id="f1"] textarea'), text);
   return { field: () => must('[data-annotation-id="f1"] textarea'), saves: () => edits.length };
 }, { skip });
-
-// --- The sidebar: "+ Global comment" and an outdated comment's edit box ---
 
 describeCommentSubmitKeys('review sidebar general comment', async (text) => {
   const added: string[] = [];

@@ -1,22 +1,3 @@
-/**
- * The top of the code review sidebar (approved design records
- * "review-sidebar-aligned" and, for the tabs and the sentence,
- * "review-sidebar-header", variant "sentence"): every control one click away.
- *
- *  1. Go to file, a quiet field (⌘P).
- *  2. Tree / Git status / Commits as underlined tabs (icons under 200 px),
- *     with the panel's one line under them.
- *  3. The comparison read as one sentence whose words are the controls:
- *     "All changes ⌄ since main ⌄". Each word opens its existing menu (the
- *     diff type, the base). A long base keeps its start and end
- *     ("feature/very-l…ame-for-a-stack"); the full name is the trigger's title.
- *
- * Changes N / All files N and the All files listing's state are `ScopeSwitch`,
- * the lead of the list's sticky tools row.
- *
- * One component for the three panels (FileTree, SectionsPanel, CommitsPanel),
- * fed one model built by App, so nothing moves between views.
- */
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ChevronDown, FileSearch, FolderTree, GitCommitHorizontal, Layers3 } from 'lucide-react';
 import { Tooltip } from '@plannotator/ui/components/Tooltip';
@@ -33,18 +14,12 @@ export type ReviewPanelView = 'sections' | 'commits' | 'tree';
 type ReadyRepo = Extract<RepoFilesState, { status: 'ready' }>;
 
 export interface ReviewPanelHeaderModel {
-  /** The view on screen. */
   view: ReviewPanelView;
-  /** Offer Git status (a session with since-base sections). */
   showSections: boolean;
-  /** Offer Commits (git-local and jj sessions). */
   showCommits: boolean;
   onSelectView: (view: ReviewPanelView) => void;
-  /** Changes | All files. Choosing a scope from Git status or Commits goes to the tree. */
   scope?: { value: TreeScope; onSelect: (scope: TreeScope) => void; changed: number; all?: number };
-  /** The All files listing once it is ready, for the live dot. */
   repo?: ReadyRepo | null;
-  /** The diff type menu (the tree view). */
   diff?: {
     options: DiffOption[];
     active: string;
@@ -53,7 +28,6 @@ export interface ReviewPanelHeaderModel {
     activeBase?: string | null;
     hasBasePicker: boolean;
   };
-  /** The compare target, when the active diff reads one. */
   base?: {
     availableBranches: AvailableBranches;
     selectedBase: string;
@@ -64,8 +38,6 @@ export interface ReviewPanelHeaderModel {
     recentCommits?: RecentCommit[];
   };
   onGoToFile?: () => void;
-  /** A diff search is on: the list shows results from the changes only, so
-   *  Changes | All files steps aside until it ends. */
   searching?: boolean;
 }
 
@@ -75,7 +47,6 @@ const VIEW_META: Record<ReviewPanelView, { label: string; title: string; Icon: R
   commits: { label: 'Commits', title: 'Commit history: click a commit to review its diff', Icon: GitCommitHorizontal },
 };
 
-/** Below this the view tabs become icons and the scope reads "All". */
 export const NARROW_HEADER_WIDTH = 200;
 /** Below this Go to File drops its keys. */
 const GO_TO_FILE_KEYS_WIDTH = 210;
@@ -94,7 +65,6 @@ function relativeAge(ms: number): string {
   return `${Math.round(minutes / 60)}h ago`;
 }
 
-/** "1 added, 1 edited": what changed on disk since the diff was taken. */
 function onDiskSummary(repo: ReadyRepo): string {
   const counts = { A: 0, M: 0, D: 0 };
   for (const change of Object.values(repo.onDisk)) counts[change] += 1;
@@ -109,7 +79,6 @@ function onDiskSummary(repo: ReadyRepo): string {
 
 export const PARTIAL_LISTING_TEXT = 'Part of the repository is listed (the platform stopped early).';
 
-/** "Live · updated 45s ago · 1 added, 1 edited", for the dot's tooltip. */
 function useLiveTooltip(repo: ReadyRepo | null | undefined): string | null {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -124,12 +93,6 @@ function useLiveTooltip(repo: ReadyRepo | null | undefined): string | null {
   return `Live · updated ${relativeAge(now - repo.updatedAt)}${changes ? ` · ${changes}` : ''}`;
 }
 
-/**
- * The listing's state as a dot after the All files count: green while live,
- * an amber ring for a partial listing. Decoration only: the words are the
- * tooltip, the status line under the row (partial) and the polite status
- * region (live), so the button's name stays "All files N".
- */
 const LiveDot: React.FC<{ repo: ReadyRepo | null | undefined; className?: string }> = ({ repo, className = 'inline-flex items-center' }) => {
   const text = useLiveTooltip(repo);
   if (!repo || !text) return null;
@@ -155,7 +118,6 @@ const LiveStatus: React.FC<{ repo: ReadyRepo | null | undefined }> = ({ repo }) 
   );
 };
 
-/** `aria-keyshortcuts` wants key names ("Meta+P"), not the keycaps drawn. */
 export function ariaKeyShortcut(binding: string, mac: boolean = isMac): string {
   return binding
     .split('+')
@@ -163,7 +125,6 @@ export function ariaKeyShortcut(binding: string, mac: boolean = isMac): string {
     .join('+');
 }
 
-/** The sentence's words for the active diff: a noun and, when a base applies, the word before it. */
 export function diffWords(model: Pick<ReviewPanelHeaderModel, 'view' | 'diff' | 'base'>): {
   noun: string;
   connector: string | null;
@@ -171,7 +132,6 @@ export function diffWords(model: Pick<ReviewPanelHeaderModel, 'view' | 'diff' | 
   const id = model.view === 'sections' ? 'since-base' : model.diff?.active;
   const option = model.diff?.options.find((o) => o.id === id);
   if (!model.base) {
-    // No base in the sentence: the option's own words say everything.
     if (id === 'since-base' && model.view === 'sections') return { noun: 'All changes', connector: null };
     if (id === 'since-base' && model.diff?.activeBase) return { noun: `All changes since ${displayRef(model.diff.activeBase)}`, connector: null };
     return { noun: option?.label ?? 'Changes', connector: null };
@@ -190,16 +150,10 @@ export function diffWords(model: Pick<ReviewPanelHeaderModel, 'view' | 'diff' | 
   }
 }
 
-/** The base word's monospace advance at 11.5px (0.6em, every mono face in the stack). */
 const BASE_CHAR_PX = 6.9;
 /** What the base word cannot use of the panel: the row's padding and its chevron. */
 const BASE_CHROME_PX = 44;
 
-/**
- * A long ref keeps its start and end ("feature/very-l…ame-for-a-stack"): the
- * end is what tells stacked branches apart. Sized for the base word on a line
- * of its own in a panel `width` px wide; short refs come back whole.
- */
 export function middleTruncateRef(base: string, width: number): string {
   const ref = displayRef(base);
   const max = Math.max(8, Math.floor((width - BASE_CHROME_PX) / BASE_CHAR_PX));
@@ -210,11 +164,6 @@ export function middleTruncateRef(base: string, width: number): string {
 }
 
 
-/**
- * Go to File as a quiet field at the top of the panel: a faint fill, no
- * border, shadow or key boxes. The icon sits on the panel's content edge and
- * the words on its label edge. Opens the existing palette (⌘P / Ctrl+P).
- */
 const GoToFileField: React.FC<{ onClick: () => void; showKeys: boolean }> = ({ onClick, showKeys }) => {
   const binding = resolveShortcutBindings(reviewExplorerShortcuts.shortcuts.goToFile)[0] ?? '';
   const keys = formatShortcutBindingTokens(binding);
@@ -248,7 +197,6 @@ const Chevron: React.FC<{ loading?: boolean }> = ({ loading }) =>
     <ChevronDown className="w-3 h-3 flex-shrink-0 text-muted-foreground" aria-hidden="true" />
   );
 
-/** Choosing All files from Git status goes to the tree; Changes is already on there. */
 function selectScope(model: ReviewPanelHeaderModel, scope: TreeScope) {
   if (!model.scope) return;
   if (model.view === 'sections' && scope === 'changes') return;
@@ -256,13 +204,11 @@ function selectScope(model: ReviewPanelHeaderModel, scope: TreeScope) {
   model.scope.onSelect(scope);
 }
 
-/** The scope shown as on (Git status counts as Changes; Commits shows none). */
 function shownScope(model: ReviewPanelHeaderModel): TreeScope | null {
   if (!model.scope || model.view === 'commits' || model.searching) return null;
   return model.view === 'sections' ? 'changes' : model.scope.value;
 }
 
-/** The views a session offers, in tab order. */
 function panelViews(model: ReviewPanelHeaderModel): ReviewPanelView[] {
   return [
     'tree',
@@ -271,13 +217,11 @@ function panelViews(model: ReviewPanelHeaderModel): ReviewPanelView[] {
   ];
 }
 
-/** The id of the region the view tabs control: the panel's list, below the line. */
 export const REVIEW_PANEL_BODY_ID = 'review-panel-body';
 
 /**
- * The tab panel attributes for the list under the header: a tab panel
- * labelled by the chosen tab when the header draws tabs, nothing otherwise
- * (no header, or a session with one view).
+ * The tab panel attributes for the list under the header: a tab panel labelled by the chosen tab
+ * when the header draws tabs, nothing otherwise (no header, or a session with one view).
  */
 export function reviewPanelBodyProps(model: ReviewPanelHeaderModel | undefined): {
   id?: string;
@@ -288,23 +232,8 @@ export function reviewPanelBodyProps(model: ReviewPanelHeaderModel | undefined):
   return { id: REVIEW_PANEL_BODY_ID, role: 'tabpanel', 'aria-labelledby': `review-panel-tab-${model.view}` };
 }
 
-/**
- * Each view is its own panel component, so choosing a tab unmounts the
- * header that holds it. The tab chosen is remembered here and the same tab in
- * the new panel's header takes focus when it mounts: focus stays on the tab.
- */
 let pendingTabFocus: ReviewPanelView | null = null;
 
-/**
- * Tree / Git status / Commits as underlined tabs with real tab markup
- * (tablist / tab / aria-selected / aria-controls). The keys are the standard
- * tabs pattern, handled inside the tablist only (never a page shortcut): the
- * chosen tab is the one Tab stop; Left and Right move focus between the tabs,
- * wrapping; Enter or Space chooses the focused tab (manual activation: a view
- * switch can load a diff, so an arrow never switches by itself). The tabs'
- * track is the panel's one line: above it stays the same on every tab, below
- * it belongs to the tab.
- */
 const ViewTabs: React.FC<{ model: ReviewPanelHeaderModel; views: ReviewPanelView[]; narrow: boolean }> = ({ model, views, narrow }) => {
   const listRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -319,9 +248,6 @@ const ViewTabs: React.FC<{ model: ReviewPanelHeaderModel; views: ReviewPanelView
     if (view === model.view) return;
     pendingTabFocus = view;
     model.onSelectView(view);
-    // The new panel mounts in this same update. A switch the app refused
-    // must not pull focus onto a tab later, when the view changes by another
-    // route: the wish lasts one frame.
     requestAnimationFrame(() => {
       if (pendingTabFocus === view) pendingTabFocus = null;
     });
@@ -383,18 +309,6 @@ const ViewTabs: React.FC<{ model: ReviewPanelHeaderModel; views: ReviewPanelView
   );
 };
 
-/**
- * The top of the panel (approved design record "review-sidebar-aligned";
- * the tabs and sentence from "review-sidebar-header", variant "sentence").
- * Containers start on the panel's 8 px edge, content on 16, labels on 34:
- *
- *  1. Go to file, a quiet field (⌘P).
- *  2. Tree / Git status / Commits, and the panel's one line under them.
- *  3. The comparison as one sentence: "All changes ⌄ since main ⌄".
- *
- * Changes N / All files moved down to the list's sticky tools row
- * (`ScopeSwitch`, drawn by the panel through `PanelControlsRow`).
- */
 export const ReviewPanelHeader: React.FC<{ model: ReviewPanelHeaderModel; width: number }> = ({ model, width }) => {
   const narrow = width < NARROW_HEADER_WIDTH;
   const views = panelViews(model);
@@ -464,16 +378,6 @@ export const ReviewPanelHeader: React.FC<{ model: ReviewPanelHeaderModel; width:
   );
 };
 
-/**
- * Changes N / All files, the lead of the list's sticky tools row: two pills,
- * the chosen one a quiet grey fill. All files keeps its count in its name and
- * tooltip, not on screen, and its live dot sits at its top corner: that way
- * the pills and the three tools fit on one line at the default 256 px in
- * either scope, and switching scope never moves the list. While All files is
- * on, its listing's state follows: the live dot, a visible line for a partial
- * listing, and a polite status region for a live one. Draws nothing when the
- * panel shows no scope (Commits, a search, a session without All files).
- */
 export const ScopeSwitch: React.FC<{ model: ReviewPanelHeaderModel; width: number }> = ({ model, width }) => {
   const scope = shownScope(model);
   if (!scope || !model.scope) return null;

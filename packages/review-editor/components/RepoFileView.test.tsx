@@ -1,16 +1,3 @@
-/**
- * DOM coverage for opening any file of the repository (approved design record
- * "review-explorer", step 2): the file a review does not change, whole and
- * read-only, and the Changes | Whole file switch.
- *
- * Regressions guarded:
- *  - an unchanged file not saying it is outside the review, or at which
- *    revision it was read;
- *  - a file with no text (too large, binary, gone) showing an empty pane
- *    instead of why;
- *  - the preview tab's hint missing, or shown on a kept tab;
- *  - the switch letting Whole file open where the file has none.
- */
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
