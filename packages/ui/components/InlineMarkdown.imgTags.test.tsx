@@ -13,10 +13,13 @@ const ELSEWHERE = 'https://example.com/x.png';
 const GIF = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 const served = (src: string) => `${GIF}#${encodeURIComponent(src)}`;
 
+const BADGE = 'https://badge.invalid/ci-passing.svg';
 const resolveImage: ImageResolver = (src) =>
   src.startsWith('https://github.com/user-attachments/')
     ? { kind: 'src', src: served(src) }
-    : { kind: 'unavailable', title: 'Not shown' };
+    : src === BADGE
+      ? null
+      : { kind: 'unavailable', title: 'Not shown' };
 
 const BODY = [
   '| Before | After |',
@@ -26,6 +29,8 @@ const BODY = [
   `<details><summary>Dark</summary>\n\n<img alt="Dark shot" src="${A}">\n\n</details>`,
   '',
   `Elsewhere: <img alt="Other host" src="${ELSEWHERE}">`,
+  '',
+  `Badge: <img alt="badge" src="${BADGE}">`,
 ].join('\n');
 
 describe.if(hasDom)('<img> tags in text with InlineImageTagsContext (DOM)', () => {
@@ -51,7 +56,7 @@ describe.if(hasDom)('<img> tags in text with InlineImageTagsContext (DOM)', () =
     return host;
   }
 
-  test('pictures in one table row render side by side with their sizes; one under a <details> summary too; another host is a chip', async () => {
+  test('pictures in one table row render side by side with their sizes; one under a <details> summary too; a host the resolver refuses is a chip, one it has no say on loads as written', async () => {
     const page = await render(true);
     const row = page.querySelector('tbody tr')!;
     const inRow = [...row.querySelectorAll('img')];
@@ -64,6 +69,8 @@ describe.if(hasDom)('<img> tags in text with InlineImageTagsContext (DOM)', () =
 
     expect(page.querySelector(`img[src="${ELSEWHERE}"]`)).toBeNull();
     expect([...page.querySelectorAll('[data-image-unavailable]')].map((chip) => chip.textContent)).toContain('Other host');
+    // The resolver has no say: as written, as `![badge](…)` would load.
+    expect(page.querySelector('img[alt="badge"]')?.getAttribute('src')).toBe(BADGE);
   });
 
   test('without the context a tag in a line stays text, as before', async () => {
