@@ -36,6 +36,16 @@ dialog.ib-dlg.ib-agi[open] { display: flex; flex-direction: column; }
 .ib-agi .am-own-c:hover > .am-own-x, .ib-agi .am-own-c:focus-within > .am-own-x { opacity: 1; }
 @media (hover: none) { .ib-agi .am-own-x { opacity: 1; width: 24px; height: 24px; right: -6px; top: -6px; } }
 
+/* "Animate it" (AnimateIt.tsx): under the agent's own picture, the picture, one line, one button. */
+.ib-agi-anim { flex: none; display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; background: color-mix(in oklch, var(--foreground) 3%, transparent); }
+.ib-agi-anim-pic { flex: none; width: 32px; height: 32px; object-fit: contain; }
+.ib-agi-anim-t { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.ib-agi-anim-l { font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.4; color: var(--muted-foreground); text-wrap: pretty; }
+.ib-agi-anim-e { font-size: var(--ib-fs-12-5, 12.5px); color: var(--destructive, #dc2626); }
+.ib-agi-anim-b { flex: none; display: inline-flex; align-items: center; gap: 6px; }
+.ib-agi-anim-b > img { width: 16px; height: 16px; object-fit: contain; }
+.ib-agi-anim-b[aria-busy] { cursor: progress; }
+
 /* "Sets": search, the sets, a numbered grid as wide as the dialog. */
 .am-sets { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
 .am-sets-q { width: 100%; height: 34px; padding: 0 12px; border: 0; border-radius: 8px; background: var(--muted); color: var(--foreground); font: inherit; font-size: var(--ib-fs-13-5, 13.5px); outline: none; flex: none; }
@@ -71,6 +81,9 @@ dialog.ib-dlg.ib-agi[open] { display: flex; flex-direction: column; }
   .ib-agi-head .ib-seg { order: 3; width: 100%; }
   .ib-agi-head .ib-seg-o { flex: 1; justify-content: center; height: 36px; }
   .ib-agi-drop { height: 132px; }
+  .ib-agi-anim { flex-wrap: wrap; }
+  .ib-agi-anim-t { flex-basis: calc(100% - 44px); }
+  .ib-agi-anim-b { margin-left: 44px; height: 36px; }
   .am-sets-q { height: 40px; font-size: var(--ib-fs-16-in, 16px); }
   .am-sets-tab { height: 34px; padding: 0 11px; }
   .am-sets-g { grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); }

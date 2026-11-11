@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { keepAgentFace, keepOwnPicture, removeOwnPicture, type AgentFaceRef } from './agentFaces';
 import { isOwnFace, type AgentFace } from './faceChoices';
 import { OWN_LABEL } from './FaceFan';
+import { AnimateIt } from './AnimateIt';
 import { ownIconSrc, useOwnIcons } from './ownIcons';
 
 /**
@@ -114,6 +115,7 @@ export function OwnIconsBody({ agent, face, onDone }: { agent: AgentFaceRef; fac
           ))}
         </div>
       )}
+      <AnimateIt agent={agent} face={face} onDone={onDone} />
     </div>
   );
 }
