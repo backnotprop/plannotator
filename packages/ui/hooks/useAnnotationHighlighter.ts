@@ -21,7 +21,8 @@ import { getIdentity } from '../utils/identity';
 import { annotationOwnsHighlight } from '../utils/annotationOwnsHighlight';
 import { transformPlainText } from '../utils/inlineTransforms';
 import { richCopySourceFromRange, type RichCopySource } from '../utils/richClipboard';
-import { TOUCH_PRIMARY_QUERY, TOUCH_SELECTION_SETTLE_MS } from '../utils/touchSelection';
+import { TOUCH_PRIMARY_QUERY, touchHighlightDueAt } from '../utils/touchSelection';
+import { restoreSelection, sameSelection, saveSelection, type SavedSelection } from '../utils/selectionTextOffsets';
 import type { ShelvedCommentDraft } from '../utils/commentDraftShelf';
 import { unionToolbarRect, type ToolbarRect } from '../utils/touchToolbarPlacement';
 
@@ -38,6 +39,11 @@ export interface ToolbarState {
    *  marks; a 1px anchor over an HTML frame). The touch toolbar goes below it
    *  (`AnnotationToolbar` `touchAnchorRect`). Absent: `element`'s rect. */
   getAnchorRect?: () => ToolbarRect | null;
+  /** A selection made with a finger whose END was the one moving: the touch
+   *  toolbar goes above it when there is room, clear of the end handle and of
+   *  the lines the finger may drag on to (`AnnotationToolbar` `touchSide`).
+   *  Absent: below, as before. */
+  touchSide?: 'above';
 }
 
 export interface CommentPopoverState {
@@ -1772,6 +1778,8 @@ export function useAnnotationHighlighter({
 
     /** The selection string of a drag let go outside the document, while its highlight is made. */
     let releasedOutsideQuote: string | null = null;
+    /** While the touch bridge paints a finger's selection: where its toolbar goes first (ToolbarState.touchSide). */
+    let touchSideForCreate: 'above' | undefined;
 
     highlighter.on(Highlighter.event.CREATE, ({ sources, type }: { sources: any[]; type?: string }) => {
       if (type === 'from-store') return;
@@ -1879,6 +1887,7 @@ export function useAnnotationHighlighter({
               getAnchorRect: () => unionToolbarRect(
                 marks.filter((m) => m.isConnected).flatMap((m) => Array.from(m.getClientRects())),
               ),
+              ...(touchSideForCreate ? { touchSide: touchSideForCreate } : {}),
             });
           }
         }
@@ -1898,11 +1907,32 @@ export function useAnnotationHighlighter({
     // the range it paints and quotes has to be corrected before that handler
     // runs: registered on the capture phase of the same element, and before
     // `run()` so registration order settles the at-target case too.
-    const handlePointerEndCapture = () => {
+    // The library's handler sits out one release (a listener removed during
+    // dispatch never runs) and listens again on the next task.
+    const sitOutThisRelease = () => {
+      if (!listening) return;
+      highlighter.stop();
+      listening = false;
+      window.setTimeout(() => {
+        if (disposed) return;
+        highlighter.run();
+        listening = true;
+      }, 0);
+    };
+    const handlePointerEndCapture = (event: Event) => {
       const container = containerRef.current;
       const selection = window.getSelection();
       if (!container || !selection || selection.isCollapsed || selection.rangeCount === 0) {
         pendingRangeRunsRef.current = null;
+        return;
+      }
+      // On a touch screen a finger's selection is the touch bridge's (below):
+      // highlighted once it is finished, with the selection kept. The library
+      // would paint it at the lift and take the selection away, and paint
+      // again a selection the bridge has already highlighted.
+      if (touchBridgeOwnsRelease(event, selection)) {
+        pendingRangeRunsRef.current = null;
+        sitOutThisRelease();
         return;
       }
       const range = selection.getRangeAt(0).cloneRange();
@@ -1924,18 +1954,9 @@ export function useAnnotationHighlighter({
         // card under text comments, a diagram): the selection is the
         // person's to copy. The library's own pointer-end handler paints
         // nothing for it and then removes the DOM selection anyway, so it
-        // sits this one event out (a listener removed during dispatch never
-        // runs) and listens again on the next task.
+        // sits this one event out.
         pendingRangeRunsRef.current = null;
-        if (listening) {
-          highlighter.stop();
-          listening = false;
-          window.setTimeout(() => {
-            if (disposed) return;
-            highlighter.run();
-            listening = true;
-          }, 0);
-        }
+        sitOutThisRelease();
         return;
       }
       if (isBlankQuote(selection.toString()) || !isSerializableRange(range)) {
@@ -2299,7 +2320,6 @@ export function useAnnotationHighlighter({
     containerRef.current.addEventListener('mouseup', handleMathMouseUp, true);
 
     // Mobile bridge
-    let selectionTimer: ReturnType<typeof setTimeout>;
     // The page's selection, painted as a pending highlight; false when there is none to take.
     const takeTouchSelection = (): boolean => {
       const sel = window.getSelection();
@@ -2325,16 +2345,148 @@ export function useAnnotationHighlighter({
       }
     };
     takeTouchSelectionRef.current = takeTouchSelection;
+
+    // --- Touch: a finger's selection is highlighted once it is finished, and stays selected ---
+    // The rules and their reasons: utils/touchSelection.ts. While the finger is
+    // on the screen nothing is painted; every change to the selection starts
+    // the wait again; the highlight is painted under the selection and the
+    // selection is put back over the same words (utils/selectionTextOffsets.ts),
+    // so its handles stay and a handle dragged later makes one new highlight,
+    // replacing this one, once that drag is finished too.
+    const clock = () => performance.now();
+    let touches = 0;
+    const pointersDown = new Set<number>();
+    let lastTouchAt = 0;
+    let liftAt: number | null = null;
+    let lastChangeAt = 0;
+    let restTimer: ReturnType<typeof setTimeout> | undefined;
+    /** The selection as it was put back over the highlight just painted: not painted again while it is the same. */
+    let committed: { saved: SavedSelection; sourceId: string } | null = null;
+    const fingerDown = () => touches > 0 || pointersDown.size > 0;
+    const dueAt = () => touchHighlightDueAt({ fingerDown: fingerDown(), lastTouchAt, liftAt, lastChangeAt });
+    const committedStillSelected = (selection: Selection): boolean => {
+      const root = containerRef.current;
+      if (!committed || !root) return false;
+      // Its highlight was closed, made into an annotation or replaced: the selection is new again.
+      if (pendingSourceRef.current?.id !== committed.sourceId) {
+        committed = null;
+        return false;
+      }
+      return sameSelection(root, selection, committed.saved);
+    };
+    const touchBridgeOwnsRelease = (event: Event, selection: Selection) =>
+      isTouchPrimary && !hostComposesRef.current && (event.type === 'touchend' || committedStillSelected(selection));
+    /** Which end of the selection the finger moved last: the toolbar keeps clear of it. */
+    const movedEnd = (saved: SavedSelection | null): 'start' | 'end' => {
+      const order = (s: SavedSelection) => {
+        const { offset: a } = s.anchor;
+        const { offset: f } = s.focus;
+        return a === null || f === null ? null : { start: Math.min(a, f), end: Math.max(a, f), focusAtEnd: f >= a };
+      };
+      const now = saved ? order(saved) : null;
+      if (!now) return 'end';
+      const before = committed ? order(committed.saved) : null;
+      if (before && now.start !== before.start && now.end === before.end) return 'start';
+      if (before && now.end !== before.end) return 'end';
+      return now.focusAtEnd ? 'end' : 'start';
+    };
+    const commitTouchSelection = () => {
+      const root = containerRef.current;
+      const selection = window.getSelection();
+      if (!root || !selection || selection.isCollapsed || selection.rangeCount === 0) return;
+      if (committedStillSelected(selection)) return;
+      const saved = saveSelection(root, selection);
+      const before = pendingSourceRef.current;
+      touchSideForCreate = movedEnd(saved) === 'end' ? 'above' : undefined;
+      let took = false;
+      try {
+        took = takeTouchSelection();
+      } finally {
+        touchSideForCreate = undefined;
+      }
+      const created = pendingSourceRef.current;
+      // Nothing painted, or painted straight into an annotation (redline): nothing to keep selected.
+      if (!took || !saved || !created || created === before || typeof created.id !== 'string') {
+        committed = null;
+        return;
+      }
+      if (!restoreSelection(root, selection, saved)) {
+        committed = null;
+        return;
+      }
+      const kept = saveSelection(root, selection);
+      committed = kept ? { saved: kept, sourceId: created.id } : null;
+    };
+    const armTouchHighlight = () => {
+      clearTimeout(restTimer);
+      if (disposed || hostComposesRef.current) return;
+      restTimer = setTimeout(onTouchRest, Math.max(0, dueAt() - clock()));
+    };
+    const onTouchRest = () => {
+      restTimer = undefined;
+      if (disposed || hostComposesRef.current) return;
+      // A finger went down, or the selection changed, since this was armed.
+      if (dueAt() > clock()) {
+        armTouchHighlight();
+        return;
+      }
+      commitTouchSelection();
+    };
     const handleSelectionChange = isTouchPrimary
       ? () => {
-          clearTimeout(selectionTimer);
-          if (hostComposesRef.current) return;
-          selectionTimer = setTimeout(takeTouchSelection, TOUCH_SELECTION_SETTLE_MS);
+          if (hostComposesRef.current) {
+            clearTimeout(restTimer);
+            return;
+          }
+          const selection = window.getSelection();
+          if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+            // Nothing selected: nothing to paint, and a later selection of the same words is new.
+            clearTimeout(restTimer);
+            committed = null;
+            return;
+          }
+          lastChangeAt = clock();
+          armTouchHighlight();
         }
       : null;
+    /** A finger is up when the last one lifts; a lift (not a cancel) is the person letting go. */
+    const fingersChanged = (wasDown: boolean, lifted: boolean) => {
+      if (!wasDown || fingerDown()) return;
+      if (lifted) liftAt = lastTouchAt;
+      armTouchHighlight();
+    };
+    const handleTouch = (event: TouchEvent) => {
+      lastTouchAt = clock();
+      const wasDown = fingerDown();
+      touches = event.touches?.length ?? 0;
+      // The touch list is every finger on the screen: no pointer is still down without one.
+      if (touches === 0) pointersDown.clear();
+      fingersChanged(wasDown, event.type === 'touchend');
+    };
+    const handlePointer = (event: PointerEvent) => {
+      if (event.type === 'pointermove' && !pointersDown.has(event.pointerId)) return;
+      lastTouchAt = clock();
+      const wasDown = fingerDown();
+      if (event.type === 'pointerdown') pointersDown.add(event.pointerId);
+      else if (event.type !== 'pointermove') pointersDown.delete(event.pointerId);
+      fingersChanged(wasDown, event.type === 'pointerup');
+    };
+    /** The page put away (another app, another tab): no finger is on it any more. */
+    const forgetFingers = () => {
+      const wasDown = fingerDown();
+      touches = 0;
+      pointersDown.clear();
+      fingersChanged(wasDown, false);
+    };
+    const TOUCH_EVENTS = ['touchstart', 'touchmove', 'touchend', 'touchcancel'] as const;
+    const POINTER_EVENTS = ['pointerdown', 'pointermove', 'pointerup', 'pointercancel'] as const;
+    const watching = { capture: true, passive: true } as const;
 
     if (handleSelectionChange) {
       document.addEventListener('selectionchange', handleSelectionChange);
+      for (const type of TOUCH_EVENTS) document.addEventListener(type, handleTouch, watching);
+      for (const type of POINTER_EVENTS) document.addEventListener(type, handlePointer, watching);
+      window.addEventListener('blur', forgetFingers);
     }
 
     // Visible drafts waiting from another mount of this document come back as draft marks.
@@ -2346,8 +2498,11 @@ export function useAnnotationHighlighter({
 
     return () => {
       if (handleSelectionChange) {
-        clearTimeout(selectionTimer);
+        clearTimeout(restTimer);
         document.removeEventListener('selectionchange', handleSelectionChange);
+        for (const type of TOUCH_EVENTS) document.removeEventListener(type, handleTouch, watching);
+        for (const type of POINTER_EVENTS) document.removeEventListener(type, handlePointer, watching);
+        window.removeEventListener('blur', forgetFingers);
       }
       containerRef.current?.removeEventListener('mousedown', handleMathMouseDown, true);
       containerRef.current?.removeEventListener('mouseup', handleMathMouseUp, true);
