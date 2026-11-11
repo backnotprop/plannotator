@@ -1,25 +1,3 @@
-/**
- * Context notes in the Inbox's code review (issue #2588, approval
- * "inbox-context-notes", take Line): one model for every writer's notes.
- *
- * A note is an agent's words on lines of the diff, never the person's comment:
- * it is not a `CodeAnnotation`, so nothing has to filter it out of the comments
- * panel, the count, the draft, the verdict or a post. The diff draws notes
- * through review-editor's `contextNotes` seam (their own line annotations).
- *
- * Where notes come from (each read where it already is, nothing new stored):
- * - `guide`: the guided review's author, `notes` on its guide's diff references (snapshot v4);
- * - `risk`: a high-risk judgment's places (`InboxPullRiskJudgment.where`), on the PR's diff;
- * - `thread`: a `:::note path#L…` block in a message the thread's agent sent (core `inboxNoteBlocks`).
- *   An Ask's answer is never pinned by itself: it stays in the thread (the owner, 2026-11-07);
- * - `picture`: a Show me board's part that points at code (`data-code`), on its lines.
- *
- * A note written on an earlier review of the thread lands where its lines are
- * now (Show me's rule, `earlierLinesNow`): the same text, moved or not, keeps
- * the note fresh; text that changed, but whose place is still known, makes it
- * stale ("The code here changed after this answer"); a place not known draws
- * nothing in the diff.
- */
 import { diffHunkLines, isLineRangeInPatch } from '@plannotator/core/diff-files';
 import type { GuideSnapshot } from '@plannotator/core/guide-format';
 import { inboxNoteBlocks, type InboxNoteSide } from '@plannotator/core/inbox-context-notes';
@@ -36,51 +14,35 @@ export interface ContextNote {
   side: InboxNoteSide;
   lineStart: number;
   lineEnd: number;
-  /** The agent's words: plain text, never markup. */
   text: string;
-  /** guide, thread, picture: the agent's name. */
   agent?: string;
-  /** risk: the level (always high) and the person's own rule the lines touch, when the agent named one. */
   level?: 'high';
   rule?: string;
-  /** thread: what the person said that the message answers (its first words), when it answers one; when it came. */
   asked?: string;
   at?: string;
-  /** thread: the message that carries the block. */
   message?: string;
-  /** picture: the board, its title and the part's name. */
   picture?: { board: string; title: string; part: string };
-  /** The code changed after the note was written: the round it was written on and the lines it named then. */
   stale?: { round: number; lines: [number, number] };
 }
 
-/** A file of a review, as the diff draws it. */
 export interface NoteFile {
   path: string;
   patch: string;
 }
 
-/**
- * The writer in words: what tells a review note, a risk, the thread agent's note and a picture apart (never color
- * alone). The thread agent's note is labelled with that agent's name as the thread shows it ("Claude Code"; the
- * owner, q-38221c8b), and the thread's own fallback when none is known.
- */
 export function writerWord(note: Pick<ContextNote, 'writer' | 'agent'>): string {
   if (note.writer === 'thread') return note.agent || agentName(null);
   return note.writer === 'guide' ? 'Review note' : note.writer === 'risk' ? 'Risk' : 'Picture';
 }
 
-/** "16–18", or "5". */
 export function rangeWord(lines: readonly [number, number]): string {
   return lines[0] === lines[1] ? `${lines[0]}` : `${lines[0]}–${lines[1]}`;
 }
 
-/** A path's last part. */
 export function baseName(path: string): string {
   return path.slice(path.lastIndexOf('/') + 1);
 }
 
-/** A file's lines on one side as the patch shows them (`new`: context and additions; `old`: context and removals). */
 export function sideLines(patch: string, side: InboxNoteSide): Map<number, string> {
   const out = new Map<number, string>();
   for (const hunk of diffHunkLines(patch) ?? []) {
@@ -92,18 +54,15 @@ export function sideLines(patch: string, side: InboxNoteSide): Map<number, strin
   return out;
 }
 
-/** Whether a note's lines are in this file's diff, on its side, inside one hunk. */
 function inDiff(files: readonly NoteFile[], file: string, side: InboxNoteSide, start: number, end: number): boolean {
   const patch = files.find((f) => f.path === file)?.patch;
   return patch !== undefined && isLineRangeInPatch(patch, start, end, side);
 }
 
-/** Whether a note is on a place the review was opened at: its file, its side, and that line inside its lines. */
 export function noteHolds(note: Pick<ContextNote, 'file' | 'side' | 'lineStart' | 'lineEnd'>, at: { path: string; line: number; side: InboxNoteSide }): boolean {
   return note.file === at.path && note.side === at.side && at.line >= note.lineStart && at.line <= note.lineEnd;
 }
 
-/** The guided review's author's notes, from its snapshot (version 4). A note outside the diff is left out. */
 export function guideNotes(snapshot: Pick<GuideSnapshot, 'guide'>, files: readonly NoteFile[], agent: string): ContextNote[] {
   const out: ContextNote[] = [];
   snapshot.guide.sections.forEach((section, i) =>
@@ -118,7 +77,6 @@ export function guideNotes(snapshot: Pick<GuideSnapshot, 'guide'>, files: readon
   return out;
 }
 
-/** A high-risk judgment's places on the PR's diff (the diff that was judged). Medium and low mark nothing. */
 export function riskNotes(judgment: InboxPullRiskJudgment | null | undefined, files: readonly NoteFile[]): ContextNote[] {
   if (!judgment || judgment.level !== 'high') return [];
   return (judgment.where ?? [])
@@ -136,7 +94,6 @@ export function riskNotes(judgment: InboxPullRiskJudgment | null | undefined, fi
     }));
 }
 
-/** The parts of a thread's message `threadNotes` reads. */
 export interface NoteMessage {
   id: string;
   created_at?: string;
@@ -146,7 +103,6 @@ export interface NoteMessage {
   guide?: { review?: unknown } | null;
 }
 
-/** The first words of what the person said, one line, for "you asked “…”". */
 function firstWords(body: string | undefined, max = 60): string | undefined {
   const line = (body ?? '').split('\n').map((l) => l.trim()).find((l) => l && !l.startsWith('#') && !l.startsWith(':::') && !l.startsWith('```'));
   if (!line) return undefined;
@@ -154,13 +110,6 @@ function firstWords(body: string | undefined, max = 60): string | undefined {
   return chars.length > max ? `${chars.slice(0, max - 1).join('').trimEnd()}…` : chars.join('');
 }
 
-/**
- * The thread agent's notes that land on review `reviewId`: every `:::note` block in the agent's messages, drawn on
- * the newest review at or before its message (Show me's `reviewDrawnOn`). On this review: where its lines are in
- * the diff. On an earlier review: where those lines are now, fresh when the text is the same and stale when it
- * changed (`earlier` holds that review's files, undefined while it is read). A later review's notes, and lines not
- * found, stay in the thread only.
- */
 export function threadNotes(input: {
   messages: readonly NoteMessage[];
   reviewId: string;
@@ -220,10 +169,6 @@ export function threadNotes(input: {
   return out;
 }
 
-/**
- * The review each agent message's `:::note` blocks are drawn on (the newest at or before it, as `threadNotes` draws
- * them), by message: null for a message before the thread's first review, whose chip then has no way into a review.
- */
 export function noteReviews(messages: readonly NoteMessage[]): Map<string, string | null> {
   const out = new Map<string, string | null>();
   if (!messages.some((m) => m.guide?.review)) return out;
@@ -233,22 +178,17 @@ export function noteReviews(messages: readonly NoteMessage[]): Map<string, strin
   return out;
 }
 
-/** One part of a board that points at code, as the window reads it off the drawing. */
 export interface PicturePart {
   board: string;
   title: string;
   part: string;
-  /** The part's words beyond its name. */
   words: string;
-  /** Where the part's lines land in this review (`partLanding`), already worked out. */
   lines: [number, number];
   path: string;
   agent: string;
-  /** Drawn on an earlier review whose code here changed since. */
   stale?: { round: number; lines: [number, number] };
 }
 
-/** Show me boards' parts on their lines (new side), one note per part; the same lines twice draw once. */
 export function pictureNotes(parts: readonly PicturePart[], files: readonly NoteFile[]): ContextNote[] {
   const seen = new Set<string>();
   const out: ContextNote[] = [];
@@ -272,7 +212,6 @@ export function pictureNotes(parts: readonly PicturePart[], files: readonly Note
   return out;
 }
 
-/** Notes in the order the diff reads them: by file as the diff lists them, then side and line. */
 export function orderNotes(notes: readonly ContextNote[], files: readonly NoteFile[]): ContextNote[] {
   const fileAt = new Map(files.map((f, i) => [f.path, i] as const));
   return [...notes].sort(
@@ -280,7 +219,6 @@ export function orderNotes(notes: readonly ContextNote[], files: readonly NoteFi
   );
 }
 
-/** When a thread note came, as a short time: "9:41 AM" today, "Yesterday", else the date. */
 export function noteTime(iso: string | undefined, now = new Date()): string | null {
   if (!iso) return null;
   const when = new Date(iso);
@@ -292,41 +230,30 @@ export function noteTime(iso: string | undefined, now = new Date()): string | nu
   return when.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-/** The stale line, as Show me's corner card words it. */
 export function staleWords(note: ContextNote): string | null {
   if (!note.stale) return null;
   const what = note.writer === 'thread' ? 'answer' : note.writer === 'picture' ? 'picture' : 'note';
   return `The code here changed after this ${what} (${note.writer === 'picture' ? 'drawn' : 'written'} on round ${note.stale.round}, lines ${rangeWord(note.stale.lines)}).`;
 }
 
-/** What the Ask box starts with for "Ask again": the file and the lines where they are now. */
 export function askAgainWords(note: ContextNote): string {
   return `${baseName(note.file)} ${note.lineStart === note.lineEnd ? 'line' : 'lines'} ${rangeWord([note.lineStart, note.lineEnd])}: `;
 }
 
-/** How many places a judgment marks in its diff: a high one's `where`, else none. */
 export function riskPlaceCount(judgment: InboxPullRiskJudgment | null | undefined): number {
   return judgment?.level === 'high' ? (judgment.where?.length ?? 0) : 0;
 }
 
-/** "2 places", "1 place". */
 export function placesWord(count: number): string {
   return `${count} ${count === 1 ? 'place' : 'places'}`;
 }
 
-/** How long a "See the N places" ask waits for the PR's diff to mount and take it. */
 export const RISK_PLACES_ASK_MS = 10_000;
 
-/**
- * The PR page's "See the N places" asks the PR's diff to open at its first place. The diff is another view that
- * mounts after the click, so the ask waits here, named by the PR, for a moment. The next PR diff to mount takes it
- * away, whichever PR it shows, so an ask never lingers to move a diff opened some other way later.
- */
 let placesAsked: { key: string; at: number } | null = null;
 export function askRiskPlaces(pullKey: string, now = Date.now()): void {
   placesAsked = { key: pullKey, at: now };
 }
-/** Whether the PR diff now mounting (`pullKey`) was asked to open at its first place. The ask is gone after this. */
 export function takeRiskPlaces(pullKey: string, now = Date.now()): boolean {
   const asked = placesAsked;
   placesAsked = null;

@@ -1,9 +1,3 @@
-/**
- * The notes of one review in a thread (the Inbox's code review): the guide's
- * own, the thread agent's `:::note` blocks and the Show me boards' parts that
- * point at code, each where it lands in this review's diff (model.ts).
- * Earlier reviews' files are read once, only when a note was written on one.
- */
 import { useEffect, useMemo, useState } from 'react';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
 import { parseGuideSnapshot, type GuideSnapshot } from '@plannotator/core/guide-format';
@@ -16,7 +10,6 @@ import { agentName } from '../format';
 import { anchorLines, partLanding, partName, reviewDrawnOn, reviewLines } from '../review-drawing/showMeModel';
 import { guideNotes, orderNotes, pictureNotes, threadNotes, type ContextNote, type NoteFile, type PicturePart } from './model';
 
-/** Each earlier review's files, read once (an empty list when it can't be read: it anchors nothing). */
 function useReviewFiles(ids: readonly string[]): Record<string, NoteFile[]> {
   const [read, setRead] = useState<Record<string, NoteFile[]>>({});
   const key = [...new Set(ids)].sort().join(',');
@@ -42,7 +35,7 @@ function useReviewFiles(ids: readonly string[]): Record<string, NoteFile[]> {
   return read;
 }
 
-/** A drawn view's parts that point at code: the part's name and its other words. Read with an inert parser (no script runs, nothing loads). */
+/** Parsed with an inert parser: no script runs, nothing loads. */
 export function codeParts(html: string): { code: string; name: string; words: string }[] {
   if (typeof DOMParser === 'undefined' || !html.includes('data-code')) return [];
   const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html');
@@ -61,7 +54,6 @@ export function codeParts(html: string): { code: string; name: string; words: st
   });
 }
 
-/** The boards' latest versions, read once each and again when the window's `event: shapes` names one. */
 function useBoards(ids: readonly string[], subscribe: (listener: (ids: string[]) => void) => () => void): Record<string, { title: string; version: ShapeVersion; agent: string }> {
   const [boards, setBoards] = useState<Record<string, { title: string; version: ShapeVersion; agent: string }>>({});
   const key = [...new Set(ids)].sort().join(',');
@@ -89,21 +81,17 @@ function useBoards(ids: readonly string[], subscribe: (listener: (ids: string[])
 }
 
 export function useReviewNotes(input: {
-  /** Off (a resolved thread's reader, Code review's pane not on screen): no note is worked out. */
   enabled: boolean;
   messages: readonly InboxMessageWire[];
   message: InboxMessageWire;
   snapshot: GuideSnapshot | null;
   files: readonly NoteFile[];
-  /** Show me boards this thread made (and the thread's board), whose code parts land here. */
   boards: readonly string[];
-  /** The review a board's newest Show me was asked on. */
   askedOn: (board: string) => string | undefined;
   subscribeBoards: (listener: (ids: string[]) => void) => () => void;
 }): ContextNote[] {
   const { enabled, messages, message, snapshot, files, boards } = input;
   const at = messages.findIndex((m) => m.id === message.id);
-  // Earlier reviews a note was written on: their files tell where its lines are now.
   const notedOn = useMemo(() => {
     if (!enabled) return [];
     const out: string[] = [];
@@ -150,7 +138,6 @@ export function useReviewNotes(input: {
         const earlierFiles = drawnOn && drawnOn !== message.id ? earlier[drawnOn] : undefined;
         const landing = partLanding(target, now, drawnOn === message.id ? undefined : drawnOn ? { lines: earlierFiles ? reviewLines(earlierFiles) : undefined } : null);
         if (!Array.isArray(landing)) continue;
-        // Drawn on an earlier review and its code changed since (found only by the code around it): stale, as a thread note is.
         const was: [number, number] = [target.line, target.lineEnd ?? target.line];
         const changed = earlierFiles && drawnOn && !anchorLines(was, reviewLines(earlierFiles).get(target.path), now.get(target.path));
         parts.push({
