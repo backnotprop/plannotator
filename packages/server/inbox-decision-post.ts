@@ -1,8 +1,8 @@
 /**
  * `POST /api/inbox/threads/<id>/decisions/post` `{ pull, tz? }`: Post decisions (design brief "export-decisions" step
- * 2). The thread's decisions go on one of its pull requests as ONE comment (a GitLab merge request note), edited in
- * place on a later post: the comment is found on the forge by its first line, the hidden marker the Markdown download
- * already carries, never a second one. Only when the person (or `plannotator inbox export-decisions --pr`) asks;
+ * 2). The thread's decisions go on one of its pull requests: by default in a section of its description between hidden
+ * markers, else as ONE comment (a GitLab merge request note), edited in place on a later post (the section found by
+ * its markers, the comment by its first line, the marker the Markdown download already carries), never a second one. Only when the person (or `plannotator inbox export-decisions --pr`) asks;
  * nothing posts on Send.
  *
  * Every forge call goes through the review app's provider layer (`upsertPRMarkedComment`,
@@ -11,13 +11,15 @@
  * same origin. Unlike the review post it needs no head commit: a comment is not pinned to one, and a merged or
  * closed PR still takes it.
  *
- * Where it goes is `DECISION_POST_DESTINATION` (packages/shared/inbox/decision-post.ts): the comment until the owner
- * answers about the description. `deps.destination` overrides it for tests only.
+ * Where it goes is the person's setting (config.json `inboxDecisionsPostTo`, read per post and handed in as
+ * `deps.destination`; unset is `DECISION_POST_DESTINATION`, the description). In the description, a refusal to edit it
+ * (not the author, no write access) or a description that would pass the forge's limit posts the comment instead,
+ * and the answer's `fallback` says why.
  */
 import { inboxThreadPullRefOfKey, inboxThreadPullText, parseInboxThreadPullRef } from "@plannotator/core/inbox-types";
-import { DECISION_POST_DESTINATION, DECISION_POST_SECTION_END, DECISION_POST_SECTION_START, DECISION_POST_COMMENT_MARKER, decisionExportForPost, renderDecisionComment, renderDecisionSummary, type DecisionPostPlatform } from "@plannotator/shared/inbox/decision-post";
+import { DECISION_POST_COMMENT_MARKER, DECISION_POST_SECTION_END, DECISION_POST_SECTION_START, decisionExportForPost, decisionPostDestinationOf, renderDecisionComment, renderDecisionSection, renderDecisionSummary, type DecisionPostPlatform } from "@plannotator/shared/inbox/decision-post";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
-import { PRMarkedBrokenSectionError, PRMarkedRaceError, PRMarkedTooLongError, type PRMarkedDestination, type PRMarkedResult } from "@plannotator/shared/pr-marked";
+import { PRMarkedBrokenSectionError, PRMarkedForbiddenError, PRMarkedRaceError, PRMarkedTooLongError, type PRMarkedDestination, type PRMarkedResult } from "@plannotator/shared/pr-marked";
 import { canPostMarkedText, upsertPRDescriptionSection, upsertPRMarkedComment, type PRRef, type PRRuntime } from "@plannotator/shared/pr-provider";
 import { threadDecisionExport } from "./inbox-decision-export";
 
@@ -31,6 +33,8 @@ export interface InboxDecisionPostAnswer {
   /** As the person writes it: `owner/repo#12`, `group/project!12`. */
   ref: string;
   url: string;
+  /** Posted as a comment instead of in the description: the person may not edit it, or it would be too long. */
+  fallback?: "no_permission" | "too_long";
 }
 
 export type InboxDecisionPostResult = { status: 200; body: InboxDecisionPostAnswer } | { status: number; body: { error: string; code: string } };
@@ -68,7 +72,7 @@ export async function postThreadDecisions(
   store: InboxStore,
   threadId: string,
   input: { pull: unknown; tz?: unknown },
-  deps: { runtime: PRRuntime; version: string; now?: () => Date; destination?: PRMarkedDestination },
+  deps: { runtime: PRRuntime; version: string; now?: () => Date; destination?: unknown },
 ): Promise<InboxDecisionPostResult> {
   const built = threadDecisionExport(store, threadId, { tz: typeof input.tz === "string" ? input.tz : "UTC", version: deps.version, now: deps.now });
   if (!built) return refused(404, "thread_not_found", "No such thread.");
@@ -82,29 +86,47 @@ export async function postThreadDecisions(
   if (!ref || ref.platform === "bitbucket" || !canPostMarkedText(ref)) return refused(422, "forge_unsupported", "Posting decisions works on GitHub and GitLab only.");
   const platform: DecisionPostPlatform = ref.platform;
   const refText = inboxThreadPullText(linked);
-  const destination = deps.destination ?? DECISION_POST_DESTINATION;
+  const destination = decisionPostDestinationOf(deps.destination);
   const comment = () =>
     upsertPRMarkedComment(deps.runtime, ref, { marker: DECISION_POST_COMMENT_MARKER(doc.thread.id), body: (room) => renderDecisionComment(doc, { platform, room }) });
   const section = (body: (room: number) => string) =>
     upsertPRDescriptionSection(deps.runtime, ref, { start: DECISION_POST_SECTION_START(doc.thread.id), end: DECISION_POST_SECTION_END, body });
-  let step: "comment" | "description" = "comment";
+  const done = (result: PRMarkedResult, used: PRMarkedDestination, fallback?: InboxDecisionPostAnswer["fallback"]): InboxDecisionPostResult => ({
+    status: 200,
+    body: { ok: true, action: result.action, destination: used, ref: refText, url: result.url, ...(fallback ? { fallback } : {}) },
+  });
+  let step: "comment" | "description" = destination === "description" ? "description" : "comment";
   try {
-    let result: PRMarkedResult;
-    if (destination === "comment") result = await comment();
-    else if (destination === "description") {
-      step = "description";
-      // The whole body (its marker line aside: the section has its own); past the room, the short form.
-      result = await section((room) => {
-        const full = renderDecisionComment(doc, { platform }).split("\n").slice(1).join("\n");
-        return full.length <= room ? full : renderDecisionSummary(doc, { room });
-      });
-    } else {
-      result = await comment();
-      step = "description";
-      const url = result.url;
-      await section((room) => renderDecisionSummary(doc, { commentUrl: url, room }));
+    if (destination === "comment") return done(await comment(), "comment");
+    if (destination === "description") {
+      try {
+        return done(
+          await section((room) => {
+            const body = renderDecisionSection(doc, { platform, room });
+            if (body === null) throw new PRMarkedTooLongError(room);
+            return body;
+          }),
+          "description",
+        );
+      } catch (cause) {
+        // Not allowed to edit it, or too long for it: the same decisions as a comment, which the toast says.
+        const fallback = cause instanceof PRMarkedForbiddenError ? "no_permission" : cause instanceof PRMarkedTooLongError ? "too_long" : null;
+        if (!fallback) throw cause;
+        step = "comment";
+        return done(await comment(), "comment", fallback);
+      }
     }
-    return { status: 200, body: { ok: true, action: result.action, destination, ref: refText, url: result.url } };
+    const posted = await comment();
+    step = "description";
+    try {
+      await section((room) => renderDecisionSummary(doc, { commentUrl: posted.url, room }));
+    } catch (cause) {
+      // The comment is there; a description the person may not edit, or that is full, keeps it as the comment alone.
+      const fallback = cause instanceof PRMarkedForbiddenError ? "no_permission" : cause instanceof PRMarkedTooLongError ? "too_long" : null;
+      if (!fallback) throw cause;
+      return done(posted, "comment", fallback);
+    }
+    return done(posted, "both");
   } catch (cause) {
     const already = destination === "both" && step === "description" ? "The comment is posted, but the description was not changed. " : "";
     if (cause instanceof PRMarkedTooLongError) return refused(422, "too_long", `${already}Too long for ${FORGE[platform].name} even in its shortest form. Download the decisions instead.`);

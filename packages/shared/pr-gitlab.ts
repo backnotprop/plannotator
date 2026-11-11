@@ -10,7 +10,7 @@ import { mkdirSync, writeFileSync } from "fs";
 import type { PRRuntime, PRMetadata, PRContext, PRReviewFileComment, PRReviewCommentFailure, PRReviewAction, PRReviewSubmissionResult, CommandResult } from "./pr-types";
 import { decodeBase64Bytes, encodeApiFilePath, isNotFoundCommandFailure, type PRFileBytesResult, type PRTreeResult } from "./pr-types";
 import { getPlannotatorDataDir } from "./data-dir";
-import { markedCommentText, PRMarkedRaceError, spliceMarkedSection, startsWithMarker, type PRMarkedCommentInput, type PRMarkedResult, type PRMarkedSectionInput } from "./pr-marked";
+import { isAccessRefusal, markedCommentText, PRMarkedForbiddenError, PRMarkedRaceError, spliceMarkedSection, startsWithMarker, type PRMarkedCommentInput, type PRMarkedResult, type PRMarkedSectionInput } from "./pr-marked";
 import { diffHunkLines, parseDiffToFiles } from "@plannotator/core/diff-files";
 
 // GitLab-specific MRRef shape (used internally)
@@ -995,6 +995,9 @@ export async function upsertGlDescriptionSection(runtime: PRRuntime, ref: GlMRRe
   const planned = spliceMarkedSection(first.body, input, GL_DESCRIPTION_MAX);
   if ((await read()).body !== first.body) throw new PRMarkedRaceError();
   const written = await runtime.runCommandWithInput("glab", apiArgs(ref.host, path, ["--method", "PUT", "--input", "-", "-H", "Content-Type:application/json"]), JSON.stringify({ description: planned.text }));
-  if (written.exitCode !== 0) throw new Error(`Couldn't edit the description: ${glFailure(written)}`);
+  if (written.exitCode !== 0) {
+    if (isAccessRefusal(written.stderr, written.stdout)) throw new PRMarkedForbiddenError(glFailure(written));
+    throw new Error(`Couldn't edit the description: ${glFailure(written)}`);
+  }
   return { action: planned.replaced ? "updated" : "created", url: first.url };
 }

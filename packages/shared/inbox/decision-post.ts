@@ -5,9 +5,11 @@
  * folded in `<details>`, then the other states as short lists. Posting again from the same thread edits that same
  * comment, found by its first line, the `DECISION_EXPORT_MARKER` the download already carries.
  *
- * Also the two forms the description route takes (the owner asked "why not in PR body?"; not the default until he
- * answers): the whole body in a marked section, or a short section (title, counts, one line per decision) that links
- * to the comment. Where it goes is `DECISION_POST_DESTINATION`, here and nowhere else.
+ * Where it goes is the person's setting (config.json `inboxDecisionsPostTo`, the Post group's "Where" in Export
+ * decisions); the owner chose the DESCRIPTION as the default ("In the description only", 2026-11-10): a section of the
+ * PR's description between hidden markers (`renderDecisionSection`: read raw it starts with a plain heading and one
+ * line per decision, so a squash commit that inherits the description stays legible; the banner and the folds follow).
+ * The other two: the comment, or a short section in the description that links to the comment.
  *
  * What a public post leaves out that the download keeps: a pick the person saved and did not send is not posted;
  * its question shows under "Still open" instead (`decisionExportForPost`).
@@ -22,8 +24,14 @@ import type { PRMarkedDestination } from "../pr-marked";
 
 // ── The switch (the owner's to choose; the comment until he answers) ──
 
-/** Where Post decisions puts them: one comment (default), a section of the description, or a short section plus the comment. */
-export const DECISION_POST_DESTINATION: PRMarkedDestination = "comment";
+/** Where Post decisions puts them when the person never chose: the description (the owner, 2026-11-10). */
+export const DECISION_POST_DESTINATION: PRMarkedDestination = "description";
+export const DECISION_POST_DESTINATIONS: readonly PRMarkedDestination[] = ["description", "comment", "both"];
+
+/** A stored value as a destination: anything else (unset, an older or broken value) is the default. */
+export function decisionPostDestinationOf(value: unknown): PRMarkedDestination {
+  return DECISION_POST_DESTINATIONS.includes(value as PRMarkedDestination) ? (value as PRMarkedDestination) : DECISION_POST_DESTINATION;
+}
 
 // ── Markers and the banner ──
 
@@ -230,6 +238,30 @@ export function renderDecisionComment(doc: DecisionExportV1, options: { platform
   let body = build("table", max);
   while (body.length > room && max > 0) body = build("table", (max = Math.floor(max / 2)));
   return body;
+}
+
+/** The plain head every description form starts with: a heading, the counts, one line per question. No HTML. */
+function plainSummary(doc: DecisionExportV1): string[] {
+  const lines = [`### Decisions: ${mdInline(doc.thread.subject)}`, "", decisionPostTally(doc), ""];
+  for (const item of doc.decisions) lines.push(`- D${item.n} ${mdInline(item.prompt)} **${mdInline(clip(answerOf(item), 80))}**`);
+  for (const item of doc.others) lines.push(`- D${item.n} ${mdInline(item.prompt)} _${shortState(doc, item)}_`);
+  return lines;
+}
+
+/**
+ * The description section (the default destination): read raw, a plain heading, the counts and one line per
+ * question come first, before any HTML, so a squash commit message that inherits the description stays legible; then
+ * the banner, each decision folded, the other states and the footer, as the comment has them. Past `room`, the folds
+ * without context, facts and pros/cons; past that, null (the caller posts a comment instead).
+ */
+export function renderDecisionSection(doc: DecisionExportV1, options: { platform: DecisionPostPlatform; room?: number }): string | null {
+  const room = options.room ?? Infinity;
+  const when = decisionExportDesignDates(doc.tz);
+  for (const level of ["full", "compact"] as const) {
+    const body = [...plainSummary(doc), "", banner(options.platform), "", ...doc.decisions.flatMap((d) => folded(doc, d, level, when)), ...rest(doc), `<sub>Posted from Plannotator · ${when.footer(doc.exported_at)}</sub>`].join("\n");
+    if (body.length <= room) return body;
+  }
+  return null;
 }
 
 /**

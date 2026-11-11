@@ -203,7 +203,7 @@ import { createInboxLiveSites, type InboxLiveBridgeSources, type InboxLiveSites 
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
 import { INBOX_DECISION_EXPORT_ROUTE, inboxDecisionExportRoute } from "./inbox-decision-export";
 import { INBOX_DECISION_POST_ROUTE, postThreadDecisions } from "./inbox-decision-post";
-import type { PRMarkedDestination } from "@plannotator/shared/pr-marked";
+import { DECISION_POST_DESTINATIONS, decisionPostDestinationOf } from "@plannotator/shared/inbox/decision-post";
 import { createInboxAccountsFor, switchTarget } from "./inbox-accounts";
 import { INBOX_ACCOUNT_SWITCHING, INBOX_ACTIVITY_MAX_DAYS, type InboxNoteAutoAdd } from "@plannotator/core/inbox-types";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
@@ -555,8 +555,6 @@ export interface InboxServerOptions {
    * app's providers, `submitPRReview`). Default the Bun command runtime (pr.ts).
    */
   prRuntime?: PRRuntime;
-  /** Tests: where Post decisions puts them (default `DECISION_POST_DESTINATION`, the comment). */
-  decisionPostDestination?: PRMarkedDestination;
   /** Tests: how a person's web link's favicon is fetched (inbox-card-favicons.ts): a scripted fetch and DNS, never the network. */
   cardFavicons?: CardFaviconOptions;
   /** Tests: how a PR author's picture is fetched (inbox-pull-avatars.ts): a scripted fetch and DNS, never the network. */
@@ -5410,7 +5408,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           }
           const body = await readBody(req);
           if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-          const result = await postThreadDecisions(store, posting[1]!, { pull: body.pull, tz: body.tz }, { runtime: options.prRuntime ?? prCommandRuntime, version, destination: options.decisionPostDestination });
+          const result = await postThreadDecisions(store, posting[1]!, { pull: body.pull, tz: body.tz }, { runtime: options.prRuntime ?? prCommandRuntime, version, destination: loadConfig().inboxDecisionsPostTo });
           return json(result.status === 200 ? { serverSession, ...result.body } : result.body, result.status);
         }
       }
@@ -5424,6 +5422,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return (await inboxDecisionExportRoute(url, store, { version }))!;
       }
       // Settings → Storage's sizes walk every file in the store, so only that panel asks for them, when it is shown.
+      // Where Post decisions puts them (config.json `inboxDecisionsPostTo`; the Post group's "Where" in Export decisions):
+      // read by any window that may post, changed by the owner only, like the post itself.
+      if (path === "/api/inbox/settings/decisions-post") {
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (req.method === "GET") return json({ serverSession, post_to: decisionPostDestinationOf(loadConfig().inboxDecisionsPostTo) });
+        if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        if (!DECISION_POST_DESTINATIONS.includes(body.post_to as never)) throw new InboxError("validation_error", "post_to: description, comment or both.", { field: "post_to" });
+        saveConfig({ inboxDecisionsPostTo: body.post_to as "description" | "comment" | "both" });
+        const saved = decisionPostDestinationOf(loadConfig().inboxDecisionsPostTo);
+        if (saved !== body.post_to) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+        return json({ serverSession, post_to: saved });
+      }
       if (path === "/api/inbox/settings/storage") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         return json(perfPhase("disk", () => store.diskUsage()));

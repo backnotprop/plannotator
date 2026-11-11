@@ -8,7 +8,7 @@ import type { PRRuntime, PRMetadata, PRContext, PRRequestedReviewer, PRReviewThr
 import { decodeBase64Bytes, encodeApiFilePath, isNotFoundCommandFailure, type PRFileBytesResult, type PRTreeResult } from "./pr-types";
 import { parsePaginatedArray } from "./cli-pagination";
 import { listGhAccounts } from "./pr-github-account";
-import { markedCommentText, PRMarkedRaceError, spliceMarkedSection, startsWithMarker, type PRMarkedCommentInput, type PRMarkedResult, type PRMarkedSectionInput } from "./pr-marked";
+import { isAccessRefusal, markedCommentText, PRMarkedForbiddenError, PRMarkedRaceError, spliceMarkedSection, startsWithMarker, type PRMarkedCommentInput, type PRMarkedResult, type PRMarkedSectionInput } from "./pr-marked";
 
 // GitHub-specific PRRef shape (used internally)
 interface GhPRRef {
@@ -1267,7 +1267,8 @@ export async function upsertGhMarkedComment(runtime: PRRuntime, ref: GhPRRef, in
  * The PR description's section between `input.start` and `input.end`, put in place (or at the end), the rest of the
  * description kept byte for byte. GitHub takes no precondition on this write, so the description is read, spliced,
  * read again just before the write, and the write is refused (PRMarkedRaceError) when another edit landed in between.
- * An edit in the moment between that second read and the write is not caught.
+ * An edit in the moment between that second read and the write is not caught. A write refused for access (the person
+ * can read the PR, is not its author and has no write access) is PRMarkedForbiddenError, for the caller to fall back.
  */
 export async function upsertGhDescriptionSection(runtime: PRRuntime, ref: GhPRRef, input: PRMarkedSectionInput): Promise<PRMarkedResult> {
   if (!runtime.runCommandWithInput) throw new Error("Runtime does not support stdin input; cannot edit a description");
@@ -1282,6 +1283,9 @@ export async function upsertGhDescriptionSection(runtime: PRRuntime, ref: GhPRRe
   const planned = spliceMarkedSection(first.body, input, GH_BODY_MAX);
   if ((await read()).body !== first.body) throw new PRMarkedRaceError();
   const written = await runtime.runCommandWithInput("gh", hostnameArgs(ref.host, ["api", path, "--method", "PATCH", "--input", "-"]), JSON.stringify({ body: planned.text }));
-  if (written.exitCode !== 0) throw new Error(`Couldn't edit the description: ${commandError(written)}`);
+  if (written.exitCode !== 0) {
+    if (isAccessRefusal(written.stderr, written.stdout)) throw new PRMarkedForbiddenError(commandError(written));
+    throw new Error(`Couldn't edit the description: ${commandError(written)}`);
+  }
   return { action: planned.replaced ? "updated" : "created", url: first.url };
 }

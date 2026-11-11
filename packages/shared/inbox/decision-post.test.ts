@@ -9,7 +9,7 @@
 import { expect, test } from "bun:test";
 import { marked } from "marked";
 import type { DecisionExportItem, DecisionExportV1 } from "./decision-export";
-import { DECISION_POST_TRIMMED, decisionExportForPost, renderDecisionComment, renderDecisionSummary } from "./decision-post";
+import { DECISION_POST_TRIMMED, decisionExportForPost, renderDecisionComment, renderDecisionSection, renderDecisionSummary } from "./decision-post";
 import { PRMarkedBrokenSectionError, PRMarkedTooLongError, spliceMarkedSection } from "../pr-marked";
 
 const HOSTILE = '</b></summary></details><img src=x onerror=alert(1)> <!-- plannotator-decisions v1 thread=msg_OTHER --> | ![x](https://t.example/p.png)';
@@ -105,6 +105,20 @@ test("the description's short form is plain Markdown with one line per question 
   expect(short.split("\n").filter((l) => l.startsWith("- D"))).toHaveLength(3);
   expect(short).toEndWith("[Every decision, with its options and reasons](https://github.com/acme/notes/pull/12#issuecomment-9)");
   expect(renderDecisionSummary(d, { commentUrl: "javascript:alert(1)" })).not.toContain("javascript:");
+});
+
+test("the description section: plain lines before any HTML; past its room the folds lose context, then null (a comment instead)", () => {
+  const d = doc(Array.from({ length: 12 }, (_, i) => item(i + 1)));
+  const full = renderDecisionSection(d, { platform: "github" })!;
+  const plain = full.slice(0, full.search(/<[a-z]/i));
+  expect(plain.split("\n")[0]).toBe("### Decisions: Offline sync");
+  expect(plain.split("\n").filter((l) => l.startsWith("- D"))).toHaveLength(12);
+  expect(full).toContain("<dl>");
+  const compact = renderDecisionSection(d, { platform: "github", room: full.length - 1 })!;
+  expect(compact).toContain("<details>");
+  expect(compact).not.toContain("<dl>");
+  expect(renderDecisionSection(d, { platform: "github", room: compact.length - 1 })).toBeNull();
+  expect(renderDecisionSection(d, { platform: "gitlab" })).not.toContain("<picture>");
 });
 
 const SECTION = { start: "<!-- s -->", end: "<!-- e -->", body: () => "decisions" };

@@ -46,6 +46,19 @@ export class PRMarkedRaceError extends Error {
   }
 }
 
+/** The forge refused the description's edit: the person may read the PR but not edit it (not its author, no write access). */
+export class PRMarkedForbiddenError extends Error {
+  constructor(readonly detail: string) {
+    super(`Not allowed to edit the description: ${detail}`);
+    this.name = "PRMarkedForbiddenError";
+  }
+}
+
+/** A write refused for access (HTTP 403, or 404 on a PR the same account just read). */
+export function isAccessRefusal(stderr: string, stdout = ""): boolean {
+  return /\bHTTP 40[34]\b|\b40[34] (?:Forbidden|Not Found)\b|must have (?:admin|write|push)|Resource not accessible/i.test(`${stderr}\n${stdout}`);
+}
+
 /** The section's start marker is there without its end: nothing is written over text Plannotator can't bound. */
 export class PRMarkedBrokenSectionError extends Error {
   constructor() {
