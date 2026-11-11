@@ -32,6 +32,25 @@ export function writtenMediaUrl(src: string): string | null {
   }
 }
 
+export type PullMediaSizes = Record<string, { width: number; height: number }>;
+
+const sizeReads = new Map<string, Promise<PullMediaSizes>>();
+
+export function pullMediaSizes(key: string): Promise<PullMediaSizes> {
+  let read = sizeReads.get(key);
+  if (!read) {
+    read = inboxApi.pullMediaSizes(key).then((answer) => answer.sizes, () => ({}));
+    sizeReads.set(key, read);
+  }
+  return read;
+}
+
+/** The box a picture takes before it loads: the width the text gave (or its own), at its own shape. */
+export function reservedBox(size: { width: number; height: number }, writtenWidth: number | null): { width: number; height: number } {
+  const width = writtenWidth && writtenWidth > 0 ? writtenWidth : size.width;
+  return { width, height: Math.max(1, Math.round((width * size.height) / size.width)) };
+}
+
 const probes = new Map<string, Promise<boolean>>();
 
 export function probeVideo(key: string, url: string): Promise<boolean> {

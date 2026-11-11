@@ -37,6 +37,7 @@ beforeEach(() => {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = String(input instanceof Request ? input.url : input);
     asked.push(url);
+    if (url.includes('/pulls/media/sizes')) return Response.json({ sizes: { [SHOT]: { width: 1000, height: 500 } } });
     const named = new URL(url, 'http://inbox.test').searchParams.get('url');
     return named === CLIP
       ? new Response(new Uint8Array([0]), { status: 206, headers: { 'content-type': 'video/mp4' } })
@@ -63,6 +64,7 @@ test.if(hasDom)('a GitHub upload loads through the Inbox (a failed one is the ch
   const src = new URL(shot.getAttribute('src')!, 'http://inbox.test');
   expect(src.pathname).toBe('/api/inbox/pulls/media');
   expect(src.searchParams.get('url')).toBe(SHOT);
+  expect([shot.getAttribute('width'), shot.getAttribute('height')]).toEqual(['1000', '500']);
   expect(host.querySelector(`img[src="${ELSEWHERE}"]`)).toBeNull();
   expect(host.textContent).toContain('elsewhere');
 

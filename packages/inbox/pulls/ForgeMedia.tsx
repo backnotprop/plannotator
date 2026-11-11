@@ -4,7 +4,7 @@ import type { ImageResolver } from '@plannotator/ui/components/ImageResolverCont
 import type { InboxPull } from '@plannotator/core/inbox-types';
 import { isGitHubAttachmentUrl } from '@plannotator/core/pr-attachment-url';
 import { inboxApi } from '../api';
-import { mayBeVideoLink, probeVideo, servesPullMedia, writtenMediaUrl, type PullMediaItem } from './pullMedia';
+import { mayBeVideoLink, probeVideo, pullMediaSizes, reservedBox, servesPullMedia, writtenMediaUrl, type PullMediaItem, type PullMediaSizes } from './pullMedia';
 import { PullMediaViewer } from './PullMediaViewer';
 
 const CHIP_TITLE = 'Images in a description open on the forge';
@@ -35,9 +35,16 @@ export function ForgeMedia({ layer, children }: { layer: InboxPull; children: Re
     const root = ref.current;
     if (!root || !serves) return;
     let live = true;
+    let sizes: PullMediaSizes = {};
     const decorate = () => {
       for (const img of root.querySelectorAll<HTMLImageElement>('img')) {
         const url = writtenMediaUrl(img.getAttribute('src') ?? '');
+        const size = url ? sizes[url] : undefined;
+        if (size && !img.hasAttribute('height')) {
+          const box = reservedBox(size, Number(img.getAttribute('width')) || null);
+          img.setAttribute('width', String(box.width));
+          img.setAttribute('height', String(box.height));
+        }
         if (url === null || !shown(img)) {
           if (img.hasAttribute(MEDIA)) for (const name of [MEDIA, 'role', 'tabindex', 'aria-label']) img.removeAttribute(name);
           continue;
@@ -58,6 +65,11 @@ export function ForgeMedia({ layer, children }: { layer: InboxPull; children: Re
       }
     };
     decorate();
+    void pullMediaSizes(key).then((read) => {
+      if (!live) return;
+      sizes = read;
+      decorate();
+    });
     let frame = 0;
     const observer = new MutationObserver(() => {
       cancelAnimationFrame(frame);

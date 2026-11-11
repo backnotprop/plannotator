@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { PRContext, PRRuntime } from "@plannotator/shared/pr-types";
 import type { InboxPull } from "@plannotator/core/inbox-pulls";
-import { pullMediaResponse } from "./inbox-pull-media";
+import { pullMediaResponse, pullMediaSizesResponse } from "./inbox-pull-media";
 
 const SHOT = "https://github.com/user-attachments/assets/1111-aaaa";
 const CLIP = "https://github.com/user-attachments/assets/2222-bbbb";
@@ -123,5 +123,19 @@ describe("GET /api/inbox/pulls/media", () => {
       script(() => new Response("<svg onload=alert(1)>", { headers: { "content-type": type } }));
       expect({ type, status: (await pullMediaResponse(pulls, pull.key, SHOT, null)).status }).toEqual({ type, status: 415 });
     }
+  });
+
+  test("sizes: each named picture's box from its first bytes, read under the same rules", async () => {
+    const header = new Uint8Array(24);
+    header.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 3, 0xe8, 0, 0, 1, 0xf4]);
+    script((url, init) => {
+      if (url === SHOT) return new Response(null, { status: 302, headers: { location: BUCKET } });
+      expect(new Headers(init?.headers).get("range")).toBe("bytes=0-65535");
+      return new Response(header, { status: 206, headers: { "content-type": "image/png" } });
+    });
+    const res = await pullMediaSizesResponse(pulls, pull.key);
+    expect(await res.json()).toEqual({ sizes: { [SHOT]: { width: 1000, height: 500 } } });
+    expect(fetched).toEqual([SHOT, BUCKET]);
+    expect(auth).toEqual(["Bearer gho_fake", null]);
   });
 });

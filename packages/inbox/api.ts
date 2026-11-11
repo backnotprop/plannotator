@@ -1987,6 +1987,7 @@ export const inboxApi = {
   pullDetails: (key: string, signal?: AbortSignal) => get<InboxPullDetailsAnswer>(inboxUrl(`/pulls/details?key=${encodeURIComponent(key)}`), signal),
   pullAvatarUrl: (host: string, login: string) => inboxUrl('/pulls/avatar', `host=${encodeURIComponent(host)}&login=${encodeURIComponent(login)}`),
   pullMediaUrl: (key: string, url: string) => inboxUrl('/pulls/media', `key=${encodeURIComponent(key)}&url=${encodeURIComponent(url)}`),
+  pullMediaSizes: (key: string, signal?: AbortSignal) => get<{ sizes: Record<string, { width: number; height: number }> }>(inboxUrl(`/pulls/media/sizes?key=${encodeURIComponent(key)}`), signal),
   /** One layer's diff, or the stack's from its base up to that layer (a PR the last list named). */
   pullDiff: (key: string, scope: InboxPullDiffScope, signal?: AbortSignal) =>
     get<InboxPullDiffAnswer>(inboxUrl(`/pulls/diff?key=${encodeURIComponent(key)}&scope=${scope}`), signal),
