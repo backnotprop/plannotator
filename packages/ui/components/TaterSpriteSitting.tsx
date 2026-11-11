@@ -2,7 +2,6 @@
 import React from 'react';
 import spriteSheet from '../sprite_package_new/sprite.png';
 
-// Sprite: 96x96 native, 12 frames, scaled to 64x64 for display
 const NATIVE_SIZE = 96;
 const DISPLAY_SIZE = 64;
 const FRAMES = 12;

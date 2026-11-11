@@ -5,10 +5,7 @@ interface SparklesIconProps {
   animated?: boolean;
 }
 
-/**
- * Three-star sparkle icon used for Ask AI entry points.
- * Uses currentColor for fill so it inherits from parent text color.
- */
+/** Three-star sparkle icon used for Ask AI entry points. */
 export const SparklesIcon: React.FC<SparklesIconProps> = ({ className = 'w-3 h-3', animated = false }) => (
   <svg className={`${className} flex-shrink-0`} viewBox="0 0 128 128" fill="none">
     {animated && (

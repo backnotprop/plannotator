@@ -3,30 +3,12 @@ import { ArrowUpRight, Play } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog';
 
 /**
- * One-time announcement for the Plannotator Inbox, on plan review, annotate
- * and code review. Nearly full screen: the Inbox film from plannotator.ai/inbox
- * fills the top, under it one title, one sentence, "Close" and one link to the
- * Inbox page.
- *
- * Built on the shared dialog (`./ui/dialog`, Base UI): modal, focus trapped,
- * focus restored on close, the backdrop and Escape close it. Like the other
- * announcements it swallows Mod+Enter on the capture phase, so a keystroke
- * aimed at it cannot approve a plan or post a review behind it.
- *
- * The film is the marketing page's own file (`inbox-film.mp4`, 1920x1080,
- * ~14 MB, voice-led), hosted at plannotator.ai/assets like the other
- * announcements' footage. It never
- * autoplays and is `preload="none"`: opening the dialog fetches only the poster
- * (~120 KB), and the film downloads when the reader presses play. Until then
- * the frame is the poster with one play button, as on the Inbox page; after
- * that the native controls take over (sound, seeking, full screen). If the
- * film cannot load, the frame says so and the rest of the dialog is unchanged.
+ * Built on the shared dialog (`./ui/dialog`, Base UI): modal, focus trapped, focus restored on
+ * close, the backdrop and Escape close it.
  */
 
-/** The Inbox page on plannotator.ai. */
 export const INBOX_PAGE_URL = 'https://plannotator.ai/inbox';
 
-/** Where the marketing deploy publishes `apps/marketing/public/assets/`. */
 const MEDIA_BASE_URL = 'https://plannotator.ai/assets';
 
 export const INBOX_FILM = {
@@ -34,23 +16,13 @@ export const INBOX_FILM = {
   poster: `${MEDIA_BASE_URL}/inbox-film-poster.jpg`,
 } as const;
 
-/** The film is 1920x1080. */
 const FILM_ASPECT = 16 / 9;
 
-/**
- * The panel's width also follows the viewport height, so on a short window the
- * film shrinks until film and footer fit instead of scrolling the film away.
- * 2rem is the overlay's padding, 10rem the footer on a wide panel.
- */
 const PANEL_WIDTH =
   `min(1200px, 100%, calc((var(--pn-viewport-height, 100dvh) - 2rem - 10rem) * ${FILM_ASPECT}))`;
 
 interface InboxAnnouncementDialogProps {
   readonly isOpen: boolean;
-  /**
-   * Marks the announcement seen and closes it. Wired to Close, Escape, the
-   * backdrop and the link to the Inbox page.
-   */
   readonly onDismiss: () => void;
 }
 
@@ -61,8 +33,6 @@ function Film() {
 
   const play = () => {
     setStarted(true);
-    // A rejected play() (autoplay policy, no media) leaves the native
-    // controls up, which offer play again.
     void videoRef.current?.play()?.catch(() => {});
   };
 
@@ -76,8 +46,6 @@ function Film() {
         playsInline
         preload="none"
         aria-label="The Plannotator Inbox film"
-        // A source that cannot be fetched errors on <source>; a file that was
-        // fetched but cannot be decoded errors on the element itself.
         onError={() => setFailed(true)}
         className="absolute inset-0 h-full w-full bg-muted object-contain"
       >
@@ -183,9 +151,6 @@ export function InboxAnnouncementDialog({ isOpen, onDismiss }: InboxAnnouncement
               target="_blank"
               rel="noopener noreferrer"
               data-inbox-announcement-learn-more
-              // Following the link counts as seeing the announcement. Closed on
-              // the next task: a link removed from the page during its own click
-              // is not followed.
               onClick={() => {
                 setTimeout(() => onDismissRef.current(), 0);
               }}

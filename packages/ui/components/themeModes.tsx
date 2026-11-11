@@ -14,7 +14,6 @@ export const THEME_MODES = [
   { id: 'system', label: 'System', Icon: SystemIcon },
 ] as const satisfies readonly ThemeMode[];
 
-/** A persisted theme-mode preference. */
 export type Mode = (typeof THEME_MODES)[number]['id'];
 
 /** Return whether an unknown persisted value is a supported theme mode. */

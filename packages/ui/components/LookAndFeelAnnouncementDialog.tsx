@@ -6,23 +6,14 @@ import lookFlatImg from '../assets/look-flat.png';
 
 interface LookAndFeelAnnouncementDialogProps {
   isOpen: boolean;
-  /** Current value of the singleton configStore 'gridEnabled' key. */
   gridEnabled: boolean;
-  /** App owns this: it calls configStore.set('gridEnabled', value). */
   onToggleGrid: (value: boolean) => void;
-  /** Persists the current choice and closes the dialog. */
   onDismiss: () => void;
-  /**
-   * `first-run` (default): the first-use choice. `moved`: the one-time notice
-   * for someone moved from Grid to Clean when Clean became the default; the
-   * same chooser, with a line saying what changed.
-   */
   variant?: 'first-run' | 'moved';
 }
 
 const LOOK_OPTIONS: {
   key: string;
-  /** gridEnabled value this option selects. */
   value: boolean;
   img: string;
   title: string;
@@ -44,11 +35,7 @@ const LOOK_OPTIONS: {
   },
 ];
 
-/**
- * First-use plan appearance choice. The version announcement that previously
- * wrapped this decision is intentionally gone: startup asks only for the
- * preference Plannotator cannot infer, and Settings remains the long-term home.
- */
+/** First-use plan appearance choice. */
 export const LookAndFeelAnnouncementDialog: React.FC<LookAndFeelAnnouncementDialogProps> = ({
   isOpen,
   gridEnabled,

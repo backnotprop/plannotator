@@ -160,10 +160,8 @@ function relativePosition(
 }
 
 /**
- * Draw the video HUD's targeting treatment on top of the real Vim target.
- *
- * Geometry always comes from the live semantic element, caret, or browser
- * selection. The overlay never owns focus and never participates in layout.
+ * Draw the video HUD's targeting treatment on top of the real Vim target. Geometry always comes
+ * from the live semantic element, caret, or browser selection.
  */
 export function VimTargetReticle({
   containerRef,

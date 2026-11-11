@@ -3,21 +3,13 @@ import { createPortal } from 'react-dom';
 import type { SelectionAction } from '../utils/selectionActions';
 
 /**
- * The host-actions dropdown: the same context-menu shape `QuickLabelDropdown`
- * draws (single column, accent bar, full-width rows) and the same floating
- * placement `FloatingQuickLabelPicker` computes, opened directly below the
- * toolbar's wand button.
- *
- * Keyboard here is arrows + Enter + Escape rather than the quick labels'
- * digit keys: a host's list is not a fixed ten with memorized numbers.
- * Nothing is preselected until the first arrow, so a stray Enter while the
- * dropdown is open never invokes a host command.
+ * Nothing is preselected until the first arrow, so a stray Enter while the dropdown is open
+ * never invokes a host command.
  */
 
 const PICKER_WIDTH = 224;
 const GAP = 6;
 const VIEWPORT_PADDING = 12;
-/** Room the dropdown wants below the anchor before it flips above. */
 const FLIP_THRESHOLD = 220;
 
 function computePosition(anchorEl: HTMLElement): { top: number; left: number; flipAbove: boolean } {
@@ -115,7 +107,6 @@ export const FloatingSelectionActionsPicker: React.FC<{
         return;
       }
       if (e.key === 'Enter') {
-        // Nothing preselected: Enter before the first arrow is not aimed here.
         if (activeIndex === null) return;
         e.preventDefault();
         const action = actions[activeIndex];
@@ -126,8 +117,6 @@ export const FloatingSelectionActionsPicker: React.FC<{
     return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [actions, activeIndex, onDismiss, onSelect]);
 
-  // Click outside dismisses. Deferred capture-phase registration, so the click
-  // that opened the dropdown does not immediately close it.
   useEffect(() => {
     const handlePointerDown = (e: PointerEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) onDismiss();

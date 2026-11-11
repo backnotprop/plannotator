@@ -3,38 +3,17 @@ import { createPortal } from 'react-dom';
 import { agentToolHostName } from '../utils/agentToolSetting';
 
 /**
- * One-time offer to turn on the `plannotator` agent tool on Pi and OpenCode 2,
- * where it is off by default. Question first ("Do you use Plannotator as a
- * skill?"), two example requests, one line of why, the cost, and two buttons,
- * under a small diagram of the round trip (the agent opens a review right
- * away, keeps working, your feedback comes back). Same shell as the other
- * first-run announcements (portal, z-[100], hand-rolled Escape + Tab wrap +
- * focus restore, backdrop dismiss, capture-phase keydown that swallows
- * Mod+Enter so a keystroke aimed here cannot approve a plan or post a review
- * behind it).
- *
- * Unlike those, it collects a decision, so it never dismisses itself while a
- * save is in flight, and it reports the outcome in place: a failed save shows
- * the server's reason and keeps both buttons; a successful one says when the
- * tool arrives and offers Done.
- *
- * LAST in each app's first-run dialog chain; the Apps gate rendering through
- * agentToolAnnouncementEligible and useFirstRunAnnouncementWindow.
+ * One-time offer to turn on the `plannotator` agent tool on Pi and OpenCode 2, where it is off
+ * by default.
  */
 
 export type AgentToolOfferHost = 'pi' | 'opencode';
 
 interface AgentToolAnnouncementDialogProps {
   readonly isOpen: boolean;
-  /** The session's host; names the agent and when the change applies. */
   readonly host: AgentToolOfferHost;
-  /**
-   * "Yes, turn it on": writes the setting (POST /api/config `{ agentTool: true }`).
-   * Rejects with an Error whose message is shown. The App marks the offer
-   * seen when it resolves.
-   */
+  /** Rejects with an Error whose message is shown. */
   readonly onTurnOn: () => Promise<void>;
-  /** The decline button ("No, I’ll just use slash commands"), Escape, the backdrop and Done: marks the offer seen and closes it. */
   readonly onDismiss: () => void;
 }
 
@@ -98,7 +77,6 @@ export function AgentToolAnnouncementDialog({
     }
   }, [onTurnOn]);
 
-  // Focus follows the outcome: Done once saved.
   useEffect(() => {
     if (save.kind === 'saved') doneRef.current?.focus();
   }, [save.kind]);
@@ -119,9 +97,9 @@ export function AgentToolAnnouncementDialog({
         dismiss();
         return;
       }
-      // Both apps submit their decision on Mod+Enter from a window-level
-      // handler; swallowing it here on the capture phase keeps a keystroke
-      // aimed at this dialog from approving a plan or posting a review.
+      // Both apps submit their decision on Mod+Enter from a window-level handler; swallowing it
+      // here on the capture phase keeps a keystroke aimed at this dialog from approving a plan or
+      // posting a review.
       if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
         event.preventDefault();
         event.stopPropagation();
@@ -217,7 +195,6 @@ export function AgentToolAnnouncementDialog({
               </p>
             ) : null}
 
-            {/* Stacks full-width below sm (secondary first, so focus order matches reading order); one row from sm. */}
             <div className="pn-ato-actions">
               {save.kind === 'saved' ? (
                 <button
@@ -261,15 +238,6 @@ export function AgentToolAnnouncementDialog({
   );
 }
 
-/*
- * Layout rules, the graphic band tint and the graphic colors are plain CSS (theme
- * tokens through var()) rather than Tailwind utilities on purpose: this file
- * is scanned by the review stylesheet, which the portable guides.show viewer
- * shares, and utilities used nowhere else would change the pinned viewer CSS
- * for a dialog the viewer never renders. Same result as the approved markup:
- * the graphic hides below 420px; the buttons stack full-width below `sm`
- * (40rem) and sit in one right-aligned row from it.
- */
 const DIALOG_LAYOUT_CSS = `
 .pn-ato-graphic { display: none; background-color: color-mix(in oklab, var(--muted) 45%, transparent); }
 @media (min-width: 420px) { .pn-ato-graphic { display: block; } }
@@ -279,21 +247,14 @@ const DIALOG_LAYOUT_CSS = `
 }
 `;
 
-/** When the change applies on each host; part of the small print and the saved status. */
 function startsLine(host: AgentToolOfferHost): string {
   return host === 'opencode' ? 'Starts the next time OpenCode starts.' : 'Starts with your next Pi session.';
 }
 
 /*
- * The round trip, as inline SVG painted only from theme tokens (var(--token)
- * values from theme.css), so it follows every palette in light and dark.
- * aria-hidden: the copy beside it carries the whole meaning.
- *
- * Motion, in one sentence: your feedback travelling back to the agent is what
- * the tool adds, and drawing that one arrow once shows the direction the
- * static picture only implies. Runs once on mount (900ms draw, then a 200ms
- * fade of its head and label), never loops, and is off under
- * prefers-reduced-motion, where the resting frame is the final one.
+ * The round trip, as inline SVG painted only from theme tokens (var(--token) values from
+ * theme.css), so it follows every palette in light and dark. aria-hidden: the copy beside it
+ * carries the whole meaning.
  */
 const ROUND_TRIP_MOTION_CSS = `
 .pn-ato-return { stroke-dasharray: 1; stroke-dashoffset: 0; animation: pn-ato-draw 900ms cubic-bezier(0.23, 1, 0.32, 1) 300ms both; }
@@ -310,7 +271,6 @@ function RoundTripGraphic({ agent }: { agent: string }) {
     <svg viewBox="0 0 480 176" className="mx-auto block h-auto w-full font-sans" style={{ maxWidth: 460 }} focusable="false">
       <style>{ROUND_TRIP_MOTION_CSS}</style>
 
-      {/* The agent: a terminal tile */}
       <g transform="translate(92 52)">
         <rect x="0.75" y="0.75" width="54.5" height="54.5" rx="12" style={{ fill: 'var(--card)', stroke: 'var(--border)' }} strokeWidth="1.5" />
         <path d="M17 21 L25 28 L17 35" style={{ fill: 'none', stroke: 'var(--primary)' }} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
@@ -320,7 +280,6 @@ function RoundTripGraphic({ agent }: { agent: string }) {
         {agent} <tspan fontWeight="400" style={{ fill: 'var(--muted-foreground)' }}>keeps working</tspan>
       </text>
 
-      {/* Plannotator: a document with one highlighted, commented line */}
       <g transform="translate(318 38)">
         <rect x="0.75" y="0.75" width="66.5" height="82.5" rx="10" style={{ fill: 'var(--card)', stroke: 'var(--border)' }} strokeWidth="1.5" />
         <rect x="12" y="15" width="30.8" height="4" rx="2" style={{ fill: 'var(--foreground)' }} fillOpacity="0.55" />
@@ -333,12 +292,10 @@ function RoundTripGraphic({ agent }: { agent: string }) {
       </g>
       <text x={352} y={140} textAnchor="middle" fontSize="13" fontWeight="600" style={{ fill: 'var(--foreground)' }}>Plannotator</text>
 
-      {/* opens right away */}
       <path d="M152 64 Q 236 16 310 56" style={{ fill: 'none', stroke: 'var(--muted-foreground)' }} strokeWidth="1.75" strokeLinecap="round" />
       <path d="M302.5 47.5 L311 56.5 L299 59" style={{ fill: 'none', stroke: 'var(--muted-foreground)' }} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" />
       <text x={232} y={28} textAnchor="middle" fontSize="12" style={{ fill: 'var(--muted-foreground)' }}>opens right away</text>
 
-      {/* your feedback comes back */}
       <path d="M310 106 Q 236 150 152 98" pathLength={1} className="pn-ato-return" style={{ fill: 'none', stroke: 'var(--primary)' }} strokeWidth="2.25" strokeLinecap="round" />
       <path d="M153 112 L151.5 98.5 L164.5 100" className="pn-ato-return-head" style={{ fill: 'none', stroke: 'var(--primary)' }} strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round" />
       <text x={236} y={166} textAnchor="middle" fontSize="12" fontWeight="600" className="pn-ato-return-label" style={{ fill: 'var(--primary)' }}>your feedback, as a message</text>

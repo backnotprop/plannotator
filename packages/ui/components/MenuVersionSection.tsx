@@ -5,7 +5,6 @@ import { isWindows } from '../utils/platform';
 import { copyTextToClipboard } from '../utils/clipboard';
 import { requestUpdateNow } from '../utils/updateNotice';
 
-/** The command when the server sent none (an advert always carries one). */
 function fallbackCommand(origin?: Origin | null, isWSL = false): string {
   if (origin === 'pi') return 'pi update --extensions';
   return isWindows && !isWSL
@@ -13,7 +12,6 @@ function fallbackCommand(origin?: Origin | null, isWSL = false): string {
     : 'curl -fsSL https://plannotator.ai/install.sh | bash';
 }
 
-/** "Oct 26, 9:14 AM", from the server's ISO time. */
 function failingSince(iso: string): string {
   const date = new Date(iso);
   return Number.isNaN(date.getTime())
@@ -29,12 +27,7 @@ interface MenuVersionSectionProps {
   closeMenu: () => void;
 }
 
-/**
- * The Options menu's version section: the running version and, when the
- * machine knows of a newer release, "X is available · What's new" with the
- * command for this host (remembered install flags included) and, for the
- * binary the install script manages, Update now.
- */
+/** The Options menu's version section: the running version and, when the machine knows of a newer release. */
 export const MenuVersionSection: React.FC<MenuVersionSectionProps> = ({
   appVersion,
   updateInfo,
@@ -45,7 +38,6 @@ export const MenuVersionSection: React.FC<MenuVersionSectionProps> = ({
   const [copied, setCopied] = useState(false);
   const [updating, setUpdating] = useState<'idle' | 'starting' | 'started' | string>('idle');
   const hasUpdate = !!updateInfo?.updateAvailable;
-  // Checking for updates has failed for hours: a quiet line and the command (no dot, no toast).
   const checkFailing = updateInfo?.checkFailing ?? null;
   const command = updateInfo?.command ?? fallbackCommand(origin, isWSL);
 
@@ -103,7 +95,6 @@ export const MenuVersionSection: React.FC<MenuVersionSectionProps> = ({
         )}
         {(hasUpdate || checkFailing) && (
           <div className="w-full mt-1 flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1" data-menu-update-command="">
-            {/* Shown whole when checking fails (it is the only way forward there); one scrolling line beside an update, as before. */}
             <code
               className={`flex-1 min-w-0 font-mono text-[10px] text-foreground ${hasUpdate ? 'overflow-x-auto whitespace-nowrap' : 'whitespace-pre-wrap break-all'}`}
             >

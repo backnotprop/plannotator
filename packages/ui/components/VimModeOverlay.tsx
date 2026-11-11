@@ -38,8 +38,8 @@ export interface VimModeOverlayProps {
 }
 
 /**
- * Render immediate, non-interactive feedback for Vim mode without changing
- * document layout or intercepting pointer selection.
+ * Render immediate, non-interactive feedback for Vim mode without changing document layout or
+ * intercepting pointer selection.
  */
 export function VimModeOverlay({
   containerRef,

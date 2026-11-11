@@ -1,7 +1,3 @@
-/**
- * Reusable confirmation dialog component
- */
-
 import React, { useEffect, useId, useRef } from 'react';
 import { Dialog, DialogContent, DialogTitle } from './ui/dialog';
 

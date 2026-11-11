@@ -1,16 +1,4 @@
-/**
- * The "Star the repo" ask (approval "star-ask", 2026-11-06, `.product/approved/star-ask/`): one humble card, in two
- * shapes. `corner`: a small card in the Inbox's bottom-right corner (packages/inbox). `card`: in place under the done
- * message on the done screen of plan review, code review and annotate (`StarAskDoneScreen`). Nothing here decides who
- * sees it or talks to a server: the host claims it (packages/shared/star-ask.ts) and hands in `onStar` / `onAnswer`.
- * A host that renders neither (the Workspaces app) never shows it.
- *
- * States: the ask; "Starring…" while gh stars it; "Starred. Thank you!" (the star fills #FFC926, the big line reads
- * "starred.", the row "decided · recorded"); "Thank you! GitHub is open in a new tab." after the link; on a failed star,
- * "Couldn't star it from here." with an "Open GitHub" link. The corner sees itself out 4 s after a thank-you; the card
- * waits for Close. Nothing moves: no entrance and no tween, the same under reduced motion. A named region, never a
- * dialog; no keyboard shortcut. Words: utils/starAskWords.ts.
- */
+/** Nothing moves: no entrance and no tween, the same under reduced motion. */
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { STAR_ASK_DISPLAY_FONT, STAR_ASK_MONO_FONT } from '../utils/starAskFonts';
 import { STAR_ASK_CSS } from '../utils/starAskStyles';
@@ -23,14 +11,11 @@ export const STAR_ASK_THANKS_LEAVE_MS = 4_000;
 export type StarAskShape = 'corner' | 'card';
 export type StarAskState = 'ask' | 'starring' | 'starred' | 'opened' | 'failed';
 
-/** The board the art is drawn on (scaled to the card's width), and the measure the big line fills. */
 const BOARD_W = 340;
 const BOARD_H = 104;
 const MEASURE = 316;
-/** The big line's size for the approved words, solved once in the harness (Archivo 900 at width 125). */
 const SOLVED_SIZE: Record<string, number> = { 'star it?': 68.95, 'starred.': 62.99 };
 
-/** A plain upright five-point star (centre, outer radius; inner radius 0.382 of it). */
 function starPoints(cx: number, cy: number, r: number): string {
   const ri = r * 0.382;
   return Array.from({ length: 10 }, (_, i) => {
@@ -39,10 +24,8 @@ function starPoints(cx: number, cy: number, r: number): string {
     return `${(cx + rr * Math.cos(a)).toFixed(2)},${(cy + rr * Math.sin(a)).toFixed(2)}`;
   }).join(' ');
 }
-/** Centred behind "star it?", its top point through the rule (the approved v3). */
 const STAR_POINTS = starPoints(198, 58, 70);
 
-/** The big line, solved to the measure once its face has loaded (one measurement: width scales with the size). */
 function BigLine({ text }: { text: string }) {
   const ref = useRef<HTMLSpanElement>(null);
   const [size, setSize] = useState(SOLVED_SIZE[text] ?? 60);
@@ -86,7 +69,6 @@ export function StarAskArt({ lit, words = STAR_ASK_WORDS }: { lit: boolean; word
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
-  // The mono face is tiny; ask for it with the display face so neither paints late.
   useEffect(() => {
     void document.fonts?.load?.(`500 9px "${STAR_ASK_MONO_FONT}"`).catch(() => undefined);
   }, []);
@@ -120,17 +102,11 @@ const StarIcon = () => (
 
 export interface StarAskCardProps {
   shape: StarAskShape;
-  /** The button stars with gh (the claim's check found it can); false: it is a link to the repository. */
   canStar: boolean;
-  /** Star it with gh: resolves true when GitHub took the star. Only ever called from the person's click. */
   onStar: () => Promise<boolean>;
-  /** Record how it ended: Not now, or the GitHub page opened from a link. Best effort. */
   onAnswer: (answer: 'not-now' | 'opened') => void;
-  /** Take the card away (Not now, Close, or the corner's own leave after a thank-you). */
   onLeave: () => void;
-  /** The state it starts in (tests and pictures). */
   initialState?: StarAskState;
-  /** The corner's leave after a thank-you (tests). Default `STAR_ASK_THANKS_LEAVE_MS`. */
   leaveAfterMs?: number;
   words?: StarAskWords;
 }
@@ -146,7 +122,6 @@ export function StarAskCard({ shape, canStar, onStar, onAnswer, onLeave, initial
   const lit = state === 'starred' || state === 'opened';
   const answered = lit || state === 'failed';
 
-  /** A state change that replaces the buttons: keep the keyboard where it was (on Close). */
   const move = useCallback((next: StarAskState) => {
     const active = typeof document !== 'undefined' ? document.activeElement : null;
     hadFocus.current = !!active && !!root.current?.contains(active);
@@ -159,7 +134,6 @@ export function StarAskCard({ shape, canStar, onStar, onAnswer, onLeave, initial
     closeRef.current?.focus();
   }, [answered, state]);
 
-  // The corner sees itself out after a thank-you; the card waits for Close.
   useEffect(() => {
     if (shape !== 'corner' || !lit) return;
     const timer = setTimeout(() => leave.current(), leaveAfterMs);
@@ -232,7 +206,6 @@ export function StarAskCard({ shape, canStar, onStar, onAnswer, onLeave, initial
                 <span>{state === 'starring' ? words.starring : words.star}</span>
               </button>
             ) : (
-              // A real link: the browser opens it from the click itself, so no popup blocker applies.
               <a href={STAR_ASK_REPO_URL} target="_blank" rel="noopener noreferrer" className={`psa-btn psa-pri${big ? ' psa-lg' : ''}`} onClick={opened}>
                 <StarIcon />
                 <span>{words.star}</span>

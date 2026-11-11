@@ -10,14 +10,7 @@ import {
 import { ActionMenuDivider } from './ActionMenu';
 import { cn } from '../lib/utils';
 
-/**
- * Rows plan review puts under the decisions in DecisionControl's menu
- * (`menuFooter`, #1057). Neither is a decision: picking an agent keeps the
- * menu open, and the permission line only reports what Approve already sends.
- *
- * NOT host-supported surface (like DecisionControl): Plannotator's own plan
- * review chrome.
- */
+/** NOT host-supported surface (like DecisionControl): Plannotator's own plan review chrome. */
 
 function isSelected(agentId: string, setting: AgentSwitchSettings): boolean {
   if (setting.switchTo === 'custom' || setting.switchTo === 'disabled') return false;
@@ -47,14 +40,8 @@ const RadioRow: React.FC<{
   </button>
 );
 
-/**
- * OpenCode: the agent an approval hands off to, as a radio section of the
- * decision menu (it replaces ApproveDropdown's separate caret). Reads and
- * writes the same `agentSwitch` setting Settings does.
- */
+/** Reads and writes the same `agentSwitch` setting Settings does. */
 export const AgentSwitchMenuSection: React.FC<{ agents: Agent[] }> = ({ agents }) => {
-  // Reactive: config.json's value lands through configStore.init() once
-  // /api/plan answers, which may be after this mounts (#1390).
   const stored = useConfigValue('agentSwitch');
   const setting: AgentSwitchSettings = stored ?? getAgentSwitchDefaults('plan');
   const isCustom = setting.switchTo === 'custom' && !!setting.customName;
@@ -95,10 +82,7 @@ export const AgentSwitchMenuSection: React.FC<{ agents: Agent[] }> = ({ agents }
   );
 };
 
-/**
- * Claude Code: the permission mode Approve already sends, made visible. Read
- * only; "Change" opens Settings, where the mode is set.
- */
+/** Claude Code: the permission mode Approve already sends, made visible. */
 export const PermissionModeMenuLine: React.FC<{
   agentName: string;
   modeLabel: string;

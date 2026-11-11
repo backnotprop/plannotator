@@ -2,8 +2,6 @@
 import React from 'react';
 import spriteSheet from '../sprite_package_additional/sprite.png';
 
-// Sprite: 176x96 native, 24 frames, 5 second animation cycle
-// Running across screen should sync with animation speed
 const NATIVE_WIDTH = 176;
 const NATIVE_HEIGHT = 96;
 const DISPLAY_HEIGHT = 64;
@@ -13,8 +11,6 @@ const FRAMES = 24;
 const FRAME_DURATION = 5; // seconds for full run cycle
 const TOTAL_SPRITE_WIDTH = NATIVE_WIDTH * FRAMES * SCALE;
 
-// Screen traverse: character runs across in ~12 seconds
-// This gives ~2.4 run cycles per screen width, feels natural
 const SCREEN_TRAVERSE_TIME = 18;
 
 export const TaterSpriteRunning: React.FC = () => {

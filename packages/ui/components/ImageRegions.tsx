@@ -6,30 +6,20 @@ import { naturalBoxToStage } from './imageZoom';
 import { getImageSrc } from './ImageThumbnail';
 
 /**
- * The URL a markdown image's src (as written) loads from, the way the
- * document renders it: http(s), data: and blob: as written, anything else
- * through the host's image route relative to `baseDir`. For the crop
- * thumbnails of region cards in the document's annotations panel.
+ * The URL a markdown image's src (as written) loads from, the way the document renders it:
+ * http(s), data: and blob: as written.
  */
 export function loadableImageSrc(src: string, baseDir?: string): string {
   return /^(https?:\/\/|data:|blob:)/i.test(src) ? src : getImageSrc(src, baseDir);
 }
 
-/**
- * The pieces of image region comments (#2100, approval
- * "image-region-comments", variant C): the Move | Region strip, the boxes
- * drawn over the image in the viewer, the crop thumbnail and the card body
- * the annotations panel shows. The lightbox (`ImageLightbox`) composes them.
- */
-
-/** The validated region of an annotation, or null (a malformed region is no region). */
 export function regionOf(annotation: Pick<Annotation, 'imageRegion'>): ImageRegion | null {
   return annotation.imageRegion == null ? null : parseImageRegion(annotation.imageRegion);
 }
 
 /**
- * Each region comment's number on its image: 1, 2, … in the order they were
- * made, counted per image (the src as written). Replies are not regions.
+ * Each region comment's number on its image: 1, 2, … in the order they were made, counted per
+ * image (the src as written).
  */
 export function imageRegionNumbers(annotations: readonly Annotation[]): Map<string, number> {
   const bySrc = new Map<string, Annotation[]>();
@@ -69,9 +59,8 @@ export const ChatIcon: React.FC<{ size?: number }> = ({ size = 15 }) => (
 );
 
 /**
- * A crop of the image showing the region, as a CSS background (no canvas, no
- * second request: the browser reuses the image it already loaded). The crop
- * keeps the region's shape within `maxWidth` × `maxHeight`.
+ * A crop of the image showing the region, as a CSS background (no canvas, no second request: the
+ * browser reuses the image it already loaded).
  */
 export const RegionThumb: React.FC<{
   src: string;
@@ -110,8 +99,8 @@ export const RegionNumber: React.FC<{ n: number; selected?: boolean; className?:
 );
 
 /**
- * What a region card shows in place of a quote: the crop, the file, the
- * box's size in the image's own pixels and the image's line.
+ * What a region card shows in place of a quote: the crop, the file, the box's size in the
+ * image's own pixels and the image's line.
  */
 export const RegionCardInfo: React.FC<{ region: ImageRegion; thumbSrc?: string | null }> = ({ region, thumbSrc }) => (
   <div className="mb-1.5 flex items-center gap-2.5" data-region-card-info="">
@@ -126,7 +115,6 @@ export const RegionCardInfo: React.FC<{ region: ImageRegion; thumbSrc?: string |
   </div>
 );
 
-/** One region drawn on the image. */
 export interface RegionBoxItem {
   id: string;
   n: number;
@@ -145,11 +133,8 @@ const boxStyle = (rect: StageRect, eased: boolean): React.CSSProperties => ({
 });
 
 /**
- * The boxes over the image, in stage pixels (so a stroke and a badge keep
- * their size at every zoom): the saved regions (numbered, the comment
- * colour), the selected one (ringed, the rest and the image dimmed), the box
- * being drawn (dashed, with its size in the image's own pixels) and the box
- * waiting for its comment (solid, numbered).
+ * The boxes over the image, in stage pixels (so a stroke and a badge keep their size at every
+ * zoom): the saved regions (numbered, the comment colour).
  */
 export const RegionBoxLayer: React.FC<{
   view: ZoomViewport | null;
@@ -157,14 +142,10 @@ export const RegionBoxLayer: React.FC<{
   eased: boolean;
   regions: readonly RegionBoxItem[];
   selectedId: string | null;
-  /** The box being drawn now. */
   draft: NaturalBox | null;
-  /** The box waiting for its comment, and its number. */
   pending: { box: NaturalBox; n: number } | null;
-  /** Saved boxes take a click (Move mode); in Region mode the drag draws through them. */
   interactive: boolean;
   onPick: (id: string) => void;
-  /** The pending box's element, the comment box's anchor. */
   pendingRef?: React.Ref<HTMLDivElement>;
 }> = ({ view, stage, eased, regions, selectedId, draft, pending, interactive, onPick, pendingRef }) => {
   if (!view || !stage) return null;
@@ -228,15 +209,12 @@ export const RegionBoxLayer: React.FC<{
 };
 
 /**
- * The Move | Region switch and the comment count (approval variant C):
- * floating over the image on a desktop, a bottom bar on a phone. The switch
- * is a radio group (arrows move between the two, as a segmented control);
- * the count opens the drawer of this image's region comments.
+ * The switch is a radio group (arrows move between the two, as a segmented control); the count
+ * opens the drawer of this image's region comments.
  */
 export const RegionToolStrip: React.FC<{
   tool: 'move' | 'region';
   onToolChange: (tool: 'move' | 'region') => void;
-  /** False on a read-only document: only the count shows. */
   canDraw: boolean;
   count: number;
   drawerOpen: boolean;
@@ -326,7 +304,6 @@ export const RegionToolStrip: React.FC<{
   );
 };
 
-/** The annotations among `all` that are region comments on the image `src` (as written). */
 export function useImageRegionAnnotations(all: readonly Annotation[], src: string | null | undefined): Annotation[] {
   return useMemo(() => {
     if (!src) return [];
@@ -335,10 +312,8 @@ export function useImageRegionAnnotations(all: readonly Annotation[], src: strin
 }
 
 /**
- * The document line an image is written on: its block's first line plus the
- * line breaks before `](src` in the block's text (a paragraph, a list item, a
- * table, a quote's own markdown). The block's first line when the reference
- * cannot be found; null when the block has no line.
+ * The document line an image is written on: its block's first line plus the line breaks before
+ * `](src` in the block's text (a paragraph, a list item, a table.
  */
 export function imageSourceLine(block: { content: string; startLine?: number }, src: string): number | null {
   if (typeof block.startLine !== 'number' || block.startLine < 1) return null;
@@ -348,11 +323,7 @@ export function imageSourceLine(block: { content: string; startLine?: number }, 
   return block.startLine + (block.content.slice(0, at).match(/\n/g)?.length ?? 0);
 }
 
-/**
- * Where the markdown image reference to `src` starts in `text` (`](src)`,
- * `](src "title")`, `](<src>)`), or -1. The src must be the whole reference:
- * `a.png` never matches `](data.png)` or `](a.png.bak)`.
- */
+/** The src must be the whole reference: `a.png` never matches `](data.png)` or `](a.png.bak)`. */
 export function imageReferenceIndex(text: string, src: string): number {
   if (!src) return -1;
   for (const opener of [`](${src}`, `](<${src}>`]) {

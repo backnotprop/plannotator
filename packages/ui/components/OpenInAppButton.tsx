@@ -12,39 +12,15 @@ import {
   DropdownMenuSeparator,
 } from './ui/dropdown-menu';
 
-/**
- * OpenInAppButton — split button + file-actions menu.
- *
- * When the file is launchable (local session, resolvable path), the left half
- * opens it in the last-selected app and the chevron drops down the detected
- * apps (file manager, then editors, then terminals) — picking one persists it
- * AND opens immediately. The menu also carries Copy path and (review only)
- * Copy file diff.
- *
- * When launching is unavailable (remote session, or PR review with no local
- * checkout), the app actions are hidden but the copy actions remain behind a
- * `⋯` overflow button — so e.g. Copy file diff never disappears. Renders
- * nothing when there is neither an app to open nor a diff to copy.
- */
-
 interface OpenInAppButtonProps {
   filePath: string | null | undefined;
   base?: string | null;
-  /** Diff/patch text for the "Copy file diff" menu action (review only). */
   diffText?: string | null;
-  /**
-   * When false, hide the app-launch actions (e.g. PR review with no local
-   * checkout, where files aren't resolvable on disk) but keep copy actions.
-   */
   canOpen?: boolean;
-  /** When true, render the primary label text alongside the icon. */
   showLabel?: boolean;
   disabled?: boolean;
 }
 
-// The host app catalog is static for the session, but the all-files view
-// renders one OpenInAppButton per file — so /api/open-in/apps is fetched once
-// and the promise shared across every instance (useOpenInApps).
 const OPEN_IN_APPS_URL = '/api/open-in/apps';
 
 export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
@@ -59,7 +35,6 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
   const apps = detected?.apps ?? null;
   const available = detected ? detected.available : null;
   const [storedId, rememberApp] = useRememberedOpenInApp();
-  // Nothing picked yet: the file manager, as before.
   const currentId = storedId ?? 'reveal';
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -73,18 +48,11 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
   }, []);
 
   const list = apps ?? [];
-  // Apps are launchable: server says available, the surface allows it, the path
-  // is resolvable, and at least one app was detected.
   const openable =
     available === true && canOpen && !!filePath && list.length > 0;
 
-  // Nothing to do: can't open AND nothing to copy. Also preserve the
-  // "hide when unavailable" behavior for surfaces whose only copy action is the
-  // path (annotate in a remote session) — show the standalone menu only when
-  // there's a diff to copy.
   if (!openable && !diffText) return null;
 
-  // Resolve the active app: last-used if still detected, else reveal, else first.
   const resolvedId = list.some((a) => a.id === currentId)
     ? currentId
     : list.some((a) => a.id === 'reveal')
@@ -137,7 +105,6 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
     setMenuOpen(false);
   };
 
-  // Menu groups: file manager first, then editors, then terminals.
   const grouped = [
     list.filter((a) => a.kind === 'file-manager'),
     list.filter((a) => a.kind === 'editor'),
@@ -160,7 +127,6 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
   return (
     <div className="flex items-center gap-1">
       <div className="flex items-center rounded overflow-hidden">
-        {/* Primary: open in the current app (only when launchable). */}
         {openable && currentApp && (
           <button
             type="button"
@@ -176,7 +142,6 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
             {showLabel && <span className="whitespace-nowrap">{currentApp.label}</span>}
           </button>
         )}
-        {/* Chevron (with primary) or standalone overflow (copy-only). */}
         <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
           <DropdownMenuTrigger
             render={

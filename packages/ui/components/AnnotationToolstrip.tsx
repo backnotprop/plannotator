@@ -2,51 +2,18 @@ import React, { useState, useEffect } from 'react';
 import type { EditorMode, InputMethod } from '../types';
 import { TaterSpritePullup } from './TaterSpritePullup';
 
-/** Props for the shared annotation input and action mode toolstrip. */
 export interface AnnotationToolstripProps {
   inputMethod: InputMethod;
   onInputMethodChange: (method: InputMethod) => void;
   mode: EditorMode;
   onModeChange: (mode: EditorMode) => void;
   taterMode?: boolean;
-  /**
-   * Compact mode: used inside the sticky header lane. Buttons only expand for
-   * the active mode (no hover expansion), gap is tightened, and the help link
-   * is hidden.
-   */
   compact?: boolean;
-  /**
-   * Show the "how does this work?" help link. Default true; hidden on the
-   * floating HTML toolstrip where space is tight.
-   */
   showHelpLink?: boolean;
-  /**
-   * Icon-only mode: no button ever expands to show a label, even the active
-   * one. Used in the sticky header lane on mobile so the toolstrip stays
-   * narrow and leaves room for the diff badges.
-   */
   iconOnly?: boolean;
-  /**
-   * Hide the drag/pinpoint input group entirely. Live app sessions are
-   * pinpoint-only, so the switch would be a dead control there.
-   */
   hideInputMethodSwitch?: boolean;
-  /**
-   * Omit only the Quick Label action. Defaults to false so existing consumers
-   * retain the complete action-mode group.
-   */
   hideQuickLabel?: boolean;
-  /**
-   * Omit only the Redline action. Defaults to false. For a host whose
-   * composer is its own (the Inbox surface on a phone draws Select, Pinpoint,
-   * Markup and Comment).
-   */
   hideRedline?: boolean;
-  /**
-   * Omit the action group (Markup, Comment, Redline, Label) and show only the
-   * Select / Pinpoint pair. For a host whose composer decides the action (a
-   * Shape board: Change it or Ask).
-   */
   hideActionModes?: boolean;
 }
 
@@ -69,7 +36,6 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
   const [helpTab, setHelpTab] = useState<'selection' | 'plannotator'>('selection');
   const [mounted, setMounted] = useState(false);
 
-  // Enable transitions only after first paint
   useEffect(() => {
     requestAnimationFrame(() => setMounted(true));
   }, []);
@@ -77,7 +43,6 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
   return (
     <>
       <div className={`flex items-center flex-wrap ${compact ? 'gap-1' : 'gap-1.5'}`}>
-        {/* Input method group */}
         {!hideInputMethodSwitch && (
         <div className="inline-flex items-center gap-0.5 bg-muted/50 rounded-lg p-0.5 border border-border/30">
           <ToolstripButton
@@ -120,7 +85,6 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
         </div>
         )}
 
-        {/* Action mode group */}
         {!hideActionModes && (
         <div className="inline-flex items-center gap-0.5 bg-muted/50 rounded-lg p-0.5 border border-border/30">
           <ToolstripButton
@@ -186,7 +150,6 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
         </div>
         )}
 
-        {/* Help */}
         {!compact && showHelpLink && (
           <button
             onClick={() => setShowHelp(true)}
@@ -197,7 +160,6 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
         )}
       </div>
 
-      {/* Help Video Dialog */}
       {showHelp && (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-background/80 backdrop-blur-sm p-4"
@@ -262,8 +224,6 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
   );
 };
 
-/* ─── Color system ─── */
-
 const colorStyles = {
   primary: {
     active: 'bg-background text-foreground shadow-sm',
@@ -294,8 +254,6 @@ const colorStyles = {
 
 type ButtonColor = keyof typeof colorStyles;
 
-/* ─── Constants ─── */
-
 const ICON_SIZE = 28;       // collapsed button width (px)
 const H_PAD = 10;           // horizontal padding when expanded (px) — matches px-2.5
 const GAP = 6;              // gap between icon and label (px) — matches gap-1.5
@@ -304,22 +262,6 @@ const COLLAPSED_PAD = (ICON_SIZE - ICON_INNER) / 2;
 const DURATION = 180;       // transition ms
 const EASE = 'cubic-bezier(0.25, 0.46, 0.45, 0.94)';
 
-/* ─── Button ─── */
-
-/**
- * One toolstrip button: the icon, and a label that slides out beside it.
- *
- * The width comes from layout, never from a JS measurement. A hidden copy of
- * the label sits in a one-column grid whose column animates `0fr` -> `1fr`, so
- * the button's shrink-to-fit width runs from the icon-only 28 px to the icon,
- * the gap and the label; the side padding animates 7 -> 10 px with it. The
- * width at every frame matches the explicit-width version this replaced
- * (28 + (12 + label) x progress, same 180 ms curve). The visible label is
- * positioned beside the icon and clipped by the button's own edge, as before:
- * a grid track laid out at a fraction of its width reveals its content more
- * slowly than the button grows, so the label is not drawn inside it.
- * Reading `offsetWidth` per button forced a layout on every document open.
- */
 const ToolstripButton: React.FC<{
   active: boolean;
   onClick: () => void;
@@ -334,9 +276,8 @@ const ToolstripButton: React.FC<{
   const styles = colorStyles[color];
   const [isTouchDevice] = useState(() => 'ontouchstart' in window || navigator.maxTouchPoints > 0);
 
-  // iconOnly: never expand (mobile sticky lane).
-  // compact: only active expands (sm+ sticky lane — shows current mode).
-  // default: active or hovered expands (top-of-doc full toolstrip).
+  // iconOnly: never expand (mobile sticky lane). compact: only active expands (sm+ sticky lane —
+  // shows current mode). default: active or hovered expands (top-of-doc full toolstrip).
   const expanded = iconOnly
     ? false
     : compact
@@ -365,7 +306,6 @@ const ToolstripButton: React.FC<{
       style={{ paddingInlineStart: pad, paddingInlineEnd: pad, transition }}
     >
       {icon}
-      {/* The label people see, beside the icon, clipped at the button's edge. */}
       <span
         className="absolute inset-y-0 flex items-center text-xs font-medium"
         style={{
@@ -378,8 +318,6 @@ const ToolstripButton: React.FC<{
       >
         {label}
       </span>
-      {/* The width: a hidden copy of the gap and label in a column that
-          animates 0fr -> 1fr. min-width 0 and overflow hidden let it reach 0. */}
       <span
         aria-hidden
         style={{

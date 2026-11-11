@@ -4,9 +4,10 @@ import { groupModelOptions, labelWithinGroup, SEARCHABLE_THRESHOLD } from './Age
 
 export type InlinePickerOption = { value: string; label: string };
 
-/** Inline "Label: Value ▾" picker — the wireframe's compact select pill.
- *  Long catalogs (marker-engine model lists can run to hundreds) automatically
- *  gain a type-to-filter input, a wider popover, and provider group headers. */
+/**
+ * Long catalogs (marker-engine model lists can run to hundreds) automatically gain a
+ * type-to-filter input, a wider popover, and provider group headers.
+ */
 export function InlinePicker({
   label,
   value,
@@ -19,9 +20,7 @@ export function InlinePicker({
   value: string;
   options: InlinePickerOption[];
   onChange: (v: string) => void;
-  /** For a picker inside a dialog's form: Escape and Enter act on the open list and nothing behind it. */
   keysStayInList?: boolean;
-  /** Group headings as the ids write them, with no capitals or wide tracking. */
   plainGroupLabels?: boolean;
 }) {
   const [open, setOpen] = useState(false);

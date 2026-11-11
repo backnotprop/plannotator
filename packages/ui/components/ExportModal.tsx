@@ -1,11 +1,3 @@
-/**
- * Export Modal with tabs for Share, Annotations, and Notes
- *
- * Share tab (default): Shows shareable URL with copy button
- * Annotations tab: Shows human-readable annotations output with copy/download
- * Notes tab: Save plan to Obsidian/Bear without approving
- */
-
 import React, { useState, useEffect } from 'react';
 import { getObsidianSettings, getEffectiveVaultPath } from '../utils/obsidian';
 import { getBearSettings } from '../utils/bear';
@@ -16,7 +8,6 @@ import { copyTextToClipboard } from '../utils/clipboard';
 import { noteServerSessionMismatch, withServerSession } from '../utils/serverSession';
 import { OverlayScrollArea } from './OverlayScrollArea';
 
-/** POST body shape sent to the notes endpoint (mirrors what the Notes tab builds today). */
 interface SaveToNotesPayload {
   obsidian?: object;
   bear?: object;
@@ -24,12 +15,10 @@ interface SaveToNotesPayload {
   notion?: object;
 }
 
-/** Parsed response from the notes endpoint. */
 interface SaveToNotesResult {
   results?: Record<string, { success?: boolean; error?: string; url?: string }>;
 }
 
-/** Default save-to-notes wire: today's literal POST to /api/save-notes. */
 async function defaultSaveToNotes(body: SaveToNotesPayload): Promise<SaveToNotesResult> {
   const res = await fetch('/api/save-notes', {
     method: 'POST',
@@ -48,13 +37,9 @@ interface ExportModalProps {
   onClose: () => void;
   shareUrl: string;
   shareUrlSize: string;
-  /** Short share URL from the paste service (empty string when unavailable) */
   shortShareUrl?: string;
-  /** Whether the short URL is currently being generated */
   isGeneratingShortUrl?: boolean;
-  /** Error from the last short URL generation attempt (empty string = no error) */
   shortUrlError?: string;
-  /** Generate a short URL on demand (user clicks "Create short link") */
   onGenerateShortUrl?: () => void | Promise<unknown>;
   annotationsOutput: string;
   annotationCount: number;
@@ -63,14 +48,7 @@ interface ExportModalProps {
   markdown?: string;
   isApiMode?: boolean;
   initialTab?: Tab;
-  /** Override the save-to-notes wire. Default: POST /api/save-notes (today's behavior). */
   onSaveToNotes?: (payload: SaveToNotesPayload) => Promise<SaveToNotesResult>;
-  /**
-   * Wrap the annotations output for the clipboard Copy button. Annotate
-   * sessions pass a mode-aware wrapper so Copy matches Send Feedback instead
-   * of the plan-deny framing (#1107). Default: plan-deny wrap (today's
-   * plan-review behavior).
-   */
   wrapCopiedAnnotations?: (feedback: string) => string;
 }
 
@@ -105,14 +83,12 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const [saveErrors, setSaveErrors] = useState<Record<string, string>>({});
   const [savedUrls, setSavedUrls] = useState<Partial<Record<SaveTarget, string>>>({});
 
-  // Reset tab when modal opens
   useEffect(() => {
     if (isOpen) {
       setActiveTab(initialTab || (sharingEnabled ? 'share' : 'annotations'));
     }
   }, [isOpen, initialTab, sharingEnabled]);
 
-  // Reset save status when modal opens
   useEffect(() => {
     if (isOpen) {
       setSaveStatus({ obsidian: 'idle', bear: 'idle', octarine: 'idle', notion: 'idle' });
@@ -131,7 +107,6 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const isObsidianReady = obsidianSettings.enabled && effectiveVaultPath.trim().length > 0;
   const isBearReady = bearSettings.enabled;
   const isOctarineReady = octarineSettings.enabled && octarineSettings.workspace.trim().length > 0;
-  // Notion shows only when this server offers it (NOTION_TOKEN set, local session).
   const notionAvailable = isNotionAvailable();
   const notionParentPageId = getNotionParentPageId();
   const isNotionReady = notionParentPageId !== null;
@@ -149,9 +124,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     await handleCopy(wrapCopiedAnnotations(annotationsOutput), 'annotations');
   };
 
-  // Warn when the hash URL may be too long for messaging apps
   const urlIsLarge = shareUrl.length > 2048;
-  // Hash-based sharing unavailable (e.g. HTML render mode) — show only short link
   const hashUnavailable = !shareUrl && !!onGenerateShortUrl;
 
   const handleDownloadAnnotations = () => {
@@ -223,7 +196,6 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
   const readyCount = [isObsidianReady, isBearReady, isOctarineReady, isNotionReady].filter(Boolean).length;
 
-  // Determine which tabs to show
   const showTabs = sharingEnabled || showNotesTab;
 
   return (
@@ -234,7 +206,6 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       >
         {taterSprite}
 
-        {/* Header */}
         <div className="p-4 border-b border-border">
           <div className="flex justify-between items-center">
             <h3 className="font-semibold text-sm">Export</h3>
@@ -254,10 +225,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           </div>
         </div>
 
-        {/* Body */}
         <OverlayScrollArea className="flex-1 min-h-0">
         <div className="p-4">
-          {/* Tabs */}
           {showTabs && (
             <div className="flex gap-1 bg-muted rounded-lg p-1 mb-4">
               {sharingEnabled && (
@@ -297,10 +266,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </div>
           )}
 
-          {/* Tab content */}
           {activeTab === 'share' && sharingEnabled ? (
             <div className="space-y-4">
-              {/* Short URL — primary copy target when available */}
               {shortShareUrl ? (
                 <div>
                   <label className="block text-xs font-medium text-muted-foreground mb-2">
@@ -368,7 +335,6 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 </div>
               ) : null}
 
-              {/* Full hash URL — hidden when hash-based sharing is unavailable (HTML mode) */}
               {!hashUnavailable && <div>
                 <label className="block text-xs font-medium text-muted-foreground mb-2">
                   {shortShareUrl ? 'Full URL (backup)' : 'Shareable URL'}
@@ -421,7 +387,6 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 Save this plan to your notes app without approving or denying.
               </p>
 
-              {/* Obsidian */}
               <div className="border border-border rounded-lg p-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -466,7 +431,6 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 )}
               </div>
 
-              {/* Bear */}
               <div className="border border-border rounded-lg p-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -506,7 +470,6 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 )}
               </div>
 
-              {/* Octarine */}
               <div className="border border-border rounded-lg p-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -551,7 +514,6 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 )}
               </div>
 
-              {/* Notion */}
               {notionAvailable && (
                 <div className="border border-border rounded-lg p-3 space-y-2">
                   <div className="flex items-center justify-between">
@@ -608,7 +570,6 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 </div>
               )}
 
-              {/* Save All button */}
               {readyCount >= 2 && (
                 <div className="flex justify-end">
                   <button
@@ -629,7 +590,6 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         </div>
         </OverlayScrollArea>
 
-        {/* Footer actions - only show for Annotations tab */}
         {activeTab === 'annotations' && (
           <div className="p-4 border-t border-border flex justify-end gap-2">
             <button

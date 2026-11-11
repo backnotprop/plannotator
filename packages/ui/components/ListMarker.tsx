@@ -1,30 +1,5 @@
 import React from 'react';
 
-/**
- * Shared list-item marker used by both the main Viewer and the plan-diff
- * clean view. Renders the appropriate glyph(s) for a list item given its
- * level, ordered flag, display index, and checkbox state.
- *
- * Rendering rules:
- *   - Ordered items render `${orderedIndex}.` with tabular-nums so digit
- *     widths stay stable across e.g. `9.` → `10.`.
- *   - Checkbox items render the circle / checkmark SVG.
- *   - Ordered + checkbox renders BOTH: numeral first, checkbox second
- *     (matches GitHub's `1. [ ] task` rendering).
- *   - Plain bullets fall back to `•` / `◦` / `▪` by level.
- *
- * Interactivity is opt-in: the Viewer passes `interactive` + `onToggle`
- * for click-to-toggle checkboxes; the diff view leaves both undefined.
- *
- * The marker carries `annotation-exclude` because it is `select-none`: the
- * browser leaves the bullet/numeral out of every selection string, so it is
- * out of the quote an annotation stores. Without the class the highlighter
- * still PAINTS it (a selection crossing two list items wraps the second item's
- * bullet on the way), and the restore verification then compares a painted
- * "a•b" against a stored "a\nb", rejects a perfectly good restore, and
- * the annotation comes back from a reload with no highlight at all. Excluding
- * it makes the two agree by construction.
- */
 interface ListMarkerProps {
   level: number;
   ordered?: boolean;

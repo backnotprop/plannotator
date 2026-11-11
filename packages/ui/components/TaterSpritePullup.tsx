@@ -2,7 +2,6 @@
 import React from 'react';
 import spriteSheet from '../sprite_package_pulluphang/sprite.png';
 
-// Sprite specs: 96x96 native, 24 frames, 3 seconds
 const NATIVE_SIZE = 96;
 const DISPLAY_SIZE = 56;
 const FRAMES = 24;

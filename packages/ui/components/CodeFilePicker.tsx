@@ -2,10 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useDismissOnOutsideAndEscape } from "../hooks/useDismissOnOutsideAndEscape";
 
-/**
- * Floating popover anchored to a code-file link with multiple repo matches.
- * Selecting an entry calls `onPick(path)`. Esc / outside-click dismisses.
- */
+/** Floating popover anchored to a code-file link with multiple repo matches. */
 export const CodeFilePicker: React.FC<{
 	anchorEl: HTMLElement | null;
 	matches: string[];

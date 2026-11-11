@@ -1,20 +1,7 @@
 import { createPortal } from 'react-dom';
 import type { MentionPerson } from '../utils/mentions';
 
-/**
- * The `@` menu over the comment composer's textarea.
- *
- * NOTHING IS PRESELECTED (`active === null` until the person arrows into the
- * list), the same rule `useSkillReferenceAutocomplete` keeps for `/` and `$`:
- * until then Enter and Tab mean what they always meant in a comment box.
- *
- * PORTALED AND FIXED, not absolute inside the composer: the popover clips its
- * own box and the expanded dialog scrolls, so a menu positioned inside the
- * textarea's wrapper is cut off at the card's edge. It is placed from the
- * textarea's measured rect instead — above it by default, below when the
- * composer sits too close to the top of the window for the menu to open
- * upward.
- */
+/** The `@` menu over the comment composer's textarea. */
 
 export interface MentionAnchor {
   readonly top: number;
@@ -23,11 +10,9 @@ export interface MentionAnchor {
   readonly width: number;
 }
 
-/** The menu's own height cap (max-h-48 = 12rem), in px. */
 const MENU_MAX_PX = 192;
 const MENU_GAP_PX = 4;
 
-/** Measure the composer textarea for {@link MentionPicker}. Null closes the menu. */
 export function mentionAnchorOf(element: HTMLElement | null): MentionAnchor | null {
   if (element === null) return null;
   const rect = element.getBoundingClientRect();
@@ -46,7 +31,6 @@ export function mentionGroups(people: readonly MentionPerson[]): { group: string
   return runs;
 }
 
-/** The optional avatar column: an image, else initials on a tinted disc. */
 function MentionAvatar({
   avatar,
   label,
@@ -93,11 +77,8 @@ export function MentionPicker({
   /** Id referenced by the focused textarea's aria-controls attribute. */
   readonly id?: string;
   readonly people: readonly MentionPerson[];
-  /** Shown as one non-selectable row when `people` is empty. */
   readonly emptyNotice?: string | null;
-  /** Optional heading above the list. Absent → nothing rendered. */
   readonly heading?: string | null;
-  /** Index of the arrow-focused row, or null for "nothing preselected". */
   readonly active: number | null;
   readonly anchor: MentionAnchor | null;
   readonly onPick: (person: MentionPerson) => void;
@@ -129,7 +110,6 @@ export function MentionPicker({
           {emptyNotice}
         </p>
       ) : people.some((person) => person.group) ? (
-        // Grouped (a host set `group`): each run of one group is a `role="group"` labelled by its heading.
         mentionGroups(people).map((run) => {
           const headingId = id ? `${id}-group-${run.start}` : undefined;
           return (
@@ -190,7 +170,6 @@ export function MentionPicker({
             {person.avatar && <MentionAvatar avatar={person.avatar} label={person.label} />}
             <span className="min-w-0 flex-1 truncate">{person.label}</span>
             {person.detail && (
-              // The NAME is what the person reads; the detail gives way first.
               <span className="min-w-0 max-w-[44%] shrink-0 truncate text-[10px] text-muted-foreground">
                 {person.detail}
               </span>

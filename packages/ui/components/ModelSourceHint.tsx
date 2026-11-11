@@ -21,10 +21,7 @@ export function modelSourceToolForProvider(providerType: string | null | undefin
   return null;
 }
 
-/**
- * Where the model list under a picker came from. Only when the server reports
- * the tool's version: a host that does not send it gets no hint.
- */
+/** Where the model list under a picker came from. */
 export function modelSourceHint(tool: ModelSourceTool | null | undefined, info: ModelSourceInfo | null | undefined): string | null {
   if (!tool || !info?.toolVersion) return null;
   const name = TOOL_NAME[tool];

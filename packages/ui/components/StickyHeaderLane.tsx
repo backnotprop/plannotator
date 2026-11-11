@@ -1,30 +1,3 @@
-/**
- * StickyHeaderLane — compact "ghost" header that can pin as the user scrolls
- * past the AnnotationToolstrip.
- *
- * By default, the lane is invisible and non-interactive at rest, leaving the
- * original toolstrip and badge cluster as the visible source of truth. Hosts
- * can keep this measured lane visible at rest or let it scroll normally.
- *
- * Layout is driven by two ResizeObserver measurements — the lane
- * wrapper's actual width AND the Viewer action button cluster's actual
- * width — so the bar fits exactly into the space between its left edge
- * and the buttons, with no fixed pixel reserves.
- *
- *   availableForBar = wrapperWidth - LEFT_OFFSET - actionsWidth - GAP
- *
- * Three states based on availableForBar:
- *   wide  (>= WIDE_BAR_WIDTH): shared lane, toolstrip with active labels.
- *   tight (>= MIN_BAR_WIDTH):  shared lane, toolstrip icon-only — gives
- *                              the bar another ~160px of room before
- *                              forcing a layout change.
- *   narrow (< MIN_BAR_WIDTH):  stacked below the action buttons on its
- *                              own full-width row, icon-only toolstrip.
- *
- * Composes <AnnotationToolstrip compact /> + <DocBadges layout="row" />.
- * No state is duplicated — all props are passed through from App.tsx.
- */
-
 import React, { useEffect, useRef, useState } from 'react';
 import { AnnotationToolstrip } from './AnnotationToolstrip';
 import { DocBadges } from './DocBadges';
@@ -39,59 +12,39 @@ import {
   snapCompactHeaderWidth,
 } from './compactHeaderLayout';
 
-// Matches the bar's `md:left-5` inset. The remaining shared geometry lives
-// in compactHeaderLayout so Viewer-owned and standalone lanes cannot drift.
 const LEFT_OFFSET = 20;
 
-/** Controls when the compact header lane is visible and interactive. */
 export type StickyHeaderLaneVisibility = 'stuck' | 'always';
 
-/** Props for the measured compact annotation and document header lane. */
 export interface StickyHeaderLaneProps {
-  // Toolstrip state
   inputMethod: InputMethod;
   onInputMethodChange: (method: InputMethod) => void;
   mode: EditorMode;
   onModeChange: (mode: EditorMode) => void;
   taterMode?: boolean;
-  /** Omit the Quick Label tool in the compact toolstrip (mirrors AnnotationToolstripProps.hideQuickLabel). */
   hideQuickLabel?: boolean;
 
   /**
-   * Show the lane only after it sticks, or keep it visible at rest too.
-   * Defaults to `'stuck'`, preserving the incumbent ghost-header behavior.
-   * Hosts using `'always'` must reserve a clear header-height region because
-   * the lane remains zero-height and absolutely positioned over its sibling.
+   * Hosts using `'always'` must reserve a clear header-height region because the lane remains
+   * zero-height and absolutely positioned over its sibling.
    */
   visibility?: StickyHeaderLaneVisibility;
-  /**
-   * Keep the lane pinned while its scroll viewport moves. Pass the same value
-   * to `Viewer.stickyActions` so both measured header lanes share one policy.
-   * Defaults to true. Pair false with `visibility="always"`; the default
-   * stuck-only visibility cannot become visible when stickiness is disabled.
-   */
   sticky?: boolean;
 
-  // Badge state
   repoInfo?: { display: string; branch?: string } | null;
   planDiffStats?: PlanDiffStats | null;
   isPlanDiffActive?: boolean;
   hasPreviousVersion?: boolean;
   onPlanDiffToggle?: () => void;
-  /** Baseline suffix + tooltip for the plan-diff badge (see DocBadges). */
   planDiffBaselineLabel?: string;
   planDiffBaselineTooltip?: string;
   archiveInfo?: { status: 'approved' | 'denied' | 'unknown'; timestamp: string; title: string } | null;
 
-  // Layout
   maxWidth?: number | null;
 
-  // Re-query token for the [data-sticky-actions] ResizeObserver. When the
-  // Viewer remounts (e.g., toggling a linked doc), its `data-sticky-actions`
-  // node is replaced — but StickyHeaderLane itself does NOT remount, so
-  // its observer would otherwise stay attached to the now-detached old
-  // node and freeze `actionsWidth`. Pass a string that changes whenever
-  // Viewer remounts and the effect re-runs against the fresh DOM.
+  // When the Viewer remounts (e.g., toggling a linked doc), its `data-sticky-actions` node is
+  // replaced — but StickyHeaderLane itself does NOT remount, so its observer would otherwise stay
+  // attached to the now-detached old node and freeze `actionsWidth`.
   remountToken?: string;
 }
 
@@ -124,9 +77,8 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
   const scrollViewport = useScrollViewport();
   const laneIsStuck = sticky && isStuck;
   const isVisible = visibility === 'always' || laneIsStuck;
-  // Preserve the incumbent ghost lane exactly: its chrome remains mounted
-  // while the whole hidden bar fades out. Only the new always-visible mode
-  // removes chrome at rest for the supported chrome-free presentation.
+  // Preserve the incumbent ghost lane exactly: its chrome remains mounted while the whole hidden
+  // bar fades out.
   const showChrome = visibility === 'always' ? laneIsStuck : true;
 
   const headerGeometry = resolveCompactHeaderGeometry({
@@ -148,18 +100,7 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
     return () => ro.disconnect();
   }, []);
 
-  // Measure the Viewer's action button cluster so the right reserve
-  // reflects its REAL width (which varies with viewport — short vs full
-  // labels — and with button count). No more guessing at ~310/360/400px.
-  // The action button div is tagged with `data-sticky-actions` in
-  // Viewer.tsx. It's a sibling in the DOM by the time effects fire.
-  // Re-runs when `remountToken` changes so we re-query after Viewer
-  // unmounts/remounts (e.g., linked-doc toggle) instead of leaving the
-  // observer attached to a detached node.
   useEffect(() => {
-    // Reset to the unmeasured state so the bar falls back to the safe
-    // "no maxWidth cap" path for the one frame between Viewer remounting
-    // and the new observer firing its first callback.
     setActionsWidth(0);
     const el = document.querySelector<HTMLElement>('[data-sticky-actions]');
     if (!el) return;
@@ -171,14 +112,6 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
     return () => ro.disconnect();
   }, [remountToken]);
 
-  // IntersectionObserver-on-sentinel pattern (mirrors Viewer.tsx:257-267).
-  // Sentinel sits inline at the top of the column. The 80px positive top
-  // rootMargin grows the effective viewport upward so the sentinel is
-  // considered "visible" for an extra ~80px of scroll — delaying the bar's
-  // appearance until the real toolstrip has actually scrolled past. Without
-  // this, the sentinel fires the moment scrolling begins and the ghost bar
-  // doubles up with the still-visible toolstrip. Root is the OverlayScrollArea
-  // viewport from context, NOT <main> (which doesn't actually scroll).
   useEffect(() => {
     if (!sticky) {
       setIsStuck(false);
@@ -199,23 +132,8 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
 
   return (
     <>
-      {/* Sentinel — present only for sticky positioning. It sits at the top of
-          the column and activates the stuck state after scrolling out of the
-          OverlayScrollArea viewport. */}
       {sticky && <div ref={sentinelRef} aria-hidden="true" className="h-0 w-0" />}
 
-      {/* Zero-height wrapper — sticky by default, relative when sticky is
-          disabled so the absolutely positioned lane scrolls in normal flow.
-          It never pushes document content down.
-          The Viewer's outer wrapper uses z-50, so the sticky lane must
-          sit above that to paint over the card.
-
-          Narrow: the bar pins at top-[52px] / md:top-[60px] on its OWN
-          full-width row BELOW the card's sticky action buttons. Stacked
-          horizontal lanes, no horizontal collision possible.
-
-          Wide / tight: the bar shares the top-3 lane with the action
-          buttons (single horizontal header). */}
       <div
         ref={wrapperRef}
         data-sticky-header-lane="true"
@@ -224,20 +142,6 @@ export const StickyHeaderLane: React.FC<StickyHeaderLaneProps> = ({
         }`}
         style={maxWidth == null ? { height: 0 } : { maxWidth, height: 0 }}
       >
-        {/* Responsive bar.
-
-            `inline-flex flex-wrap` + a measured `max-width` cap (set inline
-            below) lets the bar wrap badges to a second row if the toolstrip
-            + badges can't fit on one line. The max-width is computed from
-            the real measured action button width — no fixed reserves.
-
-            `flex-shrink-0` on the toolstrip wrapper is a defensive measure:
-            if a long branch name pushes the badges, this stops the toolstrip
-            from being squeezed below its natural width. `overflow-hidden`
-            is the final safety net so any overflow clips inside the chrome
-            rather than leaking out.
-
-            `inert` removes the bar from the tab order whenever it is hidden. */}
         <div
           inert={!isVisible || undefined}
           className={`absolute left-3 md:left-5 top-0 inline-flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0 overflow-hidden rounded-lg py-1 md:py-1.5 ${

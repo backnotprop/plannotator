@@ -62,9 +62,6 @@ export interface ApproveButtonProps {
   mobileLabel?: string;
   mobileLoadingLabel?: string;
   title?: string;
-  /** Kept for plan mode (packages/editor AppHeader) — the softened "you have
-   *  annotations" treatment. The old platform-mode `muted` prop died with
-   *  PR6 (DecisionControl owns the self-approval mute now). */
   dimmed?: boolean;
   labelBreakpoint?: ToolbarLabelBreakpoint;
 }
@@ -108,9 +105,6 @@ interface ExitButtonProps {
   isLoading?: boolean;
   title?: string;
   labelBreakpoint?: ToolbarLabelBreakpoint;
-  /** `'ghost'` renders the icon-only ghost-X form that sits beside the
-   *  decision control. Default `'pill'` keeps every existing caller
-   *  byte-identical. */
   appearance?: 'pill' | 'ghost';
 }
 
@@ -129,9 +123,6 @@ export const ExitButton: React.FC<ExitButtonProps> = ({
     disabled={disabled || isLoading}
     title={title}
     aria-label={title}
-    // Maintainer ruling (post-demo): a bare X carries "close without
-    // sending" semantics an unlabeled icon should not carry alone — the
-    // word renders at every breakpoint.
     className="px-2 text-muted-foreground gap-1.5"
   >
     {isLoading ? '…' : (

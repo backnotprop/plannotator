@@ -1,21 +1,12 @@
 import React from 'react';
 import { Tooltip } from './Tooltip';
 
-/**
- * The viewed circle and the +/- columns the review app and the Inbox's PR rail share. They live here so the Inbox
- * window can draw a file row without loading anything of review-editor's, whose reader is a chunk of its own.
- * review-editor's `FileRowBits` re-exports them. The columns' styles are each host's (`.review-count-columns`).
- */
-
-/** Viewed checkbox — always visible: green check-circle when viewed, empty
- * circle otherwise. Fixed 16px slot, same as StageControl, so the two align
- * as a column. (`forceVisible` retained as a no-op for call-site stability.) */
+/** Viewed checkbox — always visible: green check-circle when viewed, empty circle otherwise. */
 export const ViewedControl: React.FC<{
   isViewed: boolean;
   onToggle?: () => void;
   /** The file, for a screen reader's name; a host's rows pass it. */
   name?: string;
-  /** Deprecated no-op — the control is always visible now. */
   forceVisible?: boolean;
 }> = ({ isViewed, onToggle, name }) => (
   <Tooltip content={isViewed ? 'Viewed — click to unmark' : 'Mark as viewed'} side="bottom">
@@ -23,9 +14,6 @@ export const ViewedControl: React.FC<{
       role="checkbox"
       aria-checked={isViewed}
       aria-label={name ? (isViewed ? `${name}: viewed, unmark` : `Mark ${name} as viewed`) : isViewed ? 'Viewed — unmark' : 'Mark as viewed'}
-      // tabIndex + key handling: these controls live INSIDE the row <button>
-      // (a real nested <button> is invalid HTML), so they need their own
-      // focus stop and Enter/Space activation to be keyboard-operable.
       tabIndex={0}
       onClick={(e) => {
         e.stopPropagation();
@@ -54,14 +42,8 @@ export const ViewedControl: React.FC<{
 );
 
 /**
- * The +/- counts as two right-aligned columns: each + ends on one edge and
- * each - on the next, on every row of the panel (All changes, group headings,
- * folders, files), so the size of each change reads down one column. The
- * column widths come from `--count-add-w` / `--count-del-w`, which the panel
- * sets from its widest numbers (`countColumnVars`); a number wider than that
- * grows its own row instead of overlapping. `tone="quiet"` draws both numbers
- * in the panel's tertiary grey (headings, folders); file rows keep the green
- * and red of `.file-tree-item .additions / .deletions`.
+ * The +/- counts as two right-aligned columns: each + ends on one edge and each - on the next,
+ * on every row of the panel (All changes, group headings, folders, files).
  */
 export const CountColumns: React.FC<{
   additions: number;
@@ -80,10 +62,10 @@ export const CountColumns: React.FC<{
   </span>
 );
 
-/** The column widths for a panel whose largest numbers are `additions` and
- *  `deletions` (the whole change's totals: every row's count is part of
- *  them). At least 3 characters, so a panel of small changes keeps its edge;
- *  2 px over, because a sign is a little wider than a tabular digit. */
+/**
+ * At least 3 characters, so a panel of small changes keeps its edge; 2 px over, because a sign
+ * is a little wider than a tabular digit.
+ */
 export function countColumnVars(additions: number, deletions: number): React.CSSProperties {
   const width = (n: number) => `calc(${Math.max(3, String(n).length + 1)}ch + 2px)`;
   return { '--count-add-w': width(additions), '--count-del-w': width(deletions) } as React.CSSProperties;

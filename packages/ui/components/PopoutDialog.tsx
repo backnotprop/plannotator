@@ -6,17 +6,9 @@ export const ANNOTATION_SELECTORS = [
   '.annotation-toolbar',
   '[data-comment-popover="true"]',
   '[data-floating-picker="true"]',
-  // Transient hidden textarea created by the legacy clipboard fallback
-  // (packages/ui/utils/clipboard.ts). It briefly steals focus during copy;
-  // without this guard the focus-out close reason would dismiss the popout
-  // whenever a copy button inside it falls back to execCommand.
   '[data-clipboard-fallback="true"]',
 ];
 
-/**
- * With `pageMarks` on (utils/pageMarks), the dialog marks `<body data-pn-popout>` while it is in the page: what
- * theme.css's `body:has([data-popout="true"])` matches, for a host that keys on the mark instead.
- */
 const markPopoutOpen = (el: HTMLElement | null) => (el ? holdPageMark(el.ownerDocument.body, 'data-pn-popout') : undefined);
 
 interface PopoutDialogProps {
@@ -26,7 +18,6 @@ interface PopoutDialogProps {
   container?: HTMLElement | null;
   className?: string;
   children: React.ReactNode;
-  /** Extra data attributes to spread onto the dialog popup */
   dataAttributes?: Record<string, string>;
 }
 
@@ -51,14 +42,7 @@ export const PopoutDialog: React.FC<PopoutDialogProps> = ({
   const handleOpenChange = useCallback(
     (next: boolean, eventDetails: Dialog.Root.ChangeEventDetails) => {
       if (next) return;
-      // Interactions with annotation UI (toolbars/popovers portal outside the
-      // dialog) must not dismiss the popout — the Radix version guarded this
-      // via onInteractOutside preventDefault; Base UI expresses it as
-      // cancelling the outside-press/focus-out close reason.
       if (eventDetails.reason === 'outside-press' || eventDetails.reason === 'focus-out') {
-        // For focus events the annotation UI may sit on either side of the
-        // event (target = element losing focus, relatedTarget = gaining), so
-        // guard both.
         const event = eventDetails.event as Event | undefined;
         const candidates = [
           event?.target as Element | null,
@@ -81,9 +65,6 @@ export const PopoutDialog: React.FC<PopoutDialogProps> = ({
   return (
     <Dialog.Root open={open} onOpenChange={handleOpenChange} modal={false}>
       <Dialog.Portal container={container ?? undefined}>
-        {/* Non-modal dialogs render no library backdrop, so we use a plain
-            div for the dark scrim + blur while keeping annotation toolbars
-            (which portal outside the dialog) interactive. */}
         <div
           className="fixed inset-0 z-50 bg-black/50 backdrop-blur-[2px]"
           onClick={handleBackdropClick}
