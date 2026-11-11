@@ -141,16 +141,13 @@ describe('the title in the transcript', () => {
     appendFileSync(path, title('release 0.28.61') + aiTitle('Release notes draft'))
     expect(await titles.read()).toBe('release 0.28.61')
     expect(titles.generatedTitle()).toBe('Release notes draft')
-  })
 
-  test('the generated title survives twenty name lines after it in one read, and the name is not lost to it', async () => {
+    // Many name lines after it in one read (the script keeps the last 20 lines): neither is lost to the other.
     let text = chatter('hello') + aiTitle('Early title')
     for (let i = 0; i < 25; i += 1) text += title(`name ${i}`)
-    const path = transcript(text)
-    const { host } = realHost()
-    const titles = new TranscriptTitle(host, SESSION, async () => [path])
-    expect(await titles.read()).toBe('name 24')
-    expect(titles.generatedTitle()).toBe('Early title')
+    const many = new TranscriptTitle(host, SESSION, async () => [transcript(text)])
+    expect(await many.read()).toBe('name 24')
+    expect(many.generatedTitle()).toBe('Early title')
   })
 
   test('an empty title says the session has none', async () => {

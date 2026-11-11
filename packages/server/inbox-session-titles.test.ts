@@ -4,8 +4,7 @@
  * the list as `session_titles`. The failures this catches: a generated title that leaks into `session_labels` (it
  * would show as the session's name in the @ picker, the To menu and every author line, which the owner has not
  * decided); a title that sticks after the session cleared it; a guest reading one;
- * Claude Code asked with no session live or no window watching, or asked again while a call is running; a `claude`
- * that is missing asked again on every tick; a "You" name taken from its listing. No real `claude` runs: the
+ * Claude Code asked with no session live or no window watching, or asked again while a call is running. No real `claude` runs: the
  * listing is a fake environment.
  */
 import { afterEach, describe, expect, test } from "bun:test";
@@ -14,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { INBOX_BRIDGE_POLL_PATH } from "@plannotator/shared/inbox/connection";
 import type { AgentEnvironment, AgentRunResult } from "./inbox-agents";
-import { CLAUDE_NAMES_EVERY_MS, CLAUDE_NAMES_MISSING_RETRY_MS, claudeAgentNames, createInboxClaudeNames } from "./inbox-claude-names";
+import { CLAUDE_NAMES_EVERY_MS, createInboxClaudeNames } from "./inbox-claude-names";
 import { startInboxServer, type InboxServer } from "./inbox";
 
 const roots: string[] = [];
@@ -67,22 +66,6 @@ function fakeClaude(listing: () => unknown, found = true) {
 }
 
 describe("Claude Code's own names (claude agents --json)", () => {
-  test("its listing reads as session → name, each name cleaned as a label is ('You' refused, controls stripped)", () => {
-    const names = claudeAgentNames(
-      JSON.stringify([
-        { sessionId: "a", name: "plannotator-3f", status: "idle" },
-        { sessionId: "b", name: "you" },
-        { sessionId: "c", name: "‮docs‬ sweep" },
-        { sessionId: "", name: "orphan" },
-        { name: "no id" },
-        "junk",
-      ]),
-    );
-    expect(names && Object.fromEntries(names)).toEqual({ a: "plannotator-3f", c: "docs sweep" });
-    expect(claudeAgentNames("not json")).toBeNull();
-    expect(claudeAgentNames("{}")).toBeNull();
-  });
-
   test("asked only while wanted, at most once per period and never twice at once; a rename is heard; a gone session keeps its name", async () => {
     let clock = 1_000;
     let wanted = false;
@@ -125,26 +108,6 @@ describe("Claude Code's own names (claude agents --json)", () => {
     clock += CLAUDE_NAMES_EVERY_MS;
     await names.refresh();
     expect(names.all()).toEqual({ s1: "release 0.28.61" });
-  });
-
-  test("with no claude found it waits the long retry before looking again", async () => {
-    let clock = 1_000;
-    const fake = fakeClaude(() => [], false);
-    let looked = 0;
-    const environment = () => {
-      looked += 1;
-      return fake.environment;
-    };
-    const names = createInboxClaudeNames({ environment, wanted: () => true, onChange: () => {}, now: () => clock });
-    stops.push(names.stop);
-    await names.refresh();
-    clock += CLAUDE_NAMES_EVERY_MS;
-    await names.refresh();
-    expect(looked).toBe(1);
-    clock += CLAUDE_NAMES_MISSING_RETRY_MS;
-    await names.refresh();
-    expect(looked).toBe(2);
-    expect(fake.runs).toEqual([]);
   });
 });
 

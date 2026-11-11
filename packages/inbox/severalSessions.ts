@@ -12,11 +12,11 @@
  *   plugin or loses the Inbox for a minute never makes the rows flip.
  *
  * `nextSeveral` is the rule (pure, tested alone); the rest keeps it in this window, recomputed when the agents change
- * (`onInboxAgentsSet`, which does not make every list read carry them) and when the window is hidden or shown.
+ * (`subscribeInboxAgents`) and when the window is hidden or shown.
  */
 import { useSyncExternalStore } from 'react';
 import type { InboxAgent, InboxAgentsGroup } from '@plannotator/core/inbox-types';
-import { inboxAgentsNow, onInboxAgentsSet } from './agentsList';
+import { inboxAgentsNow, subscribeInboxAgents } from './agentsList';
 
 export const SEVERAL_HOLD_MS = 10 * 60_000;
 
@@ -89,7 +89,9 @@ let wired = false;
 function subscribe(listener: () => void): () => void {
   if (!wired) {
     wired = true;
-    onInboxAgentsSet(() => recompute(hidden()));
+    // As a watcher: a session that starts or ends without writing must reach the rows too, so the window reads the
+    // list on the Agents' change even when the sidebar's Agents section is not drawn (a phone, the sidebar closed).
+    subscribeInboxAgents(() => recompute(hidden()));
     // Hidden, or just shown again: nobody was looking, so a project may be let go now.
     if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => recompute(true));
     recompute(hidden());

@@ -13,7 +13,7 @@ const K = projectKey(null, 'p1');
 const live = (n: number) => new Map([[K, n]]);
 
 describe('the hold', () => {
-  test('a second session turns names on at once; the second-last ending keeps them while anyone looks', () => {
+  test('a second session turns names on at once; they are let go only unseen, after the hold', () => {
     let held = nextSeveral(new Map(), live(1), 0, true);
     expect(held.has(K)).toBe(false);
     held = nextSeveral(held, live(2), 1_000, false);
@@ -26,14 +26,9 @@ describe('the hold', () => {
     // Long after, still looked at: kept.
     held = nextSeveral(held, live(1), 4_000 + SEVERAL_HOLD_MS * 3, false);
     expect(held.has(K)).toBe(true);
-  });
-
-  test('let go only when nobody looks and the hold has run out since it last had two', () => {
-    let held = nextSeveral(new Map(), live(2), 0, false);
-    held = nextSeveral(held, live(1), SEVERAL_HOLD_MS - 1, true);
-    expect(held.has(K)).toBe(true);
-    held = nextSeveral(held, live(1), SEVERAL_HOLD_MS, true);
-    expect(held.has(K)).toBe(false);
+    // Nobody looking, but the hold since it last had two (at 3 s) has not run out: kept. Run out: let go.
+    expect(nextSeveral(held, live(1), 3_000 + SEVERAL_HOLD_MS - 1, true).has(K)).toBe(true);
+    expect(nextSeveral(held, live(1), 3_000 + SEVERAL_HOLD_MS, true).has(K)).toBe(false);
   });
 });
 

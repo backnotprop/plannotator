@@ -2145,14 +2145,16 @@ function Inbox() {
      * many came (#2593). A record's read, which starts after them, covers it: it is dropped then.
      */
     let eventListTimer: ReturnType<typeof setTimeout> | null = null;
-    const listAfterEvents = (delay: number) => {
+    const listAfterEvents = (delay: number, failed = 0) => {
       if (eventListTimer) clearTimeout(eventListTimer);
       eventListTimer = setTimeout(() => {
         eventListTimer = null;
-        void refreshList(false);
+        // A read lost on a bad link (the stream still up, so nothing else re-reads): tried again, 2 s doubling to 30 s.
+        void refreshList(false).then((next) => next === null && !eventListTimer && listAfterEvents(Math.min(30_000, 2_000 * 2 ** failed), failed + 1));
       }, delay);
     };
     let snoozesTimer: ReturnType<typeof setTimeout> | null = null;
+    let streamConnected = false;
     let cardsTimer: ReturnType<typeof setTimeout> | null = null;
     let machinesTimer: ReturnType<typeof setTimeout> | null = null;
     let machineThreadTimer: ReturnType<typeof setTimeout> | null = null;
@@ -2442,6 +2444,9 @@ function Inbox() {
         onConnect: (hello) => {
           // The Inbox restarted under this page: when it is provably the same one, writes go on without a reload.
           if (hello) void adoptAfterRestart(hello);
+          // A reconnect may have missed `event: deliveries` (a rename, a session that came or went): the list is read again.
+          if (streamConnected) listAfterEvents(80);
+          streamConnected = true;
           // A reconnect may have missed `event: shapes`: the boards are read again.
           for (const listener of shapeFrameListeners) listener([]);
           reportWindow();
