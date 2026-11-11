@@ -3789,8 +3789,8 @@ export class InboxStore {
     // Drafts count in the total (compose); their files, uploaded or not yet sent, are blobs already counted.
     let total = [...blobSizes.values()].reduce((sum, size) => sum + size, 0) + inboxDraftsBytes(this.dir) + this.replyDraftsBytes() + this.decisionLinesBytes();
     // A log in one file is counted as that file (its lines still size each project and thread), plus its backups.
-    const stored = this.log.stored?.();
-    if (stored) total += stored.bytes + stored.backups.reduce((sum, backup) => sum + backup.bytes, 0);
+    const inOneFile = this.log.stored?.();
+    if (inOneFile) total += inOneFile.bytes + inOneFile.backups.reduce((sum, backup) => sum + backup.bytes, 0);
     // Size and Delete stay per folder: a combined project keeps its own files, so it keeps its own row, by its own name.
     for (const stored of this.allProjects()) {
       const head = this.canonicalProjectId(stored.id);
@@ -3809,7 +3809,8 @@ export class InboxStore {
       for (const sha256 of projectBlobs) bytes += blobSizes.get(sha256) ?? 0;
       const onDisk = this.log.usage(project);
       bytes += onDisk.bytes;
-      if (!stored) total += onDisk.bytes;
+      // Each project's lines are the total's on JSONL; in one file, that file was counted above.
+      if (!inOneFile) total += onDisk.bytes;
       for (const { line, bytes: lineBytes } of onDisk.lines) {
         const messageId =
           line.kind === "message"
@@ -3839,7 +3840,7 @@ export class InboxStore {
       });
     }
     projects.sort((a, b) => b.bytes - a.bytes || a.name.localeCompare(b.name));
-    return { dir: this.dir, bytes: total, projects, ...(stored ? { database: stored.bytes, backups: stored.backups } : {}) };
+    return { dir: this.dir, bytes: total, projects, ...(inOneFile ? { database: inOneFile.bytes, backups: inOneFile.backups } : {}) };
   }
 
   /** Settings → Storage's Remove on a dated backup (SQLite only): false when there is no such backup. */
