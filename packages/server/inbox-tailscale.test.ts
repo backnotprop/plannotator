@@ -952,7 +952,7 @@ describe("what the owner reads through the tailnet, and what a page there never 
     }
   });
 
-  test("the one-time sound dialog is never claimed through the tailnet; it waits for a page on this computer", async () => {
+  test("the one-time sound dialog is claimed by the owner's page over the tailnet as on this computer, once", async () => {
     const dataDir = world({ inboxTailscale: true });
     writeFileSync(join(dataDir, "update-state.json"), JSON.stringify({ inboxVersion: "0.28.9" }));
     const ts = fakeTailscale();
@@ -963,13 +963,13 @@ describe("what the owner reads through the tailnet, and what a page there never 
     const own = { Origin: `https://${MAGIC}:${inbox.port}`, "Content-Type": "application/json" };
     const remote = await throughServe(inbox, "/api/inbox/sound/dialog", { method: "POST", headers: own, body: JSON.stringify({ serverSession: inbox.serverSession }) });
     expect(remote.status).toBe(200);
-    expect(((await remote.json()) as Json).show).toBe(false);
-    expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxSound).toEqual({ dialogDueFor: "0.28.10" });
+    expect(((await remote.json()) as Json).show).toBe(true);
+    expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxSound).toMatchObject({ dialogShownFor: "0.28.10" });
     const local = await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/sound/dialog`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ serverSession: inbox.serverSession }),
     });
-    expect(((await local.json()) as Json).show).toBe(true);
+    expect(((await local.json()) as Json).show).toBe(false);
   });
 });

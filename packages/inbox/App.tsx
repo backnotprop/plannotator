@@ -1183,7 +1183,7 @@ function Inbox() {
   const [listIntro, setListIntro] = useState<'none' | 'claimed' | 'open' | 'shown'>('none');
   const [listIntroDecided, setListIntroDecided] = useState(false);
   const listIntroAsked = useRef(false);
-  const listIntroLatch = useRef<{ local: boolean; firstRun: boolean; rows: number } | null>(null);
+  const listIntroLatch = useRef<{ owner: boolean; firstRun: boolean; rows: number } | null>(null);
   const [listIntroSettled, setListIntroSettled] = useState(false);
   /**
    * A one-time dialog of the line is claimed or open now (a reveal's, voice's, the star ask's, Code review's offer):
@@ -2892,7 +2892,7 @@ function Inbox() {
     const now = routeRef.current;
     return openThreadAsks(oneTimeRows.current, now.page === 'inbox' ? (now.thread ?? null) : null);
   };
-  const soundDialogDue = latest !== null && settings?.sound?.dialog_due === true && (settings.via ?? 'local') === 'local' && lineArms('sound');
+  const soundDialogDue = latest !== null && settings?.sound?.dialog_due === true && !tailnetGuest(settings) && lineArms('sound');
   // Not during the tour: one-time dialogs never open over it (they wait for its end).
   const soundDialogBlocked = updateDialog !== null || restarting || route.page === 'tour';
   useEffect(() => {
@@ -2921,11 +2921,11 @@ function Inbox() {
   // design): asks about each agent that can take a note and was never asked.
   // Decided once per load, once the agents are read (the run that opened the
   // window has finished connecting) and the list has loaded; after the sound
-  // dialog, and never on a load that showed it. Never through the tailnet,
-  // even for the owner, who can read the agents there (like the other one-time
+  // dialog, and never on a load that showed it. On the owner's other devices too
+  // (owner ruling 2026-11-11), never on a tailnet guest's page (like the other one-time
   // dialogs; Settings → Agents asks the same thing), never while an update
   // dialog is open or a reply is being typed, and it waits while Settings is open.
-  const soundSettled = settings !== null && (!(settings.sound?.dialog_due === true && (settings.via ?? 'local') === 'local' && lineArms('sound')) || soundClaimed);
+  const soundSettled = settings !== null && (!(settings.sound?.dialog_due === true && !tailnetGuest(settings) && lineArms('sound')) || soundClaimed);
   const agentNoteOpen = typeof agentNote === 'object';
   // The notification lines (the ask, "tab slept") wait until this load's
   // one-time dialogs are decided (the sound claim settled, the note dialog
@@ -5119,7 +5119,7 @@ function Inbox() {
   if (updateDialog !== null || restarting) updatingThisLoad.current = true;
   if (listIntroLatch.current === null && settings && latest !== null && shown !== null) {
     listIntroLatch.current = {
-      local: (settings.via ?? 'local') === 'local',
+      owner: !tailnetGuest(settings),
       firstRun,
       rows: filterList(shown).reduce((n, section) => n + section.threads.length, 0),
     };
@@ -5173,7 +5173,7 @@ function Inbox() {
   const groupingFirst = lineLatch?.listIntroDue === true && lineLatch.ahead.includes('list_view') && readListView() === 'grouped' && listTallerThanScreen(listBody(rootRef.current));
   const listIntroLoad: ListIntroLoad = {
     due: listIntroAtLoad !== null && lineLatch?.listIntroDue === true && !groupingFirst,
-    local: listIntroAtLoad?.local ?? false,
+    owner: listIntroAtLoad?.owner ?? false,
     listLoaded: listIntroAtLoad !== null,
     firstRun: listIntroAtLoad?.firstRun ?? false,
     rows: listIntroAtLoad?.rows ?? 0,
@@ -5239,7 +5239,7 @@ function Inbox() {
   const voiceIntro = useVoiceIntro(
     {
       due: lineLatch?.voiceDue === true,
-      local: listIntroLoad.local,
+      owner: listIntroLoad.owner,
       listLoaded: listIntroLoad.listLoaded,
       firstRun: listIntroLoad.firstRun,
       listIntroDue: listIntroLoad.due,
@@ -5553,7 +5553,6 @@ function Inbox() {
   // once an agent is installed or turned on: it reads the agents again when the window comes back
   // into focus (the person ran the install command in a terminal) and every few seconds while shown.
   const { model: firstRunSessions } = useComposeSessions(firstRun);
-  const overTailnet = settings?.via === 'tailnet';
   // For a tailnet guest the agents route is local only: nothing to read again.
   const guestPage = tailnetGuest(settings);
   // Pull requests (approval "inbox-code-review-direction", items 4 and 5): only with Code review on, read while the
@@ -6095,7 +6094,7 @@ function Inbox() {
     const decide = () => {
       if (cancelled || agentNoteDecided.current || replyInProgress() || openQuestionHere()) return false;
       agentNoteDecided.current = true;
-      const model = settings?.via === 'tailnet' ? null : agentsRef.current;
+      const model = tailnetGuest(settings) ? null : agentsRef.current;
       const rows = model ? noteQuestionRows(model) : [];
       // Not on this load (the line's gap): decided, so the notification lines need not wait for it.
       if (rows.length === 0 || !model || settingsRef.current?.reveal?.setup === false) {
@@ -6130,15 +6129,15 @@ function Inbox() {
   // The connect line (approval "inbox-agent-note-auto"; ConnectLine): once the agents are read (the run that
   // opened the window has finished connecting and writing notes), the news not said yet shows above the list and
   // on the first-run screen, quiet, never a dialog. Fixed for this load when it shows, and said at once
-  // (`POST /api/inbox/agents/seen`). Not over the tailnet: the agents are this computer's, as for the note dialog.
+  // (`POST /api/inbox/agents/seen`). On this computer and on its owner's other devices; never a tailnet guest's page.
   useEffect(() => {
-    if (connectLine !== null || !agentsSettled || !agents || !settings || settings.via === 'tailnet') return;
+    if (connectLine !== null || !agentsSettled || !agents || !settings || tailnetGuest(settings)) return;
     const news = connectLineNews(agents);
     if (!news) return;
     setConnectLine(news);
     void inboxApi.agentsSeen(news.report?.at ?? null, news.notes).then(setAgents, () => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agents, agentsSettled, settings?.via, connectLine]);
+  }, [agents, agentsSettled, settings?.via, settings?.guest, connectLine]);
   const connectLineEl =
     connectLine && connectLine !== 'gone' ? (
       <ConnectLine
@@ -6495,7 +6494,7 @@ function Inbox() {
   })();
 
   // The last step’s notifications line (choice 6): asked on the click, in the screen's "Try it".
-  const tourAskKind = tourRealStep && !tourAskHidden && !overTailnet && notifications.permission !== 'unsupported'
+  const tourAskKind = tourRealStep && !tourAskHidden && !guestPage && notifications.permission !== 'unsupported'
     ? notifications.permission === 'denied'
       ? 'blocked'
       : notifications.permission === 'granted' && settings?.notifications.enabled
@@ -6537,11 +6536,11 @@ function Inbox() {
               </button>
             </div>
           ) : null
-        ) : // Not over the tailnet: that page is another device, and the first run is set up on this computer.
-        connectLineEl || (notifications.firstRunAsk && askLinesFree && !overTailnet) ? (
+        ) : // On this computer and on the owner's other devices (owner ruling 2026-11-11); never a tailnet guest's page.
+        connectLineEl || (notifications.firstRunAsk && askLinesFree && !guestPage) ? (
           <>
             {connectLineEl}
-            {notifications.firstRunAsk && askLinesFree && !overTailnet && (
+            {notifications.firstRunAsk && askLinesFree && !guestPage && (
               <NotificationAsk
                 kind={notifications.firstRunAsk}
                 firstRun

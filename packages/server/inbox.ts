@@ -2500,13 +2500,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /**
    * The one-time sound dialog, claimed by the page that will show it: a
    * compare-and-set from `dialogDueFor` to `dialogShownFor`, so of several
-   * tabs (or a reload) only the first ever gets `show: true`. Only on this
-   * computer: a page that came through the tailnet (a phone, most likely)
-   * never shows it and leaves it for the next page opened here. The server is
-   * one process and this runs with no await, so two claims cannot interleave.
+   * tabs (or a reload) only the first ever gets `show: true`. This computer's
+   * page or its owner's on another device (owner ruling 2026-11-11), never a
+   * tailnet guest's. The server is one process and this runs with no await,
+   * so two claims cannot interleave.
    */
-  const claimSoundDialog = (via: RequestVia, load: string | null = null): boolean => {
-    if (via !== "local" || !soundState().dialog_due) return false;
+  const claimSoundDialog = (owner: boolean, load: string | null = null): boolean => {
+    if (!owner || !soundState().dialog_due) return false;
     // The line of one-time dialogs (shared/inbox/reveals.ts): 40 minutes apart, on any load.
     if (!lineFree("spaced", load)) return false;
     const { dialogDueFor, ...rest } = savedSound();
@@ -2590,11 +2590,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
   /**
    * The page that is about to show the dialog claims it: only the first claim ever gets `show: true`, so two tabs
-   * never both show it. Only on this computer (a page through the tailnet leaves it for the next page opened here).
+   * never both show it. This computer's page or its owner's on another device, never a tailnet guest's.
    * No await between the read and the write, so two claims cannot interleave.
    */
-  const claimListIntro = (via: RequestVia, load: string | null = null): boolean => {
-    if (via !== "local" || !listIntroState().due || !lineFree("spaced", load)) return false;
+  const claimListIntro = (owner: boolean, load: string | null = null): boolean => {
+    if (!owner || !listIntroState().due || !lineFree("spaced", load)) return false;
     const at = new Date().toISOString();
     // A one-time announcement: it keeps the line's day and spacing (shared/inbox/reveals.ts). A dev build never stamps
     // that clock.
@@ -3093,7 +3093,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * with Copy prompt; someone who saw it before (its `inboxBoardIntro.shownAt`) does not see it again. `show`: the page
    * draws the dialog. `key` (the page's own, kept with the stamp): the same page's retry after a lost answer gets
    * `show: true` again, without a write, while the feature is still undecided; any other key, window or device does not.
-   * `agent_note`: the agent note (a setup dialog), on this computer only: the line's gap, not an offer's Not now.
+   * `agent_note`: the agent note (a setup dialog), the owner's on any of their devices: the line's gap, not an offer's Not now.
    */
   const claimReveal = (
     id: RevealId | "agent_note",
@@ -3103,7 +3103,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     via: RequestVia = "local",
     agents: string[] | null = null,
   ): boolean => {
-    if (id === "agent_note") return claimAgentNote(via, load, agents);
+    if (id === "agent_note") return claimAgentNote(owner, load, agents);
     if (id === "snooze") return claimSnoozeIntro(owner, load);
     const undecided = lineOffers[id];
     if (!undecided || !owner || !snoozeIntroRelease) return false;
@@ -3146,8 +3146,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * unanswered is not shown again for the same agents, so it never takes another day (`revealAgentNoteNew`). A dev
    * build keeps no line: always yes.
    */
-  const claimAgentNote = (via: RequestVia, load: string | null, agents: string[] | null): boolean => {
-    if (via !== "local") return false;
+  const claimAgentNote = (owner: boolean, load: string | null, agents: string[] | null): boolean => {
+    if (!owner) return false;
     if (!snoozeIntroRelease) return true;
     const saved = loadConfig().inboxReveals;
     if (!revealAgentNoteNew(saved?.agentNote?.shownFor, agents) || !lineFree("setup", load)) return false;
@@ -3226,7 +3226,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       ahead: owner && snoozeIntroRelease ? revealAhead(state, now) : [],
       // The star ask (reveals.ts `aside`): armed beside `next` while the line is free; it moves no one.
       aside: owner && snoozeIntroRelease ? revealAsideNow(state, now) : [],
-      setup: via === "local" && revealLineFree("setup", state, now),
+      // Day 0's setup asks: this computer's, and its owner's on their other devices (owner ruling 2026-11-11); never a guest's.
+      setup: owner && revealLineFree("setup", state, now),
       line: snoozeIntroRelease,
       // How long until a date can change the line (reveals.ts `revealAgainAt`: the gap's end, a Not now's, a tenure),
       // null when none can: a page left loaded asks again once, then, and keeps no other timer for the line.
@@ -5659,17 +5660,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-        const show = claimSoundDialog(via, revealLoadId(req.headers.get("x-plannotator-load")));
+        const show = claimSoundDialog(ownerOrLocal(req, via), revealLoadId(req.headers.get("x-plannotator-load")));
         return json({ show, sound: soundState() });
       }
 
-      // The one-time list options dialog (approval "inbox-list-options-intro"): the first page on this computer to
-      // ask gets `show: true`, once per machine; a page reached over the tailnet never claims it.
+      // The one-time list options dialog (approval "inbox-list-options-intro"): the first of the owner's pages to
+      // ask gets `show: true`, once per machine; a tailnet guest's page never claims it.
       if (path === "/api/inbox/list-intro") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-        return json({ show: claimListIntro(via, revealLoadId(req.headers.get("x-plannotator-load"))), list_intro: listIntroState() });
+        return json({ show: claimListIntro(ownerOrLocal(req, via), revealLoadId(req.headers.get("x-plannotator-load"))), list_intro: listIntroState() });
       }
 
       // The one-time Snooze announcement (approval "inbox-snooze-announce"): the first page to ask gets `show: true`,
