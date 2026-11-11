@@ -8,11 +8,9 @@ export type CallFlowAnalysisState =
 
 export interface CallFlowAnalysisController {
   readonly state: CallFlowAnalysisState;
-  /** Start a fresh client request without changing the shared review snapshot. */
   readonly retry: () => void;
 }
 
-/** Run once per visible review snapshot; all Dock/Lens consumers share this state. */
 export function useCallFlowAnalysis(
   snapshotId: string | undefined,
   available: boolean,

@@ -53,10 +53,6 @@ export function usePRStack(callbacksRef: RefObject<PRStackCallbacks | null>) {
     }
   }, [callbacksRef]);
 
-  // Partial-diff upgrade: same layer re-POST as handleScopeSelect, but with
-  // its own loading flag so the full-screen PRSwitchOverlay does NOT render.
-  // The request can park for minutes behind the checkout warmup — the user
-  // keeps reviewing the partial diff while the notice shows progress.
   const handleLoadFullDiff = useCallback(async () => {
     const cb = callbacksRef.current;
     if (!cb) return;

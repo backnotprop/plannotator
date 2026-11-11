@@ -2,14 +2,7 @@ import { useEffect, type RefObject } from 'react';
 
 export type CallFlowFindShortcutSurface = 'dock' | 'lens';
 
-/**
- * Gives Cmd/Ctrl+F to exactly one visible Call Flow search surface.
- *
- * Dockview retains inactive panel portals, so mount state is never sufficient
- * proof of ownership. Callers must pass the Dockview active-panel state for a
- * Dock surface or the Popover open state for a Lens surface. An open Lens wins
- * over the Dock because it is the foreground interaction surface.
- */
+/** An open Lens wins over the Dock because it is the foreground interaction surface. */
 export function useCallFlowFindShortcut({
   active,
   surface,

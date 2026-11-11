@@ -4,23 +4,12 @@ import type { CallFlowLanguageId } from '@plannotator/shared/call-flow-languages
 
 export interface CallFlowInstallController {
   readonly status: CallFlowInstallStatus;
-  /** Start the runtime install, or retry after an error. */
   readonly start: (languageIds?: readonly CallFlowLanguageId[]) => void;
 }
 
 const DEFAULT_POLL_INTERVAL_MS = 2_500;
 const MAX_RECONCILE_ATTEMPTS = 10;
 
-/**
- * Client controller for the opt-in CallDiff runtime install.
- *
- * POST /api/call-flow/install starts (or joins) the server-side install;
- * while it reports running, GET /api/call-flow/install-status is polled on
- * a slow interval. Status polling stops on done, error, and unmount. Once
- * done, capability reconciliation retries at the same interval for a bounded
- * number of attempts, so one transient advert failure cannot strand the panel
- * and a corrupt store cannot leave the UI polling forever.
- */
 export function useCallFlowInstall(
   onInstalled: () => Promise<void>,
   pollIntervalMs: number = DEFAULT_POLL_INTERVAL_MS,
@@ -105,8 +94,6 @@ export function useCallFlowInstall(
           if (!cancelled) applyStatus(next);
         })
         .catch(() => {
-          // Transient poll failures keep the current running state; the next
-          // tick retries.
         });
     }, pollIntervalMs);
     return () => {

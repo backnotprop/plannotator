@@ -4,12 +4,6 @@ import { extendThemeSwitch, useTheme } from '@plannotator/ui/components/ThemePro
 import { useConfigValue } from '@plannotator/ui/config';
 import { buildPierreFontCSS } from '../utils/pierreFontCss';
 
-/**
- * The (colorTheme, mode) -> Shiki theme mapping moved to
- * `@plannotator/ui/utils/syntaxTheme` so the plan editor's markdown fences
- * resolve the same theme this diff pane does. Re-exported here because it is
- * the import path the review editor has always used.
- */
 import { resolveSyntaxTheme } from '@plannotator/ui/utils/syntaxTheme';
 import { tokenHoverUnderlineCss } from '../components/tokenHoverStyles';
 export { SHIKI_THEME_MAP, resolveSyntaxTheme } from '@plannotator/ui/utils/syntaxTheme';
@@ -21,28 +15,9 @@ export interface PierreTheme {
 }
 
 /**
- * Bg-share percentages plugged into Pierre's `--mix-light` / `--mix-dark` —
- * the share of decoration-bg in `color-mix(decoration-bg X%, mix-target)`
- * inside Pierre's `light-dark()` switch (`Light` applies in light themes,
- * `Dark` in dark themes). Lower number = more line colour. We mirror Pierre's
- * own pattern of slightly lower values for dark themes (its defaults are
- * 88 / 80) since darker themes need a larger colour share to read at the
- * same perceptual intensity.
- *
- * `hoverMix*` values are the FINAL rendered bg shares, matching what our
- * pre-1.3 overrides produced. Since @pierre/diffs 1.3.0 the per-selector
- * hover rules (`[data-hovered] { --mix-light: … }`) are gone; hover is one
- * central rule that re-mixes `--diffs-computed-editor-active-line-bg`
- * 97% (light) / 91% (dark) toward `--diffs-hover-mix-target` (the
- * addition/deletion base colour on changed lines). Our hovered `--mix-*`
- * values therefore feed the rest formula first and get multiplied by
- * 0.97 / 0.91 on the way to the screen — `hoverEmittedMix()` divides the
- * targets back out so the composed result equals these numbers exactly
- * (color-mix in lab is linear, so the compensation is exact).
- *
- * Driving the line bg through these vars (instead of overriding the final
- * `background-color`) keeps Pierre's `--diffs-line-bg` pipeline intact, so
- * selected / hovered / decorated states keep their state-specific visuals.
+ * Bg-share percentages plugged into Pierre's `--mix-light` / `--mix-dark` — the share of
+ * decoration-bg in `color-mix(decoration-bg X%, mix-target)` inside Pierre's `light-dark()` switch
+ * (`Light` applies in light themes, `Dark` in dark themes).
  */
 interface IntensityConfig {
   restMixLight: number;
@@ -68,74 +43,33 @@ function hoverEmittedMix(finalShare: number, keep: number): string {
 }
 
 /**
- * At 1.2.12 Pierre's own per-selector hover rules gave changed lines these
- * final bg shares (deletion 80/75, addition 80/70). `subtle` rode them
- * untouched; 1.3.x's central hover rule instead lands at ~85.4 light /
- * ~72.8 dark, a visibly weaker light-theme hover. We pin the old finals so
- * `subtle` hover looks the same before and after the upgrade.
+ * At 1.2.12 Pierre's own per-selector hover rules gave changed lines these final bg shares
+ * (deletion 80/75, addition 80/70).
  */
 const SUBTLE_HOVER_FINALS = {
   deletion: { light: 80, dark: 75 },
   addition: { light: 80, dark: 70 },
 };
 
-/**
- * The word-level chip is derived from the *actual computed line bg* (not from
- * the theme's addition/deletion base colour) and nudged by this OKLCH-`l`
- * delta — darker on light themes, lighter on dark themes. Pulling it off the
- * line bg keeps the chip-vs-line relationship constant across intensities:
- * Normal and Strong each produce a chip that's "one step deeper than this
- * specific line", instead of one fixed chip that fights more or less against
- * different lines.
- */
 const EMPHASIS_LIGHTNESS_SHIFT = 0.07;
 
 /**
- * @pierre/diffs hardcodes the diff-line bg as a ~12-20% mix of the line colour
- * over the gutter (`--mix-light: 88%` / `--mix-dark: 80%`). To get a bolder
- * look we lower those percentages on changed lines, so the library's existing
- * `--diffs-line-bg` pipeline naturally produces stronger output. The hue comes
- * from the resolved theme tokens (`--diffs-addition-base` /
- * `--diffs-deletion-base`) — themes that customize diff colours keep them.
- *
- * `subtle` keeps Pierre's default line bg (its faint mix + alpha-overlay
- * emphasis is exactly what Pierre's design intends), but still emits the
- * "hide emphasis when diff bg is off" rule so that toggle behaves consistently
- * at every intensity.
+ * @pierre/diffs hardcodes the diff-line bg as a ~12-20% mix of the line colour over the gutter
+ * (`--mix-light: 88%` / `--mix-dark: 80%`).
  */
 export function buildLineBgOverrides(intensity: DiffLineBgIntensity, mode: 'light' | 'dark'): string {
-  // The library's word-emphasis rule (`[data-line-type=…] [data-diff-span] {
-  // background-color: var(--diffs-bg-addition-emphasis); }`) is NOT gated on
-  // `[data-background]`, so disabling diff backgrounds still leaves chips
-  // showing on plain lines. We hide them explicitly. Applies regardless of
-  // intensity so the "Diff background" toggle behaves consistently.
   const hideEmphasisWithoutBg = `
     pre:not([data-background]) [data-line-type='change-addition'] [data-diff-span],
     pre:not([data-background]) [data-line-type='change-deletion'] [data-diff-span] {
       background-color: transparent !important;
     }
   `;
-  // Targeting `[data-line]` and `[data-no-newline]` only — the actual code
-  // lines. Skipping `[data-gutter-buffer]` / `[data-column-number]` keeps the
-  // line-number gutter at the page bg (matching the existing
-  // `[data-column-number] { background-color: bg }` integration). Gating on
-  // `[data-background]` mirrors the library's own `:where([data-background])`
-  // scoping, so the "Diff background" toggle still turns line bgs off.
-  //
-  // Specificity is (0,4,0); wins against the library's rest rules (max
-  // (0,2,0) inside `:where([data-background])`). Since 1.3.0 the library's
-  // hover rule sets `--diffs-computed-hovered-line-bg` (a different property)
-  // on `[data-line][data-hovered]`, so there is no specificity race on
-  // `--mix-*` anymore — our hovered `--mix-*` values flow through the rest
-  // formula and Pierre's central hover re-mix composes on top (compensated
-  // via hoverEmittedMix, see INTENSITY_CONFIG docs).
   const changedLine =
     "[data-background] :is([data-line-type='change-addition'], [data-line-type='change-deletion'])" +
     ":is([data-line], [data-no-newline])";
   if (intensity === 'subtle') {
-    // Keep Pierre's rest bg untouched, but pin the hovered finals to the
-    // 1.2.x values (see SUBTLE_HOVER_FINALS). Per-type split preserved:
-    // 1.2.x deletion hover was 80/75, addition 80/70.
+    // Keep Pierre's rest bg untouched, but pin the hovered finals to the 1.2.x values (see
+    // SUBTLE_HOVER_FINALS).
     const del = SUBTLE_HOVER_FINALS.deletion;
     const add = SUBTLE_HOVER_FINALS.addition;
     return `
@@ -171,27 +105,11 @@ export function buildLineBgOverrides(intensity: DiffLineBgIntensity, mode: 'ligh
   `;
 }
 
-/** Pierre's own display for the slot, until a host's selection bar is open (comments.css). */
 const SELECTION_BAR_PLUS_CSS = `[data-gutter-utility-slot] { display: var(--review-selection-plus, flex); }`;
 
 /**
- * Pierre's gutter comment button (`[data-utility-button]`) is `1lh` square —
- * 20px at the default line height — plus a 4px leftward bleed on its invisible
- * `::before`. On compact touch that button is the ONLY way to open the composer
- * for a preserved range, so it has to meet the same 44px standard
- * `[data-pn-touch-target]` enforces everywhere else in the shell.
- *
- * The glyph keeps its size; only the `::before` hit area grows, centred on the
- * button, to `max(44px, its previous size)`. `--pn-touch-target` is a custom
- * property on `:root` and custom properties inherit across the shadow boundary,
- * so the token still drives the number inside Pierre's shadow DOM.
- *
- * Injected conditionally rather than through the `html:has([data-pn-compact-
- * touch-layout])` gate: this CSS is applied INSIDE Pierre's shadow root, where
- * a selector rooted at `html` matches nothing. A `@media (pointer: coarse)`
- * query is not a substitute either — the shell's compact classification is
- * deliberately not "any coarse pointer is present", so a desktop with a
- * touchscreen must not pick this up.
+ * Pierre's gutter comment button (`[data-utility-button]`) is `1lh` square — 20px at the default
+ * line height — plus a 4px leftward bleed on its invisible `::before`.
  */
 const COMPACT_TOUCH_GUTTER_UTILITY_CSS = `
   [data-utility-button]::before {
@@ -202,28 +120,6 @@ const COMPACT_TOUCH_GUTTER_UTILITY_CSS = `
   }
 `;
 
-/**
- * Opt-in hooks for a host page that sets a file's name on its own surface, above
- * a framed code box (the Inbox's review, inbox.css). Custom properties inherit
- * into Pierre's shadow root, so the host sets them on any ancestor of the
- * `diffs-container`:
- *
- * - `--pn-diff-header-bg`: the file header's fill. The header sticks to the top
- *   of the scroller, so it needs a solid colour (the host's surface), never
- *   transparent, or the code shows through it while stuck.
- * - `--pn-diff-code-border`, `--pn-diff-code-radius`, `--pn-diff-code-overflow`:
- *   a border, corners and clipping (`clip`, so the rows' fills keep to the
- *   corners) on the code under the header. The border is not in CodeView's
- *   height metrics, so these assume one file per CodeView (the 2 px land in the
- *   host's box padding); an outline would not show over the code's own layers.
- *   The sideways scrollbar's track is inset by the radius, so the corners do
- *   not cut its thumb's ends.
- *
- * Each fallback is what Pierre draws without them (its sticky and default
- * headers fill with `--diffs-bg`; `pre` has no border, radius or overflow of
- * its own, nor the scrollbar track a margin), so the review app, which sets
- * none, renders exactly as before.
- */
 const HOST_SURFACE_HOOKS_CSS = `
   [data-diffs-header][data-sticky], [data-diffs-header='default'] { background-color: var(--pn-diff-header-bg, var(--diffs-bg)); }
   pre[data-diff], pre[data-file] {
@@ -282,7 +178,6 @@ export function usePierreTheme(options?: {
 
       const fontCSS = buildPierreFontCSS(fontFamily, fontSize);
 
-      // A frame after a theme switch: keep the switch's no-fade hold over this redraw too.
       extendThemeSwitch();
       setPierreTheme({
         type: resolvedMode,

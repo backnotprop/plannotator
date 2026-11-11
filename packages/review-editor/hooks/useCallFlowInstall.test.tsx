@@ -83,7 +83,6 @@ describe('useCallFlowInstall', () => {
     let installedCalls = 0;
     await render(async () => { installedCalls++; });
     expect(host?.querySelector('[data-state]')?.textContent).toBe('idle');
-    // Idle never polls.
     await act(async () => {
       await Bun.sleep(40);
     });
@@ -93,7 +92,6 @@ describe('useCallFlowInstall', () => {
     expect(requests.filter((request) => request.method === 'POST')).toHaveLength(1);
     expect(host?.querySelector('[data-state]')?.textContent).toBe('running');
 
-    // Polling reflects server-side stage progress.
     statusPayload = { state: 'running', stage: 'building', languageIds: ['javascript-typescript'] };
     for (let attempt = 0; attempt < 300 && host?.querySelector('[data-stage]')?.textContent !== 'building'; attempt++) {
       await act(async () => {
@@ -106,14 +104,12 @@ describe('useCallFlowInstall', () => {
     await waitForState('done');
     expect(installedCalls).toBe(1);
 
-    // Polling stops once done: no further status requests arrive.
     const requestsAtDone = requests.length;
     await act(async () => {
       await Bun.sleep(50);
     });
     expect(requests.length).toBe(requestsAtDone);
     expect(installedCalls).toBe(1);
-    // The whole flow issued exactly one install POST.
     expect(requests.filter((request) => request.method === 'POST')).toHaveLength(1);
   });
 
