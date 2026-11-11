@@ -138,12 +138,15 @@ interface AnnotationToolbarProps {
    */
   touchAnchorRect?: () => ToolbarRect | null;
   /**
-   * Touch placement only: `above` puts the toolbar over the selection first
-   * (above the band where iOS draws its edit menu) when there is room, for a
-   * selection whose end the finger was moving, so it covers neither the end
-   * handle nor the lines the finger may drag on to. Absent: below first.
+   * The selection is not painted: a touch screen's resting selection, still
+   * the system's, handles and edit menu included (`element` is any element
+   * of its start; `touchAnchorRect` its live box). The toolbar is placed by
+   * the touch rules whatever the host opted into (the system's menu is above
+   * the selection), a press on it leaves the page's selection alone, and it
+   * is marked for `useAnnotationHighlighter`, which keeps it through that
+   * press. Absent: a painted selection, exactly as before.
    */
-  touchSide?: 'above';
+  unpainted?: boolean;
   /** Close toolbar when element scrolls out of viewport */
   closeOnScrollOut?: boolean;
   /** Exit animation state */
@@ -171,14 +174,14 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   showDelete,
   hideCopyButton = false,
   touchAnchorRect,
-  touchSide,
+  unpainted = false,
   closeOnScrollOut = false,
   isExiting = false,
   onMouseEnter,
   onMouseLeave,
 }) => {
   const [position, setPosition] = useState<{ top: number; left?: number; right?: number; touch?: TouchToolbarPlacement; maxWidth?: number } | null>(null);
-  const touchToolbar = useTouchToolbar();
+  const touchToolbar = useTouchToolbar() || unpainted;
   const [copied, setCopied] = useState(false);
   const [richCopied, setRichCopied] = useState<RichCopyOutcome | false>(false);
   const richCopyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -280,7 +283,6 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
           viewport: readVisibleViewport(),
           insets: readSafeAreaInsets(),
           mode: positionMode,
-          ...(touchSide ? { prefer: touchSide } : {}),
         });
         hiddenRef.current = placed.placement === 'hidden';
         setPosition({ top: placed.top, left: placed.left, touch: placed.placement, maxWidth: placed.maxWidth });
@@ -319,7 +321,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       vv?.removeEventListener("resize", updatePosition);
       vv?.removeEventListener("scroll", updatePosition);
     };
-  }, [element, positionMode, closeOnScrollOut, onClose, touchToolbar, touchSide]);
+  }, [element, positionMode, closeOnScrollOut, onClose, touchToolbar]);
 
   // Touch placement needs the toolbar's real size to keep it inside the
   // screen. Its width does not depend on where it sits (width: max-content in
@@ -441,9 +443,14 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       // Touch placement (host opt-in, finger pointer): which side of the
       // selection it took. theme.css sizes the buttons for a thumb here.
       data-pn-annotation-toolbar-touch={position.touch}
+      data-pn-touch-selection-offer={unpainted ? '' : undefined}
       className="annotation-toolbar fixed z-[100] bg-popover border border-border rounded-lg shadow-2xl"
       style={style}
-      onMouseDown={(e) => e.stopPropagation()}
+      onMouseDown={(e) => {
+        e.stopPropagation();
+        // The press must not take the selection off the page: it is the words the buttons act on.
+        if (unpainted) e.preventDefault();
+      }}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
@@ -523,6 +530,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
               onClose();
             }}
             onDismiss={() => setShowSelectionActions(false)}
+            unpainted={unpainted}
           />
         )}
         {onQuickLabel && (
@@ -550,6 +558,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
                   onQuickLabel(label);
                 }}
                 onDismiss={() => setShowQuickLabels(false)}
+                unpainted={unpainted}
               />
             )}
           </>
