@@ -240,7 +240,7 @@ test.skipIf(!hasDom)('after the person replies, Looks good is gone: the reply is
   const reply = [...el.querySelectorAll('section.ib-pane .ib-pfoot button')].find((b) => b.textContent?.trim() === 'Reply') as HTMLButtonElement;
   act(() => reply.click());
   await settle();
-  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  const text = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
   act(() => {
     setter.call(text, 'Thanks, carry on.');
@@ -248,7 +248,7 @@ test.skipIf(!hasDom)('after the person replies, Looks good is gone: the reply is
   });
   const send = [...el.querySelectorAll('section.ib-pane .ib-pfoot button')].find((b) => b.textContent?.trim() === 'Send') as HTMLButtonElement;
   act(() => send.click());
-  await until(() => el.querySelector('textarea') === null, 'the Send');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   await settle();
   expect(ackButton(el)).toBeNull();
   expect(footButtons(el)).toEqual(['Reply']);

@@ -80,7 +80,7 @@ export const INBOX_ROWS_SETTINGS: readonly InboxRowsSetting[] = [
       { value: "1", label: "1 line" },
       { value: "2", label: "2 lines" },
     ],
-    changes: "Lines of grey subject under a thread's name.",
+    changes: "Lines of the latest message under a thread's name.",
     get: (on) => (on.has("hidePreview") ? "none" : on.has("previewTwo") ? "2" : "1"),
     set: (value) => ({ hidePreview: value === "none", previewTwo: value === "2" }),
   },

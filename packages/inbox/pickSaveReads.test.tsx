@@ -44,6 +44,8 @@ let frames: Map<string, (event: MessageEvent<string>) => void>;
 let seq = 1_000_000;
 let saves = 0;
 let reads: string[] = [];
+/** The agents reads since the window opened, never cleared by a test: the load reads them twice (App.tsx `refreshAgents`). */
+let agentsReads = 0;
 let slow = false;
 /** The next saves never answer, as on a connection that went away without a word. */
 let hang = false;
@@ -117,6 +119,7 @@ beforeEach(() => {
   world = worlds.shift()!;
   saves = 0;
   reads = [];
+  agentsReads = 0;
   slow = false;
   hang = false;
   gated = false;
@@ -144,6 +147,7 @@ beforeEach(() => {
       }
     }
     if (method === 'GET') reads.push(path.split('?')[0]!);
+    if (method === 'GET' && path.split('?')[0] === '/api/inbox/agents') agentsReads += 1;
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
   savedEventSource = (globalThis as Record<string, unknown>).EventSource;
@@ -192,7 +196,7 @@ async function open() {
       </Profiler>,
     );
   });
-  const field = () => host!.querySelector<HTMLInputElement>('input[aria-label^="Other answer"]');
+  const field = () => host!.querySelector<HTMLTextAreaElement>('textarea[aria-label^="Other answer"]');
   await until(() => field() !== null, 'the question card');
   await until(() => frames.has('record'), 'the stream');
   await wait(200);
@@ -200,8 +204,8 @@ async function open() {
   return field()!;
 }
 
-function type(field: HTMLInputElement, words: string) {
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+function type(field: HTMLTextAreaElement, words: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
   act(() => {
     setter.call(field, words);
     field.dispatchEvent(new Event('input', { bubbles: true }));
@@ -216,7 +220,7 @@ async function closePane() {
     window.location.hash = '';
     window.dispatchEvent(new HashChangeEvent('hashchange'));
   });
-  await until(() => host!.querySelector('input[aria-label^="Other answer"]') === null, 'the pane closed');
+  await until(() => host!.querySelector('textarea[aria-label^="Other answer"]') === null, 'the pane closed');
 }
 
 test.skipIf(!hasDom)('a run of saves reads nothing until the last one lands, then the list and the drafts once, never the thread or its files', async () => {
@@ -244,6 +248,13 @@ test.skipIf(!hasDom)('a run of saves reads nothing until the last one lands, the
 
 test.skipIf(!hasDom)("a save's record that comes after its answer reads nothing more, and a list read with nothing new draws nothing", async () => {
   const field = await open();
+  // The page's load is done first: it reads the agents again 2.5 s after it opened and draws what that settles, which
+  // a slow run counted below as the list read's.
+  await until(() => agentsReads >= 2, "the load's second agents read");
+  for (let quiet = -1, i = 0; quiet !== commits && i < 50; i++) {
+    quiet = commits;
+    await wait(200);
+  }
   type(field, 'a');
   // The save landed with no record yet: what its record will owe is read at once (the list, the drafts).
   await until(() => saves === 1 && count('/api/inbox/threads') === 1 && count('/api/inbox/drafts') === 1, 'the reads after the save');
@@ -261,7 +272,7 @@ test.skipIf(!hasDom)("a save's record that comes after its answer reads nothing 
   await until(() => count('/api/inbox/threads') === 1, 'the list read for the pins');
   await wait(80);
   expect(commits).toBe(drawn);
-});
+}, 20_000);
 
 test.skipIf(!hasDom)('a record that is not a question line is read at once, whatever is saving', async () => {
   const field = await open();

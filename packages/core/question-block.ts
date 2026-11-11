@@ -1857,11 +1857,19 @@ export const formatQuestionAnswerLines = (
       : `Answer: ${labels[0]} (already settled in the document)\n`;
   }
   const picks = [...answer.selected.map(oneLine)];
-  if (answer.other?.trim()) picks.push(`Other: ${oneLine(answer.other)}`);
+  // A multi-line Other answer keeps its line breaks, quoted under `Other:`
+  // the way a multi-line note is quoted under `Note:` (indented under its
+  // bullet when there are several picks); a one-line one stays on its line.
+  const other = answer.other?.trim() ?? '';
+  const otherLines = /\r?\n/.test(other) ? other.split(/\r?\n/) : null;
+  if (other) picks.push(otherLines ? 'Other:' : `Other: ${oneLine(other)}`);
+  const quoted = (indent: string) => (otherLines ?? []).map((line) => `${indent}> ${line}\n`).join('');
   if (answer.text?.trim()) {
     out += `Answer${rec}:\n> ${answer.text.trim().replace(/\r?\n/g, '\n> ')}\n`;
   } else if (picks.length > 1) {
-    out += `Answer${rec}:\n${picks.map((p) => `- ${p}\n`).join('')}`;
+    out += `Answer${rec}:\n${picks.map((p) => `- ${p}\n`).join('')}${quoted('  ')}`;
+  } else if (picks.length === 1 && otherLines) {
+    out += `Answer${rec}: ${picks[0]}\n${quoted('')}`;
   } else if (picks.length === 1) {
     out += `Answer: ${picks[0]}${rec}\n`;
   } else if (answer.skipped) {
