@@ -2160,8 +2160,11 @@ export const inboxApi = {
   artifactPins: () => get<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins')),
   /** The face each agent's icon shows (inbox/agent-faces.json, agents/agentFaces.ts). This window's Inbox only. */
   agentFaces: () => get<unknown>(inboxUrl('/agent-faces')),
-  /** One agent's face (`agent`: its own mark again), or this browser's faces from before (`adopt`); every window hears it (`event: agent-faces`). */
-  saveAgentFace: (change: InboxAgentFaceChange) => post<unknown>(inboxUrl('/agent-faces'), change as Record<string, unknown>),
+  /**
+   * One agent's face (`agent`: its own mark again) or given name, or this browser's faces from before (`adopt`); every
+   * window hears it (`event: agent-faces`). `machine`: the agent's own machine, which keeps it (approval "inbox-linked-marks").
+   */
+  saveAgentFace: (change: InboxAgentFaceChange, machine?: string | null) => post<unknown>(inboxUrl('/agent-faces', undefined, machine), change as Record<string, unknown>),
   /** "Your own…": keep an uploaded picture for agents' icons (a data: URL, as Set picture… sends); answers `{ icon, faces, rev, icons }`. */
   uploadAgentIcon: (picture: string) => post<{ icon?: { id?: unknown } } & Record<string, unknown>>(inboxUrl('/agent-icons'), { picture }),
   /** Take an uploaded picture away: the agents showing it go back to their own mark. Answers `{ faces, rev, icons }`. */

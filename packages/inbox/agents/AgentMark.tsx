@@ -21,8 +21,14 @@ export { loadAgentFaceArt } from './faceArtLoad';
  * The face is kept for that agent until changed (agentFaces.ts), and every other icon of it shows it too. A host
  * with no rig shows its plain mark, moved as a whole, and has the same faces. `agent`: the sessions it is (absent:
  * only its id), so its threads' icons find the face.
+ *
+ * `picks` (approval "inbox-linked-marks"): `shared` for a linked machine's agent, whose face lives there: the
+ * built-in faces and the built-in sets only, never "Your own…" (its picture stays on this computer); `none` for one
+ * whose machine takes no face from here: the mark alone, and a press on it is the row's.
  */
-export function AgentMark({ id, host, name, agent }: { id: string; host: string | null; name: string; agent?: Pick<InboxAgent, 'id' | 'session' | 'continues'> }) {
+export type AgentMarkPicks = 'all' | 'shared' | 'none';
+
+export function AgentMark({ id, host, name, agent, picks = 'all' }: { id: string; host: string | null; name: string; agent?: Pick<InboxAgent, 'id' | 'session' | 'continues'>; picks?: AgentMarkPicks }) {
   const ref = useRef<HTMLSpanElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const [plain, setPlain] = useState<HTMLElement | null>(null);
@@ -163,6 +169,16 @@ export function AgentMark({ id, host, name, agent }: { id: string; host: string 
     if (event.key === ' ') event.preventDefault();
   };
 
+  if (picks === 'none') {
+    return (
+      <>
+        <span className="am-btn" data-agent-icon={id} data-picks="none">
+          <span ref={ref} className="am" aria-hidden="true" data-agent-mark={id} data-rig={rig ?? 'plain'} />
+        </span>
+        {plain && createPortal(<HostMark host={host} />, plain)}
+      </>
+    );
+  }
   return (
     <>
       <button
@@ -192,7 +208,9 @@ export function AgentMark({ id, host, name, agent }: { id: string; host: string 
         <span ref={ref} className="am" aria-hidden="true" data-agent-mark={id} data-rig={rig ?? 'plain'} />
       </button>
       {plain && createPortal(<HostMark host={host} />, plain)}
-      {fan && button.current && <FaceFan anchor={button.current} open={fan.open} openedBy={fan.by} host={host} name={name} face={face} sources={sources} onChoose={choose} onOwn={() => openDialog('own')} onSets={() => openDialog('sets')} onClose={closeFan} />}
+      {fan && button.current && (
+        <FaceFan anchor={button.current} open={fan.open} openedBy={fan.by} host={host} name={name} face={face} sources={sources} onChoose={choose} onOwn={picks === 'all' ? () => openDialog('own') : undefined} onSets={() => openDialog('sets')} onClose={closeFan} />
+      )}
       {dialog && (
         <AgentIconDialog
           place={dialog}
@@ -200,6 +218,7 @@ export function AgentMark({ id, host, name, agent }: { id: string; host: string 
           host={host}
           name={name}
           face={face}
+          shared={picks === 'shared'}
           onClose={() => {
             clicked.current = true;
             quiet.current = true;

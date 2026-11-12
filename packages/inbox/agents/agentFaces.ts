@@ -19,11 +19,17 @@
  *
  * An entry also keeps the name the person gave the agent (`keepAgentName`), found by the same ids and folded into
  * agentNames.ts on each change; an entry with a name and no face has `face: 'agent'`.
+ *
+ * A linked machine's agent (approval "inbox-linked-marks"): its face and name live on that machine. They come with the
+ * merged list (its agents group's `faces`) or a save's answer, whichever is newer, and are never kept in this Inbox's
+ * file or this page's paint copy. An entry this Inbox's file has for one of its ids is not drawn. A save goes to that
+ * machine and shows once it answers: one held while it is away shows when its list brings it.
  */
 import { useCallback, useSyncExternalStore } from 'react';
-import { readInboxAgentFaces, type InboxAgentFaceEntry } from '@plannotator/core/inbox-types';
-import type { InboxAgent } from '@plannotator/core/inbox-types';
+import { readInboxAgentFaces, type InboxAgentFaceChange, type InboxAgentFaceEntry } from '@plannotator/core/inbox-types';
+import type { InboxAgent, InboxAgentsGroup } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
+import { selfMachineId } from '../inboxUrl';
 import { inboxAgentsFlat, inboxAgentsNow, onInboxAgentsSet } from '../agentsList';
 import { AGENT_FACES, type AgentFace, type OurFace } from './faceChoices';
 import { loadAgentFaceArt } from './faceArtLoad';
@@ -51,6 +57,10 @@ let legacy: Record<string, OurFace> | null = null;
 const pending = new Map<string, { face: AgentFace; sessions: string[] }>();
 /** This page's given names the server has not answered yet (null: Reset name). */
 const pendingNames = new Map<string, { name: string | null; sessions: string[] }>();
+/** A linked machine's faces from its answer to a save here, until its list brings a newer copy. */
+const linkedAnswers = new Map<string, { faces: Entries; rev: number }>();
+/** Hears a linked machine's refusal of a save, or that the save waits for it (App's toast). */
+let refused: ((cause: unknown) => void) | null = null;
 let resolved = new Map<string, Shown>();
 let ready = false;
 let watching = false;
@@ -112,16 +122,41 @@ function entries(withLegacy = true): Entries {
 
 const chainOf = (agent: Pick<InboxAgent, 'id' | 'session' | 'continues'>) => [agent.id, agent.session, ...(agent.continues ?? [])];
 
+/** The groups of linked machines' agents (the merged list names this Inbox's own group too). */
+function linkedGroups(): InboxAgentsGroup[] {
+  const self = selfMachineId();
+  return self ? (inboxAgentsNow() ?? []).filter((group) => group.machine !== undefined && group.machine !== self) : [];
+}
+
+/** A linked machine's faces as this page knows them: its list's copy, or a save's answer that is newer. */
+function linkedFaces(group: InboxAgentsGroup): Entries {
+  const answer = linkedAnswers.get(group.machine!);
+  if (answer && answer.rev > (group.faces_rev ?? -1)) return answer.faces;
+  return group.faces ?? {};
+}
+
+/** The linked machine an agent is on, by its id; null for this Inbox's own (or one the list does not name). */
+function machineOfAgent(id: string): string | null {
+  return linkedGroups().find((group) => group.agents.some((agent) => agent.id === id))?.machine ?? null;
+}
+
 function rebuild(): void {
   const next = new Map<string, Shown>();
   const names = new Map<string, string>();
-  for (const [key, entry] of Object.entries(entries())) {
+  const linked = linkedGroups().map(linkedFaces);
+  // Every id of a linked machine's agents: only that machine's copy draws them.
+  const theirs = new Set<string>();
+  for (const group of linkedGroups()) for (const agent of group.agents) for (const id of chainOf(agent)) theirs.add(id);
+  for (const faces of linked) for (const [key, entry] of Object.entries(faces)) for (const id of [key, ...entry.sessions]) theirs.add(id);
+  const fold = (key: string, entry: InboxAgentFaceEntry) => {
     if (entry.name) for (const id of [key, ...entry.sessions]) names.set(id, entry.name);
     // An entry kept only for its name, or an uploaded picture this Inbox does not keep: the agent's own mark.
-    if (entry.face === 'agent' || (entry.face.startsWith('own:') && !ownFaceShows(entry.face))) continue;
+    if (entry.face === 'agent' || (entry.face.startsWith('own:') && !ownFaceShows(entry.face))) return;
     next.set(key, entry.face);
     for (const session of entry.sessions) next.set(session, entry.face);
-  }
+  };
+  for (const [key, entry] of Object.entries(entries())) if (![key, ...entry.sessions].some((id) => theirs.has(id))) fold(key, entry);
+  for (const faces of linked) for (const [key, entry] of Object.entries(faces)) fold(key, entry);
   // A listed agent is every id of its chain: a launch's session, the session a conversation went on as.
   const direct = new Map(next);
   const directNames = new Map(names);
@@ -188,11 +223,29 @@ async function send(): Promise<void> {
 }
 const sentNow = new WeakSet<object>();
 
-/** Keep a face for an agent (its own mark: forget it): every icon of it redraws at once, then the Inbox keeps it. */
+/** A save for a linked machine's agent, sent to that machine; shown when it answers (inbox-linked-marks). */
+async function saveLinked(machine: string, change: InboxAgentFaceChange): Promise<void> {
+  const answer = (await inboxApi.saveAgentFace(change, machine)) as { faces?: unknown; rev?: unknown } | null;
+  if (!answer || typeof answer.rev !== 'number') return;
+  const held = linkedAnswers.get(machine);
+  if (held && held.rev >= answer.rev) return;
+  linkedAnswers.set(machine, { faces: readInboxAgentFaces(answer.faces), rev: answer.rev });
+  rebuild();
+}
+
+/**
+ * Keep a face for an agent (its own mark: forget it): every icon of it redraws at once, then the Inbox keeps it. A
+ * linked machine's agent's face is drawn once that machine has it.
+ */
 export function keepAgentFace(agent: AgentFaceRef, face: AgentFace): void {
   boot();
   const ref = typeof agent === 'string' ? { id: agent, session: agent } : agent;
   const sessions = [...new Set(chainOf(ref).filter((id) => id !== ref.id))];
+  const machine = machineOfAgent(ref.id);
+  if (machine) {
+    saveLinked(machine, { agent: ref.id, sessions, face }).catch((cause) => refused?.(cause));
+    return;
+  }
   pending.delete(ref.id);
   pending.set(ref.id, { face, sessions });
   keepPaint();
@@ -204,13 +257,16 @@ export function keepAgentFace(agent: AgentFaceRef, face: AgentFace): void {
 
 /**
  * Rename… and Reset name (null or blank). Shown on this page at once; throws when the Inbox did not keep it, and the
- * page goes back to the Inbox's name.
+ * page goes back to the Inbox's name. A linked machine's agent's name shows once that machine has it; throws while
+ * the save waits for it (`InboxHeldError`) or when it refused.
  */
 export async function keepAgentName(agent: AgentFaceRef, name: string | null): Promise<void> {
   boot();
   const ref = typeof agent === 'string' ? { id: agent, session: agent } : agent;
   const sessions = [...new Set(chainOf(ref).filter((id) => id !== ref.id))];
   const clean = name?.replace(/\s+/g, ' ').trim() || null;
+  const machine = machineOfAgent(ref.id);
+  if (machine) return saveLinked(machine, { agent: ref.id, sessions, name: clean });
   const change = { name: clean, sessions };
   pendingNames.delete(ref.id);
   pendingNames.set(ref.id, change);
@@ -286,10 +342,20 @@ export async function readAgentFaces(): Promise<void> {
   }
 }
 
-/** Another window's save (`event: agent-faces`). */
-export function hearAgentFacesEvent(data: unknown): void {
+/**
+ * Another window's save (`event: agent-faces`). False for a frame with no faces: a linked machine's agent changed
+ * there (inbox-peer-link.ts), and the list read brings it.
+ */
+export function hearAgentFacesEvent(data: unknown): boolean {
   boot();
+  if (!data || typeof data !== 'object' || typeof (data as { rev?: unknown }).rev !== 'number') return false;
   hear(data, false);
+  return true;
+}
+
+/** Who hears a linked machine's refusal of a face, or that it waits for that machine. */
+export function onAgentFaceRefused(listener: ((cause: unknown) => void) | null): void {
+  refused = listener;
 }
 
 function subscribeTo(id: string, listener: () => void): () => void {
@@ -333,6 +399,8 @@ export function resetAgentFaces(): void {
   legacy = null;
   pending.clear();
   pendingNames.clear();
+  linkedAnswers.clear();
+  refused = null;
   ready = false;
   sending = null;
   const was = resolved;

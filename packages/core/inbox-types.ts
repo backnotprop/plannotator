@@ -3217,7 +3217,7 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * (approval "inbox-linked-marks"). The list says them (`marks`), so a linked machine offers a mark on this Inbox's
  * rows only once this Inbox takes it; an older Inbox says none.
  */
-export const INBOX_LINKED_MARKS = ["star"] as const;
+export const INBOX_LINKED_MARKS = ["star", "agent-face", "agent-name"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**
@@ -3365,6 +3365,13 @@ export interface InboxAgentsGroup {
   total: number;
   /** How many of `total` ended today (each `ended`). */
   ended_today: number;
+  /**
+   * A linked machine's faces and given names for its agents, as kept there (`inbox/agent-faces.json`; approval
+   * "inbox-linked-marks"): in that machine's group on the merged view, and in its own group when a linked machine reads
+   * its list. Absent from an older Inbox. `faces_rev` is that file's `rev`.
+   */
+  faces?: Record<string, InboxAgentFaceEntry>;
+  faces_rev?: number;
 }
 
 /** A press of Trust and start, on `POST /api/inbox/messages`'s `to.launch.trust`: what the person was offered. The press is the consent. */

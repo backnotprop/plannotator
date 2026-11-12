@@ -41,10 +41,11 @@ function usePinnedTop(dialog: () => HTMLDialogElement | null | undefined): void 
  * window in the Inbox's own dialog (`Modal`, components/Updates.tsx: a native modal, Escape and a click outside close
  * it, focus goes back to the agent's face). Its head names the agent and shows the icon it has now; a switch moves
  * between the two places. Picking an icon applies it at once and closes the dialog. On a phone it is a full-height
- * sheet. No shortcut: its keys are the dialog's own.
+ * sheet. No shortcut: its keys are the dialog's own. `shared`: a linked machine's agent (AgentMark.tsx), Sets alone
+ * and only its built-in sets, with no switch.
  */
-export function AgentIconDialog({ place, agent, host, name, face, onClose }: { place: AgentIconPlace; agent: AgentFaceRef; host: string | null; name: string; face: AgentFace; onClose: () => void }) {
-  const [on, setOn] = useState<AgentIconPlace>(place);
+export function AgentIconDialog({ place, agent, host, name, face, shared = false, onClose }: { place: AgentIconPlace; agent: AgentFaceRef; host: string | null; name: string; face: AgentFace; shared?: boolean; onClose: () => void }) {
+  const [on, setOn] = useState<AgentIconPlace>(shared ? 'sets' : place);
   const uid = useId();
   const agentId = typeof agent === 'string' ? agent : agent.id;
   const places: { id: AgentIconPlace; label: string }[] = [
@@ -65,19 +66,21 @@ export function AgentIconDialog({ place, agent, host, name, face, onClose }: { p
         <h2 id={`${uid}-t`} dir="auto">
           {name}
         </h2>
-        <div className="ib-seg" role="tablist" aria-labelledby={`${uid}-t`}>
-          {places.map((p) => (
-            <button key={p.id} type="button" role="tab" className="ib-seg-o" data-on={on === p.id ? '' : undefined} aria-selected={on === p.id} data-agi-place={p.id} onClick={() => setOn(p.id)}>
-              {p.label}
-            </button>
-          ))}
-        </div>
+        {!shared && (
+          <div className="ib-seg" role="tablist" aria-labelledby={`${uid}-t`}>
+            {places.map((p) => (
+              <button key={p.id} type="button" role="tab" className="ib-seg-o" data-on={on === p.id ? '' : undefined} aria-selected={on === p.id} data-agi-place={p.id} onClick={() => setOn(p.id)}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+        )}
         <button type="button" className="ib-btn ib-ghost ib-icon ib-agi-x" aria-label="Close" onClick={onClose}>
           <Icon name="x" />
         </button>
       </div>
-      <div className="ib-agi-body" role="tabpanel" tabIndex={-1}>
-        {on === 'own' ? <OwnIconsBody agent={agent} face={face} onDone={onClose} /> : <SetsBody agent={agent} face={face} onDone={onClose} />}
+      <div className="ib-agi-body" role={shared ? undefined : 'tabpanel'} tabIndex={-1}>
+        {on === 'own' ? <OwnIconsBody agent={agent} face={face} onDone={onClose} /> : <SetsBody agent={agent} face={face} builtInOnly={shared} onDone={onClose} />}
       </div>
     </Modal>
   );

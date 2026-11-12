@@ -39,6 +39,7 @@ import { DecisionPill, decideEntryShown } from './decisions/entry';
 import { threadDecisions } from './decisions/model';
 import {
   InboxApiError,
+  InboxHeldError,
   inboxApi,
   onReplySent,
   adoptPageSession,
@@ -205,7 +206,7 @@ import { ComposeDialog, type ComposeHeld, type ComposeJoined, type ComposeReques
 import { heldLaunchToast } from './compose/heldLaunch';
 import { ArtifactsWall } from './components/ArtifactsWall';
 import { readArtifactPins } from './artifactPins';
-import { hearAgentFacesEvent, keepAgentName, readAgentFaces } from './agents/agentFaces';
+import { hearAgentFacesEvent, keepAgentName, onAgentFaceRefused, readAgentFaces } from './agents/agentFaces';
 import { DraftsPage } from './compose/DraftsPage';
 import { BoardPage, type BoardMove } from './board/BoardPage';
 import { PullsPage, ReviewsOff } from './pulls/PullsPage';
@@ -2518,7 +2519,10 @@ function Inbox() {
         onRows: (rows, rev, last) => hearRowsEvent(rows, rev, () => void refreshSettings(), last),
         onSidebar: (sidebar, rev) => hearSidebarEvent(sidebar, rev, () => void refreshSettings()),
         // An agent icon's face was saved (here, another window, a phone): every icon of that agent redraws at once.
-        onAgentFaces: (data) => hearAgentFacesEvent(data),
+        // A linked machine's agent's face or name changed there: its list brings it.
+        onAgentFaces: (data) => {
+          if (!hearAgentFacesEvent(data)) listAfterEvents(60);
+        },
         onReactions: (reactions, rev) => hearReactionsEvent(reactions, rev),
         // A capability switch saved here or in another window (approval "inbox-thread-steps"; the Board too): every window follows.
         onCapabilities: (capabilities) => {
@@ -3587,6 +3591,11 @@ function Inbox() {
     onSavedReactionsFailed((cause) => showToast(errorToast(cause, 'Your saved emoji did not change.')));
     return () => onSavedReactionsFailed(null);
   });
+  // A linked machine's agent's face that waits for that machine, or that it refused (agents/agentFaces.ts).
+  useEffect(() => {
+    onAgentFaceRefused((cause) => showToast(errorToast(cause, 'The picture did not change.')));
+    return () => onAgentFaceRefused(null);
+  });
   useEffect(() => () => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
   }, []);
@@ -4441,7 +4450,8 @@ function Inbox() {
       await keepAgentName(agent, name);
     } catch (cause) {
       showToast(errorToast(cause, 'The name did not change.'));
-      return false;
+      // Held for the agent's machine: the field closes, and the name shows once that machine has it.
+      return cause instanceof InboxHeldError;
     }
     say(name === null ? `Name reset${own ? ` to ${own}` : ''}.` : `Renamed to ${name}.`);
     return true;

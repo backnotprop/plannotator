@@ -45,9 +45,12 @@ export type FanChoice = Exclude<AgentFace, `own:${string}` | `set:${string}`> | 
 export const OWN_LABEL = 'Your own…';
 export const SETS_LABEL = 'Sets';
 
-/** The fan's arcs: the kinds inside, the Glass colours outside (one arc, or two short ones when room is short). */
-export function fanArcs(cx: number, cy: number, w: number, h: number, touch = false): { faces: FanChoice[][]; spots: FanSpot[][] } {
-  const kinds: FanChoice[] = ['agent', 'transparent', 'totman', OWN_CHOICE, SETS_CHOICE];
+/**
+ * The fan's arcs: the kinds inside, the Glass colours outside (one arc, or two short ones when room is short). `own`:
+ * "Your own…" among the kinds (not for a linked machine's agent, AgentMark.tsx).
+ */
+export function fanArcs(cx: number, cy: number, w: number, h: number, touch = false, own = true): { faces: FanChoice[][]; spots: FanSpot[][] } {
+  const kinds: FanChoice[] = own ? ['agent', 'transparent', 'totman', OWN_CHOICE, SETS_CHOICE] : ['agent', 'transparent', 'totman', SETS_CHOICE];
   const base = { ...FAN_OPTIONS, ...(touch ? FAN_TOUCH : {}) };
   // Near a window's edge the inner arc's five kinds would crowd: it moves out (and the colours with it) until they
   // keep their pitch, a few steps at most.
@@ -80,8 +83,8 @@ export interface FaceFanProps {
   face: AgentFace;
   sources: FaceSources | null;
   onChoose: (face: AgentFace) => void;
-  /** "Your own…" was chosen: the uploaded pictures open. */
-  onOwn: () => void;
+  /** "Your own…" was chosen: the uploaded pictures open. Absent: no "Your own…". */
+  onOwn?: () => void;
   /** "Sets" was chosen: the icon sets open. */
   onSets: () => void;
   onClose: () => void;
@@ -97,7 +100,8 @@ export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onC
     if (open) setPlace({ rect: anchor.getBoundingClientRect(), w: window.innerWidth, h: window.innerHeight });
   }, [open, anchor]);
   const touch = openedBy === 'touch';
-  const arcs = useMemo(() => (place ? fanArcs(place.rect.left + place.rect.width / 2, place.rect.top + place.rect.height / 2, place.w, place.h, touch) : null), [place, touch]);
+  const own = onOwn !== undefined;
+  const arcs = useMemo(() => (place ? fanArcs(place.rect.left + place.rect.width / 2, place.rect.top + place.rect.height / 2, place.w, place.h, touch, own) : null), [place, touch, own]);
   const order = useMemo<FanChoice[]>(() => arcs?.faces.flat() ?? [], [arcs]);
   // The dial's plate: a half disc out past the farthest choice, turned the way the fan opens.
   const dial = useMemo(() => {
@@ -261,7 +265,7 @@ export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onC
                       onPointerDown={(event: ReactPointerEvent) => {
                         if (event.pointerType !== 'touch') event.preventDefault();
                       }}
-                      onClick={() => (f === OWN_CHOICE ? onOwn() : f === SETS_CHOICE ? onSets() : onChoose(f))}
+                      onClick={() => (f === OWN_CHOICE ? onOwn?.() : f === SETS_CHOICE ? onSets() : onChoose(f))}
                     >
                       <span className="am-fan-f" data-kind={f === 'agent' ? 'agent' : f.startsWith('glass') || f === 'yellow' ? 'glass' : f} aria-hidden="true">
                         {f === 'agent' ? (

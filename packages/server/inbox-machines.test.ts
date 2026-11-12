@@ -1705,7 +1705,7 @@ describe("a star on a linked machine's thread lives on that machine (approval in
       const two = await send("Second news");
       await waitFor("B's threads on A", async () => JSON.stringify((await list(a.port)).sections).includes(two));
       const view = async () => (((await (await fetch(`${at(a.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === bId)!;
-      expect((await view()).marks).toEqual(["star"]);
+      expect((await view()).marks).toContain("star");
 
       // Starred from A: one copy, on B. A's answer comes after its list of B was read, so its next read shows the star.
       expect((await forward(a.port, bId, `threads/${one}/pin`, { pinned: true })).status).toBe(200);
@@ -1774,6 +1774,155 @@ describe("a star on a linked machine's thread lives on that machine (approval in
         await waitFor("that machine's list", async () => typeof (await view())?.list_cursor === "number");
         expect((await view())!.marks).toEqual(marks ?? []);
         expect(await starred(inbox.port)).toEqual(marks ? [[thread, id]] : []);
+      } finally {
+        inbox.stop();
+        door.stop(true);
+      }
+    }
+  });
+});
+
+describe("an agent's face and given name on a linked machine live on that machine (approval inbox-linked-marks)", () => {
+  const dirs: string[] = [];
+  const sandboxWas = process.env.PLANNOTATOR_TEST_SANDBOX;
+  beforeAll(() => {
+    process.env.PLANNOTATOR_TEST_SANDBOX = "1";
+  });
+  afterAll(() => {
+    if (sandboxWas === undefined) delete process.env.PLANNOTATOR_TEST_SANDBOX;
+    else process.env.PLANNOTATOR_TEST_SANDBOX = sandboxWas;
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  });
+  const scratch = (prefix: string) => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+    dirs.push(dir);
+    return dir;
+  };
+  const start = (dataDir: string) => startInboxServer({ dataDir, binaryPath: null, phones: false, tailscale: scriptedTailscale().run });
+  const at = (port: number) => `http://127.0.0.1:${port}`;
+  const list = async (port: number) => (await (await fetch(`${at(port)}/api/inbox/threads?archived=exclude&snoozed=exclude&machines=1`)).json()) as Json;
+  /** The faces a merged list carries for one machine's agents. */
+  const facesOn = async (port: number, machine: string) => ((((await list(port)).agents as Json[]).find((group) => group.machine === machine)?.faces ?? null) as Json | null);
+  const ownFaces = async (port: number) => ((await (await fetch(`${at(port)}/api/inbox/agent-faces`)).json()) as Json).faces as Json;
+  const post = async (port: number, path: string, body: Json) => {
+    const health = (await (await fetch(`${at(port)}/api/inbox/health`)).json()) as Json;
+    return fetch(`${at(port)}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: health.serverSession, ...body }) });
+  };
+  let keys = 0;
+  /** A's window writing to B through the forward, with the key the window adds. */
+  const forward = (port: number, machine: string, body: Json) => post(port, `/api/inbox/m/${machine}/agent-faces`, { idempotency_key: `window-face-${++keys}`, ...body });
+  /** A's window stream, read until `want` is heard (or the time is up): the frames heard. */
+  const heard = async (port: number, want: (event: string) => boolean, act: () => Promise<unknown>) => {
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), 15_000);
+    const events: string[] = [];
+    try {
+      const response = await fetch(`${at(port)}/api/inbox/events?machines=1`, { signal: abort.signal });
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let acted = false;
+      for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+        buffer += decoder.decode(chunk, { stream: true });
+        let cut: number;
+        while ((cut = buffer.indexOf("\n\n")) >= 0) {
+          const event = /^event: (.+)$/m.exec(buffer.slice(0, cut))?.[1] ?? "message";
+          buffer = buffer.slice(cut + 2);
+          events.push(event);
+          if (!acted && event === "machines") {
+            acted = true;
+            await act();
+          }
+          if (acted && want(event)) return events;
+        }
+      }
+    } catch {
+      // Timed out: the caller's expectation fails.
+    } finally {
+      clearTimeout(timer);
+      abort.abort();
+    }
+    return events;
+  };
+
+  test("set from A on B's agent: stored only on B, shown by both, B's own change reaches A without a read of A's; B away, it waits and lands", async () => {
+    const dataA = scratch("plannotator-face-linked-a-");
+    const dataB = scratch("plannotator-face-linked-b-");
+    const a = await start(dataA);
+    let b = await start(dataB);
+    try {
+      const offered = (await (await fetch(`${at(b.port)}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      const linked = await fetch(`${at(a.port)}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: at(b.port), back: at(a.port) }) });
+      expect(linked.status).toBe(201);
+      const bId = (JSON.parse(readFileSync(join(dataA, "inbox", "machines.json"), "utf8")) as Json).links[0].id as string;
+      const view = async () => (((await (await fetch(`${at(a.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === bId)!;
+      await waitFor("B's list on A", async () => typeof (await view()).list_cursor === "number");
+      expect((await view()).marks).toEqual(expect.arrayContaining(["agent-face", "agent-name"]));
+      // Nothing set yet: B's group carries its (empty) faces, so A knows B keeps them.
+      expect(await facesOn(a.port, bId)).toEqual({});
+
+      // A face from A: one copy, in B's file. A's answer comes after its list of B was read, so its next read shows it.
+      const set = await forward(a.port, bId, { agent: "ses_b", sessions: ["ses_b_before"], face: "glass-red" });
+      expect(set.status).toBe(200);
+      expect((((await set.json()) as Json).faces as Json).ses_b.face).toBe("glass-red");
+      expect((await ownFaces(b.port)).ses_b).toEqual({ face: "glass-red", sessions: ["ses_b_before"] });
+      expect((await ownFaces(a.port)).ses_b).toBeUndefined();
+      expect(existsSync(join(dataA, "inbox", "agent-faces.json"))).toBe(false);
+      expect(((await facesOn(a.port, bId)) as Json).ses_b.face).toBe("glass-red");
+      // This Inbox's own group never carries faces to its own window (it reads them apart).
+      expect(((await list(a.port)).agents as Json[])[0]!.faces).toBeUndefined();
+
+      // A given name from A, in the same entry on B.
+      expect((await forward(a.port, bId, { agent: "ses_b", name: "Retry worker" })).status).toBe(200);
+      expect((await ownFaces(b.port)).ses_b).toEqual({ face: "glass-red", sessions: ["ses_b_before"], name: "Retry worker" });
+      expect(((await facesOn(a.port, bId)) as Json).ses_b.name).toBe("Retry worker");
+
+      // Changed in B's own window: A's windows hear `agent-faces` and A's list follows, with no write of A's.
+      const frames = await heard(a.port, (event) => event === "agent-faces", () => post(b.port, "/api/inbox/agent-faces", { agent: "ses_b", face: "yellow" }));
+      expect(frames).toContain("agent-faces");
+      expect(((await facesOn(a.port, bId)) as Json).ses_b.face).toBe("yellow");
+
+      // B away: the face waits in A's outbox (202, nothing stored on A) and lands when B is back.
+      b.stop();
+      await waitFor("B offline on A", async () => (await view()).state === "offline", 30_000);
+      const held = await forward(a.port, bId, { agent: "ses_b", face: "glass-teal" });
+      expect(held.status).toBe(202);
+      expect(existsSync(join(dataA, "inbox", "agent-faces.json"))).toBe(false);
+      b = await start(dataB);
+      await waitFor("the held face on B", async () => (await ownFaces(b.port)).ses_b?.face === "glass-teal", 45_000);
+      await waitFor("the face on A", async () => ((await facesOn(a.port, bId)) as Json | null)?.ses_b?.face === "glass-teal", 15_000);
+      expect((await ownFaces(a.port)).ses_b).toBeUndefined();
+    } finally {
+      a.stop();
+      b.stop();
+    }
+  }, 120_000);
+
+  test("an older machine (its list names no agent marks, its agents group no faces): its group here carries none", async () => {
+    const id = "ibx_01K0000000000000000000000F";
+    for (const marks of [["star"], ["star", "agent-face", "agent-name"]]) {
+      const faces: Json = marks.length > 1 ? { faces: { ses_m: { face: "glass-blue", sessions: [], name: "Docs pass" } }, faces_rev: 3 } : {};
+      const door = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        idleTimeout: 0,
+        fetch(req) {
+          const route = new URL(req.url).pathname.replace("/api/inbox/device/", "");
+          if (route === "health") return Response.json({ ok: true, inbox_id: id, machine_links: 1, version: "0.29.0" });
+          if (route === "events") return new Response(new ReadableStream({ start: (c) => c.enqueue(new TextEncoder().encode(`event: hello\ndata: {"cursor":0}\n\n`)) }), { headers: { "Content-Type": "text/event-stream" } });
+          const agent = { id: "ses_m", session: "ses_m", host: "pi", state: "idle", project: null };
+          if (route === "threads") return Response.json({ cursor: 0, sections: [], projects: [], marks, agents: [{ agents: [agent], total: 1, ended_today: 0, ...faces }] });
+          return Response.json({ code: "device_route_not_found", error: "Not a phone route." }, { status: 404 });
+        },
+      });
+      const dataDir = scratch("plannotator-face-linked-older-");
+      mkdirSync(join(dataDir, "inbox"), { recursive: true });
+      writeFileSync(join(dataDir, "inbox", "machines.json"), JSON.stringify({ v: 1, self: { id: "ibx_01K00000000000000000000008" }, links: [{ id, name: "Mini", token: "tok_0", transport: { kind: "tailnet", url: at(door.port as number) }, device_id: null, linked_at: "2026-10-30T00:00:00Z" }] }), { mode: 0o600 });
+      const inbox = await start(dataDir);
+      try {
+        const view = async () => (((await (await fetch(`${at(inbox.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === id);
+        await waitFor("that machine's list", async () => typeof (await view())?.list_cursor === "number");
+        expect((await view())!.marks).toEqual(marks);
+        expect(await facesOn(inbox.port, id)).toEqual(marks.length > 1 ? faces.faces : null);
       } finally {
         inbox.stop();
         door.stop(true);
