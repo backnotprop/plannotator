@@ -14,8 +14,8 @@
  * everywhere at once and a session that ended keeps its name while the Inbox runs. The map has no prototype and is
  * read with `Object.hasOwn`, so a session id like "constructor" finds nothing.
  *
- * A name the person gave the agent (Rename… on its sidebar row, agents/agentNames.ts) is that session's label here,
- * over the one its poll sends: every place that reads these labels shows it.
+ * A name the person gave the agent (agents/agentNames.ts) is read here over the label its poll sends; the poll's
+ * label is kept, so Reset name shows it as it is then.
  */
 import { useSyncExternalStore } from 'react';
 import { graphemesOf } from '@plannotator/core/inbox-format';
@@ -68,7 +68,12 @@ function subscribe(listener: () => void): () => void {
 
 const snapshot = () => current;
 
-/** The labels now, redrawn when a list read changes them. */
+/** The labels now, outside React. */
+export function sessionLabelsNow(): SessionLabels {
+  return current;
+}
+
+/** The labels now, redrawn when a list read or a given name changes them. */
 export function useSessionLabels(): SessionLabels {
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }

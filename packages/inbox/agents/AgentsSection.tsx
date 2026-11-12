@@ -29,11 +29,9 @@ import { agentFacts, agentHostName, agentRowName, agentsGroups, type AgentEntry 
  * everything again. An agent with no thread in the window has nothing to filter: a click messages it (New message).
  * Its hover card says where and when it started, and its project.
  *
- * Its menu is a project row's (ProjectRow.tsx, the same parts and words): ⋯ on hover, keyboard focus and while the
- * menu is open (always on a phone, the menu then a sheet titled by the agent), and a right-click on the row opens
- * the same menu at the pointer. Rename… turns the row into the project rename field (Enter saves, Escape or leaving
- * cancels); an empty name is the agent's own name again, as Reset name is, offered once a name is given. The name is
- * the window's for it everywhere (agents/agentNames.ts), and is never sent to the agent.
+ * Its menu is a project row's (ProjectRow.tsx): ⋯ on hover, keyboard focus and while open (always on a phone, where
+ * the menu is a sheet), and the same menu on a right-click. Rename… turns the row into the project rename field; an
+ * empty name, like Reset name, goes back to the agent's own name (agents/agentNames.ts).
  *
  * Its data is the list's `agents` (agentsList.ts): drawing the section is what makes the window read the list again
  * on `event: deliveries` with `agents`.
@@ -144,7 +142,7 @@ const AgentRow = memo(
     const [contextOpen, setContextOpen] = useState(false);
     const [renaming, setRenaming] = useState(false);
     const more = useRef<HTMLButtonElement>(null);
-    // As a project row's: Rename… picked, the closing menu leaves focus to the field; the field closed, ⋯ takes it.
+    // Rename… picked: the closing menu leaves focus to the field. The field closed: ⋯ takes it.
     const toField = useRef(false);
     const backToMore = useRef(false);
     const [portal, setPortal] = useState<HTMLElement | null>(null);
@@ -184,7 +182,7 @@ const AgentRow = memo(
           others={[]}
           onCancel={doneRenaming}
           onSave={async (name) => {
-            // An empty name: its own name again (nothing to do when it has no other).
+            // Empty on an agent with no given name: nothing to save.
             const saved = name === '' && !named ? true : await onRename(entry, name === '' ? null : name);
             if (saved) doneRenaming(true);
             return saved;
@@ -312,7 +310,7 @@ export function AgentsSection(props: AgentsSectionProps) {
   const openNow = useRef(open);
   openNow.current = open;
   const onOpen = useCallback((entry: AgentEntry, opener: HTMLElement) => openNow.current(entry, opener), []);
-  // The same for Rename…: the name it goes back to is its row's name without the given one.
+  // One callback for every row, as `onOpen`. `own`: the row's name without the given one.
   const renameNow = useRef(props.onRename);
   renameNow.current = props.onRename;
   const canRename = props.onRename !== undefined;

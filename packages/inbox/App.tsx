@@ -4260,10 +4260,7 @@ function Inbox() {
     return true;
   };
 
-  /**
-   * An agent row's Rename… and Reset name: kept with its face (agents/agentFaces.ts), so every window shows it at
-   * once. The words are the project menu's.
-   */
+  /** An agent row's Rename… and Reset name, kept with its face (agents/agentFaces.ts); the live region says it as for a project. */
   const renameAgent = async (agent: InboxAgent, name: string | null, own: string): Promise<boolean> => {
     try {
       await keepAgentName(agent, name);

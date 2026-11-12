@@ -5,8 +5,8 @@
  *
  *   GET  /api/inbox/agent-faces   `{ faces, rev }`
  *   POST /api/inbox/agent-faces   `{ agent, sessions?, face }`: one agent's face (`agent`: its own mark again); `{ faces, rev }`
- *   POST /api/inbox/agent-faces   `{ agent, sessions?, name }`: the name the person gave it (Rename…; null or blank:
- *                                 Reset name), kept in the same entry as its face; `{ faces, rev }`
+ *   POST /api/inbox/agent-faces   `{ agent, sessions?, name }`: its given name (null or blank: none), in the same
+ *                                 entry as its face; `{ faces, rev }`
  *   POST /api/inbox/agent-faces   `{ adopt: { [agent id]: face } }`: this browser's faces from before, once; `{ faces, rev }`
  *
  * Every answer and event also carries `icons`, the pictures uploaded for "Your own…" (inbox-agent-icons.ts).

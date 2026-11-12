@@ -5,10 +5,9 @@
  * mark kept on disk; a continued session (a poll's `continues`) or a launch's session not linked to the face, so its
  * threads lose it after it ends; a link that writes on every poll; the file growing past its cap; this browser's
  * faces from before written over another window's choice, or adopted twice; a newer file written over; a write
- * with no event for the other windows; another site reading the faces. Given names (Rename… on an agent's sidebar
- * row): a name lost on a restart, by a face change, by a removed picture or by a continued session; a reset or blank
- * name kept on disk; a name over the cap or on two lines taken. No Inbox is started: the route is called directly with a
- * temp folder.
+ * with no event for the other windows; another site reading the faces. Given names: one lost on a restart, a face
+ * change, a removed picture or a continued session; a reset or blank name kept on disk; a name over the cap or with a
+ * control character taken. No Inbox is started: the route is called directly with a temp folder.
  */
 import { beforeEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, statSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
@@ -123,7 +122,7 @@ test('a given name is kept beside the face, survives a restart, and a reset or b
   faces.change({ agent: 'lnc_1', sessions: ['ses_a', 'launch:lnc_1'], name: 'Retry worker' });
   expect(faces.wire().faces.lnc_1).toEqual({ face: 'agent', sessions: ['ses_a', 'launch:lnc_1'], name: 'Retry worker' });
   expect(heard.map((w) => w.rev)).toEqual([1]);
-  // Another process (the Inbox after a restart) reads it back.
+  // The Inbox after a restart reads it back.
   expect(createInboxAgentFacesFile(dir, () => {}).wire().faces.lnc_1!.name).toBe('Retry worker');
   // A face change keeps the name; a name change keeps the face; the agent's own mark again keeps the name.
   faces.change({ agent: 'lnc_1', face: 'glass-blue' });
@@ -132,7 +131,7 @@ test('a given name is kept beside the face, survives a restart, and a reset or b
   expect(faces.wire().faces.lnc_1).toEqual({ face: 'glass-blue', sessions: ['ses_a', 'launch:lnc_1'], name: 'Release notes' });
   faces.change({ agent: 'lnc_1', face: 'agent' });
   expect(faces.wire().faces.lnc_1).toEqual({ face: 'agent', sessions: ['ses_a', 'launch:lnc_1'], name: 'Release notes' });
-  // Reset name, with nothing else kept: the entry goes.
+  // Reset with no face kept: the entry goes.
   faces.change(checkInboxAgentFaceChange({ agent: 'lnc_1', name: '   ' }));
   expect(faces.wire().faces).toEqual({});
   // Reset of an agent never named writes nothing.
@@ -145,18 +144,18 @@ test('a continued session keeps its name: a choice for the new id takes the old 
   const faces = file();
   faces.change({ agent: 'ses_old', face: 'totman' });
   faces.change({ agent: 'ses_old', name: 'Retry worker' });
-  // Named again from the new session, which continues the old: one entry, the face and the old sessions kept.
+  // Named from the new session: one entry, the old face and session kept.
   faces.change({ agent: 'ses_new', sessions: ['ses_old'], name: 'Retry worker 2' });
   expect(faces.wire().faces).toEqual({ ses_new: { face: 'totman', sessions: ['ses_old'], name: 'Retry worker 2' } });
-  // A face chosen from a newer session yet keeps the old entry's name.
+  // A face chosen from a newer session keeps the name.
   faces.change({ agent: 'ses_newer', sessions: ['ses_new'], face: 'yellow' });
   expect(faces.wire().faces).toEqual({ ses_newer: { face: 'yellow', sessions: ['ses_new'], name: 'Retry worker 2' } });
-  // A poll from a session that continues it links it to the named entry, the name kept.
+  // A poll from a continuing session links it, the name kept.
   faces.link('ses_last', () => ['ses_newer']);
   expect(faces.wire().faces.ses_newer).toEqual({ face: 'yellow', sessions: ['ses_new', 'ses_last'], name: 'Retry worker 2' });
 });
 
-test('a removed picture keeps a named agent, with its own mark; only names that read as one line under the cap are taken', () => {
+test('a removed picture leaves a named agent with its own mark; names follow a project name’s rules', () => {
   const faces = file();
   const own = `own:${'a'.repeat(64)}`;
   faces.change({ agent: 'ses_1', face: own as never });
@@ -165,13 +164,13 @@ test('a removed picture keeps a named agent, with its own mark; only names that 
   faces.dropFace(own);
   expect(faces.wire().faces).toEqual({ ses_1: { face: 'agent', sessions: [], name: 'Pictured' } });
   expect(faces.shown().has('agent')).toBe(false);
-  // Spaces fold; too long or a control character is refused, as a project name is.
+  // A project name's rules.
   expect(checkInboxAgentFaceChange({ agent: 'ses_1', name: '  Retry   worker ' })).toEqual({ agent: 'ses_1', name: 'Retry worker', sessions: [] });
   expect(() => checkInboxAgentFaceChange({ agent: 'ses_1', name: 'x'.repeat(INBOX_AGENT_NAME_MAX + 1) })).toThrow();
   expect(checkInboxAgentFaceChange({ agent: 'ses_1', name: 'x'.repeat(INBOX_AGENT_NAME_MAX) })).toMatchObject({ name: 'x'.repeat(INBOX_AGENT_NAME_MAX) });
   expect(() => checkInboxAgentFaceChange({ agent: 'ses_1', name: 'one\u0007two' })).toThrow();
   expect(() => checkInboxAgentFaceChange({ agent: 'ses_1', name: 7 })).toThrow();
-  // A wire entry with neither a face nor a name, or a name that is no line, is dropped when read.
+  // Read from a wire: an entry with neither face nor name goes; a refused name is dropped.
   expect(readInboxAgentFaces({ ses_a: { face: 'agent', sessions: [] }, ses_b: { face: 'agent', sessions: [], name: 'B' }, ses_c: { face: 'glass', sessions: [], name: 'x'.repeat(INBOX_AGENT_NAME_MAX + 1) } })).toEqual({
     ses_b: { face: 'agent', sessions: [], name: 'B' },
     ses_c: { face: 'glass', sessions: [] },

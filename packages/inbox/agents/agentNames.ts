@@ -1,15 +1,13 @@
 /**
- * The names the person gave agents (Rename… on an agent's sidebar row): id → name, for every id an agent has (its
- * `InboxAgent.id`, every session it was or is). The Inbox keeps them in the agent faces' entries (agentFaces.ts,
- * `POST /api/inbox/agent-faces` with `name`), so a continued session keeps its name as it keeps its face, and every
- * window open hears a rename at once (`event: agent-faces`). agentFaces.ts folds them here on each change.
+ * The names the person gave agents (Rename… on an agent's sidebar row), by every id an agent has: its
+ * `InboxAgent.id` and every session it was or is. agentFaces.ts fills it from the Inbox's faces entries and the
+ * agents' list.
  *
- * A given name beats every other name the window has for that agent: the agents' list (`InboxAgent.label`,
- * agentsList.ts) and the sessions' labels (sessionLabels.ts) read through this map, so the sidebar, the list's agent
- * filter, the list rows' agents, a message's author and the To picker show it. Display only: what is sent to an agent
- * (an `@` tag's token and label, a hand-off's label) stays what it was.
+ * Precedence is decided at read time, never stored: a given name, else the session's own title (its latest poll's
+ * `label`), else what the caller falls back to. So a title the tool changes later shows only while no name is given,
+ * and Reset name shows the title as it is then. Display only: nothing here is sent to an agent.
  *
- * A leaf: it imports nothing of the window's, so the label stores can read it without a cycle.
+ * A leaf (no import from the window), so the label stores can read it without a cycle.
  */
 import { useSyncExternalStore } from 'react';
 
@@ -51,4 +49,13 @@ export function givenName(names: AgentNames, ...ids: readonly (string | null | u
     if (name) return name;
   }
   return null;
+}
+
+/** Sessions with each named one's `label` replaced by its given name; the same array when none is named. */
+export function withGivenLabels<T extends { session: string; label?: string }>(sessions: readonly T[], names: AgentNames): readonly T[] {
+  if (names.size === 0 || !sessions.some((s) => names.has(s.session))) return sessions;
+  return sessions.map((s) => {
+    const name = names.get(s.session);
+    return name ? { ...s, label: name } : s;
+  });
 }

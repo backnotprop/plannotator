@@ -152,8 +152,8 @@ export function createInboxAgentFacesFile(inboxDirPath: string, onChange: (wire:
         return added ? save(faces) : this.wire();
       }
       const before = faces[change.agent];
-      // Another entry kept for one of these sessions (a session's own entry, from before it was continued) is this
-      // agent now: what this change does not set comes from it when this agent's own entry lacks it.
+      // An entry kept for one of these sessions (from before the conversation continued) is this agent now: it fills
+      // what this change does not set and this agent's own entry lacks.
       const merged = (change.sessions ?? []).map((session) => (session !== change.agent ? faces[session] : undefined)).filter((entry) => entry !== undefined);
       delete faces[change.agent];
       for (const session of change.sessions ?? []) if (session !== change.agent && faces[session]) delete faces[session];
@@ -194,7 +194,7 @@ export function createInboxAgentFacesFile(inboxDirPath: string, onChange: (wire:
     touch(): InboxAgentFacesWire {
       return save(copy());
     },
-    /** A removed picture: every agent that showed it goes back to its own mark (keeping a given name), in one save (none when no agent did). */
+    /** A removed picture: every agent that showed it goes back to its own mark and keeps a given name; one save, or none. */
     dropFace(face: string): InboxAgentFacesWire {
       const faces = copy();
       let dropped = false;

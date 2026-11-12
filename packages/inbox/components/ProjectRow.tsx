@@ -318,8 +318,8 @@ function folderName(root: string): string {
  * Escape cancels. A name several projects answer to ("acme", two clones) offers one button for each, and
  * Enter leaves the choice to the person.
  *
- * An agent's sidebar row (Rename… on it, agents/AgentsSection.tsx) uses the same field: `label` names it, there is
- * nothing to combine, and `emptyResets` saves an empty name as "" (its own name again) instead of refusing it.
+ * An agent's sidebar row uses it too (agents/AgentsSection.tsx): `label` names the field, nothing combines, and
+ * `emptyResets` saves an empty name as "" instead of refusing it.
  */
 export function ProjectNameField(props: {
   name: string;

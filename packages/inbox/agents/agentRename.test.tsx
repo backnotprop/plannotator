@@ -1,14 +1,11 @@
 /**
- * Rename… on an agent's sidebar row (owner: "as its own PR next", a context menu click on the agent): the project
- * row's menu and field (ProjectRow.tsx) on the real AgentsSection, the name kept through the Inbox's real faces route
- * (packages/server/inbox-agent-faces.ts) on a temp folder, called through a fetch stand-in: no Inbox is started.
+ * Rename… on an agent's sidebar row: the real AgentsSection, the name kept through the Inbox's real faces route
+ * (packages/server/inbox-agent-faces.ts) on a temp folder behind a fetch stand-in; no Inbox is started.
  *
- * What this catches: an agent row with no ⋯ or no right-click menu, or a menu with other words than a project's
- * ("Rename…", "Reset name" once a name is given); the field not opening with the row's name, or with another key than
- * Enter to save and Escape to cancel; the name not kept by the Inbox (so another window, or a restart, loses it), or
- * kept and not shown on the row, the list rows' and messages' labels (sessionLabels.ts) or the To picker; an empty name
- * refused instead of resetting; Reset name not going back to the agent's own name; a continued session (a new session
- * id for the same conversation) losing the name; another window's rename not shown here; focus left on the page.
+ * What this catches: a row with no ⋯ or right-click menu, or other words than a project's; the field not holding the
+ * row's name, or other keys than Enter and Escape; a name the Inbox does not keep, or keeps and does not show on the
+ * row, the sessions' labels or the To picker; an empty name refused instead of resetting; a continued session losing
+ * the name; another window's rename, or the Inbox's answer racing it, leaving a stale name; focus left on the page.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -102,7 +99,7 @@ function Probe({ session }: { session: string }) {
   return <i data-probe-label={label ?? ''} />;
 }
 
-/** The section with the window's Rename… (App.tsx `renameAgent`, as it is: keep the name, then say it). */
+/** The section with App.tsx's `renameAgent` in place. */
 function mount(rows: InboxListRow[] = [], phone = false) {
   const host = document.createElement('div');
   host.className = 'pn-inbox';
@@ -189,13 +186,13 @@ async function key(el: HTMLElement, name: string) {
   await settle();
 }
 
-test.skipIf(!hasDom)('Rename… from ⋯: the project field with the row’s name, Enter keeps it with the Inbox, every surface shows it; Reset name goes back', async () => {
+test.skipIf(!hasDom)('⋯ → Rename… → Enter keeps the name with the Inbox and shows it on the row and the session labels; Reset name shows the own title again', async () => {
   setInboxAgents([group([agent('ses_a', { label: 'Fix login redirect' })])]);
   mount([thread('thr_1', 'ses_a', 'Invoice retries')]);
   await settle();
   expect(rowName('ses_a')).toBe('Fix login redirect');
   await openMore('ses_a');
-  // A project's words: Rename… alone while no name is given.
+  // Reset name only once a name is given.
   expect(menuItems()).toEqual(['Rename…']);
   await pick('rename');
   expect(field()!.value).toBe('Fix login redirect');
@@ -207,14 +204,12 @@ test.skipIf(!hasDom)('Rename… from ⋯: the project field with the row’s nam
   expect(field()).toBeNull();
   expect(rowName('ses_a')).toBe('Retry worker');
   expect(posted.map(({ serverSession: _, ...change }) => change)).toEqual([{ agent: 'ses_a', sessions: [], name: 'Retry worker' }]);
-  // Kept by the Inbox (another window, a restart, read it there), and shown where a session's label is read.
+  // Kept by the Inbox, and read over the session's own label.
   expect(file.wire().faces.ses_a).toEqual({ face: 'agent', sessions: [], name: 'Retry worker' });
   expect(document.querySelector('[data-probe-label]')!.getAttribute('data-probe-label')).toBe('Retry worker');
   expect(said).toEqual(['Renamed to Retry worker.']);
-  // Focus back on ⋯, never the page.
   expect(document.activeElement).toBe(row('ses_a').querySelector('[data-agent-more]'));
 
-  // A right-click opens the same menu, now with Reset name.
   await rightClick('ses_a');
   expect(menuItems()).toEqual(['Rename…', 'Reset name']);
   await pick('reset');
@@ -224,7 +219,7 @@ test.skipIf(!hasDom)('Rename… from ⋯: the project field with the row’s nam
   expect(said.at(-1)).toBe('Name reset to Fix login redirect.');
 });
 
-test.skipIf(!hasDom)('an empty name is Reset name; Escape cancels; a name past the cap is refused with the project’s words', async () => {
+test.skipIf(!hasDom)('Escape keeps the old name, a name past 64 characters is refused, an empty name resets and keeps the face', async () => {
   setInboxAgents([group([agent('ses_a', { host: 'pi', project: null })])]);
   file.change({ agent: 'ses_a', face: 'glass-blue' });
   file.change({ agent: 'ses_a', name: 'Docs pass' });
@@ -248,33 +243,31 @@ test.skipIf(!hasDom)('an empty name is Reset name; Escape cancels; a name past t
   await type('   ');
   await key(field()!, 'Enter');
   expect(field()).toBeNull();
-  // Its own name again (a Pi session with no title or thread: its agent's), the face it had kept.
+  // A Pi session with no title or thread reads as its agent.
   expect(rowName('ses_a')).toBe('Pi');
   expect(file.wire().faces.ses_a).toEqual({ face: 'glass-blue', sessions: [] });
 });
 
-test.skipIf(!hasDom)('a continued session keeps its name, and another window’s rename shows here at once', async () => {
+test.skipIf(!hasDom)('a continued session shows the name given to its old session; another window’s rename shows without a read', async () => {
   file.change({ agent: 'ses_old', name: 'Retry worker' });
   setInboxAgents([group([agent('ses_new', { continues: ['ses_old'], label: 'Its own title' })])]);
   mount();
   await act(async () => await faces.readAgentFaces());
   await settle();
-  // The same conversation under a new session id: the name given to the old one.
   expect(rowName('ses_new')).toBe('Retry worker');
-  // Renamed from here: one entry for the agent, its old session in it.
+  // Renamed from the new row: one entry, the old session folded in.
   await openMore('ses_new');
   expect(menuItems()).toEqual(['Rename…', 'Reset name']);
   await pick('rename');
   await type('Retry worker 2');
   await key(field()!, 'Enter');
   expect(file.wire().faces).toEqual({ ses_new: { face: 'agent', sessions: ['ses_old'], name: 'Retry worker 2' } });
-  // Another window renamed it (`event: agent-faces`): shown without a read.
   await act(async () => faces.hearAgentFacesEvent({ faces: { ses_new: { face: 'agent', sessions: ['ses_old'], name: 'From the phone' } }, rev: 99 }));
   await settle();
   expect(rowName('ses_new')).toBe('From the phone');
 });
 
-test.skipIf(!hasDom)('a given name beats the session’s own title on the To picker’s sessions', async () => {
+test.skipIf(!hasDom)('the To picker’s sessions read the given name over their own title', async () => {
   file.change({ agent: 'ses_a', name: 'Retry worker' });
   const model: ComposeSessionsModel = { projects: [{ project: { id: 'prj_bill', name: 'billing-svc', root: '/code/billing' }, sessions: [{ session: 'ses_a', host: 'claude-code', label: 'Its own title' }, { session: 'ses_b', host: 'pi' }] }] } as unknown as ComposeSessionsModel;
   function To() {
@@ -289,4 +282,42 @@ test.skipIf(!hasDom)('a given name beats the session’s own title on the To pic
   await act(async () => await faces.readAgentFaces());
   await settle();
   expect(host.querySelector('[data-to]')!.getAttribute('data-to')).toBe('ses_a:Retry worker,ses_b:');
+});
+
+const { agentNamesNow } = (hasDom ? await import('./agentNames') : {}) as typeof import('./agentNames');
+
+test.skipIf(!hasDom)('a save another window’s later save overtook leaves that later name once its answer lands', async () => {
+  await act(async () => await faces.readAgentFaces());
+  const saving = faces.keepAgentName('ses_a', 'From here');
+  expect(agentNamesNow().get('ses_a')).toBe('From here');
+  // Another window's save, counted later than this one's will be.
+  faces.hearAgentFacesEvent({ faces: { ses_a: { face: 'agent', sessions: [], name: 'From the phone' } }, rev: 1000 });
+  // This page's own change shows until its answer.
+  expect(agentNamesNow().get('ses_a')).toBe('From here');
+  await saving;
+  expect(agentNamesNow().get('ses_a')).toBe('From the phone');
+});
+
+test.skipIf(!hasDom)('a save the Inbox refuses goes back to the Inbox’s name and throws for the toast', async () => {
+  file.change({ agent: 'ses_a', name: 'Kept' });
+  await act(async () => await faces.readAgentFaces());
+  const real = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({ error: 'nope' }), { status: 500, headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch;
+  await expect(faces.keepAgentName('ses_a', 'Not kept')).rejects.toBeDefined();
+  globalThis.fetch = real;
+  expect(agentNamesNow().get('ses_a')).toBe('Kept');
+});
+
+test.skipIf(!hasDom)('a name heard before its agent is listed applies when the agent arrives; an agent gone before the save answers still keeps it', async () => {
+  // After a restart the faces can come before the list: the continued session is named once it is listed.
+  faces.hearAgentFacesEvent({ faces: { ses_old: { face: 'agent', sessions: [], name: 'Retry worker' } }, rev: 5 });
+  expect(agentNamesNow().get('ses_new')).toBeUndefined();
+  setInboxAgents([group([agent('ses_new', { continues: ['ses_old'] })])]);
+  await settle();
+  expect(agentNamesNow().get('ses_new')).toBe('Retry worker');
+  // Its row leaves the list while the save is on its way.
+  const saving = faces.keepAgentName(agent('ses_new', { continues: ['ses_old'] }), 'Retry worker 2');
+  setInboxAgents([group([])]);
+  await saving;
+  expect(file.wire().faces).toEqual({ ses_new: { face: 'agent', sessions: ['ses_old'], name: 'Retry worker 2' } });
 });

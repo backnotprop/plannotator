@@ -17,8 +17,8 @@
  * The faces this browser kept before the Inbox kept them (`plannotator-inbox-agent-faces`) show at once and are sent
  * once (`adopt`): the old key goes only when the server has them.
  *
- * An entry also keeps the name the person gave the agent (Rename… on its sidebar row, `keepAgentName`), found by the
- * same ids and folded into agentNames.ts on each change; an entry with a name and no face keeps `agent`.
+ * An entry also keeps the name the person gave the agent (`keepAgentName`), found by the same ids and folded into
+ * agentNames.ts on each change; an entry with a name and no face has `face: 'agent'`.
  */
 import { useCallback, useSyncExternalStore } from 'react';
 import { readInboxAgentFaces, type InboxAgentFaceEntry } from '@plannotator/core/inbox-types';
@@ -117,8 +117,7 @@ function rebuild(): void {
   const names = new Map<string, string>();
   for (const [key, entry] of Object.entries(entries())) {
     if (entry.name) for (const id of [key, ...entry.sessions]) names.set(id, entry.name);
-    // Its own mark (an entry kept for its name), or an uploaded picture this Inbox does not keep (removed, or chosen
-    // on another machine): the agent's own mark.
+    // An entry kept only for its name, or an uploaded picture this Inbox does not keep: the agent's own mark.
     if (entry.face === 'agent' || (entry.face.startsWith('own:') && !ownFaceShows(entry.face))) continue;
     next.set(key, entry.face);
     for (const session of entry.sessions) next.set(session, entry.face);
@@ -204,9 +203,8 @@ export function keepAgentFace(agent: AgentFaceRef, face: AgentFace): void {
 }
 
 /**
- * Rename… and Reset name on an agent's sidebar row: the name every window shows for it (null, or only spaces: back
- * to its own). Shown at once on this page; resolves once the Inbox kept it, and throws when it did not (the name goes
- * back to what the Inbox has; the caller's toast says why).
+ * Rename… and Reset name (null or blank). Shown on this page at once; throws when the Inbox did not keep it, and the
+ * page goes back to the Inbox's name.
  */
 export async function keepAgentName(agent: AgentFaceRef, name: string | null): Promise<void> {
   boot();

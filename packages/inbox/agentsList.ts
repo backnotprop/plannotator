@@ -7,9 +7,8 @@
  * The list is read again on `event: deliveries` with `agents` only while something reads this store
  * (`inboxAgentsWatched`), so the frames cost nothing until the section draws.
  *
- * The hooks hand out each agent with the name the person gave it as its `label` (agents/agentNames.ts), so every name
- * worked out from the list (its sidebar row, the list's agent filter and its title, a thread's sessions) shows it;
- * `agentAsListed` gives the agent back as its own connection named it. `inboxAgentsNow` is the list as read.
+ * The hooks hand out a named agent with its given name as `label` (agents/agentNames.ts); `agentAsListed` gives back
+ * the agent as read, and `inboxAgentsNow` is the list as read.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { InboxAgent, InboxAgentsGroup, InboxListRow } from '@plannotator/core/inbox-types';
@@ -74,10 +73,7 @@ const snapshot = () => current;
 const asListed = new WeakMap<InboxAgent, InboxAgent>();
 const namedCache = new WeakMap<readonly InboxAgentsGroup[], { names: AgentNames; out: readonly InboxAgentsGroup[] }>();
 
-/**
- * The groups with each agent the person named carrying that name as its `label` (by its id, or the session it runs
- * as). The same groups, and the same agent objects, while neither the list nor the names change.
- */
+/** The groups with given names as labels: the same groups and agent objects while neither the list nor the names change. */
 export function withGivenNames(groups: readonly InboxAgentsGroup[] | null, names: AgentNames): readonly InboxAgentsGroup[] | null {
   if (!groups || names.size === 0) return groups;
   const kept = namedCache.get(groups);
@@ -86,7 +82,8 @@ export function withGivenNames(groups: readonly InboxAgentsGroup[] | null, names
   const out = groups.map((group) => {
     let any = false;
     const agents = group.agents.map((agent) => {
-      const name = givenName(names, agent.id, agent.session);
+      // The whole chain: a continued session is named before the faces store has folded the agents in.
+      const name = givenName(names, agent.id, agent.session, ...(agent.continues ?? []));
       if (!name) return agent;
       any = true;
       const named = { ...agent, label: name };
@@ -102,12 +99,12 @@ export function withGivenNames(groups: readonly InboxAgentsGroup[] | null, names
   return result;
 }
 
-/** The agent as its own connection names it (before a given name); the same agent when the person named it nothing. */
+/** The agent as the list read it, before a given name. */
 export function agentAsListed(agent: InboxAgent): InboxAgent {
   return asListed.get(agent) ?? agent;
 }
 
-/** Whether the person gave this agent (as the hooks hand it out) a name. */
+/** Whether this agent, as the hooks hand it out, has a given name. */
 export function agentIsNamed(agent: InboxAgent): boolean {
   return asListed.has(agent);
 }
