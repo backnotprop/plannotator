@@ -3,7 +3,10 @@ import { inboxApi } from '../api';
 import { openComposer } from '../compose/openComposer';
 import { keepAgentFace, type AgentFaceRef } from './agentFaces';
 import { ANIMATE_THREAD_NAME, animatePrompt } from './animatePrompt';
-import { isOwnFace, type AgentFace } from './faceChoices';
+import type { FaceSources } from './FaceFan';
+import { useAgentFaceSources } from './faceArtLoad';
+import { isAgentFace, isOwnFace, type AgentFace } from './faceChoices';
+import { isSetFace, setFaceParts, setIconSrc, setLookOf } from './iconSets';
 import { ownFaceShows, ownIconSrc, useOwnIcons } from './ownIcons';
 
 export const ANIMATE_WORDS = {
@@ -19,18 +22,24 @@ const STEP_MS = 20_000;
 const within = <T,>(work: Promise<T>): Promise<T> => Promise.race([work, new Promise<never>((_, no) => setTimeout(() => no(new Error('timeout')), STEP_MS))]);
 const EXT: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/svg+xml': 'svg' };
 
-/** Picture handed back → the picture it replaced, re-read whenever the pictures change (a hand-back adds one). */
-function useAnimatedOriginals(): ReadonlyMap<string, string> {
+/** Picture handed back → the face it replaced, re-read whenever the pictures change (a hand-back adds one). */
+function useAnimatedOriginals(): ReadonlyMap<string, AgentFace> {
   const icons = useOwnIcons();
   const key = (icons ?? []).map((icon) => icon.id).join();
-  const [originals, setOriginals] = useState<ReadonlyMap<string, string>>(new Map());
+  const [originals, setOriginals] = useState<ReadonlyMap<string, AgentFace>>(new Map());
   useEffect(() => {
     let live = true;
     inboxApi
       .iconAnimateResults()
       .then((answer) => {
         const list = Array.isArray(answer.results) ? (answer.results as { icon?: unknown; result?: unknown }[]) : [];
-        if (live) setOriginals(new Map(list.flatMap((r) => (typeof r.icon === 'string' && typeof r.result === 'string' ? [[r.result, r.icon] as const] : []))));
+        // `icon` is an uploaded picture's hash, or the face itself (a set's icon, one of ours).
+        const pairs = list.flatMap((r) => {
+          if (typeof r.result !== 'string' || typeof r.icon !== 'string') return [];
+          const face = /^[0-9a-f]{64}$/.test(r.icon) ? `own:${r.icon}` : r.icon;
+          return isAgentFace(face) ? [[r.result, face] as const] : [];
+        });
+        if (live) setOriginals(new Map(pairs));
       })
       .catch(() => {
         // An Inbox from before "Animate it", or offline: no way back is offered until a read answers.
@@ -43,23 +52,50 @@ function useAnimatedOriginals(): ReadonlyMap<string, string> {
 }
 
 /**
- * "Animate it", under the agent's own picture in the icon dialog's "Your own…" (OwnIconsBody.tsx). One press keeps a
- * request with the Inbox (packages/server/inbox-icon-animate.ts) and opens New message filled in (compose/openComposer.ts):
- * the words (animatePrompt.ts), the picture attached, To open on the running agents and "New <agent> session". The
- * person sends it. The agent's hand-back changes this icon in every window by itself; a picture an agent handed back
- * offers "Use the original" in its place.
+ * The picture an agent is handed for a face, and the id the request names it by (an uploaded picture's hash, else the
+ * face). Null for the agent's own mark (the brand's, already a moving rig) and Transparent (a picture per theme).
+ */
+export function animateSource(face: AgentFace, ours: FaceSources | null): { icon: string; src: string } | null {
+  if (isOwnFace(face)) return { icon: face.slice(4), src: ownIconSrc(face, false) };
+  if (isSetFace(face)) {
+    const { set, icon } = setFaceParts(face);
+    return { icon: face, src: setIconSrc(set, icon) };
+  }
+  if (face === 'agent' || face === 'transparent') return null;
+  const src = ours?.[face];
+  return typeof src === 'string' ? { icon: face, src } : null;
+}
+
+/** The original's still, for "Use the original" (none for a one-colour set's icon: an image cannot take the text colour). */
+function originalStill(face: AgentFace, ours: FaceSources | null): string | null {
+  if (isOwnFace(face)) return ownIconSrc(face, true);
+  if (isSetFace(face)) return setLookOf(setFaceParts(face).set)?.mono ? null : animateSource(face, ours)?.src ?? null;
+  return animateSource(face, ours)?.src ?? null;
+}
+
+const isOurs = (face: AgentFace) => !isOwnFace(face) && !isSetFace(face) && face !== 'agent';
+
+/**
+ * "Animate it", under the agent icon dialog's head (AgentIconDialog.tsx), whichever place is open, for the icon the
+ * agent shows now: its own picture, a set's icon or one of our faces. One press keeps a request with the Inbox
+ * (packages/server/inbox-icon-animate.ts) and opens New message filled in (compose/openComposer.ts): the words
+ * (animatePrompt.ts), the picture attached, To open on the running agents and "New <agent> session". The person sends
+ * it. The agent's hand-back changes this icon in every window by itself; a picture an agent handed back offers "Use the
+ * original" in its place.
  */
 export function AnimateIt({ agent, face, onDone }: { agent: AgentFaceRef; face: AgentFace; onDone: () => void }) {
   const originals = useAnimatedOriginals();
+  const ours = useAgentFaceSources(isOurs(face));
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
-  const current = isOwnFace(face) ? face.slice(4) : null;
-  if (!current) return null;
-  const original = originals.get(current);
-  const back = original && ownFaceShows(`own:${original}`) ? original : null;
+  const source = animateSource(face, ours);
+  const original = isOwnFace(face) ? originals.get(face.slice(4)) : undefined;
+  const back = original && (!isOwnFace(original) || ownFaceShows(original)) ? original : null;
+  if (!source && !back) return null;
+  const backStill = back ? originalStill(back, ours) : null;
 
   const start = async () => {
-    if (busy) return;
+    if (busy || !source) return;
     setBusy(true);
     setFailed(false);
     try {
@@ -67,11 +103,11 @@ export function AnimateIt({ agent, face, onDone }: { agent: AgentFaceRef; face: 
       const sessions = [...new Set([ref.session, ...(ref.continues ?? [])].filter((id): id is string => !!id && id !== ref.id))];
       const [picture, answer] = await within(
         Promise.all([
-          fetch(ownIconSrc(current, false)).then((r) => {
+          fetch(source.src).then((r) => {
             if (!r.ok) throw new Error(String(r.status));
             return r.blob();
           }),
-          inboxApi.askIconAnimate({ icon: current, agent: ref.id, sessions }),
+          inboxApi.askIconAnimate({ icon: source.icon, agent: ref.id, sessions }),
         ]),
       );
       if (typeof answer.request !== 'string') throw new Error('no request');
@@ -86,7 +122,6 @@ export function AnimateIt({ agent, face, onDone }: { agent: AgentFaceRef; face: 
 
   return (
     <div className="ib-agi-anim" data-animate-it="">
-      <img className="ib-agi-anim-pic" src={ownIconSrc(current, true)} alt="" draggable={false} />
       <div className="ib-agi-anim-t">
         <span className="ib-agi-anim-l">{back ? ANIMATE_WORDS.done : ANIMATE_WORDS.line}</span>
         {failed && (
@@ -101,11 +136,11 @@ export function AnimateIt({ agent, face, onDone }: { agent: AgentFaceRef; face: 
           className="ib-btn ib-sm ib-agi-anim-b"
           data-animate-undo=""
           onClick={() => {
-            keepAgentFace(agent, `own:${back}`);
+            keepAgentFace(agent, back);
             onDone();
           }}
         >
-          <img src={ownIconSrc(back, true)} alt="" draggable={false} />
+          {backStill && <img src={backStill} alt="" draggable={false} />}
           {ANIMATE_WORDS.undo}
         </button>
       ) : (

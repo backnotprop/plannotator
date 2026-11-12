@@ -211,6 +211,19 @@ test('Sets: the dialog applies an icon everywhere at once, closes and gives focu
     const box = (await dialog.boundingBox())!;
     const view = page.viewportSize()!;
     expect(Math.abs(box.x + box.width / 2 - view.width / 2)).toBeLessThan(2);
+    expect(Math.abs(box.y + box.height / 2 - view.height / 2)).toBeLessThan(2);
+    if (key === 'tiny') {
+      // "Your own…" and back: one size in both places, so no edge moves (a shorter "Your own…" once hung Sets low).
+      const edges = async () => {
+        const b = (await dialog.boundingBox())!;
+        return [b.y, b.y + b.height].map(Math.round);
+      };
+      const before = await edges();
+      await dialog.locator('[data-agi-place="own"]').click();
+      expect(await edges()).toEqual(before);
+      await dialog.locator('[data-agi-place="sets"]').click();
+      expect(await edges()).toEqual(before);
+    }
     await dialog.locator(`.am-sets-tab[data-set="${set}"]`).click();
     await dialog.locator('.am-sets-q').fill(query);
     if (key === 'tiny') await both(page, 'dialog-sets');

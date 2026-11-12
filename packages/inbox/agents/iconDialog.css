@@ -1,11 +1,8 @@
 /* ---------- The agent icon dialog: "Your own…" and "Sets" (AgentIconDialog.tsx, OwnIconsBody.tsx, SetsBody.tsx) ----------
-   The Inbox's own dialog (`.ib-dlg`, a native modal in the middle of the window), made a fixed size so the grid scrolls
-   inside it; a full-height sheet on a phone. */
-/* Its top edge stays where it opened (`--agi-top`, AgentIconDialog.tsx): switching places moves only the bottom edge. */
-.pn-inbox dialog.ib-dlg.ib-agi, dialog.ib-dlg.ib-agi { width: min(720px, calc(100vw - 32px)); height: min(640px, calc(100vh - 48px)); overflow: hidden; margin: var(--agi-top, auto) auto auto; }
+   The Inbox's own dialog (`.ib-dlg`, a native modal in the middle of the window), one fixed size in both places so it
+   stays centred and a switch moves no edge; the grid and the pictures scroll inside it. A full-height sheet on a phone. */
+.pn-inbox dialog.ib-dlg.ib-agi, dialog.ib-dlg.ib-agi { width: min(720px, calc(100vw - 32px)); height: min(640px, calc(100vh - 48px)); overflow: hidden; margin: auto; }
 dialog.ib-dlg.ib-agi[open] { display: flex; flex-direction: column; }
-/* "Your own…" is only as tall as its pictures need (the grid of a set keeps the full height). */
-.pn-inbox dialog.ib-dlg.ib-agi:has(.ib-agi-own), dialog.ib-dlg.ib-agi:has(.ib-agi-own) { height: fit-content; max-height: min(640px, calc(100vh - 48px)); }
 .ib-agi > .ib-dlg-in { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 14px; padding: 16px 18px; }
 .ib-agi-head { gap: 10px; }
 .ib-agi-head h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -47,9 +44,8 @@ dialog.ib-dlg.ib-agi[open] { display: flex; flex-direction: column; }
   .ib-agi .am-own-x::before { content: ""; position: absolute; inset: 3px; z-index: -1; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 1.5px var(--background); }
 }
 
-/* "Animate it" (AnimateIt.tsx): under the agent's own picture, the picture, one line, one button. */
+/* "Animate it" (AnimateIt.tsx): under the head, for the icon the head shows: one line, one button. */
 .ib-agi-anim { flex: none; display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 10px; background: color-mix(in oklch, var(--foreground) 3%, transparent); }
-.ib-agi-anim-pic { flex: none; width: 32px; height: 32px; object-fit: contain; }
 .ib-agi-anim-t { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .ib-agi-anim-l { font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.4; color: var(--muted-foreground); text-wrap: pretty; }
 .ib-agi-anim-e { font-size: var(--ib-fs-12-5, 12.5px); color: var(--destructive, #dc2626); }
@@ -97,8 +93,8 @@ dialog.ib-dlg.ib-agi[open] { display: flex; flex-direction: column; }
   .ib-agi-head .ib-seg-o { flex: 1; justify-content: center; height: 36px; }
   .ib-agi-drop { height: 132px; }
   .ib-agi-anim { flex-wrap: wrap; }
-  .ib-agi-anim-t { flex-basis: calc(100% - 44px); }
-  .ib-agi-anim-b { margin-left: 44px; height: 36px; }
+  .ib-agi-anim-t { flex-basis: 100%; }
+  .ib-agi-anim-b { height: 36px; }
   .am-sets-q { height: 40px; font-size: var(--ib-fs-16-in, 16px); }
   .am-sets-tab { height: 34px; padding: 0 11px; }
   .am-sets-g { grid-template-columns: repeat(auto-fill, minmax(56px, 1fr)); }
