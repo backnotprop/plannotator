@@ -278,7 +278,7 @@ test.skipIf(!hasDom)("Escape's last rung goes back where full screen was opened 
   await openTile('page.html');
   await until(inFullScreen, 'the page full screen');
   expect(choice()).toBeNull();
-  // The pen first (Annotate → Interact), then full screen ends: opened from the thread alone, the file closes.
+  // Full screen ends (the page opens in Interact, so no pen rung): opened from the thread alone, the file closes.
   for (let i = 0; i < 4 && view() !== null; i++) await escapeOnPane();
   await until(() => view() === null, 'the thread as it was, no file beside it');
   expect(window.location.hash).toBe(threadOnly);

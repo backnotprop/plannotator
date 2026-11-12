@@ -31,12 +31,12 @@ const keys = (body: string) => pullsNamedInBody(body).map((ref) => ref.key);
 
 type Result = { content: { text: string }[]; isError?: boolean; structuredContent?: Record<string, unknown> };
 
-function world() {
+function world(projectHost?: InboxMcpContext["projectHost"]) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-hints-")));
   roots.push(root);
   const store = InboxStore.open(join(root, "data"));
   const project = store.ensureProject({ name: "api", root: join(root, "api") });
-  const context = { store, baseUrl: () => "http://localhost:1/", resolveProject: async () => project } as unknown as InboxMcpContext;
+  const context = { store, baseUrl: () => "http://localhost:1/", resolveProject: async () => project, projectHost } as unknown as InboxMcpContext;
   const server = createInboxMcpServer(context) as unknown as { _registeredTools: Record<string, { handler: (input: Record<string, unknown>, ctx: unknown) => Promise<Result> }> };
   const send = async (session: string, input: Record<string, unknown>) => {
     const result = await server._registeredTools.send_message!.handler({ project_path: project.root, agent_session: session, agent_host: "claude-code", ...input }, {});
@@ -97,6 +97,17 @@ test("no PR line when the PR is passed in pulls now, is already on the thread, o
   expect(quietHint(w.store, { session: "ses_a", threadId, body: `${PR} again`, replayed: false, now: Date.now() })).toBeNull();
   // Still unsaid for this session: a PR on no thread gets it.
   expect((await w.send("ses_a", { body: "And https://github.com/acme/api/pull/99.", thread: "new" })).last).toContain("acme/api#99");
+});
+
+test("in a project on a self-hosted GitLab, send_message's short group/project!n lands on that host, and the same words in the body ask nothing", async () => {
+  const w = world(async (projectId) => (projectId === w.project.id ? "gitlab.acme.dev" : null));
+  const sent = await w.send("ses_a", { body: "Opened acme/web!7.", pulls: ["acme/web!7"] });
+  expect(sent.lines).toHaveLength(1);
+  expect(sent.lines[0]).toContain("PRs: Added https://gitlab.acme.dev/acme/web/-/merge_requests/7.");
+  const threadId = String(sent.result.structuredContent!.thread_id);
+  expect(w.store.threadPulls(threadId).map((p) => p.url)).toEqual(["https://gitlab.acme.dev/acme/web/-/merge_requests/7"]);
+  expect(keys("acme/web!7")).toEqual(["gitlab.com/acme/web#7:pull"]);
+  expect(pullsNamedInBody("acme/web!7", "gitlab.acme.dev").map((ref) => ref.key)).toEqual(["gitlab.acme.dev/acme/web#7:pull"]);
 });
 
 test("one hint a send: the PR line first, the question line on a later send that still qualifies, each once", async () => {
