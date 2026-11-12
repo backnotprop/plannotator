@@ -25,8 +25,9 @@ import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { INBOX_PERMISSION_FULL, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { inboxLaunchedSession } from '@plannotator/core/inbox-run-line';
 import { LaunchChoiceMeta } from './LaunchChoiceMeta';
-import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxDraftFile, type InboxListGroupId, type InboxListRow, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxReaction, type InboxReplyDraft, type InboxRun, type InboxSentRecipient, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
+import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxDraftFile, type InboxListGroupId, type InboxListRow, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxReaction, type InboxReplyDraft, type InboxReplyQuote, type InboxRun, type InboxSentRecipient, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
+import { withoutInboxReplyQuoteLead } from '@plannotator/core/inbox-reply-quote';
 import { capQuestionPrompt, emptyQuestionAnswer, indexQuestionBlocks, isQuestionAnswerEmpty, type IndexedQuestion, type QuestionAnswer, type QuestionStatus } from '@plannotator/core/question-block';
 import { INBOX_AUTO_SEND_ACK_NOTES, inboxAskingMessage, inboxPersonAnsweredSince, wholeMinutes, isInboxNote, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachment, type InboxAttachmentState, type InboxInlineImage, type InboxQuestionState } from '@plannotator/core/inbox-types';
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
@@ -170,6 +171,8 @@ import { ActionChecklist, type ActionMark } from './ActionChecklist';
 import { actionForBlock } from '../actions';
 import { splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
 import { Tip } from './Tip';
+import { ReplyQuoteLine, SentQuoteLine } from './ReplyQuote';
+import { arrowQuotesWhole, flashQuoteWords, quoteToSend, REPLY_QUOTE_WORDS, selectedWordsIn } from '../replyQuote';
 import { ReactionTray, justReacted, reactionSpeech } from './ReactionTray';
 import { useHoldPress } from '../holdPress';
 import { threadChipName } from '../threadChip';
@@ -600,8 +603,10 @@ export function MessageBody({
   const actionsSent = (sentActions?.length ?? 0) > 0;
   const sent = useMemo(() => {
     const raw = skills ? skills.before : message.body;
-    return actionsSent ? withoutInboxActionsSection(raw) : raw;
-  }, [skills, message.body, actionsSent]);
+    // A quoting reply's lead is the agent's: the window draws the quote as its own line (approval "inbox-reply-quote").
+    const words = message.author.kind === 'person' && message.quote ? withoutInboxReplyQuoteLead(raw) : raw;
+    return actionsSent ? withoutInboxActionsSection(words) : words;
+  }, [skills, message.body, message.author.kind, message.quote, actionsSent]);
   const replyParts = useMemo(() => sentReplyParts(message, sent, sentAnswers ?? []), [message, sent, sentAnswers]);
   // The files the reply's feedback names, as links (display only; replyFileLinks.ts).
   // Only the person's own message: an agent's text is drawn as it wrote it, whatever its headings say.
@@ -2813,6 +2818,74 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const files = replyFiles.draftFiles(text);
     if (boxRef.current.open && (text.trim() !== '' || files.length > 0)) replyDraft.save(text, files);
   };
+  // ── Reply with a quote (approval "inbox-reply-quote"; replyQuote.ts) ──
+  /** The message the box's words answer: set by ↩ on an older message, or on words selected in one; null: none (a plain Reply). */
+  const [quote, setQuoteState] = useState<InboxReplyQuote | null>(null);
+  const quoteRef = useRef(quote);
+  quoteRef.current = quote;
+  /** The person chose the quote in this window (↩ or ×): a draft's answer never takes it back while the box is open. */
+  const quoteChosen = useRef(false);
+  /** The quoted message, when it is in the thread (a quote of anything else is not shown and not sent). */
+  const quotedMessage = quote ? thread.messages.find((m) => m.id === quote.of) : undefined;
+  /** Set (or drop) the quote; the draft's next saves name it, and a draft already kept learns it now. */
+  const setQuote = (next: InboxReplyQuote | null) => {
+    quoteChosen.current = true;
+    setQuoteState(next);
+    replyDraft.quote(next);
+    const text = replyText.get();
+    const files = replyFiles.draftFiles(text);
+    if (boxRef.current.open && (text.trim() !== '' || files.length > 0)) replyDraft.save(text, files);
+  };
+  // The quote a draft was saved with comes back (a reload, another window, back to the thread). While the box is
+  // open the person's own choice stands.
+  const draftQuote = replyDraft.draft?.quote ? JSON.stringify(replyDraft.draft.quote) : '';
+  useEffect(() => {
+    if (!draftQuote) return;
+    if (boxRef.current.open && quoteChosen.current) return;
+    const saved = JSON.parse(draftQuote) as InboxReplyQuote;
+    setQuoteState(saved);
+    replyDraft.quote(saved);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftQuote]);
+  useEffect(() => {
+    setQuoteState(null);
+    quoteChosen.current = false;
+  }, [thread.thread_id]);
+  // A box closed with no draft forgets its quote, as it forgets the pill's choice.
+  useEffect(() => {
+    if (box.open || replyDraft.draft) return;
+    quoteChosen.current = false;
+    if (quoteRef.current) {
+      setQuoteState(null);
+      replyDraft.quote(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [box.open]);
+  /** The quote is gone after a Send that carried the words, or a Discard. */
+  const forgetQuote = () => {
+    quoteChosen.current = false;
+    setQuoteState(null);
+    replyDraft.quote(null);
+  };
+  /** The × on the box's quote line: the reply goes without it; focus stays in the words. */
+  const removeQuote = () => {
+    setQuote(null);
+    announce(REPLY_QUOTE_WORDS.removed);
+    textRef.current?.focus();
+  };
+  /** A sent reply's quote line: to the original, its quoted words tinted for a moment. */
+  const jumpToQuote = (target: InboxReplyQuote) => {
+    jumpTo({ kind: 'message', messageId: target.of });
+    if (target.words === undefined) return;
+    const words = target.words;
+    setTimeout(() => {
+      const article = bodyRef.current?.querySelector(`[data-message-article="${CSS.escape(target.of)}"] .ib-msg`);
+      if (article) flashQuoteWords(article, words);
+    }, 250);
+  };
+  /** The words selected in a message when its ↩ was pressed (read on the press, before a click can move the selection). */
+  const quoteWordsAtPress = useRef<{ id: string; words: string | null } | null>(null);
+
   const noteId = `ib-asker-note-${thread.thread_id}`;
   const conflictId = `ib-draft-conflict-${thread.thread_id}`;
   // The choice at Send, when the session that asked has ended.
@@ -4648,6 +4721,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     setBox({ open: later, text: '' });
     if (carriedWords) replyDraft.sent();
     else replyDraft.release();
+    if (carriedWords) forgetQuote();
     setTaggedIds([]);
     setTagMode('ask');
     // The pill's choice resets after Send: the next reply goes to the last writer until the person aims it.
@@ -4915,6 +4989,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         }
       }
       const lastKey = parts.at(-1)!.key;
+      // The message the words answer, with its time as this window shows it (approval "inbox-reply-quote").
+      const sendQuote = quoteToSend(quoteRef.current, current.messages, whenTime);
       // Every tag of this Send (the words', the pill's other recipients' and every carried comment's), once each, on the last reply.
       const sendTags = sendTagsByTarget(
         parts.map((p) => ({ id: p.key, owner: p.wordsTo ? p.wordsTo.session : p.target.message.author.kind === 'agent' ? (p.target.message.author.session ?? null) : null })),
@@ -4941,7 +5017,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           {
             value: JSON.stringify([
               p.target.message.id,
-              p.key === lastKey ? [words, uploads, sendTags.get(lastKey) ?? [], p.wordsTo ?? null] : [],
+              p.key === lastKey ? [words, uploads, sendTags.get(lastKey) ?? [], p.wordsTo ?? null, sendQuote ?? null] : [],
               p.own.map((r) => [r.id, r.updated_at]),
             ]),
             answers: sendTargetAnswerIds(p.target),
@@ -4975,6 +5051,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           ...(last && options.stayFull && file && fileAttachment ? { viewing: replyViewingOf(fileAttachment, file, current.messages) } : {}),
           // The pasted files ride the reply that carries the words, as attachments.
           ...(files.length > 0 ? { uploads: files } : {}),
+          // The message the words answer (approval "inbox-reply-quote") rides the reply that carries them.
+          ...(last && sendQuote && words.trim() !== '' ? { quote: sendQuote } : {}),
           ...(tags.length > 0 ? { tags } : {}),
           // The reply that carries the box's words: their draft goes with the Send (that draft, or one holding
           // exactly these words when the `updated_at` they were saved as is not known here).
@@ -5625,6 +5703,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             to: replyTo,
             value: box.open ? (composerText ?? '') : (replyDraft.conflict ?? replyDraft.draft?.body ?? ''),
             onChange: (text) => changeReply(text, true),
+            quote: quote && quotedMessage ? { message: quotedMessage, words: quote.words, onRemove: () => setQuote(null) } : null,
             onLateVoice,
             onSend: () => void send({ stayFull: true }),
             sending,
@@ -5700,8 +5779,20 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     field.setSelectionRange(end, end);
     document.execCommand('insertText', false, end === 0 || /\s$/.test(field.value) ? '@' : ' @');
   };
-  /** The Reply arrow on an agent's message: the pill aims at that message's agent, and the words stay. */
+  /**
+   * The Reply arrow on a message: the pill aims at that message's agent, and the words stay. On an older message the
+   * box quotes it; with words selected in the message, those words (approval "inbox-reply-quote"). With nothing
+   * selected, on a message no agent wrote after (`arrowQuotesWhole`), it is a plain Reply, as before (a quote there is dropped).
+   */
   const replyToMessage = (message: InboxMessageWire) => {
+    const pressed = quoteWordsAtPress.current;
+    quoteWordsAtPress.current = null;
+    const article = bodyRef.current?.querySelector(`[data-message-article="${CSS.escape(message.id)}"] .ib-msg`) ?? null;
+    const words = (pressed?.id === message.id ? pressed.words : null) ?? selectedWordsIn(article);
+    if (words) setQuote({ of: message.id, words });
+    else if (arrowQuotesWhole(thread.messages, message.id)) setQuote({ of: message.id });
+    else if (quoteRef.current) setQuote(null);
+    if (words) window.getSelection()?.removeAllRanges();
     const session = message.author.kind === 'agent' ? (message.author.session ?? null) : null;
     if (!pillActive || !session) {
       openBox();
@@ -5724,6 +5815,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     // An empty box with nothing saved has nothing to discard: it only closes, and says nothing that is not so.
     const had = replyText.get().trim() !== '' || replyFiles.files.length > 0 || replyDraft.draft !== null;
     replyDraft.discard();
+    forgetQuote();
     closeBox(true);
     if (had) announce('Draft discarded.');
   };
@@ -6991,9 +7083,21 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                       <Tip content={fullWhen}>
                         <span data-full-when="">{time}</span>
                       </Tip>
-                      {isAgent && liveMessage(message) && (
+                      {/* The person's own messages take ↩ too (approval "inbox-reply-quote"): the reply quotes them. */}
+                      {liveMessage(message) && (isAgent || (!isInboxNote(message) && !message.ack_of)) && (
                         <Tip content="Reply">
-                          <button type="button" className="ib-mut" onClick={() => replyToMessage(message)} aria-label="Reply">
+                          <button
+                            type="button"
+                            className="ib-mut"
+                            // Read the words selected in this message on the press: a click may move the selection.
+                            onPointerDown={() => {
+                              const article = bodyRef.current?.querySelector(`[data-message-article="${CSS.escape(message.id)}"] .ib-msg`) ?? null;
+                              quoteWordsAtPress.current = { id: message.id, words: selectedWordsIn(article) };
+                            }}
+                            onClick={() => replyToMessage(message)}
+                            aria-label="Reply"
+                            data-message-reply={message.id}
+                          >
                             <Icon name="reply" size={15} />
                           </button>
                         </Tip>
@@ -7031,6 +7135,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 ) : (
                 <>
                 {reviewView?.asked && message.id === thread.messages[0]?.id && <p className="ib-rvasked" data-review-asked="">{reviewView.asked}</p>}
+                {/* The message this reply quotes (approval "inbox-reply-quote"): a press goes to it. */}
+                {message.author.kind === 'person' && message.quote && (
+                  <SentQuoteLine message={thread.messages.find((m) => m.id === message.quote!.of)} words={message.quote.words} phone={phone} onJump={() => jumpToQuote(message.quote!)} />
+                )}
                 <MessageBody
                   message={message}
                   sentAnswers={message.author.kind === 'person' ? (sentAnswersByReply.get(message.id) ?? NO_SENT_ANSWERS) : undefined}
@@ -7373,6 +7481,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   <Icon name="chevD" size={phone ? 20 : 16} />
                 </button>
               </Tip>
+              {/* The message the words answer (approval "inbox-reply-quote"): one quiet line over them, × drops it. */}
+              {quote && quotedMessage && <ReplyQuoteLine message={quotedMessage} words={quote.words} phone={phone} onRemove={removeQuote} />}
               {/* The words, files, answers and actions scroll in one region capped near half the window (decision D1), so
                   the row with Send under it is always in view however much the reply holds. */}
               <div className="ib-rscroll" data-reply-scroll="" ref={replyScrollRef}>
