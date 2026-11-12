@@ -439,7 +439,7 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   "cloud-grok": "Grok Bot",
   "cloud-muse": "Muse by Meta",
   "cloud-hermes": "Hermes Agent",
-  "cloud-openclaw": "OpenClaw",
+  "cloud-openclaw": "OpenClaw server",
 };
 
 /**
