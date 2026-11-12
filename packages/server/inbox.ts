@@ -4749,6 +4749,34 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   }, LAZY_ASSET_WARM_DELAY_MS);
   lazyAssetWarm.unref?.();
 
+  /**
+   * The window's read of one thread (`GET /api/inbox/threads/<id>`), or null when there is none: each message's seq
+   * (what is new since the last look) and a reply's sent annotations. A Send asks for it with its reply
+   * (`with_thread`), so the window draws the sent reply from that answer instead of reading the thread again.
+   */
+  const windowThreadRead = async (threadId: string, req: Request, via: RequestVia) => {
+    // Images the messages show with no captured file yet: copied in the background; the read never waits (approval "inbox-image-viewer").
+    if (store.thread(threadId)) imageCapture.schedule(threadId);
+    const thread = perfPhase("thread", () => store.windowThread(threadId));
+    if (!thread) return null;
+    // `pull_theirs`: the person handed this thread only teammates' PRs, so its reviews take no verdict.
+    // `pull_keys` (Code review on): the PRs it owns, which its review may be posted to (Post to GitHub/GitLab).
+    const pullKeys = codeReviewOn() ? pullOwners.keys(thread.thread_id) : [];
+    const withRepo = {
+      ...thread,
+      project: { ...thread.project, repo: repos.get(thread.project.root) },
+      ...(pullOwners.theirs(thread.thread_id) ? { pull_theirs: true as const } : {}),
+      ...(pullKeys.length > 0 ? { pull_keys: pullKeys } : {}),
+      ...(codeReviewOn() && pullOwners.started().has(thread.thread_id) ? { review_started: true as const } : {}),
+    };
+    // `run` (additive, launch only): the launched thread's run line; null while the agent rests.
+    // `attach_command` (with `run`): the host's attach command, there while the agent rests too.
+    const run = await launch.runOf(thread.thread_id, isOwner(req, via));
+    const row = store.listRow(thread.thread_id);
+    // `row` (additive): the thread's list row, also for an archived thread, which the window's list leaves out.
+    return { serverSession, cursor: store.cursor(), thread: withRepo, row: row ? withSnooze(launch.rowDecorator()(row)) : row, ...(run === undefined ? {} : { run, attach_command: launch.attachOf(thread.thread_id) }) };
+  };
+
   const handle = async (req: Request, via: RequestVia): Promise<Response> => {
     // The tailnet listener checked its own Host (the served MagicDNS name)
     // and the owner's Tailscale login before handing the request here.
@@ -6171,27 +6199,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
       const threadMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)$/.exec(path);
       if (threadMatch && req.method === "GET") {
-        // The window's thread: each message's seq (what is new since the last look) and a reply's sent annotations.
-        // Images the messages show with no captured file yet: copied in the background; the read never waits (approval "inbox-image-viewer").
-        if (store.thread(threadMatch[1]!)) imageCapture.schedule(threadMatch[1]!);
-        const thread = perfPhase("thread", () => store.windowThread(threadMatch[1]!));
-        if (!thread) return json({ error: "No such thread.", code: "thread_not_found" }, 404);
-        // `pull_theirs`: the person handed this thread only teammates' PRs, so its reviews take no verdict.
-        // `pull_keys` (Code review on): the PRs it owns, which its review may be posted to (Post to GitHub/GitLab).
-        const pullKeys = codeReviewOn() ? pullOwners.keys(thread.thread_id) : [];
-        const withRepo = {
-          ...thread,
-          project: { ...thread.project, repo: repos.get(thread.project.root) },
-          ...(pullOwners.theirs(thread.thread_id) ? { pull_theirs: true as const } : {}),
-          ...(pullKeys.length > 0 ? { pull_keys: pullKeys } : {}),
-          ...(codeReviewOn() && pullOwners.started().has(thread.thread_id) ? { review_started: true as const } : {}),
-        };
-        // `run` (additive, launch only): the launched thread's run line; null while the agent rests.
-        // `attach_command` (with `run`): the host's attach command, there while the agent rests too.
-        const run = await launch.runOf(thread.thread_id, isOwner(req, via));
-        const row = store.listRow(thread.thread_id);
-        // `row` (additive): the thread's list row, also for an archived thread, which the window's list leaves out.
-        return json({ serverSession, cursor: store.cursor(), thread: withRepo, row: row ? withSnooze(launch.rowDecorator()(row)) : row, ...(run === undefined ? {} : { run, attach_command: launch.attachOf(thread.thread_id) }) });
+        const read = await windowThreadRead(threadMatch[1]!, req, via);
+        if (!read) return json({ error: "No such thread.", code: "thread_not_found" }, 404);
+        return json(read);
       }
 
       const seenMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/seen$/.exec(path);
@@ -6610,11 +6620,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               removeInboxUploads(store.dir, sentIds);
               for (const threadId of store.dropSentUploadsFromReplyDrafts(sentIds)) for (const listener of draftListeners) listener(threadId);
             }
+            // `with_thread` (the window's Send, its last reply): the thread as a read of it would answer now, so the
+            // sent reply is drawn from this answer, with no read of the thread after it.
+            const threadRead = body.with_thread === true ? await windowThreadRead(store.message(messageId)?.thread_id ?? "", req, via) : null;
             return json({
               message_id: messageId,
               questions: store.questionsOf(messageId),
               reply: result.reply,
               replayed: result.replayed,
+              ...(threadRead ? { thread_read: threadRead } : {}),
             });
           }
           case "reask": {

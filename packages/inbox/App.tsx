@@ -61,7 +61,9 @@ import {
 } from './api';
 import { listReadRefused, readFirstList } from './firstListRead';
 import { adoptRestartedInbox, type RestartHello } from './sessionAdopt';
-import { listsThread, newRecordBatch, noteOwnRecord, noteRecord, openThreadRead } from './openThreadReads';
+import { listsThread, newRecordBatch, noteOwnRecord, noteRecord, openThreadRead, threadOfRecord } from './openThreadReads';
+import { createThreadCache } from './threadCache';
+import { archivedRowPatch, patchShownRow, patchedRow, readRowPatch, shownRowOf, withEntry, withPinPatches, type RowPatch } from './rowActions';
 import { createOwnSaves } from './ownSaves';
 import { createSignal } from './signal';
 import { onlyQuestionsChanged } from './pickQueue';
@@ -171,7 +173,7 @@ import { StalePageNotice } from './components/StalePageNotice';
 import { InboxToast, type InboxToastModel, toastSpeech } from './components/Toast';
 import { errorToast } from './toastError';
 import { pictureFromFile } from './projectPictures';
-import { canToggleRead, confirmSetAside, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, offersRowMarkRead, seenHeldInNew, setAsideCount, type SetAsideAnswer, type SetAsideCount } from './markRead';
+import { canToggleRead, confirmSetAside, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, offersRowMarkRead, seenHeldInNew, setAsideCount, type SetAsideAnswer, type SetAsideCount, warnsBeforeRead } from './markRead';
 import { MarkReadWarning } from './components/MarkReadWarning';
 import { summarizeInboxQuestions } from '@plannotator/core/inbox-questions';
 import { threadLink, type RowMenuAction } from './rowMenu';
@@ -240,7 +242,7 @@ import { useComposerOpener } from './compose/openComposer';
 import { COMPOSE_CLONE_EVENT, composeActions, composeTargets, hostLabel, lastLaunchAgent, launchHistory, projectCanStart, projectPlusOn, SCRATCH_PICK, type ComposeAction, type ComposeCloneRequest } from './compose/model';
 import { machineLaunchesKept } from './compose/useMachineLaunches';
 import { reviewBoxPulls } from './compose/reviewBox';
-import type { CardsModel, DraftView, InboxStorageModel, UpdateCheckFailing } from './api';
+import type { CardsModel, DraftView, InboxStorageModel, ThreadModel, UpdateCheckFailing } from './api';
 import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
 import type { InboxComposeLaunch, InboxReaction, InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { reactionSpeech } from './components/ReactionTray';
@@ -978,7 +980,19 @@ function Inbox() {
    * reads they owe (`onPickSaves`): `read` everything, as for a record no one placed; `readHeld` what the held
    * records owe, at once; `readOwn` what a run with no record held owes (the list, the decisions, the drafts).
    */
-  const pickSaves = useRef({ saving: new Set<string>() as ReadonlySet<string>, owed: false, held: [] as InboxEvent[], read: () => {}, readOwn: () => {}, readHeld: (_held: InboxEvent[]) => {} });
+  const pickSaves = useRef({
+    saving: new Set<string>() as ReadonlySet<string>,
+    owed: false,
+    held: [] as InboxEvent[],
+    /**
+     * Every save of this run kept each question's state (only the words typed in an answer changed): nothing the list,
+     * the decisions or the drafts show moved, so the run's end reads none of them (typedAnswers.ts).
+     */
+    textOnly: true,
+    read: () => {},
+    readOwn: () => {},
+    readHeld: (_held: InboxEvent[], _quiet?: boolean) => {},
+  });
   /** What this window's own question saves brought back: their records are echoes, not news (ownSaves.ts). */
   const [ownSaves] = useState(createOwnSaves);
   const subscribeQuestions = useCallback((listener: (question: InboxQuestion) => void) => {
@@ -1077,6 +1091,21 @@ function Inbox() {
   const threadLoaded = useRef<InboxThread | null>(null);
   /** When `threadLoaded` landed (Date.now()): an old read is read again on the next record (openThreadReads.ts). */
   const threadLoadedAt = useRef(0);
+  /** The last few threads opened, as last read: going back to one draws it at once (threadCache.ts). */
+  const [threadCache] = useState(() => createThreadCache());
+  /** The open thread's reads on their way: given up when the person moves on to another thread before they answer. */
+  const openThreadReadsOut = useRef(new Set<{ threadId: string; controller: AbortController }>());
+  /** The thread drawn from its kept copy until its read lands (its objects are shared with that read). */
+  const shownFromCache = useRef<InboxThread | null>(null);
+  /**
+   * A row action's result, drawn the moment it is pressed while its write is on its way (rowActions.ts): Mark read's
+   * and Archive's row state, a Star's pin. Taken away when the list read after the write lands (the server's row), or
+   * at once when the write fails, with the action's own error.
+   */
+  const [rowPatches, setRowPatches] = useState<ReadonlyMap<string, RowPatch>>(new Map());
+  const [pinPatches, setPinPatches] = useState<ReadonlyMap<string, boolean>>(new Map());
+  /** A Mark read drawn and still on its way, per thread: Move back waits for it, so the two writes land in order. */
+  const readWrites = useRef(new Map<string, Promise<unknown>>());
   /** Wakes the open effect's wait between retries when another read lands the thread. */
   const wakeThreadRetry = useRef<(() => void) | null>(null);
   /**
@@ -1632,6 +1661,9 @@ function Inbox() {
       setCheckFailing(next.update_check_failing ?? null);
       // Held: the order waits for an action, but each row's own state (a delivery, an agent's read) follows at once.
       const groups = listGroups(next);
+      // A kept thread the list no longer has (deleted, archived elsewhere) is never drawn from its copy.
+      const listedIds = new Set(groups.flatMap((group) => group.threads.map((row) => row.thread_id)));
+      threadCache.prune((id) => listedIds.has(id));
       setShown((current) =>
         current === null || !hasRows(current)
           ? groups
@@ -1745,14 +1777,20 @@ function Inbox() {
     [refreshList, trackLook],
   );
 
-  const refreshThread = useCallback(async (threadId: string) => {
+  /** `given`: a read that came with another answer (a Send's `thread_read`): drawn as a read of the thread, none sent. */
+  const refreshThread = useCallback(async (threadId: string, given?: ThreadModel) => {
     const mine = ++threadReadSeq.current;
     // A thread being opened (not a re-read of the one on screen): pn:thread-open runs until its messages are drawn.
     if (threadLoaded.current?.thread_id !== threadId) perfThreadOpenStart(threadId);
     // The machine this read goes to: null is this Inbox (or an owner not learned yet).
     const askedOwner = machineOf(threadId);
+    // A read of the open thread is given up when the person moves on before it answers (the open effect), so
+    // clicking through threads reads only the one they land on.
+    const out = routeRef.current.thread === threadId && !given ? { threadId, controller: new AbortController() } : null;
+    if (out) openThreadReadsOut.current.add(out);
+    const keepToken = threadCache.begin(threadId);
     try {
-      const next = await inboxApi.thread(threadId, THREAD_READ_TIMEOUT_MS);
+      const next = given ?? (await inboxApi.thread(threadId, THREAD_READ_TIMEOUT_MS, out?.controller.signal));
       // Its code fences' grammars and KaTeX are chunks loaded on first use (#2593): the thread draws once
       // they are in, so its code paints highlighted and its math typeset, never plain first.
       await threadDrawReady(next.thread);
@@ -1763,7 +1801,10 @@ function Inbox() {
         // a window left open on a busy thread no longer holds a full copy of it per message that came in.
         const before = threadLoaded.current;
         const reread = before?.thread_id === threadId;
-        const read = reread ? shareUnchanged(before, next.thread) : next.thread;
+        // Drawn from its kept copy until now: what did not change keeps its objects, so nothing is drawn again.
+        const kept = !reread && shownFromCache.current?.thread_id === threadId ? shownFromCache.current : null;
+        shownFromCache.current = null;
+        const read = reread ? shareUnchanged(before, next.thread) : kept ? shareUnchanged(kept, next.thread) : next.thread;
         // Every real read reads the thread's files again too (pickQueue.ts's onlyQuestionsChanged counts on a read's
         // objects being new): a read that brought nothing new keeps the thread object (and one that changed only
         // questions keeps the pane's files revision), so it says so here. Any other change reads them by itself.
@@ -1773,6 +1814,8 @@ function Inbox() {
         wakeThreadRetry.current?.();
         stopLiveThreadRetry();
         setThread(read);
+        // Kept for going back to it: only this Inbox's own listed threads, never a launched one (threadCache.ts).
+        if (!askedOwner && !machineOf(threadId) && next.run === undefined && listsThread(latestRef.current, threadId)) threadCache.put(threadId, { ...next, thread: read }, keepToken);
         // The row and the run line as drawn when this read brought them unchanged: nothing is drawn again for them.
         setThreadRow((current) => keepSame(current, next.row ?? null));
         setThreadRun((current) => keepSame(current, next.run === undefined ? null : { threadId, run: next.run, attach: next.attach_command ?? null }));
@@ -1791,6 +1834,8 @@ function Inbox() {
       return next.thread;
     } catch (cause) {
       perfThreadOpenDropped(threadId);
+      // Given up: the person moved on to another thread. Nothing to say or retry.
+      if (out?.controller.signal.aborted) return null;
       // Not on this Inbox, asked before the list named each id's machine: once the first list is read (it may have landed
       // while this read was out; else wait a few seconds at most), read the thread on the machine it names.
       let waiting: string | null = null;
@@ -1831,8 +1876,10 @@ function Inbox() {
         }
       }
       return null;
+    } finally {
+      if (out) openThreadReadsOut.current.delete(out);
     }
-  }, [setThreadLoad, stopLiveThreadRetry]);
+  }, [setThreadLoad, stopLiveThreadRetry, threadCache]);
 
   /** A settings read arrived: the moment the Inbox named for the line, kept on this page's clock (`useLineLatch`). */
   const noteLineAgain = useCallback((reveal: SettingsModel['reveal']) => {
@@ -2278,7 +2325,10 @@ function Inbox() {
     };
     // A run of saves ended with their records held: one read for them all, at once. An echo of the window's own save
     // reads what shows the pick besides the pane (the list, the decisions, the drafts); anything else, what it owes.
-    pickSaves.current.readHeld = (held) => {
+    // `quiet`: the run only changed words typed in answers: its own echoes owe nothing, and only news is read.
+    pickSaves.current.readHeld = (all, quiet = false) => {
+      const held = quiet ? all.filter((event) => !ownEcho(event)) : all;
+      if (quiet && held.length === 0) return ownSaves.readsStarted();
       if (held.length === 0) return readAfterRecord(null, { now: true });
       held.forEach((event, i) => {
         const own = ownEcho(event);
@@ -2374,6 +2424,10 @@ function Inbox() {
             listAfterEvents(120);
             return;
           }
+          // A kept copy of the thread it changes is stale now; one it cannot place may change any (threadCache.ts).
+          const recordThread = event ? threadOfRecord(event) : null;
+          if (recordThread) threadCache.drop(recordThread);
+          else threadCache.clear();
           // Any other record may be a message that tags a thread (the person's own send too): the next `#`
           // preview reads the cards again, whatever the 5 s guard says.
           cardsReadAt.current = 0;
@@ -2489,6 +2543,8 @@ function Inbox() {
           for (const listener of shapeFrameListeners) listener(ids);
         },
         onConnect: (hello) => {
+          // A (re)connect: what happened while the stream was away is not known here; no kept thread is drawn from.
+          threadCache.clear();
           // The Inbox restarted under this page: when it is provably the same one, writes go on without a reload.
           if (hello) void adoptAfterRestart(hello);
           // `event: deliveries` carries no record, so the cursor never replays one sent before this connect.
@@ -2505,6 +2561,7 @@ function Inbox() {
         // The stream went silent past its window (or the tab came back after it): read what a record would make the
         // page read, once, so a message that arrived meanwhile is on screen. Never while the stream is heard.
         onCatchUp: () => {
+          threadCache.clear();
           emitAskChange(null);
           void refreshList(false).then((next) => next && flushNotifications(next));
           void refreshDecisions();
@@ -2519,7 +2576,10 @@ function Inbox() {
           // The rows' look another window saved meanwhile (`event: rows` is not replayed): the settings read has it.
           void refreshSettings();
         },
-        onLive: (live) => setStreamDead(!live),
+        onLive: (live) => {
+          if (!live) threadCache.clear();
+          setStreamDead(!live);
+        },
         // Linked machines. A record from another machine: a live one rings like this Inbox's own (a resync after a
         // reconnect never does), and the open thread follows when it is that machine's. Its row moves once this Inbox
         // has read that machine's list again, which the `machines` frame says.
@@ -2608,6 +2668,13 @@ function Inbox() {
   // look (so the row being opened keeps its place): Back shows it as left.
   useEffect(() => {
     const threadId = route.thread;
+    // The reads of a thread the person moved on from are given up: only the one they land on is read.
+    for (const out of [...openThreadReadsOut.current]) {
+      if (out.threadId === threadId) continue;
+      out.controller.abort();
+      openThreadReadsOut.current.delete(out);
+    }
+    shownFromCache.current = null;
     if (!threadId) {
       setThread(null);
       setThreadRow(null);
@@ -2620,7 +2687,8 @@ function Inbox() {
       return;
     }
     // A new open (not Try again on the same thread): what it opened with comes from its first read numbered after now.
-    if (openedFor.current !== threadId) {
+    const newOpen = openedFor.current !== threadId;
+    if (newOpen) {
       openedFor.current = threadId;
       openRead.current = { threadId, after: threadReadSeq.current };
       setOpenedWith(null);
@@ -2628,6 +2696,16 @@ function Inbox() {
     let cancelled = false;
     let retry: ReturnType<typeof setTimeout> | null = null;
     threadLoaded.current = null;
+    // Opened a moment ago and unchanged since (threadCache.ts): drawn at once from its last read, which goes out again
+    // below and replaces it. What the open does with its first read (the look, what it opened with) waits for that read.
+    const cached = newOpen && !machineOf(threadId) ? threadCache.get(threadId) : null;
+    if (cached) {
+      shownFromCache.current = cached.thread;
+      setThread(cached.thread);
+      setThreadRow((current) => keepSame(current, cached.row ?? null));
+      setThreadRun(null);
+      setThreadLoad(null);
+    }
     // The thread's place, if it held focus, gives it to this thread's subject (ThreadWait's onFocusLeaving).
     focusThreadSubject.current = false;
     /** Another read (the event stream's) already put this thread on screen. */
@@ -3288,8 +3366,12 @@ function Inbox() {
 
   const openRow = (row: InboxListRow) => go({ page: 'inbox', project: route.project, machine: route.machine, agent: route.agent, thread: row.thread_id });
 
-  const patchQuestions = (messageId: string, questions: InboxQuestion[]) => {
+  const patchQuestions = (messageId: string, questions: InboxQuestion[], stateKept = false) => {
     ownSaves.saved(questions);
+    // The pane drew this save; the thread's kept copy did not (threadCache.ts).
+    const open = routeRef.current.thread;
+    if (open) threadCache.drop(open);
+    if (!stateKept) pickSaves.current.textOnly = false;
     setThread((current) =>
       current
         ? { ...current, messages: current.messages.map((m) => (m.id === messageId ? { ...m, questions } : m)) }
@@ -3316,15 +3398,20 @@ function Inbox() {
     // what waits behind "N new".
     const held = pickSaves.current.held;
     pickSaves.current.held = [];
+    // Only words typed in answers changed in this run: no list, decisions or drafts read for it. The Drafts page shows
+    // the words, and decision mode's cards are read from the decisions, so both read as before.
+    const quiet = pickSaves.current.textOnly && !paneClosed && routeRef.current.page !== 'drafts' && !decisionModeOnRef.current;
+    pickSaves.current.textOnly = true;
     if (!pickSaves.current.owed) {
       // The records of these saves are still to come: read now what they will owe, so they owe nothing then.
-      if (!paneClosed) pickSaves.current.readOwn();
+      if (quiet) ownSaves.readsStarted();
+      else if (!paneClosed) pickSaves.current.readOwn();
       return;
     }
     pickSaves.current.owed = false;
     // The held records' read starts now and reads the list: it is this list read too.
     if (paneClosed) pickSaves.current.read();
-    else pickSaves.current.readHeld(held);
+    else pickSaves.current.readHeld(held, quiet);
   }, [refreshList]);
 
   /**
@@ -3563,20 +3650,66 @@ function Inbox() {
    * `putReadRowBack`).
    */
   const markRead = async (threadId: string, read: boolean, drawnBefore: InboxListSection[] | null = null) => {
+    // Move back pressed while the Mark read it undoes is still on its way: after it, never before.
+    if (!read) await readWrites.current.get(threadId)?.catch(() => {});
     const listAtPress = read ? shownRef.current : null;
+    // Mark read is drawn now (rowActions.ts), even while a look on its way is waited for below; Move back waits for
+    // its answer. A press that turns out to write nothing takes the drawn row away again. A press the warning will
+    // ask about (open questions, the warning on) is drawn only once the person goes on: never read behind the
+    // question, and Cancel leaves the row and header as they were.
+    const drawnRow = read ? shownRowOf(shownRef.current, threadId) : null;
+    let finished = () => {};
+    let drawn = false;
+    const unpatch = () => {
+      setRowPatches((current) => withEntry<RowPatch>(current, threadId, undefined));
+      finished();
+    };
+    const undraw = () => {
+      unpatch();
+      if (drawn && drawnRow) setShown((current) => (current ? replaceHeldRow(current, drawnRow) : current));
+    };
+    const draw = () => {
+      if (drawn) return;
+      drawn = true;
+      const patch = readRowPatch(new Date().toISOString());
+      setRowPatches((current) => withEntry(current, threadId, patch));
+      setShown((current) => (current ? patchShownRow(current, threadId, patch) : current));
+    };
+    if (read) {
+      const pending = new Promise<void>((done) => (finished = done));
+      readWrites.current.set(threadId, pending);
+      void pending.then(() => {
+        if (readWrites.current.get(threadId) === pending) readWrites.current.delete(threadId);
+      });
+      const atPress = rowOf(threadId);
+      const willAsk = warnsBeforeRead(atPress ? setAsideCount([atPress]) : openThreadSetAside(threadId), settings?.mark_read_warning?.on === true);
+      if (!willAsk) draw();
+    }
     // A look this tab sent and the server has not taken yet: decide on what it gives (a seen update held in New
     // moves locally), whether Mark read came before the look landed or after. Never longer than
     // MARK_READ_LOOK_WAIT_MS: a look that stalls leaves the thread New on the server, so Mark read writes.
     const looks = read ? await awaitLooks(threadId) : undefined;
     const before = rowOf(threadId);
     if (read && before) {
-      const drawn = drawnSection(shownRef.current, threadId);
-      if (seenHeldInNew(before, drawn)) return routeRef.current.thread ? moveSeenToQuiet(threadId, before) : seenStaysPut(before);
+      const drawn = drawnSection(listAtPress, threadId);
+      if (seenHeldInNew(before, drawn)) {
+        undraw();
+        return routeRef.current.thread ? moveSeenToQuiet(threadId, before) : seenStaysPut(before);
+      }
       // Once the look landed nothing waits here any more (the thread closed and the list settled, say).
-      if (looks && !canToggleRead(before, drawn)) return;
+      if (looks && !canToggleRead(before, drawn)) {
+        undraw();
+        return;
+      }
     }
     // Questions this Mark read would close unanswered (and tell the agent about): the warning asks first.
-    if (read && !(await warnSetAside(before ? setAsideCount([before]) : openThreadSetAside(threadId), false))) return;
+    if (read) {
+      if (!(await warnSetAside(before ? setAsideCount([before]) : openThreadSetAside(threadId), false))) {
+        undraw();
+        return;
+      }
+      draw();
+    }
     // The list holds still, a thread open or not (approval "inbox-list-view", R7): the row stays where it is, not
     // bold, and moves to Quiet when the list next settles.
     const open = routeRef.current.thread;
@@ -3584,10 +3717,12 @@ function Inbox() {
     try {
       await inboxApi.markRead(threadId, read);
     } catch (cause) {
+      if (read) undraw();
       showError(cause);
       return;
     }
-    await afterWrite([threadId]);
+    if (read) void afterWrite([threadId]).finally(unpatch);
+    else await afterWrite([threadId]);
     if (!read) {
       const now = rowOf(threadId);
       if (drawnBefore && now && shownRef.current && putReadRowBack(shownRef.current, drawnBefore, now)) {
@@ -3854,22 +3989,31 @@ function Inbox() {
   const archive = async (threadId: string, rootId: string, next: boolean) => {
     const before = rowOf(threadId);
     const open = routeRef.current.thread;
-    try {
-      await inboxApi.resolve(rootId, next);
-    } catch (cause) {
-      showError(cause);
-      return;
-    }
     // The list leaves archived threads out (Settings lists them). While the
     // thread is open its row stays where it is, shown archived; it goes when
     // the person leaves the thread.
     // A row archived from its menu does the same, another thread open or none (the list holds still; approval
     // "inbox-list-view", R7): it goes when the list next settles.
+    // Drawn as pressed, before the write answers (rowActions.ts); a write that fails puts the row back.
+    const drawnRow = next ? shownRowOf(shownRef.current, threadId) : null;
+    const unpatch = () => setRowPatches((current) => withEntry<RowPatch>(current, threadId, undefined));
     if (next) {
       const at = new Date().toISOString();
+      setRowPatches((current) => withEntry(current, threadId, archivedRowPatch(before ?? drawnRow, at)));
       setShown((current) => (current ? markHeldRowArchived(current, threadId, at) : current));
     }
-    await afterWrite([threadId]);
+    try {
+      await inboxApi.resolve(rootId, next);
+    } catch (cause) {
+      if (next) {
+        unpatch();
+        if (drawnRow) setShown((current) => (current ? replaceHeldRow(current, drawnRow) : current));
+      }
+      showError(cause);
+      return;
+    }
+    if (next) void afterWrite([threadId]).finally(unpatch);
+    else await afterWrite([threadId]);
     if (next) {
       // The thread's foot says the next message starts a new thread.
       // From a row's menu, a thread that is not the open one: the subject says which (as Mark read's toast).
@@ -4059,16 +4203,20 @@ function Inbox() {
     // Where it still is, from the pinned row (an archived thread has none in the list) or the list.
     const listed = (latestRef.current?.pins ?? []).find((pin) => pin.thread_id === row.thread_id) ?? rowOf(row.thread_id) ?? (threadRow?.thread_id === row.thread_id ? threadRow : null);
     if (pinned) noteStarred(row.thread_id);
+    // The star is drawn as pressed (rowActions.ts); the list read after the write brings the Pinned row itself.
+    setPinPatches((current) => withEntry(current, row.thread_id, pinned));
+    const unpatch = () => setPinPatches((current) => withEntry<boolean>(current, row.thread_id, undefined));
     try {
       await inboxApi.pin(row.thread_id, pinned);
     } catch (cause) {
+      unpatch();
       if (pinned) noteStarred(null);
       showError(cause);
       return;
     }
     // A new pin is seen: pinning while Pinned is closed opens it (owner's call, direction C).
     if (pinned) setSidebarSectionOpen('pinned', true);
-    await refreshList(false);
+    await refreshList(false).finally(unpatch);
     const subject = row.subject ?? '(no subject)';
     if (pinned) {
       say(`Starred “${subject}”`);
@@ -5002,10 +5150,10 @@ function Inbox() {
   // Pins (approval "inbox-pinned-threads"): an older Inbox sends no `pins`, so no Pinned section and no pin anywhere.
   const pinsOn = latest?.pins !== undefined;
   const pinRows = latest?.pins;
-  const pinnedIds = useMemo(() => new Set((pinRows ?? []).map((pin) => pin.thread_id)), [pinRows]);
+  const pinnedIds = useMemo(() => withPinPatches(new Set((pinRows ?? []).map((pin) => pin.thread_id)), pinPatches), [pinRows, pinPatches]);
   // The open thread's row: the list's, else its own read's (an archived thread is not in the list).
   const listedOpenRow = thread
-    ? (latestRows.get(thread.thread_id) ?? (threadRow?.thread_id === thread.thread_id ? threadRow : null))
+    ? patchedRow(latestRows.get(thread.thread_id) ?? (threadRow?.thread_id === thread.thread_id ? threadRow : null), rowPatches)
     : null;
   // Its opening look on its way: read as looked at, as its row on the list is (`listShown`).
   const openThreadRow = listedOpenRow && looking.has(listedOpenRow.thread_id) ? lookedRow(listedOpenRow) : listedOpenRow;
@@ -7278,6 +7426,15 @@ function Inbox() {
             onQuestions={patchQuestions}
             onPickSaves={onPickSaves}
             onChanged={afterWrite}
+            readPending={rowPatches.get(thread.thread_id)?.read_at !== undefined}
+            onSentRead={async (model) => {
+              // The Send's answer carried the thread: drawn from it, and only the list is read after (afterWrite reads both).
+              if (routeRef.current.thread !== model.thread.thread_id) return false;
+              const drawn = await refreshThread(model.thread.thread_id, model);
+              if (!drawn) return false;
+              void refreshList(false);
+              return true;
+            }}
             onClose={fromCard ? backToCard : () => close({ ...route, thread: null, file: null })}
             file={route.file ?? null}
             onOpenFile={(file, options) => {
