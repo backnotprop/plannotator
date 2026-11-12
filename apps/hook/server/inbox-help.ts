@@ -389,7 +389,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "- **T3 Code** (Claude in a T3 thread: `T3CODE_THREAD_ID` is set in your shell): run `plannotator t3 --help` and follow its setup. The person approves T3's sign-in page.",
     "- **Anything else**: register the stdio server; \"Connecting other agents\" below has the line for your host.",
     "",
-    "When the person runs `plannotator inbox` themselves, it already connects the terminal agents it finds (Codex, Gemini CLI, Qwen Code, Cursor, Windsurf/Devin, Amp, Kiro, Pi 0.99+, OpenCode with its plugin, DeepSeek Harness with its plugin, Cline with its plugin, OpenClaw with its plugin, Hermes Agent with its plugin) and the Claude app, so check before adding a second entry: a `plannotator-inbox` server that runs this binary is already the connection.",
+    "When the person runs `plannotator inbox` themselves, it already connects the terminal agents it finds (Codex, Gemini CLI, Qwen Code, Cursor, Windsurf/Devin, Amp, Kiro, Muse Code, Pi 0.99+, OpenCode with its plugin, DeepSeek Harness with its plugin, Cline with its plugin, OpenClaw with its plugin, Hermes Agent with its plugin) and the Claude app, so check before adding a second entry: a `plannotator-inbox` server that runs this binary is already the connection.",
     "",
     `A connection takes effect in the next session, never in the one already running. Until then, send through the stdio server directly: ${code(mcp)}.`,
     "",
