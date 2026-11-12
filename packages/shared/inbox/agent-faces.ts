@@ -1,18 +1,20 @@
 /**
  * Plannotator Inbox: the face each agent's icon shows (core `inbox-types.ts` ("Agent faces")), saved for every window.
  *
- *   inbox/agent-faces.json   { v: 1, rev, faces: { [agent id]: { face, sessions } } }, the latest choice last,
+ *   inbox/agent-faces.json   { v: 1, rev, faces: { [agent id]: { face, sessions, name? } } }, the latest choice last,
  *                            0600, written whole (temp, then rename)
  *
  * A file outside the store's JSONL, as pins are: a face is window furniture and never enters the event log, which
  * agents' cursors, the phone relay and search read. At most INBOX_AGENT_FACES_KEPT agents (the oldest choice goes),
  * so the file stays a few kilobytes however many sessions come and go; an ended agent keeps its face, so its old
- * threads still show it. The agent's own mark is never stored.
+ * threads still show it. The agent's own mark is stored only beside a name the person gave it (Rename… on its
+ * sidebar row), which lives in the same entry so a continued session keeps it as it keeps its face.
  */
 
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  checkInboxProjectName,
   cleanInboxFaceSessions,
   INBOX_AGENT_FACES_KEPT,
   INBOX_AGENT_FACE_SESSIONS_MAX,
@@ -81,11 +83,20 @@ export function checkInboxAgentFaceChange(body: Record<string, unknown>): InboxA
     return { adopt: out };
   }
   if (!isInboxAgentFaceId(body.agent)) throw new InboxError("validation_error", "agent: the agent's id.", { field: "agent" });
-  if (!isInboxAgentFace(body.face)) throw new InboxError("validation_error", "face: one of the agent icon's faces.", { field: "face" });
   if (body.sessions !== undefined && (!Array.isArray(body.sessions) || body.sessions.length > INBOX_AGENT_FACE_SESSIONS_MAX * 2)) {
     throw new InboxError("validation_error", "sessions: the agent's session ids.", { field: "sessions" });
   }
-  return { agent: body.agent, face: body.face, sessions: cleanInboxFaceSessions(body.sessions, body.agent) };
+  const sessions = cleanInboxFaceSessions(body.sessions, body.agent);
+  // A given name (Rename…): empty or only spaces is none (Reset name).
+  if (body.face === undefined && body.name !== undefined) {
+    if (body.name !== null && typeof body.name !== "string") throw new InboxError("validation_error", "name: the agent's name, or null.", { field: "name" });
+    if (body.name === null || body.name.trim() === "") return { agent: body.agent, name: null, sessions };
+    const checked = checkInboxProjectName(body.name);
+    if (!checked.ok) throw new InboxError("validation_error", `name ${checked.message}`, { field: "name" });
+    return { agent: body.agent, name: checked.name, sessions };
+  }
+  if (!isInboxAgentFace(body.face)) throw new InboxError("validation_error", "face: one of the agent icon's faces.", { field: "face" });
+  return { agent: body.agent, face: body.face, sessions };
 }
 
 /**
@@ -124,7 +135,10 @@ export function createInboxAgentFacesFile(inboxDirPath: string, onChange: (wire:
       const { faces, rev } = now();
       return { faces, rev };
     },
-    /** One agent's face: kept as its latest choice (moved last), or forgotten for its own mark. */
+    /**
+     * One agent's face or given name: kept as its latest choice (moved last); its own mark and no name, forgotten. A
+     * face change keeps the name and a name change keeps the face.
+     */
     change(change: InboxAgentFaceChange): InboxAgentFacesWire {
       const faces = copy();
       if ("adopt" in change) {
@@ -138,13 +152,17 @@ export function createInboxAgentFacesFile(inboxDirPath: string, onChange: (wire:
         return added ? save(faces) : this.wire();
       }
       const before = faces[change.agent];
+      // Another entry kept for one of these sessions (a session's own entry, from before it was continued) is this
+      // agent now: what this change does not set comes from it when this agent's own entry lacks it.
+      const merged = (change.sessions ?? []).map((session) => (session !== change.agent ? faces[session] : undefined)).filter((entry) => entry !== undefined);
       delete faces[change.agent];
-      if (change.face !== "agent") {
-        faces[change.agent] = { face: change.face, sessions: cleanInboxFaceSessions([...(before?.sessions ?? []), ...(change.sessions ?? [])], change.agent) };
-      }
-      // Another entry kept for one of these sessions (a session's own entry, from before it was continued) is this agent now.
       for (const session of change.sessions ?? []) if (session !== change.agent && faces[session]) delete faces[session];
-      if (!before && change.face === "agent" && Object.keys(faces).length === Object.keys(now().faces).length) return this.wire();
+      const face = "face" in change ? change.face : (before?.face ?? merged.find((entry) => entry.face !== "agent")?.face ?? "agent");
+      const name = "name" in change ? change.name : (before?.name ?? merged.find((entry) => entry.name)?.name ?? null);
+      if (face !== "agent" || name) {
+        faces[change.agent] = { face, sessions: cleanInboxFaceSessions([...(before?.sessions ?? []), ...(change.sessions ?? [])], change.agent), ...(name ? { name } : {}) };
+      }
+      if (!before && merged.length === 0 && !faces[change.agent]) return this.wire();
       return save(faces);
     },
     /**
@@ -162,7 +180,7 @@ export function createInboxAgentFacesFile(inboxDirPath: string, onChange: (wire:
       if (!key) return;
       const faces = copy();
       const entry = faces[key]!;
-      faces[key] = { face: entry.face, sessions: cleanInboxFaceSessions([...entry.sessions, session], key) };
+      faces[key] = { ...entry, sessions: cleanInboxFaceSessions([...entry.sessions, session], key) };
       try {
         save(faces);
       } catch {
@@ -176,20 +194,21 @@ export function createInboxAgentFacesFile(inboxDirPath: string, onChange: (wire:
     touch(): InboxAgentFacesWire {
       return save(copy());
     },
-    /** A removed picture: every agent that showed it goes back to its own mark, in one save (none when no agent did). */
+    /** A removed picture: every agent that showed it goes back to its own mark (keeping a given name), in one save (none when no agent did). */
     dropFace(face: string): InboxAgentFacesWire {
       const faces = copy();
       let dropped = false;
       for (const [key, entry] of Object.entries(faces)) {
         if (entry.face !== face) continue;
-        delete faces[key];
+        if (entry.name) faces[key] = { ...entry, face: "agent" };
+        else delete faces[key];
         dropped = true;
       }
       return dropped ? save(faces) : this.wire();
     },
     /** The faces agents show now (an uploaded picture in use is never the one the cap removes). */
     shown(): Set<string> {
-      return new Set(Object.values(now().faces).map((entry) => entry.face));
+      return new Set(Object.values(now().faces).flatMap((entry) => (entry.face === "agent" ? [] : [entry.face])));
     },
     /** Tests: forget what was read. */
     forget(): void {

@@ -6,10 +6,15 @@
  *
  * The list is read again on `event: deliveries` with `agents` only while something reads this store
  * (`inboxAgentsWatched`), so the frames cost nothing until the section draws.
+ *
+ * The hooks hand out each agent with the name the person gave it as its `label` (agents/agentNames.ts), so every name
+ * worked out from the list (its sidebar row, the list's agent filter and its title, a thread's sessions) shows it;
+ * `agentAsListed` gives the agent back as its own connection named it. `inboxAgentsNow` is the list as read.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { InboxAgent, InboxAgentsGroup, InboxListRow } from '@plannotator/core/inbox-types';
 import { agentListFilter, type AgentListFilter } from './agents/model';
+import { givenName, useAgentNames, type AgentNames } from './agents/agentNames';
 import type { MachinesModel } from './machines';
 
 const STATES = new Set<InboxAgent['state']>(['waiting', 'working', 'idle', 'ended']);
@@ -65,6 +70,48 @@ export function subscribeInboxAgents(listener: () => void): () => void {
 
 const snapshot = () => current;
 
+/** A named agent (its given name as `label`) → the agent as the list read it. */
+const asListed = new WeakMap<InboxAgent, InboxAgent>();
+const namedCache = new WeakMap<readonly InboxAgentsGroup[], { names: AgentNames; out: readonly InboxAgentsGroup[] }>();
+
+/**
+ * The groups with each agent the person named carrying that name as its `label` (by its id, or the session it runs
+ * as). The same groups, and the same agent objects, while neither the list nor the names change.
+ */
+export function withGivenNames(groups: readonly InboxAgentsGroup[] | null, names: AgentNames): readonly InboxAgentsGroup[] | null {
+  if (!groups || names.size === 0) return groups;
+  const kept = namedCache.get(groups);
+  if (kept && kept.names === names) return kept.out;
+  let changed = false;
+  const out = groups.map((group) => {
+    let any = false;
+    const agents = group.agents.map((agent) => {
+      const name = givenName(names, agent.id, agent.session);
+      if (!name) return agent;
+      any = true;
+      const named = { ...agent, label: name };
+      asListed.set(named, agent);
+      return named;
+    });
+    if (!any) return group;
+    changed = true;
+    return { ...group, agents };
+  });
+  const result = changed ? out : groups;
+  namedCache.set(groups, { names, out: result });
+  return result;
+}
+
+/** The agent as its own connection names it (before a given name); the same agent when the person named it nothing. */
+export function agentAsListed(agent: InboxAgent): InboxAgent {
+  return asListed.get(agent) ?? agent;
+}
+
+/** Whether the person gave this agent (as the hooks hand it out) a name. */
+export function agentIsNamed(agent: InboxAgent): boolean {
+  return asListed.has(agent);
+}
+
 /**
  * Each machine's agents now (this Inbox's first), redrawn when a list read changes them; null when the Inbox names none.
  *
@@ -81,7 +128,8 @@ export function useInboxAgents(): readonly InboxAgentsGroup[] | null {
     read();
     return subscribeInboxAgents(read);
   }, []);
-  return groups;
+  const names = useAgentNames();
+  return withGivenNames(groups, names);
 }
 
 /**
@@ -113,7 +161,8 @@ function useInboxAgentsWho(on: boolean): readonly InboxAgentsGroup[] | null {
     read();
     return onInboxAgentsSet(read);
   }, [on]);
-  return on ? groups : null;
+  const names = useAgentNames();
+  return on ? withGivenNames(groups, names) : null;
 }
 
 /**

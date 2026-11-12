@@ -16,6 +16,9 @@
  *
  * The faces this browser kept before the Inbox kept them (`plannotator-inbox-agent-faces`) show at once and are sent
  * once (`adopt`): the old key goes only when the server has them.
+ *
+ * An entry also keeps the name the person gave the agent (Rename… on its sidebar row, `keepAgentName`), found by the
+ * same ids and folded into agentNames.ts on each change; an entry with a name and no face keeps `agent`.
  */
 import { useCallback, useSyncExternalStore } from 'react';
 import { readInboxAgentFaces, type InboxAgentFaceEntry } from '@plannotator/core/inbox-types';
@@ -27,6 +30,7 @@ import { loadAgentFaceArt } from './faceArtLoad';
 import { hearOwnIcons, ownFaceShows, ownIconsNow } from './ownIcons';
 import { pictureFromFile } from '../projectPictures';
 import { errorText } from '../toastError';
+import { setAgentNames } from './agentNames';
 
 /** This browser's faces from before the Inbox kept them: `{ [agent id]: face }`. */
 export const AGENT_FACES_KEY = 'plannotator-inbox-agent-faces';
@@ -45,6 +49,8 @@ let server: { faces: Entries; rev: number } | null = null;
 let legacy: Record<string, OurFace> | null = null;
 /** This page's changes the server has not answered yet, the latest last. */
 const pending = new Map<string, { face: AgentFace; sessions: string[] }>();
+/** This page's given names the server has not answered yet (null: Reset name). */
+const pendingNames = new Map<string, { name: string | null; sessions: string[] }>();
 let resolved = new Map<string, Shown>();
 let ready = false;
 let watching = false;
@@ -89,9 +95,17 @@ function entries(withLegacy = true): Entries {
   if (withLegacy) for (const [key, face] of Object.entries(legacy ?? {})) if (!out[key]) out[key] = { face, sessions: [] };
   for (const [key, change] of pending) {
     const before = out[key];
+    const name = before?.name ?? change.sessions.map((session) => out[session]?.name).find(Boolean);
     delete out[key];
     for (const session of change.sessions) delete out[session];
-    if (change.face !== 'agent') out[key] = { face: change.face, sessions: [...new Set([...(before?.sessions ?? []), ...change.sessions])] };
+    if (change.face !== 'agent' || name) out[key] = { face: change.face, sessions: [...new Set([...(before?.sessions ?? []), ...change.sessions])], ...(name ? { name } : {}) };
+  }
+  for (const [key, change] of pendingNames) {
+    const before = out[key];
+    const face = before?.face ?? change.sessions.map((session) => out[session]?.face).find((found) => found && found !== 'agent') ?? 'agent';
+    delete out[key];
+    for (const session of change.sessions) delete out[session];
+    if (face !== 'agent' || change.name) out[key] = { face, sessions: [...new Set([...(before?.sessions ?? []), ...change.sessions])], ...(change.name ? { name: change.name } : {}) };
   }
   return out;
 }
@@ -100,19 +114,26 @@ const chainOf = (agent: Pick<InboxAgent, 'id' | 'session' | 'continues'>) => [ag
 
 function rebuild(): void {
   const next = new Map<string, Shown>();
+  const names = new Map<string, string>();
   for (const [key, entry] of Object.entries(entries())) {
-    // An uploaded picture this Inbox does not keep (removed, or chosen on another machine): the agent's own mark.
-    if (entry.face.startsWith('own:') && !ownFaceShows(entry.face)) continue;
+    if (entry.name) for (const id of [key, ...entry.sessions]) names.set(id, entry.name);
+    // Its own mark (an entry kept for its name), or an uploaded picture this Inbox does not keep (removed, or chosen
+    // on another machine): the agent's own mark.
+    if (entry.face === 'agent' || (entry.face.startsWith('own:') && !ownFaceShows(entry.face))) continue;
     next.set(key, entry.face);
     for (const session of entry.sessions) next.set(session, entry.face);
   }
   // A listed agent is every id of its chain: a launch's session, the session a conversation went on as.
   const direct = new Map(next);
+  const directNames = new Map(names);
   for (const agent of inboxAgentsFlat(inboxAgentsNow())) {
     const chain = chainOf(agent);
     const face = chain.map((id) => direct.get(id)).find((found) => found !== undefined);
     if (face) for (const id of chain) if (!direct.has(id)) next.set(id, face);
+    const name = chain.map((id) => directNames.get(id)).find((found) => found !== undefined);
+    if (name) for (const id of chain) if (!directNames.has(id)) names.set(id, name);
   }
+  setAgentNames(names);
   const was = resolved;
   resolved = next;
   // Our faces' pictures load only when one is shown (an uploaded picture or a set icon needs none of them).
@@ -126,7 +147,7 @@ function rebuild(): void {
 /** The paint copy: the server's faces with this page's changes on them, so a reload shows a choice even before it is saved. */
 function keepPaint(): void {
   try {
-    if (server || pending.size > 0) window.localStorage.setItem(AGENT_FACES_PAINT_KEY, JSON.stringify({ faces: entries(false), rev: server?.rev ?? 0, ...(ownIconsNow() ? { icons: ownIconsNow() } : {}) }));
+    if (server || pending.size > 0 || pendingNames.size > 0) window.localStorage.setItem(AGENT_FACES_PAINT_KEY, JSON.stringify({ faces: entries(false), rev: server?.rev ?? 0, ...(ownIconsNow() ? { icons: ownIconsNow() } : {}) }));
   } catch {
     // Storage full or off: a reload paints the plain marks until the read answers.
   }
@@ -180,6 +201,33 @@ export function keepAgentFace(agent: AgentFaceRef, face: AgentFace): void {
   sending ??= send().finally(() => {
     sending = null;
   });
+}
+
+/**
+ * Rename… and Reset name on an agent's sidebar row: the name every window shows for it (null, or only spaces: back
+ * to its own). Shown at once on this page; resolves once the Inbox kept it, and throws when it did not (the name goes
+ * back to what the Inbox has; the caller's toast says why).
+ */
+export async function keepAgentName(agent: AgentFaceRef, name: string | null): Promise<void> {
+  boot();
+  const ref = typeof agent === 'string' ? { id: agent, session: agent } : agent;
+  const sessions = [...new Set(chainOf(ref).filter((id) => id !== ref.id))];
+  const clean = name?.replace(/\s+/g, ' ').trim() || null;
+  const change = { name: clean, sessions };
+  pendingNames.delete(ref.id);
+  pendingNames.set(ref.id, change);
+  keepPaint();
+  rebuild();
+  try {
+    const answer = await inboxApi.saveAgentFace({ agent: ref.id, sessions, name: clean });
+    if (pendingNames.get(ref.id) === change) pendingNames.delete(ref.id);
+    if (!hear(answer, false)) rebuild();
+  } catch (cause) {
+    if (pendingNames.get(ref.id) === change) pendingNames.delete(ref.id);
+    keepPaint();
+    rebuild();
+    throw cause;
+  }
 }
 
 /**
@@ -269,9 +317,11 @@ export function resetAgentFaces(): void {
   server = null;
   legacy = null;
   pending.clear();
+  pendingNames.clear();
   ready = false;
   sending = null;
   const was = resolved;
   resolved = new Map();
   for (const id of was.keys()) for (const listener of [...(listeners.get(id) ?? [])]) listener();
+  setAgentNames(new Map());
 }
