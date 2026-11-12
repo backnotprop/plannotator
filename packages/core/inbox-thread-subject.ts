@@ -89,6 +89,7 @@ function firstLineSubject(body: string): string | null {
   return first === null ? null : cutColumns(first.replace(/\s+/g, " "), PERSON_THREAD_SUBJECT_COLUMNS);
 }
 
+// The link and tag patterns backtrack on a long unclosed `[x](y` or `<a `, so only the start of a line is read.
 const PLAIN_LINE_MAX = 4096;
 
 function plainSubjectLine(input: string, images: { alt: string; src: string }[]): string {

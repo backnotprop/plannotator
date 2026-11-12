@@ -231,6 +231,7 @@ export function inboxQuestionState(
   return "picked";
 }
 
+// Builds through 0.28.26 may have joined a `Context:` line onto the bullet above it.
 const STORED_CONTEXT_SPLIT_RE = /\s+(?:[*_]{1,2})?(?:context|stakes|shows|why|reversible)(?:[*_]{1,2})?\s*:/gi;
 
 const UNCLOSED_IMAGE_RE = /!\[(?![^\]\n]*\]\([^)\n]+\))/;

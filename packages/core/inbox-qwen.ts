@@ -1,3 +1,4 @@
+// The first Qwen Code with trusted senders, so a reply goes in without review.
 export const INBOX_QWEN_WAKE_MIN_VERSION = "0.24.0";
 
 /** The host id a Qwen Code session is recorded under. */

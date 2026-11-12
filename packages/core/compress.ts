@@ -10,6 +10,7 @@ export async function compress(data: unknown): Promise<string> {
   const buffer = await new Response(stream.readable).arrayBuffer();
   const compressed = new Uint8Array(buffer);
 
+  // Loop, not spread: String.fromCharCode(...arr) throws RangeError past ~65K arguments.
   let binary = '';
   for (let i = 0; i < compressed.length; i++) {
     binary += String.fromCharCode(compressed[i]);

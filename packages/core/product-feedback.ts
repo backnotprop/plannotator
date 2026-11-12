@@ -46,7 +46,10 @@ export const FEEDBACK_HEREDOC_END = "PLANNOTATOR_FEEDBACK_END";
  */
 export const FEEDBACK_TIMEOUT_MS = 8_000;
 
-/** The resend without agent names goes only when at least this much of the deadline is left. */
+/**
+ * The resend without agent names goes only when this much of the deadline is left: with less, a slow
+ * Worker could store it after the wait gave up and the person would read "nothing was saved".
+ */
 export const FEEDBACK_RESEND_MIN_MS = 1_000;
 
 /** `unavailable`: the service could not take it (reason is FEEDBACK_UNAVAILABLE); otherwise the Worker refused it and `reason` is its words. */

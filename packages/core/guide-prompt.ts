@@ -54,6 +54,7 @@ export const GUIDE_SCHEMA_JSON = JSON.stringify({
 });
 
 /** The Guided Review methodology. */
+// Mirrored verbatim in the standalone `guided-review` agent skill: change both together.
 export const GUIDE_REVIEW_PROMPT = `# Guided Review Organizer
 
 ## Identity
@@ -372,7 +373,8 @@ function buildWorkspaceGuideUserMessage(
 
 /**
  * Coerces one raw (untrusted) section from model output into a well-typed `GuideSection`, or drops
- * it entirely.
+ * it entirely: the validator after it dereferences fields unchecked, and a throw there is swallowed,
+ * leaving a done-looking job that 404s.
  */
 export function sanitizeGuideSection(raw: unknown): GuideSection | null {
   if (!raw || typeof raw !== "object") return null;
@@ -433,6 +435,7 @@ export function validateGuideOutput(raw: unknown, changedFiles: string[]): { gui
     }
 
     if (diffs.length === 0) {
+      // Keep a zero-diff section only if it was prose-only to begin with; one that lost its diffs to validation is dropped.
       if (originalDiffCount === 0 && section.overview.trim().length > 0) {
         validatedSections.push({ ...section, diffs });
       }

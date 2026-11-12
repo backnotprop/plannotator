@@ -350,6 +350,7 @@ export interface AnnotationStore<T extends StorableAnnotation> {
   add(items: T[]): T[];
   remove(id: string): boolean;
   clearBySource(source: string): number;
+  // `id` and `source` are pinned: `source` gates skill-instruction injection in exports, so PATCH must not clear it.
   update(id: string, fields: Partial<T>): T | null;
   clearAll(): number;
   getAll(): T[];

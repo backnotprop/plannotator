@@ -222,6 +222,7 @@ export function claudeCatalogFromSdk(infos: readonly ClaudeSdkModelInfo[]): Cata
       pointer ??= info;
       continue;
     }
+    // Claude Code 2.1.282+ moved the name to `displayName`: a description with no ' · ' is a tagline, never the label.
     const desc = info.description ?? '';
     const lead = (desc.includes(' · ') ? desc.split(' · ')[0].trim() : '') || info.displayName || info.value;
     const efforts = info.supportsEffort !== false ? (info.supportedEffortLevels ?? []) : [];

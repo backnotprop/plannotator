@@ -604,6 +604,7 @@ function nextWhere(html: string, stop: (c: string) => boolean): Int32Array {
   return next;
 }
 
+// May over-read but must never miss a code the board draws; extra codes only make the check stricter.
 export function shapeHtmlDataCodes(html: string): string[] {
   const out: string[] = [];
   const n = html.length;

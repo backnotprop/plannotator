@@ -41,6 +41,7 @@ export function unquoteGitPath(value: string): string {
       flush();
       out += String.fromCharCode(C_ESCAPES[next]);
       i++;
+    // Git never emits \uXXXX, but quoteGitPath (JSON.stringify) does for control chars: decode so such paths round-trip.
     } else if (next === "u" && /^[0-9a-fA-F]{4}$/.test(inner.slice(i + 2, i + 6))) {
       flush();
       out += String.fromCharCode(parseInt(inner.slice(i + 2, i + 6), 16));
@@ -158,12 +159,12 @@ export function parseDiffFilePathLines(lines: string[]): DiffPathPair {
 }
 
 /**
- * Extended-header line the review core injects into the display-only stub it emits for a file whose
- * bytes exceed the review size cap.
+ * Extended-header line of the display-only stub emitted for a file over the review size cap; the
+ * `#` prefix cannot start a diff content line, so a client can tell it from a real binary diff.
  */
 export const OVERSIZED_REVIEW_STUB_MARKER = "#plannotator-oversized-file";
 
-/** Human-readable form of the cap for UI copy. */
+/** UI copy for the cap; the authoritative value is MAX_REVIEW_FILE_CONTENT_BYTES in review-core (a test there keeps them equal). */
 export const OVERSIZED_REVIEW_STUB_LIMIT_LABEL = "5 MB";
 
 /** True when `patch` is one of our oversized-file stubs (see the marker above). */

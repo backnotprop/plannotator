@@ -316,6 +316,7 @@ function withVersions(table: PackageDepTable, lock: PackageLockIndex | null, imp
   return out;
 }
 
+// A row fetched from another host keeps its name but is marked, so the registry lookup withholds it.
 function markLocal(changes: PackageChange[], lock: LockState): PackageChange[] {
   const local = new Set([...(lock.old.localNames ?? []), ...(lock.new.localNames ?? [])]);
   const hosted = new Set([...(lock.old.privateNames ?? []), ...(lock.new.privateNames ?? [])]);

@@ -16,6 +16,7 @@ export type InboxGitUrl =
   | { kind: "account"; host: string; owner: string }
   | { kind: "notrepo"; host: string; text: string };
 
+// Never `-…` (an option) or `..`.
 const PART = /^[A-Za-z0-9_~][A-Za-z0-9._~-]*$/;
 const HOST = /^(?=.{1,253}$)[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*$/;
 const BRANCH = /^[A-Za-z0-9_][A-Za-z0-9._/-]{0,199}$/;

@@ -245,6 +245,7 @@ function fail(path: string, message: string): Parsed<never> {
   return { ok: false, error: { _tag: "GuideSnapshotParseError", path, message } };
 }
 
+// Core compiles without strictNullChecks, where `!x.ok` does not narrow the union; a user-defined guard does.
 function isFail<T>(x: Parsed<T>): x is { readonly ok: false; readonly error: GuideSnapshotParseError } {
   return !x.ok;
 }
@@ -761,6 +762,7 @@ function escapeHtmlAttribute(input: string): string {
   return escapeHtmlText(input).replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }
 
+/** Escape `</script>`, `<!--` and U+2028/9 as JSON unicode escapes so inlined JSON cannot end the element. */
 export function escapeJsonForHtmlScript(json: string): string {
   return json
     .replaceAll("&", "\\u0026")
@@ -898,6 +900,7 @@ export interface GuideShellHtmlOptions {
   readonly payloadUrl: string;
 }
 
+/** Encrypted guide: no title, snapshot or fallback prose, because the host cannot read it. */
 export function createGuideShellHtml(options: GuideShellHtmlOptions): string {
   const head = buildGuideHead({
     viewer: options.viewer,

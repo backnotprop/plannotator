@@ -169,7 +169,10 @@ export type OpenInAppIdCheck =
   | { ok: true; app: OpenInApp }
   | { ok: false; error: string };
 
-/** Validate the `appId` of a POST /api/open-in request (both runtimes). */
+/**
+ * Validate the `appId` of a POST /api/open-in request (both runtimes). No implicit "system default"
+ * launch: the OS handler can run an arbitrary file (`.command`, `.app`, scripts), so unknown ids get 400.
+ */
 export function checkOpenInAppId(raw: unknown): OpenInAppIdCheck {
   if (typeof raw !== 'string' || raw === '') {
     return { ok: false, error: 'Missing appId' };

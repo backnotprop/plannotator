@@ -41,6 +41,7 @@ export function planEmbedInsert(
   const embedEnd = lineStart + prefix.length + embedLine.length;
   return {
     from: lineStart,
+    // Swallow a whitespace-only rest of line: leaving it adds trailing spaces that break exact-line host grammars.
     to: /^\s*$/.test(restOfLine) ? lineEnd : to,
     insert: prefix + embedLine + suffix,
     cursor: embedEnd + 1,

@@ -42,6 +42,7 @@ export const VOID_HTML_TAGS: ReadonlySet<string> = new Set([
 
 export const HTML_BLOCK_OPEN_RE = /^<\/?([a-zA-Z][a-zA-Z0-9]*)(?:\s|>|\/|$)/;
 
+// CommonMark's label bound; it also caps the bracket-group backtracking (a long run of `[` is linear, not quadratic).
 const MAX_REF_LABEL_CHARS = 999;
 const MAX_CODE_SPAN_CHARS = 5000;
 // A pathological document could otherwise grow the map without bound; this keeps that growth
@@ -256,6 +257,7 @@ export const resolveReferenceLinks = (markdown: string): string => {
   const isProtected = markProtectedLines(lines);
   const defs = new Map<string, string>();
   const defLabelByLine = new Array<string | null>(lines.length).fill(null);
+  // A definition cannot interrupt a paragraph (CommonMark 4.7).
   let canStartDefinition = true;
   for (let i = 0; i < lines.length; i++) {
     if (isProtected[i]) {
@@ -278,6 +280,7 @@ export const resolveReferenceLinks = (markdown: string): string => {
   }
   if (defs.size === 0) return markdown;
   const usedLabels = new Set<string>();
+  // Definition-shaped lines pass through unresolved so a definition's own `[label]` is never taken for a reference.
   const resolved = lines.map((line, i) =>
     isProtected[i] || defLabelByLine[i] !== null ? line : resolveRefsInLine(line, defs, usedLabels),
   );

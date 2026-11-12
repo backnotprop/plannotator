@@ -410,7 +410,10 @@ export interface ProjectedHostAnnotation {
   elementContext?: HtmlElementContext;
 }
 
-/** Project stored host rows onto the viewer's `annotations` prop. */
+/**
+ * Project stored host rows onto the viewer's `annotations` prop. Output order is input order and the
+ * viewer numbers markers by array position, so pass rows in the panel's order.
+ */
 export function projectHostThreads(
   threads: readonly HostThread[],
   options: ProjectHostThreadsOptions = {},

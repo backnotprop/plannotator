@@ -94,6 +94,7 @@ export async function deriveRelayKeys(pairingSecret: string, deviceId: string): 
 }
 
 function bytesToBase64url(bytes: Uint8Array): string {
+  // Loop, not spread: String.fromCharCode(...arr) throws RangeError past ~65K arguments.
   let binary = '';
   for (let i = 0; i < bytes.length; i++) {
     binary += String.fromCharCode(bytes[i]);

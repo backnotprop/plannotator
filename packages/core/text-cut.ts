@@ -1,3 +1,4 @@
+// `slice` counts UTF-16 units and can split a surrogate pair (an emoji) into "�".
 const graphemes: Intl.Segmenter | null =
   typeof Intl !== "undefined" && typeof (Intl as { Segmenter?: unknown }).Segmenter === "function"
     ? new Intl.Segmenter(undefined, { granularity: "grapheme" })

@@ -114,7 +114,7 @@ export interface InboxReviewLanding {
   through_review: string | null;
 }
 
-/** The review's time is this machine's and the merge's is the forge's. */
+/** The review's time is this machine's and the merge's is the forge's: within this margin a review is not counted as newer. */
 export const INBOX_REVIEW_CLOCK_SKEW_MS = 5 * 60_000;
 
 /** A record's identity: two threads on one PR each have their own, against their own review. */

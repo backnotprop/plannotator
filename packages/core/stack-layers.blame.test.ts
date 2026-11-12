@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { diffHunkLines, parseDiffToFiles, type DiffFile } from "./diff-files";
 import { lineOrigin, mapStackLines, type StackLineMap } from "./stack-layers";
 
+// Git must see only the temp repo: no GIT_DIR or GIT_INDEX_FILE from a hook running these tests, no user config.
 const GIT_ENV = {
   ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_"))),
   GIT_CONFIG_GLOBAL: "/dev/null",
