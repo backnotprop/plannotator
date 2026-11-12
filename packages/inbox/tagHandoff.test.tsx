@@ -268,12 +268,11 @@ test.skipIf(!hasDom)('Add: Send carries it, the added session is marked, and the
   expect(posted.filter((p) => p.path.endsWith('/reply')).at(-1)!.body.tags).toEqual([{ host: 'pi', session: S.pi, label: 'Pi', mode: 'add' }]);
   expect((await serverMessages(tags.ids.t3)).at(-1)!.tags).toEqual([expect.objectContaining({ session: S.pi, joined: true })]);
   await until(() => el.querySelector('[data-thread-move="added"]') !== null, 'the added line');
-  // Two sessions in the thread now (issue #3108): one quiet line, "You added <Pi's session's name> · <time>", named as
-  // the sidebar names it (Pi sends no title here, so its name is its thread's), with no icon and no mark.
+  // Two sessions in the thread now (issue #3108): one quiet line with no icon and no mark. Pi sends no title, so
+  // inside the thread it is "Pi" (never the thread the sidebar names it by).
   const added = el.querySelector<HTMLElement>('[data-thread-move="added"]')!;
   expect(added.hasAttribute('data-quiet')).toBe(true);
-  expect(added.textContent).toMatch(/^You added .+ · \S/);
-  expect(added.textContent).not.toContain('to this thread');
+  expect(added.textContent).toMatch(/^You added Pi · \S/);
   expect(added.querySelector('svg, .ib-mk')).toBeNull();
   expect(el.querySelector('[data-thread-owner]')).toBeNull();
 }, 30_000);

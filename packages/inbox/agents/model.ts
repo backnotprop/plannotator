@@ -193,9 +193,10 @@ export function agentFacts(entry: AgentEntry, machine: MachineView | null, now: 
 
 /**
  * One session of a thread as its header and its message lines name it (issue #3108, approval
- * "inbox-thread-session-names"). The name is the sidebar's for a listed agent (`agentRowName`, through the same
- * groups, so a conversation drawn as one row there is one session here), else the session's label, else its agent's
- * name: the window's one way of naming a session, never a second rule.
+ * "inbox-thread-session-names"). Found through the sidebar's groups (so a conversation drawn as one row there is one
+ * session here), and named by its own title, else its label, else its agent's name: never by a thread or a project,
+ * the sidebar's fallbacks, which inside a thread read as the thread's own title. Two unnamed sessions of one agent
+ * both read as the agent ("Claude Code"); the header's "2 sessions" says there are two.
  */
 export interface ThreadSession {
   /** Its first session id in the thread: the id its face is found by. */
@@ -232,19 +233,20 @@ export function threadSessions(
   const { all, shown, others } = groupEntries(group, found?.machine ?? null, self, rows);
   const out: ThreadSession[] = [];
   for (const p of participants) {
-    let name: string;
     let agent: InboxAgent | null = null;
     const listed = all.find((e) => agentSessions(e.agent, others).includes(p.session));
     if (listed) {
       // An older session drawn as a later row is that row here too.
       const entry = shown.includes(listed) ? listed : (shown.find((later) => drawnAs(listed, later)) ?? listed);
       agent = entry.agent;
-      name = entry.name;
     } else {
       agent = group?.agents.find((a) => a.session === p.session || (a.continues ?? []).includes(p.session)) ?? null;
-      const own = Object.hasOwn(labels, p.session) ? labels[p.session]?.trim() : '';
-      name = agent ? agentRowName(agent, agentThread(agent, found?.machine ?? null, self, rows)) : own || p.name || agentHostName(p.host);
     }
+    // Inside a thread a session is named only by a name it has itself: its title (the sidebar's name when that is its
+    // title), else the label the window has for it, else its agent ("Pi", "Claude Code"). Never a thread's subject or
+    // a project, the sidebar's fallbacks: inside a thread those read as this thread's own title.
+    const own = Object.hasOwn(labels, p.session) ? labels[p.session]?.trim() : '';
+    const name = agent?.label?.trim() || own || p.name || agentHostName(p.host);
     const same = agent ? out.find((s) => s.agentId === agent!.id) : undefined;
     if (same) {
       if (!same.sessions.includes(p.session)) same.sessions.push(p.session);

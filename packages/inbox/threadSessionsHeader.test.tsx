@@ -272,3 +272,16 @@ test.skipIf(!hasDom)('a session added to a thread of several: one quiet line, "Y
   expect(line.textContent).toMatch(/^You added Retry worker · \S/);
   expect(line.querySelector('svg, .ib-mk')).toBeNull();
 });
+
+test.skipIf(!hasDom)("an unnamed session is its agent everywhere in the thread: the opened line, its messages and \"You added Pi\"", async () => {
+  // Pi has no title; the sidebar would name it by its thread, which inside this thread reads as the thread's own title.
+  const agents = [THREE[0]!, agent('ses_pi', { host: 'pi', state: 'working' })];
+  const thread = threadOf(author('ses_a'), { kind: 'person' }, author('ses_pi', 'pi'), author('ses_a'));
+  thread.messages[1] = { ...thread.messages[1]!, body: 'Pi, look at this.', tags: [{ host: 'pi', session: 'ses_pi', label: 'Pi', wakes: true, joined: true }] };
+  const el = await render(thread, agents);
+  expect(el.querySelector('[data-thread-move="added"]')!.textContent).toMatch(/^You added Pi · \S/);
+  expect(authors(el)).toEqual(['Billing refactor', 'You', 'Pi', 'Billing refactor']);
+  expect(el.querySelector('[data-message-article] [data-session-name]')!.textContent).toBe('Billing refactor');
+  act(() => toggle(el).focus());
+  expect(opened(el)).toEqual(['Billing refactor · waiting on you', 'Pi · working']);
+});
