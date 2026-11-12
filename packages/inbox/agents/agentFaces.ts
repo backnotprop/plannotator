@@ -264,6 +264,23 @@ export function useAgentFace(id: string | null | undefined): AgentFace {
   return useSyncExternalStore(subscribe, () => agentFaceOf(id), plain);
 }
 
+/**
+ * The faces kept for several agents at once, one line per id in order ("agent" for the agent's own mark), redrawn
+ * when any of them changes: the thread header's pile, which draws one mark where several sessions look the same.
+ */
+export function useAgentFacesKey(ids: readonly string[]): string {
+  const key = ids.join('\n');
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      const offs = key ? key.split('\n').map((id) => subscribeTo(id, listener)) : [];
+      return () => offs.forEach((off) => off());
+    },
+    [key],
+  );
+  const read = useCallback(() => (key ? key.split('\n').map((id) => agentFaceOf(id)).join('\n') : ''), [key]);
+  return useSyncExternalStore(subscribe, read, () => key.split('\n').map(() => 'agent').join('\n'));
+}
+
 /** Tests: forget everything this page had and read the browser again. */
 export function resetAgentFaces(): void {
   server = null;
