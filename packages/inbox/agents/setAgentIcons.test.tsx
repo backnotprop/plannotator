@@ -342,6 +342,27 @@ test.if(hasDom)('a fetchable set: "Get" downloads it in one click and its grid f
   for (const s of OUTSIDE) expect(drawn(at(host, s))).toBe('/api/inbox/icon-sets/blobs/2 px 16px');
 });
 
+// The owner, 2026-11-12: a click opens the picker; it no longer drops a set icon for Transparent.
+test.if(hasDom)('a click on a mark showing a set icon opens the picker and keeps the set icon; the picker\'s Sets shows it and opens the dialog with it marked', async () => {
+  inbox();
+  const host = mount(<Surfaces />);
+  act(() => faces.keepAgentFace('ses_a', 'set:dcss/orc'));
+  await settle();
+  const face = host.querySelector<HTMLButtonElement>('[data-agent-icon="ses_a"]')!;
+  act(() => void face.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 })));
+  await settle();
+  expect(face.getAttribute('aria-expanded')).toBe('true');
+  expect(faces.agentFaceOf('ses_a')).toBe('set:dcss/orc');
+  const place = document.querySelector<HTMLButtonElement>('[data-face-choice="sets"]')!;
+  expect(place.getAttribute('aria-checked')).toBe('true');
+  expect(place.querySelector('.am-sets-art img')!.getAttribute('src')).toBe('/api/inbox/icon-sets/dcss/orc');
+  act(() => place.click());
+  await settle();
+  const dialog = document.querySelector<HTMLElement>('dialog[data-dialog="agent-icon"][open]')!;
+  expect([...dialog.querySelectorAll('.am-sets-i[aria-checked="true"]')].map((cell) => cell.getAttribute('data-set-icon'))).toEqual(['orc']);
+  expect(faces.agentFaceOf('ses_a')).toBe('set:dcss/orc');
+});
+
 test.if(hasDom)('the dialog: a modal naming the agent with its icon now; Escape and a click outside close it; focus goes back to the face', async () => {
   inbox();
   const host = mount(<Surfaces />);

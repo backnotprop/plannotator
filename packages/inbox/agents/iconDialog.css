@@ -131,3 +131,5 @@ dialog.ib-dlg.ib-agi[open] { display: flex; flex-direction: column; }
 @media (max-width: 560px) {
   .ib-agi-sel .ib-agi-use { align-self: stretch; height: 44px; }
 }
+/* "Optional", a quiet label over the Animate it block. */
+.ib-agi-sel-opt { display: block; margin: 0 0 6px 2px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }

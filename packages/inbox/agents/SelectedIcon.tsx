@@ -8,6 +8,7 @@ import { isSetFace, setFaceParts, useIconSets, useSetListing } from './iconSets'
 import { setNumber } from './SetsBody';
 
 export const USE_THIS_ICON = 'Use this icon';
+export const OPTIONAL = 'Optional';
 
 /**
  * Exploration ("selected", agents/iconFlowDev.ts): the agent icon dialog's page for one icon. `previewing`: just
@@ -73,6 +74,7 @@ export function SelectedIcon({ agent, host, name, face, previewing, onBack, onDo
           </button>
         )}
         <div className="ib-agi-sel-anim">
+          <span className="ib-agi-sel-opt">{OPTIONAL}</span>
           <AnimateIt agent={agent} face={face} onDone={onDone} onBack={() => {}} beforeStart={previewing ? keep : undefined} />
         </div>
       </div>

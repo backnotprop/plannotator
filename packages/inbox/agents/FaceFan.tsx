@@ -16,9 +16,10 @@ import { focusBackTo } from './focusBack';
  * short of room, the colours split over two short arcs. An overlay (Base UI's Popover, portaled), so the list never
  * moves.
  *
- * Opens: the pointer resting on the mark for FAN_DWELL_MS (a pointer passing over opens nothing), Enter or Space on
- * the focused mark, or a long press on a touch screen. Closes: the pointer leaving the mark and the fan (a short grace,
- * and the room between them counts as the fan's), Escape, a press outside, a scroll or resize, or a choice.
+ * Opens: a click or a tap on the mark, the pointer resting on it for FAN_DWELL_MS (a pointer passing over opens
+ * nothing), Enter or Space on the focused mark, or a long press on a touch screen. Closes: a second click on the mark
+ * (the plate lies over it, so that click reaches onMark), the pointer leaving the mark and the fan (a short grace, and
+ * the room between them counts as the fan's), Escape, a press outside, a scroll or resize, or a choice.
  * Keyboard inside: the arrows move along the arcs, Home and End to the ends, Enter or Space chooses. A labelled radio
  * group for screen readers. No global shortcut.
  */
@@ -84,12 +85,14 @@ export interface FaceFanProps {
   onOwn: () => void;
   /** "Sets" was chosen: the icon sets open. */
   onSets: () => void;
+  /** A click on the fan's plate where the mark is under it: the mark's own click. */
+  onMark: () => void;
   onClose: () => void;
 }
 
 const reduceMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onChoose, onOwn, onSets, onClose }: FaceFanProps) {
+export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onChoose, onOwn, onSets, onMark, onClose }: FaceFanProps) {
   const chosen: FanChoice = isOwnFace(face) ? OWN_CHOICE : isSetFace(face) ? SETS_CHOICE : face;
   // Measured once as it opens: the mark's box and the window (nothing is read while the pointer moves).
   const [place, setPlace] = useState<{ rect: DOMRect; w: number; h: number } | null>(null);
@@ -206,7 +209,15 @@ export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onC
   const label = (f: FanChoice) => (f === 'agent' ? agentHostName(host) : f === OWN_CHOICE ? OWN_LABEL : f === SETS_CHOICE ? SETS_LABEL : FACE_LABELS[f]);
   let index = -1;
   return (
-    <Popover.Root open={open && !!arcs} onOpenChange={(next) => !next && onClose()} modal={false}>
+    <Popover.Root
+      open={open && !!arcs}
+      onOpenChange={(next, details) => {
+        // A press on the mark is the mark's own (AgentMark.tsx opens and closes the fan on its click).
+        if (next || (details.reason === 'outside-press' && details.event.target instanceof Node && anchor.contains(details.event.target))) return;
+        onClose();
+      }}
+      modal={false}
+    >
       <Popover.Portal container={container}>
         <Popover.Positioner
           className="am-fan-pos"
@@ -225,6 +236,11 @@ export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onC
             aria-label={`Icon for ${name}`}
             initialFocus={openedBy === 'keyboard' ? () => items.current[Math.max(0, order.indexOf(chosen))] ?? true : false}
             finalFocus={openedBy === 'keyboard' ? focusBackTo(anchor, '.am-fan') : false}
+            onClick={(event) => {
+              if (!place || (event.target instanceof Element && event.target.closest('[data-face-choice]'))) return;
+              const box = place.rect;
+              if (event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom) onMark();
+            }}
           >
             <span className="am-fan-dial" aria-hidden="true" style={{ '--r': `${Math.round(dial.reach)}px`, '--a': `${dial.aim.toFixed(1)}deg` } as CSSProperties}>
               <span className="am-fan-shade">

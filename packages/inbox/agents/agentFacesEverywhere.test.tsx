@@ -147,7 +147,8 @@ test.if(hasDom)('a face chosen on the sidebar mark shows on the row, the authors
   setInboxAgents(listed(agent({})));
   const host = mount(<Surfaces sidebar={agent({})} />);
   for (const s of ['row', 'author', 'recipient']) expect(faceOf(at(host, s))).toBe('agent');
-  act(() => host.querySelector<HTMLButtonElement>('[data-agent-icon="ses_a"]')!.click());
+  act(() => void host.querySelector<HTMLButtonElement>('[data-agent-icon="ses_a"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 })));
+  act(() => document.querySelector<HTMLButtonElement>('[data-face-choice="glass"]')!.click());
   for (const s of ['row', 'author', 'recipient']) expect(faceOf(at(host, s))).toBe('glass');
   // The phone row and the header's stack: the Claude Code tile is ses_a's (the first to join), Pi stays itself.
   expect(at(host, 'phone-row')!.querySelectorAll('[data-agent-face="glass"]').length).toBe(1);
