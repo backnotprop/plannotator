@@ -18,6 +18,7 @@
 import { join } from "node:path";
 import type { InboxLaunchAgent, InboxLaunchError, InboxLaunchNotReady, InboxLaunchRecord, InboxMessage } from "@plannotator/core/inbox-types";
 import type { InboxRunHostState } from "@plannotator/core/inbox-run-line";
+import type { InboxLaunchChoices } from "@plannotator/core/inbox-launch-choice";
 import type { resolveInboxLaunch } from "@plannotator/shared/config";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -54,20 +55,58 @@ export type LaunchDelivery = "delivered" | "queue" | "hold" | { failed: string }
  */
 export const launchUploadsDir = (dataDir: string) => join(inboxDir(dataDir), INBOX_UPLOADS_DIR);
 
+/** A word that is a link: cut inside it, it would be a link to somewhere else. */
+const LINK_WORD = /^(?:[a-z][a-z0-9+.-]*:\/\/|www\.)/i;
+
 /**
  * Text from an agent as a thread note quotes it: one line, controls and invisible characters dropped, Markdown's
  * marks escaped, `max` characters at most. What a note quotes comes from the agent or its provider, never the person.
+ * `words`: a cut falls between words when the last one starts in the second half of the room (else through it), and
+ * never inside a link, which goes whole.
  */
-export function launchNoteText(text: unknown, max: number): string {
+export function launchNoteText(text: unknown, max: number, options: { words?: boolean } = {}): string {
   const flat = String(typeof text === "string" ? text : "")
     // Controls, bidi and other invisible format characters go; the zero-width joiner stays (it holds an emoji together).
     .replace(/(?:(?!‍)[\p{Cc}\p{Cf}\p{Zl}\p{Zp}])+/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
-  const short = [...flat].length > max ? `${[...flat].slice(0, max - 1).join("").trimEnd()}…` : flat;
+  const chars = [...flat];
+  let short = flat;
+  if (chars.length > max) {
+    let end = max - 1;
+    if (options.words && chars[end] !== " ") {
+      const space = chars.lastIndexOf(" ", end - 1);
+      const next = chars.indexOf(" ", end);
+      const word = chars.slice(space + 1, next === -1 ? chars.length : next).join("");
+      if (LINK_WORD.test(word) || space >= end / 2) end = Math.max(space, 0);
+    }
+    short = `${chars.slice(0, end).join("").trimEnd()}…`;
+  }
   // Only marks the Inbox's inline Markdown both formats and unescapes (InlineMarkdown's
   // backslash rule): an escaped `:` or `<` would show its backslash; React keeps `<` text.
   return short.replace(/[\\`*_[\]~#>|$!&{}]/g, (mark) => `\\${mark}`);
+}
+
+/** The most of an agent's own error a failed turn's note quotes. */
+export const LAUNCH_TURN_ERROR_MAX = 300;
+
+/**
+ * The note a launched session's failed turn leaves in its thread (Codex, Pi, Claude Code): "<name>'s turn ended with
+ * an error: <the agent's own words>", one line, LAUNCH_TURN_ERROR_MAX characters at most, cut between words.
+ */
+export function launchTurnErrorNote(name: string, error: string): string {
+  const shown = launchNoteText(error, LAUNCH_TURN_ERROR_MAX, { words: true });
+  return shown ? `${name}'s turn ended with an error: ${shown}` : `${name}'s turn ended with an error.`;
+}
+
+/**
+ * A launched session's last turn ended in an error the session itself wrote down (Claude Code's transcript): `key`
+ * names that entry (one note per entry, however often it is read), `text` is the agent's own words, `at` when (ms).
+ */
+export interface LaunchTurnError {
+  key: string;
+  text: string;
+  at: number;
 }
 
 /**
@@ -213,6 +252,7 @@ export interface LaunchHost {
    * scopes); not cached. None: the machine's own setup.
    */
   available(folders?: readonly string[]): Promise<LaunchAvailability>;
+  choices?(): Promise<Omit<InboxLaunchChoices, "last"> | null>;
   /** How a launch made now in `folder` starts; fixed on the record at Send. */
   startOf(folder: string): { full: boolean; ownMode: boolean; bypass: boolean };
   /** It starts in `folder` (and every scratch folder in it) without a trust prompt. */
@@ -263,6 +303,12 @@ export interface LaunchHost {
    * no turn after it.
    */
   deliver?(launch: InboxLaunchRecord, text: string, signal: AbortSignal): Promise<LaunchDelivery>;
+  /**
+   * Only a host whose session writes its failed turns down where the Inbox can read them (Claude Code's transcript)
+   * and says nothing to the Inbox itself: the error the session's last turn ended in, or null (it ended well, a new
+   * turn began, nothing could be read). The engine asks only for a session this Inbox launched, while it is idle.
+   */
+  turnError?(launch: InboxLaunchRecord, session: string): LaunchTurnError | null;
   /** The Inbox stops: let go of what this host holds (a connection, the processes it owns). No `close`: it holds nothing. */
   close?(): void;
 }

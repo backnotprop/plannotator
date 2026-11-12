@@ -84,6 +84,9 @@ import { createDriveList } from "./inbox-drives";
 import { checkGitRemote, cloneTarget, defaultCloneFolder, originKeyOf, readLastCloneFolder, runGitClone, tildeOf, writeLastCloneFolder, type CloneRun } from "./inbox-launch-clone";
 import { parseInboxGitUrl } from "@plannotator/core/inbox-git-url";
 import { inboxLaunchNotReadyWords } from "@plannotator/core/inbox-launch-ready";
+import { LaunchChoiceError, parseLaunchChoice, type InboxLaunchChoice } from "@plannotator/core/inbox-launch-choice";
+import { readLastLaunchChoice, withinLaunchWait, writeLastLaunchChoice } from "./inbox-launch-choice";
+import { claudeSettingsFilePath, readClaudeSettingsFile } from "./inbox-launch-claude-settings-file";
 import { accessSync, appendFileSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmdirSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchFrom, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
@@ -105,6 +108,7 @@ import type { LaunchAvailability, LaunchDelivery, LaunchHost, LaunchHostContext,
 import { openPermissionSince } from "./inbox-launch-permission";
 import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, INBOX_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import { samePlace } from "./agent-files";
+import { launchTurnErrorNote, writeLaunchNote } from "./inbox-launch-host";
 
 const AVAILABLE_TTL_MS = 30_000;
 const HOST_TTL_MS = 10_000;
@@ -119,7 +123,18 @@ export type InboxLaunchTarget = (
   | { agent: InboxLaunchAgent; folder: string; create?: true; clone?: { url: string; branch?: string } }
 ) & {
   trust?: InboxLaunchTrust;
+  choice?: InboxLaunchChoice;
 };
+
+function choiceOfTarget(value: Record<string, unknown>): { choice?: InboxLaunchChoice } {
+  try {
+    const choice = parseLaunchChoice(value, null);
+    return choice.model || choice.effort ? { choice } : {};
+  } catch (error) {
+    const field = error instanceof LaunchChoiceError ? error.field : "model";
+    throw new InboxError("validation_error", (error as Error).message, { field: `to.launch.${field}` });
+  }
+}
 
 /** The reading a press was made on, or nothing when the press came without one. */
 function trustOfTarget(value: Record<string, unknown>): { trust?: InboxLaunchTrust } {
@@ -164,6 +179,14 @@ interface Memo {
    * would undo the Stop); the person's next reply does, and takes it along.
    */
   heldReply: string | null;
+  /**
+   * The session's last turn ended in an error it wrote down (`LaunchHost.turnError`), while it is idle: the run line
+   * says it couldn't answer, with Try again. `noted`: the entry whose note is in the thread (one per entry).
+   * `tried`: the entry Try again sent the message past, which stands for nothing any more.
+   */
+  turnError?: { key: string; at: number } | null;
+  turnErrorNoted?: string | null;
+  turnErrorTried?: string | null;
   /** Clone from a git URL: the reply that started the clone again last (once per reply, as a respawn). */
   cloneFor?: string | null;
   /** When the running clone began: its percent shows only after a few seconds (E2). */
@@ -259,7 +282,9 @@ export function createInboxLaunch(options: {
       ? json({ error: "Hidden folders aren't listed.", code: "folder_hidden" }, 422)
       : refused === "system"
         ? json({ error: "System folders aren't listed.", code: "folder_system" }, 422)
-        : json({ error: "That isn't a full path.", code: "folder_bad_path" }, 422);
+        : refused === "home_only"
+          ? json({ error: "Only folders inside the home folder.", code: "folder_outside_home" }, 422)
+          : json({ error: "That isn't a full path.", code: "folder_bad_path" }, 422);
   const slowAnswer = (name: string): Response => json({ error: `${name} isn't responding.`, code: "folder_slow", drive: name }, 504);
 
   /**
@@ -623,6 +648,7 @@ export function createInboxLaunch(options: {
       waitingSince: memo.waitingSince,
       respawnFailed: respawnFailedOf(memo),
       respawnUntrusted: respawnUntrustedOf(memo),
+      turnErrorAt: memo.turnError ? memo.turnError.at : null,
       stoppedByPersonAt: memo.stoppedAt,
       stoppedNote: host.stoppedNote?.(launch) ?? null,
       connector: host.connector,
@@ -671,6 +697,38 @@ export function createInboxLaunch(options: {
   };
 
   /**
+   * A launched session whose host writes its failed turns down (Claude Code): once it is idle, the error its last turn
+   * ended in becomes one note in the thread, from the session, in the words Codex's and Pi's failed turns use, and the
+   * run line's "couldn't answer" with Try again. A turn that runs, or a last turn that ended well, clears the line;
+   * the note stays. Only a session this Inbox started, never one it did not.
+   */
+  const watchTurnError = (root: InboxMessage) => {
+    const launch = root.launch!;
+    const host = hostOf(launch);
+    const session = inboxLaunchedSession(root);
+    if (!host?.turnError || launch.error || !session || session.startsWith("launch:") || root.to?.session !== session) return;
+    const memo = memoOf(launch);
+    const live = liveOf(host, root, memo);
+    const was = memo.turnError ?? null;
+    // Not connected (stopped, or not yet back): the stopped line says what it is. A turn runs: its end decides.
+    let found = !live || live.busy === true ? null : host.turnError(launch, session);
+    if (found && found.key === memo.turnErrorTried) found = null;
+    memo.turnError = found ? { key: found.key, at: found.at } : null;
+    if (found && memo.turnErrorNoted !== found.key) {
+      memo.turnErrorNoted = found.key;
+      startLog(launch.id, `${launch.agent} ${session}: the turn ended with an error: ${found.text.slice(0, 2000)}`);
+      log(`Inbox launch ${launch.id}: a ${host.name} turn ended with an error: ${found.text.slice(0, 200)}`);
+      writeLaunchNote(
+        { store, onChange: options.onChange },
+        root,
+        { author: { host: launch.agent, session, name: host.name }, body: launchTurnErrorNote(host.name, found.text), key: `${launch.agent}-error-${launch.id}-${found.key}` },
+        log,
+      );
+    }
+    if ((was?.key ?? null) !== (memo.turnError?.key ?? null)) options.onChange();
+  };
+
+  /**
    * Look at every launch: respawn a stopped session someone wrote to, and,
    * only while a window watches (`watched`), keep each host's check and
    * view fresh where a line could change. An agent with no host is skipped.
@@ -680,6 +738,7 @@ export function createInboxLaunch(options: {
     const all = roots().filter((root) => !root.launch!.deleted_at && hostOf(root.launch!));
     if (all.length === 0) return;
     for (const root of all) maybeRespawn(root);
+    for (const root of all) watchTurnError(root);
     for (const host of hostList) stateOf(host).permissions.sweep();
     if (!watched) return;
     for (const host of hostList) {
@@ -1250,6 +1309,21 @@ ${result.text}`);
         if (config().scratchDir !== (path ? resolve(path) : null)) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
         return json({ launch: settingsState() });
       }
+      if ("settings_file" in body) {
+        // Checked now so a typo is said here rather than at the next start.
+        const raw = body.settings_file;
+        if (raw !== null && typeof raw !== "string") throw new InboxError("validation_error", "settings_file: a file path, or null.", { field: "settings_file" });
+        const typed = (raw ?? "").trim();
+        if (typed && !(typed === "~" || typed.startsWith("~/") || isAbsolute(typed))) throw new InboxError("validation_error", "Give a full path, such as ~/.claude/gateway.json.", { field: "settings_file" });
+        if (typed) {
+          const path = claudeSettingsFilePath(typed, options.homeDir);
+          const read = readClaudeSettingsFile(path, options.displayFolder(path));
+          if (!read.ok) throw new InboxError("validation_error", read.text.replace(/ Fix it in Settings → Agents, or clear it there\.$/, ""), { field: "settings_file" });
+        }
+        saveConfig({ inboxLaunch: { settingsFile: typed || undefined } as { settingsFile?: string } });
+        if (config().settingsFile !== (typed || null)) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
+        return json({ launch: settingsState() });
+      }
       if (typeof body.full_permissions !== "boolean") throw new InboxError("validation_error", "full_permissions: a boolean.", { field: "full_permissions" });
       saveConfig({ inboxLaunch: { fullPermissions: body.full_permissions } });
       if (config().fullPermissions !== body.full_permissions) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
@@ -1444,6 +1518,11 @@ ${result.text}`);
   const tryAgain = (root: InboxMessage, host: LaunchHost): void => {
     const launch = root.launch!;
     const memo = memoOf(launch);
+    // A turn that ended in an error: the person's message it was for goes to the session once more.
+    if (!launch.error && memo.turnError && runOfRoot(root)?.turn_error) {
+      sendAgain(root, memo);
+      return;
+    }
     // A reply's respawn that did not take: respawn once more (the session exists; a new start would make a second).
     if (!launch.error && launch.session_ref && root.to && respawnFailedOf(memo)) {
       respawn(root, host, memo.respawn!.for);
@@ -1459,6 +1538,32 @@ ${result.text}`);
     }
     // The start never ran (untrusted, failed): Try again is its first real start, never "Starting … again".
     void run(store.settleLaunch(root.id, { error: null }), host, false);
+  };
+
+  /**
+   * Try again on a turn that ended in an error: the person's latest message the session took goes to it again
+   * (`store.sendAgain`), unless something of theirs still waits for it (that goes in anyway). The error's entry
+   * stands for nothing after this: the line goes until the session's next turn ends.
+   */
+  const sendAgain = (root: InboxMessage, memo: Memo): void => {
+    const session = inboxLaunchedSession(root)!;
+    if (store.pendingReplies(session, { tags: true }).length === 0) {
+      const last = store
+        .threadMessageIds(root.thread_id)
+        .map((id) => store.message(id))
+        .filter((m): m is InboxMessage => !!m && m.author.kind === "person" && m.delivery?.session === session)
+        .at(-1);
+      if (!last) throw new InboxError("validation_error", "That launch did not fail.");
+      store.sendAgain(last.id, session);
+    }
+    memo.turnErrorTried = memo.turnError?.key ?? null;
+    memo.turnError = null;
+    // "Starting <agent> again…" until its turn begins.
+    memo.busySeen = false;
+    memo.startedAt = now();
+    memo.again = true;
+    log(`Inbox launch ${root.launch!.id}: Try again sent the message to ${session} again`);
+    options.onChange();
   };
 
   const realOrSelf = (path: string) => {
@@ -1544,7 +1649,7 @@ ${result.text}`);
       if (!enabled()) return null;
       const value = (to as { launch: unknown }).launch as Record<string, unknown> | null;
       const host = value && typeof value === "object" && typeof value.agent === "string" && Object.hasOwn(hosts, value.agent) ? hosts[value.agent]! : null;
-      if (host && value!.scratch === true && value!.project_id === undefined) return { agent: host.agent, scratch: true, ...trustOfTarget(value!) };
+      if (host && value!.scratch === true && value!.project_id === undefined) return { agent: host.agent, scratch: true, ...trustOfTarget(value!), ...choiceOfTarget(value!) };
       // "Another folder on <machine>…": a folder under home that is not a project yet (`~/…`).
       // `create: true` (Create a folder): its last folder may not be there yet; the Send makes it.
       if (host && typeof value!.folder === "string" && value!.project_id === undefined && value!.scratch === undefined) {
@@ -1555,15 +1660,15 @@ ${result.text}`);
           if (!repo || repo.kind !== "repo" || (clone.branch !== undefined && (typeof clone.branch !== "string" || clone.branch.startsWith("-") || !/^[A-Za-z0-9_][A-Za-z0-9._/-]{0,199}$/.test(clone.branch)))) {
             throw new InboxError("validation_error", "to.launch.clone: { url: an https or ssh git URL, branch? }.", { field: "to.launch.clone" });
           }
-          return { agent: host.agent, folder: value!.folder, clone: { url: clone.url as string, ...(typeof clone.branch === "string" ? { branch: clone.branch } : {}) }, ...trustOfTarget(value!) };
+          return { agent: host.agent, folder: value!.folder, clone: { url: clone.url as string, ...(typeof clone.branch === "string" ? { branch: clone.branch } : {}) }, ...trustOfTarget(value!), ...choiceOfTarget(value!) };
         }
-        return { agent: host.agent, folder: value!.folder, ...(value!.create === true ? { create: true as const } : {}), ...trustOfTarget(value!) };
+        return { agent: host.agent, folder: value!.folder, ...(value!.create === true ? { create: true as const } : {}), ...trustOfTarget(value!), ...choiceOfTarget(value!) };
       }
       if (!host || typeof value!.project_id !== "string") {
         const agent = hostList.map((h) => `"${h.agent}"`).join(" | ");
         throw new InboxError("validation_error", `to.launch: { agent: ${agent}, project_id }, { agent: ${agent}, folder } or { agent: ${agent}, scratch: true }.`, { field: "to.launch" });
       }
-      return { agent: host.agent, project_id: value!.project_id, ...trustOfTarget(value!) };
+      return { agent: host.agent, project_id: value!.project_id, ...trustOfTarget(value!), ...choiceOfTarget(value!) };
     },
 
     /**
@@ -1648,6 +1753,14 @@ ${result.text}`);
         }
         throw new InboxError("agent_unavailable", `${host.name} can't be started here: ${ok.reason}. Nothing was sent.`);
       }
+      // Lists not read yet (a slow CLI) check the tokens only: a slow CLI never refuses the start.
+      const lists = host.choices ? await withinLaunchWait(host.choices()) : null;
+      if (target.choice && !host.choices) throw new InboxError("validation_error", `${host.name} takes no model or effort from the Inbox. Nothing was sent.`, { field: "to.launch.model" });
+      if (target.choice?.effort && lists && !lists.efforts.includes(target.choice.effort)) {
+        throw new InboxError("validation_error", `${host.name} takes ${lists.effort_word.toLowerCase()} ${lists.efforts.join(", ")}. Nothing was sent.`, { field: "to.launch.effort" });
+      }
+      const model = target.choice?.model;
+      const effort = target.choice?.effort;
       const id = inboxId("lch");
       // How it starts, fixed for this launch (the host's `startOf`: for Claude Code the switch, the person's own
       // setup with this folder's settings, and the last finished shell read, however old; the start reads the
@@ -1708,8 +1821,17 @@ ${result.text}`);
         ...(start.full ? { full_permissions: true } : {}),
         ...(start.ownMode ? { own_mode: true } : {}),
         ...(start.bypass ? { bypass_available: true } : {}),
+        ...(model ? { model } : {}),
+        ...(effort ? { effort } : {}),
         ...(input.from ? { from: { machine: input.from.machine, name: input.from.name } } : {}),
       };
+      if (host.choices) {
+        try {
+          writeLastLaunchChoice(options.dataDir, host.agent, target.choice ?? {});
+        } catch {
+          // Only where the menu starts: never worth failing a Send.
+        }
+      }
       // C1c: the next clone on this machine goes where this one went.
       if (launch.clone) {
         try {
@@ -1802,7 +1924,11 @@ ${result.text}`);
           }
           state.lastAvailable = ok;
           // `scratch_trusted`: whether it starts in the scratch root without a trust prompt (the trust-once row).
-          return ok.ok ? [{ agent: host.agent, name: host.name, scratch_trusted: host.trusts(root), ...(owner ? { untrusted: untrustedOf(host, owner.pick) } : {}) }] : [];
+          if (!ok.ok) return [];
+          const lists = host.choices ? await withinLaunchWait(host.choices()) : null;
+          const last = lists ? readLastLaunchChoice(options.dataDir, host.agent) : null;
+          const choices = lists ? { ...lists, ...(last && (last.model || last.effort) ? { last } : {}) } : null;
+          return [{ agent: host.agent, name: host.name, scratch_trusted: host.trusts(root), ...(owner ? { untrusted: untrustedOf(host, owner.pick) } : {}), ...(choices ? { choices } : {}) }];
         }),
       );
       // Why the others can't start now, for a linked machine's window to say with this machine's name (remote launch).

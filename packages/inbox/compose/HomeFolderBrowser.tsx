@@ -8,6 +8,7 @@ import {
   cleanPastedPath,
   cloneAt,
   folderBrowserView,
+  folderChild,
   folderRefusalWords,
   homeRelative,
   needsNameRead,
@@ -232,7 +233,7 @@ export function HomeFolderBrowser({
   const read = useFolderRead(refused || quietHere ? null : parent, machine.id, asleep, retry);
   const ok = read && 'answer' in read ? read.answer : null;
   // A name typed that is none of the folders read: the full path is read too (a file? a folder that can't be opened?).
-  const nameRead = useFolderRead(needsNameRead(ok, tail) ? `${parent === '~' ? '~' : parent === '/' ? '' : parent}/${tail}` : null, machine.id, asleep, retry);
+  const nameRead = useFolderRead(needsNameRead(ok, tail) ? folderChild(parent, tail) : null, machine.id, asleep, retry);
   const slow = quietHere || (!!read && 'error' in read && read.code === 'folder_slow');
   // Remember which drive didn't answer, and forget it once one of its folders is read.
   useEffect(() => {
@@ -279,10 +280,12 @@ export function HomeFolderBrowser({
   // "Choose in Finder…": waiting on the dialog on this computer.
   const [finding, setFinding] = useState(false);
   const okName = nameRead && 'answer' in nameRead ? nameRead.answer : null;
+  // A name the machine won't offer (Windows hides AppData by its mark, not a dot): its words, not a blank.
+  const nameRefused = nameRead && 'error' in nameRead && (nameRead.code === 'folder_hidden' || nameRead.code === 'folder_system') ? nameRead.error : null;
   const target = useCloneTarget(clone ? cloneAt(shown, ok, okName) : null, clone?.url ?? null, machine.id, asleep);
   const view = asleep
     ? { note: null, rows: [] as FolderRow[], after: null }
-    : folderBrowserView({ typed: shown, read: ok, nameRead: okName, error: quietHere ? `${here!.name} isn't responding.` : read && 'error' in read ? read.error : null, clone: clone ? { repo: clone.repo, target } : null });
+    : folderBrowserView({ typed: shown, read: ok, nameRead: okName, nameRefused, error: quietHere ? `${here!.name} isn't responding.` : read && 'error' in read ? read.error : null, clone: clone ? { repo: clone.repo, target } : null });
   const rows = view.rows;
   const rowsKey = rows.map((row) => `${row.kind}>${row.path}`).join('\n');
 
