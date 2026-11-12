@@ -3099,9 +3099,28 @@ Pinned by `components/Viewer.clickAWord.test.tsx`, `hooks/useClickWord.test.tsx`
 
 Pinned by `components/blocks/QuestionBlock.test.tsx` ("an Other answer of several lines") and core's `question-block.test.ts`.
 
+## `useAnnotationHighlighter`: a finger's selection is highlighted once it is finished, and stays selected (unreleased; touch-primary hosts only, no opt-in, no core change)
+
+A bug fix for every host of the hook whose main pointer is a finger (`(pointer: coarse)`) and that does not compose (`onHostDraft` absent). Mouse and trackpad screens (`pointer: fine`) never run this code; a touch-primary host that composes is unchanged.
+
+- **What was wrong.** The touch bridge painted the selection 400 ms after its last `selectionchange`, with the finger still dragging. The marks it wrapped around the words took the live selection away under the finger (on iOS the handles and the magnifier went and the drag stopped selecting), and a later highlight replacing the first moved the selection's ends onto other words, so a wrong highlight followed.
+- **When it paints now** (`utils/touchSelection`: `touchHighlightDueAt`, `TOUCH_HIGHLIGHT_REST_MS` 800, `TOUCH_HIGHLIGHT_LIFT_MS` 150, `TOUCH_FINGER_STALE_MS` 2000). Never while a finger is known to be on the screen (passive capture listeners on `document` for touch and pointer events while the hook is mounted). After a lift (`touchend` / `pointerup` leaving no finger), 150 ms after the selection's last change. A selection that changed with no lift seen (no touch event at all, or a `touchcancel`) waits until it has not changed for 800 ms. A finger whose end never comes (iOS 27 drops the rest of a touch that starts on a selection handle) stops counting 2 s after its last touch event.
+- **The selection is kept.** The selection is read as character offsets from the container before the paint and put back over the same words after it (`utils/selectionTextOffsets`), direction kept, also when the paint replaces the previous pending highlight. While the selection put back is unchanged nothing is painted again; a handle dragged later makes ONE new pending highlight once that drag is finished, replacing the old one. Before, the selection was gone (or moved) after the paint.
+- **The library's own release on a touch screen.** On a phone user agent web-highlighter commits at `touchend` and removes the selection; on a touch-primary screen that release is now left to the bridge (the library sits that one release out), and a `mouseup` whose selection is the one the bridge already highlighted is not painted a second time.
+- **Toolbar.** `ToolbarState.touchSide?: 'above'` (set when the end of the selection was the one moving) → `AnnotationToolbar` `touchSide` → `placeTouchToolbar` `prefer: 'above'`: with the touch toolbar on (`touchSelectionToolbar`), it goes above the selection, over the band where iOS draws its edit menu, when the menu and the toolbar both fit there; otherwise below, as before. A host without `touchSelectionToolbar` (Workspaces) places the toolbar as before. All three are additive and optional.
+- **For a touch-primary host that does nothing**: the highlight comes later (when the finger lifts, or after 800 ms of rest instead of 400 ms) and the selection stays on screen over it. The HTML viewer's bridge (`bridge-script.ts`) changes nothing on the page and keeps its 400 ms (`TOUCH_SELECTION_SETTLE_MS`).
+
+Pinned by `hooks/useAnnotationHighlighter.touchRest.test.tsx` and `utils/touchToolbarPlacement.test.ts`; in WebKit at iPad and iPhone sizes by `tests/e2e/inbox-touch-highlight-webkit.spec.ts`.
+
 ## `InlineImageTagsContext`: an `<img>` tag inside a line renders as a picture (unreleased; additive, opt-in, no core change)
 
 An `<img>` tag inside a table cell or a sentence is not an HTML block, so `InlineMarkdown` printed it as text. GitHub writes every resized screenshot that way, and PR authors put before/after pairs in tables.
 
 - **New context `InlineImageTagsContext`** (`components/ImageResolverContext`, default `false`). With it `true` and an image resolver, an inline `<img>` goes through the resolver as `![alt](src)` does: `src` resolved, `unavailable` is the quiet chip. Only `src`, `alt`, `width` and `height` (whole numbers) are read; nothing else of the tag reaches the page.
 - **A host that provides nothing sees no change.** The Plannotator Inbox turns it on for a PR's text.
+
+## `RenderedMarkdown` `renderParagraph` and fullscreen in HTML frames (unreleased; one opt-in prop, fullscreen for every host)
+
+- **`RenderedMarkdown` `renderParagraph?: (block: Block, fallback: React.ReactNode) => React.ReactNode`**: called for each paragraph block, with the standard rendering as `fallback`. Return `fallback` to keep it. Absent: paragraphs render as before, with the same keys and DOM. Plannotator passes it only for a github.com PR description, where a paragraph that is only a bare `github.com/user-attachments` URL becomes a video player once the attachment proxy answers `video/*`.
+- **`HtmlViewer` and the fenced HTML embed frame now set `allowFullScreen` (no seam).** A video inside a rendered document or embed can enter fullscreen from its own control, which needs a user gesture. The sandbox tokens are unchanged. Every host gets this, Workspaces included.
+- Pinned by `review-editor/components/PRDescriptionVideo.test.tsx` (the prop), `components/html-embed/HtmlEmbedBlock.test.tsx` and `components/html-viewer/HtmlViewer.sandbox.test.tsx` (`allowfullscreen`).

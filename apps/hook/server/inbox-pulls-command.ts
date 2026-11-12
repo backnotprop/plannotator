@@ -20,7 +20,7 @@ export const INBOX_PULLS_USAGE = [
   "You own your thread's list: add a PR when you open or take on one for this work, and remove one",
   "when it stops being part of the work; merged ones stay. The person can add and remove too.",
   "",
-  "<ref>: owner/repo#123, group/sub/project!45, or the PR's URL.",
+  "<ref>: owner/repo#123 (GitHub), group/sub/project!45 (GitLab), or the PR's URL (Bitbucket: the URL only).",
   "<thread>: the thread id, or a message id in it.",
   "--all (rm): takes off every PR on the thread.",
   "--session <id>: as for 'plannotator inbox call'.",

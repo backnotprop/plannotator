@@ -269,9 +269,9 @@ test.skipIf(!hasDom)('no section when nothing is pinned; Star thread leads the r
   });
   await until(() => rowMenu()?.getAttribute('data-row-menu') === ids.stopped, 'the row menu');
   const items = [...rowMenu()!.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent?.trim());
-  expect(items.slice(0, 2)).toEqual(['Star thread', 'Add to Priority']);
-  // Its own group with Add to Priority: a separator right after the two.
-  expect(rowMenu()!.querySelector('[data-row-action="pin"] + [data-row-action="priority-add"] + [role="separator"]')).not.toBeNull();
+  expect(items.slice(0, 3)).toEqual(['Star thread', 'Add to Priority', 'Add tag']);
+  // Its own group with Add to Priority and Add tag: a separator right after them.
+  expect(rowMenu()!.querySelector('[data-row-action="pin"] + [data-row-action="priority-add"] + [data-add-tag-item] + [role="separator"]')).not.toBeNull();
   await act(async () => {
     rowMenu()!.querySelector<HTMLElement>('[data-row-action="pin"]')!.click();
   });
@@ -330,11 +330,13 @@ test.skipIf(!hasDom)("the header ⋯ menu's Star thread pins and Unstar thread u
   await renderApp(`#thread=${ids.waiting}`);
   await until(() => !!document.querySelector('[data-thread-more]'), 'the header ⋯');
   expect(document.querySelector('[data-pin-toggle]')).toBeNull();
-  // In its own group with Add to Priority, after the read action and Snooze (which lead the menu), with a separator on each side.
+  // In its own group with Add to Priority and Add tag, after the read action and Snooze (which lead the menu), with a separator on each side.
   const first = await openThreadMenu();
-  expect([...threadMenu()!.querySelectorAll('[role="menuitem"]')].slice(0, 4).map((el) => el.textContent?.trim())).toEqual(['Mark read', 'Snooze', 'Star thread', 'Add to Priority']);
+  expect([...threadMenu()!.querySelectorAll('[role="menuitem"]')].slice(0, 6).map((el) => el.textContent?.trim())).toEqual(['Mark read', 'Snooze', 'Star thread', 'Add to Priority', 'Add tag', 'Copy thread']);
   expect(first.previousElementSibling?.getAttribute('role')).toBe('separator');
-  expect(first.nextElementSibling?.nextElementSibling?.getAttribute('role')).toBe('separator');
+  expect(first.nextElementSibling?.hasAttribute('data-thread-priority-item')).toBe(true);
+  expect(first.nextElementSibling?.nextElementSibling?.hasAttribute('data-add-tag-item')).toBe(true);
+  expect(first.nextElementSibling?.nextElementSibling?.nextElementSibling?.getAttribute('role')).toBe('separator');
   await act(async () => first.click());
   await until(() => !threadMenu(), 'the menu to close');
   await until(() => pinnedOrder().includes(ids.waiting), 'the pinned row');

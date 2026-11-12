@@ -139,7 +139,7 @@ async function stopReview(child: ChildProcess | undefined, root: string) {
   rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
 
-async function withReview(browser: Browser, run: (page: Page) => Promise<void>) {
+async function withReview(browser: Browser, run: (page: Page) => Promise<void>, prepare?: (page: Page) => Promise<void>) {
   test.skip(!existsSync(binary), `compile the binary first: ${binary}`);
   const root = mkdtempSync(join(tmpdir(), 'plannotator-review-stays-put-'));
   const repo = buildRepo(root);
@@ -153,6 +153,7 @@ async function withReview(browser: Browser, run: (page: Page) => Promise<void>) 
     const context = await browser.newContext({ viewport: { width: 1274, height: 1185 } });
     await context.addCookies(Object.entries(FIRST_RUN).map(([name, value]) => ({ name, value, url })));
     const page = await context.newPage();
+    await prepare?.(page);
     await page.goto(url);
     await expect(page.locator('[data-review-sticky-tools]')).toBeVisible();
     await run(page);
@@ -182,6 +183,12 @@ const mainHeaders = (page: Page) =>
     return out.sort((a, b) => a.top - b.top);
   }, [...MODIFIED, ...ADDED]);
 
+const headerUnder = (page: Page, x: number, y: number) =>
+  page.evaluate(
+    ([px, py]) => document.elementFromPoint(px!, py!)?.closest('diffs-container')?.querySelector('span[title]')?.getAttribute('title') ?? null,
+    [x, y],
+  );
+
 test('All changes: opening a folded file leaves every header where it was', async ({ browser }) => {
   await withReview(browser, async (page) => {
     await page.locator('[data-review-sidebar] [title="Every change of this review in one view"]').click();
@@ -198,6 +205,7 @@ test('All changes: opening a folded file leaves every header where it was', asyn
     const x = target.nameX;
     const y = target.nameY;
     await page.mouse.move(x, y);
+    await expect.poll(() => headerUnder(page, x, y)).toBe(target.path);
     await page.mouse.click(x, y);
     const opened = async () => (await mainHeaders(page)).find((h) => h.path === target.path)!.height;
     // Open: its code drawn, then two frames for Pierre's sticky window to settle.
@@ -211,12 +219,31 @@ test('All changes: opening a folded file leaves every header where it was', asyn
       expect(Math.abs(now.top - was.top), `${was.path} moved`).toBeLessThan(0.5);
     }
     // The pointer is still on the header it clicked.
-    const underPath = await page.evaluate(
-      ([px, py]) => document.elementFromPoint(px!, py!)?.closest('diffs-container')?.querySelector('span[title]')?.getAttribute('title') ?? null,
-      [x, y],
-    );
-    expect(underPath).toBe(target.path);
+    expect(await headerUnder(page, x, y)).toBe(target.path);
   });
+});
+
+test('All changes: Collapse all files clicked while the code is still loading folds every file once it shows', async ({ browser }) => {
+  await withReview(
+    browser,
+    async (page) => {
+      await page.locator('[data-review-sidebar] [title="Every change of this review in one view"]').click();
+      await page.getByRole('button', { name: 'Collapse all files' }).click();
+      await expect(page.getByRole('button', { name: 'Expand all files' })).toBeVisible();
+      await expect.poll(async () => (await mainHeaders(page)).length).toBe(15);
+      await expect.poll(async () => (await mainHeaders(page)).filter((h) => h.height > 40).length).toBe(0);
+    },
+    (page) =>
+      page.addInitScript(() => {
+        const Base = window.Worker;
+        const until = performance.now() + 3_000;
+        window.Worker = class extends Base {
+          override postMessage(message: unknown, options?: StructuredSerializeOptions | Transferable[]) {
+            setTimeout(() => super.postMessage(message, options as StructuredSerializeOptions), Math.max(0, until - performance.now()));
+          }
+        } as typeof Worker;
+      }),
+  );
 });
 
 test('Hide viewed: the file you leave keeps its row while the pointer is in the list', async ({ browser }) => {

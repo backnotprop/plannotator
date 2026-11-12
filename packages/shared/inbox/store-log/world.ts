@@ -3,7 +3,7 @@
  * with questions, action items, attachments and hashtags; the person's picks (typed notes too, a key at a time),
  * Sends, re-asks, comments, reads, archives and New messages; an agent naming a thread the person started, and
  * the person sending one on to another session; cards (an agent's drop the person then sees), initiatives, steps
- * and PRs; pins, snoozes and reply drafts; project renames and combines; and thread deletions. A refused step (the store's own rules) is skipped, as a person
+ * and PRs; pins, thread tags, snoozes and reply drafts; project renames and combines; and thread deletions. A refused step (the store's own rules) is skipped, as a person
  * or agent would see a refusal and move on.
  *
  * Test-only. Shared by the "every read" test and the size budget, so both run against any record log.
@@ -188,7 +188,7 @@ export function writeInboxWorld(options: InboxWorldOptions): InboxWorld {
     const id = picked.size > 0 && chance(0.8) ? pick([...picked]) : pick(agentMessages);
     picked.delete(id);
     const qs = store.questionsOf(id).filter((q) => q.state === "picked");
-    store.sendReply(id, { words: chance(0.7) ? words(6) : undefined, questions: qs.map((q) => ({ key: q.key, revision: q.revision })), idempotency_key: `r-${n++}` });
+    store.sendReply(id, { words: chance(0.7) ? `${words(6)}${chance(0.3) ? ` ${pick(TAGS)}` : ""}` : undefined, questions: qs.map((q) => ({ key: q.key, revision: q.revision })), idempotency_key: `r-${n++}` });
   };
 
   const ops: [weight: number, run: () => void][] = [
@@ -223,6 +223,11 @@ export function writeInboxWorld(options: InboxWorldOptions): InboxWorld {
     }],
     [2, () => store.markCardDropsSeen()],
     [1, () => store.setPinned(pick(roots), chance(0.7))],
+    [1, () => store.createInitiative({ name: pick(["Release", "Billing", "Search"]), by: { kind: "person" } })],
+    [2, () => {
+      const live = store.initiatives().filter((i) => i.deleted_at === null);
+      if (live.length > 0) store.setThreadTag(pick(roots), pick(live).id, chance(0.7));
+    }],
     [1, () => store.setSnooze(pick(roots), new Date(clock + 3 * 3600_000).toISOString())],
     [2, () => store.saveReplyDraft(pick(roots), { body: words(5), base: null })],
     [1, () => store.renameProject(pick(projects).id, chance(0.7) ? `${pick(WORDS)} app` : null)],
