@@ -721,7 +721,7 @@ export function createInboxLaunch(options: {
       writeLaunchNote(
         { store, onChange: options.onChange },
         root,
-        { author: { host: launch.agent, session, name: host.name }, body: launchTurnErrorNote(host.name, found.text), key: `${launch.agent}-error-${launch.id}-${found.key}` },
+        { author: { host: launch.agent, session, name: host.name }, body: launchTurnErrorNote(host.name, found.text), key: `${launch.agent}-error-${launch.id}-${found.key}`, turnError: true },
         log,
       );
     }
@@ -1758,6 +1758,10 @@ ${result.text}`);
       if (target.choice && !host.choices) throw new InboxError("validation_error", `${host.name} takes no model or effort from the Inbox. Nothing was sent.`, { field: "to.launch.model" });
       if (target.choice?.effort && lists && !lists.efforts.includes(target.choice.effort)) {
         throw new InboxError("validation_error", `${host.name} takes ${lists.effort_word.toLowerCase()} ${lists.efforts.join(", ")}. Nothing was sent.`, { field: "to.launch.effort" });
+      }
+      const modelEfforts = target.choice?.model ? lists?.model_efforts?.[target.choice.model] : undefined;
+      if (target.choice?.effort && modelEfforts && !modelEfforts.includes(target.choice.effort)) {
+        throw new InboxError("validation_error", `${target.choice.model} takes ${lists!.effort_word.toLowerCase()} ${modelEfforts.join(", ")}. Nothing was sent.`, { field: "to.launch.effort" });
       }
       const model = target.choice?.model;
       const effort = target.choice?.effort;

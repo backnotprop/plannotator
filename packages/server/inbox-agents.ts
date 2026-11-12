@@ -43,6 +43,7 @@ import {
   INBOX_AGENT_LABELS,
   inboxAgentList,
   inboxElsewhereText,
+  inboxGrantText,
   type InboxAgentId,
   type InboxConnectReport,
 } from "@plannotator/core/inbox-types";
@@ -60,8 +61,8 @@ import { inboxDir } from "@plannotator/shared/inbox/schema";
 import { qwenHome, qwenHomeIsRelative } from "@plannotator/shared/inbox/qwen-sessions";
 import { INBOX_QWEN_TRUST_ON_CONNECT, QWEN_TRUST_REVOKED_REASON, ensureQwenTrust, retryQwenRevoke, setQwenTrust, type QwenTrustOutcome } from "./inbox-qwen-trust";
 import { addJsonMember, removeJsonMember } from "./json-edit";
-import { HERMES_PLUGIN_INSTALL, HERMES_WAKE_GRANT } from "@plannotator/core/inbox-hermes";
-import { hermesFound, hermesPluginInstalled } from "./inbox-hermes";
+import { HERMES_PLUGIN_INSTALL, HERMES_WAKE_GRANT, HERMES_WAKE_SETTING, HERMES_WAKE_UNDO_LINE } from "@plannotator/core/inbox-hermes";
+import { hermesFound, hermesPluginInstalled, hermesWakeGranted } from "./inbox-hermes";
 import {
   agentFileContains,
   describeFsError,
@@ -596,7 +597,7 @@ type ConnectWay =
   /** One key in a JSON file (`json`: how it is edited). */
   | { kind: "json"; keys: readonly string[]; json?: JsonFileRules }
   /** `inboxTool` on for Plannotator's own extension/plugin; `then`: the agent's own command that finishes connecting it. */
-  | { kind: "tool"; host: InboxToolHost; then?: { bin: string; args: readonly string[] } }
+  | { kind: "tool"; host: InboxToolHost; then?: ToolConnectStep }
   /** Only a person can connect it; `why` says how. */
   | { kind: "manual"; why: string }
   /** Nothing to do (Claude Code). */
@@ -1292,7 +1293,7 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
     detect: (e) => hermesPluginInstalled(e) || hermesFound(e),
     way: async (e) =>
       hermesPluginInstalled(e)
-        ? { kind: "tool", host: "hermes", then: { bin: "hermes", args: HERMES_WAKE_GRANT } }
+        ? { kind: "tool", host: "hermes", then: { bin: "hermes", args: HERMES_WAKE_GRANT, done: hermesWakeGranted, setting: HERMES_WAKE_SETTING, undo: HERMES_WAKE_UNDO_LINE } }
         : { kind: "manual", why: `add Plannotator's Hermes Agent plugin (${HERMES_PLUGIN_INSTALL})` },
     file: () => null,
     raw: () => null,
@@ -1539,9 +1540,19 @@ export function formatSeconds(ms: number): string {
   return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)} s`;
 }
 
+interface ToolConnectStep {
+  bin: string;
+  args: readonly string[];
+  done: (e: AgentEnvironment) => boolean;
+  setting: string;
+  undo: string;
+}
+
+type ToolGrant = { setting: string; undo: string };
+
 type AgentOutcome =
-  | { kind: "added"; record: InboxAgentRecord }
-  | { kind: "already"; record: InboxAgentRecord | null }
+  | { kind: "added"; record: InboxAgentRecord; granted?: ToolGrant }
+  | { kind: "already"; record: InboxAgentRecord | null; granted?: ToolGrant }
   | { kind: "foreign"; record: InboxAgentRecord; path: string | null }
   | { kind: "failed"; reason: string; path: string | null }
   | { kind: "manual"; why: string }
@@ -1581,9 +1592,11 @@ async function connectOne(spec: AgentSpec, options: ConnectOptions, at: string):
         return { kind: "failed", reason: "Plannotator's config.json can't be written", path: null };
       }
     }
-    const unfinished = way.then ? await finishToolConnect(e, way.then, timeoutMs) : null;
+    const step = way.then && !way.then.done(e) ? way.then : null;
+    const unfinished = step ? await finishToolConnect(e, step, timeoutMs) : null;
     if (unfinished) return { kind: "failed", reason: unfinished, path: null };
-    return configured === true ? { kind: "already", record: { state: "found", reach: "tool", path: null, at } } : { kind: "added", record: { state: "added", reach: "tool", path: null, at } };
+    const granted = step ? { granted: { setting: step.setting, undo: step.undo } } : {};
+    return configured === true ? { kind: "already", record: { state: "found", reach: "tool", path: null, at }, ...granted } : { kind: "added", record: { state: "added", reach: "tool", path: null, at }, ...granted };
   }
   const before = classify(spec.raw(e) ?? { kind: "absent" }, ourCommands(options), true);
   if (before.kind === "unreadable") {
@@ -1613,7 +1626,7 @@ async function connectOne(spec: AgentSpec, options: ConnectOptions, at: string):
   return { kind: "added", record: { state: "added", reach: "mcp", path: file, command, at } };
 }
 
-async function finishToolConnect(e: AgentEnvironment, then: { bin: string; args: readonly string[] }, timeoutMs: number): Promise<string | null> {
+async function finishToolConnect(e: AgentEnvironment, then: ToolConnectStep, timeoutMs: number): Promise<string | null> {
   const line = [then.bin, ...then.args].join(" ");
   const bin = e.which(then.bin);
   if (!bin) return `${then.bin} is not on PATH, so run ${line} yourself`;
@@ -1733,10 +1746,12 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
       case "added":
         report.added.push(spec.id);
         file.agents[spec.id] = outcome.record;
+        if (outcome.granted) (report.granted ??= []).push({ agent: spec.id, ...outcome.granted });
         break;
       case "already":
         report.already.push(spec.id);
         if (outcome.record) file.agents[spec.id] = outcome.record;
+        if (outcome.granted) (report.granted ??= []).push({ agent: spec.id, ...outcome.granted });
         break;
       case "foreign":
         report.foreign.push({ agent: spec.id, path: displayPath(outcome.path, e) });
@@ -1796,6 +1811,7 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
     report.foreign.length > 0 ||
     (report.elsewhere?.length ?? 0) > 0 ||
     (report.trusted?.length ?? 0) > 0 ||
+    (report.granted?.length ?? 0) > 0 ||
     (report.trust_failed?.length ?? 0) > 0;
   file.last_report = news ? { ...report, seen: false } : file.last_report;
   try {
@@ -1827,6 +1843,7 @@ export function formatConnectReport(report: InboxConnectReport): string[] {
       `Plannotator can now send your replies straight into any running ${inboxAgentList(report.trusted)} session, without it asking you first (Plannotator is its trusted sender). Turning it off in Settings → Agents, or plannotator uninstall, removes that.`,
     );
   }
+  for (const grant of report.granted ?? []) lines.push(inboxGrantText(grant));
   for (const failure of report.trust_failed ?? []) {
     lines.push(`${INBOX_AGENT_LABELS[failure.agent]} won't get your replies by itself: ${failure.reason}. Plannotator tries again at the next plannotator inbox.`);
   }

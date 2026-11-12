@@ -994,7 +994,7 @@ const LEDE: Record<SettingsSection, string> = {
   agents: "How each agent on this computer reaches the Inbox and learns when to use it. A change applies to that agent's next session; sessions already running keep what they started with.",
   accounts: '',
   prompts: "What Plannotator tells your agents. A change applies to each agent's next session.",
-  devices: 'Your phone, browsers on your other devices, and cloud agents the Inbox wakes.',
+  devices: 'Your phone, and browsers on your other devices.',
   machines: 'Your other computers with Plannotator. Each keeps its own Inbox; this one shows their threads too.',
   voice: 'Speak a reply instead of typing it.',
   archived: 'Threads you archived stay out of the list. Unarchive one to put it back and open it.',
@@ -1370,7 +1370,7 @@ export function SettingsPage(props: SettingsPageProps) {
         in {tildePath(store?.dir ?? settings.store_dir ?? settings.store?.dir ?? '', settings.home)}: messages, attached files as they were sent, and annotations.
       </p>
     ) : section === 'devices' && settings && !phonesOn ? (
-      <p className="ib-lede">Browsers on your other devices, and cloud agents the Inbox wakes.</p>
+      <p className="ib-lede">Browsers on your other devices.</p>
     ) : section && LEDE[section] ? (
       <p className="ib-lede">{LEDE[section]}</p>
     ) : null;
