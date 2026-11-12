@@ -274,6 +274,9 @@ export interface ReviewState {
   prContext: PRContext | null;
   /** Viewable attachments harvested from the current hosted PR/MR context. */
   prArtifacts: readonly PRArtifact[];
+  openPRArtifact: (artifactId: string) => void;
+  prArtifactFocus: { readonly id: string; readonly seq: number } | null;
+  onPRArtifactFocusHandled: (seq: number) => void;
   isPRContextLoading: boolean;
   prContextError: string | null;
   fetchPRContext: () => void;

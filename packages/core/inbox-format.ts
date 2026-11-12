@@ -38,14 +38,12 @@ export function shortAgentName(name: string, max = INBOX_AGENT_NAME_SHORT_MAX): 
 
 /**
  * The agent name the Inbox stores (send_message's and card's `agent_name`, the tag list's MCP rows): trimmed, and
- * past INBOX_AGENT_NAME_SHORT_MAX characters cut by shortAgentName's rule (design record "inbox-toasts-break-fixes":
- * names are capped in the server and the UI). A name is only ever shown and searched: sessions, never names, decide
- * a thread's owner, where a reply goes and what a tag names, so two names cut alike stay two agents. Null: none given.
+ * otherwise whole, so rows, the thread and search have all of it. Only a one-line place (a toast) cuts it, with
+ * shortAgentName, when it shows it. (Through 0.28.61 it was stored cut at INBOX_AGENT_NAME_SHORT_MAX.) Null: none given.
  */
 export function inboxStoredAgentName(raw: string | null | undefined): string | null {
   const name = raw?.trim();
-  if (!name) return null;
-  return graphemesOf(name).length <= INBOX_AGENT_NAME_SHORT_MAX ? name : shortAgentName(name);
+  return name ? name : null;
 }
 
 const TIME = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' });

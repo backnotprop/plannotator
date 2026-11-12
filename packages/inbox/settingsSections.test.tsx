@@ -814,7 +814,6 @@ test.skipIf(!hasDom)('phones off (the released default): Devices is Over your ta
   expect(el.querySelector('[data-settings-phones]')).toBeNull();
   expect(el.querySelector('[data-pair-flow]')).toBeNull();
   expect(buttonText(el, 'Pair a phone')).toBeNull();
-  // No phone group: Over your tailnet and Cloud agents (packages/inbox/cloud/) are the section's groups.
   expect([...el.querySelectorAll('.ib-spg .ib-sgroup')].map((g) => (g.hasAttribute('data-settings-tailscale') ? 'tailnet' : g.hasAttribute('data-settings-cloud') ? 'cloud' : 'other'))).toEqual(['tailnet', 'cloud']);
 });
 

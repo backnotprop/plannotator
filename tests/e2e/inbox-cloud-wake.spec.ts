@@ -87,7 +87,6 @@ test('pair a routine, send a test, write to it from New message: the thread says
   expect(seen).toHaveLength(1);
   expect(seen[0]!.authorization).toBe(`Bearer ${KEY}`);
   if (shotsDir) await page.screenshot({ path: join(shotsDir, 'e2e-02-paired.png') });
-  // The window never learns the key or the address.
   expect(await page.content()).not.toContain(KEY);
   await expect(section.locator('[data-cloud-agent]')).toContainText('Nightly fixer');
 

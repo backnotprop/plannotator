@@ -1,10 +1,26 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useContext } from 'react';
 import { createPortal } from 'react-dom';
 import { ImageThumbnail, getImageSrc } from './ImageThumbnail';
 import { ImageAnnotator } from './ImageAnnotator';
 import type { ImageAttachment } from '../types';
 import { modKey } from '../utils/platform';
-import { getUploadTransport } from '../utils/upload';
+import { CommentUploadContext, getUploadTransport } from '../utils/upload';
+
+export function pictureFileName(name: string, file: File): string {
+  const types: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/avif': 'avif', 'image/svg+xml': 'svg' };
+  const ext = types[file.type] ?? /\.([a-z0-9]{1,5})$/i.exec(file.name)?.[1]?.toLowerCase() ?? 'png';
+  // eslint-disable-next-line no-control-regex
+  const base = name.replace(/[\/\\\u0000-\u001f\u007f]+/g, '-').trim().slice(0, 120) || 'image';
+  return `${base}.${ext}`;
+}
+
+interface PendingPicture {
+  file: File;
+  name: string;
+  replaces: string | null;
+  progress: number;
+  error: string | null;
+}
 
 /**
  * Derive a clean, human-readable name from an original filename.
@@ -50,6 +66,7 @@ interface AttachmentsButtonProps {
   /** Hide the "Images" label (icon-only). When images.length > 0 the
    *  numeric badge still shows so the user can see the count. */
   hideLabel?: boolean;
+  onPendingChange?: (pending: boolean) => void;
 }
 
 export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
@@ -58,7 +75,16 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
   onRemove,
   variant = 'toolbar',
   hideLabel = false,
+  onPendingChange,
 }) => {
+  const hostUpload = useContext(CommentUploadContext);
+  const [pending, setPending] = useState<PendingPicture | null>(null);
+  const pendingAbort = useRef<AbortController | null>(null);
+  const isPending = pending !== null;
+  useEffect(() => {
+    if (hostUpload) onPendingChange?.(isPending);
+  }, [hostUpload, isPending, onPendingChange]);
+  useEffect(() => () => pendingAbort.current?.abort(), []);
   const [isOpen, setIsOpen] = useState(false);
   const [manualPath, setManualPath] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -123,7 +149,45 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
     setIsOpen(false); // Close popover when annotator opens
   };
 
+  const uploadThroughHost = (transport: NonNullable<typeof hostUpload>, picture: Omit<PendingPicture, 'progress' | 'error'>) => {
+    pendingAbort.current?.abort();
+    const abort = new AbortController();
+    pendingAbort.current = abort;
+    setPending({ ...picture, progress: 0, error: null });
+    const named = new File([picture.file], pictureFileName(picture.name, picture.file), { type: picture.file.type });
+    transport
+      .upload(named, {
+        signal: abort.signal,
+        onProgress: (loaded, total) => {
+          if (!abort.signal.aborted) setPending((current) => (current ? { ...current, progress: total > 0 ? loaded / total : 0 } : current));
+        },
+      })
+      .then((data) => {
+        if (abort.signal.aborted) return;
+        if (picture.replaces) onRemove(picture.replaces);
+        onAdd({ path: data.path, name: picture.name });
+        setPending(null);
+      })
+      .catch((err: unknown) => {
+        if (abort.signal.aborted) return;
+        const message = err instanceof Error && err.message ? err.message : 'The upload failed.';
+        setPending((current) => (current ? { ...current, error: message } : current));
+      });
+  };
+
+  const stopPending = () => {
+    pendingAbort.current?.abort();
+    pendingAbort.current = null;
+    setPending(null);
+  };
+
   const handleAnnotatorAccept = async (blob: Blob, hasDrawings: boolean, name: string) => {
+    if (hostUpload) {
+      const file = annotatorImage && !hasDrawings ? annotatorImage.file : new File([blob], 'annotated.png', { type: 'image/png' });
+      uploadThroughHost(hostUpload, { file, name, replaces: editingImage?.path ?? null });
+      handleAnnotatorClose();
+      return;
+    }
     setUploading(true);
     try {
       // Use annotated blob if drawings exist, otherwise original file
@@ -267,6 +331,36 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
         )}
       </button>
 
+      {pending && (
+        <span className="pn-picture-status inline-flex items-center gap-1 text-xs whitespace-nowrap" role="status" data-picture-status={pending.error ? 'failed' : 'uploading'}>
+          {pending.error ? (
+            <>
+              <span style={{ color: 'var(--destructive)' }} title={pending.error}>Picture not added</span>
+              <button
+                type="button"
+                className="px-1.5 py-1 rounded-md font-medium text-foreground hover:bg-muted/50"
+                onClick={() => hostUpload && uploadThroughHost(hostUpload, pending)}
+              >
+                Retry
+              </button>
+            </>
+          ) : (
+            <span className="text-muted-foreground tabular-nums">Uploading picture {Math.round(pending.progress * 100)}%</span>
+          )}
+          <button
+            type="button"
+            aria-label={pending.error ? 'Remove the picture' : 'Stop the upload'}
+            title={pending.error ? 'Remove the picture' : 'Stop the upload'}
+            className="w-6 h-6 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            onClick={stopPending}
+          >
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </span>
+      )}
+
       {/* Popover */}
       {isOpen && createPortal(
         <>
@@ -340,8 +434,8 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
                 className="hidden"
               />
 
-              {/* Manual path input */}
-              <div className="flex gap-2">
+              {/* Manual path input (not under a host's upload: a typed path or URL is not carried there) */}
+              {!hostUpload && <div className="flex gap-2">
                 <input
                   type="text"
                   value={manualPath}
@@ -358,7 +452,7 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
                 >
                   Add
                 </button>
-              </div>
+              </div>}
 
               {/* Grid of current attachments */}
               {images.length > 0 && (
@@ -402,6 +496,7 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
           initialName={annotatorInitialName}
           onAccept={handleAnnotatorAccept}
           onClose={handleAnnotatorClose}
+          sourceBlob={hostUpload ? annotatorImage?.file : undefined}
         />,
         document.body
       )}

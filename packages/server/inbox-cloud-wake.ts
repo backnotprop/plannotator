@@ -1,24 +1,3 @@
-/**
- * The cloud wake: the person's message or reply to a paired cloud agent
- * (inbox-cloud-agents.ts) is POSTed to its webhook, the key as
- * `Authorization: Bearer`, the body per preset (@plannotator/core/inbox-cloud).
- *
- * The rules (design "pair-cloud-agent", section 4):
- *  - at most one wake per thread per minute (INBOX_CLOUD_WAKE_GAP_MS); replies
- *    inside that minute are `held` and go together in the next wake;
- *  - each item's state is written on the message itself before the POST
- *    (`sending`) and after it, so every window shows one line and a wake that
- *    may have gone is never sent twice: a `sending` found at start, or no
- *    answer in time, is `uncertain` and never sent again;
- *  - only a 200 is `started` (Other: any 2xx), recorded as the delivery;
- *  - a 5xx or no connection retries on the Codex wake's backoff (30 s,
- *    doubling to 10 min); a 429 waits for its Retry-After; a refused key
- *    (401, 403) waits for a new key; any other answer is `failed`;
- *  - Remove: what still waits for the agent is `unpaired`, never sent.
- *
- * The agent is live in its project while it stays paired (`pinCloud`), so New
- * message's To lists it under its name.
- */
 
 import { homedir } from "node:os";
 import {
@@ -38,13 +17,10 @@ import { postCloudWebhook } from "./inbox-cloud-post";
 
 const RETRY_FIRST_MS = 30_000;
 const RETRY_MAX_MS = 10 * 60_000;
-/** States a wake left behind that a POST went out under: they start the thread's minute. */
 const POSTED = new Set(["started", "uncertain", "sending"]);
 
 export interface InboxCloudWaker {
-  /** `alive` for a paired agent's session, `dead` for a cloud session no longer paired, null for anything else. */
   status(session: string): "alive" | "dead" | null;
-  /** Agents were paired, re-keyed or removed: pin the live ones, settle a removed agent's items, look again. */
   agentsChanged(agents: readonly InboxCloudAgent[]): void;
   sweep(): Promise<void>;
   stop(): void;
@@ -53,14 +29,12 @@ export interface InboxCloudWaker {
 export function createInboxCloudWake(options: {
   store: InboxStore;
   agents: InboxCloudAgents;
-  /** The live sessions' pin (inbox-sessions.ts `pinCloud`). */
   pin: (session: string, root: string | null, name: string, host?: string) => void;
   threadUrl: (threadId: string) => string;
   now?: () => number;
   fetch?: typeof fetch;
   timeoutMs?: number;
   gapMs?: number;
-  /** The first retry's wait (default 30 s, doubling to 10 min). */
   retryMs?: number;
   log?: (line: string) => void;
 }): InboxCloudWaker {
@@ -70,13 +44,9 @@ export function createInboxCloudWake(options: {
   const log = options.log ?? ((line: string) => void process.stderr.write(`Inbox: ${line}\n`));
   let stopped = false;
   let first = true;
-  /** The agents pinned live, by session, with their names (a removed agent's items are settled under it). */
   const pinned = new Map<string, string>();
-  /** Each thread's last POST (ms), learned from its messages once, then kept. */
   const lastWake = new Map<string, number>();
-  /** Each thread's retry wait, doubling while its wakes fail. */
   const backoff = new Map<string, number>();
-  /** An agent at its hourly limit: no wake before this (ms). */
   const limitedUntil = new Map<string, number>();
   let timer: ReturnType<typeof setTimeout> | null = null;
   let nextDue: number | null = null;
@@ -98,14 +68,12 @@ export function createInboxCloudWake(options: {
     }
   };
 
-  /** Write an item's state, unless it already says this (the time of a repeat is not news). */
   const setWake = (item: InboxMessage, session: string, wake: InboxCloudWake) => {
     const before = store.message(item.id)?.cloud_wake;
     if (before && before.state === wake.state && before.next_at === wake.next_at && before.run_url === wake.run_url && before.status === wake.status) return;
     try {
       store.recordCloudWake(item.id, wake, session, inboxCloudHostOf(agents.agent(session)?.preset ?? wake.preset ?? "other"));
     } catch {
-      // Deleted meanwhile.
     }
   };
 
@@ -136,7 +104,6 @@ export function createInboxCloudWake(options: {
 
   const wakeItem = (item: InboxMessage): InboxCloudWakeItem => ({ id: item.id, at: item.created_at, body: item.body, files: item.attachments?.length ?? 0 });
 
-  /** One wake for a thread's waiting items. Answers when to look again (a retry, a limit), or null. */
   const wakeThread = async (agent: InboxCloudWakeAgent, threadId: string, items: InboxMessage[]): Promise<number | null> => {
     const thread = store.thread(threadId);
     if (!thread) return null;
@@ -158,7 +125,6 @@ export function createInboxCloudWake(options: {
     const retryLater = (status?: number): number => {
       const wait = Math.min((backoff.get(threadId) ?? (options.retryMs ?? RETRY_FIRST_MS) / 2) * 2, RETRY_MAX_MS);
       backoff.set(threadId, wait);
-      // A failed try started nothing: the minute is not spent.
       lastWake.set(threadId, 0);
       settle({ state: "retrying", next_at: iso(done + wait), ...(status ? { status } : {}) });
       log(`Could not wake the cloud agent "${agent.name}"${status ? ` (it answered ${status})` : " (no connection)"}. Trying again later.`);
@@ -207,14 +173,12 @@ export function createInboxCloudWake(options: {
     for (const [session, all] of pending) {
       const agent = agents.agent(session);
       if (!agent || !hasCloudWake(agent)) continue;
-      // Found `sending` at a start: it may have gone, so it never goes again.
       if (startPass) for (const item of all) if (item.cloud_wake?.state === "sending") setWake(item, session, { ...item.cloud_wake, state: "uncertain" });
       const open = all.filter((item) => !inboxCloudWakeSettled(store.message(item.id)?.cloud_wake));
       const byThread = new Map<string, InboxMessage[]>();
       for (const item of open) (byThread.get(item.thread_id) ?? byThread.set(item.thread_id, []).get(item.thread_id)!).push(item);
       for (const [threadId, items] of byThread) {
         if (stopped) return;
-        // A refused key: nothing goes until a new one is pasted (said once, on each item).
         if (agent.key_rejected_at) {
           for (const item of items) if (item.cloud_wake?.state !== "key_rejected") setWake(item, session, { state: "key_rejected", name: agent.name, preset: agent.preset, at: iso(now()) });
           continue;
@@ -280,7 +244,6 @@ export function createInboxCloudWake(options: {
     status: (session) => (!isInboxCloudSession(session) ? null : agents.agent(session) ? "alive" : "dead"),
     agentsChanged: (list) => {
       const paired = new Set(list.map((agent) => agent.session));
-      // Removed: what waited for it is never sent.
       const gone = new Set([...pinned.keys()].filter((session) => !paired.has(session)));
       if (gone.size > 0) {
         for (const [session, items] of store.pendingRepliesFor(gone, { tags: true })) {
@@ -291,7 +254,6 @@ export function createInboxCloudWake(options: {
         }
       }
       pinAll(list);
-      // A new key: the refused items go again, under the minute's rule.
       for (const agent of list) if (!agent.key_rejected_at) limitedUntil.delete(agent.session);
       void sweep();
     },

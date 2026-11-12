@@ -17,6 +17,7 @@ import {
   aliveArgv,
   CLAIM_EXIT,
   claimArgv,
+  cliArgvFor,
   cleanupArgv,
   DEBUG_LOG_MAX_BYTES,
   debugAppendArgv,
@@ -32,10 +33,35 @@ import {
   stopArgv,
   waitArgv,
 } from './launch'
+import { gitBashShell } from './git-bash'
 import { encodePowerShell, powerShellScript, powerShellShell } from './powershell'
 import { POSIX_SHELL, resolveShell, shellArgv, useShell, type ShellHost } from './shell'
 
 describe('the PowerShell shell, on any host', () => {
+  test("a typed Windows path with an apostrophe reaches the CLI whole, through PowerShell and through Git Bash", () => {
+    const path = "C:\\Users\\Administrator\\O'Brien [x]\\{a,b}\\plan.md"
+    const dir = 'C:\\Users\\Administrator\\.plannotator\\claude-code-mod\\s\\1'
+    for (const shell of [powerShellShell('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'), gitBashShell('C:\\Program Files\\Git\\bin\\bash.exe')]) {
+      useShell(shell)
+      try {
+        // Bare, the apostrophe opens nothing; quoted, the space and brackets stay too.
+        expect(cliArgvFor('annotate', "C:\\Users\\Administrator\\O'Brien\\plan.md --gate")).toEqual(['plannotator', 'annotate', "C:\\Users\\Administrator\\O'Brien\\plan.md", '--gate'])
+        const cli = cliArgvFor('annotate', `"${path}" --gate`)
+        expect(cli).toEqual(['plannotator', 'annotate', path, '--gate'])
+        const argv = launchArgv(dir, cli)
+        if (shell.name === 'sh') expect(argv.slice(-4)).toEqual(cli)
+        else {
+          // PowerShell reads each argument back from its own base64, so no quote in it is ever PowerShell syntax.
+          const script = Buffer.from(argv.at(-1)!, 'base64').toString('utf16le')
+          const encoded = [...script.matchAll(/\(Read-Argument '([^']*)'\)/g)].map((m) => Buffer.from(m[1]!, 'base64').toString('utf16le'))
+          expect(encoded).toEqual([dir, ...cli])
+        }
+      } finally {
+        useShell(POSIX_SHELL)
+      }
+    }
+  })
+
   test('-EncodedCommand is UTF-16LE base64, non-ASCII and surrogate pairs included', () => {
     for (const text of ['', 'a', 'ab', 'abc', "Write-Output 'é ✓ 😀'", 'C:\\Users\\Zoë\\repo']) {
       expect(encodePowerShell(text)).toBe(Buffer.from(text, 'utf16le').toString('base64'))

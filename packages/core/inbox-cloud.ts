@@ -1,38 +1,18 @@
-/**
- * A cloud agent (step 1 of "Pair a cloud agent"): a Claude Code routine, a
- * Grok Bot routine or any other webhook the person pastes in Settings →
- * Devices. The Inbox wakes it by POSTing to that webhook when the person
- * writes to it; the agent cannot reach the Inbox (that is a later step), so
- * it answers wherever its routine works (a PR, its own run).
- *
- * Pure: the presets, the wake's words and body, and how an answer reads.
- * The server side is packages/server/inbox-cloud-agents.ts (the 0600 file and
- * the routes) and packages/server/inbox-cloud-wake.ts (the wake).
- */
 
-/** The host of an "Other" cloud agent (the cloud mark). Its session is `cloud.<id>` whatever its kind. */
 export const INBOX_CLOUD_HOST = "cloud";
 
-/**
- * Each kind's host: its mark and its name in the window come from it, as every agent's do. A Claude Code routine
- * shows Claude Code's mark, a Grok Bot routine Grok Bot's, any other webhook the cloud.
- */
 export const INBOX_CLOUD_HOSTS = { "claude-routine": "cloud-claude", "grok-bot": "cloud-grok", muse: "cloud-muse", other: INBOX_CLOUD_HOST } as const;
 
-/** Whether a host is a paired cloud agent's (any kind). */
 export function isInboxCloudHost(host: unknown): boolean {
   return host === "cloud" || host === "cloud-claude" || host === "cloud-grok" || host === "cloud-muse";
 }
 
 export const INBOX_CLOUD_POLLING_HOSTS: ReadonlySet<string> = new Set(["cloud-muse"]);
 
-/** At most one wake per thread in this window; replies inside it go together in the next wake. */
 export const INBOX_CLOUD_WAKE_GAP_MS = 60_000;
 
-/** One wake waits this long for an answer; past it the wake is uncertain and never sent again. */
 export const INBOX_CLOUD_WAKE_TIMEOUT_MS = 15_000;
 
-/** Claude's fire endpoint takes at most this many characters of `text`. */
 export const INBOX_CLOUD_TEXT_MAX = 60_000;
 
 export const INBOX_CLOUD_PRESETS = ["claude-routine", "grok-bot", "muse", "other"] as const;
@@ -64,14 +44,12 @@ export function isInboxCloudPreset(value: unknown): value is InboxCloudPreset {
   return typeof value === "string" && (INBOX_CLOUD_PRESETS as readonly string[]).includes(value);
 }
 
-/** A cloud agent's session id: `cloud.` and 12 lowercase hex characters. */
 export const INBOX_CLOUD_SESSION_PATTERN = /^cloud\.[0-9a-f]{12}$/;
 
 export function isInboxCloudSession(session: unknown): session is string {
   return typeof session === "string" && INBOX_CLOUD_SESSION_PATTERN.test(session);
 }
 
-/** What the window learns about a paired cloud agent: never its address or its key. */
 export interface InboxCloudAgentView {
   session: string;
   name: string;
@@ -90,50 +68,26 @@ export interface InboxCloudLink {
   last_seen_at: string | null;
 }
 
-/**
- * Where one person message stands with its cloud agent, kept on the message
- * itself (`InboxMessage.cloud_wake`) so every window, device and restart sees
- * the same line, and so a wake that may have gone is never sent twice.
- */
 export interface InboxCloudWake {
   state: InboxCloudWakeState;
-  /** The agent's name when this was written. */
   name: string;
-  /** Its kind (Grok Bot's line points at its chat, which has no run link). */
   preset?: InboxCloudPreset;
   at: string;
-  /** `started`: the run's link, when the product returns one (Claude). */
   run_url?: string;
-  /** `held`, `retrying`, `rate_limited`: when the next try goes. */
   next_at?: string;
-  /** `failed`, `retrying`: the routine's HTTP status, when it answered. */
   status?: number;
 }
 
-/**
- * - `held`: waits for the thread's next wake (one per minute), with the replies since.
- * - `sending`: the POST is out. Found at a start, it is treated as `uncertain`.
- * - `started`: a 200; the run started.
- * - `uncertain`: no answer in time, or the connection broke mid-request; never sent again.
- * - `retrying`: a 5xx or no connection; tried again on a backoff.
- * - `rate_limited`: a 429; tried again after its Retry-After.
- * - `key_rejected`: a 401 or 403; tried again once a new key is pasted.
- * - `failed`: any other answer (paused, not found); not tried again.
- * - `unpaired`: the agent was removed before it went.
- */
 export type InboxCloudWakeState = "held" | "sending" | "started" | "uncertain" | "retrying" | "rate_limited" | "key_rejected" | "failed" | "unpaired";
 
-/** States that end the item: nothing sends it again by itself. */
 export function inboxCloudWakeSettled(wake: InboxCloudWake | null | undefined): boolean {
   return !!wake && (wake.state === "started" || wake.state === "uncertain" || wake.state === "failed" || wake.state === "unpaired" || wake.state === "sending");
 }
 
-/** One person message a wake carries. */
 export interface InboxCloudWakeItem {
   id: string;
   at: string;
   body: string;
-  /** Files attached in the Inbox: named, never sent. */
   files: number;
 }
 
@@ -141,11 +95,9 @@ export interface InboxCloudWakeInput {
   name: string;
   thread: { id: string; subject: string; url: string };
   items: readonly InboxCloudWakeItem[];
-  /** What still waits on the person in the thread. */
   open: { questions: number; actions: number };
 }
 
-/** The plain words of a wake, the same for every preset (Claude gets only these). */
 export function inboxCloudWakeText(input: InboxCloudWakeInput): string {
   const lines: string[] = [];
   lines.push(`Plannotator Inbox: the person wrote to you (${input.name}).`);
@@ -170,7 +122,6 @@ export function inboxCloudWakeText(input: InboxCloudWakeInput): string {
   return text.slice(0, INBOX_CLOUD_TEXT_MAX - note.length) + note;
 }
 
-/** The request body for a preset: Claude routines take `{ text }` only; Grok Bot and Other get JSON with the same text. */
 export function inboxCloudWakeBody(preset: InboxCloudPreset, input: InboxCloudWakeInput): Record<string, unknown> {
   const text = inboxCloudWakeText(input);
   if (preset === "claude-routine") return { text };
@@ -184,13 +135,11 @@ export function inboxCloudWakeBody(preset: InboxCloudPreset, input: InboxCloudWa
   };
 }
 
-/** The test wake Settings' Send a test fires. */
 export function inboxCloudTestBody(preset: InboxCloudPreset, name: string): Record<string, unknown> {
   const text = `Plannotator Inbox: a test from Settings, to check that ${name} can be woken. There is no message and nothing to do. End the run.`;
   return preset === "claude-routine" ? { text } : { text, source: "plannotator-inbox", agent: name, test: true };
 }
 
-/** The headers of a wake. Claude's fire endpoint needs `anthropic-version` (any version since 2023-06-01). */
 export function inboxCloudWakeHeaders(preset: InboxCloudPreset, key: string): Record<string, string> {
   return {
     Authorization: `Bearer ${key}`,
@@ -199,7 +148,6 @@ export function inboxCloudWakeHeaders(preset: InboxCloudPreset, key: string): Re
   };
 }
 
-/** What a webhook's answer means. */
 export type InboxCloudAnswer =
   | { kind: "started"; run_url?: string }
   | { kind: "retry"; status: number }
@@ -207,7 +155,6 @@ export type InboxCloudAnswer =
   | { kind: "key_rejected"; status: number }
   | { kind: "failed"; status: number };
 
-/** How long a 429 asks to wait: `Retry-After` in seconds or as a date; a minute when it says nothing usable. */
 export function inboxRetryAfterMs(header: string | null, now: number): number {
   const fallback = 60_000;
   if (!header) return fallback;
@@ -218,11 +165,6 @@ export function inboxRetryAfterMs(header: string | null, now: number): number {
   return fallback;
 }
 
-/**
- * Read a webhook's answer. Only a 200 counts as started for Claude and Grok
- * (both say so); Other takes any 2xx. The run link is Claude's
- * `claude_code_session_url`, kept only when it is an https link on claude.ai.
- */
 export function inboxCloudAnswer(preset: InboxCloudPreset, status: number, retryAfter: string | null, body: unknown, now: number): InboxCloudAnswer {
   const ok = preset === "other" ? status >= 200 && status < 300 : status === 200;
   if (ok) {
@@ -235,7 +177,6 @@ export function inboxCloudAnswer(preset: InboxCloudPreset, status: number, retry
   return { kind: "failed", status };
 }
 
-/** Plain words for a failed answer's status. */
 export function inboxCloudStatusWords(status: number | undefined): string {
   if (status === undefined) return "no answer";
   if (status === 400) return "it refused the request (a paused routine answers this)";
@@ -244,7 +185,6 @@ export function inboxCloudStatusWords(status: number | undefined): string {
   return `it answered ${status}`;
 }
 
-/** The thread's line for a wake, as plain words (the window adds the run link and the Settings link). */
 export function inboxCloudWakeLine(wake: InboxCloudWake, time: (iso: string) => string): string {
   const name = wake.name;
   const preset = wake.preset ?? null;

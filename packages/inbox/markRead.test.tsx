@@ -312,7 +312,8 @@ test.skipIf(!hasDom)('E marks the open thread read; a stopped thread warns with 
   press('e');
   await until(() => posted.at(-1)?.path === `/api/inbox/threads/${ids.stopped}/read`, 'the Mark read');
   await until(() => markedRead(el), 'Move back in ⋯');
-  expect(el.querySelector('[data-read-line]')?.textContent).toContain('2 questions were closed unanswered');
+  // The line under the header waits for the write and its reads, so it shows whole.
+  await until(() => el.querySelector('[data-read-line]')?.textContent?.includes('2 questions were closed unanswered') === true, 'the read line');
   const toast = document.querySelector('[data-inbox-toast]') as HTMLElement;
   expect(toast.querySelector('.ib-tlead')?.textContent).toBe('Marked read');
   expect(toast.querySelector('.ib-tdetail')?.textContent).toBe('Claude Code was stopped');
