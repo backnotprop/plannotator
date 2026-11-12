@@ -12,6 +12,8 @@ import { appliedFilter, filterListSections, localDay, pickCount, useListFilter }
 import { filterSections, heldNews as heldNewsOf, heldNotice, listGroups, lookedRow, markHeldRowLooked, showLandsIn, waitingCount, type OpenThread } from '../held';
 import { useAgentListFilter } from '../agentsList';
 import { filterAgentRows } from '../agents/model';
+import { filterTagRows } from '../threadTags';
+import { useThreadTagsHost } from '../useThreadTagsHost';
 import { projectsWithReadable, shownProjects } from '../projectMenu';
 import { projectActivity } from '../projectSort';
 import type { Route } from './route';
@@ -34,9 +36,10 @@ export interface ListViewInputs {
   openedHere: { readonly current: Set<string> };
   heldOpen: () => OpenThread | null;
   heldRead: ReadonlySet<string>;
+  tags: Omit<Parameters<typeof useThreadTagsHost>[0], 'routeTag' | 'self' | 'windowRows' | 'latestSections'>;
 }
 
-export function useListShown({ latest, projects, route, thread, threadRow, rowPatches, pinPatches, looking, shown, machines, hideAway, openedHere, heldOpen, heldRead }: ListViewInputs) {
+export function useListShown({ latest, projects, route, thread, threadRow, rowPatches, pinPatches, looking, shown, machines, hideAway, openedHere, heldOpen, heldRead, tags }: ListViewInputs) {
   const latestSections = latest?.sections ?? [];
   // Every row the list knows, the Snoozed band's too: only counts read `latestSections`, which has none of those.
   const latestGroups = useMemo(() => (latest ? listGroups(latest) : []), [latest]);
@@ -78,16 +81,17 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
   const threadAgentContext = useMemo(() => ({ rows: windowRows, machines }), [windowRows, machines]);
   // The Agents section's filter (`#agent=<id>`): one agent's threads, named by its row's name.
   const filterAgent = useAgentListFilter(route.page === 'inbox' ? (route.agent ?? null) : null, machines, windowRows);
+  const { tagsOfRow, filterTag, threadTagsHost, sidebarTags } = useThreadTagsHost({ ...tags, routeTag: route.page === 'inbox' ? (route.tag ?? null) : null, self: machines.self, windowRows, latestSections });
   const projectNames = useMemo(
     () => machineProjectNames({ projects, sidebar: shownProjects(projects, sidebarKeeps), sections: shown ?? [], pins: pinRows }, machines, !filterMachine),
     [projects, sidebarKeeps, shown, pinRows, machines, filterMachine],
   );
   /** The sidebar's Machines counts: rows waiting on the person per machine, as Projects counts them. */
   const sidebarMachineCounts = useMemo(() => machineCounts(latestSections, machines), [latestSections, machines]);
-  /** One project's rows, then one machine's, then one agent's, then without the machines the person hid while away. */
   const filterList = useCallback(
-    (sections: readonly InboxListSection[]) => filterAgentRows(filterMachineRows(filterSections(sections, route.project), machines, filterMachine?.id ?? null, hideAway), filterAgent, machines.self),
-    [route.project, machines, filterMachine, filterAgent, hideAway],
+    (sections: readonly InboxListSection[]) =>
+      filterTagRows(filterAgentRows(filterMachineRows(filterSections(sections, route.project), machines, filterMachine?.id ?? null, hideAway), filterAgent, machines.self), route.tag ?? null, tagsOfRow),
+    [route.project, machines, filterMachine, filterAgent, hideAway, route.tag, tagsOfRow],
   );
   // The list's filter (listFilter.ts): this browser's picks; on a project's page its Project picks step aside. The
   // day is in the keys so Today and the last N days move on at midnight.
@@ -118,7 +122,7 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
     listSections.every((section) => section.id === 'snoozed' || section.threads.length === 0) &&
     listFilterRows.some((row) => !row.snoozed);
   // The list's name: Inbox, or the project's window name (or the machine's, or the agent's); its back buttons read the same.
-  const listTitle = filterProject ? (projectNames.get(filterProject.id) ?? filterProject.name) : filterMachine ? filterMachine.name : filterAgent ? filterAgent.name : 'Inbox';
+  const listTitle = filterProject ? (projectNames.get(filterProject.id) ?? filterProject.name) : filterMachine ? filterMachine.name : filterAgent ? filterAgent.name : filterTag ? filterTag.name : 'Inbox';
   const heldNews = shown && latest ? heldNotice(filterShown(shown), filterShown(latestGroups), openedHere.current, heldOpen(), projectNames) : null;
   // Show opens the groups the rows it brings in land in (held.ts showLandsIn), so they are on screen.
   // `news`: the same threads, for the pill at the list's edge while the line is out of view (ListNewPill.tsx).
@@ -131,5 +135,5 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
           news: heldNewsOf(filterShown(shown), filterShown(latestGroups), openedHere.current, heldOpen()),
         }
       : null;
-  return { latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listTitle, notice };
+  return { latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listTitle, notice, tagsOfRow, filterTag, threadTagsHost, sidebarTags };
 }

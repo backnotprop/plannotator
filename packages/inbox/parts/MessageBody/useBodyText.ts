@@ -30,7 +30,7 @@ export function useBodyText({ message, sentActions, sentAnswers, replyFiles, pro
   const replyFileList = ownReply ? replyFiles?.files : undefined;
   const replyPeople = ownReply ? replyFiles?.personMessageIds : undefined;
   // `#Shape` naming a live initiative links to the Board filtered to it (approval "board-hashtags"; display only).
-  const tagInitiatives = useLiveInitiatives();
+  const { initiatives: tagInitiatives, href: tagHref } = useLiveInitiatives();
   const linkFiles = useCallback(
     (text: string) =>
       linkHashtags(
@@ -38,8 +38,9 @@ export function useBodyText({ message, sentActions, sentAnswers, replyFiles, pro
           ? linkReplyFeedback(text, { files: replyFileList, projectRoot, personMessageIds: replyPeople, replyAt: message.created_at })
           : text,
         tagInitiatives,
+        tagHref,
       ),
-    [replyFileList, replyPeople, projectRoot, message.created_at, tagInitiatives],
+    [replyFileList, replyPeople, projectRoot, message.created_at, tagInitiatives, tagHref],
   );
   // The feedback the Send wrote after the person's words ("# Feedback on the attached files"…): a block of
   // its own, its headings at text size (replyFeedback.ts; display only). The person's own message only.

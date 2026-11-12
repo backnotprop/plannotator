@@ -12,9 +12,10 @@
  * messages, keeping the frame (full screen stays full screen, with its
  * toolbar) and replacing the route; › greys at the end,
  * keeps focus, and says "Last file in this thread"; the list opens
- * upward, grouped by message, and jumps; inside the HTML page a plain `]`
- * steps while armed (Annotate) and does nothing in Interact or in the page's
- * text field; a typed image comment never stops a step (its words wait for
+ * upward, grouped by message, and jumps; the HTML page opens in Interact,
+ * and inside it a plain `]` steps in Interact (a key the page did not use) and
+ * in Annotate, never from the page's text field; Annotate, once on, is still
+ * on when the page opens again; a typed image comment never stops a step (its words wait for
  * that image, back in its box when it opens again); one Back returns
  * to the thread; on a phone (always full screen) the toolbar's ⋯ opens every
  * file of the thread as a sheet.
@@ -236,7 +237,7 @@ test('beside the thread: "1 of 5 · SCOPE.md" in the bar, the name gone from the
   await shot('01-side-markdown');
 });
 
-test('] and › step in thread order, keep the frame, and replace the route; inside the HTML page ] steps only while armed', async () => {
+test('] and › step in thread order, keep the frame, and replace the route; inside the HTML page ] steps in Interact and in Annotate', async () => {
   const page = world.page;
   // Full screen: a step keeps it (and its toolbar), the route is replaced.
   await pane().getByRole('button', { name: 'Full screen' }).click();
@@ -261,8 +262,8 @@ test('] and › step in thread order, keep the frame, and replace the route; ins
   await expect(htmlFrame().locator('#promo')).toHaveValue('a]b[');
   await expectAt(2, 'checkout-flow.html');
 
-  // Armed (Annotate): a plain ] pressed in the page steps.
-  await expect(pane().locator('[data-html-annotate-toggle]')).toHaveAttribute('aria-pressed', 'true');
+  // Interact (how the page opens): a plain ] pressed in the page, which the page does not use, steps.
+  await expect(pane().locator('[data-html-annotate-toggle]')).toHaveAttribute('aria-pressed', 'false');
   await htmlFrame().locator('header').evaluate((el) => {
     el.setAttribute('tabindex', '-1');
     (el as HTMLElement).focus();
@@ -270,19 +271,23 @@ test('] and › step in thread order, keep the frame, and replace the route; ins
   await page.keyboard.press(']');
   await expectAt(3, 'retry-states.mmd');
 
-  // Back to the page, then Interact: ] belongs to the page, nothing steps.
+  // Back to the page, then Annotate: a plain ] pressed in the page steps too.
   await page.keyboard.press('[');
   await expectAt(2, 'checkout-flow.html');
   await expect(htmlFrame().locator('#pay')).toHaveText('Pay now');
   await pane().locator('[data-html-annotate-toggle]').click();
-  await expect(pane().locator('[data-html-annotate-toggle]')).toHaveAttribute('aria-pressed', 'false');
+  await expect(pane().locator('[data-html-annotate-toggle]')).toHaveAttribute('aria-pressed', 'true');
   await htmlFrame().locator('header').evaluate((el) => {
     el.setAttribute('tabindex', '-1');
     (el as HTMLElement).focus();
   });
   await page.keyboard.press(']');
-  await page.waitForTimeout(400);
+  await expectAt(3, 'retry-states.mmd');
+  // Back again: the page is still in Annotate.
+  await page.keyboard.press('[');
   await expectAt(2, 'checkout-flow.html');
+  await expect(htmlFrame().locator('#pay')).toHaveText('Pay now');
+  await expect(pane().locator('[data-html-annotate-toggle]')).toHaveAttribute('aria-pressed', 'true');
 
   // The › button steps on to the end, focus staying on it.
   await nextButton().click();

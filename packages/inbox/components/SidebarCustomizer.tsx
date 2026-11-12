@@ -36,6 +36,7 @@ import {
   type InboxSidebarStack,
 } from '@plannotator/core/inbox-sidebar';
 import { GogglesMark } from '../agents/AgentsSection';
+import { TagIcon } from './InitiativePeek';
 import { useInboxAgents } from '../agentsList';
 import { Icon } from '../icons';
 import { usePhone } from '../phone';
@@ -55,9 +56,9 @@ function Grip() {
   );
 }
 
-/** An item's icon; Agents draws the section's own goggles. */
+/** An item's icon; Agents draws the section's own goggles, Tags the tag's `#`. */
 function ItemIcon({ item }: { item: InboxSidebarItem }) {
-  return item === 'agents' ? <GogglesMark /> : <Icon name={SIDEBAR_ITEM_ICON[item]} />;
+  return item === 'agents' ? <GogglesMark /> : item === 'tags' ? <TagIcon className="ib-ic" /> : <Icon name={SIDEBAR_ITEM_ICON[item]} />;
 }
 
 type Drop = { stack: InboxSidebarStack; index: number };
@@ -225,6 +226,7 @@ export function SidebarCustomizer({
             <Icon name="folder" />
             Starred and Projects
           </div>
+          {drawn.has('tags') && <FixedRow item="tags" layout={layout} />}
           {drawn.has('agents') && <AgentsRow layout={layout} machines={machines === true} />}
           {group('bottom')}
         </div>

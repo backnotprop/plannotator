@@ -84,6 +84,7 @@ export interface Route {
    * place of a project or a machine, never beside them.
    */
   agent?: string | null;
+  tag?: string | null;
   thread: string | null;
   /**
    * An attachment open beside the thread: `file=att_…`, `v=sent` for the version the agent sent, `at=` an annotation to show,
@@ -185,6 +186,7 @@ export function routeOf(fullHash: string): Route {
     project: fromReviews ? null : params.get('project'),
     machine: params.get('machine'),
     agent: fromReviews ? null : params.get('agent'),
+    tag: fromReviews ? null : params.get('tag'),
     thread,
     file: fileId ? { id: fileId, version: params.get('v') === 'sent' ? 'sent' : 'current', focus: params.get('at'), linked: params.get('linked'), view: parseFileView(params.get('view')), set: params.get('set') } : null,
     guide: thread ? params.get('guide') : null,

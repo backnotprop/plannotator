@@ -20,7 +20,7 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxSearchIndex } from "@plannotator/shared/inbox/search";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxUploadAttachments, receiveInboxUpload, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
-import type { InboxCloudAgent, InboxCloudAgents } from "./inbox-cloud-agents";
+import { hasCloudWake, type InboxCloudAgent, type InboxCloudAgents } from "./inbox-cloud-agents";
 import { createInboxMcpServer, type InboxMcpContext } from "./inbox-mcp";
 import { fail, okComplete, type ToolResult } from "./inbox-mcp-result";
 import { INBOX_AGENT_SEARCH_LIMIT, INBOX_AGENT_SEARCH_BUILD_WAIT_MS, rowOf, searchRowText } from "./inbox-mcp-search";
@@ -120,7 +120,7 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
         if (ids.length !== uploads.length || ids.some((id, i) => id !== uploads[i])) throw new InboxError("attachment_path_refused", "attachments: uploaded bytes only.");
         return inboxUploadAttachments(store.dir, uploads, at);
       },
-      sessionWakes: async (_host, session) => session === agent.session,
+      sessionWakes: async (_host, session) => session === agent.session && hasCloudWake(agent),
       stepsOn: () => false,
       boardOn: () => false,
       ...(context.searchIndex ? { searchIndex: context.searchIndex } : {}),

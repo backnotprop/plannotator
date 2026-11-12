@@ -1,4 +1,5 @@
 import { perfInteraction, perfKeystroke } from '../perfMarks';
+import { useThreadArmed } from '../threadArmed';
 import { postDecisions, threadHasQuestionCards } from '../decisionExport';
 import { ThreadPullsButton } from '../threadPulls/ThreadPulls';
 import { machineOf, selfMachineId } from '../inboxUrl';
@@ -162,7 +163,7 @@ import { fitWholeFootRowForms, footRowOpenQuestionsForm, footRowTokens, laidOutC
 import { useTextUnderFoot } from '../footLine';
 import { clearPhoneHead, fitPhoneHead } from '../headFit';
 import { useInboxTextSize } from '../textSize';
-import { openQuestionsShown, placeOf, reaskItemLabel, skipToggledAnswer, threadOpenActions, threadOpenQuestions, type OpenQuestion, type OpenQuestionPlace } from '../openQuestions';
+import { openQuestionsShown, reaskItemLabel, skipToggledAnswer, threadOpenActions, threadOpenQuestions, type OpenQuestion } from '../openQuestions';
 import { newUuid } from '../uuid';
 import { ShortcutHint, useShortcutAria, useShortcutHintShown, withShortcut } from '../shortcuts/hint';
 import { lastInput, traversedJustNow } from '../lastInput';
@@ -183,6 +184,7 @@ import { AckPill } from '../parts/AckPill';
 import { HeadMark } from '../parts/HeadMark';
 import { SkipChip } from '../parts/SkipChip';
 import { namedTagOptions, useThreadSessions } from '../thread/useThreadSessions';
+import { measureOpenPlaces } from '../thread/openPlaces';
 import { ReplyTextField } from '../parts/ReplyTextField';
 import { labelledAuthorName } from '../parts/AuthorName';
 import { MessageBody } from '../parts/MessageBody/MessageBody';
@@ -224,6 +226,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const launchOn = !!launched && runLine !== undefined;
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
+  const htmlArmed = useThreadArmed(thread.thread_id);
   const launchAct = async <T,>(action: () => Promise<T>, done?: string | ((result: T) => { lead: string; detail?: string })) => {
     setLaunchError(null);
     try {
@@ -3736,10 +3739,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       : lastTo
         ? deliveryLine({
             name: last.delivery ? toName(last, last.delivery) : last.to ? toName(last, last.to) : hostName(lastTo.host),
-            deliveredAt: last.delivery?.at ?? null,
+            deliveredAt: last.delivery?.at ?? (recipientConnection?.polls ? (sent?.checked_at ?? null) : null),
             time: whenTime,
             // A Codex reply whose `codex queue` ran out of time may not have gone: saved, not queued.
-            wakes: !uncertainItem(recipientConnection, last.id),
+            wakes: !recipientConnection?.polls && !uncertainItem(recipientConnection, last.id),
             sendingNow: !!last.deliver_now_at,
             connection: recipientConnection,
             undelivered: undelivered ? { host: hostName(lastTo.host) } : null,
@@ -3761,7 +3764,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           });
   // A hand-off inside its Undo window (approval "inbox-tag-handoff") goes to nobody yet: its line says when.
   const heldHandoff = last.author.kind === 'person' && !!last.handoff && !last.handoff.settled_at && !last.handoff.undone_at;
-  const cloudLast = last.author.kind === 'person' && !isInboxNote(last) && (last.cloud_wake != null || isInboxCloudHost(lastTo?.host)) ? last : null;
+  const cloudLast = last.author.kind === 'person' && !isInboxNote(last) && (last.cloud_wake != null || (isInboxCloudHost(lastTo?.host) && !recipientConnection?.polls && !last.delivery)) ? last : null;
   const delivered: DeliveryLine | null = cloudLast
     ? null
     : heldHandoff && deliveredNow
@@ -4046,37 +4049,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // these" is offered (they live in the list, so never out of reach). Every question answered in the draft: the icon
   // alone, "? ⌄" (approval "reply-bar-pairs": the draft counts those), so the list and its Unskip stay in reach.
   const openQShown = openQuestionsShown(openQ.questions, reaskShown, openActions.length) || decide !== null;
-  /** Where each listed card sits now: in a folded message, or above or below the middle of the thread's view. */
-  const measureOpenQuestions = (): ReadonlyMap<string, OpenQuestionPlace> => {
-    const places = new Map<string, OpenQuestionPlace>();
-    const body = bodyRef.current;
-    const current = foldRef.current;
-    const hidden = new Set(current.hidden.flatMap((ids, index) => stillHidden(ids, current.shown[index])));
-    const view = body?.getBoundingClientRect() ?? { top: 0, bottom: 0 };
-    for (const q of openQ.questions) {
-      if (current.folded.has(q.messageId) || hidden.has(q.messageId)) {
-        places.set(q.id, 'folded');
-        continue;
-      }
-      const card =
-        body?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(q.messageId)}"] [data-question-key="${CSS.escape(q.key)}"]`) ??
-        body?.querySelector<HTMLElement>(`[data-message-article="${CSS.escape(q.messageId)}"]`) ??
-        null;
-      places.set(q.id, placeOf(card?.getBoundingClientRect() ?? null, view));
-    }
-    for (const a of openActions) {
-      if (current.folded.has(a.messageId) || hidden.has(a.messageId)) {
-        places.set(a.id, 'folded');
-        continue;
-      }
-      const row =
-        body?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(a.messageId)}"] [data-action-card="${CSS.escape(a.key)}"]`) ??
-        body?.querySelector<HTMLElement>(`[data-message-article="${CSS.escape(a.messageId)}"]`) ??
-        null;
-      places.set(a.id, placeOf(row?.getBoundingClientRect() ?? null, view));
-    }
-    return places;
-  };
+  const measureOpenQuestions = () => measureOpenPlaces(bodyRef.current, foldRef.current, openQ.questions, openActions);
 
   // The error after a failed Send (or Re-ask) sits ABOVE the button row it belongs to (approval
   // "thread-foot-status-right"), in the two states that have one: the reply box and the closed foot.
@@ -6127,6 +6100,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         // A full screen opened over another file beside the thread goes back to that file: a comment not saved yet waits as the full screen file's draft.
         exitLeavesFor={fullExitFile && fullExitFile !== openAttachment.id ? (allFiles.find((a) => a.id === fullExitFile)?.name ?? 'that file') : null}
         phone={phone}
+        armedStart={htmlArmed.armedStart}
+        onArmed={htmlArmed.onArmed}
         openIn={openIn}
         steps={optionSet ? optionSet.steps : steps}
         allSteps={steps}

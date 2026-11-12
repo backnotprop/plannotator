@@ -107,10 +107,12 @@ describe('Plannotator Inbox launch switch', () => {
     expect(inlined && JSON.parse(inlined)).toBe(source);
   });
 
-  test('on: the cloud agent setup page is served as plain ASCII markdown at /inbox/cloud-agent.md', async () => {
-    const source = await readFile(join(marketingRoot, 'src/lib/inbox-cloud-agent.md'), 'utf8');
-    expect(source).toMatch(/^[\x09\x0a\x20-\x7e]*$/);
-    expect(await read(dist.on, 'inbox/cloud-agent.md')).toBe(source);
+  test('on: the cloud agent setup pages are served as plain ASCII markdown at /inbox/cloud-agent.md and /inbox/muse.md', async () => {
+    for (const [file, path] of [['inbox-cloud-agent.md', 'inbox/cloud-agent.md'], ['inbox-muse.md', 'inbox/muse.md']]) {
+      const source = await readFile(join(marketingRoot, 'src/lib', file), 'utf8');
+      expect(source).toMatch(/^[\x09\x0a\x20-\x7e]*$/);
+      expect(await read(dist.on, path)).toBe(source);
+    }
   });
 
   test('on: every image on the page and the post resolves', async () => {

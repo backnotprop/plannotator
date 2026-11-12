@@ -131,6 +131,7 @@ packages/inbox/notificationStates.test.tsx
 packages/inbox/attachmentStepping.test.tsx
 packages/inbox/imageZoom.test.tsx
 packages/inbox/fullView.test.tsx
+packages/inbox/htmlOpensInInteract.test.tsx
 packages/inbox/earlierComments.test.tsx
 packages/inbox/phoneStepping.test.tsx
 packages/inbox/htmlPageSize.test.tsx
@@ -319,6 +320,7 @@ packages/ui/hooks/useAnnotationHighlighter.selectionEdges.test.tsx
 packages/ui/hooks/useAnnotationHighlighter.releaseOutside.test.tsx
 packages/ui/hooks/useAnnotationHighlighter.caretDrag.test.tsx
 packages/ui/hooks/useAnnotationHighlighter.wobbleClick.test.tsx
+packages/ui/hooks/useAnnotationHighlighter.touchRest.test.tsx
 packages/ui/components/AnnotationToolbar.scrollOut.test.tsx
 packages/ui/hooks/useClickWord.test.tsx
 packages/ui/components/Viewer.clickAWord.test.tsx
@@ -610,6 +612,8 @@ packages/inbox/reviewPaneGuide.test.tsx
 packages/inbox/reviewJump.test.tsx
 packages/inbox/reviewAllFilesTree.test.tsx
 packages/inbox/pulls/pullFilter.test.tsx
+packages/inbox/pulls/pullLaunchpad.test.tsx
+packages/inbox/pulls/prPaneFocus.test.tsx
 packages/inbox/pulls/pullDetails.test.tsx
 packages/inbox/guideGlobalComment.test.tsx
 packages/inbox/guideChapterDiagram.test.tsx
@@ -712,3 +716,4 @@ packages/inbox/paneRetention.test.tsx
 packages/review-editor/components/guide/GuideEmptyState.aiOff.test.tsx
 packages/review-editor/components/PRMediaScope.test.tsx
 packages/ui/components/InlineMarkdown.imgTags.test.tsx
+packages/inbox/threadTags.test.tsx

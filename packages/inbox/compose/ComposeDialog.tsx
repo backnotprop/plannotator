@@ -57,6 +57,7 @@ import { useShortcutAria } from '../shortcuts/hint';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { INBOX_MESSAGE_SKILL_AUDIENCE, INBOX_REPLY_SKILL_AUDIENCE, inboxSkillsBlock, withSkillsBlock } from '../skills';
 import { THREAD_NAME_TAKEN, threadNameHolder, type ThreadNameHolder } from './threadNameHolder';
+import { BoardChip } from './BoardChip';
 import { ThreadPill } from './ThreadPill';
 import { registerReloadFlush } from '../stalePage';
 import {
@@ -91,6 +92,7 @@ import {
   cloneOfUrl,
   defaultStartProject,
   launchGroups,
+  projectWithAgent,
   type LaunchHistory,
   type MachineLaunchProject,
 } from './model';
@@ -264,25 +266,6 @@ export interface ComposeDialogProps {
   localWindow?: boolean;
 }
 
-/**
- * The Board chip (approval "inbox-compose-board-chip", v3): at the right of
- * the Thread row, a plain toggle (`aria-pressed`) named "Track on Board",
- * with a component tooltip. On, the Send asks the agent to track the work on
- * the Board (`board_request`); the agent makes the card(s). No shortcut.
- */
-function BoardChip(props: { on: boolean; onToggle: () => void }) {
-  return (
-    <Tip content={props.on ? 'On your Board when sent' : 'Track on your Board'}>
-      <button type="button" className="ib-cp-board" aria-pressed={props.on} aria-label="Track on Board" data-compose-board="" onClick={props.onToggle}>
-        <span className="ib-cp-board-box" aria-hidden="true">
-          {props.on && <Icon name="check" size={11} />}
-        </span>
-        Board
-      </button>
-    </Tip>
-  );
-}
-
 export function ComposeDialog(props: ComposeDialogProps) {
   const { request, phone, current, lastSent, home, transport } = props;
   // New review keeps no draft: its words are a few, and what it reviews is chosen again in a moment.
@@ -415,12 +398,10 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // Linked machines (remote launch): the folder menu groups every machine's projects (`launchGroups`); with none, or
   // none with anything to offer, `grouped` is false and everything below is exactly this computer's.
   const selfView = there.machines.find((m) => m.self) ?? null;
-  const machineGroups = useMemo(() => {
-    const here = model?.launch;
-    const anyAgent = startPick?.agent ?? here?.agents[0]?.agent ?? [...there.reads.values()].find((r) => r.launch?.agents[0])?.launch?.agents[0]?.agent ?? null;
+  const groupsFor = (agent: string | null) => {
     const made = launchGroups({
-      agent: (anyAgent as ComposeStart['agent'] | null) ?? null,
-      self: { launch: here, home, id: selfView?.id ?? null, name: selfView?.name ?? null },
+      agent: (agent as ComposeStart['agent'] | null) ?? null,
+      self: { launch: model?.launch, home, id: selfView?.id ?? null, name: selfView?.name ?? null },
       machines: there.machines,
       reads: there.reads,
       history: props.launched,
@@ -429,7 +410,12 @@ export function ComposeDialog(props: ComposeDialogProps) {
     if (box) return { grouped: false, groups: [] };
     if (!pulls) return made;
     return { grouped: made.grouped, groups: made.groups.map((g) => ({ ...g, scratch: null, projects: g.projects.filter((p) => pulls.projects.includes(p.id)) })) };
-  }, [model?.launch, startPick?.agent, there.machines, there.reads, selfView?.id, selfView?.name, home, props.launched, pulls, box]);
+  };
+  const machineGroups = useMemo(
+    () => groupsFor(startPick?.agent ?? model?.launch?.agents[0]?.agent ?? [...there.reads.values()].find((r) => r.launch?.agents[0])?.launch?.agents[0]?.agent ?? null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [model?.launch, startPick?.agent, there.machines, there.reads, selfView?.id, selfView?.name, home, props.launched, pulls, box],
+  );
   const grouped = machineGroups.grouped;
   const launch = useMemo(() => {
     const offered = model?.launch;
@@ -1400,7 +1386,10 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const toStart = startLaunch && canStart && startLaunch.projects.length > 0 ? { launch: startLaunch, current: start && !start.scratch ? { id: start.project.id, root: start.project.root } : current } : null;
   const pickStart = (picked: ComposeStart) => {
     setToFilled(false);
-    setStartPick({ agent: picked.agent, projectId: picked.project.id, machine: (picked.project as MachineLaunchProject).machine ?? null });
+    // To offers every machine's agents: one the caption's machine doesn't have starts on a machine that has it.
+    const lacks = grouped && !blockOf((picked.project as MachineLaunchProject).machine ?? null)?.agents.some((a) => a.agent === picked.agent);
+    const project = (lacks ? projectWithAgent(groupsFor(picked.agent).groups, picked.project) : null) ?? (picked.project as MachineLaunchProject);
+    setStartPick({ agent: picked.agent, projectId: project.id, machine: project.machine ?? null });
     // Reads the login shell ahead, so the Send need not wait on it (answer unused; a phone is refused).
     void inboxApi.launchSettingsRead(true).catch(() => {});
     setChosen(null);

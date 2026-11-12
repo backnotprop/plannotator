@@ -37,6 +37,9 @@ export function leavesCoveringPane(route: Route): boolean {
   if (covering.thread && route.page === 'inbox' && !route.thread) {
     return from.page === 'inbox' && !!from.thread && !from.file && !from.guide;
   }
+  if (covering.thread && route.page === 'reviews' && !route.stack) {
+    return from.page === 'reviews' && !!from.stack && !from.layer;
+  }
   return false;
 }
 

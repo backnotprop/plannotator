@@ -64,17 +64,16 @@ export function MessageBody({
   // A sent tag's preview: hover or focus, or a first tap on a touch screen (InitiativePeek).
   const tagPeek = useInitiativePeek(bodyRef);
   const { tapOpens } = tagPeek;
-  // A hashtag's link opens the Board in this window (the markdown renderer opens links in a new tab).
   const openHashtag = useCallback(
     (event: ReactMouseEvent<HTMLDivElement>) => {
       const target = event.target as Element | null;
       // The preview is portaled: its own links are plain in-app links.
       if (target?.closest?.('[data-tag-peek]')) return;
-      const link = target?.closest?.('a[href^="#board&initiative="]');
+      const link = target?.closest?.('a[href^="#board&initiative="], a[href^="#tag="]');
       if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
-      if (tapOpens(link)) return;
+      if (link.getAttribute('href')!.startsWith('#board&') && tapOpens(link)) return;
       window.location.hash = link.getAttribute('href')!;
     },
     [tapOpens],
@@ -114,8 +113,6 @@ export function MessageBody({
     />
   );
 
-  // Here and not through the Viewer's onSelectAnnotation: on a touch screen the highlighter does not listen (the
-  // system's selection is the person's, ui's useAnnotationHighlighter), so a tap would reach nothing.
   const openHighlight = (event: ReactMouseEvent<HTMLDivElement>) => {
     const target = event.target as Element;
     const mark = target.closest?.<HTMLElement>('[data-bind-id], [data-highlight-id]');
