@@ -1,0 +1,69 @@
+---
+// A command or a config line to copy: global.css's .hero-install box, wrapping
+// (the /inbox/ page's setup boxes).
+interface Props {
+  code: string;
+  file?: string;
+}
+
+const { code, file } = Astro.props;
+// A shell command gets the prompt sign; a config line or a slash command
+// inside an agent does not.
+const shell = !file && !code.startsWith('/') && !code.startsWith('{');
+const copyIcon =
+  '<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>';
+---
+{file && <span class="ag-box-label">{file}</span>}
+<div class="hero-install ag-box">
+  {shell && <span class="ag-dollar" aria-hidden="true">$</span>}
+  <code>{code}</code>
+  <button type="button" class="copy-btn" data-copy={code} aria-label={file ? 'Copy the config' : 'Copy the command'} set:html={copyIcon} />
+</div>
+
+<style>
+  .ag-box {
+    display: flex;
+    align-items: flex-start;
+    padding: 0.7rem 3rem 0.7rem 1rem;
+    font-size: 0.8125rem;
+    line-height: 1.6;
+  }
+
+  .ag-box code {
+    font-family: var(--font-mono);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--foreground);
+  }
+
+  .ag-dollar {
+    font-family: var(--font-mono);
+    color: var(--muted-foreground);
+    margin-right: 0.5rem;
+    user-select: none;
+  }
+
+  .ag-box :global(.copy-btn) {
+    top: 0.5rem;
+    right: 0.5rem;
+    transform: none;
+    display: inline-flex;
+  }
+
+  .ag-box :global(.copy-btn:focus-visible) {
+    outline: 2px solid var(--primary);
+    outline-offset: 3px;
+  }
+
+  .ag-box-label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: color-mix(in oklab, var(--foreground) 45%, transparent);
+    margin: 0 0 0.25rem;
+  }
+
+  @media (max-width: 639px) {
+    .ag-box { font-size: 0.75rem; padding: 0.65rem 2.75rem 0.65rem 0.875rem; }
+  }
+</style>

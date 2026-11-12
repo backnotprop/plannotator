@@ -8,10 +8,13 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { AGENTS, COLUMNS } from './src/lib/inbox-agents';
 
 const marketingRoot = fileURLToPath(new URL('.', import.meta.url));
 const switchFile = join(marketingRoot, 'src/lib/inbox-launch.ts');
 const postPath = 'blog/the-age-of-the-inbox/index.html';
+const agentsPath = 'inbox/agents/index.html';
+const agentPaths = AGENTS.map((a) => `inbox/agents/${a.slug}/index.html`);
 
 let temporaryRoot = '';
 const dist = { on: '' };
@@ -84,7 +87,7 @@ describe('Plannotator Inbox launch switch', () => {
   });
 
   test('on: no comma in any h1 h2 h3 or button on the page and the post', async () => {
-    for (const path of ['inbox/index.html', postPath]) {
+    for (const path of ['inbox/index.html', postPath, agentsPath, ...agentPaths]) {
       const html = await read(dist.on, path);
       const elements = html.match(/<(h1|h2|h3|button)\b[^>]*>[\s\S]*?<\/\1>/g) ?? [];
       expect(elements.length).toBeGreaterThan(0);
@@ -108,7 +111,7 @@ describe('Plannotator Inbox launch switch', () => {
   });
 
   test('on: every image on the page and the post resolves', async () => {
-    for (const path of ['inbox/index.html', postPath]) {
+    for (const path of ['inbox/index.html', postPath, agentsPath, ...agentPaths]) {
       const html = await read(dist.on, path);
       const urls = new Set<string>();
       for (const [, attr, value] of html.matchAll(/\b(src|srcset|data-lightbox-dark|data-lightbox-light|content)="([^"]*)"/g)) {
@@ -118,10 +121,40 @@ describe('Plannotator Inbox launch switch', () => {
           if (url.startsWith('/') || url.startsWith('https://plannotator.ai/')) urls.add(url.replace('https://plannotator.ai', ''));
         }
       }
-      expect(urls.size).toBeGreaterThan(path === postPath ? 3 : 30);
+      expect(urls.size).toBeGreaterThan(path === 'inbox/index.html' ? 30 : 0);
       for (const url of urls) {
         if (/\.(webp|png|jpe?g|svg)$/.test(url)) expect(existsSync(join(dist.on, url)), `${path}: ${url}`).toBe(true);
       }
+    }
+  });
+
+  // The agents overview and every agent's page read src/lib/inbox-agents.ts:
+  // each agent has its page, a row in the overview's table linking to it, its
+  // answers in the row in the columns' order, and a place in the sitemap.
+  test('on: the agents overview and one page per agent are built from one list', async () => {
+    const overview = await read(dist.on, agentsPath);
+    expect(overview).toContain('<title>Agents and the Plannotator Inbox</title>');
+    expect(await read(dist.on, 'inbox/index.html')).toContain('href="/inbox/agents/"');
+    const sitemap = await read(dist.on, 'sitemap-0.xml');
+    expect(sitemap).toContain('<loc>https://plannotator.ai/inbox/agents/</loc>');
+    const rows = overview.match(/<tr[^>]*class="ag-row[^"]*"[^>]*>[\s\S]*?<\/tr>/g) ?? [];
+    expect(rows).toHaveLength(AGENTS.length);
+    const cols = [...COLUMNS.inbox, ...COLUMNS.plannotator];
+    AGENTS.forEach((agent, i) => {
+      const href = `/inbox/agents/${agent.slug}/`;
+      expect(rows[i]).toContain(`href="${href}"`);
+      const cells = (rows[i].match(/<td\b[\s\S]*?<\/td>/g) ?? []).map(text);
+      const want = cols.map((c) => (c.key in agent.inbox ? (agent.inbox as any)[c.key] : (agent.plannotator as any)[c.key]).label);
+      expect(cells).toEqual(want);
+      expect(sitemap).toContain(`<loc>https://plannotator.ai${href}</loc>`);
+    });
+    for (const [i, path] of agentPaths.entries()) {
+      const html = await read(dist.on, path);
+      expect(text(html.match(/<h1\b[\s\S]*?<\/h1>/)?.[0] ?? '')).toBe(AGENTS[i].name);
+      const copies = [...html.matchAll(/data-copy="([^"]*)"/g)].map(([, v]) =>
+        v.replace(/&quot;/g, '"').replace(/&#39;|&#x27;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'),
+      );
+      for (const step of AGENTS[i].install) if (step.code) expect(copies, path).toContain(step.code);
     }
   });
 });

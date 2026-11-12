@@ -1,0 +1,153 @@
+/* The agents pages (/inbox/agents/ and /inbox/agents/<slug>/): the /inbox/
+   page's type and chapter shapes (src/pages/[inbox].astro, ib-*), at the same
+   sizes, with the site's tokens from global.css. Nothing here is new colour. */
+
+.ag-main {
+  --ag-dim: color-mix(in oklab, var(--foreground) 62%, transparent);
+  --ag-subtle: color-mix(in oklab, var(--foreground) 45%, transparent);
+}
+
+.ag-main code {
+  font-family: var(--font-mono);
+}
+
+/* ── Hero ── */
+.ag-hero {
+  padding: 6.5rem 0 1rem;
+  max-width: 58rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.ag-kicker {
+  font-size: 0.9375rem;
+  color: var(--muted-foreground);
+}
+
+.ag-kicker a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, currentColor 35%, transparent);
+  text-underline-offset: 3px;
+}
+
+.ag-kicker a:hover { color: var(--foreground); }
+
+.ag-heading {
+  font-size: clamp(2.25rem, 6vw, 3.5rem);
+  line-height: 1.04;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+  font-feature-settings: normal;
+}
+
+.ag-heading em {
+  display: block;
+  font-style: normal;
+  color: var(--primary);
+}
+
+.ag-lede {
+  font-size: 1rem;
+  line-height: 1.7;
+  color: var(--ag-dim);
+  max-width: 42rem;
+}
+
+/* ── Chapters (ib-arc) ── */
+.ag-arc {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  margin-top: 4rem;
+  padding: 4rem 0 2rem;
+  border-top: 2px solid var(--border);
+}
+
+.ag-arc-title {
+  font-size: clamp(1.75rem, 3.5vw, 2.375rem);
+  line-height: 1.1;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+
+.ag-body {
+  font-size: 0.9375rem;
+  line-height: 1.7;
+  color: var(--ag-dim);
+  max-width: 44rem;
+}
+
+.ag-body b { color: var(--foreground); font-weight: 600; }
+
+.ag-body code,
+.ag-list code,
+.ag-dl code,
+.ag-step-body p code,
+.ag-lede code {
+  font-size: 0.85em;
+  padding: 0.05em 0.35em;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--foreground) 8%, transparent);
+  color: var(--foreground);
+}
+
+.ag-title {
+  font-size: 1.25rem;
+  line-height: 1.25;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+/* ── Links in running text ── */
+.ag-link {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, var(--foreground) 30%, transparent);
+  text-underline-offset: 3px;
+}
+
+.ag-link:hover { text-decoration-color: var(--primary); }
+
+.ag-main a:focus-visible,
+.ag-main button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* ── Plain lists ── */
+.ag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 44rem;
+  list-style: disc;
+  padding-left: 1.25rem;
+}
+
+.ag-list li {
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  color: var(--ag-dim);
+}
+
+.ag-list li::marker { color: var(--ag-subtle); }
+
+/* ── The end of a page ── */
+.ag-end {
+  padding: 4rem 0 6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.ag-others {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.25rem;
+  font-size: 0.9375rem;
+}

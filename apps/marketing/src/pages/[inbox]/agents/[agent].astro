@@ -1,0 +1,235 @@
+---
+import Base from '../../../layouts/Base.astro';
+import Nav from '../../../components/Nav.astro';
+import Footer from '../../../components/Footer.astro';
+import InboxShot from '../../../components/inbox/InboxShot.astro';
+import AgentLevel from '../../../components/inbox/AgentLevel.astro';
+import CommandBox from '../../../components/inbox/CommandBox.astro';
+import AgentsPageScript from '../../../components/inbox/AgentsPageScript.astro';
+import Inline from '../../../components/inbox/Inline.astro';
+import '../../../components/inbox/agents.css';
+import { INBOX_LAUNCHED } from '../../../lib/inbox-launch';
+import { AGENTS, COLUMNS, agentHref, tierOf, type Agent } from '../../../lib/inbox-agents';
+
+// /inbox/agents/<slug>/: one page per agent, one template, every word about the
+// agent from src/lib/inbox-agents.ts (the overview's table reads the same).
+export function getStaticPaths() {
+  if (!INBOX_LAUNCHED) return [];
+  return AGENTS.map((agent) => ({ params: { inbox: 'inbox', agent: agent.slug }, props: { agent } }));
+}
+
+const { agent } = Astro.props as { agent: Agent };
+const tier = tierOf(agent.tier);
+const title = `${agent.name} and the Plannotator Inbox`;
+const groups = [
+  { name: 'With the Inbox', cols: COLUMNS.inbox.map((c) => ({ ...c, cell: agent.inbox[c.key] })) },
+  { name: 'In Plannotator', cols: COLUMNS.plannotator.map((c) => ({ ...c, cell: agent.plannotator[c.key] })) },
+];
+// What doesn't work: the capabilities marked no, by name, then the limits.
+const missing = groups.flatMap((g) => g.cols).filter((c) => c.cell.level === 'no').map((c) => c.name);
+const others = AGENTS.filter((a) => a.slug !== agent.slug);
+// Steps that only continue the step before (a second command) join it.
+const steps = agent.install.reduce<{ text: string; boxes: { code: string; file?: string }[] }[]>((out, s) => {
+  if (!s.text && out.length) out[out.length - 1].boxes.push({ code: s.code ?? '', file: s.file });
+  else out.push({ text: s.text, boxes: s.code ? [{ code: s.code, file: s.file }] : [] });
+  return out;
+}, []);
+---
+
+<Base title={title} description={agent.lede} ogImage="https://plannotator.ai/assets/inbox/inbox-og.jpg">
+  <div class="min-h-screen bg-background text-foreground">
+    <Nav />
+
+    <main class="ag-main max-w-6xl mx-auto px-6 md:px-8">
+      <header class="ag-hero">
+        <p class="ag-kicker"><a href="/inbox/agents/">Agents</a> · {tier.name}</p>
+        <h1 class="font-display ag-heading">{agent.name}</h1>
+        <p class="ag-lede"><Inline text={agent.lede} /></p>
+      </header>
+
+      <!-- ── What you get ── -->
+      <section class="ag-arc" aria-labelledby="ag-get">
+        <h2 class="font-display ag-arc-title" id="ag-get">What you get</h2>
+        <p class="ag-body">{tier.get}</p>
+      </section>
+      <div class="ag-groups-grid">
+        {groups.map((g) => (
+          <section class="ag-group" aria-label={g.name}>
+            <h3 class="ag-title">{g.name}</h3>
+            <dl class="ag-dl">
+              {g.cols.map((c) => (
+                <div class="ag-dl-row">
+                  <dt>{c.name}</dt>
+                  <dd>
+                    <AgentLevel level={c.cell.level} label={c.cell.label} />
+                    <p><Inline text={c.cell.detail} /></p>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+            {g.name === 'With the Inbox' && agent.inbox.tool.level !== 'no' && (
+              <p class="ag-note">Once connected it can send you questions with choices and files to annotate and guided reviews.</p>
+            )}
+          </section>
+        ))}
+      </div>
+
+      {agent.shot && <InboxShot name={agent.shot.name} alt={agent.shot.alt} class="ag-shot" />}
+
+      <!-- ── Install ── -->
+      <section class="ag-arc" aria-labelledby="ag-install">
+        <h2 class="font-display ag-arc-title" id="ag-install">Install</h2>
+      </section>
+      <ol class="ag-steps">
+        {steps.map((s, i) => (
+          <li class="ag-step">
+            <span class="ag-step-n" aria-hidden="true">{String(i + 1).padStart(2, '0')}</span>
+            <div class="ag-step-body">
+              {s.text && <p><Inline text={s.text} /></p>}
+              {s.boxes.map((b) => <CommandBox code={b.code} file={b.file} />)}
+            </div>
+          </li>
+        ))}
+      </ol>
+      <p class="ag-body ag-windows"><b>Windows.</b> <Inline text={agent.windows.text} /></p>
+
+      <!-- ── Limits ── -->
+      <section class="ag-arc" aria-labelledby="ag-limits">
+        <h2 class="font-display ag-arc-title" id="ag-limits">What doesn't work yet</h2>
+        {missing.length > 0 && (
+          <p class="ag-body">Not with {agent.name} yet: {missing.join(' · ')}.</p>
+        )}
+        {agent.limits.length > 0 && (
+          <ul class="ag-list">
+            {agent.limits.map((l) => <li><Inline text={l.text} /></li>)}
+          </ul>
+        )}
+      </section>
+
+      <section class="ag-end" aria-labelledby="ag-more">
+        <h2 class="font-display ag-title" id="ag-more">More</h2>
+        <p class="ag-others">
+          <a class="ag-link" href="/inbox/agents/">Every agent compared</a>
+          {agent.docs && <a class="ag-link" href={agent.docs}>The full {agent.name} setup guide</a>}
+          <a class="ag-link" href="/inbox/">The Inbox</a>
+        </p>
+        <p class="ag-others ag-others-quiet" aria-label="Other agents">
+          {others.map((a) => <a class="ag-link" href={agentHref(a.slug)}>{a.name}</a>)}
+        </p>
+      </section>
+    </main>
+
+    <AgentsPageScript />
+    <Footer />
+  </div>
+</Base>
+
+<style>
+  .ag-groups-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.75rem;
+  }
+
+  @media (min-width: 900px) {
+    .ag-groups-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+
+  .ag-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 1.5rem 1.5rem 1.25rem;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--card);
+  }
+
+  .ag-dl-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.25rem;
+    padding: 0.875rem 0;
+  }
+
+  .ag-dl-row + .ag-dl-row { border-top: 1px solid color-mix(in oklab, var(--border) 55%, transparent); }
+
+  .ag-dl dt {
+    font-size: 0.8125rem;
+    color: var(--muted-foreground);
+  }
+
+  .ag-dl dd {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-size: 0.9375rem;
+    font-weight: 600;
+  }
+
+  .ag-dl dd p {
+    font-size: 0.875rem;
+    line-height: 1.6;
+    font-weight: 400;
+    color: var(--ag-dim);
+  }
+
+  .ag-note {
+    font-size: 0.8125rem;
+    line-height: 1.6;
+    color: var(--ag-subtle);
+    padding-top: 0.25rem;
+  }
+
+  .ag-main :global(.ag-shot) { margin-top: 1.75rem; }
+
+  /* ── Install (the /inbox/ page's ib-step) ── */
+  .ag-steps {
+    display: flex;
+    flex-direction: column;
+    max-width: 46rem;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--card);
+    padding: 0.25rem 1.5rem;
+  }
+
+  .ag-step {
+    display: grid;
+    grid-template-columns: 2.25rem minmax(0, 1fr);
+    gap: 0 0.5rem;
+    padding: 1.125rem 0;
+  }
+
+  .ag-step + .ag-step { border-top: 1px solid color-mix(in oklab, var(--border) 60%, transparent); }
+
+  .ag-step-n {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--primary);
+    padding-top: 0.2rem;
+  }
+
+  .ag-step-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .ag-step-body p {
+    font-size: 0.9375rem;
+    line-height: 1.6;
+    color: var(--ag-dim);
+  }
+
+  .ag-windows { margin-top: 1rem; }
+
+  .ag-others-quiet { font-size: 0.875rem; color: var(--ag-dim); }
+
+  @media (max-width: 639px) {
+    .ag-group { padding: 1.25rem 1rem 1rem; }
+    .ag-steps { padding: 0.25rem 1rem; }
+    .ag-step { grid-template-columns: 1.75rem minmax(0, 1fr); }
+  }
+</style>

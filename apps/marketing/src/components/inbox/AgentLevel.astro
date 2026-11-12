@@ -1,0 +1,49 @@
+---
+// One capability's answer: a mark for how far it works, then its words.
+// The mark is decoration; the words say it (see the legend on /inbox/agents/).
+import type { Level } from '../../lib/inbox-agents';
+
+interface Props {
+  level: Level;
+  label: string;
+}
+
+const { level, label } = Astro.props;
+---
+<span class:list={['ag-level', `ag-level-${level}`]}>
+  <span class="ag-mark" aria-hidden="true">
+    {level === 'yes' && (
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8.5l3 3 6-7" /></svg>
+    )}
+    {level === 'part' && (
+      <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.25" fill="none" stroke="currentColor" stroke-width="1.75" /><path d="M8 2.75a5.25 5.25 0 0 1 0 10.5z" fill="currentColor" /></svg>
+    )}
+    {level === 'no' && (
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M4.5 8h7" /></svg>
+    )}
+  </span>
+  <span class="ag-level-text">{label}</span>
+</span>
+
+<style>
+  .ag-level {
+    display: inline-flex;
+    align-items: flex-start;
+    gap: 0.4rem;
+    line-height: 1.35;
+  }
+
+  .ag-mark {
+    flex: 0 0 auto;
+    width: 15px;
+    height: 15px;
+    margin-top: 0.1em;
+  }
+
+  .ag-mark svg { width: 100%; height: 100%; display: block; }
+
+  .ag-level-yes .ag-mark { color: var(--success); }
+  .ag-level-part .ag-mark { color: var(--primary); }
+  .ag-level-no .ag-mark { color: var(--muted-foreground); }
+  .ag-level-no .ag-level-text { color: var(--muted-foreground); }
+</style>

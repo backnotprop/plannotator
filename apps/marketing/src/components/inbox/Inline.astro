@@ -1,0 +1,9 @@
+---
+// Words from src/lib/inbox-agents.ts, with `backticks` as inline code.
+interface Props {
+  text: string;
+}
+
+const parts = Astro.props.text.split('`');
+---
+{parts.map((part, i) => (i % 2 ? <code>{part}</code> : part))}
