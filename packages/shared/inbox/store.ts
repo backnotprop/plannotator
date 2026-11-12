@@ -7659,7 +7659,7 @@ export class InboxStore {
     const key = inboxInitiativeNameKey(name);
     for (const other of this.initiativesById.values()) {
       if (other.id !== self && other.deleted_at === null && inboxInitiativeNameKey(other.name) === key) {
-        throw new InboxError("initiative_exists", `There is already an initiative named ${other.name}.`, { field: "name", initiative_id: other.id });
+        throw new InboxError("initiative_exists", `There is already a tag named ${other.name}.`, { field: "name", initiative_id: other.id });
       }
     }
     return name;

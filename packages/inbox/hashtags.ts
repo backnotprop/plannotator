@@ -38,7 +38,7 @@ export interface InitiativeTags {
   cards: readonly InboxCardWire[];
   /** The list's rows by thread id (sections, snoozed, pinned): the preview's thread names and who waits. */
   rows: ReadonlyMap<string, InboxListRow>;
-  /** Project names by id: the preview's "Initiative · plannotator, workspaces". */
+  /** Project names by id: the preview's "Tag · plannotator, workspaces". */
   projects: ReadonlyMap<string, string>;
   /** Per initiative, the latest threads a message tags it in and how many in all (the cards payload's `initiative_threads`). */
   mentions: ReadonlyMap<string, TaggedThreads>;

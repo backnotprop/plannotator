@@ -243,7 +243,7 @@ export function useInitiativePeek(rootRef: React.RefObject<HTMLElement | null>):
       className="ib-tagpeek fixed z-[120] flex flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl"
       id={peekId}
       role="dialog"
-      aria-label={`Initiative ${initiative.name}`}
+      aria-label={`Tag ${initiative.name}`}
       data-tag-peek={initiative.id}
       style={{ width: Math.min(WIDTH, window.innerWidth - EDGE * 2), left: pos?.left ?? -9999, top: pos?.top ?? -9999, maxHeight: 'min(560px, calc(100dvh - 24px))' }}
       onPointerEnter={() => {
@@ -305,7 +305,7 @@ function PeekView({ name, board, model, onGo }: { name: string; board: string; m
   const cardHref = (item: PeekItem) => `${board}&card=${encodeURIComponent(item.id)}`;
   const empty = model.cards === 0;
   const updated = model.updated ? cardAge(model.updated).short : null;
-  const meta = ['Initiative', model.projects.length ? model.projects.join(', ') : null, empty ? 'no cards yet' : null, updated ? `updated ${updated}` : null].filter(Boolean);
+  const meta = ['Tag', model.projects.length ? model.projects.join(', ') : null, empty ? 'no cards yet' : null, updated ? `updated ${updated}` : null].filter(Boolean);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex-none px-4 pb-4 pt-3.5" data-tag-peek-head="">

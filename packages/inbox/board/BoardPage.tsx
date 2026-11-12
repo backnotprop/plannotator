@@ -164,7 +164,7 @@ export function BoardPage(props: BoardPageProps) {
   const counts = boardCounts(cards);
   const drops = unseenDrops(cards);
   const [creating, setCreating] = useState<null | 'backlog' | 'send'>(null);
-  /** The Initiatives dialog (the filter's New initiative… or Edit initiatives…). */
+  /** The Tags dialog (the filter's New tag… or Edit tags…). */
   const [managing, setManaging] = useState<null | 'new' | 'edit'>(null);
   const [intro, setIntro] = useState(false);
   const claimed = useRef(false);
@@ -201,8 +201,8 @@ export function BoardPage(props: BoardPageProps) {
     try {
       const { card: changed } = await inboxApi.setCardInitiative(card.id, next);
       props.onChanged(changed);
-      const name = next ? (initiatives.find((i) => i.id === next)?.name ?? 'the initiative') : null;
-      setSaid(name ? `“${card.title}” is in ${name} now.` : `“${card.title}” is in no initiative now.`);
+      const name = next ? (initiatives.find((i) => i.id === next)?.name ?? 'the tag') : null;
+      setSaid(name ? `“${card.title}” is in ${name} now.` : `“${card.title}” has no tag now.`);
     } catch {
       setFailed(`“${card.title}” did not change. Try again.`);
     }
