@@ -7,6 +7,7 @@ import { isPhone } from '../phone';
 import { backTo } from '../history';
 import { actedSince, inputMark } from '../lastInput';
 import { focusLost } from '../backFocus';
+import { focusFirst } from '../focusLanding';
 import { readRoute, type Route } from './route';
 import { hashOf, writeRoute } from './writeRoute';
 
@@ -55,20 +56,6 @@ export function tourPageInFront(): boolean {
   return document.visibilityState === 'visible' && document.hasFocus();
 }
 
-/** Focus the first element on screen that matches one of `selectors`, in order (a list draws some rows twice, one hidden). */
-export function focusFirst(selectors: readonly string[]): boolean {
-  for (const selector of selectors) {
-    const el = [...document.querySelectorAll<HTMLElement>(selector)].find((candidate) => candidate.getClientRects().length > 0);
-    if (el) {
-      // Inside a thread's messages (its subject heading): focus never moves the thread's scroll, the place the
-      // person was in (closing a file with `‹ Inbox` put the thread back at its top).
-      el.focus(el.closest('.ib-pbody') ? { preventScroll: true } : undefined);
-      return true;
-    }
-  }
-  return false;
-}
-
 /**
  * A search result or a link just opened a screen: one with nothing to land on (a reply box already open with a
  * draft, no Reply to focus) leaves focus nowhere, so the thread's subject takes it, never the page. Not once the
@@ -81,8 +68,6 @@ export function focusAfterOpen(): void {
   }, 400);
 }
 
-/** A tour setting that did not save is tried again after these waits (ms), then said. */
-export const TOUR_SAVE_RETRY_MS = [1000, 4000];
 /** How long the first-run screen waits for the settings before it draws without them. */
 export const SETTINGS_LATE_MS = 1500;
 

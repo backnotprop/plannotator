@@ -1,6 +1,7 @@
 /** What the thread pane (components/Thread.tsx `ThreadPane`) takes from App. */
 import type { InboxListGroupId, InboxListRow, InboxQuestion, InboxReaction, InboxRun, InboxSentRecipient, InboxThread } from '@plannotator/core/inbox-types';
 import type { MachineView, OutboxView, ThreadModel } from '../api';
+import type { MachinesModel } from '../machines';
 import type { FrameMove } from '../fullScreenOrigin';
 import type { InboxToastModel } from '../components/Toast';
 import type { ReviewView } from '../pulls/reviewsModel';
@@ -108,6 +109,9 @@ export interface ThreadPaneProps {
   lookSeq?: number | null;
   /** When this thread came back from its snooze, while the person stays in it (snoozeBack.ts); else null. */
   snoozeBack?: string | null;
+  agentContext?: { rows: readonly InboxListRow[]; machines: MachinesModel } | null;
+  agentFilter?: string | null;
+  onAgentFilter?: (agentId: string | null) => void;
   /**
    * Seen on sight (design record "inbox-new-in-open-thread", approved
    * 2026-10-12): the seq the window's looks this visit covered (the look
@@ -228,10 +232,6 @@ export interface ThreadPaneProps {
    * local app list.
    */
   remote?: boolean | null;
-  /**
-   * A tailnet guest's page (`tailnetGuest(settings)`): a launched agent's ⋯ has
-   * no Stop or Delete, as the server answers both `owner_only`.
-   */
   guest?: boolean;
   /**
    * A file open beside the thread on a desktop hides the list and the

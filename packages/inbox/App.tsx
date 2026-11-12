@@ -85,6 +85,7 @@ import { ASK_AGENT_TO_UPDATE, ASK_AGENT_TO_UPDATE_THREAD, MachineUpdateDialog } 
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { flatRows, readListView, useListView, type ListSort } from './listView';
 import { useShowLight, type ListEdge } from './showLight';
+import { useHeldRead } from './app/useHeldRead';
 import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
 import { addOwnThreads, drawnSection, listGroups, markHeldRowArchived, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, goneRows, hasRows, settleOwn, settlesOnBack, settleThread, showBroughtIn, snoozeChangedRows, shownAfter, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
@@ -144,7 +145,7 @@ import { useSystemProjects } from './system/projects';
 import { systemDropped, systemEscapeTo, systemKept } from './system/route';
 import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
 import { connectLineNews, noteQuestionRows } from './agents';
-import type { InboxAgentRow, InboxAgentsModel, InboxTourChange, InboxTourState } from '@plannotator/core/inbox-types';
+import type { InboxAgentRow, InboxAgentsModel, InboxTourChange } from '@plannotator/core/inbox-types';
 import { SettingsPage } from './components/Settings';
 import { createStepsBus } from './steps/useThreadSteps';
 import { threadBoardCard } from './steps/model';
@@ -160,7 +161,7 @@ import { adoptVoiceSettings } from './voice';
 import { useVoiceIntro, VOICE_INTRO_MIN_WORDS, VOICE_INTRO_MOMENT_MS } from './voiceIntro';
 import { SnoozeIntro } from './components/SnoozeIntro';
 import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from './snoozeIntro';
-import { useLineLatch, claimRevealOnce, listTallerThanScreen, listViewRevealClear, listViewRevealLeaveCounts, listViewRevealMayClaim, idleClockArmed, noteRevealThread, openThreadAsks, revealArmed, broRevealIdleCounts, broRevealLeaveCounts, grillMeTipIdleCounts, grillMeTipLeaveCounts, useBoardReveal, useLineReveal, useStepsReveal, useStarReveal } from './reveal';
+import { useLineLatch, claimRevealOnce, listTallerThanScreen, listViewRevealClear, listViewRevealLeaveCounts, listViewRevealMayClaim, idleClockArmed, noteRevealThread, openThreadAsks, revealArmed, broRevealIdleCounts, broRevealLeaveCounts, grillMeTipIdleCounts, grillMeTipLeaveCounts, REVEAL_TIMES, starRevealLeaveCounts, useBoardReveal, useLineReveal, useStepsReveal, useStarReveal } from './reveal';
 import { useIdleClock } from './idleClock';
 import { launchTipDue } from './compose/launchTip';
 import type { InboxRevealId } from './api';
@@ -179,6 +180,8 @@ import { leaveOnPurpose, unsentReply } from './unsent';
 import { reloadOntoInbox, STALE_HEALTH_MS, useStalePage } from './stalePage';
 import { StalePageNotice } from './components/StalePageNotice';
 import { InboxToast, type InboxToastModel, toastSpeech } from './components/Toast';
+import { saveTour as saveTourChange, TOUR_DECIDED_COOKIE } from './tour/saveTour';
+import { focusFirst, landFocusAfterTour } from './focusLanding';
 import { errorToast } from './toastError';
 import { pictureFromFile } from './projectPictures';
 import { canToggleRead, confirmSetAside, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, offersRowMarkRead, seenHeldInNew, setAsideCount, setAsideOf, type SetAsideAnswer, type SetAsideCount, warnsBeforeRead } from './markRead';
@@ -211,7 +214,7 @@ import { ComposeDialog, type ComposeHeld, type ComposeJoined, type ComposeReques
 import { heldLaunchToast } from './compose/heldLaunch';
 import { ArtifactsWall } from './components/ArtifactsWall';
 import { readArtifactPins } from './artifactPins';
-import { hearAgentFacesEvent, readAgentFaces } from './agents/agentFaces';
+import { hearAgentFacesEvent, keepAgentName, readAgentFaces } from './agents/agentFaces';
 import { DraftsPage } from './compose/DraftsPage';
 import { BoardPage, type BoardMove } from './board/BoardPage';
 import { PullsPage, ReviewsOff } from './pulls/PullsPage';
@@ -231,6 +234,8 @@ import { BroIntro } from './components/BroIntro';
 import { GrillMeTip } from './components/GrillMeTip';
 import { ListViewIntro } from './components/ListViewIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
+import { RulesIntro } from './components/RulesIntro';
+import { rulesSet, wantRulesEditor } from './agentRules';
 import { StarAskCard } from '@plannotator/ui/components/StarAskCard';
 import { CodeReviewOffer } from './components/CodeReviewOffer';
 import { useCodeReviewOffer } from './codeReviewOffer';
@@ -241,14 +246,15 @@ import { openThemeSettings, useThemeChooser } from './themeChooser';
 import { CardChip } from './board/CardChip';
 import { boardInitiativeOf, cardsInInitiative, liveInitiatives, newCardProject } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
+import { useComposerOpener } from './compose/openComposer';
 import { COMPOSE_CLONE_EVENT, composeActions, composeTargets, hostLabel, lastLaunchAgent, launchHistory, projectCanStart, projectPlusOn, SCRATCH_PICK, type ComposeAction, type ComposeCloneRequest } from './compose/model';
 import { machineLaunchesKept } from './compose/useMachineLaunches';
 import { reviewBoxPulls } from './compose/reviewBox';
 import type { CardsModel, DraftView, InboxStorageModel, ThreadModel, UpdateCheckFailing } from './api';
 import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
-import type { InboxComposeLaunch, InboxReaction, InboxRestartAgents } from '@plannotator/core/inbox-types';
+import type { InboxAgent, InboxComposeLaunch, InboxReaction, InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { reactionSpeech } from './components/ReactionTray';
-import { inboxTabCount, useTabCount } from './tabCount';
+import { inboxTabCount, setAppBadge, useTabCount } from './tabCount';
 import { pageOffersUpdates, pageOffersWhatsNew, sidebarUpdateNotice, updateForPage } from './updateNotice';
 import { actedSince, inputMark, lastInput } from './lastInput';
 import { backFocusTargets, focusKept, focusLost } from './backFocus';
@@ -260,6 +266,7 @@ import { SideButtonContext } from './ask/sideButton';
 import { useReplyFloaters } from './floaters/useReplyFloaters';
 import { emitFloaterEvent } from './floaters/model';
 import { setSessionLabels } from './sessionLabels';
+import { setSessionTitles } from './sessionTitles';
 import { createInboxShapeHost } from './shape/inboxShapeHost';
 import { ShapeGridPage, ShapePebbleButton } from './shape/ShapeParts';
 import { ThreadShapeLayer, ThreadShowMeBox, useThreadShowMe } from './shape/ThreadShapeLayer';
@@ -276,8 +283,8 @@ import { SIDEBAR_OPEN_COOKIE, HIDE_AWAY_MACHINES_COOKIE, COMPOSE_LAST_COOKIE, DR
 import { shapeFrameListeners, subscribeShapeFrames } from './app/shapeFrames';
 import { readRoute, routeOf, type Route } from './app/route';
 import { hashOf, currentHash, writeRoute } from './app/writeRoute';
-import { TOUR_ENDED_STATE, settleTourEntry, TOUR_DECIDED_COOKIE, settleOldExperimental, settleMovedSettings, stripStrayMsg, stripClickSignal, REVIEWS_AFTER_STORE_MS, REVIEWS_AFTER_STORE_MAX_MS, settleReviewsAlias } from './app/boot';
-import { closeTo, covering, listCovered, rowElement, tourPageInFront, focusFirst, focusAfterOpen, TOUR_SAVE_RETRY_MS, SETTINGS_LATE_MS, FIRST_RUN_AGENTS_REFRESH_MS, FIRST_RUN_AGENTS_MIN_GAP_MS, platformOf, replyInProgress, listIntroHeldBack } from './app/focus';
+import { TOUR_ENDED_STATE, settleTourEntry, settleOldExperimental, settleMovedSettings, stripStrayMsg, stripClickSignal, REVIEWS_AFTER_STORE_MS, REVIEWS_AFTER_STORE_MAX_MS, settleReviewsAlias } from './app/boot';
+import { closeTo, covering, listCovered, rowElement, tourPageInFront, focusAfterOpen, SETTINGS_LATE_MS, FIRST_RUN_AGENTS_REFRESH_MS, FIRST_RUN_AGENTS_MIN_GAP_MS, platformOf, replyInProgress, listIntroHeldBack } from './app/focus';
 export { THREAD_READ_RETRY_MS, THREAD_READ_TIMEOUT_MS } from './app/constants';
 
 // The Inbox has no /api/config and no browser-agent tools: settings stay in
@@ -485,7 +492,12 @@ function Inbox() {
   const faviconHref = useInboxFaviconHref();
   const faviconBadgeHref = useInboxFaviconBadgeHref();
   const faviconInUse = useInboxFavicon();
-  useTabCount(useMemo(() => (latest ? inboxTabCount(latest.sections) : 0), [latest]), faviconHref, faviconBadgeHref);
+  const tabCount = useMemo(() => (latest ? inboxTabCount(latest.sections) : 0), [latest]);
+  useTabCount(tabCount, faviconHref, faviconBadgeHref);
+  // The installed app's badge is shared by every window: only a window that has read a list writes it.
+  useEffect(() => {
+    if (latest) setAppBadge(tabCount);
+  }, [latest, tabCount]);
   /** The list on screen: held until the person acts (the "N new" notice). */
   const [shown, setShown] = useState<InboxListSection[] | null>(null);
   const shownRef = useRef(shown);
@@ -691,7 +703,7 @@ function Inbox() {
   const [listIntro, setListIntro] = useState<'none' | 'claimed' | 'open' | 'shown'>('none');
   const [listIntroDecided, setListIntroDecided] = useState(false);
   const listIntroAsked = useRef(false);
-  const listIntroLatch = useRef<{ local: boolean; firstRun: boolean; rows: number } | null>(null);
+  const listIntroLatch = useRef<{ owner: boolean; firstRun: boolean; rows: number } | null>(null);
   const [listIntroSettled, setListIntroSettled] = useState(false);
   /**
    * A one-time dialog of the line is claimed or open now (a reveal's, voice's, the star ask's, Code review's offer):
@@ -727,6 +739,7 @@ function Inbox() {
   }, [thread]);
   const routeRef = useRef(route);
   routeRef.current = route;
+  const { heldRead, settleHeldRead } = useHeldRead(route.thread, routeRef, shownRef);
   // The full-window review is open (set where it is worked out, below), for the Escape ladder.
   const reviewPaneOpenRef = useRef(false);
   // The review a link on a Shape board opened (approval "review-show-me", q-db7db55f): with Code review on it shows the
@@ -1042,9 +1055,10 @@ function Inbox() {
       snoozeMoved.current.clear();
       const groups = listGroups(next);
       setShown((current) => (what === 'all' || current === null || !hasRows(current) ? groups : settleOwn(current, groups, openedHere.current, closed)));
+      settleHeldRead();
       sortedWhole();
     },
-    [armSlide, cancelSettle, sortedWhole],
+    [armSlide, cancelSettle, sortedWhole, settleHeldRead],
   );
   useEffect(() => cancelSettle, [cancelSettle]);
 
@@ -1118,6 +1132,7 @@ function Inbox() {
       putList(queryClient, next);
       // The sessions' labels (issue #2450): every row's agents and the open thread's authors read them.
       setSessionLabels(next.session_labels);
+      setSessionTitles(next.session_titles);
       if (!firstList.current!.done) {
         firstList.current!.done = true;
         firstList.current!.resolve();
@@ -1145,7 +1160,10 @@ function Inbox() {
       const gone = adopt ? new Set<string>() : goneRows(shownRef.current, groups, routeRef.current.thread);
       if (gone.size > 0) armSlide();
       setShown((current) => shownAfter(current, groups, { adopt, keep, open: heldOpen(), gone }));
-      if (adopt) sortedWhole(keep);
+      if (adopt) {
+        sortedWhole(keep);
+        settleHeldRead();
+      }
       setLoadError(null);
       return next;
     } catch (cause) {
@@ -1153,7 +1171,7 @@ function Inbox() {
       setLoadError(cause instanceof Error ? cause.message : String(cause));
       return null;
     }
-  }, [armSlide, sortedWhole, queryClient]);
+  }, [armSlide, sortedWhole, queryClient, settleHeldRead]);
   /**
    * The list read again after a snooze changed or ran out, whichever said so first (`event: snoozes`, or this
    * window's clock). With no thread open only the rows whose snooze changed move (held.ts `snoozeChangedRows`), each
@@ -1666,11 +1684,12 @@ function Inbox() {
      * many came (#2593). A record's read, which starts after them, covers it: it is dropped then.
      */
     let eventListTimer: ReturnType<typeof setTimeout> | null = null;
-    const listAfterEvents = (delay: number) => {
+    const listAfterEvents = (delay: number, failed = 0) => {
       if (eventListTimer) clearTimeout(eventListTimer);
       eventListTimer = setTimeout(() => {
         eventListTimer = null;
-        void refreshList(false);
+        // The stream stayed up, so nothing else would read again.
+        void refreshList(false).then((next) => next === null && !eventListTimer && listAfterEvents(Math.min(30_000, 2_000 * 2 ** failed), failed + 1));
       }, delay);
     };
     let snoozesTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1693,11 +1712,11 @@ function Inbox() {
      */
     /** When the last record was heard (debug log on only, perfMarks.ts), for pn:record-refresh. */
     let heard: ReturnType<typeof perfStart> = null;
-    const readAfterRecord = (event: InboxEvent | null, how: { own?: string; now?: boolean; applied?: boolean } = {}) => {
+    const readAfterRecord = (event: InboxEvent | null, how: { own?: string; now?: boolean; applied?: boolean; files?: boolean } = {}) => {
       // Every answer this window's saves brought back so far is covered by the read about to start (ownSaves.ts).
       if (how.now) ownSaves.readsStarted();
       if (how.own) noteOwnRecord(batch, how.own);
-      else noteRecord(batch, event, how.applied);
+      else noteRecord(batch, event, how.applied, how.files);
       heard = perfStart();
       pause.ask(how.now === true);
     };
@@ -1726,6 +1745,7 @@ function Inbox() {
           });
           if (read === 'thread') threadRead = refreshThread(open);
           else {
+            if (read === 'files') filesSignal.emit();
             // Gone from the list this read brought (deleted elsewhere, which no record says): read it, as before.
             void listRead.then((next) => {
               if (routeRef.current.thread === open && !listsThread(next, open)) void refreshThread(open);
@@ -1893,7 +1913,7 @@ function Inbox() {
             emitFloaterEvent('record', null);
             return;
           }
-          readAfterRecord(event, own ? { own } : { applied });
+          readAfterRecord(event, own ? { own } : { applied, files: stream.kind !== 'any' && stream.files === true });
           // A floating draft's window reads its thread again (a new message, a hand-off).
           emitFloaterEvent('record', null);
         },
@@ -1916,6 +1936,14 @@ function Inbox() {
         onPins: () => listAfterEvents(60),
         // The pinned artifacts changed (another window, a phone): read them again (artifactPins.ts).
         onArtifactPins: () => void readArtifactPins(),
+        // `plannotator inbox --open <thread>` (a tool on this computer): the window the person used last shows the
+        // thread as a row click would. A new history entry, so Back returns; the reply being typed is kept as its draft.
+        onShow: (threadId, target) => {
+          if (target !== windowReport().id) return;
+          const now = routeRef.current;
+          if (now.page === 'inbox' && now.thread === threadId && !now.file && !now.guide) return;
+          writeRoute({ page: 'inbox', project: now.page === 'inbox' && !now.machine ? now.project : null, thread: threadId });
+        },
         // A snooze changed (another window, a phone, a linked machine) or ran out: read the list. It is the person's
         // own act, so with no thread open the row goes to its place, as it does in the window they did it in; a return
         // waits behind "N new" (held.ts). A return may ask something: notifications read this list too.
@@ -1966,6 +1994,8 @@ function Inbox() {
           listAfterEvents(80);
         },
         // Every (re)connect: the permission now, since a reconnect's URL may be stale.
+        // "Over your tailnet" published by itself once Tailscale came back: Settings' row shows the address at once.
+        onTailscale: (tailscale) => setSettings((current) => (current ? { ...current, tailscale } : current)),
         // Shape's boards changed (only sent while Shape is on).
         onShapes: (ids) => {
           for (const listener of shapeFrameListeners) listener(ids);
@@ -1975,6 +2005,8 @@ function Inbox() {
           staleThreads(queryClient);
           // The Inbox restarted under this page: when it is provably the same one, writes go on without a reload.
           if (hello) void adoptAfterRestart(hello);
+          // `event: deliveries` carries no record, so the cursor never replays one sent before this connect.
+          listAfterEvents(80);
           // A reconnect may have missed `event: shapes`: the boards are read again.
           for (const listener of shapeFrameListeners) listener([]);
           reportWindow();
@@ -2424,7 +2456,7 @@ function Inbox() {
     const now = routeRef.current;
     return openThreadAsks(oneTimeRows.current, now.page === 'inbox' ? (now.thread ?? null) : null);
   };
-  const soundDialogDue = latest !== null && settings?.sound?.dialog_due === true && (settings.via ?? 'local') === 'local' && lineArms('sound');
+  const soundDialogDue = latest !== null && settings?.sound?.dialog_due === true && !tailnetGuest(settings) && lineArms('sound');
   // Not during the tour: one-time dialogs never open over it (they wait for its end).
   const soundDialogBlocked = updateDialog !== null || restarting || route.page === 'tour';
   useEffect(() => {
@@ -2453,11 +2485,11 @@ function Inbox() {
   // design): asks about each agent that can take a note and was never asked.
   // Decided once per load, once the agents are read (the run that opened the
   // window has finished connecting) and the list has loaded; after the sound
-  // dialog, and never on a load that showed it. Never through the tailnet,
-  // even for the owner, who can read the agents there (like the other one-time
+  // dialog, and never on a load that showed it. On the owner's other devices too
+  // (owner ruling 2026-11-11), never on a tailnet guest's page (like the other one-time
   // dialogs; Settings → Agents asks the same thing), never while an update
   // dialog is open or a reply is being typed, and it waits while Settings is open.
-  const soundSettled = settings !== null && (!(settings.sound?.dialog_due === true && (settings.via ?? 'local') === 'local' && lineArms('sound')) || soundClaimed);
+  const soundSettled = settings !== null && (!(settings.sound?.dialog_due === true && !tailnetGuest(settings) && lineArms('sound')) || soundClaimed);
   const agentNoteOpen = typeof agentNote === 'object';
   // The notification lines (the ask, "tab slept") wait until this load's
   // one-time dialogs are decided (the sound claim settled, the note dialog
@@ -3804,6 +3836,18 @@ function Inbox() {
     return true;
   };
 
+  /** An agent row's Rename… and Reset name, kept with its face (agents/agentFaces.ts); the live region says it as for a project. */
+  const renameAgent = async (agent: InboxAgent, name: string | null, own: string): Promise<boolean> => {
+    try {
+      await keepAgentName(agent, name);
+    } catch (cause) {
+      showToast(errorToast(cause, 'The name did not change.'));
+      return false;
+    }
+    say(name === null ? `Name reset${own ? ` to ${own}` : ''}.` : `Renamed to ${name}.`);
+    return true;
+  };
+
   /**
    * The project menu's Set picture… (approval "inbox-letter-marks"): the picture kept by the Inbox, then the list read
    * again, so every project mark shows it. A refused picture (not an image, too big) says why in the toast.
@@ -4303,7 +4347,7 @@ function Inbox() {
   useEffect(() => {
     if (combinedHead) writeRoute({ ...route, project: combinedHead }, { replace: true });
   }, [combinedHead]);
-  const { latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listTitle, notice } = useListShown({ latest, projects, route, thread, threadRow, rowPatches, pinPatches, looking, shown, machines, hideAway, openedHere, heldOpen });
+  const { latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listTitle, notice } = useListShown({ latest, projects, route, thread, threadRow, rowPatches, pinPatches, looking, shown, machines, hideAway, openedHere, heldOpen, heldRead });
   const { decisionModeOn, decideInThread, sittingDecisions, closeDecide } = useDecideSitting({ settings, decisions, setDecisions, decide, setDecide, decideOpener, decisionModeOnRef, refreshDecisions, refreshList });
   const snoozeBack = useSnoozeBack({ thread, route, listedOpenRow, looking, openThreadCovered, lookRef, trackLook, refreshList, snoozed: latest?.snoozed, refreshSnoozes, seen: inboxApi.seen });
 
@@ -4328,7 +4372,7 @@ function Inbox() {
   if (updateDialog !== null || restarting) updatingThisLoad.current = true;
   if (listIntroLatch.current === null && settings && latest !== null && shown !== null) {
     listIntroLatch.current = {
-      local: (settings.via ?? 'local') === 'local',
+      owner: !tailnetGuest(settings),
       firstRun,
       rows: filterList(shown).reduce((n, section) => n + section.threads.length, 0),
     };
@@ -4382,7 +4426,7 @@ function Inbox() {
   const groupingFirst = lineLatch?.listIntroDue === true && lineLatch.ahead.includes('list_view') && readListView() === 'grouped' && listTallerThanScreen(listBody(rootRef.current));
   const listIntroLoad: ListIntroLoad = {
     due: listIntroAtLoad !== null && lineLatch?.listIntroDue === true && !groupingFirst,
-    local: listIntroAtLoad?.local ?? false,
+    owner: listIntroAtLoad?.owner ?? false,
     listLoaded: listIntroAtLoad !== null,
     firstRun: listIntroAtLoad?.firstRun ?? false,
     rows: listIntroAtLoad?.rows ?? 0,
@@ -4448,7 +4492,7 @@ function Inbox() {
   const voiceIntro = useVoiceIntro(
     {
       due: lineLatch?.voiceDue === true,
-      local: listIntroLoad.local,
+      owner: listIntroLoad.owner,
       listLoaded: listIntroLoad.listLoaded,
       firstRun: listIntroLoad.firstRun,
       listIntroDue: listIntroLoad.due,
@@ -4572,6 +4616,21 @@ function Inbox() {
     mayClaim: () => true,
     holds: () => true,
   });
+  const agentRulesReveal = useLineReveal({
+    id: 'agent_rules',
+    due: lineLatch?.next === 'agent_rules',
+    blocked: revealBlocked,
+    rows: snoozeIntroRows,
+    toast: toast !== null,
+    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
+    clear: listIntroClear,
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+    leaveCounts: (visit, now) => starRevealLeaveCounts(visit, now),
+    idle: pageIdle,
+    mayClaim: (pageAge) => lineLatch !== null && !firstRun && pageAge >= REVEAL_TIMES.pageAgeMs,
+    holds: () => !rulesSet(settingsRef.current?.prompts?.rules),
+  });
   // The List view's choice, registered with the line (approval "inbox-one-time-dialogs", the change; reveal.ts
   // `useLineReveal`): armed while it is `reveal.next`, or in `reveal.ahead` (it goes at its own moment, ahead of the
   // other offers), back on the list with no thread open or the page idle (any layout), once the list is taller than the
@@ -4648,7 +4707,7 @@ function Inbox() {
   // The "Star the repo" ask (approval "star-ask"): beside the line, never in its order (settings `reveal.aside`), at the
   // same calm moment (a thread read and left, 60 s into the page) while no other reveal is showing or claiming; its
   // claim runs the already-starred check, then the corner card shows.
-  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage].some((stage) => stage === 'open' || stage === 'claimed');
+  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage].some((stage) => stage === 'open' || stage === 'claimed');
   const starReveal = useStarReveal({
     due: lineLatch?.aside.includes('star') === true,
     listLoaded: lineLatch !== null,
@@ -4730,6 +4789,8 @@ function Inbox() {
     stepsReveal.stage !== 'claimed' &&
     broReveal.stage !== 'open' &&
     broReveal.stage !== 'claimed' &&
+    agentRulesReveal.stage !== 'open' &&
+    agentRulesReveal.stage !== 'claimed' &&
     grillMeTipReveal.stage !== 'open' &&
     grillMeTipReveal.stage !== 'claimed' &&
     starReveal.stage !== 'open' &&
@@ -4762,7 +4823,6 @@ function Inbox() {
   // once an agent is installed or turned on: it reads the agents again when the window comes back
   // into focus (the person ran the install command in a terminal) and every few seconds while shown.
   const { model: firstRunSessions } = useComposeSessions(firstRun);
-  const overTailnet = settings?.via === 'tailnet';
   // For a tailnet guest the agents route is local only: nothing to read again.
   const guestPage = tailnetGuest(settings);
   // Pull requests (approval "inbox-code-review-direction", items 4 and 5): only with Code review on, read while the
@@ -4921,66 +4981,7 @@ function Inbox() {
     if (options?.focusCoach) setCoachFocus((n) => n + 1);
   }, []);
   useTourReplay(tourState, dispatchTour, reducedMotion, say);
-  const saveTour = (change: Parameters<typeof inboxApi.saveTour>[0]) => {
-    // Kept here at once, so the entry screen leaves without waiting; the server's answer replaces it.
-    const now = new Date().toISOString();
-    setSettings((current) =>
-      current?.tour
-        ? {
-            ...current,
-            tour: {
-              ...current.tour,
-              seen_at: change.seen ? now : current.tour.seen_at,
-              finished_at: change.finished ? now : current.tour.finished_at,
-              skipped_at: change.skipped ? now : current.tour.skipped_at,
-              notify_again: change.notify_again ?? current.tour.notify_again,
-            },
-          }
-        : current,
-    );
-    // The server's answer replaces the local state, a stamp never going back to null: an earlier save's answer
-    // that lands after a later one (seen, then skipped) never brings Two paths back.
-    const adopt = (tour: InboxTourState) =>
-      setSettings((current) => {
-        if (!current) return current;
-        const local = current.tour;
-        return {
-          ...current,
-          tour: local
-            ? { ...tour, seen_at: tour.seen_at ?? local.seen_at, finished_at: tour.finished_at ?? local.finished_at, skipped_at: tour.skipped_at ?? local.skipped_at }
-            : tour,
-        };
-      });
-    const decision = change.finished ? 'finished' : change.skipped ? 'skipped' : null;
-    // A failed save is tried again (the server restarting, a busy moment); one the server refuses for good
-    // (a 4xx) is not. A decision that still did not reach config.json is remembered in this browser and said,
-    // quietly: the tour never pretends it was saved, and Two paths does not come back here.
-    const attempt = (tries: number) => {
-      void inboxApi.saveTour(change).then(
-        ({ tour }) => adopt(tour),
-        (cause: unknown) => {
-          const status = cause instanceof InboxApiError ? cause.status : 0;
-          if (tries < TOUR_SAVE_RETRY_MS.length && !(status >= 400 && status < 500)) {
-            setTimeout(() => attempt(tries + 1), TOUR_SAVE_RETRY_MS[tries]);
-            return;
-          }
-          if (!decision) return;
-          storage.setItem(TOUR_DECIDED_COOKIE, decision);
-          const why = cause instanceof Error ? cause.message : String(cause);
-          showToast(
-            {
-              icon: 'warn',
-              lead: 'Not saved',
-              detail: 'This browser remembers the tour',
-              speech: `The tour could not be saved: ${why} This browser remembers that you ${decision === 'finished' ? 'finished' : 'left'} it, so it will not offer itself again here.`,
-            },
-            6000,
-          );
-        },
-      );
-    };
-    attempt(0);
-  };
+  const saveTour = (change: InboxTourChange) => saveTourChange(change, setSettings, showToast);
   // The step rides the address (`#tour=N`): a reload or a link opens that step with the walk's state up to it,
   // and each step the person reaches replaces the entry, so one Back leaves the tour.
   const tourSynced = useRef<number | null>(null);
@@ -5078,32 +5079,6 @@ function Inbox() {
     );
     landFocusAfterTour();
   };
-  /**
-   * Focus never drops to the page once the Inbox is back. The browser's Back lands, and the screen redraws, some
-   * frames later on a slow machine; until the tour's own screen is gone the control that was pressed still holds
-   * focus and is about to go, so nothing counts as landed before then. Tried for up to 3 s.
-   */
-  function landFocusAfterTour() {
-    const until = performance.now() + 3000;
-    let settled = 0;
-    const land = () => {
-      if (performance.now() > until) return;
-      if (document.querySelector('[data-tour-bar]')) {
-        requestAnimationFrame(land);
-        return;
-      }
-      const active = document.activeElement;
-      if (!active || active === document.body || !active.isConnected) {
-        // Back where it was started: its own Take the tour (Settings, What's new); else the thread, the first-run heading, the list.
-        focusFirst(['[data-settings-take-tour]', '[data-whats-new-tour] button', 'section.ib-pane h2.ib-subject', '.ib-main .ib-empty h2', '.ib-main .ib-lbody [data-thread-id]', '.ib-main h1']);
-      }
-      const now = document.activeElement;
-      // Landed: focus held over a few frames (a screen that is still drawing can take the element away again).
-      settled = now && now !== document.body && now.isConnected ? settled + 1 : 0;
-      if (settled < 5) requestAnimationFrame(land);
-    };
-    requestAnimationFrame(land);
-  }
   // During the tour, focus that a control took with it (a screen redrawn by a step, a hash change, Try again)
   // lands on the tour's own place: the coach card, the loading screen, step 11's heading, else Exit. Only focus
   // that was LOST (the last focused element left the page): a click on empty space is left alone.
@@ -5276,7 +5251,7 @@ function Inbox() {
   });
   const offerLinesFree = linesFree && codeReviewOffer.stage !== 'open' && codeReviewOffer.stage !== 'claimed';
   // One of the line's dialogs is claimed or open now: the load arms nothing else meanwhile (`lineLatch`).
-  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage, starReveal.stage, codeReviewOffer.stage].some(
+  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage, starReveal.stage, codeReviewOffer.stage].some(
     (stage) => stage === 'claimed' || stage === 'open',
   );
   useEffect(() => setLineStagesBusy(stagesBusy), [stagesBusy]);
@@ -5304,7 +5279,7 @@ function Inbox() {
     const decide = () => {
       if (cancelled || agentNoteDecided.current || replyInProgress() || openQuestionHere()) return false;
       agentNoteDecided.current = true;
-      const model = settings?.via === 'tailnet' ? null : agentsRef.current;
+      const model = tailnetGuest(settings) ? null : agentsRef.current;
       const rows = model ? noteQuestionRows(model) : [];
       // Not on this load (the line's gap): decided, so the notification lines need not wait for it.
       if (rows.length === 0 || !model || settingsRef.current?.reveal?.setup === false) {
@@ -5339,15 +5314,15 @@ function Inbox() {
   // The connect line (approval "inbox-agent-note-auto"; ConnectLine): once the agents are read (the run that
   // opened the window has finished connecting and writing notes), the news not said yet shows above the list and
   // on the first-run screen, quiet, never a dialog. Fixed for this load when it shows, and said at once
-  // (`POST /api/inbox/agents/seen`). Not over the tailnet: the agents are this computer's, as for the note dialog.
+  // (`POST /api/inbox/agents/seen`). On this computer and on its owner's other devices; never a tailnet guest's page.
   useEffect(() => {
-    if (connectLine !== null || !agentsSettled || !agents || !settings || settings.via === 'tailnet') return;
+    if (connectLine !== null || !agentsSettled || !agents || !settings || tailnetGuest(settings)) return;
     const news = connectLineNews(agents);
     if (!news) return;
     setConnectLine(news);
     void inboxApi.agentsSeen(news.report?.at ?? null, news.notes).then(setAgents, () => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agents, agentsSettled, settings?.via, connectLine]);
+  }, [agents, agentsSettled, settings?.via, settings?.guest, connectLine]);
   const connectLineEl =
     connectLine && connectLine !== 'gone' ? (
       <ConnectLine
@@ -5672,6 +5647,7 @@ function Inbox() {
   // Remote launch: where the person last started an agent on each machine, from the merged list's launched rows.
   // The rows the window has: where the sidebar's Agents section finds each agent's thread, and the last agent started.
   const composeLastAgent = useMemo(() => lastLaunchAgent(windowRows), [windowRows]);
+  useComposerOpener(openCompose, composeLastAgent);
   // "+" on project rows (F1-F7): on while launch is on and this is no guest's page. This computer's launch block says
   // which rows can start anything (agents, the folder still there): read when "+" comes on, when the tab is shown, and
   // when the projects change; never on a timer.
@@ -5704,7 +5680,7 @@ function Inbox() {
   })();
 
   // The last step’s notifications line (choice 6): asked on the click, in the screen's "Try it".
-  const tourAskKind = tourRealStep && !tourAskHidden && !overTailnet && notifications.permission !== 'unsupported'
+  const tourAskKind = tourRealStep && !tourAskHidden && !guestPage && notifications.permission !== 'unsupported'
     ? notifications.permission === 'denied'
       ? 'blocked'
       : notifications.permission === 'granted' && settings?.notifications.enabled
@@ -5746,11 +5722,11 @@ function Inbox() {
               </button>
             </div>
           ) : null
-        ) : // Not over the tailnet: that page is another device, and the first run is set up on this computer.
-        connectLineEl || (notifications.firstRunAsk && askLinesFree && !overTailnet) ? (
+        ) : // On this computer and on the owner's other devices (owner ruling 2026-11-11); never a tailnet guest's page.
+        connectLineEl || (notifications.firstRunAsk && askLinesFree && !guestPage) ? (
           <>
             {connectLineEl}
-            {notifications.firstRunAsk && askLinesFree && !overTailnet && (
+            {notifications.firstRunAsk && askLinesFree && !guestPage && (
               <NotificationAsk
                 kind={notifications.firstRunAsk}
                 firstRun
@@ -6414,6 +6390,11 @@ function Inbox() {
               return blocked ? { name: blocked.name, onPress: () => setMachineUpdateOpen({ id: blocked.id, snooze: true }) } : undefined;
             })()}
             machine={machines.linked.find((m) => m.id === machineOf(thread.thread_id)) ?? null}
+            agentContext={threadAgentContext}
+            // A session's name in the thread's header filters the list to that agent, as the sidebar's agent does,
+            // and keeps this thread on screen (the person is reading it); a second click shows everything again.
+            agentFilter={route.page === 'inbox' ? (route.agent ?? null) : null}
+            onAgentFilter={(agentId) => leave({ page: 'inbox', project: null, machine: null, agent: agentId, thread: route.page === 'inbox' ? route.thread : null })}
             // A Delete refused by a machine too old to take one: the error line's Update opens that machine's update dialog.
             onMachineUpdate={pageOffersUpdates(settings) ? (id) => setMachineUpdateOpen({ id, snooze: false }) : undefined}
             outbox={threadOutbox(outbox, thread)}
@@ -6698,6 +6679,7 @@ function Inbox() {
             projectsReadable={projectsReadable}
             onProjectAction={(projectId, action) => void projectAction(projectId, action)}
             onProjectRename={renameProject}
+            onAgentRename={guestPage ? undefined : renameAgent}
             onProjectPicture={setProjectPicture}
             onProjectCombine={async (pair) => (await combineProjects([pair])) === null}
             // "+" on a project row (F1-F7): while agents can be started from New message, and not on a guest's page.
@@ -6824,7 +6806,6 @@ function Inbox() {
         <MarkReadWarning
           count={readWarning.count}
           bulk={readWarning.bulk}
-          offerNever={settings?.guest !== true}
           onAnswer={(answer) => {
             setReadWarning(null);
             readWarning.answer(answer);
@@ -6914,6 +6895,20 @@ function Inbox() {
             stepsReveal.close();
           }}
           onTurnOn={() => turnOnFromReveal('steps', stepsReveal.close)}
+        />
+      )}
+      {agentRulesReveal.stage === 'open' && (
+        <RulesIntro
+          phone={phone}
+          onClose={() => {
+            void inboxApi.revealNotNow('agent_rules');
+            agentRulesReveal.close();
+          }}
+          onAdd={() => {
+            agentRulesReveal.close();
+            wantRulesEditor();
+            window.location.hash = '#settings/prompts';
+          }}
         />
       )}
       {broReveal.stage === 'open' && (

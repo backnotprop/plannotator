@@ -30,7 +30,7 @@
  */
 
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { INBOX_DRAFT_BODY_MAX, INBOX_PULL_OWNER_KEYS_MAX, inboxId, type InboxAuthor, type InboxDraft, type InboxDraftTo, type InboxReviewChanges, type InboxReviewLinkAnswer } from '@plannotator/core/inbox-types';
+import { INBOX_DRAFT_BODY_MAX, INBOX_PULL_OWNER_KEYS_MAX, inboxId, type InboxDraft, type InboxDraftTo, type InboxReviewChanges, type InboxReviewLinkAnswer } from '@plannotator/core/inbox-types';
 import { InboxApiError, InboxHeldError, inboxApi, type DraftView, type StartThreadInput } from '../api';
 import { tildePath, whenTime } from '../format';
 import { HostMark, Icon } from '../icons';
@@ -39,6 +39,7 @@ import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, useComposeFi
 import { SessionDetail, ToPicker, startKey } from './ToPicker';
 import { PhoneToSheet } from './PhoneToSheet';
 import { FolderMenu, type FolderGroup } from './FolderMenu';
+import { useLaunchChoice } from './useLaunchChoice';
 import { unpluggedDrive } from './homeFolders';
 import { THREAD_NAME_ATTACHED_NOTE, ThreadNameChip } from './ThreadNameChip';
 import { TrustDetails } from './TrustDetails';
@@ -55,8 +56,7 @@ import { fetchSkillCatalog, getCachedSkillCatalog } from '@plannotator/ui/utils/
 import { useShortcutAria } from '../shortcuts/hint';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { INBOX_MESSAGE_SKILL_AUDIENCE, INBOX_REPLY_SKILL_AUDIENCE, inboxSkillsBlock, withSkillsBlock } from '../skills';
-import { wordsMessage } from '../sendTargets';
-import { pinnedState, type PinnedState } from '../pins';
+import { THREAD_NAME_TAKEN, threadNameHolder, type ThreadNameHolder } from './threadNameHolder';
 import { ThreadPill } from './ThreadPill';
 import { registerReloadFlush } from '../stalePage';
 import {
@@ -145,38 +145,10 @@ export interface ComposeRequest {
    * agent the person started last when it can start (`agent`), else the first. Nothing to start: To stays empty.
    */
   launch?: { agent: string | null } | null;
-}
-
-/** What the chip says when another open thread of the project has the typed name. */
-const THREAD_NAME_TAKEN = 'Another open thread in this project has this name.';
-
-/** The open thread that has the name the person typed, and the message a reply typed in it answers. */
-interface ThreadNameHolder {
-  threadId: string;
-  messageId: string;
-  /** Its name as that thread has it (the typed one may differ in case or spaces). */
-  name: string;
-  /** Who a reply typed in it reaches: "Claude Code". */
-  agent: string;
-  /** That agent, for its mark. */
-  author: InboxAuthor;
-  /** The thread's state as its list row has it (Stopped, Holds N, open questions); null when the read carried no row. */
-  state: PinnedState | null;
-}
-
-/** Read the thread that has the name; null when it can't be read (the notice then offers nothing). */
-async function threadNameHolder(threadId: string): Promise<ThreadNameHolder | null> {
-  try {
-    const { thread, row } = await inboxApi.thread(threadId, 5000);
-    if (thread.resolved_at !== null || thread.thread_name === null) return null;
-    const target = wordsMessage(thread);
-    // A thread no agent wrote in yet is its addressee's.
-    const author: InboxAuthor = target.author.kind === 'agent' ? target.author : { kind: 'agent', host: target.to?.host ?? null, session: target.to?.session ?? null, name: null };
-    const agent = (author.kind === 'agent' ? author.name : null) ?? (author.kind === 'agent' && author.host ? hostLabel(author.host) : 'That thread’s agent');
-    return { threadId, messageId: target.id, name: thread.thread_name, agent, author, state: row ? pinnedState(row) : null };
-  } catch {
-    return null;
-  }
+  /** Files the message starts with, uploaded as picked ones are (compose/openComposer.ts). */
+  files?: readonly File[];
+  /** To opens on its own list at once: the person picks a running agent or a new session (compose/openComposer.ts). */
+  pickTo?: boolean;
 }
 
 /** Compose's message went into an open thread instead of starting one ("Send to that thread"). */
@@ -386,6 +358,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     if (reuseStarted.current) return;
     reuseStarted.current = true;
     for (const source of request.reuse ?? []) files.addExisting(source);
+    if (request.files?.length) files.add(request.files);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   // `machine`: the linked machine the project is on (remote launch); null for this computer. `folder`: a folder under
@@ -474,7 +447,9 @@ export function ComposeDialog(props: ComposeDialogProps) {
     const projects: MachineLaunchProject[] = [...machineGroups.groups.filter((g) => !g.asleep), ...machineGroups.groups.filter((g) => g.asleep)].flatMap((g) => g.projects);
     return { agents, projects, ...(offered?.scratch && !pulls ? { scratch: offered.scratch } : {}) };
   }, [model?.launch, pulls, onlyProjects?.join(), box, linkScratch, grouped, machineGroups, there.reads]);
-  const canStart = !!launch && launch.agents.length > 0 && (launch.projects.length > 0 || (grouped && machineGroups.groups.some((g) => !!g.scratch)));
+  // A fresh Inbox has no projects yet: its scratch folder is where a first agent starts (the start block names it).
+  const startLaunch = useMemo(() => (launch && launch.projects.length === 0 && launch.scratch ? { ...launch, projects: [scratchProject(launch.scratch.root)] } : launch), [launch]);
+  const canStart = !!startLaunch && startLaunch.agents.length > 0 && (startLaunch.projects.length > 0 || (grouped && machineGroups.groups.some((g) => !!g.scratch)));
   // The launch block of the machine a pick is on: this computer's, or that machine's last good read.
   const blockOf = (machine: string | null) => (machine ? there.reads.get(machine)?.launch : model?.launch);
   const start: (ComposeStart & { machine: string | null }) | null = useMemo(() => {
@@ -502,14 +477,14 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // Add agent: the default start, once the launch block is read, unless the person chose To already.
   const launchPicked = useRef(false);
   useEffect(() => {
-    if (!request.launch || launchPicked.current || startPick || chosen || !launch || !canStart) return;
-    const project = defaultStartProject(launch, current);
+    if (!request.launch || launchPicked.current || startPick || chosen || !startLaunch || !canStart) return;
+    const project = defaultStartProject(startLaunch, current);
     if (!project) return;
     launchPicked.current = true;
-    const agent = launch.agents.find((a) => a.agent === request.launch!.agent) ?? launch.agents[0]!;
+    const agent = startLaunch.agents.find((a) => a.agent === request.launch!.agent) ?? startLaunch.agents[0]!;
     setStartPick({ agent: agent.agent, projectId: project.id, machine: (project as MachineLaunchProject).machine ?? null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [request.launch, launch, canStart, startPick, chosen, current]);
+  }, [request.launch, startLaunch, canStart, startPick, chosen, current]);
   // "+" on a project row and Add agent: an agent that machine doesn't have (or none started yet) becomes its first,
   // once its block is read.
   useEffect(() => {
@@ -528,6 +503,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const startAsleep = !!startMachine && startMachine.state === 'offline';
   const [folderMenu, setFolderMenu] = useState(!!request.clone);
   const startAgent = start ? blockOf(start.machine)?.agents.find((a) => a.agent === start.agent) : undefined;
+  const launchChoice = useLaunchChoice(start ? `${start.machine ?? ''}:${start.agent}` : null, startAgent?.choices, phone);
   // Trust and start: the folder To names, when the agent does not trust it and the owner can from here. No entry (a
   // trusted folder, home, a guest): plain Send. Its facts follow the pick by a read, so a press can come before them.
   const trust = (start?.project.exists ? startAgent?.untrusted?.[start.project.id] : undefined) ?? null;
@@ -638,7 +614,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     } else if (model && chosen && lastTarget.current?.session === chosen) setLost(lastTarget.current);
   }, [target, model, chosen]);
 
-  const [picker, setPicker] = useState(false);
+  const [picker, setPicker] = useState(!!request.pickTo);
   const [error, setError] = useState<string | null>(null);
   // What is wrong with the name the person typed (409 `thread_name_taken`, or not a valid name): said on the chip until it changes.
   const [nameError, setNameError] = useState<string | null>(null);
@@ -797,7 +773,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
       if (document.activeElement !== textRef.current) trustCircleRef.current?.focus();
       return;
     }
-    if (picker || folderMenu || reviewMenu) {
+    if (picker || folderMenu || reviewMenu || launchChoice.open) {
+      launchChoice.close();
       setPicker(false);
       setFolderMenu(false);
       setReviewMenu(false);
@@ -914,6 +891,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
                     : { agent: start.agent, project_id: start.project.id }),
                 // The press is the consent, to what it was offered: the server refuses a folder that changed since.
                 ...(trust ? { trust: { folder: trust.folder, facts: trustFacts } } : {}),
+                ...launchChoice.send,
               },
             }
           : { host: target!.host, session: target!.session },
@@ -1354,6 +1332,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
         <span className="ib-cp-startin">
           <span className="ib-cp-in">in</span>
           {folderButton('ib-cp-tobtn', 15)}
+          {launchChoice.button('ib-cp-tobtn')}
         </span>
       )}
       {(boxPull || (linkOnly && !linkScratch)) && (target || start) && !phone && <span className="ib-cp-rvfrompull">· from the pull request</span>}
@@ -1395,6 +1374,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     <div className="ib-cp-startline" data-compose-start-line="">
       <span>New {start.name} session in</span>
       {folderButton('ib-cp-startlineb', 13)}
+      {launchChoice.button('ib-cp-startlineb')}
     </div>
   );
   // A phone's Skills button, as the reply box has it: it types the `/` the skill list opens on.
@@ -1417,7 +1397,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     void fetchSkillCatalog().then((catalog) => (catalog.length > 0 ? slash() : none()));
   };
 
-  const toStart = launch && canStart && launch.projects.length > 0 ? { launch, current: start && !start.scratch ? { id: start.project.id, root: start.project.root } : current } : null;
+  const toStart = startLaunch && canStart && startLaunch.projects.length > 0 ? { launch: startLaunch, current: start && !start.scratch ? { id: start.project.id, root: start.project.root } : current } : null;
   const pickStart = (picked: ComposeStart) => {
     setToFilled(false);
     setStartPick({ agent: picked.agent, projectId: picked.project.id, machine: (picked.project as MachineLaunchProject).machine ?? null });
@@ -1758,6 +1738,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
       ) : (
         picker && <ToPicker groups={groups} selected={toSelected} home={home} phone={false} start={toStart} onStart={pickStart} onPick={pickSession} onClose={closePicker} />
       )}
+      {launchChoice.menu()}
       {folderMenu && start && launch && (
         <FolderMenu
           projects={launch.projects}

@@ -6,7 +6,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { InboxMessageWire, InboxQuestion } from '@plannotator/core/inbox-types';
 import type { InboxEvent, ThreadModel } from '../../api';
-import { applyRecord, reconcileRead, type HeldThread } from './record';
+import { applyRecord, reconcileRead, recordMovesFiles, type HeldThread } from './record';
 
 const T = 'msg_ROOT';
 const at = '2026-11-10T10:00:00.000Z';
@@ -41,6 +41,9 @@ const rows: Row[] = [
     expect([after.thread.resolved_at, after.thread.archive_seq]).toEqual([at, 13]);
     expect(after.thread.messages[0]!.questions?.[0]?.key).toBe('q1');
   }],
+  ['the root archived: its open questions close, as a read says', message(13, msg(T, { resolved_at: at }), false), (after) => {
+    expect(after.thread.messages[0]!.questions?.map((x) => x.state)).toEqual(['closed']);
+  }],
   ['the root renamed: the thread takes the name', message(14, msg(T, { thread_name: 'Ship it' }), false), (after) => {
     expect(after.thread.thread_name).toBe('Ship it');
   }],
@@ -56,10 +59,15 @@ const rows: Row[] = [
     expect([root.questions?.map((x) => x.key), root.actions?.map((x) => x.key)]).toEqual([['q1'], ['a1']]);
   }],
   ['an older revision never takes an answer back', q(20, question('q1', 0)), 'none'],
+  // The thread's subject came from q1 (the agent gave none): the server follows the replacement, so the header does.
+  ['the question a subject came from replaced: the thread is read (its subject)', q(25, question('q1', 2, { state: 'superseded', superseded_by: { message_id: 'msg_N', key: 'q1' } })), 'reread'],
   ['a question of a message not held is read', q(21, { ...question('q9', 1), message_id: 'msg_X' }), 'reread'],
   ['a comment that went with a reply is read (its count)', { seq: 22, kind: 'annotation', id: 'ann', annotation: { thread_id: T, sent_reply_id: 'msg_R' } as never }, 'reread'],
   ['a comment waiting on a file changes no message', { seq: 23, kind: 'annotation', id: 'ann', annotation: { thread_id: T, sent_reply_id: null } as never }, 'none'],
   ["another thread's record does nothing here", message(24, { ...msg('msg_O'), thread_id: 'msg_OTHER' }), 'none'],
+  // Safe default: a kind this build has no case for (a newer Inbox's) is read, never left as it was.
+  ['a record kind this build does not know is read', { seq: 26, kind: 'reaction', id: 'r' } as unknown as InboxEvent, 'reread'],
+  ['a project record (a label the header reads) is read', { seq: 27, kind: 'project', id: 'prj', project: {} } as unknown as InboxEvent, 'reread'],
 ];
 
 describe('one stream record on a held thread', () => {
@@ -73,6 +81,11 @@ describe('one stream record on a held thread', () => {
       }
     });
   }
+  test('a question replaced under a subject the agent gave changes no subject: drawn in place', () => {
+    const given = model([msg(T, { seq: 1, subject_question: null, questions: [question('q1', 1)] })]);
+    const out = applyRecord(given, q(25, question('q1', 2, { state: 'superseded', superseded_by: { message_id: 'msg_N', key: 'q1' } })));
+    expect(out.kind).toBe('applied');
+  });
   test('the same record twice draws once', () => {
     const once = applyRecord(held, message(11, msg('msg_N')));
     if (once.kind !== 'applied') throw new Error('not applied');
@@ -103,7 +116,28 @@ describe('a read landing after records', () => {
       now = out.model;
     }
     const kept = reconcileRead(now, read(11, base));
-    expect(kept.thread.messages[0]!.questions?.[0]).toMatchObject({ revision: 3, state: 'picked' });
+    expect(kept.thread.messages[0]!.questions?.[0]).toMatchObject({ revision: 3, state: 'closed' });
     expect([kept.thread.resolved_at, kept.thread.archive_seq]).toEqual([at, 13]);
   });
+});
+
+describe('which records read the thread\'s files apart (a comment, the agent at work), and which do not', () => {
+  const ann = (thread: string): InboxEvent => ({ seq: 30, kind: 'annotation', id: 'ann', annotation: { thread_id: thread, sent_reply_id: null } as never });
+  const cases: [string, InboxEvent, boolean][] = [
+    ['a comment added, edited or removed (the foot\'s count)', ann(T), true],
+    ["another thread's comment", ann('msg_OTHER'), false],
+    ['a new message with no file (a file edited or deleted on disk shows)', message(31, msg('msg_N')), true],
+    ['a new message that brings files: the pane reads them itself', message(32, msg('msg_F', { attachments: [{ id: 'att' }] } as never)), false],
+    ["the agent read the person's reply (the root's agent_checked_seq moved)", message(33, msg(T, { agent_checked_seq: 5 } as never), false), true],
+    ['a look on the root (person_seen_seq)', message(34, msg(T, { person_seen_seq: 5 } as never), false), false],
+    ['the root archived', message(35, msg(T, { resolved_at: at }), false), false],
+    ["a later line of a reply", message(36, msg('msg_R', { author: person, delivered_at: at } as never), false), false],
+    ['a pick saved', q(37, question('q1', 2, { state: 'picked' })), false],
+  ];
+  for (const [name, event, want] of cases) test(name, () => expect(recordMovesFiles(held, event)).toBe(want));
+});
+
+test('the root unarchived with a question the archive closed: the thread is read (only the server knows each state again)', () => {
+  const archived = model([msg(T, { seq: 1, resolved_at: at, questions: [question('q1', 1, { state: 'closed' })] })]);
+  expect(applyRecord({ ...archived, thread: { ...archived.thread, resolved_at: at } }, message(28, msg(T, { resolved_at: null }), false)).kind).toBe('reread');
 });

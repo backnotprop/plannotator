@@ -3,6 +3,7 @@ import { useCallback, useMemo, useRef } from 'react';
 import { inboxNoteBlocks } from '@plannotator/core/inbox-context-notes';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
+import { withoutInboxReplyQuoteLead } from '@plannotator/core/inbox-reply-quote';
 import { linkReplyFeedback } from '../../replyFileLinks';
 import { splitReplyFeedback } from '../../replyFeedback';
 import { sentReplyParts } from '../../sentReply';
@@ -19,8 +20,9 @@ export function useBodyText({ message, sentActions, sentAnswers, replyFiles, pro
   const actionsSent = (sentActions?.length ?? 0) > 0;
   const sent = useMemo(() => {
     const raw = skills ? skills.before : message.body;
-    return actionsSent ? withoutInboxActionsSection(raw) : raw;
-  }, [skills, message.body, actionsSent]);
+    const words = message.author.kind === 'person' && message.quote ? withoutInboxReplyQuoteLead(raw) : raw;
+    return actionsSent ? withoutInboxActionsSection(words) : words;
+  }, [skills, message.body, message.author.kind, message.quote, actionsSent]);
   const replyParts = useMemo(() => sentReplyParts(message, sent, sentAnswers ?? []), [message, sent, sentAnswers]);
   // The files the reply's feedback names, as links (display only; replyFileLinks.ts).
   // Only the person's own message: an agent's text is drawn as it wrote it, whatever its headings say.

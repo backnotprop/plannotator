@@ -60,6 +60,23 @@ async function withPictures(doc: DecisionExportV1, pictures: readonly DecisionEx
   }
 }
 
+/** A thread's export as the download and Post decisions build it, or null for no such thread. */
+export function threadDecisionExport(store: InboxStore, threadId: string, options: { tz: string; version: string; now?: () => Date }): ReturnType<typeof buildDecisionExport> | null {
+  const input = store.decisionExportInput(threadId);
+  if (!input) return null;
+  const pulls = store.threadPulls(threadId).map((pull) => {
+    const wire = inboxThreadPullWire(pull);
+    return { ref: wire.ref, url: wire.url, title: wire.title };
+  });
+  return buildDecisionExport(input, {
+    now: options.now?.() ?? new Date(),
+    tz: options.tz,
+    generator: `Plannotator ${options.version}`,
+    pulls,
+    home: process.env.HOME || homedir(),
+  });
+}
+
 /** The download, or null when the path is not this route. */
 export async function inboxDecisionExportRoute(url: URL, store: InboxStore, options: { version: string; now?: () => Date }): Promise<Response | null> {
   const match = INBOX_DECISION_EXPORT_ROUTE.exec(url.pathname);
@@ -68,19 +85,9 @@ export async function inboxDecisionExportRoute(url: URL, store: InboxStore, opti
   const raw = url.searchParams.get("format") ?? "md";
   if (!(raw in FORMATS)) return Response.json({ error: "format: md, html or json.", code: "validation_error" }, { status: 422 });
   const format = raw as DecisionExportFormat;
-  const input = store.decisionExportInput(threadId);
-  if (!input) return Response.json({ error: "No such thread.", code: "thread_not_found" }, { status: 404 });
-  const pulls = store.threadPulls(threadId).map((pull) => {
-    const wire = inboxThreadPullWire(pull);
-    return { ref: wire.ref, url: wire.url, title: wire.title };
-  });
-  const { doc, pictures } = buildDecisionExport(input, {
-    now: options.now?.() ?? new Date(),
-    tz: url.searchParams.get("tz") ?? "UTC",
-    generator: `Plannotator ${options.version}`,
-    pulls,
-    home: process.env.HOME || homedir(),
-  });
+  const built = threadDecisionExport(store, threadId, { tz: url.searchParams.get("tz") ?? "UTC", version: options.version, now: options.now });
+  if (!built) return Response.json({ error: "No such thread.", code: "thread_not_found" }, { status: 404 });
+  const { doc, pictures } = built;
   if (format !== "md") await withPictures(doc, pictures, store);
   const body = format === "md" ? renderDecisionExportMarkdown(doc) : format === "html" ? renderDecisionExportHtml(doc) : `${JSON.stringify(doc, null, 2)}\n`;
   return new Response(body, {

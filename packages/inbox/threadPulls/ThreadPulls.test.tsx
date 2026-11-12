@@ -309,6 +309,53 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
     expect(popover()!.querySelectorAll('[data-pr-row]')).toHaveLength(2);
   });
 
+  test('Post decisions: a row on each PR, only on a thread with decisions', async () => {
+    answer = answerOf([pull('o/r#1', 'open', 'main', 'a'), pull('o/web#2', 'open', 'main', 'b')]);
+    const posted: string[] = [];
+    render(<ThreadPullsButton threadId={THREAD} summary={undefined} onPost={(ref) => posted.push(ref)} />);
+    await settle();
+    await click(host!.querySelector('[data-pr-button]'));
+    const rows = [...popover()!.querySelectorAll('[data-pr-post]')];
+    expect(rows.map((b) => [b.getAttribute('data-pr-post'), b.getAttribute('aria-label')])).toEqual([
+      ['o/r#1', 'Post decisions on o/r#1'],
+      ['o/web#2', 'Post decisions on o/web#2'],
+    ]);
+    await click(rows[1]!);
+    expect(posted).toEqual(['o/web#2']);
+    act(() => root!.render(<ThreadPullsButton threadId={THREAD} summary={undefined} />));
+    await settle();
+    expect(popover()!.querySelector('[data-pr-post]')).toBeNull();
+  });
+
+  test('Post decisions with one PR: a button under its card', async () => {
+    answer = answerOf([pull('o/r#1', 'open', 'main', 'a')]);
+    const posted: string[] = [];
+    render(<ThreadPullsButton threadId={THREAD} summary={undefined} onPost={(ref) => posted.push(ref)} />);
+    await settle();
+    await click(host!.querySelector('[data-pr-button]'));
+    await click(popover()!.querySelector('[data-pr-edit] [data-pr-post="o/r#1"]'));
+    expect(posted).toEqual(['o/r#1']);
+  });
+
+  test('Post on a pull request with none linked: the card opens on Add, and the PR added gets the post, then the card closes', async () => {
+    postAnswer = (body) => {
+      answer = answerOf([pull((body.add as string[])[0]!, 'unknown', 'main', 'z')]);
+      return Response.json(answer);
+    };
+    const posted: string[] = [];
+    let done = 0;
+    render(<ThreadPullsButton threadId={THREAD} summary={undefined} adding postOnAdd onAddingDone={() => (done += 1)} onPost={(ref) => posted.push(ref)} />);
+    await settle();
+    const input = popover()!.querySelector<HTMLInputElement>('[data-pr-add-input]')!;
+    expect(document.activeElement).toBe(input);
+    await type(input, 'https://github.com/acme/notes/pull/12');
+    await click(popover()!.querySelector('[data-pr-add]'));
+    expect(posts.map((p) => p.body)).toEqual([{ add: ['https://github.com/acme/notes/pull/12'] }]);
+    expect(posted).toEqual(['acme/notes#12']);
+    expect(done).toBe(1);
+    expect(popover()).toBeNull();
+  });
+
   test("a change to this thread's PRs reads them again; another thread's does not", async () => {
     answer = answerOf([pull('o/r#1', 'open', 'main', 'a')]);
     render(<ThreadPullsButton threadId={THREAD} summary={undefined} />);
@@ -376,4 +423,36 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
     expect(popover()).toBeNull();
     expect(document.activeElement).toBe(button);
   });
+
+  // The sheet follows the phone layout (phone.ts's PHONE_QUERY), as the ⋯ menus' sheets do: a tablet's touch screen
+  // gets the card under the button, and a phone the sheet with its scrim.
+  for (const [what, matches, sheet] of [
+    ['a phone', (query: string) => query.includes('max-width: 767px') || query.includes('pointer: coarse'), true],
+    ['a tablet (a touch screen, not the phone layout)', (query: string) => query === '(pointer: coarse)', false],
+  ] as const) {
+    test(`${what}: the button opens ${sheet ? 'the bottom sheet over a scrim' : 'the card, no sheet'}`, async () => {
+      const saved = window.matchMedia;
+      window.matchMedia = ((query: string) => ({ matches: matches(query), media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false })) as typeof window.matchMedia;
+      try {
+        answer = answerOf([pull('o/r#1', 'open', 'main', 'a'), pull('o/r#2', 'merged', 'main', 'b')]);
+        render(<ThreadPullsButton threadId={THREAD} summary={undefined} />);
+        await settle();
+        await click(host!.querySelector('[data-pr-button]'));
+        expect(popover()?.hasAttribute('data-sheet')).toBe(sheet);
+        expect(popover()?.classList.contains('ib-prpop-sheet')).toBe(sheet);
+        expect(document.querySelector('[data-pr-scrim]') !== null).toBe(sheet);
+        if (sheet) {
+          // The scrim closes the sheet on its click, never on the press: closed on the press, a touch's click lands
+          // on what was under the scrim (the header's Back, at the top left).
+          const scrim = document.querySelector<HTMLElement>('[data-pr-scrim]')!;
+          await act(async () => scrim.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
+          expect(popover()).not.toBeNull();
+          await click(scrim);
+          expect(popover()).toBeNull();
+        }
+      } finally {
+        window.matchMedia = saved;
+      }
+    });
+  }
 });

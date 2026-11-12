@@ -43,6 +43,7 @@ import {
   INBOX_AGENT_LABELS,
   inboxAgentList,
   inboxElsewhereText,
+  inboxGrantText,
   type InboxAgentId,
   type InboxConnectReport,
 } from "@plannotator/core/inbox-types";
@@ -60,9 +61,12 @@ import { inboxDir } from "@plannotator/shared/inbox/schema";
 import { qwenHome, qwenHomeIsRelative } from "@plannotator/shared/inbox/qwen-sessions";
 import { INBOX_QWEN_TRUST_ON_CONNECT, QWEN_TRUST_REVOKED_REASON, ensureQwenTrust, retryQwenRevoke, setQwenTrust, type QwenTrustOutcome } from "./inbox-qwen-trust";
 import { addJsonMember, removeJsonMember } from "./json-edit";
+import { HERMES_PLUGIN_INSTALL, HERMES_WAKE_GRANT, HERMES_WAKE_SETTING, HERMES_WAKE_UNDO_LINE } from "@plannotator/core/inbox-hermes";
+import { hermesFound, hermesPluginInstalled, hermesWakeGranted } from "./inbox-hermes";
 import {
   agentFileContains,
   describeFsError,
+  placeKey,
   readAgentFile,
   samePlace,
   stripJsonComments,
@@ -592,8 +596,8 @@ type ConnectWay =
   | { kind: "cli"; bin: string; add: (command: readonly string[]) => string[]; remove: string[] }
   /** One key in a JSON file (`json`: how it is edited). */
   | { kind: "json"; keys: readonly string[]; json?: JsonFileRules }
-  /** `inboxTool` on for Plannotator's own extension/plugin. */
-  | { kind: "tool"; host: InboxToolHost }
+  /** `inboxTool` on for Plannotator's own extension/plugin; `then`: the agent's own command that finishes connecting it. */
+  | { kind: "tool"; host: InboxToolHost; then?: ToolConnectStep }
   /** Only a person can connect it; `why` says how. */
   | { kind: "manual"; why: string }
   /** Nothing to do (Claude Code). */
@@ -797,6 +801,34 @@ export function clinePluginInstalled(e: AgentEnvironment, cwd: string = process.
   return clinePluginsFolderHasPlugin(global) || (workspace !== global && clinePluginsFolderHasPlugin(workspace));
 }
 
+export const OPENCLAW_PLUGIN_PACKAGE = "@plannotator/openclaw";
+
+export function openclawStateDir(e: AgentEnvironment): string {
+  const explicit = envDir(e, "OPENCLAW_STATE_DIR");
+  if (explicit) return explicit;
+  const home = envDir(e, "OPENCLAW_HOME") ?? e.homeDir;
+  const profile = e.env.OPENCLAW_PROFILE?.trim().toLowerCase();
+  return join(home, profile && profile !== "default" ? `.openclaw-${profile}` : ".openclaw");
+}
+
+function namesOpenClawPlugin(manifest: string): boolean {
+  const read = readAgentFile(manifest);
+  if (read.kind !== "file") return false;
+  try {
+    return (JSON.parse(read.text) as { name?: unknown }).name === OPENCLAW_PLUGIN_PACKAGE;
+  } catch {
+    return false;
+  }
+}
+
+export function openclawPluginInstalled(e: AgentEnvironment): boolean {
+  const state = openclawStateDir(e);
+  const projects = join(state, "npm", "projects");
+  if (listDir(projects).some((project) => namesOpenClawPlugin(join(projects, project, "node_modules", "@plannotator", "openclaw", "package.json")))) return true;
+  const extensions = join(state, "extensions");
+  return listDir(extensions).some((id) => namesOpenClawPlugin(join(extensions, id, "package.json")));
+}
+
 const CLAUDE_PLUGIN_ID = /^plannotator@/;
 
 /** One Claude Code settings file, parsed (null: missing or unreadable). */
@@ -820,11 +852,53 @@ function claudeSettingsPluginState(settings: { enabledPlugins?: unknown } | null
   return ours.length > 0 ? false : undefined;
 }
 
-/** Claude Code's settings scopes the Inbox can read, strongest first: managed, then the user's settings.local.json, then settings.json. */
-function claudeSettingsScopes(e: AgentEnvironment): { scope: "managed" | "user"; settings: { enabledPlugins?: unknown; env?: unknown } | null }[] {
+/** A Claude Code settings scope, by Claude's precedence: managed, then the project's local and shared files, then the user's. */
+export type ClaudeSettingsScope = "managed" | "local" | "project" | "user";
+
+/**
+ * Where a launch folder's Claude Code project settings are: `project`, the folder Claude starts in (its
+ * `.claude/settings.json`); `local`, the folder whose `.claude/settings.local.json` Claude reads (the repository's
+ * root, a linked worktree's main checkout, or the folder itself).
+ */
+export type ClaudeProjectSettingsDirs = { project: string; local: string };
+
+/** The most a project's Claude Code settings file may be for the Inbox to read it. */
+export const CLAUDE_PROJECT_SETTINGS_MAX_BYTES = 256 * 1024;
+
+/**
+ * One of a project's Claude Code settings files (`<dir>/.claude/<name>`), parsed, or null: missing, too big, not
+ * JSON, or a symlink (of the file or of `.claude`) that leads out of `dir`. Read only.
+ */
+function readClaudeProjectSettings(dir: string, name: string): { enabledPlugins?: unknown; env?: unknown } | null {
+  const path = join(dir, ".claude", name);
+  const inside = placeKey(dir);
+  const real = placeKey(path);
+  if (!real.startsWith(inside.endsWith(sep) ? inside : `${inside}${sep}`)) return null;
+  const read = readAgentFile(real, CLAUDE_PROJECT_SETTINGS_MAX_BYTES);
+  if (read.kind !== "file") return null;
+  try {
+    const parsed = JSON.parse(stripJsonComments(read.text)) as unknown;
+    return parsed && typeof parsed === "object" ? (parsed as { enabledPlugins?: unknown; env?: unknown }) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Claude Code's settings scopes the Inbox can read, strongest first: managed, then (for a launch folder) the
+ * project's `settings.local.json` and `settings.json`, then the user's settings.local.json and settings.json.
+ * Without `project` (Settings → Agents, which has no folder): managed and the user's only.
+ */
+function claudeSettingsScopes(e: AgentEnvironment, project: ClaudeProjectSettingsDirs | null = null): { scope: ClaudeSettingsScope; settings: { enabledPlugins?: unknown; env?: unknown } | null }[] {
   const managed = claudeManagedSettingsPath(e);
   return [
     ...(managed ? [{ scope: "managed" as const, settings: readClaudeSettings(managed) }] : []),
+    ...(project
+      ? [
+          { scope: "local" as const, settings: readClaudeProjectSettings(project.local, "settings.local.json") },
+          { scope: "project" as const, settings: readClaudeProjectSettings(project.project, "settings.json") },
+        ]
+      : []),
     { scope: "user" as const, settings: readClaudeSettings(join(claudeConfigDir(e), "settings.local.json")) },
     { scope: "user" as const, settings: readClaudeSettings(join(claudeConfigDir(e), "settings.json")) },
   ];
@@ -833,10 +907,11 @@ function claudeSettingsScopes(e: AgentEnvironment): { scope: "managed" | "user";
 /**
  * The plugin's state from the scopes (strongest first) and the registry: the
  * strongest scope that names it decides (managed settings turning it off win
+ * over everything; a project's true wins over the user's false, and its false
  * over the user's true), else the registry. Pure.
  */
 export function claudePluginStateFromScopes(
-  scopes: readonly { scope: "managed" | "user"; on: boolean | undefined }[],
+  scopes: readonly { scope: ClaudeSettingsScope; on: boolean | undefined }[],
   registered: boolean,
 ): { state: "enabled" | "disabled" | "absent"; managed: boolean } {
   const decided = scopes.find((scope) => scope.on !== undefined);
@@ -912,12 +987,14 @@ function claudePluginRegistered(e: AgentEnvironment): boolean {
  * Whether Plannotator's Claude Code plugin is enabled for this user: a
  * settings scope the Inbox can see (user `settings.json` and
  * `settings.local.json`, managed settings) enables it, or Claude Code's plugin
- * registry records it and no scope turns it off. A project's own
- * `.claude/settings.json` and `claude --plugin-dir` are not visible here; the
- * window counts a live Claude Code session as connected for those.
+ * registry records it and no scope turns it off. With `project` (a launch
+ * folder's settings, see ClaudeProjectSettingsDirs) that folder's local and
+ * shared settings count too, by Claude's precedence. `claude --plugin-dir` is
+ * not visible here; the window counts a live Claude Code session as connected
+ * for that.
  */
-export function claudeCodePluginEnabled(e: AgentEnvironment): boolean {
-  return claudeCodePluginState(e) === "enabled";
+export function claudeCodePluginEnabled(e: AgentEnvironment, project: ClaudeProjectSettingsDirs | null = null): boolean {
+  return claudeCodePluginStatus(e, project).state === "enabled";
 }
 
 /**
@@ -930,8 +1007,8 @@ export function claudeCodePluginState(e: AgentEnvironment): "enabled" | "disable
 }
 
 /** claudeCodePluginState, and whether managed (enterprise) settings decided it. */
-export function claudeCodePluginStatus(e: AgentEnvironment): { state: "enabled" | "disabled" | "absent"; managed: boolean } {
-  const scopes = claudeSettingsScopes(e).map(({ scope, settings }) => ({ scope, on: claudeSettingsPluginState(settings) }));
+export function claudeCodePluginStatus(e: AgentEnvironment, project: ClaudeProjectSettingsDirs | null = null): { state: "enabled" | "disabled" | "absent"; managed: boolean } {
+  const scopes = claudeSettingsScopes(e, project).map(({ scope, settings }) => ({ scope, on: claudeSettingsPluginState(settings) }));
   return claudePluginStateFromScopes(scopes, claudePluginRegistered(e));
 }
 
@@ -1202,6 +1279,26 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
     raw: () => null,
   },
   {
+    id: "openclaw",
+    detect: (e) => openclawPluginInstalled(e) || !!e.which("openclaw") || isDir(openclawStateDir(e)),
+    way: async (e) =>
+      openclawPluginInstalled(e)
+        ? { kind: "tool", host: "openclaw" }
+        : { kind: "manual", why: `add Plannotator's OpenClaw plugin (openclaw plugins install ${OPENCLAW_PLUGIN_PACKAGE})` },
+    file: () => null,
+    raw: () => null,
+  },
+  {
+    id: "hermes",
+    detect: (e) => hermesPluginInstalled(e) || hermesFound(e),
+    way: async (e) =>
+      hermesPluginInstalled(e)
+        ? { kind: "tool", host: "hermes", then: { bin: "hermes", args: HERMES_WAKE_GRANT, done: hermesWakeGranted, setting: HERMES_WAKE_SETTING, undo: HERMES_WAKE_UNDO_LINE } }
+        : { kind: "manual", why: `add Plannotator's Hermes Agent plugin (${HERMES_PLUGIN_INSTALL})` },
+    file: () => null,
+    raw: () => null,
+  },
+  {
     id: "claude-app",
     detect: (e) => isDir(claudeAppDir(e)),
     way: async () => ({ kind: "json", keys: ["mcpServers"] }),
@@ -1443,9 +1540,19 @@ export function formatSeconds(ms: number): string {
   return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)} s`;
 }
 
+interface ToolConnectStep {
+  bin: string;
+  args: readonly string[];
+  done: (e: AgentEnvironment) => boolean;
+  setting: string;
+  undo: string;
+}
+
+type ToolGrant = { setting: string; undo: string };
+
 type AgentOutcome =
-  | { kind: "added"; record: InboxAgentRecord }
-  | { kind: "already"; record: InboxAgentRecord | null }
+  | { kind: "added"; record: InboxAgentRecord; granted?: ToolGrant }
+  | { kind: "already"; record: InboxAgentRecord | null; granted?: ToolGrant }
   | { kind: "foreign"; record: InboxAgentRecord; path: string | null }
   | { kind: "failed"; reason: string; path: string | null }
   | { kind: "manual"; why: string }
@@ -1478,13 +1585,18 @@ async function connectOne(spec: AgentSpec, options: ConnectOptions, at: string):
       return resolveInboxTool(loadConfig(), e.env as NodeJS.ProcessEnv, way.host) ? { kind: "already", record: null } : { kind: "none" };
     }
     const configured = configuredInboxTool(loadConfig(), way.host);
-    if (configured === true) return { kind: "already", record: { state: "found", reach: "tool", path: null, at } };
     if (configured === false) return { kind: "off", record: { state: "off", reach: "tool", path: null, at } };
-    saveConfig({ inboxTool: inboxToolWith(loadConfig().inboxTool, { [way.host]: true }) });
-    if (configuredInboxTool(loadConfig(), way.host) !== true) {
-      return { kind: "failed", reason: "Plannotator's config.json can't be written", path: null };
+    if (configured !== true) {
+      saveConfig({ inboxTool: inboxToolWith(loadConfig().inboxTool, { [way.host]: true }) });
+      if (configuredInboxTool(loadConfig(), way.host) !== true) {
+        return { kind: "failed", reason: "Plannotator's config.json can't be written", path: null };
+      }
     }
-    return { kind: "added", record: { state: "added", reach: "tool", path: null, at } };
+    const step = way.then && !way.then.done(e) ? way.then : null;
+    const unfinished = step ? await finishToolConnect(e, step, timeoutMs) : null;
+    if (unfinished) return { kind: "failed", reason: unfinished, path: null };
+    const granted = step ? { granted: { setting: step.setting, undo: step.undo } } : {};
+    return configured === true ? { kind: "already", record: { state: "found", reach: "tool", path: null, at }, ...granted } : { kind: "added", record: { state: "added", reach: "tool", path: null, at }, ...granted };
   }
   const before = classify(spec.raw(e) ?? { kind: "absent" }, ourCommands(options), true);
   if (before.kind === "unreadable") {
@@ -1512,6 +1624,19 @@ async function connectOne(spec: AgentSpec, options: ConnectOptions, at: string):
     return { kind: "failed", reason: `${way.bin} mcp add ran, but ${displayPath(file, e)} does not have the entry`, path: file };
   }
   return { kind: "added", record: { state: "added", reach: "mcp", path: file, command, at } };
+}
+
+async function finishToolConnect(e: AgentEnvironment, then: ToolConnectStep, timeoutMs: number): Promise<string | null> {
+  const line = [then.bin, ...then.args].join(" ");
+  const bin = e.which(then.bin);
+  if (!bin) return `${then.bin} is not on PATH, so run ${line} yourself`;
+  const ran = await e.run([bin, ...then.args], { timeoutMs });
+  if (ran.timedOut) return `${line} did not finish within ${formatSeconds(timeoutMs)}`;
+  if (ran.exitCode !== 0) {
+    const why = firstLine(ran.stderr) || firstLine(ran.stdout);
+    return `${line} exited with code ${ran.exitCode}${why ? ` (${why})` : ""}`;
+  }
+  return null;
 }
 
 /**
@@ -1621,10 +1746,12 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
       case "added":
         report.added.push(spec.id);
         file.agents[spec.id] = outcome.record;
+        if (outcome.granted) (report.granted ??= []).push({ agent: spec.id, ...outcome.granted });
         break;
       case "already":
         report.already.push(spec.id);
         if (outcome.record) file.agents[spec.id] = outcome.record;
+        if (outcome.granted) (report.granted ??= []).push({ agent: spec.id, ...outcome.granted });
         break;
       case "foreign":
         report.foreign.push({ agent: spec.id, path: displayPath(outcome.path, e) });
@@ -1684,6 +1811,7 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
     report.foreign.length > 0 ||
     (report.elsewhere?.length ?? 0) > 0 ||
     (report.trusted?.length ?? 0) > 0 ||
+    (report.granted?.length ?? 0) > 0 ||
     (report.trust_failed?.length ?? 0) > 0;
   file.last_report = news ? { ...report, seen: false } : file.last_report;
   try {
@@ -1715,6 +1843,7 @@ export function formatConnectReport(report: InboxConnectReport): string[] {
       `Plannotator can now send your replies straight into any running ${inboxAgentList(report.trusted)} session, without it asking you first (Plannotator is its trusted sender). Turning it off in Settings → Agents, or plannotator uninstall, removes that.`,
     );
   }
+  for (const grant of report.granted ?? []) lines.push(inboxGrantText(grant));
   for (const failure of report.trust_failed ?? []) {
     lines.push(`${INBOX_AGENT_LABELS[failure.agent]} won't get your replies by itself: ${failure.reason}. Plannotator tries again at the next plannotator inbox.`);
   }

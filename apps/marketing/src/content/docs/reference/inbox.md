@@ -26,6 +26,7 @@ This starts the Inbox and opens it in your browser. If it is already running, th
 | `plannotator inbox --background` | Start it detached without opening a browser, print its URL and exit. Agents run this form |
 | `plannotator inbox --no-open` | Run it in this terminal without opening a browser |
 | `plannotator inbox --open` | Open it in the browser and print its URL, starting it in the background first if it is not running. It returns at once. Over SSH it opens no browser on the remote machine and says how to reach the Inbox |
+| `plannotator inbox --open <thread>` | Show that thread in the Inbox window you already have open, as if you clicked its row (Back returns). Takes a thread id, a message id or a `#thread=` link. With no window open, it opens one at the thread. For a status-bar widget or a script |
 | `plannotator inbox --tailscale` | Also publish it [over your tailnet](#over-your-tailnet) until it stops. Works with the forms above. If the Inbox is already running, it is asked to publish |
 | `plannotator inbox mcp` | The stdio MCP server for agents. It starts a stopped Inbox without opening a browser tab |
 | `plannotator inbox call <action> [<json> \| -]` | Run one Inbox action from a script and print its result as JSON, so an agent can make many fixes in one go. `-` reads the JSON from stdin. It starts a stopped Inbox the same way |
@@ -72,6 +73,7 @@ Agents use it from their next session. PLANNOTATOR_INBOX_CONNECT=0 skips this st
 | Claude Code | the Plannotator plugin is enabled | nothing: the plugin already gives it the `plannotator_inbox` tool |
 | Pi, OpenCode | Plannotator's extension or plugin is installed | the inbox tool turned on (`inboxTool` in `~/.plannotator/config.json`) |
 | DeepSeek Harness | Plannotator's plugin (`@plannotator/dsh`) is in a DSH profile (`~/.dsh/profiles`, or `$DSH_HOME/profiles`) | the inbox tool turned on. Without the plugin, add it yourself: `dsh plugin --profile <profile> add @plannotator/dsh`. Plannotator never runs `dsh`. |
+| Hermes Agent | Plannotator's plugin is in `~/.hermes/plugins/plannotator` (or `$HERMES_HOME`) | the inbox tool turned on, and `hermes config set plugins.entries.plannotator.allow_gateway_injection true` so a reply can start a turn. Without the plugin, add it yourself: `hermes plugins install backnotprop/plannotator/apps/hermes-plugin --enable`. |
 | Pi without the extension | Pi 0.99 or later on your `PATH` (older Pi has no `pi mcp`: connect it by hand) | `pi mcp add plannotator-inbox` |
 | Codex | `codex` 0.35 or later on your `PATH` (older Codex has no `codex mcp add`, and a `~/.codex` or `$CODEX_HOME` folder without the CLI: connect it by hand) | `codex mcp add plannotator-inbox` (the Codex app and IDE extension share it) |
 | Gemini CLI | `gemini` 0.1.19 or later on your `PATH` (older has no `gemini mcp add`: connect it by hand; `$GEMINI_CLI_HOME` honored) | `gemini mcp add -s user plannotator-inbox` |
@@ -237,6 +239,17 @@ DSH runs its plugins in its own process, so DSH and its other plugins can read w
 
 By default, DeepSeek Harness sends its session to DeepSeek, including the Inbox messages and replies the agent reads. The Inbox key is never in the session.
 
+### Hermes Agent
+
+Install Plannotator's Hermes Agent plugin and let it start a turn with your reply, then run `plannotator inbox`: it turns the inbox tool on for Hermes Agent when it finds the plugin.
+
+```bash
+hermes plugins install backnotprop/plannotator/apps/hermes-plugin --enable
+hermes config set plugins.entries.plannotator.allow_gateway_injection true
+```
+
+The tool is off by default, since Hermes sends every tool's definition with each request; the switch in **Settings → Agents** turns it on or off, and it applies to new Hermes sessions without restarting Hermes. Only your own sessions get it: the terminal, the TUI, the Desktop app, and your own direct messages to the bot (you are on that platform's DM admin list, `allow_admin_from`, or its allowlist names only you). Anywhere else the tool refuses. When the session is idle, a reply arrives as a new turn, and the thread shows "Delivered to Hermes Agent". It never goes into a running turn.
+
 ### The same session in two windows
 
 You can open one Pi session twice (`pi -c` or `--session`), or run two OpenCode 2 servers on one database. Then only one process delivers a reply: the one you used last. On Pi, typing in a window or the agent calling the inbox tool there moves replies to that window. On OpenCode 2, only the agent calling the inbox tool moves them, because the plugin does not see what you type (checked on OpenCode 2.0.19). On DeepSeek Harness (Web and Desktop on one session), typing or the agent calling the inbox tool moves them, as on Pi. The process that holds replies checks in every 5 seconds. If it quits, another process takes over at once, and if it crashes, after about 20 seconds. A reply is delivered once either way.
@@ -256,6 +269,7 @@ Claude Code needs only the setting: before the Inbox was ever installed, the too
 | Pi | off |
 | OpenCode | off |
 | DeepSeek Harness | off |
+| Hermes Agent | off |
 
 There are three ways to change it. The first that decides wins:
 
@@ -298,7 +312,7 @@ You can replace the line with your own, in **Settings → Prompts** or in `~/.pl
 
 - `prompts.inbox.reminder` is for every agent. `prompts.inbox.runtimes.<agent>.reminder` (`claude-code`, `pi` or `opencode`) is for one agent and wins over the shared text.
 - Your text replaces the whole line, on every host, OpenCode 1 included. Each `plannotator_inbox` in it becomes the tool's name in that agent (on Claude Code, its full `mcp__…` name).
-- Empty or blank text counts as unset. At most 4,128 characters; longer text is refused when you save it, and ignored if written by hand (Settings → Prompts says so, with Reset to default).
+- Empty or blank text counts as unset. At most 9,000 characters (Claude Code puts at most 10,000 characters of hook text in context, and a compaction adds your open threads); longer text is refused when you save it, and ignored if written by hand (Settings → Prompts says so, with Reset to default).
 - With no `prompts.inbox` set, every agent gets the line above, exactly as before.
 - Like the switch, it is read when a session starts: a change applies to each agent's next session.
 - After a compaction on Claude Code, the plugin adds your line again, exactly as you wrote it.

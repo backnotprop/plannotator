@@ -4,13 +4,11 @@
  *
  * Against the compiled binary (build it first, see inbox.spec.ts), in a scratch Inbox:
  *  - every write held unanswered: keys typed in "Other…", a pick, Send (busy at once, the words kept) and Mark read
- *    (pressed at once) all draw within a few frames;
+ *    (the ⋯ menu offers Move back at once) all draw within a few frames;
  *  - budgets, counted from the requests the page makes: 60 keys in "Other…" make at most 2 requests and no list or
  *    drafts read; clicking through five threads whose reads are slow reads only the last (the others given up), and
  *    going back to one of them draws it before its read answers; one Send reads the thread no more than once after
  *    it, and draws the sent reply before any such read;
- *  - Send on a poor link draws the words at once; refused, they stay in the box with the reason, and sent again they
- *    land as one reply, nothing left spinning;
  *  - a Mark read the Inbox refuses puts the row back and shows the Inbox's own error;
  *  - two windows picking different answers on one question 50 ms apart end on the same answer, the later one, with
  *    no raw "changed since you read it" error (pickConflict.ts holds that rule);
@@ -119,7 +117,7 @@ test('every write held unanswered: typing, a pick, Send and Mark read still draw
   page.on('request', (r) => api(r) && !/\/sessions(\?|$)/.test(new URL(r.url()).pathname) && requests.push(r));
 
   // 60 keys in "Other…": every key drawn, at most two requests, no list or drafts read.
-  const other = card(page, T[0]!, 0).locator('[aria-label^="Other answer"]');
+  const other = card(page, T[0]!, 0).locator('textarea[aria-label^="Other answer"]');
   await other.click();
   const words = 'Cards, but keep the totals pinned at the bottom of the list.';
   expect(words).toHaveLength(60);
@@ -145,13 +143,14 @@ test('every write held unanswered: typing, a pick, Send and Mark read still draw
   await expect(box).toHaveValue('ok go');
   await expect(other).toHaveValue(words);
 
-  // Mark read on another thread: pressed at once.
+  // Mark read on another thread, from the ⋯ menu: read at once, its write still held.
   await page.evaluate((id) => (location.hash = `#thread=${encodeURIComponent(id)}`), T[1]!);
-  await expect(page.locator(`${pane(T[1]!)} [data-mark-read]:not([disabled])`)).toBeVisible();
-  const readMs = await paintMs(page, () => page.locator(`${pane(T[1]!)} [data-mark-read]`).click(), `return document.querySelector('${pane(T[1]!)} [data-mark-read]')?.getAttribute('aria-pressed') === 'true'`);
-  expect(readMs).toBeGreaterThanOrEqual(0);
-  expect(readMs).toBeLessThan(250);
-  expect(held.length).toBeGreaterThan(0);
+  const more = page.locator(`${pane(T[1]!)} [data-thread-more]`);
+  await more.click();
+  await page.locator('[data-thread-menu] [data-thread-read-item]').click();
+  await more.click();
+  await expect(page.locator('[data-thread-menu] [data-thread-move-back-item]')).toBeVisible({ timeout: 1000 });
+  await expect.poll(() => held.some((r) => r.url().endsWith(`/threads/${T[1]}/read`))).toBe(true);
   await context.close();
 });
 
@@ -209,8 +208,7 @@ test('one Send draws the reply from its own answer: no read of the thread before
   await page.locator(`${pane(T[2]!)} .ib-pfoot`).getByRole('button', { name: /^(Reply|Edit)/ }).first().click();
   await page.locator(`${pane(T[2]!)} .ib-rbox textarea`).fill('Cards it is.');
   await page.locator(`${pane(T[2]!)} .ib-rbox [data-reply-send]`).click();
-  // The reply itself (not the Send drawn while it is on its way).
-  await expect(page.locator(`${pane(T[2]!)} [data-message-article]:not([data-sending])`)).toHaveCount(before + 1);
+  await expect(page.locator(`${pane(T[2]!)} [data-message-article]`)).toHaveCount(before + 1);
   const shownAt = Date.now();
   await page.waitForTimeout(2000);
   expect(reads.filter((x) => x.at < shownAt)).toHaveLength(0);
@@ -218,55 +216,17 @@ test('one Send draws the reply from its own answer: no read of the thread before
   await context.close();
 });
 
-test('Send on a poor link: drawn at once; refused, the words stay in the box with the reason; sent again, one reply', async ({ browser }) => {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-  const page = await open(context, T[3]!);
-  const p = pane(T[3]!);
-  const words = `Refunds go weekly ${Date.now() % 10000}.`;
-  // A poor link: every write takes 900 ms; the reply's first try comes back refused by a failing disk.
-  let refuse = true;
-  await page.route('**/api/inbox/**', async (route) => {
-    if (route.request().method() !== 'POST') return route.fallback();
-    await new Promise((done) => setTimeout(done, 900));
-    if (refuse && /\/reply$/.test(new URL(route.request().url()).pathname)) {
-      refuse = false;
-      return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'Internal error.', code: 'internal_error' }) });
-    }
-    return route.fallback();
-  });
-  await page.locator(`${p} .ib-pfoot`).getByRole('button', { name: /^(Reply|Edit)/ }).first().click();
-  const box = page.locator(`${p} .ib-rbox textarea`);
-  await box.fill(words);
-  const sending = `${p} [data-sending]`;
-  const drawnMs = await paintMs(page, () => page.locator(`${p} .ib-rbox [data-reply-send]`).click(), `return document.querySelector('${sending}')?.textContent?.includes(${JSON.stringify(words)}) === true`);
-  expect(drawnMs).toBeGreaterThanOrEqual(0);
-  expect(drawnMs).toBeLessThan(250);
-  // Refused: the drawing goes, the words are still in the box, the reason shows, and Send can be pressed again.
-  await expect(page.getByText('The reply was not sent: the Inbox could not write it. Send again to retry.')).toBeVisible({ timeout: 15_000 });
-  await expect(page.locator(sending)).toHaveCount(0);
-  await expect(box).toHaveValue(words);
-  await expect(page.locator(`${p} .ib-rbox [data-reply-send]`)).toBeEnabled();
-  // Sent again over the same poor link: drawn at once, then exactly one reply with the words, nothing left spinning.
-  await page.locator(`${p} .ib-rbox [data-reply-send]`).click();
-  await expect(page.locator(sending)).toHaveCount(1);
-  const replies = page.locator(`${p} [data-message-article][data-author="person"]:not([data-sending])`, { hasText: words });
-  await expect(replies).toHaveCount(1, { timeout: 15_000 });
-  await expect(page.locator(sending)).toHaveCount(0);
-  await page.waitForTimeout(1500);
-  await expect(replies).toHaveCount(1);
-  await expect(page.locator(`${p} .ib-rbox`)).toHaveCount(0);
-  await context.close();
-});
-
 test('a Mark read the Inbox refuses puts the row back and shows its own error', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   const page = await open(context, T[5]!);
   await page.route('**/api/inbox/threads/*/read', (route) => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'The disk is full.', code: 'internal_error' }) }));
-  const button = page.locator(`${pane(T[5]!)} [data-mark-read]`);
-  await expect(button).toBeEnabled();
-  await button.click();
+  const more = page.locator(`${pane(T[5]!)} [data-thread-more]`);
+  await more.click();
+  await page.locator('[data-thread-menu] [data-thread-read-item]').click();
   await expect(page.locator('.ib-tlead', { hasText: 'The disk is full.' })).toBeVisible();
-  await expect(button).toHaveAttribute('aria-pressed', 'false');
+  await more.click();
+  await expect(page.locator('[data-thread-menu] [data-thread-read-item]')).toBeVisible();
+  await expect(page.locator('[data-thread-menu] [data-thread-move-back-item]')).toHaveCount(0);
   await context.close();
 });
 

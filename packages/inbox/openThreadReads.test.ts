@@ -38,9 +38,9 @@ const settledOpen = (over: Partial<OpenThreadState> = {}): OpenThreadState => ({
   ...over,
 });
 
-const readFor = (events: (InboxEvent | null)[], open = settledOpen()) => {
+const readFor = (events: (InboxEvent | null)[], open = settledOpen(), applied = false) => {
   const batch = newRecordBatch();
-  for (const event of events) noteRecord(batch, event);
+  for (const event of events) noteRecord(batch, event, applied);
   return openThreadRead(batch, open);
 };
 
@@ -115,6 +115,31 @@ describe('an open thread whose view does not come from records alone is read on 
 
   test('a project the server resolved to no git origin needs no read: its repo will not come with one', () => {
     expect(readFor(another, settledOpen({ loaded: { thread_id: OPEN, project: { repo: null, repo_known: true } } }))).toBe('none');
+  });
+});
+
+describe('records the cache applied to the open thread: no read of it, its files when they can have moved', () => {
+  const later = { seq: 9, kind: 'message', id: OPEN, first: false, message: { id: OPEN, thread_id: OPEN } } as unknown as InboxEvent;
+  const applied = (events: [InboxEvent, boolean][], open = settledOpen()) => {
+    const batch = newRecordBatch();
+    for (const [event, files] of events) noteRecord(batch, event, true, files);
+    return openThreadRead(batch, open);
+  };
+
+  test("one that can have moved them (data/apply/record.ts recordMovesFiles): the files and waiting comments are read (the foot's count, a file gone)", () => {
+    expect(applied([[annotation(OPEN), true]])).toBe('files');
+    expect(applied([[later, false], [message(OPEN), true]])).toBe('files');
+  });
+
+  test('none that can: nothing of the open thread is read; nor for records of another thread', () => {
+    expect(applied([[later, false], [question(OPEN), false]])).toBe('none');
+    expect(applied([[annotation(OTHER), true]])).toBe('none');
+  });
+
+  test('a launched thread is read on every record: its run line ("Starting Pi again…") moves with no record', () => {
+    const launched = settledOpen({ loaded: { thread_id: OPEN, project: { repo: null, repo_known: true }, messages: [{ launch: { id: 'lch_1' } }] } });
+    expect(applied([[later, false]], launched)).toBe('thread');
+    expect(readFor([message(OTHER)], launched)).toBe('thread');
   });
 });
 

@@ -31,6 +31,19 @@
 .pn-inbox .ib-agents-body[data-flat] .ib-sbagent .am-btn { left: 7px; }
 .pn-inbox .ib-sbagent .am-btn:focus-visible { outline-offset: -2px; }
 .pn-inbox .ib-sbagent:is(:has(> .am-btn:hover), :has(> .am-btn[data-fan-open])) .ib-proj:not(.ib-on) { background: var(--ib-side-hover); }
+/* Its menu, a project row's (inbox.css .ib-pmore): ⋯ on hover, keyboard focus or while the menu is open, at the row's
+   middle; the name gives it room. Rename…: the project field in the row's own height. */
+.pn-inbox .ib-sbagent .ib-pmore { top: 50%; transform: translateY(-50%); }
+.pn-inbox .ib-sbagent:is(:hover, :has(:focus-visible), [data-menu]) .ib-pmore { opacity: 1; }
+.pn-inbox .ib-sbagent:is(:hover, :has(:focus-visible), [data-menu]):has(> .ib-pmore) .ib-proj { padding-right: 32px; }
+.pn-inbox .ib-sbagent[data-menu] .ib-proj:not(.ib-on) { background: var(--ib-side-menu); color: var(--foreground); }
+.pn-inbox .ib-sbagent[data-menu] .ib-pmore { color: var(--foreground); }
+.pn-inbox .ib-sbagent[data-renaming] { padding: 3px 0; }
+/* A screen that cannot hover: ⋯ always shown, as a project row's. */
+@media (hover: none) {
+  .pn-inbox .ib-sbagent .ib-pmore { opacity: 1; }
+  .pn-inbox .ib-sbagent:has(> .ib-pmore) .ib-proj { padding-right: 32px; }
+}
 /* The one spacing rule of the sidebar's sections, for a section that is one block: its heading 2 px under a closed
    section with no row left, and the next heading 2 px under it while it is closed (closed, it draws no row at all). */
 .pn-inbox .ib-sidescroll > [data-closed]:empty + .ib-agentsec > .ib-secrow { margin-top: 2px; }
@@ -56,6 +69,9 @@
   .pn-inbox .ib-agents-cap .ib-proj, .pn-inbox .ib-sbagent .ib-proj { height: 44px; }
   .pn-inbox .ib-agents-cap .ib-proj { font-size: var(--ib-fs-13, 13px); }
   .pn-inbox .ib-sbagent .ib-proj { font-size: var(--ib-fs-15, 15px); }
+  /* ⋯ always shown, a 44 px target at the row's end (a project row's on a phone). */
+  .pn-inbox .ib-sbagent .ib-pmore { opacity: 1; right: 0; }
+  .pn-inbox .ib-sbagent:has(> .ib-pmore) .ib-proj, .pn-inbox .ib-sbagent:is(:hover, :has(:focus-visible), [data-menu]):has(> .ib-pmore) .ib-proj { padding-right: 46px; }
 }
 
 /* ---------- the animated agent mark (motion.ts): 24 px, no tile, always alive ---------- */
@@ -165,3 +181,69 @@
 /* Reduced motion: no travel, a plain fade. */
 .am-fan[data-still] .am-fan-i, .am-fan[data-still][data-starting-style] .am-fan-i, .am-fan[data-still][data-ending-style] .am-fan-i { transform: translate(var(--x), var(--y)); transition: opacity 120ms linear; }
 .am-fan[data-still] .am-fan-i:hover { transform: translate(var(--x), var(--y)); }
+
+/* ---------- "Your own…": an uploaded picture (ownIcons.ts, OwnIconsBody.tsx) ----------
+   Shown as uploaded, only scaled to fit: its own shape and transparency, no crop, no tile colour behind it and no
+   rounded mask. It takes the mark's whole tile (the tile's box is unchanged, so no row changes size), and a wide or
+   tall picture sits letterboxed in it with clear room either side. */
+/* The sidebar's: the mark's box exactly, whatever the picture's own size (its layers would otherwise take it). */
+.am-f-own > .am-fb, .am-f-own .am-ownart { width: var(--am); height: var(--am); }
+.am-ownart > img.am-art { width: 100%; height: 100%; object-fit: contain; }
+:root .ib-mk.ib-face.ib-own { background: none; }
+:root .ib-mk.ib-face.ib-own > img[src] { width: 100%; height: 100%; object-fit: contain; }
+/* In a list row's grey tile (or another tile round the mark): the picture fills the tile's box, and the tile shows no colour. */
+:root :is(.ib-atile, .ib-bc-who) > .ib-mk.ib-face.ib-own { width: 100%; height: 100%; }
+:root :is(.ib-atile, .ib-draft-mk, .ib-bc-who):has(> .ib-mk.ib-own) { background: none; }
+
+/* The fan's last inner place: a dashed "+", or the agent's own picture. */
+.am-own-add { position: relative; display: block; width: 18px; height: 18px; border-radius: 6px; border: 1.25px dashed color-mix(in oklch, var(--foreground) 45%, transparent); }
+.am-own-add::before, .am-own-add::after { content: ""; position: absolute; left: 50%; top: 50%; width: 8px; height: 1.25px; margin: -0.625px 0 0 -4px; border-radius: 1px; background: color-mix(in oklch, var(--foreground) 70%, transparent); }
+.am-own-add::after { transform: rotate(90deg); }
+.am-fan-f > img.am-own-art { object-fit: contain; }
+.am-fan[data-touch] .am-own-add { width: 24px; height: 24px; border-radius: 8px; }
+
+/* ---------- "Sets": an icon from a set (iconSets.ts, SetsBody.tsx) ----------
+   It takes the mark's whole tile, as an uploaded picture does (the same box: no row changes size). Pixel art is drawn
+   nearest-neighbour at a whole multiple of its native size in device pixels only (`--set-px`, the screen's
+   `--ib-dpr`): the largest that fits the box, or half its native size where even one does not fit. A one-colour icon
+   is a mask filled with the theme's text colour. */
+:root { --ib-dpr: 1; }
+@media (min-resolution: 2dppx) { :root { --ib-dpr: 2; } }
+@media (min-resolution: 3dppx) { :root { --ib-dpr: 3; } }
+:root .ib-mk.ib-face.ib-set { background: none; }
+:root .ib-mk.ib-face.ib-set > img { width: 100%; height: 100%; object-fit: contain; }
+:root .ib-mk.ib-face.ib-set > img[hidden] { display: none; }
+:root :is(.ib-atile, .ib-bc-who) > .ib-mk.ib-face.ib-set { width: 100%; height: 100%; }
+:root :is(.ib-atile, .ib-draft-mk, .ib-bc-who):has(> .ib-mk.ib-set) { background: none; }
+:root .ib-mk.ib-face.ib-set[data-pixel] > img, .am-setart[data-pixel] > img, .am-sets-art[data-pixel] > img {
+  --set-step: calc(var(--set-px, 16px) / var(--ib-dpr));
+  /* The largest whole multiple that fits, else exactly a half or a quarter of the native size. */
+  width: max(round(down, 100%, var(--set-step)), round(down, min(100%, calc(var(--set-step) / 2)), calc(var(--set-step) / 2)), round(down, min(100%, calc(var(--set-step) / 4)), calc(var(--set-step) / 4)));
+  height: auto;
+  aspect-ratio: 1;
+  image-rendering: pixelated;
+}
+/* A set with wide empty margins (`zoom`): drawn larger, its edges cut by its own box. */
+.ib-mk.ib-set, .am-setart, .am-sets-art { overflow: hidden; }
+:is(.ib-mk.ib-set, .am-setart, .am-sets-art) > img { scale: var(--set-zoom, 1); }
+.ib-set-mono, .am-set-mono, .am-sets-mono { display: block; width: 100%; height: 100%; background-color: var(--foreground); -webkit-mask: var(--set-src) center / contain no-repeat; mask: var(--set-src) center / contain no-repeat; }
+/* The sidebar's: the mark's box exactly. */
+.am-f-set > .am-fb, .am-f-set .am-setart { width: var(--am); height: var(--am); }
+.am-setart { display: grid; place-items: center; }
+.am-setart > img { width: 100%; height: 100%; object-fit: contain; }
+.am-setart > img[hidden] { display: none; }
+
+/* The fan's place after "Your own…": a little grid of four, or the agent's set icon. */
+.am-sets-add { display: grid; grid-template-columns: 7px 7px; gap: 2px; }
+.am-sets-add > i { width: 7px; height: 7px; border-radius: 2px; background: color-mix(in oklch, var(--foreground) 55%, transparent); }
+.am-sets-add > i:nth-child(2), .am-sets-add > i:nth-child(3) { background: color-mix(in oklch, var(--foreground) 30%, transparent); }
+.am-fan[data-touch] .am-sets-add { grid-template-columns: 10px 10px; }
+.am-fan[data-touch] .am-sets-add > i { width: 10px; height: 10px; }
+.am-fan-f > .am-sets-art { width: 22px; height: 22px; }
+
+/* A set icon in a small box of its own (the fan's place, the dialog's grid). */
+.am-sets-art { width: 32px; height: 32px; display: grid; place-items: center; flex: none; }
+.am-sets-art > img { width: 100%; height: 100%; object-fit: contain; }
+.am-sets-art > img:not([src]) { visibility: hidden; }
+.am-sets-art[data-mono] { width: 28px; height: 28px; margin: 2px; }
+.am-sets-art[data-mono]:not([style*="--set-src"]) > .am-sets-mono { visibility: hidden; }

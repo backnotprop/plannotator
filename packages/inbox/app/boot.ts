@@ -30,13 +30,6 @@ export function settleTourEntry(): void {
 }
 
 /**
- * Set when a tour decision (finished, skipped) could not be saved on the server
- * (config.json unreadable, the server stopped): this browser remembers it, so
- * Two paths does not come back here. A cookie, so a port change keeps it.
- */
-export const TOUR_DECIDED_COOKIE = 'plannotator-inbox-tour-decided';
-
-/**
  * `#settings/experimental`, Experimental's own page before it moved into
  * Capabilities (the owner, 2026-10-27): the address becomes
  * `#settings/capabilities` in place (no new history entry). True when it
