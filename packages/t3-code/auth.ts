@@ -47,7 +47,6 @@ export class T3Credentials {
 
   save(value: Credentials): void { privateWrite(this.path, value); }
 
-  /** Delete the saved grant (`plannotator t3 logout`). True when there was one. */
   forget(): boolean {
     if (!existsSync(this.path)) return false;
     rmSync(this.path, { force: true });
@@ -86,8 +85,6 @@ export class T3OAuthProvider implements OAuthClientProvider {
   }
 }
 
-// SDK v2 validates issuer/PKCE; callback state remains the client's responsibility.
-// https://github.com/modelcontextprotocol/typescript-sdk/tree/v2.2.0/packages/client
 export async function loginT3(store: T3Credentials, authorize: (url: URL) => void | Promise<void>, timeoutMs = 300_000): Promise<void> {
   let provider: T3OAuthProvider;
   let transport: StreamableHTTPClientTransport;
@@ -95,7 +92,6 @@ export async function loginT3(store: T3Credentials, authorize: (url: URL) => voi
   let resolveLogin: () => void;
   let rejectLogin: (error: Error) => void;
   const completed = new Promise<void>((resolve, reject) => { resolveLogin = resolve; rejectLogin = reject; });
-  // Attach a handler immediately: startup can fail before the callback is awaited.
   void completed.catch(() => {});
   const callback = Bun.serve({
     hostname: "127.0.0.1", port: 0,

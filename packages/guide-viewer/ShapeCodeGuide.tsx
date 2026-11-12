@@ -1,18 +1,3 @@
-/**
- * Shape's Code view as a Guided Review: the guide chain (GuideView →
- * GuideSectionCard → GuideFileCard, through the GuideHost contract) over the
- * board's own guide and patch (`ShapeCodeView` in @plannotator/core/shape).
- *
- *  - after:  the real diff, walked through as the guide's steps; "Open at
- *            line N" opens the whole file (the host's viewer).
- *  - before: the same steps as a plan. A step with no diff lists the files it
- *            will add or change; a proposed diff is marked "Proposed · not
- *            applied" and drawn in a dashed frame.
- *
- * The board (@plannotator/ui's ShapeSurface) receives this component as a
- * prop, so @plannotator/ui never depends on the guide chain. Its props are
- * the ones ShapeSurface's `ShapeCodeGuideProps` names.
- */
 import React, { useCallback, useMemo, useState } from 'react';
 import type { CodeGuideData } from '@plannotator/core/guide';
 import type { ShapeCodeView } from '@plannotator/core/shape';
@@ -23,14 +8,10 @@ import { renderInlineMarkdown } from './renderInlineMarkdown';
 
 export interface ShapeCodeGuideProps {
   code: ShapeCodeView;
-  /** Draws one file's hunks (the host's diff renderer). */
   renderDiff: (file: { path: string; patch: string }) => React.ReactNode;
-  /** The line a file opens at in the whole-file viewer, or null when the host cannot open it. */
   openLine?: (path: string) => number | null;
   onOpenFile?: (path: string, line: number) => void;
-  /** Controls at the guide header's right (the board's "Global comment"). */
   headerActions?: React.ReactNode;
-  /** The host's control beside a file (its "open in"). */
   fileAction?: (path: string) => React.ReactNode;
 }
 
@@ -74,7 +55,6 @@ export function ShapeCodeGuide({ code, renderDiff, openLine, onOpenFile, headerA
     [before, openLine, onOpenFile, fileAction],
   );
 
-  // `code:path#L12` opens the whole file there (after implementation); an http link is a link.
   const renderLink = useCallback(
     (href: string, label: React.ReactNode, key: string | number) => {
       if (/^https?:\/\//i.test(href)) {

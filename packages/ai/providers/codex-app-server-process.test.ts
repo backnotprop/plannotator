@@ -1,7 +1,3 @@
-/**
- * The one `codex app-server` process Ask AI and voice dictation share: its stdout reader and its stop. A scratch
- * `codex` script stands in each time and CODEX_HOME points at scratch, so no test runs the real one or reads its config.
- */
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -28,7 +24,6 @@ function rig(body: string, lineMax?: number) {
   return { codex, root, start: (ms: number) => codex.start(path, root, ms, env) };
 }
 
-/** A `codex` in Bun: `write` runs on each call, with `answer(result)` to hand. */
 const answering = (write: string) =>
   `exec ${JSON.stringify(process.execPath)} -e 'require("readline").createInterface({input:process.stdin}).on("line",(l)=>{const m=JSON.parse(l);if(m.id===undefined)return;const answer=(result)=>process.stdout.write(JSON.stringify({id:m.id,result})+"\\n");${write}})'`;
 
@@ -99,7 +94,6 @@ describe("stdout", () => {
 });
 
 describe("stopping", () => {
-  /** Answers `initialize`, then ignores SIGTERM for longer than any test here. Its children inherit the ignore. */
   const STUBBORN = `trap '' TERM
 read -r line
 id=$(printf '%s' "$line" | sed 's/.*"id":\\([0-9]*\\).*/\\1/')

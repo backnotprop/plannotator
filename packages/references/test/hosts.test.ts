@@ -1,10 +1,3 @@
-// The `hosts` option: GitHub Enterprise and self-managed GitLab hosts.
-// New in Plannotator (not ported from Workspaces). Guards: a served host
-// matches and keeps its host in the canonical URL; github.com and
-// gitlab.com keys and URLs stay byte-identical; each host's reads go to
-// that host's own API with a credential asked for that host; a host the
-// adapter does not serve is never asked for a credential or fetched.
-
 import { afterEach, beforeEach, describe, expect, it, type Mock, spyOn } from "bun:test";
 
 import { createGithubAdapter, githubAdapter } from "../src/adapters/github.ts";
@@ -48,7 +41,6 @@ describe("host-aware grammars", () => {
 			key: "acme/web#12",
 			url: "https://github.com/acme/web/issues/12",
 		});
-		// The same path on two hosts never shares a key.
 		expect(grammar.match(new URL(`https://${GHES}/acme/web/issues/12`))?.key).not.toBe(
 			grammar.match(new URL("https://github.com/acme/web/issues/12"))?.key,
 		);
@@ -59,7 +51,6 @@ describe("host-aware grammars", () => {
 			url: `https://${GHES}/acme/web/tree/feat/x`,
 		});
 		expect(grammar.matchCodeLink(new URL(`https://${GHES}/acme/web.git`))?.url).toBe(`https://${GHES}/acme/web`);
-		// A port, another host, or the default grammar: plain links.
 		expect(grammar.match(new URL(`https://${GHES}:8443/acme/web/issues/1`))).toBeNull();
 		expect(grammar.match(new URL("https://github.other.example/acme/web/issues/1"))).toBeNull();
 		expect(githubAdapter.match(new URL(`https://${GHES}/acme/web/issues/1`))).toBeNull();
@@ -109,7 +100,6 @@ describe("host-aware grammars", () => {
 			["www.gitlab.com as GitHub", { github: { hosts: ["www.gitlab.com"] } }],
 			["github.com as GitLab", { gitlab: { hosts: ["github.com"] } }],
 			["linear.app as GitLab", { gitlab: { hosts: ["linear.app"] } }],
-			// Another host's API origin.
 			["api.github.com as GitHub", { github: { hosts: ["api.github.com"] } }],
 			["api.github.com as GitLab", { gitlab: { hosts: ["api.github.com"] } }],
 			["api.linear.app as GitHub", { github: { hosts: ["api.linear.app"] } }],
@@ -118,7 +108,6 @@ describe("host-aware grammars", () => {
 		for (const [name, hosts] of cases) {
 			expect(() => createReferenceAdapters(hosts), name).toThrow(TypeError);
 		}
-		// A forge's own www. alias is its public host, not a clash.
 		expect(() => createReferenceAdapters({ github: { hosts: ["www.github.com", GHES] }, gitlab: { hosts: [GLSM] } })).not.toThrow();
 	});
 });
@@ -168,7 +157,6 @@ describe("GitHub Enterprise reads", () => {
 	it("a *.ghe.com host reads api.{host}; a github.com token is never sent to it", async () => {
 		const gh = fakeProvider();
 		gh.on(`GET https://api.${GHE_CLOUD}/repos/acme/web/pulls/4`, () => json(200, { title: "Cloud", state: "open", merged: false }));
-		// The port answers only github.com: the ghe.com read rides with no token.
 		const port = makePort(gh.fetch, async () => dotcom);
 		const result = await adapter.resolve(refFrom(adapter, `https://${GHE_CLOUD}/acme/web/pull/4`), port);
 		expect(result.ok).toBe(true);
@@ -217,10 +205,8 @@ describe("GitHub Enterprise reads", () => {
 			ok: false,
 			reason: "not_linked",
 		});
-		// A hand-made ref on that host is not read either.
 		const forged: ExternalRef = { provider: "github", key: "x", url: `https://${elsewhere}/acme/web/issues/1` };
 		expect(await adapter.resolve(forged, port)).toEqual({ ok: false, reason: "not_resolvable" });
-		// And the default adapter serves github.com only.
 		expect(await githubAdapter.search?.({ query: "", scope: "acme/web", host: GHES }, port)).toMatchObject({ field: "scope" });
 		expect(port.asked).toEqual([]);
 		expect(gh.calls).toEqual([]);

@@ -24,7 +24,6 @@ describe("the host's own MCP tools", () => {
     expect(ownToolAutoAllow(request({ title: "send_message", kind: "other" }), INBOX)).toBeNull();
     expect(ownToolAutoAllow(request({ title: "echo plannotator-inbox__send_message", kind: "execute" }), INBOX)).toBeNull();
     expect(ownToolAutoAllow(request({ title: "plannotator-inbox__send_message", kind: "execute" }), INBOX)).toBeNull();
-    // A bare name counts only for a host that asks for it (Guides' builder tools).
     expect(isOwnToolCall({ title: "send_message" }, { ...INBOX, bare: true })).toBe(true);
   });
 });

@@ -93,44 +93,15 @@ export function buildWindowsCommandScriptSpawnCommand(
 	];
 }
 
-/**
- * A character cmd.exe does not read literally inside a quoted argument: `"`
- * ends the quotes, `%` and `!` expand variables, a line break ends the
- * command. Control characters are refused too.
- */
 const WINDOWS_COMMAND_SCRIPT_UNSAFE_ARG = /["%!^\u0000-\u001f\u007f]/;
 
-/** How an agent job starts its CLI (see `planAgentJobSpawn`). */
 export interface AgentJobSpawn {
-	/** The argv to spawn. */
 	command: string[];
-	/** Text for the job's stdin, if any. */
 	stdinPrompt?: string;
-	/** Spawn with `windowsVerbatimArguments: true` (the cmd.exe command line is already quoted). */
 	verbatim: boolean;
-	/**
-	 * Set when the CLI is a Windows command script (`.cmd`/`.bat`) whose
-	 * arguments cmd.exe would misread. `command` is then the job's own argv,
-	 * unchanged, and both runtimes refuse the job with this text.
-	 */
 	unsafeScript?: string;
 }
 
-/**
- * How to start an agent job's CLI (code review, Code Tour, Guided Review).
- * #2372: on Windows a CLI installed as a `.cmd` shim (Pi's `pi.cmd`, npm's
- * shims) is not found by `spawn("pi")`, so the job failed with
- * `spawn pi ENOENT`. Ask AI resolves the shim (`resolveWindowsCommandShim`)
- * and runs it through cmd.exe; jobs do the same here.
- *
- * - Not Windows, a program not on PATH, or an `.exe`: the argv as it is.
- * - A `.cmd`/`.bat`: `cmd.exe /d /s /c ""<script>" "<arg>" …"`, spawned
- *   verbatim. A job's prompt cannot go through cmd.exe (it holds line breaks
- *   and quotes), so `promptOnStdin` (Pi's) moves it to stdin first. When an
- *   argument that is left still has a character cmd.exe would read
- *   (`WINDOWS_COMMAND_SCRIPT_UNSAFE_ARG`), the argv is returned as it is with
- *   `unsafeScript` set: nothing the job did not ask for is ever run.
- */
 export function planAgentJobSpawn(
 	command: string[],
 	options: {
@@ -166,8 +137,6 @@ export function planAgentJobSpawn(
 			unsafeScript: `${script} is a Windows command script, and this job's arguments cannot be passed through cmd.exe safely. Install the CLI as an .exe, or put its .exe first on PATH.`,
 		};
 	}
-	// A trailing backslash would escape the closing quote for the CLI's own
-	// argument parser, so it is doubled.
 	const line = [script, ...args].map((arg) => `"${arg.replace(/(\\+)$/, "$1$1")}"`).join(" ");
 	return {
 		command: [options.comspec || process.env.ComSpec || "cmd.exe", "/d", "/s", "/c", `"${line}"`],

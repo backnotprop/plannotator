@@ -40,7 +40,6 @@ describe("T3 OAuth and durable sends", () => {
     expect((statSync(store.path).mode & 0o777)).toBe(0o600);
     expect((statSync(store.directory).mode & 0o777)).toBe(0o700);
     await expect(new T3Delivery(thread, store).send("Changed reply", "reply-1")).rejects.toThrow("changed its scope or content");
-    // A wake's words can drift between tries (a renamed thread): its retry re-sends the first words under the same request.
     networkLost = true;
     const sent: unknown[] = [];
     const wake = new T3Thread({ call: (name, args) => (sent.push(args.message), rpc.call(name, args)) }, "thread-a");
@@ -59,7 +58,6 @@ describe("T3 OAuth and durable sends", () => {
     expect(sends).toBe(1);
   });
   test("after a new login a running worker's delivery object sends new decisions without a restart", async () => {
-    // What regresses: every send refused with "Restart this thread's companion" after re-login.
     const store = credentials(); store.save({ endpoint: store.endpoint.href, epoch: "old", tokens: { access_token: "a", token_type: "Bearer" } });
     const thread = new T3Thread({ async call(_name, args) { return { threadId: args.threadId, messageId: "m", runId: "r", status: "queued", delivery: "queued" }; } }, "thread-a");
     const delivery = new T3Delivery(thread, store);
@@ -80,7 +78,6 @@ describe("T3 OAuth and durable sends", () => {
         const id = crypto.randomUUID(); sessions.set(id, token);
         return Response.json({ jsonrpc: "2.0", id: rpc.id, result: { protocolVersion: "2025-11-25", capabilities: { tools: {} }, serverInfo: { name: "t3", version: "test" } } }, { headers: { "mcp-session-id": id } });
       }
-      // A session belongs to the grant that opened it.
       if (!session || sessions.get(session) !== token) return new Response("Session not found", { status: 404 });
       if (rpc.id === undefined) return new Response(null, { status: 202 });
       seen.push(token);
@@ -92,7 +89,6 @@ describe("T3 OAuth and durable sends", () => {
       store.save({ endpoint: store.endpoint.href, epoch: "a", tokens: { access_token: "token-a", token_type: "Bearer" } });
       const client = await T3Client.connect(store.endpoint, store.token);
       expect(await client.call("t3_thread_read", {})).toEqual({ ok: true });
-      // `plannotator t3 login` again: the old grant stops working.
       accepted = "token-b";
       store.save({ endpoint: store.endpoint.href, epoch: "b", tokens: { access_token: "token-b", token_type: "Bearer" } });
       expect(await client.call("t3_thread_read", {})).toEqual({ ok: true });

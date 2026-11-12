@@ -1,4 +1,3 @@
-/** DOM coverage for a chapter's files grouped by kind (code, tests, generated). */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -10,7 +9,6 @@ import { GuideSectionCard } from './GuideSectionCard';
 
 const hasDom = typeof document !== 'undefined';
 let mountedProps: Record<string, unknown>[] = [];
-/** Each mount of the renderer (not each render), by file path. */
 let mounts: string[] = [];
 
 function FakeDiffRenderer(props: Record<string, unknown>) {
@@ -131,13 +129,11 @@ describe('GuideSectionCard file kinds', () => {
     expect(mounts.sort()).toEqual(['bun.lock', 'src/a.ts']);
     const lastCollapsed = (path: string) => mountedProps.filter((p) => (p.files as DiffFile[])[0].path === path).at(-1)?.mountCollapsed;
 
-    // Expand all: the folded generated file opens; the open one keeps its viewer (its opened gaps, an open comment).
     mounts = [];
     await renderChapter(paths, undefined, { collapsed: false, token: 1 });
     expect(mounts).toEqual(['bun.lock']);
     expect(lastCollapsed('bun.lock')).toBe(false);
 
-    // Collapse all: both change, both fold.
     mounts = [];
     await renderChapter(paths, undefined, { collapsed: true, token: 2 });
     expect(mounts.sort()).toEqual(['bun.lock', 'src/a.ts']);

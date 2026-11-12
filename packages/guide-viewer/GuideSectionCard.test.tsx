@@ -7,7 +7,6 @@ import { GuideHostProvider, type GuideHostValue } from './host';
 import { GuideViewportProvider } from './GuideViewportManager';
 
 let codeViewProps: Record<string, unknown>[] = [];
-/** Stand-in diff renderer: records the props the guide chain hands it. */
 function FakeDiffRenderer(props: Record<string, unknown>) {
   codeViewProps.push(props);
   const files = props.files as DiffFile[];
@@ -41,13 +40,11 @@ type HostOverrides = {
   [passthrough: string]: unknown;
 };
 
-/** Build a GuideHost value: known host fields map onto the contract, anything else is forwarded to the renderer. */
 function makeState(overrides: HostOverrides = {}): GuideHostValue<Record<string, unknown>> {
   const { files = [], guideRevealFile = null, onGuideRevealFile, allFilesActiveSearchMatch = null, ...passthrough } = overrides;
   return {
     files,
     DiffRenderer: FakeDiffRenderer as unknown as GuideHostValue<Record<string, unknown>>['DiffRenderer'],
-    // Mirrors the in-app host, which also forwards the active match to the renderer.
     getDiffRendererProps: () => ({ ...passthrough, activeSearchMatch: allFilesActiveSearchMatch }),
     revealFile: guideRevealFile,
     onRevealFile: onGuideRevealFile,
@@ -97,7 +94,6 @@ function renderCard(
 
 describe('GuideSectionCard', () => {
   test.skipIf(!hasDom)('renders per-file summaries in the card and never delegates them to the renderer', async () => {
-    // Windowing at scale is covered by GuideView.test.tsx; this guards only what the card owns.
     const files = Array.from({ length: 3 }, (_, index) => makeFile(`src/file-${index}.ts`));
     const summarized: GuideSection = {
       title: 'Summarized chapter',
@@ -181,7 +177,6 @@ describe('GuideSectionCard', () => {
     document.body.appendChild(host);
     await act(async () => {
       root = createRoot(host!);
-      // Sentinel: the chain must hand getDiffRendererProps() output to the renderer untouched.
       root.render(renderCard(makeState({ files: [file], hostSentinel: 'sentinel-42' })));
     });
 
@@ -190,8 +185,6 @@ describe('GuideSectionCard', () => {
     expect(latest.allowScrollChaining).toBe(true);
   });
 
-  // The host's section tab (renderSectionTab): the Inbox's Split | Unified switch on the first card.
-  // A host that passes nothing (guides.show, the review app) gets the card exactly as before.
   test.skipIf(!hasDom)('draws no tab and keeps the card as it was when the host has no renderSectionTab', async () => {
     const file = makeFile();
     host = document.createElement('div');
@@ -228,21 +221,18 @@ describe('GuideSectionCard', () => {
     });
     const tab = host.querySelector('[data-guide-section-tab]')!;
     expect(tab).not.toBeNull();
-    // The host's control sits inside the tab, right above the card, whose top-right corner the tab carries.
     expect(tab.querySelector('[data-host-control]')).not.toBeNull();
     const card = host.querySelector<HTMLElement>('[data-guide-section]')!;
     expect(tab.nextElementSibling).toBe(card);
     expect(card.style.borderTopRightRadius).toBe('0px');
     expect(calls).toContain(0);
 
-    // A folded (reviewed) first card keeps its tab, so the switch stays reachable.
     await act(async () => {
       root!.render(withTab(true, 0));
     });
     expect(host.querySelector('[data-guide-section-tab] [data-host-control]')).not.toBeNull();
     expect(host.querySelector('[data-guide-file-shell]')).toBeNull();
 
-    // Another card, for which the host answers null: no tab, card untouched.
     await act(async () => {
       root!.render(withTab(false, 1));
     });
@@ -270,7 +260,6 @@ describe('GuideSectionCard: a chapter\'s diagram (format version 5)', () => {
     host!.remove();
     root = null;
   }
-  /** A host's fold store in memory, so the test never writes the page's localStorage. */
   function memoryStore() {
     const kept = new Map<string, string>();
     return { getItem: (key: string) => kept.get(key) ?? null, setItem: (key: string, value: string) => void kept.set(key, value) };
@@ -316,7 +305,6 @@ describe('GuideSectionCard: a chapter\'s diagram (format version 5)', () => {
     await act(async () => header()!.click());
     expect(header()!.getAttribute('aria-expanded')).toBe('false');
     expect(card().querySelector('svg[data-drawn-chapter]')).toBeNull();
-    // The files are still there under the folded header.
     expect(card().querySelector('[data-guide-file-shell]')).not.toBeNull();
     await unmount();
 
@@ -325,12 +313,10 @@ describe('GuideSectionCard: a chapter\'s diagram (format version 5)', () => {
     expect(card().querySelector('svg[data-drawn-chapter]')).toBeNull();
     await unmount();
 
-    // Another chapter, or the same one with a new drawing, is not folded by it.
     await mount(state, { section: { ...section, diagram: { ...diagram, source: 'flowchart LR\n  a --> c' } } });
     expect(card().querySelector('svg[data-drawn-chapter]')).not.toBeNull();
     await unmount();
 
-    // Opened again, it stays open.
     await mount(state, { section: { ...section, diagram } });
     await act(async () => header()!.click());
     await unmount();

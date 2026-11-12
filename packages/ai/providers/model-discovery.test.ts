@@ -8,7 +8,6 @@ import { CodexAppServerProvider, codexCatalogFromModelList } from "./codex-app-s
 import { createDeferredModelDiscovery } from "../endpoints.ts";
 
 describe("codexCatalogFromModelList", () => {
-  // Shape of codex-cli 0.154 `model/list` entries (trimmed to the read fields).
   const list = [
     {
       id: "gpt-6-astra",
@@ -41,8 +40,6 @@ describe("codexCatalogFromModelList", () => {
   });
 
   test("fast mode is also read from serviceTiers (the replacement for additionalSpeedTiers)", () => {
-    // Codex's ModelPreset::supports_fast_mode: a service tier whose id is the
-    // fast tier's request value ("priority") or its "fast" alias.
     const tier = (id: string) => ({ id, name: id, description: "" });
     const catalog = codexCatalogFromModelList([
       { id: "a", serviceTiers: [tier("priority")] },
@@ -54,7 +51,6 @@ describe("codexCatalogFromModelList", () => {
 });
 
 describe("tool version capture during discovery", () => {
-  // The Codex provider reads $CODEX_HOME/config.toml: a temp folder, never the real ~/.codex.
   const savedCodexHome = process.env.CODEX_HOME;
   const codexHome = mkdtempSync(join(tmpdir(), "plannotator-codex-home-"));
   beforeAll(() => {
@@ -65,8 +61,6 @@ describe("tool version capture during discovery", () => {
     else process.env.CODEX_HOME = savedCodexHome;
     rmSync(codexHome, { recursive: true, force: true });
   });
-  // Fake CLIs: each reports a version but cannot list models, so the version
-  // must survive a failed discovery (it is what explains a fallback list).
   const fakeCli = (name: string, body: string) => {
     const dir = mkdtempSync(join(tmpdir(), "plannotator-fake-cli-"));
     const path = join(dir, name);
@@ -119,9 +113,6 @@ process.stdin.on("data", (d) => {
   }, 15_000);
 
   test.skipIf(process.platform === "win32")("codex: the version is not published while model/list is still pending", async () => {
-    // Publishing it early would pair the version with the still-fallback list,
-    // and the picker would claim "Using the built-in list" for a discovery
-    // that is about to succeed.
     const cli = fakeCli(
       "codex",
       `#!/usr/bin/env node
@@ -162,14 +153,10 @@ describe("Claude model discovery", () => {
       cwd: process.cwd(),
       claudeExecutablePath: resolve(import.meta.dir, "does-not-exist", "claude"),
     });
-    // Rejecting (rather than swallowing) is what lets the runtime's
-    // once-wrapper retry discovery later instead of pinning the fallback.
     await expect(provider.fetchModels()).rejects.toThrow();
     expect(provider.models).toBe(CLAUDE_FALLBACK_MODELS);
   }, 15_000);
 
-  // Discovery spawns `claude`, so neither runtime may run it at startup — only
-  // behind the deferred initializer (?activate= from a picker, or a session).
   for (const relPath of ["packages/server/ai-runtime.ts", "apps/pi-extension/server/ai-runtime.ts"]) {
     test(`${relPath} defers Claude model discovery`, () => {
       const src = readFileSync(resolve(import.meta.dir, "../../..", relPath), "utf8");
@@ -178,8 +165,6 @@ describe("Claude model discovery", () => {
       expect(start).toBeGreaterThan(-1);
       expect(end).toBeGreaterThan(start);
       const block = src.slice(start, end);
-      // Claude sessions never wait on discovery (fix: first Ask AI answer
-      // blocked ~2-10s); both runtimes must register it that way.
       expect(block).toContain("deferModelDiscovery(providerId, provider, { blockSession: false })");
       expect(block).not.toContain("modelDiscovery.push");
     });
@@ -207,7 +192,6 @@ describe("createDeferredModelDiscovery", () => {
     d.defer("claude-agent-sdk", claude.provider, { blockSession: false });
     expect(await settledWithin(d.beforeProviderSession("claude-agent-sdk", "session"))).toBe(true);
     expect(claude.calls()).toBe(1);
-    // An explicit ?activate= probe still waits: it reports the refreshed list.
     const activate = d.beforeProviderSession("claude-agent-sdk", "activate");
     expect(await settledWithin(activate)).toBe(false);
     claude.finish();
@@ -225,9 +209,6 @@ describe("createDeferredModelDiscovery", () => {
   });
 
   test("before discovery lands, a pick only the tool offers waits for it (never resolved onto the fallback)", async () => {
-    // opus[1m] is not in the fallback: resolving now would run the first
-    // session on `opus` (another context window and billing) and later ones
-    // on opus[1m].
     const d = createDeferredModelDiscovery();
     const claude = hanging();
     d.defer("claude-agent-sdk", claude.provider, { blockSession: false });

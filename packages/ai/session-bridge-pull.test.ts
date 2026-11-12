@@ -33,7 +33,6 @@ interface HostAsk {
   signal: AbortSignal;
 }
 
-/** The host side: an in-process bridge the test drives by hand. */
 function fakeHost(initial: SessionBridgeStatus = "ready", modes = { turn: true, transient: false }) {
   let status = initial;
   const asks: HostAsk[] = [];
@@ -83,10 +82,6 @@ afterEach(() => {
   for (const cleanup of cleanups.splice(0)) cleanup();
 });
 
-/**
- * A Plannotator server's AI runtime with a pull bridge, plus a host process
- * simulated by the real pull client talking to it through `fetch`.
- */
 function setup(options: Partial<PullSessionBridgeOptions> = {}, host = fakeHost(), wire: { olderServer?: boolean } = {}, client: { statusIntervalMs?: number } = {}) {
   const pull = createPullSessionBridge({
     token: TOKEN,
@@ -114,7 +109,6 @@ function setup(options: Partial<PullSessionBridgeOptions> = {}, host = fakeHost(
     const path = new URL(String(url)).pathname;
     const res = await call(path, init ?? {});
     if (!wire.olderServer || path !== SESSION_BRIDGE_POLL_PATH) return res;
-    // A server from before the `features` advert.
     const { features: _features, ...rest } = (await res.json()) as Record<string, unknown>;
     return Response.json(rest, { status: res.status });
   }) as typeof fetch;
@@ -168,7 +162,6 @@ describe("pull session bridge", () => {
   });
 
   test("a host that never interrupts says so on its polls; every other host's advert is unchanged", async () => {
-    // What regresses: the capability leaking onto other hosts' adverts (absent = interruptible).
     const ordinary = setup();
     void ordinary.startHost();
     await waitFor(() => ordinary.pull.bridge.status() === "ready" && !!ordinary.provider.sessionBridge);
@@ -207,8 +200,6 @@ describe("pull session bridge", () => {
     expect(run.messages.at(-1)).toMatchObject({ type: "result", success: true, result: "Because of #12." });
   });
 
-  // The failure this guards: a host's `taken_over` read as an unknown code,
-  // so the reviewer saw "the session could not answer" instead of the note.
   test("a host's taken_over crosses the pull bridge as session_taken_over with the partial answer kept", async () => {
     const { provider, host, startHost } = setup();
     void startHost();
@@ -223,8 +214,6 @@ describe("pull session bridge", () => {
     expect(run.messages.at(-1)).toEqual({ type: "error", code: SESSION_BRIDGE_ERROR.takenOver, error: "the person typed" });
   });
 
-  // The failure this guards: a newer OpenCode plugin against an older CLI,
-  // whose UI would replace the partial answer with a "failed" error.
   test("against a server that does not advertise taken_over, the host settles the partial answer plus the note", async () => {
     const { provider, host, startHost } = setup({}, fakeHost(), { olderServer: true });
     void startHost();
@@ -290,15 +279,12 @@ describe("pull session bridge", () => {
     expect(run.messages.at(-1)).toMatchObject({ type: "result", result: "done" });
   });
 
-  // The failure this guards: the client called the host's interrupt on a bridge
-  // that already reads `gone`, and told the server it had worked.
   test("an interrupt that reaches a session already gone never calls the host, and reports ok: false", async () => {
     const host = fakeHost("busy");
     const { startHost, pull } = setup({}, host, {}, { statusIntervalMs: 60_000 });
     void startHost();
     await waitFor(() => pull.bridge.status() === "busy");
 
-    // The status push has not gone out, so the server still thinks it is busy.
     host.setStatus("gone");
     const refused = await Promise.resolve(pull.bridge.interrupt!()).then(() => "reported ok", (error: Error) => error.message);
     expect(host.interrupts).toBe(0);
@@ -318,7 +304,6 @@ describe("pull session bridge", () => {
     await run.done;
     await waitFor(() => host.asks[0].signal.aborted);
 
-    // Still running on the host: a second question is refused until it ends.
     const second = await provider.createSession({ context: CONTEXT });
     const refused = collect(second.query("next"));
     await refused.done;
@@ -389,7 +374,6 @@ describe("pull session bridge", () => {
     expect((await call(SESSION_BRIDGE_POLL_PATH, poll, { authorization: `Bearer ${"x".repeat(43)}` })).status).toBe(401);
     expect((await call(SESSION_BRIDGE_POLL_PATH, poll)).status).toBe(401);
     expect((await call(SESSION_BRIDGE_EVENT_PATH, { method: "POST", body: "{}" }, { ...auth, origin: "http://localhost:4321" })).status).toBe(403);
-    // DNS rebinding: right token, wrong Host.
     expect((await call(SESSION_BRIDGE_POLL_PATH, poll, { ...auth, host: "evil.example:4321" })).status).toBe(403);
 
     const bare = createAIEndpoints({ registry: new ProviderRegistry(), sessionManager: new SessionManager(), authorizeSessionBridgeRequest: () => true });

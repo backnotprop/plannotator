@@ -1,30 +1,3 @@
-// Source: apps/rooms/src/external-refs/github-pulls.ts, plus GITHUB_API_BASE and githubHeaders lifted from apps/rooms/src/external-refs/github-app.ts (Workspaces repo, main 7379b0195de140adc00b4496eefe553a3eec803e).
-// Changed: installationAuth (which minted an App token) is githubAuth, which asks the port; reads take the port's wrapped fetch.
-//
-// GitHub's picker reads. In Workspaces these run on a per-call
-// installation token of the team's GitHub App installation and need only
-// Metadata read and Pull requests read (Issues read for `include:
-// "issues"`). Here the token comes from the port.
-//
-//   scopes    GET /installation/repositories: the repositories the
-//             installation covers, each `owner/repo`. Installation tokens
-//             only: a user token has no installation to list.
-//   search    GET /repos/{owner}/{repo}/pulls?state=open: one page of a
-//             repository's open pull requests (the scope is required).
-//             With `include: "issues"`: GET /repos/{owner}/{repo}/issues?state=open,
-//             one page of open issues and pull requests together, most
-//             recently updated first (GitHub's issues list carries both; a
-//             pull request's item has a `pull_request` key).
-//   the diff  github-pull-diff.ts (the pinned diff read and the size facts).
-//
-// HOSTS: every read runs against one host, github.com by default. A
-// GitHub Enterprise host (the adapter's `hosts` option) reads its own API
-// (githubApiBase) with a credential asked for that host; a host the
-// adapter does not serve is a scope error with no credential asked.
-//
-// Payload shapes: docs.github.com/en/rest/pulls/pulls and
-// /rest/apps/installations (2022-11-28), read 2026-09-24.
-
 import type {
 	ExternalRef,
 	ExternalRefFacts,
@@ -53,33 +26,22 @@ import { credentialFor, type FetchLike, type ReferencePort } from "../port.ts";
 
 export const GITHUB_API_BASE = "https://api.github.com";
 
-/** The item host GitHub credentials are asked for by default. */
 export const GITHUB_HOST = "github.com";
 
-/** True when `host` is GitHub Enterprise Server: its API sits under
- * paths on the host itself, not on an api. host. */
 function isEnterpriseServer(host: string): boolean {
 	return apiOrigin("github", host) === `https://${host.toLowerCase()}`;
 }
 
-/** The REST API base for an item host: api.github.com for github.com,
- * api.{host} for GitHub Enterprise Cloud with data residency (*.ghe.com),
- * and https://{host}/api/v3 for GitHub Enterprise Server. This is a base
- * URL, not an origin: a port binds its fetch to `apiOrigin("github", host)`. */
 export function githubApiBase(host: string): string {
 	const origin = apiOrigin("github", host);
 	return isEnterpriseServer(host) ? `${origin}/api/v3` : origin;
 }
 
-/** The GraphQL endpoint for an item host (same three cases), on the same
- * `apiOrigin("github", host)`. */
 export function githubGraphqlUrl(host: string): string {
 	const origin = apiOrigin("github", host);
 	return isEnterpriseServer(host) ? `${origin}/api/graphql` : `${origin}/graphql`;
 }
 
-/** One GitHub REST API as the reads call it: the item host, its API base,
- * the port's wrapped fetch, and the port's user agent. */
 export interface GithubApi {
 	readonly host: string;
 	readonly base: string;
@@ -87,7 +49,6 @@ export interface GithubApi {
 	readonly userAgent: string;
 }
 
-/** The GitHub API for a port and an item host (default github.com). */
 export function githubApi(port: ReferencePort, host: string = GITHUB_HOST): GithubApi {
 	return {
 		host,
@@ -97,7 +58,6 @@ export function githubApi(port: ReferencePort, host: string = GITHUB_HOST): Gith
 	};
 }
 
-/** GitHub REST headers. */
 export function githubHeaders(userAgent: string, authorization?: string): Record<string, string> {
 	const headers: Record<string, string> = {
 		accept: "application/vnd.github+json",
@@ -110,12 +70,8 @@ export function githubHeaders(userAgent: string, authorization?: string): Record
 
 export const REPO = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9_.-]{1,100}$/;
 const PAGE = /^[1-9][0-9]{0,3}$/;
-/** GitHub's own page size ceiling for both lists. */
 const PER_PAGE = 100;
 
-/** The authorization for a credentialed GitHub read on `host`. No
- * credential is not_linked: the picker and pull reads have no anonymous
- * rung. */
 export async function githubAuth(
 	port: ReferencePort,
 	host: string = GITHUB_HOST,
@@ -161,7 +117,6 @@ export async function get(
 	}
 }
 
-/** The page number of a `Link: <...page=N>; rel="next"` header, if any. */
 function nextPage(response: Response): string | undefined {
 	for (const part of (response.headers.get("link") ?? "").split(",")) {
 		if (!/rel="next"/u.test(part)) continue;
@@ -180,13 +135,6 @@ export function str(value: unknown): string | undefined {
 	return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-/** Issue state → {label, tone}. GitHub's word for any closed issue is
- * "Closed"; state_reason (completed | not_planned | duplicate | reopened |
- * null) is cheaply in the payload, so a not-planned or duplicate close
- * earns the closed tone and every other close the done tone. A null reason
- * is an issue closed before GitHub had close reasons, which GitHub itself
- * shows as completed. This is the one mapping: list rows and reference
- * chips both read it (lowercase words; GraphQL's enums are lowercased). */
 export function issueState(state: string, stateReason: string | null): ExternalRefState {
 	if (state === "open") return { label: "Open", tone: "open" };
 	if (stateReason === "not_planned" || stateReason === "duplicate") {
@@ -195,29 +143,9 @@ export function issueState(state: string, stateReason: string | null): ExternalR
 	return { label: "Closed", tone: "done" };
 }
 
-// ── list(query): GraphQL ─────────────────────────────────────────────────────
-//
-// With no text: repository.issues with filterBy and orderBy, which has no
-// result cap. filterBy carries the state, the assignee, the FIRST label
-// (filterBy.labels ORs its labels, so one is exact) and the milestone by
-// number; the row re-check (keepsRow) requires every other label. The
-// milestone number comes from repository.milestones(query:), a title
-// search, paged until the exact title is found (MILESTONE_PAGES).
-// With text: the search API, which answers at most 1,000 results per query
-// (GitHub's cap), so a text list ends after 10 pages of 100 with no cursor.
-// Docs: docs.github.com/en/graphql/reference/objects#repository (issues,
-// milestones, IssueFilters, IssueOrder), /queries#search, and
-// docs.github.com/en/search-github/searching-on-github/searching-issues-and-pull-requests.
-
-/** Labels read per row: GraphQL's largest page. A row whose labels run
- * past this is kept whole by the label re-check (labelsComplete). */
 const ROW_LABELS = 100;
-/** Milestone title-search pages read (100 each) before the exact title is
- * given up on and the milestone goes to search as a qualifier instead. */
 const MILESTONE_PAGES = 10;
-/** GitHub's search query limit, in characters, not counting qualifiers. */
 const SEARCH_TEXT_LIMIT = 256;
-/** Assignees read per row: GitHub allows at most 10 on an issue. */
 const ROW_ASSIGNEES = 20;
 
 const LIST_ISSUE_FIELDS = `number title url state stateReason createdAt updatedAt
@@ -251,28 +179,14 @@ const SEARCH_ISSUES_QUERY = `query($q: String!, $first: Int!, $after: String) {
   }
 }`;
 
-/** A GitHub login: letters, digits and hyphens, plus `_` for Enterprise
- * Managed Users (`mona_acme`; every *.ghe.com user is one), and `[bot]`.
- * It is sent as a GraphQL variable, or as a search value where neither
- * `_` nor `-` can start a qualifier. */
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9_-]{0,99})(?:\[bot\])?$/;
 
-/** A quoted search qualifier value (`label:"..."`). A colon inside quotes
- * cannot start another qualifier, so `type: bug` stays as written. A value
- * holding `"` or `\` cannot be quoted faithfully and is refused before
- * this (QUOTE_BREAKING); line breaks become spaces. */
 function quotedValue(value: string): string {
 	return value.replace(/[\r\n]/gu, " ").replace(/\s+/gu, " ").trim();
 }
 
-/** Characters a quoted search value cannot carry as written. */
 const QUOTE_BREAKING = /["\\]/u;
 
-/** Free text as search terms. Quotes, backslashes and parentheses are
- * removed, then every word is quoted, so no word can act as a qualifier
- * (`repo:other/x`) or an operator (OR, AND, NOT, a leading `-`) and widen
- * the search past `repo:`. Rows from another repository are still dropped
- * after the read (listFacts), as a backstop. */
 function quotedWords(text: string): string {
 	return text
 		.replace(/["\\()]/gu, " ")
@@ -282,7 +196,6 @@ function quotedWords(text: string): string {
 		.join(" ");
 }
 
-/** One GraphQL query on `api`'s host, answered as data or a failure. */
 async function githubGraphql(
 	api: GithubApi,
 	authorization: string,
@@ -317,11 +230,9 @@ interface PullListItem {
 }
 
 interface IssueListItem extends PullListItem {
-	/** Present exactly when the item is a pull request (issues doc). */
 	pull_request?: unknown;
 }
 
-/** The picker reads of one GitHub grammar: its hosts, its canonicals. */
 export interface GithubPickerReads {
 	scopes(port: ReferencePort, options?: { readonly host?: string }): Promise<ScopesResult>;
 	search(
@@ -331,7 +242,6 @@ export interface GithubPickerReads {
 	list(query: ReferenceListQuery, port: ReferencePort): Promise<SearchResult>;
 }
 
-/** The picker reads for the hosts `grammar` serves. */
 export function githubPickerReads(grammar: GithubGrammar): GithubPickerReads {
 	function pullFacts(host: string, repo: string, pull: PullListItem): ExternalRefFacts | null {
 		const n = typeof pull.number === "number" && Number.isInteger(pull.number) ? pull.number : null;
@@ -372,7 +282,6 @@ export function githubPickerReads(grammar: GithubGrammar): GithubPickerReads {
 		};
 	}
 
-	/** The installation's repositories on one host, every page. */
 	async function scopes(
 		port: ReferencePort,
 		options: { readonly host?: string } = {},
@@ -381,7 +290,6 @@ export function githubPickerReads(grammar: GithubGrammar): GithubPickerReads {
 		if (host === null) return { ok: false, reason: "not_resolvable", field: "scope" };
 		const auth = await githubAuth(port, host);
 		if (!auth.ok) return auth;
-		// GET /installation/repositories answers only an installation token.
 		if (auth.kind !== "installation") return { ok: false, reason: "not_linked" };
 		const api = githubApi(port, host);
 		const items: { id: string; label: string }[] = [];
@@ -411,11 +319,6 @@ export function githubPickerReads(grammar: GithubGrammar): GithubPickerReads {
 		return { ok: true, items };
 	}
 
-	/** One page of a repository's open pull requests, newest first; with
-	 * `include: "issues"`, one page of its open issues and pull requests
-	 * together, most recently updated first. `query` narrows the page by title
-	 * or number (GitHub's lists have no search parameter); the scope,
-	 * `owner/repo`, is required, on `host` (default github.com). */
 	async function search(
 		args: { query: string; scope?: string; cursor?: string; include?: "issues"; host?: string },
 		port: ReferencePort,
@@ -462,9 +365,6 @@ export function githubPickerReads(grammar: GithubGrammar): GithubPickerReads {
 		return { ok: true, items, ...(cursor === undefined ? {} : { cursor }) };
 	}
 
-	/** One list node as facts, or null when it is not an issue of `scope`
-	 * on the list's own `host` (the search API can answer other
-	 * repositories; a list on host H answers refs on H only). */
 	function listFacts(
 		host: string,
 		scope: string,
@@ -499,9 +399,6 @@ export function githubPickerReads(grammar: GithubGrammar): GithubPickerReads {
 		};
 	}
 
-	/** The number of the milestone titled `title` (case-insensitive), "none"
-	 * when the repository has no such milestone, or "unknown" when the title
-	 * search ran past MILESTONE_PAGES pages without it. */
 	async function milestoneNumber(
 		api: GithubApi,
 		authorization: string,
@@ -528,13 +425,6 @@ export function githubPickerReads(grammar: GithubGrammar): GithubPickerReads {
 		return { ok: true, number: "unknown" };
 	}
 
-	/** One page (up to 100) of a repository's issues, filtered: GraphQL
-	 * repository.issues with filterBy and orderBy, or the search API when the
-	 * query has text (see the section note: search answers at most 1,000
-	 * results). Each row is re-checked after the read (host, repository,
-	 * state, every label, milestone title), so a page can hold fewer than
-	 * 100 rows and still carry a cursor. No credential is not_linked:
-	 * GitHub's GraphQL API has no anonymous rung. */
 	async function list(query: ReferenceListQuery, port: ReferencePort): Promise<SearchResult> {
 		const checked = checkListQuery(query);
 		if (!checked.ok) return checked;
@@ -547,8 +437,6 @@ export function githubPickerReads(grammar: GithubGrammar): GithubPickerReads {
 			return { ok: false, reason: "not_resolvable", field: "filter" };
 		}
 		const text = quotedWords(q.text ?? "");
-		// A search value that cannot be quoted as written, or text past
-		// GitHub's search length limit, would answer an empty or failed page.
 		const searchValues = [...q.labels, ...(q.milestone === undefined ? [] : [q.milestone])];
 		if (
 			q.text !== undefined &&
@@ -594,8 +482,6 @@ export function githubPickerReads(grammar: GithubGrammar): GithubPickerReads {
 		} else {
 			const filterBy: Record<string, unknown> = {};
 			if (q.state !== "all") filterBy["states"] = [q.state === "open" ? "OPEN" : "CLOSED"];
-			// The first label only, where "any" and "every" agree; the re-check
-			// requires the rest.
 			const first = q.labels[0];
 			if (first !== undefined) filterBy["labels"] = [first];
 			if (q.assignee !== undefined) filterBy["assignee"] = q.assignee;
@@ -613,7 +499,6 @@ export function githubPickerReads(grammar: GithubGrammar): GithubPickerReads {
 			});
 			if (!answer.ok) return answer;
 			const repository = objectAt(answer.data, "repository");
-			// A repository the token cannot see answers null (NOT_FOUND).
 			if (repository === null) return { ok: false, reason: "not_linked" };
 			connection = objectAt(repository, "issues");
 		}
@@ -642,12 +527,8 @@ export function githubPickerReads(grammar: GithubGrammar): GithubPickerReads {
 
 const DEFAULT_READS = githubPickerReads(githubGrammar());
 
-/** The github.com installation's repositories, every page. */
 export const githubScopes: GithubPickerReads["scopes"] = DEFAULT_READS.scopes;
 
-/** One page of a github.com repository's open pull requests (or, with
- * `include: "issues"`, its open issues and pull requests). */
 export const githubSearch: GithubPickerReads["search"] = DEFAULT_READS.search;
 
-/** One filtered page of a github.com repository's issues. */
 export const githubList: GithubPickerReads["list"] = DEFAULT_READS.list;

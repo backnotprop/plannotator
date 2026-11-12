@@ -1,13 +1,3 @@
-// The GitHub read adapter. Ported from the Workspaces suites (main 7379b0195):
-//   apps/rooms/test/external-refs.test.ts  the public rung, the state table,
-//     the issues-form PR, 404 / 403 answers, the connection rung, the dead
-//     credential (now answered by the port), the HOME-installation rung
-//     (now the port's choice of credential)
-//   apps/rooms/test/github-pulls.test.ts   G1 to G10
-// The route-level shapes (HTTP 404/502/422, the cache, the guest fence,
-// broken_at stamping) are Workspaces' and stay there; here the adapter's
-// own ResolveResult is asserted.
-
 import { afterEach, beforeEach, describe, expect, it, type Mock, spyOn } from "bun:test";
 
 import { githubAdapter } from "../src/adapters/github.ts";
@@ -56,7 +46,6 @@ function refOf(url: string) {
 	return found.ref;
 }
 
-// Bun runs every test file in one process: the console spy is restored after each test.
 let info: Mock<typeof console.info>;
 beforeEach(() => {
 	info = spyOn(console, "info").mockImplementation(() => {});
@@ -269,8 +258,6 @@ describe("resolve: the credential rung (the port's token)", () => {
 	});
 });
 
-// ── the picker and pull reads (github-pulls.test.ts) ─────────────────────────
-
 const HEAD_A = "a".repeat(40);
 const HEAD_B = "b".repeat(40);
 const BASE_SHA = "c".repeat(40);
@@ -481,17 +468,14 @@ describe("GitHub picker and pull reads", () => {
 			[`${path}/files?per_page=100&page=1`, "application/vnd.github+json"],
 			[path, "application/vnd.github+json"],
 		]);
-		// G6: the diff media type is never asked for.
 		expect(gh.calls.map((c) => c.headers.get("accept"))).not.toContain("application/vnd.github.diff");
 
-		// A push lands between the first head read and the files list: read again.
 		gh = fakeProvider();
 		gh.on(`GET ${path}`, pull(42, HEAD_A), pull(42, HEAD_B), pull(42, HEAD_B), pull(42, HEAD_B));
 		gh.on(files, page);
 		const reread = await fetchPullDiff({ repo: "acme/web", number: 42 }, port(gh));
 		expect(reread.ok && reread.headSha).toBe(HEAD_B);
 
-		// The BASE moves with the head unchanged: read again.
 		const BASE_B = "d".repeat(40);
 		gh = fakeProvider();
 		gh.on(`GET ${path}`, pull(42, HEAD_A), pull(42, HEAD_A, BASE_B), pull(42, HEAD_A, BASE_B), pull(42, HEAD_A, BASE_B));
@@ -499,7 +483,6 @@ describe("GitHub picker and pull reads", () => {
 		const rebased = await fetchPullDiff({ repo: "acme/web", number: 42 }, port(gh));
 		expect(rebased.ok && rebased.baseSha).toBe(BASE_B);
 
-		// It keeps moving: refused rather than passed off as pinned.
 		gh = fakeProvider();
 		gh.on(`GET ${path}`, pull(42, HEAD_A), pull(42, HEAD_B), pull(42, HEAD_B), pull(42, HEAD_A));
 		gh.on(files, page);
@@ -534,7 +517,6 @@ describe("GitHub picker and pull reads", () => {
 			`${path}/files?per_page=100&page=1`,
 			`${path}/files?per_page=100&page=2`,
 		]);
-		// listPullFiles reads the same pages and the head it was listed at.
 		gh.on(`GET ${path}`, pull(45, HEAD_A, BASE_SHA, 101));
 		const listed = await listPullFiles({ repo: "acme/web", number: 45 }, port);
 		expect(listed.ok && listed.files.length).toBe(101);
@@ -622,7 +604,6 @@ describe("GitHub picker and pull reads", () => {
 		expect(await readPullSummary({ repo: "bad_owner/web", number: 1 }, dead)).toEqual({ ok: false, reason: "not_linked" });
 		expect(dead.asked).toEqual(["github github.com", "github github.com"]);
 		expect(gh.calls).toHaveLength(0);
-		// The adapter carries the pull reads under `pulls`.
 		expect(githubAdapter.pulls?.diff).toBe(fetchPullDiff);
 	});
 });

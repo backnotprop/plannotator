@@ -1,8 +1,3 @@
-// The GitLab read adapter. Ported from the Workspaces suite (main 7379b0195):
-//   apps/rooms/test/external-refs-providers.test.ts  "gitlab — resolve through the route"
-// The form-connect cases (the /api/v4/user probe, the http/IP/localhost
-// refusals) are connect side and stay in Workspaces.
-
 import { afterEach, beforeEach, describe, expect, it, type Mock, spyOn } from "bun:test";
 
 import { gitlabAdapter } from "../src/adapters/gitlab.ts";
@@ -30,7 +25,6 @@ function refOf(url: string) {
 
 const pat: ReferenceCredential = { kind: "private-token", token: "token-gl", host: "gitlab.com" };
 
-// Bun runs every test file in one process: the console spy is restored after each test.
 let info: Mock<typeof console.info>;
 beforeEach(() => {
 	info = spyOn(console, "info").mockImplementation(() => {});

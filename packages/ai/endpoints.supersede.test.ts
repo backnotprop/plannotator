@@ -12,7 +12,6 @@ class Slow extends BaseSession {
     const started = this.startQuery()!;
     signals.push(started.signal);
     yield { type: "text_delta", delta: "x" } as any;
-    // Like a provider that waits for its process to confirm the stop.
     await new Promise<void>(r => releases.push(r));
     this.endQuery(started.gen);
   }

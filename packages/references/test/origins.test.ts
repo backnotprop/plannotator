@@ -1,9 +1,3 @@
-// apiOrigin(provider, host): the one origin every provider call for an
-// item on a host goes to. New in Plannotator (not ported from Workspaces).
-// Guards: the origin table for each host kind, and that every read of
-// every adapter, for host H, reaches the port's fetch on apiOrigin(H) only,
-// so a port that binds its fetch to that origin never refuses a real read.
-
 import { afterEach, beforeEach, describe, expect, it, type Mock, spyOn } from "bun:test";
 
 import { createGithubAdapter } from "../src/adapters/github.ts";
@@ -42,8 +36,6 @@ describe("apiOrigin", () => {
 	});
 });
 
-/** A port that answers every call 200 `{}` with a token for any host,
- * recording each URL that reaches its fetch. */
 function recordingPort(kind: "installation" | "private-token" | "linear-api-key"): ReferencePort & { urls: string[] } {
 	const urls: string[] = [];
 	const fetch: FetchLike = async (input) => {
@@ -59,7 +51,6 @@ function recordingPort(kind: "installation" | "private-token" | "linear-api-key"
 	};
 }
 
-/** Every read an adapter offers for one host, each run on a fresh port. */
 async function everyRead(
 	adapter: RefReadAdapter,
 	host: string,

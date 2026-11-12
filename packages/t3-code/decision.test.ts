@@ -1,6 +1,4 @@
 import { describe, expect, test } from "bun:test";
-// The Claude Code mod's own delivery rules: T3 words its decisions the same way.
-// (Test-only import; product code never reaches into the mod.)
 import { deliveryFor, type HostResultRecord } from "../../apps/hook/hooks/mod/delivery";
 import { t3Decision, type T3HostResult } from "./decision";
 
@@ -55,7 +53,6 @@ describe("T3 decision messages match the Claude Code mod's", () => {
   });
 
   test("every sent message fits T3's 120,000-character cap", () => {
-    // What regresses: feedback over the cap was retried forever.
     const { t3 } = both({ v: 1, surface: "annotate", decision: "annotated", message: "y".repeat(500_000), noop: false, annotationCount: 9 }, "annotate");
     expect(t3.action).toBe("send");
     if (t3.action !== "send") return;

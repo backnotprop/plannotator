@@ -1,27 +1,3 @@
-// Source: apps/rooms/src/external-refs/linear.ts (resolve, GraphQL queries, state mapping, the adapter object) (Workspaces repo, main 7379b0195de140adc00b4496eefe553a3eec803e).
-// Cut: the OAuth connect, the token endpoint exchange, the refresh single-flight and updateSecret; the port supplies a live access token and its workspace.
-//
-// The Linear adapter, read side: issues, projects, and documents under
-// linear.app, resolved over GraphQL.
-//
-// TOKEN CUSTODY moved to the port. Workspaces' Linear credential is an
-// OAuth `actor=app` install whose access token dies in about 24 hours and
-// whose refresh token ROTATES on every refresh; the Workspaces port keeps
-// the refresh loop (single-flight, the rotated pair persisted before use)
-// and answers `unavailable` with credentialDead true only when the token
-// endpoint REFUSES the refresh (400/401). A network failure, 429 or 5xx on
-// refresh is transient: credentialDead false.
-//
-// Verified against the Linear docs (2026-07-23):
-//   GraphQL: https://linear.app/developers/graphql
-//     (POST api.linear.app/graphql, `Authorization: Bearer` for OAuth
-//     tokens, a bare `Authorization: <key>` for personal API keys (the
-//     `linear-api-key` kind); issue(id:) accepts the human identifier "ENG-123"; workflow
-//     state types: triage backlog unstarted started completed canceled)
-//
-// NO PUBLIC RUNG: nothing on linear.app reads unauthenticated. No
-// credential answers not_linked with zero fetches.
-
 import type {
 	ExternalRef,
 	ExternalRefFacts,
@@ -52,8 +28,6 @@ import {
 
 const LINEAR_GRAPHQL_URL = `${apiOrigin("linear", "linear.app")}/graphql`;
 
-// ── GraphQL: one query per entity type ──────────────────────────────────────
-
 const ISSUE_QUERY = `query($id: String!) {
   issue(id: $id) {
     identifier title createdAt updatedAt
@@ -80,14 +54,10 @@ interface GraphqlAnswer {
 	data?: Record<string, unknown> | null;
 }
 
-/** The Authorization header value for a Linear credential: an OAuth access
- * token takes `Bearer`, a personal API key is sent bare. */
 function linearAuthorization(credential: ReferenceCredential): string {
 	return credential.kind === "linear-api-key" ? credential.token : `Bearer ${credential.token}`;
 }
 
-/** POST one GraphQL query; null data node = the entity is not readable
- * here (wrong workspace, private team, gone): the not_linked answer. */
 async function graphql(
 	query: string,
 	variables: Record<string, string>,
@@ -107,7 +77,6 @@ async function graphql(
 	} catch {
 		return { ok: false, result: { ok: false, reason: "not_resolvable" } };
 	}
-	// A 401 on a token the port handed out as live: revoked out from under us.
 	if (response.status === 401) {
 		return {
 			ok: false,
@@ -119,26 +88,21 @@ async function graphql(
 	}
 	const payload = (await response.json().catch(() => null)) as GraphqlAnswer | null;
 	if (payload === null || payload.data === null || payload.data === undefined) {
-		// GraphQL "errors" for a missing entity: not readable here.
 		return { ok: false, result: { ok: false, reason: "not_linked" } };
 	}
 	return { ok: true, data: payload.data };
 }
 
-// ── state mapping (the workspace's own words, three tones) ──────────────────
-
-/** Issue workflow-state types (the fixed six). */
 function issueTone(type: string | undefined): ExternalRefState["tone"] {
 	if (type === "completed") return "done";
 	if (type === "canceled") return "closed";
-	return "open"; // triage | backlog | unstarted | started
+	return "open";
 }
 
-/** Project status types: same map with `paused` also reading open. */
 function projectTone(type: string | undefined): ExternalRefState["tone"] {
 	if (type === "completed") return "done";
 	if (type === "canceled") return "closed";
-	return "open"; // backlog | planned | started | paused
+	return "open";
 }
 
 function str(value: unknown): string | undefined {
@@ -149,11 +113,8 @@ function node(value: unknown): Record<string, unknown> | null {
 	return value !== null && typeof value === "object" ? (value as Record<string, unknown>) : null;
 }
 
-// ── resolve ─────────────────────────────────────────────────────────────────
-
 async function resolveLinear(ref: ExternalRef, port: ReferencePort): Promise<ResolveResult> {
 	const parsed = parseLinearCanonical(ref);
-	// Only a canonical the grammar mints is read, as on the forges.
 	if (parsed === null || !isMintedCanonical(matchLinearUrl, ref.url)) {
 		return { ok: false, reason: "not_resolvable" };
 	}
@@ -163,20 +124,11 @@ async function resolveLinear(ref: ExternalRef, port: ReferencePort): Promise<Res
 		"bearer",
 		"linear-api-key",
 	]);
-	// No public rung: without a credential nothing resolves.
 	if (credential === null) return { ok: false, reason: "not_linked" };
 	if (credential.kind === "unavailable") {
 		return { ok: false, reason: "not_resolvable", credentialDead: credential.credentialDead };
 	}
 
-	// THE WORKSPACE BINDING: the issue query asks Linear by bare human
-	// identifier ("ENG-123"), and Linear answers within the TOKEN'S OWN
-	// workspace, so without this comparison a pasted foreign-workspace URL
-	// (nearly every workspace has an ENG-1) would render the credential's
-	// workspace's same-named issue under a link pointing at someone else's.
-	// The credential's account IS its workspace urlKey; a URL on any other
-	// workspace is simply not linked here, with ZERO provider fetches. This
-	// holds for both kinds: a personal API key is also bound to one workspace.
 	const installed = credential.account?.toLowerCase() ?? null;
 	if (installed === null || installed !== parsed.workspace) {
 		return { ok: false, reason: "not_linked" };
@@ -220,7 +172,6 @@ async function resolveLinear(ref: ExternalRef, port: ReferencePort): Promise<Res
 		const facts: ExternalRefFacts = {
 			ref,
 			kind: "project",
-			// No number exists; the honest mono word, never a fake id.
 			shortId: "Project",
 			title,
 			state: { label, tone: projectTone(str(status?.["type"])) },
@@ -246,27 +197,10 @@ async function resolveLinear(ref: ExternalRef, port: ReferencePort): Promise<Res
 		title,
 		author: str(node(doc["creator"])?.["name"]),
 		updatedAt: str(doc["updatedAt"]),
-		// No state: Linear documents carry none at all (the stateless chip).
 	};
 	return { ok: true, facts };
 }
 
-// ── list(query): GraphQL issues(filter:) ────────────────────────────────────
-//
-// Linear pages Relay style (first/after and last/before) and takes an
-// `orderBy` of createdAt or updatedAt with no direction argument. Docs:
-// https://linear.app/developers/pagination ("We implement Relay style
-// cursor-based pagination model with first/after and last/before";
-// "By default results are ordered by createdAt"; ordering by updatedAt
-// gives "most recently updated" first), read 2026-10-30. So both orders
-// run newest first, and the query always sends `orderBy` explicitly.
-// Oldest first (`created_asc`) reads the LAST page of the createdAt order
-// (`last: 100, before: cursor`) and reverses it; the next cursor is that
-// page's startCursor while hasPreviousPage holds, which steps toward newer
-// issues. Not probed against a live workspace.
-
-/** Labels read per row: Linear filters labels itself, so this bounds the
- * facts only; real issues carry far fewer. */
 const ROW_LABELS = 50;
 
 const LIST_ISSUES_QUERY = `query($first: Int, $after: String, $last: Int, $before: String, $filter: IssueFilter, $orderBy: PaginationOrderBy) {
@@ -282,13 +216,9 @@ const LIST_ISSUES_QUERY = `query($first: Int, $after: String, $last: Int, $befor
   }
 }`;
 
-/** A Linear team key ("ENG"). */
 const TEAM_KEY = /^[A-Za-z][A-Za-z0-9_]{0,15}$/;
 const CLOSED_TYPES = ["completed", "canceled"];
 
-/** One page (up to 100) of the credential's workspace issues, filtered by
- * Linear itself. `scope` is a team key (optional). Like resolve: no public
- * rung, and the credential's `account` binds the answer to its workspace. */
 async function listLinear(query: ReferenceListQuery, port: ReferencePort): Promise<SearchResult> {
 	const checked = checkListQuery(query);
 	if (!checked.ok) return checked;
@@ -345,7 +275,6 @@ async function listLinear(query: ReferenceListQuery, port: ReferencePort): Promi
 		variables,
 	);
 	if (!answer.ok) {
-		// A 401 on a token the port handed out as live: revoked.
 		return answer.status === 401
 			? { ok: false, reason: "not_resolvable", credentialDead: true }
 			: { ok: false, reason: "not_resolvable" };
@@ -364,8 +293,6 @@ async function listLinear(query: ReferenceListQuery, port: ReferencePort): Promi
 	return { ok: true, items, ...(cursor === undefined ? {} : { cursor }) };
 }
 
-/** One list node as facts, or null when its URL is not an issue in the
- * credential's workspace. The canonical comes from the grammar. */
 function linearListFacts(workspace: string, issue: Record<string, unknown>): ExternalRefFacts | null {
 	const url = str(issue["url"]);
 	const title = str(issue["title"]);
@@ -391,7 +318,6 @@ function linearListFacts(workspace: string, issue: Record<string, unknown>): Ext
 		shortId: str(issue["identifier"]) ?? parsed.item.identifier,
 		title,
 		state: { label, tone: issueTone(str(state?.["type"])) },
-		// The resolve's rule, so a chip and a list row agree.
 		author: str(assignee?.["name"]) ?? str(node(issue["creator"])?.["name"]),
 		createdAt: str(issue["createdAt"]),
 		updatedAt: str(issue["updatedAt"]),

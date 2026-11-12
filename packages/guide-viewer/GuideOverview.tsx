@@ -4,19 +4,9 @@ import { useGuideHost } from './host';
 import { renderMarkdownProse } from './renderMarkdownProse';
 import type { GuideLinkRenderer } from './renderInlineMarkdown';
 
-/**
- * The agent's overview above the chapters (snapshot format version 2): a few
- * sentences on how the change fits together, with links into code, and
- * optionally one diagram. The diagram is drawn by the host
- * (`GuideHostValue.renderOverviewDiagram`); without one, Mermaid shows as its
- * source and an HTML picture as a short note. No agent markup is ever put in
- * the page here: prose goes through the inline markdown renderer, a diagram's
- * source is text.
- */
 export const GuideOverview: React.FC<{
   overview: GuideOverviewData;
   renderLink: GuideLinkRenderer;
-  /** No "Overview" label above the prose (GuideView `threadHeading`: the host's chapter menu names it). The host styles `gv-` names. */
   plain?: boolean;
 }> = ({ overview, renderLink, plain = false }) => {
   const host = useGuideHost();

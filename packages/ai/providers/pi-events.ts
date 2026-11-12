@@ -1,25 +1,5 @@
-/**
- * Pi event mapping — shared between Bun and Node.js Pi providers.
- *
- * Pure functions, no runtime-specific dependencies.
- */
-
 import type { AIMessage } from "../types.ts";
 
-/**
- * Map a Pi AgentEvent (received as JSONL) to AIMessage[].
- *
- * Pi event hierarchy:
- *   agent_start > turn_start > message_start > message_update* > message_end
- *     > tool_execution_start > tool_execution_end > turn_end > agent_end
- *
- * We extract:
- * - text_delta from message_update.assistantMessageEvent
- * - text from completed assistant messages when no stream deltas arrived
- * - tool_use from toolcall_end
- * - tool_result from tool_execution_end
- * - result from agent_end
- */
 export function mapPiEvent(
 	event: Record<string, unknown>,
 	sessionId: string,

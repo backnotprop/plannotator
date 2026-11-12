@@ -6,8 +6,6 @@ type El = { type: unknown; props: { children?: unknown } };
 const isElement = (node: unknown): node is El =>
   typeof node === "object" && node !== null && "type" in node && "props" in node;
 
-/** Flattens a React node tree (as returned by renderMarkdownProse, never
- *  actually mounted) down to its plain text content. */
 function textOf(node: unknown): string {
   if (node === null || node === undefined || typeof node === "boolean") return "";
   if (typeof node === "string" || typeof node === "number") return String(node);
@@ -24,8 +22,6 @@ describe("renderMarkdownProse", () => {
     expect(isElement(callout) && callout.type).toBe("div");
     expect(textOf(callout)).toContain("message here");
 
-    // The label span and the content span are the two children — the content
-    // span specifically (not just the label) must carry the opener's text.
     const children = isElement(callout) ? callout.props.children : null;
     expect(Array.isArray(children)).toBe(true);
     const contentSpan = (children as unknown[])[1];
@@ -58,8 +54,6 @@ describe("renderMarkdownProse", () => {
     expect(nodes).toHaveLength(1);
     const heading = nodes[0];
     expect(isElement(heading) && heading.type).toBe("h3");
-    // Inline rendering strips the backticks into a <code> element, so the
-    // flattened text must NOT contain the raw markdown tokens.
     expect(textOf(heading)).toBe("The useGuideData hook");
     expect(textOf(heading)).not.toContain("`");
   });
@@ -71,7 +65,6 @@ describe("renderMarkdownProse", () => {
       expect(isElement(nodes[1]) && nodes[1].type).toBe("h3");
       expect(textOf(nodes[1])).toBe("Why this matters");
     }
-    // Seven hashes, or no space after them, is prose.
     for (const prose of ["####### seven", "#hashtag"]) {
       const [node] = renderMarkdownProse(prose);
       expect(isElement(node) && node.type).toBe("p");

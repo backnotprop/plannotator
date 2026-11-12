@@ -1,6 +1,3 @@
-// Source: new barrel for @plannotator/references over the files cut from apps/rooms/src/external-refs and apps/web (Workspaces repo, main 7379b0195de140adc00b4496eefe553a3eec803e).
-// Everything public is exported here; see PROVENANCE.md for each file's source.
-
 export type {
 	CodeLinkKind,
 	CodeLinkProviderId,

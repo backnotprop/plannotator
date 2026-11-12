@@ -1,39 +1,11 @@
-/**
- * Qwen Code stream-json lines → AIMessage. Pure, no runtime dependencies.
- *
- * `qwen -o stream-json --include-partial-messages` writes one JSON object per
- * stdout line, in the Claude stream-json shape (as reported for Qwen Code
- * 0.25.0):
- *
- *   system/init  - the model and `qwen_code_version`; not chat content.
- *   stream_event - Anthropic-style events. Only a `content_block_delta` with a
- *                  `text_delta` is shown; thinking and tool-input deltas are
- *                  not (the full tool input arrives in the assistant line).
- *   assistant    - one line per content-block group: text blocks map to
- *                  `text`, tool_use blocks to `tool_use`.
- *   user         - tool results (`tool_result` blocks; content is a string or
- *                  a block array).
- *   result       - the final answer; it ends the query.
- *
- * Lines from a subagent carry its `parent_tool_use_id`; Ask AI shows the
- * top-level run only, so they are dropped.
- */
-
 import type { AIMessage } from "../types.ts";
 
-/**
- * Every Ask AI Qwen session id starts with this (still a valid UUID v4), so
- * readers of Qwen's chat folder can tell Ask AI chats from the person's own.
- * apps/hook/server/qwen-session.ts keeps a copy; its test pins the two equal.
- */
 export const QWEN_ASK_AI_SESSION_PREFIX = "a5ca1000";
 
-/** A fresh Qwen session id for an Ask AI conversation. */
 export function newQwenAskAISessionId(): string {
 	return QWEN_ASK_AI_SESSION_PREFIX + crypto.randomUUID().slice(QWEN_ASK_AI_SESSION_PREFIX.length);
 }
 
-/** `sessionId` is the Plannotator session's id; a result line reports it. */
 export function mapQwenLine(line: Record<string, unknown>, sessionId: string): AIMessage[] {
 	if (line.parent_tool_use_id != null) return [];
 
@@ -111,7 +83,6 @@ export function mapQwenLine(line: Record<string, unknown>, sessionId: string): A
 	}
 }
 
-/** A `tool_result` content: a string, or blocks whose `text` entries are kept. */
 function toolResultText(content: unknown): string {
 	if (typeof content === "string") return content;
 	if (Array.isArray(content)) {

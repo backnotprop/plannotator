@@ -1,10 +1,3 @@
-// The read-side registry. Workspaces pins its registry through the adapter
-// suites and a tripwire on its import graph (apps/rooms/test/
-// external-refs-tripwire.test.ts, main 7379b0195); the order and
-// composition cases here are new for the package, which exposes
-// createReferenceRegistry. The boundary case is this package's tripwire:
-// the cut stays cut.
-
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -68,7 +61,6 @@ describe("the registry", () => {
 		expect(registry.matchExternalRef(new URL("https://bitbucket.org/w/r"))?.adapter.provider).toBe("bitbucket");
 		expect(registry.matchCodeLinkUrl(new URL("https://bitbucket.org/w/r"))?.provider).toBe("bitbucket");
 		expect(registry.adapterFor("bitbucket")).toBe(shadow);
-		// The default registry is untouched.
 		expect(adapterFor("bitbucket")).toBeNull();
 		expect(matchCodeLinkUrl(new URL("https://bitbucket.org/w/r"))).toBeNull();
 	});
@@ -118,7 +110,6 @@ describe("the cut stays cut", () => {
 	it("no source file reads env, mints a JWT, runs an auth flow, or reaches Workspaces runtime code", () => {
 		expect(files.length).toBeGreaterThan(10);
 		for (const file of files) {
-			// Code only: the provenance comments name what was cut.
 			const text = readFileSync(file, "utf8")
 				.replace(/\/\*[\s\S]*?\*\//g, "")
 				.replace(/^\s*\/\/.*$/gm, "");
@@ -145,27 +136,19 @@ describe("the cut stays cut", () => {
 			]) {
 				expect(text.includes(banned), `${file} contains ${banned}`).toBe(false);
 			}
-			// Auth-flow words, any case. The one exception is the literal "oauth"
-			// in the Linear grammar's reserved workspace slugs (a URL it refuses).
 			const code = text.replace(/RESERVED_WORKSPACES = new Set\(\["oauth", /u, "RESERVED_WORKSPACES = new Set([");
 			for (const word of ["refresh_token", "client_secret", "grant_type", "/login/oauth", "oauth"]) {
 				expect(code.toLowerCase().includes(word), `${file} contains ${word}`).toBe(false);
 			}
-			// Static imports in both quote styles, and side-effect imports.
 			const imports = [...text.matchAll(/\bfrom\s+["']([^"']+)["']|^\s*import\s+["']([^"']+)["']/gm)].map(
 				(m) => m[1] ?? m[2] ?? "",
 			);
 			for (const spec of imports) {
 				expect(spec.startsWith(".") || spec === "@plannotator/core/diff-paths", `${file} imports ${spec}`).toBe(true);
 			}
-			// import(...) only as a relative literal (contract.ts names types
-			// with it); never a computed or package specifier.
 			for (const m of text.matchAll(/\bimport\s*\(\s*([^)]*)\)/g)) {
 				expect(/^["']\.\.?\/[^"']+["']$/u.test((m[1] ?? "").trim()), `${file}: ${m[0]}`).toBe(true);
 			}
-			// The global fetch would skip the port's host gate and the redirect
-			// policy: a bare `fetch(`, or through a global object. Every file,
-			// fetch.ts included; `port.fetch(`, `api.fetch(` and `fetcher(` pass.
 			expect(/(?<![.\w$])fetch\s*\(/u.test(text), `${file} calls the global fetch`).toBe(false);
 			expect(
 				/\b(?:globalThis|self|window|global)\s*(?:\.\s*fetch|\[\s*["']fetch["']\s*\])/u.test(text),

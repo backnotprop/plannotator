@@ -26,21 +26,19 @@ describe("fs/read_text_file for an agent that calls it", () => {
 });
 
 describe("start: an agent that hangs in initialize can be stopped", () => {
-  // Never answers initialize, ignores SIGTERM and stdin's end; writes its pid to PID_OUT.
   const HANG = "require('node:fs').writeFileSync(process.env.PID_OUT, String(process.pid)); process.on('SIGTERM', () => {}); process.stdin.on('data', () => {}); process.stdin.on('end', () => {}); setInterval(() => {}, 1000);";
   const pids: number[] = [];
   afterEach(() => {
     for (const pid of pids.splice(0)) {
       try {
-        process.kill(pid, "SIGKILL"); // own child (the hanging stand-in), whatever the test asserted
+        process.kill(pid, "SIGKILL");
       } catch {
-        // Already gone.
       }
     }
   });
   const alive = (pid: number) => {
     try {
-      process.kill(pid, 0); // own child
+      process.kill(pid, 0);
       return true;
     } catch {
       return false;
@@ -94,7 +92,6 @@ describe("start: an agent that hangs in initialize can be stopped", () => {
 });
 
 describe("an exited agent's process group: never a signal to an empty group (its id may be reused)", () => {
-  // Answers initialize, then exits after EXIT_AFTER ms (never, when unset); dies on SIGTERM. Starts nothing.
   const QUICK = [
     "const rl = require('node:readline').createInterface({ input: process.stdin });",
     "rl.on('line', (line) => { const m = JSON.parse(line); if (m.method === 'initialize') process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: m.id, result: { protocolVersion: 1, agentCapabilities: {}, authMethods: [] } }) + '\\n'); });",
@@ -103,7 +100,6 @@ describe("an exited agent's process group: never a signal to an empty group (its
   ].join("\n");
   const handlers = { onUpdate: () => {}, requestPermission: async () => ({ outcome: { outcome: "cancelled" as const } }) };
   const info = { name: "test", title: "Test", version: "0" };
-  /** Every signal this process sends to `-pid` (the group), recorded through a wrapped process.kill. */
   function watchGroupSignals(): { to: (pid: number) => (string | number)[]; restore: () => void } {
     const real = process.kill.bind(process);
     const sent: { pid: number; signal: string | number }[] = [];
@@ -126,7 +122,6 @@ describe("an exited agent's process group: never a signal to an empty group (its
       await exited(client);
       await Bun.sleep(3500);
       killPendingProcessGroups();
-      // Only probes (signal 0): never a real signal to the empty group.
       expect(watch.to(pid).filter((sig) => sig !== 0)).toEqual([]);
       expect(watch.to(pid)).toContain(0);
     } finally {
@@ -158,15 +153,14 @@ describe("this program crashes (an uncaught exception): its exit hook kills the 
   afterEach(() => {
     for (const pid of strays.splice(0)) {
       try {
-        process.kill(pid, "SIGKILL"); // own grandchild (the fake agent's stubborn child), whatever the test asserted
+        process.kill(pid, "SIGKILL");
       } catch {
-        // Already gone.
       }
     }
   });
   const alive = (pid: number) => {
     try {
-      process.kill(pid, 0); // own grandchild
+      process.kill(pid, 0);
       return true;
     } catch {
       return false;
@@ -198,7 +192,6 @@ describe("this program crashes (an uncaught exception): its exit hook kills the 
       expect(code).not.toBe(0);
       const stubborn = (readFileSync(log, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) as { event: string; pid?: number }[]).find((e) => e.event === "stubborn")!.pid!;
       strays.push(stubborn);
-      // SIGKILL from the exit hook, at once: well inside the 3 s grace a stopped agent's timer would have used.
       const end = Date.now() + 1000;
       while (alive(stubborn) && Date.now() < end) await Bun.sleep(25);
       expect(alive(stubborn)).toBe(false);

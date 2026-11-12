@@ -4,7 +4,6 @@ import { createAIEndpoints } from "./endpoints.ts";
 import { ProviderRegistry } from "./provider.ts";
 import { SessionManager } from "./session-manager.ts";
 
-/** Streams a word, then waits for the test, then finishes: what a slow answer does. */
 class Slow extends BaseSession {
   signal: AbortSignal | null = null;
   finish: () => void = () => {};
@@ -59,7 +58,6 @@ test("with keepRunningOnDisconnect a dropped stream leaves the question running 
   const { session, reader } = await run(true);
   await reader.cancel();
   expect(session.signal!.aborted).toBe(false);
-  // The rest of the answer still drains: nothing throws into the provider, and it gets to finish.
   session.finish();
   await session.ended;
   expect(session.isActive).toBe(false);

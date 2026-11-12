@@ -1,7 +1,6 @@
 import React, { useRef } from 'react';
 import type { GuideGlobalComments } from './host';
 
-/** The globe Plannotator's document viewer draws on its "Global comment" button. */
 const GlobeIcon: React.FC = () => (
   <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
     <path
@@ -12,12 +11,6 @@ const GlobeIcon: React.FC = () => (
   </svg>
 );
 
-/**
- * The guide header's "Global comment" button: the same words, icon and look
- * as the document viewer's (packages/ui/components/Viewer.tsx), so a global
- * comment reads as one thing across Plannotator. The host's composer opens
- * anchored to it.
- */
 export const GuideGlobalCommentButton: React.FC<{ onAdd: (anchor: HTMLElement) => void }> = ({ onAdd }) => {
   const ref = useRef<HTMLButtonElement>(null);
   return (
@@ -30,18 +23,11 @@ export const GuideGlobalCommentButton: React.FC<{ onAdd: (anchor: HTMLElement) =
       className="flex min-w-0 max-w-full items-center gap-1.5 rounded-md bg-muted/50 px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
     >
       <GlobeIcon />
-      {/* Cut with "…" only where the row is narrower than the button (the tab's row in a narrow bare guide). */}
       <span className="truncate">Global comment</span>
     </button>
   );
 };
 
-/**
- * The review's global comments, under the guide's header and before its first
- * section: a comment on the whole review sits at the top of it, as a line
- * comment sits at its line. Choosing one shows it where the host lists
- * comments (its edit and delete are there).
- */
 export const GuideGlobalCommentList: React.FC<{ globalComments: GuideGlobalComments }> = ({ globalComments }) => {
   const { comments, onSelect, selectedId } = globalComments;
   if (comments.length === 0) return null;

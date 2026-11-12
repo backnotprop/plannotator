@@ -5,15 +5,6 @@ import { join } from "node:path";
 import { PiSDKNodeProvider } from "./pi-sdk-node.ts";
 import { PiSDKProvider } from "./pi-sdk.ts";
 
-/**
- * A stand-in for `pi`. `--version` prints the version the test baked in;
- * `--mode rpc` answers the commands a model-discovery probe and a session
- * startup send, and appends every command it receives to a log file so a test
- * can assert the order and content of what the provider sent. The rows carry
- * different `reasoning` / `thinkingLevelMap` shapes so the per-model level
- * derivation is exercised end to end, and two providers share a display name
- * to cover the label format.
- */
 const FAKE_PI = `
 import { appendFileSync } from "node:fs";
 
@@ -138,7 +129,6 @@ for (const [runtime, Provider] of [
 			...(reasoningEffort ? { reasoningEffort } : {}),
 		});
 		for await (const _message of session.query("hello")) {
-			// Drain the turn; the fake ends it with `agent_end`.
 		}
 	}
 
@@ -151,7 +141,6 @@ for (const [runtime, Provider] of [
 					id: "provider-a/shared-model",
 					label: "Shared name (provider-a)",
 					default: true,
-					// `off` nulled by the map; xhigh and max named by it.
 					reasoningEfforts: [
 						{ id: "minimal", label: "Minimal" },
 						{ id: "low", label: "Low" },
@@ -164,7 +153,6 @@ for (const [runtime, Provider] of [
 				{
 					id: "provider-b/shared-model",
 					label: "Shared name (provider-b)",
-					// No map: off..high, never xhigh/max.
 					reasoningEfforts: [
 						{ id: "off", label: "Off" },
 						{ id: "minimal", label: "Minimal" },
@@ -186,18 +174,12 @@ for (const [runtime, Provider] of [
 			const levelIndex = commands.findIndex((c) => c.type === "set_thinking_level");
 			expect(commands[modelIndex]).toMatchObject({ provider: "provider-a", modelId: "shared-model" });
 			expect(commands[levelIndex]).toMatchObject({ level: "max" });
-			// The levels a model accepts depend on the model, so the level must
-			// follow the model, never precede it.
 			expect(levelIndex).toBeGreaterThan(modelIndex);
 		});
 	});
 
-	// Pi's RPC mode reports `ctx.hasUI === true`, so without these switches the
-	// Plannotator Pi extension inside Ask AI's Pi would offer its model the
-	// Inbox tool and connect the throwaway process to the person's Inbox.
 	test(`${runtime}: every Pi Ask AI starts runs with Plannotator's Inbox and agent tools off`, async () => {
 		const saved = { inbox: process.env.PLANNOTATOR_INBOX_TOOL, agent: process.env.PLANNOTATOR_AGENT_TOOL };
-		// The person turned both on (the env wins over config.json).
 		process.env.PLANNOTATOR_INBOX_TOOL = "1";
 		process.env.PLANNOTATOR_AGENT_TOOL = "1";
 		try {
@@ -208,13 +190,11 @@ for (const [runtime, Provider] of [
 					.split("\n")
 					.filter((line) => line.trim())
 					.map((line) => JSON.parse(line));
-				// The model probe and the session.
 				expect(spawned.length).toBe(2);
 				for (const env of spawned) {
 					expect(env).toEqual({ PLANNOTATOR_INBOX_TOOL: "0", PLANNOTATOR_AGENT_TOOL: "0", PLANNOTATOR_ASK_AI_CHILD: "1" });
 				}
 			});
-			// Only the child's env: the host's own switches are untouched.
 			expect(process.env.PLANNOTATOR_INBOX_TOOL).toBe("1");
 		} finally {
 			if (saved.inbox === undefined) delete process.env.PLANNOTATOR_INBOX_TOOL;
@@ -236,8 +216,6 @@ for (const [runtime, Provider] of [
 			await provider.fetchModels();
 			expect(provider.models?.length).toBe(3);
 			expect(provider.models?.some((m) => m.reasoningEfforts)).toBe(false);
-			// A level that arrives anyway (e.g. a pick made against another
-			// server) must still not reach pi's settings.
 			await ask(provider, "high");
 			expect(sentCommands(logPath).some((c) => c.type === "set_thinking_level")).toBe(false);
 		});

@@ -13,11 +13,6 @@ import { GuideView } from './GuideView';
 
 const hasDom = typeof document !== 'undefined';
 
-/**
- * An IntersectionObserver that never delivers. Mount state observed under it is
- * exactly what the manager decides on its own (seed vs eager), which is what
- * these tests pin.
- */
 class SilentIntersectionObserver {
   static instances = 0;
   constructor(_callback: IntersectionObserverCallback) {
@@ -28,7 +23,6 @@ class SilentIntersectionObserver {
   disconnect = () => {};
 }
 
-/** One registered shell; renders a marker only while the manager admits it. */
 function Shell({ id }: { id: string }) {
   const { mounted, register } = useGuideFileWindow(id);
   return (
@@ -113,7 +107,6 @@ describe('GuideViewportProvider eager mode', () => {
     );
 
     expect(mountedIds()).toEqual(ids);
-    // No window means no observer: nothing is constructed to evict from.
     expect(SilentIntersectionObserver.instances).toBe(0);
   });
 
@@ -158,7 +151,6 @@ describe('GuideViewportProvider eager mode', () => {
   });
 });
 
-/** An IntersectionObserver the test drives: `deliver` says which shells are now in the window. */
 class DrivenIntersectionObserver {
   static current: DrivenIntersectionObserver | null = null;
   private targets = new Set<Element>();
@@ -203,13 +195,11 @@ describe('GuideViewportProvider window', () => {
     await deliver((id) => inWindow.includes(id));
     expect(mountedIds()).toEqual(inWindow);
 
-    // Further down: what left the window goes, with nothing kept over what arrived.
     const further = ids.slice(10, 40);
     await deliver((id) => further.includes(id));
     expect(mountedIds()).toEqual(further);
   });
 
-  /** The manager's scroller, with a real height (the test DOM has no layout). */
   async function renderInScroller() {
     await render(
       <div data-scroller="" style={{ overflowY: 'auto' }}>
@@ -230,7 +220,6 @@ describe('GuideViewportProvider window', () => {
       scroller.dispatchEvent(new Event('scroll'));
     });
 
-  /** From here on frames run only when the test says, one per call. */
   function manualFrames(): () => Promise<void> {
     const queued = new Map<number, FrameRequestCallback>();
     let nextHandle = 1;
@@ -253,7 +242,6 @@ describe('GuideViewportProvider window', () => {
       });
   }
 
-  /** Far enough apart that the step between them is never read as a fast one. */
   const frames = (count: number) =>
     act(async () => {
       for (let i = 0; i < count; i++) await new Promise((done) => setTimeout(done, 20));
@@ -303,11 +291,9 @@ describe('GuideViewportProvider window', () => {
       await scrollTo(scroller, top);
       DrivenIntersectionObserver.current!.deliver((id) => ids.slice(passing, passing + 5).includes(id));
       await frame();
-      // Still what it was: nothing it passes mounts, and what it left is not torn down on the way.
       expect(mountedIds()).toEqual(ids.slice(0, 5));
     }
 
-    // One still frame may be a gap in the input; the second is the stop.
     await frame();
     expect(mountedIds()).toEqual(ids.slice(0, 5));
     await frame();
@@ -324,7 +310,6 @@ describe('GuideViewportProvider window', () => {
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'End' }));
     for (const [step, passing] of [[100, 5], [200, 10]] as const) {
-      // Slow enough that only the key says this is passing.
       await new Promise((done) => setTimeout(done, 40));
       await scrollTo(scroller, step);
       DrivenIntersectionObserver.current!.deliver((id) => ids.slice(passing, passing + 5).includes(id));
@@ -338,7 +323,6 @@ describe('GuideViewportProvider window', () => {
     expect(mountedIds()).not.toContain(ids[5]);
   });
 
-  /** End pressed and its scroll come to rest at the end of a scroll `height()` px tall. */
   async function endPressed(height: () => number) {
     const scroller = await renderInScroller();
     Object.defineProperty(scroller, 'scrollHeight', { configurable: true, get: height });
@@ -349,13 +333,10 @@ describe('GuideViewportProvider window', () => {
     await new Promise((done) => setTimeout(done, 40));
     await scrollTo(scroller, height() - 1_000);
     DrivenIntersectionObserver.current!.deliver((id) => ids.slice(35).includes(id));
-    // Moving, one still frame, the stop.
     for (let i = 0; i < 3; i++) await frame();
     return { scroller, frame };
   }
 
-  // Guards End on a long review: the files at the end draw taller or shorter than their estimates after the browser
-  // has aimed, and the view was left short of the end (the Inbox's review of 300 files, 50 to 100 px).
   test.skipIf(!hasDom)('after End the view stays at the end while the files there change height', async () => {
     let height = 16_000;
     const { scroller, frame } = await endPressed(() => height);
@@ -368,7 +349,6 @@ describe('GuideViewportProvider window', () => {
     expect(scroller.scrollTop).toBe(15_066);
   });
 
-  // Guards the person's own scroll: End's hold never pulls them back down.
   test.skipIf(!hasDom)('after End, a scroll back up with the wheel is left alone', async () => {
     let height = 16_000;
     const { scroller, frame } = await endPressed(() => height);
@@ -379,7 +359,6 @@ describe('GuideViewportProvider window', () => {
     expect(scroller.scrollTop).toBe(14_600);
   });
 
-  // Guards a scrollbar drag, which has no event: the view goes up while the scroll is as tall as it was.
   test.skipIf(!hasDom)('after End, a scroll back up with the scrollbar is left alone', async () => {
     let height = 16_000;
     const { scroller, frame } = await endPressed(() => height);
@@ -391,7 +370,6 @@ describe('GuideViewportProvider window', () => {
     expect(scroller.scrollTop).toBe(14_600);
   });
 
-  // Guards a key that did something else (a caret brought into view): the reader is not thrown to the end.
   test.skipIf(!hasDom)('End that leaves the view more than a view from the end holds nothing', async () => {
     const scroller = await renderInScroller();
     Object.defineProperty(scroller, 'scrollHeight', { configurable: true, get: () => 16_000 });
@@ -440,7 +418,6 @@ describe('GuideViewportProvider window', () => {
     await act(async () => hover());
     expect(mountedIds()).not.toContain(ids[20]);
 
-    // Still under the pointer when the scroll stops, it draws.
     await frame();
     await frame();
     expect(mountedIds()).toContain(ids[20]);
@@ -456,7 +433,6 @@ describe('GuideViewportProvider window', () => {
 
     DrivenIntersectionObserver.current!.deliver((id) => ids.slice(0, 6).includes(id));
     await frame();
-    // On screen: tops 0, 400 and 800. The next nearest, top 1,200, comes along in the same step.
     expect(mountedIds()).toEqual(ids.slice(0, 4));
     await frame();
     expect(mountedIds()).toEqual(ids.slice(0, 5));
@@ -474,12 +450,10 @@ describe('GuideViewportProvider window', () => {
     DrivenIntersectionObserver.current!.deliver((id) => ids.slice(0, 2).includes(id));
     await frame();
 
-    // Moving, at a good pace.
     await new Promise((done) => setTimeout(done, 20));
     await scrollTo(scroller, 100);
     await frame();
 
-    // The next frame takes 60 ms: of the files it brings into the window, 0 to 2 are on screen, 3 is nearest, the rest wait.
     await new Promise((done) => setTimeout(done, 60));
     await scrollTo(scroller, 200);
     DrivenIntersectionObserver.current!.deliver((id) => ids.slice(0, 8).includes(id));
@@ -504,7 +478,6 @@ describe('GuideViewportProvider window', () => {
     await frame();
     await frame();
 
-    // A file above swaps its estimate: everything below moves up with no scroll of its own, and the scroll takes it back.
     shift = -99;
     const before = scroller.scrollTop;
     await frame();
@@ -525,7 +498,6 @@ describe('GuideViewportProvider window', () => {
     await frame();
     await frame();
 
-    // The thumb moves again, with no pointer event: the view is the person's.
     await scrollTo(scroller, 8_200);
     await frame();
     await frame();
@@ -615,10 +587,6 @@ describe('a jump', () => {
     if (hasDom) HTMLElement.prototype.scrollIntoView = originalScrollIntoView!;
   });
 
-  /**
-   * A view 1,000 px tall over shells with a settable place. Its scrollIntoView does what the browser's does at once: it
-   * puts the shell at 16 px from the top (its scroll margin). A smooth one is left to `finishSmooth`.
-   */
   async function setup(startTop: number) {
     const calls: string[] = [];
     let targetTop = startTop;
@@ -672,7 +640,6 @@ describe('a jump', () => {
     expect(view.calls).toEqual(['smooth']);
   });
 
-  // Guards the Inbox's content-fit readers (GuideFileCard), where the page's own place-holding would stop a smooth scroll.
   test.skipIf(!hasDom)('asked to go at once, a near jump goes at once and still holds its place', async () => {
     const view = await setup(1_900);
     await view.jump({ instant: true });
@@ -698,14 +665,12 @@ describe('a jump', () => {
     const view = await setup(1_000);
     await view.jump();
 
-    // Still on its way: moving every frame, and no instant scroll cuts it short.
     for (const top of [800, 500, 200]) {
       view.moveTarget(top);
       await view.frames(1);
     }
     expect(view.calls).toEqual(['smooth']);
 
-    // It ended on the old estimate, short of the place.
     view.moveTarget(-90);
     await view.frames(5);
     expect(view.top()).toBe(16);
@@ -754,7 +719,6 @@ describe('GuideView eager threshold', () => {
   }
 
   test.skipIf(!hasDom)('a guide at the file limit mounts every CodeView up front, however large the review', async () => {
-    // The threshold counts the guide's own files, not the whole review behind the host.
     const review = Array.from({ length: GUIDE_EAGER_MOUNT_MAX_FILES + 10 }, (_, index) => makeFile(`src/file-${index}.ts`));
     const files = review.slice(0, GUIDE_EAGER_MOUNT_MAX_FILES);
     await renderGuide(files, review);

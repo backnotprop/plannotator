@@ -28,7 +28,6 @@ interface PendingAsk {
   signal: AbortSignal;
 }
 
-/** A host bridge whose status and answers the test drives by hand. */
 function fakeBridge(initial: SessionBridgeStatus = "ready", options: { interrupt?: boolean; transient?: boolean } = {}) {
   let status = initial;
   const asks: PendingAsk[] = [];
@@ -64,7 +63,6 @@ async function waitFor(predicate: () => boolean, timeoutMs = 2000): Promise<void
   }
 }
 
-/** Drain a query into an array while the test drives the bridge. */
 function collect(iterable: AsyncIterable<AIMessage>) {
   const messages: AIMessage[] = [];
   const done = (async () => {
@@ -185,7 +183,6 @@ describe("SessionBridgeProvider", () => {
     await run.done;
     expect(host.asks[0].signal.aborted).toBe(true);
     expect(host.interrupts).toHaveLength(0);
-    // A late answer after the stop goes nowhere.
     host.asks[0].sink.done("late");
     expect(run.messages.some((m) => m.type === "result")).toBe(false);
   });
@@ -377,8 +374,6 @@ describe("Ask this session over the shared /api/ai endpoints", () => {
       body: JSON.stringify({ context: CONTEXT, providerId }),
     }));
 
-    // A session created while allowed cannot be queried once the guard refuses
-    // (a rebinding page that learned the id from /api/ai/sessions).
     const { sessionId } = await (await create(SESSION_BRIDGE_PROVIDER_NAME)).json();
     allow = false;
     const refusedQuery = await endpoints["/api/ai/query"](new Request("http://x/api/ai/query", {
@@ -416,8 +411,6 @@ describe("Ask this session over the shared /api/ai endpoints", () => {
 });
 
 describe("the question's surface line", () => {
-  // A review of several files: the session must know which file the reviewer
-  // is asking about and where it sits, or "this file" is ambiguous.
   test("names the open file's place in a review of several files", () => {
     const text = formatSessionAskText(
       { mode: "annotate", annotate: { content: "<h1>Mock</h1>", filePath: "/repo/mock.html", bundlePosition: { index: 2, total: 3 } } },

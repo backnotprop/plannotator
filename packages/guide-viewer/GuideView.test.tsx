@@ -6,7 +6,6 @@ import type { DiffFile } from './types';
 import { GuideHostProvider, type GuideHostValue } from './host';
 
 let latestCodeViewProps: Record<string, unknown>[] = [];
-/** Stand-in diff renderer: records the props the guide chain hands it. */
 function FakeDiffRenderer(props: Record<string, unknown>) {
   latestCodeViewProps.push(props);
   const files = props.files as DiffFile[];
@@ -75,13 +74,11 @@ type HostOverrides = {
   [passthrough: string]: unknown;
 };
 
-/** Build a GuideHost value: known host fields map onto the contract, anything else is forwarded to the renderer. */
 function makeState(overrides: HostOverrides = {}): GuideHostValue<Record<string, unknown>> {
   const { files = [], guideRevealFile = null, onGuideRevealFile, allFilesActiveSearchMatch = null, ...passthrough } = overrides;
   return {
     files,
     DiffRenderer: FakeDiffRenderer as unknown as GuideHostValue<Record<string, unknown>>['DiffRenderer'],
-    // Mirrors the in-app host, which also forwards the active match to the renderer.
     getDiffRendererProps: () => ({ ...passthrough, activeSearchMatch: allFilesActiveSearchMatch }),
     revealFile: guideRevealFile,
     onRevealFile: onGuideRevealFile,
@@ -145,7 +142,6 @@ async function renderView(
     );
   };
 
-  // A second render inside one test replaces the previous tree instead of leaking it into document.body.
   if (root !== null) await act(async () => root?.unmount());
   host?.remove();
   host = document.createElement('div');
@@ -381,7 +377,6 @@ describe('GuideView per-file windowing', () => {
       });
 
       expect(host!.querySelector(`[data-testid="file-code-view"][data-file="${files[19].path}"]`)).not.toBeNull();
-      // Far from the view: no CodeView, count or no count.
       expect(host!.querySelector(`[data-testid="file-code-view"][data-file="${files[10].path}"]`)).toBeNull();
     } finally {
       Object.defineProperty(globalThis, 'IntersectionObserver', {
@@ -430,8 +425,6 @@ describe('GuideView per-file windowing', () => {
         (fileOneProps!.onFileCollapsedChange as (path: string, collapsed: boolean) => void)(files[1].path, true);
       });
 
-      // Let the old 1.5s force-mount lease expire; only the focus pin may keep
-      // file 0 alive when the observer moves the near window away.
       await act(async () => {
         await new Promise((resolve) => setTimeout(resolve, 1_550));
       });
@@ -445,7 +438,6 @@ describe('GuideView per-file windowing', () => {
 
       expect(host!.querySelector(`[data-testid="file-code-view"][data-file="${files[0].path}"]`)).toBe(focusedBefore);
       expect(host!.querySelector(`[data-testid="file-code-view"][data-file="${files[1].path}"]`)).toBeNull();
-      // The eight in the window, and the focused file beside them.
       expect(host!.querySelectorAll('[data-testid="file-code-view"]').length).toBe(9);
 
       await act(async () => {
@@ -493,8 +485,6 @@ describe('GuideView per-file windowing', () => {
 });
 
 describe('GuideView global comments', () => {
-  // Guards the button leaking into hosts that take no comments (guides.show, the VS Code reader), a read-only
-  // review still offering it, and the composer opening anywhere but on the button.
   test.skipIf(!hasDom)('draws the Global comment button and the list only for a host that passes them', async () => {
     await renderView(makeGuide());
     expect(host!.querySelector('[data-guide-global-comment-add]')).toBeNull();
@@ -513,19 +503,16 @@ describe('GuideView global comments', () => {
     await act(async () => add.click());
     expect(anchors).toEqual([add]);
     const list = host!.querySelector('[data-guide-global-comments]')!;
-    // Under the header, before the first section.
     expect(list.compareDocumentPosition(host!.querySelector('[data-guide-section]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     await act(async () => list.querySelector<HTMLButtonElement>('[data-guide-global-comment="g1"] button')!.click());
     expect(chosen).toEqual(['g1']);
 
-    // Read-only: the comments stay, the button goes.
     await renderView(makeGuide(), { state: { ...makeState(), globalComments: { comments: [{ id: 'g1', text: 'Split it in two.' }] } } });
     expect(host!.querySelector('[data-guide-global-comment-add]')).toBeNull();
     expect(host!.querySelector('[data-guide-global-comments]')!.textContent).toContain('Split it in two.');
   });
 });
 
-/** A new file of `rows` lines, as git writes it: five header lines before the hunk. */
 function addedFile(path: string, rows: number): DiffFile {
   const body = Array.from({ length: rows }, (_, i) => `+line ${i + 1}`).join('\n');
   return {
@@ -538,14 +525,12 @@ function addedFile(path: string, rows: number): DiffFile {
 }
 
 const box = (path: string) => host!.querySelector<HTMLElement>(`[data-guide-file-shell="${path}"] [data-guide-code-view-mounted]`)!;
-// A fitted, mounted box follows its content: what it holds is a floor. Otherwise a fixed height.
 const boxHeight = (path: string) => box(path).style.minHeight || box(path).style.height;
 
 describe('GuideView threadHeading (the Inbox review, under its top bar)', () => {
   const overview = { overview: { text: 'How the change fits together.' } };
   const headActions = () => <button data-testid="head-action">Show me</button>;
 
-  // Guards the seam reaching the hosts that did not ask for it: the review app, guides.show and VS Code draw this path.
   test.skipIf(!hasDom)('off: the heading, its Overview label and its counts as before, and no head actions', async () => {
     await renderView(makeGuide(overview), { state: { ...makeState(), renderHeadActions: headActions }, engineLabel: 'Claude Code', sourceLine: 'repo · main' });
     expect(host!.querySelector('[data-guide-heading]')).toBeNull();
@@ -555,7 +540,6 @@ describe('GuideView threadHeading (the Inbox review, under its top bar)', () => 
     expect(host!.querySelector('[data-testid="head-action"]')).toBeNull();
   });
 
-  // Guards the owner's order (Show me, then Global comment) and the one line of facts that says what is being reviewed.
   test.skipIf(!hasDom)('on: the intent is the title, the facts sit on one line with the branch, and the actions sit on the title row in order', async () => {
     const state: GuideHostValue<Record<string, unknown>> = { ...makeState(), renderHeadActions: headActions, globalComments: { comments: [], onAdd: () => {} } };
     await renderView(makeGuide(overview), { threadHeading: true, state, engineLabel: 'Claude Code · claude-opus-5', sourceLine: 'charges · master · main...HEAD' });
@@ -564,9 +548,7 @@ describe('GuideView threadHeading (the Inbox review, under its top bar)', () => 
     expect([...heading.querySelectorAll('[data-guide-facts] > span:not([aria-hidden])')].map((fact) => fact.textContent)).toEqual(['Written by Claude Code', 'claude-opus-5', 'charges', 'master', 'main...HEAD']);
     const buttons = [...heading.querySelectorAll('.gv-tools button')].map((button) => button.textContent?.trim());
     expect(buttons).toEqual(['Show me', 'Global comment']);
-    // One Global comment: the row above the old title is not drawn as well.
     expect(host!.querySelectorAll('[data-guide-global-comment-add]')).toHaveLength(1);
-    // The menu in the host's top bar names the overview: no label over the prose, no counts line.
     expect(host!.querySelector('[data-guide-overview] h2')).toBeNull();
     expect(host!.querySelector('[data-guide-overview]')?.textContent).toContain('How the change fits together.');
     expect(host!.textContent).not.toContain('1 section');
@@ -581,14 +563,12 @@ describe('GuideView threadHeading (the Inbox review, under its top bar)', () => 
 describe('GuideView showReviewed (the Inbox walkthrough: nothing to review)', () => {
   const reviewedButtons = () => [...host!.querySelectorAll('button')].filter((button) => /Mark as reviewed|Un-mark as reviewed/.test(button.getAttribute('title') ?? button.getAttribute('aria-label') ?? ''));
 
-  // Guards the hosts that never pass it (the review app, guides.show, VS Code, an Inbox review): each chapter keeps its tick.
   test.skipIf(!hasDom)('by default each chapter has its Reviewed tick', async () => {
     await renderView(makeGuide(), { threadHeading: true });
     expect(reviewedButtons()).toHaveLength(1);
     expect(reviewedButtons()[0]!.textContent).toContain('Reviewed');
   });
 
-  // Guards the walkthrough: no tick on a chapter, open or folded, even one stored as reviewed.
   test.skipIf(!hasDom)('off: no chapter has a Reviewed tick, and a chapter stored as reviewed opens rather than folding', async () => {
     await renderView(makeGuide({ reviewed: [true] }), { threadHeading: true, showReviewed: false });
     expect(reviewedButtons()).toHaveLength(0);
@@ -598,18 +578,14 @@ describe('GuideView showReviewed (the Inbox walkthrough: nothing to review)', ()
 });
 
 describe('GuideView bare (the Inbox PR page)', () => {
-  // Guards the empty band under a short file on the PR page (#2615): the box was sized by an estimate that counted
-  // git's header lines and a 150px floor, so a 5-line file stood in a 304px box.
   test.skipIf(!hasDom)('a file box is as tall as its diff: the hunk rows first, then the height the renderer reports', async () => {
     const guide = makeGuide({ sections: [{ title: 'Every changed file', overview: '', diffs: [{ file: 'm.sql' }, { file: 's.ts' }] }] });
     const files = [addedFile('m.sql', 5), addedFile('s.ts', 10)];
     await renderView(guide, { bare: true, state: makeState({ files }) });
-    // Before a measure: 5 and 10 rows of 20px, the 33px header, the list's padding and the border, as the browser lays it out.
     expect(boxHeight('m.sql')).toBe('151px');
     expect(boxHeight('s.ts')).toBe('251px');
 
     const report = (path: string) => latestCodeViewProps.filter((p) => (p.files as DiffFile[])[0]?.path === path).at(-1)!.onContentHeightChange as (h: number) => void;
-    // Inline comments, wrapped lines and opened gaps grow the content: the box follows, with no limit, and nothing scrolls inside it.
     await act(async () => report('m.sql')(300));
     expect(boxHeight('m.sql')).toBe('318px');
     await act(async () => report('m.sql')(40000));
@@ -619,12 +595,9 @@ describe('GuideView bare (the Inbox PR page)', () => {
     expect(latestCodeViewProps.at(-1)!.scrollsWithPage).toBe(true);
   });
 
-  // Guards the PR page's seam (approval pr-view-one-surface): a flush host's box holds the renderer's height and nothing
-  // more, so the next file's header meets the last code row with no strip of box padding between.
   test.skipIf(!hasDom)('a flush host: the box is exactly what the renderer reports, with no border or padding', async () => {
     const guide = makeGuide({ sections: [{ title: 'Every changed file', overview: '', diffs: [{ file: 'm.sql' }] }] });
     await renderView(guide, { bare: true, state: { ...makeState({ files: [addedFile('m.sql', 5)] }), flushFiles: true } });
-    // Before a measure: 5 rows of 20px and the 33px header, without the bordered box's 18px.
     expect(boxHeight('m.sql')).toBe('133px');
     const report = latestCodeViewProps.at(-1)!.onContentHeightChange as (h: number) => void;
     await act(async () => report(300));
@@ -632,7 +605,6 @@ describe('GuideView bare (the Inbox PR page)', () => {
     expect(box('m.sql').className).not.toMatch(/\b(border|py-2|rounded-lg)\b/);
   });
 
-  // Guards the Inbox's guided review in a thread (not bare) getting the fit through the opt-in.
   test.skipIf(!hasDom)('a host opts in without bare: the box fits, the heading stays', async () => {
     const guide = makeGuide({ sections: [{ title: 'One', overview: '', diffs: [{ file: 'm.sql' }] }] });
     await renderView(guide, { fitFileHeights: true, state: makeState({ files: [addedFile('m.sql', 5)] }) });
@@ -641,7 +613,6 @@ describe('GuideView bare (the Inbox PR page)', () => {
     expect(latestCodeViewProps.at(-1)!.onContentHeightChange).toBeFunction();
   });
 
-  // Guards the row being read moving when a box above mounts: with a reader the viewer draws an arrow row after the last hunk.
   test.skipIf(!hasDom)('with a reader of whole files, a changed file\'s first estimate holds the arrow row after its last hunk', async () => {
     const guide = makeGuide({ sections: [{ title: 'One', overview: '', diffs: [{ file: 'a.ts' }] }] });
     const patch = 'diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1,1 +1,1 @@\n-a\n+b\n';
@@ -652,24 +623,20 @@ describe('GuideView bare (the Inbox PR page)', () => {
     expect(Number.parseFloat(boxHeight('a.ts'))).toBe(without + 32);
     await renderView(guide, { fitFileHeights: true, state: { ...makeState({ files: [{ ...file, status: 'renamed', oldPath: 'b.ts' }] }), diffStyle: 'split', opensWholeFiles: true } });
     expect(Number.parseFloat(boxHeight('a.ts'))).toBe(without + 32);
-    // Nothing more to open in a file with one side.
     await renderView(guide, { fitFileHeights: true, state: { ...makeState({ files: [{ ...file, status: 'added' }] }), diffStyle: 'split', opensWholeFiles: true } });
     expect(Number.parseFloat(boxHeight('a.ts'))).toBe(without);
   });
 
-  // Guards the Split over-count: a replaced line is one row in Split, two in Unified; before a measure the box follows the host's layout.
   test.skipIf(!hasDom)('the first estimate follows the layout the host draws: Split pairs removed and added lines', async () => {
     const patch = 'diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1,4 +1,5 @@\n ctx\n-a\n-b\n+A\n+B\n+C\n ctx2\n-d\n';
     const file: DiffFile = { path: 'a.ts', patch, additions: 3, deletions: 3, status: 'modified' };
     const guide = makeGuide({ sections: [{ title: 'One', overview: '', diffs: [{ file: 'a.ts' }] }] });
-    // Rows: ctx, ctx2, then 3 (max of 2 removed, 3 added) and 1 → 6 in Split; ctx, ctx2, 5 and 1 → 8 in Unified.
     await renderView(guide, { fitFileHeights: true, state: { ...makeState({ files: [file] }), diffStyle: 'split' } });
     expect(boxHeight('a.ts')).toBe(`${51 + 6 * 20}px`);
     await renderView(guide, { fitFileHeights: true, state: { ...makeState({ files: [file] }), diffStyle: 'unified' } });
     expect(boxHeight('a.ts')).toBe(`${51 + 8 * 20}px`);
   });
 
-  // Guards a modified file growing on its first mount: the separators above and between hunks are 32 px each, with no gaps around them.
   test.skipIf(!hasDom)('the first estimate counts the separator above a first hunk and those between hunks', async () => {
     const hunk = (at: number) => `@@ -${at},2 +${at},2 @@\n ctx\n-a\n+b\n`;
     const patchOf = (...ats: number[]) => `diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n${ats.map(hunk).join('')}`;
@@ -679,14 +646,12 @@ describe('GuideView bare (the Inbox PR page)', () => {
       await renderView(guide, { fitFileHeights: true, state: { ...makeState({ files: [file] }), diffStyle: 'unified' } });
       return boxHeight('a.ts');
     };
-    // Each hunk draws three rows in Unified.
     expect(await box(patchOf(1))).toBe(`${51 + 3 * 20}px`);
     expect(await box(patchOf(10))).toBe(`${51 + 3 * 20 + 32}px`);
     expect(await box(patchOf(1, 30))).toBe(`${51 + 6 * 20 + 32}px`);
     expect(await box(patchOf(10, 30, 50))).toBe(`${51 + 9 * 20 + 3 * 32}px`);
   });
 
-  // Guards the same growth on a file with no final newline: the viewer draws that note as a row of its own.
   test.skipIf(!hasDom)('the first estimate gives a "No newline" note its row, on the side it follows', async () => {
     const NOTE = '\\ No newline at end of file\n';
     const guide = makeGuide({ sections: [{ title: 'One', overview: '', diffs: [{ file: 'a.ts' }] }] });
@@ -695,7 +660,6 @@ describe('GuideView bare (the Inbox PR page)', () => {
       await renderView(guide, { fitFileHeights: true, state: { ...makeState({ files: [file] }), diffStyle } });
       return boxHeight('a.ts');
     };
-    // As measured in the browser.
     const oldSide = `-a\n${NOTE}+a\n`;
     const bothSides = `-a\n${NOTE}+b\n${NOTE}`;
     const afterContext = `-a\n+b\n c\n${NOTE}`;
@@ -707,15 +671,11 @@ describe('GuideView bare (the Inbox PR page)', () => {
     expect(await box(afterContext, 'split')).toBe('111px');
   });
 
-  // A commented file back in the outer window: 20 files so the window runs, frames by hand once it is back.
-  // Each test waits out the mount lease, up to twice, hence the explicit timeouts.
   async function withCommentedFile(run: (file: {
     path: string;
     report: (height: number) => Promise<void>;
     frame: () => Promise<void>;
-    /** The file's CodeView unmounted (the box keeps its height). */
     away: () => Promise<void>;
-    /** Brought back by focus; from here frames run by hand. */
     back: () => Promise<void>;
   }) => Promise<void>) {
     const originalObserver = globalThis.IntersectionObserver;
@@ -742,20 +702,17 @@ describe('GuideView bare (the Inbox PR page)', () => {
         globalThis.cancelAnimationFrame = realCancel;
       };
       await near((index) => index < 8);
-      // The file with its comments drawn.
       await act(async () => (props().onContentHeightChange as (h: number) => void)(400));
       expect(boxHeight(path)).toBe('418px');
       await run({
         path,
         report: (height) => act(async () => (props().onContentHeightChange as (h: number) => void)(height)),
-        // happy-dom's frames run at once, and the wait is counted in frames.
         frame: () => act(async () => {
           const due = [...queued.values()];
           queued.clear();
           for (const callback of due) callback(0);
         }),
         away: async () => {
-          // Past the mount lease; the viewport manager moves the window on real frames.
           realFrames();
           await act(async () => {
             shells[8]!.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
@@ -787,8 +744,6 @@ describe('GuideView bare (the Inbox PR page)', () => {
     }
   }
 
-  // Guards a commented file's box dipping for a frame: a remounted CodeView first reports its layout before its
-  // inline comments are drawn. A growth ends the wait; a real shrink then lands at once.
   test.skipIf(!hasDom)('after a remount a shrinking report waits, and a growth ends the wait', async () => {
     await withCommentedFile(async ({ path, report, away, back }) => {
       await away();
@@ -803,7 +758,6 @@ describe('GuideView bare (the Inbox PR page)', () => {
     });
   }, 15_000);
 
-  // Guards a real shrink never landing, or landing before the viewer has drawn.
   test.skipIf(!hasDom)('after a remount a shrink alone lands two frames later', async () => {
     await withCommentedFile(async ({ path, report, frame, away, back }) => {
       await away();
@@ -816,7 +770,6 @@ describe('GuideView bare (the Inbox PR page)', () => {
     });
   }, 15_000);
 
-  // Guards the box settling on a stale height: only the last report of the wait counts.
   test.skipIf(!hasDom)('after a remount the latest shrinking report is the one that lands', async () => {
     await withCommentedFile(async ({ path, report, frame, away, back }) => {
       await away();
@@ -830,7 +783,6 @@ describe('GuideView bare (the Inbox PR page)', () => {
     });
   }, 15_000);
 
-  // Guards a wait outliving its CodeView: gone again before the frames ran, the box keeps its height.
   test.skipIf(!hasDom)('a shrink still waiting when the file unmounts never lands', async () => {
     await withCommentedFile(async ({ path, report, frame, away, back }) => {
       await away();
@@ -843,8 +795,6 @@ describe('GuideView bare (the Inbox PR page)', () => {
     });
   }, 15_000);
 
-  // Guards the opened lines being lost: the viewer holds them, so leaving the outer window closed the gap, the box
-  // shrank under the reader, the file below jumped and the file was read again.
   test.skipIf(!hasDom)('a file whose gap was opened stays mounted past the window, and the files near the viewport still mount', async () => {
     await withCommentedFile(async ({ path, away }) => {
       const arrow = document.createElement('button');
@@ -852,7 +802,6 @@ describe('GuideView bare (the Inbox PR page)', () => {
       const view = host!.querySelector(`[data-testid="file-code-view"][data-file="${path}"]`)!;
       view.appendChild(arrow);
       await act(async () => arrow.click());
-      // The helper's own check that the file left the window fails here, which is the point.
       await away().catch(() => {});
       expect(host!.querySelector(`[data-testid="file-code-view"][data-file="${path}"]`)).not.toBeNull();
       expect(boxHeight(path)).toBe('418px');
@@ -862,7 +811,6 @@ describe('GuideView bare (the Inbox PR page)', () => {
 
   describe('the reader\'s place', () => {
     const box = () => host!.querySelector<HTMLElement>('[data-guide-code-view-mounted]')!;
-    /** The page, a box `top` px from its top, and what a ResizeObserver would say when the box's height changes. */
     async function placed(top: number, height: number, below: () => number = () => 9_000) {
       const heard: (() => void)[] = [];
       const savedObserver = globalThis.ResizeObserver;
@@ -880,7 +828,6 @@ describe('GuideView bare (the Inbox PR page)', () => {
       document.body.appendChild(page);
       let scrolled = 5_000;
       Object.defineProperty(page, 'scrollTop', { configurable: true, get: () => scrolled, set: (next: number) => void (scrolled = next) });
-      // A view 1,000 px tall; the page ends `below` px under it.
       Object.defineProperty(page, 'clientHeight', { configurable: true, get: () => 1_000 });
       Object.defineProperty(page, 'scrollHeight', { configurable: true, get: () => scrolled + 1_000 + below() });
       page.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
@@ -890,7 +837,6 @@ describe('GuideView bare (the Inbox PR page)', () => {
       Object.defineProperty(box(), 'offsetHeight', { configurable: true, get: () => boxHeightNow });
       box().getBoundingClientRect = () => ({ top }) as DOMRect;
       const again = () => heard.forEach((say) => say());
-      // The card's first look at its height, in that page.
       again();
       scrolled = 5_000;
       return {
@@ -907,7 +853,6 @@ describe('GuideView bare (the Inbox PR page)', () => {
       };
     }
 
-    // Guards the row being read moving: browsers do not hold it on this scroller (Safari never does).
     test.skipIf(!hasDom)('a box wholly above the viewport that changes height moves the page by as much; one in view does not', async () => {
       const above = await placed(-900, 500);
       try {
@@ -927,8 +872,6 @@ describe('GuideView bare (the Inbox PR page)', () => {
       }
     }, 15_000);
 
-    // Guards the end of a long review: a file above the view that draws shorter than its estimate brings the page up
-    // with it (a browser never leaves a page past its end), and a second move left End 50 to 100 px short of the end.
     test.skipIf(!hasDom)('at the end of the page, a box above the viewport that shrinks moves nothing: the browser has already', async () => {
       const atEnd = await placed(-900, 150, () => 0);
       try {
@@ -939,7 +882,6 @@ describe('GuideView bare (the Inbox PR page)', () => {
       }
     }, 15_000);
 
-    // Guards folding from the sticky header landing the reader in an unrelated file.
     test.skipIf(!hasDom)('folded with its top above the viewport, the file comes to the top of the page; a file already in view stays', async () => {
       const fold = () => act(async () => (latestCodeViewProps.at(-1) as { onFileCollapsedChange: (path: string, collapsed: boolean) => void }).onFileCollapsedChange('a.ts', true));
       const above = await placed(-2_527, 3_163);
@@ -959,7 +901,6 @@ describe('GuideView bare (the Inbox PR page)', () => {
     }, 15_000);
   });
 
-  // Guards the shared chain's default (the review app, guides.show, VS Code): unchanged.
   test.skipIf(!hasDom)('with neither bare nor the opt-in the box keeps its estimate and the renderer is asked for no height', async () => {
     const guide = makeGuide({ sections: [{ title: 'Every changed file', overview: '', diffs: [{ file: 'm.sql' }] }] });
     await renderView(guide, { state: makeState({ files: [addedFile('m.sql', 5)] }) });
@@ -967,8 +908,6 @@ describe('GuideView bare (the Inbox PR page)', () => {
     expect(latestCodeViewProps.every((p) => !('onContentHeightChange' in p))).toBe(true);
   });
 
-  // Guards the owner's choice (q-bfcf3a4a B): on the PR page the Global comment button sits on the Split | Unified
-  // tab's row, not on a row of its own above it; with no tab (a phone) it keeps its own row.
   test.skipIf(!hasDom)('the Global comment button shares the first card\'s tab row; with no tab it keeps its own row', async () => {
     const guide = makeGuide({ sections: [{ title: 'Every changed file', overview: '', diffs: [{ file: 'a.ts' }] }] });
     const globalComments = { comments: [], onAdd: () => {} };
@@ -982,18 +921,15 @@ describe('GuideView bare (the Inbox PR page)', () => {
     expect(row!.querySelector('[data-testid="switch"]')).not.toBeNull();
     expect(buttons[0]!.closest('[data-guide-section-tab-lead]')).not.toBeNull();
 
-    // A phone: no tab, so the button stays above the content on a row of its own.
     await renderView(guide, { bare: true, state: { ...makeState({ files: [makeFile('a.ts')] }), globalComments } });
     expect(host!.querySelectorAll('[data-guide-global-comment-add]')).toHaveLength(1);
     expect(host!.querySelector('[data-guide-global-comment-add]')!.closest('[data-guide-section-tab]')).toBeNull();
 
-    // Not bare (the review app, the Inbox's guided review): the header keeps the button, the tab keeps its row.
     await renderView(guide, { state: withTab });
     expect(host!.querySelector('[data-guide-global-comment-add]')!.closest('[data-guide-section-tab]')).toBeNull();
     expect(host!.querySelector('[data-guide-section-tab-lead]')).toBeNull();
   });
 
-  // Guards the PR review's strip: its controls leave the files' column, and the host's element is all they need.
   test.skipIf(!hasDom)('bare with a host element, the actions are drawn there, no row above the content', async () => {
     const guide = makeGuide();
     const strip = document.createElement('div');

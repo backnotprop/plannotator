@@ -1,13 +1,3 @@
-// The URL grammars. Ported from the Workspaces suites (main 7379b0195):
-//   apps/rooms/test/external-refs.test.ts       "the GitHub match grammar"
-//   apps/rooms/test/external-refs-providers.test.ts  "linear — match grammar", "gitlab — match grammar"
-//   apps/rooms/test/code-link-grammar.test.ts   the GitHub and GitLab rows of the census
-//   apps/web/test/external-ref-match.test.ts    the GitHub, GitLab and Linear cases of matchExternalRefUrl
-//   apps/web/test/code-link-match.test.ts       (mirrors the census; one table here now)
-// The server and client copies were separate grammars kept in step by
-// convention; in this package there is one grammar per provider, so the two
-// test tables run against the same functions.
-
 import { describe, expect, it } from "bun:test";
 
 import { matchCodeLinkUrl, matchExternalRef, matchExternalRefUrl } from "../src/registry.ts";
@@ -87,7 +77,6 @@ describe("GitHub match grammar", () => {
 		}
 		expect(matchExternalRefUrl("https://github.com/acme/./issues/1")).toBeNull();
 		expect(matchExternalRefUrl("https://github.com/acme/../issues/1")).toBeNull();
-		// Sentence punctuation is not part of the number.
 		expect(matchExternalRefUrl("https://github.com/acme/api/issues/2.")).toBeNull();
 		expect(matchExternalRefUrl("not a url")).toBeNull();
 	});
@@ -101,7 +90,6 @@ describe("GitLab match grammar", () => {
 			key: "gitlab-org/gitlab#259606",
 			url: "https://gitlab.com/gitlab-org/gitlab/-/issues/259606",
 		});
-		// The modern alias canonicalizes to the issues form (same REST item).
 		expect(match("https://gitlab.com/gitlab-org/gitlab/-/work_items/259606")?.ref).toEqual(
 			issue?.ref,
 		);
@@ -113,10 +101,10 @@ describe("GitLab match grammar", () => {
 		);
 
 		for (const bad of [
-			"https://gitlab.com/project/-/issues/1", // no namespace before /-/
+			"https://gitlab.com/project/-/issues/1",
 			"https://gitlab.com/g/p/-/pipelines/5",
-			"https://gitlab.com/g/p/issues/1", // no /-/ separator
-			"https://gitlab.example.com/g/p/-/issues/1", // self-managed: plain link
+			"https://gitlab.com/g/p/issues/1",
+			"https://gitlab.example.com/g/p/-/issues/1",
 			"https://gitlab.com/g/p/-/issues/abc",
 		]) {
 			expect(match(bad), bad).toBeNull();
@@ -142,9 +130,9 @@ describe("Linear match grammar", () => {
 
 		for (const bad of [
 			"https://linear.app/acme/issue/notakey",
-			"https://linear.app/acme/team/ENG", // collections stay plain links
-			"https://linear.app/acme/project/no-slug-id-", // no stable tail
-			"https://linear.app/settings/issue/ENG-1", // app chrome
+			"https://linear.app/acme/team/ENG",
+			"https://linear.app/acme/project/no-slug-id-",
+			"https://linear.app/settings/issue/ENG-1",
 			"https://evil.example/acme/issue/ENG-123",
 		]) {
 			expect(match(bad), bad).toBeNull();
@@ -154,7 +142,6 @@ describe("Linear match grammar", () => {
 
 interface GrammarFixture {
 	readonly url: string;
-	/** null = rejected (a plain link). */
 	readonly expect: {
 		readonly provider: "github" | "gitlab";
 		readonly kind: "pr" | "repo" | "branch" | "issue";
@@ -165,20 +152,16 @@ interface GrammarFixture {
 	} | null;
 }
 
-/** The GitHub and GitLab rows of the Workspaces code-link census. */
 const CODE_LINK_FIXTURES: readonly GrammarFixture[] = [
-	// GitHub repo
 	{
 		url: "https://github.com/acme-eng/api",
 		expect: { provider: "github", kind: "repo", repoPath: "acme-eng/api", canonical: "https://github.com/acme-eng/api" },
 	},
 	{
-		// Clone-URL noise: trailing "/", ".git", ?tab= and fragment all drop.
 		url: "https://github.com/acme-eng/api.git/?tab=readme-ov-file#readme",
 		expect: { provider: "github", kind: "repo", repoPath: "acme-eng/api", canonical: "https://github.com/acme-eng/api" },
 	},
 	{
-		// Display case survives into repo_path and the canonical URL.
 		url: "https://www.github.com/AcMe-Eng/API",
 		expect: { provider: "github", kind: "repo", repoPath: "AcMe-Eng/API", canonical: "https://github.com/AcMe-Eng/API" },
 	},
@@ -189,7 +172,6 @@ const CODE_LINK_FIXTURES: readonly GrammarFixture[] = [
 	{ url: "https://github.com/acme-eng", expect: null },
 	{ url: "https://github.com/acme-eng/api/blob/main/README.md", expect: null },
 	{ url: "https://github.com/acme-eng/api/releases", expect: null },
-	// GitHub issue
 	{
 		url: "https://github.com/acme-eng/api/issues/482",
 		expect: { provider: "github", kind: "issue", repoPath: "acme-eng/api", number: 482, canonical: "https://github.com/acme-eng/api/issues/482" },
@@ -199,7 +181,6 @@ const CODE_LINK_FIXTURES: readonly GrammarFixture[] = [
 		url: "https://github.com/acme-eng/api/issues/77/?q=1#issuecomment-9",
 		expect: { provider: "github", kind: "issue", repoPath: "acme-eng/api", number: 77, canonical: "https://github.com/acme-eng/api/issues/77" },
 	},
-	// GitHub branch
 	{
 		url: "https://github.com/acme-eng/api/tree/feature/session-resume",
 		expect: {
@@ -227,12 +208,10 @@ const CODE_LINK_FIXTURES: readonly GrammarFixture[] = [
 	{ url: "https://github.com/acme-eng/api/tree/@", expect: null },
 	{ url: "https://github.com/acme-eng/api/tree/has%20space", expect: null },
 	{ url: "https://github.com/acme-eng/api/tree/has%7E1tilde", expect: null },
-	// GitHub pr
 	{
 		url: "https://github.com/acme-eng/api/pull/482/files?diff=split#discussion_r1",
 		expect: { provider: "github", kind: "pr", repoPath: "acme-eng/api", number: 482, canonical: "https://github.com/acme-eng/api/pull/482" },
 	},
-	// GitLab repo
 	{
 		url: "https://gitlab.com/acme-group/platform/api-service",
 		expect: {
@@ -250,7 +229,6 @@ const CODE_LINK_FIXTURES: readonly GrammarFixture[] = [
 	{ url: "https://gitlab.com/groups/acme-group", expect: null },
 	{ url: "https://gitlab.com/users/someone/projects", expect: null },
 	{ url: "https://gitlab.com/-/profile", expect: null },
-	// GitLab branch
 	{
 		url: "https://gitlab.com/acme-group/platform/api-service/-/tree/feature/session-resume",
 		expect: {
@@ -262,7 +240,6 @@ const CODE_LINK_FIXTURES: readonly GrammarFixture[] = [
 		},
 	},
 	{ url: "https://gitlab.com/acme-group/api/-/tree", expect: null },
-	// GitLab pr
 	{
 		url: "https://gitlab.com/acme-group/platform/api-service/-/merge_requests/57?diff_id=1",
 		expect: {
@@ -275,11 +252,9 @@ const CODE_LINK_FIXTURES: readonly GrammarFixture[] = [
 	},
 	{ url: "https://gitlab.com/acme-group/api/-/issues/12", expect: null },
 	{ url: "https://gitlab.com/acme-group/api/-/work_items/12", expect: null },
-	// Cross-provider rejects: self-managed hosts stay plain links.
 	{ url: "https://gitlab.example.com/acme/api", expect: null },
 	{ url: "https://github.com:8443/acme/api", expect: null },
 	{ url: "ftp://github.com/acme/api", expect: null },
-	// Linear has no code-link forms.
 	{ url: "https://linear.app/acme/issue/ENG-123", expect: null },
 ];
 
@@ -298,8 +273,6 @@ describe("code-link grammar census", () => {
 			expect(found.link.repoPath).toBe(fixture.expect.repoPath);
 			expect(found.link.number).toBe(fixture.expect.number);
 			expect(found.link.branch).toBe(fixture.expect.branch);
-			// Byte identity with the reference grammar: the canonical string is
-			// the per-URL facts cache key.
 			expect(found.link.url).toBe(fixture.expect.canonical);
 			if (found.link.kind === "pr" || found.link.kind === "issue") {
 				expect(match(fixture.url)?.ref.url).toBe(found.link.url);
