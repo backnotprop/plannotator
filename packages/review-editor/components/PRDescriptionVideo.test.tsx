@@ -94,6 +94,28 @@ describe.if(hasDom)('PR description attachment videos', () => {
     expect(page.querySelector('video')).toBeNull();
   });
 
+  test('the player opens its item in Artifacts, as the comments player does', async () => {
+    mockFetch(async () => new Response('x', { status: 206, headers: { 'Content-Type': 'video/mp4' } }));
+    const { ReviewStateProvider } = await import('../dock/ReviewStateContext');
+    const { buildPRArtifacts } = await import('../utils/prArtifacts');
+    const metadata = { platform: 'github', host: 'github.com', owner: 'acme', repo: 'widgets', number: 42, url: 'https://github.com/acme/widgets/pull/42' } as never;
+    const artifacts = buildPRArtifacts(metadata, { body: src, comments: [], reviews: [], reviewThreads: [] } as never);
+    const clip = artifacts.find((artifact) => artifact.url === src)!;
+    const opened: string[] = [];
+    const state = { prMetadata: metadata, prArtifacts: artifacts, openPRArtifact: (id: string) => opened.push(id) } as unknown as ReviewState;
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => {
+      root!.render(<ReviewStateProvider value={state}><RenderedMarkdown markdown={src} renderParagraph={renderPRDescriptionVideo} /></ReviewStateProvider>);
+      await new Promise(resolve => setTimeout(resolve, 10));
+    });
+    await act(async () => { host!.querySelector('video')!.dispatchEvent(new Event('loadedmetadata')); });
+    const button = [...host.querySelectorAll('button')].find((el) => el.textContent?.includes('Open in Artifacts'));
+    await act(async () => { button!.click(); });
+    expect(opened).toEqual([clip.id]);
+  });
+
   test('changing the description aborts the pending probe', async () => {
     let signal: AbortSignal | null | undefined;
     mockFetch((_url, init) => {

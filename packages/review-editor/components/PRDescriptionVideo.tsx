@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import type { Block } from '@plannotator/ui/types';
 import { artifactContentProxyUrl } from '../dock/panels/artifactDocument';
+import { OpenInArtifactsButton } from './OpenInArtifactsButton';
 
 const attachmentPattern =
   /^https:\/\/github\.com\/user-attachments\/(?:assets|files)\/[^\s<>]+$/;
@@ -84,6 +85,9 @@ function PRDescriptionVideo({
           onLoadedMetadata={() => setState('video')}
           onError={() => setState('link')}
         />
+        <div className="mt-1 flex">
+          <OpenInArtifactsButton url={src} />
+        </div>
       </div>
     </>
   );
