@@ -23,10 +23,6 @@ import { Tip } from './Tip';
  * only config.json `prompts.inbox` (Reset and Use shared delete the key);
  * whether the reminder is sent stays `inboxReminder`, in Settings → Agents.
  *
- * On top, "Rules for your agents" (AgentRules.tsx): the person's own rules, added
- * after the reminder. The reminder itself is folded into one row (the owner,
- * 2026-11-11: the page stays light), open on a press.
- *
  * Then Guided reviews: the person's standing instructions for every guide
  * (`guide-instructions.md`, the same file the review UI's guide launch and
  * VS Code edit), Default (none) or Custom, the same Edit and Reset.
@@ -44,14 +40,13 @@ const GUIDE_COUNT_WITHIN = 1000;
 type ReminderSlot = 'shared' | InboxPromptHost;
 type Slot = ReminderSlot | 'guide';
 
-/** The phone's list of sections: Default, or Custom once any reminder text, rules or guide instructions are the person's own. */
+/** The phone's list of sections: Default, or Custom once any reminder text or guide instructions are the person's own. */
 export function promptsSummary(prompts: InboxPromptsSettings): string {
   const rules = prompts.rules;
   const ruled = rules ? rules.shared !== null || INBOX_PROMPT_HOSTS.some((host) => rules.runtimes[host] !== null) : false;
   return reminderCustom(prompts) || ruled || Boolean(prompts.guide?.text) ? 'Custom' : 'Default';
 }
 
-/** Whether any reminder text is the person's own. */
 function reminderCustom(prompts: InboxPromptsSettings): boolean {
   const { shared, runtimes } = prompts.reminder;
   return shared !== null || INBOX_PROMPT_HOSTS.some((host) => runtimes[host] !== null);
@@ -86,7 +81,6 @@ export function PromptsSection({
   const [error, setError] = useState<{ slot: Slot; text: string } | null>(null);
   const [showDefault, setShowDefault] = useState(false);
   const [otherOpen, setOtherOpen] = useState(false);
-  // Folded, unless config.json holds reminder text over the cap: that note must be seen.
   const [reminderOpen, setReminderOpen] = useState(() => prompts.reminder.over?.shared != null || INBOX_PROMPT_HOSTS.some((host) => prompts.reminder.over?.runtimes[host] != null));
   const field = useRef<HTMLTextAreaElement>(null);
   const root = useRef<HTMLDivElement>(null);

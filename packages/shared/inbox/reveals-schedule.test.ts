@@ -110,7 +110,6 @@ interface User {
   grillMeGap?: number;
   /** Still on the default theme (shared/inbox/theme-chooser.ts): the "themes" dialog is open. Absent: a theme was picked. */
   defaultTheme?: boolean;
-  /** No rules for any agent (config.json `prompts.inbox` `rules`): "Set the rules" is open. Absent: rules were set. */
   noRules?: boolean;
 }
 

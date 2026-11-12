@@ -293,7 +293,6 @@ interface Allowed {
   inboxReminder: boolean
   /** The person's own reminder text (config.json `prompts.inbox`), or null: the built-in line. */
   inboxReminderCustom: string | null
-  /** The person's own rules (config.json `prompts.inbox` `rules`), added after the reminder, or null. */
   inboxReminderRules: string | null
 }
 

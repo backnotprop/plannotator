@@ -136,7 +136,7 @@ export function inboxPromptsModel(
 }
 
 /**
- * Check `{ inbox?: { reminder?, rules?, runtimes?: { <agent>: { reminder?, rules? } } }, guide? }`,
+ * Check `{ inbox?: { reminder?, runtimes?: { <agent>: { reminder? } } }, guide? }`,
  * at least one: each value a string or null, a blank string read as null, a
  * string over its cap refused (422). Nothing else is accepted.
  */
@@ -166,7 +166,6 @@ export function parseInboxPromptsChange(input: unknown): InboxPromptsChange {
   }
   change.inbox = {};
   if ("reminder" in inbox!) change.inbox.reminder = text(inbox!.reminder, "prompts.inbox.reminder");
-  // The rules' own room (the reminder they follow) is checked against config.json by inboxRulesFitError.
   if ("rules" in inbox!) change.inbox.rules = text(inbox!.rules, "prompts.inbox.rules");
   if ("runtimes" in inbox!) {
     const runtimes = record(inbox!.runtimes);

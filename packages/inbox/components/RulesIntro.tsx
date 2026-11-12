@@ -3,14 +3,6 @@ import { HostMark, Icon } from '../icons';
 import { useReducedMotion } from '../tour/Tour';
 import { Modal } from './Updates';
 
-/**
- * "Set the rules", the one-time dialog for Rules for your agents (#2194; the owner approved it, 2026-11-11: "Yes, the
- * Settings place and this dialog"). The Board's and the Checklist's frame, type and buttons (`.ib-bi`) over a small
- * picture: an agent's long message, then the person's rules arrive and shape it (shorter, a stray update gone, the
- * question up front). "Add your rules" opens Settings → Prompts with the editor open; "Not now", Escape and a click
- * outside close it. Every way out is final: the claim already stamped it. No keyboard shortcut. Under reduced motion
- * the picture rests on its last beat; it runs only while the dialog is open.
- */
 export function RulesIntro({ phone, onClose, onAdd }: { phone: boolean; onClose: () => void; onAdd: () => void }) {
   return (
     <Modal labelledBy="ib-ri-title" describedBy="ib-ri-desc" testId="rules-intro" onClose={onClose} ownKeys className={`ib-bi ib-ri${phone ? ' ib-bi-phone' : ''}`}>
@@ -34,7 +26,6 @@ export function RulesIntro({ phone, onClose, onAdd }: { phone: boolean; onClose:
 }
 
 const RULES = ['Keep messages short', 'Only when blocked or done'];
-/** One loop, ms from its start: rules shown, the message shortened, the stray update gone, the question up front. */
 const BEATS = [
   { at: 0, rules: 0, short: false, gone: false, ask: false },
   { at: 1300, rules: 1, short: false, gone: false, ask: false },
@@ -65,7 +56,6 @@ function useBeat(still: boolean): (typeof BEATS)[number] & { fading: boolean } {
   return still ? { ...LAST, fading: false } : { ...BEATS[index]!, fading };
 }
 
-/** The picture. Decoration only (aria-hidden). */
 function RulesIntroArt() {
   const beat = useBeat(useReducedMotion());
   const on = (value: boolean) => (value ? '' : undefined);

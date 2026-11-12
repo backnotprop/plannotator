@@ -2954,7 +2954,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const stepsUndecided = () => options.steps === undefined && loadConfig().inboxSteps === undefined;
   /** Bro mode's offer, while config.json `inboxBro` is unset (the person never decided). */
   const broUndecided = () => loadConfig().inboxBro === undefined;
-  /** "Set the rules": offered while the person has no rules for any agent (config.json `prompts.inbox` `rules`). */
   const agentRulesUnset = () => {
     const config = loadConfig();
     return INBOX_PROMPT_HOSTS.every((host) => inboxReminderRulesText(config, host) === null);
@@ -5609,7 +5608,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The address this computer's browser opens: the owner's to change.
         if (body.cookie_host !== undefined && !owner) return localOnly();
         const promptsChange = body.prompts === undefined ? undefined : parseInboxPromptsChange(body.prompts);
-        // Rules for your agents: refused when, with the reminder they follow, they would pass the cap.
         const rulesMisfit = promptsChange ? inboxRulesFitError(promptsChange, loadConfig(), promptWakes()) : null;
         if (rulesMisfit) throw new InboxError("validation_error", rulesMisfit.message, { field: rulesMisfit.field });
         let tailscaleChange: { on: boolean; replaceExposed: boolean } | undefined;

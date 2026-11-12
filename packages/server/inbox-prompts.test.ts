@@ -232,7 +232,6 @@ describe("Settings → Prompts", () => {
     expect(onDisk()).toEqual({ displayName: "Ann" });
   });
 
-  // Rules for your agents (#2194): added after the reminder, so they live beside it and never touch it.
   test("rules save beside the reminder, an agent's own beside its reminder; Back to default deletes only the rules", async () => {
     const { server, onDisk } = await world({ prompts: { inbox: { reminder: "Shared line.", runtimes: { pi: { reminder: "Pi line." } } } } });
     const save = async (inbox: unknown) => {

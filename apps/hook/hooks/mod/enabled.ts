@@ -203,12 +203,6 @@ export function resolveInboxReminderCustom(configText: string | null | undefined
   }
 }
 
-/**
- * The person's own rules for Claude Code, from config.json
- * (`prompts.inbox.runtimes["claude-code"].rules`, then `prompts.inbox.rules`),
- * or null. `inboxReminderFor(custom, toolName, { rules })` adds them after the
- * reminder. Read with the custom text, once, at the first session.start.
- */
 export function resolveInboxReminderRules(configText: string | null | undefined): string | null {
   if (!configText) return null
   try {

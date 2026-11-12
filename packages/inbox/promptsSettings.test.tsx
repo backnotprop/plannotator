@@ -93,7 +93,6 @@ function mount(start: InboxPromptsSettings, open = true) {
     root = createRoot(host!);
     render();
   });
-  // The reminder is folded into one row ("Reminder text"): these cases read it open.
   const fold = q<HTMLButtonElement>(host!, '[data-prompts-reminder-fold]');
   if (open && fold?.getAttribute('aria-expanded') === 'false') act(() => fold.click());
   return host;
@@ -328,7 +327,6 @@ test.skipIf(!hasDom)('Guided reviews: Default with only Edit; Save writes `guide
   expect(promptsSummary({ ...model(), guide: { text: 'x', max: 12000 } })).toBe('Custom');
   // Past the cap Save is refused.
   await click(q(row, '[data-prompt-edit="guide"]'));
-  // The count from 11,000 (the cap the review page and VS Code share is 12,000).
   type(q<HTMLTextAreaElement>(el, '[data-prompt-field="guide"]')!, 'a'.repeat(10_999));
   expect(q(el, '[data-prompt-count]')).toBeNull();
   type(q<HTMLTextAreaElement>(el, '[data-prompt-field="guide"]')!, 'a'.repeat(12_001));
@@ -351,7 +349,6 @@ test.skipIf(!hasDom)('through the tailnet: read-only, no Edit anywhere', () => {
   expect(el.querySelectorAll('[data-prompt-edit], [data-prompt-reset]')).toHaveLength(0);
 });
 
-/** The model with "Rules for your agents" (an Inbox that has them). */
 function withRules(rules: Partial<NonNullable<InboxPromptsSettings['rules']>> = {}): InboxPromptsSettings {
   return {
     ...model(),
@@ -365,14 +362,14 @@ function withRules(rules: Partial<NonNullable<InboxPromptsSettings['rules']>> = 
   };
 }
 
-test.skipIf(!hasDom)('Rules for your agents: on top, the reminder folded under it; a tap adds an example, Save writes the rules for all agents, Back to default deletes them', async () => {
+test.skipIf(!hasDom)('Rules for your agents: on top, the reminder folded under it; the box starts empty, Save writes the rules for all agents, Back to default deletes them', async () => {
   const sent = server(withRules());
   const el = mount(withRules(), false);
   expect(q(el, '[data-rules-section] + section [data-prompts-reminder-fold]')).not.toBeNull();
   expect(q(el, '[data-prompts-reminder]')).toBeNull();
   await click(q(el, '[data-rules-add]'));
-  await click(q(document.body, '[data-rules-example]'));
-  expect(q<HTMLTextAreaElement>(document.body, '[data-rules-field]')!.value).toBe('Only message me when you are blocked or done.');
+  expect(q<HTMLTextAreaElement>(document.body, '[data-rules-field]')!.value).toBe('');
+  type(q<HTMLTextAreaElement>(document.body, '[data-rules-field]')!, 'Only message me when you are blocked or done.');
   await click(q(document.body, '[data-rules-save]'));
   expect(sent.at(-1)).toEqual({ inbox: { rules: 'Only message me when you are blocked or done.' } });
   expect(q(el, '[data-rules-text="shared"]')?.textContent).toBe('Only message me when you are blocked or done.');

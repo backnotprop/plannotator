@@ -91,12 +91,6 @@ export interface PromptConfig {
    */
   inbox?: {
     reminder?: string;
-    /**
-     * The person's own rules for how agents use the Inbox (Settings → Prompts,
-     * "Rules for your agents"): ADDED after the reminder, under
-     * INBOX_RULES_LEAD, for every host; `runtimes.<host>.rules` for one host
-     * (it wins). Whitespace only counts as unset.
-     */
     rules?: string;
     runtimes?: Partial<Record<InboxToolHost, { reminder?: string; rules?: string }>>;
   };
@@ -655,7 +649,6 @@ export interface PlannotatorConfig {
     code_review?: { shownAt?: string; key?: string };
     board?: { shownAt?: string; key?: string };
     steps?: { shownAt?: string; key?: string };
-    /** "Set the rules" (Rules for your agents): claimed once, as the Board's; nothing to turn on. */
     agent_rules?: { shownAt?: string; key?: string };
     /** The Bro mode offer (approval "bro-mode"): claimed once, as the Board's. */
     bro?: { shownAt?: string; key?: string };

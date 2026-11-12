@@ -7868,12 +7868,10 @@ dialog.ib-dlg.ib-thc[open] { animation: ib-thc-in 240ms cubic-bezier(0.23, 1, 0.
 .pm-fold[aria-expanded="true"] svg.ib-ic { transform: rotate(90deg); }
 .pm-osec { border-top: 1px solid var(--ib-sep-s, var(--ib-hair)); padding: 12px 16px 4px; }
 .pm-osec h3 { margin: 0 0 8px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 600; color: var(--muted-foreground); }
-/* Rules for your agents (AgentRules.tsx, #2194): the box on top of Settings → Prompts, and its editor (the intro dialogs' frame). */
 .ar-empty { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
 .ar-ic { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
 .ar-t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .ar-l { font-size: var(--ib-fs-13-5, 13.5px); font-weight: 550; }
-.ar-d { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ar-slot + .ar-slot { border-top: 1px solid var(--ib-sep-s, var(--ib-hair)); }
 .ar-who { display: inline-flex; align-items: center; gap: 7px; font-size: var(--ib-fs-13, 13px); font-weight: 550; }
 .pm-rem-body { border-top: 1px solid var(--ib-sep-s, var(--ib-hair)); }
@@ -7881,22 +7879,14 @@ dialog.ib-dlg.ar-ed { width: 500px; }
 .ar-ed .ib-bi-text { padding-top: 22px; }
 .pn-inbox .ar-area { margin-top: 14px; min-height: 104px; font-size: var(--ib-fs-14, 14px); }
 .ar-lbl { margin: 12px 0 6px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
-.ar-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.pn-inbox .ar-chip { display: inline-flex; align-items: center; gap: 5px; min-height: 30px; padding: 0 11px 0 9px; border-radius: 999px; border: 1px dashed color-mix(in oklch, var(--muted-foreground) 45%, transparent); background: transparent; color: var(--foreground); font-size: var(--ib-fs-12-5, 12.5px); text-align: left; cursor: pointer; }
-.pn-inbox .ar-chip:hover { background: var(--ib-fill, var(--muted)); }
-.ar-chip b { color: var(--primary); font-weight: 600; }
-.ar-chip[data-used] { opacity: 0.45; }
 .ar-seg { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px; border-radius: 9px; background: color-mix(in oklch, var(--muted) 80%, transparent); }
 .pn-inbox .ar-seg button { min-height: 28px; padding: 0 10px; border: 0; border-radius: 7px; background: transparent; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); cursor: pointer; }
 .pn-inbox .ar-seg button[aria-pressed="true"] { background: var(--card); color: var(--foreground); font-weight: 550; box-shadow: 0 1px 2px rgb(0 0 0 / 0.12); }
 .ib-bi-text .ar-quiet { margin: 10px 0 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); line-height: 1.45; }
 .ib-bi-text .pm-err { font-size: var(--ib-fs-12-5, 12.5px); }
 @media (pointer: coarse) {
-  .pn-inbox .ar-chip, .pn-inbox .ar-seg button { min-height: 38px; }
-  /* Never under 16 px on a touch screen: iOS zooms the page into a smaller field. */
   .pn-inbox .ar-area { font-size: max(16px, var(--ib-fs-16, 16px)); }
 }
-/* "Set the rules" (RulesIntro.tsx): the Board's frame; the picture is an agent's message shaped by two rules. */
 .ib-ri-stage { display: flex; flex-direction: column; gap: 10px; width: 400px; max-width: 100%; margin: 0 auto; transition: opacity 400ms ease-out; }
 .ib-ri-stage[data-fading] { opacity: 0; }
 .ib-ri-rules { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; min-height: 24px; }
@@ -7918,7 +7908,6 @@ dialog.ib-dlg.ar-ed { width: 500px; }
 .ib-ri-ask[data-on] { opacity: 1; transform: none; }
 .ib-ri-ask i { width: 8px; height: 8px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--bi-amber); }
 .ib-ri-ask b { width: 30%; height: 4px; border-radius: 2px; background: var(--bi-amber); }
-/* A phone: For's four choices in two even rows, never one left alone on a second line. */
 .ib-bi-phone .ar-seg { display: grid; grid-template-columns: 1fr 1fr; width: 100%; box-sizing: border-box; }
 .ib-bi-phone .ib-ri-rule { font-size: var(--ib-fs-11, 11px); padding: 0 8px 0 6px; }
 @media (prefers-reduced-motion: reduce) {

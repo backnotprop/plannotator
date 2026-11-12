@@ -5391,9 +5391,6 @@ function Inbox() {
     mayClaim: () => true,
     holds: () => true,
   });
-  // "Set the rules" (Rules for your agents, #2194), registered with the line: 2 days' use and 10 threads (reveals.ts).
-  // Its moment: back from a thread read 5 s or more (the star ask's), or the page idle, 60 s into the page. Rules set
-  // meanwhile (Settings, another window) drop it. The claim only stamps it; RulesIntro invites.
   const agentRulesReveal = useLineReveal({
     id: 'agent_rules',
     due: lineLatch?.next === 'agent_rules',
@@ -7748,7 +7745,6 @@ function Inbox() {
         <RulesIntro
           phone={phone}
           onClose={() => {
-            // Not now (Escape, a click outside): final, and the line's next offer waits three days.
             void inboxApi.revealNotNow('agent_rules');
             agentRulesReveal.close();
           }}

@@ -1,9 +1,3 @@
-// "Rules for your agents" (#2194): the person's rules are ADDED after the
-// reminder each agent gets at session start. The failures this guards: the
-// rules replace Plannotator's text instead of following it, an agent's own
-// rules stop winning over the shared ones, the mod's copy (enabled.ts over the
-// contract) and packages/shared disagree, or rules too long for Claude Code's
-// context ceiling get cut instead of left out.
 import { describe, expect, test } from 'bun:test'
 import { resolveInboxReminderText } from '@plannotator/shared/config'
 import { INBOX_REMINDER_MAX_CHARS, INBOX_RULES_LEAD } from '@plannotator/shared/inbox/connection'
@@ -14,7 +8,6 @@ import { inboxReminderFor, inboxReminderText } from './inbox-contract'
 const TOOL = 'mcp__plugin_plannotator_tools__plannotator_inbox'
 const RULES = 'Only message me when you are blocked or done.\nKeep messages under 10 lines.'
 
-/** What the mod puts in Claude Code's first-prompt context for this config.json. */
 function modReminder(config: unknown): string {
   const text = JSON.stringify(config)
   return inboxReminderFor(resolveInboxReminderCustom(text), TOOL, { rules: resolveInboxReminderRules(text) })
@@ -27,7 +20,6 @@ describe('rules follow the reminder', () => {
     for (const host of ['pi', 'opencode'] as const) {
       expect(resolveInboxReminderText(config, host)).toBe(`${inboxReminderText()}\n\n${INBOX_RULES_LEAD}\n${RULES}`)
     }
-    // The post-compaction variable carries the same text.
     expect(inboxReminderEnvValue(true, TOOL, null, RULES)).toBe(modReminder(config))
   })
 

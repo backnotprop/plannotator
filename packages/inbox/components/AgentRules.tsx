@@ -1,17 +1,10 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { INBOX_PROMPT_HOSTS, type InboxPromptHost, type InboxPromptsChange, type InboxPromptsSettings } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
-import { RULE_EXAMPLES, RULES_COUNT_WITHIN, takeRulesEditorWish, withRuleExample } from '../agentRules';
+import { RULES_COUNT_WITHIN, takeRulesEditorWish } from '../agentRules';
 import { HostMark, Icon } from '../icons';
 import { usePhone } from '../phone';
 import { Modal } from './Updates';
-
-/**
- * Settings → Prompts, on top: "Rules for your agents" (#2194). The person's own rules, ADDED after the reminder
- * (Plannotator's text stays): one box for all agents, or an agent's own (it wins, as the reminder's own text does).
- * The card shows what is set; Add rules / Edit opens the editor, a dialog (at the bottom on a phone) with one text box,
- * examples a tap adds, "For" and Back to default. Writes only config.json `prompts.inbox` `rules`.
- */
 
 type Rules = NonNullable<InboxPromptsSettings['rules']>;
 type Slot = 'shared' | InboxPromptHost;
@@ -33,7 +26,6 @@ export function AgentRulesSection({
   const [editing, setEditing] = useState<Slot | null>(null);
   const textOf = (slot: Slot) => (slot === 'shared' ? rules.shared : rules.runtimes[slot]);
   const set = SLOTS.filter((slot) => textOf(slot) !== null);
-  // "Add your rules" in the "Set the rules" dialog lands here with the editor open.
   useEffect(() => {
     if (editable && takeRulesEditorWish()) setEditing('shared');
   }, [editable]);
@@ -50,7 +42,6 @@ export function AgentRulesSection({
             </span>
             <span className="ar-t">
               <span className="ar-l">No rules yet</span>
-              <span className="ar-d">Like “Only message me when you are blocked or done”</span>
             </span>
             {editable && (
               <button type="button" className="ib-btn ib-sm ib-pri" onClick={() => setEditing('shared')} data-rules-add="">
@@ -84,7 +75,6 @@ export function AgentRulesSection({
   );
 }
 
-/** Rules that, with the reminder they follow, are over the cap: said, never cut. */
 function DroppedNote({ hosts }: { hosts: InboxPromptHost[] }) {
   if (hosts.length === 0) return null;
   return (
@@ -126,10 +116,6 @@ function RulesEditor({ rules, first, onClose, onPrompts }: { rules: Rules; first
     setDraft(saved(next));
     setError(null);
   };
-  const add = (example: string) => {
-    setDraft((text) => withRuleExample(text, example));
-    field.current?.focus();
-  };
 
   return (
     <Modal labelledBy="ar-ed-title" describedBy="ar-ed-desc" testId="rules-editor" onClose={onClose} ownKeys initialFocus=".pm-area" className={`ib-bi ar-ed${phone ? ' ib-bi-phone' : ''}`}>
@@ -141,21 +127,12 @@ function RulesEditor({ rules, first, onClose, onPrompts }: { rules: Rules; first
           className="pm-area ar-area"
           value={draft}
           rows={4}
-          placeholder="Write your rules in your own words, one per line"
+          placeholder="Write your rules, one per line"
           aria-label={`Rules for ${slotName(slot).toLowerCase()}`}
           aria-invalid={over || undefined}
           onChange={(event) => setDraft(event.target.value)}
           data-rules-field=""
         />
-        <div className="ar-lbl" id="ar-ex">Tap to add</div>
-        <div className="ar-chips" role="group" aria-labelledby="ar-ex">
-          {RULE_EXAMPLES.map((example) => (
-            <button type="button" className="ar-chip" key={example} data-used={draft.includes(example) || undefined} onClick={() => add(example)} data-rules-example="">
-              <b aria-hidden="true">+</b>
-              {example.replace(/\.$/, '')}
-            </button>
-          ))}
-        </div>
         <div className="ar-lbl" id="ar-for">For</div>
         <div className="ar-seg" role="group" aria-labelledby="ar-for">
           {SLOTS.map((which) => (

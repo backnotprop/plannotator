@@ -538,7 +538,6 @@ describe("the Checklist reveal at day 6", () => {
 });
 
 describe('"Set the rules" (Rules for your agents): last of the later group', () => {
-  // Every earlier offer decided, so only "Set the rules" can be next.
   const decided = { inboxBoard: false, inboxSteps: false, inboxBro: false, inboxCodeReview: false, inboxReveals: { list_view: { shownAt: new Date(Date.now() - 3 * DAY).toISOString() } } };
 
   test("two days' use and ten threads: next, shown once (a second tab gets no), and Not now is final and holds the next dialog back", async () => {
