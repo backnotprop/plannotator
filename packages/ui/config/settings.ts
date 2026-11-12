@@ -1,14 +1,3 @@
-/**
- * Settings registry — declares all config settings and their resolution rules.
- *
- * Each SettingDef describes:
- *   - defaultValue: fallback (can be a lazy factory for expensive defaults)
- *   - fromCookie/toCookie: serialization to/from cookie storage
- *   - serverKey + fromServer/toServer: opt-in sync to ~/.plannotator/config.json
- *
- * Add new settings here. Cookie-only settings omit serverKey.
- */
-
 import {
   isAnnotateAgentTerminalSide,
   type AnnotateAgentTerminalSide,
@@ -46,52 +35,22 @@ import {
 } from '../utils/themeRegistry';
 import { parseThemeMode } from '../components/themeModes';
 
-/** Legacy single-palette key, still written so a downgrade renders styled. */
 const COLOR_THEME_COOKIE = 'plannotator-color-theme';
 const MODE_COOKIE = 'plannotator-theme';
 const LIGHT_THEME_COOKIE = 'plannotator-light-theme';
 const DARK_THEME_COOKIE = 'plannotator-dark-theme';
 
-/**
- * Where a host keeps the two PRE-PAIR values, if not under Plannotator's own
- * keys. These mirror ThemeProvider's `storageKey` / `colorThemeStorageKey`
- * props, which existed before the pair and are what a host's already-stored
- * user preference lives under.
- *
- * Only these two legacy keys are overridable. The pair halves are a new
- * concept with no pre-existing host data, so they always use the fixed
- * `plannotator-light-theme` / `plannotator-dark-theme` keys; two hosts sharing
- * one origin with different key prefixes would share those halves.
- */
 export interface ThemePairLegacyKeys {
-  /** Where the mode is stored (ThemeProvider's `storageKey`). */
   mode?: string;
-  /** Where the single pre-pair palette is stored (`colorThemeStorageKey`). */
   colorTheme?: string;
 }
 
-/**
- * Persist a pair to its cookies without touching the server.
- *
- * ThemeProvider calls this once it has resolved a pair, because a pair
- * migrated from the legacy single-palette key is DERIVED until it is written:
- * the provider then mirrors the active palette back onto that legacy key, so
- * leaving the halves underived would lose the migration on the next load.
- */
 export function writeThemePairCookies(pair: ThemePair, keys?: ThemePairLegacyKeys): void {
   storage.setItem(keys?.mode ?? MODE_COOKIE, pair.mode);
   storage.setItem(LIGHT_THEME_COOKIE, pair.light);
   storage.setItem(DARK_THEME_COOKIE, pair.dark);
 }
 
-/**
- * Read the persisted pair, seeding either half from the single palette older
- * releases stored. Returns undefined only when the user has never expressed a
- * theme preference at all — ThemeProvider reads that as "my props decide".
- *
- * `keys` points the two legacy reads at a host's own storage keys so an
- * upgrade migrates that host's stored preference instead of discarding it.
- */
 export function readThemePairCookies(keys?: ThemePairLegacyKeys): ThemePair | undefined {
   const mode = storage.getItem(keys?.mode ?? MODE_COOKIE);
   const light = storage.getItem(LIGHT_THEME_COOKIE);
@@ -102,7 +61,6 @@ export function readThemePairCookies(keys?: ThemePairLegacyKeys): ThemePair | un
   return normalizeThemePair({ mode, light: light ?? seeded.light, dark: dark ?? seeded.dark }, seeded);
 }
 
-/** Pre-registry cookie keys of the agent switch, kept so an upgrade keeps the choice. */
 const AGENT_SWITCH_COOKIE = 'plannotator-agent-switch';
 const AGENT_SWITCH_CUSTOM_COOKIE = 'plannotator-agent-custom';
 
@@ -114,12 +72,9 @@ function readAgentSwitchCookies(): AgentSwitchChoice | undefined {
 }
 
 function writeAgentSwitchCookies(choice: AgentSwitchChoice | null): void {
-  // null = never chosen: write nothing, so the surface default keeps applying.
   if (!choice) return;
   storage.setItem(AGENT_SWITCH_COOKIE, choice.switchTo);
   if (choice.customName) storage.setItem(AGENT_SWITCH_CUSTOM_COOKIE, choice.customName);
-  // Custom with its name cleared: drop the old name, or the next read would
-  // pair it with "custom" and switch to that old agent again.
   else if (choice.switchTo === 'custom') storage.removeItem(AGENT_SWITCH_CUSTOM_COOKIE);
 }
 
@@ -145,13 +100,11 @@ export interface SettingDef<T> {
   defaultValue: T | (() => T);
   fromCookie: () => T | undefined;
   toCookie: (value: T) => void;
-  /** If set, this setting syncs to server via POST /api/config */
   serverKey?: string;
   fromServer?: (serverConfig: Record<string, unknown>) => T | undefined;
   toServer?: (value: T) => Record<string, unknown>;
 }
 
-/** Typed registry of persisted UI settings and their storage codecs. */
 export const SETTINGS = {
   displayName: {
     defaultValue: () => generateIdentity(),
@@ -163,21 +116,6 @@ export const SETTINGS = {
     toServer: (v: string) => ({ displayName: v }),
   },
 
-  /**
-   * Appearance: the mode plus the palette assigned to each half of the pair.
-   * Stored as one value because the three fields are only meaningful together —
-   * `mode: system` picks between `light` and `dark` at render time.
-   *
-   * Cookies: `plannotator-theme` (mode) keeps its meaning, joined by
-   * `plannotator-light-theme` / `plannotator-dark-theme`. A user arriving from
-   * an older release has neither half, so the pair is seeded from the single
-   * `plannotator-color-theme` palette they were on (ThemeProvider keeps writing
-   * that key, so a downgrade still finds a palette and never renders unstyled).
-   *
-   * Server: round-trips through `theme` in ~/.plannotator/config.json exactly
-   * like `diffOptions` does, so the choice survives the random port each hook
-   * invocation runs on.
-   */
   themePair: {
     defaultValue: () => getDefaultThemePair(),
     fromCookie: () => readThemePairCookies(),
@@ -207,17 +145,8 @@ export const SETTINGS = {
   },
 
   gridEnabled: {
-    // Default OFF: plans open in the Clean look (the document edge to edge).
-    // Grid (the classic floating card on grid paper) is a choice, made in the
-    // first-run chooser or in Settings.
     defaultValue: false as boolean,
     fromCookie: () => {
-      // ConfigStore writes the default into this cookie on first load, so every
-      // browser that ran an older build stored 'true' (the old default) without
-      // anyone choosing it. The stored value counts only once the person has
-      // resolved the Grid/Clean choice under the Clean default (the v2 marker;
-      // a v1 marker with Grid stored is moved to Clean once, see
-      // utils/lookAndFeelAnnouncement); until then they get Clean.
       if (!isLookChoiceResolved()) return undefined;
       const v = storage.getItem('plannotator-grid-enabled');
       return v === 'true' ? true : v === 'false' ? false : undefined;
@@ -226,18 +155,9 @@ export const SETTINGS = {
     serverKey: undefined, fromServer: undefined, toServer: undefined,
   },
 
-  /**
-   * How strong the drop shadow under Mermaid diagram nodes is, 0..100, where
-   * 100 is Mermaid 12's own default geometry. Default 70: the shipped neo look
-   * with its halo toned down (the colour is always derived from the palette,
-   * see `utils/mermaidTheme`). Cookie-only, like the other display knobs.
-   */
   diagramShadow: {
     defaultValue: DEFAULT_DIAGRAM_SHADOW as number,
     fromCookie: () => {
-      // `Number(null)` and `Number('')` are 0, which is a VALID amount here
-      // (unlike the token-hover steps), so an absent cookie must be rejected
-      // before the guard sees it — otherwise no cookie reads as "no shadow".
       const raw = storage.getItem('plannotator-diagram-shadow');
       if (raw === null || raw.trim() === '') return undefined;
       const parsed = Number(raw);
@@ -247,11 +167,6 @@ export const SETTINGS = {
     serverKey: undefined, fromServer: undefined, toServer: undefined,
   },
 
-  /**
-   * The document's body text size in plan review and annotate, in px (#2066;
-   * see `utils/documentTextSize`). Default 15, today's size. Cookie-only, like
-   * the other display knobs; an unknown value reads as the default.
-   */
   documentTextSize: {
     defaultValue: DEFAULT_DOCUMENT_TEXT_SIZE as DocumentTextSize,
     fromCookie: () => {
@@ -265,11 +180,6 @@ export const SETTINGS = {
     serverKey: undefined, fromServer: undefined, toServer: undefined,
   },
 
-  /**
-   * The document's font in plan review and annotate (#1657; see
-   * `utils/documentFont`): a generic preset or an installed family name.
-   * Empty = the theme's font. Cookie-only, like Text size.
-   */
   documentFontFamily: {
     defaultValue: '' as string,
     fromCookie: () =>
@@ -278,12 +188,6 @@ export const SETTINGS = {
     serverKey: undefined, fromServer: undefined, toServer: undefined,
   },
 
-  /**
-   * Enter saves a comment and Shift+Enter adds a new line (#1934). Default
-   * OFF: comments save with Cmd/Ctrl+Enter only, as they always have, and
-   * Cmd/Ctrl+Enter keeps saving with it on. Read by every comment composer
-   * through `isCommentSubmitKey` (`utils/commentSubmitKey`). Cookie-only.
-   */
   enterSavesComment: {
     defaultValue: false as boolean,
     fromCookie: () => {
@@ -295,13 +199,6 @@ export const SETTINGS = {
     serverKey: undefined, fromServer: undefined, toServer: undefined,
   },
 
-  /**
-   * Hide the owner in the repository's label: `payments-service` (on) instead
-   * of `acme/payments-service`. Default OFF, today's look. Applies beside the
-   * document, in the plan diff, in code review's header and in the tab
-   * titles; hovering the label always shows the full `owner/repo`. Read
-   * through `repoLabel` (`utils/repoLabel`). Cookie-only.
-   */
   hideRepoOwner: {
     defaultValue: false as boolean,
     fromCookie: () => {
@@ -314,9 +211,6 @@ export const SETTINGS = {
   },
 
   vimModeEnabled: {
-    // Vim bindings deliberately default OFF. Unmodified letter keys must remain
-    // inert for existing users until they explicitly opt into modal document
-    // navigation from Settings > Vim.
     defaultValue: false as boolean,
     fromCookie: () => {
       const value = storage.getItem('plannotator-vim-mode-enabled');
@@ -328,8 +222,6 @@ export const SETTINGS = {
   },
 
   vimHudEnabled: {
-    // The larger command HUD is an optional presentation layer on top of Vim
-    // controls. It has no effect while Vim mode itself is disabled.
     defaultValue: false as boolean,
     fromCookie: () => {
       const value = storage.getItem('plannotator-vim-hud-enabled');
@@ -341,8 +233,6 @@ export const SETTINGS = {
   },
 
   vimHudKeyPanelEnabled: {
-    // Preserve the existing full HUD for current users while allowing the
-    // bottom-right key panel to be hidden independently from the reticle.
     defaultValue: true as boolean,
     fromCookie: () => {
       const value = storage.getItem('plannotator-vim-hud-key-panel-enabled');
@@ -353,23 +243,6 @@ export const SETTINGS = {
     serverKey: undefined, fromServer: undefined, toServer: undefined,
   },
 
-  // --- Diff display options (namespaced under diffOptions in config.json) ---
-
-  // Which left-panel view a code review OPENS in. 'sections' = the git-status
-  // view (Committed/Changes/Untracked); 'tree' = the classic file tree.
-  // Cookie-only. Written ONLY by Settings — the in-review header toggle is
-  // session-scoped and never writes this (looking at another view mid-review
-  // must not silently change the default).
-  //
-  // The default is 'tree': the classic file tree renders every diff type, so
-  // the (reviewPanelView, defaultDiffType) pair is trivially consistent for a
-  // reviewer who has chosen neither. 'sections' is reachable from the panel's
-  // Tree | Git status | Commits toggle and settable as the default here in
-  // Settings. Anyone with a persisted cookie keeps whatever they chose.
-  //
-  // Deliberately NOT a value here: 'commits'. The Commits view is session-only
-  // and never the opening view — a review always opens on files. A
-  // previously-persisted 'commits' cookie is treated as unset.
   reviewPanelView: {
     defaultValue: 'tree' as 'sections' | 'tree',
     fromCookie: () => {
@@ -380,13 +253,6 @@ export const SETTINGS = {
     serverKey: undefined, fromServer: undefined, toServer: undefined,
   },
 
-  // The view the user last SELECTED via the in-review header toggle. Layered
-  // between the session state and the persisted reviewPanelView default, so a
-  // new session opens on what the user was actually using. Cookie-only.
-  // null = no last-used recorded (fall through to reviewPanelView).
-  //
-  // 'commits' is never recorded here for the same reason reviewPanelView
-  // rejects it: the Commits view is session-only and never an opening view.
   reviewPanelViewLastUsed: {
     defaultValue: null as 'sections' | 'tree' | null,
     fromCookie: () => {
@@ -394,8 +260,6 @@ export const SETTINGS = {
       return v === 'tree' || v === 'sections' ? v : undefined;
     },
     toCookie: (v: 'sections' | 'tree' | null) => {
-      // The null default seeds through here on first load — "unrecorded" has
-      // no cookie representation, so write nothing.
       if (v === 'sections' || v === 'tree') {
         storage.setItem('plannotator-review-panel-view-last-used', v);
       }
@@ -403,9 +267,6 @@ export const SETTINGS = {
     serverKey: undefined, fromServer: undefined, toServer: undefined,
   },
 
-  // Compact left-panel preferences. These are deliberately cookie-only: they
-  // shape the local file-list chrome without changing review semantics or the
-  // repository state, and should follow the reviewer across review sessions.
   reviewShowViewedControls: {
     defaultValue: true as boolean,
     fromCookie: () => {
@@ -417,10 +278,6 @@ export const SETTINGS = {
     serverKey: undefined, fromServer: undefined, toServer: undefined,
   },
 
-  // Mark a file viewed when the reviewer scrolls past it or moves on to
-  // another file. Cookie-only like the other review-chrome preferences: it
-  // shapes how the local file list checks itself off and changes no review
-  // semantics (viewed gates nothing on submit).
   reviewAutoViewed: {
     defaultValue: true as boolean,
     fromCookie: () => {
@@ -432,19 +289,6 @@ export const SETTINGS = {
     serverKey: undefined, fromServer: undefined, toServer: undefined,
   },
 
-  // Hovering a token in a code-review diff opens a card with what the search
-  // backend knows about that symbol. Cookie-only like the other review-chrome
-  // preferences: it is presentational, per-browser, and changes no review
-  // semantics — `off` simply means no listeners, no requests and no card.
-  //
-  // This one select REPLACED the original `tokenHoverCards` boolean rather
-  // than sitting beside it: a toggle plus a mode has an unreachable state
-  // (disabled + modifier) and asks one question with two controls. The legacy
-  // cookie is still read — on every load until the user touches this setting,
-  // since a migrating read returns a value and so never triggers the
-  // registry's default-seeding write — so an early adopter who turned cards
-  // off stays off. Resolution is pure and identical every time; see
-  // resolveStoredTokenHoverTrigger.
   tokenHoverTrigger: {
     defaultValue: 'hover' as TokenHoverTrigger,
     fromCookie: () => resolveStoredTokenHoverTrigger(
@@ -456,9 +300,6 @@ export const SETTINGS = {
     serverKey: undefined, fromServer: undefined, toServer: undefined,
   },
 
-  // How long the pointer rests on a symbol before a card is requested. Three
-  // fixed steps, not a slider: "too eager" is a real complaint that neither
-  // `modifier` nor `off` answers, but nobody can tell 340ms from 360ms.
   tokenHoverDelay: {
     defaultValue: DEFAULT_TOKEN_HOVER_DELAY_MS as TokenHoverDelay,
     fromCookie: () => {
@@ -608,7 +449,7 @@ export const SETTINGS = {
   },
 
   diffFontFamily: {
-    defaultValue: '' as string, // empty = theme default
+    defaultValue: '' as string,
     fromCookie: () => storage.getItem('plannotator-diff-font-family') || undefined,
     toCookie: (v: string) => storage.setItem('plannotator-diff-font-family', v),
     serverKey: 'diffOptions',
@@ -650,7 +491,7 @@ export const SETTINGS = {
   },
 
   diffFontSize: {
-    defaultValue: '' as string, // empty = theme default
+    defaultValue: '' as string,
     fromCookie: () => storage.getItem('plannotator-diff-font-size') || undefined,
     toCookie: (v: string) => storage.setItem('plannotator-diff-font-size', v),
     serverKey: 'diffOptions',
@@ -690,13 +531,6 @@ export const SETTINGS = {
     },
     toServer: (v: DiffLineBgIntensity) => ({ diffOptions: { lineBgIntensity: v } }),
   },
-  /** Experimental: author suggestions by editing code in place in the review
-   *  all-files view. Cookie-only (no server sync) while the feature is
-   *  experimental — default OFF, and when off no edit UI renders and no
-   *  editor is ever constructed. (In code-split hosts the editor chunk is
-   *  never fetched; Plannotator's single-file production build inlines all
-   *  dynamic imports, so there the module namespace exists at page load —
-   *  audited free of top-level side effects — but stays inert.) */
   editSuggestions: {
     defaultValue: false as boolean,
     fromCookie: () => {
@@ -739,11 +573,6 @@ export const SETTINGS = {
     },
     toServer: (value: boolean) => ({ reviewAnalysis: { callFlow: value } }),
   },
-  /**
-   * Opt-in background auto-update of the compiled CLI (#1634). The server
-   * always sends the config-file value (default false), so the cookie is only
-   * a mirror and can never turn this on by itself.
-   */
   autoUpdate: {
     defaultValue: false as boolean,
     fromCookie: () => {
@@ -770,8 +599,6 @@ export const SETTINGS = {
     },
     toServer: (v: boolean) => ({ conventionalComments: v }),
   },
-  /** JSON-serialized array of label configs, or null for defaults.
-   *  Synced to ~/.plannotator/config.json as a parsed array (not a string). */
   conventionalLabels: {
     defaultValue: null as string | null,
     fromCookie: () => storage.getItem('plannotator-cc-labels') || undefined,
@@ -795,16 +622,6 @@ export const SETTINGS = {
       }
     },
   },
-  /**
-   * OpenCode's agent switch after plan approval / review feedback (#1390).
-   * null = never chosen: each surface applies its own default (plan approval
-   * switches to "build", review feedback stays), see utils/agentSwitch.
-   *
-   * Server-synced to `agentSwitch` in ~/.plannotator/config.json because some
-   * webviews (Glimpse's WKWebView) keep no cookies between runs, and a lost
-   * choice silently hands the session to the build agent. The cookie keys
-   * are the pre-registry ones, so an upgrade keeps an existing choice.
-   */
   agentSwitch: {
     defaultValue: null as AgentSwitchChoice | null,
     fromCookie: () => readAgentSwitchCookies(),
@@ -812,10 +629,7 @@ export const SETTINGS = {
     serverKey: 'agentSwitch',
     fromServer: (sc: Record<string, unknown>) => {
       const choice = parseAgentSwitchConfig(sc.agentSwitch);
-      // Custom with no name means no switch: never pair it with an old name.
       if (!choice || choice.customName || choice.switchTo === 'custom') return choice;
-      // A plain choice keeps the name typed in the Custom field earlier, so
-      // picking Custom again shows it (the cookie is the only place it lives).
       const customName = storage.getItem(AGENT_SWITCH_CUSTOM_COOKIE);
       return isAgentSwitchName(customName) ? { ...choice, customName } : choice;
     },
@@ -824,17 +638,6 @@ export const SETTINGS = {
       return value === undefined ? {} : { agentSwitch: value };
     },
   },
-  /**
-   * Where the annotate-mode Agent TUI docks: 'left' (where it always docked),
-   * 'right', or 'hidden' (no slot until the user opens it for the session).
-   *
-   * Server-synced so the placement survives the random port every annotate
-   * session runs on — a cookie alone is per-origin, and each invocation is a
-   * new origin, so a cookie-only preference is effectively per-session.
-   *
-   * The cookie key is the pre-registry one, so a user who already picked a
-   * side keeps it across the upgrade.
-   */
   agentTerminalSide: {
     defaultValue: 'left' as AnnotateAgentTerminalSide,
     fromCookie: () => {
@@ -848,11 +651,6 @@ export const SETTINGS = {
       isAnnotateAgentTerminalSide(sc.agentTerminalSide) ? sc.agentTerminalSide : undefined,
     toServer: (v: AnnotateAgentTerminalSide) => ({ agentTerminalSide: v }),
   },
-  /**
-   * Which agent the annotate-mode Agent TUI preselects. Empty string = no
-   * choice recorded yet, in which case the first available agent wins.
-   * Server-synced for the same reason as the placement above.
-   */
   agentTerminalDefaultAgent: {
     defaultValue: '' as string,
     fromCookie: () =>
@@ -868,9 +666,6 @@ export const SETTINGS = {
         : undefined,
     toServer: (v: string) => ({ agentTerminalDefaultAgent: v }),
   },
-  /* SettingDef<any>, not <unknown>: consumers compile this shipped source under
-     their own strictFunctionTypes, where a narrow `toCookie: (v: string) => void`
-     is contravariantly incompatible with `(value: unknown) => void`. */
 } satisfies Record<string, SettingDef<any>>;
 
 export type SettingsMap = typeof SETTINGS;

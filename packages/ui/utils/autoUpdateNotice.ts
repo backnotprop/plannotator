@@ -1,14 +1,3 @@
-/**
- * One-time notice after a background auto-update (#1634).
- *
- * The compiled CLI's servers attach `autoUpdateNotice` to /api/plan and
- * /api/diff when the data dir records an install attempt: `updated` once the
- * running binary is the new version, `failed` when the install script exited
- * non-zero. The notice id is stable per attempt; the "seen" marker is a cookie,
- * which is shared across the random ports sessions run on, so the toast shows
- * once whichever app (plan, annotate, review) loads first.
- */
-
 import { getItem, setItem } from './storage';
 
 export interface AutoUpdateNotice {
@@ -17,10 +6,6 @@ export interface AutoUpdateNotice {
   version: string;
   releaseUrl: string;
   logPath?: string;
-  /**
-   * `mismatch`: the download did not match its checksum; `download`: it could not be downloaded;
-   * `prepare`: it was downloaded but the temp folder could not hold it. The old version is kept in each case.
-   */
   reason?: 'mismatch' | 'download' | 'prepare';
 }
 
@@ -43,17 +28,12 @@ export function parseAutoUpdateNotice(value: unknown): AutoUpdateNotice | undefi
   };
 }
 
-/**
- * True the first time a given notice is claimed in this browser, false after.
- * Claiming marks it seen, so a caller shows the toast only when this is true.
- */
 export function claimAutoUpdateNotice(notice: AutoUpdateNotice): boolean {
   if (getItem(SEEN_KEY) === notice.id) return false;
   setItem(SEEN_KEY, notice.id);
   return true;
 }
 
-/** Title and description for the toast. */
 export function describeAutoUpdateNotice(notice: AutoUpdateNotice): { title: string; description: string } {
   if (notice.kind === 'updated') {
     return { title: `Updated to v${notice.version}`, description: 'Plannotator updated itself in the background.' };

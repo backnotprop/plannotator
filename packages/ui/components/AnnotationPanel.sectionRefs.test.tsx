@@ -1,11 +1,3 @@
-/**
- * `#Heading` links in comment text (DOM-gated), wired the way the editor app
- * wires them: panel `onNavigateAnchor` → Viewer handle `scrollToAnchor`.
- *
- * Failures to catch: a link that scrolls nowhere (panel and Viewer disagree on
- * the anchor), a click that also selects the card, and links appearing for a
- * host that did not opt in.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act, createRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

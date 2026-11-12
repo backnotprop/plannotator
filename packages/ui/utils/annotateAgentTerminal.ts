@@ -4,10 +4,6 @@ import type {
 } from "@plannotator/core/agent-terminal";
 import { configStore } from "../config";
 
-// The side/placement vocabulary lives in @plannotator/core so the settings
-// registry can reach it without importing this module (which would close a
-// cycle through ConfigStore). Re-exported here because this is the seam the
-// editor package imports from.
 export {
   ANNOTATE_AGENT_TERMINAL_SIDES,
   isAnnotateAgentTerminalSide,
@@ -19,13 +15,6 @@ export type {
   AnnotateAgentTerminalSide,
 } from "@plannotator/core/agent-terminal";
 
-/**
- * Both Agent TUI preferences resolve through ConfigStore (server config file >
- * cookie > default) rather than reading cookies directly. Annotate sessions run
- * on a fresh random port every time, so a cookie is scoped to a single session;
- * the server round-trip through ~/.plannotator/config.json is what makes these
- * choices durable. Same seam identity.ts uses for `displayName`.
- */
 export function getSavedAnnotateAgentId(): string | null {
   return configStore.get("agentTerminalDefaultAgent") || null;
 }

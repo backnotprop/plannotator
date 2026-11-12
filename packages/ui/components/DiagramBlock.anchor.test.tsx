@@ -1,23 +1,3 @@
-/**
- * The bridge between a comment composed on a diagram part and an annotation
- * on the document: a mermaid fence parsed from real markdown (so the fence's
- * `startLine` is the parser's own), the captured Chromium svg through the
- * host runtime slot, Chromium's geometry for the parts.
- *
- * What regresses if these fail:
- * - the annotation the block mints does not carry `diagramAnchor`, the
- *   fence's `blockId`, the label as `originalText`, or a `sourceLine` that
- *   names the DOCUMENT line (the fence offset lost, so the export and an
- *   agent's grep land on the wrong line);
- * - a stored annotation with a diagram anchor does not restore onto its
- *   node after a reload, or one whose part is gone is not reported through
- *   `onRestoreReport` (so the panel never shows the "Unanchored" chip);
- * - the popout does not open the same viewer at full size, or Escape on the
- *   canvas closes it while a draft is open;
- * - read-only (an archive) still opens a composer.
- *
- * DOM-gated (DOM_TESTS=1).
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -54,14 +34,11 @@ const MARKDOWN = [
   '',
   'Some prose after.',
 ].join('\n');
-/** `D` is declared on line 7 of the document (1-based). */
 const D_DOCUMENT_LINE = 7;
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let restoreParser: (() => void) | null = null;
-// happy-dom defines the two geometry methods on SVGGraphicsElement, which
-// would shadow a stub on SVGElement; install where the engine defines them.
 const svgProto = (hasDom ? ((globalThis as { SVGGraphicsElement?: typeof SVGElement }).SVGGraphicsElement ?? SVGElement).prototype : {}) as unknown as Record<string, unknown>;
 const elementProto = (hasDom ? Element.prototype : {}) as unknown as Record<string, unknown>;
 const saved = { getBBox: svgProto['getBBox'], getScreenCTM: svgProto['getScreenCTM'] };
@@ -212,8 +189,6 @@ describe.if(hasDom)('DiagramBlock: comments become annotations on the document',
       diagramAnchor: { v: 1, family: 'flowchart', kind: 'node', id: 'Gone', label: 'Nowhere', sourceLine: null },
     };
     const other: Annotation = { ...restored, id: 'a3', blockId: 'block-other' };
-    // Viewer tells the blocks which diagram blocks the document has, so a
-    // comment that names ANOTHER diagram is left to that diagram.
     await mount(
       <DiagramAnchorClaimsContext.Provider value={new DiagramAnchorClaims([block.id, 'block-other'])}>
         <MermaidBlock block={block} annotations={[restored, gone, other]} onRestoreReport={(r) => reports.push(r)} />
@@ -221,7 +196,6 @@ describe.if(hasDom)('DiagramBlock: comments become annotations on the document',
     );
     await waitFor(() => expect(host!.querySelector('[data-diagram-badge="a1"]')).not.toBeNull());
     expect(host!.querySelector('[data-diagram-badge="a2"]')).toBeNull();
-    // Another fence's comment is not this block's.
     expect(host!.querySelector('[data-diagram-badge="a3"]')).toBeNull();
     await waitFor(() => expect(reports.length).toBeGreaterThan(0));
     const last = reports[reports.length - 1]!;
@@ -251,7 +225,6 @@ describe.if(hasDom)('DiagramBlock: comments become annotations on the document',
     await waitFor(() => expect(document.querySelector('[data-diagram-popout]')).not.toBeNull());
     const popout = document.querySelector('[data-diagram-popout]')!;
     await waitFor(() => expect(popout.querySelector('[id$="-flowchart-D-1"]')).not.toBeNull());
-    // Two viewers over one fence carry two render ids.
     expect(popout.querySelector('[id$="-flowchart-D-1"]')!.id).not.toBe(host!.querySelector('[id$="-flowchart-D-1"]')!.id);
     await clickNodeD(popout);
     await waitFor(() => expect(popout.querySelector('[data-diagram-composer]')).not.toBeNull());
@@ -284,8 +257,6 @@ describe.if(hasDom)('DiagramBlock: comments that name no diagram block', () => {
   });
 
   test('an externally posted diagram comment is shown by the first diagram that resolves it; one nobody resolves is unanchored', async () => {
-    // What regresses: `blockId: "external"` matches no block, so the comment
-    // is shown by no diagram and is never reported unanchored either.
     const first = fence();
     const second: Block = { ...first, id: 'block-second' };
     const reports: AnnotationRestoreReport[] = [];
@@ -297,7 +268,6 @@ describe.if(hasDom)('DiagramBlock: comments that name no diagram block', () => {
       </DiagramAnchorClaimsContext.Provider>,
     );
     await waitFor(() => expect(host!.querySelector('#first [data-diagram-badge="e1"]')).not.toBeNull());
-    // Both diagrams could resolve node D; only the first in document order shows it.
     await waitFor(() => expect(host!.querySelector('#second [data-diagram-badge="e1"]')).toBeNull());
     expect(host!.querySelector('[data-diagram-badge="e2"]')).toBeNull();
     await waitFor(() => {

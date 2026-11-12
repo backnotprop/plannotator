@@ -1,11 +1,3 @@
-/**
- * Glue between `:::question` answers (`@plannotator/core/question-block`)
- * and the UI's `Annotation` list. An answer is ONE annotation carrying
- * `questionAnswer`, id `ann-question-<key>`, so drafts, reload, the panel and
- * host persistence carry it with no second store. These helpers are pure; a
- * host (or Plannotator's editor) calls `upsertQuestionAnswerAnnotation` from
- * the Viewer's `onAnswerQuestion` and stores the returned list.
- */
 import {
   buildQuestionAnswerAnnotation,
   canonicalQuestionAnswer,
@@ -21,7 +13,6 @@ import {
 } from '@plannotator/core/question-block';
 import { AnnotationType, type Annotation } from '../types';
 
-/** The answer annotation for a question block, typed for the UI. */
 export const questionAnswerToAnnotation = (
   blockId: string,
   answer: QuestionAnswer,
@@ -31,8 +22,6 @@ export const questionAnswerToAnnotation = (
   return { ...record, type: AnnotationType.COMMENT };
 };
 
-/** Valid answers in an annotation list, keyed by question key (first wins).
- *  Malformed `questionAnswer` values are skipped, never thrown on. */
 export const collectQuestionAnswers = (annotations: ReadonlyArray<Annotation>): Map<string, QuestionAnswer> => {
   const out = new Map<string, QuestionAnswer>();
   for (const ann of annotations) {
@@ -43,11 +32,6 @@ export const collectQuestionAnswers = (annotations: ReadonlyArray<Annotation>): 
   return out;
 };
 
-/** The answers the cards draw, keyed by question key. A host that keeps its
- *  answers itself passes them (a Map or a plain object keyed by the
- *  de-duplicated question key) and they replace the annotation-derived ones
- *  outright; each entry is validated like any other reader, so a malformed
- *  one is dropped. Without host answers this is `collectQuestionAnswers`. */
 export const resolveQuestionAnswers = (
   annotations: ReadonlyArray<Annotation>,
   hostAnswers?: ReadonlyMap<string, QuestionAnswer> | Readonly<Record<string, QuestionAnswer>> | null,
@@ -64,16 +48,9 @@ export const resolveQuestionAnswers = (
   return out;
 };
 
-/** Whether an annotation is a question answer (validated). */
 export const isQuestionAnswerAnnotation = (ann: Pick<Annotation, 'questionAnswer'>): boolean =>
   ann.questionAnswer != null && parseQuestionAnswer(ann.questionAnswer) !== null;
 
-/**
- * Apply one `onAnswerQuestion(blockId, answer, key)` call to an annotation
- * list: replace the question's answer annotation in place (keeping its
- * `createdA` and position), append it when new, or remove it when `answer`
- * is null or empty. Returns the same array when nothing changed.
- */
 export const upsertQuestionAnswerAnnotation = (
   annotations: ReadonlyArray<Annotation>,
   blockId: string,
@@ -96,27 +73,16 @@ export const upsertQuestionAnswerAnnotation = (
   return copy;
 };
 
-// ─────────────────────────── Panel + progress ───────────────────────────
-
-/** One row of the annotations panel's Questions section. */
 export interface QuestionPanelRow {
   key: string;
-  /** "Question N of M" number; absent for an answer whose question is gone. */
   number?: number;
   prompt: string;
-  /** Document line of the prompt, when the question is in the document. */
   line?: number;
-  /** The question block, when the question is in the document. */
   blockId?: string;
   status: QuestionStatus;
-  /** One line describing the answer: the picks, Other or free text; the
-   *  settled choice; `Skipped`. Absent while the question is open. */
   answerText?: string;
   hasNote: boolean;
-  /** The answer's annotation, when there is one. */
   annotationId?: string;
-  /** The answer's question is no longer in the document (the prompt was
-   *  edited or the block removed). The answer still exports. */
   orphaned: boolean;
 }
 
@@ -129,12 +95,6 @@ const answerSummary = (answer: QuestionAnswer): string => {
   return parts.join('; ');
 };
 
-/**
- * The Questions section rows for a document: every question block in
- * document order, then one row per answer whose question is no longer in the
- * document (`orphaned`). Pure; the status rule is core's `questionStatus`, the
- * same one the card draws.
- */
 export const buildQuestionPanelRows = (
   blocks: ReadonlyArray<QuestionSourceBlock>,
   annotations: ReadonlyArray<Annotation>,
@@ -186,8 +146,6 @@ export const buildQuestionPanelRows = (
   return rows;
 };
 
-/** Progress over the document's questions (orphaned answers excluded):
- *  `done` counts answered and settled questions, `total` every question. */
 export const questionProgress = (rows: ReadonlyArray<QuestionPanelRow>): { done: number; total: number } => {
   const live = rows.filter((r) => !r.orphaned);
   return {
@@ -196,12 +154,6 @@ export const questionProgress = (rows: ReadonlyArray<QuestionPanelRow>): { done:
   };
 };
 
-/**
- * The key of the next open question after `afterKey` in document order,
- * wrapping around; the first open question when `afterKey` is absent or not
- * a question. Null when no question is open (answered, settled and skipped
- * questions are not open).
- */
 export const nextOpenQuestionKey = (
   rows: ReadonlyArray<QuestionPanelRow>,
   afterKey?: string | null,
@@ -215,10 +167,6 @@ export const nextOpenQuestionKey = (
   return null;
 };
 
-/** Scroll a question card into view and focus its first control (the
- *  first choice, or the text box). Returns false when the card is not in
- *  the DOM. The focus does not scroll; the card scrolls smoothly to the
- *  centre. */
 export const focusQuestionCard = (key: string, root: ParentNode = document): boolean => {
   const card = root.querySelector<HTMLElement>(`fieldset[data-question-key="${key.replace(/"/g, '')}"]`);
   if (!card) return false;

@@ -1,12 +1,3 @@
-/**
- * The panel's thread ordering must stay linear: 2,000 threaded comments took
- * 4.5 s and 5,000 over a minute per render when the sort comparator walked
- * each reply chain with a linear parent lookup. POST /api/external-annotations
- * has no depth or count limit, so a buggy tool could freeze the tab.
- *
- * Exercises the same helpers the panel renders from (threadReplies plus the
- * shared root-timestamp resolution) without a DOM.
- */
 import { describe, expect, test } from 'bun:test';
 import { resolveThreadRootTimestamps } from '@plannotator/core/annotation-threads';
 import { AnnotationType, type Annotation } from '../types';

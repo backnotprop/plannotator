@@ -1,33 +1,17 @@
-// A box dragged over the board, like the Mac's screenshot selection: what is
-// inside it (the parts, the words, the code), where it sits, and its picture.
-// No request of its own and no permission prompt: the host hands over any bytes.
 import { useEffect, useRef, type RefObject } from 'react';
 import { parseShapeCodeTarget, SHAPE_LIMITS, type ShapeNoteBox, type ShapeNoteInput, type ShapeViewId } from '@plannotator/core/shape';
 
-/** A press that moves less than this is a click, as it always was. */
 const DRAG_PX = 5;
 const PICTURE_MAX_SIDE = 1600;
 
-/**
- * What a box hands over, one object: the same one for Change it, Ask and Show me.
- * `parts` and `code` are in the drawing's order, and `picture` settles shortly after
- * the drag (null when there is none: a capture that failed).
- */
 export interface ShapeBoxSelection {
   view: ShapeViewId;
-  /** The board version the box was drawn on. */
   v: number;
-  /** `data-mark` ids inside the box. */
   parts: string[];
-  /** The words inside the box, as shown. */
   words: string;
-  /** `data-code` values inside the box ("src/a.ts#L42"). */
   code: string[];
-  /** Where it sits, as fractions of the drawing. */
   box: ShapeNoteBox;
-  /** A PNG of the box as a data: URL. */
   picture: Promise<string | null>;
-  /** What the box's composer is headed with ("Picture · 3 parts"), when the board hands the box on. */
   label?: string;
 }
 
@@ -36,7 +20,6 @@ type Rect = Pick<DOMRect, 'left' | 'top' | 'right' | 'bottom'>;
 const overlap = (a: Rect, b: Rect) => Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) * Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
 const area = (r: Rect) => Math.max(0, r.right - r.left) * Math.max(0, r.bottom - r.top);
 
-/** Seen on the page? A drawing keeps a dark and a light copy of a picture and hides one with opacity. */
 function seen(el: Element, memo: Map<Element, boolean>): boolean {
   const known = memo.get(el);
   if (known !== undefined) return known;
@@ -67,7 +50,6 @@ function wordsIn(scope: Element, box: Rect, memo: Map<Element, boolean>): string
   return words.length > SHAPE_LIMITS.quote ? `${words.slice(0, SHAPE_LIMITS.quote - 1).replace(/\s+\S*$/, '')}…` : words;
 }
 
-/** The parts and words inside a box on `scope` (the drawing). Null: the box missed it. */
 export function readBox(scope: HTMLElement, box: Rect): Pick<ShapeBoxSelection, 'parts' | 'words' | 'code'> & { box: ShapeNoteBox } | null {
   const s = scope.getBoundingClientRect();
   if (!s.width || !s.height || !overlap(s, box)) return null;
@@ -78,13 +60,11 @@ export function readBox(scope: HTMLElement, box: Rect): Pick<ShapeBoxSelection, 
     const r = rectOf(el);
     return area(r) ? overlap(r, box) / area(r) : 0;
   };
-  // How much of a part's width and of its height the box crosses.
   const across = (el: Element) => {
     const r = rectOf(el);
     const w = r.right - r.left, h = r.bottom - r.top;
     return { x: w ? Math.max(0, Math.min(r.right, box.right) - Math.max(r.left, box.left)) / w : 0, y: h ? Math.max(0, Math.min(r.bottom, box.bottom) - Math.max(r.top, box.top)) / h : 0 };
   };
-  // Inside another part: in its markup, or drawn within its bounds (an agent draws a field beside its form's group).
   const within = (el: Element, o: Element) => {
     if (o === el) return false;
     if (o.contains(el)) return true;
@@ -92,20 +72,15 @@ export function readBox(scope: HTMLElement, box: Rect): Pick<ShapeBoxSelection, 
     return a.left >= b.left - 2 && a.top >= b.top - 2 && a.right <= b.right + 2 && a.bottom <= b.bottom + 2 && area(a) < area(b);
   };
   const marks = [...scope.querySelectorAll('[data-mark]')].filter((el) => seen(el, memo));
-  // People drag lazily: a box from the middle of one row to the middle of another means both. A part counts when the
-  // box crosses most of half its width and of half its height, and a quarter of it in all (a corner clipped on the way
-  // does not). A row with a wide tag is boxed only to its middle by a drag that stops mid-way along the shorter rows.
   const taken = marks.filter((el) => {
     const c = across(el);
     return c.x >= 0.45 && c.y >= 0.45 && cover(el) >= 0.25;
   });
-  // A part mostly boxed stands for what is inside it; one only partly boxed gives way to its parts inside the box.
   let parts = taken.filter((el) => {
     if (cover(el) < 0.75 && taken.some((o) => within(o, el))) return false;
     return !taken.some((o) => within(el, o) && cover(o) >= 0.75);
   });
   if (!parts.length) {
-    // A box inside one big part: that part (the smallest one under most of the box).
     const under = marks
       .map((el) => ({ el, on: overlap(el.getBoundingClientRect(), box), size: area(el.getBoundingClientRect()) }))
       .filter((m) => m.on > 0)
@@ -128,7 +103,6 @@ export function readBox(scope: HTMLElement, box: Rect): Pick<ShapeBoxSelection, 
   };
 }
 
-/** The note a box makes: parts in the note's `part` (comma-separated), its words in `quote`. */
 export async function boxNoteInput(sel: ShapeBoxSelection, text: string): Promise<Omit<ShapeNoteInput, 'kind' | 'v'>> {
   let part = '';
   for (const id of sel.parts) if ((part ? part.length + 1 : 0) + id.length <= 200) part = part ? `${part},${id}` : id;
@@ -136,9 +110,6 @@ export async function boxNoteInput(sel: ShapeBoxSelection, text: string): Promis
   return { view: sel.view, part: part || null, quote: sel.words || null, text, box: sel.box, ...(sel.code.length ? { code: sel.code } : {}), ...(picture ? { picture } : {}) };
 }
 
-// ── drawing a box on the board: in the drawing's own coordinates, so it scrolls and scales with it ──
-
-/** A box's own element, inside `scope`. All inline. */
 export function placeBox(scope: HTMLElement, box: ShapeNoteBox, k = 1, comment?: string): HTMLElement {
   if (getComputedStyle(scope).position === 'static') scope.style.position = 'relative';
   const el = document.createElement('div');
@@ -162,23 +133,17 @@ export interface KeptBox {
   text: string;
 }
 
-/** The kept boxes on `scope`, redrawn. The box a composer is open on is left alone. */
 export function syncKeptBoxes(scope: HTMLElement, boxes: readonly KeptBox[], k = 1): void {
   for (const el of scope.querySelectorAll('[data-shp-kept]')) el.remove();
   for (const b of boxes) placeBox(scope, b.box, k, b.text).setAttribute('data-shp-kept', b.id);
 }
 
-// ── the picture ──
-
-/** Bytes a host hands over (a data: URL): the drawing's images and fonts, which an image of the page cannot load itself. */
 export type ShapeReadAsset = (url: string) => Promise<string | null>;
 
-/** Safari draws a blurred box-shadow inside an SVG image as a grey block. Without shadows its picture is clean. */
 const safariPicture = () => typeof navigator !== 'undefined' && /AppleWebKit/.test(navigator.userAgent) && !/Chrome|Chromium|Edg|OPR/.test(navigator.userAgent);
 
 const fontData = new Map<string, Promise<string | null>>();
 
-/** The page's latin faces of the families the drawing uses, with their bytes inlined. */
 async function fontCss(families: string, read: ShapeReadAsset): Promise<string> {
   const faces: Promise<string | null>[] = [];
   for (const sheet of Array.from(document.styleSheets)) {
@@ -203,10 +168,6 @@ async function fontCss(families: string, read: ShapeReadAsset): Promise<string> 
   return (await Promise.all(faces)).filter(Boolean).join('');
 }
 
-/**
- * What the picture shows: the box, grown to take in the whole of each part it picked (a lazy box cuts a row in half;
- * the agent should see the rows), with a little room around, and never past the drawing.
- */
 export function pictureRect(scope: HTMLElement, box: Rect, parts: readonly string[]): Rect {
   let { left, top, right, bottom } = box;
   for (const id of parts) {
@@ -223,11 +184,6 @@ export function pictureRect(scope: HTMLElement, box: Rect, parts: readonly strin
   return { left: Math.max(s.left, left - pad), top: Math.max(s.top, top - pad), right: Math.min(s.right, right + pad), bottom: Math.min(s.bottom, bottom + pad) };
 }
 
-/**
- * A PNG of the box: the drawing, serialized, in an SVG foreignObject, drawn to a canvas. A `data:` URL on purpose:
- * from a `blob:` one the canvas is tainted and cannot be read. Null outside a shadow root and for any failure: the
- * words still go.
- */
 export async function captureBox(scope: HTMLElement, box: Rect, read?: ShapeReadAsset, drawn?: Rect): Promise<string | null> {
   try {
     const root = scope.getRootNode();
@@ -244,7 +200,6 @@ export async function captureBox(scope: HTMLElement, box: Rect, read?: ShapeRead
     for (const el of clone.querySelectorAll('[data-shp-box]')) el.remove();
     clone.classList.remove('entering');
     clone.classList.add('skip');
-    // What a person picked on the drawing (a `pick` radio) is state, not an attribute: the copy needs it spelled out.
     const inputs = scope.querySelectorAll<HTMLInputElement>('input');
     clone.querySelectorAll('input').forEach((input, i) => {
       if (inputs[i]?.checked) input.setAttribute('checked', '');
@@ -285,7 +240,6 @@ export async function captureBox(scope: HTMLElement, box: Rect, read?: ShapeRead
     size();
     const g = canvas.getContext('2d');
     if (!g) return null;
-    // The drawing's ground: a colour-mix of the theme's resolves only on an element.
     const ground = document.createElement('i');
     ground.style.cssText = `display:none;background:${paper}`;
     scope.appendChild(ground);
@@ -299,7 +253,6 @@ export async function captureBox(scope: HTMLElement, box: Rect, read?: ShapeRead
       g.fillRect(0, 0, canvas.width, canvas.height);
       g.setTransform(scale, 0, 0, scale, (r.left - box.left) * scale, (r.top - box.top) * scale);
       g.drawImage(img, 0, 0, r.width, r.height);
-      // The box the person drew, where it was, when the picture takes in more than it.
       if (drawn && (drawn.left > box.left || drawn.top > box.top || drawn.right < box.right || drawn.bottom < box.bottom)) {
         g.setTransform(scale, 0, 0, scale, -box.left * scale, -box.top * scale);
         g.strokeStyle = stroke;
@@ -308,12 +261,10 @@ export async function captureBox(scope: HTMLElement, box: Rect, read?: ShapeRead
       }
     };
     draw();
-    // WebKit's first draw of an SVG image can miss what is inlined in it.
     if (safariPicture()) {
       await new Promise((ok) => setTimeout(ok, 220));
       draw();
     }
-    // A busy picture over the limit comes smaller rather than not at all: the size it would fit, a little under.
     let png = canvas.toDataURL('image/png');
     for (let tries = 0; png.length > SHAPE_LIMITS.notePicture && tries < 4; tries++) {
       scale *= Math.sqrt(SHAPE_LIMITS.notePicture / png.length) * 0.9;
@@ -327,21 +278,13 @@ export async function captureBox(scope: HTMLElement, box: Rect, read?: ShapeRead
   }
 }
 
-// ── the drag ──
-
 export interface BoxDragOptions {
   stageRef: RefObject<HTMLElement | null>;
-  /** Annotating with the pointer, nothing open. */
   enabled: boolean;
-  /** A drag began: anything that pops up under the pointer goes. */
   onStart: () => void;
   onEnd: (box: Rect) => void;
 }
 
-/**
- * A mouse press that travels draws a box; a press that does not is left to be the click it was. A finger or a pen
- * never starts one (dragging scrolls). Returns a ref that says whether a drag is on, for the board's own Escape.
- */
 export function useBoxDrag({ stageRef, enabled, onStart, onEnd }: BoxDragOptions): RefObject<boolean> {
   const live = useRef({ onStart, onEnd });
   live.current = { onStart, onEnd };
@@ -351,12 +294,10 @@ export function useBoxDrag({ stageRef, enabled, onStart, onEnd }: BoxDragOptions
     const stage = stageRef.current;
     if (!stage || !enabled) return;
 
-    // A board that goes mid-drag takes the drag with it: its listeners would otherwise eat the next Escape.
     let endDrag: (() => void) | null = null;
     const onDown = (down: PointerEvent) => {
       endDrag?.();
       if (down.pointerType !== 'mouse' || down.button !== 0 || down.ctrlKey) return;
-      // A press on a scrollbar scrolls.
       for (const s of stage.querySelectorAll<HTMLElement>('.shp-view:not(.leaving), .shp-drawn.pan')) {
         const r = s.getBoundingClientRect();
         const inside = down.clientX >= r.left && down.clientX <= r.right && down.clientY >= r.top && down.clientY <= r.bottom;
@@ -365,7 +306,6 @@ export function useBoxDrag({ stageRef, enabled, onStart, onEnd }: BoxDragOptions
       let band: HTMLElement | null = null;
       let cancelled = false;
       let last: Rect | null = null;
-      // The box stays on the board: under an open panel it stops at the panel's edge.
       const stageBox = stage.getBoundingClientRect();
       const panel = stage.closest('.shp-root')?.querySelector('.shp-sidep.open:not(.sheet)')?.getBoundingClientRect();
       const maxX = panel ? Math.min(stageBox.right, panel.left) : stageBox.right;
@@ -386,8 +326,7 @@ export function useBoxDrag({ stageRef, enabled, onStart, onEnd }: BoxDragOptions
         if (!band) {
           if (Math.hypot(e.clientX - down.clientX, e.clientY - down.clientY) < DRAG_PX) return;
           dragging.current = true;
-          // Captured: what is under the pointer gets no hover, so no bubble pops and no part lights up.
-          try { stage.setPointerCapture(down.pointerId); } catch { /* the pointer is gone; pointerup ends it */ }
+          try { stage.setPointerCapture(down.pointerId); } catch { }
           band = document.createElement('div');
           band.className = 'shp-box-band';
           stage.parentElement?.appendChild(band);
@@ -422,7 +361,6 @@ export function useBoxDrag({ stageRef, enabled, onStart, onEnd }: BoxDragOptions
         e.preventDefault();
         e.stopImmediatePropagation();
         cancelled = true;
-        // The pointer is still down: the press stays open until it lifts, so its click can be eaten.
         band.remove();
         band = null;
         dragging.current = false;
@@ -433,7 +371,6 @@ export function useBoxDrag({ stageRef, enabled, onStart, onEnd }: BoxDragOptions
       window.addEventListener('keydown', onKey, true);
       endDrag = finish;
     };
-    // A link or a picture would start the browser's own drag, which ends the pointer.
     const onDragStart = (e: Event) => e.preventDefault();
     stage.addEventListener('pointerdown', onDown, true);
     stage.addEventListener('dragstart', onDragStart, true);

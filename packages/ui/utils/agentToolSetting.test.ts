@@ -1,9 +1,3 @@
-/**
- * Reading the agent tool switch out of serverConfig and writing it back.
- * Guards: an older server, OpenCode 1 or a Workspaces host (no agentToolHost)
- * yielding a setting; a failed write resolving as if it saved; the offer
- * applying where it should not.
- */
 import { describe, expect, test } from 'bun:test';
 import { parseAgentToolSetting, saveAgentToolSetting } from './agentToolSetting';
 import { agentToolAnnouncementEligible, agentToolOfferApplies, type AgentToolAnnouncementGateState } from './agentToolAnnouncement';
@@ -14,7 +8,6 @@ describe('parseAgentToolSetting', () => {
       .toEqual({ host: 'pi', enabled: false, configured: false });
     expect(parseAgentToolSetting({ agentToolHost: 'opencode', agentToolEnabled: true, agentToolConfigured: true, agentToolEnv: true }))
       .toEqual({ host: 'opencode', enabled: true, configured: true, env: true });
-    // The Pi extension inside Oh My Pi reports its own host (on by default there).
     expect(parseAgentToolSetting({ agentToolHost: 'oh-my-pi', agentToolEnabled: true, agentToolConfigured: false, agentTool: true }))
       .toEqual({ host: 'oh-my-pi', enabled: true, configured: false });
   });
@@ -22,7 +15,6 @@ describe('parseAgentToolSetting', () => {
   test('nothing without a known tool host', () => {
     expect(parseAgentToolSetting(undefined)).toBeUndefined();
     expect(parseAgentToolSetting({})).toBeUndefined();
-    // A saved value alone (a session whose host has no tool) is not a switch.
     expect(parseAgentToolSetting({ agentTool: true, agentToolConfigured: true })).toBeUndefined();
     expect(parseAgentToolSetting({ agentToolHost: 'codex', agentToolEnabled: false })).toBeUndefined();
     expect(parseAgentToolSetting({ agentToolHost: 'pi' })).toBeUndefined();
@@ -69,7 +61,6 @@ describe('agent tool offer eligibility', () => {
     for (const setting of [
       undefined,
       { host: 'claude-code', enabled: false, configured: false },
-      // Oh My Pi has the tool on by default: nothing to offer, even if it reads off.
       { host: 'oh-my-pi', enabled: true, configured: false },
       { host: 'oh-my-pi', enabled: false, configured: false },
       { host: 'pi', enabled: true, configured: true },

@@ -1,7 +1,3 @@
-/**
- * Import Modal for loading teammate annotations from a share URL
- */
-
 import React, { useState, useRef } from 'react';
 import type { ImportResult } from '../hooks/useSharing';
 
@@ -33,7 +29,6 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     setResult(res);
     setLoading(false);
     if (res.success && res.count > 0) {
-      // Auto-close after successful import
       autoCloseTimer.current = setTimeout(() => {
         autoCloseTimer.current = null;
         setUrl('');
@@ -65,7 +60,6 @@ export const ImportModal: React.FC<ImportModalProps> = ({
         className="bg-card border border-border rounded-xl w-full max-w-lg flex flex-col shadow-2xl"
         onClick={e => e.stopPropagation()}
       >
-        {/* Header */}
         <div className="p-4 border-b border-border">
           <div className="flex justify-between items-center">
             <h3 className="font-semibold text-sm">Import Teammate Review</h3>
@@ -80,7 +74,6 @@ export const ImportModal: React.FC<ImportModalProps> = ({
           </div>
         </div>
 
-        {/* Body */}
         <div className="p-4 space-y-4">
           <div>
             <label className="block text-xs font-medium text-muted-foreground mb-2">
@@ -102,7 +95,6 @@ export const ImportModal: React.FC<ImportModalProps> = ({
             Paste a share link from a teammate to import their annotations into the current plan review.
           </p>
 
-          {/* Result feedback */}
           {result && (
             <div className={`rounded-lg px-3 py-2 text-xs ${
               result.success && result.count > 0
@@ -124,7 +116,6 @@ export const ImportModal: React.FC<ImportModalProps> = ({
           )}
         </div>
 
-        {/* Footer */}
         <div className="p-4 border-t border-border flex justify-end gap-2">
           <button
             onClick={handleClose}

@@ -1,8 +1,3 @@
-/**
- * `keepBlankLines` (the Inbox's person-typed text) records a run of 2+ blank
- * lines before a paragraph. Without it, plan review and annotate parse
- * exactly as before: the block list carries no such field.
- */
 import { expect, test } from 'bun:test';
 import { parseMarkdownToBlocks } from './parser';
 

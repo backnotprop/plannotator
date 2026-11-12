@@ -1,11 +1,3 @@
-/**
- * Re-export surface test: hosts import wikiLinks (and its types) from
- * @plannotator/ui's MarkdownEditor module — never from @plannotator/atomic-editor
- * directly (the engine is outside the consumer import allowlist).
- *
- * Runs without DOM: it pins identity and the type surface, not editor behavior
- * (the extensions seam itself is covered by MarkdownEditor.extensions.test.tsx).
- */
 import { describe, test, expect } from 'bun:test';
 import {
   wikiLinks as engineWikiLinks,
@@ -33,8 +25,6 @@ describe('MarkdownEditor module: wikiLinks re-export', () => {
   });
 
   test('the config types round-trip through the ui surface', () => {
-    // Compile-time assertions: these fail typecheck (not just this test) if
-    // the re-exported types drift from the engine's contracts.
     const suggestion: WikiLinkSuggestion = { target: 'doc_01XYZ', label: 'Roadmap' };
     const resolved: WikiLinkResolvedTarget = {
       target: 'doc_01XYZ',
@@ -48,9 +38,6 @@ describe('MarkdownEditor module: wikiLinks re-export', () => {
       onOpen: () => {},
       openOnClick: true,
       maxSuggestions: 10,
-      // Engine ≥0.7.0: labeled links opt into resolved titles. This line is
-      // the seam assertion — it fails typecheck if the flag ever drops out of
-      // the ui re-export of WikiLinksConfig.
       preferResolvedLabel: true,
     };
     const extension = wikiLinks(config);

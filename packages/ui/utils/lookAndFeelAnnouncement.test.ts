@@ -26,8 +26,6 @@ describe('plan look choice gate', () => {
     setStorageBackend(memoryStorage);
 
     expect(needsLookAndFeelAnnouncement()).toBe(true);
-    // ConfigStore seeds this default before the chooser initializes. It must
-    // not be mistaken for a user decision.
     values.set('plannotator-grid-enabled', 'true');
     expect(needsLookAndFeelAnnouncement()).toBe(true);
 

@@ -1,10 +1,3 @@
-/**
- * #1647: scroll keys do nothing on load because the document scrolls inside
- * <main>, not the window. These tests guard the routing that fills that gap
- * and, just as much, every owner it must stay out of the way of.
- *
- * DOM-gated: run with DOM_TESTS=1 (listed in .github/workflows/test.yml).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -16,7 +9,6 @@ let host: HTMLElement | null = null;
 
 interface ScrollCall { readonly top?: number }
 
-/** A viewport that reports overflow and records the scrolls asked of it. */
 function makeViewport(): { el: HTMLElement; calls: ScrollCall[] } {
   const el = document.createElement('main');
   el.style.overflowY = 'auto';
@@ -54,7 +46,6 @@ function pointerDown(target: EventTarget): void {
   target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
 }
 
-// Plain objects, not `new KeyboardEvent`: this block runs in the non-DOM job too.
 const k = (init: Partial<ScrollKeyInput> & { key: string }) => scrollKeyAction({
   isComposing: false, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false, ...init,
 });
@@ -160,20 +151,16 @@ describe('useScrollKeyRouting', () => {
     const { el, calls } = makeViewport();
     await mount(el);
 
-    // A click in the document: the browser now scrolls <main> natively, so
-    // routing too would move it twice.
     pointerDown(el.querySelector('p')!);
     expect(key(document.body, { key: 'PageDown' }).defaultPrevented).toBe(false);
     expect(calls).toEqual([]);
 
-    // A click on chrome with nothing scrollable above it (the header).
     const header = document.createElement('header');
     document.body.appendChild(header);
     pointerDown(header);
     key(document.body, { key: 'PageDown' });
     expect(calls).toHaveLength(1);
 
-    // A click on a node that then goes away (a dismissed first-run dialog).
     const dialogButton = document.createElement('button');
     el.appendChild(dialogButton);
     pointerDown(dialogButton);

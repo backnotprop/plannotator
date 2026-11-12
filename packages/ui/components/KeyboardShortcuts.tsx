@@ -10,8 +10,6 @@ import {
 } from '../shortcuts';
 import { isMac, modKey, altKey } from '../utils/platform';
 
-/* ─── Key cap component ─── */
-
 const Kbd: React.FC<{ children: React.ReactNode; wide?: boolean }> = ({ children, wide }) => (
   <kbd
     className={`inline-flex items-center justify-center h-[22px] ${
@@ -22,8 +20,6 @@ const Kbd: React.FC<{ children: React.ReactNode; wide?: boolean }> = ({ children
   </kbd>
 );
 
-/* ─── Key combo renderer ─── */
-
 const Keys: React.FC<{ keys: string[] }> = ({ keys }) => (
   <span className="inline-flex items-center gap-0.5">
     {keys.map((k, i) => (
@@ -31,8 +27,6 @@ const Keys: React.FC<{ keys: string[] }> = ({ keys }) => (
     ))}
   </span>
 );
-
-/* ─── Shortcut row ─── */
 
 const ShortcutRow: React.FC<{ keys: string[]; desc: string; hint?: string }> = ({ keys, desc, hint }) => (
   <div className="flex items-center justify-between py-1">
@@ -51,8 +45,6 @@ const ShortcutRow: React.FC<{ keys: string[]; desc: string; hint?: string }> = (
   </div>
 );
 
-/* ─── Section ─── */
-
 const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
   <div className="space-y-0.5">
     <div className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-1.5">
@@ -62,12 +54,8 @@ const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title
   </div>
 );
 
-/* ─── Platform-aware key names ─── */
-
 const enter = isMac ? '⏎' : '↵';
 const shiftKey = isMac ? '⇧' : 'Shift';
-
-/* ─── Shortcut data ─── */
 
 interface Shortcut {
   keys: string[];
@@ -145,7 +133,6 @@ const vimShortcuts: ShortcutSection[] = (() => {
   return Array.from(sections, ([title, shortcuts]) => ({ title, shortcuts }));
 })();
 
-/** Sections read from registry scopes (this system's keys), so they cannot drift. */
 function scopeSections(scope: ShortcutScopeDefinition<any>): ShortcutSection[] {
   const sections = new Map<string, Shortcut[]>();
   const entries = listScopeShortcuts(scope)
@@ -246,9 +233,6 @@ const reviewShortcuts: ShortcutSection[] = [
   },
 ];
 
-/* ─── Exported panel ─── */
-
-/** Render the surface shortcut reference, including opt-in Vim commands. */
 export const KeyboardShortcuts: React.FC<{
   mode: 'plan' | 'annotate' | 'review';
   vimModeEnabled?: boolean;

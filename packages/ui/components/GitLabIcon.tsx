@@ -1,9 +1,5 @@
 import React from "react";
 
-/**
- * GitLab tanuki icon using official SVG paths.
- * Uses currentColor + opacity layers for theme-adaptive rendering.
- */
 export const GitLabIcon: React.FC<{ className?: string }> = ({ className }) => (
   <svg
     className={className}

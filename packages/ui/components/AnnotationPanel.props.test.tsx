@@ -1,11 +1,3 @@
-/**
- * Consumer-surface contract for AnnotationPanel's host props:
- *   - readOnly hides every mutation affordance (delete/edit on all card kinds)
- *   - renderCardFooter renders a per-card slot whose interactions do NOT
- *     select the card
- *   - embedded presentation leaves stage geometry and chrome to its host
- * All default to today's behavior (mutable panel, no footer).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -79,10 +71,6 @@ describe('AnnotationPanel consumer props', () => {
   });
 
   test.skipIf(!hasDom)('readOnly hides direct-edit discard but keeps the host footer slot', async () => {
-    // The footer's contents are host-owned and may be pure read affordances
-    // (a replies list, a copy link) — view-only panels losing them was the
-    // Workspaces regression behind the 0.30.0 change. Built-in mutation
-    // affordances stay hidden; the host gates its own footer contents.
     await mount(
       <AnnotationPanel
         {...baseProps}
@@ -126,8 +114,6 @@ describe('AnnotationPanel consumer props', () => {
       replyBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     expect(footerClicks).toBe(1);
-    // The click bubbled only to the slot wrapper, which stops propagation —
-    // the card's onSelect must not fire.
     expect(selected).toHaveLength(0);
   });
 

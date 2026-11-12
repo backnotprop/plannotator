@@ -1,8 +1,3 @@
-/**
- * Where "Follow an example" puts a step's tag when its first spot covers something (`bestSpot`). What
- * regresses: tags land on an arrow's label, on another part's edge or on a line, as on a real agent's
- * board, where a second tag on the same part was pushed up onto the box above. Pure geometry, no DOM.
- */
 import { describe, expect, test } from 'bun:test';
 import { besideOf, bestSpot, type Box } from './followPainter';
 
@@ -12,7 +7,6 @@ const at = (t: Box, go: { dx: number; dy: number }): Box => ({ left: t.left + go
 const anywhere = () => true;
 const beside = (part: Box) => besideOf(part, 'mark');
 
-// A part 240 wide, its tag above its top edge, right-aligned 12 px in.
 const part = box(300, 300, 240, 64);
 const tag = box(358, 270, 170, 26);
 
@@ -23,12 +17,10 @@ describe('a step tag that covers something', () => {
     const r = at(tag, go);
     expect(meets(r, label)).toBe(false);
     expect(beside(part)(r)).toBe(true);
-    // Near where it was put: a short step up (24 px) costs less than sliding past the label (108 px).
     expect(go).toMatchObject({ spot: 0, dx: 0, dy: -24 });
   });
 
   test('a second tag on the same part never lands on the part above it', () => {
-    // The real board: step 4's tag sits over the part already, and the part above is one row up.
     const placed = box(354, 266, 178, 34);
     const above = box(300, 172, 240, 64);
     const go = bestSpot([tag], [placed, above], [], anywhere, beside(part))!;
@@ -47,12 +39,9 @@ describe('a step tag that covers something', () => {
   });
 
   test('never floats off its own part, even when that spot is nearer', () => {
-    // Above the part the only room is past 40 px up, where the tag no longer reads as the part's;
-    // on the bottom edge there is room a little to the right.
     const overTop = box(250, 256, 400, 44);
     const nearBottom = box(300, 340, 140, 60);
     const under = box(358, 351, 170, 26);
-    // The middle of its own part is taken too, as the painter passes it: a tag sits on an edge, never across the box.
     const middle = box(300, 313.5, 240, 37);
     const go = bestSpot([tag, under], [overTop, nearBottom, middle], [], anywhere, beside(part))!;
     expect(go.spot).toBe(1);
@@ -60,7 +49,6 @@ describe('a step tag that covers something', () => {
   });
 
   test("a crowded phone: a tag meets another tag before it covers the drawing's words", () => {
-    // Every spot over the top edge is on a frame's label; every spot on the bottom edge meets a tag already placed.
     const label = box(250, 240, 400, 60);
     const placed = box(250, 340, 400, 100);
     const under = box(358, 351, 170, 26);
@@ -72,7 +60,6 @@ describe('a step tag that covers something', () => {
   });
 
   test('crosses no line where a free spot nearby crosses none', () => {
-    // A vertical arrow running down into the part, right through where the tag sits.
     const line = Array.from({ length: 12 }, (_, i) => box(448, 240 + i * 5, 4, 4));
     const go = bestSpot([tag], [], line, anywhere, beside(part))!;
     const r = at(tag, go);
@@ -89,7 +76,6 @@ describe('a step tag that covers something', () => {
   });
 
   test('with no free spot beside its part, the one that covers least, still in view', () => {
-    // A crowded phone: something under every spot, and a label on the first one as well.
     const crowd = box(-1000, -1000, 4000, 4000);
     const label = box(420, 276, 70, 14);
     const view = (r: Box) => r.top >= 200;

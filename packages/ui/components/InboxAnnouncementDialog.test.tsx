@@ -9,7 +9,6 @@ let host: HTMLElement | null = null;
 
 const DIALOG = '[data-inbox-announcement-dialog]';
 
-/** Holds the open state so a dismiss actually unmounts, like the Apps do. */
 function Harness({ onDismiss }: { readonly onDismiss: () => void }) {
   const [open, setOpen] = useState(true);
   return (
@@ -40,7 +39,6 @@ async function unmount() {
   if (hasDom) document.body.replaceChildren();
 }
 
-/** Booleans, not elements: bun's diff printer crashes on a Base UI element. */
 function isOpen(): boolean {
   return document.querySelector(DIALOG) !== null;
 }
@@ -68,15 +66,11 @@ describe.if(hasDom)('InboxAnnouncementDialog', () => {
     await mount(onDismiss);
     const link = document.querySelector<HTMLAnchorElement>(`${DIALOG} a[data-inbox-announcement-learn-more]`);
     if (!link) throw new Error('Link did not render');
-    // Stop happy-dom from navigating; the handler under test still runs.
     link.addEventListener('click', (event) => event.preventDefault());
 
-    // A synchronous act: an async one waits a task, past the deferred close.
     let openDuringClick = false;
     link.addEventListener('click', () => { openDuringClick = isOpen(); });
     act(() => link.click());
-    // Still on the page during and right after its own click, so the browser
-    // follows it.
     expect(openDuringClick).toBe(true);
     expect(isOpen()).toBe(true);
     expect(onDismiss).not.toHaveBeenCalled();
@@ -94,7 +88,6 @@ describe.if(hasDom)('InboxAnnouncementDialog', () => {
     expect(video.getAttribute('poster')).toBe(INBOX_FILM.poster);
     expect(video.querySelector('source')?.getAttribute('src')).toBe(INBOX_FILM.mp4);
     expect(INBOX_FILM.mp4).toBe('https://plannotator.ai/assets/inbox-film.mp4');
-    // One play button over the poster; the native controls come with playing.
     expect(video.hasAttribute('controls')).toBe(false);
   });
 

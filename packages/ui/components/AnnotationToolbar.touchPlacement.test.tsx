@@ -4,14 +4,6 @@ import { createRoot, type Root } from 'react-dom/client';
 import { AnnotationToolbar } from './AnnotationToolbar';
 import { resetTouchSelectionToolbar, setTouchSelectionToolbar } from '../utils/touchToolbarPlacement';
 
-/**
- * The toolbar's touch placement is a host opt-in (`touchSelectionToolbar`):
- * with it on and a finger as the main pointer, the toolbar goes below the
- * selection, inside the screen, and is marked for theme.css's thumb-sized
- * buttons. A mouse, or a host that did not opt in (Workspaces), keeps the
- * centered-above toolbar exactly as before.
- */
-
 const hasDom = typeof document !== 'undefined';
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -19,7 +11,6 @@ let anchor: HTMLElement | null = null;
 let originalMatchMedia: typeof window.matchMedia | undefined;
 const restorers: Array<() => void> = [];
 
-/** Replace a property for one test; afterEach puts the original back. */
 function stubProperty(target: object, key: string, descriptor: PropertyDescriptor) {
   const own = Object.getOwnPropertyDescriptor(target, key);
   Object.defineProperty(target, key, { configurable: true, ...descriptor });
@@ -29,7 +20,6 @@ function stubProperty(target: object, key: string, descriptor: PropertyDescripto
   });
 }
 
-/** A 390x844 phone screen with no visual viewport object, and a toolbar that measures `width` x 54. */
 function phoneScreen(width: number) {
   stubProperty(window, 'innerWidth', { value: 390 });
   stubProperty(window, 'innerHeight', { value: 844 });
@@ -124,7 +114,6 @@ describe.if(hasDom)('AnnotationToolbar touch placement', () => {
     const toolbar = await mount({
       optIn: true,
       coarse: true,
-      // `element` is the first mark, at the end of one line; the selection ends on the next line.
       rect: { left: 300, top: 300, width: 70, height: 22 },
       touchAnchorRect: () => ({ left: 16, right: 370, top: 300, bottom: 352 }),
     });
@@ -132,7 +121,6 @@ describe.if(hasDom)('AnnotationToolbar touch placement', () => {
   });
 
   test('placed from its measured size: a 300px toolbar at the right edge ends 8px from it', async () => {
-    // Wider than the first estimate, so only the measure-and-re-place pass gets this right.
     phoneScreen(300);
     const toolbar = await mount({ optIn: true, coarse: true, rect: { left: 350, top: 300, width: 30, height: 22 } });
     expect(parseFloat(toolbar.style.left)).toBe(390 - 8 - 300);
@@ -154,7 +142,6 @@ describe.if(hasDom)('AnnotationToolbar touch placement', () => {
       coarse: true,
       closeOnScrollOut: true,
       onClose: () => { closes += 1; },
-      // The first mark is above the screen; the selection runs down to 400.
       rect: { left: 40, top: -100, width: 200, height: 22 },
       touchAnchorRect: () => ({ left: 16, right: 370, top: -100, bottom: 400 }),
     });

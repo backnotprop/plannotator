@@ -1,22 +1,3 @@
-/**
- * "Follow an example" on a Shape board (approval "trace-it-board", r5).
- * DOM-gated: runs under DOM_TESTS=1 from tests/dom-test-list.txt.
- *
- * What regresses:
- *  - the dock's "Follow an example" showing on a board with no examples, or
- *    on a view other than How it works;
- *  - rapid next, next, back leaving two parts lit, or a stray dot on the
- *    picture, or the card on a different step from the picture;
- *  - a click on a lit part opening Change it instead of jumping to its step, or
- *    jumping once the person has turned Annotate on;
- *  - a step still to come keeping an invisible tab stop on the picture;
- *  - Esc closing the whole board while an example is followed;
- *  - the function's link not reaching the host's file;
- *  - reduced motion still running the dot, the slides or the flight;
- *  - the path missing a step or leaving the picture behind, and a long step's
- *    signature scrolling away with its checks. What needs real layout is in
- *    tests/e2e/inbox-shape-follow.spec.ts.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -29,7 +10,6 @@ const { ShapeSurface } = (hasDom ? await import('./ShapeSurface') : {}) as typeo
 
 const ID = 'shp_follow_test';
 
-// An invented kettle: three parts, and an arrow between the first two named by data-edge.
 const HOW_HTML =
   '<div data-mark="how-a">Water heats</div>' +
   '<svg width="40" height="10"><g data-edge="hot"><path d="M0 5 H30 M24 1 L30 5 L24 9"/></g></svg><span data-edge="hot">hot enough</span>' +
@@ -95,7 +75,6 @@ function fakeHost(b: ShapeBoard, reads: string[] = []): ShapeHost {
   };
 }
 
-// ── the page's motion, recorded: every animation the board and the card start ──
 type Recorded = { el: Element; frames: Keyframe[]; options: KeyframeAnimationOptions; cancelled: boolean };
 let recorded: Recorded[] = [];
 let realAnimate: PropertyDescriptor | undefined;
@@ -157,7 +136,6 @@ afterEach(() => {
 
 const wait = (ms = 20) => act(() => new Promise((r) => setTimeout(r, ms)));
 
-/** The How it works drawing's shadow root. */
 function drawing(): ShadowRoot | null {
   for (const host of document.querySelectorAll('*')) if (host.shadowRoot?.querySelector('[data-mark="how-a"]')) return host.shadowRoot;
   return null;
@@ -188,10 +166,8 @@ async function press(name: string) {
   });
 }
 
-/** The card's "n of N" on now. */
 const count = () => document.querySelector('.shp-ex-text.cur .shp-ex-count')?.textContent?.trim() ?? null;
 
-/** The step each lit-now thing on the picture belongs to. */
 function nowOnPicture(): string[] {
   const d = drawing()!;
   return [...d.querySelectorAll('[data-ex-s="now"], .shp-ex-tag[data-s="now"]')].map((el) => el.getAttribute('data-ex-i')!);
@@ -214,14 +190,12 @@ describe.if(hasDom)('Follow an example', () => {
   test('next, next, back: the card and the picture agree on one step, with no stray dot', async () => {
     await mount(fakeHost(board([EXAMPLE])));
     await press('Follow an example');
-    // All steps: every part on the path is lit, none is "now".
     expect(nowOnPicture()).toEqual([]);
     expect(drawing()!.querySelector('[data-mark="how-off"]')!.hasAttribute('data-ex-dim')).toBe(true);
 
     await press('Step through');
     expect(count()).toBe('1 of 3');
     await press('Next step');
-    // Forward: the dot runs on the arrow to the next part.
     expect(drawing()!.querySelectorAll('.shp-ex-dot').length).toBe(1);
     await press('Next step');
     expect(drawing()!.querySelectorAll('.shp-ex-dot').length).toBe(1);
@@ -234,7 +208,6 @@ describe.if(hasDom)('Follow an example', () => {
     expect(new Set(now)).toEqual(new Set(['1']));
     expect(drawing()!.querySelectorAll('.shp-ex-tag[data-s="now"]').length).toBe(1);
     expect(drawing()!.querySelectorAll('.shp-ex-dot').length).toBe(0);
-    // The arrow taken to step 2 is lit with it.
     expect(drawing()!.querySelector('g[data-edge="hot"]')!.getAttribute('data-ex-s')).toBe('now');
 
     await press('Stop following');
@@ -260,7 +233,6 @@ describe.if(hasDom)('Follow an example', () => {
     await act(async () => {
       drawing()!.querySelector('[data-mark="how-c"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
     });
-    // Annotate off: it jumps.
     expect(count()).toBe('3 of 3');
     await press('Previous step');
     await press('Annotate: point at a part to change it or ask about it');
@@ -295,7 +267,6 @@ describe.if(hasDom)('Follow an example', () => {
   });
 
   test('the board made only shorter lays out again, in a host that never re-renders it: a phone hides the slice left above the card', async () => {
-    // Watched boxes, resized by hand: nothing else here re-renders the board.
     const watching: { cb: ResizeObserverCallback; els: Element[] }[] = [];
     const realRO = globalThis.ResizeObserver;
     globalThis.ResizeObserver = class {
@@ -338,7 +309,6 @@ describe.if(hasDom)('Follow an example', () => {
       expect(document.querySelector('.shp-root.follow-sheet')).not.toBeNull();
       expect(view().classList.contains('shp-ex-covered')).toBe(false);
 
-      // Shorter only: the card keeps its height, and 300 - 60 - 200 leaves less than a board's room.
       tall = 300;
       resize(surface);
       await wait();
@@ -382,7 +352,7 @@ describe.if(hasDom)('Follow an example', () => {
   });
 
   test('open, the path names every step and jumps with the picture; folded, it is gone', async () => {
-    reduceMotion = true; // Closing waits on no fade.
+    reduceMotion = true;
     await mount(fakeHost(board([EXAMPLE])));
     await press('Follow an example');
     await press('Step through');

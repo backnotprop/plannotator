@@ -1,9 +1,3 @@
-/**
- * The linked-document "Viewing / Back to …" header lives inside the table of
- * contents. A raw-HTML document is never parsed into blocks, so it has no TOC
- * entries at all — and the component used to render nothing in that case,
- * which left a linked HTML document with no visible way back to the root.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';

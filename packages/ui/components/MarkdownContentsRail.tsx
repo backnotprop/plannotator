@@ -1,36 +1,3 @@
-// Moved from the Workspaces app's MarkdownContentsRail (apps/web/src/plannotator/
-// MarkdownContentsRail.tsx), the document contents rail approved 2026-10-03
-// ("it should just be on the right side": the ticks in the document's right
-// gutter, the Contents panel on click, no hover reveal, no Left/Right setting).
-// The owner approved the move into @plannotator/ui on 2026-10-30 so the
-// Plannotator Inbox can use it. Port:
-// - Workspaces-only imports moved into the package: the shared parse memo
-//   (utils/blockParse) and usePrefersReducedMotion (hooks/); `cn` had nothing
-//   left to join once the `floating-surface` chrome and the EYEBROW title
-//   became the rail's own
-//   `pn-contents-rail-*` rules in theme.css, on the same tokens
-//   (--popover, --shadow-menu, --geometry-floating-radius, ...) with fallbacks.
-//   The `ws-markdown-contents-*` classes and `--ws-contents-*` properties are
-//   `pn-contents-rail-*` and `--pn-contents-*`.
-// - The rail's scroll math (cached heading tops, the binary search, the last
-//   heading at the document's end, re-binding on DOM change, a pick marked at
-//   once) moved as it was into utils/headingScrollSpy, so `DocumentContents`
-//   uses it too; the activation line is 80 px (it was 52), plan review's
-//   scroll offset, so a pick lands where plan review's does. DOM changes are
-//   watched on the whole scroll element, so a re-rendered reading column is
-//   re-bound too.
-// - The headings come from `tocHeadings(blocks, 4)`.
-// - Host seams, all optional (Workspaces passes none and is unchanged):
-//   `blocks` (a host that parsed already), `contentSelector` (the reading
-//   column), `hidden` + `onAvailableChange` (a host's own hide choice and
-//   fallback), `panelAction` (one control in the open panel's title row).
-// - Escape also closes a panel opened by pointer while focus stays outside
-//   the rail (a tick press never takes focus), unless focus is in an editable
-//   control, a dialog, a menu or a listbox. It is preventDefault-ed, not stopped: a host's own
-//   Escape sees it was used.
-// - The rules are the package's own stylesheet, contents-rail.css (import it
-//   outside any CSS layer), not part of theme.css.
-
 import {
   useCallback,
   useEffect,
@@ -71,7 +38,6 @@ const VIEWPORT_EDGE_INSET = 8;
 const MIN_RAIL_VIEWPORT_WIDTH = CONTENTS_RAIL_MIN_PANE_WIDTH;
 const SMOOTH_SCROLL_SETTLE = 350;
 const SCROLL_CORRECTION_THRESHOLD = 24;
-/** The reading column, by default: the element Workspaces marks around its document. */
 const DEFAULT_CONTENT_SELECTOR = '[data-document-read-content]';
 
 export interface MarkdownContentsItem {
@@ -94,12 +60,6 @@ export interface CondensedContentsMarker {
   readonly rangeEnd: number;
 }
 
-/** Place only the persistent marker dock in the document's existing right
- * padding, 24px right of the reading column (owner ruling 2026-10-03: the
- * rail returns to the right gutter it held from PR 76 until PR 241). The
- * Contents surface opens to the LEFT as an overlay, away from a docked
- * comments column, so this accessory never changes document width. `left`
- * is the dock's left edge. */
 export function resolveContentsRailGeometry(
   viewportRight: number,
   contentRight: number,
@@ -115,11 +75,6 @@ export function resolveContentsRailGeometry(
   };
 }
 
-/** Keep the rail out of compact document panes and require a complete marker
- * lane in the document's existing right padding. The pane's right edge is the
- * docked comments (or people) column's edge when one is open, so the rail
- * yields to the column instead of overlapping it or its resize edge. The
- * panel itself may still overlay the prose once the marker lane qualifies. */
 export function canShowContentsRail(
   viewportWidth: number,
   viewportRight: number,
@@ -187,21 +142,10 @@ function markdownBlocks(markdown: string): Block[] {
   return parseBlocksShared(extractFrontmatter(markdown).content);
 }
 
-/**
- * Build the semantic index from the same cached parse the Viewer consumes.
- * DOM binding happens later, after the package has assigned its duplicate-safe
- * heading anchors. Scroll never reparses or searches the document.
- */
 export function buildMarkdownContentsModel(markdown: string): readonly MarkdownContentsItem[] {
   return buildContentsItems(markdownBlocks(markdown));
 }
 
-/**
- * Divide a long document into ten ordered spans, then represent each span with
- * its shallowest heading nearest the span midpoint. This is one O(n) pass when
- * the Markdown model changes; scroll updates only map the active index to a
- * slot with arithmetic.
- */
 export function condenseMarkdownContentsMarkers(
   items: readonly MarkdownContentsItem[],
 ): readonly CondensedContentsMarker[] {
@@ -241,7 +185,6 @@ function condensedSlotForItem(itemIndex: number, itemCount: number, slotCount: n
   return Math.min(slotCount - 1, Math.floor((boundedIndex * slotCount) / itemCount));
 }
 
-/** Focus in an editable control, a dialog, a menu or a listbox: its Escape is its own. */
 function ownsEscape(element: HTMLElement): boolean {
   return (
     element.isContentEditable ||
@@ -254,36 +197,13 @@ function setViewportScroll(viewport: HTMLElement, top: number, behavior: ScrollB
 }
 
 export interface MarkdownContentsRailProps {
-  /** The document's Markdown (frontmatter is skipped). Ignored when `blocks` is given. */
   readonly markdown?: string;
-  /** The document's parsed blocks, for a host that already has them (the Viewer's). */
   readonly blocks?: readonly Block[];
-  /** The element the document scrolls in; the rail sits in its right gutter. */
   readonly scrollViewport: HTMLElement | null;
-  /** Unused by the rail; kept so Workspaces' call site compiles unchanged. */
   readonly documentPath?: string;
-  /**
-   * The reading column inside `scrollViewport`: the dock goes 24 px right of
-   * its right edge. Default `[data-document-read-content]` (Workspaces). The
-   * Plannotator Inbox passes the Viewer's `[data-doc-text-root]`.
-   */
   readonly contentSelector?: string;
-  /**
-   * The host's own hide choice: the rail keeps measuring (so
-   * `onAvailableChange` still reports) but draws nothing. Default false.
-   */
   readonly hidden?: boolean;
-  /**
-   * Whether the rail can show: enough headings, a pane at least 480 px wide
-   * and a 68 px gutter. Called when it changes, so a host can offer its own
-   * way to Contents when the rail yields.
-   */
   readonly onAvailableChange?: (available: boolean) => void;
-  /**
-   * One host control drawn at the right of the open panel's "Contents" title
-   * (the Inbox's Hide). Shown only while the panel is open; Tab reaches it
-   * after the headings. Default: none.
-   */
   readonly panelAction?: ReactNode;
 }
 
@@ -301,7 +221,6 @@ export function MarkdownContentsRail({
     [hostBlocks, markdown],
   );
   const reducedMotion = usePrefersReducedMotion();
-  // null until the first measure: nothing is reported before the rail knows.
   const [available, setAvailable] = useState<boolean | null>(null);
   const [interactionIndex, setInteractionIndex] = useState<number | null>(null);
   const [titlesVisible, setTitlesVisible] = useState(false);
@@ -350,7 +269,6 @@ export function MarkdownContentsRail({
 
   const refreshActiveSection = useCallback(() => {
     if (scrollViewport === null) return;
-    // No binding (nothing drawn yet): the index stays.
     const binding = activeHeadingBinding(bindingsRef.current, scrollViewport);
     if (binding !== null) commitActiveIndex(binding.itemIndex);
   }, [commitActiveIndex, scrollViewport]);
@@ -374,8 +292,6 @@ export function MarkdownContentsRail({
     bindingsRef.current = bindings;
 
     const viewportRect = scrollViewport.getBoundingClientRect();
-    // The scroll surface's own scrollbar sits in the right gutter: measure
-    // the lane up to the scrollbar, never under it.
     const scrollbarWidth =
       scrollViewport.clientWidth > 0
         ? Math.max(
@@ -435,8 +351,6 @@ export function MarkdownContentsRail({
     scrollViewport.addEventListener('load', scheduleMeasure, true);
     window.addEventListener('resize', scheduleMeasure);
 
-    // The reading column is observed for size; a host that re-renders it (a
-    // new element) is followed through the mutation observer below.
     let observedContent: HTMLElement | null = null;
     const resizeObserver =
       typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(scheduleMeasure);
@@ -450,8 +364,6 @@ export function MarkdownContentsRail({
     resizeObserver?.observe(scrollViewport);
     followContent();
 
-    // Any change to the document's elements re-binds the headings (an edit
-    // can replace them and keep their count), except the rail's own.
     const mutationObserver =
       typeof MutationObserver === 'undefined'
         ? null
@@ -512,10 +424,6 @@ export function MarkdownContentsRail({
       if (target instanceof Node && railRef.current?.contains(target)) return;
       closeTitles();
     };
-    // Escape closes a panel opened by pointer, where focus stayed outside the
-    // rail (a tick press never takes focus). Not while focus is in an editable
-    // control, a dialog, a menu or a listbox: that Escape is theirs. preventDefault, never
-    // stopPropagation, so a host's own Escape (a full-screen view's) sees it was used.
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
       const focused = document.activeElement;
@@ -658,7 +566,6 @@ export function MarkdownContentsRail({
     [closeTitles, navigateTo, openTitles, renderedItemIndexes, titlesVisible],
   );
 
-  /** Focus left the panel (its list, and the host's action): the panel closes. */
   const closeWhenFocusLeaves = useCallback(
     (relatedTarget: EventTarget | null) => {
       const inPanel =
@@ -673,8 +580,6 @@ export function MarkdownContentsRail({
   if (!visible) return null;
   const baseLevel = Math.min(...items.map((item) => item.level));
   const railStyle = {
-    // The nav box is [panel][gap][dock]; its left edge sits a panel and a
-    // gap left of the dock so the surface opens over the prose margin.
     left: `${railGeometry.left - PANEL_GAP - PANEL_WIDTH}px`,
     top: `${railGeometry.top}px`,
     '--pn-contents-dock-width': `${DOCK_WIDTH}px`,
@@ -682,12 +587,6 @@ export function MarkdownContentsRail({
     '--pn-contents-panel-width': `${PANEL_WIDTH}px`,
   } as CSSProperties;
 
-  // Layering: the rail is document chrome and renders in place, inside the
-  // document pane, not portalled to <body>. A host keeps the pane its own
-  // stacking context (an `isolate` ancestor) at the document level, so the
-  // host's floaters and overlays cover the rail, and inside the pane the
-  // diagram lightbox (z-50) covers it too. z-index 20 (theme.css) keeps it
-  // above the read surface.
   return (
     <nav
       ref={railRef}

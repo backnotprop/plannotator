@@ -1,18 +1,3 @@
-/**
- * The "Diff display" popover behind a gear (approval "diff-controls-headers":
- * "The popover looks good"): how every diff is drawn, from the settings code
- * review keeps (`diff*` in the config store: a `plannotator-diff-*` cookie
- * and config.json `diffOptions`), so a choice made in one surface holds in
- * the others. Split / Unified is not here: the header's one button
- * (DiffLayoutToggle) sets it.
- *
- * Code review draws it in its dock strip (review-editor DiffOptionsPopover);
- * the Inbox in its review bars, without the two rows that need the local
- * repository (`repositoryOptions={false}`: Whole file, Hide whitespace).
- *
- * The option lists are this file's own, not Settings.tsx's, so a host that
- * draws only this popover does not load the settings dialog.
- */
 import React from 'react';
 import { Popover } from '@base-ui/react/popover';
 import { configStore, useConfigValue } from '../config';
@@ -20,7 +5,6 @@ import type { SettingName } from '../config/settings';
 import type { SettingValue } from '../config/configStore';
 import { HostTitle } from './HostTitle';
 
-/** The settings this popover writes. */
 export type DiffDisplaySetting =
   | 'diffOverflow'
   | 'diffShowLineNumbers'
@@ -129,17 +113,11 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 }
 
 export interface DiffDisplayOptionsPopoverProps {
-  /** Whole file and Hide whitespace, which need the local repository. Default: shown (code review). */
   repositoryOptions?: boolean;
-  /** Writes one setting. Default: the config store's `set`. */
   onChange?: DiffDisplayChange;
-  /** The gear's classes. Default: code review's dock strip button. */
   triggerClassName?: string;
-  /** The gear's content. Default: a gear icon. */
   triggerContent?: React.ReactNode;
-  /** A phone-sized review: bigger targets in the popup (theme.css `[data-pn-compact-diff-options]`). */
   compactTouchLayout?: boolean;
-  /** Where the gear's hover text opens when the host draws ui's tooltips (`componentTooltips`). Default: top. */
   triggerTitleSide?: 'top' | 'right' | 'bottom' | 'left';
 }
 
@@ -172,7 +150,6 @@ export const DiffDisplayOptionsPopover: React.FC<DiffDisplayOptionsPopoverProps>
 
   return (
     <Popover.Root>
-      {/* A native title by default (code review); ui's tooltip where the host opts in (the Inbox), like its neighbours. */}
       <HostTitle title="Diff display options" side={triggerTitleSide}>
         <Popover.Trigger
           render={

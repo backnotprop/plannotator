@@ -1,18 +1,3 @@
-/**
- * Click a word (part of Select): one click on a word selects it and, after a
- * short wait, hands the word to the shared highlight path.
- *
- * What must not regress: a click becoming a highlight where it has another
- * meaning (a link, a button, an existing highlight, a click that closes a
- * toolbar), from another mouse button or a modified click, while a second
- * click is on its way (double and triple click stay the browser's) or while
- * the page is scrolling; and the method doing anything when it is off.
- *
- * happy-dom has no layout: the caret under a point is stubbed to an offset the
- * test sets, and every range reports one box at the origin.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { useRef } from 'react';
 import { act } from 'react';
@@ -40,7 +25,6 @@ function Harness({ enabled = true, clicksEnabled = true, annotationUiOpen = fals
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let caret: { node: Node; offset: number } | null = null;
-/** Whether the pointer is on the glyphs of the word beside the caret. */
 let onGlyphs = true;
 type CaretDoc = { caretRangeFromPoint?: unknown; caretPositionFromPoint?: unknown };
 let saved: { range: unknown; position: unknown; rects: unknown } | null = null;
@@ -94,7 +78,6 @@ const pointer = (type: string, init: Record<string, unknown> = {}): Event => {
 const mouse = (type: string, init: MouseEventInit = {}) =>
   new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: 0, clientY: 0, detail: 1, ...init });
 
-/** One click on `target`, the caret under it at `at`. */
 const click = (target: HTMLElement, at: { node: Node; offset: number } | null, init: MouseEventInit = {}) => {
   caret = at;
   target.dispatchEvent(pointer('pointerdown', init as Record<string, unknown>));
@@ -144,7 +127,6 @@ describe.if(hasDom)('useClickWord: a click on a word', () => {
 
   test('a click beside a word, not on its letters, is no word', async () => {
     const { first, text, picked } = await mount();
-    // The caret lands next to "now", but the pointer is in the margin past it.
     onGlyphs = false;
 
     click(first, { node: text, offset: 25 });
@@ -168,7 +150,6 @@ describe.if(hasDom)('useClickWord: a document that changes during the wait', () 
   test('the text under the click replaced by new nodes: nothing', async () => {
     const { first, text, picked } = await mount();
     click(first, { node: text, offset: 10 });
-    // A host that re-renders its body: same words, new nodes.
     first.replaceChildren(document.createTextNode(TEXT));
     await wait(AFTER);
     expect(picked).toEqual([]);
@@ -235,7 +216,7 @@ describe.if(hasDom)('useClickWord: clicks that keep their own meaning', () => {
 
     caret = { node: text, offset: 10 };
     first.dispatchEvent(pointer('pointerdown'));
-    window.getSelection()!.removeAllRanges(); // the browser's own press
+    window.getSelection()!.removeAllRanges();
     first.dispatchEvent(pointer('pointerup'));
     first.dispatchEvent(mouse('click'));
     await wait(AFTER);
@@ -264,11 +245,10 @@ describe.if(hasDom)('useClickWord: a drag selects whole words', () => {
   test('both ends of the browser\'s selection move out to word edges', async () => {
     const { first, text } = await mount();
 
-    caret = { node: text, offset: 10 }; // in "focused"
+    caret = { node: text, offset: 10 };
     first.dispatchEvent(pointer('pointerdown'));
     first.dispatchEvent(mouse('mousedown'));
     first.dispatchEvent(pointer('pointermove', { clientX: 80 }));
-    // The browser's own selection: "cused te".
     window.getSelection()!.setBaseAndExtent(text, 10, text, 18);
     document.dispatchEvent(new Event('selectionchange'));
 

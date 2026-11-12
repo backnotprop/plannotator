@@ -69,7 +69,6 @@ function cursorDescriptor(command: VimHudCommand | null): string {
   return CURSOR_DESCRIPTORS[command.actionId] ?? 'TEXT';
 }
 
-/** Build the concise target label shared with the approved Vim demo. */
 export function getVimReticleLabel(
   state: VimRestorableState,
   target: VimReticleSemanticTarget | null,

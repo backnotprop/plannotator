@@ -1,12 +1,3 @@
-/**
- * "Open Plannotator at plannotator.localhost" (#2184) in Settings (DOM_TESTS=1),
- * on plan review, annotate and code review, held by useCookieHostSetting as
- * the Apps hold it (adopted from serverConfig, written with POST /api/config).
- *
- * Regressions guarded: the row missing from a surface or shown without the
- * server's advert; the switch writing over another urlHost or an env var (it
- * must be locked and say what holds it); a refused write shown as saved.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -47,7 +38,6 @@ async function mount(mode: Mode, serverConfig: Record<string, unknown> | undefin
   });
 }
 
-/** Answer POST /api/config with `answer`, recording the bodies. */
 function fakeConfigWrites(answer: (body: Record<string, unknown>) => { status: number; body: unknown }): Record<string, unknown>[] {
   const bodies: Record<string, unknown>[] = [];
   globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {

@@ -1,12 +1,3 @@
-/**
- * `ViewerHandle.reopenComment`: a host that kept a comment being written when
- * its file closed puts it back, and the markdown Viewer opens the composer on
- * the same words of the document, holding the person's words, without saving
- * anything. Missing anchors say so (`onMissing`), and kinds the Viewer has no
- * composer for refuse (false), so the host can keep the words some other way.
- *
- * Requires DOM (happy-dom) — runs under DOM_TESTS=1.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { useLayoutEffect } from 'react';
 import { act } from 'react';
@@ -82,7 +73,6 @@ const metaFor = (el: HTMLElement, textOffset: number) => ({
 });
 const composer = (): HTMLTextAreaElement | null => document.querySelector<HTMLTextAreaElement>('[data-comment-popover] textarea');
 
-/** The comment a person was writing on the SECOND "beta" (its stored positions name it, not the first). */
 function keptOnSecondBeta(): Annotation {
   const p = paragraph('Second');
   const text = p.textContent ?? '';
@@ -117,7 +107,6 @@ describe('Viewer.reopenComment', () => {
     expect(answer).toBe(true);
     expect(missing).toBe(0);
     expect(composer()?.value).toBe('Not sent yet');
-    // The pending mark is on the second "beta", where the stored positions put it.
     const marks = Array.from(paragraph('Second').querySelectorAll('mark'));
     expect(marks.map((m) => m.textContent).join('')).toBe('beta');
     expect(marks[0]!.nextSibling?.textContent?.startsWith(' again')).toBe(true);
@@ -155,7 +144,6 @@ describe('Viewer.reopenComment', () => {
     const kept = { current: null as Annotation | null };
     function Host({ viewerRef }: { viewerRef: React.RefObject<ViewerHandle | null> }) {
       useLayoutEffect(() => {
-        // The Viewer's layout phase is done (the handle is set), its effects are not.
         const p = Array.from(document.querySelectorAll('article p')).find((el) => (el.textContent ?? '').includes('Second')) as HTMLElement;
         const text = p.textContent ?? '';
         const at = text.lastIndexOf('beta');

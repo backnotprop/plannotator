@@ -2,7 +2,6 @@ import React from "react";
 import { GitHubIcon } from "./GitHubIcon";
 import { GitLabIcon } from "./GitLabIcon";
 
-/** Bitbucket bucket mark (simple-icons, CC0). Uses currentColor. */
 export const BitbucketIcon: React.FC<{ className?: string }> = ({ className }) => (
   <svg
     className={className}
@@ -14,7 +13,6 @@ export const BitbucketIcon: React.FC<{ className?: string }> = ({ className }) =
   </svg>
 );
 
-/** The mark of the platform a PR/MR lives on. Unknown platforms get GitHub's. */
 export const PRPlatformIcon: React.FC<{ platform: string; className?: string }> = ({ platform, className }) => {
   if (platform === "gitlab") return <GitLabIcon className={className} />;
   if (platform === "bitbucket") return <BitbucketIcon className={className} />;

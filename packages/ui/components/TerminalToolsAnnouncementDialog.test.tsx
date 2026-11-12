@@ -25,7 +25,6 @@ async function mountDialog(
   });
 }
 
-/** Holds the open state so a dismiss actually unmounts, like the Apps do. */
 function Harness({ onDismiss }: { readonly onDismiss: () => void }) {
   const [open, setOpen] = useState(true);
   return (
@@ -88,7 +87,6 @@ describe('TerminalToolsAnnouncementDialog', () => {
     expect(document.getElementById(labelledBy ?? '')).not.toBeNull();
     expect(document.getElementById(describedBy ?? '')).not.toBeNull();
 
-    // One primary way out, so the announcement can never read as a choice.
     const completions = Array.from(document.querySelectorAll<HTMLButtonElement>(`${DIALOG} button`))
       .filter((button) => button.textContent?.trim() === 'Got it');
     expect(completions).toHaveLength(1);
@@ -99,16 +97,12 @@ describe('TerminalToolsAnnouncementDialog', () => {
     await mountDialog();
 
     const element = video();
-    // Silent + inline is what lets a browser autoplay it at all (and what
-    // keeps iOS from hijacking the dialog into a fullscreen player). React
-    // mirrors `muted` to the property, not the attribute, so read both ways.
     expect(element.muted || element.hasAttribute('muted')).toBe(true);
     expect(element.hasAttribute('playsinline')).toBe(true);
     expect(element.hasAttribute('loop')).toBe(true);
     expect(element.hasAttribute('autoplay')).toBe(true);
     expect(element.getAttribute('poster')).toMatch(/^https:\/\/plannotator\.ai\/assets\//);
 
-    // mp4 is the first source every browser can play; webm is the fallback.
     const sources = Array.from(element.querySelectorAll('source')).map((source) => source.type);
     expect(sources).toEqual(['video/mp4', 'video/webm']);
   });
@@ -118,15 +112,11 @@ describe('TerminalToolsAnnouncementDialog', () => {
 
     const element = video();
     expect(element.hasAttribute('autoplay')).toBe(false);
-    // Still silent and inline: the reader may press play, and it must then
-    // behave exactly like the autoplaying version.
     expect(element.muted || element.hasAttribute('muted')).toBe(true);
     expect(element.hasAttribute('playsinline')).toBe(true);
     const play = document.querySelector(`${DIALOG} [data-terminal-tools-playback="play"]`);
     expect(play).not.toBeNull();
     expect(play?.getAttribute('aria-label')).toBe('Play demo');
-    // The tag's sheen is motion too: it must not run for a reader who asked
-    // for none, while the tag itself stays.
     const tag = document.querySelector(`${DIALOG} [data-terminal-tools-tag]`);
     expect(tag).not.toBeNull();
     expect(tag?.getAttribute('data-shimmer')).toBe('off');
@@ -156,8 +146,6 @@ describe('TerminalToolsAnnouncementDialog', () => {
 
     await act(async () => tab('Lite').click());
 
-    // The X link has to follow the footage: "Watch on X" under the Lite demo
-    // pointing at the Full post would be a lie.
     expect(video().getAttribute('data-terminal-tools-demo')).toBe('lite');
     expect(watchLink()?.getAttribute('href')).toBe(lite.watchUrl);
     expect(tab('Lite').getAttribute('aria-selected')).toBe('true');
@@ -251,8 +239,6 @@ describe('TerminalToolsAnnouncementDialog', () => {
     document.body.appendChild(outside);
     try {
       await mountDialog();
-      // The unselected demo tab is tabindex -1 (roving tabindex), so the
-      // wrap must skip it the same way the browser's own Tab order does.
       const focusable = Array.from(
         document.querySelectorAll<HTMLElement>(`${DIALOG} button, ${DIALOG} [href]`),
       ).filter((element) => element.getAttribute('tabindex') !== '-1');

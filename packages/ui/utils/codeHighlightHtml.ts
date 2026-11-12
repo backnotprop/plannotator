@@ -1,13 +1,3 @@
-/**
- * The markup a highlighted fence is drawn with, from Shiki's themed tokens.
- *
- * Pure (no DOM, no Shiki import), so the window's `highlightToHtml`
- * (`./codeHighlight`) and a host's background tokenizer (a Web Worker with its
- * own Shiki core, e.g. the Inbox's) build the same characters from the same
- * tokens.
- */
-
-/** Shiki's `FontStyle` bitmask. Inlined so this module needs no shiki types. */
 const FONT_STYLE_ITALIC = 1;
 const FONT_STYLE_BOLD = 2;
 const FONT_STYLE_UNDERLINE = 4;
@@ -48,15 +38,6 @@ export function tokenStyle(token: ThemedTokenish): string {
   return parts.join(';');
 }
 
-/**
- * The markup for `code` from its themed lines, or null when the tokens do not
- * spell `code` exactly.
- *
- * Invariant: the rendered text must be byte-identical to the source. The
- * annotation layer addresses these blocks by text offset, so a tokenizer that
- * normalised line endings (or dropped a trailing newline) would silently
- * misplace every highlight in the block. Bail to plain text instead.
- */
 export function themedLinesToHtml(lines: readonly (readonly ThemedTokenish[])[], code: string): string | null {
   let html = '';
   let plain = '';

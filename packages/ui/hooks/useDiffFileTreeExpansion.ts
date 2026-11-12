@@ -6,8 +6,6 @@ import {
   type DiffFileTreeNode,
 } from '../utils/diffFileTree';
 
-/** Which folders start open: every folder (the review's behavior), none, or
- * an explicit list of folder paths (`DiffFileTreeNode.path`). */
 export type DiffFileTreeDefaultExpanded = 'all' | 'none' | readonly string[];
 
 function initialSet(allFolderPaths: string[], defaultExpanded: DiffFileTreeDefaultExpanded): Set<string> {
@@ -16,14 +14,6 @@ function initialSet(allFolderPaths: string[], defaultExpanded: DiffFileTreeDefau
   return new Set(defaultExpanded);
 }
 
-/**
- * Folder open/closed state for a diff file tree, shared by the review's
- * FileTree and the embeddable DiffFileTree:
- * - starts from `defaultExpanded` and resets to it whenever `tree` changes
- *   identity (a new diff), so pass a memoized tree;
- * - keeps every ancestor of `activePath` open, so moving the selection always
- *   reveals the selected file.
- */
 export function useDiffFileTreeExpansion<F extends DiffFileTreeFile>(
   tree: DiffFileTreeNode<F>[],
   activePath: string | null | undefined,
@@ -33,13 +23,11 @@ export function useDiffFileTreeExpansion<F extends DiffFileTreeFile>(
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => initialSet(allFolderPaths, defaultExpanded));
   const [prevTree, setPrevTree] = useState(tree);
 
-  // Reset when the tree changes (initial render + diff switch).
   if (tree !== prevTree) {
     setPrevTree(tree);
     setExpandedFolders(initialSet(allFolderPaths, defaultExpanded));
   }
 
-  // Auto-expand ancestors of the active file so keyboard nav always reveals the target.
   useEffect(() => {
     if (activePath) {
       const ancestors = getAncestorPaths(activePath);

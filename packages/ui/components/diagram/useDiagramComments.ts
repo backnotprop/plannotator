@@ -8,35 +8,15 @@ import {
 } from '@plannotator/core/diagram-anchor';
 import type { DiagramFinder } from '../../utils/diagram-anchor';
 
-/**
- * Diagram comments: the html-annotation grammar adapted to an app-owned
- * svg. Hover outlines a part, click opens the composer at it, Enter saves,
- * shift-click adds targets to the one draft (up to the host's cap); a saved
- * comment paints as a ring and a numbered badge, numbers from the
- * `comments` array order. Restore runs the engine's finder
- * (`finder.findTarget`, from the renderer slot) per comment after every
- * render (the svg is replaced, so element references are re-resolved), and
- * the ids that resolve to nothing are reported as the unanchored set,
- * exactly as the html viewer reports its own.
- *
- * The host's storage never enters here: `comments` come in as the adapter
- * shape and a new comment leaves through `onCreateComment(anchor, text,
- * additionalTargets)`.
- */
-
-/** One comment the host holds on this diagram (the adapter's input shape). */
 export interface DiagramComment {
   readonly id: string;
   readonly anchor: DiagramAnchor;
-  /** Shift-click targets the one comment also covers; absent for most. */
   readonly additionalTargets?: readonly DiagramTarget[];
   readonly text: string;
   readonly author?: string;
   readonly resolved?: boolean;
 }
 
-/** The adapter's output: a comment the person composed on a part. The
- * anchor's `sourceLine` already carries the host's document-line offset. */
 export type DiagramCreateComment = (
   anchor: DiagramAnchor,
   text: string,
@@ -45,14 +25,11 @@ export type DiagramCreateComment = (
 
 export interface ResolvedDiagramComment {
   readonly id: string;
-  /** Array position in the host's list, 1-based. */
   readonly number: number;
   readonly element: Element | null;
   readonly additional: readonly Element[];
   readonly label: string;
   readonly resolved: boolean;
-  /** The comment is on the WHOLE diagram: its ring is the content bounds
-   * and its badge sits top-left. */
   readonly whole: boolean;
 }
 
@@ -64,9 +41,6 @@ export interface DiagramHover {
 export interface DiagramComposerDraft {
   readonly primary: DiagramHover;
   readonly additional: readonly DiagramHover[];
-  /** The primary target's line in the SAVED text, offset into the host's
-   * document; null when the part only exists in an unsaved draft (the
-   * composer says so). */
   readonly sourceLine: readonly [number, number] | null;
 }
 
@@ -87,51 +61,32 @@ export function useDiagramComments({
   onResolutionChange,
   familyOf,
 }: {
-  /** The engine's id grammar (mermaid or graphviz), from the renderer
-   * slot: the one place the kind reaches this hook. */
   readonly finder: DiagramFinder;
   readonly svgRoot: SVGSVGElement | null;
   readonly renderId: string | null;
   readonly renderVersion: number;
   readonly comments: readonly DiagramComment[];
-  /** The baseline (saved) diagram text the anchor's `sourceLine` counts in. */
   readonly savedSource: string;
-  /** Lines to add so a written `sourceLine` names DOCUMENT lines: 0 when
-   * the document IS the diagram, the fence's opening line for a fence. */
   readonly sourceLineOffset: number;
   readonly sourceDirty: boolean;
   readonly maxAdditionalTargets: number;
-  /** Whether a click may open the composer at all. */
   readonly canCreate: boolean;
   readonly onCreateComment: DiagramCreateComment | undefined;
   readonly onSelectComment: ((id: string | null) => void) | undefined;
   readonly onUnanchoredChange: ((ids: ReadonlySet<string>) => void) | undefined;
-  /** Every comment's verdict (true: its part is in this render), whenever
-   * any verdict or the comment list changes. `onUnanchoredChange` only
-   * speaks when the unanchored SET changes, which says nothing about a new
-   * comment that resolved. */
   readonly onResolutionChange: ((resolution: ReadonlyMap<string, boolean>) => void) | undefined;
-  /** The family a whole-diagram comment records (the engine's, from the
-   * rendered svg). */
   readonly familyOf: (svg: Element) => DiagramFamily;
 }): {
   readonly resolved: readonly ResolvedDiagramComment[];
   readonly hover: DiagramHover | null;
   readonly composer: DiagramComposerDraft | null;
   readonly submitting: boolean;
-  /** The last submit's failure, shown in the composer; cleared on retry. */
   readonly submitError: string | null;
   readonly setHoverElement: (element: Element | null) => void;
-  /** A click without a drag on the canvas: opens or extends the draft. */
   readonly clickElement: (element: Element | null, shiftKey: boolean) => void;
-  /** The canvas's priority rule over everything under the pointer: a node,
-   * then an edge, then a cluster. */
   readonly pickTarget: (candidates: readonly Element[]) => Element | null;
   readonly submit: (body: string) => Promise<void>;
   readonly cancel: () => void;
-  /** Open the composer at a part of this render (a comment being written that
-   * the host put back): false when commenting is off, nothing is drawn yet,
-   * or the part is not in the render. */
   readonly openAt: (target: DiagramTarget) => boolean;
 } {
   const [hover, setHover] = useState<DiagramHover | null>(null);
@@ -142,9 +97,6 @@ export function useDiagramComments({
   const composerOpenRef = useRef(false);
   composerOpenRef.current = composer !== null;
 
-  // Resolve every comment's parts against the current render. The
-  // renderVersion dependency is the re-resolution after a re-render: the
-  // elements are new objects even when the ids did not change.
   const resolved = useMemo<readonly ResolvedDiagramComment[]>(() => {
     void renderVersion;
     return comments.map((comment, index) => {
@@ -185,9 +137,6 @@ export function useDiagramComments({
     onResolutionChange(new Map(resolved.map((entry) => [entry.id, entry.element !== null])));
   }, [onResolutionChange, resolved, svgRoot]);
 
-  // The unanchored set: comments whose primary part is gone from this
-  // render. Reported only when the membership changes, so the host's state
-  // does not churn per render.
   const lastReportedRef = useRef<string | null>(null);
   useEffect(() => {
     if (svgRoot === null || onUnanchoredChange === undefined) return;
@@ -198,8 +147,6 @@ export function useDiagramComments({
     onUnanchoredChange(ids);
   }, [onUnanchoredChange, resolved, svgRoot]);
 
-  // A re-render drops stale element references from the draft and the
-  // hover; the composer re-opens at the same part when it still exists.
   useEffect(() => {
     setHover(null);
     setComposer((current) => {
@@ -222,8 +169,6 @@ export function useDiagramComments({
       if (element === null || svgRoot === null || renderId === null) return null;
       const target = finder.targetFromElement(svgRoot, element, renderId);
       if (target === null) return null;
-      // The part's ONE element: an edge label resolves to its edge, a
-      // sequence actor's bottom box to the same actor as its top box.
       return { element: finder.findTarget(svgRoot, target, renderId) ?? element, target };
     },
     [finder, renderId, svgRoot],
@@ -257,10 +202,6 @@ export function useDiagramComments({
     (element: Element | null, shiftKey: boolean) => {
       let part = describe(element);
       if (part === null) {
-        // The background, a marker, a part no family addresses. A click
-        // there closes an open draft; with none open it comments on the
-        // WHOLE diagram, so a click never does nothing (a sequence note
-        // the codec misses, a gitGraph, a pie, anything future).
         if (shiftKey) return;
         if (composerOpenRef.current || !canCreate || svgRoot === null) {
           setComposer(null);
@@ -342,7 +283,6 @@ export function useDiagramComments({
         );
         setComposer(null);
       } catch (error) {
-        // The draft stays open with its text; the person retries.
         setSubmitError(error instanceof Error && error.message ? error.message : "Couldn't save the comment. Try again.");
       } finally {
         setSubmitting(false);
@@ -351,8 +291,6 @@ export function useDiagramComments({
     [composer, onCreateComment, sourceDirty, submitting],
   );
 
-  // Selecting through a badge is the host's selection, so the panel and
-  // the ring agree.
   void onSelectComment;
 
   return {

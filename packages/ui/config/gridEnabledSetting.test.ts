@@ -1,17 +1,3 @@
-/**
- * The plan look default (Grid vs Clean), by stored cookie state.
- *
- * Clean is the default (owner, 2026-10-27), and existing users move to Clean
- * once: both earlier choosers opened with Grid preselected, so a stored Grid
- * next to an old (v1) marker is not proof anyone chose it. ConfigStore also
- * writes a setting's default into its cookie on first load, so most browsers
- * hold `plannotator-grid-enabled=true` without a choice at all.
- *
- * Each row is one state from the #2268 review table: what the person sees
- * on load (the look and which dialog), and that a choice made under the
- * Clean default (v2) is never moved again. A "reload" is a fresh
- * ConfigStoreForTest over the same storage.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { resetStorageBackend, setStorageBackend } from '../utils/storage';
 import { markLookAndFeelChoiceResolved, planLookPrompt } from '../utils/lookAndFeelAnnouncement';
@@ -32,7 +18,6 @@ function installBackend(seed: Record<string, string> = {}): Map<string, string> 
   return values;
 }
 
-/** One page load: the look the store resolves, then the dialog the app asks for. */
 function load(): { grid: boolean; prompt: ReturnType<typeof planLookPrompt> } {
   const grid = new ConfigStoreForTest().get('gridEnabled');
   return { grid, prompt: planLookPrompt() };
@@ -91,9 +76,7 @@ describe('plan look by cookie state', () => {
   test('the notice shows until it is answered, then never again', () => {
     installBackend({ [GRID]: 'true', [V1]: 'true' });
     expect(load().prompt).toBe('moved');
-    // Closed the tab without answering: asked again, still Clean.
     expect(load()).toEqual({ grid: false, prompt: 'moved' });
-    // Continue / Escape on Clean.
     markLookAndFeelChoiceResolved();
     expect(load()).toEqual({ grid: false, prompt: null });
     expect(load()).toEqual({ grid: false, prompt: null });
@@ -121,7 +104,6 @@ describe('plan look by cookie state', () => {
 
   test('an older build re-writing its v1 marker cannot move a v2 Grid choice', () => {
     const values = installBackend({ [GRID]: 'true', [V2]: 'resolved' });
-    // An older bundle on the same cookie jar resolves its own chooser.
     values.set(V1, 'true');
     values.set(LEGACY_SEEN, '2');
     expect(load()).toEqual({ grid: true, prompt: null });
@@ -136,7 +118,6 @@ describe('plan look by cookie state', () => {
       removeItem: (key) => { values.delete(key); },
     });
     expect(load()).toEqual({ grid: true, prompt: null });
-    // Cookies last a year from their last write: the load wrote v2 again.
     expect(writes).toContain(V2);
     expect(values.get(V2)).toBe('resolved');
   });

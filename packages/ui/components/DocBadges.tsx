@@ -1,20 +1,3 @@
-/**
- * DocBadges — repo / branch / plan-diff / demo / archive / linked-doc badge cluster.
- *
- * Extracted from Viewer.tsx so the same markup can render in two places:
- *   - layout="column": original location at the top-left of the plan card (absolute)
- *   - layout="row":   compact context inside the legacy sticky header lane
- *   - layout="header": complete context inside Viewer's in-flow shared header
- *
- * In row layout, the demo badge and linked-doc breadcrumb are dropped —
- * everything else is decorative top-of-doc context except the plan-diff
- * badge, which is NOT suppressed by linkedDocInfo: `planDiffStats`/
- * `hasPreviousVersion` already arrive pre-scoped to whichever document is
- * currently active (root, or a folder/linked doc with its own diff
- * baseline), so it renders in linked-doc mode exactly when that document
- * actually has a previous version to diff against.
- */
-
 import React from 'react';
 import { PlanDiffBadge } from './plan-diff/PlanDiffBadge';
 import type { PlanDiffStats } from '../utils/planDiffEngine';
@@ -27,8 +10,6 @@ import { repoLabel } from '../utils/repoLabel';
 
 export interface LinkedDocBadgeInfo {
   filepath: string;
-  /** Leave the document. Optional for `folder-file`: absent shows no Close
-   *  (a file of a review of several files, which the switcher moves between). */
   onBack?: () => void;
   label?: string;
   backLabel?: string;
@@ -42,20 +23,12 @@ export interface DocBadgesProps {
   isPlanDiffActive?: boolean;
   hasPreviousVersion?: boolean;
   onPlanDiffToggle?: () => void;
-  /** Baseline suffix + tooltip for the plan-diff badge — annotate/folder
-   *  sessions pass "since last review" so the badge's numbers read against
-   *  the right baseline. See PlanDiffBadge. Plan review passes nothing. */
   planDiffBaselineLabel?: string;
   planDiffBaselineTooltip?: string;
   showDemoBadge?: boolean;
   archiveInfo?: { status: 'approved' | 'denied' | 'unknown'; timestamp: string; title: string } | null;
   linkedDocInfo?: LinkedDocBadgeInfo | null;
-  /** Source attribution for HTML/URL annotations (e.g. "https://..." or "index.html") */
   sourceInfo?: string;
-  /**
-   * Absolute on-disk path of the annotated source file, used by the
-   * Open-in-app control. Omitted (or an https:// URL) -> no control rendered.
-   */
   openInAppPath?: string | null;
 }
 
@@ -79,40 +52,25 @@ export const DocBadges: React.FC<DocBadgesProps> = ({
   const isHorizontal = layout !== 'column';
   const canOpenInApp =
     !!openInAppPath && !/^https?:\/\//i.test(openInAppPath);
-  // Never shrinks: a file name chip beside it gives up its width first.
   const openInButton = canOpenInApp ? (
     <span className="flex flex-shrink-0">
       <OpenInAppButton filePath={openInAppPath} base={null} />
     </span>
   ) : null;
 
-  // In row layout, only PlanDiffBadge (when it has stats to show) and
-  // archiveInfo (outside linked-doc mode) actually render — everything else
-  // is hidden. Check what will truly produce visible output to avoid an
-  // empty wrapper div. PlanDiffBadge is not linkedDocInfo-gated — see the
-  // header comment.
   const anything = isRow
     ? (hasPreviousVersion && planDiffStats) || (archiveInfo && !linkedDocInfo)
     : repoInfo || hasPreviousVersion || showDemoBadge || linkedDocInfo || archiveInfo || sourceInfo || canOpenInApp;
   if (!anything) return null;
 
-  // Row layout: single horizontal line. Column layout: stacked rows.
   const outerClass = isHorizontal
     ? `flex flex-row items-center gap-1.5 text-[9px] text-muted-foreground/70 font-mono ${layout === 'header' ? 'flex-wrap' : ''}`
     : 'flex flex-col items-start gap-1 text-[9px] text-muted-foreground/50 font-mono';
 
   return (
     <div className={outerClass}>
-      {/* Legacy row layout omits repo/branch to keep the ghost bar compact —
-          they'd otherwise push the container wide enough to visually extend
-          under the action buttons. The Viewer-owned header measures and wraps
-          the complete badge set, so its `header` layout keeps this context. */}
       {repoInfo && !linkedDocInfo && !isRow && (
         <div className="flex min-w-0 max-w-full items-center gap-1.5">
-          {/* No fixed caps: the chips take the room the cluster has. When it runs
-              out, the branch gives way first, down to its icon and a letter or
-              two, and only then the repository: the repository never shrinks,
-              but stops short of the branch's floor (4.5em) and the gap. */}
           <div className="flex min-w-0 items-center gap-1.5">
             <HostTitle title={repoInfo.display} cut>
               <span
@@ -134,14 +92,10 @@ export const DocBadges: React.FC<DocBadgesProps> = ({
               </HostTitle>
             )}
           </div>
-          {/* Markdown/text annotate sessions have no separate source badge, so
-              keep the open-in control attached to the repository context. */}
           {canOpenInApp && !sourceInfo && openInButton}
         </div>
       )}
 
-      {/* Non-repository files still need an open-in entry when there is no
-          source or linked-document row to attach it to. */}
       {!isRow && canOpenInApp && !repoInfo && !sourceInfo && !linkedDocInfo && openInButton}
 
       {sourceInfo && !linkedDocInfo && !isRow && (
@@ -169,7 +123,6 @@ export const DocBadges: React.FC<DocBadgesProps> = ({
         />
       )}
 
-      {/* Demo badge: only in column (top-of-doc) layout */}
       {!isRow && showDemoBadge && !linkedDocInfo && (
         <span className="px-1.5 py-0.5 rounded text-[9px] font-mono bg-amber-500/15 text-amber-600 dark:text-amber-400">
           Demo
@@ -212,7 +165,6 @@ export const DocBadges: React.FC<DocBadgesProps> = ({
         </div>
       )}
 
-      {/* Linked-doc breadcrumb: only in column layout (sticky lane is hidden in linked-doc mode) */}
       {!isRow && linkedDocInfo && (
         linkedDocInfo.variant === 'folder-file' ? (
           <div className="flex min-w-0 max-w-full items-center gap-2">
@@ -225,7 +177,6 @@ export const DocBadges: React.FC<DocBadgesProps> = ({
                 Close
               </button>
             )}
-            {/* The hover text is the whole path, so it shows whether or not the name is cut. */}
             <HostTitle title={linkedDocInfo.filepath}>
               <span className="min-w-0 truncate rounded bg-muted/50 px-1.5 py-0.5 text-[9px] text-muted-foreground">
                 {basenameFromPath(linkedDocInfo.filepath)}

@@ -1,15 +1,3 @@
-/**
- * `@Label` tokens rendered as CHIPS in the composer, against the REAL
- * CommentPopover (DOM-gated).
- *
- * What these catch: a pick that inserts a token the overlay does not paint
- * (so a tag looks different in the input than in the picker row and in the
- * host's posted comment), a chip that outlives the token it names when the
- * author edits it, a chip whose span covers more or fewer bytes than the
- * token (the caret would drift from the painted text), the two token sources
- * fighting over one overlay — and the one that matters for Plannotator: an
- * overlay element existing at all when no host supplied a source.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -20,8 +8,6 @@ import type { SkillCatalogEntry } from '../utils/skillReferences';
 
 const hasDom = typeof document !== 'undefined';
 
-// CommentPopover imports DOM-reading modules; load lazily so this file stays
-// inert in the DOM-less default `bun test` run.
 const popoverMod = hasDom ? await import('./CommentPopover') : null;
 const CommentPopover =
   popoverMod?.CommentPopover as typeof import('./CommentPopover')['CommentPopover'];
@@ -87,7 +73,6 @@ function textarea(): HTMLTextAreaElement {
   return el;
 }
 
-/** The mirrored highlight layer, or null when the composer has no sources. */
 function overlay(): HTMLElement | null {
   return document.querySelector<HTMLElement>('[data-pn-mobile-editable-mirror]');
 }
@@ -112,13 +97,10 @@ async function press(el: HTMLTextAreaElement, key: string, init: KeyboardEventIn
   return event;
 }
 
-/** Type `@<query>`, arrow onto the first row and take it. */
 async function pick(el: HTMLTextAreaElement, typed: string) {
   await type(el, typed);
   await press(el, 'ArrowDown');
   await press(el, 'Enter');
-  // The pick restores focus and the caret in a macrotask; let it land so a
-  // following keystroke reads the caret the composer actually has.
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 }
 
@@ -131,12 +113,9 @@ describe.if(hasDom)('CommentPopover mention chips', () => {
   });
 
   test('a mentionSource turns the overlay on before anything is picked', async () => {
-    // The overlay's lifetime is the composer's, so the first pick never swaps
-    // the textarea element under the caret.
     await mountPopover({ mentionSource: { people: PEOPLE } });
     expect(overlay()).not.toBeNull();
     expect(chips()).toEqual([]);
-    // It is presentation only and names no skill-reference layer.
     expect(overlay()!.getAttribute('aria-hidden')).toBe('true');
     expect(overlay()!.getAttribute('data-skill-ref-overlay')).toBeNull();
   });
@@ -151,9 +130,7 @@ describe.if(hasDom)('CommentPopover mention chips', () => {
     expect(painted.length).toBe(1);
     expect(painted[0]!.getAttribute('data-mention-token')).toBe('user_1');
     expect(painted[0]!.getAttribute('data-mention-kind')).toBe('user');
-    // Exactly the token — not the trailing space, not the words before it.
     expect(painted[0]!.textContent).toBe('@Marcus Chen');
-    // And the overlay still paints the whole value, chip included.
     expect(overlay()!.textContent).toBe(`${el.value}\n`);
   });
 
@@ -180,11 +157,9 @@ describe.if(hasDom)('CommentPopover mention chips', () => {
     expect(chips().length).toBe(1);
     expect(seen.at(-1)).toEqual(['user_1']);
 
-    // One byte out of the middle of the token: no partial chip survives.
     await type(el, 'ping @Marcus Chn ');
     expect(chips()).toEqual([]);
     expect(seen.at(-1)).toEqual([]);
-    // The text is still painted in full; only the highlight went away.
     expect(overlay()!.textContent).toBe('ping @Marcus Chn \n');
   });
 
@@ -195,10 +170,9 @@ describe.if(hasDom)('CommentPopover mention chips', () => {
     expect(el.value).toBe('see $humanizer and ping @Marcus Chen ');
 
     const layers = document.querySelectorAll('[data-pn-mobile-editable-mirror]');
-    expect(layers.length).toBe(1); // ONE overlay, two sources
+    expect(layers.length).toBe(1);
     expect(document.querySelector('[data-skill-ref-token]')!.textContent).toBe('$humanizer');
     expect(chips().map((c) => c.textContent)).toEqual(['@Marcus Chen']);
-    // Document order inside the single layer: skill token first.
     const spans = Array.from(layers[0]!.querySelectorAll('span'));
     expect(spans.map((s) => s.textContent)).toEqual(['$humanizer', '@Marcus Chen']);
   });
@@ -241,7 +215,6 @@ describe.if(hasDom)('CommentPopover mention chips', () => {
     expect(expand).toBeTruthy();
     await act(async () => { expand!.click(); });
     await act(async () => {});
-    // Still exactly one composer, now the dialog one.
     expect(document.querySelectorAll('[data-comment-popover] textarea').length).toBe(1);
     await pick(textarea(), 'ping @dan');
     expect(chips().map((c) => c.getAttribute('data-mention-token'))).toEqual(['user_2']);
@@ -263,12 +236,6 @@ describe.if(hasDom)('CommentPopover mention chips', () => {
   });
 });
 
-// Not DOM-gated: the swap above is only flicker-free if the textarea's color
-// flips as instantly as the overlay's visibility. The global `*` rule in
-// theme.css animates `color` for 150ms, which blanked the text at every
-// composition start and doubled it at every end (Korean/Japanese/Chinese IMEs
-// swap on nearly every keystroke). happy-dom runs no transitions, so the CSS
-// itself is the thing to guard.
 describe('IME composition swap', () => {
   test('the composer textarea opts out of the global color transition', () => {
     const css = readFileSync(join(import.meta.dir, '..', 'theme.css'), 'utf8');
@@ -279,9 +246,6 @@ describe('IME composition swap', () => {
 });
 
 describe.if(hasDom)('mentionSource forwarded by the viewers reaches the chips', () => {
-  // Viewer/HtmlViewer forward `mentionSource` to the composers they mount
-  // (0.43.1) and needed no change for chips; this pins that the prop the
-  // viewers pass is the same one the chip layer reads.
   test('a composer mounted with a viewer-shaped source chips a pick', async () => {
     const source: MentionSource = { people: PEOPLE, heading: 'People here' };
     await mountPopover({ mentionSource: source, isGlobal: true });

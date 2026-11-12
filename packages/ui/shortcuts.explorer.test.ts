@@ -1,15 +1,3 @@
-/**
- * The registry's per-system keys and the two tokens code review's navigation
- * keys need (approved design record "review-explorer", step 3).
- *
- * Regressions guarded:
- *  - `Ctrl` (the physical Control key) matching ⌘, or `Mod` no longer
- *    matching both ⌘ and Ctrl (every existing key depends on it);
- *  - `-` not matching with Shift held (⌃⇧- is Forward);
- *  - a system's own bindings not replacing the shared ones, or the docs not
- *    saying which key belongs to which system;
- *  - a new code review key taking a key code review already used.
- */
 import { describe, expect, it } from 'bun:test';
 import {
   formatShortcutBindingTokens,

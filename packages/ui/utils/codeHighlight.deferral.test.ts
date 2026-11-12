@@ -1,12 +1,3 @@
-/**
- * DOM-gated (DOM_TESTS=1): `deferOffscreenCodeHighlight`, the opt-in that highlights a code fence when it comes
- * near the screen instead of when it mounts (a long Inbox thread's few hundred fences blocked the page for
- * seconds when they were all highlighted at once).
- *
- * happy-dom lays nothing out, so each fence is given its place on the page (getBoundingClientRect) and the
- * ResizeObserver is a stand-in whose `notice()` is the browser's first notice after layout, before paint.
- * The highlighter is a stand-in too (one coloured token per line), so the markup is known.
- */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 
 import {
@@ -28,7 +19,6 @@ const THEME = 'pierre-dark';
 const OTHER_THEME = 'pierre-light';
 const COLOR: Record<string, string> = { [THEME]: '#79c0ff', [OTHER_THEME]: '#0550ae' };
 
-/** The markup the stand-in highlighter gives for `code` (what `highlightToHtml` writes). */
 function markupFor(code: string, theme = THEME): string {
   return code
     .split('\n')
@@ -67,13 +57,11 @@ class StandInResizeObserver {
   }
 }
 
-/** The browser's first notice to every observed fence: after layout, before the frame paints. */
 function layoutNotice(): void {
   for (const observer of StandInResizeObserver.all) observer.notice();
 }
 
 let idleQueue: Array<() => void> = [];
-/** Run idle callbacks until none is asked for again. */
 function runIdle(): void {
   for (let round = 0; round < 100 && idleQueue.length > 0; round++) {
     const due = idleQueue;
@@ -85,7 +73,6 @@ function runIdle(): void {
 const saved: Record<string, unknown> = {};
 const fences: HTMLElement[] = [];
 
-/** A fence on the page whose box is at `top` (px from the window's top), `height` tall; 0x0 when hidden. */
 function fence(top: number, height = 120): HTMLElement {
   const el = document.createElement('code');
   document.body.appendChild(el);
@@ -154,7 +141,6 @@ describe.if(hasDom)('deferOffscreenCodeHighlight', () => {
     setDeferOffscreenCodeHighlight(true);
     const el = fence(100);
     applyHighlight(el, 'const onScreen = 1;', LANG, THEME);
-    // Its own text at its own size from the first layout.
     expect(el.textContent).toBe('const onScreen = 1;');
     layoutNotice();
     expect(el.innerHTML).toBe(markupFor('const onScreen = 1;'));
@@ -182,7 +168,6 @@ describe.if(hasDom)('deferOffscreenCodeHighlight', () => {
     expect(isHighlightPending(el)).toBe(true);
 
     place(el, 200);
-    // Any scroll on the page (capture), before the frame that shows the new place.
     document.dispatchEvent(new Event('scroll'));
     expect(el.innerHTML).toBe(markupFor(code));
     expect(isHighlightPending(el)).toBe(false);
@@ -252,7 +237,6 @@ describe.if(hasDom)('deferOffscreenCodeHighlight', () => {
     const worker: CodeHighlightWorker = {
       html: async (code) => {
         asked.push(code);
-        // Distinguishable from the page's own markup: one span over the whole line, in another colour.
         return code === 'const fromWorker = 1;' ? `<span style="color:#00ff00">${code}</span>` : null;
       },
     };

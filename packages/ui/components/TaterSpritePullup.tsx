@@ -2,7 +2,6 @@
 import React from 'react';
 import spriteSheet from '../sprite_package_pulluphang/sprite.png';
 
-// Sprite specs: 96x96 native, 24 frames, 3 seconds
 const NATIVE_SIZE = 96;
 const DISPLAY_SIZE = 56;
 const FRAMES = 24;
@@ -14,7 +13,7 @@ export const TaterSpritePullup: React.FC = () => {
     <div
       className="absolute pointer-events-none hidden md:block -z-10"
       style={{
-        bottom: -49, // Hangs off bottom of dialog
+        bottom: -49,
         left: 12,
         width: DISPLAY_SIZE,
         height: DISPLAY_SIZE,

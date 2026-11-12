@@ -1,10 +1,3 @@
-/**
- * Where the sanitizer cannot be trusted, nothing goes out as HTML. With no DOM
- * DOMPurify does nothing; under happy-dom it reports itself supported and lets
- * scripts through. Both fail its proof on first use, so this file passes in
- * either state. `chatSanitizer.dom.test.ts` holds what it does when it does
- * work, and this file also holds the markdown step it runs on.
- */
 import { describe, expect, test } from 'bun:test';
 
 import { chatMarkdownHtml, personMarkdownHtml, personMarkdownToHtml } from './chatMarkdown';

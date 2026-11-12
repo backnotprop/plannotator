@@ -1,15 +1,3 @@
-/**
- * Sidebar/panel persistence for raw-HTML annotate sessions (DOM-gated).
- *
- * Contract under test: the default HTML session opens with both side surfaces
- * closed AND the floating tools hidden — the page gets the whole viewport;
- * an explicit change the user makes persists across a fresh mount, but only
- * while the record stays fresh: state older than the staleness TTL (or a
- * legacy record with no timestamp) expires back to the defaults.
- * `toolsHidden` (the header "Hide tools" eye toggle) persists in BOTH
- * directions: a user who showed the tools keeps them next session, and one
- * who hid them is not stranded because the header toggle is the way back.
- */
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import { resetStorageBackend, setStorageBackend, type StorageBackend } from './storage';
 import { STALE_PREFERENCE_TTL_MS } from './preferenceTtl';
@@ -17,8 +5,6 @@ import { STALE_PREFERENCE_TTL_MS } from './preferenceTtl';
 const hasDom = typeof document !== 'undefined';
 const htmlChromeModule = hasDom ? await import('./htmlChrome') : null;
 
-// In-memory storage so tests don't depend on happy-dom cookie semantics
-// (the codebase-standard pattern for persistence tests).
 const memory = new Map<string, string>();
 const memoryBackend: StorageBackend = {
   getItem: (key) => memory.get(key) ?? null,
@@ -63,17 +49,12 @@ describe.if(hasDom)('resolveHtmlChromeState (pure)', () => {
   });
 
   test('toolsHidden persists like the rest of the record, in both directions', () => {
-    // The header eye toggle is part of the header (never part of the hidden
-    // chrome), so restoring a hidden state cannot strand the user.
     expect(
       htmlChromeModule!.resolveHtmlChromeState(
         stamp({ toolsHidden: true, sidebarOpen: true, panelOpen: true }),
         NOW,
       ),
     ).toEqual({ sidebarOpen: true, panelOpen: true, toolsHidden: true });
-    // The direction that matters now that hidden is the default: a reviewer
-    // who explicitly showed the tools must not have them hidden again next
-    // session by the default winning over their fresh record.
     expect(
       htmlChromeModule!.resolveHtmlChromeState(stamp({ toolsHidden: false }), NOW),
     ).toEqual({ sidebarOpen: false, panelOpen: false, toolsHidden: false });
@@ -103,10 +84,7 @@ describe.if(hasDom)('getHtmlChromeState / saveHtmlChromeState (cookie round trip
   });
 
   test('a "user opened surfaces" state persists across a fresh mount', () => {
-    // Session 1: user shows the tools, opens the sidebar and the drawer, then leaves.
     htmlChromeModule!.saveHtmlChromeState({ sidebarOpen: true, panelOpen: true, toolsHidden: false });
-    // Session 2 (fresh mount, same cookies): opens exactly as left — the
-    // hidden-by-default tools stay shown because the record wins.
     expect(htmlChromeModule!.getHtmlChromeState()).toEqual({
       sidebarOpen: true,
       panelOpen: true,
@@ -148,10 +126,6 @@ describe.if(hasDom)('shouldRestoreHtmlChrome (entry, not every render)', () => {
   });
 
   test('navigating BETWEEN HTML documents does not', () => {
-    // The regression this guards: following a link re-runs the effect with
-    // isHtmlSurface still true, and a restore there would slam the tools back
-    // to hidden and re-apply the remembered sidebar state mid-session —
-    // exactly the two things a link click must leave alone.
     expect(restore({ wasHtmlSurface: true })).toBe(false);
   });
 
@@ -178,11 +152,6 @@ describe.if(hasDom)('mergeHtmlChromeState (what a session is entitled to record)
   });
 
   test('a session that does not own its sidebar records only toolsHidden', () => {
-    // A folder annotate session's file browser owns the left sidebar for the
-    // whole session, so its sidebar/panel state says nothing about what the
-    // reviewer wants on an ordinary HTML surface. The eye, though, means the
-    // same thing everywhere — and suppressing that half is what made the
-    // hidden-by-default tools permanent in folder sessions.
     expect(htmlChromeModule!.mergeHtmlChromeState({
       persisted,
       live,

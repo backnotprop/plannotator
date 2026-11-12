@@ -1,14 +1,3 @@
-/**
- * Hook contract (DOM-gated, DOM_TESTS=1): a fake `document.modelContext`
- * is installed with save/restore of the property descriptor.
- *
- * Regressions guarded: mount registers and unmount aborts; a rebuild with
- * new handler identities (deps changed, descriptors unchanged) swaps the
- * handlers in place and never calls registerTool again; `active: false`
- * (what the Settings toggle drives) aborts every controller and `true`
- * re-registers; the policy seam's `enabled: false` and `namePrefix` are
- * honored; a document without the API mounts with no effect at all.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

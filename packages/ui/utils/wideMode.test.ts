@@ -51,8 +51,6 @@ describe('resolveFocusShortcutAction', () => {
     })).toBe('exit');
   });
 
-  // A press while `wide` is active must restore, not swap wide -> focus: the
-  // panels are already hidden, so re-hiding them would read as a dead key.
   test('restores from wide mode instead of switching to focus', () => {
     expect(resolveFocusShortcutAction({
       canUseWideMode: true,
@@ -67,8 +65,6 @@ describe('resolveFocusShortcutAction', () => {
     })).toBe('none');
   });
 
-  // Availability can drop while a view mode is still active (opening the plan
-  // diff); the shortcut must still be able to give the panels back.
   test('still restores when availability drops mid-focus', () => {
     expect(resolveFocusShortcutAction({
       canUseWideMode: false,

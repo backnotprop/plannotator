@@ -1,10 +1,3 @@
-// The scene player's hands on the drawing: it finds each `data-part` piece in
-// the agent's SVG (already sanitized and drawn by ShapeDrawn), measures where
-// it is drawn, and sets only a short list of things on it: its `transform`
-// attribute, and its style's opacity, color (the piece's currentColor),
-// filter (lit; in the technical look, a shape's stroke or a box's border
-// colour), stroke dashes (draw), and its words. Each is put back as it
-// was when the player goes. No script from the board runs; the board is data.
 import type { ShapeScene } from '@plannotator/core/shape-scene';
 import { colourCss, lookAt, places, type Geo, type PieceLook, type Pt } from './timeline';
 import { ownLine } from '../litLine';
@@ -15,20 +8,11 @@ const LIT = 'drop-shadow(0 0 2.5px var(--mark)) drop-shadow(0 0 7px color-mix(in
 interface Piece {
   el: Element;
   svg: boolean;
-  /** As found: put back when the player goes or measures again. */
   was: { transform: string | null; opacity: string; color: string; text: string | null; dashes: { el: SVGGeometryElement; da: string; dof: string }[] };
-  /**
-   * What `lit` changes, each with what it had: the piece, or (shapes only) its shapes without its words.
-   * `line`: in the technical look, a shape with a stroke or a box with a border takes the mark colour on that
-   * line (one border); only one with no line of its own gets the outline filter.
-   */
   lit: { el: HTMLElement | SVGElement; filter: string; line: 'stroke' | 'border' | null; colour: string }[];
-  /** Its centre in its own coordinates, and as drawn in the scene SVG's. */
   local: Pt;
   home: Pt;
-  /** Its parent's coordinates → the scene SVG's (for turning a move into the parent's terms). */
   parentInv: DOMMatrix | null;
-  /** The element whose words `text` sets. */
   textEl: Element | null;
   lines: { el: SVGGeometryElement; len: number }[];
 }
@@ -44,14 +28,8 @@ export class SceneDom implements Geo {
   private root: SVGSVGElement | null = null;
   missing: string[] = [];
 
-  /**
-   * `lit`: the filter a lit piece gets (the technical look passes a thin outline in place of the glow).
-   * `litShapesOnly` (the technical look): a lit group lights its shapes and leaves its words alone, so letters
-   * never smudge, and a shape's own stroke (a box's own border) takes the mark colour in place of a second outline.
-   */
   constructor(private slot: HTMLElement, private scene: ShapeScene, private lit: string = LIT, private litShapesOnly = false) {}
 
-  /** The scene's SVG: the first one in the slot. Its coordinates are the scene's. */
   private svg(): SVGSVGElement | null {
     return this.slot.querySelector('svg');
   }
@@ -61,7 +39,6 @@ export class SceneDom implements Geo {
     return this.slot.querySelector(sel) ?? (this.slot.getRootNode() as ParentNode).querySelector?.(sel) ?? null;
   }
 
-  /** The matrix from an element's own coordinates to the scene SVG's (screen matrices, so the board's zoom cancels out). */
   private toRoot(el: Element): DOMMatrix | null {
     const root = this.root;
     if (!root || !isSvgGraphic(el)) return null;
@@ -70,7 +47,6 @@ export class SceneDom implements Geo {
     return DOMMatrix.fromMatrix(r).inverse().multiply(DOMMatrix.fromMatrix(m));
   }
 
-  /** Find and measure every piece the scene names. Puts everything back first, so it can run again (a resize, a redraw). */
   measure() {
     this.restore();
     this.pieces.clear();
@@ -96,7 +72,6 @@ export class SceneDom implements Geo {
       const lines = geoms
         .filter((g) => typeof g.getTotalLength === 'function')
         .map((g) => {
-          // With pathLength set, dashes count in its units.
           const pl = Number(g.getAttribute('pathLength'));
           let len = 0;
           try {
@@ -163,7 +138,6 @@ export class SceneDom implements Geo {
     return pt(path.toRoot.transformPoint(new DOMPoint(q.x, q.y)));
   }
 
-  /** Draw the scene at time `t`. */
   apply(t: number) {
     for (const [id, keys] of Object.entries(this.scene.tracks)) {
       const piece = this.pieces.get(id);
@@ -185,7 +159,6 @@ export class SceneDom implements Geo {
       }
       if (piece.was.transform) parts.push(piece.was.transform);
       const s = look.scale ?? 1, r = look.rotate ?? 0;
-      // Width and height alone multiply the whole size; all three are about the piece's centre.
       const sx = Math.max(0, s * (look.scaleX ?? 1)), sy = Math.max(0, s * (look.scaleY ?? 1));
       if (sx !== 1 || sy !== 1 || r !== 0) {
         const { x, y } = piece.local;
@@ -210,7 +183,6 @@ export class SceneDom implements Geo {
     }
   }
 
-  /** Lights one element (or puts it back): its own line in the mark colour where it has one, else the lit filter. */
   private light(l: Piece['lit'][number], on: boolean) {
     const style = l.el.style;
     if (!l.line) style.filter = on ? this.lit : l.filter;
@@ -218,7 +190,6 @@ export class SceneDom implements Geo {
     else style.removeProperty(l.line === 'stroke' ? 'stroke' : 'border-color');
   }
 
-  /** Everything back as the board drew it. */
   restore() {
     for (const piece of this.pieces.values()) {
       const { el, was } = piece;

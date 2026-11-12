@@ -6,7 +6,6 @@ import { parseHtmlElementContext as uiParseHtmlElementContext } from "../compone
 import type { Block } from "../types";
 import { AnnotationType } from "../types";
 
-/** Tiny factory for list-item blocks used by computeListIndices tests. */
 const li = (level: number, ordered: boolean, orderedStart?: number): Block => ({
   id: `b${Math.random()}`,
   type: "list-item",
@@ -54,32 +53,21 @@ describe("resolveReferenceLinks (#923)", () => {
 
   test("leaves unknown references and non-reference brackets untouched", () => {
     expect(resolveReferenceLinks("[text][missing].")).toBe("[text][missing].");
-    // No definitions at all: fast path returns the input unchanged.
     expect(resolveReferenceLinks("array [0] and [TODO] here")).toBe(
       "array [0] and [TODO] here",
     );
-    // A shortcut that does not name a definition stays literal even when other
-    // definitions exist. The definition itself is never consumed by anything
-    // in this document, so it stays visible too (PR #1168: unused definitions
-    // are not blanked).
     expect(resolveReferenceLinks("[TODO] and [0]\n\n[id]: https://e.com")).toBe(
       "[TODO] and [0]\n\n[id]: https://e.com",
     );
   });
 
   test("does not double-link an inline link whose text matches a definition", () => {
-    // The inline link uses its own explicit URL and never consumes the
-    // definition, so the definition stays visible (PR #1168).
     expect(
       resolveReferenceLinks("[text](https://real.com)\n\n[text]: https://def.com"),
     ).toBe("[text](https://real.com)\n\n[text]: https://def.com");
   });
 
   test("never rewrites references inside fenced code blocks or inline code spans", () => {
-    // Both definitions are only ever "referenced" from inside a protected
-    // region (a fence, an inline code span), so neither reference resolves
-    // and neither definition is consumed — both stay visible verbatim
-    // (PR #1168).
     expect(resolveReferenceLinks("```\n[a][b]\n```\n\n[b]: https://e.com")).toBe(
       "```\n[a][b]\n```\n\n[b]: https://e.com",
     );
@@ -89,7 +77,6 @@ describe("resolveReferenceLinks (#923)", () => {
   });
 
   test("does not collect a definition that sits inside a fenced code block", () => {
-    // The only `[id]:` is inside code, so `[id]` outside stays a literal shortcut.
     expect(
       resolveReferenceLinks("```\n[id]: https://code.com\n```\n\n[id]"),
     ).toBe("```\n[id]: https://code.com\n```\n\n[id]");
@@ -109,8 +96,6 @@ describe("resolveReferenceLinks (#923)", () => {
 
   test("blanks definition lines in place so block start-lines stay accurate", () => {
     const blocks = parseMarkdownToBlocks("[id]: https://e.com\n\n# Heading\n\ntext [x][id]");
-    // The definition line renders nothing; the heading and paragraph keep their
-    // original source line numbers.
     const heading = blocks.find((b) => b.type === "heading");
     const paragraph = blocks.find((b) => b.type === "paragraph");
     expect(heading?.startLine).toBe(3);
@@ -120,8 +105,6 @@ describe("resolveReferenceLinks (#923)", () => {
   });
 
   test("does not delete a definition-shaped line that continues a paragraph", () => {
-    // CommonMark: a definition cannot interrupt a paragraph. The second line
-    // must survive as content, not be silently blanked.
     expect(resolveReferenceLinks("The config keys are:\n[timeout]: 30")).toBe(
       "The config keys are:\n[timeout]: 30",
     );
@@ -140,9 +123,6 @@ describe("resolveReferenceLinks (#923)", () => {
   });
 
   test("does not clobber a checked task-list item when an [x] definition exists", () => {
-    // The checkbox guard means the task-list `[x]` never resolves as a
-    // reference, so the "x" definition is never consumed and stays visible
-    // (PR #1168).
     expect(resolveReferenceLinks("- [x] done task\n- [ ] todo\n\n[x]: https://e.com")).toBe(
       "- [x] done task\n- [ ] todo\n\n[x]: https://e.com",
     );
@@ -158,13 +138,7 @@ describe("resolveReferenceLinks (#923)", () => {
 
 describe("resolveReferenceLinks — owner review fixups (PR #1168)", () => {
   test("does not rewrite a reference inside a fence indented 4+ spaces (block parser still treats it as code)", () => {
-    // The block parser detects a fence via `trimmed.startsWith('```')` after a
-    // full `.trim()` — ANY indentation still opens a code block. The resolver
-    // must recognize the exact same fence, not just fences within 3 spaces.
     const md = "    ```\n    [a][b]\n    ```\n\n[b]: https://e.com";
-    // The code content must survive verbatim, and since "b" is never consumed
-    // outside the code fence, the definition itself must remain visible too —
-    // as its own trailing paragraph, not silently dropped.
     expect(parseMarkdownToBlocks(md).map((b) => b.type)).toEqual(["code", "paragraph"]);
     expect(resolveReferenceLinks(md)).toBe(md);
   });
@@ -190,9 +164,6 @@ describe("resolveReferenceLinks — owner review fixups (PR #1168)", () => {
   });
 
   test("does not treat a GFM footnote definition ([^label]: ...) as a link reference definition", () => {
-    // A footnote body that is a bare token (looks exactly like a definition
-    // destination) is the real hazard — prose bodies with spaces already fail
-    // the destination shape by accident.
     const md = "See the note.[^1]\n\n[^1]: https://example.com/footnote";
     expect(resolveReferenceLinks(md)).toBe(md);
   });
@@ -240,8 +211,6 @@ describe("resolveReferenceLinks — owner review fixups (PR #1168)", () => {
     expect(resolved.split("\n").length).toBe(md.split("\n").length);
     const blocks = parseMarkdownToBlocks(md);
     expect(blocks.find((b) => b.type === "heading")?.startLine).toBe(1);
-    // "unused" and "coded" (only referenced inside the fence) must remain
-    // visible; only the genuinely consumed "used" definition is blanked.
     expect(resolved).toContain("[unused]: https://unused.com");
     expect(resolved).toContain("[coded]: https://coded.com");
     expect(resolved).not.toContain("[used]: https://used.com");
@@ -264,8 +233,6 @@ describe("resolveReferenceLinks — owner review fixups (PR #1168)", () => {
     const start = performance.now();
     const result = resolveReferenceLinks(md);
     const elapsed = performance.now() - start;
-    // A naive unbounded backtracking scan would take many seconds to minutes
-    // here; a bounded one-pass scan finishes in well under a second.
     expect(elapsed).toBeLessThan(1500);
     expect(result.startsWith(junk)).toBe(true);
   });
@@ -273,9 +240,6 @@ describe("resolveReferenceLinks — owner review fixups (PR #1168)", () => {
   test("caps reference/definition label length so a single pathological label cannot force backtracking", () => {
     const longLabel = "x".repeat(1500);
     const md = `[text][${longLabel}]\n\n[${longLabel}]: https://e.com`;
-    // Deliberate safe degradation: a label above the bound is not resolved
-    // and its definition-shaped line is not collected either, so both sides
-    // are left untouched rather than partially/incorrectly rewritten.
     expect(resolveReferenceLinks(md)).toBe(md);
   });
 
@@ -314,10 +278,6 @@ describe("resolveReferenceLinks — owner review fixups (PR #1168)", () => {
   });
 
   test("a genuinely nested-bracket shortcut does not corrupt the destination pipeline or crash", () => {
-    // Unescaped nested brackets in link text are not legal CommonMark; the
-    // simplified single-pass scanner does not fully recover the intended
-    // reference, but it must never throw and must never do something that
-    // could bypass URL sanitization later.
     const md = "[outer [inner] text][id]\n\n[id]: https://e.com";
     expect(() => resolveReferenceLinks(md)).not.toThrow();
     const result = resolveReferenceLinks(md);
@@ -325,22 +285,12 @@ describe("resolveReferenceLinks — owner review fixups (PR #1168)", () => {
   });
 
   test("dangerous destinations still go through sanitizeLinkUrl identically to a hand-written inline link", () => {
-    // resolveReferenceLinks only ever emits `[text](dest)`, so it reuses the
-    // exact same inline-link rendering/sanitization path — it must never
-    // special-case or bypass it.
     const resolved = resolveReferenceLinks("[x][id]\n\n[id]: javascript:alert(1)");
     expect(resolved).toBe("[x](javascript:alert(1))\n\n");
-    // The literal string is unchanged (dangerous-protocol stripping happens
-    // downstream in sanitizeLinkUrl at render time), confirming this pass
-    // does not attempt — and therefore cannot get wrong — its own filtering.
   });
 });
 
 describe("parseMarkdownToBlocks — code fences", () => {
-  /**
-   * Baseline: the common triple-backtick fence still works after the nested-
-   * fence fix. Regression guard so we don't break normal plans.
-   */
   test("triple-backtick fence produces a single code block", () => {
     const md = "```js\nconsole.log('hi');\n```";
     const blocks = parseMarkdownToBlocks(md);
@@ -350,11 +300,6 @@ describe("parseMarkdownToBlocks — code fences", () => {
     expect(blocks[0].content).toBe("console.log('hi');");
   });
 
-  /**
-   * A 4-backtick fence is used to embed a triple-backtick fence inside a code
-   * block (e.g. showing a markdown example). Before the fix the inner ``` would
-   * prematurely close the block, producing broken output.
-   */
   test("4-backtick fence treats inner triple-backtick as content", () => {
     const md = "````md\n```js\ncode\n```\n````";
     const blocks = parseMarkdownToBlocks(md);
@@ -363,10 +308,6 @@ describe("parseMarkdownToBlocks — code fences", () => {
     expect(blocks[0].content).toBe("```js\ncode\n```");
   });
 
-  /**
-   * Ensure the language tag is still extracted correctly when the fence uses
-   * more than three backticks.
-   */
   test("4-backtick fence preserves language tag", () => {
     const md = "````markdown\nhello\n````";
     const blocks = parseMarkdownToBlocks(md);
@@ -374,10 +315,6 @@ describe("parseMarkdownToBlocks — code fences", () => {
     expect(blocks[0].language).toBe("markdown");
   });
 
-  /**
-   * 5-backtick fence should allow both ``` and ```` lines as content,
-   * only closing on a line of 5+ backticks.
-   */
   test("5-backtick fence treats 3- and 4-backtick lines as content", () => {
     const md = "`````\n````\n```\n`````";
     const blocks = parseMarkdownToBlocks(md);
@@ -386,11 +323,6 @@ describe("parseMarkdownToBlocks — code fences", () => {
     expect(blocks[0].content).toBe("````\n```");
   });
 
-  /**
-   * A closing fence may have more backticks than the opener (CommonMark §4.5).
-   * We support this so plans generated by tools that follow the spec parse
-   * correctly.
-   */
   test("closing fence with more backticks than opener still closes the block", () => {
     const md = "````\ncontent\n`````";
     const blocks = parseMarkdownToBlocks(md);
@@ -398,10 +330,6 @@ describe("parseMarkdownToBlocks — code fences", () => {
     expect(blocks[0].content).toBe("content");
   });
 
-  /**
-   * Text before and after a nested-fence block must still parse into their own
-   * blocks — the nested-fence fix must not swallow surrounding content.
-   */
   test("nested-fence block does not swallow surrounding paragraphs", () => {
     const md = "intro\n\n````\n```\nnested\n```\n````\n\noutro";
     const blocks = parseMarkdownToBlocks(md);
@@ -410,10 +338,6 @@ describe("parseMarkdownToBlocks — code fences", () => {
     expect(blocks[1].content).toBe("```\nnested\n```");
   });
 
-  /**
-   * An unclosed fence at end-of-file should produce a code block containing
-   * whatever content was seen (CommonMark §4.5: unclosed fences extend to EOF).
-   */
   test("unclosed fence at EOF produces a code block with seen content", () => {
     const md = "```js\nconst x = 1;";
     const blocks = parseMarkdownToBlocks(md);
@@ -423,10 +347,6 @@ describe("parseMarkdownToBlocks — code fences", () => {
     expect(blocks[0].content).toBe("const x = 1;");
   });
 
-  /**
-   * A fence opener as the very last line of the document (no content, no
-   * closing fence) should produce an empty code block rather than crashing.
-   */
   test("fence opener as last line produces an empty code block", () => {
     const md = "```ts";
     const blocks = parseMarkdownToBlocks(md);
@@ -436,12 +356,6 @@ describe("parseMarkdownToBlocks — code fences", () => {
     expect(blocks[0].content).toBe("");
   });
 
-  /**
-   * Indented code fences (e.g. inside list items in a plan) must close when
-   * the closing fence is equally indented. Before the fix, the closing fence
-   * regex required backticks at column 0, so indented ``` never matched and
-   * the code block swallowed everything to EOF.
-   */
   test("indented closing fence closes the code block", () => {
     const md = "- Replace with reads:\n  ```ts\n  const x = 1;\n  ```\n- Next item";
     const blocks = parseMarkdownToBlocks(md);
@@ -451,11 +365,6 @@ describe("parseMarkdownToBlocks — code fences", () => {
     expect(blocks[2].content).toBe("Next item");
   });
 
-  /**
-   * A closing fence with trailing text (e.g. ``` some comment) should still
-   * close the block. Before the fix, the regex required only whitespace after
-   * backticks, so trailing text caused the fence to swallow everything to EOF.
-   */
   test("closing fence with trailing text still closes the block", () => {
     const md = "```js\nconst x = 1;\n``` this is ignored\nafter";
     const blocks = parseMarkdownToBlocks(md);
@@ -504,9 +413,6 @@ describe("parseMarkdownToBlocks — display math", () => {
   });
 
   test("unclosed display math does NOT swallow the rest of the document", () => {
-    // A stray/unclosed $$ (or informal money like "$$100k") must not consume every
-    // following block to EOF — it's treated as ordinary text and later content
-    // (headings, paragraphs) is preserved. Mirrors the unclosed-HTML-tag policy.
     const blocks = parseMarkdownToBlocks("$$\nx + y\n\n## Later heading\n\nMore text.");
     expect(blocks.some((b) => b.type === "math")).toBe(false);
     expect(blocks.some((b) => b.type === "heading" && b.content === "Later heading")).toBe(true);
@@ -514,9 +420,6 @@ describe("parseMarkdownToBlocks — display math", () => {
   });
 
   test("unclosed $$ does not pair with a stray $$ inside a later code fence", () => {
-    // The close-tag scan stops at a blank line, so an unterminated $$ can't reach
-    // (and pair with) a $$ that appears far below inside a code fence — which would
-    // otherwise swallow every heading/paragraph in between into one broken block.
     const md = "$$\n\\theta = x\n\n## Next\n\n```\nnot math $$ here\n```\n\n## After";
     const blocks = parseMarkdownToBlocks(md);
     expect(blocks.every((b) => !(b.type === "math" && b.content.length > 100))).toBe(true);
@@ -550,9 +453,6 @@ describe("parseMarkdownToBlocks — display math", () => {
     expect(blocks[1].sourceLineCount).toBe(1);
   });
 
-  // Regression: the closing $$ was only recognized when it was the last thing
-  // on the line, so a trailing char (a period) or trailing words made the line
-  // look like an unterminated opener and swallowed the rest of the document.
   test("$$ closing with a trailing period does not swallow following content", () => {
     const md = "$$E = mc^2$$.\n\n## Next\n\nBody.";
     const blocks = parseMarkdownToBlocks(md);
@@ -597,11 +497,6 @@ describe("parseMarkdownToBlocks — tables", () => {
     expect(blocks[0].type).toBe("table");
   });
 
-  /**
-   * Prose containing pipe characters (e.g. TypeScript union types in inline
-   * code) must NOT be treated as a table. Before the fix, the regex
-   * matched any line with 2+ pipes.
-   */
   test("paragraph with inline code containing pipes is not a table", () => {
     const md = "The type is `'scroll' | 'wrap'` and supports `'a' | 'b' | 'c'` values.";
     const blocks = parseMarkdownToBlocks(md);
@@ -642,12 +537,12 @@ describe("parseMarkdownToBlocks — real-world plan regression", () => {
     const blocks = parseMarkdownToBlocks(md);
     const types = blocks.map((b) => b.type);
     expect(types).toEqual([
-      "heading",      // ### 5. Migrate App.tsx
-      "list-item",    // - **Remove**
-      "list-item",    // - **Replace**
-      "code",         // ```ts ... ```
-      "list-item",    // - **Update**
-      "heading",      // ### 6. Update DiffViewer
+      "heading",
+      "list-item",
+      "list-item",
+      "code",
+      "list-item",
+      "heading",
     ]);
     expect(blocks[3].type).toBe("code");
     expect(blocks[3].language).toBe("ts");
@@ -941,9 +836,6 @@ describe("parseMarkdownToBlocks — blockquotes", () => {
     expect(blocks[0].content).toBe("just one");
   });
 
-  // A run of `>` lines is ONE quote whose content is the quote's own
-  // markdown (the `>` and one space stripped per line, one content line per
-  // source line); the renderer parses it again for the blocks inside.
   const quoteBody = (block: { content: string }) =>
     parseMarkdownToBlocks(block.content, { frontmatter: false }).map((b) => [b.type, b.content]);
 
@@ -1046,8 +938,6 @@ describe("parseMarkdownToBlocks — blockquotes", () => {
   });
 
   test("wrapped prose quote still merges (regression guard for the merge fix)", () => {
-    // This is the case the merge fix was added for — a single logical
-    // paragraph wrapped across multiple source lines. Must still merge.
     const md = "> This is a long quoted paragraph\n> that wraps across several\n> source lines for readability.";
     const blocks = parseMarkdownToBlocks(md);
     expect(blocks).toHaveLength(1);
@@ -1099,10 +989,6 @@ describe("parseMarkdownToBlocks — blockquotes", () => {
   });
 
   test("multi-paragraph blockquote encodes paragraph break as double newline", () => {
-    // The empty `>` line sits between two quoted paragraphs. We merge all
-    // three `>` lines into one block, but the blank `>` becomes an empty
-    // string, leaving a `\n\n` in the content so the renderer can split on
-    // paragraph breaks and emit two <p> children.
     const md = "> first paragraph\n>\n> second paragraph";
     const blocks = parseMarkdownToBlocks(md);
     expect(blocks).toHaveLength(1);
@@ -1226,7 +1112,6 @@ describe("parseMarkdownToBlocks — directive containers", () => {
   });
 
   test("unterminated directive absorbs rest of document", () => {
-    // Not ideal, but prevents silent loss — user sees the whole body styled.
     const md = ":::note\nbody\nmore body";
     const blocks = parseMarkdownToBlocks(md);
     expect(blocks).toHaveLength(1);
@@ -1286,7 +1171,6 @@ describe("parseMarkdownToBlocks — raw HTML blocks", () => {
   });
 
   test("inline HTML in the middle of a paragraph is NOT a block", () => {
-    // Line does not start with `<tag`, so the paragraph path wins.
     const md = "Press <kbd>Ctrl</kbd> to submit";
     const blocks = parseMarkdownToBlocks(md);
     expect(blocks).toHaveLength(1);
@@ -1358,20 +1242,7 @@ describe("parseMarkdownToBlocks — raw HTML blocks", () => {
 });
 
 describe("parseMarkdownToBlocks / resolveReferenceLinks — unclosed-HTML-opener perf (PR #1168 follow-up)", () => {
-  // Root cause: the balanced open/close depth scan for a multi-line HTML
-  // block does not advance the outer index when it fails to find a closing
-  // tag — so a document with many consecutive unclosed openers (e.g.
-  // thousands of bare `<div>` lines with no `</div>` anywhere) makes EVERY
-  // one of them independently re-scan all the way to end-of-document. That
-  // is O(N^2) work for N such lines, a real DoS-shaped hazard well within
-  // the 2MB annotate cap. Both markProtectedLines (used by
-  // resolveReferenceLinks) and parseMarkdownToBlocks's own HTML-block
-  // section duplicate this exact scan, so both must be fixed.
   const N = 8000;
-  // Generous bound: a linear/bounded fix finishes in well under 100ms for
-  // this input; the pre-fix O(N^2) scan takes multiple seconds (measured
-  // ~2.2s for N=8000 during triage). 800ms leaves large machine-variance
-  // headroom while still failing clearly against the quadratic behavior.
   const TIME_BOUND_MS = 800;
 
   test("parseMarkdownToBlocks stays fast with many consecutive unclosed <div> openers", () => {
@@ -1409,8 +1280,6 @@ describe("parseMarkdownToBlocks / resolveReferenceLinks — unclosed-HTML-opener
     const elapsed = performance.now() - start;
     expect(elapsed).toBeLessThan(TIME_BOUND_MS);
 
-    // parseMarkdownToBlocks: the real <details> block is captured whole,
-    // undisturbed by the decoys before it, followed by its own paragraph.
     const detailsBlock = blocks.find((b) => b.type === "html" && b.content.startsWith("<details>"));
     expect(detailsBlock).toBeDefined();
     expect(detailsBlock!.content).toBe(
@@ -1419,27 +1288,16 @@ describe("parseMarkdownToBlocks / resolveReferenceLinks — unclosed-HTML-opener
     const paragraph = blocks.find((b) => b.type === "paragraph" && b.content === "After.");
     expect(paragraph).toBeDefined();
 
-    // resolveReferenceLinks: the SAME <details> span is protected — the
-    // definition inside it is never consumed by anything, so it stays
-    // visible verbatim, exactly mirroring the block parser's own boundary
-    // for this block (not corrupted, not partially rewritten).
     expect(resolved).toContain("[id]: https://from-details.com");
   });
 });
 
 describe("parseMarkdownToBlocks / resolveReferenceLinks — long valid HTML blocks must not be truncated (owner follow-up on 9440be06)", () => {
-  // Regression: a fixed MAX_HTML_BLOCK_SCAN_LINES cap on the balanced
-  // open/close depth scan incorrectly cut off VALID HTML blocks whose
-  // closing tag sits beyond the cap. closeExistsFromLine already rejects a
-  // truly-unclosed opener in O(1) without scanning at all, so a genuinely
-  // closed block — however long — should simply be scanned once to its
-  // real end, not capped. A cap that can truncate valid parsing is not an
-  // acceptable trade-off no matter how generous its value.
   const N_UNCLOSED = 40_000;
   const TIME_BOUND_MS = 1500;
 
   test("a <details> block with its closing tag more than 2000 lines below the opener stays one whole html block", () => {
-    const innerLineCount = 2500; // deliberately past the old 2000-line cap
+    const innerLineCount = 2500;
     const inner = Array.from({ length: innerLineCount }, (_, i) => `body line ${i}`).join("\n");
     const md = `<details>\n<summary>Big</summary>\n${inner}\n</details>\n\nAfter.`;
 
@@ -1452,7 +1310,7 @@ describe("parseMarkdownToBlocks / resolveReferenceLinks — long valid HTML bloc
   });
 
   test("a raw HTML <table> block with its closing tag more than 2000 lines below the opener stays one whole html block", () => {
-    const rowCount = 2200; // deliberately past the old 2000-line cap
+    const rowCount = 2200;
     const rows = Array.from({ length: rowCount }, (_, i) => `<tr><td>${i}</td></tr>`).join("\n");
     const md = `<table>\n${rows}\n</table>\n\nAfter table.`;
 
@@ -1467,20 +1325,13 @@ describe("parseMarkdownToBlocks / resolveReferenceLinks — long valid HTML bloc
   test("a link definition inside a long (>2000-line) <details> block stays protected by resolveReferenceLinks, and never wins over a real outside definition", () => {
     const innerLineCount = 2500;
     const filler = Array.from({ length: innerLineCount }, (_, i) => `body line ${i}`).join("\n");
-    // Same label defined both inside the (protected) details block and
-    // outside it. If the interior is genuinely protected, the inside
-    // definition is never collected at all, so the outside one — the only
-    // real candidate — wins and resolves the reference. If protection were
-    // to end early (the truncation bug), the inside definition would be
-    // collected FIRST (first-definition-wins) and incorrectly win instead,
-    // and would incorrectly be blanked as "consumed" too.
     const md =
       `<details>\n<summary>Big</summary>\n${filler}\n\n[id]: https://inside-details.com\n\n</details>` +
       `\n\n[id]: https://outside.com\n\ntext [x][id]`;
     const resolved = resolveReferenceLinks(md);
-    expect(resolved).toContain(`[id]: https://inside-details.com`); // stays visible, untouched
-    expect(resolved).toContain("text [x](https://outside.com)"); // outside definition wins
-    expect(resolved).not.toContain("[id]: https://outside.com\n"); // the real (consumed) one is blanked
+    expect(resolved).toContain(`[id]: https://inside-details.com`);
+    expect(resolved).toContain("text [x](https://outside.com)");
+    expect(resolved).not.toContain("[id]: https://outside.com\n");
   });
 
   test("40k unclosed <div> openers (no close anywhere) stay fast, with parity between parser and resolver", () => {
@@ -1498,10 +1349,7 @@ describe("parseMarkdownToBlocks / resolveReferenceLinks — long valid HTML bloc
     expect(parseElapsed).toBeLessThan(TIME_BOUND_MS);
     expect(resolveElapsed).toBeLessThan(TIME_BOUND_MS);
 
-    // Parity: every decoy is its own single-line html block to the parser...
     expect(blocks.filter((b) => b.type === "html")).toHaveLength(N_UNCLOSED);
-    // ...and every decoy line is likewise individually protected (never
-    // rewritten) by the resolver — same boundary, both call sites agree.
     expect(resolved).toContain("[x](https://e.com)");
     expect(resolved.split("\n").filter((l) => l === "<div>")).toHaveLength(N_UNCLOSED);
   });
@@ -1527,19 +1375,6 @@ describe("parseMarkdownToBlocks / resolveReferenceLinks — long valid HTML bloc
 });
 
 describe("parseMarkdownToBlocks / resolveReferenceLinks — linear matching-close index (owner follow-up on a55db2b9)", () => {
-  // Owner-flagged regression: removing the fixed cap fixed truncation but
-  // reintroduced O(N^2) for a different adversarial shape — N unclosed
-  // `<div>` openers followed by a SINGLE trailing `</div>`.
-  // closeExistsFromLine's "does a close exist anywhere" pre-check is true
-  // for every one of the N openers (the trailing close exists), so every
-  // one of them still independently scans forward — most all the way to
-  // end-of-document — before giving up. Measured (pre-fix): 5000 → ~1.0s,
-  // 10000 → ~4.1s (textbook ~4x per doubling). Fixed by replacing the
-  // scan entirely with a per-tag-name prefix-sum + "next smaller-or-equal
-  // element" index (a classic O(N) monotonic-stack construction, built once
-  // per tag name and cached per document), so every opener's closing
-  // position — whether it exists, and exactly where if so, however far away
-  // — is an O(1) lookup with no scanning at all.
   const N = 40_000;
   const TIME_BOUND_MS = 1500;
 
@@ -1551,10 +1386,6 @@ describe("parseMarkdownToBlocks / resolveReferenceLinks — linear matching-clos
     const parseElapsed = performance.now() - parseStart;
     expect(parseElapsed).toBeLessThan(TIME_BOUND_MS);
 
-    // Only the LAST opener (immediately preceding the trailing close) can
-    // actually pair with it — every earlier opener's cumulative depth
-    // overshoots and never returns to its own baseline, so it stays an
-    // unclosed, single-line block. N-1 singles + 1 paired block = N blocks.
     expect(blocks).toHaveLength(N);
     expect(blocks.slice(0, N - 1).every((b) => b.type === "html" && b.content === "<div>")).toBe(
       true,
@@ -1573,8 +1404,6 @@ describe("parseMarkdownToBlocks / resolveReferenceLinks — linear matching-clos
     const elapsed = performance.now() - start;
     expect(elapsed).toBeLessThan(TIME_BOUND_MS);
     expect(resolved).toContain("[x](https://e.com)");
-    // Every decoy line and the paired <div>/</div> stay literal (protected),
-    // exactly mirroring the parser's block boundaries above.
     expect(resolved.split("\n").filter((l) => l === "<div>")).toHaveLength(N);
     expect(resolved).toContain("</div>");
   });
@@ -1627,7 +1456,6 @@ describe("computeListIndices", () => {
   });
 
   test("renumbering ignores subsequent orderedStart values (CommonMark)", () => {
-    // Source markdown `1. / 2. / 99.` should render as 1, 2, 3
     const blocks = [li(0, true, 1), li(0, true, 2), li(0, true, 99)];
     expect(computeListIndices(blocks)).toEqual([1, 2, 3]);
   });
@@ -1643,10 +1471,6 @@ describe("computeListIndices", () => {
   });
 
   test("unordered nested children do not break top-level numbering", () => {
-    // 1. a
-    //   - bullet
-    //   - bullet
-    // 2. b
     const blocks = [
       li(0, true, 1),
       li(1, false),
@@ -1657,11 +1481,6 @@ describe("computeListIndices", () => {
   });
 
   test("nested ordered sublists number independently and reset between siblings", () => {
-    // 1. a
-    //   1. a.1
-    //   2. a.2
-    // 2. b
-    //   1. b.1
     const blocks = [
       li(0, true, 1),
       li(1, true, 1),
@@ -1673,9 +1492,6 @@ describe("computeListIndices", () => {
   });
 
   test("ordered sublist after an unordered sub-bullet restarts from its source orderedStart", () => {
-    // 1. a
-    //   - bullet
-    //   2. honored as 2 because the source said `2.`
     const blocks = [
       li(0, true, 1),
       li(1, false),
@@ -1685,11 +1501,6 @@ describe("computeListIndices", () => {
   });
 
   test("mixed sub-bullets between ordered top-level items keep top-level streak alive", () => {
-    // 1. a
-    //   - sub
-    // 2. b
-    //   - sub
-    // 3. c
     const blocks = [
       li(0, true, 1),
       li(1, false),
@@ -1936,9 +1747,6 @@ body`;
   });
 
   test("a quoted key is still a mapping entry, not a dropped row", () => {
-    // Regression: the quoted-scalar guard swallowed the whole line, so
-    // `"title": "Doc"` produced {} and the row vanished from the
-    // frontmatter card entirely.
     const md = `---
 "title": "Doc"
 'status': draft
@@ -1947,8 +1755,6 @@ body`;
 ---
 body`;
     const { frontmatter } = extractFrontmatter(md);
-    // Values keep their quotes exactly as an unquoted key would produce
-    // (`title: "Doc"`); only the KEY's quotes are structural.
     expect(frontmatter).toEqual({
       title: '"Doc"',
       status: "draft",
@@ -1957,7 +1763,6 @@ body`;
   });
 
   test("a quoted key parses identically to the same key unquoted", () => {
-    // The point of the fix: quoting a key changes nothing but the key text.
     const quoted = extractFrontmatter('---\n"title": "Doc"\n"n":\n  k: v\n---\nb');
     const plain = extractFrontmatter('---\ntitle: "Doc"\nn:\n  k: v\n---\nb');
     expect(quoted.frontmatter).toEqual(plain.frontmatter!);
@@ -1975,8 +1780,6 @@ body`;
   });
 
   test("a nested map as an item's FIRST key does not swallow its siblings", () => {
-    // Regression: the pending key recorded the dash's indent, so `id`
-    // (indented to the key's column, not the dash's) landed inside `meta`.
     const md = `---
 items:
   - meta:
@@ -2004,18 +1807,18 @@ describe("parseMarkdownToBlocks — startLine accuracy", () => {
   test("basic blocks get correct startLine", () => {
     const md = "# Heading\n\nParagraph\n\n- Item";
     const blocks = parseMarkdownToBlocks(md);
-    expect(blocks[0].startLine).toBe(1); // # Heading
-    expect(blocks[1].startLine).toBe(3); // Paragraph
-    expect(blocks[2].startLine).toBe(5); // - Item
+    expect(blocks[0].startLine).toBe(1);
+    expect(blocks[1].startLine).toBe(3);
+    expect(blocks[2].startLine).toBe(5);
   });
 
   test("code block startLine points to the opening fence", () => {
     const md = "intro\n\n```ts\nconst x = 1;\nconst y = 2;\n```\n\noutro";
     const blocks = parseMarkdownToBlocks(md);
-    expect(blocks[0].startLine).toBe(1); // intro
-    expect(blocks[1].startLine).toBe(3); // ```ts
+    expect(blocks[0].startLine).toBe(1);
+    expect(blocks[1].startLine).toBe(3);
     expect(blocks[1].type).toBe("code");
-    expect(blocks[2].startLine).toBe(8); // outro
+    expect(blocks[2].startLine).toBe(8);
   });
 
   test("frontmatter shifts all startLines", () => {
@@ -2084,7 +1887,6 @@ describe("exportAnnotations — line labels", () => {
 });
 
 describe("exportAnnotations — multi-target raw-HTML comments", () => {
-  // HTML-surface annotations have blockId '' — no blocks apply.
   const htmlAnn = (extra: object = {}) => ({
     blockId: "",
     startOffset: 0,
@@ -2099,7 +1901,6 @@ describe("exportAnnotations — multi-target raw-HTML comments", () => {
     const output = exportAnnotations([], [htmlAnn({
       htmlAdditionalTargets: [
         { label: "Button", text: "Create", anchor: { selector: "span.btn", tagName: "span", text: "Create" } },
-        // Fail-closed target (no anchor) still exports its label + text.
         { label: "rowchip", text: "adopted   by 1" },
       ],
     })]);
@@ -2107,17 +1908,11 @@ describe("exportAnnotations — multi-target raw-HTML comments", () => {
     expect(output).toContain("Also applies to 2 more elements:");
     expect(output.indexOf("Primary chip")).toBeLessThan(output.indexOf("Also applies"));
     expect(output).toContain('- [Button] "Create"');
-    expect(output).toContain('- [rowchip] "adopted by 1"'); // whitespace collapsed
-    // A blank line separates the block from the `> comment` blockquote above,
-    // or markdown lazy continuation folds it INTO the quote.
+    expect(output).toContain('- [rowchip] "adopted by 1"');
     expect(output).toContain('> Unify these\n\n**Also applies');
   });
 
   test("hostile labels with newlines cannot inject markdown structure into the export", () => {
-    // Labels come from page-controlled attributes (aria-label). The DTO
-    // boundary collapses whitespace, but persisted pre-fix drafts bypass it —
-    // the exporter must collapse again so no line in agent-read feedback
-    // starts with attacker-controlled markdown.
     const output = exportAnnotations([], [htmlAnn({
       htmlAdditionalTargets: [
         { label: "Save\n## INJECTED HEADING", text: "Save\n# ALSO INJECTED" },
@@ -2137,11 +1932,6 @@ describe("exportAnnotations — multi-target raw-HTML comments", () => {
   });
 
   test("targets with no element context export byte-identically to the pre-context format", () => {
-    // #1517 added the selector/path locator suffix, and claimed the element
-    // context was additive — but it keyed the suffix off `anchor.selector`,
-    // which every multi-target annotation has always had, so an annotation
-    // restored from an older draft silently changed shape. The locator is a
-    // property of the captured context; without context there is none.
     const output = exportAnnotations([], [htmlAnn({
       htmlAdditionalTargets: [
         { label: "Button", text: "Create", anchor: { selector: "span.btn", tagName: "span", text: "Create" } },
@@ -2171,10 +1961,6 @@ describe("exportAnnotations — multi-target raw-HTML comments", () => {
 });
 
 describe("exportAnnotations — live-app page grouping (heading hierarchy)", () => {
-  // Live sessions stamp annotations with the page they were made on; the
-  // export groups entries under per-page headers. The headers must OUTRANK
-  // the entries (## Page over ### N.) or every page section renders nested
-  // under the previous entry.
   const liveAnn = (num: string, pageUrl?: string, extra: object = {}) => ({
     blockId: "",
     startOffset: 0,
@@ -2192,7 +1978,6 @@ describe("exportAnnotations — live-app page grouping (heading hierarchy)", () 
       liveAnn("b", "/dashboard"),
       liveAnn("c", "/settings"),
     ]);
-    // Header level outranks entry level.
     expect(output).toMatch(/^## Page: \/dashboard$/m);
     expect(output).toMatch(/^## Page: \/settings$/m);
     expect(output).toMatch(/^### 1\. /m);
@@ -2200,7 +1985,6 @@ describe("exportAnnotations — live-app page grouping (heading hierarchy)", () 
     expect(output).toMatch(/^### 3\. /m);
     expect(output).not.toMatch(/^### Page: /m);
     expect(output).not.toMatch(/^## \d+\. /m);
-    // Entries sit BELOW the page header they belong to.
     expect(output.indexOf("## Page: /dashboard")).toBeLessThan(output.indexOf("### 1. "));
     expect(output.indexOf("### 2. ")).toBeLessThan(output.indexOf("## Page: /settings"));
     expect(output.indexOf("## Page: /settings")).toBeLessThan(output.indexOf("### 3. "));
@@ -2213,10 +1997,7 @@ describe("exportAnnotations — live-app page grouping (heading hierarchy)", () 
       liveAnn("c", "/a-page"),
       liveAnn("d", "/b-page"),
     ]);
-    // The pageless global leads, before any page header, at entry level.
     expect(output.indexOf("### 1. ")).toBeLessThan(output.indexOf("## Page: "));
-    // Grouping regroups pages by first appearance but keeps the GLOBAL
-    // numbers (matching on-page markers), so /b-page shows 2 and 4.
     const bPage = output.slice(output.indexOf("## Page: /b-page"), output.indexOf("## Page: /a-page"));
     expect(bPage).toContain("### 2. ");
     expect(bPage).toContain("### 4. ");
@@ -2232,11 +2013,6 @@ describe("exportAnnotations — live-app page grouping (heading hierarchy)", () 
 });
 
 describe("parseMarkdownToBlocks — non-markdown plain text (#1029)", () => {
-  /**
-   * Annotate now accepts YAML/JSON/TOML-style config files and renders them
-   * through the same pipeline as .txt. The parser must treat structured
-   * config content as ordinary text without crashing or dropping lines.
-   */
   test("YAML content parses into blocks without crashing", () => {
     const yaml = [
       "name: plannotator",
@@ -2264,15 +2040,11 @@ describe("parseMarkdownToBlocks — non-markdown plain text (#1029)", () => {
   });
 
   test("multi-document YAML keeps its first document with frontmatter: false", () => {
-    // A k8s-style multi-document YAML starts with `---`. With frontmatter
-    // stripping disabled (the rule for non-markdown annotatable sources),
-    // the FIRST document must survive parsing.
     const yaml = "---\napiVersion: v1\nkind: ConfigMap\n---\napiVersion: v1\nkind: Secret\n";
     const blocks = parseMarkdownToBlocks(yaml, { frontmatter: false });
     const joined = blocks.map((b) => b.content).join("\n");
     expect(joined).toContain("kind: ConfigMap");
     expect(joined).toContain("kind: Secret");
-    // First real content line keeps its original line number (nothing consumed).
     expect(blocks[0].startLine).toBe(1);
   });
 
@@ -2285,21 +2057,17 @@ describe("parseMarkdownToBlocks — non-markdown plain text (#1029)", () => {
   });
 
   test("shouldStripFrontmatter keys off the source path", () => {
-    expect(shouldStripFrontmatter(undefined)).toBe(true); // plans/messages
+    expect(shouldStripFrontmatter(undefined)).toBe(true);
     expect(shouldStripFrontmatter("notes.md")).toBe(true);
     expect(shouldStripFrontmatter("guide.mdx")).toBe(true);
     expect(shouldStripFrontmatter("deploy.yaml")).toBe(false);
     expect(shouldStripFrontmatter("notes.txt")).toBe(false);
     expect(shouldStripFrontmatter("data.csv")).toBe(false);
-    expect(shouldStripFrontmatter("https://example.com/page")).toBe(true); // converted source
+    expect(shouldStripFrontmatter("https://example.com/page")).toBe(true);
   });
 });
 
 describe("exportAnnotations — element context (raw-HTML / live-app pinpoints)", () => {
-  // Failures to catch: the element block silently disappearing (back to a
-  // one-word placeholder), an annotation WITHOUT context changing shape, a
-  // copied entry drifting from what Send Feedback delivers, and a page-
-  // controlled string breaking out of the fence or inline code.
   const NAV_CONTEXT = {
     tag: "nav", id: "site-nav", classes: ["site-nav", "sticky"],
     path: "body > div#root > header.site-header > nav#site-nav",
@@ -2328,7 +2096,6 @@ describe("exportAnnotations — element context (raw-HTML / live-app pinpoints)"
     expect(output).toContain('- **attrs** `aria-label="Primary" data-component="AppNav"`\n');
     expect(output).toContain("- **box** 0,0 1280×64 (viewport 1280×800)\n");
     expect(output).toContain('- **near** header.site-header · heading h1 "Acme Analytics"\n');
-    // The block sits between the comment and the closing rule.
     expect(output.indexOf("> this")).toBeLessThan(output.indexOf("````html"));
     expect(output.indexOf("**near**")).toBeLessThan(output.indexOf("\n---\n"));
   });
@@ -2348,10 +2115,6 @@ describe("exportAnnotations — element context (raw-HTML / live-app pinpoints)"
     expect(inline).toContain("## 1. Feedback on the <img> element (data:image/png)\n");
   });
 
-  // Failure to catch (0.28.1 smoke): an image with no usable `src` (srcset
-  // only, a lazy data: placeholder with the file in data-src, <picture>, a
-  // video poster) exported as a bare "<img> element" or "(data:image/png)"
-  // while the composer quote named the real file.
   test("an image heading names the file the bridge resolved, not the src attribute alone", () => {
     const img = (context: object, originalText: string) => ({
       blockId: "", startOffset: 0, endOffset: 0, type: "COMMENT", text: "swap this",
@@ -2360,14 +2123,12 @@ describe("exportAnnotations — element context (raw-HTML / live-app pinpoints)"
     });
     const srcsetOnly = exportAnnotations([], [img({ sourceName: "hero-480.jpg" }, "[element: Image (hero-480.jpg)]")]);
     expect(srcsetOnly).toContain("## 1. Feedback on the <img> element (hero-480.jpg)\n");
-    // The data: placeholder in src loses to the resolved lazy file.
     const lazy = exportAnnotations([], [img(
       { sourceName: "hero-banner.webp", attrs: [["src", "data:image/gif;base64,…"]] },
       "[element: Image (hero-banner.webp)]",
     )]);
     expect(lazy).toContain("## 1. Feedback on the <img> element (hero-banner.webp)\n");
     expect(lazy).not.toContain("(data:image/gif)");
-    // A file that equals the accessible name is not repeated.
     const same = exportAnnotations([], [img({ name: "logo.svg", sourceName: "logo.svg" }, '[element: Image "logo.svg"]')]);
     expect(same).toContain('## 1. Feedback on the <img> element — "logo.svg"\n');
   });
@@ -2414,10 +2175,8 @@ describe("exportAnnotations — element context (raw-HTML / live-app pinpoints)"
       },
     });
     const output = exportAnnotations([], [hostile]);
-    // The outline's own 4-backtick run cannot close the export fence.
     const fences = output.match(/^````/gm) ?? [];
     expect(fences.length).toBe(2);
-    // The injected heading line is fenced content, never markdown structure.
     const open = output.indexOf("````html");
     const close = output.indexOf("````", open + 7);
     const injected = output.indexOf("\n# INJECTED");
@@ -2439,17 +2198,13 @@ describe("exportAnnotations — element context (raw-HTML / live-app pinpoints)"
   });
 
   test("exportAnnotationEntry with includeOutline: false omits the outline fence but keeps identity lines", () => {
-    // Failure caught: model turn wasting ~600 chars of context window on the HTML outline
-    // when disabled, or conversely dropping selector/path/role/name identity lines when outline is disabled.
     const ann = navAnn();
-    // Default includes outline
     const defaultEntry = exportAnnotationEntry(ann);
     expect(defaultEntry).toContain("````html\n");
     expect(defaultEntry).toContain("- **selector** `nav#site-nav`\n");
     expect(defaultEntry).toContain("- **path** `body > div#root > header.site-header > nav#site-nav`\n");
     expect(defaultEntry).toContain('- **role** navigation · **name** "Primary" · **component** `data-component=AppNav`\n');
 
-    // With includeOutline: false, outline fence is omitted, identity lines remain
     const outlineLessEntry = exportAnnotationEntry(ann, { includeOutline: false });
     expect(outlineLessEntry).not.toContain("````html");
     expect(outlineLessEntry).not.toContain("<nav id=\"site-nav\"");
@@ -2462,7 +2217,6 @@ describe("exportAnnotations — element context (raw-HTML / live-app pinpoints)"
   });
 
   test("elementContextExportBlock respects includeOutline option", () => {
-    // Failure caught: elementContextExportBlock ignoring includeOutline: false when called directly.
     const ann = navAnn();
     const blockWithOutline = elementContextExportBlock(ann, { includeOutline: true });
     expect(blockWithOutline).toContain("````html\n");
@@ -2475,8 +2229,6 @@ describe("exportAnnotations — element context (raw-HTML / live-app pinpoints)"
   });
 
   test("no mirror validator remains: useHtmlAnnotation imports and re-exports core parseHtmlElementContext", () => {
-    // Failure caught: UI keeping a duplicated/diverged hand-mirrored parseHtmlElementContext
-    // instead of importing and re-exporting the authoritative core validator.
     expect(uiParseHtmlElementContext).toBe(coreParseHtmlElementContext);
   });
 });

@@ -1,14 +1,5 @@
-/**
- * Obsidian Integration Utility
- *
- * Manages settings for auto-saving plans to Obsidian vaults.
- * Settings are stored in cookies (like other settings) so they persist
- * across different ports used by the hook server.
- */
-
 import { storage } from './storage';
 
-// Storage keys
 const STORAGE_KEY_ENABLED = 'plannotator-obsidian-enabled';
 const STORAGE_KEY_VAULT = 'plannotator-obsidian-vault';
 const STORAGE_KEY_FOLDER = 'plannotator-obsidian-folder';
@@ -18,34 +9,25 @@ const STORAGE_KEY_VAULT_BROWSER = 'plannotator-obsidian-vault-browser';
 const STORAGE_KEY_AUTOSAVE = 'plannotator-obsidian-autosave';
 const STORAGE_KEY_FILENAME_SEPARATOR = 'plannotator-obsidian-filename-separator';
 
-// Sentinel value for custom path selection
 export const CUSTOM_PATH_SENTINEL = '__custom__';
 
-// Default folder name in the vault
 const DEFAULT_FOLDER = 'plannotator';
 
-// Default filename format — matches the original hardcoded behavior
 export const DEFAULT_FILENAME_FORMAT = '{title} - {Mon} {D}, {YYYY} {h}-{mm}{ampm}';
 
-/**
- * Obsidian integration settings
- */
 export type FilenameSeparator = 'space' | 'dash' | 'underscore';
 
 export interface ObsidianSettings {
   enabled: boolean;
-  vaultPath: string;      // Selected vault path OR '__custom__' sentinel
+  vaultPath: string;
   folder: string;
-  customPath?: string;    // User-entered path when vaultPath === '__custom__'
-  filenameFormat?: string; // Custom filename format (e.g. '{YYYY}-{MM}-{DD} - {title}')
-  filenameSeparator: FilenameSeparator; // Replace spaces in filename with dash/underscore
-  autoSave: boolean;      // Auto-save to Obsidian on plan arrival
-  vaultBrowserEnabled: boolean; // Show vault file browser in sidebar
+  customPath?: string;
+  filenameFormat?: string;
+  filenameSeparator: FilenameSeparator;
+  autoSave: boolean;
+  vaultBrowserEnabled: boolean;
 }
 
-/**
- * Get current Obsidian settings from storage
- */
 export function getObsidianSettings(): ObsidianSettings {
   return {
     enabled: storage.getItem(STORAGE_KEY_ENABLED) === 'true',
@@ -59,9 +41,6 @@ export function getObsidianSettings(): ObsidianSettings {
   };
 }
 
-/**
- * Save Obsidian settings to storage
- */
 export function saveObsidianSettings(settings: ObsidianSettings): void {
   storage.setItem(STORAGE_KEY_ENABLED, String(settings.enabled));
   storage.setItem(STORAGE_KEY_VAULT, settings.vaultPath);
@@ -73,9 +52,6 @@ export function saveObsidianSettings(settings: ObsidianSettings): void {
   storage.setItem(STORAGE_KEY_VAULT_BROWSER, String(settings.vaultBrowserEnabled));
 }
 
-/**
- * Get the effective vault path, resolving custom path if selected
- */
 export function getEffectiveVaultPath(settings: ObsidianSettings): string {
   if (settings.vaultPath === CUSTOM_PATH_SENTINEL) {
     return settings.customPath || '';
@@ -83,66 +59,42 @@ export function getEffectiveVaultPath(settings: ObsidianSettings): string {
   return settings.vaultPath;
 }
 
-/**
- * Check if Obsidian integration is properly configured
- */
 export function isObsidianConfigured(): boolean {
   const settings = getObsidianSettings();
   const effectivePath = getEffectiveVaultPath(settings);
   return settings.enabled && effectivePath.trim().length > 0;
 }
 
-/**
- * Check if the vault browser sidebar tab should be shown
- */
 export function isVaultBrowserEnabled(): boolean {
   const settings = getObsidianSettings();
   const effectivePath = getEffectiveVaultPath(settings);
   return settings.enabled && settings.vaultBrowserEnabled && effectivePath.trim().length > 0;
 }
 
-/**
- * Extract tags from markdown content using simple heuristics
- *
- * Extracts:
- * - Words from the first H1 title (excluding common words)
- * - Code fence languages (```typescript, ```sql, etc.)
- * - Always includes "plan" as base tag
- *
- * @param markdown - The markdown content to extract tags from
- * @returns Array of lowercase tag strings (max 6)
- */
 export function extractTags(markdown: string): string[] {
   const tags = new Set<string>(['plannotator']);
 
-  // Common words to exclude from title extraction
   const stopWords = new Set([
     'the', 'and', 'for', 'with', 'this', 'that', 'from', 'into',
     'plan', 'implementation', 'overview', 'phase', 'step', 'steps',
   ]);
 
-  // 1. Extract from first H1 title
-  // Matches: "# Title" or "# Implementation Plan: Title" or "# Plan: Title"
   const h1Match = markdown.match(/^#\s+(?:Implementation\s+Plan:|Plan:)?\s*(.+)$/im);
   if (h1Match) {
     const titleWords = h1Match[1]
       .toLowerCase()
-      .replace(/[^\w\s-]/g, ' ')  // Remove special chars except hyphens
+      .replace(/[^\w\s-]/g, ' ')
       .split(/\s+/)
       .filter(word => word.length > 2 && !stopWords.has(word));
 
-    // Add first 3 meaningful words from title
     titleWords.slice(0, 3).forEach(word => tags.add(word));
   }
 
-  // 2. Extract code fence languages
-  // Matches: ```typescript, ```sql, ```rust, etc.
   const langMatches = markdown.matchAll(/```(\w+)/g);
   const seenLangs = new Set<string>();
 
   for (const [, lang] of langMatches) {
     const normalizedLang = lang.toLowerCase();
-    // Skip generic/config languages and duplicates
     if (!seenLangs.has(normalizedLang) &&
         !['json', 'yaml', 'yml', 'text', 'txt', 'markdown', 'md'].includes(normalizedLang)) {
       seenLangs.add(normalizedLang);
@@ -150,16 +102,9 @@ export function extractTags(markdown: string): string[] {
     }
   }
 
-  // Return max 6 tags
   return Array.from(tags).slice(0, 6);
 }
 
-/**
- * Generate YAML frontmatter for an Obsidian note
- *
- * @param tags - Array of tags to include
- * @returns Frontmatter string including opening and closing ---
- */
 export function generateFrontmatter(tags: string[]): string {
   const now = new Date().toISOString();
   const tagList = tags.map(t => t.toLowerCase()).join(', ');
@@ -171,28 +116,16 @@ tags: [${tagList}]
 ---`;
 }
 
-/**
- * Generate a filename for the plan note
- * Format: YYYY-MM-DD-HHmm.md (e.g., 2026-01-02-1430.md)
- *
- * @returns Filename string
- */
 export function generateFilename(): string {
   const now = new Date();
   const timestamp = now.toISOString()
-    .slice(0, 16)           // "2026-01-02T14:30"
-    .replace('T', '-')      // "2026-01-02-14:30"
-    .replace(/:/g, '');     // "2026-01-02-1430"
+    .slice(0, 16)
+    .replace('T', '-')
+    .replace(/:/g, '');
 
   return `${timestamp}.md`;
 }
 
-/**
- * Prepare the full note content with frontmatter
- *
- * @param markdown - The plan markdown content
- * @returns Full note content with frontmatter prepended
- */
 export function prepareNoteContent(markdown: string): string {
   const tags = extractTags(markdown);
   const frontmatter = generateFrontmatter(tags);

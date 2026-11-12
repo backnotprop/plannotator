@@ -1,11 +1,3 @@
-/**
- * The Contents rail is a reading aid, not part of the document's critical
- * paint (moved from the Workspaces app's
- * test/dom/deferred-markdown-contents-rail.test.ts with the rail). Keep its
- * scheduler idle-first with a bounded fallback.
- *
- * DOM-gated (DOM_TESTS=1).
- */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 
 const hasDom = typeof window !== 'undefined';

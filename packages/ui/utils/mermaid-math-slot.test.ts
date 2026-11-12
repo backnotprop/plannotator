@@ -1,21 +1,3 @@
-/**
- * Mermaid's KaTeX served from the math slot (utils/mermaid-math-slot.ts).
- *
- * What regresses if these fail:
- * - a host that redirected Mermaid's `katex` import to this module stops
- *   getting its registered renderer for `$$` labels (the default would be
- *   requested, or a label would render through the wrong renderer);
- * - Mermaid's own options (`throwOnError: true`, `displayMode: true`, the
- *   MathML `output` mode) stop reaching the renderer, changing the markup
- *   Mermaid produced from its direct import;
- * - an empty slot fails silently instead of naming the cause;
- * - `hasMermaidMath` drifts from Mermaid's own `$$...$$` test, so the block
- *   stops warming the slot for a label Mermaid will render (or warms it for
- *   every diagram).
- *
- * That this module never names `katex` (which would re-create the chunk the
- * redirect removes) is pinned on source in tests/entry-assets.test.ts.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import katex from 'katex';
 import mermaidKatex, { MERMAID_MATH_SLOT_EMPTY_MESSAGE, hasMermaidMath } from './mermaid-math-slot';
@@ -42,7 +24,6 @@ afterEach(() => {
   if (savedRenderer) setMathRenderer(savedRenderer, savedSource ?? 'host');
 });
 
-/** The exact call Mermaid makes in `renderKatexUnsanitized` (unchanged 11 -> 12). */
 const MERMAID_OPTIONS = { throwOnError: true, displayMode: true, output: 'mathml' } as const;
 
 describe('default export (what Mermaid receives for `katex`)', () => {

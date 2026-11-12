@@ -11,7 +11,6 @@ import {
 } from '../utils/vimHud';
 
 const HUD_MONO_FONT = '"SFMono-Regular", "JetBrains Mono", Menlo, var(--font-mono), monospace';
-// Match the seven-frame pressed state in the 30fps product-demo HUD.
 const PRESSED_DURATION_MS = (7 / 30) * 1000;
 const KEY_MAP_COLUMNS: readonly (readonly VimHudLegendGroupId[])[] = [
   ['structure', 'control'],
@@ -249,25 +248,16 @@ function VimKeyMapGroup({
   );
 }
 
-/** Props for the pixel-faithful, live Vim HUD used by both document renderers. */
 export interface VimKeyHudProps {
   readonly command: VimHudCommand | null;
   readonly phase: VimHudPhase;
   readonly inputMethod: InputMethod;
   readonly expanded: boolean;
   readonly onExpandedChange: (expanded: boolean) => void;
-  /** Hide the persistent key panel while leaving the targeting HUD enabled. */
   readonly onHide?: () => void;
-  /** Notify the owner when keyboard focus leaves the HUD for another surface. */
   readonly onFocusLeave?: () => void;
 }
 
-/**
- * Render the video HUD against real handled Vim commands.
- *
- * Key feedback changes instantly rather than animating navigation, preserving
- * the responsiveness expected by high-frequency keyboard users.
- */
 export function VimKeyHud({
   command,
   phase,
@@ -466,8 +456,6 @@ export function VimKeyHud({
             aria-label="Hide Vim key panel"
             title="Hide key panel (keep target reticle)"
             onPointerDown={(event) => {
-              // Preserve document ownership for pointer users. Keyboard
-              // activation is handed back by the owner after hiding.
               event.preventDefault();
             }}
             onClick={onHide}
@@ -498,8 +486,6 @@ export function VimKeyHud({
           aria-controls="vim-hud-key-map"
           aria-label={expanded ? 'Collapse Vim key map' : 'Expand Vim key map'}
           onPointerDown={(event) => {
-            // Keep keyboard ownership on the document/iframe while the pointer
-            // toggles this fixed HUD control.
             event.preventDefault();
           }}
           onClick={() => onExpandedChange(!expanded)}

@@ -17,9 +17,6 @@ import {
   type QuestionAnswer,
 } from "@plannotator/core/question-block";
 
-/** A question block rendered outside a Viewer's document index (plan diff,
- *  other markdown surfaces): parsed alone, unnumbered. Its contract lines
- *  show as context unless the host asks for them (`questionContractLines`). */
 const standaloneQuestion = (block: Block, contractLines: boolean): IndexedQuestion | undefined => {
   const [indexed] = indexQuestionBlocks([block], { contractLines });
   return indexed ? { ...indexed, number: 0 } : undefined;
@@ -38,47 +35,25 @@ export const BlockRenderer: React.FC<{
   repoHost?: string;
   headingAnchorId?: string;
   onNavigateAnchor?: (hash: string) => void;
-  /** `:::question` blocks: this block's entry in the document's question
-   *  index (numbering, key, prompt line) and the document's question count.
-   *  Absent, a question block is parsed on its own and shows no "N of M". */
   question?: IndexedQuestion;
   questionTotal?: number;
-  /** The answer to draw (from the annotation carrying `questionAnswer`). */
   questionAnswer?: QuestionAnswer;
-  /** Absent: question blocks render read-only. */
   onAnswerQuestion?: (blockId: string, answer: QuestionAnswer | null, key: string) => void;
-  /** Explicit save mode for question cards (see `QuestionBlock`). */
   onSaveQuestionAnswer?: QuestionBlockProps['onSaveAnswer'];
-  /** Label of the explicit-save-mode Save button (see `QuestionBlock`). */
   saveQuestionAnswerLabel?: QuestionBlockProps['saveLabel'];
-  /** Host actions in a question card's footer (see `QuestionBlock`). */
   renderQuestionFooter?: QuestionBlockProps['renderFooter'];
-  /** Whether answering this question records a decision (see `QuestionBlock`). */
   questionDecisionRecording?: QuestionBlockProps['decisionRecording'];
-  /** `'any'` lets a question without a decision line carry the tag (see `QuestionBlock`). */
   questionDecisionScope?: QuestionBlockProps['decisionScope'];
-  /** Makes the "Records a decision" tag a toggle (see `QuestionBlock`). */
   onToggleQuestionDecisionRecording?: QuestionBlockProps['onToggleDecisionRecording'];
-  /** Opens the host's decision card from the tag's words (see `QuestionBlock`). */
   onOpenQuestionDecision?: QuestionBlockProps['onOpenDecision'];
-  /** `'none'` hides the card's own status tag (see `QuestionBlock`). */
   questionStatusTag?: QuestionBlockProps['statusTag'];
-  /** The host's words for a question's status tag (see `QuestionBlock`). */
   questionStatusLabel?: QuestionBlockProps['statusLabel'];
-  /** Host content under a question's prompt (see `QuestionBlock`). */
   renderQuestionBelowPrompt?: QuestionBlockProps['renderBelowPrompt'];
-  /** Host content right after a question's choices (see `QuestionBlock` `renderAfterChoices`). */
   renderQuestionAfterChoices?: QuestionBlockProps['renderAfterChoices'];
-  /** Read a standalone question's contract lines into the card (default
-   *  false: context). A `question` the host passes was parsed by the host. */
   questionContractLines?: boolean;
-  /** Picture choices as tiles (see `QuestionBlock` `pictureChoices`). */
   questionPictureChoices?: QuestionBlockProps['pictureChoices'];
-  /** A label over each picture tile (see `QuestionBlock` `pictureBadge`). */
   questionPictureBadge?: QuestionBlockProps['pictureBadge'];
-  /** A picture tile's zoom, with its question and choice (see `QuestionBlock` `onZoomChoice`). */
   onQuestionPictureZoom?: QuestionBlockProps['onZoomChoice'];
-  /** A picture choice's size before it loads (see `QuestionBlock` `pictureSize`). */
   questionPictureSize?: QuestionBlockProps['pictureSize'];
 }> = ({ block, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, onToggleCheckbox, checkboxOverrides, orderedIndex, githubRepo, repoHost, headingAnchorId, onNavigateAnchor, question, questionTotal, questionAnswer, onAnswerQuestion, onSaveQuestionAnswer, saveQuestionAnswerLabel, renderQuestionFooter, questionDecisionRecording, questionDecisionScope, onToggleQuestionDecisionRecording, onOpenQuestionDecision, questionStatusTag, questionStatusLabel, renderQuestionBelowPrompt, renderQuestionAfterChoices, questionContractLines = false, questionPictureChoices, questionPictureBadge, onQuestionPictureZoom, questionPictureSize }) => {
   switch (block.type) {
@@ -118,8 +93,6 @@ export const BlockRenderer: React.FC<{
           />
         );
       }
-      // One quote whatever it holds: its content is the quote's own markdown
-      // (paragraphs, code fences, lists, nested quotes), see BlockquoteBlock.
       return (
         <BlockquoteBlock
           block={block}
@@ -135,7 +108,7 @@ export const BlockRenderer: React.FC<{
     }
 
     case 'list-item': {
-      const indent = (block.level || 0) * 1.25; // 1.25rem per level
+      const indent = (block.level || 0) * 1.25;
       const isCheckbox = block.checked !== undefined;
       const isChecked = checkboxOverrides?.has(block.id)
         ? checkboxOverrides.get(block.id)!
@@ -197,7 +170,6 @@ export const BlockRenderer: React.FC<{
     case 'directive': {
       const kind = block.directiveKind || 'note';
       if (isQuestionDirectiveKind(kind)) {
-        // An unparseable question (no prompt) falls through to the callout.
         const indexed = question ?? standaloneQuestion(block, questionContractLines);
         if (indexed) {
           return (
@@ -257,8 +229,6 @@ export const BlockRenderer: React.FC<{
         <p
           className="mb-4 leading-relaxed text-foreground/90 text-[15px]"
           data-block-id={block.id}
-          // Blank lines the person typed (parse option keepBlankLines): N lines in all. This margin collapses with the
-          // previous block's bottom margin (mb-4), so the gap is max(the two), i.e. N lines, not N lines plus 1rem.
           style={block.blankLinesBefore ? { marginTop: `${block.blankLinesBefore}lh` } : undefined}
           data-blank-lines={block.blankLinesBefore}
         >

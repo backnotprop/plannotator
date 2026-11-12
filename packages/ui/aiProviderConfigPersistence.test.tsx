@@ -1,16 +1,3 @@
-/**
- * Persistence tests for the shared AI provider/model selection hook.
- *
- * Guards the "saved preference no-clobber" invariant: with Codex model
- * discovery deferred until activation, capabilities can advertise only the
- * provider's static fallback model. The hook then resolves the *session*
- * model to that fallback, but must never write the resolver-derived fallback
- * back into the saved per-provider preference — only an explicit user pick
- * may change the cookie.
- *
- * Requires DOM_TESTS=1 (happy-dom preload). Run:
- *   DOM_TESTS=1 bun test aiProviderConfigPersistence
- */
 import { describe, test, expect, beforeEach, afterAll } from 'bun:test';
 import React, { useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -25,7 +12,6 @@ import { setStorageBackend, resetStorageBackend, type StorageBackend } from './u
 
 const hasDom = typeof document !== 'undefined';
 
-// In-memory storage so tests don't depend on happy-dom cookie semantics.
 const memory = new Map<string, string>();
 const memoryBackend: StorageBackend = {
   getItem: (key) => memory.get(key) ?? null,
@@ -51,7 +37,6 @@ function Harness(props: {
   return null;
 }
 
-// Capabilities before deferred discovery: only the static fallback model.
 const fallbackOnlyProviders: AIProviderOption[] = [
   {
     id: 'codex-local',
@@ -111,8 +96,6 @@ describe('useAIProviderConfig persistence', () => {
   });
 
   test.skipIf(!hasDom)('a resolver-derived fallback model is not persisted over the saved preference', async () => {
-    // The user's real Codex model preference, saved from a prior session —
-    // not present in the pre-activation fallback list.
     saveAIProviderSettings({
       providerId: 'codex-local',
       preferredModels: { 'codex-local': 'gpt-5.3-codex' },
@@ -121,12 +104,9 @@ describe('useAIProviderConfig persistence', () => {
 
     const getResult = await mountHarness(fallbackOnlyProviders);
 
-    // Session-facing state falls back to the advertised model...
     expect(getResult().aiConfig.providerId).toBe('codex-local');
     expect(getResult().aiConfig.model).toBe('gpt-5.6-sol');
 
-    // ...and a non-model change (reasoning effort) persists without touching
-    // the saved model preference.
     await act(async () => {
       getResult().applyConfigChange({ reasoningEffort: 'high' });
     });
@@ -151,7 +131,6 @@ describe('useAIProviderConfig persistence', () => {
     ];
     const getResult = await mountHarness(providers);
 
-    // Switch away and back: both are provider-only gestures.
     await act(async () => {
       getResult().applyConfigChange({ providerId: 'claude-local' });
     });
@@ -180,8 +159,6 @@ describe('useAIProviderConfig persistence', () => {
     expect(getAIProviderSettings().preferredModels['codex-local']).toBe('gpt-5.6-sol');
   });
 
-  // A server with a session bridge offers only the bridge. The saved pick is
-  // for sessions without one, so selecting the bridge must not overwrite it.
   test.skipIf(!hasDom)('a bridge-only capability answer selects the bridge and leaves the saved pick alone', async () => {
     saveAIProviderSettings({
       providerId: 'codex-local',

@@ -40,10 +40,6 @@ describe("computePlanDiff — block-level behavior", () => {
 });
 
 describe("computePlanDiff — a quote holding a code fence diffs as one unit", () => {
-  // Each diff chunk renders as its own quote. Line-level diffing split an
-  // edit inside a quoted fence into chunks holding half a fence each, so one
-  // chunk opened a fence it never closed and rendered the prose after it as
-  // code.
   const OLD = "# Plan\n\n> Steps:\n>\n> ```\n> step one\n> step two\n> ```\n>\n> Done.\n\nAfter.\n";
   const NEW = OLD.replace("step two", "step 2");
   const fenceLines = (text: string) => text.split("\n").filter((line) => /^\s*(>\s?)+`{3,}/.test(line)).length;
@@ -133,18 +129,13 @@ describe("computeInlineDiff — qualification gate", () => {
   });
 
   test("paragraph with inline code qualifies; code spans round-trip atomically", () => {
-    // Changed code spans are replaced with internal sentinels before the
-    // word diff and restored afterwards, so the final tokens contain the
-    // original `backtick-wrapped` text — not raw sentinel placeholders.
     const result = computeInlineDiff(
       "Call `foo()` here.\n",
       "Call `bar()` here.\n"
     );
     expect(result).not.toBeNull();
     const serialized = result!.tokens.map((t) => t.value).join("");
-    // Sentinels must not leak through
     expect(serialized).not.toMatch(/PLDIFFCODE/);
-    // The two code spans appear in the restored output, one on each side
     const removed = result!.tokens
       .filter((t) => t.type === "removed")
       .map((t) => t.value)
@@ -172,12 +163,6 @@ describe("computeInlineDiff — token content", () => {
   });
 
   test("unified string round-trip preserves delimiter pair around diff tags", () => {
-    // After pair-based emphasis atomization, the whole `**phrase**`
-    // becomes one atomic token on each side — so the unified string
-    // starts with `<del>**important**</del>` rather than
-    // `**<del>important</del>...**`. Visual render is equivalent because
-    // `<del>` recurses into `InlineMarkdown` and the inner `**…**` parses
-    // as bold.
     const result = computeInlineDiff(
       "**important** text\n",
       "**critical** text\n"
@@ -196,8 +181,6 @@ describe("computeInlineDiff — token content", () => {
   });
 });
 
-// Helper to build a unified <ins>/<del>-wrapped string from a computeInlineDiff
-// result for readable assertions in tests below.
 function unify(result: { tokens: InlineDiffToken[] }) {
   return result.tokens
     .map((t) => {
@@ -216,9 +199,6 @@ describe("computeInlineDiff — emphasis pair atomization (A3)", () => {
   });
 
   test("multi-word bold with one-word change renders as balanced bold swap", () => {
-    // The demo case: `**preliminary analysis**` → `**final analysis**`.
-    // Before this fix, the closing `**` orphaned into unchanged-tail,
-    // leaving raw literal asterisks in the rendered view.
     const r = computeInlineDiff(
       "Review the **preliminary analysis** today.",
       "Review the **final analysis** today."
@@ -227,7 +207,6 @@ describe("computeInlineDiff — emphasis pair atomization (A3)", () => {
     const u = unify(r!);
     expect(u).toContain("<del>**preliminary analysis**</del>");
     expect(u).toContain("<ins>**final analysis**</ins>");
-    // No literal unbalanced `**` outside diff tags.
     expect(u).not.toMatch(/\*\*[^*]*\*\*/g.test(
       u.replace(/<(?:ins|del)>[\s\S]*?<\/(?:ins|del)>/g, "")
     ) ? /.*/ : /never/);
@@ -264,15 +243,9 @@ describe("computeInlineDiff — emphasis pair atomization (A3)", () => {
   });
 
   test("word-boundary guard: `my__var__name` → `my__var__names` leaves intraword `__` alone", () => {
-    // Markdown doesn't treat intraword `__` as bold delimiters, so the pair
-    // regex must not consume them. Verify the diff treats both sides as
-    // single identifiers rather than mis-sentinelizing them.
     const r = computeInlineDiff("my__var__name", "my__var__names");
     expect(r).not.toBeNull();
     const u = unify(r!);
-    // The exact diff shape can vary, but no token should contain an
-    // unmatched sentinel fragment and the full identifiers must survive
-    // the round-trip.
     expect(u).toContain("my__var__name");
     expect(u).toContain("my__var__names");
     expect(u).not.toMatch(/PLDIFFEMPH/);
@@ -302,25 +275,18 @@ describe("computeInlineDiff — emphasis pair atomization (A3)", () => {
   });
 
   test("stray unbalanced `**` in arithmetic context is preserved as literal", () => {
-    // `2**3` (exponent in prose) must not be mis-matched. Only the real
-    // balanced `**bold**` should atomize.
     const r = computeInlineDiff(
       "2**3 and **bold** text",
       "2**4 and **bold** text"
     );
     expect(r).not.toBeNull();
     const u = unify(r!);
-    // `**bold**` unchanged
     expect(u).toContain("**bold**");
-    // The stray `**` preserved literally; the 3→4 swap shows normally
     expect(u).toContain("<del>3</del>");
     expect(u).toContain("<ins>4</ins>");
   });
 
   test("existing code-span sentinel format is not corrupted", () => {
-    // Two paragraphs both containing inline code spans — the diff should
-    // still round-trip the code spans correctly with the pair atomization
-    // layered on top.
     const r = computeInlineDiff(
       "Call `foo()` inside **bold text** here.",
       "Call `bar()` inside **bold text** here."
@@ -344,7 +310,6 @@ describe("computeInlineDiff — hyphenated compound atomization", () => {
     const u = unify(r!);
     expect(u).toContain("<del>ninety-five</del>");
     expect(u).toContain("<ins>ninety-nine</ins>");
-    // No partial-word fragmentation.
     expect(u).not.toContain("<del>five</del>");
     expect(u).not.toContain("<ins>nine</ins>");
     expect(u).not.toMatch(/PLDIFFHY/);
@@ -381,7 +346,6 @@ describe("computeInlineDiff — hyphenated compound atomization", () => {
     );
     expect(r).not.toBeNull();
     const u = unify(r!);
-    // Compound must be intact in unchanged context — no PLDIFFHY leak.
     expect(u).toContain("cookie-based");
     expect(u).toContain("<del>nightly</del>");
     expect(u).toContain("<ins>daily</ins>");
@@ -389,7 +353,6 @@ describe("computeInlineDiff — hyphenated compound atomization", () => {
   });
 
   test("leading/trailing dash is not substituted (em-dash-like prose)", () => {
-    // A dash with no word char on one side is a separator, not a compound.
     const r = computeInlineDiff("foo - bar end", "foo - baz end");
     expect(r).not.toBeNull();
     const u = unify(r!);
@@ -413,14 +376,11 @@ describe("computeInlineDiff — coalescing pass (Commit 2)", () => {
     const r = computeInlineDiff("foo bar baz", "qux quux baz");
     expect(r).not.toBeNull();
     const u = unify(r!);
-    // Both word swaps merge into a single phrase swap ending at the
-    // unchanged tail ` baz`.
     expect(u).toContain("<del>foo bar</del><ins>qux quux</ins>");
     expect(u).toContain(" baz");
   });
 
   test("three adjacent swaps (the motivating paragraph example) coalesce", () => {
-    // Parens act as hard boundaries because they aren't in the thin set.
     const r = computeInlineDiff(
       "(and the originating case)",
       "(and a small set of admins who opted in)"
@@ -436,12 +396,9 @@ describe("computeInlineDiff — coalescing pass (Commit 2)", () => {
     const r = computeInlineDiff("the quick brown fox", "the slow brown fox");
     expect(r).not.toBeNull();
     const u = unify(r!);
-    // Only the `quick` → `slow` change should be diffed; `brown fox` must
-    // stay as unchanged text.
     expect(u).toContain("<del>quick</del>");
     expect(u).toContain("<ins>slow</ins>");
     expect(u).toContain(" brown fox");
-    // No accidental absorption of `brown fox` into a combined swap.
     expect(u).not.toContain("quick brown fox");
     expect(u).not.toContain("slow brown fox");
   });
@@ -450,10 +407,6 @@ describe("computeInlineDiff — coalescing pass (Commit 2)", () => {
     const r = computeInlineDiff("foo bar baz end", "foo newword end");
     expect(r).not.toBeNull();
     const u = unify(r!);
-    // `bar` and `baz` both removed, `newword` added — coalesce absorbs the
-    // intervening space into the combined swap. The trailing space to the
-    // unchanged `end` gets pulled into the ins/del because jsdiff pairs
-    // `baz ` with `newword ` as a single token-level swap.
     expect(u).toContain("<del>bar baz");
     expect(u).toContain("<ins>newword");
     expect(u).toContain("end");
@@ -470,20 +423,15 @@ describe("computeInlineDiff — coalescing pass (Commit 2)", () => {
     const r = computeInlineDiff("foo bar baz qux end", "zap bar zip end");
     expect(r).not.toBeNull();
     const u = unify(r!);
-    // `bar` unchanged word between the two swaps must block coalescing.
     expect(u).toContain("<del>foo</del>");
     expect(u).toContain("<ins>zap</ins>");
     expect(u).toContain(" bar ");
     expect(u).toContain("<del>baz qux");
     expect(u).toContain("<ins>zip");
-    // Sanity: not a single combined swap across `bar`.
     expect(u).not.toContain("<del>foo bar baz qux</del>");
   });
 
   test("swap + swap separated by an unchanged inline link does NOT coalesce", () => {
-    // The link is an atomic unchanged token whose value is the whole
-    // `[text](url)` string — that contains non-thin chars (`[`, `]`, `(`,
-    // `)`), so it blocks coalescing.
     const r = computeInlineDiff(
       "see foo [docs](https://example.com) bar end",
       "see zop [docs](https://example.com) zip end"
@@ -495,16 +443,10 @@ describe("computeInlineDiff — coalescing pass (Commit 2)", () => {
     expect(u).toContain("[docs](https://example.com)");
     expect(u).toContain("<del>bar</del>");
     expect(u).toContain("<ins>zip</ins>");
-    // Not coalesced across the link.
     expect(u).not.toContain("<del>foo [docs]");
   });
 
   test("multi-word bold phrase swap via coalescing-rescue (Case 2 wrap)", () => {
-    // `foo bar baz` → `foo **bar baz**`: without coalescing, atomization
-    // leaves `bar` and `baz` as two word tokens on the old side but
-    // `**bar baz**` as one atomic pair on the new side, producing
-    // alternating removes/adds that coalescing folds back into a single
-    // clean phrase swap.
     const r = computeInlineDiff("foo bar baz end", "foo **bar baz** end");
     expect(r).not.toBeNull();
     const u = unify(r!);
@@ -556,7 +498,6 @@ describe("computeInlineDiff — broader integration", () => {
             : t.value
       )
       .join("");
-    // Balanced bold pair on each side of the diff — no orphan delimiters.
     expect(u).toContain("<del>**preliminary analysis**</del>");
     expect(u).toContain("<ins>**final analysis**</ins>");
   });
@@ -588,12 +529,6 @@ describe("computePlanDiff — modified blocks populate inlineTokens when qualifi
 
 describe("computePlanDiff — reference-link definition edits (PR #1168)", () => {
   test("a URL-only edit to a link reference definition renders as a real change, not an empty diff", () => {
-    // diffLines isolates just the definition line into its own hunk (the
-    // paragraph that actually uses [docs][ref] is unchanged and elsewhere).
-    // Before the resolver stopped blanking unconsumed definitions, resolving
-    // that isolated one-line chunk on its own (no co-located reference to
-    // consume the label) blanked it to nothing on both sides, so the diff
-    // silently rendered zero blocks for a real content change.
     const oldText =
       "Read the [docs][ref] for details.\n\n[ref]: https://old.example.com/docs\n";
     const newText =
@@ -603,15 +538,8 @@ describe("computePlanDiff — reference-link definition edits (PR #1168)", () =>
     expect(modified).toBeDefined();
     expect(modified!.content.trim().length).toBeGreaterThan(0);
     expect(modified!.oldContent!.trim().length).toBeGreaterThan(0);
-    // The isolated chunk must render as at least one visible block on each
-    // side — this is exactly what PlanCleanDiffView's MarkdownChunk uses to
-    // draw the change; zero blocks here is the "non-empty edit renders as
-    // empty" bug.
     expect(parseMarkdownToBlocks(modified!.oldContent!).length).toBeGreaterThan(0);
     expect(parseMarkdownToBlocks(modified!.content).length).toBeGreaterThan(0);
-    // The isolated chunk resolves to a single paragraph on each side (no
-    // co-located reference to consume the definition), so it qualifies for
-    // word-level inline diffing and the URL change is actually visible.
     expect(modified!.inlineTokens).toBeDefined();
     const removedText = modified!.inlineTokens!
       .filter((t) => t.type === "removed")

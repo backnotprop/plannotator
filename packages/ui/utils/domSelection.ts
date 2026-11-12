@@ -1,4 +1,3 @@
-/** Elements whose text must not become part of a document annotation range. */
 const NON_ANNOTATABLE_SELECTOR = [
   'button',
   'input',
@@ -27,11 +26,6 @@ const DOCUMENT_KEYBOARD_CONTROL_SELECTOR = [
   '[role="dialog"]',
 ].join(',');
 
-/**
- * Return the annotatable text nodes under an element in document order.
- * Existing highlight wrappers remain eligible so Vim selections can overlap
- * annotations just like pointer selections.
- */
 export function getAnnotatableTextNodes(element: Element): Text[] {
   const nodes: Text[] = [];
   const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT, {
@@ -54,10 +48,6 @@ export function getAnnotatableTextNodes(element: Element): Text[] {
   return nodes;
 }
 
-/**
- * Return whether a keyboard event originated in an editable or interactive
- * control that must retain ownership of ordinary typing keys.
- */
 export function isDocumentKeyboardControl(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   return target.matches(DOCUMENT_KEYBOARD_CONTROL_SELECTOR)
@@ -65,11 +55,6 @@ export function isDocumentKeyboardControl(target: EventTarget | null): boolean {
     || (target instanceof HTMLElement && target.isContentEditable);
 }
 
-/**
- * Create a text-node-anchored range spanning an element's annotatable text.
- * Web-highlighter cannot paint element-node endpoints, so callers share this
- * conversion instead of synthesizing subtly different ranges.
- */
 export function createTextRange(element: HTMLElement): Range | null {
   const nodes = getAnnotatableTextNodes(element);
   const firstNode = nodes[0];

@@ -22,7 +22,6 @@ describe('legacyBadgesMaxWidth', () => {
   });
 
   test('a 390px phone: the badges stop inside the card, with the same inset on both sides', () => {
-    // Measured on the phone layout: the card spans 8..382, the badges start at 21.
     const phoneCard: BoxEdges = { left: 8, right: 382, top: 120, bottom: 800 };
     const phoneBadges: BoxEdges = { left: 21, right: 438, top: 132, bottom: 150 };
     expect(legacyBadgesMaxWidth(phoneBadges, null, phoneCard)).toBe(382 - 21 - 13);

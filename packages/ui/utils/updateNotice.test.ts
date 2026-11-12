@@ -12,7 +12,6 @@ const advert = (over: Partial<UpdateAdvert> = {}): UpdateAdvert => ({
 });
 
 describe('the toast rhythm: once per version, at most once a day', () => {
-  // Pinned on purpose: the owner chose "once a day" across versions.
   test('the spacing across versions is 24 hours', () => {
     expect(UPDATE_TOAST_INTERVAL_MS).toBe(24 * 60 * 60 * 1000);
   });

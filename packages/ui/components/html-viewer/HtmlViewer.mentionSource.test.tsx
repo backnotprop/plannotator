@@ -1,12 +1,3 @@
-/**
- * `mentionSource` threaded through the REAL HtmlViewer (DOM-gated).
- *
- * What these catch: a source that reaches only one of this viewer's two
- * composers (the pinpoint/selection one the bridge opens and the global one),
- * ids dropped between the composer and the annotation the host receives, and
- * a `mentions` key appearing on an annotation when no host supplied a source —
- * the raw-HTML half of the no-op guarantee.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

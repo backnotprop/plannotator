@@ -1,14 +1,3 @@
-/**
- * HtmlViewer `frameUrl` (DOM-gated): the host serves the frame document.
- *
- * Guards: the host is handed the same document the srcdoc would carry (the
- * page and the inline annotation bridge), and the frame loads the URL it
- * answers with the srcdoc frame's sandbox and no `srcdoc`, never falling back
- * to one (it would load under the host page's policy); a page the host says
- * is gone is asked for again, at most twice per document (a page posting
- * "gone" after every `ready` cannot loop it); with no prop the frame
- * is a srcdoc, unchanged.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
@@ -70,7 +59,6 @@ describe.if(hasDom)('HtmlViewer frameUrl', () => {
     await settle();
     expect(documents.length).toBe(1);
     expect(documents[0]).toContain('<p id="target">Target</p>');
-    // The inline bridge rides the served document, so annotation works as in a srcdoc.
     expect(documents[0]).toContain(bridgeModule!.BRIDGE_SCRIPT.slice(0, 200));
     expect(frame.getAttribute('src')).toBe('about:blank#served');
     expect(frame.getAttribute('sandbox')).toBe('allow-scripts allow-modals');
@@ -132,7 +120,6 @@ describe.if(hasDom)('HtmlViewer frameUrl', () => {
     await post({ type: SERVED_FRAME_GONE });
     await post(ready);
     await post({ type: SERVED_FRAME_GONE });
-    // The first load plus two asks for "gone", never a third.
     expect(asked).toBe(3);
   });
 

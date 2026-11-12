@@ -1,17 +1,3 @@
-/**
- * Stack badges on a Shape board (approval "stack-show-me", addendum 2026-11-06: take C and the card of round 2, take
- * 1). Only with `ShapeSurface`'s `stackBadges`, and only on a board whose data names two or more PRs (`stack`).
- *
- *  - The row under the title: "Stack of 3", then each PR with its icon and colour. A click keeps that PR's parts
- *    bright and fades the rest; a second click restores them.
- *  - A tag per PR on each part it changed (`StackBadgeLayer`, on the Picture and How it works drawings).
- *  - A tag opens its card by it: "#2547 What it shows" (the PR's link), "In <part>", the agent's words, a row per
- *    file with its counts, "Also changed here by #2546" (switches the card) and "Read it in the review ›" (the
- *    review's chapter for that PR, narrowed to the part's files: `review.open({ step, narrow })`). On a phone the card
- *    is a sheet at the bottom.
- *  - A file opens its lines in the code popup: "‹ <part>" (back to the card), "from #2547 What it shows", and
- *    "1 of 3 files ‹ ›".
- */
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { shapeStackBadges, shapeStackHue, type ShapeStack, type ShapeVersion } from '@plannotator/core/shape';
 import { PopoutDialog } from '../PopoutDialog';
@@ -21,7 +7,6 @@ import { StackBadgeLayer, PR_ICON_SVG } from './stackBadges';
 import { stackCard, stackFileCounts, stackFileName, stackFilePatch, stackPartName } from './stackModel';
 import type { ShapeSurfaceReview } from './types';
 
-/** A PR's colour on a chip: its hue (shape.css turns it into the colour and the soft fill). */
 const hueOf = (stack: ShapeStack, n: number) => ({ '--shp-h': shapeStackHue(stack, n) ?? 186 }) as React.CSSProperties;
 
 const PrIcon = () => <span className="shp-stk-ic" aria-hidden="true" dangerouslySetInnerHTML={{ __html: PR_ICON_SVG }} />;
@@ -37,7 +22,6 @@ const Chevron = ({ back = false }: { back?: boolean }) => (
   </svg>
 );
 
-/** A PR as a coloured chip: its icon and number, and its title beside it when asked. A link when it has one. */
 function PrName({ stack, n, title = true, link = true }: { stack: ShapeStack; n: number; title?: boolean; link?: boolean }) {
   const pull = stack.pulls.find((p) => p.n === n);
   const chip = (
@@ -63,15 +47,10 @@ function PrName({ stack, n, title = true, link = true }: { stack: ShapeStack; n:
 type Open = { pr: number; part: string; name: string; tag: HTMLElement };
 
 export interface ShapeStackState {
-  /** Whether the board shows stack badges at all (a stack of two or more PRs, and the host asked). */
   on: boolean;
-  /** For a drawn view's `onBoard`: puts the tags on that drawing (null: it is gone). */
   boardFor: (view: 'picture' | 'how') => (board: HTMLElement | null) => void;
-  /** The row of PRs under the title. */
   row: React.ReactNode;
-  /** The card, the file popup. */
   overlay: React.ReactNode;
-  /** A card or popup is open: Esc is theirs. */
   open: boolean;
 }
 
@@ -104,7 +83,6 @@ export function useShapeStack({
   const openNow = useRef(open);
   openNow.current = open;
 
-  // The drawings' layers: one per drawing shown, built afresh when the drawing is, or when a new version's stack is.
   const boards = useRef(new Map<'picture' | 'how', HTMLElement>());
   const boardFns = useMemo(() => {
     const make = (view: 'picture' | 'how') => (board: HTMLElement | null) => {
@@ -142,7 +120,6 @@ export function useShapeStack({
   useEffect(() => {
     for (const layer of layers.current.values()) layer.setOpen(open ? { pr: open.pr, part: open.part } : null);
   }, [open]);
-  // A new version without that PR or part closes what was open on it.
   useEffect(() => {
     if (!on) {
       setPick(null);
@@ -157,7 +134,6 @@ export function useShapeStack({
     }
   }, [on, stack, pick, open]);
 
-  // Closed in place, focus goes back to its tag; closed by leaving for the review, the review takes it.
   const close = useCallback((focus: boolean = true) => {
     const tag = openNow.current?.tag;
     setOpen(null);
@@ -230,7 +206,6 @@ export function useShapeStack({
 
 type Card = NonNullable<ReturnType<typeof stackCard>>;
 
-/** One file row's counts, from the agent or the review's patch. */
 function useFileRows(card: Card, review: ShapeSurfaceReview | null) {
   const [patch, setPatch] = useState<string | null | undefined>(undefined);
   useEffect(() => {
@@ -295,8 +270,6 @@ function StackCard({
   const { rows } = useFileRows(card, review);
   const { pull, change, others } = card;
 
-  // By its tag: under it, never over the part it speaks of; above only when there is no room below. Follows the tag
-  // when the board scrolls or resizes.
   useLayoutEffect(() => {
     if (phone || !root) return;
     const place = () => {
@@ -321,7 +294,6 @@ function StackCard({
     };
   }, [anchor, root, phone, card]);
 
-  // Esc and a press outside close it (a press on a tag is the tag's own: it switches or closes).
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
@@ -342,7 +314,6 @@ function StackCard({
       window.removeEventListener('pointerdown', down, true);
     };
   }, [onClose]);
-  // The card takes focus as it opens, so Tab walks it.
   useEffect(() => {
     ref.current?.focus({ preventScroll: true });
   }, [card.pull.n, card.change.part]);

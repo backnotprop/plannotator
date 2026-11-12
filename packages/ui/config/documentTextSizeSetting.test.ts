@@ -1,12 +1,3 @@
-/**
- * The document text size setting (Settings → Display → Text size, #2066).
- *
- * Guards: (1) the default draws the document exactly as before, so at 15
- * nothing is put on the page and every stylesheet rule that reads the scale is
- * gated on the attribute; (2) a non-default size reaches the page as the
- * attribute and the scale; (3) the registry contract the Settings row and the
- * app read through.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -106,7 +97,6 @@ describe('the stylesheet', () => {
     const rules = css.split('}').filter((rule) => rule.includes(DOCUMENT_TEXT_SCALE_PROPERTY));
     expect(rules.length).toBeGreaterThan(0);
     for (const rule of rules) {
-      // A rule inside `@layer base { … }` reads "@layer base { selector { …".
       const parts = rule.split('{');
       const selector = parts[parts.length - 2].trim();
       for (const part of selector.split(/,(?![^(]*\))/)) {

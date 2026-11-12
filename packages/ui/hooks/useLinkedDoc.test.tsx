@@ -6,16 +6,6 @@ import { useLinkedDoc, type UseLinkedDocReturn } from './useLinkedDoc';
 import type { ViewerHandle } from '../components/Viewer';
 import type { Annotation, DocumentRenderAs, ImageAttachment } from '../types';
 
-// Integration coverage for the diff-baseline seam useLinkedDoc gained for
-// annotate folder sessions: a document's own previousPlan/versionInfo
-// (captured from its /api/doc response) rides the same
-// activate/cache/back lifecycle as its markdown and annotations, and
-// survives re-opening a document the way those already did. The pure
-// cache-selection logic itself is covered directly in
-// useLinkedDoc.diffBaseline.test.ts — this file exercises it wired through
-// the real stateful hook (open/back/re-open), which is where a wiring
-// mistake (e.g. forgetting one of the cache-write call sites) would show up.
-
 const hasDom = typeof document !== 'undefined';
 
 const noopViewerHandle: ViewerHandle = {
@@ -150,10 +140,6 @@ describe('useLinkedDoc — per-document diff baseline', () => {
     });
     expect(current().isActive).toBe(false);
 
-    // Re-open the SAME file without diff fields this time (simulating a
-    // caller like the missing-on-disk openLoaded path, which never carries
-    // /api/doc's history fields) — the cache from the first visit must
-    // still supply them.
     await act(async () => {
       current().openLoaded({
         filepath: '/root/docs/a.md',
@@ -180,8 +166,6 @@ describe('useLinkedDoc — per-document diff baseline', () => {
     });
     expect(current().diffPreviousPlan).toBe('a v1');
 
-    // Open a different document directly (activateDocument's "already
-    // viewing a linked doc" branch, not back()).
     await act(async () => {
       current().openLoaded({
         filepath: '/root/docs/c.md',
@@ -193,7 +177,6 @@ describe('useLinkedDoc — per-document diff baseline', () => {
     expect(current().diffPreviousPlan).toBeNull();
     expect(current().diffVersionInfo).toBeNull();
 
-    // And back to the first document — its baseline is still cached.
     await act(async () => {
       current().openLoaded({
         filepath: '/root/docs/a.md',

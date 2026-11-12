@@ -14,24 +14,15 @@ interface DocumentAIChatPanelProps {
   isCreatingSession: boolean;
   isStreaming: boolean;
   onAskGeneral?: (question: string) => void;
-  /** Stop the in-flight answer. When provided, the input shows a Stop button while streaming. */
   onStop?: () => void;
   permissionRequests?: PendingPermission[];
   onRespondToPermission?: (requestId: string, allow: boolean) => void;
   aiProviders?: AIProviderOption[];
   aiConfig?: { providerId: string | null; model: string | null; reasoningEffort?: string | null };
   onAIConfigChange?: (config: { providerId?: string | null; model?: string | null; reasoningEffort?: string | null }) => void;
-  /** "Ask this session": the reviewer's choice on a busy answer. */
   onSessionAskAction?: (questionId: string, action: SessionAskAction) => void;
-  /** Optional note under the provider bar on how to get "Ask this session" (askSessionSetupHint). */
   askSessionSetupHint?: string | null;
-  /** Opt-in: no provider bar at all (a host with nothing true to say there). Absent: the bar, as always. */
   hideProviderBar?: boolean;
-  /**
-   * Start a new chat: clear the panel so the next question starts a fresh AI
-   * session (#1981). Shown above the messages once there are any; disabled
-   * while an answer is in flight. Absent: no button, the panel renders as before.
-   */
   onNewChat?: () => void;
 }
 
@@ -83,7 +74,6 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
   hideProviderBar,
   onNewChat,
 }) => {
-  // A session that is never interrupted (T3 Code): Stop only stops listening.
   const listenOnly = hasNonInterruptibleSession(aiProviders);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [generalInput, setGeneralInput] = useState('');
@@ -100,7 +90,6 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
   const handleNewChat = useCallback(() => {
     if (!onNewChat) return;
     onNewChat();
-    // The button leaves with the messages; keep focus in the panel.
     requestAnimationFrame(() => {
       rootRef.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus();
     });
@@ -157,8 +146,6 @@ export const DocumentAIChatPanel: React.FC<DocumentAIChatPanelProps> = ({
         </div>
       </OverlayScrollArea>
 
-      {/* Pending permission requests — pinned just above the input/model bar so
-          the user sees them right where they act, not buried at the top. */}
       {permissionRequests.filter(p => !p.decided).length > 0 && (
         <div className="border-t border-border/50 p-2 space-y-2">
           {permissionRequests.filter(p => !p.decided).map(permission => (

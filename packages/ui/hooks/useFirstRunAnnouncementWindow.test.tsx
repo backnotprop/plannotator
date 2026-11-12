@@ -78,7 +78,6 @@ describe('useFirstRunAnnouncementWindow', () => {
   });
 
   test.skipIf(!hasDom)('never opens over a field the reader is in', async () => {
-    // e.g. a comment composer that took focus before the window could close.
     const textarea = document.createElement('textarea');
     document.body.appendChild(textarea);
     textarea.focus();
@@ -87,8 +86,6 @@ describe('useFirstRunAnnouncementWindow', () => {
   });
 
   test.skipIf(!hasDom)('never opens while the reader is inside a framed page', async () => {
-    // Raw-HTML and live-app annotate: typing in the iframe never reaches this
-    // document, and the iframe is what the parent sees as focused.
     const frame = document.createElement('iframe');
     frame.tabIndex = 0;
     document.body.appendChild(frame);
@@ -107,7 +104,6 @@ describe('useFirstRunAnnouncementWindow', () => {
   });
 
   test.skipIf(!hasDom)("a blur during the app's own startup does not count", async () => {
-    // A viewer that focuses its iframe while loading is not the reader working.
     await render({ eligible: false, blurGraceMs: 200 });
     await act(async () => { window.dispatchEvent(new FocusEvent('blur')); });
     await render({ eligible: true, blurGraceMs: 200 });
@@ -135,7 +131,6 @@ describe('useFirstRunAnnouncementWindow', () => {
     await wait(60);
     await render({ eligible: false, windowMs: 20 });
     expect(state()).toBe('shown');
-    // Dismissal (the cookie written) is what closes it.
     await render({ pending: false, eligible: false, windowMs: 20 });
     expect(state()).toBe('hidden');
   });

@@ -1,22 +1,6 @@
-/**
- * Seam test: ImageSrcResolver override (setImageSrcResolver / resetImageSrcResolver).
- *
- * Contract: after setImageSrcResolver(fake), getImageSrc() (and thus the
- * rendered <ImageThumbnail> img src) uses the fake resolver instead of the
- * default /api/image endpoint.
- *
- * Primary assertion is via getImageSrc() (no DOM needed for the core contract).
- * The DOM render assertion validates that the component wires getImageSrc.
- *
- * IMPORTANT: function references are captured at module-load time (top-level)
- * so they remain valid even when configure.test.ts's mock.module() replaces
- * the module exports later during test execution.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import * as ImageThumbnailModule from './ImageThumbnail';
 
-// Capture real function references at import time (before configure.test.ts's
-// mock.module() runs and replaces setImageSrcResolver with a no-op spy).
 const setImageSrcResolver = ImageThumbnailModule.setImageSrcResolver;
 const resetImageSrcResolver = ImageThumbnailModule.resetImageSrcResolver;
 const getImageSrc = ImageThumbnailModule.getImageSrc;
@@ -63,7 +47,6 @@ describe('ImageSrcResolver seam', () => {
     setImageSrcResolver(fake);
     resetImageSrcResolver();
 
-    // After reset, the default resolver builds /api/image?path=... URLs for local paths.
     const result = getImageSrc('/my/photo.jpg');
 
     expect(result).toContain('/api/image');
@@ -72,7 +55,6 @@ describe('ImageSrcResolver seam', () => {
   });
 
   test('default resolver passes through remote URLs unchanged', () => {
-    // resetImageSrcResolver already called in afterEach; still on default after reset.
     const remote = 'https://upload.example.com/images/foo.png';
     const result = getImageSrc(remote);
     expect(result).toBe(remote);

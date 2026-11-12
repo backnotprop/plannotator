@@ -23,11 +23,11 @@ export interface AnnotatorState {
 }
 
 export const COLORS = [
-  '#ef4444', // red
-  '#eab308', // yellow
-  '#22c55e', // green
-  '#3b82f6', // blue
-  '#ffffff', // white
+  '#ef4444',
+  '#eab308',
+  '#22c55e',
+  '#3b82f6',
+  '#ffffff',
 ] as const;
 
 export const DEFAULT_STATE: AnnotatorState = {

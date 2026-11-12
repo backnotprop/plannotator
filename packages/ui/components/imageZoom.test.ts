@@ -1,8 +1,3 @@
-/**
- * The zoom math's host seams (the Inbox's file viewer): Fit by width or
- * height, the padding Fit leaves, and the Fit scale a gesture compares with.
- * The lightbox's own cases are in ImageLightbox.test.tsx.
- */
 import { describe, expect, test } from 'bun:test';
 import { atFit, canPanToward, fitScale, fitViewport, paddingInset, zoomLimits } from './imageZoom';
 
@@ -19,7 +14,6 @@ describe('imageZoom: fit axis and padding', () => {
   test('a panorama fits its height and starts at its left edge', () => {
     const wide = { width: 6000, height: 1200 };
     expect(fitViewport(wide, stage, undefined, 'height')).toEqual({ x: 0, y: 0, scale: 0.5 });
-    // Never above its own size.
     expect(fitScale({ width: 600, height: 100 }, stage, undefined, 'height')).toBe(1);
   });
 
@@ -45,13 +39,10 @@ describe('imageZoom: fit axis and padding', () => {
 
 describe('imageZoom: a swipe over a zoomed image pans to its edge first (approval "inbox-image-swipe")', () => {
   test('more of the image that way: the swipe pans; at that edge it steps; nothing on screen yet: it steps', () => {
-    // 2000 px wide, 600 of it on screen from x = 700: more both ways.
     expect(canPanToward({ x: 700, w: 600 }, 2000, 1)).toBe(true);
     expect(canPanToward({ x: 700, w: 600 }, 2000, -1)).toBe(true);
-    // At its right edge: toward more of the right steps; back toward the left pans.
     expect(canPanToward({ x: 1400, w: 600 }, 2000, 1)).toBe(false);
     expect(canPanToward({ x: 1400, w: 600 }, 2000, -1)).toBe(true);
-    // The whole image (Fit): steps either way.
     expect(canPanToward({ x: 0, w: 2000 }, 2000, 1)).toBe(false);
     expect(canPanToward({ x: 0, w: 2000 }, 2000, -1)).toBe(false);
     expect(canPanToward(null, 2000, 1)).toBe(false);

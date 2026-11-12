@@ -1,16 +1,3 @@
-/**
- * The host seams on question cards (Workspaces keeps answers itself and saves
- * them explicitly): the decision flag and link, the footer slot, and the
- * explicit save mode.
- *
- * What regresses if this fails: a flagged question gives no sign that its
- * answer becomes a decision; a host footer action is dead in a read-only card
- * (a disabled fieldset disables every button inside it); a save-mode edit
- * reaches the host before Save, Cancel leaves the draft on screen, or a failed
- * save throws the reviewer's draft away.
- *
- * DOM-gated (DOM_TESTS=1).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { useState } from 'react';
 import { act } from 'react';
@@ -166,7 +153,6 @@ describe('QuestionBlock footer slot', () => {
     let clicked = 0;
     const footer = (q: IndexedQuestion, a: QuestionAnswer | undefined) => {
       seen.push([q.question.key, a?.selected]);
-      // Sentinel label: only presence and clickability are under test.
       return q.number === 1 ? <button type="button" onClick={() => clicked++}>host-action</button> : null;
     };
     const [first] = indexQuestionBlocks(parseMarkdownToBlocks(DOC));
@@ -178,7 +164,6 @@ describe('QuestionBlock footer slot', () => {
     expect(action.disabled).toBe(false);
     await click(action);
     expect(clicked).toBe(1);
-    // A footer that returns null adds no footer row to a read-only card.
     expect(second.querySelectorAll('button')).toHaveLength(0);
   });
 });
@@ -199,7 +184,6 @@ describe('QuestionBlock explicit save mode', () => {
     expect(saves).toHaveLength(1);
     expect(saves[0][0]).toBe(card.dataset.questionKey!);
     expect(saves[0][1]?.selected).toEqual(['No']);
-    // Saved: the save bar goes away and the host's answer is what shows.
     expect(button(cards(el)[2], 'Save answer')).toBeUndefined();
     expect(checkedLabel(cards(el)[2])).toContain('No');
   });
@@ -232,7 +216,6 @@ describe('QuestionBlock explicit save mode', () => {
 
   test.skipIf(!hasDom)('a host label function gets the question and labels the Save button', async () => {
     const asked: string[] = [];
-    // Sentinel label: the host decides the wording, only the plumbing is under test.
     const saveLabel = (q: { key: string; prompt: string }) => {
       asked.push(q.key);
       return `host-save:${q.prompt}`;
@@ -256,7 +239,6 @@ describe('QuestionBlock explicit save mode', () => {
     await click(button(cards(el)[2], 'Save answer')!);
     await click(radio(cards(el)[2], 'No'));
     await act(async () => resolveSave());
-    // The host now holds Yes; the newer No is still an unsaved draft.
     expect(checkedLabel(cards(el)[2])).toContain('No');
     expect(button(cards(el)[2], 'Save answer')).toBeDefined();
   });

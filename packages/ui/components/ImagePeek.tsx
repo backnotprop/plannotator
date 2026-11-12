@@ -1,63 +1,30 @@
 import React, { forwardRef, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
-/**
- * The picture list a stepper opens ("A · Peek", approval "inbox-image-viewer",
- * 2026-10-15): one row per group (a message, a section of a document) with
- * its label, each item a thumbnail with its name under it, the open one
- * ringed. It floats over what is open and moves nothing under it; on a phone
- * it is a bottom sheet, three across.
- *
- * Keys only while it is open: ← → along the items, ↑ ↓ between rows (the
- * nearest column), Home / End, Enter or Space opens the item (`onPick`), Esc or
- * Tab closes it (`onClose`). The host puts focus back on the control that
- * opened it. Focus starts on the open item.
- *
- * Images are only ever drawn through `<img src>`.
- */
 export interface ImagePeekItem {
-  /** Unique across the peek. */
   key: string;
   name: string;
-  /** An image URL for the thumbnail; absent for a file drawn as a type tile. */
   thumb?: string | null;
-  /** The type tile's short label ("MD", "PDF") when there is no thumbnail. */
   tile?: string;
-  /** Comments on it, shown as a count badge when more than 0. */
   count?: number;
-  /** A paperclip badge (an attached file, as opposed to an image in the text). */
   attached?: boolean;
-  /** Extra words for a screen reader ("changed since it was sent"). */
   detail?: string;
 }
 
 export interface ImagePeekRow {
   key: string;
-  /** "11:22 AM", or a section heading. */
   label: string;
   items: ImagePeekItem[];
 }
 
 export interface ImagePeekProps {
   rows: readonly ImagePeekRow[];
-  /** The open item's key: ringed, and where focus starts. */
   current: string | null;
   onPick: (key: string) => void;
-  /** Esc or Tab (`key`: the host puts focus back on its opener), or a press outside / the sheet's backdrop (`outside`). */
   onClose: (reason: 'key' | 'outside') => void;
-  /** `popover`: a panel the host positions above its bar. `sheet`: a phone's bottom sheet, three across. */
   variant?: 'popover' | 'sheet';
-  /** The grid's accessible name. */
   label: string;
-  /** An id for the panel, for the opener's `aria-controls`. */
   id?: string;
   className?: string;
-  /**
-   * The sheet only: controls drawn above the grid, outside it (the Inbox's
-   * Previous / Next). Shift+Tab from the grid moves into them; Escape in them,
-   * or Shift+Tab out of the first, closes the sheet (`onClose('key')`), so
-   * focus never leaves it for the page behind. Absent (the default): the
-   * sheet is unchanged.
-   */
   sheetHeader?: React.ReactNode;
 }
 
@@ -67,7 +34,6 @@ const PaperclipIcon = () => (
   </svg>
 );
 
-/** Where focus may move from `at` (row, column) for a key, or null when the key is not the grid's. */
 export function peekMove(rows: readonly { items: readonly unknown[] }[], at: { row: number; col: number }, key: string): { row: number; col: number } | null {
   const flat: { row: number; col: number }[] = [];
   rows.forEach((row, r) => row.items.forEach((_, c) => flat.push({ row: r, col: c })));
@@ -96,9 +62,7 @@ export function peekMove(rows: readonly { items: readonly unknown[] }[], at: { r
   }
 }
 
-/** A host that intercepts keys before they reach the peek (a modal's capture listener) hands them over here. */
 export interface ImagePeekHandle {
-  /** Handle one key as the peek would; true when it was the peek's (the caller prevents its default). */
   handleKey: (event: { key: string; isComposing?: boolean }) => boolean;
 }
 
@@ -122,15 +86,12 @@ export const ImagePeek = forwardRef<ImagePeekHandle, ImagePeekProps>(function Im
 
   const cellOf = (at: { row: number; col: number }) => gridRef.current?.querySelector<HTMLElement>(`[data-peek-cell="${at.row}:${at.col}"]`) ?? null;
 
-  // Focus starts on the open item, and the open item is in view.
   useLayoutEffect(() => {
     const cell = cellOf(start);
     cell?.focus({ preventScroll: true });
     cell?.scrollIntoView?.({ block: 'nearest' });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // A press outside closes it (the opener toggles it itself).
   useEffect(() => {
     if (sheet) return;
     const onDown = (event: PointerEvent) => {
@@ -171,7 +132,6 @@ export const ImagePeek = forwardRef<ImagePeekHandle, ImagePeekProps>(function Im
   useImperativeHandle(ref, () => ({ handleKey: (event) => handleKeyRef.current(event) }), []);
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    // With a header above the grid, Shift+Tab moves up into it instead of closing the sheet.
     if (header && event.key === 'Tab' && event.shiftKey) return;
     if (!handleKey({ key: event.key, isComposing: event.nativeEvent.isComposing })) return;
     event.preventDefault();
@@ -267,8 +227,6 @@ export const ImagePeek = forwardRef<ImagePeekHandle, ImagePeekProps>(function Im
           <div
             className="px-3 pt-2 text-popover-foreground"
             onKeyDown={(event) => {
-              // Escape closes the sheet; so does Shift+Tab out of its first control (focus leaving the sheet
-              // closes it, as Tab out of the grid does: the host puts focus back on its opener).
               const first = event.currentTarget.querySelector<HTMLElement>('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
               const leaving = event.key === 'Tab' && event.shiftKey && event.target === first;
               if (event.key !== 'Escape' && !leaving) return;

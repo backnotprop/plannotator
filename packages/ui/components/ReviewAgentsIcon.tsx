@@ -4,10 +4,6 @@ interface ReviewAgentsIconProps {
   className?: string;
 }
 
-/**
- * Magnifying glass with cog — icon for the Review Agents tab.
- * Uses currentColor for stroke so it inherits from parent text color.
- */
 export const ReviewAgentsIcon: React.FC<ReviewAgentsIconProps> = ({ className = 'w-3.5 h-3.5' }) => (
   <svg className={`${className} flex-shrink-0`} viewBox="0 0 64 64" fill="none" stroke="currentColor">
     <path d="M40.5 40.5L55 55" strokeWidth={7} strokeLinecap="round" />

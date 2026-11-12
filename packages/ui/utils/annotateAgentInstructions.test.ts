@@ -1,9 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { resolveAnnotateInstructionsSurface } from './annotateAgentInstructions';
 
-// The surface decides which read command and targeting rules the agent gets;
-// a wrong pick hands it instructions that do not work for the session (e.g.
-// `.plan`, which is empty for HTML, live-app and folder sessions).
 describe('resolveAnnotateInstructionsSurface', () => {
   test('a live app wins over its HTML render', () => {
     expect(resolveAnnotateInstructionsSurface({ liveApp: true, annotateSource: 'file', renderAs: 'html' })).toBe('live-app');

@@ -1,11 +1,3 @@
-/**
- * Locally minted annotation ids are per viewer instance (DOM-gated).
- *
- * A module-wide set leaked every id ever minted into unrelated later
- * HtmlViewer instances of a long-lived host page (the Workspaces SPA), so a
- * fresh instance started with a populated `createdAnnotationIds`. Mount A,
- * mint, unmount, mount B: B must start empty.
- */
 import React from 'react';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';

@@ -3,7 +3,6 @@ import { newUuid } from './uuid';
 
 const original = Object.getOwnPropertyDescriptor(crypto, 'randomUUID');
 afterEach(() => {
-  // randomUUID lives on Crypto.prototype, so there is usually no own descriptor: delete the shadow so the prototype's shows again.
   if (original) Object.defineProperty(crypto, 'randomUUID', original);
   else delete (crypto as unknown as Record<string, unknown>).randomUUID;
 });

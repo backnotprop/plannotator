@@ -22,10 +22,6 @@ import type { DraftTransport } from './hooks/useAnnotationDraft';
 import type { ExternalAnnotationTransport } from './hooks/useExternalAnnotations';
 import type { AITransport } from './hooks/useAIChat';
 
-// Capture the REAL exports at module-evaluation time (top-level, before any
-// mock.module() is installed). These are used to restore the module registry
-// in afterAll so that any sibling test files run in the same Bun worker see
-// the real exports when THEY evaluate after this file finishes.
 const realSetImageSrcResolver = ImageThumbnail.setImageSrcResolver;
 const realResetImageSrcResolver = ImageThumbnail.resetImageSrcResolver;
 const realSetDocPreviewFetcher = InlineMarkdown.setDocPreviewFetcher;
@@ -48,7 +44,6 @@ const realSetWebMcpPolicy = webmcpPolicy.setWebMcpPolicy;
 const realResetWebMcpPolicy = webmcpPolicy.resetWebMcpPolicy;
 const realGetWebMcpPolicy = webmcpPolicy.getWebMcpPolicy;
 
-// Spy mocks — will be installed into the module registry in beforeAll.
 const setImageSrcResolver = mock((_: ImageSrcResolver) => {});
 const setDocPreviewFetcher = mock((_: DocPreviewFetcher) => {});
 const setStorageBackend = mock((_: StorageBackend) => {});
@@ -60,12 +55,9 @@ const setExternalAnnotationTransport = mock((_: ExternalAnnotationTransport<{ id
 const setAITransport = mock((_: AITransport) => {});
 const setWebMcpPolicy = mock((_: webmcpPolicy.WebMcpPolicy) => {});
 
-// configStore is shared with sibling suites — spy on the real instance methods
-// instead of replacing the ./config module.
 const setServerSync = spyOn(configStore, 'setServerSync');
 const loadFromBackend = spyOn(configStore, 'loadFromBackend').mockImplementation(() => {});
 
-// Shape-correct fakes (only need to satisfy the front door's optional fields).
 const imageSrcResolver: ImageSrcResolver = (path) => path;
 const docPreviewFetcher: DocPreviewFetcher = async () => null;
 const storageBackend: StorageBackend = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
@@ -98,17 +90,6 @@ const aiTransport: AITransport = {
 const serverSync = (_payload: Record<string, unknown>) => {};
 
 describe('configurePlannotatorUI routing', () => {
-  // Install mock.module() replacements HERE (in beforeAll, not at top-level)
-  // so that sibling seam test files' top-level captures (which happen at module
-  // evaluation time, BEFORE this beforeAll runs) see the real exports.
-  //
-  // Bun runs test files sequentially: file A's top-level → file A's tests
-  // (including beforeAll/afterAll) → file B's top-level → file B's tests.
-  // Because configure.test.ts runs before the seam test files (alphabetical),
-  // the seam files evaluate AFTER this file's afterAll — so they see whatever
-  // state this afterAll leaves the module registry in. We MUST restore with
-  // captured real functions (not `{ ...storage }`) because spreading the live
-  // namespace after mock.module() returns the mocked version.
   beforeAll(async () => {
     mock.module('./components/ImageThumbnail', () => ({
       ...ImageThumbnail,
@@ -165,8 +146,6 @@ describe('configurePlannotatorUI routing', () => {
 
   afterAll(() => {
     mock.restore();
-    // Restore using CAPTURED REAL FUNCTIONS (not `{ ...storage }` which would
-    // spread the mocked namespace and leave spies in place for sibling files).
     mock.module('./components/ImageThumbnail', () => ({
       ...ImageThumbnail,
       setImageSrcResolver: realSetImageSrcResolver,
@@ -251,7 +230,6 @@ describe('configurePlannotatorUI routing', () => {
     expect(setServerSync).toHaveBeenCalledWith(serverSync);
     expect(loadFromBackend).toHaveBeenCalledTimes(1);
 
-    // load-bearing order: storageBackend installed before loadFromBackend re-hydrates.
     expect(setStorageBackend.mock.invocationCallOrder[0]).toBeLessThan(
       loadFromBackend.mock.invocationCallOrder[0],
     );

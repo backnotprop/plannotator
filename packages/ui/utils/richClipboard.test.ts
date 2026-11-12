@@ -44,7 +44,6 @@ describe('selectionRangeToHtml', () => {
   });
 
   test.skipIf(!hasDom)('marks sanitized HTML past the output cap too large, even when the text fits', () => {
-    // Long link targets: the text is ten characters, the markup is not.
     const href = `https://example.test/${'x'.repeat(60_000)}`;
     document.body.innerHTML = `<p>${`<a href="${href}">y</a>`.repeat(10)}</p>`;
     const range = document.createRange();
@@ -62,7 +61,6 @@ describe('selectionRangeToHtml', () => {
     range.setStart(paragraph.firstChild!, 7);
     range.setEnd(paragraph.querySelector('a')!.firstChild!, 4);
 
-    // A link to the page's own server keeps its words and loses its href.
     expect(selectionRangeToHtml(range)).toBe('<p><strong>bold <a>link</a></strong></p>');
   });
 
@@ -90,11 +88,9 @@ describe('selectionRangeToHtml', () => {
   test.skipIf(!hasDom)('drops every link to the page origin or a loopback host, any port or path; keeps the text', () => {
     document.head.innerHTML = '<base href="http://localhost:4100/">';
     const droppedLinks = [
-      // Tokens that decode past the asset route (review of #2191).
       'http://localhost:5000/api/html-assets/TOKEN/..%2F..%2Fx',
       'http://localhost:5000/api/html-assets/TOKEN/..%5C..%5Cx',
       'http://localhost:5000/api/html-assets/TOKEN/%2e%2e%252f%2e%2e%252fx',
-      // A local document link and a live-app proxy link.
       '/Users/me/notes.md',
       'http://localhost:4100/docs/readme',
       'http://localhost:61234/dashboard?tab=2',
@@ -280,7 +276,6 @@ describe('copyRichTextToClipboard', () => {
     expect(pageCopyHandler).not.toHaveBeenCalled();
     expect(captured.get('text/plain')).toBe('plain');
 
-    // Outside the button's call, the page's copy handler runs as before.
     document.body.dispatchEvent(new Event('copy', { bubbles: true }));
     expect(pageCopyHandler).toHaveBeenCalledTimes(1);
   });
@@ -358,7 +353,6 @@ describe('copyRichTextToClipboard', () => {
     override(navigator, 'clipboard', { write, writeText: mock(async () => {}) });
     let answer!: (source: { html: string; text: string }) => void;
     const pending = copyRichSelection(() => new Promise((resolve) => { answer = resolve; }), 'quote');
-    // The write started before the markup arrived (it keeps the user gesture).
     expect(write).toHaveBeenCalledTimes(1);
     answer({ html: '<p><b>rich</b></p>', text: 'rich' });
     await expect(pending).resolves.toEqual({ copied: 'rich', truncatedTo: undefined });
@@ -373,7 +367,6 @@ describe('copyRichTextToClipboard', () => {
     }
     const write = mock(async (items: TestClipboardItem[]) => {
       const out: Record<string, string> = {};
-      // A rejected part would reject here, and Safari would copy nothing.
       for (const [type, blob] of Object.entries(items[0].items)) out[type] = await (await blob).text();
       written.push(out);
     });

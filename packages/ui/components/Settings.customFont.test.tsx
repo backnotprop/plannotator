@@ -4,12 +4,6 @@ import { createRoot, type Root } from 'react-dom/client';
 import { Settings } from './Settings';
 import { configStore } from '../config';
 
-/**
- * Code Font → Custom… (#851): a typed font name is saved after a short
- * pause, a built-in picked mid-pause wins over the typing, and closing
- * Settings mid-pause still saves what was typed.
- */
-
 const hasDom = typeof document !== 'undefined';
 const SAVE_DEBOUNCE_MS = 400;
 let host: HTMLDivElement | null = null;

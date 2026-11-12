@@ -1,31 +1,14 @@
-/**
- * "Follow an example" on the drawing itself (approval "trace-it-board" r5):
- * the example's path lights through the board's own parts (`data-mark`) and
- * arrows (`data-edge`), each step's value is written on its part, and every
- * part the example never touches fades back. Built once per example on the
- * How it works drawing (inside ShapeDrawn's shadow root); a step only changes
- * states, so every change is a cross-fade the browser can retarget mid-way.
- *
- * Motion: the dot runs on the arrow's own path (400–550 ms, eased in and
- * out) and the part it reaches pulses as it lands; the step's light comes up
- * as the dot lands. Every call cancels what is in flight first, so rapid
- * input leaves one step lit and no stray dot. Reduced motion: no dot, no
- * pulse, 150 ms fades.
- */
 import type { ShapeExample } from '@plannotator/core/shape';
 import type { FollowDir } from './followState';
 import { outlineOf } from './litLine';
 
-/** One ease-out for everything the card and the board do together; an in-out for the dot that travels. */
 export const FOLLOW_EASE = 'cubic-bezier(.22, 1, .36, 1)';
 const EASE_TRAVEL = 'cubic-bezier(.65, 0, .35, 1)';
 
-/** `el.animate`, where the page has it (a test DOM may not): null otherwise. */
 export function animate(el: Element, frames: Keyframe[], options: KeyframeAnimationOptions): Animation | null {
   return typeof (el as HTMLElement).animate === 'function' ? (el as HTMLElement).animate(frames, options) : null;
 }
 
-/** The light, in the drawing's own scope (a shadow root does not see the page's CSS). */
 export const FOLLOW_DRAWN_CSS = `
 .board.shp-ex-on [data-ex-dim] { opacity: .2; transition: opacity .3s ease; }
 .board.shp-ex-on [data-ex-i] { cursor: pointer; }
@@ -79,11 +62,8 @@ export const FOLLOW_DRAWN_CSS = `
 `;
 
 const GEOMETRY = 'path, line, polyline';
-/** What a tag keeps from the edge of what shows of the drawing. */
 const EDGE = 8;
-/** How far the drawing's frame shows past itself (ShapeDrawn's `clip-path: inset(-24px)`). */
 const FRAME_BLEED = 24;
-/** What a tag keeps from words, parts and other tags (px on screen). */
 const CLEAR = 4;
 
 export type Box = { left: number; top: number; right: number; bottom: number };
@@ -91,17 +71,12 @@ const meets = (a: Box, b: Box) => a.left < b.right && b.left < a.right && a.top 
 const grow = (b: Box, n: number): Box => ({ left: b.left - n, top: b.top - n, right: b.right + n, bottom: b.bottom + n });
 const moved = (b: Box, dx: number, dy: number): Box => ({ left: b.left + dx, top: b.top + dy, right: b.right + dx, bottom: b.bottom + dy });
 
-/** The moves a tag tries, nearest first: a few px up or down, or a longer way along its row. */
 const NEAR: readonly { dx: number; dy: number }[] = (() => {
   const out: { dx: number; dy: number }[] = [];
   for (let dy = -60; dy <= 60; dy += 6) for (let dx = -240; dx <= 240; dx += 12) out.push({ dx, dy });
   return out.sort((a, b) => Math.abs(a.dx) + 2.5 * Math.abs(a.dy) - (Math.abs(b.dx) + 2.5 * Math.abs(b.dy)));
 })();
 
-/**
- * Whether a tag still reads as its part's or arrow's: within 40 px of it, and over a part's column by
- * 40 px (half a narrow part), or within 40 px of an arrow's span.
- */
 export function besideOf(a: Box, kind: 'mark' | 'edge'): (q: Box) => boolean {
   return (q) => {
     if (q.bottom < a.top - 40 || q.top > a.bottom + 40) return false;
@@ -110,14 +85,6 @@ export function besideOf(a: Box, kind: 'mark' | 'edge'): (q: Box) => boolean {
   };
 }
 
-/**
- * Where a tag goes, near where it was put (`spots[0]`; `spots[1]` is its part's other edge): a spot in the
- * view (`fits`) that still reads as its part's or arrow's (`near`), covering none of the drawing's own words
- * (`words`) where any spot can, then as little of `hard` as it can (the other parts, the tags already placed:
- * none, where there is room), then crossing as few lines as it can (`soft`: points along the drawing's lines),
- * then the nearest. On a crowded phone a number may meet another number or a part, never the drawing's words.
- * Null: no such spot within reach (the tag stays where it was put).
- */
 export function bestSpot(spots: readonly Box[], hard: readonly Box[], soft: readonly Box[], fits: (r: Box) => boolean, near: (r: Box) => boolean, words: readonly Box[] = []): { spot: number; dx: number; dy: number } | null {
   let best: { spot: number; dx: number; dy: number } | null = null;
   let bestCost = Infinity;
@@ -163,13 +130,11 @@ const BUG = [
 ];
 const BUG_SVG = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${BUG.map((d) => `<path d="${d}"/>`).join('')}</svg>`;
 
-/** The drawing's scale on screen (its canvas is scaled to fit, and may be mid-resize). */
 export function scaleOf(board: HTMLElement) {
   const b = board.getBoundingClientRect();
   return { b, k: board.offsetWidth && b.width ? b.width / board.offsetWidth : 1 };
 }
 
-/** An element's corner radius in the drawing's coordinates: an HTML box's border-radius, an SVG rect's rx on screen. */
 function radiusOf(el: Element, k: number): string {
   if (!(el instanceof SVGElement)) return getComputedStyle(el).borderRadius;
   if (el.localName !== 'rect') return '';
@@ -182,17 +147,11 @@ const byAttr = (name: string, value: string) => `[${name}="${value.replace(/["\\
 
 type StepState = 'on' | 'now' | 'later';
 
-/**
- * The example on the picture, for as long as it is followed. `set` moves the
- * light; `place` puts the rings and tags back on their parts (after a resize);
- * `destroy` leaves the drawing exactly as it was.
- */
 export class FollowPainter {
   private layer: HTMLDivElement;
   private touched: Element[] = [];
   private dimmed: Element[] = [];
   private lit: { i: number; el: SVGElement }[] = [];
-  /** `own`: the part's own border or stroke, which takes the mark colour when lit in place of the ring's line (one border, not two). */
   private rings = new Map<number, { el: HTMLElement; mark: HTMLElement; own: Element | null }>();
   private tags: { tag: HTMLButtonElement; i: number; el: Element; kind: 'mark' | 'edge' }[] = [];
   private ro: ResizeObserver | null = null;
@@ -221,13 +180,11 @@ export class FollowPainter {
         el.setAttribute('data-ex-i', String(i));
         this.touched.push(el);
       }
-      // The arrow's light: its own lines, drawn again in the mark colour over them, so it can fade.
       for (const e of edges) {
         const lines = e.matches(GEOMETRY) ? [e] : [...e.querySelectorAll(GEOMETRY)];
         for (const p of lines) {
           const lit = p.cloneNode(false) as SVGElement;
           for (const a of ['class', 'style', 'data-step', 'data-mark', 'data-edge', 'data-ex-i', 'id', 'marker-start', 'marker-mid', 'marker-end']) lit.removeAttribute(a);
-          // A filled arrowhead (the kit's `.shp-head`) lights filled, not as an outline.
           lit.setAttribute('class', p.classList.contains('shp-head') ? 'shp-ex-lit shp-ex-head' : 'shp-ex-lit');
           p.after(lit);
           this.lit.push({ i, el: lit });
@@ -266,12 +223,10 @@ export class FollowPainter {
         this.tags.push({ tag, i, ...anchor });
       }
     });
-    // Dim what the example never touches: the siblings along each touched part's way up to the board.
     const keep = new Set<Element>();
     for (const el of this.touched) for (let e: Element | null = el; e && e !== board; e = e.parentElement) keep.add(e);
     const walk = (node: Element) => {
       for (const child of [...node.children]) {
-        // Another layer on the drawing (`data-shp-overlay`: the stack badges) dims its own pieces by their parts.
         if (child === this.layer || child.hasAttribute('data-shp-overlay') || this.touched.includes(child) || child.classList.contains('shp-ex-lit')) continue;
         if (keep.has(child)) walk(child);
         else {
@@ -295,24 +250,16 @@ export class FollowPainter {
     return step === null ? 'on' : i < step ? 'on' : i === step ? 'now' : 'later';
   }
 
-  /**
-   * Puts the rings and the values on their parts, in the drawing's coordinates, counter-scaled to read the same.
-   * `quick`: while the drawing only scales (the card's room animation, every frame), just the counter-scale:
-   * everything sits in the drawing's own coordinates, so nothing else moves until a full place when it lands.
-   */
   place(options: { quick?: boolean } = {}) {
     const { b, k } = scaleOf(this.board);
     if (!k) return;
     this.layer.style.setProperty('--ex-inv', String(Math.min(1.6, 1 / k)));
     if (options.quick) return;
-    // What shows of the drawing: its frame, which clips 24 px outside itself, within the view it scrolls in.
     const host = (this.board.getRootNode() as ShadowRoot).host as HTMLElement | undefined;
     const box = host?.closest?.('.shp-view');
     const frame = host?.closest?.('.shp-drawn');
     const v = box && box.clientWidth ? box.getBoundingClientRect() : null;
     const f = frame ? frame.getBoundingClientRect() : null;
-    // A panning drawing (a wide one on a phone) scrolls inside its frame, and the drawing's own box clips:
-    // each tag stays inside that box, the whole drawing, not the slice that shows now, so it pans with its part.
     const fitBox = frame?.classList.contains('pan') ? frame.querySelector('.shp-drawn-fit')?.getBoundingClientRect() : null;
     const view = v
       ? fitBox
@@ -326,7 +273,6 @@ export class FollowPainter {
     const x = (v: number) => (v - b.left) / k;
     const y = (v: number) => (v - b.top) / k;
     for (const { el, mark, own } of this.rings.values()) {
-      // A part with its own line: the halo and the pulse follow that line's box and corners.
       const at = own ?? mark;
       const r = at.getBoundingClientRect();
       const radius = typeof getComputedStyle === 'function' ? radiusOf(at, k) : '';
@@ -342,7 +288,6 @@ export class FollowPainter {
         tag.classList.add(bottom ? 'bottom' : 'top');
         tag.style.left = `${x(r.right) - 12}px`;
         tag.style.top = `${y(bottom ? r.bottom : r.top)}px`;
-        // Its part's other edge, should this one have no room.
         flip = () => {
           tag.classList.replace(bottom ? 'bottom' : 'top', bottom ? 'top' : 'bottom');
           tag.style.top = `${y(bottom ? r.top : r.bottom)}px`;
@@ -356,13 +301,10 @@ export class FollowPainter {
         tag.style.left = `${x(r.right) + 10}px`;
         tag.style.top = `${y(r.top + r.height / 2)}px`;
       }
-      // A tag that would run past the view it is read in comes back inside it.
       if (view) {
         const t = tag.getBoundingClientRect();
         const shift = t.left < view.left + EDGE ? view.left + EDGE - t.left : t.right > view.right - EDGE ? Math.max(view.left + EDGE - t.left, view.right - EDGE - t.right) : 0;
         if (shift) tag.style.left = `${parseFloat(tag.style.left) + shift / k}px`;
-        // Nor does it cover the drawing's own words (an arrow's label), another part or a tag already placed.
-        // Its own part: on an edge (the approved look), never across the middle of it.
         const half = tag.getBoundingClientRect().height / 2 + 0.5;
         const own = kind === 'mark' && r.height > 2 * half ? [{ left: r.left, right: r.right, top: r.top + half, bottom: r.bottom - half }] : [];
         const hard = [...parts.filter((p) => !p.el.contains(el)).map((p) => p.box), ...own, ...placed];
@@ -373,12 +315,11 @@ export class FollowPainter {
     }
   }
 
-  /** Where the drawing's own words are: every line of its text, outside the layer the tags are in. */
   private wordsOf(): Box[] {
     const doc = this.board.ownerDocument;
     if (typeof doc.createRange !== 'function') return [];
     const out: Box[] = [];
-    const walk = doc.createTreeWalker(this.board, 4 /* NodeFilter.SHOW_TEXT */);
+    const walk = doc.createTreeWalker(this.board, 4);
     const range = doc.createRange();
     for (let n = walk.nextNode(); n; n = walk.nextNode()) {
       if (!n.textContent?.trim() || this.layer.contains(n)) continue;
@@ -388,7 +329,6 @@ export class FollowPainter {
     return out;
   }
 
-  /** The drawing's parts (`data-mark`s holding no other), on screen. A part as big as a quarter of the drawing is a zone, not a part. */
   private partsOf(): { el: Element; box: Box }[] {
     const b = this.board.getBoundingClientRect();
     const zone = (b.width * b.height) / 4;
@@ -401,7 +341,6 @@ export class FollowPainter {
     return out;
   }
 
-  /** The drawing's lines (arrows, rules), as small boxes along each one, on screen. */
   private linesOf(): { el: Element; boxes: Box[] }[] {
     const out: { el: Element; boxes: Box[] }[] = [];
     for (const el of this.board.querySelectorAll<SVGGeometryElement>(GEOMETRY)) {
@@ -420,21 +359,13 @@ export class FollowPainter {
         }
         out.push({ el, boxes });
       } catch {
-        // No geometry to read here.
       }
     }
     return out;
   }
 
-  /**
-   * Moves a tag that covers something, or is cut off by the edge of what shows, to the nearest free spot
-   * beside its part (`bestSpot`): off the drawing's words, the other parts and the tags already placed,
-   * crossing as few lines as it can. Where nothing beside it is free (a crowded phone), the spot that
-   * covers least.
-   */
   private clear(tag: HTMLElement, k: number, view: { left: number; right: number; top: number; bottom: number }, words: Box[], hard: Box[], soft: Box[], near: (r: Box) => boolean, flip?: () => void) {
     const t = tag.getBoundingClientRect() as Box;
-    // Half a pixel's slack: a tag the edge just set at EDGE measures a hair inside it.
     const fits = (r: Box) => r.left > view.left + EDGE - 0.5 && r.right < view.right - EDGE + 0.5 && r.top >= view.top && r.bottom <= view.bottom;
     if (fits(t) && !words.some((w) => meets(t, w)) && !hard.some((w) => meets(t, w)) && !soft.some((w) => meets(t, w))) return;
     const { left, top } = tag.style;
@@ -456,7 +387,6 @@ export class FollowPainter {
     tag.style.top = `${parseFloat(tag.style.top) + go.dy / k}px`;
   }
 
-  /** The step on now (null: the whole path). Forward, a dot runs to it first and its light comes up as the dot lands. */
   set(step: number | null, dir: FollowDir, reduce: boolean) {
     this.stopMoving();
     const arrive = dir === 'fwd' && step !== null && step > 0 && !reduce ? this.travel(step - 1, step) : 0;
@@ -470,13 +400,11 @@ export class FollowPainter {
       const state = this.stateOf(i, step);
       tag.style.setProperty('--ex-d', `${delay(i)}ms`);
       tag.setAttribute('data-s', state);
-      // A step still to come has no tag yet: nothing to land on with the keys, or to read out.
       tag.tabIndex = state === 'later' ? -1 : 0;
       if (state === 'later') tag.setAttribute('aria-hidden', 'true');
       else tag.removeAttribute('aria-hidden');
     }
     for (const { i, el } of this.lit) {
-      // The arrow being taken lights up under the dot, over its whole run.
       el.style.setProperty('--ex-dur', arrive && i === step ? `${arrive}ms` : '');
       el.style.setProperty('--ex-d', '0ms');
       el.setAttribute('data-s', this.stateOf(i, step));
@@ -488,14 +416,12 @@ export class FollowPainter {
     }
   }
 
-  /** The element a step sits at: its part, else its arrow. */
   elementOf(i: number): Element | null {
     const s = this.ex.steps[i];
     if (!s) return null;
     return (s.part && this.board.querySelector(byAttr('data-mark', s.part))) || (s.arrow && this.board.querySelector(byAttr('data-edge', s.arrow))) || null;
   }
 
-  /** The dot, from the step just left to the step on now, on the arrow's own path. Returns when it lands (ms). */
   private travel(from: number, to: number): number {
     const { b, k } = scaleOf(this.board);
     const toBoard = (px: number, py: number) => ({ x: (px - b.left) / k, y: (py - b.top) / k });
@@ -504,7 +430,6 @@ export class FollowPainter {
     const edge = target.arrow ? this.board.querySelector(byAttr('data-edge', target.arrow)) : null;
     const line = edge ? ((edge.matches(GEOMETRY) ? edge : edge.querySelector(`:is(${GEOMETRY}):not(.shp-ex-lit)`)) as SVGGeometryElement | null) : null;
     if (line && typeof line.getTotalLength === 'function') {
-      // The arrow's line without its head: a path's first subpath, sampled on its own geometry.
       let probe: SVGGeometryElement = line;
       if (line.localName === 'path') {
         probe = line.ownerDocument.createElementNS('http://www.w3.org/2000/svg', 'path') as SVGPathElement;
@@ -523,12 +448,10 @@ export class FollowPainter {
           }
         }
       } catch {
-        // No geometry here: the straight way below.
       }
       if (probe !== line) probe.remove();
     }
     if (pts.length < 2) {
-      // No arrow: from the edge of the part just left to the facing edge of the next, straight.
       const a = this.elementOf(from)?.getBoundingClientRect();
       const z = this.elementOf(to)?.getBoundingClientRect();
       if (!a || !z) return 0;
@@ -564,7 +487,6 @@ export class FollowPainter {
     }
     run.onfinish = () => dot.remove();
     this.moving.push(run);
-    // The part answers as the dot lands: a ring that widens and fades (transform and opacity only).
     const ring = this.rings.get(to);
     if (ring) {
       const pulse = ring.el.querySelector<HTMLElement>('.pulse')!;

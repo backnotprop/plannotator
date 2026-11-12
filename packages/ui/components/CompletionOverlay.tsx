@@ -1,10 +1,6 @@
 import type { ReactNode } from 'react';
 import { useAutoClose } from '../hooks/useAutoClose';
 
-// ---------------------------------------------------------------------------
-// Icons
-// ---------------------------------------------------------------------------
-
 const CheckIcon = () => (
   <svg className="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
@@ -21,29 +17,12 @@ const ChatBubbleIcon = () => (
   </svg>
 );
 
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
-
 interface CompletionOverlayProps {
-  /** `done`: the session finished with nothing sent (an annotate Done with
-   *  no feedback). Neutral styling. `done` and `exited` (Close) send nothing,
-   *  so neither shows the "response has been sent" line. */
   submitted: 'approved' | 'denied' | 'feedback' | 'done' | 'exited' | null | false;
   title: string;
   subtitle: string;
   agentLabel: string;
-  /**
-   * Optional destinations shown under the subtitle as ordinary links (opened
-   * in a new tab by a real click, so no popup blocker applies) — e.g. the PR
-   * a platform review was just posted to. Omitted or empty renders nothing.
-   */
   links?: ReadonlyArray<{ href: string; label: string }>;
-  /**
-   * Optional content in place under the done message (Plannotator's "Star the repo" card, `useStarAskDoneScreen`).
-   * With it, the done block moves to the top of the screen (480 px wide) to make room, and the screen scrolls. Omitted
-   * or null: the done screen is exactly as before.
-   */
   footer?: ReactNode;
 }
 

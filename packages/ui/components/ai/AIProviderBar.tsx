@@ -12,10 +12,6 @@ interface AIProviderBarProps {
   onProviderChange: (providerId: string) => void;
   onModelChange: (model: string) => void;
   onReasoningEffortChange?: (effort: string | null) => void;
-  /**
-   * Optional muted line under the bar saying how to get "Ask this session"
-   * (see askSessionSetupHint). Absent: the bar renders exactly as before.
-   */
   setupHint?: string | null;
 }
 
@@ -40,8 +36,6 @@ export const AIProviderBar: React.FC<AIProviderBarProps> = ({
     );
   }
 
-  // "Ask this session": the session that opened Plannotator is the only thing
-  // Ask AI talks to, so there is no provider or model to choose. Show its label.
   const sessionBridge = findSessionBridge(providers);
   if (sessionBridge) {
     const bridgeMeta = getProviderMeta(sessionBridge.name, sessionBridge.label);
@@ -66,7 +60,6 @@ export const AIProviderBar: React.FC<AIProviderBarProps> = ({
   const reasoningEfforts = currentModel?.reasoningEfforts ?? [];
   const meta = getProviderMeta(currentProvider?.name ?? 'AI', currentProvider?.label);
   const Icon = meta.icon;
-  // Show only when the selected model actually reports reasoning efforts.
   const showReasoningEffort = !!onReasoningEffortChange && reasoningEfforts.length > 0;
 
   return (

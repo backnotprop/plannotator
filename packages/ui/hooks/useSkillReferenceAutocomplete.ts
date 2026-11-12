@@ -14,97 +14,39 @@ import { fetchSkillCatalog, getCachedSkillCatalog, onSkillCatalogReload } from '
 
 export interface SkillReferenceMenuState {
   items: SkillCatalogEntry[];
-  /** Explicitly activated row, or null — the menu opens with NOTHING active. */
   activeIndex: number | null;
   query: string;
 }
 
 export interface UseSkillReferenceAutocompleteResult {
-  /** Open menu state, or null. Render SkillReferenceMenu from this. */
   menu: SkillReferenceMenuState | null;
-  /** Call FIRST in the textarea's onKeyDown; true means the event was consumed. */
   onKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => boolean;
-  /** Call from the textarea's onSelect (fires on every caret move + input). */
   onSelect: () => void;
-  /** Insert the given menu item at the active trigger. */
   select: (index: number) => void;
-  /** Human-only skills currently referenced in the text (drives the composer warning). */
   humanOnlyReferences: SkillCatalogEntry[];
-  /** Positioned reference occurrences in the text (drives the composer highlight overlay). */
   referenceTokens: SkillReferenceToken[];
 }
 
-/**
- * Skill-reference autocomplete for a comment textarea. Typing `/` or `$` at
- * the start of a word opens a menu of the user's global agent skills; the
- * catalog is fetched lazily (memory-cached, never persisted). With no catalog
- * (endpoint absent, discovery failed, no skills installed) every path here is
- * inert and the textarea behaves exactly as before.
- *
- * NO-PRESELECTION INVARIANT (do not weaken — an adversarial review proved the
- * failure): the menu opens with no row active, and while no row is active
- * Enter, Tab, and every other typing key behave exactly as if the menu were
- * not open — "This costs $" + Enter is a newline, "cd /" + Tab leaves the
- * field. A row becomes active ONLY via explicit keyboard navigation
- * (ArrowDown from none lands on the FIRST row, ArrowUp from none on the
- * LAST) — and on a BARE trigger (zero query characters) even the arrows pass
- * through to the textarea and dismiss the menu, because in a multi-line
- * composer "cost: $" + ArrowUp means caret navigation, not menu navigation;
- * arrows engage the menu only once a query character was typed. Only with an
- * active row do Enter and Tab insert. Pointer hover never activates a
- * row (a menu rendered over the composer sits exactly where the mouse rests
- * while typing); a pointer CLICK inserts directly and never arms Enter.
- * Continuing to type re-filters the list and DISARMS any active row, so an
- * activation always refers to the exact list the user saw. Escape clears the
- * active row and dismisses the menu when the user has engaged with it (a row
- * is active or a query was typed); on a bare-trigger menu with no engagement
- * it passes through, so Escape still closes the composer in one press.
- * `bareEscapeDismisses` (default off) makes Escape close any open menu first,
- * for a composer where Escape costs more than a press (the Inbox's compose
- * dialog asks whether to keep a draft).
- */
 export function useSkillReferenceAutocomplete(options: {
   text: string;
   setText: (text: string) => void;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   enabled: boolean;
   bareEscapeDismisses?: boolean;
-  /**
-   * Which catalog entries this composer offers and paints (a host's per-place
-   * rule, e.g. the Inbox's `/review-recheck` only in a reviewed thread).
-   * Absent: every entry, as before. Keep its identity stable across renders.
-   */
   catalogFilter?: (entry: SkillCatalogEntry) => boolean;
-  /**
-   * A host's own commands (opt-in; the Inbox's `/side`): rows the `/` list offers that are not skills. They are
-   * listed after the catalog's leading host-served rows (root `plannotator`), a skill with the same name wins, and
-   * `$` never lists them. Picking one inserts nothing: the typed trigger leaves the text (`setText`) and `onCommand`
-   * gets the row and the words that are left. A command typed and not picked is plain text: never painted, never a
-   * reference. Absent: none, as before. Keep its identity stable across renders.
-   */
   commands?: readonly SkillCatalogEntry[];
   onCommand?: (command: SkillCatalogEntry, text: string) => void;
-  /**
-   * Keep the host-served rows (root `plannotator`) together at the top of the list whatever was typed (opt-in; pairs
-   * with SkillReferenceMenu's `groupHostRows`, which draws them as their own group). Within each group the filter's
-   * order stands. Absent: the filter's order alone, as before.
-   */
   hostRowsFirst?: boolean;
 }): UseSkillReferenceAutocompleteResult {
   const { text, setText, textareaRef, enabled, bareEscapeDismisses = false, catalogFilter, commands, onCommand, hostRowsFirst = false } = options;
-  // Seed from the memory cache only when the surface opted in — a disabled
-  // composer must stay inert even after another surface warmed the catalog.
   const [fullCatalog, setCatalog] = useState<SkillCatalogEntry[]>(() =>
     enabled ? getCachedSkillCatalog() : [],
   );
   const catalog = useMemo(() => (catalogFilter ? fullCatalog.filter(catalogFilter) : fullCatalog), [fullCatalog, catalogFilter]);
   const [caret, setCaret] = useState<number | null>(null);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
-  // Escape dismisses the menu for the trigger it was open on; the same trigger
-  // does not reopen until the user leaves it (new trigger start clears this).
   const [dismissedStart, setDismissedStart] = useState<number | null>(null);
 
-  // A reload (the host's catalog changed at its source) reads it again here too.
   const [reloads, setReloads] = useState(0);
   useEffect(() => (enabled ? onSkillCatalogReload(() => setReloads((n) => n + 1)) : undefined), [enabled]);
 
@@ -124,7 +66,6 @@ export function useSkillReferenceAutocomplete(options: {
     return findSkillTrigger(text, caret);
   }, [enabled, catalog, commands, text, caret]);
 
-  // What a `/` lists: the catalog, with the host's commands after its leading host-served rows.
   const slashList = useMemo(() => {
     const offered = commands?.filter((command) => !catalog.some((skill) => skill.name === command.name)) ?? [];
     if (offered.length === 0) return catalog;
@@ -141,7 +82,6 @@ export function useSkillReferenceAutocomplete(options: {
 
   const open = trigger !== null && items.length > 0 && trigger.start !== dismissedStart;
 
-  // A new trigger start clears the dismissal memory.
   const lastTriggerStart = useRef<number | null>(null);
   useEffect(() => {
     const start = trigger?.start ?? null;
@@ -151,17 +91,12 @@ export function useSkillReferenceAutocomplete(options: {
     }
   }, [trigger]);
 
-  // Any trigger change — a new trigger OR more typing re-filtering the same
-  // one — disarms the active row. An activation must always refer to the
-  // exact list the user was looking at when they pressed the arrow key.
   const triggerStart = trigger?.start ?? null;
   const triggerQuery = trigger?.query ?? null;
   useEffect(() => {
     setActiveIndex(null);
   }, [triggerStart, triggerQuery]);
 
-  // Never let a stale activation point past the list (catalog refreshes can
-  // shrink it without a query change). Out of range reads as "nothing active".
   const boundedActive =
     activeIndex !== null && activeIndex >= 0 && activeIndex < items.length ? activeIndex : null;
 
@@ -170,9 +105,6 @@ export function useSkillReferenceAutocomplete(options: {
     setCaret(el ? el.selectionStart : null);
   }, [textareaRef]);
 
-  // The caret a pick owes the field, placed in the commit that writes the new text (below), before the person can
-  // type again. Placed only from a timer, a key pressed in between landed where the commit had left the caret (the
-  // end), and the timer then pulled the caret back over it: a quick "/b" after a click came out "b/".
   const pendingCaret = useRef<{ el: HTMLTextAreaElement; text: string; caret: number } | null>(null);
   useLayoutEffect(() => {
     const pending = pendingCaret.current;
@@ -190,7 +122,6 @@ export function useSkillReferenceAutocomplete(options: {
       const item = items[index];
       if (!item) return;
       if (commands?.includes(item)) {
-        // A command: the typed trigger goes, nothing is inserted, and focus is the host's to place.
         const rest = text.slice(0, trigger.start) + text.slice(el.selectionStart);
         setText(rest);
         setCaret(trigger.start);
@@ -203,20 +134,10 @@ export function useSkillReferenceAutocomplete(options: {
       setText(result.text);
       setCaret(result.caret);
       setActiveIndex(null);
-      // Close deterministically. The DOM caret only moves in the 0ms timer
-      // below, and React's select plugin can re-read the STALE caret before
-      // then (mousedown/keydown fire onSelect), which would transiently
-      // re-open the menu on the just-replaced query. Dismissing the trigger
-      // start makes the close ordering-safe; the dismissal clears itself as
-      // soon as the trigger changes (including to null when the caret lands).
       setDismissedStart(trigger.start);
-      // Restore focus + caret once React commits the new value: in that commit (the layout effect above), else
-      // here, for a host that commits the text later. Never once the person has typed since (the text changed):
-      // their caret is already where they are typing.
       const pending = { el, text: result.text, caret: result.caret };
       pendingCaret.current = pending;
       setTimeout(() => {
-        // The commit placed it already (a later pick replaced it): leave the caret where the person has it now.
         if (pendingCaret.current !== pending) return;
         pendingCaret.current = null;
         if (!el.isConnected || el.value !== result.text) return;
@@ -230,23 +151,11 @@ export function useSkillReferenceAutocomplete(options: {
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
       if (!open) return false;
-      // IME composition: for Pinyin, Telex, 2-set Korean and friends the
-      // composition buffer is ASCII, so the menu can be open exactly when
-      // Enter means "commit this candidate" and the arrows drive the
-      // candidate list. Never consume keys mid-composition. With bare
-      // triggers opening the menu, this guard is MORE load-bearing than
-      // before: the menu is open during more compositions.
       if (e.nativeEvent.isComposing) return false;
       if (e.metaKey || e.ctrlKey || e.altKey) return false;
       switch (e.key) {
         case 'ArrowDown':
         case 'ArrowUp':
-          // BARE trigger, zero query, nothing active: the arrows were aimed
-          // at the textarea (proven regression: "first line\ncost: $" +
-          // ArrowUp must move the caret up, not arm the menu's last row so
-          // the next Enter inserts a skill). Dismiss the menu and pass the
-          // key through. Once the user has typed a query character — or
-          // engaged a row via a query — the arrows navigate the menu.
           if (boundedActive === null && trigger.query.length === 0) {
             setDismissedStart(trigger.start);
             return false;
@@ -264,17 +173,11 @@ export function useSkillReferenceAutocomplete(options: {
           return true;
         case 'Enter':
         case 'Tab':
-          // NO row active means these keys were NOT aimed at the menu:
-          // Enter stays a newline, Tab still leaves the field. This is the
-          // proven regression ("This costs $" + Enter); never consume here.
           if (boundedActive === null) return false;
           e.preventDefault();
           select(boundedActive);
           return true;
         case 'Escape':
-          // Only consume Escape when the user engaged with the menu (typed a
-          // query or activated a row). A bare-trigger menu the user ignored
-          // must not cost an extra Escape on the way to closing the composer.
           if (!bareEscapeDismisses && boundedActive === null && trigger.query.length === 0) return false;
           e.preventDefault();
           e.stopPropagation();

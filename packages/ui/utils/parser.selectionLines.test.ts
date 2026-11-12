@@ -1,9 +1,3 @@
-/**
- * `selectionSourceLines`: the lines an Ask AI question names for a text
- * selection (#1731). Failure to catch: the question naming a line the
- * selection is not on, or a different span than the exported annotation
- * made from the same selection would name.
- */
 import { describe, expect, test } from 'bun:test';
 import { codeDocumentBlocks, exportAnnotations, parseMarkdownToBlocks, selectionSourceLines } from './parser';
 import { buildDefaultPrompt } from '../hooks/useAIChat';
@@ -61,9 +55,6 @@ describe('selectionSourceLines', () => {
     expect(selectionSourceLines(blocks, [last, first])).toEqual({ lineStart: 6, lineEnd: 9 });
   });
 
-  // The question and the exported annotation from the same single-block
-  // selection must name the same lines (multi-block selections are a range,
-  // while the export names only the first block).
   test.each([
     ['a one-line paragraph after frontmatter', (c: string, t: string) => t === 'paragraph' && c === 'Retry the job once.', 'Retry the job'],
     ['a wrapped paragraph', (c: string) => c.startsWith('A paragraph'), 'A paragraph'],
@@ -83,9 +74,6 @@ describe('selectionSourceLines', () => {
     expect(exported).toContain(`(${label}) `);
   });
 
-  // A config file is ONE code block (`codeDocumentBlocks`): the block's span
-  // is the whole file, so a question naming it would point at every line.
-  // The selection's own lines, matching its exported annotation, must win.
   test('in a whole-file code document the selection names its own lines, like its export', () => {
     const yaml = 'apiVersion: v1\nkind: Service\nmetadata:\n  name: web\n---\nkind: ConfigMap\n';
     const codeBlocks = codeDocumentBlocks(yaml, 'yaml');
@@ -96,13 +84,9 @@ describe('selectionSourceLines', () => {
       type: AnnotationType.COMMENT, text: 'why?', originalText: 'kind: ConfigMap', createdA: 0,
     }]);
     expect(exported).toContain('(line 6) ');
-    // No selected text (the whole-block code toolbar): the file's span.
     expect(selectionSourceLines(codeBlocks, ['block-0'])).toEqual({ lineStart: 1, lineEnd: 6 });
   });
 
-  // The same line twice in a code document: only a measured offset can tell
-  // the copies apart. Without one (or with one that no longer holds the
-  // quote) the label must not guess the first copy; it names the file's span.
   test('a repeated line in a code document names the copy at the offset, or the span without one', () => {
     const yaml = 'a:\n  enabled: true\nb:\n  enabled: true\n';
     const codeBlocks = codeDocumentBlocks(yaml, 'yaml');
@@ -115,7 +99,6 @@ describe('selectionSourceLines', () => {
     }]);
     expect(label(second)).toContain('(line 4) ');
     expect(label(0)).toContain('(lines 1–4) ');
-    // A quote that appears once still names its line without an offset.
     expect(selectionSourceLines(codeBlocks, ['block-0'], 'b:')).toEqual({ lineStart: 3, lineEnd: 3 });
   });
 

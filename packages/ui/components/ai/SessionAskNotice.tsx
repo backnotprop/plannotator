@@ -2,13 +2,8 @@ import React from 'react';
 import type { AIResponse } from '../../types';
 import { SESSION_ASK_ERROR_CODES } from '../../utils/aiProvider';
 
-/** What the reviewer chose on an "Ask this session" answer that could not run. */
 export type SessionAskAction = 'wait' | 'interrupt';
 
-/**
- * In-progress line for a question waiting on a busy session. Renders nothing
- * for any other response, so providers without a bridge are unaffected.
- */
 export const SessionAskStatus: React.FC<{ response: AIResponse }> = ({ response }) => {
   if (!response.status) return null;
   return (
@@ -21,10 +16,6 @@ export const SessionAskStatus: React.FC<{ response: AIResponse }> = ({ response 
   );
 };
 
-/**
- * Colour for an answer's error line: a busy session is a choice, not a
- * failure, so it reads muted; every other error keeps the destructive tone.
- */
 export function sessionAskErrorTone(response: Pick<AIResponse, 'errorCode'>): string {
   return response.errorCode === SESSION_ASK_ERROR_CODES.agentBusy ? 'text-muted-foreground' : 'text-destructive';
 }
@@ -32,13 +23,6 @@ export function sessionAskErrorTone(response: Pick<AIResponse, 'errorCode'>): st
 const buttonClass =
   'px-2 py-1 rounded-md text-[10px] font-medium transition-colors';
 
-/**
- * Follow-up under an "Ask this session" error:
- * - the session is busy: ask when it finishes, or interrupt it and ask now;
- * - the session is gone or blocked: a plain note. Ask AI has no other provider
- *   while a session is attached, so there is nothing to switch to.
- * Busy actions render only when the host passes a handler.
- */
 export const SessionAskActions: React.FC<{
   response: AIResponse;
   onAction?: (action: SessionAskAction) => void;
@@ -86,12 +70,6 @@ export const SessionAskActions: React.FC<{
   return null;
 };
 
-/**
- * A muted note under an "Ask this session" answer that stopped early because
- * the person typed into the session while it answered (the rest of that turn
- * went to their prompt). The partial answer above it stands. Renders nothing
- * for any other response.
- */
 export const SessionAskNote: React.FC<{ response: Pick<AIResponse, 'notice'> }> = ({ response }) => {
   if (!response.notice) return null;
   return (

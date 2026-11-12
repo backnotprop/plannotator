@@ -10,28 +10,8 @@ import { getCommentCardEnabled } from '../../utils/commentCardPolicy';
 import { Icon } from '../inbox-thread/icons';
 import { CommentDraftScopeContext } from '../../utils/commentDraftScope';
 
-// The comment card (opt-in): the words typed on a part outlive a close, one draft per part of one document (the
-// Viewer's draft scope, the part's id and ends, and the diagram's line), as the text box's draft store keeps them.
-// The bin, a Comment that went, and a question Ask AI took drop them.
 const cardDrafts = new Map<string, string>();
 
-/**
- * The inline composer beside the ring: the part's label as the context
- * line, a textarea, Cancel and Comment. Enter saves, Shift+Enter breaks a
- * line and Esc discards, and none of the three is spelled on screen (owner
- * ruling; the markdown composer shows no hint either). It lives here
- * because the markdown composer is bound to web-highlighter's selection and
- * the html composer to the sandbox bridge; neither reaches an app-owned svg.
- *
- * With `onAskAI` it also offers the markdown composer's "Ask AI": the typed
- * text is asked as a question about the part instead of saved as a comment.
- * Disabled until there is text, never bound to a key (Enter stays Comment,
- * as Mod+Enter stays Save in the markdown composer), and the composer closes
- * once the host accepts the question.
- */
-
-/** The composer's width; it sits to the right of the ring and flips left
- * when the host is too narrow there. */
 const COMPOSER_WIDTH_PX = 288;
 
 export function DiagramComposer({
@@ -51,35 +31,23 @@ export function DiagramComposer({
   draft: DiagramComposerDraft;
   anchorRect: ScreenRect;
   hostWidth: number;
-  /** The canvas's height, to keep the composer inside it. */
   hostHeight?: number;
   sourceDirty: boolean;
   submitting: boolean;
-  /** The last submit's failure, shown under the textarea. */
   error: string | null;
-  /** When set, commenting is off for this viewer and the composer says
-   * why instead of offering a textarea. */
   disabledReason?: string;
   onSubmit: (body: string) => void;
   onCancel: () => void;
-  /** Ask the typed text as a question about this part. Resolves true when
-   * the host took it (the composer then closes), false to keep the draft.
-   * Absent: no Ask AI button. */
   onAskAI?: (question: string) => Promise<boolean>;
-  /** Opt-in: the words it opens with (a comment the host kept and put back). Absent: empty, as always. */
   initialText?: string;
 }) {
-  // The comment card (opt-in, `configurePlannotatorUI({ commentCard })`): read once, so a box never changes look open.
   const [card] = useState(getCommentCardEnabled);
   const scope = useContext(CommentDraftScopeContext);
   const part = draft.primary.target;
   const cardKey = [scope, draft.sourceLine?.[0] ?? '', part.id ?? '', part.from ?? '', part.to ?? '', part.kind ?? '', diagramTargetText(part)].join('\u0000');
-  // Words the host put back (a comment kept as the file's draft) win over the card's own draft, and become it: the
-  // card then has one store, so a chevron after a reopen keeps them as any other draft.
   const [text, setTextState] = useState(() => initialText ?? (card ? cardDrafts.get(cardKey) ?? '' : ''));
   useEffect(() => {
     if (card && initialText !== undefined && initialText.trim() !== '') cardDrafts.set(cardKey, initialText);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const setText = (value: string) => {
     setTextState(value);
@@ -92,8 +60,6 @@ export function DiagramComposer({
   useEffect(() => {
     textareaRef.current?.focus();
   }, []);
-  // A refused question hands the keyboard back to the textarea, once it is
-  // enabled again (it is disabled while the question is pending).
   const [refocus, setRefocus] = useState(0);
   useEffect(() => {
     if (refocus > 0) textareaRef.current?.focus();
@@ -104,8 +70,6 @@ export function DiagramComposer({
   const canWrite = disabledReason === undefined && !unsavedPart;
   const rightFits = anchorRect.left + anchorRect.width + 12 + COMPOSER_WIDTH_PX <= hostWidth;
   const left = rightFits ? anchorRect.left + anchorRect.width + 12 : Math.max(0, anchorRect.left - COMPOSER_WIDTH_PX - 12);
-  // The canvas clips what overflows it: a part near the bottom of a short
-  // canvas (an inline diagram on a phone) lifts the composer until it all shows.
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [height, setHeight] = useState(0);
   useLayoutEffect(() => {
@@ -135,23 +99,16 @@ export function DiagramComposer({
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Escape') {
-      // Ours: the canvas and whatever holds it (a popout) must not also
-      // act on this Escape.
       event.preventDefault();
       event.stopPropagation();
       onCancel();
       return;
     }
-    // Enter saves here whatever the "Enter saves a comment" setting says (it
-    // always has: a diagram comment is one short line); the shared check adds
-    // the IME guard Safari needs (keyCode 229) and keeps Shift+Enter a newline.
     if (isCommentSubmitKey(event, true)) {
       event.preventDefault();
       if (canWrite && !asking && text.trim() !== '') submit();
     }
   };
-  // A Comment drops the draft only once it went (the host unmounts the box with no error); a refused save keeps the
-  // words, so the chevron still keeps them.
   const sent = useRef(false);
   const submit = () => {
     if (card) sent.current = true;
@@ -167,8 +124,6 @@ export function DiagramComposer({
   }, []);
 
   if (card && disabledReason === undefined) {
-    // The comment card by the ring: the part it is on, the words, then the row (Ask AI at the left, the bin, and a
-    // solid "Comment" at the right end). The chevron closes it and keeps the words (comment-card.css).
     const on = diagramTargetText(target);
     return (
       <div
@@ -243,7 +198,6 @@ export function DiagramComposer({
       onPointerDown={(event) => event.stopPropagation()}
       onPointerUp={(event) => event.stopPropagation()}
       onKeyDown={(event) => {
-        // Keys inside the composer never reach the canvas's zoom keys.
         event.stopPropagation();
       }}
     >

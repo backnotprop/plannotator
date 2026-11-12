@@ -40,7 +40,6 @@ describe('parseAsciidocToBlocks — listing blocks', () => {
     expect(types(blocks)).toEqual(['code']);
     expect(blocks[0].language).toBe('rust');
     expect(blocks[0].content).toBe('fn main() {}');
-    // Span covers the attribute line through the closing delimiter.
     expect(blocks[0].startLine).toBe(1);
     expect(blocks[0].sourceLineCount).toBe(4);
   });
@@ -365,7 +364,6 @@ describe('parseAsciidocToBlocks — real-world structure', () => {
   test('an author line without an email is consumed; a section right under the title is not', () => {
     expect(types(parse('= Title\nJane Doe\nv2.1\n\nBody.'))).toEqual(['heading', 'paragraph']);
     expect(parse('= Title\n== Section\nBody.').map((b) => b.content)).toEqual(['Title', 'Section', 'Body.']);
-    // Attribute entries end the lookup: a later directive is not an author line.
     expect(parse('= Title\n:icons: font\nifndef::icons[]\nendif::[]').map((b) => b.content)).toEqual([
       'Title',
       '`ifndef::icons[]`',
@@ -393,30 +391,30 @@ describe('parseAsciidocToBlocks — real-world structure', () => {
 
   test('a realistic document keeps every block on its source lines', () => {
     const source = [
-      '= Operator Guide',                       // 1
-      'Docs Team <docs@example.com>',           // 2
-      ':toc: left',                             // 3
-      ':version: 1.4',                          // 4
-      '',                                       // 5
-      '== Install',                             // 6
-      '',                                       // 7
-      'Install version {version} with:',        // 8
-      '',                                       // 9
-      '[source,bash]',                          // 10
-      '----',                                   // 11
-      'helm install op ./chart',                // 12
-      '----',                                   // 13
-      '',                                       // 14
-      'WARNING: Back up the *cluster* first.',  // 15
-      '',                                       // 16
-      '.Settings',                              // 17
-      '[cols="1,3",options="header"]',          // 18
-      '|===',                                   // 19
-      '|Name |Meaning',                         // 20
-      '|replicas |Pod count',                   // 21
-      '|===',                                   // 22
-      '',                                       // 23
-      'include::upgrade.adoc[]',                // 24
+      '= Operator Guide',
+      'Docs Team <docs@example.com>',
+      ':toc: left',
+      ':version: 1.4',
+      '',
+      '== Install',
+      '',
+      'Install version {version} with:',
+      '',
+      '[source,bash]',
+      '----',
+      'helm install op ./chart',
+      '----',
+      '',
+      'WARNING: Back up the *cluster* first.',
+      '',
+      '.Settings',
+      '[cols="1,3",options="header"]',
+      '|===',
+      '|Name |Meaning',
+      '|replicas |Pod count',
+      '|===',
+      '',
+      'include::upgrade.adoc[]',
     ].join('\n');
     const blocks = parse(source);
     expect(blocks.map((b) => [b.type, b.startLine])).toEqual([

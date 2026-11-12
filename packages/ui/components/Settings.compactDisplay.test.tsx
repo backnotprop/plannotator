@@ -3,13 +3,6 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Settings } from './Settings';
 
-/**
- * The compact review shell renders a session-only unified diff, so the
- * Display tab's Split/Unified control had no effect there while still writing
- * the persisted DESKTOP preference. Hide it on compact and say what the phone
- * is doing; leave the desktop control exactly as it was.
- */
-
 const hasDom = typeof document !== 'undefined';
 let host: HTMLDivElement | null = null;
 let root: Root | null = null;
@@ -63,7 +56,6 @@ describe.if(hasDom)('review Display tab diff style', () => {
 
     expect(styleControlButtons()).toHaveLength(0);
     expect(document.body.textContent).toContain('unified diffs for the session');
-    // The rest of the tab is unaffected.
     expect(document.body.textContent).toContain('Diff Style');
   });
 });

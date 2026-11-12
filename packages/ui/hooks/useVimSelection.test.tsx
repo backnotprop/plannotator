@@ -115,8 +115,6 @@ describe.if(hasDom)('useVimSelection', () => {
   });
 
   test('never reads the page selection on a mount where vim was never on', () => {
-    // window.getSelection() forces a layout; a document open with vim off
-    // must not pay for a reset there is nothing to reset.
     const original = window.getSelection.bind(window);
     let reads = 0;
     window.getSelection = () => {
@@ -154,7 +152,6 @@ describe.if(hasDom)('useVimSelection', () => {
     expect(article.dataset.phase).toBe('inactive');
     expect(window.getSelection()?.rangeCount).toBe(0);
 
-    // Off again with the selection back: a later run while off resets nothing.
     selection?.addRange(range);
     act(() => {
       root.render(<VimHarness enabled={false} onRange={() => {}} />);
@@ -261,8 +258,6 @@ describe.if(hasDom)('useVimSelection', () => {
 
   test('copies a Visual selection, collapses it, and keeps document focus', async () => {
     const copied: string[] = [];
-    // Vim `y` copies plain text only, even where a rich clipboard is offered
-    // (rich copy is the selection toolbar's button, never a key).
     const richWrites: unknown[] = [];
     const clipboardDescriptor = Object.getOwnPropertyDescriptor(
       navigator,
@@ -343,8 +338,6 @@ describe.if(hasDom)('useVimSelection', () => {
     act(() => root.render(<VimHarness {...props} />));
     expect(document.activeElement).toBe(outside);
 
-    // A later, unrelated blocked transition must not consume the old action's
-    // focus-restoration request after focus has intentionally moved elsewhere.
     act(() => outside.blur());
     act(() => root.render(<VimHarness {...props} blocked />));
     act(() => root.render(<VimHarness {...props} />));

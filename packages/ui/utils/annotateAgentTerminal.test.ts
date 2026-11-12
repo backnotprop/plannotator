@@ -53,8 +53,6 @@ describe("resolveAnnotateAgentTerminalPlacement", () => {
   });
 
   test("hidden owns no edge, so an explicit session open docks left", () => {
-    // Hidden is a preference about the default layout, not a lock: the rail
-    // toggle and Shift Shift still open the panel, and it needs somewhere to go.
     expect(resolveAnnotateAgentTerminalPlacement("hidden")).toBe("left");
   });
 });

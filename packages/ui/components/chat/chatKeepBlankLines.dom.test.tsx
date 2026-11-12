@@ -1,9 +1,3 @@
-/**
- * `keepUserBlankLines` on `ChatTranscript`: the person's text as typed, as the
- * Inbox draws a person's reply. Off is today's behavior. Runs the real sanitizer
- * over `tests/helpers/chat-sanitizer-dom.ts`, because without it every text
- * draws as plain text. Requires DOM (DOM_TESTS=1).
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -45,7 +39,6 @@ const say = (id: string, role: ChatMessage['role'], text: string): ChatMessage =
   parts: [{ type: 'text', text } as ChatMessage['parts'][number]],
 });
 
-/** Each element in a text part, in order, so a gap drawn as `<br>` shows where it sits. */
 const shape = (id: string) =>
   [...document.querySelectorAll(`[data-text-part][data-message-id="${id}"] *`)].map((el) => el.tagName.toLowerCase());
 
@@ -60,10 +53,8 @@ describe.if(hasDom)('keepUserBlankLines', () => {
     expect(shape('a')).toEqual(folded);
 
     render({ messages, keepUserBlankLines: true });
-    // Three blank lines: the paragraph gap plus two lines, then the single break kept.
     expect(shape('u')).toEqual(['p', 'br', 'br', 'p', 'br']);
     expect(document.querySelector('[data-message-id="u"]')!.textContent!.replace(/\s/g, '')).toBe('HelloSecondline');
-    // The agent's text is drawn as it was.
     expect(shape('a')).toEqual(folded);
   });
 });

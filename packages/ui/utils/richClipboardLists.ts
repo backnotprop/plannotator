@@ -5,7 +5,6 @@ interface ListFrame {
   lastItem: HTMLLIElement | null;
 }
 
-/** Restore semantic lists in a cloned Markdown selection before sanitization. */
 export function restoreClipboardLists(fragment: ParentNode): void {
   const output = document.createDocumentFragment();
   const stack: ListFrame[] = [];

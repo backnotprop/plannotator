@@ -14,23 +14,13 @@ const EDITABLE_FOCUS_SELECTOR = [
 const BLOCKING_OVERLAY_SELECTOR = [
   '[role="dialog"]',
   '[aria-modal="true"]',
-  // Some legacy Plannotator modals predate explicit dialog semantics. Keep
-  // Vim from focusing the obscured document underneath those full-screen
-  // overlays while they are brought onto the shared dialog primitive.
   '.fixed.inset-0',
-  // An open dismissable popover (ActionMenu, ApproveDropdown, DecisionControl)
-  // owns Escape through useDismissablePopover. Without this, the vim handler
-  // runs first (it registered earlier on document), preventDefaults while
-  // reclaiming focus, and the popover's own Escape handler then skips the
-  // defaultPrevented event — the menu never closes.
   '[data-pn-dismissable-popover]',
 ].join(',');
 
-/** Inputs for restoring keyboard ownership to a Vim-enabled document. */
 export interface UseVimDocumentFocusOptions {
   readonly enabled: boolean;
   readonly blocked: boolean;
-  /** Focus the owning document surface and report whether focus moved to it. */
   readonly focusDocument: () => boolean;
 }
 
@@ -38,7 +28,6 @@ function pageFocusIsNeutral(): boolean {
   return document.activeElement === document.body || document.activeElement === null;
 }
 
-/** True while a dialog, modal overlay, or dismissable popover owns the page. */
 export function hasBlockingOverlay(): boolean {
   return document.querySelector(BLOCKING_OVERLAY_SELECTOR) !== null;
 }
@@ -47,18 +36,10 @@ function targetOwnsTextInput(target: EventTarget | null): boolean {
   return target instanceof Element && target.closest(EDITABLE_FOCUS_SELECTOR) !== null;
 }
 
-/** Ask the active Vim document to reclaim focus after an owned UI closes. */
 export function requestVimDocumentFocus(): void {
   document.dispatchEvent(new Event(VIM_DOCUMENT_FOCUS_REQUEST, { cancelable: true }));
 }
 
-/**
- * Give an enabled Vim document initial keyboard ownership and let Escape from
- * neutral app chrome return to it.
- *
- * Editable controls and overlays retain first ownership of Escape. The hook
- * only prevents the event after focus actually moves back to the document.
- */
 export function useVimDocumentFocus({
   enabled,
   blocked,
@@ -87,8 +68,6 @@ export function useVimDocumentFocus({
         && !hasBlockingOverlay()
         && focusDocument()
       ) {
-        // One visible document owns each request when a host renders multiple
-        // Viewer instances.
         event.preventDefault();
       }
     };

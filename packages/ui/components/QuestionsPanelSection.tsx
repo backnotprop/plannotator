@@ -2,13 +2,6 @@ import React from 'react';
 import { cn } from '../lib/utils';
 import { questionProgress, type QuestionPanelRow } from '../utils/questionAnswers';
 
-/**
- * The annotations panel's Questions section (the approved Card mock): a
- * header with the progress count, a thin progress bar, and one row per
- * `:::question` block with its answer or "Not answered yet" and an
- * Open / answered state. A row whose question is no longer in the document
- * carries the Unanchored chip; its answer still exports.
- */
 const CheckIcon = () => (
   <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true" className="text-success">
     <path d="m3.5 8.5 3 3 6-7" strokeLinecap="round" strokeLinejoin="round" />
@@ -48,8 +41,6 @@ const StateTag: React.FC<{ row: QuestionPanelRow }> = ({ row }) => {
 export interface QuestionsPanelSectionProps {
   rows: readonly QuestionPanelRow[];
   onSelect?: (row: QuestionPanelRow) => void;
-  /** Remove an orphaned answer (its card is gone, so the panel is the only
-   *  place to drop it). Absent: no remove control. */
   onRemoveOrphan?: (row: QuestionPanelRow) => void;
 }
 

@@ -44,7 +44,6 @@ describe('Ask this session announcement gate', () => {
 
     markAskSessionAnnouncementSeen();
     expect(needsAskSessionAnnouncement()).toBe(false);
-    // Its own key: dismissing it must not retire the terminal-tools one.
     expect(memory.has('plannotator-announce-tui-herdr-seen')).toBe(false);
   });
 
@@ -57,10 +56,8 @@ describe('Ask this session announcement gate', () => {
   test('never on the same load as a pending terminal-tools announcement', () => {
     setStorageBackend(memoryBackend);
 
-    // A fresh browser: the terminal-tools announcement takes this load.
     expect(askSessionAnnouncementPendingThisLoad()).toBe(false);
 
-    // Once that one is dismissed (an earlier load), this one is next.
     markTerminalToolsAnnouncementSeen();
     expect(askSessionAnnouncementPendingThisLoad()).toBe(true);
 
@@ -78,14 +75,10 @@ describe('Ask this session announcement gate', () => {
     expect(connectedAskSessionAgent([bridge('claude-code', 'ready')])).toBe('claude-code');
     expect(connectedAskSessionAgent([bridge('pi', 'busy')])).toBe('pi');
     expect(connectedAskSessionAgent([bridge('opencode', 'blocked')])).toBe('opencode');
-    // No bridge: remote, --tailscale, Windows, mod off, -p, OpenCode 1...
     expect(connectedAskSessionAgent([])).toBeNull();
     expect(connectedAskSessionAgent([sdk])).toBeNull();
-    // Listed but gone: telling the reader it is connected would be false.
     expect(connectedAskSessionAgent([bridge('claude-code', 'gone')])).toBeNull();
-    // A host this copy cannot name.
     expect(connectedAskSessionAgent([bridge('amp', 'ready')])).toBeNull();
-    // The provider row without its live status.
     expect(connectedAskSessionAgent([{ name: 'session-bridge' }])).toBeNull();
   });
 

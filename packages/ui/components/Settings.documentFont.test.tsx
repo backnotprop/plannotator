@@ -1,9 +1,3 @@
-/**
- * Settings → Display → Document font (#1657): picking a font reaches the page
- * the app is on (through `useDocumentFont`, which the plan / annotate app
- * mounts), Theme Default clears it, a typed name is saved after the pause, and
- * a host that does not opt in never shows a row that would do nothing.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

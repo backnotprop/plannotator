@@ -1,9 +1,3 @@
-/**
- * The position translation behind `Viewer` `belowTitle` (DOM-gated,
- * DOM_TESTS=1). Failures to catch: a root with no slot is not left exactly as
- * is; the two directions disagree; web-highlighter's sentinel indexes are
- * rewritten; a position inside the slot is renumbered.
- */
 import { afterEach, expect, test } from 'bun:test';
 import { BELOW_TITLE_SLOT_ATTRIBUTE, BELOW_TITLE_SLOT_MARKER, metaWithBelowTitle, metaWithoutBelowTitle } from './belowTitleSlot';
 
@@ -43,7 +37,6 @@ test.skipIf(!hasDom)('with a slot: live index ↔ slot-free index, round trip', 
     expect(stored.parentIndex).toBe(['one', 'two', 'three'].indexOf(text));
     expect(metaWithBelowTitle(root, stored).parentIndex).toBe(liveIndex);
   }
-  // Sentinels are left alone.
   for (const m of [meta(-1), meta(-2)]) expect(metaWithoutBelowTitle(root, m, 'end')).toBe(m);
   const past = meta(9);
   expect(metaWithBelowTitle(root, past)).toBe(past);
@@ -51,7 +44,6 @@ test.skipIf(!hasDom)('with a slot: live index ↔ slot-free index, round trip', 
 
 test.skipIf(!hasDom)('a boundary inside the slot is moved out of it: an end back to the title, a start on to the body', () => {
   const root = build(true);
-  // Live P 0 is the slot's "a".
   expect(metaWithoutBelowTitle(root, meta(0), 'end')).toEqual({ parentTagName: 'H1', parentIndex: 0, textOffset: 1 });
   expect(metaWithoutBelowTitle(root, meta(1), 'start')).toEqual({ parentTagName: 'P', parentIndex: 0, textOffset: 0 });
 });

@@ -1,11 +1,5 @@
-// A lit part in the board's technical drawing language shows one line in the
-// mark colour: its own border or stroke, recoloured. A second ring drawn
-// around a part that already has a line reads as two borders, one inside the
-// other. Only a part with no line of its own gets an outline drawn for it.
-
 const SHAPES = 'rect, circle, ellipse, polygon, path';
 
-/** The line an element draws round itself: an SVG shape's stroke, an HTML box's border, or null (none). */
 export function ownLine(el: Element): 'stroke' | 'border' | null {
   const cs = typeof getComputedStyle === 'function' ? getComputedStyle(el) : null;
   if (el instanceof SVGElement) {
@@ -23,13 +17,7 @@ export function ownLine(el: Element): 'stroke' | 'border' | null {
   return null;
 }
 
-/**
- * The element that draws a part's outline: the part itself when it is a box with a border or a shape with a stroke,
- * else (an SVG group) the stroked shape that spans it, at least 80% of its area (the box a part is drawn as, not an icon
- * or a rule inside it). Null: the part has no outline of its own.
- */
 export function outlineOf(part: Element): Element | null {
-  // A group's stroke is only what its shapes inherit: the part's line is one of its shapes.
   if (!(part instanceof SVGElement) || part.matches(SHAPES)) return ownLine(part) ? part : null;
   const r = part.getBoundingClientRect();
   const area = r.width * r.height;

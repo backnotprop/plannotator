@@ -1,14 +1,3 @@
-/**
- * The facts a host lays a question's picture choices out from, before any
- * picture loads (approval "picture-choices-layout", Adaptive).
- *
- * What regresses if this fails: an iPhone screenshot is taken for a full-page
- * capture (and cropped to its top) or the other way round, a terminal strip is
- * not a panorama, a set of phone screenshots stops getting narrow columns, a
- * picture of unknown size breaks a set into "mixed", or the words' length is
- * read from the raw markdown (a long hidden link URL, or Japanese counted as
- * half its drawn width), which moves three choices between Rows and columns.
- */
 import { describe, expect, test } from 'bun:test';
 import {
   drawnTextColumns,
@@ -23,9 +12,9 @@ describe('a picture\'s shape from its size', () => {
     [3840, 600, 'pano'],
     [1440, 900, 'wide'],
     [64, 64, 'square'],
-    [1170, 2532, 'tall'], // an iPhone screenshot
-    [1080, 2520, 'tall'], // a 9:21 phone
-    [1170, 8000, 'scroll'], // a full-page capture
+    [1170, 2532, 'tall'],
+    [1080, 2520, 'tall'],
+    [1170, 8000, 'scroll'],
   ] as const)('%i x %i is %s', (width, height, shape) => {
     expect(questionPictureShape({ width, height })).toBe(shape);
   });
@@ -64,7 +53,6 @@ describe('how long the words run', () => {
   test('a long hidden URL does not make short words long; Japanese of the same drawn width is as long as Latin', () => {
     const hidden = `A · Short — [link](https://example.com/${'x'.repeat(400)})`;
     expect(questionChoiceWords([{ label: hidden }])).toBe('short');
-    // 50 CJK characters draw about as wide as 100 Latin ones.
     expect(questionChoiceWords([{ label: 'あ'.repeat(50) }])).toBe('medium');
     expect(questionChoiceWords([{ label: 'a'.repeat(50) }])).toBe('short');
   });

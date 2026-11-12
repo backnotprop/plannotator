@@ -1,26 +1,7 @@
-/**
- * Element-context URL scrubbing in the bridge (no DOM needed).
- *
- * The captured element context is agent-facing and is written into drafts,
- * submission records and exported feedback, so its documented contract is that
- * `href`/`src` keep the path and lose the query and the fragment. That held for
- * absolute http(s) URLs only: a relative `./checkout?session=...#token=...`
- * was copied through whole, which is where per-visit secrets actually live
- * (implicit-flow tokens are specifically a fragment convention).
- *
- * `srcdoc.test.ts` covers the end-to-end click path for one absolute and one
- * relative href; this pins the scrub's edge cases (fragment-only, `../`,
- * clean relative, data:, javascript:) without a DOM. The function is a plain,
- * dependency-light helper inside the bridge's JS string, so the test evaluates
- * the SHIPPED source rather than a copy.
- */
 import { describe, expect, test } from 'bun:test';
 import { ELEMENT_CONTEXT_SHED_ORDER } from '@plannotator/core/html-anchor';
 import { BRIDGE_SCRIPT } from './bridge-script';
 
-// Failure to catch: the bridge and the parent's validator shedding different
-// fields (or one of them never shedding a new field such as sourceName), so a
-// context the bridge trimmed to fit is dropped whole at the trust boundary.
 describe('element context shed order', () => {
   test("the bridge's CTX_SHED_ORDER equals core's ELEMENT_CONTEXT_SHED_ORDER", () => {
     const match = /var CTX_SHED_ORDER = (\[[^\]]*\]);/.exec(BRIDGE_SCRIPT);
@@ -31,8 +12,6 @@ describe('element context shed order', () => {
   });
 });
 
-/** Pull one `function name(...) { ... }` out of the bridge source by brace
- *  balance, so the test never diverges from what ships. */
 function extractFunction(source: string, name: string): string {
   const start = source.indexOf(`function ${name}(`);
   if (start < 0) throw new Error(`bridge no longer defines ${name}`);
@@ -60,7 +39,6 @@ describe('ctxScrubUrl (bridge element context)', () => {
     expect(scrub('./checkout?session=abc123')).toBe('./checkout?…');
     expect(scrub('/account/settings?token=secret#access_token=leak')).toBe('/account/settings?…');
     expect(scrub('../docs/guide.html#section-3')).toBe('../docs/guide.html?…');
-    // Nothing but state: no path survives, and none is invented.
     expect(scrub('#access_token=leak')).toBe('?…');
   });
 
@@ -76,18 +54,12 @@ describe('ctxScrubUrl (bridge element context)', () => {
     expect(scrub('javascript:steal()')).toBeNull();
   });
 
-  // Failure to catch: every srcdoc asset reaching the agent as
-  // /api/html-assets/<session token>/x.png, a path that exists nowhere in
-  // the author's source and changes every session.
   test("a srcdoc session's asset route reads as the author's own relative path", () => {
     expect(scrub('/api/html-assets/d4d63ee508f145c5/img/team.png')).toBe('img/team.png');
     expect(scrub('/api/html-assets/d4d63ee508f145c5/team.png?v=2#x')).toBe('team.png?…');
-    // The route percent-encodes segments; the author wrote the decoded name.
     expect(scrub('/api/html-assets/tok/avatars/jane%20doe.png')).toBe('avatars/jane doe.png');
-    // A malformed escape, or one that would decode to a query mark, stays raw.
     expect(scrub('/api/html-assets/tok/bad%E0%A4%A.png')).toBe('bad%E0%A4%A.png');
     expect(scrub('/api/html-assets/tok/what%3Fnow.png')).toBe('what%3Fnow.png');
-    // A live app's own paths are real routes of that app and stay whole.
     expect(makeScrub({})('/api/html-assets/abc/team.png')).toBe('/api/html-assets/abc/team.png');
   });
 });

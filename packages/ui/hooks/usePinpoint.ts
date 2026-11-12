@@ -13,32 +13,19 @@ import {
   type SemanticTarget,
 } from '../utils/blockTargeting';
 
-/** Inputs for pointer Pinpoint targeting within one rendered document. */
 export interface UsePinpointOptions {
   containerRef: RefObject<HTMLElement | null>;
   inputMethod: InputMethod;
-  /** Disable when toolbar/popover/diff is active */
   enabled: boolean;
-  /** Submit a text range through the shared annotation pipeline. */
   onSelectRange: (range: Range) => void;
-  /** Handle code block clicks (needs special annotation path) */
   onCodeBlockClick: (blockId: string, element: HTMLElement) => void;
 }
 
-/** Live pointer-owned state returned by `usePinpoint`. */
 export interface UsePinpointReturn {
-  /** Live target from the canonical semantic graph under the pointer. */
   hoverTarget: SemanticTarget | null;
-  /** Release pointer-owned feedback so keyboard navigation can take over. */
   clearHover: () => void;
 }
 
-/**
- * Resolve pointer hover and clicks through the canonical semantic target graph.
- *
- * The hook mutates only its transient hover marker and removes it when disabled
- * or unmounted.
- */
 export function usePinpoint({
   containerRef,
   inputMethod,
@@ -56,14 +43,12 @@ export function usePinpoint({
     setHoverTarget(null);
   }, []);
 
-  // Clear hover when deactivated
   useEffect(() => {
     if (!isActive) {
       clearHover();
     }
   }, [clearHover, isActive]);
 
-  // Mousemove / touchstart — resolve target and update hover state
   useEffect(() => {
     const container = containerRef.current;
     if (!isActive || !container) return;
@@ -130,15 +115,12 @@ export function usePinpoint({
     };
   }, [clearHover, isActive, containerRef]);
 
-  // Click — create Range and trigger web-highlighter
   useEffect(() => {
     const container = containerRef.current;
     if (!isActive || !container) return;
 
     const handleClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
-      // A `:::question` card's form controls are the answer UI, never a pin
-      // target: a click on a radio, a checkbox or a text box answers.
       const inQuestion = !!target.closest?.('fieldset.question-block');
       if (inQuestion && target.closest('input, textarea, select')) return;
       const resolved = resolveSemanticTargetAtPoint(
@@ -148,24 +130,19 @@ export function usePinpoint({
       );
       if (!resolved) return;
 
-      // Pinning a choice's text must not also pick the choice: the row is a
-      // <label>, which would forward this click to its radio or checkbox.
       if (inQuestion && target.closest('[data-question-option]')) {
         e.preventDefault();
       }
 
-      // Prevent link navigation in pinpoint mode
       const link = (target.closest('a') as HTMLAnchorElement | null);
       if (link && container.contains(link)) {
         e.preventDefault();
       }
 
-      // Clear hover state
       resolved.element.removeAttribute('data-pinpoint-hover');
       setHoverTarget(null);
 
       if (resolved.kind === 'code') {
-        // Route to existing code block annotation path
         const codeBlockContainer = container.querySelector(`[data-block-id="${resolved.blockId}"]`) as HTMLElement;
         if (codeBlockContainer) {
           onCodeBlockClick(resolved.blockId, codeBlockContainer);
@@ -173,15 +150,12 @@ export function usePinpoint({
         return;
       }
 
-      // Create a text-level Range spanning the target element's content.
-      // web-highlighter needs ranges anchored to text nodes, not elements.
       const range = createSemanticTargetRange(resolved);
       if (!range) return;
 
       onSelectRange(range);
     };
 
-    // Use capture phase so we get the click before links navigate
     container.addEventListener('click', handleClick, true);
 
     return () => {

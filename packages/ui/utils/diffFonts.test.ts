@@ -1,15 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { loadDiffFont } from './diffFonts';
 
-/**
- * Only the menu's own web fonts may add a stylesheet. A custom name (#851) is
- * free text, so a name that matches something inherited from Object.prototype
- * (`constructor`, `__proto__`, `toString`) must never produce a link.
- *
- * appendChild is intercepted so no stylesheet is ever really inserted (the
- * test environment must not fetch a web font).
- */
-
 const hasDom = typeof document !== 'undefined';
 let appended: HTMLLinkElement[] = [];
 let originalAppend: typeof document.head.appendChild | null = null;

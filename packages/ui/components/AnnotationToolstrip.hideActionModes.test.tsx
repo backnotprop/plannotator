@@ -1,7 +1,3 @@
-/**
- * `hideActionModes` is a seam for Shape; every other host of the toolstrip (the plan editor, the Inbox, Workspaces)
- * must keep its action group. DOM-gated (tests/dom-test-list.txt).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

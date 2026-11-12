@@ -1,21 +1,3 @@
-/**
- * Maps a Plannotator colour theme onto the Shiki theme that renders code in it.
- *
- * This used to live in `packages/review-editor/hooks/usePierreTheme.ts` and only
- * served the diff pane. It moved here so the plan/annotate editor's markdown
- * fences resolve the SAME theme the diff pane resolves, which is what makes a
- * fenced code block and a diff hunk finally look like they belong to the same
- * app. `usePierreTheme` re-exports both symbols, so the review editor's imports
- * are unchanged.
- *
- * Names on the right are resolved by `@pierre/diffs` — the `pierre-*` ones come
- * from `@pierre/theme`, the rest from `@shikijs/themes`. Both registries are
- * already bundled (Pierre pulls in Shiki's full bundle), so consuming them here
- * costs no additional bytes.
- */
-
-/** Plannotator theme id -> Shiki theme name, per mode. `null` = this palette
- *  has no counterpart in that mode and falls back to the Pierre default. */
 export const SHIKI_THEME_MAP: Record<string, { dark: string | null; light: string | null }> = {
   'andromeeda': { dark: 'andromeeda', light: null },
   'aurora-x': { dark: 'aurora-x', light: null },
@@ -41,7 +23,6 @@ export const SHIKI_THEME_MAP: Record<string, { dark: string | null; light: strin
   'nord': { dark: 'nord', light: null },
   'one-dark-pro': { dark: 'one-dark-pro', light: null },
   'one-light': { dark: null, light: 'one-light' },
-  // Dark is the PaulMillr palette (themes/plannotator-modern.css), which has no Shiki counterpart: the Pierre default, as PaulMillr.
   'plannotator-modern': { dark: null, light: 'github-light-high-contrast' },
   'plastic': { dark: 'plastic', light: null },
   'poimandres': { dark: 'poimandres', light: null },
@@ -58,35 +39,18 @@ export const SHIKI_THEME_MAP: Record<string, { dark: string | null; light: strin
   'vitesse-black': { dark: 'vitesse-black', light: null },
 };
 
-/** `@pierre/diffs`' own `DEFAULT_THEMES`. Anything the map does not cover (the
- *  Plannotator default palette, plus every palette with no counterpart in the
- *  active mode) renders in these, which is exactly what the diff pane does when
- *  `resolveSyntaxTheme` returns `undefined`. */
 export const DEFAULT_SYNTAX_THEME = { dark: 'pierre-dark', light: 'pierre-light' } as const;
 
-/**
- * The theme pair to hand `@pierre/diffs`, or `undefined` to let it use its own
- * defaults. Returning `undefined` (rather than the default pair) is deliberate:
- * it keeps the diff pane's prop identity stable for palettes that never
- * customised it.
- */
 export function resolveSyntaxTheme(colorTheme: string, mode: 'dark' | 'light'): { dark: string; light: string } | undefined {
   const map = SHIKI_THEME_MAP[colorTheme];
   if (!map || !map[mode]) return undefined;
   return { dark: map.dark || DEFAULT_SYNTAX_THEME.dark, light: map.light || DEFAULT_SYNTAX_THEME.light };
 }
 
-/**
- * Host override for the fence theme (`configurePlannotatorUI({ fenceTheme })`).
- * Return a Shiki theme name to use it, or `undefined` to fall through to the
- * default resolution below. A name Shiki does not know renders the block as
- * plain text, exactly like an unknown fence language.
- */
 export type FenceThemeResolver = (colorTheme: string, mode: 'light' | 'dark') => string | undefined;
 
 let fenceThemeResolver: FenceThemeResolver | null = null;
 
-/** Install (or with `null`, remove) the host's fence theme override. */
 export function setFenceThemeResolver(resolver: FenceThemeResolver | null): void {
   fenceThemeResolver = resolver;
 }
@@ -95,23 +59,13 @@ export function resetFenceThemeResolver(): void {
   fenceThemeResolver = null;
 }
 
-/**
- * The single concrete Shiki theme name for the palette currently on screen.
- * Markdown fences render one mode at a time, so unlike the diff pane (which
- * hands Pierre a dark/light pair and lets CSS pick) they want a resolved name.
- *
- * Every fence-style consumer resolves through here (`useFenceTheme`: Viewer
- * fences, `CodeBlock`, the code-file hover preview, the plan diff view, code
- * review's suggestion snippets), so a host override applies to all of them.
- * The diff pane's dark/light pair (`resolveSyntaxTheme`) is not affected.
- */
 export function resolveFenceTheme(colorTheme: string, mode: 'dark' | 'light'): string {
   if (fenceThemeResolver) {
     let override: string | undefined;
     try {
       override = fenceThemeResolver(colorTheme, mode);
     } catch {
-      override = undefined; // a throwing host resolver must not break rendering
+      override = undefined;
     }
     if (typeof override === 'string' && override) return override;
   }

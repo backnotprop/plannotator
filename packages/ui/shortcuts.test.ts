@@ -101,8 +101,6 @@ describe('shortcuts', () => {
 
     expect(getShortcut(planReviewSettingsShortcutRegistry, 'plan-review-editor-settings', 'submitPlan')?.description).toBe('Approve / Send feedback');
     expect(getShortcut(planReviewSettingsShortcutRegistry, 'plan-review-editor-settings', 'submitAnnotations')).toBeUndefined();
-    // Fact-guard, not a prose pin: the annotate registry's submit action must
-    // describe the adaptive Done/Send primary (distinct from plan review's).
     expect(getShortcut(annotateSettingsShortcutRegistry, 'annotate-editor-settings', 'submitAnnotations')?.description).toContain('Done / Send feedback');
     expect(getShortcut(annotateSettingsShortcutRegistry, 'annotate-editor-settings', 'submitPlan')).toBeUndefined();
     expect(getShortcut(annotateSettingsShortcutRegistry, 'annotate-sidebar', 'toggleContents')?.description).toBe('Toggle Contents sidebar');
@@ -126,10 +124,6 @@ describe('shortcuts', () => {
     ]);
   });
 
-  // The focus-mode toggle collapses both side panels at once. It has to exist
-  // on BOTH plan surfaces (they render the same panels), and its binding has to
-  // stay the only claim on `Mod+.` there — a second claimant would double-fire,
-  // since the dispatcher has no cross-scope arbitration.
   it('binds focus mode once on every plan surface', () => {
     for (const registry of [planReviewSettingsShortcutRegistry, annotateSettingsShortcutRegistry]) {
       expect(getShortcut(registry, 'document-view', 'toggleFocusMode')?.bindings).toEqual(['Mod+.']);
@@ -141,9 +135,6 @@ describe('shortcuts', () => {
     }
   });
 
-  // Change navigation (#1543) is N / Shift+N in both review views. `P` is the
-  // Markdown view key, so previous-change must never be P; and with no
-  // cross-scope arbitration a second claimant on either key would double-fire.
   it('binds next / previous change once, to N and Shift+N, clear of the Markdown P', () => {
     expect(getShortcut(reviewSettingsShortcutRegistry, 'review-editor', 'nextChange')?.bindings).toEqual(['N']);
     expect(getShortcut(reviewSettingsShortcutRegistry, 'review-editor', 'prevChange')?.bindings).toEqual(['Shift+N']);
@@ -155,12 +146,6 @@ describe('shortcuts', () => {
     expect(claimants('P')).toEqual(['review-markdown-preview.cycleMarkdownView']);
   });
 
-  // The two HTML-surface chords are the only way back into annotate mode after
-  // Esc and the only keyboard way to the header eye, so they have to reach both
-  // plan registries (the marketing docs page and the help modal read them from
-  // there) and each has to stay a single claimant: the dispatcher has no
-  // cross-scope arbitration, so a second claimant would double-fire and the
-  // toggle would land back where it started.
   it('binds the HTML annotate and tools chords once on every plan surface', () => {
     const expected = {
       toggleAnnotateMode: 'Mod+Shift+A',
@@ -179,9 +164,6 @@ describe('shortcuts', () => {
     }
   });
 
-  // The mode switcher renders on both plan surfaces, so the scope has to reach
-  // both registries — and each digit has to stay a single claimant, since the
-  // dispatcher has no cross-scope arbitration.
   it('binds annotation mode once on every plan surface', () => {
     const expected = {
       selectMarkupMode: ['Shift+1'],
@@ -202,8 +184,6 @@ describe('shortcuts', () => {
     }
   });
 
-  // The quick-label picker claims bare digits. Holding Shift has to steer the
-  // keystroke to the mode switcher instead of firing both.
   it('does not fire the bare-digit label picker while Shift is held', () => {
     const shiftedDigit = {
       key: '!', code: 'Digit1', ctrlKey: false, metaKey: false, shiftKey: true, altKey: false,
@@ -248,7 +228,6 @@ describe('shortcuts', () => {
   });
 
   it('matches a letter by its physical key only in a scope that opts in (lettersByCode)', () => {
-    // Russian layout: the E key types у. Off by default, so plan review and code review match as before.
     const cyrillicE = { key: 'у', code: 'KeyE', ctrlKey: false, metaKey: false, shiftKey: false, altKey: false } as KeyboardEvent;
     const plain = defineShortcutScope({ id: 'plain', title: 'Plain', shortcuts: { act: { description: 'Act', bindings: ['E'], section: 'S' } } });
     const optedIn = defineShortcutScope({ id: 'opted', title: 'Opted', lettersByCode: true, shortcuts: { act: { description: 'Act', bindings: ['E'], section: 'S' } } });
@@ -256,7 +235,6 @@ describe('shortcuts', () => {
     expect(dispatchShortcutEvent(plain, { act: () => calls.push('plain') }, cyrillicE)).toBe(false);
     expect(dispatchShortcutEvent(optedIn, { act: () => calls.push('opted') }, cyrillicE)).toBe(true);
     expect(calls).toEqual(['opted']);
-    // A Latin character on another key is that character, opted in or not (AZERTY's A on KeyQ is never Q).
     const azertyA = { ...cyrillicE, key: 'a', code: 'KeyQ' } as KeyboardEvent;
     expect(matchesShortcutBinding(azertyA, 'Q', { lettersByCode: true })).toBe(false);
     expect(matchesShortcutBinding(azertyA, 'A', { lettersByCode: true })).toBe(true);
@@ -265,21 +243,16 @@ describe('shortcuts', () => {
   it('lettersByCode never turns punctuation, a dead key or an unidentified key into a letter', () => {
     const on = { lettersByCode: true };
     const key = (k: string, code: string, shiftKey = false) => ({ key: k, code, ctrlKey: false, metaKey: false, shiftKey, altKey: false }) as KeyboardEvent;
-    // US Dvorak: `.` on KeyE, `>` (Shift) on KeyE, `;` on KeyZ, `'` on KeyQ.
     expect(matchesShortcutBinding(key('.', 'KeyE'), 'E', on)).toBe(false);
     expect(matchesShortcutBinding(key('>', 'KeyE', true), 'Shift+E', on)).toBe(false);
     expect(matchesShortcutBinding(key(';', 'KeyZ'), 'Z', on)).toBe(false);
     expect(matchesShortcutBinding(key("'", 'KeyQ'), 'Q', on)).toBe(false);
-    // Hebrew: `/` on KeyQ stays `/` only.
     expect(matchesShortcutBinding(key('/', 'KeyQ'), 'Q', on)).toBe(false);
     expect(matchesShortcutBinding(key('/', 'KeyQ'), '/', on)).toBe(true);
-    // AZERTY `,` on KeyM; Colemak `;` on KeyP.
     expect(matchesShortcutBinding(key(',', 'KeyM'), 'M', on)).toBe(false);
     expect(matchesShortcutBinding(key(';', 'KeyP'), 'P', on)).toBe(false);
-    // Dead and unidentified keys.
     expect(matchesShortcutBinding(key('Dead', 'KeyE'), 'E', on)).toBe(false);
     expect(matchesShortcutBinding(key('Unidentified', 'KeyE'), 'E', on)).toBe(false);
-    // A non-Latin letter still falls back (Hebrew ק on KeyE), and Dvorak's real letters match by character.
     expect(matchesShortcutBinding(key('ק', 'KeyE'), 'E', on)).toBe(true);
     expect(matchesShortcutBinding(key('e', 'KeyD'), 'E', on)).toBe(true);
     expect(matchesShortcutBinding(key('e', 'KeyD'), 'D', on)).toBe(false);
@@ -377,8 +350,8 @@ describe('shortcuts', () => {
     expect(parseDoubleTapBinding('Shift Shift')).toBe('Shift');
     expect(parseDoubleTapBinding('Alt hold')).toBeNull();
     expect(parseDoubleTapBinding('Mod+Enter')).toBeNull();
-    expect(parseDoubleTapBinding('Alt Shift')).toBeNull(); // different keys
-    expect(parseDoubleTapBinding('Alt+Shift Alt+Shift')).toBeNull(); // multi-key groups
+    expect(parseDoubleTapBinding('Alt Shift')).toBeNull();
+    expect(parseDoubleTapBinding('Alt+Shift Alt+Shift')).toBeNull();
   });
 
   it('matches key names for sequential binding support', () => {
@@ -459,7 +432,6 @@ describe('shortcuts', () => {
       preventDefaultCalls += 1;
     };
 
-    // Shift+2 reports '@' on a US layout, so matching has to fall back to event.code.
     const shiftedDigit = {
       key: '@', code: 'Digit2', ctrlKey: false, metaKey: false, shiftKey: true, altKey: false, preventDefault,
     } as unknown as KeyboardEvent;
@@ -474,11 +446,6 @@ describe('shortcuts', () => {
     expect(preventDefaultCalls).toBe(2);
   });
 
-  // PR2/PR3 registered the decision-control scope in both adopting settings
-  // registries (the entries feed the help modal and the generated marketing
-  // shortcuts page — bindings must match shipped behavior). Guards the live
-  // registrations: a duplicate scope id or non-normalized binding token would
-  // only surface as a throw at app startup otherwise.
   it('decision-control scope is registered for annotate and review', () => {
     expect(decisionControlShortcuts.id).toBe('decision-control');
     expect([...annotateSettingsShortcutRegistry].some((scope) => scope.id === 'decision-control')).toBe(true);
@@ -488,7 +455,6 @@ describe('shortcuts', () => {
   });
 
   it('leaves annotation mode alone when Alt is held', () => {
-    // AltGr sends Ctrl+Alt; the binding declares no Alt, so it must not fire.
     const altGrEvent = {
       key: '1', code: 'Digit1', ctrlKey: false, metaKey: false, shiftKey: true, altKey: true,
       preventDefault: () => {
@@ -505,10 +471,6 @@ describe('shortcuts', () => {
     expect(handled).toBe(false);
   });
 
-  // Rich-text copy is the toolbar's Copy button only (owner's decision on #2191):
-  // Cmd+Option+C is Chrome's Inspect Element key on a Mac, and new shortcuts
-  // need the owner's approval. No surface may bind Alt+C, and Mod+C stays the
-  // one copy binding, described as before.
   it('registers no keyboard shortcut for rich-text copy', () => {
     const registries = [
       planReviewSettingsShortcutRegistry,

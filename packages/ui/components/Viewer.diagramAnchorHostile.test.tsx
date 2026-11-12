@@ -1,19 +1,3 @@
-/**
- * A stored annotation whose `diagramAnchor` is not an anchor must never take
- * the document down.
- *
- * `PATCH /api/external-annotations` merged its body verbatim, so any local
- * process could store `{"diagramAnchor": null}` — a value POST refuses — and
- * the diagram block then read `.family` off it: `TypeError: Cannot read
- * properties of null`, thrown during render, the whole page blank. The server
- * validator closes the hole; this is the second layer, because a row can also
- * reach the renderer from a draft, a share link, or a future writer.
- *
- * What regresses if this fails: one malformed row blanks the page instead of
- * listing as an ordinary comment.
- *
- * DOM-gated (DOM_TESTS=1).
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -25,8 +9,6 @@ import { parseMarkdownToBlocks } from '../utils/parser';
 
 const hasDom = typeof document !== 'undefined';
 
-// Viewer pulls in web-highlighter, whose UMD bundle reads `window` at
-// module-eval time; import lazily (same pattern as Viewer.diagramLazyRestore).
 const viewerMod = hasDom ? await import('./Viewer') : null;
 const Viewer = viewerMod?.Viewer as typeof import('./Viewer')['Viewer'];
 const panelMod = hasDom ? await import('./AnnotationPanel') : null;
@@ -76,8 +58,6 @@ const row = (id: string, diagramAnchor: unknown): Annotation =>
     diagramAnchor,
   }) as unknown as Annotation;
 
-/** Exactly the shapes an unvalidated PATCH could store. `null` is the one
- *  that threw; the rest are inert today and must stay that way. */
 const HOSTILE: Annotation[] = [
   row('h-null', null),
   row('h-string', 'nope'),
@@ -172,11 +152,8 @@ describe.if(hasDom)('Viewer: an annotation carrying a malformed diagramAnchor', 
     });
     await settle(80);
 
-    // The document is on screen — the crash blanked it entirely
-    // (`document.body.innerText.length === 0`, root with no children).
     expect(host!.textContent).toContain(PROSE_AFTER);
     expect(host!.querySelector('[data-diagram-block]')).not.toBeNull();
-    // Every hostile row is still readable in the panel.
     for (const ann of HOSTILE) {
       expect(host!.querySelector(`[data-annotation-panel] [data-annotation-id="${ann.id}"]`)).not.toBeNull();
     }

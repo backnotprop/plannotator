@@ -1,11 +1,3 @@
-// The scenes a drawn view holds: each `<div data-scene="id">` in the drawing
-// plays `scenes[id]`. ShapeDrawn renders this only when a host passes scenes,
-// and the player's code loads only when the drawing has a slot for one, so a
-// board without scenes costs nothing and draws exactly as before.
-//
-// The scene's drawing is the agent's own SVG inside the slot (sanitized with
-// the rest of the board). The player adds its caption and controls after it,
-// in a shadow root of their own, so the agent's CSS never reaches them.
 import { Component, Suspense, lazy, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { ShapeScene } from '@plannotator/core/shape-scene';
@@ -13,7 +5,6 @@ import { sceneFrame } from './frame';
 
 const ScenePlayer = lazy(() => import('./ScenePlayer'));
 
-/** A player that cannot load or draw leaves the drawing as it is. */
 class Contained extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
   static getDerivedStateFromError() {
@@ -30,12 +21,10 @@ interface Slot {
 }
 
 export interface ScenePlayersProps {
-  /** The drawing's `.board` (in its shadow root), drawn afresh each time `drawnKey` changes. */
   board: HTMLElement | null;
   drawnKey: number;
   scenes: Readonly<Record<string, ShapeScene>>;
   reduce: boolean;
-  /** 'technical': every scene takes the technical look (look.ts). Absent: scenes play as drawn. */
   look?: 'technical';
 }
 
@@ -52,7 +41,6 @@ export function ScenePlayers({ board, drawnKey, scenes, reduce, look }: ScenePla
       if (!Object.hasOwn(current.current, id)) continue;
       const host = el.ownerDocument.createElement('div');
       host.setAttribute('data-shape-player', 'scene');
-      // Sticky: when a phone pans a wide drawing sideways inside the slot, the player under it stays put.
       host.style.cssText = 'display:block;width:100%;position:sticky;left:0;';
       el.appendChild(host);
       hosts.push(host);
@@ -69,7 +57,6 @@ export function ScenePlayers({ board, drawnKey, scenes, reduce, look }: ScenePla
       {slots.map(({ root, id }, i) => {
         const scene = Object.hasOwn(scenes, id) ? scenes[id] : undefined;
         if (!scene) return null;
-        // `plannotator shape frame`: this scene drawn still at one moment (frame.ts).
         const frame = sceneFrame();
         const at = frame && frame.scene === id ? Math.min(scene.end, frame.at) : undefined;
         return createPortal(

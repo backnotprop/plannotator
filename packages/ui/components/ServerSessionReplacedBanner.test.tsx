@@ -1,12 +1,3 @@
-/**
- * The stale-tab reload prompt (DOM_TESTS=1).
- *
- * Guards: a decision refused with `409 session_mismatch` (this tab's server
- * was replaced by another session on the same address) must show the reload
- * prompt instead of reading as an ordinary failure; another 409 (the plan was
- * revised) must NOT show it; and the decision bodies the tab sends must carry
- * the nonce it loaded, or the server could never tell the tabs apart.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

@@ -1,6 +1,5 @@
 import { createContext, useContext, createElement, type ReactNode } from 'react';
 
-/** Return whether this element is the browser's page-scrolling element. */
 export function isDocumentScrollViewport(
   viewport: HTMLElement | null,
 ): boolean {
@@ -8,17 +7,12 @@ export function isDocumentScrollViewport(
     && viewport.ownerDocument.scrollingElement === viewport;
 }
 
-/** Resolve the document scroller without assuming whether WebKit chose html or body. */
 export function getDocumentScrollViewport(
   targetDocument: Document = document,
 ): HTMLElement | null {
   return targetDocument.scrollingElement as HTMLElement | null;
 }
 
-/**
- * Page scrolling needs viewport geometry, not the document element's full
- * content rect. Element-backed scroll areas retain their incumbent geometry.
- */
 export function getScrollViewportRect(viewport: HTMLElement): DOMRect {
   if (!isDocumentScrollViewport(viewport)) return viewport.getBoundingClientRect();
 
@@ -67,40 +61,18 @@ export function addScrollViewportListener(
   return () => target.removeEventListener('scroll', listener);
 }
 
-/** A document scroll uses the browser viewport as its IntersectionObserver root. */
 export function getScrollViewportIntersectionRoot(
   viewport: HTMLElement,
 ): Element | null {
   return isDocumentScrollViewport(viewport) ? null : viewport;
 }
 
-/**
- * Provides the currently-active scroll viewport element to descendants.
- *
- * The element that actually scrolls is the host element rendered by
- * <OverlayScrollArea> (native scroll) — not <main>. Any code that needs the
- * scroll container (IntersectionObserver roots, scroll event listeners,
- * scrollTo / getBoundingClientRect offsets) must consume this context instead
- * of `document.querySelector('main')`.
- *
- * The value is `null` until the scroll element has mounted. Consumers should
- * handle that transient state.
- */
 export const ScrollViewportContext = createContext<HTMLElement | null>(null);
 
-/** Returns the active scroll viewport element, or `null` before it mounts. */
 export function useScrollViewport(): HTMLElement | null {
   return useContext(ScrollViewportContext);
 }
 
-/**
- * Render-transparent provider for the active scroll viewport element.
- *
- * The host mounts this around its layout and feeds it the MAIN content's scroll
- * element, so descendants — including a sidebar Table-of-Contents rendered
- * inside it — resolve to the main viewport (not the sidebar's own scroll area).
- * Ships with the package so consumers work without app-shell wiring.
- */
 export function ScrollViewportProvider({
   viewport,
   children,

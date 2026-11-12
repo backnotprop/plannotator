@@ -8,13 +8,6 @@ import {
 } from './cssFontFamily';
 import { isFontInstalled } from './fontDetect';
 
-/**
- * The custom code font (#851) is free text that ends up inside CSS strings
- * (the diff's shadow-DOM stylesheet, `--diff-font-override`, inline styles).
- * These pin that no typed name can end the string early or reach the CSS
- * as anything but one quoted family name.
- */
-
 describe('quoteFontFamily', () => {
   test('quotes a plain name', () => {
     expect(quoteFontFamily('Iosevka Term')).toBe('"Iosevka Term"');
@@ -23,11 +16,9 @@ describe('quoteFontFamily', () => {
   test('escapes quotes and backslashes so the string cannot end early', () => {
     expect(quoteFontFamily('a"b')).toBe('"a\\"b"');
     expect(quoteFontFamily('a\\b')).toBe('"a\\\\b"');
-    // A name that tries to close the string and add a declaration stays one string.
     const quoted = quoteFontFamily('x", monospace; color: red; "');
     expect(quoted.startsWith('"')).toBe(true);
     expect(quoted.endsWith('"')).toBe(true);
-    // Every inner quote is escaped.
     expect(quoted.slice(1, -1).replace(/\\\\/g, '').match(/(^|[^\\])"/)).toBeNull();
   });
 
@@ -58,7 +49,6 @@ describe('monoFontStack', () => {
 });
 
 describe('isFontInstalled', () => {
-  /** A canvas stand-in whose widths differ only for fonts in `installed`. */
   function fakeContext(installed: string[]) {
     return {
       font: '',

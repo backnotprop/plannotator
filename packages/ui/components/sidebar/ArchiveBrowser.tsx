@@ -1,10 +1,3 @@
-/**
- * ArchiveBrowser — Browsable list of saved plan decisions
- *
- * Reusable in both standalone archive mode and as a sidebar tab
- * during normal plan review sessions.
- */
-
 import React from "react";
 import type { ArchivedPlan } from "@plannotator/core/storage-types";
 

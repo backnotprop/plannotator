@@ -51,9 +51,6 @@ const bridgeOnly: AIProviderOption[] = [
 ];
 
 describe.if(hasDom)('useAIProviderActivation', () => {
-  // At page load the selection can still hold the saved cookie's id for one
-  // render. On a session-bridge server that id is not offered for Ask AI, and
-  // activating it would start Codex discovery anyway.
   test('never activates a provider the server does not list', () => {
     const urls = recordFetches();
     const activate = mount(bridgeOnly);

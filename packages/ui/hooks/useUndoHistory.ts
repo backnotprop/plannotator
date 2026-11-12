@@ -8,17 +8,10 @@ import {
   type UndoHistoryState,
 } from '../utils/undoHistory';
 
-/** Imperative bounded history API used by surface-specific command adapters. */
 export interface UndoHistoryApi<TAction> {
   readonly canUndo: boolean;
   readonly canRedo: boolean;
   record: (action: TAction) => void;
-  /**
-   * Coalesce into the newest undo entry: when it is still `expected` (the
-   * same object), replace it with `next`, or drop it when `next` is null.
-   * Returns false, changing nothing, when anything was recorded, undone or
-   * cleared since. Used to fold a typing burst into one entry.
-   */
   replaceLast: (expected: TAction, next: TAction | null) => boolean;
   undo: () => boolean;
   redo: () => boolean;
@@ -31,11 +24,6 @@ interface UndoHistoryOptions<TAction> {
   capacity?: number;
 }
 
-/**
- * Keep one bounded stack for the active surface context while replaying
- * actions through the latest adapter callbacks. A context change starts a
- * fresh baseline synchronously, before any shortcut can reach the new view.
- */
 export function useUndoHistory<TAction>({
   context,
   apply,

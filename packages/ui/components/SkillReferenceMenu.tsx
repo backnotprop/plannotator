@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { SkillCatalogEntry } from '../utils/skillReferences';
 
-/** Which skill root a row came from, shown as the right-aligned source column. */
 const ROOT_LABELS: Record<SkillCatalogEntry['root'], string> = {
   claude: 'Claude',
   codex: 'Codex',
@@ -10,43 +9,19 @@ const ROOT_LABELS: Record<SkillCatalogEntry['root'], string> = {
 };
 
 interface SkillReferenceMenuProps {
-  /** Id referenced by the focused textarea's aria-controls attribute. */
   id: string;
   items: SkillCatalogEntry[];
-  /** Explicitly activated row, or null — the menu opens with nothing active. */
   activeIndex: number | null;
   onSelect: (index: number) => void;
-  /**
-   * The box the menu must stay inside, in viewport coordinates, read at each
-   * measure. Default: the viewport. A host whose composer sits in a dialog
-   * with a footer passes the dialog's area above the footer.
-   */
   boundary?: () => { top: number; bottom: number } | null;
-  /** Which side of the anchor the menu tries first. Default: above. */
   prefer?: 'above' | 'below';
-  /** Upper bound on the list's height, in px. Default: 256. */
   maxListHeight?: number;
-  /**
-   * Draw the host-served rows (root `plannotator`) as their own group (opt-in; the Inbox's "/" list): their icon in
-   * the theme's primary colour, and one hairline between the last of them and the first other row, only when both
-   * kinds are listed. The hairline is presentational (no role, hidden from assistive tech): the options, their ids
-   * and their order are the same with or without it. The caller lists those rows first (the hook's `hostRowsFirst`).
-   * Absent: every row alike, as before.
-   */
   groupHostRows?: boolean;
-  /**
-   * A host's own glyph for a row, in place of the cube (opt-in; the Inbox gives each of its built-ins one). It must
-   * be the cube's frame (16 px, `shrink-0`, decorative: `aria-hidden`), so no row changes size. Null or undefined
-   * for a row keeps the cube. Absent: the cube on every row, as before.
-   */
   rowIcon?: (item: SkillCatalogEntry) => React.ReactNode;
 }
 
-/** Vertical gap between the composer wrapper and the menu (mb-1.5 / mt-1.5 = 6px). */
 const MENU_GAP = 6;
-/** Breathing room kept between the menu and the viewport edge. */
 const MENU_VIEWPORT_MARGIN = 8;
-/** Upper bound on the scrollable list height — the former fixed `max-h-64`. */
 const MAX_LIST_HEIGHT = 256;
 
 interface MenuPlacement {
@@ -54,17 +29,6 @@ interface MenuPlacement {
   maxListHeight: number;
 }
 
-/**
- * Adaptive placement, the same viewport-measurement idiom CommentPopover's
- * `computePosition` uses (space vs `window.innerHeight`). The menu PREFERS
- * opening above the composer — that keeps the text being typed, the action
- * row, and the human-only notice unobstructed, and matches how chat-composer
- * autocompletes behave — and flips below when the list does not fit above but
- * does fit below (the popover near the top of the viewport: the exact case
- * where the old fixed `bottom-full` menu ran off the top of the screen).
- * When neither side fits the whole list, the side with more room wins and the
- * list is clamped to it, so the menu never extends past a viewport edge.
- */
 export function computeMenuPlacement(
   anchorRect: Pick<DOMRect, 'top' | 'bottom'>,
   naturalListHeight: number,
@@ -87,31 +51,10 @@ export function computeMenuPlacement(
   const available = space(direction);
   return {
     direction,
-    // A NaN reading (a host's boundary or cap mid-rotation) keeps the cap: NaN never equals itself, so the
-    // equality-guarded setPlacement below would re-render forever (React error 185, the page goes blank).
     maxListHeight: Number.isFinite(available) ? Math.max(0, Math.min(cap, Math.round(available))) : cap,
   };
 }
 
-/**
- * Dropdown for skill references inside a comment composer. Rendered adjacent
- * to the textarea (absolute within a relative wrapper), opening above or
- * below depending on available viewport space (see computeMenuPlacement), and
- * clamped so it never runs off screen. Each row: icon, bold name, dimmed
- * inline description (ellipsis-truncated), right-aligned source root.
- * Human-invocation-only skills render identically to every other row: their
- * instructions are injected into the exported feedback automatically, so the
- * distinction needs no surfacing at pick time. (A hover-disclosed warning
- * used to live here; because it changed the menu's height while the pointer
- * sat over a row of a bottom-anchored menu, it oscillated the row under the
- * cursor every frame. Hover must never change any row's rendered size or the
- * menu's measured geometry — color-only hover styling is fine.)
- *
- * Activation is KEYBOARD-ONLY (see useSkillReferenceAutocomplete): the menu
- * floats directly over the composer, exactly where the mouse rests while
- * typing, so pointer hover must never arm the "Enter inserts" state. Hover is
- * a purely visual affordance; a pointer click inserts directly.
- */
 export const SkillReferenceMenu: React.FC<SkillReferenceMenuProps> = ({
   id,
   items,
@@ -129,23 +72,16 @@ export const SkillReferenceMenu: React.FC<SkillReferenceMenuProps> = ({
     direction: prefer ?? 'above',
     maxListHeight: maxListHeight ?? MAX_LIST_HEIGHT,
   });
-  // The optional seams, read through a ref so `measure` stays stable for its listeners.
   const optionsRef = useRef({ boundary, prefer, maxListHeight });
   optionsRef.current = { boundary, prefer, maxListHeight };
 
   const measure = useCallback(() => {
     const menuEl = menuRef.current;
     const listEl = listRef.current;
-    // The menu is a direct child of the composer's `relative` wrapper — the
-    // same box the `bottom-full` / `top-full` CSS anchors to.
     const anchor = menuEl?.parentElement;
     if (!menuEl || !listEl || !anchor) return;
     const rect = anchor.getBoundingClientRect();
-    // Non-list height the menu carries (border). This must stay constant
-    // while the pointer moves — hover-dependent chrome is what caused the
-    // jitter loop this component once shipped.
     const chrome = Math.max(0, menuEl.offsetHeight - listEl.offsetHeight);
-    // scrollHeight reports full content height even while clamped.
     const { boundary: readBoundary, prefer: side, maxListHeight: cap } = optionsRef.current;
     const box = readBoundary?.() ?? null;
     const next = computeMenuPlacement(rect, listEl.scrollHeight, chrome, box ? box.bottom : window.innerHeight, {
@@ -160,16 +96,10 @@ export const SkillReferenceMenu: React.FC<SkillReferenceMenuProps> = ({
     );
   }, []);
 
-  // Re-measure on EVERY commit: the popover re-renders on drag moves, flips,
-  // and filtering (item-count changes), and each of those can change the
-  // geometry without any window event firing. The setState above is
-  // equality-guarded, so this converges instead of looping.
   useLayoutEffect(() => {
     measure();
   });
 
-  // Same listeners CommentPopover's own position tracking uses: capture-phase
-  // scroll (the document scrolls under the anchored popover) plus resize.
   useEffect(() => {
     window.addEventListener('scroll', measure, true);
     window.addEventListener('resize', measure);
@@ -182,7 +112,6 @@ export const SkillReferenceMenu: React.FC<SkillReferenceMenuProps> = ({
   useEffect(() => {
     if (activeIndex === null) return;
     const list = listRef.current;
-    // By id, not by position: a group's hairline is a child of the list too.
     const row = list?.querySelector<HTMLElement>(`[id="${id}-option-${activeIndex}"]`);
     row?.scrollIntoView({ block: 'nearest' });
   }, [activeIndex]);
@@ -207,7 +136,6 @@ export const SkillReferenceMenu: React.FC<SkillReferenceMenuProps> = ({
       >
         {items.map((item, index) => {
           const hostRow = groupHostRows && item.root === 'plannotator';
-          // The one hairline: under the last host-served row, when a row of another kind follows it.
           const next = items[index + 1];
           const dividerAfter = hostRow && next !== undefined && next.root !== 'plannotator';
           return (
@@ -221,11 +149,6 @@ export const SkillReferenceMenu: React.FC<SkillReferenceMenuProps> = ({
             data-skill-item={item.name}
             data-skill-item-active={index === activeIndex ? 'true' : undefined}
             data-skill-item-host={hostRow ? 'true' : undefined}
-            // Insert on pointerdown so the textarea never loses focus. A
-            // click is explicit selection; hover deliberately does NOT
-            // activate the row (see the component docblock), and its only
-            // styling is the color-only hover:bg — hover must never change
-            // a row's rendered size or the menu's geometry.
             onPointerDown={(e) => {
               e.preventDefault();
               onSelect(index);
@@ -235,7 +158,6 @@ export const SkillReferenceMenu: React.FC<SkillReferenceMenuProps> = ({
             }`}
           >
             {rowIcon?.(item) ?? <SkillIcon className={hostRow ? 'text-primary' : undefined} />}
-            {/* data-skill-item-part: a host's styling hook (the Inbox lays a row out in two lines on a phone). */}
             <span data-skill-item-part="name" className="shrink-0 font-semibold text-foreground">{item.name}</span>
             <span data-skill-item-part="description" className="min-w-0 flex-1 truncate text-muted-foreground">
               {item.description ?? ''}
@@ -272,17 +194,9 @@ const SkillIcon: React.FC<{ className?: string }> = ({ className = 'text-muted-f
 
 interface HumanOnlySkillNoticeProps {
   skills: SkillCatalogEntry[];
-  /**
-   * What the instructions go with. Default: the host's (`setSkillInstructionsDestination`),
-   * else "your feedback". The Inbox says "your reply" or "your message".
-   */
   destination?: string;
 }
 
-// Module-level seam (see packages/ui/CLAUDE.md): what every composer's
-// human-only line says the instructions go with, unless the composer says.
-// Plannotator's comments go with "your feedback"; the Inbox's comments on
-// attached files ride a reply.
 const DEFAULT_DESTINATION = 'your feedback';
 let defaultDestination = DEFAULT_DESTINATION;
 
@@ -294,16 +208,6 @@ export function resetSkillInstructionsDestination(): void {
   defaultDestination = DEFAULT_DESTINATION;
 }
 
-/**
- * Composer note while human-only skill references are present. Quiet by
- * design: the user already chose to insert the reference (and saw the menu's
- * disclosure while choosing), so the resting state is a single muted summary
- * line rather than a standing explanation. The full plain-language sentence
- * is one native disclosure away — <details>/<summary> keeps the expansion
- * reachable by pointer, keyboard (the summary is focusable; Enter/Space
- * toggles), and assistive tech alike. It pairs with the dotted-underline
- * marker the composer overlay paints on human-only tokens.
- */
 export const HumanOnlySkillNotice: React.FC<HumanOnlySkillNoticeProps> = ({ skills, destination }) => {
   if (skills.length === 0) return null;
   destination ??= defaultDestination;

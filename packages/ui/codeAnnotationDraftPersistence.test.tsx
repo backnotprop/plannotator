@@ -1,18 +1,3 @@
-/**
- * Draft persistence tests for the code-review annotation autosave
- * (useCodeAnnotationDraft), exercising the REAL stack: the actual hook mounted
- * in React on one side, the actual saveDraft/loadDraft/deleteDraft disk layer
- * (packages/shared/draft.ts) on the other, joined by a fetch shim that mirrors
- * the review server's /api/draft pass-through handlers.
- *
- * Regression guard for #948: deleting every annotation must remove the draft
- * from disk (not leave a stale one that the recovery banner re-offers on
- * refresh). Also guards that a fresh, unengaged session never deletes an
- * unrestored draft sitting on disk at mount.
- *
- * Requires DOM_TESTS=1 (happy-dom preload). Run:
- *   DOM_TESTS=1 bun test codeAnnotationDraftPersistence
- */
 import { describe, test, expect, beforeAll, afterAll, afterEach } from 'bun:test';
 import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -29,7 +14,7 @@ import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from '../shared
 const hasDom = typeof document !== 'undefined';
 
 const DRAFT_KEY = 'code-annotation-draft-test';
-const DEBOUNCE_WAIT_MS = 650; // hook debounce is 500ms
+const DEBOUNCE_WAIT_MS = 650;
 
 const ANNOTATION = {
   id: 'a1',
@@ -42,15 +27,9 @@ const ANNOTATION = {
   originalText: 'const x = 1;',
 } as unknown as CodeAnnotation;
 
-// ---------------------------------------------------------------------------
-// Real-disk fetch shim (mirrors the review server's /api/draft handlers)
-// ---------------------------------------------------------------------------
-
 const realFetch = globalThis.fetch;
 let dataDir = '';
 let prevDataDirEnv: string | undefined;
-// Records every /api/draft request so tests can assert on what the hook actually
-// sent (e.g. that an external-annotation clear issued no DELETE).
 const draftCalls: { method: string; url: string }[] = [];
 
 function installFetchShim() {
@@ -109,10 +88,6 @@ afterEach(() => {
   draftCalls.length = 0;
 });
 
-// ---------------------------------------------------------------------------
-// Hook harness (the review hook is reactive — it autosaves on prop change)
-// ---------------------------------------------------------------------------
-
 type HookOptions = Parameters<typeof useCodeAnnotationDraft>[0];
 type HookResult = ReturnType<typeof useCodeAnnotationDraft>;
 
@@ -146,7 +121,7 @@ async function mountSession(opts: HookOptions): Promise<Session> {
     root = createRoot(host);
     root.render(<Harness opts={opts} resultRef={resultRef} />);
   });
-  await tick(0); // let the on-mount GET .then chain settle (sets hasMountedRef)
+  await tick(0);
   return {
     result: resultRef,
     rerender: async (next: HookOptions) => {
@@ -163,10 +138,6 @@ async function mountSession(opts: HookOptions): Promise<Session> {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
 describe('code-review annotation draft persistence', () => {
   for (const priorWrite of [false, true]) {
     test.skipIf(!hasDom)(`a rejecting flush still allows switching and saving the next target (prior write: ${priorWrite})`, async () => {
@@ -182,7 +153,7 @@ describe('code-review annotation draft persistence', () => {
       try {
         if (priorWrite) {
           await s.rerender(options({ transport: transportA, annotations: [ANNOTATION] }));
-          await tick(DEBOUNCE_WAIT_MS); // leaves an already-rejected in-flight write
+          await tick(DEBOUNCE_WAIT_MS);
         }
         const latest = { ...ANNOTATION, text: 'latest edit' };
         await s.rerender(options({ transport: transportA, annotations: [latest] }));
@@ -222,11 +193,9 @@ describe('code-review annotation draft persistence', () => {
         await s.rerender(options({ transport, annotations: comments }));
         await tick(DEBOUNCE_WAIT_MS);
         expect(s.result.current!.draftTargetChanged).toBe(true);
-        expect(conflicts).toBe(1); // a mismatch is not a transient load failure
-        expect(loadDraft(DRAFT_KEY)).toBeNull(); // never writes into the other target
+        expect(conflicts).toBe(1);
+        expect(loadDraft(DRAFT_KEY)).toBeNull();
 
-        // A failed refresh must keep the notice; successful in-place refresh
-        // selects this tab's comparison again without clearing its comments.
         await act(async () => { s.result.current!.adoptDraftTarget(undefined); });
         expect(s.result.current!.draftTargetChanged).toBe(true);
         await act(async () => {
@@ -286,7 +255,6 @@ describe('code-review annotation draft persistence', () => {
     const s = await mountSession(options({ transport: transportA }));
     try {
       await s.rerender(options({ transport: transportA, annotations: [ANNOTATION] }));
-      // Switch immediately; waiting for debounce here would hide lost edits.
       await act(async () => { await s.result.current!.flushBeforeSwitch(); });
       expect(savedA).toHaveLength(1);
       expect(savedA[0]).toMatchObject({ codeAnnotations: [ANNOTATION] });
@@ -300,7 +268,7 @@ describe('code-review annotation draft persistence', () => {
         onDraftTargetMerge: items => { merged.push(...items.annotations); },
       }));
       await tick(DEBOUNCE_WAIT_MS);
-      expect(savedB).toEqual([]); // never overwrite B before reading it
+      expect(savedB).toEqual([]);
       await act(async () => { finishLoad({ data: { codeAnnotations: [onB], draftGeneration: 40 }, generation: null }); });
       expect(merged).toEqual([onB]);
       await s.rerender(options({ transport: transportB, annotations: [ANNOTATION, ...merged] }));
@@ -340,8 +308,6 @@ describe('code-review annotation draft persistence', () => {
   });
 
   test.skipIf(!hasDom)('deleting every annotation removes the draft so it does not resurrect (#948)', async () => {
-    // Session 1: mount empty (lets the on-mount GET settle so hasMountedRef is
-    // set), then the user adds an annotation -> it autosaves to disk.
     const s1 = await mountSession(options());
     await s1.rerender(options({ annotations: [ANNOTATION] }));
     await tick(DEBOUNCE_WAIT_MS);
@@ -349,43 +315,30 @@ describe('code-review annotation draft persistence', () => {
     expect(afterSave).not.toBeNull();
     expect(afterSave!.codeAnnotations).toHaveLength(1);
 
-    // User deletes the last annotation -> list empty. Pre-fix the autosave
-    // skipped, leaving the stale draft on disk; now it must delete it.
     await s1.rerender(options({ annotations: [] }));
     await tick(DEBOUNCE_WAIT_MS);
     expect(loadDraft(DRAFT_KEY)).toBeNull();
     await s1.unmount();
 
-    // Session 2: fresh page -> no draft on disk -> no recovery banner.
     const s2 = await mountSession(options());
     expect(s2.result.current!.draftBanner).toBeNull();
     await s2.unmount();
   });
 
   test.skipIf(!hasDom)('external (source-tagged) annotation churn does not arm engagement or delete the draft', async () => {
-    // External-tool annotations (SSE-sourced) arrive via allAnnotations without
-    // user action. They must NOT count as "the user had content", or clearing
-    // them would fire a tombstone delete. (Regression guard for the engagement
-    // signal being keyed on user-authored annotations only.)
     const EXTERNAL = { ...(ANNOTATION as object), id: 'ext1', source: 'eslint' } as unknown as CodeAnnotation;
 
     const s = await mountSession(options());
-    // External annotation appears, then disappears — pure external churn.
     await s.rerender(options({ annotations: [EXTERNAL] }));
     await tick(DEBOUNCE_WAIT_MS);
     await s.rerender(options({ annotations: [] }));
     await tick(DEBOUNCE_WAIT_MS);
 
-    // Engagement is keyed on user-authored annotations, so the external clear must
-    // NOT have issued an empty-state DELETE. (If external annotations armed the
-    // flag, a draft holding real user work in an interleaved session could be
-    // wiped.) Assert directly on the wire: no DELETE was sent.
     expect(draftCalls.filter((c) => c.method === 'DELETE')).toHaveLength(0);
     await s.unmount();
   });
 
   test.skipIf(!hasDom)('a fresh, unengaged session does not delete an unrestored draft on disk', async () => {
-    // A draft from a previous session sits on disk.
     saveDraft(DRAFT_KEY, {
       codeAnnotations: [ANNOTATION],
       viewedFiles: [],
@@ -393,18 +346,12 @@ describe('code-review annotation draft persistence', () => {
       ts: Date.now(),
     });
 
-    // Mount fresh: the user has NOT restored, so annotations are empty. The
-    // empty-state autosave must NOT fire a delete (the guard keys on having had
-    // annotations this session, which we haven't).
     const s = await mountSession(options());
     expect(s.result.current!.draftBanner).toEqual({ count: 1, viewedCount: 0, timeAgo: 'just now' });
 
-    // Re-render still-empty (new Set identity) to actually run the autosave
-    // effect through the guard path, then wait past the debounce.
     await s.rerender(options({ viewedFiles: new Set<string>() }));
     await tick(DEBOUNCE_WAIT_MS);
 
-    // The unrestored draft survives — the banner can still offer it.
     const stillThere = loadDraft(DRAFT_KEY) as { codeAnnotations?: unknown[] } | null;
     expect(stillThere).not.toBeNull();
     expect(stillThere!.codeAnnotations).toHaveLength(1);
@@ -412,10 +359,6 @@ describe('code-review annotation draft persistence', () => {
   });
 
   test.skipIf(!hasDom)('auto-view suppression round-trips, and an older draft without it restores empty', async () => {
-    // Guards the "come back to this" contract across a reload: a file the
-    // reviewer un-viewed must still be off-limits to auto-view after the draft
-    // comes back. The second half guards backward compatibility — a draft
-    // written before the field must restore, not throw or resurrect state.
     const s1 = await mountSession(options());
     await s1.rerender(options({
       annotations: [ANNOTATION],
@@ -428,13 +371,11 @@ describe('code-review annotation draft persistence', () => {
     await s1.unmount();
 
     const s2 = await mountSession(options());
-    // restoreDraft clears the banner, so it is a state update like any other.
     let restoredSuppressed: string[] = [];
     await act(async () => { restoredSuppressed = s2.result.current!.restoreDraft().autoViewSuppressed; });
     expect(restoredSuppressed).toEqual(['src/b.ts']);
     await s2.unmount();
 
-    // A draft written by a build that predates the field.
     deleteDraft(DRAFT_KEY);
     saveDraft(DRAFT_KEY, {
       codeAnnotations: [ANNOTATION],
@@ -451,9 +392,6 @@ describe('code-review annotation draft persistence', () => {
   });
 
   test.skipIf(!hasDom)('suppression alone does not keep an otherwise empty draft alive', async () => {
-    // Deliberate edge (#948 semantics stay untouched): the un-view set is not
-    // content. A session with nothing but suppression is still empty and still
-    // tombstones, so clear-everything keeps meaning what it means today.
     const s = await mountSession(options());
     await s.rerender(options({ annotations: [ANNOTATION] }));
     await tick(DEBOUNCE_WAIT_MS);
@@ -468,9 +406,6 @@ describe('code-review annotation draft persistence', () => {
 
 describe('PR draft served for a changed patch (#1590)', () => {
   test.skipIf(!hasDom)('restoreDraft reports the server patchChanged flag so the host re-checks anchors; absent means false', async () => {
-    // The review server adds patchChanged when it serves a PR draft through
-    // the target key for a different patch. Losing it on the way through the
-    // hook would restore stale line comments as if nothing had moved.
     saveDraft(DRAFT_KEY, { codeAnnotations: [ANNOTATION], draftGeneration: 1, ts: Date.now(), patchChanged: true });
     const s = await mountSession(options());
     expect(s.result.current!.draftBanner).not.toBeNull();
@@ -491,8 +426,6 @@ describe('PR draft served for a changed patch (#1590)', () => {
 });
 
 describe('in-place switch onto another draft target (#1590)', () => {
-  // A host that behaves like the review App: it owns the annotation list,
-  // appends whatever the hook auto-merges after a switch, and can be edited.
   interface Host {
     result: { current: HookResult | null };
     ids: () => string[];
@@ -548,7 +481,6 @@ describe('in-place switch onto another draft target (#1590)', () => {
 
   test.skipIf(!hasDom)('adopting the target floor lets the next autosave land past an old tombstone', async () => {
     const h = await mountHost([]);
-    // The target just switched onto was submitted at generation 40 earlier.
     saveDraft(DRAFT_KEY, { codeAnnotations: [ANNOTATION], draftGeneration: 39, ts: Date.now() });
     deleteDraft(DRAFT_KEY, 40);
     await h.adopt({ found: false, draftGeneration: 40 });
@@ -564,12 +496,11 @@ describe('in-place switch onto another draft target (#1590)', () => {
     const h = await mountHost([ann('mine')]);
     saveDraft(DRAFT_KEY, { codeAnnotations: [ann('waiting-on-b')], draftGeneration: 12, ts: Date.now() });
     await h.adopt({ found: true, draftGeneration: 12 });
-    await h.setViewed(new Set(['src/b.ts'])); // the switch replaces viewed files
+    await h.setViewed(new Set(['src/b.ts']));
     await tick(DEBOUNCE_WAIT_MS);
     expect(h.ids()).toEqual(['mine', 'waiting-on-b']);
     expect(diskIds()).toEqual(['mine', 'waiting-on-b']);
     expect(h.result.current!.draftBanner).toBeNull();
-    // Nothing is left waiting: later edits keep saving.
     await h.setAnnotations([ann('mine'), ann('waiting-on-b'), ann('later')]);
     await tick(DEBOUNCE_WAIT_MS);
     expect(diskIds()).toEqual(['mine', 'waiting-on-b', 'later']);
@@ -579,7 +510,7 @@ describe('in-place switch onto another draft target (#1590)', () => {
   test.skipIf(!hasDom)('an emptied session does not delete the target\'s draft; its items are merged in instead', async () => {
     const h = await mountHost([]);
     await h.setAnnotations([ann('mine')]);
-    await h.setAnnotations([]); // engaged, then emptied
+    await h.setAnnotations([]);
     await tick(DEBOUNCE_WAIT_MS);
     saveDraft(DRAFT_KEY, { codeAnnotations: [ann('waiting-on-b')], draftGeneration: 20, ts: Date.now() });
     await h.adopt({ found: true, draftGeneration: 20 });
@@ -592,7 +523,7 @@ describe('in-place switch onto another draft target (#1590)', () => {
 
   test.skipIf(!hasDom)('a comment deleted this session is not merged back from a target saved before the delete', async () => {
     const h = await mountHost([ann('keep'), ann('x')]);
-    await h.setAnnotations([ann('keep')]); // x deleted
+    await h.setAnnotations([ann('keep')]);
     saveDraft(DRAFT_KEY, { codeAnnotations: [ann('keep'), ann('x'), ann('y')], draftGeneration: 30, ts: Date.now() });
     await h.adopt({ found: true, draftGeneration: 30 });
     await tick(0);
@@ -612,8 +543,6 @@ describe('in-place switch onto another draft target (#1590)', () => {
   });
 
   describe('switching again while the previous target\'s load is still in flight', () => {
-    // A transport whose loads resolve only when the test says so, so a slow
-    // B load can be made to land after the switch to C.
     function deferredTransport() {
       const loads: Array<(v: { data: unknown; generation: number | null }) => void> = [];
       const saves: Array<{ codeAnnotations?: Array<{ id: string }> }> = [];
@@ -637,10 +566,10 @@ describe('in-place switch onto another draft target (#1590)', () => {
         await h.setViewed(new Set(['b.ts']));
         await act(async () => {
           await h.result.current!.flushBeforeSwitch();
-          h.result.current!.adoptDraftTarget(undefined); // attempted switch failed
+          h.result.current!.adoptDraftTarget(undefined);
         });
         await tick(DEBOUNCE_WAIT_MS);
-        expect(t.saves).toEqual([]); // must not overwrite the unread draft
+        expect(t.saves).toEqual([]);
         await act(async () => {
           t.loads.shift()!({ data: { codeAnnotations: [ann('waiting-on-b')], draftGeneration: 5 }, generation: null });
         });
@@ -659,7 +588,7 @@ describe('in-place switch onto another draft target (#1590)', () => {
         await tick(DEBOUNCE_WAIT_MS);
         await act(async () => { h.result.current!.adoptDraftTarget(undefined); });
         await h.setAnnotations([ann('mine'), ann('later')]);
-        await tick(DEBOUNCE_WAIT_MS); // retries the protected read, then merges
+        await tick(DEBOUNCE_WAIT_MS);
         await tick(DEBOUNCE_WAIT_MS);
         expect(h.ids()).toEqual(['mine', 'later', 'waiting-on-b']);
         expect(t.saves.every(body => body.codeAnnotations?.some(a => a.id === 'waiting-on-b'))).toBe(true);
@@ -670,15 +599,14 @@ describe('in-place switch onto another draft target (#1590)', () => {
     test.skipIf(!hasDom)('A→B(draft, slow)→C(no draft): nothing stale is merged, and C keeps saving', async () => {
       const t = deferredTransport();
       const h = await mountHost([ann('mine')]);
-      t.loads.shift()?.({ data: null, generation: null }); // the page-load GET
+      t.loads.shift()?.({ data: null, generation: null });
       await tick(0);
-      await h.adopt({ found: true, draftGeneration: 5 }); // B: load in flight
+      await h.adopt({ found: true, draftGeneration: 5 });
       await h.setViewed(new Set(['b.ts']));
-      await h.adopt({ found: false, draftGeneration: null }); // C
+      await h.adopt({ found: false, draftGeneration: null });
       await h.setAnnotations([ann('mine'), ann('on-c')]);
       await tick(DEBOUNCE_WAIT_MS);
       expect(t.saves.at(-1)?.codeAnnotations?.map((a) => a.id)).toEqual(['mine', 'on-c']);
-      // B's load finally lands: ignored.
       await act(async () => { t.loads.shift()?.({ data: { codeAnnotations: [ann('stale-b')], draftGeneration: 5, ts: 1 }, generation: null }); });
       await tick(0);
       expect(h.ids()).toEqual(['mine', 'on-c']);
@@ -691,8 +619,8 @@ describe('in-place switch onto another draft target (#1590)', () => {
       const h = await mountHost([ann('mine')]);
       t.loads.shift()?.({ data: null, generation: null });
       await tick(0);
-      await h.adopt({ found: true, draftGeneration: 5 }); // B
-      await h.adopt({ found: true, draftGeneration: 7 }); // C
+      await h.adopt({ found: true, draftGeneration: 5 });
+      await h.adopt({ found: true, draftGeneration: 7 });
       const [bLoad, cLoad] = [t.loads.shift()!, t.loads.shift()!];
       await act(async () => { cLoad({ data: { codeAnnotations: [ann('on-c')], draftGeneration: 7, ts: 1 }, generation: null }); });
       await act(async () => { bLoad({ data: { codeAnnotations: [ann('stale-b')], draftGeneration: 5, ts: 1 }, generation: null }); });
@@ -702,15 +630,13 @@ describe('in-place switch onto another draft target (#1590)', () => {
       await h.unmount();
     });
 
-    // A transport whose target loads follow a script: each entry answers one
-    // load call ('fail' rejects, 'hang' never settles, otherwise resolves).
     function scriptedTransport(script: Array<'fail' | 'hang' | { data: unknown }>) {
       const saves: Array<{ codeAnnotations?: Array<{ id: string }> }> = [];
       let calls = 0;
       setDraftTransport({
         load: () => {
           calls += 1;
-          if (calls === 1) return Promise.resolve({ data: null, generation: null }); // page-load GET
+          if (calls === 1) return Promise.resolve({ data: null, generation: null });
           const step = script.shift() ?? 'fail';
           if (step === 'fail') return Promise.reject(new Error('offline'));
           if (step === 'hang') return new Promise(() => {});
@@ -740,7 +666,7 @@ describe('in-place switch onto another draft target (#1590)', () => {
       const h = await mountHost([ann('mine')], { targetLoadTimeoutMs: 50 });
       await h.adopt({ found: true, draftGeneration: 5 });
       await h.setViewed(new Set(['b.ts']));
-      await tick(100); // the 50ms timeout fires; the retry reads B and merges
+      await tick(100);
       await tick(DEBOUNCE_WAIT_MS);
       expect(h.ids()).toEqual(['mine', 'waiting-on-b']);
       expect(t.saves.at(-1)?.codeAnnotations?.map((a) => a.id)).toEqual(['mine', 'waiting-on-b']);
@@ -748,18 +674,15 @@ describe('in-place switch onto another draft target (#1590)', () => {
     });
 
     test.skipIf(!hasDom)('when both attempts fail the unread draft is never overwritten; the next change retries the read and saves once it succeeds', async () => {
-      // Initial read: two failures. The switch's own save attempt re-reads:
-      // two more failures. The next edit's save attempt re-reads: success.
       const t = scriptedTransport(['fail', 'fail', 'fail', 'fail', bDraft]);
       const h = await mountHost([ann('mine')]);
       await h.adopt({ found: true, draftGeneration: 5 });
       await h.setViewed(new Set(['b.ts']));
       await tick(DEBOUNCE_WAIT_MS);
-      expect(t.saves).toEqual([]); // nothing written over B's unread draft
-      // The reviewer keeps working: the next save attempt re-reads B first.
+      expect(t.saves).toEqual([]);
       await h.setAnnotations([ann('mine'), ann('later')]);
-      await tick(DEBOUNCE_WAIT_MS); // this save attempt re-reads B and merges
-      await tick(DEBOUNCE_WAIT_MS); // then the merged state is saved
+      await tick(DEBOUNCE_WAIT_MS);
+      await tick(DEBOUNCE_WAIT_MS);
       expect(h.ids()).toEqual(['mine', 'later', 'waiting-on-b']);
       expect(t.saves.at(-1)?.codeAnnotations?.map((a) => a.id)).toEqual(['mine', 'later', 'waiting-on-b']);
       await h.unmount();
@@ -772,7 +695,7 @@ describe('in-place switch onto another draft target (#1590)', () => {
       await h.setViewed(new Set(['b.ts']));
       await tick(DEBOUNCE_WAIT_MS);
       expect(t.saves).toEqual([]);
-      await h.adopt({ found: false, draftGeneration: null }); // on to C
+      await h.adopt({ found: false, draftGeneration: null });
       await tick(DEBOUNCE_WAIT_MS);
       expect(t.saves.at(-1)?.codeAnnotations?.map((a) => a.id)).toEqual(['mine']);
       await h.unmount();

@@ -1,14 +1,5 @@
 import React from 'react';
 
-/**
- * Obsidian icons.
- *
- * ObsidianIcon      — Full branded logo with background rect and gradients. Use for
- *                     larger display contexts (settings, onboarding, etc.).
- * ObsidianIconRaw   — Minimal path-only mark in Obsidian purple. Use inline in compact
- *                     UI surfaces like the file browser directory header.
- */
-
 interface IconProps {
   className?: string;
 }

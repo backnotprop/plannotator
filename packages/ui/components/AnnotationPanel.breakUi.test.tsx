@@ -1,17 +1,3 @@
-/**
- * AnnotationPanel cards under worst-case data (Workspaces' break-ui pass).
- *
- * What regresses if this fails: an unbroken token (a long URL, a stack trace,
- * a German compound) in a comment runs past the card instead of wrapping; a
- * comment from an earlier year reads as this year ("Oct 20"); a long author
- * name pushes the time out of the card; or a right-to-left name splits the
- * time around itself ("6 · <name> m").
- *
- * happy-dom does no layout, so the wrap and truncation rules are asserted as
- * the classes that carry them; the headless screenshots in the PR show them.
- *
- * DOM-gated (DOM_TESTS=1).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -110,8 +96,6 @@ describe('AnnotationPanel worst-case cards', () => {
 
   test.skipIf(!hasDom)('a comment from an earlier year names its year; this year does not', async () => {
     const old = new Date(2023, 9, 20, 12).getTime();
-    // 30 days back: older than the relative "Nd" window, and this year
-    // except in January.
     const recent = Date.now() - 30 * 86_400_000;
     const el = await mount([comment('old', { createdA: old }), comment('new', { createdA: recent })]);
     const oldTime = card(el, 'old').querySelector('[data-annotation-time]')!.textContent!;
@@ -133,7 +117,6 @@ describe('AnnotationPanel worst-case cards', () => {
     expect(time.className).toContain('shrink-0');
     expect(author.contains(time)).toBe(false);
     expect(time.textContent).toBe('6m');
-    // The line still reads as it did.
     expect(c.querySelector('[data-annotation-byline]')!.textContent).toBe(`${LONG_NAME} · 6m`);
   });
 

@@ -1,15 +1,3 @@
-/**
- * The stage's `clear` rows: a host floats things over the top and bottom of the
- * stage, and Fit and the pan's limits work between them while the stage itself
- * stays whole. The failures this guards: a picture fitted under what floats, a
- * pan that cannot bring its bottom clear, a pinch or a pan that drifts because
- * its coordinates are off by the top row, a picture jumping when the rows change
- * while it is zoomed, and a host that passes nothing (the lightbox) seeing any
- * of it.
- *
- * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
- * happy-dom has no layout, so the stage's box and the image's size are given here.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -31,7 +19,6 @@ afterEach(async () => {
   document.body.replaceChildren();
 });
 
-/** A 1000 × 600 stage whose top row is 100 px and whose bottom row is 200 px, so 300 px stay clear. */
 const CLEAR: ZoomClear = { top: 100, bottom: 200 };
 const CLEAR_BOTTOM = 600 - 200;
 
@@ -109,7 +96,6 @@ async function ctrlWheel(stage: HTMLElement, deltaY: number, x: number, y: numbe
 describe.if(hasDom)('the stage keeps clear of the rows a host floats things over', () => {
   test('Fit fits the picture between the rows', async () => {
     const { img } = await mount('fit', CLEAR);
-    // 300 px of height for a 2:1 picture: 600 × 300 at 30%, centred across, from the top row down.
     expect(view(img)).toEqual({ x: 200, y: 100, scale: 0.3 });
   });
 
@@ -174,7 +160,6 @@ describe.if(hasDom)('the stage keeps clear of the rows a host floats things over
     expect(view(img)).toEqual(onScreen);
     await setClear('actual', CLEAR);
     expect(view(img)).toEqual(onScreen);
-    // At the top stop, with nothing above the picture: once the row goes there is nothing to hold it down.
     await panBy(stage, 0, 5000);
     expect(view(img).y).toBe(CLEAR.top);
     await setClear('actual', undefined);
@@ -182,19 +167,16 @@ describe.if(hasDom)('the stage keeps clear of the rows a host floats things over
   });
 
   test('a tall picture panned at Fit stays where it is on screen when the rows come or go; resting at Fit it refits', async () => {
-    // 1000 × 3000 fitted to the stage's width: it reads from the top, 3000 px tall under a 300 px clear space.
     const { stage, img } = await mount('fit', CLEAR, 1000, 3000, 'width');
     const resting = view(img);
     expect(resting.scale).toBe(1);
     await panBy(stage, 0, -400);
     const panned = view(img);
     expect(panned.y).toBeLessThan(resting.y);
-    // Hide, minimize, a second typed line: the rows go, and the place the person panned to holds.
     await setClear('fit', undefined, 'width');
     expect(view(img).y).toBe(panned.y);
     await setClear('fit', CLEAR, 'width');
     expect(view(img).y).toBe(panned.y);
-    // Resting at Fit it still eases to the new space.
     await act(async () => root!.unmount());
     root = null;
     const again = await mount('fit', CLEAR, 1000, 3000, 'width');

@@ -2,11 +2,6 @@ import type * as React from "react";
 
 import { cn } from "../../lib/utils";
 
-/**
- * Textarea — multi-line text input primitive. `field-sizing-content` auto-grows to
- * fit content. Defaults to `bg-background`; pass `bg-card` via className when used
- * inside an elevated surface (e.g. annotation/comment editors).
- */
 function Textarea({ className, ...props }: React.ComponentProps<"textarea">) {
   return (
     <textarea

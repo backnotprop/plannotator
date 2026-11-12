@@ -3,26 +3,9 @@ import { createPortal } from "react-dom";
 import { ensureHighlight, highlightToHtml } from "../utils/codeHighlight";
 import { useFenceTheme } from "../hooks/useFenceTheme";
 
-/**
- * The floating code window a code-file reference opens on hover: a few lines
- * of one file, syntax highlighted, with line numbers. Portalled to the body
- * and positioned under (or above) its anchor.
- *
- * Used by plan / annotate code-file links (`CodeFileLink` in InlineMarkdown,
- * the exact range only) and by code review's Call Flow locations
- * (`CallFlowTreeView`, with `contextLines` around the target).
- *
- * A host may add its own controls to the header (`actions`), draw the window
- * inside its own root (`container`), and show it as a sheet from the bottom edge
- * where there is no hover (`sheet`; a click on the scrim calls `onDismiss`).
- */
-
-/** Lines highlighted above the shown ones so a range opening inside a block comment or string tokenises as one. */
 const HIGHLIGHT_LEAD_IN_LINES = 40;
-/** Gap kept between the window and the viewport edge. */
 const VIEWPORT_MARGIN = 8;
 
-/** The highlighter language for a file path, by extension; undefined renders plain text. */
 export function codeSnippetLanguage(filepath: string): string | undefined {
   const ext = filepath.split('.').pop()?.toLowerCase();
   const map: Record<string, string> = {
@@ -41,27 +24,18 @@ export function codeSnippetLanguage(filepath: string): string | undefined {
 
 export interface CodeSnippetPreviewProps {
   anchorEl: HTMLElement | null;
-  /** The whole file; the preview slices the lines it shows. */
   contents: string;
   filepath: string;
-  /** One-based first line of the target range. */
   line: number;
   lineEnd?: number;
-  /** Lines shown above and below the target range, the target rows marked. 0 (default) shows the range alone. */
   contextLines?: number;
-  /** Header label; defaults to the file's basename. */
   title?: string;
-  /** Called when the page or a scroller scrolls: the window is placed once and would drift from its anchor. */
   onDismiss?: () => void;
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
-  /** A host's controls, at the end of the header. */
   actions?: React.ReactNode;
-  /** Where the window is portalled; the body by default. */
   container?: Element | null;
-  /** A sheet from the bottom edge over a scrim, instead of a window at the anchor. */
   sheet?: boolean;
-  /** The window's element, for a host that moves focus into `actions`. */
   windowRef?: React.Ref<HTMLDivElement>;
 }
 
@@ -87,17 +61,11 @@ export const CodeSnippetPreview: React.FC<CodeSnippetPreviewProps> = ({
   const start = Math.max(0, targetStart - contextLines);
   const end = Math.min(allLines.length, targetEnd + contextLines);
   const snippet = allLines.slice(start, end).join('\n');
-  // Highlight from a little earlier than the first shown line: a range that
-  // starts inside a block comment or template literal would otherwise colour
-  // that text as code.
   const highlightStart = Math.max(0, start - HIGHLIGHT_LEAD_IN_LINES);
   const highlightSource = allLines.slice(highlightStart, end).join('\n');
   const marksTarget = contextLines > 0;
 
   const fenceTheme = useFenceTheme();
-  // Bumped once the grammar is attached, to re-run the memo below with the
-  // highlighter warm. Until then the snippet renders as plain text — no
-  // auto-detection, and an unknown extension simply stays plain.
   const [highlighterGeneration, setHighlighterGeneration] = useState(0);
   const lang = codeSnippetLanguage(filepath);
 
@@ -111,10 +79,8 @@ export const CodeSnippetPreview: React.FC<CodeSnippetPreviewProps> = ({
   }, [lang, fenceTheme]);
 
   useEffect(() => {
-    // A sheet does not hang from its anchor, so a scroll under it moves nothing.
     if (!onDismiss || sheet) return;
     const dismiss = (event: Event) => {
-      // The window's own code scrolling is reading, not drift.
       if (event.target instanceof Node && windowRef.current?.contains(event.target)) return;
       onDismiss();
     };
@@ -123,20 +89,12 @@ export const CodeSnippetPreview: React.FC<CodeSnippetPreviewProps> = ({
   }, [onDismiss, sheet]);
 
   const highlightedLines = useMemo(() => {
-    // Highlight the snippet as one unit so multi-line constructs (block
-    // comments, template literals) tokenise correctly, then split back into
-    // rows: the highlighter joins lines with "\n" and never emits one inside a
-    // span, so the split is exact.
     const html = lang ? highlightToHtml(highlightSource, lang, fenceTheme) : null;
     if (html !== null) return html.split('\n').slice(start - highlightStart);
     return snippet.split('\n').map(text =>
       text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'));
-    // highlighterGeneration is the "grammar just became available" signal.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snippet, highlightSource, start, highlightStart, lang, fenceTheme, highlighterGeneration]);
 
-  // Clamp against the window's rendered width (it sizes to its longest line,
-  // up to its max width) so a wide snippet never runs off the right edge.
   const windowRef = useRef<HTMLDivElement | null>(null);
   const [renderedWidth, setRenderedWidth] = useState<number | null>(null);
   useLayoutEffect(() => {
@@ -152,7 +110,6 @@ export const CodeSnippetPreview: React.FC<CodeSnippetPreviewProps> = ({
   const top = showAbove ? undefined : rect.bottom + 4;
   const bottom = showAbove ? window.innerHeight - rect.top + 4 : undefined;
   const left = Math.max(VIEWPORT_MARGIN, Math.min(rect.left, window.innerWidth - (renderedWidth ?? 520) - VIEWPORT_MARGIN));
-  // The room on the side it opens to, so its last lines scroll rather than run off the screen.
   const room = (showAbove ? rect.top : spaceBelow) - 4 - VIEWPORT_MARGIN;
   const label = title ?? filepath.split('/').pop();
 
@@ -175,7 +132,6 @@ export const CodeSnippetPreview: React.FC<CodeSnippetPreviewProps> = ({
       onMouseLeave={onMouseLeave}
     >
       <div className={`px-3 py-1.5 border-b border-border/50 text-muted-foreground font-mono flex items-center justify-between gap-x-4 flex-shrink-0 ${sheet ? 'flex-wrap text-xs pt-3' : 'text-[10px]'}`}>
-        {/* A sheet is narrow: the whole label on its own line, the controls under it. */}
         <span className={sheet ? 'w-full [overflow-wrap:anywhere]' : 'min-w-0 truncate'}>{label}</span>
         <span className={`flex items-center gap-2 ${sheet ? 'w-full' : 'flex-shrink-0'}`}>
           <span className={`opacity-60 ${sheet ? 'mr-auto' : ''}`}>{lineEnd && lineEnd !== line ? `lines ${line}–${lineEnd}` : `line ${line}`}</span>

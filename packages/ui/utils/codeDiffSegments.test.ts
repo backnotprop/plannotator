@@ -3,7 +3,6 @@ import { chunkSegments, codeSegmentsToHtml, indentRanges, slicePieces, wordDiffS
 import { computeCodeInlineDiff } from "./planDiffEngine";
 import type { HighlightRun } from "./codeHighlight";
 
-/** Runs for a stand-in grammar: digits in one colour, every other stretch in another. */
 const runsFor = (text: string): HighlightRun[] =>
   [...text.matchAll(/\d+|[^\d\n]+/g)].map((m) => ({
     start: m.index!,
@@ -33,7 +32,6 @@ describe("chunkSegments", () => {
     const struck = segments.filter((s) => s.struck).map((s) => s.pieces.map((p) => p.text).join(""));
     expect(struck.every((t) => !/^[ \t]/.test(t))).toBe(true);
     expect(segments.filter((s) => !s.struck).map((s) => s.pieces.map((p) => p.text).join(""))).toEqual(["      ", "      "]);
-    // The colours survive the strike.
     expect(segments.some((s) => s.struck && s.pieces.some((p) => p.style === "color:#00ff00"))).toBe(true);
   });
 

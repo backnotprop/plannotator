@@ -12,7 +12,6 @@ export const Landing: React.FC<LandingProps> = ({ onEnter, shareBaseUrl }) => {
   const demoUrl = shareBaseUrl || "https://share.plannotator.ai";
   return (
     <div className="min-h-screen bg-background text-foreground">
-      {/* Nav */}
       <nav className="fixed top-0 left-0 right-0 h-12 flex items-center justify-between px-6 bg-background/80 backdrop-blur-sm border-b border-border/30 z-50">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold tracking-tight">
@@ -43,9 +42,7 @@ export const Landing: React.FC<LandingProps> = ({ onEnter, shareBaseUrl }) => {
         </div>
       </nav>
 
-      {/* Content wrapper with vertical borders */}
       <div className="max-w-4xl mx-auto border-x border-border/30">
-        {/* Hero */}
         <section className="pt-32 pb-20 px-8">
           <div className="max-w-2xl">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium mb-6">
@@ -75,7 +72,6 @@ export const Landing: React.FC<LandingProps> = ({ onEnter, shareBaseUrl }) => {
 
             <div className="flex flex-col gap-3">
               <div className="flex items-center gap-3">
-                {/* YouTube button - Claude Code */}
                 <a
                   href="https://www.youtube.com/watch?v=a_AT7cEN_9I"
                   target="_blank"
@@ -92,7 +88,6 @@ export const Landing: React.FC<LandingProps> = ({ onEnter, shareBaseUrl }) => {
                   Watch for Claude Code
                 </a>
 
-                {/* Open Demo button */}
                 {onEnter ? (
                   <button
                     onClick={onEnter}
@@ -136,7 +131,6 @@ export const Landing: React.FC<LandingProps> = ({ onEnter, shareBaseUrl }) => {
                 )}
               </div>
 
-              {/* OpenCode video link */}
               <a
                 href="https://youtu.be/_N7uo0EFI-U"
                 target="_blank"
@@ -149,7 +143,6 @@ export const Landing: React.FC<LandingProps> = ({ onEnter, shareBaseUrl }) => {
           </div>
         </section>
 
-        {/* Problem → Solution */}
         <section className="py-16 px-8 border-t border-border/30">
           <div className="grid md:grid-cols-2 gap-8 max-w-2xl">
             <div>
@@ -175,7 +168,6 @@ export const Landing: React.FC<LandingProps> = ({ onEnter, shareBaseUrl }) => {
           </div>
         </section>
 
-        {/* Privacy & Sharing */}
         <section className="py-16 px-8 border-t border-border/30">
           <div className="grid md:grid-cols-2 gap-8 max-w-2xl">
             <div className="flex items-start gap-4">
@@ -264,15 +256,12 @@ export const Landing: React.FC<LandingProps> = ({ onEnter, shareBaseUrl }) => {
           </div>
         </section>
 
-        {/* Preview */}
         <section className="py-16 px-8 border-t border-border/30">
           <h2 className="text-xl font-semibold mb-8 text-center">
             What it looks like
           </h2>
 
-          {/* App Preview */}
           <div className="rounded-xl border border-border/50 bg-card/50 overflow-hidden shadow-2xl">
-            {/* Mock Header */}
             <div className="h-10 bg-card/80 border-b border-border/30 flex items-center px-4 gap-2">
               <div className="flex gap-1.5">
                 <div className="w-2.5 h-2.5 rounded-full bg-destructive/60" />
@@ -288,15 +277,11 @@ export const Landing: React.FC<LandingProps> = ({ onEnter, shareBaseUrl }) => {
               <div className="w-16" />
             </div>
 
-            {/* Mock Content */}
             <div className="flex h-80">
-              {/* Document Area */}
               <div className="flex-1 p-6 bg-background/50 flex items-start justify-center">
                 <div className="w-full max-w-sm bg-card rounded-lg border border-border/30 p-5 shadow-lg">
-                  {/* Mock heading */}
                   <div className="h-3 w-3/4 bg-foreground/80 rounded mb-4" />
 
-                  {/* Mock paragraph */}
                   <div className="space-y-2 mb-4">
                     <div className="h-2 w-full bg-muted-foreground/30 rounded" />
                     <div className="h-2 w-5/6 bg-muted-foreground/30 rounded" />
@@ -307,10 +292,8 @@ export const Landing: React.FC<LandingProps> = ({ onEnter, shareBaseUrl }) => {
                     </div>
                   </div>
 
-                  {/* Mock subheading */}
                   <div className="h-2.5 w-1/2 bg-foreground/60 rounded mb-3 mt-5" />
 
-                  {/* Mock list */}
                   <div className="space-y-2 mb-4">
                     <div className="flex items-center gap-2">
                       <div className="w-1 h-1 rounded-full bg-primary/60" />
@@ -326,7 +309,6 @@ export const Landing: React.FC<LandingProps> = ({ onEnter, shareBaseUrl }) => {
                     </div>
                   </div>
 
-                  {/* Mock code block */}
                   <div className="bg-muted/50 rounded p-2 space-y-1.5">
                     <div className="h-1.5 w-1/2 bg-primary/40 rounded" />
                     <div className="h-1.5 w-2/3 bg-muted-foreground/30 rounded" />
@@ -335,7 +317,6 @@ export const Landing: React.FC<LandingProps> = ({ onEnter, shareBaseUrl }) => {
                 </div>
               </div>
 
-              {/* Mock Sidebar */}
               <div className="w-48 border-l border-border/30 bg-card/30 p-3">
                 <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-3 flex items-center justify-between">
                   <span>Annotations</span>
@@ -344,7 +325,6 @@ export const Landing: React.FC<LandingProps> = ({ onEnter, shareBaseUrl }) => {
                   </span>
                 </div>
 
-                {/* Mock annotation cards */}
                 <div className="space-y-2">
                   <div className="p-2 rounded-md border border-destructive/30 bg-destructive/5">
                     <div className="flex items-center gap-1 mb-1.5">
@@ -376,7 +356,6 @@ export const Landing: React.FC<LandingProps> = ({ onEnter, shareBaseUrl }) => {
           </p>
         </section>
 
-        {/* How it works */}
         <section className="py-16 px-8 border-t border-border/30 bg-card/30">
           <h2 className="text-xl font-semibold mb-8">How it works</h2>
 
@@ -400,7 +379,6 @@ export const Landing: React.FC<LandingProps> = ({ onEnter, shareBaseUrl }) => {
           </div>
         </section>
 
-        {/* Technical */}
         <section className="py-16 px-8 border-t border-border/30 bg-card/30">
           <h2 className="text-xl font-semibold mb-6">Technical details</h2>
           <ul className="space-y-2 text-sm text-muted-foreground max-w-2xl mb-6">
@@ -446,7 +424,6 @@ export const Landing: React.FC<LandingProps> = ({ onEnter, shareBaseUrl }) => {
           </a>
         </section>
 
-        {/* Footer */}
         <footer className="py-8 px-8 border-t border-border/30 text-center">
           <p className="text-xs text-muted-foreground inline-flex items-center justify-center gap-1">
             <a

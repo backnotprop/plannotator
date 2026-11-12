@@ -1,22 +1,3 @@
-/**
- * Decision recording on ANY question, and the separate opener for the host's
- * decision card (ui 0.52.1; Workspaces' Inbox, approved 2026-10-06: "the tag
- * is the switch" on every question, and "clicking the tag's words opens the
- * decision card").
- *
- * What regresses if this fails: a question without `Decision: when answered`
- * never offers the tag even when the host opts in (`questionDecisionScope:
- * 'any'`) and supplies a recording state, or offers it when the host did not
- * (including a 0.52.0 host that returns a boolean for every question without
- * opting in, which 0.52.0 documented as ignored); switching it on does not show the
- * "Answering this records a decision" row; with `onOpenDecision` the tag stays
- * one button (so the words cannot open the card), the two targets nest, the
- * opener does not hand the host an anchor element, or either target drops out
- * of the tab order; a read-only card becomes interactive; or a card given none
- * of the new props changes markup (Plannotator passes none of them).
- *
- * DOM-gated (DOM_TESTS=1).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { useState } from 'react';
 import { act } from 'react';
@@ -26,7 +7,6 @@ import { parseMarkdownToBlocks } from '../../utils/parser';
 import { BlockRenderer } from '../BlockRenderer';
 
 const hasDom = typeof document !== 'undefined';
-// Viewer reads the DOM at module scope; load it only under DOM_TESTS.
 const viewerModule = hasDom ? await import('../Viewer') : null;
 
 const DOC = `:::question
@@ -57,7 +37,6 @@ Decision: [Use REST](https://ws.example/decisions/dec_1)
 
 type Props = Partial<React.ComponentProps<typeof BlockRenderer>>;
 
-/** Renders every block; `perQuestion` adds props for each question block. */
 function Cards({
   extra = {},
   readOnly = false,
@@ -89,8 +68,6 @@ function Cards({
   );
 }
 
-/** A host that keeps the recording state itself: off unless the question
- *  asks for a decision, flipped by the toggle. */
 function Host({
   toggles,
   opened,
@@ -137,8 +114,6 @@ afterEach(async () => {
 const cards = (el: HTMLElement) => Array.from(el.querySelectorAll<HTMLFieldSetElement>('fieldset[data-question-key]'));
 const toggle = (card: HTMLElement) => card.querySelector<HTMLButtonElement>('button[data-question-decision-toggle]');
 const opener = (card: HTMLElement) => card.querySelector<HTMLButtonElement>('button[data-question-decision-open]');
-// Assertions compare against null rather than passing elements to expect():
-// a failing matcher that pretty-prints a happy-dom node never finishes.
 const decisionRow = (card: HTMLElement) => card.querySelector('[data-question-decision-row]');
 const hasTagText = (card: HTMLElement) => (card.textContent ?? '').includes('Records a decision');
 
@@ -148,7 +123,6 @@ async function click(el: Element) {
   });
 }
 
-/** Focusable controls in document (tab) order; none of these set tabindex. */
 const tabbables = (el: HTMLElement) =>
   Array.from(el.querySelectorAll<HTMLElement>('button, input, textarea, a[href]')).filter(
     (n) => !(n as HTMLButtonElement).disabled && n.getAttribute('tabindex') !== '-1',
@@ -156,14 +130,11 @@ const tabbables = (el: HTMLElement) =>
 
 describe('decision recording on a question without a decision line', () => {
   test.skipIf(!hasDom)('without the any scope a supplied state leaves the plain question alone (0.52.0)', async () => {
-    // A 0.52.0 host may return a boolean for every question: the 0.52.0
-    // contract said a question with no decision line ignores it.
     const el = await mount(<Cards extra={{ questionDecisionRecording: true, onToggleQuestionDecisionRecording: () => {}, onOpenQuestionDecision: () => {} }} />);
     const [plain, flagged] = cards(el);
     expect(hasTagText(plain)).toBe(false);
     expect(plain.hasAttribute('data-question-decision-recording')).toBe(false);
     expect(decisionRow(plain) === null).toBe(true);
-    // The flagged question still gets its tag and the new opener.
     expect(opener(flagged) !== null).toBe(true);
   });
 
@@ -177,7 +148,6 @@ describe('decision recording on a question without a decision line', () => {
     const plainOff = cards(supplied)[0];
     expect(hasTagText(plainOff)).toBe(true);
     expect(plainOff.dataset.questionDecisionRecording).toBe('off');
-    // The question's kind attribute does not move: it still has no decision line.
     expect(plainOff.hasAttribute('data-question-decision')).toBe(false);
     expect(decisionRow(plainOff) === null).toBe(true);
   });
@@ -227,7 +197,6 @@ describe('the separate opener for the host decision card', () => {
     const sw = toggle(flagged)!;
     const words = opener(flagged)!;
     expect(sw !== null && words !== null).toBe(true);
-    // Siblings in one tag, never one inside the other.
     expect(sw.contains(words) || words.contains(sw)).toBe(false);
     expect(sw.parentElement === words.parentElement).toBe(true);
     expect(sw.parentElement!.hasAttribute('data-question-decision-tag')).toBe(true);
@@ -246,14 +215,9 @@ describe('the separate opener for the host decision card', () => {
     await click(sw);
     expect(toggles).toEqual([[key, false]]);
     expect(opened.length).toBe(1);
-    // Off: the whole tag draws off, and the words still open the card (the
-    // host decides what an off question's card does).
     const off = cards(el)[1];
     expect(toggle(off)!.parentElement!.style.outlineStyle).toBe('dotted');
     expect(off.dataset.questionDecisionRecording).toBe('off');
-    // The fade is in the color (a color-mix(), which happy-dom drops, so it is
-    // checked in Chromium), never `opacity` on the tag: that would also fade
-    // the focus ring its switch and words draw.
     expect(toggle(off)!.parentElement!.style.opacity).toBe('');
     expect(decisionRow(off) === null).toBe(true);
     await click(opener(off)!);
@@ -273,7 +237,6 @@ describe('the separate opener for the host decision card', () => {
       expect(target.type).toBe('button');
       expect(target.className).toContain('focus-visible:ring-2');
     }
-    // Every card control after the tag still follows it (the tag is first).
     expect(sw).toBe(0);
   });
 
@@ -304,11 +267,9 @@ describe('read-only and no-prop cards', () => {
       expect(toggle(card) === null).toBe(true);
       expect(opener(card) === null).toBe(true);
     }
-    // The plain question still shows the state it was given, as a plain tag.
     expect(hasTagText(cards(el)[0])).toBe(true);
     expect(cards(el)[0].querySelector('button') === null).toBe(true);
 
-    // Viewer drops both handlers under readOnly even with an answer handler.
     const Viewer = viewerModule!.Viewer;
     const blocks = parseMarkdownToBlocks(DOC);
     const v = await mount(
@@ -368,14 +329,10 @@ describe('read-only and no-prop cards', () => {
   });
 
   test.skipIf(!hasDom)('no host props: the card markup is unchanged by the new props being absent', async () => {
-    // useId differs between roots; everything else must match.
     const html = (el: HTMLElement) => el.innerHTML.replace(/(q-(?:prompt|context|suggest|note)-|question-)[A-Za-z0-9_«»]+/g, '$1#');
     const plain = await mount(<Cards />);
-    // An explicit undefined for each new seam is the same card.
     const spelled = await mount(<Cards extra={{ questionDecisionRecording: undefined, questionDecisionScope: undefined, onOpenQuestionDecision: undefined }} />);
     expect(html(spelled)).toBe(html(plain));
-    // Sentinels: the plain question has no tag and no attribute; the flagged
-    // question's tag is a plain span with its row.
     const [p, flagged] = cards(plain);
     expect(hasTagText(p)).toBe(false);
     expect(p.hasAttribute('data-question-decision-recording')).toBe(false);

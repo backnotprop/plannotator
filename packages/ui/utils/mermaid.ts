@@ -1,50 +1,10 @@
-/**
- * Mermaid runtime slot.
- *
- * ONE code path feeds `MermaidBlock`: `loadMermaidRuntime()`. It resolves at
- * once from a filled slot and otherwise imports the runtime lazily: the
- * runtime is fetched on the first diagram, a failed import is dropped from
- * the memo so the next call issues a fresh `import()`, and the block
- * re-attempts once and offers Retry.
- *
- * Since Mermaid 12 (ELK layout by default, about 1.8 MB more runtime than 11)
- * the lazy path IS Plannotator's own path: `packages/editor/App.tsx` no longer
- * imports `./mermaid-eager`, so a plan with no diagram never downloads the
- * runtime in a chunked build (the share portal, any host that bundles by
- * route), nor in the single-file builds, which carry it as a packed chunk
- * their server serves on request (build/pack-app.ts). A host that wants the runtime registered at
- * startup imports `./mermaid-eager`, which fills the slot at module
- * evaluation; the slot then short-circuits this loader.
- *
- * This module has NO static import of `mermaid`; the only place the
- * dependency is named at runtime is the default loader's `import('mermaid')`.
- */
 import type { Mermaid, MermaidConfig } from 'mermaid';
 
-/**
- * Width in px at which node labels wrap (#2064). Mermaid 12 lowered the
- * default from 200 to 120, and at Plannotator's 16 px label text that wraps
- * after about eight CJK characters and splits short Latin labels. 140 is the
- * owner-approved middle: long labels still wrap, short ones stay on one line.
- * The themed path (`buildMermaidConfig`) spreads this config, so both the
- * themed and the host-fallback `initialize` carry it.
- */
 export const MERMAID_LABEL_WRAP_WIDTH = 140;
 
-/**
- * Hoisted verbatim from the former module-scope `mermaid.initialize(...)` in
- * MermaidBlock. Nothing in it reads a CSS token or the resolved mode.
- * `securityLevel: 'strict'` is a deliberate security pin (see MermaidBlock.test.ts).
- */
 export const MERMAID_CONFIG: MermaidConfig = {
   startOnLoad: false,
   securityLevel: 'strict',
-  /**
-   * Mermaid's own failure output is a "Syntax error in text" graphic drawn
-   * into a temporary node on `document.body`, left there when it throws. The
-   * block shows a failure itself (the source, with a note), so Mermaid draws
-   * nothing for one; `diagram-render` also removes any leftover node.
-   */
   suppressErrorRendering: true,
   theme: 'dark',
   themeVariables: {
@@ -61,17 +21,6 @@ export const MERMAID_CONFIG: MermaidConfig = {
     clusterBorder: '#475569',
     titleColor: '#f8fafc',
     edgeLabelBackground: '#1e293b',
-    /**
-     * Mermaid 12's neo look shadows every node from a fixed
-     * `drop-shadow(1px 2px 2px rgba(185,185,185,1))` grey, which reads as a
-     * halo. The token-driven mapping replaces it per palette
-     * (`buildMermaidShadow` in `./mermaidTheme`); this static config is what a
-     * host with no theme tokens renders with, so it carries the same
-     * toned-down 0.7 geometry with a fixed colour. The value is what
-     * `buildMermaidShadow(#1e293b, 0.7)` returns for THIS config's own slate
-     * ground, which is dark — hence a light shadow, exactly as Mermaid's own
-     * `insertLookDefs` uses a white flood colour on dark themes.
-     */
     dropShadow: 'drop-shadow(0.79px 1.58px 1.58px rgba(210, 212, 217, 0.684))',
   },
   flowchart: {
@@ -79,26 +28,15 @@ export const MERMAID_CONFIG: MermaidConfig = {
     curve: 'basis',
     wrappingWidth: MERMAID_LABEL_WRAP_WIDTH,
   },
-  /**
-   * Mermaid 11 drew state labels with the flowchart width; Mermaid 12 gives
-   * state diagrams their own `wrappingWidth`, also 120, so it is pinned too.
-   */
   state: {
     wrappingWidth: MERMAID_LABEL_WRAP_WIDTH,
   },
 };
 
-/**
- * Who filled the slot. The eager value doubles as a build marker: the literal
- * only reaches a bundle when `./mermaid-eager` is evaluated in it, which is
- * how `tests/entry-assets.test.ts` proves on the built HTML that Plannotator's
- * own bundles do NOT register the runtime eagerly.
- */
 export type MermaidRuntimeSource = 'plannotator-mermaid-eager' | 'loader' | 'host';
 
 export type MermaidRuntimeLoader = () => Promise<Mermaid>;
 
-/** Default lazy loader: import the runtime and initialize it once. */
 const defaultMermaidLoader: MermaidRuntimeLoader = () =>
   import('mermaid').then(({ default: mermaid }) => {
     mermaid.initialize(MERMAID_CONFIG);
@@ -110,42 +48,26 @@ let runtimeSource: MermaidRuntimeSource | null = null;
 let loader: MermaidRuntimeLoader = defaultMermaidLoader;
 let pending: Promise<Mermaid> | null = null;
 
-/**
- * Delay before the block's one automatic re-attempt after a failed lazy
- * import. Only chunked builds can fail here (the share portal, a host that
- * bundles by route); a single-file build resolves the import from itself and
- * a filled slot never loads.
- */
 let retryDelayMs = 750;
 
-/** Current runtime, or `null` while the slot is empty. */
 export function getMermaidRuntime(): Mermaid | null {
   return runtime;
 }
 
-/** How the current runtime was registered, or `null` while the slot is empty. */
 export function getMermaidRuntimeSource(): MermaidRuntimeSource | null {
   return runtimeSource;
 }
 
-/** Register an already-initialized runtime (what `./mermaid-eager` does). */
 export function setMermaidRuntime(next: Mermaid, source: MermaidRuntimeSource = 'host'): void {
   runtime = next;
   runtimeSource = source;
   pending = null;
 }
 
-/** The block's retry delay for the lazy path. */
 export function getMermaidRetryDelayMs(): number {
   return retryDelayMs;
 }
 
-/**
- * Resolve the runtime: at once from a filled slot, otherwise through the
- * loader. A rejected load is dropped from the memo so the next call (the
- * block's automatic re-attempt, a later mount, or the Retry button) issues a
- * fresh `import()` instead of replaying the cached rejection.
- */
 export function loadMermaidRuntime(): Promise<Mermaid> {
   if (runtime) return Promise.resolve(runtime);
   if (!pending) {
@@ -164,7 +86,6 @@ export function loadMermaidRuntime(): Promise<Mermaid> {
   return pending;
 }
 
-/** Test hook: empty the slot, stand in for the lazy import, shorten the retry delay. */
 export function __setMermaidRuntimeLoaderForTests(
   next: MermaidRuntimeLoader | undefined,
   options?: { retryDelayMs?: number },

@@ -1,18 +1,3 @@
-/**
- * A recovered draft that carries other documents' comments (#1545).
- *
- * In plan review, and in annotate sessions on a URL or the last message, the
- * server offers each linked document's saved comments with the session draft
- * (`documents` on GET /api/draft, packages/shared/annotate-draft.ts). What
- * regresses if this fails:
- *  - Draft Recovered counts only the root's comments, or offers nothing when
- *    only a linked document has comments (the reviewer cannot get them back);
- *  - restoring puts a linked document's comments on the root, or drops them;
- *  - dismissing leaves the host no way to discard those documents' copies,
- *    so dismissed comments come back when a document is opened.
- *
- * Requires DOM (happy-dom preload).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -120,7 +105,6 @@ describe('recovered draft with other documents', () => {
   });
 
   test.skipIf(!hasDom)('only a linked document with comments still offers the draft', async () => {
-    // The plan's own draft was emptied; the linked document's comments remain.
     setDraftTransport(transportServing({
       annotations: [],
       globalAttachments: [],

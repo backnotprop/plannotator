@@ -1,13 +1,3 @@
-/**
- * The rich-text Copy through the REAL Viewer and web-highlighter (DOM-gated,
- * DOM_TESTS=1).
- *
- * Failures to catch: the toolbar button stops writing text/html beside
- * text/plain, the copied HTML carries annotation marks, review attributes or
- * theme styles, or the button's arrival changes ordinary copy: Ctrl+C / Cmd+C
- * must still write only the captured plain text through the native copy event
- * and never touch navigator.clipboard (exactly as before the button existed).
- */
 import { afterEach, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -91,7 +81,6 @@ function toolbarButton(name: string): HTMLButtonElement | undefined {
     .find((b) => (b.getAttribute('aria-label') ?? b.title) === name);
 }
 
-/** A clipboard that records every call, plus a ClipboardItem that keeps its blobs. */
 function fakeClipboard() {
   const items: Array<Record<string, Blob>> = [];
   class TestClipboardItem {
@@ -114,7 +103,6 @@ test.skipIf(!hasDom)('the toolbar button copies the selection as text/html plus 
   policy!.setRichCopyEnabled(true);
   await mountAndSelect('four and eight');
   const clipboard = fakeClipboard();
-  // One Copy button (the copy icon), shown on desktop too once rich copy is on.
   const copyButtons = [...document.querySelectorAll<HTMLButtonElement>('.annotation-toolbar button')]
     .filter((b) => /^Cop(y|ied)/.test(b.getAttribute('aria-label') ?? b.title));
   expect(copyButtons).toHaveLength(1);

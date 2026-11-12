@@ -35,8 +35,6 @@ describe('terminal tools announcement gate', () => {
     setStorageBackend(memoryBackend);
 
     expect(needsTerminalToolsAnnouncement()).toBe(true);
-    // Reading must not seed the key: a registry-backed flag would, which is why
-    // this gate reads storage directly (see lookAndFeelAnnouncement.ts).
     expect(memory.size).toBe(0);
 
     markTerminalToolsAnnouncementSeen();
@@ -47,8 +45,6 @@ describe('terminal tools announcement gate', () => {
     setStorageBackend(memoryBackend);
     memory.set('plannotator-announce-tui-herdr-seen', 'true');
 
-    // The house pattern is an exact version match, so bumping the version in
-    // the module re-announces rather than silently staying dismissed.
     expect(needsTerminalToolsAnnouncement()).toBe(true);
   });
 
@@ -68,8 +64,6 @@ describe('terminal tools announcement gate', () => {
     showable({ compact: true });
     showable({ otherFirstRunDialogVisible: true });
 
-    // A session that could not show the announcement must still show it next
-    // time, so none of those paths may consume the one-shot key.
     expect(needsTerminalToolsAnnouncement()).toBe(true);
   });
 });

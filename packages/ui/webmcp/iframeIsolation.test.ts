@@ -1,17 +1,3 @@
-/**
- * Security invariants pinned at source level (the `live-proxy` suites'
- * precedent): Plannotator's provider never runs inside a frame it does not
- * own, and neither annotate iframe ever delegates the `tools` permission.
- *
- *  - The srcdoc viewer keeps `sandbox="allow-scripts allow-modals"` and no `allow`
- *    attribute, so the framed page has an opaque origin and the WebMCP
- *    `tools` policy (default allowlist 'self') denies it.
- *  - The live-app iframe (cross-origin by port) gets no `allow="tools"`
- *    either; phase 3 revisits that deliberately, never by accident.
- *  - The bridge script that runs inside the annotated page, and the proxy
- *    core that assembles it, contain no reference to the WebMCP entry point.
- *  - Nothing under components/html-viewer imports the engine.
- */
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -22,11 +8,7 @@ const REPO = join(UI, '..', '..');
 const read = (path: string) => readFileSync(path, 'utf8');
 
 describe('iframe isolation', () => {
-  // #2063 (owner-approved): a page's alert/confirm/prompt may open, and
-  // nothing else is granted. The srcdoc frame's sandbox and the CSP sandbox
-  // on embedded documents must agree, since an embed gets their intersection.
   test('the srcdoc sandbox and the embedded-document CSP allow modals and never same-origin', () => {
-    // ui does not depend on shared, so read the CSP constant from source.
     const csp = read(join(REPO, 'packages/shared/html-assets.ts')).match(/export const HTML_ASSET_DOCUMENT_CSP = "([^"]*)";/);
     const HTML_ASSET_DOCUMENT_CSP = csp?.[1] ?? '';
     expect(HTML_VIEWER_SANDBOX.split(' ').sort()).toEqual(['allow-modals', 'allow-scripts']);
@@ -42,11 +24,9 @@ describe('iframe isolation', () => {
     const iframeStart = source.indexOf('<iframe');
     expect(iframeStart).toBeGreaterThan(0);
     const iframe = source.slice(iframeStart, source.indexOf('/>', iframeStart));
-    // The `sandbox` prop (a host's narrower value) defaults to that sandbox.
     expect(iframe).toContain('sandbox: srcdocSandbox(sandbox, hostNavigates)');
     expect(source).toContain('sandbox = HTML_VIEWER_SANDBOX,');
     expect(iframe).not.toMatch(/\ballow\s*[:=]/);
-    // Only one iframe element in the viewer: the srcdoc/src branches share it.
     expect(source.indexOf('<iframe', iframeStart + 1)).toBe(-1);
     expect(source).not.toMatch(/allow\s*[:=]\s*["'`][^"'`]*tools/);
   });

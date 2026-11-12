@@ -1,23 +1,3 @@
-/**
- * MermaidBlock follows the active colour theme and mode.
- *
- * What regresses if these fail:
- * - the block renders without first initializing the runtime for the palette
- *   on screen, so a diagram comes up in the static slate palette;
- * - a palette or mode change no longer re-renders an already rendered
- *   diagram (the code-fence re-highlight pattern), so a user who flips to
- *   light mode keeps a dark diagram until reload;
- * - the `(palette, mode)` cache stops holding, so every block on a page
- *   re-runs the global `initialize` (or two blocks under one theme run it
- *   twice);
- * - the host fallback breaks: with no theme tokens on the document the block
- *   must not call `initialize` at all.
- *
- * The runtime is a stand-in (no real Mermaid); the tokens are injected as a
- * stylesheet under the same `theme-*` / `light` classes ThemeProvider sets.
- *
- * DOM-gated (DOM_TESTS=1).
- */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -32,8 +12,6 @@ import { resetStorageBackend, setStorageBackend } from '../utils/storage';
 
 const hasDom = typeof document !== 'undefined';
 
-// happy-dom cannot host DOMPurify: the render slot's parse step is the inert
-// template parse for these tests (the scrub still runs).
 let restoreParser: (() => void) | null = null;
 beforeAll(() => {
   if (hasDom) restoreParser = installInertDiagramSvgParser();
@@ -43,7 +21,6 @@ afterAll(() => restoreParser?.());
 const block: Block = { id: 'themeSweep', type: 'code', language: 'mermaid', content: 'flowchart LR\n  A --> B', order: 0, startLine: 1 };
 const SVG = '<svg viewBox="0 0 10 10" data-sentinel="diagram"><rect width="10" height="10"/></svg>';
 
-/** `github` is a shipped palette id, so ThemeProvider accepts it; the tokens are ours. */
 const TOKENS_CSS = `
 .theme-github { --background: #24292e; --foreground: #e1e4e8; --card: #1f2428; --card-foreground: #e1e4e8; --border: #1b1f23; --muted: #2f363d; --muted-foreground: #6a737d; --primary: #58a6ff; }
 .theme-github.light { --background: #ffffff; --foreground: #24292e; --card: #f6f8fa; --card-foreground: #24292e; --border: #e1e4e8; --muted: #f6f8fa; --muted-foreground: #6a737d; --primary: #0366d6; }
@@ -99,7 +76,6 @@ async function mount(children: React.ReactNode, withProvider = true): Promise<vo
 }
 
 async function settle(): Promise<void> {
-  // The render effect awaits the (already resolved) runtime, then the render.
   for (let i = 0; i < 4; i++) {
     await act(async () => {
       await new Promise((r) => setTimeout(r, 5));
@@ -165,7 +141,6 @@ describe('MermaidBlock theming', () => {
 
     expect(svgCount()).toBe(2);
     expect(recorded.renders).toBe(2);
-    // One initialize for two blocks under one (palette, mode).
     expect(recorded.initialize).toHaveLength(1);
     const dark = recorded.initialize[0] as { theme: string; themeVariables: Record<string, string>; securityLevel: string };
     expect(dark.theme).toBe('dark');
@@ -182,7 +157,6 @@ describe('MermaidBlock theming', () => {
     const light = recorded.initialize[1] as { theme: string; themeVariables: Record<string, string> };
     expect(light.theme).toBe('default');
     expect(light.themeVariables.nodeBkg).toBe('#f6f8fa');
-    // Both diagrams were re-rendered under the new theme.
     expect(recorded.renders).toBe(4);
     expect(svgCount()).toBe(2);
   });
@@ -195,7 +169,6 @@ describe('MermaidBlock theming', () => {
     await settle();
 
     const first = recorded.initialize[0] as { themeVariables: Record<string, unknown> };
-    // The shipped default: a toned-down shadow derived from the palette.
     expect(first.themeVariables.dropShadow as string).toStartWith('drop-shadow(0.79px ');
 
     try {
@@ -207,7 +180,6 @@ describe('MermaidBlock theming', () => {
       expect(recorded.initialize).toHaveLength(2);
       const off = recorded.initialize[1] as { themeVariables: Record<string, unknown> };
       expect(off.themeVariables.dropShadow).toBe(false);
-      // The mounted diagram was re-rendered, not left on the old shadow.
       expect(recorded.renders).toBe(2);
       expect(svgCount()).toBe(1);
     } finally {

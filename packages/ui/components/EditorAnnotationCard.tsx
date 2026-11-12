@@ -2,19 +2,10 @@ import React from 'react';
 import type { EditorAnnotation } from '../types';
 import { cn } from '../lib/utils';
 
-// EditorAnnotationCard is SHARED across surfaces:
-//  - the plan/annotate AnnotationPanel (flat surface-1 cards), and
-//  - the code-review ReviewSidebar (bordered cards, sitting next to
-//    renderAnnotationCard's `p-2.5 rounded border border-transparent
-//    hover:bg-muted/30` code cards).
-// The `variant` prop keeps each surface visually cohesive:
-//  - 'plan'        → flat surface-1 hover (matches the plan AnnotationCard restyle)
-//  - 'code-review' → bordered + muted hover (matches code-review's code cards)
 type EditorAnnotationVariant = 'plan' | 'code-review';
 
 interface EditorAnnotationCardProps {
   annotation: EditorAnnotation;
-  /** Omit to render the card read-only (no delete affordance). */
   onDelete?: () => void;
   variant?: EditorAnnotationVariant;
 }
@@ -33,7 +24,6 @@ export const EditorAnnotationCard: React.FC<EditorAnnotationCardProps> = ({ anno
           : 'rounded-lg px-3 py-2.5 hover:bg-surface-1/50',
       )}
     >
-      {/* Header: type word + file:line + delete */}
       <div className="mb-1.5 flex items-center gap-1.5">
         <span className="text-[11px] font-medium text-amber-600 dark:text-amber-400">Editor</span>
         <span className="text-[10px] font-mono text-muted-foreground/50 truncate" title={annotation.filePath}>
@@ -52,12 +42,10 @@ export const EditorAnnotationCard: React.FC<EditorAnnotationCardProps> = ({ anno
         )}
       </div>
 
-      {/* Selected text */}
       <p className="mb-1.5 line-clamp-2 whitespace-pre-wrap font-mono text-[11px] leading-relaxed text-muted-foreground/80">
         {annotation.selectedText}
       </p>
 
-      {/* Comment */}
       {annotation.comment && (
         <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-foreground/90">
           {annotation.comment}

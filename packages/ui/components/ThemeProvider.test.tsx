@@ -25,7 +25,6 @@ let stored = new Map<string, string>();
 let originalMatchMediaDescriptor: PropertyDescriptor | undefined;
 let originalFetch: typeof globalThis.fetch | null = null;
 
-/** Capture every request the default server-sync transport would make. */
 function captureConfigPosts(): string[] {
   const posts: string[] = [];
   originalFetch = globalThis.fetch;
@@ -37,14 +36,12 @@ function captureConfigPosts(): string[] {
   return posts;
 }
 
-/** Let the store's 300ms server-sync debounce fire (or prove it never does). */
 async function afterServerSyncDebounce(): Promise<void> {
   await act(async () => {
     await new Promise<void>(resolve => setTimeout(resolve, 400));
   });
 }
 
-/** Flush writes an earlier test queued, so only this test's posts are counted. */
 async function drainPendingServerSync(posts: string[]): Promise<void> {
   await afterServerSyncDebounce();
   posts.length = 0;
@@ -60,7 +57,6 @@ function themeState(): ReturnType<typeof useTheme> {
   return currentTheme;
 }
 
-/** Every palette card in the grid — the only buttons carrying color swatches. */
 function paletteButtons(): HTMLButtonElement[] {
   return Array.from(host!.querySelectorAll('button')).filter(button =>
     button.querySelector('.rounded-full')
@@ -97,11 +93,6 @@ function clickButton(target: HTMLButtonElement): void {
   target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
 }
 
-/**
- * One MediaQueryList per media string, because the provider now asks for two
- * of them (`(prefers-color-scheme: light)` and `print`) and a single shared
- * stub would report the colour-scheme answer as the print answer.
- */
 function installMatchMedia(initialMatches: boolean) {
   const state = new Map<string, boolean>([
     ['(prefers-color-scheme: light)', initialMatches],
@@ -156,7 +147,6 @@ function installMatchMedia(initialMatches: boolean) {
     setMatches(nextMatches: boolean) {
       emit('(prefers-color-scheme: light)', nextMatches);
     },
-    /** What `page.emulateMedia({ media: 'print' })` fires. */
     setPrintMedia(printing: boolean) {
       emit('print', printing);
     },
@@ -164,14 +154,10 @@ function installMatchMedia(initialMatches: boolean) {
 }
 
 async function mountTheme(children?: React.ReactNode): Promise<void> {
-  // The config store is a process-wide singleton: re-read it from the storage
-  // backend this test installed so seeded cookies (not a previous test's
-  // values) decide the pair.
   configStore.loadFromBackend();
   await mountThemeFresh(children);
 }
 
-/** Mount WITHOUT pre-seeding the store, i.e. what a cookie-less visit hits. */
 async function mountThemeFresh(children?: React.ReactNode): Promise<void> {
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -227,7 +213,6 @@ describe('theme registry', () => {
     expect(dark).toContain('kanagawa-wave');
     expect(dark).not.toContain('kanagawa-lotus');
 
-    // A `both` palette — the colorblind theme included — belongs to each half.
     for (const id of ['rose-pine', 'colorblind']) {
       expect(light).toContain(id);
       expect(dark).toContain(id);
@@ -237,14 +222,12 @@ describe('theme registry', () => {
   });
 
   test('seeds both halves from the single palette older releases stored', () => {
-    // A palette that renders both modes takes over the whole pair.
     expect(seedThemePair('rose-pine', 'system')).toEqual({
       mode: 'system',
       light: 'rose-pine',
       dark: 'rose-pine',
     });
 
-    // A mode-restricted one keeps its half; the other half falls back.
     expect(seedThemePair('kanagawa-wave', 'dark')).toEqual({
       mode: 'dark',
       light: DEFAULT_COLOR_THEME,
@@ -256,7 +239,6 @@ describe('theme registry', () => {
       dark: DEFAULT_COLOR_THEME,
     });
 
-    // Nothing stored, or a palette this build does not ship.
     expect(seedThemePair(null, 'system')).toEqual({
       mode: 'system',
       light: DEFAULT_COLOR_THEME,
@@ -278,7 +260,6 @@ describe('theme registry', () => {
       dark: 'vesper',
     });
 
-    // A dark-only palette can never occupy the light half, and vice versa.
     expect(normalizeThemePair({ mode: 'sepia', light: 'vesper', dark: 'tinacious' }, fallback)).toEqual({
       mode: 'system',
       light: 'rose-pine',
@@ -353,11 +334,6 @@ describe('ThemeProvider', () => {
     expect(themeState().resolvedMode).toBe('dark');
   });
 
-  // Plannotator's packed pages set the scheme inline before any script runs
-  // (build/pack-app.ts), so the empty page never paints white under a dark
-  // theme. What regresses: the value goes stale after a theme switch (native
-  // controls and the page canvas in the wrong scheme), or a host page that set
-  // none suddenly gets one.
   test.skipIf(!hasDom)('takes over an inline color-scheme set before it mounted, and adds none where there was none', async () => {
     stored.set('plannotator-theme', 'system');
     stored.set('plannotator-color-theme', 'plannotator');
@@ -399,8 +375,6 @@ describe('ThemeProvider', () => {
     expect(document.documentElement.classList.contains('theme-kanagawa-wave')).toBe(true);
     expect(document.documentElement.classList.contains('light')).toBe(false);
 
-    // Older releases read the single-palette key, so it keeps tracking the
-    // palette actually on screen — a downgrade never lands unstyled.
     expect(stored.get('plannotator-color-theme')).toBe('kanagawa-wave');
   });
 
@@ -412,15 +386,11 @@ describe('ThemeProvider', () => {
     await mountTheme();
     expect(themeState().darkTheme).toBe('kanagawa-wave');
     expect(themeState().lightTheme).toBe(DEFAULT_COLOR_THEME);
-    // The OS is light, so the migrated pair renders its light half — the mode
-    // is no longer coerced to keep a dark-only palette on screen.
     expect(themeState().mode).toBe('system');
     expect(themeState().preferredMode).toBe('light');
     expect(themeState().resolvedMode).toBe('light');
     expect(themeState().colorTheme).toBe(DEFAULT_COLOR_THEME);
 
-    // The migrated pair is persisted on arrival — the legacy key it was
-    // derived from is immediately overwritten with the active palette.
     expect(stored.get('plannotator-light-theme')).toBe(DEFAULT_COLOR_THEME);
     expect(stored.get('plannotator-dark-theme')).toBe('kanagawa-wave');
     expect(stored.get('plannotator-color-theme')).toBe(DEFAULT_COLOR_THEME);
@@ -472,7 +442,6 @@ describe('ThemeProvider', () => {
 
     await mountTheme(<ThemeTab />);
 
-    // The grid opens on the half the user is actually looking at.
     expect(paletteNames()).toContain('Kanagawa Lotus');
     expect(paletteNames()).not.toContain('Kanagawa Wave');
 
@@ -485,7 +454,6 @@ describe('ThemeProvider', () => {
     if (!tinacious) throw new Error('Tinacious palette is not registered');
     expect(swatches[3]?.style.backgroundColor).toBe(tinacious.colors.light.background);
 
-    // Assigning the other half leaves the visible palette alone.
     await act(async () => clickButton(button('Dark theme')));
     expect(paletteNames()).toContain('Kanagawa Wave');
     expect(paletteNames()).not.toContain('Kanagawa Lotus');
@@ -495,19 +463,12 @@ describe('ThemeProvider', () => {
     expect(themeState().mode).toBe('light');
     expect(themeState().colorTheme).toBe('tinacious');
 
-    // The summary names both halves and jumps the grid back to the light one.
     expect(host!.textContent).toContain('Tinacious');
     expect(host!.textContent).toContain('Dracula');
     await act(async () => clickButton(summaryButton('Light:')));
     expect(paletteNames()).toContain('Kanagawa Lotus');
   });
 
-  // The switch lands in one frame (owner, 2026-11-02): theme.css's 150 ms `*`
-  // colour transition is held at 0 s while `pn-theme-switching` is on <html>.
-  // What regresses: one path that changes what is shown (Settings' mode
-  // buttons, a palette pick, Match system following the OS) swapping the
-  // classes without the hold, so every element fades again and the page
-  // freezes first; or the hold staying, so hovers stop fading for good.
   test.skipIf(!hasDom)('every change of what is shown lands without the colour fade, and the hold then goes', async () => {
     stored.set('plannotator-theme', 'dark');
     stored.set('plannotator-light-theme', DEFAULT_COLOR_THEME);
@@ -523,27 +484,23 @@ describe('ThemeProvider', () => {
     await afterTwoFrames();
     expect(held()).toBe(false);
 
-    // Settings' mode buttons.
     await act(async () => clickButton(button('Light')));
     expect(html.classList.contains('light')).toBe(true);
     expect(held()).toBe(true);
     await afterTwoFrames();
     expect(held()).toBe(false);
 
-    // A palette for the half on screen.
     await act(async () => clickButton(palette('Tinacious')));
     expect(html.classList.contains('theme-tinacious')).toBe(true);
     expect(held()).toBe(true);
     await afterTwoFrames();
     expect(held()).toBe(false);
 
-    // A palette for the half not on screen changes nothing shown, so nothing is held.
     await act(async () => clickButton(button('Dark theme')));
     await act(async () => clickButton(palette('Dracula')));
     expect(themeState().darkTheme).toBe('dracula');
     expect(held()).toBe(false);
 
-    // Match system, then the computer turning dark at sunset.
     await act(async () => clickButton(button('System')));
     expect(html.classList.contains('theme-dracula')).toBe(true);
     expect(held()).toBe(true);
@@ -572,11 +529,9 @@ describe('ThemeProvider', () => {
       );
     });
 
-    // The host's stored preference is migrated, not discarded.
     expect(themeState().mode).toBe('system');
     expect(themeState().darkTheme).toBe('kanagawa-wave');
     expect(themeState().colorTheme).toBe('kanagawa-wave');
-    // And the mirror keeps writing the host's keys, not Plannotator's.
     expect(stored.get('host-mode')).toBe('system');
     expect(stored.get('host-palette')).toBe('kanagawa-wave');
   });
@@ -621,11 +576,7 @@ describe('ThemeProvider server write-back', () => {
     resetStorageBackend();
   });
 
-  // A cookie-less visit (fresh profile, incognito, cleared cookies) must not
-  // write anything to ~/.plannotator/config.json: that POST would land after
-  // the server config arrives and reset the user's real theme to defaults.
   test.skipIf(!hasDom)('posts nothing when mounting with no stored preference', async () => {
-    // Drain anything an earlier test's debounce still had in flight.
     await drainPendingServerSync(posts);
     installMatchMedia(false);
 
@@ -633,7 +584,6 @@ describe('ThemeProvider server write-back', () => {
     await afterServerSyncDebounce();
 
     expect(posts).toEqual([]);
-    // The pair still resolved and was persisted locally.
     expect(themeState().colorTheme).toBe(DEFAULT_COLOR_THEME);
     expect(stored.get('plannotator-light-theme')).toBe(DEFAULT_COLOR_THEME);
   });
@@ -652,8 +602,6 @@ describe('ThemeProvider server write-back', () => {
     });
   });
 
-  // The legacy single-palette API was cookie-only before pairs existed, and a
-  // host that never installed a serverSync transport has no endpoint to post to.
   test.skipIf(!hasDom)('keeps the legacy setColorTheme cookie-only', async () => {
     await drainPendingServerSync(posts);
     installMatchMedia(false);
@@ -710,7 +658,6 @@ describe('ThemeProvider legacy setColorTheme', () => {
     await act(async () => themeState().setColorTheme('gruvbox'));
 
     expect(themeState().darkTheme).toBe('gruvbox');
-    // The other half keeps the user's assignment.
     expect(themeState().lightTheme).toBe('one-light');
     expect(themeState().mode).toBe('dark');
   });
@@ -727,11 +674,9 @@ describe('ThemeProvider legacy setColorTheme', () => {
     await act(async () => themeState().setColorTheme('vesper'));
     expect(themeState().darkTheme).toBe('vesper');
     expect(themeState().lightTheme).toBe('one-light');
-    // Still System: a dark-only palette does not yank the user out of it.
     expect(themeState().mode).toBe('system');
     expect(themeState().colorTheme).toBe('one-light');
 
-    // And it is what renders as soon as the OS goes dark.
     await act(async () => media.setMatches(false));
     expect(themeState().colorTheme).toBe('vesper');
   });
@@ -751,18 +696,6 @@ describe('ThemeProvider legacy setColorTheme', () => {
   });
 });
 
-/**
- * Printing renders the LIGHT half of the pair, on every surface at once.
- *
- * What regresses if these fail: a dark-palette page prints its own dark tokens
- * under a print stylesheet that assumes white paper — which is how a Mermaid
- * label (HTML inside `<foreignObject>`, so the stylesheet's near-black text
- * applied to it) ended up near-black on a near-black node fill.
- *
- * `beforeprint` is asserted separately from the `print` media query because
- * only the first runs before a real print snapshot, and only the second is
- * what headless `emulateMedia({ media: 'print' })` fires.
- */
 describe('ThemeProvider print mode', () => {
   beforeEach(() => {
     if (hasDom) {
@@ -815,7 +748,6 @@ describe('ThemeProvider print mode', () => {
     expect(themeState().colorTheme).toBe('one-light');
     expect(document.documentElement.classList.contains('light')).toBe(true);
     expect(document.documentElement.classList.contains('theme-one-light')).toBe(true);
-    // The stored preference is untouched: this is a rendering override.
     expect(themeState().mode).toBe('dark');
     expect(themeState().darkTheme).toBe('plannotator');
 
@@ -830,9 +762,6 @@ describe('ThemeProvider print mode', () => {
   test.skipIf(!hasDom)('the light tokens are on <html> before the print snapshot, not a tick later', async () => {
     await mountDarkPair();
 
-    // Asserted INSIDE act, before it flushes: exactly what a real Cmd+P gives
-    // the handler — one synchronous event, then the snapshot. A React state
-    // flush would be too late, so the class write cannot depend on one.
     await act(async () => {
       window.dispatchEvent(new Event('beforeprint'));
       expect(document.documentElement.classList.contains('light')).toBe(true);

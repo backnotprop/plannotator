@@ -15,7 +15,6 @@ test.skipIf(!hasDom)('a separate provider that reports its own abort does not sh
       if (n === 1) return new Response(new ReadableStream({ start(c) { first = c; signal.addEventListener('abort', () => { try { c.error(new DOMException('aborted', 'AbortError')); } catch {} }); } }));
       return new Response('data: {"type":"text_delta","delta":"ok"}\ndata: [DONE]\n\n');
     },
-    // Like the server: the provider's generator yields its abort error, then the stream closes, then the ack lands.
     abort: async () => {
       first!.enqueue(new TextEncoder().encode('data: {"type":"error","error":"OpenCode query aborted.","code":"provider_error"}\n\ndata: [DONE]\n\n'));
       first!.close();

@@ -1,13 +1,3 @@
-/**
- * Geometry-forced expanded composer (DOM_TESTS=1)
- *
- * On a fine-pointer viewport the composer normally opens as a popover and the
- * expanded dialog is a user choice, so Escape and the Collapse button take it
- * back. When the anchor has no room, the position tracker FORCES the dialog,
- * and collapsing recomputes the same geometry and immediately re-expands. That
- * made Escape a no-op and left the composer with no keyboard exit.
- */
-
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -15,8 +5,6 @@ import { CommentPopover } from './CommentPopover';
 
 const hasDom = typeof document !== 'undefined';
 
-// Fine pointer, and a viewport short enough that a mid-document anchor has
-// under 280px of room on either side (the popover's minimum).
 const VIEWPORT_WIDTH = 900;
 const VIEWPORT_HEIGHT = 560;
 const CRAMPED_ANCHOR = { top: 280, bottom: 300, left: 400, right: 460, width: 60 };
@@ -28,8 +16,6 @@ let originalMatchMedia: typeof window.matchMedia | undefined;
 let originalWidth = 0;
 let originalHeight = 0;
 
-// SAFETY: implements the MediaQueryList surface the composer consumes; nothing
-// matches, which is a fine-pointer desktop.
 function fineMatchMedia(query: string): MediaQueryList {
   return {
     matches: false,
@@ -141,7 +127,6 @@ describe.if(hasDom)('CommentPopover forced expansion', () => {
         onClose={() => { closes += 1; }}
       />,
     );
-    // Roomy anchor: opens as a popover.
     expect(dialog()).toBeNull();
 
     const expand = document.querySelector<HTMLButtonElement>('button[title="Expand"]');

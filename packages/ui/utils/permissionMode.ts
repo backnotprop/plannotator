@@ -1,16 +1,3 @@
-/**
- * Permission Mode Settings Utility (Claude Code only)
- *
- * Manages the preferred permission mode to restore after plan approval.
- * Claude Code 2.1.7+ supports updatedPermissions in hook responses.
- *
- * Available modes:
- * - acceptEdits: Auto-approve file edits only
- * - auto: Autonomous execution gated by a model-based safety classifier (Claude Code 2026-03+, Sonnet 4.6+)
- * - bypassPermissions: Auto-approve all tool calls
- * - default: Manually approve each tool call
- */
-
 import { storage } from './storage';
 
 const STORAGE_KEY_MODE = 'plannotator-permission-mode';
@@ -20,7 +7,7 @@ export type PermissionMode = 'bypassPermissions' | 'acceptEdits' | 'auto' | 'def
 
 export interface PermissionModeSettings {
   mode: PermissionMode;
-  configured: boolean; // Whether user has explicitly set this
+  configured: boolean;
 }
 
 export const PERMISSION_MODE_OPTIONS: { value: PermissionMode; label: string; description: string }[] = [
@@ -48,9 +35,6 @@ export const PERMISSION_MODE_OPTIONS: { value: PermissionMode; label: string; de
 
 const DEFAULT_MODE: PermissionMode = 'acceptEdits';
 
-/**
- * Get current permission mode settings from storage
- */
 export function getPermissionModeSettings(): PermissionModeSettings {
   const mode = storage.getItem(STORAGE_KEY_MODE) as PermissionMode | null;
   const configured = storage.getItem(STORAGE_KEY_CONFIGURED) === 'true';
@@ -61,17 +45,11 @@ export function getPermissionModeSettings(): PermissionModeSettings {
   };
 }
 
-/**
- * Save permission mode settings to storage
- */
 export function savePermissionModeSettings(mode: PermissionMode): void {
   storage.setItem(STORAGE_KEY_MODE, mode);
   storage.setItem(STORAGE_KEY_CONFIGURED, 'true');
 }
 
-/**
- * Check if the user needs to configure their permission mode preference
- */
 export function needsPermissionModeSetup(): boolean {
   return storage.getItem(STORAGE_KEY_CONFIGURED) !== 'true';
 }

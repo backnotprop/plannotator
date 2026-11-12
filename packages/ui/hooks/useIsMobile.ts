@@ -1,14 +1,7 @@
 import { useState, useEffect } from 'react';
 
-/** Maximum CSS viewport width that can enter Plannotator's compact touch shell. */
 export const COMPACT_TOUCH_LAYOUT_MAX_WIDTH = 1024;
 
-/**
- * Canonical media query for the compact application shell.
- *
- * The primary pointer is intentional: `any-pointer: coarse` also matches
- * touchscreen laptops whose primary mouse or trackpad needs the desktop shell.
- */
 export const COMPACT_TOUCH_LAYOUT_MEDIA_QUERY =
   `(max-width: ${COMPACT_TOUCH_LAYOUT_MAX_WIDTH}px) and (pointer: coarse)`;
 
@@ -28,11 +21,6 @@ export function useIsMobile(breakpoint = 768): boolean {
   return isMobile;
 }
 
-/**
- * Reports whether the current viewport needs Plannotator's compact touch shell.
- * Plan and Code Review must share this decision so responsive chrome and scroll
- * ownership cannot diverge on hybrid devices.
- */
 export function useCompactTouchLayout(): boolean {
   const [isCompactTouchLayout, setIsCompactTouchLayout] = useState(
     () => typeof window !== 'undefined'

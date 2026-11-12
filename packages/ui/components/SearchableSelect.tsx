@@ -91,7 +91,6 @@ export function SearchableSelect<T extends { id: string }>({
         className={`${width} p-0`}
         initialFocus={inputRef}
       >
-        {/* Search row */}
         <div className="flex items-center gap-2 border-b border-border/50 px-3 py-2">
           <svg
             className="w-3 h-3 flex-shrink-0 text-muted-foreground/60"
@@ -122,7 +121,6 @@ export function SearchableSelect<T extends { id: string }>({
 
         {headerContent}
 
-        {/* Item list */}
         <div ref={listRef} className="max-h-60 overflow-y-auto py-1">
           {filtered.length === 0 ? (
             <p className="px-3 py-4 text-center text-xs text-muted-foreground/60">{emptyMessage}</p>

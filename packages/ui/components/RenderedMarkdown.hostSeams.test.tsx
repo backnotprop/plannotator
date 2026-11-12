@@ -1,13 +1,3 @@
-/**
- * RenderedMarkdown's optional host seams (`resolveLocalLink`, `resolveImage`,
- * `headingAnchors`) must leave a host that passes none of them EXACTLY where
- * it was: the same DOM as rendering the blocks straight through BlockRenderer
- * (the component's body before the seams existed), raw-HTML media included,
- * and an enclosing LocalLinkContext provider still applies.
- *
- * DOM-gated (DOM_TESTS=1) and registered in .github/workflows/test.yml's
- * "Run UI seam-contract + DOM tests" step.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
@@ -37,7 +27,6 @@ const DOC = [
   '',
 ].join('\n');
 
-/** RenderedMarkdown's body as it was before the host seams. */
 function Baseline({ markdown, className }: { markdown: string; className?: string }) {
   const groups = groupBlocks(parseMarkdownToBlocks(markdown));
   return (
@@ -90,7 +79,6 @@ describe.if(hasDom)('RenderedMarkdown host seams (DOM)', () => {
     const before = await render(<Baseline markdown={DOC} className="md-compact" />);
     const after = await render(<RenderedMarkdown markdown={DOC} className="md-compact" />);
     expect(after.innerHTML).toBe(before.innerHTML);
-    // Raw-HTML media untouched: srcset, <source> and <video> stay.
     expect(after.querySelector('img[srcset]')).not.toBeNull();
     expect(after.querySelector('picture source')).not.toBeNull();
     expect(after.querySelector('video')).not.toBeNull();
@@ -129,10 +117,6 @@ describe.if(hasDom)('RenderedMarkdown host seams (DOM)', () => {
     expect(inert.hasAttribute('title')).toBe(false);
   });
 
-  // A README-style themed image (#2328): with a resolver, `responsiveImages`
-  // keeps the dark-mode `<source>`, its candidate resolved like the `<img>`.
-  // Without it the resolver host gets today's behavior (sources dropped), and
-  // a candidate the resolver refuses never reaches the browser.
   test('responsiveImages keeps <picture> sources with each srcset candidate resolved', async () => {
     const themed = [
       '<picture>',
@@ -160,8 +144,6 @@ describe.if(hasDom)('RenderedMarkdown host seams (DOM)', () => {
     expect(refused.innerHTML).not.toContain('dark');
   });
 
-  // A host that serves a smaller copy of a big picture (the Inbox's `?w=`) names the original's width: the picture
-  // lays out as the original would, and decodes off the main thread only when it nears the view.
   test("a resolved image with the original's width draws at that width, lazily and decoded async", async () => {
     const doc = ['![shot](img/a.png)', '', '<p><img src="img/b.png" alt="raw"> <img src="img/c.png" width="300" alt="sized"></p>'].join('\n');
     const resolveImage = (src: string) => ({ kind: 'src' as const, src: `/copy/${src}?w=1600`, width: 3840 });
@@ -172,19 +154,14 @@ describe.if(hasDom)('RenderedMarkdown host seams (DOM)', () => {
     expect(shot.getAttribute('loading')).toBe('lazy');
     expect(shot.getAttribute('decoding')).toBe('async');
     expect(host.querySelector('img[alt="raw"]')?.getAttribute('width')).toBe('3840');
-    // Raw HTML that sized its picture keeps its own size.
     expect(host.querySelector('img[alt="sized"]')?.getAttribute('width')).toBe('300');
-    // A resolution without a width leaves the picture at its own size, as before.
     const plain = await render(<RenderedMarkdown markdown="![shot](img/a.png)" resolveImage={(src) => ({ kind: 'src', src: `/copy/${src}` })} />);
     expect(plain.querySelector('img')?.hasAttribute('width')).toBe(false);
-    // ...and decodes as the browser chooses, as before: async decoding is part of the smaller copy's opt-in only.
     expect(plain.querySelector('img')?.hasAttribute('decoding')).toBe(false);
     const none = await render(<RenderedMarkdown markdown="![shot](img/a.png)" />);
     expect(none.querySelector('img')?.hasAttribute('decoding')).toBe(false);
   });
 
-  // A `data:` candidate's comma is part of its URL. Split there, the tail
-  // (`AAAA`) became a relative candidate and an `/api/image?path=AAAA` fetch.
   test('responsiveImages keeps a data: srcset candidate whole', async () => {
     const inline = 'data:image/png;base64,AAAA';
     const html = `<p><img src="https://cdn.test/light.png" srcset="${inline} 2x, https://cdn.test/light@3x.png 3x" alt="inline"></p>`;

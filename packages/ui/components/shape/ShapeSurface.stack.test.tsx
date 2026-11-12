@@ -1,16 +1,3 @@
-/**
- * Stack badges on a Shape board (approval "stack-show-me", addendum 2026-11-06: take C and the card).
- * DOM-gated: runs under DOM_TESTS=1 from tests/dom-test-list.txt.
- *
- * What regresses:
- *  - badges or the PR row on a board of one PR, or on a host that did not ask (`stackBadges`): Workspaces and every
- *    other board must stay as they were;
- *  - Follow an example dimming the whole badge layer, so the tags of the parts it lights fade with the rest;
- *  - a tag's card showing another PR's words, "Also changed here by" not switching it, or the file popup losing the
- *    way back to the card;
- *  - picking a PR in the row leaving its parts faded, or another PR's parts bright, or a second click not restoring;
- *  - "Read it in the review" opening the review anywhere but that PR's chapter, narrowed to the part's files.
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -134,11 +121,9 @@ describe.if(hasDom)('Stack badges', () => {
   test('a stack shows a tag per PR on each part it changed, and the row; one PR or a host that did not ask shows none', async () => {
     await mount(board(STACK));
     expect(tags().map((t) => `${t.closest('[data-shp-stack-part]')!.getAttribute('data-shp-stack-part')}#${t.getAttribute('data-shp-stack-pr')}`)).toEqual(['how-a#11', 'how-b#12', 'how-b#13']);
-    // A PR keeps one colour: its tag and its chip in the row carry the same hue, and no two PRs share one.
     const hue = (el: Element | null) => (el as HTMLElement | null)?.style.getPropertyValue('--shp-h');
     expect(hue(tag('how-b', 12))).toBe(hue(document.querySelector('[data-shp-stack-pick="12"]')));
     expect(new Set([11, 12, 13].map((n) => hue(document.querySelector(`[data-shp-stack-pick="${n}"]`)))).size).toBe(3);
-    // A tag says it opens a dialog, and is closed until its card opens.
     expect(tag('how-b', 12).getAttribute('aria-haspopup')).toBe('dialog');
     expect(tag('how-b', 12).getAttribute('aria-expanded')).toBe('false');
     expect(document.querySelector('[data-shp-stack-row]')?.textContent).toContain('Stack of 3');
@@ -194,12 +179,10 @@ describe.if(hasDom)('Stack badges', () => {
     await click(nav.querySelector('.shp-stk-back'));
     expect(card()?.getAttribute('data-shp-stack-card')).toBe('how-b#12');
 
-    // A second click on the open tag closes its card.
     await click(tag('how-b', 12));
     expect(card()).toBeNull();
     expect(tag('how-b', 12).getAttribute('aria-expanded')).toBe('false');
 
-    // Esc closes the card and gives focus back to its tag.
     await click(tag('how-a', 11));
     expect(card()).not.toBeNull();
     await act(async () => {

@@ -1,19 +1,3 @@
-/**
- * A linked/folder document's feedback is rendered by the SAME entry renderer
- * as the root document's (`exportAnnotations`), so it carries the same
- * fidelity.
- *
- * Failures to catch:
- *  - Entries in string order of their block ids (block-10 before block-2)
- *    instead of document order.
- *  - A reply exported as its own numbered entry instead of nested under its
- *    parent's **Replies:**.
- *  - A version-diff comment losing its `[In diff content]` label.
- *  - A quick label exported as a plain quote, losing its `[Label]` heading,
- *    its tip and the Label Summary.
- *  - Plain comment/deletion/global output for linked docs drifting from the
- *    format main shipped.
- */
 import { describe, expect, test } from 'bun:test';
 import { AnnotationType, type Annotation } from '../types';
 import { exportAnnotations, exportLinkedDocAnnotations, parseMarkdownToBlocks } from './parser';
@@ -58,7 +42,6 @@ describe('linked-document export fidelity', () => {
     const out = linked(ANNOTATIONS);
     expect(out.indexOf('ON-BLOCK-TWO')).toBeLessThan(out.indexOf('ON-BLOCK-TEN'));
     expect(out).toContain('### 1. (line 5)');
-    // Without blocks the ids still compare numerically.
     const bare = linked(ANNOTATIONS, false);
     expect(bare.indexOf('ON-BLOCK-TWO')).toBeLessThan(bare.indexOf('ON-BLOCK-TEN'));
   });
@@ -68,7 +51,6 @@ describe('linked-document export fidelity', () => {
     expect(out).toContain('**Replies:**\n- **Reply (agent):** A-REPLY\n');
     expect(out.indexOf('A-REPLY')).toBeGreaterThan(out.indexOf('ON-BLOCK-TWO'));
     expect(out.indexOf('A-REPLY')).toBeLessThan(out.indexOf('IN-THE-DIFF'));
-    // Four numbered entries (the reply is not one).
     expect(out).toContain('### 4. ');
     expect(out).not.toContain('### 5. ');
   });
@@ -84,7 +66,6 @@ describe('linked-document export fidelity', () => {
   });
 
   test('a linked document renders the same entries the root export does', () => {
-    // Same renderer: the root's entries one heading level up.
     const root = exportAnnotations(BLOCKS, ANNOTATIONS, [], 'Plan Feedback', 'document');
     const rootEntries = root.slice(root.indexOf('## 1. '), root.indexOf('---\n'));
     const out = linked(ANNOTATIONS);
@@ -109,8 +90,6 @@ describe('linked-document export fidelity', () => {
       markdown: MARKDOWN,
       blocks: BLOCKS,
     }]]));
-    // Pinned on purpose: this is the agent-facing export format, unchanged for
-    // these annotation kinds by the shared renderer.
     expect(out).toBe(
       '\n# Linked Document Feedback\n\nThe following feedback is on documents referenced in the plan.\n\n' +
       `## ${DOC}\n\n` +
@@ -124,9 +103,6 @@ describe('linked-document export fidelity', () => {
 });
 
 describe('main-document order for block ids missing from the document', () => {
-  // Failure caught: two comments whose (different) block ids are both absent
-  // from `blocks` tied at position -1 and kept insertion order, reordering the
-  // root export that main sorted by offset.
   test('ties on block position fall through to the offset', () => {
     const stale = comment('s1', 'block-stale', 'LATER-OFFSET', { startOffset: 40 });
     const general = comment('g1', '', 'EARLIER-OFFSET', { startOffset: 0 });

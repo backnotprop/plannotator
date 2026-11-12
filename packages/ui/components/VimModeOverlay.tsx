@@ -21,7 +21,6 @@ interface CursorPosition {
   readonly height: number;
 }
 
-/** Props for Vim's cursor, status, and contextual-help feedback. */
 export interface VimModeOverlayProps {
   containerRef: RefObject<HTMLElement | null>;
   inputMethod: InputMethod;
@@ -37,10 +36,6 @@ export interface VimModeOverlayProps {
   onHudFocusLeave: () => void;
 }
 
-/**
- * Render immediate, non-interactive feedback for Vim mode without changing
- * document layout or intercepting pointer selection.
- */
 export function VimModeOverlay({
   containerRef,
   inputMethod,

@@ -1,20 +1,3 @@
-/**
- * `darkContrast` (an opt-in prop on ShapeSurface and ShapeDrawn): on a dark board only, the board's structure holds
- * WCAG 1.4.11 contrast, and its words stay as readable as they were.
- *
- * - a box's border (`--rule`) at 3:1 against the paper, a box (`--surface`) and every zone fill (`--*-soft`);
- * - a zone's edge (`--shp-edge-<zone>`, drawn by the frame's CSS around a shape filled with that zone) at 3:1
- *   against the paper and its own fill, in the zone's own hue;
- * - a box (`--surface`) at 1.25:1 against the paper and every zone fill, so it reads as a box on any zone (lighter, or
- *   darker where the palette's box is already darker than its paper);
- * - words: the ink and `--grey` keep at least the contrast they had on a box (up to 7:1), so lifting a box never
- *   costs a word.
- *
- * Each colour starts from the one the board resolved (the palette's, or the one #2721's palette fixes left) and moves
- * toward the ink (a box: or toward black), in OKLab, only as far as it must. A colour that already holds is left as it is. Pure, so the rule is
- * tested without a browser; ShapeDrawn reads the colours and sets the answer on `.board`.
- */
-
 export type Rgb = readonly [number, number, number];
 
 export const SHAPE_DARK_ZONES = ['blue', 'amber', 'green', 'plum', 'alert'] as const;
@@ -26,7 +9,6 @@ export interface ShapeDarkColors {
   rule: Rgb;
   ink: Rgb;
   grey: Rgb;
-  /** Each zone's fill (`--blue-soft`…) and its colour (`--blue`…). */
   fills: Record<ShapeDarkZone, Rgb>;
   zones: Record<ShapeDarkZone, Rgb>;
 }
@@ -35,7 +17,6 @@ export interface ShapeDarkFixes {
   surface?: Rgb;
   rule?: Rgb;
   grey?: Rgb;
-  /** Every zone's edge. */
   edges: Record<ShapeDarkZone, Rgb>;
 }
 
@@ -80,13 +61,11 @@ function fromOklab([L, a, b]: [number, number, number]): Rgb {
   ];
 }
 
-/** `from` moved toward `to` by `t` (0 to 1), in OKLab. */
 export function mixOklab(from: Rgb, to: Rgb, t: number): Rgb {
   const a = toOklab(from), b = toOklab(to);
   return fromOklab([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]);
 }
 
-/** The least step from `from` toward `to` (in 2% steps) at which `ok` holds; null when even `to` does not. */
 function leastToward(from: Rgb, to: Rgb, ok: (c: Rgb) => boolean, max = 1): Rgb | null {
   for (let i = 0; i <= 50; i++) {
     const t = Math.min(max, i / 50);
@@ -97,22 +76,17 @@ function leastToward(from: Rgb, to: Rgb, ok: (c: Rgb) => boolean, max = 1): Rgb 
   return null;
 }
 
-/** Is this a dark board: light words on darker paper. */
 export const isDarkBoard = (c: Pick<ShapeDarkColors, 'paper' | 'ink'>) => luminance(c.ink) > 0.3 && luminance(c.paper) < luminance(c.ink);
 
-/** What `darkContrast` sets on a dark board. On a light one: nothing (`null`). */
 export function shapeDarkFixes(c: ShapeDarkColors): ShapeDarkFixes | null {
   if (!isDarkBoard(c)) return null;
   const fills = SHAPE_DARK_ZONES.map((z) => c.fills[z]);
   const out: ShapeDarkFixes = { edges: {} as Record<ShapeDarkZone, Rgb> };
 
-  // A box: distinct from the paper and every zone, never at a word's cost.
   const inkKeep = Math.min(SHAPE_DARK_TEXT_KEEP, contrast(c.ink, c.surface));
   const boxOk = (s: Rgb) => [c.paper, ...fills].every((f) => contrast(s, f) >= SHAPE_DARK_BOX_MIN);
   let surface = c.surface;
   if (!boxOk(surface)) {
-    // The least move that holds: lighter (toward the ink) or darker (toward black, for a box already darker than
-    // its paper), never past the contrast the ink had on it.
     const reach = (to: Rgb) => {
       let best: { at: number; c: Rgb } | null = null;
       for (let i = 1; i <= 50; i++) {
@@ -131,16 +105,13 @@ export function shapeDarkFixes(c: ShapeDarkColors): ShapeDarkFixes | null {
     }
   }
 
-  // Grey words keep what they had on a box (up to 7:1), on the new box too.
   const greyKeep = Math.min(SHAPE_DARK_TEXT_KEEP, contrast(c.grey, c.surface));
   if (contrast(c.grey, surface) < greyKeep) out.grey = leastToward(c.grey, c.ink, (g) => contrast(g, surface) >= greyKeep) ?? c.ink;
 
-  // A box's border: 3:1 on the paper, a box and every zone.
   const grounds = [c.paper, surface, ...fills];
   const ruleOk = (r: Rgb) => grounds.every((g) => contrast(r, g) >= SHAPE_DARK_EDGE_MIN);
   if (!ruleOk(c.rule)) out.rule = leastToward(c.rule, c.ink, ruleOk) ?? c.ink;
 
-  // A zone's edge, in its own hue: from the paper toward the zone's colour, then toward the ink if that is not enough.
   for (const z of SHAPE_DARK_ZONES) {
     const ok = (e: Rgb) => contrast(e, c.paper) >= SHAPE_DARK_EDGE_MIN && contrast(e, c.fills[z]) >= SHAPE_DARK_EDGE_MIN;
     out.edges[z] = leastToward(c.paper, c.zones[z], ok) ?? leastToward(c.zones[z], c.ink, ok) ?? c.ink;
@@ -150,19 +121,13 @@ export function shapeDarkFixes(c: ShapeDarkColors): ShapeDarkFixes | null {
 
 export const rgbCss = ([r, g, b]: Rgb) => `rgb(${r} ${g} ${b})`;
 
-// ── On the page ────────────────────────────────────────────────────────────────────────────────────────────
-
 const SVG_NS = 'http://www.w3.org/2000/svg';
-/** Parts of an SVG that are never drawn where they stand: a picture inside one gets no tile. */
 const UNDRAWN = 'defs, symbol, clipPath, mask, marker, pattern';
-/** What the pass set on a board, to take back before it runs again (a theme change) or when the opt-in goes. */
 const held = new WeakMap<HTMLElement, { vars: [name: string, was: string, mine: string][]; edged: Element[]; tiles: Element[] }>();
 
-/** A CSS colour as the screen shows it over `under` (alpha laid on), or null where it cannot be painted. */
 export type ShapeDarkPaint = (color: string, under?: Rgb) => Rgb | null;
 
 let paintCtx: CanvasRenderingContext2D | null | undefined;
-/** On a 1×1 canvas, so every colour syntax the browser knows (color-mix, oklab…) comes out as sRGB. */
 const painted: ShapeDarkPaint = (color, under = [0, 0, 0]) => {
   if (paintCtx === undefined) {
     try {
@@ -187,7 +152,6 @@ const painted: ShapeDarkPaint = (color, under = [0, 0, 0]) => {
 
 const near = (a: Rgb, b: Rgb) => a.every((v, i) => Math.abs(v - b[i]!) <= 2);
 
-/** What shows behind the board: the first ancestor (across the shadow root) with a solid background; black if none. */
 function backdrop(board: HTMLElement, paint: ShapeDarkPaint): Rgb {
   let el: Element | null = board;
   while (el) {
@@ -199,7 +163,6 @@ function backdrop(board: HTMLElement, paint: ShapeDarkPaint): Rgb {
   return [0, 0, 0];
 }
 
-/** The board's colours as they resolve on it now (the palette's, plus any fix already on `.board`). */
 function readColors(board: HTMLElement, paint: ShapeDarkPaint): ShapeDarkColors | null {
   const probe = document.createElement('span');
   probe.style.display = 'none';
@@ -209,7 +172,6 @@ function readColors(board: HTMLElement, paint: ShapeDarkPaint): ShapeDarkColors 
     return getComputedStyle(probe).color;
   };
   try {
-    // A see-through paper (a host's `--shp-paper: transparent`) shows what is behind the board.
     const paper = paint(raw('--paper'), backdrop(board, paint));
     if (!paper) return null;
     const on = (name: string) => paint(raw(name), paper);
@@ -228,20 +190,16 @@ function readColors(board: HTMLElement, paint: ShapeDarkPaint): ShapeDarkColors 
   }
 }
 
-/** A shape that draws a line around itself (an unset width is SVG's 1). */
 const drawsLine = (cs: CSSStyleDeclaration) =>
   !!cs.stroke && cs.stroke !== 'none' && !/^(rgba\(.*,\s*0\)|transparent)$/.test(cs.stroke) && (cs.strokeWidth ? parseFloat(cs.strokeWidth) > 0 : true);
-/** An HTML box with a border or a shadow of its own. */
 const hasEdge = (cs: CSSStyleDeclaration) =>
   ['top', 'right', 'bottom', 'left'].some((s) => parseFloat(cs.getPropertyValue(`border-${s}-width`)) > 0 && cs.getPropertyValue(`border-${s}-style`) !== 'none') || (!!cs.boxShadow && cs.boxShadow !== 'none');
 
-/** Takes back what `holdDarkBoard` set. */
 export function releaseDarkBoard(board: HTMLElement): void {
   const was = held.get(board);
   board.classList.remove('dark-hold');
   if (!was) return;
   held.delete(board);
-  // Only a value still ours goes back: another pass (#2721's palette fixes) may have set its own since.
   for (const [name, value, mine] of was.vars) {
     if (board.style.getPropertyValue(name) !== mine) continue;
     if (value) board.style.setProperty(name, value);
@@ -251,12 +209,6 @@ export function releaseDarkBoard(board: HTMLElement): void {
   for (const el of was.tiles) el.remove();
 }
 
-/**
- * `darkContrast` on one board: takes back its last pass, reads the colours, and on a dark board sets the fixes
- * (`shapeDarkFixes`) on `.board`, gives each shape filled with a zone and drawn without a line an edge in the
- * zone's hue (`data-shp-edge`), and puts a tile behind each kept SVG picture. On a light board it sets nothing.
- * `paint`: the canvas, unless a test brings its own.
- */
 export function holdDarkBoard(board: HTMLElement, paint: ShapeDarkPaint = painted): boolean {
   releaseDarkBoard(board);
   const colors = readColors(board, paint);
@@ -274,7 +226,6 @@ export function holdDarkBoard(board: HTMLElement, paint: ShapeDarkPaint = painte
   for (const z of SHAPE_DARK_ZONES) set(`--shp-edge-${z}`, fixes.edges[z]);
   board.classList.add('dark-hold');
 
-  // A zone: a shape the drawing filled with one of the zone colours and drew no line around.
   const edged: Element[] = [];
   const seen = new Map<string, ShapeDarkZone | null>();
   const zoneOf = (color: string) => {
@@ -294,7 +245,6 @@ export function holdDarkBoard(board: HTMLElement, paint: ShapeDarkPaint = painte
     edged.push(el);
   }
 
-  // A kept picture: on a light tile, so a dark logo or a screenshot's edge shows on the dark board.
   const tiles: Element[] = [];
   for (const image of board.querySelectorAll<SVGImageElement>('image[data-shp-pic]')) {
     if (image.closest(UNDRAWN) || image.closest('[clip-path], [mask]') || /clip-path|mask/.test(image.getAttribute('style') ?? '')) continue;
@@ -305,7 +255,6 @@ export function holdDarkBoard(board: HTMLElement, paint: ShapeDarkPaint = painte
     tile.setAttribute('class', 'shp-pic-tile');
     tile.setAttribute('aria-hidden', 'true');
     for (const [k, v] of [['x', x! - pad], ['y', y! - pad], ['width', w! + pad * 2], ['height', h! + pad * 2], ['rx', Math.min(12, pad + 5)]] as const) tile.setAttribute(k, String(Math.round(v * 10) / 10));
-    // It moves and draws in with its picture.
     const transform = image.getAttribute('transform');
     if (transform) tile.setAttribute('transform', transform);
     const step = image.getAttribute('data-step');

@@ -1,18 +1,7 @@
-/**
- * `darkContrast`'s rule (approval shape-any-picture, the owner's "poor contrast in dark mode"). What regresses if
- * these fail:
- * - a light board is touched at all (it must look exactly as without the opt-in);
- * - on a dark board a box's border sinks into its zone, a zone's edge into the paper (WCAG 1.4.11, 3:1), or a box's
- *   fill into its zone;
- * - holding the structure costs a word: the ink or grey on a box falls below what it had (up to 7:1);
- * - a palette that already holds is changed anyway, or a zone's edge loses its zone's hue.
- * The palettes are the frame's own formulas (ShapeDrawn's SHAPE_FRAME_CSS) over real theme tokens.
- */
 import { describe, expect, test } from 'bun:test';
 import { contrast, mixOklab, shapeDarkFixes, SHAPE_DARK_ZONES, type Rgb, type ShapeDarkColors, type ShapeDarkZone } from './darkContrast';
 
 const hex = (h: string): Rgb => [0, 2, 4].map((i) => parseInt(h.slice(1 + i, 3 + i), 16)) as unknown as Rgb;
-/** An `oklch(L C h)` token in sRGB. */
 function oklch(L: number, C: number, h: number): string {
   const a = C * Math.cos((h * Math.PI) / 180), b = C * Math.sin((h * Math.PI) / 180);
   const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3, m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3, s = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
@@ -21,7 +10,6 @@ function oklch(L: number, C: number, h: number): string {
   return `#${lin.map((v) => g(v).toString(16).padStart(2, '0')).join('')}`;
 }
 
-/** A board's colours as the frame mixes them from a theme's tokens. */
 function board(t: { paper: string; ink: string; surface: string; rule: string; grey: string; alert: string }): ShapeDarkColors {
   const paper = hex(t.paper), ink = hex(t.ink), alert = hex(t.alert);
   const hues: Record<ShapeDarkZone, [string, number, number]> = {
@@ -40,7 +28,6 @@ function board(t: { paper: string; ink: string; surface: string; rule: string; g
   return { paper, ink, surface: hex(t.surface), rule: hex(t.rule), grey: hex(t.grey), zones, fills };
 }
 
-// The Inbox's default theme (plannotator, dark and light), tokyo-night and plannotator-modern, dark: themes/*.css.
 const DARK = board({ paper: oklch(0.15, 0.02, 260), ink: oklch(0.9, 0.01, 260), surface: oklch(0.22, 0.02, 260), rule: oklch(0.35, 0.02, 260), grey: oklch(0.72, 0.02, 260), alert: oklch(0.65, 0.2, 25) });
 const LIGHT = board({ paper: oklch(0.97, 0.005, 260), ink: oklch(0.18, 0.02, 260), surface: oklch(1, 0, 0), rule: oklch(0.88, 0.01, 260), grey: oklch(0.4, 0.02, 260), alert: oklch(0.5, 0.25, 25) });
 const TOKYO_DARK = board({ paper: '#24283b', ink: '#c0caf5', surface: '#1d202f', rule: '#414868', grey: '#787c99', alert: '#f7768e' });
@@ -59,7 +46,6 @@ function holds(c: ShapeDarkColors) {
   expect(contrast(rule, c.paper)).toBeGreaterThanOrEqual(3);
   expect(contrast(rule, surface)).toBeGreaterThanOrEqual(3);
   expect(contrast(surface, c.paper)).toBeGreaterThanOrEqual(1.25);
-  // Words keep what they had on a box, up to 7:1.
   expect(contrast(c.ink, surface)).toBeGreaterThanOrEqual(Math.min(7, contrast(c.ink, c.surface)));
   expect(contrast(grey, surface)).toBeGreaterThanOrEqual(Math.min(7, contrast(c.grey, c.surface)) - 0.01);
   return f;
@@ -68,12 +54,10 @@ function holds(c: ShapeDarkColors) {
 describe('darkContrast', () => {
   test('a light board gets nothing', () => {
     expect(shapeDarkFixes(LIGHT)).toBeNull();
-    // Nor one whose paper reads as black because it is see-through: dark words are a light board.
     expect(shapeDarkFixes({ ...LIGHT, paper: [0, 0, 0] })).toBeNull();
   });
 
   test('a dark board that sinks today: borders, zone edges and boxes hold, and no word loses contrast', () => {
-    // As drawn today, a box's border and fill vanish into the amber zone.
     expect(contrast(DARK.rule, DARK.fills.amber)).toBeLessThan(2);
     expect(contrast(DARK.surface, DARK.fills.amber)).toBeLessThan(1.25);
     const f = holds(DARK);

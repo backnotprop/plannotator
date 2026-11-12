@@ -1,15 +1,3 @@
-/**
- * Remember where a reader was in a rendered document, and put them back there.
- *
- * Raw pixels are a poor bookmark: images that finish loading, highlights that
- * are re-applied, or a sidebar that changes the reading column's width all move
- * the text under a fixed scrollTop. So the anchor is the first block
- * (`data-block-id`) still visible at the top of the scroll viewport, plus how
- * far its top sat from the viewport's top. Restoring scrolls that block back to
- * the same offset; the raw scrollTop is only the fallback when the block is
- * gone.
- */
-
 import {
   getScrollViewportRect,
   getScrollViewportTop,
@@ -18,12 +6,8 @@ import {
 } from '../hooks/useScrollViewport';
 
 export interface ScrollAnchor {
-  /** The first block visible at the top of the viewport, null when none is. */
   blockId: string | null;
-  /** That block's top minus the viewport's top, in CSS pixels (≤ 0 when the
-   *  block starts above the viewport). */
   offset: number;
-  /** The viewport's scrollTop when captured — the fallback. */
   scrollTop: number;
 }
 
@@ -31,7 +15,6 @@ function blocksIn(viewport: HTMLElement): HTMLElement[] {
   return Array.from(viewport.querySelectorAll<HTMLElement>('[data-block-id]'));
 }
 
-/** Capture where the reader is in `viewport`. */
 export function captureScrollAnchor(viewport: HTMLElement): ScrollAnchor {
   const scrollTop = getScrollViewportTop(viewport);
   const viewportTop = getScrollViewportRect(viewport).top;
@@ -56,19 +39,11 @@ function findBlock(viewport: HTMLElement, blockId: string): HTMLElement | null {
   return null;
 }
 
-/**
- * Whether the anchor's block is in the viewport's DOM yet. A document that is
- * still mounting has none of its blocks, so a caller can wait for this.
- */
 export function scrollAnchorReady(viewport: HTMLElement, anchor: ScrollAnchor): boolean {
   if (anchor.blockId === null) return blocksIn(viewport).length > 0 || anchor.scrollTop === 0;
   return findBlock(viewport, anchor.blockId) !== null;
 }
 
-/**
- * Put the reader back at `anchor`. Returns the viewport's scrollTop afterwards.
- * When the anchor's block is gone, falls back to the captured scrollTop.
- */
 export function restoreScrollAnchor(viewport: HTMLElement, anchor: ScrollAnchor): number {
   const block = anchor.blockId === null ? null : findBlock(viewport, anchor.blockId);
   if (block) {

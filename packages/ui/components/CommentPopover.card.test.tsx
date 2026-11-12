@@ -1,21 +1,3 @@
-/**
- * The comment card (`configurePlannotatorUI({ commentCard })`, DOM_TESTS=1): the Inbox's comment box, approval
- * "inbox-comment-box" round 3.
- *
- * Failures to catch:
- * - a host that does not opt in (plan review, code review, Workspaces) sees anything other than today's popover:
- *   its header, Expand and Close, and "Save" / "Add";
- * - the card's button says anything but "Comment" (for a selection and for a global comment alike);
- * - the card's chevron, or Escape, loses the words typed (they must come back on the next open of that draft);
- * - Escape on a card opened to full closes it, instead of taking it back to small first (one layer per Escape);
- * - a phone gets the old full-screen veil (blurred page behind) instead of the card docked at the foot;
- * - a box's single extra action (Shape's Show me on code lines) vanishes in the card;
- * - a surface that keeps its own footer (Shape's board, `allowCard={false}`) is turned into the card anyway;
- * - "/" in the card lists no skills: the list was drawn inside the card's scrolling field, which clipped all of it
- *   (the owner: "the skills don't work"), or a pick does not write the reference into the words;
- * - the card cannot be dragged by its words, closes or loses its words when dragged, leaves the window, or a phone's
- *   docked card gets a handle; or the popover of a host that did not opt in changes how far it may be dragged.
- */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -74,7 +56,6 @@ async function type(words: string): Promise<void> {
   });
 }
 
-/** Typing as a keyboard does it: the caret at the end, then the keyup React reads the caret from. */
 async function typeAtCaret(words: string): Promise<void> {
   const field = textarea()!;
   const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(field), 'value')?.set;
@@ -86,7 +67,6 @@ async function typeAtCaret(words: string): Promise<void> {
   });
 }
 
-/** happy-dom lays nothing out: the box reports the place its own style gives it, and a size. */
 function giveLayout(el: HTMLElement, width: number, height: number): void {
   el.getBoundingClientRect = () => new DOMRect(parseFloat(el.style.left) || 0, parseFloat(el.style.top) || 0, width, height);
   Object.defineProperty(el, 'offsetWidth', { configurable: true, value: width });
@@ -98,7 +78,6 @@ function pointer(type: string, target: EventTarget, x: number, y: number): void 
   target.dispatchEvent(new Ctor(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y }));
 }
 
-/** Press on `handle` and let go `dx`, `dy` away. */
 async function drag(handle: Element, dx: number, dy: number): Promise<void> {
   await act(async () => pointer('pointerdown', handle, 400, 200));
   await act(async () => pointer('pointermove', document, 400 + dx, 200 + dy));
@@ -266,9 +245,6 @@ describe.if(hasDom)('The comment card: "/" lists the skills, and its words drag 
     const menu = document.querySelector<HTMLElement>('[data-skill-menu]');
     expect(menu !== null).toBe(true);
     expect([...menu!.querySelectorAll('[data-skill-item]')].map((row) => row.getAttribute('data-skill-item'))).toEqual(['tidy-notes', 'check-figures']);
-    // The field scrolls (overflow-y: auto in comment-card.css), so a list inside it is clipped away whole: it hangs
-    // off the card, which stops clipping while the list is open.
-    // (Booleans: a failed match on an element prints the whole document.)
     expect(menu!.closest('.pn-cbox-field') === null).toBe(true);
     expect(menu!.parentElement === box()).toBe(true);
     expect(box()!.style.overflow).toBe('visible');
@@ -289,7 +265,6 @@ describe.if(hasDom)('The comment card: "/" lists the skills, and its words drag 
     expect(place()).toEqual({ left: from.left + 60, top: from.top + 80 });
     expect(closes).toBe(0);
     expect(textarea()!.value).toBe('Half a thought');
-    // It stays put: the card no longer hangs by the foot of the window.
     expect(box()!.style.bottom).toBe('');
   });
 

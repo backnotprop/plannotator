@@ -1,12 +1,3 @@
-/**
- * The document font setting (Settings → Display → Document font, #1657).
- *
- * Guards: (1) the default draws the document exactly as before, so nothing is
- * put on the page and the stylesheet rule is gated on the attribute; (2) a
- * chosen font reaches the page, a typed name only ever as one quoted family
- * with the theme's font behind it; (3) code keeps its font, because the rule
- * sits in the base layer where a block's own font-mono utility wins.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';

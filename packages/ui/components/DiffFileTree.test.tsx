@@ -1,12 +1,3 @@
-/**
- * DiffFileTree: the embeddable read-only diff tree (DOM_TESTS=1).
- *
- * Guards the host-facing contract: selection is controlled and reported by
- * path, the keyboard walks files in tree order the way the review does (and
- * only while focus is in the tree), folders open/close with ARIA state, the
- * selected file's folders open themselves, and a host re-rendering with an
- * equal file list does not reset what the reader collapsed.
- */
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -20,7 +11,6 @@ const FILES: DiffFileTreeFile[] = [
   { path: 'src/index.ts', status: 'deleted', additions: 0, deletions: 4 },
   { path: 'README.md', status: 'renamed', oldPath: 'README.old', additions: 0, deletions: 0 },
 ];
-// Tree order: src/{components/{deep/Widget, Button}, index.ts}, README.md
 const ORDER = ['src/components/deep/Widget.tsx', 'src/components/Button.tsx', 'src/index.ts', 'README.md'];
 
 let root: Root | null = null;
@@ -91,7 +81,7 @@ describe.if(hasDom)('DiffFileTree', () => {
     expect(selectedPath()).toBe(ORDER[1]);
     await key('End');
     expect(selectedPath()).toBe(ORDER[3]);
-    await key('ArrowDown'); // already last: stays
+    await key('ArrowDown');
     expect(selectedPath()).toBe(ORDER[3]);
     await key('Home');
     expect(selectedPath()).toBe(ORDER[0]);

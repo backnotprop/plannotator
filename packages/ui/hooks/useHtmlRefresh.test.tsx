@@ -1,11 +1,3 @@
-/**
- * Refresh-cycle guards for the published useHtmlRefresh (DOM-gated).
- *
- * The failures worth catching: a superseded or post-navigation fetch still
- * applying its bytes; a missing/unavailable snapshot applying anything; the
- * restore acknowledgement firing more than once per refresh, or for a
- * report that belongs to another document or an older reload generation.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -81,9 +73,6 @@ async function mount(initialKey: string | null) {
   };
   await render(initialKey);
   const settle = async (index: number, value: HtmlRefreshSnapshot) => {
-    // The hook's continuation (apply, generation bump, isRefreshing reset)
-    // runs several microtasks after the fetch resolves; a macrotask turn
-    // keeps every resulting state update inside act.
     await act(async () => {
       pending[index]!.resolve(value);
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -122,7 +111,6 @@ describe.if(hasDom)('useHtmlRefresh (published)', () => {
     await inflight;
     expect(h.snapshots).toEqual([]);
     expect(h.api.current!.reloadGeneration).toBe(0);
-    // No pending ack survives the navigation: a report is ignored.
     h.api.current!.reportAnnotationRestore(['x']);
     expect(h.unanchored).toEqual([]);
   });
@@ -143,7 +131,6 @@ describe.if(hasDom)('useHtmlRefresh (published)', () => {
 
   test('the restore ack fires once per refresh with the first report, and only for that generation', async () => {
     const h = await mount('a.html');
-    // Before any refresh a report has nothing to acknowledge.
     h.api.current!.reportAnnotationRestore(['early']);
     expect(h.unanchored).toEqual([]);
 
@@ -155,7 +142,6 @@ describe.if(hasDom)('useHtmlRefresh (published)', () => {
     h.api.current!.reportAnnotationRestore([]);
     expect(h.unanchored).toEqual([['lost-1', 'lost-2']]);
 
-    // A clean refresh acknowledges an empty report too (the host clears its chip).
     await act(async () => { p = h.api.current!.refresh(); });
     await h.settle(1, { status: 'ok', rawHtml: '<p>v3</p>' });
     await p;

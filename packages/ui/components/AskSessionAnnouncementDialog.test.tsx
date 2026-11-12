@@ -32,7 +32,6 @@ async function mountDialog(onDismiss: () => void = () => {}, props: MountProps =
   });
 }
 
-/** Holds the open state so a dismiss actually unmounts, like the Apps do. */
 function Harness({ onDismiss }: { readonly onDismiss: () => void }) {
   const [open, setOpen] = useState(true);
   return (
@@ -96,8 +95,6 @@ describe('AskSessionAnnouncementDialog', () => {
   });
 
   test.skipIf(!hasDom)('names the agent that opened the session', async () => {
-    // The copy must address the reader's own host: a Pi user told about
-    // "Claude Code" would be told about a session they do not have.
     for (const [agent, name] of [['claude-code', 'Claude Code'], ['pi', 'Pi'], ['opencode', 'OpenCode']] as const) {
       await mountDialog(() => {}, { agent });
       const dialog = document.querySelector(DIALOG);
@@ -109,8 +106,6 @@ describe('AskSessionAnnouncementDialog', () => {
   });
 
   test.skipIf(!hasDom)('always says the session is connected; there is no setup variant', async () => {
-    // The Apps open it only for a connected session, so the footer never
-    // tells a reader to go and set something up.
     for (const agent of ['claude-code', 'pi', 'opencode'] as const) {
       await mountDialog(() => {}, { agent });
       expect(document.querySelector(`${DIALOG} [data-ask-session-status="connected"]`)).not.toBeNull();
@@ -127,7 +122,6 @@ describe('AskSessionAnnouncementDialog', () => {
       ['a[data-ask-session-learn-more]', ASK_SESSION_DOCS_URL],
     ] as const;
     const gotIt = gotItButton();
-    // Got it stays the primary: it has focus, and Tab order reaches the links first.
     expect(document.activeElement).toBe(gotIt);
 
     for (const [selector, href] of links) {
@@ -138,8 +132,6 @@ describe('AskSessionAnnouncementDialog', () => {
       expect(link.getAttribute('rel')).toBe('noopener noreferrer');
       expect(link.compareDocumentPosition(gotIt) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
-      // Like the terminal-tools announcement's outbound links, following one
-      // neither closes the announcement nor spends its cookie.
       const stopNavigation = (event: Event) => event.preventDefault();
       link.addEventListener('click', stopNavigation);
       await act(async () => link.click());
@@ -181,7 +173,6 @@ describe('AskSessionAnnouncementDialog', () => {
     });
     const fallback = document.querySelector(`${DIALOG} [data-ask-session-demo-unavailable]`);
     expect(fallback?.querySelector('a')?.getAttribute('href')).toBe(ASK_SESSION_WATCH_URL);
-    // The way out is unaffected.
     expect(gotItButton()).toBeDefined();
   });
 

@@ -1,13 +1,3 @@
-/**
- * Token hover trigger/delay settings.
- *
- * The failure this guards is the expensive one: `tokenHoverCards` was a
- * boolean, and its `false` is a real preference. A migration that drops it
- * silently turns hover cards back ON for the one user who went looking for the
- * switch. The rest pins the registry contract the Settings UI and the App both
- * read through (unrecognized values fall back to the default rather than
- * reaching the hook).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { resetStorageBackend, setStorageBackend } from '../utils/storage';
 import { SETTINGS } from './settings';
@@ -69,8 +59,6 @@ describe('tokenHoverTrigger', () => {
     const values = installBackend({ [LEGACY_KEY]: 'false' });
     SETTINGS.tokenHoverTrigger.fromCookie();
     SETTINGS.tokenHoverTrigger.toCookie('off');
-    // Left in place deliberately: deleting it would let a downgrade to the
-    // pre-migration build re-enable cards for someone who turned them off.
     expect(values.get(LEGACY_KEY)).toBe('false');
     expect(values.get(TRIGGER_KEY)).toBe('off');
   });
@@ -92,8 +80,6 @@ describe('tokenHoverDelay', () => {
       expect(SETTINGS.tokenHoverDelay.fromCookie()).toBe(delay);
     }
 
-    // An off-step number is as invalid as a word: the hook takes this value as
-    // a raw setTimeout delay, so a hand-edited cookie must not reach it.
     values.set(DELAY_KEY, '5000');
     expect(SETTINGS.tokenHoverDelay.fromCookie()).toBeUndefined();
     values.set(DELAY_KEY, 'slow');

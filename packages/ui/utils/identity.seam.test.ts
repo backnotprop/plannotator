@@ -1,21 +1,6 @@
-/**
- * Seam test: IdentityProvider override (setIdentityProvider / resetIdentityProvider).
- *
- * Contract: after setIdentityProvider(fake), getIdentity() delegates to the
- * fake's getIdentity() — not to ConfigStore. resetIdentityProvider() restores
- * the tater (ConfigStore-backed) provider.
- *
- * No DOM required.
- *
- * IMPORTANT: function references are captured at module-load time (top-level)
- * so they remain valid even when configure.test.ts's mock.module() replaces
- * the module exports later during test execution.
- */
 import { afterEach, describe, expect, it } from 'bun:test';
 import * as identityModule from './identity';
 
-// Capture real function references at import time (before configure.test.ts's
-// mock.module() runs and replaces setIdentityProvider/resetIdentityProvider exports).
 const setIdentityProvider = identityModule.setIdentityProvider;
 const resetIdentityProvider = identityModule.resetIdentityProvider;
 const getIdentity = identityModule.getIdentity;
@@ -90,8 +75,6 @@ describe('IdentityProvider seam', () => {
     setIdentityProvider(fake);
     resetIdentityProvider();
 
-    // After reset the default provider returns a non-empty tater name from ConfigStore,
-    // NOT the fake's sentinel value.
     const result = getIdentity();
     expect(result).not.toBe('should-not-appear');
     expect(typeof result).toBe('string');

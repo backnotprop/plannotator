@@ -1,11 +1,3 @@
-/**
- * PlanDiffViewer — Orchestrator for plan diff views
- *
- * Replaces the Viewer component when plan diff mode is active.
- * Renders the document card with the same styling, but shows
- * diff content instead of the annotatable plan.
- */
-
 import React, { useState } from "react";
 import type { PlanDiffBlock, PlanDiffStats } from "../../utils/planDiffEngine";
 import type { Annotation, EditorMode } from "../../types";
@@ -31,24 +23,13 @@ interface PlanDiffViewerProps {
   baseVersionLabel?: string;
   baseVersion?: number;
   maxWidth?: number;
-  // Annotation props
   annotations?: Annotation[];
   onAddAnnotation?: (ann: Annotation) => void;
   onSelectAnnotation?: (id: string | null) => void;
   selectedAnnotationId?: string | null;
   mode?: EditorMode;
   onOpenVscodeDiff?: (baseVersion: number) => Promise<{ ok?: boolean; error?: string }>;
-  /**
-   * Grow the diff card to the full height the parent gives it, like Viewer's
-   * `fillHeight`, so a short diff's card still runs to the bottom of the view.
-   * Default false: the card sizes to its content.
-   */
   fillHeight?: boolean;
-  /**
-   * The document is a config or data file (`renderAs: "code"`): the Rendered
-   * and Classic modes show its chunks as code in `language` instead of
-   * parsing them as markdown. Absent, the diff renders as markdown.
-   */
   codeDocument?: PlanDiffCodeDocument;
 }
 
@@ -59,7 +40,6 @@ const defaultOpenVscodeDiff = async (
     const res = await fetch("/api/plan/vscode-diff", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      // The stale-tab guard (a no-op for a host that never adopted a session).
       body: JSON.stringify(withServerSession({ baseVersion })),
     });
     if (await noteServerSessionMismatch(res)) {
@@ -110,8 +90,6 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
         setVscodeDiffError(result.error);
       }
     } catch {
-      // A host-supplied opener that throws (instead of returning { error }) must
-      // not wedge the button in a permanent loading state.
       setVscodeDiffError("Failed to open VS Code diff");
     } finally {
       setVscodeDiffLoading(false);
@@ -125,7 +103,6 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
       style={maxWidth ? { maxWidth } : { maxWidth: 832 }}
     >
       <article className={`w-full ${fillHeight ? 'flex-1 ' : ''}bg-card border border-border/50 rounded-xl shadow-xl p-5 md:p-8 lg:p-10 xl:p-12 relative`} data-doc-text-root="">
-        {/* Top-left: repo info + diff badge — matches Viewer layout (flex-col) so badge doesn't jump position */}
         <div className="absolute top-3 left-3 md:top-4 md:left-5 flex flex-col items-start gap-1 text-[9px] text-muted-foreground/50 font-mono">
           {repoInfo && (
             <div className="flex items-center gap-1.5">
@@ -160,7 +137,6 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
           />
         </div>
 
-        {/* Top-right: back to plan view button */}
         <div className="float-right -mr-4 -mt-4 md:-mr-5 md:-mt-5 lg:-mr-7 lg:-mt-7 xl:-mr-9 xl:-mt-9 p-2">
           <button
             onClick={onPlanDiffToggle}
@@ -184,7 +160,6 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
           </button>
         </div>
 
-        {/* Diff mode switcher + version label + VS Code button */}
         <div className="mt-6 mb-6 flex items-center gap-3">
           <PlanDiffModeSwitcher mode={diffMode} onChange={onDiffModeChange} />
           {baseVersionLabel && (
@@ -207,7 +182,6 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
           )}
         </div>
 
-        {/* VS Code diff error message */}
         {vscodeDiffError && (
           <div className="mb-4 px-3 py-2 rounded-md bg-destructive/10 border border-destructive/20 text-xs text-destructive">
             {vscodeDiffError}
@@ -220,7 +194,6 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
           </div>
         )}
 
-        {/* Diff content */}
         {diffMode === "raw" ? (
           <PlanRawDiffView blocks={diffBlocks} />
         ) : (

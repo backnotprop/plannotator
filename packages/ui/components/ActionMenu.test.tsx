@@ -61,12 +61,6 @@ describe('ActionMenu Escape with vim document focus', () => {
     host = null;
   });
 
-  // Regression: useVimDocumentFocus registers its document-level Escape
-  // handler before the popover's (the vim hook mounts with the app; the
-  // popover hook registers on open). Without the [data-pn-dismissable-popover]
-  // entry in BLOCKING_OVERLAY_SELECTOR, vim reclaims focus and preventDefaults
-  // first, the popover's handler then skips the defaultPrevented event, and
-  // the menu never closes.
   test.skipIf(!hasDom)('Escape closes an open menu instead of vim reclaiming focus', async () => {
     const focusCalls: number[] = [];
     const VimHarness: React.FC = () => {
@@ -102,7 +96,7 @@ describe('ActionMenu Escape with vim document focus', () => {
     await act(async () => trigger.click());
     expect(host.querySelector('[data-pn-dismissable-popover]')).not.toBeNull();
 
-    const callsBeforeEscape = focusCalls.length; // mount-time autofocus may have fired
+    const callsBeforeEscape = focusCalls.length;
 
     await act(async () => {
       document.body.dispatchEvent(
@@ -110,7 +104,6 @@ describe('ActionMenu Escape with vim document focus', () => {
       );
     });
 
-    // The menu closed, and the vim handler did NOT reclaim focus on this Escape.
     expect(host.querySelector('[data-pn-dismissable-popover]')).toBeNull();
     expect(focusCalls.length).toBe(callsBeforeEscape);
   });

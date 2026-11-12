@@ -1,14 +1,3 @@
-// A drawn view (Picture, How it works): the agent's HTML and SVG, sanitized,
-// in its own shadow root so its CSS reaches nothing else and the board's
-// reaches it only through the frame's variables. The board's motion (parts
-// drawing in by step, the erase, the redraw of a changed part), its marks
-// (Change it / Ask on any part), its reference bubbles and its links into
-// code work on it from outside, through `data-step`, `data-mark`, `data-ref`
-// and `data-code`.
-//
-// It stands on its own: every board prop is optional, so a host can draw one
-// diagram without ShapeSurface (`ShapeDiagram` below), and a part with
-// `data-code="src/a.ts#L42"` calls the host's `onCode` with that file and line.
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import DOMPurify from 'dompurify';
 import {
@@ -35,11 +24,6 @@ import { holdDarkBoard, releaseDarkBoard } from './darkContrast';
 import { ScenePlayers } from './scene/ScenePlayers';
 import type { ShapeScene } from '@plannotator/core/shape-scene';
 
-/**
- * Holds a board's colours to contrast in the palette on screen (`shapeContrast.ts`): the frame's
- * own colours where they hold, a darker or lighter one (hue kept) where not, and a dark logo lifted on a dark board.
- * Returns the undo. Nothing changes where the palette's tokens cannot be read.
- */
 function holdShapeContrast(board: HTMLElement): () => void {
   const undo: (() => void)[] = [];
   const read = readThemeTokenValues(SHAPE_COLOR_NAMES, board);
@@ -64,10 +48,6 @@ function holdShapeContrast(board: HTMLElement): () => void {
   return () => undo.forEach((u) => u());
 }
 
-/**
- * Sharp's line colours held to their bars in the palette on screen (`sharpContrast.ts`): set on `.board` only where
- * the frame's own mix falls short. Returns the undo. Nothing changes where the colours cannot be read.
- */
 function holdSharpLines(board: HTMLElement): () => void {
   const read = readThemeTokenValues(SHAPE_SHARP_COLOR_NAMES, board);
   const colors = {} as ShapeSharpColors;
@@ -83,21 +63,12 @@ function holdSharpLines(board: HTMLElement): () => void {
   };
 }
 
-/**
- * What `holdSharpLines` reads, as one string: the board's colour variables as computed (their `var()` chains already
- * substituted), without the line variables the hold itself sets. One style read, no probes, so a change on `<html>`
- * that moves no colour (a viewport height, a class for something else) costs almost nothing.
- */
 const SHARP_INPUTS = SHAPE_SHARP_COLOR_NAMES.filter((name) => !name.startsWith('shp-')).map((name) => `--${name}`);
 function sharpInputs(board: HTMLElement): string {
   const cs = getComputedStyle(board);
   return SHARP_INPUTS.map((name) => cs.getPropertyValue(name).trim()).join('|');
 }
 
-/**
- * A drawing's files/ pictures get their real URL before the browser parses them, so nothing asks for the bare name first.
- * `tile`: each also carries `data-shp-pic`, for `darkContrast`'s picture tiles.
- */
 function resolveFiles(html: string, resolve: ((src: string) => string) | undefined, tile = false): string {
   if (!resolve && !tile) return html;
   const attr = (url: string) => url.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
@@ -110,24 +81,11 @@ export interface MarkState {
   noted: ReadonlySet<string>;
 }
 
-/** A tagged part's top padding at least: the tag (2 px down, about 19 px tall) and a gap above the part's words. */
 const TAG_ROOM = 28;
-/** A tagged part's own inline padding-top, to put back when its tag goes. */
 const tagPads = new WeakMap<HTMLElement, string>();
 
 export const NO_MARKS: MarkState = { fresh: new Set(), erasing: new Set(), noted: new Set() };
 
-/**
- * How every board is drawn (approval "shape-board-sharp-only": Sharp only, no switch). CSS beats an SVG's
- * presentation attributes, so it reaches every board as shown, stored or new, and rewrites none: 1 px lines at any
- * zoom (`vector-effect: non-scaling-stroke`), 2 px corners on boxes, panels, chips and pills (3 canvas units, about
- * 2 px on a board shown at 1440), square ends and joins, box borders a softer grey and connectors stronger
- * (`--shp-hair`, `--shp-wire`), quieter zone fills with a 1 px edge in the zone's hue (`--shp-zone-*`), no drop
- * shadow. The kit draws square elbows and small filled arrowheads (`.shp-head`); an older board keeps the elbows and
- * open arrowheads it was drawn with. `sharpContrast.ts` holds the line colours to their bars in every palette.
- * `ShapeDrawn` writes `data-shp-style="sharp"` on every `.board`: the rules carry its weight, so a drawing's own
- * class rules do not undo them.
- */
 const SHARP = '.board[data-shp-style="sharp"]';
 const SHARP_ZONE = ':not(.line, .ink, .grey, .acc, .alert, .acc-fill)';
 const softIs = (zone: string) => `:is([style*="--${zone}-soft"], [fill*="--${zone}-soft"])`;
@@ -178,12 +136,6 @@ ${SHARP} .pick { border-radius: 3px; border-width: 1px; }
 ${SHARP} .mk { border-radius: 2px; }
 `;
 
-/**
- * The frame every drawn view sits in: the variables an agent colours with
- * (light and dark follow the app's theme), the SVG classes of the Shape
- * skill's frame, and the board's motion. Keyframes live here because a
- * shadow root does not see the page's.
- */
 export const SHAPE_FRAME_CSS = `
 :host { display: block; }
 .board {
@@ -308,26 +260,15 @@ svg tspan.shp-rb:hover, svg tspan.shp-rb.lit { text-decoration: underline; }
 ${SHAPE_SHARP_CSS}
 `;
 
-// One sanitizer of our own, so its hook reaches no other DOMPurify user.
-// `isSupported` is no proof (a partial DOM reports true and sanitizes
-// nothing), so the sanitizer proves itself on a known bad drawing first; if
-// the proof fails, the board shows no drawing rather than an unsanitized one.
-//
-// Nothing loads from outside the board: every URL attribute goes through the
-// format's allowlist (`files/…`, `#…`, a data:image; a link may be https), a
-// `style` attribute through the view-css rules, and any other attribute may
-// use only `url(#id)`. The values reach the hook decoded, as the page reads them.
 let purifier: ReturnType<typeof DOMPurify> | null | undefined;
 const PROOF_INPUT =
   '<b onclick="x()">kept</b><script>x()</script><img src="https:evil.invalid/i.png"><img srcset="https://evil.invalid/s.png 2x"><i style="background:u\\72l(//evil.invalid/a)">i</i><style>p{}</style>';
 const PROOF_FAILED = /onclick|<script|evil\.invalid|<style|srcset/i;
 const CONFIG = {
   ADD_TAGS: ['foreignObject'],
-  // HTML inside an SVG's foreignObject (a label in a box) is kept.
   HTML_INTEGRATION_POINTS: { foreignobject: true, 'annotation-xml': true },
   ADD_ATTR: ['pathLength', 'target'],
   FORBID_TAGS: ['style', 'script', 'iframe', 'frame', 'object', 'embed', 'link', 'meta', 'base', 'form', 'template', 'source', 'animate', 'set', 'animateMotion', 'animateTransform', 'dialog', 'select', 'area', 'map'],
-  // Nothing may open in the top layer: it sits over the whole app, past the frame's containment and clip.
   FORBID_ATTR: [...SHAPE_DROPPED_ATTRS, ...SHAPE_TOP_LAYER_ATTRS],
 };
 const WORDS_ONLY = /^(?:data-|aria-)|^(?:title|alt|class|id|role|lang|dir)$/;
@@ -335,7 +276,6 @@ const WORDS_ONLY = /^(?:data-|aria-)|^(?:title|alt|class|id|role|lang|dir)$/;
 function attributeAllowed(tag: string, name: string, value: string): boolean {
   if (SHAPE_DROPPED_ATTRS.includes(name) || SHAPE_TOP_LAYER_ATTRS.includes(name)) return false;
   if (SHAPE_URL_ATTRS.includes(name)) {
-    // An image input loads its src; no input needs one.
     if (tag === 'input') return false;
     return shapeUrlAllowed(value, tag === 'a' && (name === 'href' || name === 'xlink:href'));
   }
@@ -355,7 +295,6 @@ function sanitizer(): ReturnType<typeof DOMPurify> | null {
   return purifier;
 }
 
-/** An agent's drawing, made safe: no script, handlers, outside loads, frames or <style>. Empty when this page cannot sanitize. */
 export function sanitizeShapeHtml(html: string): string {
   const p = sanitizer();
   return p ? p.sanitize(shapeKeepSvgWhole(html), CONFIG) : '';
@@ -363,7 +302,6 @@ export function sanitizeShapeHtml(html: string): string {
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-// Parts of an SVG that are never drawn where they stand.
 const UNDRAWN = new Set(['defs', 'symbol', 'clippath', 'mask', 'marker', 'pattern', 'lineargradient', 'radialgradient', 'filter']);
 const drawnWords = (root: Element): Element[] =>
   [root, ...root.querySelectorAll('text')].filter((t) => {
@@ -372,13 +310,6 @@ const drawnWords = (root: Element): Element[] =>
     return true;
   });
 
-/**
- * In SVG only a `<text>` shows words, so an empty number among the shapes
- * (`<g data-ref="1"/>`) is drawn at the end of the nearest words: those just
- * before it, else just after it, in its own group first, then in the groups
- * around it. With no words in the drawing, it goes just after the SVG, as a
- * bubble. A shape (`<circle data-ref>`) stays where it is: it is the number.
- */
 function placeNumber(el: Element): Element {
   const doc = el.ownerDocument;
   const copy = (spot: Element) => {
@@ -410,73 +341,34 @@ const codeOf = (path: EventTarget[]) => path.find((t): t is HTMLElement => t ins
 
 export interface ShapeDrawnProps {
   drawn: ShapeDrawnView;
-  /** entering: parts draw in by step; drawn: still; leaving: no pointing. Default drawn. */
   phase?: 'entering' | 'drawn' | 'leaving';
-  /** Skip the draw-in (Esc). */
   skip?: boolean;
-  /** Reduced motion. Default: the person's setting. */
   reduce?: boolean;
-  /** References the drawing cites by `data-ref`; a bubble for a missing one is dropped. */
   refs?: readonly ShapeRef[];
   refHover?: number | null;
   refFlash?: number | null;
   onRefHover?: (n: number | null) => void;
-  /** A bubble was opened (PR and link bubbles open their URL themselves, unless they carry a picture). */
   onRefOpen?: (n: number) => void;
-  /**
-   * A fixed canvas in a narrow space keeps a readable size and scrolls sideways: the side with more
-   * drawing fades out and a small track under it shows how much there is. Absent: it shrinks to fit.
-   */
   pan?: boolean;
-  /** A fixed canvas sits at the top of its view, not in the middle. Absent: in the middle, as before. */
   top?: boolean;
-  /**
-   * The bubble's preview: hover or keyboard focus shows it (null hides it), a tap on a touch
-   * screen pins it. Absent: a bubble only lights and opens, as before.
-   */
   onRefPeek?: (n: number | null, el: HTMLElement, how: 'hover' | 'focus' | 'tap') => void;
-  /**
-   * A part with `data-code="path#L42"` was clicked (or Enter on it): the host
-   * opens that file at that line. Absent: `data-code` does nothing. While
-   * `pinpoint` is on, a click on a marked part picks the part instead.
-   */
   onCode?: (target: ShapeCodeTarget, el: HTMLElement) => void;
-  /** A `files/…` image's URL. */
   resolveSrc?: (src: string) => string;
-  /** On a dark board only: borders, zone edges, boxes and pictures held to contrast (`ShapeSurfaceProps.darkContrast`). Absent: as drawn. */
   darkContrast?: boolean;
-  /** Pointing at marked parts (Change it / Ask). Board only. */
   pinpoint?: boolean;
-  /** Select mode: a text selection inside a mark picks it. Board only. */
   select?: boolean;
   marks?: MarkState;
-  /** Marked parts whose code changed since the drawing was made: a dashed outline, and the `tags.stale` words on them. */
   stale?: ReadonlySet<string>;
-  /** Words a host puts on parts: `fresh` on `marks.fresh` parts ("changed"), `stale` on `stale` ones. Absent: no tag. */
   tags?: { fresh?: string; stale?: string };
-  /** A dragged box can start here: the cross cursor, and no text selection. Board only. */
   boxable?: boolean;
-  /** Kept boxes with their comments, on this view. Board only. */
   boxes?: readonly KeptBox[];
   onHoverMark?: (el: HTMLElement | null) => void;
-  /** A marked part was chosen; `text` is the selected words in Select mode. */
   onPickMark?: (el: HTMLElement, text?: string) => void;
-  /**
-   * The drawing's `.board`, each time it is drawn afresh (new content, or the
-   * wide and tall layouts swapping), and null once it is gone. For a layer
-   * that works on the drawing itself ("Follow an example").
-   */
   onBoard?: (board: HTMLElement | null) => void;
-  /**
-   * The board's scenes: a `<div data-scene="id">` holding the agent's SVG plays `scenes[id]` (`scene/ScenePlayer`,
-   * loaded lazily, in a shadow root of its own inside the slot). Absent: the drawing stays still, as before.
-   */
   scenes?: Readonly<Record<string, ShapeScene>>;
-  /** 'technical': scenes take the technical look (`scene/look.ts`). Absent: scenes play as drawn. A board without scenes is never touched. */
   sceneLook?: 'technical';
 }
 
-/** How much room the view has, for a fixed canvas. */
 function useFit(ref: React.RefObject<HTMLElement | null>, enabled: boolean) {
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   useLayoutEffect(() => {
@@ -498,7 +390,6 @@ function useFit(ref: React.RefObject<HTMLElement | null>, enabled: boolean) {
 }
 
 const noop = () => {};
-/** How wide the fade is on a side of a panning drawing with more to see, and the track under it (px). */
 const PAN_FADE = 28;
 const PAN_TRACK = 56;
 const FRAME_CONTAIN: React.CSSProperties = { contain: 'layout', clipPath: 'inset(-24px)' };
@@ -520,13 +411,11 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
   const html = useTall ? drawn.tall!.html : drawn.html;
   const css = useTall ? drawn.tall!.css ?? drawn.css ?? '' : drawn.css ?? '';
   const scaled = canvas && !useTall;
-  // No height to fill (a diagram in a flowing page): fit the width alone.
   const pan = !!props.pan && scaled && narrow;
   const k = scaled && fit ? Math.max(pan ? 0.55 : 0.2, Math.min(fit.w / drawn.width!, fit.h > 40 ? fit.h / drawn.height! : Infinity, 1.08)) : 1;
   const [contentKey, setContentKey] = useState(0);
   const trackRef = useRef<HTMLDivElement>(null);
 
-  // The content: sanitized once per change, then marked up for the board.
   useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host) return;
@@ -535,7 +424,6 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     const safeCss = shapeCssProblems(css).length ? '' : css;
     root.innerHTML = `<style>${SHAPE_FRAME_CSS}\n${safeCss}</style><div class="board${scaled ? ' canvas' : ''}${handlers.current.onRefPeek ? ' peek' : ''}" data-shp-style="sharp">${resolveFiles(sanitizeShapeHtml(html), handlers.current.resolveSrc, !!handlers.current.darkContrast)}</div>`;
     const board = root.querySelector<HTMLElement>('.board')!;
-    // Steps: the agent's numbers, in order, become 0, 1, 2… however sparse.
     const steps = [...board.querySelectorAll<HTMLElement | SVGElement>('[data-step]')];
     const order = [...new Set(steps.map((el) => Number(el.getAttribute('data-step')) || 0))].sort((a, b) => a - b);
     for (const el of steps) el.style.setProperty('--i', String(order.indexOf(Number(el.getAttribute('data-step')) || 0)));
@@ -547,7 +435,6 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
         el.remove();
         continue;
       }
-      // Empty: the board draws the number. Not empty: what the agent drew is the number.
       if (!el.children.length && !el.textContent?.trim()) {
         if (el.namespaceURI === SVG_NS && (el.localName === 'g' || el.localName === 'tspan') && !el.closest('text')) el = placeNumber(el);
         el.textContent = String(n);
@@ -572,7 +459,6 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
   }, [html, css, scaled]);
   useEffect(() => () => handlers.current.onBoard?.(null), []);
 
-  // The canvas scale.
   useLayoutEffect(() => {
     const board = rootRef.current?.querySelector<HTMLElement>('.board');
     if (!board) return;
@@ -585,24 +471,19 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     }
   }, [scaled, k, drawn.width, drawn.height, contentKey]);
 
-  // Panning: the side with more drawing fades out, and the track under the drawing follows the scroll.
-  // Written straight to the DOM, so a swipe re-renders nothing.
   useLayoutEffect(() => {
     const frame = frameRef.current;
     const track = trackRef.current;
     if (!frame || !track || !pan) return;
     const fit = frame.querySelector<HTMLElement>('.shp-drawn-fit');
     const update = () => {
-      // Every read first, then the writes: one layout per scroll event.
       const { scrollLeft, scrollWidth, clientWidth, clientHeight } = frame;
       const below = fit ? fit.offsetTop + fit.offsetHeight : 0;
       const more = scrollWidth - clientWidth;
-      // Only a drawing that is wider than its frame pans: one that fits shows no track.
       track.hidden = more <= 1;
       frame.style.setProperty('--shp-fl', scrollLeft > 1 ? `${PAN_FADE}px` : '0px');
       frame.style.setProperty('--shp-fr', scrollLeft < more - 1 ? `${PAN_FADE}px` : '0px');
       track.style.left = `${scrollLeft + (clientWidth - PAN_TRACK) / 2}px`;
-      // 12 px under the drawing, or less where the frame ends sooner: the track never makes the frame scroll down.
       track.style.top = `${Math.max(below, Math.min(below + 12, clientHeight - 4))}px`;
       const thumb = track.firstElementChild as HTMLElement | null;
       if (thumb && scrollWidth) {
@@ -623,9 +504,6 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     };
   }, [pan, k]);
 
-  // Contrast, in one pass so the two never undo each other: the palette's (`holdShapeContrast`, every board) first, then
-  // on a dark board `darkContrast` (opt-in), which starts from the colours the first left; undone the other way round.
-  // Both again when the theme or mode changes (every frame colour comes from these page tokens, which neither sets).
   const darkContrast = !!props.darkContrast;
   useLayoutEffect(() => {
     const board = rootRef.current?.querySelector<HTMLElement>('.board');
@@ -670,7 +548,6 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     };
   }, [darkContrast, contentKey]);
 
-  // Motion and mode.
   useLayoutEffect(() => {
     const board = rootRef.current?.querySelector<HTMLElement>('.board');
     if (!board) return;
@@ -681,14 +558,12 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     board.classList.toggle('boxable', !!props.boxable);
   }, [phase, skip, reduce, pinpoint, props.boxable, contentKey]);
 
-  // Kept boxes: inside the drawing, so they scroll and scale with it. A box belongs to the layout it was drawn on.
   const boxes = props.boxes;
   useLayoutEffect(() => {
     const board = rootRef.current?.querySelector<HTMLElement>('.board');
     if (board && boxes) syncKeptBoxes(board, boxes.filter((b) => !!b.box.tall === useTall), scaled ? k : 1);
   }, [boxes, useTall, scaled, k, contentKey]);
 
-  // Marks, and a host's tags on them.
   const stale = props.stale;
   const freshTag = props.tags?.fresh;
   const staleTag = props.tags?.stale;
@@ -705,10 +580,7 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
       const tag = isStale ? staleTag : marks.fresh.has(id) ? freshTag : undefined;
       if (tag) {
         el.setAttribute('data-shp-tag', tag);
-        // The tag sits in the part's corner: a part the drawing left in the flow becomes its containing block.
         if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
-        // Room for it above the part's own words; the part's own padding kept here (never in the DOM, where
-        // the drawing could have written it) to put back when the tag goes.
         if (!tagPads.has(el)) {
           tagPads.set(el, el.style.paddingTop);
           const top = parseFloat(getComputedStyle(el).paddingTop) || 0;
@@ -725,8 +597,6 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     }
   }, [marks, stale, freshTag, staleTag, contentKey]);
 
-  // Sharp's line colours, after every other pass over the board's colours (darkContrast's included, so a flip of it
-  // holds them again); again when the page's theme or palette changes, and only then.
   useLayoutEffect(() => {
     const board = rootRef.current?.querySelector<HTMLElement>('.board');
     if (!board) return;
@@ -756,7 +626,6 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     };
   }, [darkContrast, contentKey]);
 
-  // Bubbles: lit with their list row, flashed from it.
   useEffect(() => {
     const board = rootRef.current?.querySelector<HTMLElement>('.board');
     if (!board) return;
@@ -768,7 +637,6 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     }
   }, [refHover, refFlash, contentKey, reduce]);
 
-  // Pointing, clicking and keys inside the shadow root.
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
@@ -822,7 +690,6 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
       const b = bubbleOf(path);
       if (b) {
         e.stopPropagation();
-        // A tap has no hover: the first shows the bubble; the host opens it from there.
         if (lastPointer === 'touch' && handlers.current.onRefPeek) {
           (b as HTMLElement).blur?.();
           handlers.current.onRefPeek(Number(b.getAttribute('data-ref')), b, 'tap');
@@ -830,10 +697,6 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
         else openBubble(b);
         return;
       }
-      // A drawing's link never moves the page it sits on: `#…` scrolls inside the drawing (never the host's
-      // hash, which is the Inbox's route), an http(s) link opens in a new tab, and anything else does nothing.
-      // Any element with an href is held (an `<area>` the store and sanitizer refuse would still be caught); only a
-      // link (`<a>`, `<area>`) is followed, the way below. Another element's href (`<use href="#icon">`) moves nothing.
       const withHref = path.filter((t): t is Element => t instanceof Element && (t.hasAttribute('href') || t.hasAttribute('xlink:href')));
       if (withHref.length) e.preventDefault();
       const link = withHref.find((t) => t.localName === 'a' || t.localName === 'area');
@@ -903,13 +766,6 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     };
   }, [contentKey]);
 
-  // The frame contains the drawing: its css styles the shadow host (`:host`),
-  // and without this `:host { position: fixed; inset: 0 }` (or a huge
-  // transform) would lay the drawing over the whole app. Layout containment
-  // makes the frame the box anything fixed is placed in, and the clip keeps
-  // every pixel within 24px of the frame: room for a ring, a focus outline
-  // or a border a pixel over, which paint containment would cut. Inline, so
-  // it holds even where the host page has not loaded shape.css.
   return (
     <div
       ref={frameRef}
@@ -930,12 +786,6 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
   );
 }
 
-/**
- * One drawing on its own, outside ShapeSurface: a diagram whose parts open
- * code (`data-code`) and whose bubbles open references. It draws in once
- * when it mounts (or when `drawn` changes) and then holds still. For a host
- * such as code review answering "show me how this works".
- */
 export function ShapeDiagram({
   drawn,
   refs,
@@ -953,14 +803,10 @@ export function ShapeDiagram({
   onCode?: ShapeDrawnProps['onCode'];
   onRefOpen?: (ref: ShapeRef) => void;
   resolveSrc?: (src: string) => string;
-  /** Draw in on mount. Default true (reduced motion: a short fade). */
   animate?: boolean;
   className?: string;
-  /** Marks on parts by `data-mark` id (ShapeDrawn's): `noted` rings a part (you are here), `fresh` redraws one. Default none. */
   marks?: MarkState;
-  /** Parts whose code changed since the drawing was made. Default none. */
   stale?: ReadonlySet<string>;
-  /** Words on tagged parts (ShapeDrawn's `tags`). Default none. */
   tags?: ShapeDrawnProps['tags'];
 }) {
   const [phase, setPhase] = useState<'entering' | 'drawn'>(animate ? 'entering' : 'drawn');

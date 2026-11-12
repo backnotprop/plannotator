@@ -1,8 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { wordSpanAt } from './wordAtPoint';
 
-// Click-a-word highlights exactly the word under the pointer: these pin which
-// characters count as one word, with and without Intl.Segmenter.
 describe('wordSpanAt', () => {
   const word = (text: string, index: number, seg = true) => {
     const span = wordSpanAt(text, index, seg);
@@ -26,7 +24,7 @@ describe('wordSpanAt', () => {
       const text = 'Dead-lettered charges, a well-known re-run.';
       expect(word(text, 1, seg)).toBe('Dead-lettered');
       expect(word(text, 8, seg)).toBe('Dead-lettered');
-      expect(word(text, 4, seg)).toBe('Dead-lettered'); // on the hyphen itself
+      expect(word(text, 4, seg)).toBe('Dead-lettered');
       expect(word(text, 27, seg)).toBe('well-known');
       expect(word(text, 38, seg)).toBe('re-run');
       expect(word('state-of-the-art', 7, seg)).toBe('state-of-the-art');

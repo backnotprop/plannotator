@@ -1,9 +1,3 @@
-/**
- * PlanDiffModeSwitcher — Toggle between clean/rendered and raw diff views
- *
- * Follows the same visual pattern as ModeSwitcher.
- */
-
 import React from "react";
 
 export type PlanDiffMode = "clean" | "classic" | "raw";

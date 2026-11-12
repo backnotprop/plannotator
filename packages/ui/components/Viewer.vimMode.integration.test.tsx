@@ -529,9 +529,6 @@ describe.if(hasDom)('Viewer Vim mode with repository fixtures', () => {
     if (!article || !codeBlock) throw new Error('Missing code-hover Vim fixture');
     act(() => article.focus());
 
-    // Scrolling with j/k can move a code block underneath a stationary pointer.
-    // React reports that as mouseenter even though the user did not switch to
-    // pointer annotation.
     act(() => {
       codeBlock.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
     });
@@ -548,8 +545,6 @@ describe.if(hasDom)('Viewer Vim mode with repository fixtures', () => {
     expect(document.querySelector('[data-comment-popover="true"]')).toBeNull();
     expect(document.querySelector('textarea')).toBeNull();
 
-    // The same code toolbar may take keyboard ownership only after an explicit
-    // Vim action on the code target.
     act(() => { keydown(article, 'j'); });
     act(() => { keydown(article, 'j'); });
     expect(article.dataset.vimTargetKey).toContain(':code');

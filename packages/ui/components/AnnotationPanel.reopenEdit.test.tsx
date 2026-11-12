@@ -1,14 +1,3 @@
-/**
- * `reopenEdit` on the REAL AnnotationPanel (DOM-gated): a host that kept an
- * edit of a saved comment, not saved, when its file closed puts it back, and
- * the card opens its edit box holding those words, once per request, saving
- * only on the card's own Save.
- *
- * What regresses: the words not coming back (or landing on another card), the
- * edit saving by itself, one request reopening the box after the person
- * cancelled it, the caret selecting every word (one key would replace them),
- * and, with no prop, any card opening by itself.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -90,7 +79,6 @@ describe.if(hasDom)('AnnotationPanel reopenEdit', () => {
     await press(el!, 'Enter', { metaKey: true, ctrlKey: true });
     expect(edits).toEqual([['second', { text: 'second, rewritten' }]]);
     expect(box('second')).toBeNull();
-    // The same request does not open it again.
     await rerender(panel(request, edits));
     expect(box('second')).toBeNull();
   });

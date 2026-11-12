@@ -1,11 +1,3 @@
-/**
- * The board as a person meets it (DOM-gated, tests/dom-test-list.txt). What regresses if these fail:
- * - annotation is on from the start, so a click on a part opens a comment box;
- * - the Annotate button no longer turns pointing on, or an SVG part throws when picked;
- * - `views.know` (or an old board's Requirements) is drawn again, comes back as a tab, lights a dot, or crashes a board
- *   that has nothing else; an old #view=know or #view=reqs link stops opening the Shape view;
- * - Show more cannot go back, or a bubble does not pop out, close on Esc, or avoid another number.
- */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -45,7 +37,6 @@ function host(views: ShapeVersion['views'], refs: ShapeRef[] = REFS, claim = 'Bu
 
 let root: Root | null = null;
 let unbridge: (() => void) | null = null;
-// A wide board: this DOM measures everything as 0 wide, which reads as a phone.
 let wide: PropertyDescriptor | undefined;
 beforeAll(() => {
   if (!hasDom) return;
@@ -239,7 +230,6 @@ describe.if(hasDom)('annotation: off until asked for', () => {
     await mount({ picture: PICTURE });
     await click(dock('Annotate')!);
     expect(dock('Annotate')?.getAttribute('aria-pressed')).toBe('true');
-    // Select and Pinpoint only: the board's box decides the action.
     expect(document.querySelectorAll('.shp-tstrip button').length).toBe(3);
     await click(inDrawing('[data-mark="whistle"]')!);
     expect(popover()?.textContent).toContain('One whistle');
@@ -262,7 +252,6 @@ describe.if(hasDom)('views.know is not shown (approval shape-know-removed)', () 
   const shown = () => document.querySelector('.shp-view:not(.leaving)')!;
   const WORDS = 'Sent anyway, never shown [^1].\n\nA second paragraph.';
 
-  // Agents are no longer asked for views.know, but one that sends it anyway is not refused: nothing draws its words.
   test('a board an agent sends with views.know passes the check, and its words are nowhere on the board', async () => {
     const sent = checkShapeBoard({ title: 'Kettle', claim: 'Built.', views: { picture: PICTURE, know: WORDS }, refs: REFS });
     expect('errors' in sent ? sent.errors : []).toEqual([]);
@@ -273,13 +262,11 @@ describe.if(hasDom)('views.know is not shown (approval shape-know-removed)', () 
     expect(document.querySelector('[data-mark="know-1"]')).toBeNull();
     expect(document.body.textContent).not.toContain('never shown');
     expect(document.body.textContent).not.toContain('second paragraph');
-    // The drawing is as it is with no words.
     expect(shown().classList.contains('v-picture')).toBe(true);
     expect(inDrawing('[data-mark="whistle"]')).not.toBeNull();
     expect(bar()).toEqual(['Shape']);
   });
 
-  // On purpose: the owner's words for the bar (Picture became Shape, What to know went).
   test('the bar says Shape, How it works, Code, with no tab for the words', async () => {
     await mount({ picture: PICTURE, how: PICTURE, know: 'Only this.', code: { stage: 'after', guide: { title: 'G', intent: 'I', sections: [] } } as unknown as NonNullable<ShapeVersion['views']['code']> });
     expect(bar()).toEqual(['Shape', 'How it works', 'Code']);
@@ -306,7 +293,6 @@ describe.if(hasDom)('views.know is not shown (approval shape-know-removed)', () 
       expect(document.querySelector('.shp-head h1')?.textContent).toContain('Kettle');
       expect(document.querySelector('.shp-claim')?.textContent).toBe('Built.');
       expect(bar()).toEqual([]);
-      // No empty Views group left in the dock.
       expect(document.querySelector('.shp-dock [aria-label="Views"]')).toBeNull();
       expect(shown().textContent).toBe('');
       expect(document.body.textContent).not.toContain('Only this.');
@@ -353,7 +339,6 @@ describe.if(hasDom)('views.know is not shown (approval shape-know-removed)', () 
     await mount({}, { host: h, initialView: 'how' });
     const data = await h.load(ID);
     const nextBoard: ShapeBoard = { title: 'Kettle', claim: 'Built.', views: { picture: PICTURE, how: PICTURE, know: 'First, changed.' }, refs: REFS };
-    // A version saved while the words were parts still carries them: they light nothing either.
     const oldParts = [...shapeParts(nextBoard), { view: 'know' as const, id: 'know-1', text: 'First, changed.' }];
     await act(async () => send!({ type: 'version', shape: data.shape, version: { ...nextBoard, n: 2, at: data.version.at, base: 1, through: null, by: null, parts: oldParts } }));
     for (let i = 0; i < 40 && !document.querySelector('.shp-pill'); i++) await wait();
@@ -436,7 +421,6 @@ describe.if(hasDom)('a reference\'s bubble', () => {
     document.body.appendChild(el);
     root = createRoot(el);
     const ref: ShapeRef = { n: 1, kind: 'file', title: 'T', target: 'a.ts' };
-    // happy-dom gives the bubble no size, and the choice needs one.
     const width = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth')!;
     const height = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
     Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, get: () => 200 });
@@ -537,7 +521,6 @@ describe.if(hasDom)('a host\'s control beside a file (fileAction)', () => {
   });
 });
 
-// A real agent's board sat in the middle of its view, with a band of nothing under the claim.
 describe.if(hasDom)("Plannotator's board sits under the claim; another host keeps it in the middle", () => {
   const canvas = { ...PICTURE, width: 800, height: 400 };
 

@@ -3,11 +3,8 @@ import { toast } from 'sonner';
 import { copyTextToClipboard } from '../utils/clipboard';
 import { claimUpdateToast, describeUpdateToast, requestUpdateNow, type UpdateAdvert } from '../utils/updateNotice';
 
-/** First look after the page settles: past the first-run announcements' own 4 s window. */
 export const UPDATE_TOAST_DELAY_MS = 5_000;
-/** While something blocks it (a first-run dialog, a focused composer), look again this often. */
 const RETRY_MS = 5_000;
-/** Give up for this load after this long; the next load (or the menu) says it. */
 const GIVE_UP_MS = 120_000;
 
 function isTypingSomewhere(): boolean {
@@ -15,28 +12,13 @@ function isTypingSomewhere(): boolean {
   if (!el || el === document.body) return false;
   const tag = el.tagName;
   if (tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT' || (el as HTMLElement).isContentEditable) return true;
-  // An open dialog owns the screen; the toast waits for it.
   return !!el.closest('[role="dialog"], dialog[open]');
 }
 
-/**
- * The review windows' "a new version is out" toast (design §4.5): from the
- * server's advert only, at most once per version and once a day
- * (claimUpdateToast), queued behind the first-run dialogs (`blocked`) and
- * never while a composer or dialog has focus. A blocked attempt is not
- * consumed: it looks again, and gives up for this load after two minutes.
- *
- * Actions: What's new (the release on GitHub) and, for the binary the install
- * script manages, Update (POST /api/update runs it now); elsewhere Copy
- * command (the right command for the host).
- */
 export function useUpdateToast(input: {
   advert: UpdateAdvert | null;
-  /** A first-run dialog is showing or may still show this load. */
   blocked: boolean;
-  /** Auto-update will install it; the post-update toast speaks instead. */
   autoUpdateActive: boolean;
-  /** A share link or archive: nobody to tell. */
   suppressed?: boolean;
   position?: 'top-right' | 'bottom-right';
 }): void {

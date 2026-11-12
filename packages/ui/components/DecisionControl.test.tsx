@@ -100,8 +100,6 @@ afterEach(async () => {
 });
 
 describe('DecisionControl', () => {
-  // Guards the in-flight branches' zero-state flip coming back: the left
-  // segment fires the primary and NEVER opens the popover, in both states.
   test.skipIf(!hasDom)('left segment calls handlers.primary and never opens the popover', async () => {
     for (const input of [ANNOTATE_EMPTY, REVIEW_FEEDBACK]) {
       const handlers = makeHandlers();
@@ -118,8 +116,6 @@ describe('DecisionControl', () => {
     }
   });
 
-  // Guards a revert to a one-line field: Enter stays a newline, Mod+Enter
-  // (both modifier spellings) fires the composer action once, trimmed.
   test.skipIf(!hasDom)('Mod+Enter submits the trimmed note; plain Enter does not submit', async () => {
     for (const modifier of [{ metaKey: true }, { ctrlKey: true }]) {
       const handlers = makeHandlers();
@@ -145,8 +141,6 @@ describe('DecisionControl', () => {
     }
   });
 
-  // Guards the keyboard path to a note: a bumped openNoteRequest opens the
-  // first composer straight away, and the initial value opens nothing.
   test.skipIf(!hasDom)('openNoteRequest opens the note composer', async () => {
     const handlers = makeHandlers();
     await mountControl(REVIEW_FEEDBACK, handlers, { openNoteRequest: 0 });
@@ -170,8 +164,6 @@ describe('DecisionControl', () => {
     expect(handlers['note-with-feedback']).toHaveBeenCalledWith('ship it');
   });
 
-  // Guards both throwing away a half-typed note and hijacking the host app's
-  // own Escape ladder.
   test.skipIf(!hasDom)('Escape ladder: composer keeps the draft, menu consumes, closed propagates', async () => {
     const handlers = makeHandlers();
     await mountControl(REVIEW_FEEDBACK, handlers);
@@ -182,7 +174,6 @@ describe('DecisionControl', () => {
     };
     document.addEventListener('keydown', spy);
     try {
-      // Rung 1: composer → menu, draft kept.
       await openMenu();
       await clickItem('Send with a note…');
       await typeNote('half a thought');
@@ -193,7 +184,6 @@ describe('DecisionControl', () => {
       expect(noteInput().value).toBe('half a thought');
       await pressKey(noteInput(), { key: 'Escape' });
 
-      // Rung 2: menu → closed, consumed, focus back on the caret.
       const focused = document.activeElement as HTMLElement;
       await pressKey(focused ?? popover()!, { key: 'Escape' });
       expect(popover()).toBeNull();
@@ -202,7 +192,6 @@ describe('DecisionControl', () => {
         document.querySelector('[data-decision-caret]'),
       );
 
-      // Rung 3: nothing open → the event is NOT consumed by the control.
       await pressKey(document.body, { key: 'Escape' });
       expect(documentEscapes.length).toBe(1);
     } finally {
@@ -210,8 +199,6 @@ describe('DecisionControl', () => {
     }
   });
 
-  // The action stays visually enabled and an empty note refocuses the field —
-  // never a disabled-gray submit, never an empty submission.
   test.skipIf(!hasDom)('empty note does not submit and refocuses the field', async () => {
     const handlers = makeHandlers();
     await mountControl(REVIEW_FEEDBACK, handlers);
@@ -228,8 +215,6 @@ describe('DecisionControl', () => {
     expect(document.activeElement).toBe(noteInput());
   });
 
-  // Guards a refactor that fires the destructive discard without its one
-  // confirm, and the cancel path that must return to the open menu.
   test.skipIf(!hasDom)('discard item raises the confirm; confirm fires, cancel returns to the menu', async () => {
     const handlers = makeHandlers();
     await mountControl(REVIEW_FEEDBACK, handlers);
@@ -241,7 +226,6 @@ describe('DecisionControl', () => {
     expect(dialog()).not.toBeNull();
     expect(handlers['discard-and-finish']).not.toHaveBeenCalled();
 
-    // Cancel: back to the open menu, one decision still one click away.
     const cancel = Array.from(dialog()!.querySelectorAll('button')).find(
       (el) => el.textContent === 'Cancel',
     );
@@ -250,10 +234,8 @@ describe('DecisionControl', () => {
     expect(popover()?.dataset.decisionPopover).toBe('menu');
     expect(handlers['discard-and-finish']).not.toHaveBeenCalled();
 
-    // Confirm: exactly one handler call, after confirmation only.
     await clickItem('Approve, discard 3 annotations…');
     const go = Array.from(dialog()!.querySelectorAll('button')).find(
-      // Frozen copy (maintainer-approved): 'Discard & approve'.
       (el) => el.textContent === 'Discard & approve',
     );
     await act(async () => go!.click());
@@ -261,11 +243,6 @@ describe('DecisionControl', () => {
     expect(dialog()).toBeNull();
   });
 
-  // Guards the Escape leak: when focus has dropped OUTSIDE the popover (Tab
-  // past the last item, click on popover padding), the document-level Escape
-  // must dismiss AND consume — the host apps' window-level Escape ladders
-  // must never also act on the same keypress. A closed control must not
-  // consume anything.
   test.skipIf(!hasDom)('outside-focus Escape dismisses fail-closed; closed control does not consume', async () => {
     const handlers = makeHandlers();
     await mountControl(REVIEW_FEEDBACK, handlers);
@@ -276,7 +253,6 @@ describe('DecisionControl', () => {
     };
     window.addEventListener('keydown', windowSpy);
     try {
-      // Menu open, focus outside: Escape closes and never reaches window.
       await openMenu();
       (document.activeElement as HTMLElement | null)?.blur?.();
       const consumed = await pressKey(document.body, { key: 'Escape' });
@@ -284,9 +260,6 @@ describe('DecisionControl', () => {
       expect(consumed.defaultPrevented).toBe(true);
       expect(windowEscapes.length).toBe(0);
 
-      // Composer open, focus outside: consume-and-close-ALL (an outside
-      // Escape is an outside-dismissal gesture, like an outside click) — and
-      // the draft survives the full close.
       await openMenu();
       await clickItem('Send with a note…');
       await typeNote('kept across dismissal');
@@ -297,10 +270,9 @@ describe('DecisionControl', () => {
       await openMenu();
       await clickItem('Send with a note…');
       expect(noteInput().value).toBe('kept across dismissal');
-      await pressKey(noteInput(), { key: 'Escape' }); // back to menu
-      await pressKey(document.activeElement!, { key: 'Escape' }); // close
+      await pressKey(noteInput(), { key: 'Escape' });
+      await pressKey(document.activeElement!, { key: 'Escape' });
 
-      // Closed: the control holds no listener, the ladder gets the event.
       const passedThrough = await pressKey(document.body, { key: 'Escape' });
       expect(passedThrough.defaultPrevented).toBe(false);
       expect(windowEscapes.length).toBe(1);
@@ -309,9 +281,6 @@ describe('DecisionControl', () => {
     }
   });
 
-  // Guards the HTML/live-app hang-over-the-page defect: iframe clicks never
-  // reach the parent document, so iframe focus must dismiss — but only when
-  // the host says the surface is framed.
   test.skipIf(!hasDom)('blur to an iframe dismisses only with dismissOnIframeFocus', async () => {
     for (const framed of [true, false]) {
       const handlers = makeHandlers();
@@ -339,8 +308,6 @@ describe('DecisionControl', () => {
     }
   });
 
-  // Guards the menu's keyboard contract: arrow keys rove between the
-  // role="menuitem" rows and wrap at both ends.
   test.skipIf(!hasDom)('roving focus: Down/Up move between menu items and wrap', async () => {
     const handlers = makeHandlers();
     await mountControl(REVIEW_FEEDBACK, handlers);
@@ -364,9 +331,6 @@ describe('DecisionControl', () => {
     expect(document.activeElement).toBe(items[0]);
   });
 
-  // F6: the spec is live. Without the fallback, deleting the annotations that
-  // back an open composer (feedback state -> empty state) leaves the popover
-  // rendering an empty shell until Escape.
   test.skipIf(!hasDom)('live spec change that removes the active composer item morphs back to the menu', async () => {
     const handlers = makeHandlers();
     await mountControl(REVIEW_FEEDBACK, handlers);
@@ -375,8 +339,6 @@ describe('DecisionControl', () => {
     expect(popover()?.dataset.decisionPopover).toBe('composer');
     await typeNote('half-typed');
 
-    // The last annotation is deleted elsewhere: the state flips to empty and
-    // `note-with-feedback` leaves the spec while the composer is open.
     await act(async () => {
       root!.render(
         <DecisionControl
@@ -390,14 +352,10 @@ describe('DecisionControl', () => {
       );
     });
 
-    // Not an empty shell: the popover is back in menu state with the new items.
     expect(popover()?.dataset.decisionPopover).toBe('menu');
     expect(menuItems().length).toBeGreaterThan(0);
     for (const handler of Object.values(handlers)) expect(handler).not.toHaveBeenCalled();
 
-    // Same rule for an OPEN CONFIRM (L2): the dialog resolves from the live
-    // spec, so when its item leaves the spec it closes back to the menu
-    // instead of confirming a stale decision.
     await act(async () => {
       root!.render(
         <DecisionControl
@@ -429,9 +387,6 @@ describe('DecisionControl', () => {
     expect(handlers['discard-and-finish']).not.toHaveBeenCalled();
   });
 
-  // Guards a note lost to a failed send (Inbox code review): a host holding
-  // the notes gets each keystroke, a fresh mount shows what it holds, and the
-  // control never clears a note on submit; the host does, once it went.
   test.skipIf(!hasDom)('host-held notes survive a submit and a remount until the host clears them', async () => {
     let held: Record<string, string> = { 'note-with-feedback': 'kept from before' };
     const handlers = makeHandlers();

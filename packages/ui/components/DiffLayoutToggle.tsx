@@ -1,14 +1,3 @@
-/**
- * Split / Unified as one button (approval "diff-controls-headers": "One
- * button, like DiffsHub"). The mark shows the layout on screen; a click
- * switches to the other one, and the tooltip says which. Pierre's
- * `diffs-icon-diff-split` and `diffs-icon-diff-unified` marks (@pierre/diffs
- * dist/sprite.js), drawn in one stroke weight, with the two panes filled
- * faintly in the old and new tones.
- *
- * The host styles the button (`className`) and keeps the setting: code
- * review's dock strip and the Inbox's review bars both draw it.
- */
 import React from 'react';
 
 export type DiffLayout = 'split' | 'unified';
@@ -31,7 +20,6 @@ export function DiffLayoutIcon({ layout, size = 15 }: { layout: DiffLayout; size
   );
 }
 
-/** The words a tooltip shows for the button: the layout on screen, then what a click does. */
 export function diffLayoutToggleTip(layout: DiffLayout): string {
   return layout === 'split' ? 'Split view. Click for Unified' : 'Unified view. Click for Split';
 }
@@ -39,11 +27,9 @@ export function diffLayoutToggleTip(layout: DiffLayout): string {
 export interface DiffLayoutToggleProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'value' | 'onChange'> {
   value: DiffLayout;
   onChange: (next: DiffLayout) => void;
-  /** A native tooltip (`title`). Off when the host wraps the button in its own tooltip. Default: on. */
   nativeTitle?: boolean;
 }
 
-/** Other button props (a tooltip trigger's handlers) and the ref reach the button. */
 export const DiffLayoutToggle = React.forwardRef<HTMLButtonElement, DiffLayoutToggleProps>(function DiffLayoutToggle(
   { value, onChange, nativeTitle = true, onClick, ...rest },
   ref,

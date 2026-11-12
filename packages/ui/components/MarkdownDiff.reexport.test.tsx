@@ -1,12 +1,3 @@
-/**
- * Re-export surface test: hosts import MarkdownDiff (and its handle/prop
- * types) from @plannotator/ui's MarkdownDiff module — never from
- * @plannotator/markdown-editor's MarkdownDiff or @plannotator/atomic-editor's
- * AtomicDiffEditor directly (both are outside the consumer import allowlist).
- *
- * Runs without DOM: it pins availability and the type surface, not diff
- * behavior (the mounted surface is covered by MarkdownDiff.frozen.test.tsx).
- */
 import { describe, test, expect } from 'bun:test';
 import { EditorView } from '@codemirror/view';
 import { MarkdownDiff, type MarkdownDiffHandle, type MarkdownDiffProps } from './MarkdownDiff';
@@ -18,8 +9,6 @@ describe('MarkdownDiff module: public re-export surface', () => {
   });
 
   test('the handle type round-trips through the ui surface', () => {
-    // Compile-time assertion: fails typecheck (not just this test) if the
-    // re-exported handle drifts from the engine's navigation/byte contract.
     const handle: MarkdownDiffHandle = {
       goToNextChange: () => true,
       goToPreviousChange: () => false,
@@ -33,10 +22,6 @@ describe('MarkdownDiff module: public re-export surface', () => {
   });
 
   test('the props type round-trips, including the extensions seam', () => {
-    // Compile-time assertions: the shim keeps the packaged prop surface
-    // (minus mode/cardClassName, which the shim owns) and adds gridEnabled.
-    // wikiLinks comes from the ui MarkdownEditor surface and must be
-    // assignable to the diff's extensions seam so consumer extensions compose.
     const props: MarkdownDiffProps = {
       originalMarkdown: 'older\n',
       modifiedMarkdown: 'newer\n',

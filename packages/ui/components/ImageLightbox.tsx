@@ -14,54 +14,31 @@ import { canPanToward, type NaturalBox, type ZoomSize, type ZoomViewport } from 
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useSwipeStep } from '../hooks/useSwipeStep';
 
-/** One image of a document, for the lightbox's stepping (`images`). */
 export interface LightboxImage {
   src: string;
   alt: string;
-  /** What the viewer calls the image (a picture choice: "B · Quiet hover menu"). Absent: the file name its src names. */
   name?: string;
-  /** The heading the image sits under ("Options"), for "2 of 4 · in “Options”" and the peek's rows. */
   section?: string | null;
-  /**
-   * The image's src AS WRITTEN in the markdown (not the URL the browser
-   * loads), its document line and its block: what a comment on part of the
-   * image records (#2100). Absent: the image takes no region comments.
-   */
   writtenSrc?: string;
   line?: number | null;
   blockId?: string;
 }
 
-/**
- * Comments on part of an image (#2100, approval "image-region-comments",
- * variant C). Given, the viewer shows a Move | Region switch and a comment
- * count over each markdown image (one with a `writtenSrc` and `blockId`):
- * Region turns a drag into a box, the comment box opens beside it, Save adds
- * an ordinary COMMENT carrying `imageRegion`, and the count opens a drawer of
- * the image's region comments (a card zooms to its box). Absent: the viewer
- * is unchanged.
- */
 export interface LightboxRegionComments {
-  /** The document's annotations; the viewer shows the ones carrying `imageRegion`. */
   annotations: readonly Annotation[];
-  /** Whether new boxes may be drawn (false on a read-only document: boxes and the drawer only). */
   canCreate: boolean;
   onAdd: (annotation: Annotation) => void;
   onDelete?: (id: string) => void;
   onEdit?: (id: string, updates: Partial<Annotation>) => void;
-  /** Open on this comment: its image, zoomed to its box, its card selected (a card picked in the document's panel). */
   focusId?: string | null;
-  /** Ask AI from the comment box (the viewer closes once a question is taken, as the diagram popout does). */
   onAskAI?: CommentAskAIHandler;
   mentionSource?: MentionSource;
 }
 
-/** The image a region draft is kept for: its src as written, or a hash of a data URL (which can be megabytes long). */
 function imageRegionDraftScope(writtenSrc: string): string {
   return writtenSrc.startsWith('data:') ? `data:${hashDraftScope(writtenSrc)}` : writtenSrc;
 }
 
-/** `Region 3 · 356 × 486 px`, the comment box's header. */
 function regionHeader(n: number, box: NaturalBox): string {
   return `Region ${n} · ${box.w} × ${box.h} px`;
 }
@@ -78,11 +55,6 @@ function isTextField(el: EventTarget | null): boolean {
   return tag === 'INPUT' || tag === 'TEXTAREA' || el.isContentEditable;
 }
 
-/**
- * What the viewer calls an image: its `name` when the host gave one, else the
- * file name its src names (the `path` a host route carries,
- * `/api/image?path=…`, else the URL's last segment), else the alt text.
- */
 export function lightboxImageName(image: Pick<LightboxImage, 'src' | 'alt' | 'name'>): string {
   if (image.name) return image.name;
   try {
@@ -92,19 +64,10 @@ export function lightboxImageName(image: Pick<LightboxImage, 'src' | 'alt' | 'na
     const last = named.split(/[\\/]/).filter(Boolean).pop();
     if (last) return decodeURIComponent(last);
   } catch {
-    // Not a URL: fall back to the alt text.
   }
   return image.alt || 'Image';
 }
 
-/**
- * Every image a rendered document shows, in document order, each with the
- * heading it sits under: what the lightbox steps through (plan review and
- * annotate's light version of the Inbox's one viewer, approval
- * "inbox-image-viewer"). Only images that open the lightbox count
- * (`.cursor-zoom-in`, or `[data-zoomable]`: a question card's picture
- * choices, whose picture picks and whose separate zoom button opens it).
- */
 export function collectDocumentImages(container: ParentNode | null): LightboxImage[] {
   if (!container) return [];
   const out: LightboxImage[] = [];
@@ -119,8 +82,6 @@ export function collectDocumentImages(container: ParentNode | null): LightboxIma
     const src = img.getAttribute('src');
     if (!src || out.some((i) => i.src === src)) continue;
     const image: LightboxImage = { src, alt: img.getAttribute('alt') ?? '', section };
-    // A markdown image says how it was written (InlineMarkdown's
-    // `data-image-src`) and sits in a block: what region comments need.
     const written = img.getAttribute('data-image-src');
     const blockId = img.closest<HTMLElement>('[data-block-id]')?.dataset.blockId;
     if (written && blockId) {
@@ -134,65 +95,18 @@ export function collectDocumentImages(container: ParentNode | null): LightboxIma
 
 const ICON = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true };
 
-/**
- * Overlay for viewing one image enlarged. Shared by the markdown Viewer
- * (clicking an image in a document) and the raw-HTML surface (a link to a
- * local image inside the annotated page).
- *
- * The image is only ever shown through `<img src>`, so an SVG runs no script
- * and cannot reach the page.
- *
- * It is modal for the keyboard. Its keydown listener runs on the CAPTURE phase
- * at the window and stops every key there, so nothing behind it reacts:
- * Escape closes the lightbox before the HTML surface's Esc ladder sees it,
- * and Mod+Enter cannot submit a decision behind it. Focus moves to the
- * overlay when it opens, which also pulls focus out of an HTML page's iframe
- * (whose keys the parent would otherwise never see), and goes back to where
- * it was when it closes.
- *
- * With `images` (two or more) it is the light version of the Inbox's one
- * viewer: full screen, `2 of 4 · in “Options”`, ← → (and `]` `[`) through the
- * document's images, stopping at the ends, Actual size, and the same peek
- * from the pill under the image. No pen, no comments: there the person
- * annotates the document itself. Without `images` it is the single image
- * overlay it always was (a click beside the image closes it).
- *
- * Both zoom (#2067, `ImageZoomStage`): Ctrl/⌘ + wheel and a trackpad pinch
- * zoom about the pointer, a plain wheel scrolls an image larger than the
- * screen and zooms one that fits, drag (or one finger) pans, two fingers
- * pinch, a double click toggles Fit and 2×, Fit to 800%. The stepping header
- * shows the scale beside Fit / Actual size, which resets it. No keys were
- * added: the focused stage takes the browser's own scroll keys, as the
- * scroller it replaced did. Stepping to another image starts at Fit.
- */
 export const ImageLightbox: React.FC<{
   src: string;
   alt: string;
   onClose: () => void;
-  /** The document's images in order; with two or more the lightbox steps through them. Additive: absent keeps the single image overlay. */
   images?: readonly LightboxImage[];
-  /** Comments on part of an image (#2100). Additive: absent, no region tools. */
   regions?: LightboxRegionComments;
-  /**
-   * A touch screen's swipe through `images` (`useSwipeStep`, the Inbox
-   * phone viewer's, approval "inbox-image-swipe"): the image follows the
-   * finger and steps past a third of the width or on a flick, a zoomed image
-   * pans to its edge first, and a drag down at Fit closes. Additive: absent,
-   * no swipe.
-   */
   swipe?: boolean;
-  /**
-   * Which of `images` opens first when more than one of them is `src` (one
-   * picture shown for two choices): its place in `images`. Ignored unless that
-   * image is `src`. Additive: absent, the first image that is `src` opens.
-   */
   at?: number;
 }> = ({ src, alt, onClose, images, regions, swipe, at }) => {
   const overlayRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
-  // With region comments a single image still gets the framed viewer (its
-  // header, the strip); without, it keeps the dark one-image overlay.
   const list = images && images.length > 0 && (images.length > 1 || images[0]!.src === src) ? images : undefined;
   const stepping = !!list && list.length > 1;
   const [index, setIndex] = useState(() => {
@@ -210,7 +124,6 @@ export const ImageLightbox: React.FC<{
   const [announced, setAnnounced] = useState('');
   const peekRef = useRef<ImagePeekHandle>(null);
   const stageRef = useRef<ImageZoomStageHandle>(null);
-  // The "⌘ + scroll to zoom" hint shows once while the lightbox is open, whichever image a plain wheel first scrolls (#2127).
   const wheelHint = useRef<WheelHintGate>({ shown: false }).current;
   const refocusStage = useRef(false);
   const pillRef = useRef<HTMLButtonElement>(null);
@@ -218,7 +131,6 @@ export const ImageLightbox: React.FC<{
   const current: LightboxImage = list ? list[index]! : { src, alt, section: null };
   const name = lightboxImageName(current);
 
-  // --- Region comments (#2100) -------------------------------------------
   const phone = useIsMobile();
   const regionsOn = !!regions && !!current.writtenSrc && !!current.blockId;
   const framed = stepping || regionsOn;
@@ -227,7 +139,6 @@ export const ImageLightbox: React.FC<{
   const [draft, setDraft] = useState<NaturalBox | null>(null);
   const [pending, setPending] = useState<NaturalBox | null>(null);
   const [pendingEl, setPendingEl] = useState<HTMLDivElement | null>(null);
-  // Taken only while a box waits for its comment, and once per image (not on every zoom or pan).
   const hasPending = pending !== null;
   const regionDraftScope = useMemo(
     () => (hasPending && current.writtenSrc ? imageRegionDraftScope(current.writtenSrc) : null),
@@ -238,7 +149,6 @@ export const ImageLightbox: React.FC<{
   const [selectedId, setSelectedId] = useState<string | null>(() => regions?.focusId ?? null);
   const [view, setView] = useState<{ view: ZoomViewport; stage: ZoomSize; eased: boolean } | null>(null);
   const [dims, setDims] = useState<ZoomSize | null>(null);
-  /** A comment to zoom to once the image it is on has loaded (a card, or `focusId`). */
   const zoomOnLoad = useRef<string | null>(regions?.focusId ?? null);
   const countRef = useRef<HTMLButtonElement>(null);
   const drawerRef = useRef<HTMLElement>(null);
@@ -257,7 +167,6 @@ export const ImageLightbox: React.FC<{
     [allRegions, current.writtenSrc, regionsOn],
   );
   const boxes = useMemo<RegionBoxItem[]>(() => here.map((r, i) => ({ id: r.ann.id, n: i + 1, box: r.region.box, text: r.ann.text })), [here]);
-  // The images of this viewer whose src as written another image of the list shows, for "All" and its crops.
   const writtenToLoaded = useMemo(() => {
     const map = new Map<string, string>();
     for (const image of list ?? [current]) if (image.writtenSrc && !map.has(image.writtenSrc)) map.set(image.writtenSrc, image.src);
@@ -274,27 +183,22 @@ export const ImageLightbox: React.FC<{
     if (hit) stageRef.current?.zoomTo(hit.region.box, animate);
   };
 
-  // Once an image has loaded, zoom to the comment that asked for it.
   useEffect(() => {
     if (!dims || !zoomOnLoad.current) return;
     const id = zoomOnLoad.current;
     if (!here.some((r) => r.ann.id === id)) return;
     zoomOnLoad.current = null;
     zoomToComment(id, false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dims, here]);
 
-  // A card picked in the document's panel while the viewer is open.
   const lastFocus = useRef(regions?.focusId ?? null);
   useEffect(() => {
     const focus = regions?.focusId ?? null;
     if (focus === lastFocus.current) return;
     lastFocus.current = focus;
     if (focus) pickComment(focus);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [regions?.focusId]);
 
-  /** A card (or a box) was picked: select it, show its image, zoom to its box. */
   const pickComment = (id: string) => {
     const hit = allRegions.find((r) => r.ann.id === id);
     if (!hit || waitingComment()) return;
@@ -312,8 +216,6 @@ export const ImageLightbox: React.FC<{
   };
 
   const onDraw = (event: ZoomDraw) => {
-    // A box waiting for its comment keeps it: a new drag never throws away
-    // words being written (Save, or close the comment box, first).
     if (pending) return;
     if (event.phase === 'move') {
       setSelectedId(null);
@@ -328,7 +230,6 @@ export const ImageLightbox: React.FC<{
     }
   };
 
-  /** Keyboard: Enter in Region mode comments on the part of the image on screen. */
   const boxFromScreen = () => {
     const box = stageRef.current?.visibleBox();
     if (!box) return;
@@ -383,7 +284,6 @@ export const ImageLightbox: React.FC<{
     if (endTimer.current) clearTimeout(endTimer.current);
     endTimer.current = setTimeout(() => setEndNote(null), 1800);
   };
-  /** A box waiting for its comment keeps the viewer on it: stepping away would throw the words away. */
   const waitingComment = () => {
     if (!pending) return false;
     showNote('Save or close the comment first');
@@ -400,8 +300,6 @@ export const ImageLightbox: React.FC<{
   };
   const go = (next: number) => {
     if (waitingComment()) return;
-    // The stage is keyed by image, so stepping remounts it: keep focus on it
-    // when it had focus (its scroll keys, and Tab staying inside the dialog).
     refocusStage.current = !!stageRef.current?.element && document.activeElement === stageRef.current.element;
     setIndex(next);
     setZoomMode('fit');
@@ -421,12 +319,8 @@ export const ImageLightbox: React.FC<{
   }, [index]);
   const stepRef = useRef(step);
   stepRef.current = step;
-  // A touch screen's swipe (`swipe`): heard on the image area, which stays put (so a finger that comes back while the
-  // last step is still sliding is heard), and only the picture follows the finger (`swipeTrackRef`), not the region
-  // strip over it. A box being drawn, Region, or the peek keep the touch. One image alone: a drag down still closes.
   const swipeAreaRef = useRef<HTMLDivElement>(null);
   const swipeTrackRef = useRef<HTMLDivElement>(null);
-  /** The zoom stage, inside the track that follows the finger with `swipe`; without it, as before (no wrapper). */
   const tracked = (stage: React.ReactNode) =>
     swipe ? (
       <div ref={swipeTrackRef} className="absolute inset-0" data-lightbox-track="">
@@ -456,7 +350,6 @@ export const ImageLightbox: React.FC<{
       onProgress: (share) => {
         const overlay = overlayRef.current;
         if (!overlay) return;
-        // The framed viewer's page colour, or the one-image overlay's dark veil, fades with the drag.
         const veil = framed ? `color-mix(in oklch, var(--background) ${Math.round((1 - share) * 100)}%, transparent)` : `rgb(0 0 0 / ${(0.8 * (1 - share)).toFixed(3)})`;
         overlay.style.backgroundColor = share > 0 ? veil : '';
       },
@@ -466,8 +359,6 @@ export const ImageLightbox: React.FC<{
   steppingRef.current = stepping;
   const peekOpenRef = useRef(peekOpen);
   peekOpenRef.current = peekOpen;
-  // The Escape ladder and Enter-to-comment read the region state through a ref
-  // (the key listener is installed once).
   const regionKeys = useRef({ pending: false, draft: false, tool, drawerOpen, canDraw, boxFromScreen, setTool, setDrawerOpen, setPending, setDraft });
   regionKeys.current = { pending: pending !== null, draft: draft !== null, tool, drawerOpen, canDraw, boxFromScreen, setTool, setDrawerOpen, setPending, setDraft };
 
@@ -479,23 +370,16 @@ export const ImageLightbox: React.FC<{
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     overlayRef.current?.focus({ preventScroll: true });
     const handleKeyDown = (e: KeyboardEvent) => {
-      // The peek owns the keys while it is open (it is inside this modal, so they reach it from here).
       if (peekOpenRef.current) {
         e.stopImmediatePropagation();
         if (peekRef.current?.handleKey({ key: e.key, isComposing: e.isComposing })) e.preventDefault();
         else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) e.preventDefault();
         return;
       }
-      // Tab stays native: the overlay's own controls take it.
       if (e.key === 'Tab') return;
       const target = e.target instanceof Element ? e.target : null;
       const r = regionKeys.current;
-      // The comment box owns its keys (Escape closes it, Mod+Enter saves);
-      // the overlay's React handler keeps them from the page behind.
       if (target?.closest('[data-comment-popover]')) return;
-      // The strip's radio group takes its arrows; a text field in the drawer
-      // (a card's edit box) takes everything but Escape-less app keys, and
-      // the drawer's cards take Enter / Space. Escape climbs the ladder below.
       const inOwnUi = target?.closest('[data-region-strip], [data-region-drawer]');
       if (inOwnUi && (isTextField(target) || (e.key !== 'Escape' && !(e.key === 'Enter' && (e.metaKey || e.ctrlKey))))) return;
       e.stopImmediatePropagation();
@@ -503,9 +387,6 @@ export const ImageLightbox: React.FC<{
         e.preventDefault();
       }
       if (e.key === 'Escape') {
-        // One thing per press: the box being drawn or waiting for its
-        // comment, the drawer when focus is in it, Region (back to Move),
-        // the drawer, then the viewer.
         if (r.draft || r.pending) {
           r.setDraft(null);
           r.setPending(null);
@@ -530,14 +411,11 @@ export const ImageLightbox: React.FC<{
       }
       if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;
       const stage = stageRef.current;
-      // Region mode, the stage focused: Enter comments on what is on screen.
       if (e.key === 'Enter' && r.canDraw && r.tool === 'region' && stage?.element && e.target === stage.element) {
         e.preventDefault();
         r.boxFromScreen();
         return;
       }
-      // The focused stage takes the browser's scroll keys, as the scroller it
-      // replaced did; ← → stay stepping when there is more than one image.
       if (stage?.element && e.target === stage.element && stage.scrollKey(e.key, e.shiftKey, !steppingRef.current)) {
         e.preventDefault();
         return;
@@ -560,9 +438,6 @@ export const ImageLightbox: React.FC<{
     };
   }, []);
 
-  // Ctrl + wheel (a pinch in Chrome and Firefox) and Safari's gesture events
-  // anywhere over the lightbox, the header and buttons included, must not
-  // zoom the page behind it. The stage zooms the image from its own listeners.
   useEffect(() => {
     const overlay = overlayRef.current;
     if (!overlay) return;
@@ -733,10 +608,7 @@ export const ImageLightbox: React.FC<{
       aria-label={stepping ? `${name}, image ${index + 1} of ${total}` : name}
       data-image-lightbox=""
       data-image-lightbox-stepping={stepping ? '' : undefined}
-      // On a phone the drawer is a sheet over the lower part: the image sits above it.
       className={`fixed inset-0 z-[200] flex flex-col bg-background text-foreground outline-none ${phone && drawer ? 'pb-[46vh]' : ''}`}
-      // Keys the capture listener let through (the comment box, the strip,
-      // the drawer) still never reach the page behind.
       onKeyDown={(e) => e.stopPropagation()}
     >
       <div className="flex h-14 flex-none items-center gap-3 px-5">
@@ -799,9 +671,6 @@ export const ImageLightbox: React.FC<{
                   onModeChange={setZoomMode}
                   onScaleChange={setScale}
                   onImageLoad={setDims}
-                  // A single image keeps #2067's tap beside the image to close
-                  // (its click swallowed so the page beneath never gets it), in
-                  // Move only: in Region a press there may start a box.
                   onBackgroundTap={!stepping && !drawing ? onClose : undefined}
                   onViewChange={regionsOn ? (v, stage, eased) => setView({ view: v, stage, eased }) : undefined}
                   drawing={drawing}
@@ -923,7 +792,6 @@ export const ImageLightbox: React.FC<{
           placement="side"
           zIndex={210}
           allowImages={false}
-          // The words typed for this box survive a close (Escape, X) and come back when the same box is drawn again.
           draftKey={`image-region:${regionDraftScope}:${pending.x},${pending.y},${pending.w},${pending.h}`}
           mentionSource={regions!.mentionSource}
           onAskAI={askAI}

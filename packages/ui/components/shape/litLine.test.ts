@@ -1,10 +1,3 @@
-/**
- * A lit part shows one border. DOM-gated (tests/dom-test-list.txt).
- * What regresses: "Follow an example" draws a ring in the mark colour around a part whose own box already
- * has a line, so every lit box reads as two borders (an outer ring, the box's own line just inside); and a
- * lit scene piece in the technical look gets an outline filter around its own stroke the same way. A part
- * with a line of its own takes the mark colour on that line; only a part with none keeps a drawn ring.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { ShapeExample, ShapeExampleStep } from '@plannotator/core/shape';
 import type { ShapeScene } from '@plannotator/core/shape-scene';
@@ -25,7 +18,6 @@ function standInLayout() {
   };
 }
 
-/** A board in a shadow root, as ShapeDrawn draws it: an SVG part (a box with a stroke and its words), an HTML box with a border, a plain HTML part. */
 function board() {
   const host = document.createElement('div');
   document.body.append(host);
@@ -87,16 +79,13 @@ describe.skipIf(!hasDom)('a lit part shows one border', () => {
     try {
       painter.set(null, 'fwd', true);
       const ring = (i: number) => b.querySelectorAll<HTMLElement>('.shp-ex-ring')[i]!;
-      // Lit: the box's own stroke and the HTML box's own border carry the light; their rings draw no line of their own.
       expect(ring(0).classList.contains('own')).toBe(true);
       expect(box.hasAttribute('data-ex-own')).toBe(true);
       expect(box.getAttribute('data-ex-s')).toBe('on');
       expect(ring(1).classList.contains('own')).toBe(true);
       expect(bordered.getAttribute('data-ex-s')).toBe('on');
-      // No line of its own: the ring draws the one line.
       expect(ring(2).classList.contains('own')).toBe(false);
       expect(plain.hasAttribute('data-ex-own')).toBe(false);
-      // A step still to come is not lit.
       painter.set(0, 'fwd', true);
       expect(box.getAttribute('data-ex-s')).toBe('now');
       expect(bordered.getAttribute('data-ex-s')).toBe('later');
@@ -133,7 +122,6 @@ describe.skipIf(!hasDom)('a lit part shows one border', () => {
     dom.apply(0.5);
     expect(shape.style.stroke).toBe('var(--mark)');
     expect(shape.style.filter).toBe('');
-    // A shape with no line of its own: the thin outline.
     expect(blob.style.filter).toContain('drop-shadow');
     expect(card.style.borderColor).toBe('var(--mark)');
     expect(card.style.filter).toBe('');

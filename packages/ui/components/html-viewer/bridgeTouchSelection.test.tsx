@@ -1,17 +1,3 @@
-/**
- * A selection made with a finger on an HTML page, and a pin revealed above a
- * card that floats over the frame.
- *
- * A long press and its handles send no mouseup, so the bridge reads the
- * selection from `selectionchange`, as the Markdown viewer does. These evaluate
- * the SHIPPED functions out of the bridge's string with small fakes; the real
- * selection is driven in tests/e2e/inbox-html-phone.spec.ts. The bridge is
- * vendored whole and imports nothing, so its query and wait are written out in
- * it: these use the shared constants, and fail if the two drift.
- *
- * The viewer half is DOM-gated: a viewer that never asks posts nothing, so
- * Plannotator's plan, review and annotate surfaces are unchanged.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
@@ -34,7 +20,6 @@ function extractFunction(name: string): string {
   throw new Error(`unbalanced braces around ${name}`);
 }
 
-/** A range at character offsets: two ranges are the same when their offsets are. */
 class FakeRange {
   static START_TO_START = 0;
   static END_TO_END = 2;
@@ -122,7 +107,6 @@ function bridge(options: { coarse: boolean }) {
       world.selection = { isCollapsed: start === end, rangeCount: 1, range, text };
       return range;
     },
-    /** A selectionchange, and the wait running out. */
     settle() {
       for (const fn of [...listeners]) fn();
       for (const timer of [...timers.values()]) timer.run();
@@ -132,7 +116,6 @@ function bridge(options: { coarse: boolean }) {
 }
 
 describe('touch selection in the bridge', () => {
-  // Failure to catch: the selection bridge listening on a desktop, or a viewer's pointer query drifting from the shared one.
   test('it listens only where it is asked and the main pointer is a finger', () => {
     const mouse = bridge({ coarse: false });
     mouse.setTouchSelection(true);
@@ -147,7 +130,6 @@ describe('touch selection in the bridge', () => {
     expect(phone.listeners).toHaveLength(0);
   });
 
-  // Failure to catch: reporting each handle movement, or a wait that drifts from the Markdown viewer's.
   test('a selection is read once it rests, after the same wait as Markdown', () => {
     const phone = bridge({ coarse: true });
     phone.setTouchSelection(true);
@@ -161,7 +143,6 @@ describe('touch selection in the bridge', () => {
     expect(phone.calls).toEqual(['clearMultiTargets', 'clearPendingPin', 'handleSelection']);
   });
 
-  // Failure to catch: a pin selects its element's text, so reading that back would turn every pin into a selection draft.
   test('the selection a pin made is not reported again, and new words over it are', () => {
     const phone = bridge({ coarse: true });
     phone.setTouchSelection(true);
@@ -174,7 +155,6 @@ describe('touch selection in the bridge', () => {
     expect(phone.calls).toContain('handleSelection');
   });
 
-  // Failure to catch: a focus move out of the frame collapsing the selection and taking the card and its words with it.
   test('a collapsed or blank selection is not taken', () => {
     const phone = bridge({ coarse: true });
     phone.setTouchSelection(true);
@@ -219,18 +199,14 @@ describe('a pin revealed above a card', () => {
     return nodes.map((n) => n.scrollTop);
   }
 
-  // Failure to catch: the page jumping under a person who pinned something already in sight.
   test('a pin in sight moves nothing', () => {
     expect(reveal({ top: 100, bottom: 200 }, 250, [{ scrollTop: 50, max: 1000 }])).toEqual([50]);
   });
 
-  // Failure to catch: the pin sitting under the card with the comment about it.
   test('a pin under the card comes into the clear part of the page', () => {
-    // 350 px are clear: a 100 px pin centred there is at 125-225, so from 500 it moves by 375.
     expect(reveal({ top: 500, bottom: 600 }, 250, [{ scrollTop: 10, max: 1000 }])).toEqual([385]);
   });
 
-  // Failure to catch: an inner scroller at its end swallowing the move, when the page around it could still scroll.
   test('what one scroller cannot take goes to the next, past ones that do not scroll', () => {
     expect(reveal({ top: 500, bottom: 600 }, 250, [{ scrollTop: 0, max: 100 }, { scrollTop: 0, max: 0, overflowY: 'visible' }, { scrollTop: 0, max: 1000 }])).toEqual([100, 0, 275]);
   });
@@ -282,14 +258,12 @@ describe.if(hasDom)('HtmlViewer touchSelection', () => {
   }
   const asked = (posted: Array<Record<string, unknown>>) => posted.filter((m) => m.type === 'plannotator-bridge-set-touch-selection');
 
-  // Failure to catch: the plan, review and annotate surfaces gaining a message they never had.
   test('a viewer that does not ask posts nothing', async () => {
     const { posted } = await mount();
     expect(posted.length).toBeGreaterThan(0);
     expect(posted.filter((m) => String(m.type).includes('touch'))).toEqual([]);
   });
 
-  // Failure to catch: the listener staying on when the Inbox leaves the phone layout.
   test('a viewer that asks turns it on when the bridge is ready, and off again', async () => {
     const { posted, rerender } = await mount(true);
     expect(asked(posted).map((m) => m.active)).toEqual([true]);
@@ -297,7 +271,6 @@ describe.if(hasDom)('HtmlViewer touchSelection', () => {
     expect(asked(posted).map((m) => m.active)).toEqual([true, false]);
   });
 
-  // Failure to catch: revealPin() with no argument changing for the surface that centres its pin.
   test('revealPin says how much is covered only when told', async () => {
     const { posted, handle } = await mount();
     posted.length = 0;
