@@ -269,9 +269,9 @@ test.skipIf(!hasDom)('no section when nothing is pinned; Star thread leads the r
   });
   await until(() => rowMenu()?.getAttribute('data-row-menu') === ids.stopped, 'the row menu');
   const items = [...rowMenu()!.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent?.trim());
-  expect(items[0]).toBe('Star thread');
-  // Its own group: a separator right after it.
-  expect(rowMenu()!.querySelector('[data-row-action="pin"] + [role="separator"]')).not.toBeNull();
+  expect(items.slice(0, 2)).toEqual(['Star thread', 'Add to Priority']);
+  // Its own group with Add to Priority: a separator right after the two.
+  expect(rowMenu()!.querySelector('[data-row-action="pin"] + [data-row-action="priority-add"] + [role="separator"]')).not.toBeNull();
   await act(async () => {
     rowMenu()!.querySelector<HTMLElement>('[data-row-action="pin"]')!.click();
   });

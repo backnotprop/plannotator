@@ -25,6 +25,7 @@ import { resetListGroupsForTests } from './listGroups';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
+const { resetListReads } = (hasDom ? await import('./api') : {}) as typeof import('./api');
 
 const SERVER_SCRIPT = resolve(import.meta.dir, '../../tests/helpers/inbox-dom-server.ts');
 
@@ -113,6 +114,8 @@ beforeEach(() => {
   if (!hasDom) return;
   ids = worlds.shift()!;
   older = false;
+  // Each test reads the whole list first: a kept list would carry the rows of the test before (and their `priority`).
+  resetListReads();
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
