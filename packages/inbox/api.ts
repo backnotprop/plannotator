@@ -5,6 +5,7 @@
  * writing into a store it did not read.
  */
 
+import type { InboxCloudAgentView, InboxCloudPreset } from '@plannotator/core/inbox-cloud';
 import { readHello, type RestartHello } from './sessionAdopt';
 import type { InboxSidebarLayout } from '@plannotator/core/inbox-sidebar';
 import type { DecisionDataSummary, InboxAgentsGroup } from '@plannotator/core/inbox-types';
@@ -49,6 +50,7 @@ import type {
   InboxDraft,
   InboxDraftPasted,
   InboxReplyDraft,
+  InboxReplyQuote,
   InboxReplyDraftRow,
   InboxDraftStatus,
   InboxUpload,
@@ -133,7 +135,7 @@ function noteReplySent(words: string): void {
   for (const listener of replyListeners) listener(lastReply);
 }
 
-export type AgentToolHost = 'claude-code' | 'pi' | 'opencode' | 'dsh' | 'cline';
+export type AgentToolHost = 'claude-code' | 'pi' | 'opencode' | 'dsh' | 'cline' | 'openclaw';
 
 /** The browser notifications as the Inbox keeps them (config.json, so they survive a port change). */
 export interface NotificationSettings {
@@ -1103,7 +1105,14 @@ function actionMarkBody(mark: ActionMarkBody | null, staged: boolean): Record<st
 }
 
 /** A reply draft save's JSON body (the page's save as it goes builds the same one by hand). */
-export function replyDraftSaveBody(body: string, base: string | null, baseBody: string | null, files: ReplyDraftFileOps, recipients?: readonly string[]): Record<string, unknown> {
+export function replyDraftSaveBody(
+  body: string,
+  base: string | null,
+  baseBody: string | null,
+  files: ReplyDraftFileOps,
+  recipients?: readonly string[],
+  quote?: InboxReplyQuote | null,
+): Record<string, unknown> {
   // The box's file changes (the Inbox applies them to the draft's files as they are), always sent, even empty:
   // a save without them is an older page's, which names long pastes only. `recipients` (the recipient pill) only
   // once chosen: without it the draft keeps its own.
@@ -1115,6 +1124,8 @@ export function replyDraftSaveBody(body: string, base: string | null, baseBody: 
     files_remove: files.remove,
     files_place: files.place,
     ...(recipients !== undefined ? { recipients } : {}),
+    // The message the reply quotes (approval "inbox-reply-quote"): null takes it away; absent, the draft keeps its own.
+    ...(quote !== undefined ? { quote } : {}),
   };
 }
 
@@ -1322,6 +1333,17 @@ export interface SearchRequest {
 }
 
 /** GET /api/inbox/sessions: every live session, grouped by project (compose). */
+export interface CloudAgentsModel {
+  agents: InboxCloudAgentView[];
+  projects: { id: string; name: string }[];
+}
+
+export interface CloudAgentTest {
+  started: boolean;
+  run_url?: string;
+  words: string;
+}
+
 export interface ComposeSessionsModel {
   serverSession: string;
   home: string;
@@ -1751,6 +1773,11 @@ export const inboxApi = {
       clear_draft?: string;
       /** The person's verdict on the review this message carries (Approve / Send feedback in the review's header; Code review on). */
       review_verdict?: 'approved' | 'changes_requested';
+      /**
+       * The message this reply quotes (approval "inbox-reply-quote"), with the words selected in it and its time as this
+       * window shows it: the Inbox writes the lead the agent reads in front of the words.
+       */
+      quote?: { of: string; words?: string; time?: string };
       /** The answer carries the thread as a read of it would (`thread_read`): the Send's last reply asks, and reads nothing after. */
       with_thread?: boolean;
     },
@@ -1967,8 +1994,15 @@ export const inboxApi = {
    * `files_place`); the Inbox applies them to the draft's files as they are and answers the result. Only
    * different words refuse a save (`base_body`: the words this window saved last).
    */
-  saveReplyDraft: (threadId: string, body: string, base: string | null, baseBody: string | null = null, files: ReplyDraftFileOps = NO_FILE_OPS, recipients?: readonly string[]) =>
-    post<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`), replyDraftSaveBody(body, base, baseBody, files, recipients)),
+  saveReplyDraft: (
+    threadId: string,
+    body: string,
+    base: string | null,
+    baseBody: string | null = null,
+    files: ReplyDraftFileOps = NO_FILE_OPS,
+    recipients?: readonly string[],
+    quote?: InboxReplyQuote | null,
+  ) => post<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`), replyDraftSaveBody(body, base, baseBody, files, recipients, quote)),
   /** A pending pasted-text upload's words (Put back after a reload, or in another window); `machine`: another machine's thread. */
   uploadText: (uploadId: string, machine: string | null = null) =>
     get<{ text: string }>(inboxUrl(`/uploads/${encodeURIComponent(uploadId)}/text`, undefined, machine)),
@@ -2219,6 +2253,12 @@ export const inboxApi = {
   pairingChecks: (fresh = false) => get<{ checks: PairingChecks; lan: LanState; tailnet: TailnetState }>(inboxUrl(`/pairing/checks${fresh ? '?fresh=1' : ''}`)),
   devices: () => get<{ devices: PairedDevice[] }>(inboxUrl('/devices')),
   removeDevice: (id: string) => post<{ device: PairedDevice }>(inboxUrl(`/devices/${encodeURIComponent(id)}/revoke`), {}),
+  cloudAgents: () => get<CloudAgentsModel>(inboxUrl('/cloud-agents')),
+  pairCloudAgent: (fields: { name: string; preset: InboxCloudPreset; url: string; key: string; project_id: string | null }) =>
+    post<CloudAgentsModel & { agent: InboxCloudAgentView }>(inboxUrl('/cloud-agents'), fields),
+  testCloudAgent: (session: string) => post<CloudAgentsModel & { test: CloudAgentTest }>(inboxUrl(`/cloud-agents/${encodeURIComponent(session)}/test`), {}),
+  rekeyCloudAgent: (session: string, key: string) => post<CloudAgentsModel>(inboxUrl(`/cloud-agents/${encodeURIComponent(session)}/key`), { key }),
+  removeCloudAgent: (session: string) => post<CloudAgentsModel>(inboxUrl(`/cloud-agents/${encodeURIComponent(session)}/remove`), {}),
   tailnet: () => get<{ tailnet: TailnetState }>(inboxUrl('/tailnet')),
   setTailnet: (on: boolean) => post<{ tailnet: TailnetState }>(inboxUrl('/tailnet'), { on }),
   lan: () => get<{ lan: LanState }>(inboxUrl('/lan')),

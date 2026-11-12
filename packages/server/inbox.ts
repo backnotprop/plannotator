@@ -220,6 +220,8 @@ import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
 import { createInboxVoice } from "./inbox-voice";
 import { createInboxQwenWake, type InboxQwenWake } from "./inbox-qwen-wake";
 import { createInboxT3Wake, type InboxT3Wake, type T3Connect } from "./inbox-t3-wake";
+import { CloudAgentError, createInboxCloudAgents } from "./inbox-cloud-agents";
+import { createInboxCloudWake, type InboxCloudWaker } from "./inbox-cloud-wake";
 import {
   claudePluginBehindInbox,
   claudeRestartCommand,
@@ -619,6 +621,7 @@ export interface InboxServerOptions {
   qwenWake?: { now?: () => number; sendTimeoutMs?: number; receiptTimeoutMs?: number; comebackMs?: number; socketParent?: string };
   /** The T3 Code wake (inbox-t3-wake.ts): tests pass a scripted T3, a clock and a log. */
   t3Wake?: { connect?: T3Connect; now?: () => number; log?: (line: string) => void; lookupTimeoutMs?: number };
+  cloudWake?: { now?: () => number; gapMs?: number; timeoutMs?: number; retryMs?: number; log?: (line: string) => void };
 }
 
 /**
@@ -689,6 +692,7 @@ export interface InboxServer {
   /** The Qwen Code wake (inbox-qwen-wake.ts): tests run its sweep. */
   qwenWake: InboxQwenWake;
   t3Wake: InboxT3Wake;
+  cloudWake: InboxCloudWaker;
   /** Shape's watch of the boards: tests read how many windows it reads the store for. */
   shapeWatchers: () => number;
   stop: () => void;
@@ -2104,7 +2108,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (problem) problems.push(problem);
     }
     if (typeof body.tool === "boolean") {
-      if (!(INBOX_TOOL_HOSTS as readonly string[]).includes(agent)) throw new InboxError("validation_error", "tool: only Claude Code, Pi, OpenCode, DeepSeek Harness and Cline have one.", { field: "tool" });
+      if (!(INBOX_TOOL_HOSTS as readonly string[]).includes(agent)) throw new InboxError("validation_error", "tool: only Claude Code, Pi, OpenCode, DeepSeek Harness, Cline and OpenClaw have one.", { field: "tool" });
       const problem = setInboxTool(agent as InboxToolHost, body.tool, agentEnvironment);
       if (problem) problems.push(problem);
     }
@@ -3488,7 +3492,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const changes: Partial<Record<InboxToolHost, boolean>> = {};
     for (const [host, value] of Object.entries(input as Record<string, unknown>)) {
       if (!(INBOX_TOOL_HOSTS as readonly string[]).includes(host)) {
-        throw new InboxError("validation_error", `inbox_tool.${host}: not a host (claude-code, pi, opencode, dsh, cline).`, { field: `inbox_tool.${host}` });
+        throw new InboxError("validation_error", `inbox_tool.${host}: not a host (claude-code, pi, opencode, dsh, cline, openclaw).`, { field: `inbox_tool.${host}` });
       }
       if (typeof value !== "boolean") {
         throw new InboxError("validation_error", `inbox_tool.${host}: must be a boolean.`, { field: `inbox_tool.${host}` });
@@ -4152,7 +4156,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     autoSendAfterMs: options.autoSendAfterMs ?? INBOX_AUTO_SEND_AFTER_MS,
     // A Codex thread has no connection that polls: it is there until Codex says its thread is gone.
     // A Qwen Code session too, until its registry record goes (inbox-qwen-wake.ts).
-    wakeOnlyStatus: (session) => codexWake.status(session) ?? qwenWake.status(session) ?? t3Wake.status(session),
+    wakeOnlyStatus: (session) => codexWake.status(session) ?? qwenWake.status(session) ?? t3Wake.status(session) ?? cloudWake.status(session),
     uncertainItemsOf: (session) => [...codexWake.uncertainItems(session), ...qwenWake.uncertainItems(session), ...t3Wake.uncertainItems(session)],
     // A session that is an agent with a face (its conversation's earlier id, its launch): its threads show that face too.
     onPoll: (session, continues) =>
@@ -4220,6 +4224,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A steps-only Tidy wake with steps off is withdrawn, never handed (a switch turned off in config.json by hand).
     skip: (item) => withdrawnTidy(item),
     ...options.t3Wake,
+  });
+
+  const cloudAgents = createInboxCloudAgents({
+    store,
+    dataDir,
+    onChange: (agents) => cloudWake.agentsChanged(agents),
+    ...(options.cloudWake?.timeoutMs ? { timeoutMs: options.cloudWake.timeoutMs } : {}),
+  });
+  const cloudWake = createInboxCloudWake({
+    store,
+    agents: cloudAgents,
+    pin: (session, root, name, host) => live.pinCloud(session, root, name, host),
+    threadUrl: (threadId) => threadPageUrl(baseUrl, threadId),
+    ...options.cloudWake,
   });
 
   // A reply that waited 5 minutes on a busy session goes into its running turn by itself, as if the person
@@ -5573,6 +5591,27 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
         return json({ account: await codexAccount.read() });
       }
+      if (path === "/api/inbox/cloud-agents" || path.startsWith("/api/inbox/cloud-agents/")) {
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
+        const cloudView = () => ({ agents: cloudAgents.list().map(cloudAgents.view), projects: cloudAgents.projects() });
+        if (path === "/api/inbox/cloud-agents" && req.method === "GET") return json(cloudView());
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        try {
+          if (path === "/api/inbox/cloud-agents") return json({ agent: cloudAgents.view(cloudAgents.pair(body)), ...cloudView() });
+          const match = /^\/api\/inbox\/cloud-agents\/(cloud\.[0-9a-f]{12})\/(test|key|remove)$/.exec(path);
+          if (!match) return json({ error: "Not found", code: "not_found" }, 404);
+          const [, session, action] = match as unknown as [string, string, "test" | "key" | "remove"];
+          if (action === "test") return json({ test: await cloudAgents.test(session), ...cloudView() });
+          if (action === "key") return json({ agent: cloudAgents.view(cloudAgents.rekey(session, body)), ...cloudView() });
+          return json({ removed: cloudAgents.remove(session), ...cloudView() });
+        } catch (error) {
+          if (error instanceof CloudAgentError) return json({ error: error.message, code: error.code, ...(error.field ? { field: error.field } : {}) }, error.code === "cloud_agent_not_found" ? 404 : 422);
+          throw error;
+        }
+      }
       // The agents on this computer: paths in the person's home, and writes to their real agent files.
       if (path === "/api/inbox/agents" || path.startsWith("/api/inbox/agents/")) {
         // The person's own agent files: only theirs, never a tailnet guest's.
@@ -6639,6 +6678,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 // `skip_unanswered` flag is ignored (approval "inbox-explicit-skip", 2026-10-21).
                 skip: body.skip,
                 actions: body.actions,
+                // The message the reply quotes (approval "inbox-reply-quote"); absent from an older window.
+                ...(body.quote !== undefined ? { quote: body.quote } : {}),
               });
             } catch (error) {
               removeInboxAttachmentFiles(store.dir, attachments);
@@ -7044,6 +7085,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     codexWake.stop();
     qwenWake.stop();
     t3Wake.stop();
+    cloudWake.stop();
     voice.stop();
     codexAccount.stop();
     // An answer in progress is saved. Open clients lose the connection (the force below cuts their
@@ -7063,7 +7105,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     tailnetStopFailedPort = tailscale.stop().failedPort;
   };
 
-  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, connectAgents, search: search.index, imageCapture, codexWake, liveSites: { running: liveSites.running, sweep: liveSites.sweep }, qwenWake, t3Wake, shapeWatchers: () => shapes.watch.watching(), stop };
+  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, connectAgents, search: search.index, imageCapture, codexWake, liveSites: { running: liveSites.running, sweep: liveSites.sweep }, qwenWake, t3Wake, cloudWake, shapeWatchers: () => shapes.watch.watching(), stop };
 }
 
 /** Print where the Inbox is, and open it when a person asked for it. */
