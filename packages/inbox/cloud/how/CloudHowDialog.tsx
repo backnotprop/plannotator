@@ -13,6 +13,7 @@ type Panel = {
   seen: string;
   title: string;
   line: string;
+  note?: string;
 };
 
 const PANELS: Panel[] = [
@@ -47,9 +48,10 @@ const PANELS: Panel[] = [
   {
     id: 'replies',
     picture: <HowReplies />,
-    seen: 'With a wake address, your reply starts the agent. Without one, it reads your reply when it next checks.',
+    seen: 'With a wake address, your computer calls the agent’s own service and a run starts. Without one, it reads your reply when it next checks.',
     title: 'It hears back when you reply',
-    line: 'With a wake address, your computer starts it when you write. Without one, it reads your reply when it next checks.',
+    line: 'With a wake address, your computer starts it within a minute of your reply. Without one, it reads your reply when it next checks.',
+    note: 'A wake goes straight from your computer to the agent’s own service, such as Anthropic for a Claude Code routine or xAI for Grok Bot, and carries your reply’s words there. It does not pass through the relay.',
   },
 ];
 
@@ -81,6 +83,11 @@ export function CloudHowDialog({ onClose }: { onClose: () => void }) {
           <div className="ib-chow-words" aria-live="polite">
             <h3 className="ib-chow-t">{panel.title}</h3>
             <p className="ib-chow-l">{panel.line}</p>
+            {panel.note && (
+              <p className="ib-chow-note" data-cloud-how-note="">
+                {panel.note}
+              </p>
+            )}
             {last && (
               <p className="ib-chow-end" data-cloud-how-end="">
                 Remove cuts it off at once. A new pairing stops the old one.

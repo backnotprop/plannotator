@@ -10,7 +10,7 @@ function Lane({ wakes }: { wakes: boolean }) {
         <HowWire toward="right" tone={wakes ? 'ok' : 'quiet'} chip={<Icon name={wakes ? 'play' : 'clock'} size={12} />} />
         <span className="ib-chow-agent">
           <HostMark host="cloud-grok" big />
-          <span className="ib-chow-cap">{wakes ? 'Starts a run' : 'Reads it at its next check'}</span>
+          <span className="ib-chow-cap">{wakes ? 'Its service starts a run' : 'Reads it at its next check'}</span>
         </span>
       </span>
     </div>
