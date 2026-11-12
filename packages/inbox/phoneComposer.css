@@ -127,6 +127,10 @@
 .ib-cp-picker[data-phone] .ib-cp-lchcols { grid-auto-flow: row; overflow-y: auto; }
 .ib-cp-picker[data-phone] .ib-cp-lchcols > .ib-cp-lchcol + .ib-cp-lchcol { border-left: 0; border-top: 1px solid var(--ib-line); }
 .ib-cp-picker[data-phone] .ib-cp-lchcol { display: grid; }
+.ib-cp-picker[data-phone] .ib-cp-lchcol[data-filterable] { max-height: calc(var(--ib-vvh, 100dvh) * 0.55); overflow-y: auto; }
+.ib-cp-picker[data-phone] .ib-cp-lchfilter { background: var(--card); }
+.ib-cp-picker[data-phone] .ib-cp-lchcol[data-filterable][data-typing] { max-height: calc(var(--ib-vvh, 100dvh) - 52px - env(safe-area-inset-top)); }
+.ib-cp-picker[data-phone] .ib-cp-lchcols:has([data-typing]) > .ib-cp-lchcol:not([data-filterable]) { display: none; }
 .ib-cp-picker[data-phone] .ib-cp-opt.ib-cp-lchopt { display: flex; justify-content: space-between; padding: 0 10px; }
 .ib-cp-hint { flex: none; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); white-space: nowrap; }
 /* The Launch tip over the row, its arrow pointing down at To. */
