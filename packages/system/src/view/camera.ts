@@ -2,6 +2,7 @@ export type Cam = { cx: number; cy: number; k: number; sx: number; sy: number };
 export type Rect = { x: number; y: number; w: number; h: number };
 
 export const STEP_MS = 250, CAM_MS = 375, DIVE_MS = 700;
+// Rest below a pixel: a larger value left a 2 px snap at the end of a long move.
 export const SETTLE = 0.0005;
 export const LAND = 0.03;
 export const WHEEL_TAU = 80, WHEEL_TAU_PINCH = 45;

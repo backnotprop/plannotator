@@ -18,6 +18,7 @@ const ROOTS: Record<string, string> = {
   '/css/demo/': import.meta.dir,
 };
 
+// Fixed routes made at start: no path is ever read from a request.
 const files: Record<string, () => Response> = {};
 for (const [prefix, root] of Object.entries(ROOTS)) {
   for (const rel of readdirSync(root, { recursive: true }) as string[]) {

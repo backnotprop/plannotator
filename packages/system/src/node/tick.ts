@@ -143,6 +143,7 @@ export function runCommand(argv: string[], o: { cwd: string; timeoutMs: number; 
     };
     child.on('error', (e) => finish({ code: 127, stdout, stderr: stderr + e.message }));
     child.on('close', (code) => finish({ code: code ?? 1, stdout, stderr }));
+    // A process that left the group can hold the pipes open after exit: give output a grace to arrive, then let go.
     child.on('exit', (code) => {
       drain = setTimeout(() => {
         child.stdout.destroy();
@@ -158,6 +159,7 @@ export function runCommand(argv: string[], o: { cwd: string; timeoutMs: number; 
 const failure = (name: string, r: Run, timeoutMs: number) =>
   r.timedOut ? `${name} was stopped after ${minutes(timeoutMs)} with no end` : `${name}: ${(r.stderr || r.stdout).trim() || `exit ${r.code}`}`;
 
+// launchd has no terminal or editor. GIT_OPTIONAL_LOCKS=0 keeps a read from taking index.lock and failing the person's own commit.
 const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', GIT_EDITOR: 'true', GIT_MERGE_AUTOEDIT: 'no', GIT_OPTIONAL_LOCKS: '0', GIT_LFS_SKIP_SMUDGE: '1' };
 
 const runGit = (cwd: string, args: string[], env?: Record<string, string>) =>
@@ -308,6 +310,7 @@ async function remoteAccess(root: string): Promise<ConfigEntry[]> {
   });
 }
 
+// An empty value resets a git list: the clone must end with the person's list exactly, not the global list twice.
 function accessList(entries: ConfigEntry[]): ConfigEntry[] {
   const byKey = new Map<string, (string | null)[]>();
   for (const e of entries) {
@@ -407,9 +410,8 @@ export async function prepareSource(root: string, source: string,
     const broken = (await whole(source, tip)) ? [] : [tip.slice(0, 7)];
     for (const c of o.need ?? []) {
       if (!c || !isRef(c) || (await whole(source, c))) continue;
-      // One that is not there at all lost them only when main's history has a hole; otherwise it is
-      // gone from origin itself (history rewritten), no fault of the clone, and the caller reports
-      // it
+      // A commit that is there but not whole lost objects; one that is missing did only if main's
+      // history has a hole, otherwise origin itself lost it (rewritten): not the clone's fault.
       if (await gitOk(source, ['cat-file', '-e', `${c}^{commit}`]) || !(await gitOk(source, ['rev-list', '--quiet', tip]))) broken.push(c.slice(0, 7));
     }
     const since: string[] = [];
@@ -519,6 +521,7 @@ export async function tick(o: { root: string; dataDir: string; key: string; now?
     await restoreDrawing(paths);
     const model = (await load(paths.drawing)).model;
     if (!model) return { ran: 'nothing', gated: '', why: 'no drawing yet' };
+    // A first draw lists sheets under wanted: while drawing; a redraw would copy it half drawn over the drawing agent.
     if (stillWanted(model).length) return { ran: 'nothing', gated: state.gated ?? '', why: 'the drawing is still being drawn: system.yaml lists sheets under wanted:' };
     const stamp = now().replace(/[:.]/g, '-');
     const { tip: target, recloned } = await prepareSource(o.root, paths.source,
@@ -655,6 +658,7 @@ async function afterAgent(
   r: RedrawInput,
   c: { agent: { ok: boolean; output: string }; prs: number[]; fail: (error: string) => Promise<TickResult> },
 ): Promise<TickResult> {
+  // The agent is the long step: a lock lost meanwhile must be found before redraw/ or source/ is touched again.
   await r.holding();
   const { agent, prs, fail } = c;
   const { source, drawing, redraw: work, summary: summaryPath } = r.paths;

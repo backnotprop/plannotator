@@ -32,6 +32,7 @@ export async function git(root: string, args: string[]): Promise<string> {
   return text;
 }
 
+/** Refuses a caller's ref that git could read as an option. */
 export function checkRef(ref: string): string {
   if (!ref || ref.startsWith('-') || /[\s\0]/.test(ref)) throw new Error(`"${ref}" is not a git ref`);
   return ref;

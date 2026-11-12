@@ -79,6 +79,7 @@ function alive(pid: number): boolean {
   }
 }
 
+// A lock is broken only when its holder's pid is dead or its heartbeat is older than staleMs (pid reuse, hung holder).
 export const LOCK_TIMINGS = { heartbeatMs: 10_000, staleMs: 60_000, settleMs: 1_000, staleSettleMs: 25_000 };
 
 export type LockOptions = {
@@ -117,7 +118,7 @@ const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
 const sameHolder = (a: Holder, b: Holder) => a.token === b.token && a.pid === b.pid && (a.token !== null || a.mtimeMs === b.mtimeMs);
 
 
-/** Windows FAT gives EISDIR), an exclusive create, then the write. */
+/** Hard-link a temp file so the file is whole once it exists; where linking fails (FAT, SMB, some sync folders: varied errors) fall back to an exclusive create. */
 async function createWhole(name: string, text: string, pid: number, token: string, linkFn: (a: string, b: string) => Promise<void>): Promise<void> {
   const tmp = `${name}.tmp-${pid}-${token}`;
   await writeFile(tmp, text, { mode: 0o600 });
@@ -170,6 +171,7 @@ export async function takeLock(path: string, o: number | LockOptions = {}): Prom
     const second = await readHolder(path);
     if (!second) continue;
     if (!sameHolder(first, second) || !breakable(second)) return null;
+    // Break under a second lock so only one taker at a time removes a lock, and only the one it looked at twice.
     const guard = `${path}.break`;
     const broke = await underGuard(guard, pid, token, staleMs, linkFn, async () => {
       const now = await readHolder(path);

@@ -117,6 +117,7 @@ function minWidth(p: WPart, v: Variant, marks: string[]): number {
         longestWord(p.role, FONTS.plateRole) + 34,
       );
     case 'window':
+      // 260 is the narrowest width at which a window's inside still reads as a sheet.
       return Math.max(260, textWidth(p.name, FONTS.plateName) + Math.min(mk, 44) + 60);
     case 'chip':
       return Math.max(textWidth(p.name, FONTS.chipName) + mk + 30, textWidth(p.sub || p.role || '', FONTS.monoSm) + 26);
@@ -155,6 +156,7 @@ function naturalWidth(p: WPart, v: Variant, marks: string[]): number {
   }
   if (v === 'box' || v === 'node') {
     const sub = subOf(p, v), s = sub || p.role, font = sub ? FONTS.mono : FONTS.boxRole;
+    // Never narrower than the longest word: a wider word would break inside itself and read as cut off.
     return Math.max(minWidth(p, v, marks), comfortWidth(p, v, marks), s ? Math.min(lineW(textWidth(s, font), 40), 360) : 0, s ? Math.ceil(longestWord(s, font)) + 28 : 0);
   }
   if (v === 'chip') return minWidth(p, v, marks);

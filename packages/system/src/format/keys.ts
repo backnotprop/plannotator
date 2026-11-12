@@ -37,6 +37,7 @@ export const KEYS = {
 
 export type EntryKind = keyof typeof KEYS;
 
+// No prototype, so a YAML key like "constructor" finds nothing.
 const table = <T>(o: Record<string, T>): Record<string, T> => Object.assign(Object.create(null) as Record<string, T>, o);
 
 export const RESERVED_IDS = new Set(['__proto__', 'constructor', 'prototype']);

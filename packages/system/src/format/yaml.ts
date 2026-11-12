@@ -21,9 +21,11 @@ const unbalanced = (t: string) => {
   return d !== 0;
 };
 
+// Schema lines (request:, response:, a payload's lines:) are code, one per line: a lone brace is legitimate.
 const isCodeLines = (path: string) => /(^|\.)lines$/.test(path);
 const join = (path: string, k: string) => (path ? `${path}.${k}` : k);
 
+// A YAML flow sequence splits `[f(a, b), g()]` at every comma; items that open a bracket and close it later are joined back.
 function rejoin(node: unknown, path = ''): void {
   if (Array.isArray(node)) {
     if (!isCodeLines(path) && node.some((v) => typeof v === 'string' && depthOf(v) !== 0)) {

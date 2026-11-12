@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { install, launchAgentsDir, list, plist, remove, scheduleLabel, SYSTEM_TICK_INTERVAL_SECONDS, type CommandRunner } from '../src/node/index.ts';
 import { tempDir } from './helpers.ts';
 
+// launchctl never runs for real: installs and removals use a recording runner and a temp folder.
 const cleanups: (() => void)[] = [];
 afterEach(() => cleanups.splice(0).forEach((f) => f()));
 function sandbox() {

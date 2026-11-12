@@ -20,6 +20,7 @@ export type ScheduleOptions = {
   /** Seconds between ticks; SYSTEM_TICK_INTERVAL_SECONDS unless given. */
   interval?: number;
   dataDir: string;
+  // PATH above all: launchd starts the job with almost none, and the tick runs git, gh and the agent.
   env?: Record<string, string>;
 };
 
@@ -84,6 +85,7 @@ function launchd(o: { run?: CommandRunner; uid?: number }): { run: CommandRunner
   return { run: o.run ?? realRunner, domain: `gui/${uid}` };
 }
 
+// HOME first, so a test's temp HOME is the one used.
 export const launchAgentsDir = () => join(process.env.HOME || homedir(), 'Library', 'LaunchAgents');
 const agentsDirOf = (o: { agentsDir?: string }) => o.agentsDir ?? launchAgentsDir();
 const plistPath = (dir: string, key: string) => join(dir, `${scheduleLabel(key)}.plist`);

@@ -21,6 +21,7 @@ const TEST = [new RegExp(`(^|/)(${TEST_FOLDERS.join('|')})/`), /\.(test|spec)\.[
 const DOC = [/\.mdx?$/i, /(^|\/)docs\//];
 const LOCKFILES: ReadonlySet<string> = new Set(LOCKFILE_NAMES);
 
+/** Never counted unless the drawing cites it; the drawing itself is ignored so a redraw cannot wake the next redraw. */
 export function isIgnoredPath(path: string): boolean {
   if (path === '.plannotator/system' || path.startsWith('.plannotator/system/')) return true;
   if (LOCKFILES.has(path.slice(path.lastIndexOf('/') + 1))) return true;

@@ -64,6 +64,7 @@ export function setText(next: TextSetting): TextSetting {
 export const currentText = () => text;
 
 let epoch = 0;
+// Bumped when the faces finish loading so a layout measured with a fallback face is not kept.
 export const measureEpoch = () => epoch;
 
 type Ctx = { font: string; measureText(t: string): { width: number } };

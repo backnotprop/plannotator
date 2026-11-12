@@ -374,6 +374,7 @@ export function SystemView({
   };
 
   const onWheel = (e: WheelEvent) => {
+    // A pane sits in a scrolling page: the wheel scrolls the page; only pinch or Ctrl/Cmd+wheel zooms.
     if (stRef.current.layout === 'pane' && !e.ctrlKey && !e.metaKey) return;
     e.preventDefault();
     const D = A.current.dive;

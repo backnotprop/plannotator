@@ -1,3 +1,4 @@
+/** Unattended redraws read only public https addresses: no loopback, private or link-local IP literal, in any spelling the URL parser accepts. */
 export type DocUrlCheck = { ok: true; url: string } | { ok: false; url: string; reason: string };
 
 function v4Private(a: number, b: number): boolean {
