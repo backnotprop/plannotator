@@ -31,23 +31,17 @@ function settingQuery(system: (query: string) => MediaQueryList, query: string):
   const forced = system(forcedQuery(query));
   const target = new EventTarget();
   let handler: ((this: MediaQueryList, event: MediaQueryListEvent) => unknown) | null = null;
-  const list = Object.assign(target, {
-    media: query,
-    get matches() {
-      return current === 'reduced' ? forced.matches : native.matches;
+  const list = Object.defineProperties(target, {
+    media: { value: query },
+    matches: { get: () => (current === 'reduced' ? forced.matches : native.matches) },
+    onchange: {
+      get: () => handler,
+      set: (next: typeof handler) => {
+        handler = next;
+      },
     },
-    get onchange() {
-      return handler;
-    },
-    set onchange(next: typeof handler) {
-      handler = next;
-    },
-    addListener(listener: (event: MediaQueryListEvent) => void) {
-      target.addEventListener('change', listener as EventListener);
-    },
-    removeListener(listener: (event: MediaQueryListEvent) => void) {
-      target.removeEventListener('change', listener as EventListener);
-    },
+    addListener: { value: (listener: (event: MediaQueryListEvent) => void) => target.addEventListener('change', listener as EventListener) },
+    removeListener: { value: (listener: (event: MediaQueryListEvent) => void) => target.removeEventListener('change', listener as EventListener) },
   }) as unknown as MediaQueryList;
   let last = list.matches;
   const announce = () => {
