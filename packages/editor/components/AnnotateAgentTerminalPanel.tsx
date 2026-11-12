@@ -65,9 +65,7 @@ export type AgentTerminalDisplaySettings = {
 interface AnnotateAgentTerminalPanelProps {
   capability: AgentTerminalCapability;
   width: number | string;
-  /** The durable preference, which the Position control reflects. */
   side: AnnotateAgentTerminalSide;
-  /** The edge actually docked against ('hidden' opened for a session = left). */
   placement: AnnotateAgentTerminalPlacement;
   onSideChange: (side: AnnotateAgentTerminalSide) => void;
   onSessionActiveChange?: (active: boolean) => void;
@@ -530,8 +528,6 @@ function formatExit(event: PtyExit): string {
   return `Exited ${event.exitCode}`;
 }
 
-/** Exported for tests (the surrounding panel needs a live WebTUI session to
- * render this popover). `defaultOpen` is a test seam only. */
 export function AgentTerminalDisplayPopover({
   settings,
   side,
@@ -563,12 +559,6 @@ export function AgentTerminalDisplayPopover({
         <div className="space-y-2.5">
           <div className="flex items-center justify-between gap-2">
             <div className="text-xs font-medium text-foreground">Display</div>
-            {/* Resets DISPLAY settings only, exactly as the label says.
-                Position is deliberately untouched: it is a durable layout
-                preference (config.json via onSideChange), not a display
-                setting, and the segmented control below is its one explicit,
-                disclosed way to change. Resetting it here silently overwrote
-                a chosen right/hidden placement. */}
             <button
               type="button"
               aria-label="Reset terminal display settings"
@@ -579,8 +569,6 @@ export function AgentTerminalDisplayPopover({
             </button>
           </div>
 
-          {/* Hidden closes the terminal (and this popover with it). The same
-              control lives in Settings, which is how it is reopened. */}
           <TerminalDisplaySegmented
             label="Position"
             value={side}

@@ -43,8 +43,6 @@ describe.if(hasDom)('CompactPlanStage', () => {
     if (!stage || !close) throw new Error('Compact stage did not render');
 
     expect(stage.className).toContain('pn-visible-viewport-stage');
-    // A transient task surface must not print over the document (print.css
-    // hides [data-print-hide]).
     expect(stage.hasAttribute('data-print-hide')).toBe(true);
     expect(stage.getAttribute('role')).toBe('dialog');
     expect(stage.getAttribute('aria-modal')).toBe('true');

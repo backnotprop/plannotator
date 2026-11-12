@@ -1,19 +1,10 @@
 import React from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
-/**
- * The file switcher of a review of several files (annotate bundles):
- * "2 of 3 · mock.html" between previous and next. The order is the one the
- * files were given in. `index` is 1-based; 0 means the open document is not
- * one of the bundle's files (a linked document, or none), and then the
- * switcher names the count and its next button opens the first file.
- */
 export interface BundleSwitcherProps {
   index: number;
   total: number;
-  /** File name of the open bundle file; ignored when `index` is 0. */
   name?: string;
-  /** Full path, for the tooltip. */
   title?: string;
   onPrevious: () => void;
   onNext: () => void;

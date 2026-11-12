@@ -8,18 +8,6 @@ import {
 } from './AnnotateAgentTerminalPanel';
 import type { AnnotateAgentTerminalSide } from '@plannotator/ui/utils/annotateAgentTerminal';
 
-/**
- * The Display popover's reset button (DOM-gated).
- *
- * "Reset terminal display settings" must do exactly what its label says:
- * reset the DISPLAY settings. Position (left/right/hidden) is a durable
- * layout preference persisted to config.json through onSideChange — the
- * regression this guards is the reset button also firing onSideChange("left"),
- * silently overwriting a user's chosen right/hidden placement with no
- * disclosure. The Position segmented control stays the one explicit way to
- * change placement.
- */
-
 const hasDom = typeof document !== 'undefined';
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -80,11 +68,7 @@ describe.if(hasDom)('agent terminal Display popover reset', () => {
 
     await act(async () => resetButton().click());
 
-    // Display settings reset to the defaults through the panel's one
-    // sanitized update path...
     expect(changes).toEqual([DEFAULT_DISPLAY_SETTINGS]);
-    // ...and the durable placement preference is NOT touched: a user who
-    // chose "right" (or "hidden") keeps it.
     expect(sideChanges).toEqual([]);
   });
 

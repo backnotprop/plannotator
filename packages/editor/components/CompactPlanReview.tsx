@@ -6,7 +6,6 @@ type CompactPlanDecisionActionId = Extract<
   'exit' | 'feedback' | 'approve' | 'copy' | 'done' | 'note' | 'discard-finish'
 >;
 
-/** An incumbent session decision that may be presented by compact Review. */
 export type CompactPlanReviewAction = Omit<CompactPlanAction, 'id'> & {
   id: CompactPlanDecisionActionId;
 };
@@ -17,7 +16,6 @@ interface CompactPlanCompletionProps {
   maxWidth: number;
 }
 
-/** End-of-document handoff into the compact review decision surface. */
 export const CompactPlanCompletion: React.FC<CompactPlanCompletionProps> = ({
   feedbackSummary,
   onOpenReview,
@@ -60,7 +58,6 @@ interface CompactPlanReviewProps {
   onOpenAI?: () => void;
 }
 
-/** Compact review summary and the incumbent session decision actions. */
 export const CompactPlanReview: React.FC<CompactPlanReviewProps> = ({
   feedbackSummary,
   actions,

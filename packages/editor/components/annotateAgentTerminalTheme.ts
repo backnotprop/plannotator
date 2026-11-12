@@ -96,8 +96,6 @@ const PLANNOTATOR_LIGHT_TERMINAL_THEME: AnnotateAgentTerminalTheme = {
   brightWhite: "#ffffff",
 };
 
-// Browser sessions read Plannotator's live CSS variables. These presets are only
-// fallback data for non-DOM startup paths where computed CSS is unavailable.
 const TERMINAL_THEME_PRESETS: Record<string, Partial<Record<TerminalThemeMode, AnnotateAgentTerminalTheme>>> = {
   plannotator: {
     dark: PLANNOTATOR_DARK_TERMINAL_THEME,
