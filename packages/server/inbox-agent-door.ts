@@ -305,7 +305,9 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
     if (typeof args !== "object" || Array.isArray(args) || args === null) return json({ result: fail("validation_error", "arguments: a JSON object.") });
     const keyed = commandId !== null && tool === "send_message" && !("idempotency_key" in args) ? { ...args, idempotency_key: `relay.${commandId}` } : args;
     try {
-      return json({ result: await call(agent, tool as DoorTool, keyed as Record<string, unknown>) });
+      const result = await call(agent, tool as DoorTool, keyed as Record<string, unknown>);
+      if (!result.isError) context.agents.seen(device.id);
+      return json({ result });
     } catch (error) {
       if (error instanceof DoorRefusal || error instanceof InboxError) return json({ result: fail(error.code, error.message) });
       return json({ result: fail("internal_error", "The Inbox could not run that call.") });

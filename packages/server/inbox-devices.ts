@@ -1532,6 +1532,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
       return device !== null && device.platform !== AGENT_PLATFORM;
     },
     touch: (id: string) => devices.touch(id, now().toISOString()),
+    seenAt: (id: string): string | null => devices.get(id)?.last_seen_at ?? null,
     revoke: (id: string) => {
       const device = devices.get(id);
       if (device?.platform === AGENT_PLATFORM && device.revoked_at === null) revoke(device);

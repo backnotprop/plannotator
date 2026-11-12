@@ -1,7 +1,8 @@
 /**
  * Pair a cloud agent, end to end (packages/inbox/cloud/, packages/server/inbox-cloud-*.ts): Settings → Devices →
- * Pair a cloud agent, the block to paste, Send a test (a run started, its link), then New message to the agent and
- * the thread's "Woke Nightly fixer · run started" line.
+ * Pair a cloud agent with a name only (the relay is a dead loopback port, so Settings says it could not reach it),
+ * Add wake address, Send a test (a run started, its link), then New message to the agent and the thread's
+ * "Woke Nightly fixer · run started" line.
  *
  * The routine's webhook is a stub server in this spec on loopback; no outside service is called. The Inbox is the
  * compiled binary under a temp HOME and PLANNOTATOR_DATA_DIR (see inbox.spec.ts for the build). CLOUD_WAKE_SHOTS_DIR:
@@ -54,7 +55,7 @@ test.beforeAll(async () => {
 
   const root = inboxScratch('plannotator-cloud-wake-e2e-');
   const dataDir = join(root, 'data');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   url = started.stdout.trim();
@@ -78,13 +79,17 @@ test('pair a routine, send a test, write to it from New message: the thread says
   await section.locator('[data-cloud-pair-start]').click();
   const form = section.locator('[data-cloud-pair-form]');
   await form.locator('[data-cloud-name]').fill('Nightly fixer');
-  await form.locator('[data-cloud-url]').fill(hookUrl);
-  await form.locator('[data-cloud-key]').fill(KEY);
   if (shotsDir) await page.screenshot({ path: join(shotsDir, 'e2e-01-pair-form.png') });
   await form.locator('[data-cloud-pair-submit]').click();
 
-  const paired = section.locator('[data-cloud-paired]');
-  await expect(paired.locator('[data-cloud-block]')).toContainText('When woken:');
+  const paired = section.locator('[data-cloud-agent]');
+  await expect(paired.locator('[data-cloud-setup="no-relay"]')).toBeVisible();
+  await expect(paired.locator('[data-cloud-status]')).toHaveAttribute('data-cloud-status', 'no_relay');
+  await paired.locator('[data-cloud-done]').click();
+  await paired.locator('[data-cloud-wake-open]').click();
+  await paired.locator('[data-cloud-url]').fill(hookUrl);
+  await paired.locator('[data-cloud-key]').fill(KEY);
+  await paired.locator('[data-cloud-wake-save]').click();
   await paired.locator('[data-cloud-test]').click();
   const result = paired.locator('[data-cloud-test-result]');
   await expect(result).toHaveAttribute('data-cloud-test-result', 'started');
@@ -95,7 +100,6 @@ test('pair a routine, send a test, write to it from New message: the thread says
   if (shotsDir) await page.screenshot({ path: join(shotsDir, 'e2e-02-paired.png') });
   // The window never learns the key or the address.
   expect(await page.content()).not.toContain(KEY);
-  await paired.locator('[data-cloud-done]').click();
   await expect(section.locator('[data-cloud-agent]')).toContainText('Nightly fixer');
 
   await page.goto(url);

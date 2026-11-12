@@ -4168,6 +4168,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     onChange: (agents) => cloudWake.agentsChanged(agents),
     ...(options.cloudWake?.timeoutMs ? { timeoutMs: options.cloudWake.timeoutMs } : {}),
     devices: () => phones?.agentDevices ?? null,
+    relayUp: () => relay?.reachable() ?? null,
   });
   const agentSignalsFor = (line: InboxLine): string[] => {
     if (line.kind !== "message" || line.record.author.kind !== "person" || line.at !== line.record.created_at) return [];
@@ -5489,13 +5490,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         try {
           if (path === "/api/inbox/cloud-agents") {
             const paired = await cloudAgents.pair(body);
-            return json({ agent: cloudAgents.view(paired.agent), pairing: paired.pairing, ...cloudView() });
+            return json({ agent: cloudAgents.view(paired.agent), pairing: paired.pairing, setup: paired.setup, ...cloudView() });
           }
-          const match = /^\/api\/inbox\/cloud-agents\/(cloud\.[0-9a-f]{12})\/(test|key|remove)$/.exec(path);
+          const match = /^\/api\/inbox\/cloud-agents\/(cloud\.[0-9a-f]{12})\/(test|key|wake|pairing|remove)$/.exec(path);
           if (!match) return json({ error: "Not found", code: "not_found" }, 404);
-          const [, session, action] = match as unknown as [string, string, "test" | "key" | "remove"];
+          const [, session, action] = match as unknown as [string, string, "test" | "key" | "wake" | "pairing" | "remove"];
           if (action === "test") return json({ test: await cloudAgents.test(session), ...cloudView() });
           if (action === "key") return json({ agent: cloudAgents.view(cloudAgents.rekey(session, body)), ...cloudView() });
+          if (action === "wake") return json({ agent: cloudAgents.view(cloudAgents.setWake(session, body)), ...cloudView() });
+          if (action === "pairing") {
+            const paired = await cloudAgents.repair(session);
+            return json({ agent: cloudAgents.view(paired.agent), pairing: paired.pairing, setup: paired.setup, ...cloudView() });
+          }
           return json({ removed: cloudAgents.remove(session), ...cloudView() });
         } catch (error) {
           if (error instanceof CloudAgentError) return json({ error: error.message, code: error.code, ...(error.field ? { field: error.field } : {}) }, error.code === "cloud_agent_not_found" ? 404 : 422);

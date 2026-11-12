@@ -254,6 +254,7 @@ export function createInboxRelay(context: InboxRelayContext) {
   let retry: ReturnType<typeof setTimeout> | null = null;
   let delay = RECONNECT_FIRST_MS;
   let stopped = false;
+  let reachable: boolean | null = null;
   let unsubscribe: (() => void) | null = null;
   /** Per phone with carriage on, on this socket: the store seq its items have reached. Cleared on each new socket. */
   const sent = new Map<string, number>();
@@ -281,6 +282,7 @@ export function createInboxRelay(context: InboxRelayContext) {
         const answer = await call("POST", "/v1/mailboxes", null, { secret_sha256: sha256Hex(secret) }, url);
         if (answer.status !== 201) {
           log(`mailbox not made: ${answer.status}`);
+          reachable = false;
           return null;
         }
         const { mailbox_id } = (await answer.json()) as { mailbox_id: string };
@@ -290,6 +292,7 @@ export function createInboxRelay(context: InboxRelayContext) {
         return mailbox;
       } catch (error) {
         log(`mailbox not made: ${error instanceof Error ? error.message : String(error)}`);
+        reachable = false;
         return null;
       } finally {
         making = null;
@@ -531,6 +534,11 @@ export function createInboxRelay(context: InboxRelayContext) {
     // Bun's WebSocket takes headers: the Inbox's bearer goes in Authorization, never in the URL.
     const ws = new WebSocket(url, { headers: { Authorization: `Bearer ${mailbox.secret}` } } as unknown as string[]);
     socket = ws;
+    let opened = false;
+    ws.onopen = () => {
+      opened = true;
+      reachable = true;
+    };
     ws.onmessage = (event) => {
       if (typeof event.data !== "string") return;
       const text = event.data;
@@ -538,6 +546,7 @@ export function createInboxRelay(context: InboxRelayContext) {
     };
     ws.onclose = () => {
       if (socket !== ws) return;
+      if (!opened) reachable = false;
       socket = null;
       sent.clear();
       if (stopped || served().length === 0) return;
@@ -636,6 +645,7 @@ export function createInboxRelay(context: InboxRelayContext) {
       if (served().length === 0) disconnect();
     },
     signal,
+    reachable: (): boolean | null => (served().some((device) => device.platform === AGENT_PLATFORM && device.revoked_at === null) ? reachable : null),
     start(): void {
       unsubscribe = store.subscribe((line) => {
         // Every line goes down to each phone this socket is carrying.
