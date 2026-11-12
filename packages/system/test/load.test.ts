@@ -5,11 +5,9 @@ import { citations, drawingProgress, drawingStatus, FORMAT, formatIssue, loadFil
 import { load } from '../src/node/index.ts';
 import { drawingDir, edited, fixturesDir, revisionOfSize, smallDrawing } from './helpers.ts';
 
-/** Each error as one line: `<file> <field>: <message>`. */
 const errorsOf = (files: SystemFiles) => loadFiles(files).errors.map(formatIssue);
 const sysEdit = (edit: (t: string) => string) => edited('system.yaml', edit);
 
-/** Every text file under a folder, by its path. */
 function textsUnder(dir: string): [string, string][] {
   return readdirSync(dir, { recursive: true, withFileTypes: true })
     .filter((e) => e.isFile())
@@ -18,8 +16,6 @@ function textsUnder(dir: string): [string, string][] {
     .map((p) => [p, readFileSync(p, 'utf8')]);
 }
 
-// The names a fixture or the drawing may give a person. Any other two
-// capitalized words in a person's slot (people parts, "by", authors) fail.
 const ALLOWED_PEOPLE = new Set(['Maya Chen', 'Alex Rivera']);
 
 describe('the plannotator fixture', () => {
@@ -32,8 +28,6 @@ describe('the plannotator fixture', () => {
     expect(Object.keys(r.model!.revisions).sort()).toEqual(['PR-2543', 'PR-2563']);
   });
 
-  // This repo is open source: the drawing may cite only this repo. Workspaces
-  // and the desktop app are drawn as outside parts with no code at all.
   test('cites only this repo, and no path outside it', async () => {
     const { model } = await load(drawingDir);
     expect(Object.keys(model!.sources!.repos)).toEqual(['self']);
@@ -46,14 +40,12 @@ describe('the plannotator fixture', () => {
   });
 
   test('the drawing and the tests hold no private path, private repo alias or real person', async () => {
-    // the plannotator fixture sits under test/fixtures, so this covers it
     const texts = textsUnder(join(fixturesDir, '..'));
     expect(texts.length).toBeGreaterThan(10);
     const names = new Set<string>();
     for (const [path, t] of texts) {
       expect({ path, hit: /(^|[\s{,"'])ws:/m.exec(t)?.[0] ?? null }).toEqual({ path, hit: null });
       expect({ path, hit: /\/Users\/|\/home\/|\/private\/var\//.exec(t)?.[0] ?? null }).toEqual({ path, hit: null });
-      // a person's name sits in a people part's name, a git identity, a "by" or an author
       for (const m of [
         ...t.matchAll(/\{\s*name:\s*([^,}]+?),\s*kind:\s*(?:people|person)\b/g),
         ...t.matchAll(/^\s*name:\s*(.+)\n\s*kind:\s*(?:people|person)\s*$/gm),
@@ -65,7 +57,6 @@ describe('the plannotator fixture', () => {
       }
     }
     const people = [...names].map((n) => n.replace(/ \(.*$/, ''));
-    // the scan finds the fixture people, so it would find another name too
     expect(people).toContain('Maya Chen');
     expect([...names].filter((n) => !ALLOWED_PEOPLE.has(n.replace(/ \(.*$/, '')))).toEqual([]);
   });
@@ -216,7 +207,6 @@ describe('format 1 refuses', () => {
     expect(errorsOf(edited('sheets/L-101.yaml', (t) => t.replace('kind: logical', 'kind: flow')))).toContain(
       "sheets/L-101.yaml sheet: a flow sheet's code starts with F, not L",
     );
-    // a second copy of a sheet under another name fails on its file name, so no sheet is drawn twice
     const files = smallDrawing();
     files['sheets/L-102.yaml'] = files['sheets/L-101.yaml']!;
     expect(errorsOf(files)).toEqual(['sheets/L-102.yaml sheet: says L-101; the file of sheet L-101 is sheets/L-101.yaml']);
@@ -226,7 +216,6 @@ describe('format 1 refuses', () => {
     expect(errorsOf(sysEdit((t) => t.replace('to: app, says', 'to: ghost, says')))).toContain('system.yaml flows.use: names unknown part "ghost"');
     expect(errorsOf(edited('sheets/C-001.yaml', (t) => t.replace('show: [use]', 'show: [use, nope]')))).toEqual([
       'sheets/C-001.yaml show: unknown line "nope"',
-      // the sheet is left out, so the landing it was is named too
       'system.yaml root: sheet C-001 did not load (see sheets/C-001.yaml)',
     ]);
   });
@@ -353,7 +342,6 @@ describe('a drawing part way through', () => {
     const r = loadFiles(edited('sheets/L-101.yaml', (t) => t.replace('row: [api]', 'row: [ghost]')));
     expect(r.model).not.toBeNull();
     expect(Object.keys(r.model!.sheets)).toEqual(['C-001']);
-    // the line lands on api, which only L-101 drew
     expect(r.errors.map(formatIssue)).toEqual([
       'sheets/L-101.yaml: unknown part "ghost"',
       'system.yaml flows.use.lands: "api", which no sheet inside The app draws',
@@ -444,7 +432,6 @@ describe('status and progress', () => {
   test('a sheet drawn and still wanted is a warning, so check is not clean', () => {
     const r = loadFiles(sysEdit((t) => `${t}wanted:\n  - { code: L-101, kind: logical, question: x }\n  - { code: F-101, kind: flow, question: y }\n`));
     expect(r.warnings.map(formatIssue)).toEqual(['system.yaml wanted: sheet L-101 is drawn; take it out of wanted']);
-    // only the sheets not drawn yet are wanted
     expect(drawingStatus(r)).toMatchObject({ state: 'drawing', wanted: 1 });
     expect(drawingProgress(r.model!).sheets.map((s) => [s.code, s.drawn])).toEqual([['L-101', true], ['C-001', true], ['F-101', false]]);
   });

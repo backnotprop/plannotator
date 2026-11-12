@@ -6,16 +6,13 @@ import { dirname, join } from 'node:path';
 import type { SystemFiles } from '../src/index.ts';
 
 export const fixturesDir = join(import.meta.dir, 'fixtures');
-/** Plannotator drawn from its own code: a test fixture. People's drawings live in the Inbox data folder. */
 export const drawingDir = join(fixturesDir, 'plannotator');
 
-/** A temp folder removed by the returned cleanup. */
 export function tempDir(): { dir: string; done: () => void } {
   const dir = mkdtempSync(join(tmpdir(), 'plannotator-system-'));
   return { dir, done: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
-/** git in a temp repo, with a fixed identity and no signing, and no global or system config read. */
 export function git(root: string, ...args: string[]): string {
   return execFileSync(
     'git',
@@ -24,7 +21,6 @@ export function git(root: string, ...args: string[]): string {
   );
 }
 
-/** For the package's own git calls in this file's tests: no global or system git config, restored after. */
 export function isolateGitConfig(): void {
   const keys = ['GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM'] as const;
   const before = keys.map((k) => process.env[k]);
@@ -40,7 +36,6 @@ export function isolateGitConfig(): void {
   );
 }
 
-/** Write files (text or bytes) under `root`, making folders as needed. */
 export function writeTree(root: string, files: Record<string, string | Uint8Array>): void {
   for (const [rel, body] of Object.entries(files)) {
     mkdirSync(dirname(join(root, rel)), { recursive: true });
@@ -48,7 +43,6 @@ export function writeTree(root: string, files: Record<string, string | Uint8Arra
   }
 }
 
-/** The smallest drawing that loads clean: two scopes, three parts, one line, two sheets. */
 export function smallDrawing(): SystemFiles {
   return {
     'system.yaml': [
@@ -72,14 +66,12 @@ export function smallDrawing(): SystemFiles {
   };
 }
 
-/** The same drawing with one file's text changed by `edit`. */
 export function edited(path: string, edit: (text: string) => string): SystemFiles {
   const files = smallDrawing();
   files[path] = edit(files[path] ?? '');
   return files;
 }
 
-/** A revision file that loads clean and is exactly `bytes` long (ASCII, padded with a comment). */
 export function revisionOfSize(id: string, bytes: number): string {
   const head = `revision: ${id}\n# `;
   return head + 'x'.repeat(bytes - head.length - 1) + '\n';

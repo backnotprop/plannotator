@@ -1,7 +1,3 @@
-// Hand-drawn approximations of runtime and vendor marks. They tell the reader
-// the runtime without a word. Word marks are set in the drawing's ink, not the
-// vendor's colour. A mark with no drawing is written as a small mono tag, so
-// any drawing can name its own runtimes and protocols without renderer code.
 import type { ReactNode } from 'react';
 import { fs } from './type.ts';
 
@@ -15,7 +11,6 @@ const Word = ({ children, w = 600, size, italic, ls }: { children: ReactNode; w?
   <span style={{ color: 'var(--sys-ink)', fontWeight: w, fontSize: fs(size), fontStyle: italic ? 'italic' : 'normal', letterSpacing: ls, lineHeight: 1, whiteSpace: 'nowrap' }}>{children}</span>
 );
 
-// text drawn inside a mark's square
 const svgText = (n: number) => ({ fontSize: fs(n), fontWeight: 700, fontFamily: 'var(--font-sans)' });
 
 export const MARKS: Record<string, (s: number) => ReactNode> = {
@@ -195,7 +190,6 @@ export const MARKS: Record<string, (s: number) => ReactNode> = {
 
 export function Mark({ id, s = 16 }: { id: string; s?: number }) {
   const m = MARKS[id];
-  // a long tag id is cut with an ellipsis and kept whole in the tooltip
   return m ? (
     <span className="sys-mark" title={id}>{m(s)}</span>
   ) : (

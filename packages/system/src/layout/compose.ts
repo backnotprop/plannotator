@@ -1,9 +1,3 @@
-// The sheet composer. Input: a system model and a sheet code. Output: a layout
-// with every coordinate computed (layout/types.ts). Nothing here knows about
-// any one system; the same code draws any drawing in format 1. Ported from
-// entry G's compose.js with G's rulings on (`?g=off` and `?ports=off` are not
-// ported), and band and side labels in sentence case, measured as written. A
-// change's marks (change/marks.ts) are put on the finished layout.
 import type { Band, Cell, Part, SideSection, Sheet, SystemModel } from '../format/types.ts';
 import { hasMark, WIDE_MARKS } from '../draw/mark-ids.ts';
 import { lineOfFlow, lineOfMany } from '../draw/grammar.ts';
@@ -18,13 +12,9 @@ import type { CalloutBox, Edge, LineClass, PartBox, Pt, Rect, SheetLayout, Split
 
 export { W } from './common.ts';
 
-// ---------------------------------------------------------------- the working shapes
-// A cell as the composer works with it (format 1's tagged cell, flattened).
 type WCell = { id?: string; gap?: boolean; fixed?: boolean; stack?: WCell[]; span: number | null };
 type WBand = Omit<Band, 'row' | 'split'> & { row: WCell[]; split: Band['split']; hair?: boolean };
 type WSheet = Omit<Sheet, 'bands'> & { bands: WBand[]; simple?: boolean };
-// a part as the composer sees it on one sheet: _win, its inside is drawn (a
-// window); _cw, a window at rest with this many sheets inside
 type WPart = Part & { _win?: boolean; _cw?: number };
 
 const toCell = (c: Cell): WCell =>
@@ -32,8 +22,6 @@ const toCell = (c: Cell): WCell =>
 const working = (s: Sheet): WSheet => ({ ...s, bands: s.bands.map((b) => ({ ...b, row: b.row.map(toCell) })) });
 const idsOf = (c: WCell): string[] => (c.stack ? c.stack.filter((s) => s.id).map((s) => s.id!) : c.id ? [c.id] : []);
 
-// the sheet without its outer parts: cells, stacks, side sections and bands
-// that held only outer parts go
 function withoutOuter(sheet: WSheet, isOuter: (id: string) => boolean): WSheet {
   const cell = (c: WCell): WCell | null => {
     if (c.gap) return c;
@@ -44,7 +32,6 @@ function withoutOuter(sheet: WSheet, isOuter: (id: string) => boolean): WSheet {
     return c.id && isOuter(c.id) ? null : c;
   };
   const tidy = (row: (WCell | null)[]): WCell[] => {
-    // a row the rule did not touch keeps the author's gaps as written
     if (row.every((c) => c)) return row as WCell[];
     const out: WCell[] = [];
     for (const c of row) {
@@ -67,8 +54,6 @@ function withoutOuter(sheet: WSheet, isOuter: (id: string) => boolean): WSheet {
 }
 
 type PortFlow = { id: string; dir: 'in' | 'out'; inner: string[]; outer: string[]; edge?: 'top' | 'bottom' };
-// the lines this sheet shows that cross its edge: one end drawn here, the
-// other end outer. A line with ends on both sides keeps only its drawn ends.
 function portFlows(model: SystemModel, sheet: WSheet, placed: Set<string>, isOuter: (id: string) => boolean): PortFlow[] {
   const ids = sheet.show === 'all' ? Object.keys(model.flows) : sheet.show;
   const out: PortFlow[] = [];
@@ -82,39 +67,31 @@ function portFlows(model: SystemModel, sheet: WSheet, placed: Set<string>, isOut
   return out;
 }
 
-const HEAD = 36; // band label strip
+const HEAD = 36;
 const PADX = 18, PADB = 16;
-const GUT = 66; // minimum space between bands, for lines and labels
-const CG = 16; // gap between grid cells
-const UNITS = 24; // half-columns of the 12-column grid
-const AUTO_GAP = 4; // units opened between two neighbours a line joins
+const GUT = 66;
+const CG = 16;
+const UNITS = 24;
+const AUTO_GAP = 4;
 const SIDE_W = 256, SIDE_GAP = 34, CALL_W = 236, CALL_GAP = 50, BRACE = 46;
-/** A window's head (name, one line of role) over its inside sheet drawn at the window's width. */
 export const WIN_HEAD = 66;
-/** The paper height a window assumes for a scope it does not know yet. */
 export const MIN_H = 900;
-const BAND_WRAP = 8; // past this many parts a band wraps to a second row inside the band
-const FAN_IN = 6; // past this many lines into one part, they gather into one bus with a count
-const ROLE_LINES = 3; // roles clamp at three lines; the panel has the full text
-const ROW_GAP = 34; // between the rows of a wrapped band
-// A dense sheet (a band wrapped, or many lines) is drawn as a grid of gutters:
-// wrapped rows share equal columns, so the gaps between cells line up into
-// risers from band to band, wide enough to carry a bundle each way.
+const BAND_WRAP = 8;
+const FAN_IN = 6;
+const ROLE_LINES = 3;
+const ROW_GAP = 34;
 const DENSE_LINES = 40;
 const RISER = 48;
 const GUT_DENSE = 80;
-const PORT_H = 44; // the strip at the top (arrivals) or bottom (departures) of the field
+const PORT_H = 44;
 
 const KIND_VARIANT: Record<string, Variant> = { conceptual: 'plate', logical: 'box', deployment: 'node', service: 'card', flow: 'box' };
 
 function variantFor(sheet: WSheet, band: WBand | null, p: WPart, side?: SideSection): Variant {
   if (side) return side.tone ? 'node' : p.marks.length > 1 && !p.wordmark ? 'rowx' : 'row';
-  // Simple is one reading at every depth: a card or a node is the plain box
   const plain = (x: Variant): Variant => (sheet.simple && (x === 'card' || x === 'node') ? 'box' : x);
   if (band?.show) return plain(band.show as Variant);
   const v = plain(KIND_VARIANT[sheet.kind] ?? 'box');
-  // a part whose inside is drawn is a window on the conceptual and logical
-  // sheets of its own scope (elsewhere it is drawn as a reference box)
   if (p._win && (sheet.kind === 'conceptual' || sheet.kind === 'logical')) return 'window';
   return v;
 }
@@ -126,8 +103,6 @@ function shownMarks(p: Part, v: Variant, suppressed: Set<string>): string[] {
   return ms.slice(0, 1);
 }
 
-// word marks run wider than square ones; a mark with no drawing renders as a
-// mono tag, so it is measured as the tag (capped at 96)
 const TAG_MAX = 96;
 const oneMarkW = (m: string) => (!hasMark(m) ? Math.min(TAG_MAX, textWidth(m, FONTS.tag) + 12) + 6 : WIDE_MARKS.has(m) ? 34 : 22);
 const markW = (marks: string[]) => marks.reduce((s, m) => s + oneMarkW(m), 0);
@@ -135,13 +110,11 @@ const markW = (marks: string[]) => marks.reduce((s, m) => s + oneMarkW(m), 0);
 function minWidth(p: WPart, v: Variant, marks: string[]): number {
   const mk = markW(marks);
   switch (v) {
-    // a plate's name may take two lines, so it asks for half its width, never less than its longest word
     case 'plate':
       return Math.max(
         Math.max(longestWord(p.name, FONTS.plateName), textWidth(p.name, FONTS.plateName) / 2 + 12) + Math.min(mk, 44) + 40,
         longestWord(p.role, FONTS.plateRole) + 34,
       );
-    // 260 is the narrowest where a window's inside still reads as a sheet
     case 'window':
       return Math.max(260, textWidth(p.name, FONTS.plateName) + Math.min(mk, 44) + 60);
     case 'chip':
@@ -155,7 +128,6 @@ function minWidth(p: WPart, v: Variant, marks: string[]): number {
   }
 }
 function comfortWidth(p: WPart, v: Variant, marks: string[]): number {
-  // a plate would like its name on one line and its role in at most ROLE_LINES lines
   if (v === 'plate')
     return Math.max(
       minWidth(p, v, marks),
@@ -170,9 +142,6 @@ const cardText = (p: Part, k: string) => (p.card && typeof p.card[k] === 'string
 const cardList = (p: Part, k: string) => (p.card && Array.isArray(p.card[k]) ? (p.card[k] as unknown[]) : []);
 const subOf = (p: Part, v: Variant) => (v === 'node' ? cardText(p, 'config') || p.sub || p.role : p.sub);
 
-// A box is the size of what it says: its natural width puts a plate's or a
-// box's line on about two lines; a part that opens a window is never narrower
-// than 260. 0 means the variant keeps its slot. A short line stays on one line.
 const lineW = (tw: number, pad: number) => (tw + pad <= 280 ? tw + pad + 2 : tw * 0.55 + pad);
 function naturalWidth(p: WPart, v: Variant, marks: string[]): number {
   if (v === 'plate' || v === 'window') {
@@ -185,16 +154,12 @@ function naturalWidth(p: WPart, v: Variant, marks: string[]): number {
   }
   if (v === 'box' || v === 'node') {
     const sub = subOf(p, v), s = sub || p.role, font = sub ? FONTS.mono : FONTS.boxRole;
-    // never narrower than the line's longest word (a path, a host): the text
-    // runs in w - 27, and a word wider than that breaks inside itself
-    // ("inbox.js" / "on"), which reads as cut off
     return Math.max(minWidth(p, v, marks), comfortWidth(p, v, marks), s ? Math.min(lineW(textWidth(s, font), 40), 360) : 0, s ? Math.ceil(longestWord(s, font)) + 28 : 0);
   }
   if (v === 'chip') return minWidth(p, v, marks);
   return 0;
 }
 
-/** A window at rest carries one footer line, "5 sheets inside ›". */
 export const CUE_H = 22;
 function heightOf(p: WPart, v: Variant, w: number, marks: string[], childH?: number): number {
   return heightOf0(p, v, w, marks, childH) + (p._cw && v !== 'window' ? lh(CUE_H) : 0);
@@ -205,7 +170,6 @@ function heightOf0(p: WPart, v: Variant, w: number, marks: string[], childH?: nu
       return WIN_HEAD + Math.round((w * (childH || MIN_H)) / W);
     case 'plate': {
       const role = Math.min(ROLE_LINES, wrap(p.role, FONTS.plateRole, w - 32).lines.length);
-      // the name wraps beside its marks (up to two shown inline); the sub line wraps too
       const inline = marks.length <= 2 ? markW(marks) + (marks.length ? 8 : 0) : 0;
       const nameL = wrap(p.name, FONTS.plateName, w - 32 - inline).lines.length;
       let h = 13 + nameL * lh(24) + 5 + role * lh(18.5);
@@ -226,7 +190,6 @@ function heightOf0(p: WPart, v: Variant, w: number, marks: string[], childH?: nu
       return 42 + 66 + (21 + 17 + cardList(p, 'entry').length * 23) + (21 + 17 + cardList(p, 'binds').length * 20) + 62 + 58 + 8;
     }
     default: {
-      // box, node: the name wraps beside its mark (two lines at most), the sub wraps to three lines
       const sub = subOf(p, v);
       const nameLines = Math.max(1, fitName(p.name, FONTS.boxName, w - 27 - markW(marks) - 8).lines.length);
       let h = 8 + lh(20) * nameLines;
@@ -237,11 +200,8 @@ function heightOf0(p: WPart, v: Variant, w: number, marks: string[], childH?: nu
   }
 }
 
-// a cell while its row is laid out
 type Slot = WCell & { units: number; minW: number; comfortW: number; auto?: boolean; x: number; w: number };
 
-// Spread a band row over the grid. Fixed spans stay; automatic spans start from
-// each part's measured minimum and share the rest by largest remainder.
 function allocate(cells: Slot[], unitW: number, cg = CG): number {
   const fixed = cells.reduce((s, c) => s + (c.units || 0), 0);
   const autos = cells.filter((c) => !c.units);
@@ -254,8 +214,6 @@ function allocate(cells: Slot[], unitW: number, cg = CG): number {
   const got = share.map(Math.floor);
   const rest = left - got.reduce((s, n) => s + n, 0);
   const order = share.map((s, i): [number, number] => [s - Math.floor(s), i]).sort((a, b) => b[0] - a[0] || a[1] - b[1]);
-  // every cell has a fixed span (or the row is only gaps): the spans are
-  // honoured and the rest of the row stays empty at its end
   if (order.length) for (let k = 0; k < rest; k++) got[order[k % order.length]![1]]!++;
   autos.forEach((c, i) => {
     c.units = need[i]! + got[i]!;
@@ -265,7 +223,6 @@ function allocate(cells: Slot[], unitW: number, cg = CG): number {
 
 type WFlow = { id: string; from: string[]; to: string; both: boolean; says: string; quiet: boolean; line: LineClass | null; tails: Edge['tails']; fan?: Edge['fan']; port?: boolean; portOf?: { from: string[]; to: string } };
 
-// a line's words are only what it says; an overlay may add its own after them
 function shownFlows(model: SystemModel, sheet: WSheet, placed: Set<string>, ov: Overlay[]): WFlow[] {
   const ids = sheet.show === 'all' ? Object.keys(model.flows) : sheet.show;
   const out: WFlow[] = [];
@@ -280,8 +237,6 @@ function shownFlows(model: SystemModel, sheet: WSheet, placed: Set<string>, ov: 
   return out;
 }
 
-// Past FAN_IN lines into one part, they gather into one bus with a count. Each
-// member keeps its identity (fan:).
 function fanIn(flows: WFlow[]): WFlow[] {
   const by: Record<string, WFlow[]> = {};
   for (const f of flows) if (!f.both && f.from.length === 1) (by[f.to] ??= []).push(f);
@@ -297,18 +252,12 @@ function fanIn(flows: WFlow[]): WFlow[] {
   return [...flows.filter((f) => !gone.has(f.id)), ...out];
 }
 
-// How many lines a side column's label and its means take at the column width.
 function sideHead(sec: SideSection): number {
   const full = textWidth(sec.label, FONTS.band) + (sec.means ? textWidth(sec.means, FONTS.bandMeans) + 12 : 0) + (sec.marks.length ? 26 : 0);
   if (full <= SIDE_W - 28) return 1;
   return wrap(sec.label, FONTS.band, SIDE_W - 28).lines.length + (sec.means ? wrap(sec.means, FONTS.bandMeans, SIDE_W - 28).lines.length : 0);
 }
 
-// Simple, on a banded sheet of any kind at any depth: the bands stack as
-// full-width rows in their order, each band's parts packed side by side; no
-// lines, no line words, no notes, no margin text. Band labels, part names,
-// one-line captions and vendor marks stay. A side column becomes one more
-// band at the foot, so no part is lost.
 function simpleSheet(s: WSheet): WSheet {
   const bands: WBand[] = s.bands.map((b) => ({
     ...b, means: '', split: null,
@@ -320,37 +269,25 @@ function simpleSheet(s: WSheet): WSheet {
   return { ...s, simple: true, bands: [...bands, ...sides], left: [], right: [], groups: [], callouts: [], notes: [], brace: null, show: [], quiet: [] };
 }
 const SIMPLE_GUT = 20;
-const LINE_GAP = 72; // between two packed neighbours a line joins (wider for its words, up to 180)
+const LINE_GAP = 72;
 
 export type LayoutOpts = {
-  /** The paper height; the sheet is never shorter than its drawing. */
   H?: number;
-  /** The Simple reading. Ignored on a sheet that has one reading (`hasSimple`). */
   simple?: boolean;
-  /** The at-rest form: each window a plain box with its "N sheets inside" cue. */
   compact?: boolean;
-  /** Scope id to the paper height of its first sheet, so a window keeps its inside's aspect. */
   childH?: Record<string, number>;
-  /** Overlay ids to apply (none ship). */
   overlays?: string[];
-  /** The gap widening a retry adds when a line's words found no room. */
   gutAdd?: number;
 };
 
-// A line's words that find no clear gap beside their line widen the gaps
-// between the bands and the sheet is laid out again, up to three times,
-// keeping the try with the fewest words left for hover.
 const hiddenWords = (L: SheetLayout) => L.edges.filter((e) => e.says && !e.quiet && e.lb?.hidden).length;
 
-// A sheet's layout is a pure function of its model, its code, its options and
-// the text setting, so it is kept.
 const KEPT = new WeakMap<SystemModel, Map<string, SheetLayout>>();
 const keptKey = (code: string, opts: LayoutOpts) => {
   const t = currentText();
   return `${code}|${measureEpoch()}|${t.type}|${t.sans}|${t.mono}|${JSON.stringify({ ...opts, childH: undefined })}|${JSON.stringify(opts.childH ?? {})}`;
 };
 
-/** Lays out one sheet. Kept per model, so asking again is free. */
 export function layoutSheet(model: SystemModel, code: string, opts: LayoutOpts = {}): SheetLayout {
   let m = KEPT.get(model);
   if (!m) KEPT.set(model, (m = new Map()));
@@ -375,7 +312,6 @@ export function layoutSheet(model: SystemModel, code: string, opts: LayoutOpts =
   return L;
 }
 
-/** A change's marks on a finished layout: each part's and line's status, a part's number and line counts, a hop's ink. */
 function marked(model: SystemModel, L: SheetLayout): SheetLayout {
   const mk = marksOf(model);
   if (!mk) return L;
@@ -397,13 +333,11 @@ function marked(model: SystemModel, L: SheetLayout): SheetLayout {
   return { ...L, parts, edges, figures };
 }
 
-/** True when a sheet has two readings, Simple and Full: it is drawn in bands, with a band left to draw. */
 export function hasSimple(model: SystemModel, code: string): boolean {
   const s = model.sheets[code];
   return !!s?.bands.length && withoutOuter(working(s), outerTest(model, s.scope)).bands.length > 0;
 }
 
-/** The scope a part opens from a sheet of its own scope, when that scope has sheets. */
 const opensFrom = (model: SystemModel, p: Part | undefined, here: string) =>
   p && p.child && model.byScope[p.child]?.length && (p.in || 'root') === here ? p.child : null;
 
@@ -416,13 +350,10 @@ function layoutSheet0(model: SystemModel, code: string, opts: LayoutOpts): Sheet
   const sheet1 = withoutOuter(working(sheet0), isOuter);
   const SIMPLE = !!opts.simple && sheet1.bands.length > 0;
   const sheet = SIMPLE ? simpleSheet(sheet1) : sheet1;
-  // kinds that are not banded have their own composers; a kind's own composer
-  // runs only when the sheet carries that kind's fields and no bands
   const own = KINDS[sheet.kind];
   if (own && sheet0[own.field].length > 0 && !sheet0.bands.length) return own.compose(model, code, { H: opts.H });
 
   const here = sheet.scope || 'root';
-  // compact: each window drawn as the box it is at rest, its inside not reserved
   const P: Record<string, WPart> = {};
   for (const [id, p0] of Object.entries(model.parts)) {
     const p: WPart = SIMPLE ? { ...p0, sub: '' } : p0;
@@ -448,8 +379,6 @@ function layoutSheet0(model: SystemModel, code: string, opts: LayoutOpts): Sheet
   const OV = SIMPLE ? [] : pickOverlays(opts.overlays);
   const flows = fanIn(shownFlows(model, sheet, placed, OV));
   const ports = SIMPLE ? [] : portFlows(model, sheet, placed, isOuter);
-  // a crossing line meets the nearer edge of the field: parts in the upper
-  // half of the bands (and the side columns) take the top strip, the rest the bottom
   const bandIx: Record<string, number> = Object.fromEntries(sheet.bands.map((b, i) => [b.id, i]));
   const upper = (id: string) => (bandOf[id] == null ? true : bandIx[bandOf[id]!]! < sheet.bands.length / 2);
   for (const q of ports) q.edge = (q.dir === 'in' ? upper(q.inner[0]!) : q.inner.some(upper)) ? 'top' : 'bottom';
@@ -457,7 +386,6 @@ function layoutSheet0(model: SystemModel, code: string, opts: LayoutOpts): Sheet
   const dense = sheet.bands.some((b) => b.row.filter((c) => !c.gap).length > BAND_WRAP) || flows.length >= DENSE_LINES;
   const CG0 = dense ? RISER : CG;
 
-  // marks already said by a container are not repeated on its parts
   const suppress: Record<string, Set<string>> = {};
   const sup = (id: string, ms: string[]) => {
     const s = (suppress[id] ??= new Set());
@@ -470,7 +398,6 @@ function layoutSheet0(model: SystemModel, code: string, opts: LayoutOpts): Sheet
   for (const s of [...sheet.left, ...sheet.right]) for (const id of s.stack) sup(id, s.marks);
   const supOf = (id: string) => suppress[id] ?? new Set<string>();
 
-  // ---------------------------------------------------------------- columns
   const leftCall = sheet.callouts.some((c) => c.side === 'left');
   const rightCall = sheet.callouts.some((c) => c.side === 'right');
   let x = M;
@@ -490,7 +417,6 @@ function layoutSheet0(model: SystemModel, code: string, opts: LayoutOpts): Sheet
   const inGroup = (bid: string) => sheet.groups.find((g) => g.around.includes(bid));
   const GROUP_IN = 20;
 
-  // ---------------------------------------------------------------- bands
   const linked = (a: string[], b: string[]) =>
     flows.some((f) => (f.from.some((s) => a.includes(s)) && b.includes(f.to)) || (f.from.some((s) => b.includes(s)) && a.includes(f.to)));
   const rects: Record<string, RouteRect & { v: Variant; band?: string; side?: string }> = {};
@@ -498,16 +424,13 @@ function layoutSheet0(model: SystemModel, code: string, opts: LayoutOpts): Sheet
     const g = inGroup(b.id);
     const bx = fieldX + (g ? GROUP_IN : 0), bw = fieldW - (g ? GROUP_IN * 2 : 0);
     const innerX = bx + PADX, innerW = bw - PADX * 2;
-    // past BAND_WRAP parts, the row wraps into balanced rows inside the band
     const nParts = b.row.filter((c) => !c.gap).length;
     let nRows = nParts > BAND_WRAP ? Math.ceil(nParts / BAND_WRAP) : 1;
-    // a row whose measured minimums do not fit the band wraps into one more row
     const minOf = (c: WCell) =>
       Math.max(60, ...idsOf(c).filter((id) => P[id]).map((id) => {
         const v = variantFor(sheet, b, P[id]!);
         return minWidth(P[id]!, v, shownMarks(P[id]!, v, supOf(id)));
       })) + CG0;
-    // (a row with written spans or a split keeps its one row: the author placed those)
     if (!b.split && !b.row.some((c) => c.span)) {
       const sumMin = b.row.filter((c) => !c.gap).reduce((a, c) => a + minOf(c), 0) - CG0;
       while (nRows < nParts && sumMin / nRows > innerW) nRows++;
@@ -520,12 +443,11 @@ function layoutSheet0(model: SystemModel, code: string, opts: LayoutOpts): Sheet
         chunks.push([]);
         k = 0;
       }
-      if (c.gap && !chunks[chunks.length - 1]!.length) continue; // a row never starts with a gap
+      if (c.gap && !chunks[chunks.length - 1]!.length) continue;
       chunks[chunks.length - 1]!.push(c);
       if (!c.gap) k++;
     }
     const rows: WRow[] = chunks.map((row) => {
-      // open a gap between neighbours a line joins, so the line has room
       const cells: Slot[] = [];
       row.forEach((c, i) => {
         if (i > 0 && !dense) {
@@ -541,12 +463,9 @@ function layoutSheet0(model: SystemModel, code: string, opts: LayoutOpts): Sheet
         const comfortW = c.gap ? 0 : Math.max(60, ...ms.map((m) => m[1]));
         cells.push({ ...c, units: c.gap ? (c.fixed ? (c.span ?? 1) * 2 : 1) : c.span ? c.span * 2 : 0, minW, comfortW, x: 0, w: 0 });
       });
-      // a crowded row on a dense sheet narrows its risers before it squeezes a part
       const parts_ = cells.filter((c) => !c.gap);
       const cg = !dense || parts_.length < 2 ? CG0 : Math.max(CG, Math.min(RISER, (innerW - parts_.reduce((a, c) => a + Math.max(c.minW, Math.min(c.comfortW, 170)), 0)) / (parts_.length - 1)));
       const unitW0 = (innerW + cg) / UNITS;
-      // a wrapped row on a dense sheet takes equal columns, the same in every
-      // wrapped band with as many parts per row, so the risers line up
       const eq = Math.floor(UNITS / per);
       let total: number;
       if (dense && nRows > 1 && cells.every((c) => !c.gap && !c.units) && cells.every((c) => c.minW + cg <= eq * unitW0)) {
@@ -562,8 +481,6 @@ function layoutSheet0(model: SystemModel, code: string, opts: LayoutOpts): Sheet
         c.w = c.units * unitW - cg;
         u += c.units;
       }
-      // each box takes its natural width inside its slot; the spare width
-      // becomes equal gaps between the boxes, where the lines run
       if (!dense && !SIMPLE) {
         const ps = cells.filter((c) => !c.gap);
         const nat = ps.map((c) => {
@@ -573,8 +490,6 @@ function layoutSheet0(model: SystemModel, code: string, opts: LayoutOpts): Sheet
           });
           return nws.length && nws.every((n) => n > 0) ? Math.round(Math.max(...nws)) : 0;
         });
-        // every box fits at its natural width: spread with equal gaps across
-        // the band; otherwise each keeps the slot it was given
         const fits = nat.every((n) => n > 0) && nat.reduce((a, n) => a + n, 0) + (ps.length - 1) * cg <= innerW;
         if (fits) {
           ps.forEach((c, i) => {
@@ -587,9 +502,6 @@ function layoutSheet0(model: SystemModel, code: string, opts: LayoutOpts): Sheet
             xx += c.w + gapW;
           }
         } else if (nat.every((n) => n > 0) && !b.row.some((c) => c.span)) {
-          // too many for their natural widths: each gets its share of the band
-          // in proportion to what it needs, with the small gutter between (two
-          // neighbours a line joins keep room for the line and its words)
           const wordsW = (a: string[], b2: string[]) =>
             Math.max(0, ...flows.filter((f) => (f.from.some((q) => a.includes(q)) && b2.includes(f.to)) || (f.from.some((q) => b2.includes(q)) && a.includes(f.to))).map((f) => textWidth(String(f.says || ''), FONTS.label) / 2 + 28));
           const gaps = ps.map((c, i) => (i === 0 ? 0 : linked(idsOf(ps[i - 1]!), idsOf(c)) ? Math.min(180, Math.max(LINE_GAP, wordsW(idsOf(ps[i - 1]!), idsOf(c)))) : cg));
@@ -612,9 +524,7 @@ function layoutSheet0(model: SystemModel, code: string, opts: LayoutOpts): Sheet
     return { ...b, x: bx, w: bw, y: 0, h: 0, rows, cells: rows.flatMap((r) => r.cells), labelled: !!b.label };
   });
 
-  // heights
   const childH = (id: string) => opts.childH?.[P[id]?.child ?? ''];
-  // Simple: a window is as tall as its box at rest (name, line and footer)
   const cellH = (id: string, v: Variant, w: number) =>
     SIMPLE && v === 'window'
       ? heightOf({ ...P[id]!, _cw: 1, _win: false }, 'plate', w, shownMarks(P[id]!, 'plate', supOf(id)))
@@ -635,19 +545,16 @@ function layoutSheet0(model: SystemModel, code: string, opts: LayoutOpts): Sheet
     b.h = (b.labelled ? HEAD : PADB) + b.rows.reduce((a, r) => a + r.h, 0) + (b.rows.length - 1) * ROW_GAP + PADB;
   }
 
-  // ---------------------------------------------------------------- vertical
   const gapsN = Math.max(1, bands.length - 1);
   const groupExtra = sheet.groups.length * (42 + 16);
   const GUTTER = SIMPLE ? SIMPLE_GUT : dense ? GUT_DENSE : GUT;
   const gutAdd = opts.gutAdd ?? 0;
-  // the retry that widens the gaps for a line's words widens the port strips too
   const PH = PORT_H + Math.round(gutAdd * 0.6);
   const naturalField = bands.reduce((s, b) => s + b.h, 0) + gapsN * (GUTTER + gutAdd) + groupExtra + (arrIn ? PH : 0) + (arrOut ? PH : 0);
   const sideNeed = Math.max(0, ...[sheet.left, sheet.right].map((col) =>
     col.reduce((s, sec) => s + 40 + sec.stack.reduce((a, id) => a + (P[id] ? heightOf(P[id]!, variantFor(sheet, null, P[id]!, sec), SIDE_W - 24, []) + (sec.tone ? 10 : 0) : 0), 0) + 30, 0)));
   const natural = FIELD_TOP + Math.max(naturalField, sideNeed) + FOOT_H;
   const H = Math.max(opts.H ?? 0, natural);
-  // spare height widens the gutters first, up to 40 px each
   const spare = H - natural;
   const gut = GUTTER + gutAdd + (bands.length > 1 && !SIMPLE ? Math.min(40, spare / (gapsN + 1)) : 0);
 
@@ -671,8 +578,6 @@ function layoutSheet0(model: SystemModel, code: string, opts: LayoutOpts): Sheet
   let fieldBottom = y + (arrOut ? PH : 0);
   const portBottomY = y + 18 + (PH - PORT_H);
 
-  // place parts in bands: each part its own height, top-aligned; in Simple a
-  // stack fills its row, each part its own height plus an even share of the rest
   for (const b of bands) {
     let top = b.y + (b.labelled ? HEAD : PADB);
     for (const row of b.rows) {
@@ -701,7 +606,6 @@ function layoutSheet0(model: SystemModel, code: string, opts: LayoutOpts): Sheet
     }
   }
 
-  // ---------------------------------------------------------------- side columns
   const zones: Zone[] = [];
   const sideCol = (col: SideSection[], colX: number) => {
     let cy = FIELD_TOP;
@@ -709,7 +613,6 @@ function layoutSheet0(model: SystemModel, code: string, opts: LayoutOpts): Sheet
       const align = sec.beside ? bands.find((b) => b.id === sec.beside) : undefined;
       if (align) cy = Math.max(cy, align.y);
       const y0 = cy;
-      // a long label wraps inside the column; the stack starts after its lines
       const lines = sec.label ? sideHead(sec) : 0;
       let yy = y0 + (sec.label ? 30 + (lines - 1) * lh(13) : 12);
       for (const id of sec.stack) {
@@ -732,13 +635,10 @@ function layoutSheet0(model: SystemModel, code: string, opts: LayoutOpts): Sheet
   sideCol(sheet.left, sideLX);
   sideCol(sheet.right, sideRX);
 
-  // (a side column laid out as a band in Simple keeps its id and its look, a
-  // hairline when it has no tone, so it is one thing in both readings)
   for (const b of bands)
     if (b.labelled) zones.push({ id: b.id, x: b.x, y: b.y, w: b.w, h: b.h, label: b.label, means: b.means || undefined, tone: b.tone || 'stone', marks: b.marks, band: true, ...(b.hair ? { hair: true } : {}) });
   for (const gb of groupBoxes) zones.unshift({ id: gb.g.id, x: fieldX, y: gb.y0, w: fieldW, h: gb.y1 - gb.y0, label: gb.g.label, means: gb.g.means || undefined, tone: 'none', solid: true, marks: gb.g.marks });
 
-  // splits inside a band ("in the cloud" | "on your machine")
   const splits: Split[] = [];
   for (const b of bands) {
     if (!b.split) continue;
@@ -750,30 +650,23 @@ function layoutSheet0(model: SystemModel, code: string, opts: LayoutOpts): Sheet
     splits.push({ x: sx, y0: b.y + 8, y1: b.y + b.h - 8, left: b.split.left, right: b.split.right, ty: b.y + 13 });
   }
 
-  // ---------------------------------------------------------------- parts out
   const parts: Record<string, PartBox> = {};
   for (const [id, r] of Object.entries(rects)) {
     const p = P[id]!;
     const box: PartBox = { x: r.x, y: r.y, w: r.w, h: r.h, v: r.v, band: r.band, side: r.side, marks: shownMarks(p, r.v, supOf(id)), status: null, opens: opensFrom(model, model.parts[id], here) };
     if (OV.length) box.ov = overlayPart(model.parts[id]!, model, id, OV);
-    // a box name never breaks inside a word: when it would, the box draws the
-    // fitted lines, each word whole or ending in an ellipsis
     if ((r.v === 'box' || r.v === 'node') && p.name) {
       const f = fitName(p.name, FONTS.boxName, r.w - 27 - markW(box.marks) - 8);
       if (f.cut) box.nl = f.lines;
     }
-    // a window at rest says how many sheets it holds (the drawing draws the cue)
     if (p._cw && r.v !== 'window') box.cw = p._cw;
     parts[id] = box;
   }
 
-  // ---------------------------------------------------------------- callouts
   const callouts: (CalloutBox & { arrow: Pt[] })[] = [];
   sheet.callouts.forEach((c, i) => {
     const r = rects[c.to];
     if (!r) return;
-    // a title never breaks inside a word: a word wider than the column ends in
-    // an ellipsis and the full title rides along for the hover
     const tf = fitName(c.title, FONTS.calloutTitle, CALL_W, 3);
     const t = tf.lines;
     const b = wrap(c.text, FONTS.calloutText, CALL_W).lines;
@@ -787,7 +680,6 @@ function layoutSheet0(model: SystemModel, code: string, opts: LayoutOpts): Sheet
     callouts.push({ id: 'call' + i, x: cx0, y: top, w: CALL_W, h, title: t, full: tf.cut ? c.title : null, text: b, side: c.side, arrow, to: c.to });
   });
 
-  // ---------------------------------------------------------------- lines
   const header = { x: M, y: 30, w: 900, h: FIELD_TOP - 40 };
   const bandHeads = zones.filter((z) => z.label).map((z) => ({
     x: z.x + 10, y: z.y + 4, h: z.labelH ?? 26,
@@ -804,12 +696,8 @@ function layoutSheet0(model: SystemModel, code: string, opts: LayoutOpts): Sheet
     const z = zones.find((q) => q.id === (r.band || r.side));
     if (z) containerOf[id] = z;
   }
-  // a part with a sheet inside wears its cue: the router keeps ports off that corner
   const routeRects: Record<string, RouteRect> = Object.fromEntries(Object.entries(rects).map(([id, r]) => [id, parts[id]!.opens ? { ...r, bubble: true } : r]));
   const bandBoxes: BandBox[] = bands.map((b) => ({ id: b.id, x0: b.x, x1: b.x + b.w, y0: b.y, y1: b.y + b.h }));
-  // what the router needs to keep lines in the gutters: the envelope of the
-  // bands and side columns, each band's box, the strips between wrapped rows,
-  // and on a dense sheet the riser centre lines
   const env = [...bandBoxes.map((b) => ({ x: b.x0, y: b.y0, w: b.x1 - b.x0, h: b.y1 - b.y0 })), ...zones].reduce(
     (m, z) => ({ x0: Math.min(m.x0, z.x), y0: Math.min(m.y0, z.y), x1: Math.max(m.x1, z.x + z.w), y1: Math.max(m.y1, z.y + z.h) }),
     { x0: 1e9, y0: 1e9, x1: -1e9, y1: -1e9 },
@@ -828,9 +716,6 @@ function layoutSheet0(model: SystemModel, code: string, opts: LayoutOpts): Sheet
       }
     });
   }
-  // dense sheets route on channels: the gutter between two bands, the strip
-  // between a wrapped band's rows, the risers between columns, and the lane
-  // between the band field and a side column
   let channels: { gutters: number[]; lanes: number[] } | null = null;
   if (dense) {
     const byY = [...bandBoxes].sort((a, b) => a.y0 - b.y0);
@@ -844,8 +729,6 @@ function layoutSheet0(model: SystemModel, code: string, opts: LayoutOpts): Sheet
     if (rz.length) lanes.push(Math.round((Math.min(...rz.map((z) => z.x)) + fx1) / 2));
     channels = { gutters, lanes };
   }
-  // ports: each crossing line gets a small name at the field's top (lines in)
-  // or bottom (lines out), over the part it reaches, spread so none overlap
   const portRects: Record<string, RouteRect & { text: string; dir: 'in' | 'out'; edge: 'top' | 'bottom' }> = {};
   for (const edgeOf of ['top', 'bottom'] as const) {
     const list = ports
@@ -861,7 +744,6 @@ function layoutSheet0(model: SystemModel, code: string, opts: LayoutOpts): Sheet
       it.x = Math.max(edge, Math.min(xr - it.w, it.cx - it.w / 2));
       edge = it.x + it.w + 18;
     }
-    // pushed off the right end: slide the row back left
     let over = list.length ? list[list.length - 1]!.x + list[list.length - 1]!.w - xr : 0;
     for (let i = list.length - 1; i >= 0 && over > 0; i--) {
       const it = list[i]!;
@@ -916,20 +798,15 @@ function layoutSheet0(model: SystemModel, code: string, opts: LayoutOpts): Sheet
   });
   for (const e of edges) e.lb = labels[e.id] ?? null;
 
-  // callout arrows are drawn as heavy ink arrows
   for (const c of callouts) edges.push({ id: c.id, from: [], to: c.to, says: '', quiet: false, status: null, line: null, letter: null, pts: c.arrow, style: 'aud' });
 
-  // ---------------------------------------------------------------- letters
   const taken: Rect[] = Object.values(labels).filter((l) => !l.hidden);
-  // a window's corners are its own: the stacked edge bottom right, the cue bottom left
   for (const p of Object.values(parts)) {
     if (!(p.v === 'window' || p.cw)) continue;
     taken.push({ x: p.x + p.w - 26, y: p.y - 26, w: 52, h: 52 }, { x: p.x + p.w - 16, y: p.y + p.h - 16, w: 32, h: 32 });
     if (p.cw) taken.push({ x: p.x, y: p.y + p.h - 28, w: 140, h: 28 });
   }
   const letters = placeLetters(sheet.notes.filter((n) => rects[n.on]), rects, taken);
-  // a note on a quiet line, or on a line whose label found no room, keeps its
-  // letter on the line itself (middle of the longest segment) so it never vanishes
   for (const e of edges) {
     if (!e.letter || !e.pts || (!e.quiet && e.lb && !e.lb.hidden)) continue;
     let best: Pt | null = null, bl = -1;
@@ -953,21 +830,11 @@ function layoutSheet0(model: SystemModel, code: string, opts: LayoutOpts): Sheet
 }
 
 export type SystemLayouts = {
-  /** Every sheet laid out in its full form, windows open. */
   sheets: Record<string, SheetLayout>;
-  /** The at-rest form of every sheet that has windows: each window a plain box with its cue. */
   compact: Record<string, SheetLayout>;
-  /** Scope id to the paper height of its first sheet. */
   childH: Record<string, number>;
 };
 
-/**
- * Lays out every sheet. Inner scopes first, so a window knows its inside
- * sheet's height at any depth. Each sheet keeps its own paper height; the
- * width is shared. `simple` reads every banded sheet Simple (true), or the
- * banded sheets of the scopes in the set. The view at rest draws
- * `compact[code] ?? sheets[code]`.
- */
 export function layoutSystem(model: SystemModel, how: { simple?: boolean | Set<string>; overlays?: string[] } = {}): SystemLayouts {
   const sheets: Record<string, SheetLayout> = {}, compact: Record<string, SheetLayout> = {}, childH: Record<string, number> = {};
   const simpleIn = (sc: string) => how.simple === true || (how.simple instanceof Set && how.simple.has(sc || 'root'));
@@ -993,11 +860,6 @@ export function layoutSystem(model: SystemModel, how: { simple?: boolean | Set<s
   return { sheets, compact, childH };
 }
 
-/**
- * One sheet as it is drawn at rest: each window a plain box with its "N sheets
- * inside" cue, on paper as tall as that drawing. What the thumb and the view
- * draw.
- */
 export function restLayout(model: SystemModel, code: string, opts: { simple?: boolean; overlays?: string[]; childH?: Record<string, number> } = {}): SheetLayout {
   const o: LayoutOpts = { compact: true, simple: !!opts.simple && hasSimple(model, code), overlays: opts.overlays ?? [], childH: opts.childH };
   const nat = layoutSheet(model, code, o).natural;

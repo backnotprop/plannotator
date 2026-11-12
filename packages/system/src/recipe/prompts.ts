@@ -1,31 +1,12 @@
-// The prompts an agent is given: the facts of one job, then the recipe, then
-// the format reference. Pure text, browser-safe, so the Inbox window can build
-// the first-draw prompt for Copy prompt as the server builds it for launch.
 import type { GateResult } from '../gate/gate.ts';
 import type { SystemSetup } from '../agent/setup.ts';
 import { DRAW, FORMAT, REVIEW, UPDATE } from './text.ts';
 
-/** The recipes as Markdown: draw once, redraw when main moves, draw an open pull request's change; and the format they share. */
 export const recipes = { draw: DRAW, update: UPDATE, review: REVIEW, format: FORMAT } as const;
 
-/** Text from a repo or a person (a path, a name) on one line, so it cannot start a line of its own in a prompt. */
 const oneLine = (s: string) => s.replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, ' ');
 const list = (items: readonly string[], none: string) => (items.length ? items.map((i) => `  - ${oneLine(i)}`).join('\n') : `  - ${none}`);
 
-/**
- * The prompt that starts a project's first drawing, for the agent the person
- * picked. `projectRoot` is the person's own checkout, read and never edited.
- * `drawing` is the folder to write the drawing in
- * (`<PLANNOTATOR_DATA_DIR>/system/<project key>/drawing`) and `source` a
- * clone of the project to read the code in (`.../source`, made by
- * `prepareSource`); with none named the agent makes its own (owner ruling
- * 2026-11-06, q-122e6577: nothing is written in the person's repo). `repo` is
- * the project's own repo, `host/owner/name`;
- * `name` the project's name. `setup.thread_message`, when the Inbox started
- * the drawing's thread, is the message both of the agent's messages reply to,
- * the one every later redraw note replies to too; with none, the agent's
- * first message starts the thread.
- */
 export function firstDrawPrompt(
   setup: Pick<SystemSetup, 'repos' | 'docs'> & Partial<Pick<SystemSetup, 'thread_message'>>,
   projectRoot: string,
@@ -56,26 +37,17 @@ export function firstDrawPrompt(
 }
 
 export type UpdatePromptInput = {
-  /** The source clone, at `to`, where the agent reads the code. */
   source: string;
-  /** The copy of the drawing the agent edits. */
   drawing: string;
-  /** The last commit the drawing was right for. */
   from: string;
-  /** The new commit on the default branch. */
   to: string;
-  /** Pull request numbers that landed between from and to, read from the merge commits. */
   prs: number[];
   gate: Pick<GateResult, 'why' | 'touched'>;
-  /** Reviews stored while those pull requests were open, by number. */
   reviews: { pr: number; path: string }[];
-  /** Where the agent writes its one sentence per changed sheet. */
   summaryFile: string;
-  /** Doc sites already passed through `unattendedDocs`. */
   docs: string[];
 };
 
-/** The prompt for one unattended redraw. */
 export function updatePrompt(o: UpdatePromptInput): string {
   const facts = [
     '# The job: redraw after main moved',
@@ -102,21 +74,14 @@ export function updatePrompt(o: UpdatePromptInput): string {
 }
 
 export type ReviewPromptInput = {
-  /** The person's own checkout of the project. */
   project: string;
-  /** The project's drawing folder (`<PLANNOTATOR_DATA_DIR>/system/<project key>/drawing`). */
   drawing: string;
-  /** The pull request, `host/owner/repo#n`. */
   pr: string;
-  /** Its head commit. */
   head: string;
-  /** Its base branch, without the remote (`main`). */
   base: string;
-  /** The project's name; the folder's name when not given. */
   name?: string;
 };
 
-/** The prompt that has an agent draw an open pull request's change: the five facts, then REVIEW.md, then the format. */
 export function reviewPrompt(o: ReviewPromptInput): string {
   const name = oneLine(o.name ?? (o.project.replace(/\/+$/, '').split('/').pop() || 'the project'));
   const facts = [

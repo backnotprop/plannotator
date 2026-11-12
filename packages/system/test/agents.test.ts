@@ -13,7 +13,6 @@ describe('agentModel', () => {
       expect(agentModel(agent, 'gpt-6-sol')).toBe('openai/gpt-6-sol');
       expect(agentModel(agent, 'o4-mini')).toBe('openai/o4-mini');
       expect(agentModel(agent, 'gemini-3-pro')).toBe('google/gemini-3-pro');
-      // a family the package does not know is passed on for the agent to resolve
       expect(agentModel(agent, 'qwen3-coder')).toBe('qwen3-coder');
     }
   });
@@ -58,7 +57,6 @@ describe('unattendedDocUrl', () => {
       'https://[::ffff:127.0.0.1]/', 'https://[::ffff:10.0.0.1]/', 'https://[64:ff9b::7f00:1]/', 'https://[ff02::1]/',
     ];
     for (const url of literals) expect(unattendedDocUrl(url), url).toMatchObject({ ok: false, reason: 'a loopback, private or other non-public IP address' });
-    // the edges stay public
     expect(unattendedDocUrl('https://172.32.0.1/').ok).toBe(true);
     expect(unattendedDocUrl('https://[::ffff:8.8.8.8]/').ok).toBe(true);
   });

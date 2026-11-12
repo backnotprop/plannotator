@@ -1,36 +1,3 @@
-// One scheduled check of one project (`plannotator system tick`, run by
-// launchd every SYSTEM_TICK_INTERVAL_SECONDS while the Mac is awake):
-//
-//   1. bring the source clone up to date: fetch the default branch from the
-//      project's remote (the person's own git credentials);
-//   2. diff from the last commit the drawing is right for to the new tip;
-//   3. gate: no wake, write the gated commit and stop (most ticks: no model);
-//   4. wake: put the source clone at the new tip, copy the drawing, run the
-//      person's agent headless with recipe/UPDATE.md on the copy, check it;
-//   5. put the checked copy in place as the drawing and send one note.
-//
-// Owner ruling 2026-11-06 (row 7689, q-122e6577): the drawing lives in
-// Plannotator's own folder (`<dataDir>/system/<key>/drawing/`). System never
-// commits, branches or pushes in the person's repo, and writes nothing in
-// their checkout or its .git: it reads the repo's remote URL and history, and
-// keeps its own clone of the code in `<dataDir>/system/<key>/source/`. The
-// agent runs there as it normally does, with its full tools (owner ruling
-// 2026-11-06: no limits on agents); files it changed there are named in the
-// note, kept under changed/, and the clone is put back for the next run.
-// Every child the tick starts itself has a time bound, so a hung agent, git,
-// hook or note cannot hold the schedule, and a tick that is stopped (Ctrl-C,
-// `schedule remove`) stops its children too. The agent and the note are
-// injectable so the whole path runs in tests with no model and no network.
-//
-// TODO(System B9, Ops' Inbox side): a stuck tick (a fetch that fails, a time
-// bound hit) and a set-aside redraw are recorded only in state.json
-// (`last_error`, `set_aside`). The Inbox's System thread should surface
-// them; that is a follow-up on the Inbox side.
-//
-// REQUIRED of the Inbox's first draw (System, the DRAW wiring): hold tick.lock
-// (`takeLock`, state.ts) from before the drawing agent starts until it ends,
-// from the process that runs the agent, so no tick redraws or swaps the
-// drawing while DRAW.md step 6 still fixes it.
 import { spawn, spawnSync } from 'node:child_process';
 import { constants } from 'node:fs';
 import { constants as osConstants } from 'node:os';
@@ -50,78 +17,44 @@ import { check, load, readFiles } from './index.ts';
 import { readSetup, readState, systemPaths, takeLock, writeState, type HeldLock, type TickState } from './state.ts';
 
 export type TickResult = {
-  /**
-   * nothing: nothing to do (no new commit, no drawing yet, not set up,
-   * another tick running, or waiting after a failed redraw); gated: the gate
-   * ran and the drawing stands; redrew: the drawing was redrawn in place and
-   * a note sent; failed: see `error`.
-   */
   ran: 'nothing' | 'gated' | 'redrew' | 'failed';
-  /** The commit of the default branch this tick is done with, or '' when none. */
   gated: string;
-  /** Why nothing ran, in a few words. */
   why?: string;
-  /** The note sent to the Inbox. */
   note?: string;
   error?: string;
 };
 
-/**
- * One redraw run: `cwd` is the source clone, `drawing` the copy of the
- * drawing to edit and `summaryFile` where its sentences go; the prompt names
- * all three.
- */
 export type RunAgent = (o: { setup: SystemSetup; cwd: string; drawing: string; summaryFile: string; prompt: string; docs: string[] }) => Promise<{ ok: boolean; output: string }>;
 export type Notify = (o: { project: string; subject: string; body: string; replyTo: string | null }) => Promise<void>;
 export type TickDeps = {
   runAgent?: RunAgent;
   notify?: Notify;
-  /** The plannotator binary the note is sent with, absolute; `plannotatorProgram()` unless given (pass the plist's program). */
   plannotator?: string;
-  /** The default agent's command; `redrawCommand` unless given. */
   agentCommand?: (setup: SystemSetup, prompt: string) => { command: string[]; stdin: string | null };
-  /** The default agent's time bound; TICK_TIMEOUTS_MS.agent unless given. */
   agentTimeoutMs?: number;
-  /** The rename the swap of a checked redraw uses; node's unless given (the tests pass one that fails). */
   rename?: (from: string, to: string) => Promise<void>;
-  /** How tick.lock is taken; `takeLock` unless given (the tests pass one that throws). */
   takeLock?: (path: string) => Promise<HeldLock | null>;
 };
 
-/** Why a tick stopped when another holder broke its tick.lock (a sleep or a pause made its heartbeat look stale). */
 const LOST_LOCK = 'this tick lost tick.lock to another holder and stopped: it swapped and saved nothing after that';
 class LostLock extends Error {}
 
-/**
- * Time bounds on the tick's own child processes: an engineering default, not
- * a limit a person meets. A child past its bound is stopped with its whole
- * process group (SIGTERM, then SIGKILL 5 s later) and the tick records why
- * in state.json, so a hung agent, a git credential prompt that waits for a
- * person, a stalled network or a note that never goes cannot keep the job
- * running, which would stop launchd from starting it again.
- */
 export const TICK_TIMEOUTS_MS = { agent: 45 * 60_000, git: 5 * 60_000, note: 2 * 60_000 } as const;
 
 export type Run = { code: number; stdout: string; stderr: string; timedOut: boolean };
 
 const minutes = (ms: number) => (ms >= 60_000 ? `${Math.round(ms / 60_000)} minutes` : `${Math.round(ms / 1000)} seconds`);
 
-/** How long a stopped child gets after SIGTERM before SIGKILL, and how long its pipes may stay open after it ends. */
 const KILL_GRACE_MS = 5000;
 
-/** Stop a child and everything it started: its process group, or on Windows its process tree. */
 function killGroup(pid: number, signal: NodeJS.Signals): void {
   try {
     if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
     else process.kill(-pid, signal);
   } catch {
-    // already gone
   }
 }
 
-// The children running now, by pid. Each runs in its own process group, so
-// a signal to the tick does not reach them by itself: while any runs, the tick
-// passes SIGINT, SIGTERM and SIGHUP on to every group, and SIGKILLs them at exit.
 const live = new Set<number>();
 const STOP_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
 let stopping: NodeJS.Signals | null = null;
@@ -132,13 +65,10 @@ function onStopSignal(signal: NodeJS.Signals): void {
   if (stopping) return;
   stopping = signal;
   for (const pid of live) killGroup(pid, 'SIGTERM');
-  // with no other listener the signal would have ended the process: end it,
-  // once the children are gone or the grace runs out
   const sole = process.listenerCount(signal) <= 1;
   const end = () => {
     for (const pid of live) killGroup(pid, 'SIGKILL');
     if (sole) process.exit(128 + (osConstants.signals[signal] ?? 0));
-    // another listener kept the process: it may start commands again
     stopping = null;
     exitWhenStopped = null;
     if (!live.size) for (const s of STOP_SIGNALS) process.off(s, onStopSignal);
@@ -168,18 +98,10 @@ function untrack(pid: number): void {
   else for (const s of STOP_SIGNALS) process.off(s, onStopSignal);
 }
 
-/**
- * Run one command to the end, or until `timeoutMs`: then its process group
- * (it and everything it started) is stopped and `timedOut` is set. Output past
- * `keep` bytes keeps only its tail. It returns once the command has ended and
- * its pipes are closed, or KILL_GRACE_MS after it ended when something that
- * left its group still holds them.
- */
 export function runCommand(argv: string[], o: { cwd: string; timeoutMs: number; stdin?: string | null; env?: Record<string, string>; keep?: number }): Promise<Run> {
   const keep = o.keep ?? 16 * 1024 * 1024;
   if (stopping) return Promise.resolve({ code: 1, stdout: '', stderr: `not started: the tick got ${stopping}`, timedOut: false });
   return new Promise((done) => {
-    // its own process group, so a stop reaches what it started too
     const child = spawn(argv[0]!, argv.slice(1), {
       cwd: o.cwd, env: { ...process.env, ...o.env }, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32', windowsHide: true,
     });
@@ -214,8 +136,6 @@ export function runCommand(argv: string[], o: { cwd: string; timeoutMs: number; 
     };
     child.on('error', (e) => finish({ code: 127, stdout, stderr: stderr + e.message }));
     child.on('close', (code) => finish({ code: code ?? 1, stdout, stderr }));
-    // a process that left the group can hold the pipes open after the command
-    // ended: give the output a grace to arrive, then let the pipes go
     child.on('exit', (code) => {
       drain = setTimeout(() => {
         child.stdout.destroy();
@@ -228,21 +148,9 @@ export function runCommand(argv: string[], o: { cwd: string; timeoutMs: number; 
   });
 }
 
-/** Why a child failed, in a line: its own words, or the time bound it hit. */
 const failure = (name: string, r: Run, timeoutMs: number) =>
   r.timedOut ? `${name} was stopped after ${minutes(timeoutMs)} with no end` : `${name}: ${(r.stderr || r.stdout).trim() || `exit ${r.code}`}`;
 
-/**
- * git that never asks on a terminal or opens an editor: launchd has none. The
- * repo's hooks and the person's signing setup run as they normally do; a hook
- * or a signing prompt that waits for a person meets the time bound.
- * GIT_OPTIONAL_LOCKS=0 (with `--no-optional-locks` on every call): a read never
- * refreshes an index or takes index.lock, so a read in the person's repo can
- * not make their own `git commit` fail on "index.lock exists". GIT_LFS_SKIP_SMUDGE:
- * a checkout in the source clone leaves Git LFS files as their pointer files
- * (the agent can read those) and downloads nothing, so a large LFS repo is not
- * downloaded again on every redraw and does not meet the git time bound.
- */
 const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', GIT_EDITOR: 'true', GIT_MERGE_AUTOEDIT: 'no', GIT_OPTIONAL_LOCKS: '0', GIT_LFS_SKIP_SMUDGE: '1' };
 
 const runGit = (cwd: string, args: string[], env?: Record<string, string>) =>
@@ -259,7 +167,6 @@ const gitOk = async (cwd: string, args: string[]) => {
 };
 const commitOf = async (cwd: string, ref: string) => (await git(cwd, ['rev-parse', '--verify', '--quiet', '--end-of-options', `${checkRef(ref)}^{commit}`]).catch(() => '')).trim() || null;
 
-/** The default branch's name, from origin/HEAD, else main or master. */
 async function defaultBranch(root: string): Promise<string> {
   const head = (await git(root, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']).catch(() => '')).trim();
   if (head.startsWith('origin/')) return head.slice('origin/'.length);
@@ -268,13 +175,6 @@ async function defaultBranch(root: string): Promise<string> {
   throw new Error('no default branch: origin has no HEAD, main or master');
 }
 
-/**
- * Pull request numbers named by the first-parent commits in a range ("Merge
- * pull request #n", a squash's "(#n)"). With `paths`, only the commits that
- * changed one of them: the pull requests that moved the drawing, not every
- * one that landed. A rename or copy counts under both its old and its new
- * path, because the gate may name either one.
- */
 export async function mergedPrs(root: string, from: string, to: string, paths?: readonly string[]): Promise<number[]> {
   const out = await git(root, [
     'log', '--first-parent', '--diff-merges=first-parent', '--name-status', '-M', '-z', '--format=%x01%s', '--end-of-options',
@@ -283,8 +183,6 @@ export async function mergedPrs(root: string, from: string, to: string, paths?: 
   const wanted = paths ? new Set(paths) : null;
   const prs = new Set<number>();
   for (const entry of out.split('\x01').slice(1)) {
-    // <subject> NUL, then per file <status> NUL <path> NUL (the first status
-    // after a newline); a rename or copy (R100, C75) has two paths, old then new
     const [subject = '', ...rest] = entry.split('\0');
     const files: string[] = [];
     for (let i = 0; i < rest.length; i++) {
@@ -301,7 +199,6 @@ export async function mergedPrs(root: string, from: string, to: string, paths?: 
   return [...prs].sort((a, b) => a - b);
 }
 
-/** Reviews the Inbox stored for these pull requests while they were open: the newest file per number. */
 async function storedReviews(reviewsDir: string, repo: string | undefined, prs: number[]): Promise<{ pr: number; path: string }[]> {
   if (!repo || !prs.length || repo.split('/').some((s) => !s || s === '.' || s === '..')) return [];
   const dir = join(reviewsDir, ...repo.split('/'));
@@ -318,7 +215,6 @@ async function storedReviews(reviewsDir: string, repo: string | undefined, prs: 
   return found;
 }
 
-/** Changed paths in a worktree, untracked files included, from `git status --porcelain -z`. */
 async function changedPaths(wt: string): Promise<string[]> {
   const tok = (await git(wt, ['status', '--porcelain=v1', '-z', '--untracked-files=all'])).split('\0');
   const paths: string[] = [];
@@ -331,7 +227,6 @@ async function changedPaths(wt: string): Promise<string[]> {
   return paths;
 }
 
-/** How many parts and lines differ between two drawings: added, removed or changed. */
 export function changedCount(before: SystemModel, after: SystemModel): { parts: number; flows: number } {
   const count = (a: Record<string, unknown>, b: Record<string, unknown>) => {
     let n = 0;
@@ -345,11 +240,6 @@ export function changedCount(before: SystemModel, after: SystemModel): { parts: 
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
-/**
- * The note a redraw sends: "Main moved to 9c41e07. PR 1335 landed: <the
- * agent's sentences> 1 part changed. This redraw also changed: <files the
- * agent changed in the source clone>."
- */
 export function redrawNote(o: { to: string; prs: number[]; summary: string; count: { parts: number; flows: number }; also?: string[] }): string {
   const words = [`Main moved to ${o.to.slice(0, 7)}.`];
   const summary = o.summary.replace(/\s+/g, ' ').trim();
@@ -363,7 +253,6 @@ export function redrawNote(o: { to: string; prs: number[]; summary: string; coun
   return words.join(' ');
 }
 
-/** The default agent: the person's own agent CLI, headless, in the source clone, within its time bound. */
 const commandAgent = (deps: TickDeps | undefined): RunAgent => async ({ setup, cwd, prompt }) => {
   const { command, stdin } = (deps?.agentCommand ?? redrawCommand)(setup, prompt);
   const timeoutMs = deps?.agentTimeoutMs ?? TICK_TIMEOUTS_MS.agent;
@@ -372,20 +261,12 @@ const commandAgent = (deps: TickDeps | undefined): RunAgent => async ({ setup, c
   return { ok: r.code === 0, output: `${r.stdout}${r.stderr ? `\n${r.stderr}` : ''}` };
 };
 
-/** The default note: `plannotator inbox call send_message`, the JSON on stdin. */
 const inboxNotify = (plannotator: string): Notify => async ({ project, subject, body, replyTo }) => {
   const message = { body, project_path: project, ...(replyTo ? { reply_to: replyTo } : { subject }) };
-  // it runs in the person's repo: what git it runs there takes no optional lock either
   const r = await runCommand([plannotator, 'inbox', 'call', 'send_message', '-'], { cwd: project, stdin: JSON.stringify(message), env: { GIT_OPTIONAL_LOCKS: '0' }, timeoutMs: TICK_TIMEOUTS_MS.note });
   if (r.code !== 0 || r.timedOut) throw new Error(failure('plannotator inbox call send_message', r, TICK_TIMEOUTS_MS.note));
 };
 
-/**
- * The plannotator binary to send the note with, absolute: this process when
- * it is the plannotator binary (the launchd job runs it by its absolute path),
- * else the first plannotator on PATH, resolved. A caller that knows the
- * plist's program passes it as `deps.plannotator` instead.
- */
 export async function plannotatorProgram(): Promise<string> {
   if (/^plannotator(?:\.exe)?$/.test(basename(process.execPath))) return process.execPath;
   for (const dir of (process.env.PATH ?? '').split(':')) {
@@ -396,37 +277,19 @@ export async function plannotatorProgram(): Promise<string> {
   return 'plannotator';
 }
 
-/** A remote URL as git reads it from `root`: a relative local path is made absolute against the repo. */
 const remoteFrom = (root: string, url: string) => (/^\.\.?(\/|$)/.test(url) ? resolve(root, url) : url);
 
-/**
- * The origin URL as the person's repo has it, before any `url.<base>.insteadOf`
- * rewrite: the source clone carries the person's rewrite rules (below), so it
- * turns this URL into the same address once, as the person's repo does. A
- * rewrite of an already rewritten URL could apply a rule twice.
- */
 async function originUrl(root: string): Promise<string> {
   const configured = (await git(root, ['config', '--get-all', 'remote.origin.url']).catch(() => '')).split('\n')[0]!.trim();
   return remoteFrom(root, configured || (await git(root, ['remote', 'get-url', 'origin'])).trim());
 }
 
-/**
- * The config that decides how git reaches a remote and signs in to it: the ssh
- * command, credential helpers, URL rewrites and http settings. The source
- * clone lives in Plannotator's folder, so it does not read the person's
- * repo-local config or an `includeIf "gitdir:..."` file that matches only
- * their checkout (a second GitHub account's key, a work credential helper);
- * without these a private repo fails every tick.
- */
 const ACCESS_KEYS = '^(core\\.(sshcommand|askpass|gitproxy)|ssh\\.variant|credential\\..+|url\\..+|http\\..+)$';
-/** Keys whose list of values an empty value resets (credential.helper, http.extraHeader, and their per-URL forms). */
 const resetByEmpty = (key: string) => /^(credential\.(.+\.)?helper|http\.(.+\.)?extraheader)$/.test(key);
 type ConfigEntry = { key: string; value: string | null };
 
-/** The remote-access config in effect in the person's repo, in git's own order (read only). */
 async function remoteAccess(root: string): Promise<ConfigEntry[]> {
   const r = await runGit(root, ['config', '-z', '--get-regexp', ACCESS_KEYS]);
-  // 1: no key matched
   if (r.timedOut || (r.code !== 0 && r.code !== 1)) throw new Error(failure('git config', r, TICK_TIMEOUTS_MS.git));
   return r.stdout.split('\0').filter(Boolean).map((e) => {
     const nl = e.indexOf('\n');
@@ -434,12 +297,6 @@ async function remoteAccess(root: string): Promise<ConfigEntry[]> {
   });
 }
 
-/**
- * The entries as the source clone must read them after its own config: each
- * key once, all its values in order; a list an empty value resets starts with
- * that reset, so the clone ends with the person's list exactly, not the
- * global list twice.
- */
 function accessList(entries: ConfigEntry[]): ConfigEntry[] {
   const byKey = new Map<string, (string | null)[]>();
   for (const e of entries) {
@@ -449,7 +306,6 @@ function accessList(entries: ConfigEntry[]): ConfigEntry[] {
   return [...byKey].flatMap(([key, values]) => [...(resetByEmpty(key) ? [{ key, value: '' }] : []), ...values.map((value) => ({ key, value }))]);
 }
 
-/** The same config for one git run (`GIT_CONFIG_COUNT`), after any the environment already gives. */
 function accessEnv(entries: ConfigEntry[]): Record<string, string> {
   const base = Number(process.env.GIT_CONFIG_COUNT) || 0;
   const list = accessList(entries);
@@ -461,7 +317,6 @@ function accessEnv(entries: ConfigEntry[]): Record<string, string> {
   return env;
 }
 
-/** The same config as a git config file. */
 function accessFile(entries: ConfigEntry[]): string {
   const quote = (s: string) => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\t/g, '\\t')}"`;
   const lines = ['# Written by Plannotator System on every tick: the remote-access config of the project\'s repo. Edits here are replaced.'];
@@ -476,10 +331,8 @@ function accessFile(entries: ConfigEntry[]): string {
   return `${lines.join('\n')}\n`;
 }
 
-/** The name, in the source clone's .git, of the file the clone's config includes the person's remote-access config from. */
 const ACCESS_CONFIG = 'plannotator-remote.config';
 
-/** Bring the person's remote-access config into the source clone's own config: rewritten when it changed, included once. */
 async function carryAccess(source: string, entries: ConfigEntry[]): Promise<void> {
   const file = join(source, '.git', ACCESS_CONFIG);
   const text = accessFile(entries);
@@ -492,51 +345,23 @@ async function carryAccess(source: string, entries: ConfigEntry[]): Promise<void
   if (!included.includes(ACCESS_CONFIG)) await git(source, ['config', '--local', '--add', 'include.path', ACCESS_CONFIG]);
 }
 
-/** Keep the newest `keep` of the folders in `dir` whose names start with `prefix` (their names sort by time); remove the rest. */
 async function pruneOld(dir: string, prefix: string, keep: number): Promise<void> {
   const names = (await readdir(dir).catch(() => [] as string[])).filter((n) => n.startsWith(prefix)).sort();
   for (const n of names.slice(0, Math.max(0, names.length - keep))) await rm(join(dir, n), { recursive: true, force: true });
 }
 
-/** How many old source clones a re-clone keeps under failed/: the one it moved aside and the one before. */
 const KEEP_OLD_SOURCES = 2;
 
-/**
- * Plannotator's own clone of the project, for the agent to read main's code:
- * `<dataDir>/system/<key>/source`. Made when missing with
- * `git clone --reference <the repo's git folder> <its origin URL>`, so the
- * objects the person already has are borrowed, not copied, and fetched from
- * origin each tick, so the tick sees what merged even when the person has not
- * fetched. Toward the person's repo it only reads: its origin URL, its
- * remote-access config, its git folder and its objects. That config (the ssh
- * command, credential helpers, URL rewrites, http settings, as git reads them
- * in the person's repo, includeIf files included) is given to the clone and
- * written into the clone's own config, read again on every call, so a private
- * repo is reached with the person's own account. Returns the default branch
- * and its tip.
- *
- * Borrowed objects can go away: the person runs `git gc` or prune, or moves
- * or deletes the repo, or a file in its object store is lost. A clone whose
- * alternates folder is gone, whose fetch fails while its last tip no longer
- * reads whole, whose fetched tip or `need` commits (the drawing's `at`) do
- * not read whole, or whose commits from the `need` commits to the tip do not
- * read whole, is moved to `<aside>/source-<stamp>` (the newest two are kept)
- * and cloned again, once per call. When the new borrowing clone is not whole either, the person's
- * repo itself lacks the objects, so it is made again with its own copy of
- * every object. A fetch that fails on a clone that reads whole is the
- * network: it throws, and nothing moves.
- */
 export async function prepareSource(root: string, source: string,
   o: { need?: (string | null | undefined)[]; aside?: string; stamp?: string } = {}): Promise<{ main: string; tip: string; recloned?: string }> {
   const url = await originUrl(root);
   const access = await remoteAccess(root);
   let recloned: string | undefined;
   let borrow = true;
-  /** Damage found: move the clone aside (once) or, for a clone made in this call, make it again with its own objects. */
   const damaged = async (fresh: boolean, why: string) => {
     if (fresh && borrow) {
       borrow = false;
-      await rm(source, { recursive: true, force: true }); // made seconds ago by this call; nothing in it is anyone's
+      await rm(source, { recursive: true, force: true });
     } else if (!fresh && recloned === undefined && o.aside) {
       recloned = await moveAside(source, join(o.aside, `source-${o.stamp ?? new Date().toISOString().replace(/[:.]/g, '-')}`));
       await pruneOld(o.aside, 'source-', KEEP_OLD_SOURCES);
@@ -548,17 +373,14 @@ export async function prepareSource(root: string, source: string,
     const fresh = !(await stat(join(source, '.git')).then(() => true, () => false));
     if (fresh) {
       await mkdir(dirname(source), { recursive: true, mode: 0o700 });
-      // --no-local: a local-path origin is fetched like a remote one, so the borrowing is the same as for a URL
       const reference = borrow ? ['--reference', (await git(root, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim()] : [];
       const run = await runGit(dirname(source), ['clone', '--quiet', '--no-local', '--no-checkout', ...reference, '--', url, source], accessEnv(access));
       const cloned = run.code === 0 && !run.timedOut ? null : new Error(failure('git clone', run, TICK_TIMEOUTS_MS.git));
-      // a borrowing clone also fails when the person's repo claims an object it lost: try once with its own objects
       if (cloned && borrow) { await damaged(true, cloned.message); continue; }
       if (cloned) throw cloned;
       await carryAccess(source, access);
     } else {
       if (!(await alternatesPresent(source))) { await damaged(false, 'the source clone lost the folder it borrows objects from'); continue; }
-      // the person's access config as it is now: a new key or helper is used from this tick on
       await carryAccess(source, access);
       if ((await git(source, ['config', '--get', 'remote.origin.url']).catch(() => '')).trim() !== url) await git(source, ['remote', 'set-url', 'origin', url]);
     }
@@ -574,25 +396,19 @@ export async function prepareSource(root: string, source: string,
     const broken = (await whole(source, tip)) ? [] : [tip.slice(0, 7)];
     for (const c of o.need ?? []) {
       if (!c || !isRef(c) || (await whole(source, c))) continue;
-      // a commit that is there but does not read whole lost objects. One that is not there at all lost them only when
-      // main's history has a hole; otherwise it is gone from origin itself (history rewritten), no fault of the clone,
-      // and the caller reports it
       if (await gitOk(source, ['cat-file', '-e', `${c}^{commit}`]) || !(await gitOk(source, ['rev-list', '--quiet', tip]))) broken.push(c.slice(0, 7));
     }
-    // the commits that landed since the drawing's commit and the gated one: a diff, a log or the agent reads them
     const since: string[] = [];
     for (const c of o.need ?? []) if (c && isRef(c) && (await gitOk(source, ['cat-file', '-e', `${c}^{commit}`]))) since.push(c);
     if (!broken.length && since.length && !(await gitOk(source, ['rev-list', '--objects', '--quiet', '--end-of-options', tip, ...since.map((c) => `^${c}`)]))) {
       broken.push(`${since.map((c) => c.slice(0, 7)).join(' ')}..${tip.slice(0, 7)}`);
     }
     if (broken.length) { await damaged(fresh, `the source clone cannot read ${broken.join(', ')} whole`); continue; }
-    // a fresh clone has no checkout yet; a later one keeps what it has until a redraw resets it
     if (fresh) await git(source, ['checkout', '--quiet', '--force', '--detach', tip]);
     return recloned ? { main, tip, recloned } : { main, tip };
   }
 }
 
-/** Every folder in the clone's `objects/info/alternates` still exists (no file: nothing borrowed). */
 async function alternatesPresent(source: string): Promise<boolean> {
   const list = await readFile(join(source, '.git', 'objects', 'info', 'alternates'), 'utf8').catch(() => '');
   for (const line of list.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'))) {
@@ -603,21 +419,13 @@ async function alternatesPresent(source: string): Promise<boolean> {
 
 const isRef = (c: string) => { try { checkRef(c); return true; } catch { return false; } };
 
-/** A commit, its tree and every blob in it read (not its history): what a gate, a diff and a checkout need. */
 const whole = (cwd: string, commit: string) => gitOk(cwd, ['rev-list', '--objects', '--no-walk', '--end-of-options', checkRef(commit)]);
 
-/** True when a git checkout has changes (tracked or untracked) or a half-done merge. */
 async function dirty(wt: string): Promise<boolean> {
   return (await changedPaths(wt)).length > 0 || (await gitOk(wt, ['rev-parse', '--verify', '--quiet', 'MERGE_HEAD']));
 }
 
-/**
- * Keep every changed file of a checkout under `into` (its own path below it),
- * then put the checkout back to its last commit, so nothing the agent wrote
- * is lost and the next run starts clean.
- */
 async function setAside(wt: string, into: string): Promise<void> {
-  // a merge left half done is undone first, so the reset below can run
   await runGit(wt, ['merge', '--abort']);
   for (const rel of await changedPaths(wt)) {
     const from = join(wt, rel);
@@ -630,7 +438,6 @@ async function setAside(wt: string, into: string): Promise<void> {
   await git(wt, ['clean', '--quiet', '-fd']);
 }
 
-/** Move a folder to `to`, or beside it with a number when `to` is taken. */
 async function moveAside(from: string, to: string): Promise<string> {
   await mkdir(dirname(to), { recursive: true, mode: 0o700 });
   let dest = to;
@@ -639,19 +446,12 @@ async function moveAside(from: string, to: string): Promise<string> {
   return dest;
 }
 
-/** The source clone back at `commit`, clean, detached: how every redraw starts and ends. */
 async function resetSource(source: string, commit: string): Promise<void> {
   await runGit(source, ['merge', '--abort']);
   await git(source, ['checkout', '--quiet', '--force', '--detach', commit]);
   await git(source, ['clean', '--quiet', '-fd']);
 }
 
-/**
- * Set sources.repos.self.at in system.yaml by replacing only that value's
- * text, so every other byte stays as the agent wrote it (printing the parsed
- * document again would refold its lines). With no such key it adds nothing:
- * the check then names it.
- */
 async function setDrawnAt(dir: string, commit: string): Promise<void> {
   const file = join(dir, 'system.yaml');
   const text = await readFile(file, 'utf8');
@@ -660,13 +460,11 @@ async function setDrawnAt(dir: string, commit: string): Promise<void> {
   await writeFile(file, `${text.slice(0, node.range[0])}"${commit}"${text.slice(node.range[1])}`);
 }
 
-/** The newer of two commits, by ancestry; either may be missing. With neither an ancestor of the other, `a`. */
 async function newer(root: string, a: string | null, b: string | null): Promise<string | null> {
   if (!a || !b) return a ?? b;
   return (await gitOk(root, ['merge-base', '--is-ancestor', a, b])) ? b : a;
 }
 
-/** One tick for one project. Never throws: a failure is `ran: 'failed'` with `error`, also kept in state.json. */
 export async function tick(o: { root: string; dataDir: string; key: string; now?: Date; deps?: TickDeps }): Promise<TickResult> {
   if (!isAbsolute(o.root) || !isAbsolute(o.dataDir)) return { ran: 'failed', gated: '', error: 'root and dataDir must be absolute paths' };
   let paths: ReturnType<typeof systemPaths>;
@@ -682,7 +480,6 @@ export async function tick(o: { root: string; dataDir: string; key: string; now?
   try {
     release = await (o.deps?.takeLock ?? takeLock)(paths.lock);
   } catch (e) {
-    // a file system the lock cannot be made on, a folder that cannot be written: recorded, never thrown
     const before = await readState(o.dataDir, o.key);
     const error = `tick.lock could not be taken: ${(e as Error).message}`;
     await writeState(o.dataDir, o.key, { ...before, last_error: error }).catch(() => {});
@@ -692,11 +489,9 @@ export async function tick(o: { root: string; dataDir: string; key: string; now?
   const lock = release;
   const now = () => (o.now ?? new Date()).toISOString();
   const state = await readState(o.dataDir, o.key);
-  /** Throws LostLock when another holder has broken this tick's lock: what follows must not touch the shared folders. */
   const holding = async () => {
     if (!(await lock.check())) throw new LostLock(LOST_LOCK);
   };
-  // every save builds on the last one, so a later save keeps an earlier field (set_aside)
   let current = state;
   const save = async (s: Partial<TickState>) => {
     await holding();
@@ -707,15 +502,6 @@ export async function tick(o: { root: string; dataDir: string; key: string; now?
     await restoreDrawing(paths);
     const model = (await load(paths.drawing)).model;
     if (!model) return { ran: 'nothing', gated: '', why: 'no drawing yet' };
-    // The first draw writes system.yaml first, with every sheet it plans under
-    // wanted:, and takes each out as it draws it (recipe/DRAW.md). Such a
-    // drawing loads clean, but a redraw would copy it half drawn and put the
-    // copy in place under the drawing agent. A finished drawing wants nothing
-    // (check flags a sheet still wanted, so a redraw that leaves one is
-    // refused), so this waits for the first draw however it runs and whether or
-    // not it is still running. "Still drawing" is read as the Inbox's status
-    // reads it (`stillWanted`: wanted sheets not drawn yet), so the tick and the
-    // Inbox never disagree. The Inbox's DRAW also holds tick.lock (state.ts).
     if (stillWanted(model).length) return { ran: 'nothing', gated: state.gated ?? '', why: 'the drawing is still being drawn: system.yaml lists sheets under wanted:' };
     const stamp = now().replace(/[:.]/g, '-');
     const { tip: target, recloned } = await prepareSource(o.root, paths.source,
@@ -740,7 +526,6 @@ export async function tick(o: { root: string; dataDir: string; key: string; now?
     return await redraw({ ...o, setup, paths, from, target, model, result, state, save, now, holding });
   } catch (e) {
     if (e instanceof LostLock) return { ran: 'failed', gated: state.gated ?? '', error: LOST_LOCK };
-    // before any agent ran: nothing was spent, so the next tick tries again
     const error = (e as Error).message;
     await save({ last_error: error }).catch(() => {});
     return { ran: 'failed', gated: state.gated ?? '', error };
@@ -749,19 +534,6 @@ export async function tick(o: { root: string; dataDir: string; key: string; now?
   }
 }
 
-/**
- * Put the checked redraw in place as drawing/ and keep the drawing before it as
- * previous/. Node has no rename that swaps two folders in one step (Linux's
- * RENAME_EXCHANGE, macOS's RENAME_SWAP), and a symlinked drawing folder is
- * refused by the loader, so the swap is two renames on one file system with
- * nothing between them. The one state a kill or a power loss can leave, no
- * drawing/ with previous/ there, is put back by `restoreDrawing` at the start
- * of the next tick, which then redraws again. The redraw's files are synced to
- * disk before the renames and the project folder after them, so a power loss
- * does not bring back a drawing/ with a cut system.yaml. Syncing is best
- * effort: macOS's fsync does not flush the drive's own cache, and a lost
- * drawing can be redrawn.
- */
 async function swapIn(paths: ReturnType<typeof systemPaths>, move: (from: string, to: string) => Promise<void> = rename): Promise<void> {
   await syncTree(paths.redraw);
   await rm(paths.previous, { recursive: true, force: true });
@@ -769,13 +541,10 @@ async function swapIn(paths: ReturnType<typeof systemPaths>, move: (from: string
   try {
     await move(paths.redraw, paths.drawing);
   } catch (e) {
-    // the second rename failed (on Windows a file held open in redraw/: EBUSY, EPERM): put the drawing back
-    // before the failure sets redraw/ aside, or no drawing would be left
     const first = e as Error;
     try {
       await move(paths.previous, paths.drawing);
     } catch (back) {
-      // both failed: the first failure stays the one reported, with the second beside it
       throw new AggregateError([first, back], `${first.message}; moving the drawing back from previous/ also failed: ${(back as Error).message}`);
     }
     throw first;
@@ -783,7 +552,6 @@ async function swapIn(paths: ReturnType<typeof systemPaths>, move: (from: string
   await syncPath(paths.dir, 'r');
 }
 
-/** fsync one file or folder; where the platform cannot (a folder on Windows), nothing. */
 async function syncPath(path: string, flags: 'r' | 'r+'): Promise<void> {
   const fh = await open(path, flags).catch(() => null);
   if (!fh) return;
@@ -791,7 +559,6 @@ async function syncPath(path: string, flags: 'r' | 'r+'): Promise<void> {
   await fh.close().catch(() => {});
 }
 
-/** fsync every file under `dir`, then each folder, so their names are on disk too. */
 async function syncTree(dir: string): Promise<void> {
   const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
   for (const e of entries) {
@@ -801,19 +568,12 @@ async function syncTree(dir: string): Promise<void> {
   await syncPath(dir, 'r');
 }
 
-/**
- * A tick stopped inside `swapIn` left no drawing/, the last good drawing in
- * previous/ and the checked copy in redraw/: move previous/ back, so the Inbox and every later tick see a drawing.
- * The checked copy left in redraw/ is set aside as an interrupted redraw.
- */
 async function restoreDrawing(paths: ReturnType<typeof systemPaths>): Promise<void> {
   const exists = (p: string) => stat(p).then(() => true, () => false);
-  // both previous/ and redraw/: the mark of a swap cut off between its renames, not of a drawing the person removed
   if (!(await exists(paths.drawing)) && (await exists(paths.previous)) && (await exists(paths.redraw))) await rename(paths.previous, paths.drawing);
 }
 
 type RedrawInput = {
-  /** Throws LostLock when this tick no longer holds tick.lock. */
   holding: () => Promise<void>;
   root: string;
   key: string;
@@ -833,9 +593,6 @@ async function redraw(r: RedrawInput): Promise<TickResult> {
   const runAgent = r.deps?.runAgent ?? commandAgent(r.deps);
   const { source, drawing, redraw: work, summary: summaryPath } = r.paths;
 
-  // A redraw cut off before it ended (a reboot, a logout, a kill) left its
-  // copy of the drawing, and maybe changes in the source clone: both are set
-  // aside, the last good drawing stays, and this redraw goes on.
   await r.holding();
   const interrupted = join(r.paths.failed, `interrupted-${r.now().replace(/[:.]/g, '-')}`);
   const kept: string[] = [];
@@ -857,9 +614,7 @@ async function redraw(r: RedrawInput): Promise<TickResult> {
     summaryFile: summaryPath, docs,
   });
   const fail = async (error: string): Promise<TickResult> => {
-    // another holder has the folders now: leave redraw/ and source/ to it
     if (!(await r.holding().then(() => true, () => false))) return { ran: 'failed', gated: r.state.gated ?? '', error: LOST_LOCK };
-    // the drawing stays as it was; the agent's copy and its changes are kept
     const into = join(r.paths.failed, r.target);
     await moveAside(work, join(into, 'drawing')).catch(() => {});
     await setAside(source, join(into, 'source')).catch(() => {});
@@ -868,7 +623,6 @@ async function redraw(r: RedrawInput): Promise<TickResult> {
     return { ran: 'failed', gated: r.state.gated ?? '', error };
   };
 
-  // from here a model runs: any failure, a throw included, sets the work aside and waits for main to move
   try {
     const agent = await runAgent({ setup: r.setup, cwd: source, drawing: work, summaryFile: summaryPath, prompt, docs });
     return await afterAgent(r, { agent, prs, fail });
@@ -881,7 +635,6 @@ async function afterAgent(
   r: RedrawInput,
   c: { agent: { ok: boolean; output: string }; prs: number[]; fail: (error: string) => Promise<TickResult> },
 ): Promise<TickResult> {
-  // the agent is the long step: a lock lost meanwhile is found here, before redraw/ or source/ is touched again
   await r.holding();
   const { agent, prs, fail } = c;
   const { source, drawing, redraw: work, summary: summaryPath } = r.paths;
@@ -889,7 +642,6 @@ async function afterAgent(
   const summary = (await readFile(summaryPath, 'utf8').catch(() => '')).trim();
   await unlink(summaryPath).catch(() => {});
 
-  // what the agent changed in the source clone, its own commits included
   const head = (await git(source, ['rev-parse', 'HEAD'])).trim();
   const committed = head === r.target ? [] : (await git(source, ['diff', '--name-only', '-z', '--no-renames', r.target, head])).split('\0').filter(Boolean);
   const also = [...new Set([...committed, ...(await changedPaths(source))])].sort();
@@ -898,7 +650,6 @@ async function afterAgent(
 
   const same = JSON.stringify((await readFiles(work)).files) === JSON.stringify((await readFiles(drawing)).files);
   if (same) {
-    // the agent read the change and the drawing stands
     await rm(work, { recursive: true, force: true });
     await r.save({ gated: r.target, gated_at: r.now(), last_error: null, failed: null });
     const why = summary || 'the agent found nothing to change';
@@ -910,7 +661,6 @@ async function afterAgent(
   issues.push(...checked.missing.map((m) => `missing: ${m}`));
   if (issues.length) return fail(`the redraw does not check clean: ${issues.slice(0, 5).join('; ')}`);
 
-  // the checked copy becomes the drawing; the one before it is kept as previous/
   const after = (await load(work)).model;
   await r.holding();
   await swapIn(r.paths, r.deps?.rename);

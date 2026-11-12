@@ -1,6 +1,3 @@
-// Pictures of the change view for the owner's look, light and dark at 1440x900,
-// from the demo page (bun run demo). Not a test.
-//   SYSTEM_URL=http://127.0.0.1:<port>  OUT=<folder>  CHROMIUM=<executable>  node scripts/shots-change.mjs
 import { chromium } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -29,9 +26,6 @@ const SHOTS = [
   ['touches-window-lead', '?shot=touches&layout=window&lead=1'],
 ];
 
-// The inks' contrast, measured in the page: a marked part's name against its box (the wash
-// composited over the paper), and a marked line's label against the paper. WCAG ratio; text
-// wants 4.5, a line or a box edge 3. CONTRAST=1 prints them.
 const contrast = () => {
   const cv = document.createElement('canvas'); cv.width = cv.height = 1;
   const g = cv.getContext('2d', { willReadFrequently: true });

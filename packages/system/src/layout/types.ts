@@ -1,13 +1,8 @@
-// What the layout computes for one sheet: every coordinate, in sheet units (a
-// sheet is W = 1600 units wide). Plain data; the drawing (src/draw) renders it.
-
 export type Pt = [number, number];
 export type Rect = { x: number; y: number; w: number; h: number };
 
-/** How a part is drawn on a sheet. */
 export type Variant = 'plate' | 'box' | 'node' | 'chip' | 'card' | 'bar' | 'row' | 'rowx' | 'lane' | 'tile' | 'tilefor' | 'window';
 
-/** A change's mark on a part or a line: null when the sheet carries no change, or the thing is untouched. */
 export type ChangeStatus = 'added' | 'changed' | 'removed' | null;
 
 export type PartBox = Rect & {
@@ -16,21 +11,13 @@ export type PartBox = Rect & {
   side?: string;
   marks: string[];
   status: ChangeStatus;
-  /** Its number in the change (1 up), drawn on its corner, when the change marks it. */
   n?: number;
-  /** Its line counts in the change ("frame.ts · +532"), drawn as its second line. */
   lines?: string | null;
-  /** The open PRs that touch it, every one, when several are drawn at rest (its line shows two at most). */
   who?: string[];
-  /** A sheet-given second line (a lane's route, a tile's "3 parts"). */
   sub?: string | null;
-  /** A box name fitted to its box, when the whole name does not fit. */
   nl?: string[] | null;
-  /** A window at rest: how many sheets are inside it. */
   cw?: number;
-  /** The scope this part opens, when that scope has sheets. */
   opens?: string | null;
-  /** What the overlays put on the part (none ship). */
   ov?: { tint: string | null; marks: { text: string; ink: string }[] } | null;
 };
 
@@ -41,18 +28,14 @@ export type Zone = Rect & {
   tone: string;
   marks: string[];
   band?: boolean;
-  /** A side section with no tone: a hairline, no fill. */
   hair?: boolean;
-  /** A group's frame. */
   solid?: boolean;
-  /** A side label wrapped to the column's width. */
   labelW?: number;
   labelH?: number;
 };
 
 export type LabelBox = Rect & { lines: string[]; side?: string; hidden?: boolean };
 
-/** What a line carries (its hue), from the drawing's `moves:` or read from its words. */
 export type LineClass = { moves: 'data' | 'people' | 'money' | 'energy'; w: number; ink?: string };
 
 export type PortBox = Rect & { text: string; dir: 'in' | 'out'; edge: 'top' | 'bottom' | 'right' };
@@ -71,19 +54,13 @@ export type Edge = {
   lb?: LabelBox | null;
   letter: string | null;
   port?: PortBox;
-  /** A reply hop on a flow sheet is dashed. */
   dash?: string | null;
-  /** A callout's heavy ink arrow. */
   style?: 'aud';
-  /** The line ids a fan-in bus gathers. */
   fan?: { id: string; from: string; says: string }[];
-  /** The flow a hop or a step draws. */
   flow?: string | null;
-  /** Where each overlay's words start in `says`, and their ink (none ship). */
   tails?: { at: number; ink: string }[] | null;
 };
 
-/** Drawn things that are not parts and not model lines: lifelines, payloads, steps, decisions, ticks. */
 export type Figure = {
   id: string;
   type: 'lifeline' | 'vline' | 'arrow' | 'diamond' | 'tick' | 'text' | 'step' | 'term' | 'load' | 'payload';
@@ -137,12 +114,8 @@ export type SheetLayout = {
   callouts: CalloutBox[];
   figures: Figure[];
   notes: { l: string; on: string; text: string }[];
-  /** The height the sheet needs, before any paper height is applied. */
   natural: number;
-  /** A band wrapped or many lines: the sheet routes on channels. */
   dense: boolean;
-  /** Laid out in the Simple reading. */
   simple: boolean;
-  /** The at-rest form: each window a plain box with its cue. */
   compact: boolean;
 };

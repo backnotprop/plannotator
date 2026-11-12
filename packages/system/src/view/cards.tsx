@@ -1,5 +1,3 @@
-// The Key (symbols and keys) and the notes of the sheet on screen, as small
-// cards over the stage, opened from the zoom group (Key) and with N.
 import { Fragment } from 'react';
 import { MOVES, MOVES_ORDER } from '../draw/grammar.ts';
 import type { SheetLayout } from '../layout/types.ts';
@@ -13,7 +11,6 @@ const Swatch = ({ is, dashed }: { is?: 'added' | 'changed' | 'removed'; dashed?:
   </svg>
 );
 
-/** What the change on the sheet means: a PR's review, a plan, only the parts its files touch (the gate), or several open PRs' touched parts at rest. */
 export type KeyChange = 'review' | 'plan' | 'gate' | 'touches' | null;
 
 export function KeyCard({ notes, sheets, keys, pane, change = null }: { notes: boolean; sheets: boolean; keys: boolean; pane: boolean; change?: KeyChange }) {

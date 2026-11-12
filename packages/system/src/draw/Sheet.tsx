@@ -1,15 +1,3 @@
-// One sheet, drawn at rest from its layout (layout/compose.ts). Props only: no
-// fetching, no routes, no camera. The view (view/SystemView.tsx) scales it.
-//
-// Layers, bottom to top: the paper; the bands (zones) and split rules; the
-// figures under the lines (lifelines); the lines; the band labels; the parts;
-// the figures over the lines; the line words; the title, callouts, split words
-// and note letters.
-//
-// The view (view/SystemView.tsx) adds the camera, the dive and the Simple /
-// Full move around this component. A change's marks ride on the layout: a part
-// or a line added (green), changed (amber) or removed (grey, struck), a part's
-// number in the change on its corner, and its line counts as its second line.
 import { createContext, Fragment, memo, useContext, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import type { Part, SystemModel } from '../format/types.ts';
 import type { Edge, Figure, PartBox, SheetLayout } from '../layout/types.ts';
@@ -20,43 +8,32 @@ import { hasMark, TEXT_MARKS } from './mark-ids.ts';
 import { Mark, Marks } from './marks.tsx';
 import { OV_SEP } from './overlays.ts';
 
-/** Level of detail: 0 outlines, 1 names, 2 phrases (line words), 3 everything (quiet lines' words too). */
 export type Lod = 0 | 1 | 2 | 3;
 
 export type SheetProps = {
   layout: SheetLayout;
   model: SystemModel;
   lod?: Lod;
-  /** Takes the pointer and the keyboard (hover lights a part's lines, a note's letter shows its words). */
   live?: boolean;
-  /** A window's "N sheets inside" cue: the first sheet of the scope it opens (when onEnter is not given). */
   onNavigate?: (sheet: string) => void;
-  /** A window's cue, or Enter on a window: the person asked to go inside the part (the view dives). */
   onEnter?: (part: string) => void;
-  /** A part picked from outside the sheet (a row of the parts list): drawn with the selected fill. */
   picked?: string | null;
 };
 
-// A part's second line is prose, set in the sans; only the code names in it (a
-// dotted host, a path, a Durable Object, a protocol with a number) are mono.
 const CODEY = /^(?:[\w-]+[./_][\w./_-]+|[A-Za-z]+DO|[a-z]+-?\d[\w-]*|\w+\(\))$/;
 const prose = (t: string): ReactNode =>
   t.split(/(\s+)/).map((w, i) => (CODEY.test(w.replace(/[,;:.]$/, '')) ? <span key={i} className="sys-mono">{w}</span> : w));
-// a text mark that only repeats the part's own words ("MCP" on "Agents over MCP") is left off
 const echoes = (m: string, p: Part) =>
   (TEXT_MARKS.has(m) || !hasMark(m)) && new RegExp(`(^|[^a-z])${m.replace(/[^a-z0-9]/gi, '')}([^a-z]|$)`, 'i').test([p.name, p.role, p.sub].filter(Boolean).join(' '));
 
-/** A part's second line: prose, or a change's line counts ("frame.ts · +532"), set in mono. */
 const Sub = ({ text, lines }: { text: string; lines?: string | null }) =>
   lines && text === lines ? <div className="sys-sub sys-lines sys-mono sys-t-phrase">{text}</div> : <div className="sys-sub sys-t-phrase">{prose(text)}</div>;
 
-// ---------------------------------------------------------------- part bodies
 function PartBody({ p, box, simple }: { p: Part; box: PartBox; simple: boolean }) {
   const v = box.v;
   const marks = p.wordmark ? box.marks : box.marks.filter((m) => !echoes(m, p));
   const sub = simple ? '' : p.sub;
   if (v === 'lane') {
-    // a lane head: the part as a dark bar, on a flow or an algorithm sheet
     return (
       <div className="sys-pv sys-lane">
         <Marks ids={marks} s={18} />
@@ -66,7 +43,6 @@ function PartBody({ p, box, simple }: { p: Part; box: PartBox; simple: boolean }
     );
   }
   if (v === 'tile' || v === 'tilefor') {
-    // a technology on a landscape: the mark does the talking; a tall tile also says what it is for
     return (
       <div className={'sys-pv sys-tile' + (v === 'tilefor' ? ' sys-for' : '')}>
         <div className="sys-tile-mk">{marks.length ? <Mark id={marks[0]!} s={34} /> : <span className="sys-tile-none">{p.name.slice(0, 2)}</span>}</div>
@@ -119,7 +95,6 @@ function PartBody({ p, box, simple }: { p: Part; box: PartBox; simple: boolean }
       </div>
     );
   }
-  // box and node (and a card with nothing written yet)
   const second = v === 'node' ? str(p.card?.config) || sub || p.role : sub;
   return (
     <div className={'sys-pv sys-box' + (p.kind === 'store' ? ' sys-store' : '') + (p.kind === 'client' ? ' sys-client' : '') + (p.kind === 'worker' ? ' sys-door' : '')}>
@@ -168,15 +143,11 @@ function Card({ p, marks }: { p: Part; marks: string[] }) {
   );
 }
 
-// ---------------------------------------------------------------- notes
-// A lettered note folded away: the letter is a small control wherever it sits
-// (on a part, in a line's words, on a figure); its words show on hover or focus.
 const NotesCtx = createContext<{ notes: SheetLayout['notes']; live: boolean }>({ notes: [], live: false });
 function NoteMark({ l, className, style }: { l: string; className: string; style?: CSSProperties }) {
   const ctx = useContext(NotesCtx);
   const [open, setOpen] = useState(false);
   const n = ctx.notes.find((x) => x.l === l);
-  // a still picture (a thumb) draws the letter only: its note opens on a live sheet
   if (!n || !ctx.live) return <span className={className} style={style}>{l}</span>;
   return (
     <button
@@ -201,9 +172,6 @@ function NoteMark({ l, className, style }: { l: string; className: string; style
   );
 }
 
-// ---------------------------------------------------------------- lines
-// What a hover lights: a part lights its lines and their far ends; a line
-// lights itself and both ends.
 type Focus = { edges: Set<string>; parts: Set<string> } | null;
 export function focusOf(hover: string | null, L: SheetLayout): Focus {
   if (!hover) return null;
@@ -223,7 +191,7 @@ export function focusOf(hover: string | null, L: SheetLayout): Focus {
       e.from.forEach((f) => parts.add(f));
       parts.add(e.to);
     }
-  return edges.size ? { edges, parts } : null; // a part with no lines dims nothing
+  return edges.size ? { edges, parts } : null;
 }
 
 function EdgeLayer({ edges, focus, live, onHover }: { edges: Edge[]; focus: Focus; live: boolean; onHover: (h: string | null) => void }) {
@@ -238,9 +206,7 @@ function EdgeLayer({ edges, focus, live, onHover }: { edges: Edge[]; focus: Focu
         const hl = aud ? 14 : 9, hw = aud ? 6 : 3.6;
         let pts = trimEnd(e.pts, hl - 1);
         if (e.both) pts = trimEnd(pts.slice().reverse(), hl - 1).reverse();
-        // the hue for what moves; an overlay's ink replaces it
         const hue = !aud && e.line ? e.line.ink || MOVES[e.line.moves].ink : null;
-        // a change's ink replaces the line's own hue: added green, changed amber, removed grey and dotted
         const st = aud ? null : e.status;
         const ink = st ? STATUS_INK[st] : aud ? 'var(--sys-ink)' : lit ? hue || 'var(--sys-ink)' : hue || 'var(--sys-line)';
         const dash = st === 'removed' ? '2 4' : e.dash ?? undefined;
@@ -254,8 +220,6 @@ function EdgeLayer({ edges, focus, live, onHover }: { edges: Edge[]; focus: Focu
             <path d={arrowHead(e.pts, hl, hw)} fill={ink} />
             {e.both && <path d={arrowHead(e.pts, hl, hw, true)} fill={ink} />}
             {e.port && (
-              // the part at the other end lives on another sheet; its name sits
-              // at the margin, small, where the line crosses
               <g className="sys-port">
                 <circle cx={end(e.port.dir === 'in' ? 0 : 1)[0]} cy={end(e.port.dir === 'in' ? 0 : 1)[1]} r="2.4" fill="var(--sys-paper)" stroke={ink} strokeWidth="1.3" />
                 <text
@@ -282,9 +246,6 @@ function EdgeLayer({ edges, focus, live, onHover }: { edges: Edge[]; focus: Focu
   );
 }
 
-// An overlay's words ride after the line's own words, set in mono in the
-// overlay's ink; `tails` holds where each starts in the text. The wrap joins
-// words with one space, so the offsets carry across lines.
 function tailSplit(lines: string[], tails: { at: number; ink: string }[]): ReactNode[] {
   const sep = OV_SEP.length;
   const runOf = (c: number) => {
@@ -336,8 +297,6 @@ function EdgeLabels({ edges, focus }: { edges: Edge[]; focus: Focus }) {
   );
 }
 
-// ---------------------------------------------------------------- figures
-// Drawn things that are not parts and not lines of the model.
 function FigArrow({ f }: { f: Figure }) {
   const pts = f.pts!;
   const hl = f.heavy ? 11 : 8, hw = f.heavy ? 4.4 : 3.3;
@@ -428,12 +387,10 @@ function Figures({ list, under, focus }: { list: Figure[]; under: boolean; focus
   );
 }
 
-// ---------------------------------------------------------------- the sheet
 function SheetImpl({ layout: L, model, lod = 2, live = false, onNavigate, onEnter, picked = null }: SheetProps) {
   const [hover, setHover] = useState<string | null>(null);
   const focus = live ? focusOf(hover ?? picked, L) : null;
   const P = model.parts;
-  // parts in reading order (bands top to bottom, left to right): the order Tab walks them in
   const order = useMemo(() => Object.entries(L.parts).sort(([, a], [, b]) => (Math.abs(a.y - b.y) < 8 ? a.x - b.x : a.y - b.y)), [L]);
   const notesCtx = useMemo(() => ({ notes: L.notes, live }), [L.notes, live]);
   const onHover = (h: string | null) => live && setHover(h);
@@ -475,11 +432,8 @@ function SheetImpl({ layout: L, model, lod = 2, live = false, onNavigate, onEnte
                 data-part={id}
                 data-status={box.status ?? undefined}
                 data-opens={opens ? '' : undefined}
-                // several open PRs at rest: the hover names every one (the part's line shows two at most)
                 title={box.who ? `${p.name}: changed by ${box.who.join(', ')}` : p.name}
                 style={{ left: box.x, top: box.y, width: box.w, height: box.h, opacity: dim < 1 ? dim : undefined }}
-                // a live sheet's parts take the keyboard: Tab walks them in reading
-                // order, the view moves between them with the arrows and dives on Enter
                 tabIndex={live ? 0 : undefined}
                 aria-label={live ? [box.n ? `${box.n}. ${p.name}, ${box.status}` : p.name, p.role, box.who ? `changed by ${box.who.join(', ')}` : box.lines ?? '', opens ? `${plural(box.cw!, 'sheet')} inside, Enter opens it` : ''].filter(Boolean).join('. ') : undefined}
                 onPointerEnter={() => onHover(id)}
@@ -496,9 +450,6 @@ function SheetImpl({ layout: L, model, lod = 2, live = false, onNavigate, onEnte
                   </>
                 )}
                 {box.cw ? (
-                  // a window at rest says it has an inside, quietly: one footer
-                  // line in small type, and a second hairline behind the box's
-                  // bottom-right corner, like a stack of sheets
                   <>
                     <span className="sys-win-stack" aria-hidden="true" />
                     {live && opens ? (

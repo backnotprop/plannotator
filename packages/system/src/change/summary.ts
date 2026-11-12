@@ -1,7 +1,3 @@
-// What a change does, in numbers and in one line: the sheet it touches most,
-// how many parts it adds, changes and removes, and each part with the files of
-// the change it rests on. The card's picture, the tally, the numbered legend
-// and the parts list all read it, so they always agree.
 import { covers } from '../format/cited.ts';
 import { bySheetOrder } from '../format/load.ts';
 import type { Cell, Part, Revision, Sheet, SystemModel } from '../format/types.ts';
@@ -10,33 +6,25 @@ import { outerTest } from '../layout/common.ts';
 import { plural } from '../draw/format.ts';
 import type { ChangeIs } from './marks.ts';
 
-/** One file of a pull request: what `git diff --numstat` and `--name-status` say about it. */
 export type ChangeFile = { path: string; status?: 'A' | 'M' | 'D' | 'R'; from?: string; additions?: number; deletions?: number };
 
 export type ChangePart = {
   id: string;
   name: string;
   is: ChangeIs;
-  /** The PR's files this part cites (a cited folder covers its files), in the PR's order. Never a file the PR did not change. */
   files: string[];
-  /** Its line counts: read from its files when the host gives the PR's files, else as the revision writes them ("frame.ts · +532"). */
   lines?: string;
 };
 
 export type ChangeSummary = {
-  /** The sheet that draws most of the change: where the card's picture and the full view open. */
   sheet: string;
   added: number;
   changed: number;
-  /** Removed parts and removed lines. */
   removed: number;
-  /** The changed parts, numbered in this order (added, changed, removed): the number on the sheet is the index plus one. */
   parts: ChangePart[];
-  /** The lines the change adds, changes or removes. */
   flows: { id: string; says: string; is: ChangeIs }[];
 };
 
-/** True for a revision (a PR's change or a plan), false for a gate result. */
 export const isRevision = (c: Revision | GateResult): c is Revision => 'add' in c && 'change' in c;
 
 const has = (o: object, k: string) => Object.hasOwn(o, k);
@@ -44,7 +32,6 @@ const base = (p: string) => p.slice(p.lastIndexOf('/') + 1);
 const cellIds = (c: Cell): string[] => (c.type === 'part' ? [c.id] : c.type === 'stack' ? c.stack.flatMap(cellIds) : []);
 const MINUS = '−';
 
-/** The PR's files a part rests on: its cited paths in this repo that cover a changed file. Tests and docs count only when cited by name. */
 function filesOf(p: Part | undefined, files: ChangeFile[]): ChangeFile[] {
   if (!p) return [];
   const cited = p.code.filter((c) => c.repo === 'self').map((c) => c.path);
@@ -54,7 +41,6 @@ function filesOf(p: Part | undefined, files: ChangeFile[]): ChangeFile[] {
   });
 }
 
-/** "frame.ts · +532", "inbox.ts and 2 more · +21 −1": the line counts of a part's files. */
 export function linesOf(files: ChangeFile[]): string | undefined {
   if (!files.length) return undefined;
   const add = files.reduce((n, f) => n + (f.additions ?? 0), 0);
@@ -64,11 +50,6 @@ export function linesOf(files: ChangeFile[]): string | undefined {
   return counts ? `${name} · ${counts}` : name;
 }
 
-/**
- * What a change does. `files` (the PR's changed files with their counts, when
- * the host has them) names each part's files; without them, a revision's part
- * keeps only the cited files its own line counts name.
- */
 export function changeSummary(model: SystemModel, change: Revision | GateResult, files?: ChangeFile[]): ChangeSummary {
   const parts: ChangePart[] = [];
   const flows: ChangeSummary['flows'] = [];
@@ -77,13 +58,10 @@ export function changeSummary(model: SystemModel, change: Revision | GateResult,
     let mine: string[] = [];
     let lines = written || undefined;
     if (files) {
-      // the PR's own files decide: the counts are those of the files the part is credited with, so the two never
-      // disagree; the revision's words stand only for a part none of whose cited files the PR changed
       const f = filesOf(p, files);
       mine = f.map((x) => x.path);
       lines = linesOf(f) ?? lines;
     } else if (p && written) {
-      // no file list: keep only the cited files the revision's own counts name
       const named = new Set(written.split(/[\s,·]+/).filter(Boolean));
       mine = p.code.filter((c) => c.repo === 'self' && named.has(base(c.path))).map((c) => c.path);
     }
@@ -95,7 +73,6 @@ export function changeSummary(model: SystemModel, change: Revision | GateResult,
     for (const [id, p] of Object.entries(r.add.parts)) parts.push(entry(id, 'added', p ?? partOf(id), r.lines[id]));
     const isPart = (id: string) => has(model.parts, id) || !!r.add.parts[id];
     for (const id of Object.keys(r.change)) {
-      // a part the change adds is counted once, as added
       if (isPart(id)) { if (!has(r.add.parts, id)) parts.push(entry(id, 'changed', partOf(id), r.lines[id])); }
       else if (has(model.flows, id) || r.add.flows[id]) flows.push({ id, says: (model.flows[id] ?? r.add.flows[id])!.says, is: 'changed' });
     }
@@ -118,7 +95,6 @@ export function changeSummary(model: SystemModel, change: Revision | GateResult,
   };
 }
 
-/** The sheet that draws the most changed parts; a banded sheet before a flow sheet, then the drawing's own order. */
 function sheetFor(model: SystemModel, change: Revision | GateResult, ids: string[]): string {
   const want = new Set(ids);
   const place = isRevision(change) ? change.place : {};
@@ -137,7 +113,6 @@ function sheetFor(model: SystemModel, change: Revision | GateResult, ids: string
   return best || (model.sheets[model.root] ? model.root : Object.keys(model.sheets)[0] ?? '');
 }
 
-/** The change in one line: "3 parts added, 5 changed, 1 line removed". */
 export function changeWords(s: ChangeSummary): string {
   const gonePart = s.parts.filter((p) => p.is === 'removed').length;
   const goneLine = s.removed - gonePart;

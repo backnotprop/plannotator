@@ -3,13 +3,6 @@ import { citations } from '../src/index.ts';
 import { load } from '../src/node/index.ts';
 import { drawingDir } from './helpers.ts';
 
-// Plannotator drawn from its own code, kept as a test fixture
-// (test/fixtures/plannotator). It is test data and does not track the repo:
-// people's drawings live in the Inbox data folder, and the cited-path checks
-// run in check.test.ts and gate.test.ts against temp repos of their own.
-// `sources.repos.self.at` stays because format 1 asks for it; here it is only
-// fixture data. render.test.tsx draws every sheet of it (DOM tests).
-
 describe('the plannotator fixture', () => {
   test('loads clean: system.yaml, every sheet, the schema, the ids and the refs between sheets', async () => {
     const r = await load(drawingDir);

@@ -1,10 +1,3 @@
-// Composers for the kinds of sheet that are not banded: the data flow with
-// payloads on the wire (flow), the technology landscape (landscape), the one
-// endpoint drawn as an algorithm (algorithm). Each returns the same layout
-// shape as compose.ts plus `figures`: drawn things that are not parts and not
-// lines of the model (lifelines, payload boxes, steps, decisions, schemas,
-// time ticks). Nothing here knows any one system; every position is computed
-// from the drawing. Ported from entry G's kinds.js.
 import type { Payload, Sheet, SystemModel } from '../format/types.ts';
 import { FIELD_TOP, FOOT_H, M, outerTest, versionOf, W } from './common.ts';
 import { placeLetters } from './labels.ts';
@@ -23,7 +16,6 @@ function finish(
 ): SheetLayout {
   const natural = o.fieldBottom + FOOT_H;
   const H = Math.max(opts.H ?? 0, natural);
-  // notes on parts get a letter on the part; notes on a hop or a step ride in its label
   const letters = placeLetters(sheet.notes.filter((n) => o.rects[n.on]), o.rects, []);
   return {
     id: code, kind: sheet.kind, scope: sheet.scope, w: W, h: H, title: sheet.title, question: sheet.question,
@@ -32,7 +24,6 @@ function finish(
   };
 }
 
-/** A payload or schema box: a title and mono lines, measured. */
 function boxOf(pl: Payload, maxW: number) {
   const lines = pl.lines.map(String);
   const title = String(pl.name || pl.title || '');
@@ -42,24 +33,15 @@ function boxOf(pl: Payload, maxW: number) {
   return { title, lines, by: pl.by || null, w, h: 10 + (title ? lh(17) : 0) + lines.length * lh(15.5) + 8 };
 }
 
-// A lane bar shows its name first; the sub line only if both fit.
 function laneSub(name: string, marks: string[], sub: string, w: number): string {
   if (!sub) return '';
   const need = 28 + (marks.length ? 28 : 0) + textWidth(name, FONTS.laneName) + 12 + textWidth(sub, FONTS.laneSub);
   return need <= w ? sub : '';
 }
 
-// ================================================================ flow
-// Lanes are parts, left to right; time runs down. Each hop is one row: an
-// arrow between two lanes with what it says, and the payload on the wire
-// written under it. Rows pack by a skyline: a hop drops only as far as the
-// boxes already drawn across its own span require.
 function flowSheet(model: SystemModel, code: string, opts: KindOpts): SheetLayout {
   const sheet = model.sheets[code]!;
   const P = model.parts;
-  // a lane for a part outside this sheet's scope is not drawn as a lane bar; it
-  // moves to the nearer side edge, narrow, keeping only its name in small type
-  // at the margin and a faint lifeline
   const isOuter = outerTest(model, sheet.scope);
   const lanes0 = sheet.lanes.filter((id) => P[id]);
   const half = (lanes0.length - 1) / 2;
@@ -99,7 +81,7 @@ function flowSheet(model: SystemModel, code: string, opts: KindOpts): SheetLayou
   }
 
   const figures: Figure[] = [], edges: Edge[] = [];
-  const boxes: Rect[] = []; // the skyline: everything drawn so far
+  const boxes: Rect[] = [];
   const skyAt = (a: number, b: number) => boxes.reduce((m, r) => (r.x < b && r.x + r.w > a ? Math.max(m, r.y + r.h) : m), 0);
   let lastY = headY + HEAD_H + 6;
   const notesOn: Record<string, string> = Object.fromEntries(sheet.notes.map((n) => [n.on, n.l]));
@@ -111,7 +93,6 @@ function flowSheet(model: SystemModel, code: string, opts: KindOpts): SheetLayou
     const id = `${code}.${hid}`;
     if (h.on) {
       if (lx[h.on] == null) return;
-      // a step a lane takes on its own, drawn on its lifeline
       const t = wrap(h.do || '', FONTS.stepSub, laneW[h.on]! - 60);
       const tw = Math.min(laneW[h.on]! - 36, Math.max(...t.lines.map((l) => textWidth(l, FONTS.stepSub))) + 26);
       const bh = t.lines.length * lineH + 12;
@@ -134,7 +115,6 @@ function flowSheet(model: SystemModel, code: string, opts: KindOpts): SheetLayou
     const lw = lab.width + 6 + (letter ? 24 : 0), lbh = lab.lines.length * lineH + 2;
     const labX = right ? xa + 10 : xa - 10 - lw;
     const pl = h.payload ? boxOf(h.payload, Math.max(120, span - 28)) : null;
-    // the arrow clears everything across its span, and its label clears what is under it
     const y = Math.max(lastY + 24, skyAt(lo - 2, hi + 2) + 12, skyAt(labX - 4, labX + lw + 4) + lbh + 10);
     const pts: Pt[] = [[xa, y], [xb, y]];
     const lb = { x: labX, y: y - lbh - 3, w: lw, h: lbh, lines: lab.lines };
@@ -154,20 +134,16 @@ function flowSheet(model: SystemModel, code: string, opts: KindOpts): SheetLayou
   });
 
   const fieldBottom = Math.max(lastY, ...boxes.map((b) => b.y + b.h)) + 30;
-  // lifelines first, so everything sits on them
   for (const id of [...lanes].reverse())
     figures.unshift({ id: 'life:' + id, type: 'lifeline', under: true, x: lx[id]!, y0: headY + (isOuter(id) ? 26 : HEAD_H), y1: fieldBottom - 6, faint: isOuter(id) });
   figures.push(...margins);
-  // the time column
   figures.push({ id: 'time:h', type: 'text', x: M, y: headY + 14, w: TIME_W - 10, text: sheet.time || 'time', cls: 'fig-timeh' });
   figures.push({ id: 'time:axis', type: 'vline', under: true, x: M + TIME_W - 16, y0: headY + 34, y1: fieldBottom - 6, arrow: true });
-  // ticks never overlap: a tick too close to the one above moves down
   ticks.sort((a, b) => a.y - b.y).forEach((t, k) => {
     if (k && t.y < ticks[k - 1]!.y + 17) t.y = ticks[k - 1]!.y + 17;
   });
   ticks.forEach((t, k) => figures.push({ id: 'tick' + k, type: 'tick', x: M, y: t.y, w: TIME_W - 22, at: t.at, status: null }));
 
-  // places: tinted columns around groups of lanes
   const zones: Zone[] = [];
   places.forEach((pl, k) => {
     const ls = pl.lanes.filter((l) => lx[l] != null);
@@ -178,10 +154,6 @@ function flowSheet(model: SystemModel, code: string, opts: KindOpts): SheetLayou
   return finish(sheet, code, opts, { parts, zones, edges, figures, fieldBottom, rects });
 }
 
-// ================================================================ landscape
-// Columns by discipline, each a grid of tiles: the mark large, the name and
-// version small. No lines. A tile is a part of kind "technology", so it can be
-// opened; its count says how many parts are built on it.
 function landscapeSheet(model: SystemModel, code: string, opts: KindOpts): SheetLayout {
   const sheet = model.sheets[code]!;
   const P = model.parts;
@@ -196,8 +168,6 @@ function landscapeSheet(model: SystemModel, code: string, opts: KindOpts): Sheet
   const figures: Figure[] = [];
   const usedCount = (id: string) => P[id]?.usedBy.length ?? 0;
   const noteH = lh(18.5);
-  // on the final pass the paper height is known: tiles grow into the spare
-  // height (up to 156) and, once tall enough, say what each one is for
   let tileH = TILE_H;
   if (opts.H) {
     const rowsMax = Math.max(1, ...cols.map((c) => Math.ceil(c.row.filter((id) => P[id]).length / per)));
@@ -235,27 +205,18 @@ function landscapeSheet(model: SystemModel, code: string, opts: KindOpts): Sheet
   return finish(sheet, code, opts, { parts, zones, figures, fieldBottom, rects });
 }
 
-// ================================================================ algorithm
-// One endpoint, top to bottom: the part's bar with its route, then the steps
-// on a spine. A decision's "no" leaves to the right and ends there (a guard
-// clause); a step that calls another part draws a line to that part in the far
-// column. The request and response schemas sit at the left, the data loaded at
-// start above them, the metric leaves at the end.
 function algorithmSheet(model: SystemModel, code: string, opts: KindOpts): SheetLayout {
   const sheet = model.sheets[code]!;
   const P = model.parts;
-  const LW = 392; // schema column
-  const SX = M + LW + 210; // spine centre
-  const SW = 300; // a step's width
-  const EX = SX + SW / 2 + 74, EW = 214; // exits
-  const CW = 268, CX = W - M - CW; // called parts
+  const LW = 392;
+  const SX = M + LW + 210;
+  const SW = 300;
+  const EX = SX + SW / 2 + 74, EW = 214;
+  const CW = 268, CX = W - M - CW;
   const parts: Record<string, PartBox> = {}, rects: Record<string, Rect> = {}, figures: Figure[] = [], edges: Edge[] = [];
   const notesOn: Record<string, string> = Object.fromEntries(sheet.notes.map((n) => [n.on, n.l]));
   const L16 = lh(16), L18 = lh(18), L15 = lh(15), L17 = lh(17);
 
-  // when the endpoint is the part this sheet zooms into (or any part outside
-  // the sheet's scope), it is not drawn again as a bar; the request enters at
-  // the top as its route
   const isOuter = outerTest(model, sheet.scope);
   const ep0 = sheet.endpoint && P[sheet.endpoint] ? sheet.endpoint : null;
   const ep = ep0 && !isOuter(ep0) ? ep0 : null;
@@ -307,7 +268,7 @@ function algorithmSheet(model: SystemModel, code: string, opts: KindOpts): Sheet
       return;
     }
     if (st.end) {
-      const t = wrap(st.end, FONTS.step, SW - 40 - 34); // the pill's padding and border
+      const t = wrap(st.end, FONTS.step, SW - 40 - 34);
       const th = t.lines.length * L18 + 16;
       const top = y + 30;
       arrow(prev, { x: SX, y: top }, pendingLabel);
@@ -322,7 +283,6 @@ function algorithmSheet(model: SystemModel, code: string, opts: KindOpts): Sheet
       }
       return;
     }
-    // a step that does something
     const t = wrap(st.do || '', FONTS.step, SW - 28);
     const codeLines = st.code ? wrap(st.code, FONTS.mono, SW - 28).lines : [];
     const bh = 12 + t.lines.length * L18 + (codeLines.length ? 6 + codeLines.length * L15 : 0) + 10;
@@ -331,8 +291,6 @@ function algorithmSheet(model: SystemModel, code: string, opts: KindOpts): Sheet
     figures.push({ id, type: 'step', strong: true, x: SX - SW / 2, y: top, w: SW, h: bh, lines: t.lines, code: codeLines, letter });
     const called = st.calls && P[st.calls] ? st.calls : null;
     if (called && isOuter(called)) {
-      // a call to a part outside this sheet leaves by the right margin, with
-      // its words on the line and the part's name in small type at the edge
       const cy = top + bh / 2;
       const says = st.says || (st.flow ? model.flows[st.flow]?.says : '') || '';
       const xe = W - M - 4;
@@ -373,7 +331,6 @@ function algorithmSheet(model: SystemModel, code: string, opts: KindOpts): Sheet
   });
   let fieldBottom = y + 24;
 
-  // the schema column: loaded at start, request, response
   let ly = FIELD_TOP + 4;
   if (sheet.loads) {
     const Ld = sheet.loads;
