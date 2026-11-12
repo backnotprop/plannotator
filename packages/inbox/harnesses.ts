@@ -7,6 +7,8 @@
  * see the shell PATH still find it. Pure.
  */
 
+import { HERMES_APPLIES, HERMES_PLUGIN_INSTALL, HERMES_WAKE_GRANT_LINE } from '@plannotator/core/inbox-hermes';
+
 export type HarnessId =
   | 'claude-code'
   | 'claude-app'
@@ -23,6 +25,7 @@ export type HarnessId =
   | 'opencode'
   | 'dsh'
   | 'openclaw'
+  | 'hermes'
   | 'zed'
   | 'kiro'
   | 'muse'
@@ -51,6 +54,7 @@ export const HARNESSES: readonly Harness[] = [
   { id: 'opencode', label: 'OpenCode' },
   { id: 'dsh', label: 'DeepSeek Harness' },
   { id: 'openclaw', label: 'OpenClaw' },
+  { id: 'hermes', label: 'Hermes Agent' },
   { id: 'zed', label: 'Zed' },
   { id: 'kiro', label: 'Kiro' },
   { id: 'muse', label: 'Muse Code' },
@@ -279,6 +283,14 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
       return {
         artefacts: [{ kind: 'code', text: `openclaw plugins install ${OPENCLAW_PLUGIN}` }],
         note: `Plannotator's OpenClaw plugin. Its Inbox tool starts off: turn it on for OpenClaw in Settings > Agents. ${OPENCLAW_APPLIES} Only your own chats get it: OpenClaw on this computer and your direct messages, never a group. Your replies then come back into the same chat by themselves.`,
+      };
+    case 'hermes':
+      return {
+        artefacts: [
+          { kind: 'code', text: HERMES_PLUGIN_INSTALL },
+          { kind: 'code', text: HERMES_WAKE_GRANT_LINE },
+        ],
+        note: `Plannotator's Hermes Agent plugin, and Hermes's permission for it to start a turn with your reply. Its Inbox tool starts off: turn it on for Hermes Agent in Settings > Agents. ${HERMES_APPLIES} Your replies then come back into the Hermes session that asked: the terminal, the TUI, the Desktop app or your own direct messages.`,
       };
     case 'zed':
       return {

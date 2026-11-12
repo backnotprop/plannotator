@@ -2449,6 +2449,19 @@ describe("the Inbox's agent connections (inbox-agents.ts)", () => {
     expect(fixture.commandCalls.filter((call) => call.command === "/fake/qwen").map((call) => call.args)).toEqual([["sessions", "controllers", "remove", "c_0a1b2c3d"]]);
   });
 
+  test("a connected Hermes Agent plugin is left to Hermes and uninstall names the one command that removes it and its switch, without running hermes", async () => {
+    const fixture = createFixture();
+    const hermesConfig = join(fixture.homeDir, ".hermes", "config.yaml");
+    writeText(hermesConfig, "plugins:\n  entries:\n    plannotator:\n      allow_gateway_injection: true\n");
+    writeText(join(fixture.homeDir, ".hermes", "plugins", "plannotator", "plugin.yaml"), "name: plannotator\nhomepage: https://github.com/backnotprop/plannotator/tree/main/apps/hermes-plugin\n");
+    const environment = { ...fixture.environment, which: (command: string) => (command === "hermes" ? "/fake/hermes" : null) };
+
+    const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, environment);
+    expect(result.warnings.filter((line) => line.includes("`hermes plugins remove plannotator`"))).toHaveLength(1);
+    expect(fixture.commandCalls.filter((call) => call.command === "/fake/hermes")).toEqual([]);
+    expect(readFileSync(hermesConfig, "utf8")).toContain("allow_gateway_injection: true");
+  });
+
   test.skipIf(process.getuid?.() === 0)("a grant Qwen will not revoke while the data folder can't be written: the uninstall still removes the binary, and says so", async () => {
     const fixture = createFixture();
     const binary = join(fixture.homeDir, ".local", "bin", "plannotator");

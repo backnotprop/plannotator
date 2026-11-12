@@ -66,6 +66,8 @@ import { inboxDir } from "@plannotator/shared/inbox/schema";
 import { qwenHome, qwenHomeIsRelative } from "@plannotator/shared/inbox/qwen-sessions";
 import { INBOX_QWEN_TRUST_ON_CONNECT, QWEN_TRUST_REVOKED_REASON, ensureQwenTrust, retryQwenRevoke, setQwenTrust, type QwenTrustOutcome } from "./inbox-qwen-trust";
 import { addJsonMember, removeJsonMember } from "./json-edit";
+import { HERMES_PLUGIN_INSTALL, HERMES_WAKE_GRANT } from "@plannotator/core/inbox-hermes";
+import { hermesFound, hermesPluginInstalled } from "./inbox-hermes";
 import {
   agentFileContains,
   describeFsError,
@@ -614,8 +616,8 @@ type ConnectWay =
   | { kind: "cli"; bin: string; add: (command: readonly string[]) => string[]; remove: string[] }
   /** One key in a JSON file (`json`: how it is edited). */
   | { kind: "json"; keys: readonly string[]; json?: JsonFileRules; entry?: (command: readonly string[]) => Record<string, unknown> }
-  /** `inboxTool` on for Plannotator's own extension/plugin. */
-  | { kind: "tool"; host: InboxToolHost }
+  /** `inboxTool` on for Plannotator's own extension/plugin; `then`: the agent's own command that finishes connecting it. */
+  | { kind: "tool"; host: InboxToolHost; then?: { bin: string; args: readonly string[] } }
   /** Only a person can connect it; `why` says how. */
   | { kind: "manual"; why: string }
   /** Nothing to do (Claude Code). */
@@ -1317,6 +1319,16 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
     raw: () => null,
   },
   {
+    id: "hermes",
+    detect: (e) => hermesPluginInstalled(e) || hermesFound(e),
+    way: async (e) =>
+      hermesPluginInstalled(e)
+        ? { kind: "tool", host: "hermes", then: { bin: "hermes", args: HERMES_WAKE_GRANT } }
+        : { kind: "manual", why: `add Plannotator's Hermes Agent plugin (${HERMES_PLUGIN_INSTALL})` },
+    file: () => null,
+    raw: () => null,
+  },
+  {
     id: "claude-app",
     detect: (e) => isDir(claudeAppDir(e)),
     way: async () => ({ kind: "json", keys: ["mcpServers"] }),
@@ -1595,13 +1607,16 @@ async function connectOne(spec: AgentSpec, options: ConnectOptions, at: string):
       return resolveInboxTool(loadConfig(), e.env as NodeJS.ProcessEnv, way.host) ? { kind: "already", record: null } : { kind: "none" };
     }
     const configured = configuredInboxTool(loadConfig(), way.host);
-    if (configured === true) return { kind: "already", record: { state: "found", reach: "tool", path: null, at } };
     if (configured === false) return { kind: "off", record: { state: "off", reach: "tool", path: null, at } };
-    saveConfig({ inboxTool: inboxToolWith(loadConfig().inboxTool, { [way.host]: true }) });
-    if (configuredInboxTool(loadConfig(), way.host) !== true) {
-      return { kind: "failed", reason: "Plannotator's config.json can't be written", path: null };
+    if (configured !== true) {
+      saveConfig({ inboxTool: inboxToolWith(loadConfig().inboxTool, { [way.host]: true }) });
+      if (configuredInboxTool(loadConfig(), way.host) !== true) {
+        return { kind: "failed", reason: "Plannotator's config.json can't be written", path: null };
+      }
     }
-    return { kind: "added", record: { state: "added", reach: "tool", path: null, at } };
+    const unfinished = way.then ? await finishToolConnect(e, way.then, timeoutMs) : null;
+    if (unfinished) return { kind: "failed", reason: unfinished, path: null };
+    return configured === true ? { kind: "already", record: { state: "found", reach: "tool", path: null, at } } : { kind: "added", record: { state: "added", reach: "tool", path: null, at } };
   }
   const before = classify(spec.raw(e) ?? { kind: "absent" }, ourCommands(options), true);
   if (before.kind === "unreadable") {
@@ -1629,6 +1644,19 @@ async function connectOne(spec: AgentSpec, options: ConnectOptions, at: string):
     return { kind: "failed", reason: `${way.bin} mcp add ran, but ${displayPath(file, e)} does not have the entry`, path: file };
   }
   return { kind: "added", record: { state: "added", reach: "mcp", path: file, command, at } };
+}
+
+async function finishToolConnect(e: AgentEnvironment, then: { bin: string; args: readonly string[] }, timeoutMs: number): Promise<string | null> {
+  const line = [then.bin, ...then.args].join(" ");
+  const bin = e.which(then.bin);
+  if (!bin) return `${then.bin} is not on PATH, so run ${line} yourself`;
+  const ran = await e.run([bin, ...then.args], { timeoutMs });
+  if (ran.timedOut) return `${line} did not finish within ${formatSeconds(timeoutMs)}`;
+  if (ran.exitCode !== 0) {
+    const why = firstLine(ran.stderr) || firstLine(ran.stdout);
+    return `${line} exited with code ${ran.exitCode}${why ? ` (${why})` : ""}`;
+  }
+  return null;
 }
 
 /**

@@ -73,6 +73,7 @@ Agents use it from their next session. PLANNOTATOR_INBOX_CONNECT=0 skips this st
 | Claude Code | the Plannotator plugin is enabled | nothing: the plugin already gives it the `plannotator_inbox` tool |
 | Pi, OpenCode | Plannotator's extension or plugin is installed | the inbox tool turned on (`inboxTool` in `~/.plannotator/config.json`) |
 | DeepSeek Harness | Plannotator's plugin (`@plannotator/dsh`) is in a DSH profile (`~/.dsh/profiles`, or `$DSH_HOME/profiles`) | the inbox tool turned on. Without the plugin, add it yourself: `dsh plugin --profile <profile> add @plannotator/dsh`. Plannotator never runs `dsh`. |
+| Hermes Agent | Plannotator's plugin is in `~/.hermes/plugins/plannotator` (or `$HERMES_HOME`) | the inbox tool turned on, and `hermes config set plugins.entries.plannotator.allow_gateway_injection true` so a reply can start a turn. Without the plugin, add it yourself: `hermes plugins install backnotprop/plannotator/apps/hermes-plugin --enable`. |
 | Pi without the extension | Pi 0.99 or later on your `PATH` (older Pi has no `pi mcp`: connect it by hand) | `pi mcp add plannotator-inbox` |
 | Codex | `codex` 0.35 or later on your `PATH` (older Codex has no `codex mcp add`, and a `~/.codex` or `$CODEX_HOME` folder without the CLI: connect it by hand) | `codex mcp add plannotator-inbox` (the Codex app and IDE extension share it) |
 | Gemini CLI | `gemini` 0.1.19 or later on your `PATH` (older has no `gemini mcp add`: connect it by hand; `$GEMINI_CLI_HOME` honored) | `gemini mcp add -s user plannotator-inbox` |
@@ -239,6 +240,17 @@ DSH runs its plugins in its own process, so DSH and its other plugins can read w
 
 By default, DeepSeek Harness sends its session to DeepSeek, including the Inbox messages and replies the agent reads. The Inbox key is never in the session.
 
+### Hermes Agent
+
+Install Plannotator's Hermes Agent plugin and let it start a turn with your reply, then run `plannotator inbox`: it turns the inbox tool on for Hermes Agent when it finds the plugin.
+
+```bash
+hermes plugins install backnotprop/plannotator/apps/hermes-plugin --enable
+hermes config set plugins.entries.plannotator.allow_gateway_injection true
+```
+
+The tool is off by default, since Hermes sends every tool's definition with each request; the switch in **Settings → Agents** turns it on or off, and it applies to new Hermes sessions without restarting Hermes. Only your own sessions get it: the terminal, the TUI, the Desktop app, and your own direct messages to the bot (you are on that platform's DM admin list, `allow_admin_from`, or its allowlist names only you). Anywhere else the tool refuses. When the session is idle, a reply arrives as a new turn, and the thread shows "Delivered to Hermes Agent". It never goes into a running turn.
+
 ### The same session in two windows
 
 You can open one Pi session twice (`pi -c` or `--session`), or run two OpenCode 2 servers on one database. Then only one process delivers a reply: the one you used last. On Pi, typing in a window or the agent calling the inbox tool there moves replies to that window. On OpenCode 2, only the agent calling the inbox tool moves them, because the plugin does not see what you type (checked on OpenCode 2.0.19). On DeepSeek Harness (Web and Desktop on one session), typing or the agent calling the inbox tool moves them, as on Pi. The process that holds replies checks in every 5 seconds. If it quits, another process takes over at once, and if it crashes, after about 20 seconds. A reply is delivered once either way.
@@ -258,6 +270,7 @@ Claude Code needs only the setting: before the Inbox was ever installed, the too
 | Pi | off |
 | OpenCode | off |
 | DeepSeek Harness | off |
+| Hermes Agent | off |
 
 There are three ways to change it. The first that decides wins:
 
