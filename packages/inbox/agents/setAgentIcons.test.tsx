@@ -183,11 +183,9 @@ test.if(hasDom)('"Sets" opens the sets; an icon chosen there shows on the agent 
   await openSets(host);
   expect(asked).toContain('GET /api/inbox/icon-sets?remote=1');
   expect([...document.querySelectorAll('.am-sets-tab')].map((t) => t.textContent)).toEqual(['Noto Emoji 3D', 'Dungeon Crawl', 'game-icons.net', 'Tiny Creatures']);
-  // The first set shows first.
   expect(tab('noto-3d').getAttribute('aria-selected')).toBe('true');
   act(() => tab('tiny-creatures').click());
   await settle();
-  // Numbered.
   expect(cells()).toHaveLength(170);
   expect(cells()[0]!.querySelector('.am-sets-n')!.textContent).toBe('#001');
   expect(cells()[0]!.getAttribute('aria-label')).toBe('Zombie, #001');
