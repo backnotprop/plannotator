@@ -32,6 +32,20 @@
  * - Prompt: the first non-blank line that is not a choice or a
  *   recommendation. No prompt means the block is not a question: the parser
  *   returns null and the renderer falls back to the plain directive callout.
+ * - Id label: before the prompt, a short lower-case `id:` or `key:` line
+ *   (`id: sd-approach`, `question_id: q7`, `decision-key: db`; the value one
+ *   token with no spaces, not ending in `?`) is the asker's own label for
+ *   the question, as agents write it: it is never the prompt (the line
+ *   after it is), but nothing the asker wrote is hidden: it shows as the
+ *   first context line, the small line under the question. The key is still
+ *   hashed from the label line, as it was when the label was the prompt:
+ *   the store keeps each question's key from the send, while the window
+ *   computes it again from the body, so a question stored with a leading
+ *   label keeps its picks, answers and supersedes. The value itself is never
+ *   the key. A label with nothing after it to ask stays the prompt (and is
+ *   not context too). A capitalised or spaced line (`ID: x`, `Deploy: should
+ *   we…?`) is the prompt as before, and an `id:` line after the prompt is
+ *   context.
  * - Context: every other prose line (before or after the choices). A
  *   `Context:` line after the prompt is always context: it never continues
  *   the choice, bullet or recommendation above it.
@@ -149,6 +163,28 @@ export interface QuestionChoice {
   /** A picture choice: the choice's first markdown image. The picture picks
    *  the choice; the answer is still the label. Absent otherwise. */
   image?: QuestionChoiceImage;
+  /** `Pros:` under a `- [ ]` choice (option lines, the Plannotator Inbox):
+   *  its items, split on `;`. Absent otherwise: the line stays in the
+   *  description. */
+  pros?: string[];
+  /** `Cons:` (or `Trade-off:`) under a `- [ ]` choice, as `pros`. */
+  cons?: string[];
+  /** `Prototype:` (or `Try:`) under a `- [ ]` choice: the page that shows
+   *  this option, as `QuestionPrototype`. Option lines only. */
+  prototype?: QuestionPrototype;
+}
+
+/**
+ * A prototype as written: `Prototype: proto/a.html`, `Prototype:
+ * http://localhost:3000/checkout?v=a`, `Prototype: <target>` or `Prototype:
+ * [Name](target)`. `target` is the path or address exactly as written; the
+ * host decides what it opens (the Inbox: an attached HTML file, or an app
+ * running on this computer through its live proxy).
+ */
+export interface QuestionPrototype {
+  target: string;
+  /** The link's text, when written as `[Name](target)`. */
+  label?: string;
 }
 
 /** The picture of a picture choice (`- [ ] Label — ![alt](src)`). */
@@ -215,6 +251,9 @@ export interface ParsedQuestion {
   why?: string;
   /** `Reversible: no — <why>`. Absent means reversible (`yes`, or no line). */
   reversible?: QuestionIrreversible;
+  /** `Prototype:` at the block's own indent: one page every option shows
+   *  (option lines only, `ParseQuestionBlockOptions.optionLines`). */
+  prototype?: QuestionPrototype;
 }
 
 /** A recorded decision a question links to (`Decision: [statement](url)`). */
@@ -225,21 +264,29 @@ export interface QuestionDecisionLink {
   url: string;
 }
 
-/** Caps. Parsing is bounded; answers are truncated to these on validation. */
+/** @deprecated No longer applied: a block of any length is a question, and
+ *  every choice is kept (through core 0.25.27 a block over 20,000 characters
+ *  was not a question and choices past 20 were dropped, with no word to the
+ *  person or the agent). Kept so an importer still builds. */
 export const MAX_QUESTION_BODY_CHARS = 20_000;
+/** @deprecated No longer applied; see MAX_QUESTION_BODY_CHARS. */
 export const MAX_QUESTION_CHOICES = 20;
 export const MAX_QUESTION_PROMPT_CHARS = 400;
 /** The longest label a plain-bullet choice takes before the rest moves to
  *  its description (see capChoiceLabel). Task-list labels are not cut. */
 export const MAX_QUESTION_CHOICE_LABEL_CHARS = 200;
-/** The cap on each `selected` label of an answer. A picked label is a choice
- *  label, and a choice lives in a block body of at most
- *  MAX_QUESTION_BODY_CHARS, so any label a block can hold round-trips whole.
- *  (Through 0.28.17 this was MAX_QUESTION_CHOICE_LABEL_CHARS, which cut a
- *  task-list label over 200 characters, so it could never be picked.) */
+/** @deprecated No longer applied: a picked label is kept whole, as every
+ *  choice label is. (Through 0.28.17 picks were cut at
+ *  MAX_QUESTION_CHOICE_LABEL_CHARS, so a long task-list label could never be
+ *  picked; through core 0.25.27 at this body-sized cap.) */
 export const MAX_QUESTION_SELECTED_CHARS = MAX_QUESTION_BODY_CHARS;
+/** @deprecated No longer applied: the person's answer, Other and note are kept
+ *  whole (through core 0.25.27 they were cut here without a word). Kept so an
+ *  importer still builds. */
 export const MAX_QUESTION_OTHER_CHARS = 2000;
+/** @deprecated No longer applied; see MAX_QUESTION_OTHER_CHARS. */
 export const MAX_QUESTION_TEXT_CHARS = 4000;
+/** @deprecated No longer applied; see MAX_QUESTION_OTHER_CHARS. */
 export const MAX_QUESTION_NOTE_CHARS = 2000;
 
 const CHOICE_RE = /^\s*(?:[-*+]|\d{1,3}[.)])\s+\[([ xX])\]\s+(.*)$/;
@@ -281,6 +328,10 @@ const DECISION_LINK_RE = /^\[([^\]]+)\]\((\S+)\)\.?$/;
 const REPLACES_KEY = String.raw`q-[0-9a-f]{8}(?:-\d{1,3})?`;
 const REPLACES_TOKEN = String.raw`(?:msg_[0-9A-HJKMNP-TV-Z]{26}(?:/${REPLACES_KEY})?|${REPLACES_KEY})\.?`;
 const REPLACES_RE = new RegExp(String.raw`^\s*replaces\s*:\s*(${REPLACES_TOKEN}(?:[\s,;]+${REPLACES_TOKEN})*)[\s,;]*$`, 'i');
+// An asker's own label for the question before the prompt (`id: sd-approach`):
+// a lower-case `id` or `key`, optionally after a short `name_` / `name-`,
+// a colon, one token with no spaces that does not end in `?`. Shown as context.
+const ID_LABEL_RE = /^\s*(?:[a-z][a-z0-9]{0,15}[_-])?(?:id|key)\s*:\s*\S{0,79}[^\s?]\s*$/;
 // A line (leading whitespace aside) that opens a block of its own (list item, heading,
 // quote, fence, directive, table row, HTML, rule) ends a plain bullet instead
 // of continuing it lazily.
@@ -389,8 +440,8 @@ const splitBoldLead = (raw: string): { label: string; description: string } | nu
 /** A plain-bullet label longer than `MAX_QUESTION_CHOICE_LABEL_CHARS` is cut
  *  at its first sentence end (else its last space) within the cap; the rest
  *  leads the description, so the card shows a short name. Nothing is
- *  dropped. Task-list labels keep their full length (an answer quotes up to
- *  `MAX_QUESTION_SELECTED_CHARS`). */
+ *  dropped. Task-list labels keep their full length (an answer quotes them
+ *  whole). */
 const capChoiceLabel = (split: { label: string; description?: string }): { label: string; description?: string } => {
   const { label, description } = split;
   if (label.length <= MAX_QUESTION_CHOICE_LABEL_CHARS) return split;
@@ -653,18 +704,65 @@ const matchRecommendation = (
   return fallback !== -1 ? [fallback] : [];
 };
 
-type ContractField = 'stakes' | 'shows' | 'why' | 'reversible';
+type ContractField = 'stakes' | 'shows' | 'why' | 'reversible' | 'prototype';
 type ContractValue =
   | { field: 'stakes' | 'why'; value: string }
   | { field: 'shows'; value: QuestionShows }
-  | { field: 'reversible'; value: QuestionIrreversible | null };
+  | { field: 'reversible'; value: QuestionIrreversible | null }
+  | { field: 'prototype'; value: QuestionPrototype };
+
+// Option lines (`ParseQuestionBlockOptions.optionLines`): under a `- [ ]`
+// choice, `Pros:`, `Cons:` (aliases `Pro:`, `Con:`, `Trade-off:`) and
+// `Prototype:` (alias `Try:`), any case, emphasis around the label allowed.
+const OPTION_LINE_RE = /^[*_]{0,2}(pros?|cons?|trade-?offs?|prototype|try)[*_]{0,2}\s*:\s*[*_]{0,2}\s*(.*?)\s*$/i;
+const PROTOTYPE_LINK_RE = /^\[([^\]\n]*)\]\(\s*<?([^)\s>]+)>?\s*\)\.?$/;
+const PROTOTYPE_ANGLED_RE = /^<([^>\s]+)>\.?$/;
+
+/** A prototype line's value: `[Name](target)`, `<target>`, or one bare
+ *  target (no spaces: "Try: run it twice" is prose). Null when it is none. */
+const readPrototypeValue = (raw: string): QuestionPrototype | null => {
+  const value = raw.replace(/[*_]{1,2}$/, '').trim();
+  const link = value.match(PROTOTYPE_LINK_RE);
+  if (link) return link[2] ? { target: link[2], ...(link[1].trim() ? { label: link[1].trim() } : {}) } : null;
+  const angled = value.match(PROTOTYPE_ANGLED_RE);
+  if (angled) return { target: angled[1] };
+  return /^\S+$/.test(value) ? { target: value.replace(/\.$/, '') } : null;
+};
+
+/** One option line read (`Pros:` and `Cons:` items, or a prototype), or
+ *  null when the line is not one or its value is empty or not a target. */
+export const readOptionLine = (
+  line: string,
+): { field: 'pros' | 'cons'; value: string[] } | { field: 'prototype'; value: QuestionPrototype } | null => {
+  const m = line.trim().match(OPTION_LINE_RE);
+  if (!m) return null;
+  const name = m[1].toLowerCase();
+  if (name === 'prototype' || name === 'try') {
+    const value = readPrototypeValue(m[2]);
+    return value ? { field: 'prototype', value } : null;
+  }
+  const items = m[2]
+    .replace(/[*_]{1,2}$/, '')
+    .split(';')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (items.length === 0) return null;
+  return { field: name.startsWith('pro') ? 'pros' : 'cons', value: items };
+};
+
+/** A question's own `Prototype:` (or `Try:`) line at the block's indent:
+ *  one page for every option (option lines only). */
+const readSharedPrototypeLine = (line: string): ContractValue | null => {
+  const read = readOptionLine(line);
+  return read && read.field === 'prototype' ? read : null;
+};
 
 /** A contract line (`Stakes:`, `Shows:`, `Why:`, `Reversible:`) read, or
  *  null when the line is not one or its value does not fit (prose). */
 const readContractLine = (line: string): ContractValue | null => {
   const m = line.match(CONTRACT_LINE_RE);
   if (!m) return null;
-  const field = m[1].toLowerCase() as ContractField;
+  const field = m[1].toLowerCase() as Exclude<ContractField, 'prototype'>;
   const value = m[2].replace(/[*_]{1,2}$/, '').trim();
   if (!value) return null;
   if (field === 'stakes' || field === 'why') return { field, value };
@@ -829,6 +927,16 @@ export interface ParseQuestionBlockOptions {
    *  annotate pass false (approval "inbox-decision-mode": plan review shows
    *  the lines as plain text); picture choices are read either way. */
   contractLines?: boolean;
+  /** Read option lines (approval "inbox-question-tradeoffs"): `Pros:`,
+   *  `Cons:` and `Prototype:` lines indented under a `- [ ]` choice go into
+   *  that choice's `pros`, `cons` and `prototype` (the first of each wins; a
+   *  later one is description), and a `Prototype:` line at the block's own
+   *  indent is the question's shared `prototype`. Default false: each line
+   *  stays where it always went (a choice's description, or context), so
+   *  plan review, annotate and every older reader show it as text. The key,
+   *  labels and answers of `- [ ]` choices are the same either way. Only the
+   *  Plannotator Inbox passes true. */
+  optionLines?: boolean;
 }
 
 export const parseQuestionBlock = (
@@ -839,11 +947,18 @@ export const parseQuestionBlock = (
   if (!isQuestionDirectiveKind(directiveKind)) return null;
   const readDecisionLines = options?.decisionLines !== false;
   const readContractLines = options?.contractLines !== false;
-  if (typeof body !== 'string' || body.length > MAX_QUESTION_BODY_CHARS) return null;
+  const readOptionLines = options?.optionLines === true;
+  if (typeof body !== 'string') return null;
   const lines = body.replace(/\r\n?/g, '\n').split('\n');
 
   let prompt = '';
   let promptLine = -1;
+  // The text the key is hashed from when an id label came first: the label
+  // line, which builds before the label was dropped read as the prompt, so a
+  // stored question keeps its key (and its picks, answers and supersedes).
+  let keyText: string | undefined;
+  let keyTextLine = -1;
+  let keyTextContext = -1;
   const contextLines: string[] = [];
   const choices: QuestionChoice[] = [];
   const raws: string[] = [];
@@ -879,7 +994,7 @@ export const parseQuestionBlock = (
   let decisionFlag = false;
   let decision: QuestionDecisionLink | undefined;
   const replaces: string[] = [];
-  const contract: { stakes?: string; shows?: QuestionShows; why?: string; reversible?: QuestionIrreversible | null } = {};
+  const contract: { stakes?: string; shows?: QuestionShows; why?: string; reversible?: QuestionIrreversible | null; prototype?: QuestionPrototype } = {};
   // A code fence open anywhere in the body after the prompt: a contract line
   // inside it is code, never read.
   let bodyFence: string | null = null;
@@ -914,7 +1029,6 @@ export const parseQuestionBlock = (
     }
     const choice = directiveKind === 'question-text' ? null : line.match(CHOICE_RE);
     if (choice) {
-      if (choices.length >= MAX_QUESTION_CHOICES) continue;
       const raw = choice[2].trim();
       const { label, description } = splitLabel(raw);
       if (!label) continue;
@@ -957,6 +1071,18 @@ export const parseQuestionBlock = (
       openBullet = null;
       continue;
     }
+    // The asker's own label before the prompt (`id: sd-approach`): never the
+    // prompt, but it still shows, as the first context line, and the first
+    // one stays the key's text (see `keyText`).
+    if (!prompt && ID_LABEL_RE.test(line)) {
+      if (keyText === undefined) {
+        keyText = line.trim().replace(/^#{1,6}\s+/, '');
+        keyTextLine = i;
+        keyTextContext = contextLines.length;
+      }
+      pushContext(line.trimEnd());
+      continue;
+    }
     if (!prompt) {
       // A heading marker on the prompt line (`### Which…?`) is dropped.
       prompt = line.trim().replace(/^#{1,6}\s+/, '');
@@ -972,10 +1098,13 @@ export const parseQuestionBlock = (
     const fenceBefore = bodyFence;
     trackBodyFence(line);
     const atBlockIndent = indentWidth(line) <= indentWidth(lines[promptLine] ?? '');
-    const contractLine = fenceBefore || bodyFence || continuationFence || !atBlockIndent ? null : readContractLine(line);
+    const contractLine =
+      fenceBefore || bodyFence || continuationFence || !atBlockIndent
+        ? null
+        : (readContractLine(line) ?? (readOptionLines ? readSharedPrototypeLine(line) : null));
     if (contractLine && !(contractLine.field in contract)) {
       (contract as Record<string, unknown>)[contractLine.field] = contractLine.value;
-      if (!readContractLines) pushContext(line.trim());
+      if (!readContractLines && contractLine.field !== 'prototype') pushContext(line.trim());
       lastChoice = -1;
       recommendationOpen = false;
       if (openBullet) {
@@ -1036,6 +1165,13 @@ export const parseQuestionBlock = (
       trackContinuationFence(line);
       const c = choices[lastChoice];
       const extra = line.trim();
+      // An option line (`Pros:`, `Cons:`, `Prototype:`), read once per field: never the description.
+      const optionLine = readOptionLines && !continuationFence ? readOptionLine(extra) : null;
+      if (optionLine && c[optionLine.field] === undefined) {
+        if (optionLine.field === 'prototype') c.prototype = optionLine.value;
+        else c[optionLine.field] = optionLine.value;
+        continue;
+      }
       if (c.description) c.description = `${c.description} ${extra}`;
       else c.description = extra;
       raws[lastChoice] = `${raws[lastChoice]} ${extra}`;
@@ -1081,12 +1217,19 @@ export const parseQuestionBlock = (
     pushContext(line.trimEnd());
   }
 
+  // A label and nothing to ask: the label is the prompt, as before it was
+  // read, and leaves the context.
+  if (!prompt && keyText !== undefined) {
+    prompt = keyText;
+    promptLine = keyTextLine;
+    dropContext.add(keyTextContext);
+  }
   if (!prompt) return null;
 
   // A pick question written with plain bullets: the bullets are the choices.
   const choicesArePlainBullets = choices.length === 0 && directiveKind !== 'question-text' && plainBullets.length > 0;
   if (choicesArePlainBullets) {
-    const bullets = plainBullets.slice(0, MAX_QUESTION_CHOICES);
+    const bullets = plainBullets;
     const { splits, names } = plainBulletSplits(bullets);
     bullets.forEach((bullet, i) => {
       const { label, description } = splits[i];
@@ -1200,13 +1343,14 @@ export const parseQuestionBlock = (
     ...(recommendation ? { recommendation } : {}),
     ...(suggestedText ? { suggestedText } : {}),
     ...(markedAt.length > 0 ? { recommendedMarker: true as const } : {}),
-    key: questionKey(kind, prompt),
+    key: questionKey(kind, keyText ?? prompt),
     ...(!readDecisionLines ? {} : decision ? { decision } : decisionFlag ? { decisionOnAnswer: true as const } : {}),
     ...(replaces.length > 0 ? { replaces } : {}),
     ...(readContractLines && contract.stakes ? { stakes: contract.stakes } : {}),
     ...(readContractLines && contract.shows ? { shows: contract.shows } : {}),
     ...(readContractLines && contract.why ? { why: contract.why } : {}),
     ...(readContractLines && contract.reversible ? { reversible: contract.reversible } : {}),
+    ...(readOptionLines && contract.prototype ? { prototype: contract.prototype } : {}),
   };
 };
 
@@ -1471,7 +1615,7 @@ export function capQuestionPrompt(prompt: string): string {
 
 /**
  * Fail-closed validator: returns a normalized copy holding only the known
- * fields (strings truncated to their caps, empty optionals dropped), or null
+ * fields (the prompt copy cut to its cap, empty optionals dropped), or null
  * for anything malformed. Every reader of `questionAnswer` goes through it,
  * so a row from an older or foreign writer can never throw in a renderer.
  */
@@ -1491,12 +1635,12 @@ export const parseQuestionAnswer = (value: unknown): QuestionAnswer | null => {
   if (v.sourceLine !== undefined && !(Number.isInteger(v.sourceLine) && (v.sourceLine as number) > 0)) return null;
 
   const selected = [...new Set((v.selected as string[])
-    .map((s) => cap(s.trim(), MAX_QUESTION_SELECTED_CHARS))
-    .filter(Boolean))]
-    .slice(0, MAX_QUESTION_CHOICES);
-  const other = typeof v.other === 'string' ? cap(v.other, MAX_QUESTION_OTHER_CHARS) : '';
-  const text = typeof v.text === 'string' ? cap(v.text, MAX_QUESTION_TEXT_CHARS) : '';
-  const note = typeof v.note === 'string' ? cap(v.note, MAX_QUESTION_NOTE_CHARS) : '';
+    .map((s) => s.trim())
+    .filter(Boolean))];
+  // The person's own words are kept whole: never cut without a word.
+  const other = typeof v.other === 'string' ? v.other : '';
+  const text = typeof v.text === 'string' ? v.text : '';
+  const note = typeof v.note === 'string' ? v.note : '';
   return {
     v: 1,
     key: v.key,
@@ -1720,11 +1864,19 @@ export const formatQuestionAnswerLines = (
       : `Answer: ${labels[0]} (already settled in the document)\n`;
   }
   const picks = [...answer.selected.map(oneLine)];
-  if (answer.other?.trim()) picks.push(`Other: ${oneLine(answer.other)}`);
+  // A multi-line Other answer keeps its line breaks, quoted under `Other:`
+  // the way a multi-line note is quoted under `Note:` (indented under its
+  // bullet when there are several picks); a one-line one stays on its line.
+  const other = answer.other?.trim() ?? '';
+  const otherLines = /\r?\n/.test(other) ? other.split(/\r?\n/) : null;
+  if (other) picks.push(otherLines ? 'Other:' : `Other: ${oneLine(other)}`);
+  const quoted = (indent: string) => (otherLines ?? []).map((line) => `${indent}> ${line}\n`).join('');
   if (answer.text?.trim()) {
     out += `Answer${rec}:\n> ${answer.text.trim().replace(/\r?\n/g, '\n> ')}\n`;
   } else if (picks.length > 1) {
-    out += `Answer${rec}:\n${picks.map((p) => `- ${p}\n`).join('')}`;
+    out += `Answer${rec}:\n${picks.map((p) => `- ${p}\n`).join('')}${quoted('  ')}`;
+  } else if (picks.length === 1 && otherLines) {
+    out += `Answer${rec}: ${picks[0]}\n${quoted('')}`;
   } else if (picks.length === 1) {
     out += `Answer: ${picks[0]}${rec}\n`;
   } else if (answer.skipped) {

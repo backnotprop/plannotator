@@ -20,7 +20,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import net from 'node:net';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { launchOff, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
@@ -91,6 +91,7 @@ test.describe.configure({ mode: 'serial' });
 
 async function inbox(name: string, debug: boolean) {
   const dataDir = join(root, name);
+  launchOff(dataDir);
   const env = {
     PATH: process.env.PATH ?? '',
     HOME: root,
@@ -195,7 +196,8 @@ test('a healthy Send on this computer: press, the reply on both sides, clear, wi
   expect(lines.filter((l) => l.id === end.id && l.side === 'window').map((l) => l.ev)).toEqual(['req_start', 'req_head', 'req_end']);
   const order = [...lines].sort((a, b) => Number(a.seq ?? 0) - Number(b.seq ?? 0)).filter((l) => l.side === 'window' && l.id === end.id || l.ev === 'send_press' || l.ev === 'send_clear').map((l) => l.ev);
   expect(order).toEqual(['send_press', 'req_start', 'req_head', 'req_end', 'send_clear']);
-  expect(windowEv(lines, 'page_load').at(-1)?.protocol).toBeTruthy();
+  // The reload revalidates the cached page (304), so its HTTP version comes on the first answer over the network.
+  expect(windowEv(lines, 'page_load').at(-1)?.protocol ?? windowEv(lines, 'protocol').at(-1)?.protocol).toBeTruthy();
 });
 
 test('the reply never arrived: after a refresh the file shows the window started it and the server never saw it', async ({ browser }) => {

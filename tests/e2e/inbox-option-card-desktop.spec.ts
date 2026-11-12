@@ -607,7 +607,7 @@ test('the full name of a cut name shows on hover and goes with the step; the las
   }
 });
 
-test('the comment box\'s ⌄ takes the card with the tools and restoring waits for the picture; Save it and go on leaves focus on the arrow', async () => {
+test('the comment box\'s ⌄ takes the card with the tools and restoring waits for the picture; a comment typed on it never stops Next, which keeps focus', async () => {
   test.setTimeout(240_000);
   const { root, url, agent, thread } = await world();
   const browser: Browser = await chromium.launch();
@@ -625,12 +625,16 @@ test('the comment box\'s ⌄ takes the card with the tools and restoring waits f
     expect(await opacity(), 'not back while the picture is still easing').toBeLessThan(0.1);
     await expect.poll(opacity).toBe(1);
 
-    // A comment typed on the picture, then Next: the question row asks; Save it and go on steps and puts focus back on the arrow.
+    // A comment typed on the picture, then Next: it steps on that press (nothing asks) and focus stays on the arrow.
     await page.getByPlaceholder(/Comment on this image/).fill('A note on this picture');
     await page.locator('[data-option-step="next"]').click();
-    await page.getByRole('button', { name: 'Save it and go on' }).click();
     await expect(caption(page)).toHaveAttribute('data-option-caption', 'C');
+    await expect(page.locator('[data-step-guard]')).toHaveCount(0);
     await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('data-option-step'))).toBe('next');
+    // Back on B: the words wait in its box.
+    await page.locator('[data-option-step="prev"]').click();
+    await expect(caption(page)).toHaveAttribute('data-option-caption', 'B');
+    await expect(page.getByPlaceholder(/Comment on this image/)).toHaveValue('A note on this picture');
     await context.close();
   } finally {
     await browser.close().catch(() => {});

@@ -146,7 +146,7 @@ export function replyIsStale(messages: readonly InboxMessage[], seenThroughSeq: 
  *   (reply: `replyByKey`; reask, a thread's new message and compose: the
  *   key on the line they write).
  * - `set` puts a state (read, archived, a pick under its revision, an
- *   annotation under its own id), so a second copy changes nothing more.
+ *   annotation under its own id, a star), so a second copy changes nothing more.
  *   A snooze whose time has passed is the exception: it brings back a snooze
  *   still running there (`setHeldSnooze`), so a copy after a newer snooze would
  *   end that one. The owner's door answers a key it has seen without running it.
@@ -167,6 +167,9 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "l
   "POST threads/:id/unread": "set",
   "POST threads/:id/mark-unread": "set",
   "POST threads/:id/snooze": "set",
+  // A star lives on the thread's own machine (approval "inbox-linked-marks"), like a snooze.
+  "POST threads/:id/pin": "set",
+  "POST pins": "set",
   "POST messages/:id/picks": "set",
   "POST messages/:id/reply": "append",
   "POST messages/:id/resolve": "set",
@@ -198,6 +201,8 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "l
   "POST launch/:id/delete": "set",
   "POST link-back": "set",
   "POST unlink": "set",
+  // On this table so rule 8 knows it. The forward refuses it before this is read: an Update is never held to run days later.
+  "POST update": "set",
 };
 
 const DOOR_WRITE_ROUTES = Object.entries(DOOR_WRITES).flatMap(([name, kind]) =>

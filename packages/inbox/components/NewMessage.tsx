@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { INBOX_HOST_NAMES, type InboxThread } from '@plannotator/core/inbox-types';
 import { InboxApiError, inboxApi, type LiveSession, type LiveSessionsModel } from '../api';
+import { useAgentNames, withGivenLabels } from '../agents/agentNames';
 import { whenTime, tildePath } from '../format';
 import { HostMark, Icon } from '../icons';
 import { INBOX_MESSAGE_SKILL_AUDIENCE, inboxSkillsBlock, withSkillsBlock } from '../skills';
@@ -76,7 +77,14 @@ export function useLiveSessions(threadId: string, asker: string | null = null, e
     const timer = setInterval(() => void load(), refreshMs);
     return () => clearInterval(timer);
   }, [load, enabled, refreshMs]);
-  return { model, load };
+  // A session the person named (Rename… in the sidebar) reads by that name; only its id is ever sent.
+  const names = useAgentNames();
+  const named = useMemo(() => {
+    if (!model) return model;
+    const sessions = withGivenLabels(model.sessions, names);
+    return sessions === model.sessions ? model : { ...model, sessions: [...sessions] };
+  }, [model, names]);
+  return { model: named, load };
 }
 
 export function NewMessageButton({ live, mode, onClick }: { live: LiveSessionsModel | null; mode: NewMessageMode; onClick: () => void }) {
@@ -226,7 +234,7 @@ export function NewMessagePopover({
             onFocus={() => setActive(index)}
             onClick={() => onPick(session)}
           >
-            <HostMark host={session.host} />
+            <HostMark host={session.host} agent={session.session} />
             <span>
               <span className="ib-t">Started {whenTime(session.started_at)}</span>
               <span className="ib-d">{sessionWords(session)}</span>

@@ -25,6 +25,8 @@ const connections: (RecipientConnection | null | undefined)[] = [
   { busy: true, idle_since: null, send_now: false },
   { busy: false, idle_since: AT, send_now: false },
   { busy: null, idle_since: null, send_now: false },
+  // Claude Code holds the session's replies until the person types there (approval "inbox-stopped-reply").
+  { busy: false, idle_since: AT, send_now: true, held: true },
 ];
 
 function* inputs(): Generator<DeliveryLineInput> {
@@ -98,6 +100,16 @@ describe('the row words', () => {
     expect(rowDeliverySpoken({ ...base, kind: 'ack', state: 'queued' })).toBe('Looks good, queued for Claude Code');
   });
 
+  // Approval "inbox-stopped-reply": the accessible name says what the tooltip and the thread say, never "Queued".
+  test('held by a stopped Claude Code session: the accessible name says Stopped, as the tooltip does', () => {
+    const stopped: InboxRowDelivery = { ...base, reason: 'stopped', send_now: false };
+    expect(rowDeliverySpoken(stopped)).toBe('Stopped: goes in when you type in that session');
+    expect(rowDeliveryLine(stopped, time)).toBe('Stopped: goes in when you type in that session');
+    expect(rowDeliverySpoken({ ...stopped, kind: 'ack' })).toBe('Looks good, stopped: goes in when you type in that session');
+    // Once it went in: Delivered.
+    expect(rowDeliverySpoken({ ...stopped, state: 'delivered', reason: 'delivered', at: AT })).toBe('Delivered to Claude Code');
+  });
+
   test("a 👍's tooltip, in its Undo window and after", () => {
     expect(rowDeliveryLine({ ...base, kind: 'ack', reason: 'ack_pending' })).toBe('👍 Looks good · Goes to Claude Code in a few seconds');
     expect(rowDeliveryLine({ ...base, kind: 'ack', state: 'sending', reason: 'idle' })).toBe('👍 Looks good · Sending to Claude Code…');
@@ -132,6 +144,13 @@ describe('the row words', () => {
     expect(deliveriesReadList({ labels: false, sessions: true }, quiet)).toBe(true);
     expect(deliveriesReadList({ labels: true, sessions: false }, quiet)).toBe(true);
     expect(deliveriesReadList(undefined, section([{ ...base, state: 'queued' }]))).toBe(true);
+  });
+
+  test('the agents moved: the list is read again only while something draws them (the Agents section)', () => {
+    const quiet: InboxListSection[] = [{ id: 'sent', label: 'Sent', threads: [] }];
+    expect(deliveriesReadList({ labels: false, sessions: false, agents: true }, quiet, true)).toBe(true);
+    expect(deliveriesReadList({ labels: false, sessions: false, agents: true }, quiet, false)).toBe(false);
+    expect(deliveriesReadList({ labels: false, sessions: false, agents: false }, quiet, true)).toBe(false);
   });
 });
 

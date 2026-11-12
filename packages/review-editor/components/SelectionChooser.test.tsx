@@ -17,6 +17,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act, createRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { resetPageMarks, setPageMarks } from '@plannotator/ui/utils/pageMarks';
 import type { DiffSelection } from './SelectionChooser';
 import type { ToolbarHostHandle } from './ToolbarHost';
 
@@ -308,6 +309,39 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
       mount({ onShowMe: () => {} });
       await frames();
       expect(Number.parseFloat(placed().top)).toBeGreaterThanOrEqual(46 + 8);
+    });
+  });
+
+  describe('page marks (ui pageMarks: the Inbox keys comments.css\'s html:has([data-selection-chooser]) on them)', () => {
+    afterEach(() => resetPageMarks());
+    const marked = () => document.documentElement.hasAttribute('data-pn-selection-chooser');
+
+    test('<html> is marked exactly while the bar carries [data-selection-chooser]', async () => {
+      setPageMarks(true);
+      const diff = paintedDiff([{ line: 18, top: 340, left: 803 }]);
+      mount({ onShowMe: () => {} });
+      await frames();
+      expect(chooser()).not.toBeNull();
+      expect(marked()).toBe(true);
+      const rows = [...diff.shadowRoot!.querySelectorAll<HTMLElement>('[data-selected-line]')];
+      unpaint(diff);
+      await frames(3);
+      expect(chooser()).toBeNull();
+      expect(marked(), 'hidden: the + mark comes back, so the mark goes').toBe(false);
+      for (const row of rows) row.setAttribute('data-selected-line', '');
+      await frames(3);
+      expect(marked()).toBe(true);
+      act(() => document.querySelector<HTMLButtonElement>('[data-selection-action="comment"]')!.click());
+      expect(chooser()).toBeNull();
+      expect(marked(), 'closed').toBe(false);
+    });
+
+    test('off (every other host): nothing is marked', async () => {
+      paintedDiff([{ line: 18, top: 340, left: 803 }]);
+      mount({ onShowMe: () => {} });
+      await frames();
+      expect(chooser()).not.toBeNull();
+      expect(marked()).toBe(false);
     });
   });
 });

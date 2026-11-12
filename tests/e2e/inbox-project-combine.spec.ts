@@ -29,7 +29,7 @@ import { copyFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node
 import { dirname, join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
-import { inboxScratch, rememberInboxOf, removeInboxScratch, stopScratchInbox } from './inbox-scratch';
+import { E2E_LAUNCH_OFF, inboxScratch, rememberInboxOf, removeInboxScratch, stopScratchInbox } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -137,7 +137,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   writeFileSync(join(site, 'landing.md'), '# Landing\n\nThe new landing page copy.\n');
   // The Board is something the person turns on: on here, for the cards a combine must give back.
   mkdirSync(dataDir, { recursive: true });
-  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxBoard: true }));
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, inboxBoard: true }));
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   rememberInboxOf(dataDir);

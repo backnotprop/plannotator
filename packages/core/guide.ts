@@ -1,9 +1,14 @@
-/** Hard cap on reviewer-supplied extra guide instructions (#1265): the
- *  freeform text appended to the organizer methodology at launch. A hygiene
- *  bound on prompt size, not a security boundary (the instructions run on the
- *  user's own machine against their own agent). Enforced server-side in
- *  composeGuideMethodology and mirrored by the launch textarea's maxLength. */
-export const GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS = 2000;
+import type { GuideDiffNote } from './guide-notes';
+
+/** Cap on reviewer-supplied extra guide instructions (#1265): the freeform
+ *  text appended to the organizer methodology at launch. The real ceiling is
+ *  the command line: Codex, Cursor, OpenCode and Pi take the guide prompt as
+ *  one argument, and Windows caps a whole command line at 32,767 characters,
+ *  of which the methodology and the review context take about 15,000.
+ *  Enforced server-side in composeGuideMethodology and mirrored by the launch
+ *  textarea's maxLength, whose count shows near it. (2,000 through core
+ *  0.25.27, as a "hygiene bound".) */
+export const GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS = 12_000;
 
 /** Human labels for the engines that can generate a guide, keyed by the id
  *  stored in a snapshot's `generator.engine`. The one source of truth for the
@@ -25,6 +30,9 @@ export interface GuideDiffRef {
    *  for schema-enforced engines; optional here so a marker engine that omits
    *  it still yields a valid guide — the UI simply renders nothing. */
   summary?: string;
+  /** The author's notes on lines of this file (code review in the Inbox; snapshot format version 4, written only
+   *  when a note exists). Each sits inside one hunk. Readers that do not know them show the file as before. */
+  notes?: GuideDiffNote[];
 }
 
 export interface GuideSection {
@@ -38,9 +46,13 @@ export interface GuideSection {
    *  deliberate prose-only context section (no diffs, real overview text) is
    *  a valid model output and is preserved as-is rather than dropped. */
   diffs: GuideDiffRef[];
+  /** Optional: one diagram drawn at the top of the chapter's code pane, the same
+   *  shape as an overview's (snapshot format version 5, written only when a
+   *  chapter has one). Readers that cannot draw it show the chapter as before. */
+  diagram?: GuideOverviewDiagram;
 }
 
-/** The kinds of picture a guide overview can carry. Mermaid renders through
+/** The kinds of picture a guide overview or chapter can carry. Mermaid renders through
  *  Plannotator's diagram engine; HTML is a sanitized custom picture (not drawn
  *  by any viewer yet; accepted only where the producer can sanitize it). */
 export type GuideOverviewDiagramKind = 'mermaid' | 'html';

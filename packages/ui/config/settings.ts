@@ -14,7 +14,7 @@ import {
   type AnnotateAgentTerminalSide,
 } from '@plannotator/core/agent-terminal';
 import type { DiffLineBgIntensity, ReviewDefaults } from '@plannotator/core/config-types';
-import { isFaviconStyle, type FaviconStyle } from '@plannotator/core/favicon';
+import { DEFAULT_FAVICON_STYLE, isFaviconStyle, type FaviconStyle } from '@plannotator/core/favicon-style';
 import {
   agentSwitchConfigValue,
   isAgentSwitchName,
@@ -192,7 +192,7 @@ export const SETTINGS = {
     toServer: (v: ThemePair) => ({ theme: { mode: v.mode, light: v.light, dark: v.dark } }),
   },
   faviconStyle: {
-    defaultValue: 'totman' as FaviconStyle,
+    defaultValue: DEFAULT_FAVICON_STYLE as FaviconStyle,
     fromCookie: () => {
       const v = storage.getItem('plannotator-favicon');
       return isFaviconStyle(v) ? v : undefined;

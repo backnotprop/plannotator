@@ -21,8 +21,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { resolve } from 'node:path';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
-import { rememberMachine, resetMachineRoutes } from './inboxUrl';
-import type { InboxMessageWire, InboxProject, InboxThread, InboxReplyDraft } from '@plannotator/core/inbox-types';
+import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
 import type { ShapeHost } from '@plannotator/ui/components/shape';
 import type { InboxShapes } from './shape/useInboxShapes';
 
@@ -48,7 +47,6 @@ mock.module(resolve(import.meta.dir, '../review-editor/workerPool.tsx'), () => (
 
 const hasDom = typeof document !== 'undefined';
 const { ReviewPane } = (hasDom ? await import('./components/ReviewPane') : {}) as typeof import('./components/ReviewPane');
-const { default: GuideReader } = (hasDom ? await import('#guide-reader') : {}) as typeof import('#guide-reader');
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'ledger-abcdef', name: 'ledger', root: '/work/ledger', created_at: '2026-10-11T10:00:00.000Z' };
 const FIRST = 'msg_01M4H6G73M9H3Z32T859E72DPY';
@@ -89,34 +87,14 @@ let savedFetch: typeof fetch;
 /** Every annotation the window asked the store to keep. */
 let saves: Record<string, unknown>[] = [];
 let refuse = false;
-let draftRequests = 0;
 
 beforeEach(() => {
   if (!hasDom) return;
   savedFetch = globalThis.fetch;
   saves = [];
   refuse = false;
-  draftRequests = 0;
-  const drafts = new Map<string, InboxReplyDraft>();
-  let revision = 0;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
-    if (path.includes('/comment-draft')) {
-      draftRequests++;
-      const key = path.replace('/delete', '');
-      const current = drafts.get(key) ?? null;
-      if (init?.method !== 'POST') return Response.json({ draft: current });
-      const body = JSON.parse(String(init.body));
-      if (path.includes('/delete')) {
-        if (body.base === undefined || current?.updated_at === body.base) drafts.delete(key);
-        return Response.json({ deleted: true });
-      }
-      if ((current?.updated_at ?? null) !== body.base && current?.body !== body.base_body) return Response.json({ code: 'draft_conflict' }, { status: 409 });
-      const draft = { v: 1 as const, thread_id: FIRST, body: body.body, created_at: current?.created_at ?? '2026-11-07T10:00:00.000Z', updated_at: new Date(Date.UTC(2026, 10, 7, 10, 0, ++revision)).toISOString() };
-      if (draft.body.trim()) drafts.set(key, draft);
-      else drafts.delete(key);
-      return Response.json({ draft: drafts.get(key) ?? null });
-    }
     if (init?.method === 'POST' && path.includes('/guide/annotations')) {
       const annotation = (JSON.parse(String(init.body)) as { annotation: Record<string, unknown> }).annotation;
       saves.push(annotation);
@@ -141,7 +119,6 @@ beforeEach(() => {
 afterEach(() => {
   if (!hasDom) return;
   unmount();
-  resetMachineRoutes();
   globalThis.fetch = savedFetch;
 });
 
@@ -168,7 +145,7 @@ async function render(id: string) {
     root = createRoot(host!);
     root.render(
       <div className="pn-inbox">
-        <ReviewPane thread={threadOf(message)} message={message} onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />
+        <ReviewPane thread={threadOf(message)} message={message} codeReview onBack={() => {}} onClose={() => {}} onSent={() => {}} shapeHost={{} as ShapeHost} shapes={NO_BOARDS} board={null} onBoard={() => {}} />
       </div>,
     );
   });
@@ -208,12 +185,12 @@ test.skipIf(!hasDom)('the button saves a global comment; a refused save keeps th
   await add();
   expect(saves).toHaveLength(1);
   expect(saves[0]).toMatchObject({ type: 'comment', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0, text: 'Split the guard and the retry into two PRs.' });
-  expect([...document.querySelectorAll('[role="alert"]')].some((node) => node.textContent?.includes('10000'))).toBe(true);
-  expect(composer()?.value).toBe('Split the guard and the retry into two PRs.');
+  expect(document.querySelector('[role="alert"]')?.textContent).toContain('10000');
+  expect(composer()).toBeNull();
 
   // Refused: the words are back when the composer opens again, and go on the next Add.
   refuse = false;
-  const again = composer()!;
+  const again = await openComposer();
   expect(again.value).toBe('Split the guard and the retry into two PRs.');
   await add();
   expect(saves).toHaveLength(2);
@@ -251,46 +228,4 @@ test.skipIf(!hasDom)('a global comment chosen in the guide opens the folded comm
   await settle();
   expect(document.querySelector('[data-guide-comments-sheet]')?.getAttribute('aria-expanded')).toBe('true');
   expect(item.getAttribute('aria-current')).toBe('true');
-});
-
-test.skipIf(!hasDom)('a PR reader keeps its local global-comment storage, without a message draft route', async () => {
-  host = document.createElement('div');
-  document.body.appendChild(host);
-  await act(async () => {
-    root = createRoot(host!);
-    root.render(<GuideReader snapshot={snapshot} reviewed={[false]} onReviewedChange={() => {}} comments={{
-      annotations: [], selectedId: null, onSelect: () => {}, onDelete: () => {}, scrollTarget: null,
-      onSave: async (annotation) => { saves.push({ ...annotation }); return true; },
-      draftScope: 'github.com/northwind/billing-svc#412:layer',
-    }} />);
-  });
-  await type(await openComposer(), 'Keep this on the PR layer.');
-  await add();
-  expect(saves).toHaveLength(1);
-  expect(saves[0]).toMatchObject({ scope: 'general', text: 'Keep this on the PR layer.' });
-  expect(draftRequests).toBe(0);
-});
-
-test.skipIf(!hasDom)('a linked-machine guide keeps its draft when a refused Add answers after navigation', async () => {
-  const remote = 'msg_01M4H6G73M9H3Z32T859E72DQA';
-  rememberMachine([remote], `ibx_${'A'.repeat(26)}`);
-  const previousFetch = globalThis.fetch;
-  let finish: (() => void) | null = null;
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (init?.method === 'POST' && String(input).includes('/guide/annotations')) {
-      return new Promise<Response>((resolve) => { finish = () => resolve(Response.json({ code: 'validation_error', error: 'Not saved.' }, { status: 422 })); });
-    }
-    return previousFetch(input, init);
-  }) as typeof fetch;
-  await render(remote);
-  await type(await openComposer(), 'Keep these remote-review words.');
-  expect(document.querySelector('[data-global-composer]')).toBeNull();
-  await add();
-  expect(finish).not.toBeNull();
-  unmount();
-  await act(async () => finish!());
-  await settle();
-  await render(remote);
-  expect((await openComposer()).value).toBe('Keep these remote-review words.');
-  expect(draftRequests).toBe(0);
 });

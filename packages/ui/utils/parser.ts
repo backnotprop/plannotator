@@ -1,4 +1,5 @@
 import type { Block, Annotation, CodeAnnotation, EditorAnnotation, ImageAttachment } from '../types';
+import { attachedLines } from './attachedLines';
 import { planDenyFeedback } from '@plannotator/core/feedback-templates';
 import { resolveReplyParents } from '@plannotator/core/annotation-threads';
 import { diagramAnchorLocationLine, parseDiagramAnchor } from '@plannotator/core/diagram-anchor';
@@ -1070,12 +1071,7 @@ export const exportAnnotationEntry = (ann: any, opts: ElementContextExportOption
   };
   output += elementContextExportBlock(ann, resolvedOpts);
   output += additionalTargetsExportBlock(ann);
-  if (Array.isArray(ann?.images) && ann.images.length > 0) {
-    output += `**Attached images:**\n`;
-    ann.images.forEach((img: ImageAttachment) => {
-      output += `- [${img.name}] \`${img.path}\`\n`;
-    });
-  }
+  if (Array.isArray(ann?.images)) output += attachedLines(ann.images);
   return output;
 };
 
@@ -1447,12 +1443,7 @@ const renderAnnotationEntries = (
     }
 
     // Add attached images for this annotation
-    if (ann.images && ann.images.length > 0) {
-      output += `**Attached images:**\n`;
-      ann.images.forEach((img: ImageAttachment) => {
-        output += `- [${img.name}] \`${img.path}\`\n`;
-      });
-    }
+    output += attachedLines(ann.images);
 
     // Threaded replies nest under the entry they answer.
     if (hasReplies) {
@@ -1535,6 +1526,12 @@ export interface LinkedDocAnnotationEntry {
 export interface LinkedDocExportHeading {
   title: string;
   intro: string;
+  /**
+   * What each section is, in "I've reviewed this <subject>" and a global
+   * comment's "General feedback about the <subject>". Absent: "document"
+   * (today's output, byte for byte). The Inbox's live sites pass "site".
+   */
+  subject?: string;
 }
 
 export const LINKED_DOC_EXPORT_HEADING: LinkedDocExportHeading = {
@@ -1587,10 +1584,10 @@ export const exportLinkedDocAnnotations = (
     const sortedAnns = sortAnnotationsInDocumentOrder(annotations, docBlocks);
 
     if (annotations.length > 0 || answers.length === 0) {
-      output += `I've reviewed this document and have ${annotations.length} piece${annotations.length !== 1 ? 's' : ''} of feedback:\n\n`;
+      output += `I've reviewed this ${heading.subject ?? 'document'} and have ${annotations.length} piece${annotations.length !== 1 ? 's' : ''} of feedback:\n\n`;
     }
 
-    output += renderAnnotationEntries(sortedAnns, docBlocks, { subject: 'document', level: 3, injectedSkills });
+    output += renderAnnotationEntries(sortedAnns, docBlocks, { subject: heading.subject ?? 'document', level: 3, injectedSkills });
     output += labelSummaryBlock(sortedAnns, 3);
   }
 
@@ -1648,12 +1645,7 @@ export const exportCodeFileAnnotations = (annotations: CodeAnnotation[]): string
     }
     // External (tool-sourced) comments list skills but never inject.
     output += skillReferenceExportBlock(ann.text, injectedSkills, { external: !!ann.source });
-    if (ann.images && ann.images.length > 0) {
-      output += `**Attached images:**\n`;
-      ann.images.forEach((img) => {
-        output += `- [${img.name}] \`${img.path}\`\n`;
-      });
-    }
+    output += attachedLines(ann.images);
     output += '\n';
   });
 

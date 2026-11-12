@@ -4,6 +4,8 @@ interface Props {
   description?: string;
   ogImage?: string;
   canonicalUrl?: string;
+  /** A help page reached from a link (not a page to find in search): `noindex`. */
+  noindex?: boolean;
 }
 
 const {
@@ -11,6 +13,7 @@ const {
   description = 'Interactive Plan Review: Mark up and refine coding-agent plans in a browser UI, share with your team, and integrate with Claude Code, Codex, OpenCode, and more.',
   ogImage = 'https://plannotator.ai/assets/plannotator-generic-og-v1.jpg',
   canonicalUrl,
+  noindex = false,
 } = Astro.props;
 
 const canonical = canonicalUrl || Astro.url.href;
@@ -23,7 +26,9 @@ import '../styles/global.css';
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{title}</title>
-    <link rel="icon" type="image/png" sizes="256x256" href="/favicon.png">
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
     <meta name="description" content={description} />
 
     <meta property="og:type" content="website" />
@@ -37,7 +42,7 @@ import '../styles/global.css';
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={ogImage} />
 
-    <meta name="robots" content="index, follow" />
+    <meta name="robots" content={noindex ? 'noindex, follow' : 'index, follow'} />
     <link rel="canonical" href={canonical} />
     <link rel="alternate" type="application/rss+xml" title="Plannotator Blog" href="/rss.xml" />
 

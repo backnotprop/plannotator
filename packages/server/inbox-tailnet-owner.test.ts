@@ -33,8 +33,6 @@ const MAGIC = "macbook-pro.tail0000.ts.net";
 const OWNER = "ramos@example.com";
 const GUEST = "guest@example.com";
 const KEY = "sk-phone-0123456789abcd";
-/** A 1 × 1 PNG: an image a reply's Markdown can show. */
-const PNG_1PX = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
 type Caller = "local" | "owner" | "guest";
 
@@ -118,6 +116,8 @@ async function world(options: WorldOptions = {}) {
     binaryPath: null,
     version: "0.28.10",
     phones: options.phones ?? true,
+    // Pair a phone's step 1 reads this computer through these; scripted, so no real probe runs.
+    pairingProbes: { lanAddress: () => null, network: () => null, which: () => null, firewall: () => "unknown" },
     tailscale: ts.run,
     feedbackUrl: "http://127.0.0.1:9/feedback",
     ...(options.board === undefined ? {} : { board: options.board }),
@@ -190,7 +190,8 @@ const answerOf = async (response: Response): Promise<[number, string | undefined
   const text = await response.text();
   let code: string | undefined;
   try {
-    code = (JSON.parse(text) as Json).code;
+    // An error's code; a success may carry a field of that name (a link code's digits) that is no refusal.
+    code = response.status >= 400 ? (JSON.parse(text) as Json).code : undefined;
   } catch {
     code = undefined;
   }
@@ -232,16 +233,8 @@ const BLOCKED: { name: string; call: (w: World) => Call; local: [number, string?
   { name: "bridge/event", call: (w) => ({ method: "POST", path: "/api/inbox/bridge/event", headers: { Authorization: `Bearer ${w.inbox.token}` } }), local: [403, "origin_not_allowed"] },
   { name: "the door: health", call: () => ({ path: "/api/inbox/device/health" }), local: [403, "origin_not_allowed"] },
   { name: "the door: pair", call: () => ({ path: "/api/inbox/device/pair", body: { code: "000000" } }), local: null },
-  { name: "POST pairing", call: () => ({ path: "/api/inbox/pairing", body: {} }), local: "answers" },
-  { name: "GET pairing", call: () => ({ path: "/api/inbox/pairing" }), local: "answers" },
-  { name: "GET pairing/checks", call: () => ({ path: "/api/inbox/pairing/checks" }), local: null },
-  { name: "POST tailnet: the door's switch", call: () => ({ path: "/api/inbox/tailnet", body: { on: true } }), local: null },
-  { name: "POST lan: the Wi-Fi's switch", call: () => ({ path: "/api/inbox/lan", body: { on: true } }), local: null },
-  { name: "settings tailscale on", call: () => ({ path: "/api/inbox/settings", body: { tailscale: { on: true } } }), local: null },
   { name: "POST open-in: launching an app", call: () => ({ path: "/api/inbox/open-in", body: { attachment_id: "att_x", app_id: "vscode" } }), local: null },
   { name: "GET open-in/apps", call: () => ({ path: "/api/inbox/open-in/apps" }), local: "answers" },
-  { name: "POST machines/offer", call: () => ({ path: "/api/inbox/machines/offer", body: {} }), local: null },
-  { name: "POST machines/link", call: () => ({ path: "/api/inbox/machines/link", body: { link: "plannotator://link" } }), local: null },
 ];
 
 describe("what the approval opened, by caller", () => {
@@ -261,6 +254,19 @@ describe("what the approval opened, by caller", () => {
       });
     }
   }
+
+  test("the settings model gives the person's own name to the owner, never to a guest", async () => {
+    const w = await world({ config: { displayName: "Dana" } });
+    const read = async (caller: Caller) => (await (await call(w, caller, { path: "/api/inbox/settings" })).json()) as Json;
+    expect((await read("local")).display_name).toBe("Dana");
+    expect((await read("owner")).display_name).toBe("Dana");
+    expect((await read("guest")).display_name).toBeUndefined();
+  });
+
+  test("the settings model has no name until one is set", async () => {
+    const w = await world();
+    expect(((await (await call(w, "local", { path: "/api/inbox/settings" })).json()) as Json).display_name).toBeNull();
+  });
 
   test("the settings model tells the page who it is, and shows a guest nothing of what closed", async () => {
     const w = await world();
@@ -365,7 +371,7 @@ describe("starting an agent is the owner's (a guest's Send never runs code on th
   });
 });
 
-describe("stopping or deleting an agent is the owner's (a guest never ends the owner's session)", () => {
+describe("stopping, deleting and waking a launched agent: every window's, a guest's included", () => {
   /** A launched thread whose session started: Stop and Delete have a session to act on. */
   async function launchedWorld(dataDir?: string) {
     const w = await world({ config: { inboxLaunch: { enabled: true } }, ...(dataDir ? { dataDir } : {}) });
@@ -392,29 +398,16 @@ describe("stopping or deleting an agent is the owner's (a guest never ends the o
     return { ...w, project, launched, stopped };
   }
 
-  test("Stop: a guest is refused and nothing is stopped; the owner over the tailnet and this computer stop it", async () => {
+  test("Stop and Delete: a guest, the owner over the tailnet and this computer each do it (owner ruling 2026-11-11)", async () => {
     const w = await launchedWorld();
-    const a = w.launched("a");
-    expect(await answerOf(await call(w, "guest", { path: `/api/inbox/launch/${a.id}/stop`, body: {} }))).toEqual([403, "owner_only"]);
-    // A stop is logged in the launch's folder: a refused one leaves none.
-    expect(existsSync(a.stopLog)).toBe(false);
-    expect((await call(w, "owner", { path: `/api/inbox/launch/${a.id}/stop`, body: {} })).status).toBe(200);
-    expect(readFileSync(a.stopLog, "utf8")).toContain(`stop sa:`);
-    const b = w.launched("b");
-    expect((await call(w, "local", { path: `/api/inbox/launch/${b.id}/stop`, body: {} })).status).toBe(200);
-    expect(readFileSync(b.stopLog, "utf8")).toContain(`stop sb:`);
-  });
-
-  test("Delete: a guest is refused and the launch is kept; the owner over the tailnet and this computer delete it", async () => {
-    const w = await launchedWorld();
-    const a = w.launched("a");
-    expect(await answerOf(await call(w, "guest", { path: `/api/inbox/launch/${a.id}/delete`, body: {} }))).toEqual([403, "owner_only"]);
-    expect(w.inbox.store.message(a.messageId)!.launch!.deleted_at).toBeUndefined();
-    expect((await call(w, "owner", { path: `/api/inbox/launch/${a.id}/delete`, body: {} })).status).toBe(200);
-    expect(w.inbox.store.message(a.messageId)!.launch!.deleted_at).toBeString();
-    const b = w.launched("b");
-    expect((await call(w, "local", { path: `/api/inbox/launch/${b.id}/delete`, body: {} })).status).toBe(200);
-    expect(w.inbox.store.message(b.messageId)!.launch!.deleted_at).toBeString();
+    for (const caller of CALLERS) {
+      const a = w.launched(`s-${caller}`);
+      expect([caller, (await call(w, caller, { path: `/api/inbox/launch/${a.id}/stop`, body: {} })).status]).toEqual([caller, 200]);
+      expect(readFileSync(a.stopLog, "utf8")).toContain(`stop ss-${caller}:`);
+      const b = w.launched(`d-${caller}`);
+      expect([caller, (await call(w, caller, { path: `/api/inbox/launch/${b.id}/delete`, body: {} })).status]).toEqual([caller, 200]);
+      expect(w.inbox.store.message(b.messageId)!.launch!.deleted_at).toBeString();
+    }
   });
 
   type Launched = { id: string; messageId: string; stopLog: string };
@@ -428,117 +421,14 @@ describe("stopping or deleting an agent is the owner's (a guest never ends the o
   }
   const reply = (w: World, caller: Caller, messageId: string, key: string, extra: Json = {}) =>
     call(w, caller, { path: `/api/inbox/messages/${messageId}/reply`, body: { idempotency_key: key, words: "One more thing.", ...extra } });
-  const replyId = async (response: Response) => ((await response.json()) as { reply: { id: string } }).reply.id;
 
-  test("a guest's reply to a stopped session is kept for it but never starts it again; the owner's reply does", async () => {
+  test("a guest's reply to a stopped session starts it again, as the owner's does", async () => {
     const w = await launchedWorld();
     const a = w.stopped("a");
     const b = w.stopped("b");
-    const guests = await reply(w, "guest", a.messageId, "r-guest");
-    expect(guests.status).toBe(200);
+    expect((await reply(w, "guest", a.messageId, "r-guest")).status).toBe(200);
     expect((await reply(w, "owner", b.messageId, "r-owner")).status).toBe(200);
-    // The owner's reply starts its session again.
-    expect(await waitFor(() => respawned(b))).toBe(true);
-    // The guest's, written at the same moment, did not; it waits for the session like any reply, marked as the guest's.
-    expect(respawned(a)).toBe(false);
-    expect(w.inbox.store.pendingReplies("sess-a").map((m) => [m.body, m.by_guest])).toEqual([["One more thing.", true]]);
-    expect(w.inbox.store.pendingReplies("sess-b").map((m) => m.by_guest)).toEqual([undefined]);
-    expect(w.inbox.store.message(await replyId(guests))!.by_guest).toBe(true);
-  });
-
-  test("a guest's reply in another thread the session started never starts it again; the owner's does", async () => {
-    const w = await launchedWorld();
-    const a = w.stopped("a");
-    const b = w.stopped("b");
-    // Each session asked something in a thread of its own, beside the launched one.
-    const side = (key: string) =>
-      w.inbox.store.sendMessage({ project_id: w.project.id, author: { kind: "agent", host: "claude-code", session: `sess-${key}`, name: "Claude Code" }, body: "Which port?", thread: "Side question" }).message.id;
-    expect((await reply(w, "guest", side("a"), "r-guest")).status).toBe(200);
-    expect((await reply(w, "owner", side("b"), "r-owner")).status).toBe(200);
-    // Only the sweep sees a reply outside the launched thread: the owner's starts b.
-    expect(await waitFor(() => respawned(b))).toBe(true);
-    expect(respawned(a)).toBe(false);
-    expect(w.inbox.store.pendingReplies("sess-a").map((m) => m.by_guest)).toEqual([true]);
-  });
-
-  test("a guest's tag of a stopped session never starts it again; the owner's tag does", async () => {
-    const w = await launchedWorld();
-    const a = w.stopped("a");
-    const b = w.stopped("b");
-    // Each session wrote through MCP once (no wake), so a tag can name it while it is stopped.
-    for (const key of ["a", "b"]) {
-      w.inbox.store.sendMessage({ project_id: w.project.id, author: { kind: "agent", host: "claude-code", session: `sess-${key}`, name: "Claude Code" }, body: "Done with the build.", thread: `Note ${key}` });
-    }
-    // Another agent's thread, where the person tags them.
-    const other = (n: number) =>
-      w.inbox.store.sendMessage({ project_id: w.project.id, author: { kind: "agent", host: "codex", session: "ses-other", name: "Codex" }, body: `Ready for review ${n}.`, thread: `Review ${n}` }).message.id;
-    const tag = (key: string) => ({ words: `@Claude look at this ${key}.`, tags: [{ host: "claude-code", session: `sess-${key}` }] });
-    expect((await reply(w, "guest", other(1), "r-guest", tag("a"))).status).toBe(200);
-    expect((await reply(w, "owner", other(2), "r-owner", tag("b"))).status).toBe(200);
-    expect(await waitFor(() => respawned(b))).toBe(true);
-    expect(respawned(a)).toBe(false);
-    expect(w.inbox.store.pendingReplies("sess-a", { tags: true }).map((m) => m.by_guest)).toEqual([true]);
-  });
-
-  test("the owner's reply that a guest's request writes again (its images captured on the guest's read) still starts the session", async () => {
-    const w = await launchedWorld();
-    // In its start grace for 2 more seconds: the owner's reply waits for the sweep after it.
-    const a = w.stopped("a", { startedAt: new Date(Date.now() - 58_000) });
-    writeFileSync(join(w.project.root, "shot.png"), Buffer.from(PNG_1PX, "base64"));
-    const owners = await reply(w, "local", a.messageId, "r-owner", { words: "This one: ![shot](shot.png)" });
-    expect(owners.status).toBe(200);
-    const id = await replyId(owners);
-    expect(w.inbox.store.message(id)!.inline_images ?? []).toHaveLength(0);
-    // A guest opens the thread: the image is captured then, and the owner's reply's line is written again.
-    expect((await call(w, "guest", { path: `/api/inbox/threads/${a.messageId}` })).status).toBe(200);
-    expect(await waitFor(() => (w.inbox.store.message(id)!.inline_images ?? []).length > 0, 3000)).toBe(true);
-    expect(respawned(a)).toBe(false);
-    // Still the owner's: once the grace is over, the sweep starts the session for it.
-    expect(w.inbox.store.message(id)!.by_guest).toBeUndefined();
-    expect(await waitFor(() => respawned(a))).toBe(true);
-  });
-
-  test("a guest's reply stays the guest's across an Inbox restart: the sweep after it never starts the session for it", async () => {
-    const before = await launchedWorld();
-    const a = before.stopped("a");
-    // b has not read its first message yet, so nothing starts it before the restart.
-    const b = before.stopped("b", { read: false });
-    const id = await replyId(await reply(before, "guest", a.messageId, "r-guest"));
-    expect((await reply(before, "local", b.messageId, "r-owner")).status).toBe(200);
-    before.inbox.stop();
-    servers.splice(servers.indexOf(before.inbox), 1);
-    const after = await launchedWorld(before.dataDir);
-    expect(after.inbox.store.message(id)!.by_guest).toBe(true);
-    // b reads its first message: the next sweep starts it for the owner's reply, and passes over a.
-    after.inbox.store.recordDelivery(b.messageId, { host: "claude-code", session: "sess-b" });
-    expect(await waitFor(() => respawned(b))).toBe(true);
-    expect(respawned(a)).toBe(false);
-  });
-
-  test("a guest's New message to a session just stopped is marked the guest's and never starts it again; the owner's does", async () => {
-    const w = await launchedWorld();
-    // New message goes only to a live session: each polled once, and after Stop its last polls still list it for a while.
-    const stoppedJustNow = async (key: string) => {
-      const a = w.stopped(key);
-      const poll = await fetch(`http://127.0.0.1:${w.inbox.port}/api/inbox/bridge/poll`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${w.inbox.token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ session: `sess-${key}`, host: "claude-code", project_path: w.project.root, waitMs: 0, busy: false, started_at: new Date().toISOString() }),
-      });
-      expect(poll.status).toBe(200);
-      expect((await call(w, "local", { path: `/api/inbox/launch/${a.id}/stop`, body: {} })).status).toBe(200);
-      return a;
-    };
-    const a = await stoppedJustNow("a");
-    const b = await stoppedJustNow("b");
-    const message = (caller: Caller, launch: Launched, session: string) =>
-      call(w, caller, { path: `/api/inbox/threads/${launch.messageId}/message`, body: { idempotency_key: `m-${session}`, body: "One more thing.", session } });
-    const guests = await message("guest", a, "sess-a");
-    expect(guests.status).toBe(200);
-    expect((await message("owner", b, "sess-b")).status).toBe(200);
-    expect(await waitFor(() => respawned(b))).toBe(true);
-    expect(respawned(a)).toBe(false);
-    expect(w.inbox.store.message(((await guests.json()) as { message: { id: string } }).message.id)!.by_guest).toBe(true);
+    expect(await waitFor(() => respawned(a) && respawned(b))).toBe(true);
   });
 
   test("a guest's reply to a deleted launch writes nothing in the launch's folder", async () => {
@@ -702,6 +592,83 @@ describe("a tagged machine: the login its allowlist names has every route the ow
   }
 });
 
+/**
+ * Parity (owner ruling 2026-11-11: "I want to use it the same way on my phone as I can on my computers"): every
+ * route the audit found treated the owner over the tailnet differently from this computer, or a tailnet guest
+ * differently for no reason, answers the owner exactly as it answers this computer. `guest`: what a login the allow
+ * list added gets (`"same"`: the same answer too). Each caller gets a world of its own, so a write by one never
+ * changes what the next one is answered. A row that fails here is a limit coming back.
+ */
+const projectOf = (w: World) => w.inbox.store.ensureProject({ name: "web", root: join(w.dataDir, "web") }).id;
+const UNKNOWN_MACHINE = `ibx_01K${"0".repeat(22)}N`;
+const PARITY: { name: string; call: (w: World) => Call; guest: [number, string] | "same"; world?: WorldOptions; shows?: true }[] = [
+  { name: "Pair a phone: GET pairing", call: () => ({ path: "/api/inbox/pairing" }), guest: REFUSED },
+  { name: "Pair a phone: POST pairing (the code)", call: () => ({ path: "/api/inbox/pairing", body: {} }), guest: REFUSED },
+  { name: "Pair a phone: GET pairing/checks (step 1)", call: () => ({ path: "/api/inbox/pairing/checks" }), guest: REFUSED },
+  { name: "the phone's Tailscale way: POST tailnet", call: () => ({ path: "/api/inbox/tailnet", body: { on: false } }), guest: REFUSED },
+  { name: "the phone's Wi-Fi way: POST lan", call: () => ({ path: "/api/inbox/lan", body: { on: false } }), guest: REFUSED },
+  { name: "Over your tailnet: Keep it on at every start", call: () => ({ path: "/api/inbox/settings", body: { tailscale: { on: true } } }), guest: REFUSED },
+  { name: "Link a machine: POST machines/offer (the code)", call: () => ({ path: "/api/inbox/machines/offer", body: {} }), guest: [403, "owner_only"] },
+  { name: "Link a machine: POST machines/link", call: () => ({ path: "/api/inbox/machines/link", body: { link: "plannotator://link" } }), guest: [403, "owner_only"] },
+  { name: "Unlink: POST machines/:id/unlink", call: () => ({ path: `/api/inbox/machines/${UNKNOWN_MACHINE}/unlink`, body: {} }), guest: [403, "owner_only"] },
+  { name: "the sound dialog's claim", call: () => ({ path: "/api/inbox/sound/dialog", body: {} }), guest: "same", world: { config: { inboxSound: { dialogDueFor: "0.28.10" } } }, shows: true },
+  { name: "the list options dialog's claim", call: () => ({ path: "/api/inbox/list-intro", body: {} }), guest: "same" },
+  { name: "the agent note's claim", call: () => ({ path: "/api/inbox/reveal", body: { id: "agent_note", agents: ["codex"] } }), guest: "same", shows: true },
+  { name: "What's new", call: () => ({ path: "/api/inbox/whats-new?version=0.28.12" }), guest: "same" },
+  { name: "What's new: the releases panel", call: () => ({ path: "/api/inbox/whats-new/releases" }), guest: "same" },
+  { name: "a project's picture: GET", call: (w) => ({ path: `/api/inbox/projects/${projectOf(w)}/picture?logo=1` }), guest: "same" },
+  { name: "a project's picture: Set picture… (take it away)", call: (w) => ({ path: `/api/inbox/projects/${projectOf(w)}/picture`, body: { picture: null } }), guest: "same" },
+  { name: "settings float_drafts", call: () => ({ path: "/api/inbox/settings", body: { float_drafts: { on: true } } }), guest: "same" },
+  { name: "settings mark_read_warning", call: () => ({ path: "/api/inbox/settings", body: { mark_read_warning: { on: false } } }), guest: "same" },
+];
+
+describe("the owner over the tailnet gets what this computer gets", () => {
+  for (const row of PARITY) {
+    test(row.name, async () => {
+      const answers: Record<Caller, [number, string | undefined]> = {} as never;
+      const shown: Record<Caller, unknown> = {} as never;
+      for (const caller of CALLERS) {
+        const w = await world(row.world);
+        const response = await call(w, caller, row.call(w));
+        shown[caller] = row.shows ? ((await response.clone().json()) as Json).show : undefined;
+        answers[caller] = await answerOf(response);
+      }
+      expect(answers.local[0]).toBeLessThan(500);
+      expect(answers.owner).toEqual(answers.local);
+      expect(answers.guest).toEqual(row.guest === "same" ? answers.local : row.guest);
+      // A one-time dialog's claim: this computer's page and the owner's other devices get it, a guest's page never.
+      if (row.shows) expect(shown).toEqual({ local: true, owner: true, guest: false });
+    });
+  }
+
+  test("a paired phone's door reads What's new and a project's picture as the window does", async () => {
+    const w = await world();
+    const base = `http://127.0.0.1:${w.inbox.port}`;
+    const post = (path: string, body: Json = {}) => fetch(`${base}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    expect((await post("/api/inbox/tailnet", { on: true })).status).toBe(200);
+    const offer = (await (await post("/api/inbox/pairing")).json()) as Json;
+    const token = ((await (await post("/api/inbox/device/pair", { code: offer.offer.code, name: "iPhone", platform: "ios" })).json()) as Json).token as string;
+    const doorPort = (JSON.parse(readFileSync(join(w.dataDir, "inbox", "inbox.json"), "utf8")) as Json).tailnet.door_port as number;
+    const door = (route: string) => fetch(`http://127.0.0.1:${doorPort}/api/inbox/device/${route}`, { headers: { Authorization: `Bearer ${token}`, Host: `${MAGIC}:8443`, "X-Forwarded-Proto": "https" } });
+    for (const route of ["whats-new?version=0.28.12", "whats-new/releases", `projects/${projectOf(w)}/picture?logo=1`]) {
+      const window = await answerOf(await fetch(`${base}/api/inbox/${route}`));
+      expect([route, ...(await answerOf(await door(route)))]).toEqual([route, ...window]);
+    }
+  });
+
+  test("the settings model: the owner's page reads what this computer's reads, but where it is", async () => {
+    const w = await world();
+    const read = async (caller: Caller) => (await (await call(w, caller, { path: "/api/inbox/settings" })).json()) as Json;
+    const local = await read("local");
+    const owner = await read("owner");
+    expect([owner.via, owner.guest]).toEqual(["tailnet", false]);
+    // The voice line names the computer for a page that is not on it, and the line's timer counts down between the
+    // two reads; nothing else differs.
+    const strip = (model: Json) => ({ ...model, via: null, voice: { ...model.voice, computer: null }, reveal: { ...model.reveal, again_in: null } });
+    expect(strip(owner)).toEqual(strip(local));
+  });
+});
+
 describe("what stays refused for everyone over the tailnet", () => {
   for (const row of BLOCKED) {
     test(row.name, async () => {
@@ -716,12 +683,6 @@ describe("what stays refused for everyone over the tailnet", () => {
       else if (row.local) expect(await answerOf(await call(w, "local", row.call(w)))).toEqual(row.local as [number, string]);
     });
   }
-
-  test("turning the tailnet switch off stays as it was; turning it on does not", async () => {
-    const w = await world();
-    expect(await answerOf(await call(w, "owner", { path: "/api/inbox/settings", body: { tailscale: { on: true } } }))).toEqual(REFUSED);
-    expect(w.config().inboxTailscale).toBe(true);
-  });
 });
 
 describe("another site never rides the owner's login", () => {
@@ -839,8 +800,10 @@ describe("the login header counts only on the tailnet listener", () => {
 describe("a linked machine gains none of it", () => {
   test("no opened route is a door route or a forwardable write", () => {
     const names = doorRouteNames().join("\n");
-    for (const word of ["update", "agents", "settings", "cards", "voice"]) expect(names).not.toContain(` ${word}`);
-    for (const route of ["update", "update/check", "update/snooze", "agents", "agents/notes", "agents/seen", "settings", "cards/marks", "voice/key"]) {
+    for (const word of ["agents", "settings", "cards", "voice"]) expect(names).not.toContain(` ${word}`);
+    // A linked machine's `update` is the one exception, and it is not on the allowlist: the forward refuses it (below), and only a machine's token reaches it.
+    expect(names.split("\n").filter((name) => name.includes("update"))).toEqual(["POST update"]);
+    for (const route of ["update/check", "update/snooze", "agents", "agents/notes", "agents/seen", "settings", "cards/marks", "voice/key"]) {
       expect([route, doorWriteKind(route)]).toEqual([route, null]);
     }
   });
@@ -863,7 +826,11 @@ describe("a linked machine gains none of it", () => {
     const machine = ((await linked.json()) as Json).machine.id as string;
     await waitOnline(w, machine);
 
-    for (const route of ["update", "update/check", "update/snooze", "agents", "agents/notes", "settings", "cards/marks", "voice/key"]) {
+    // `update` has a window route of its own, so the forward itself refuses it, read and write.
+    const update = `/api/inbox/m/${machine}/update`;
+    expect(await answerOf(await call(w, "owner", { path: update }))).toEqual([404, "not_found"]);
+    expect(await answerOf(await call(w, "owner", { path: update, body: { auto_update: true } }))).toEqual([404, "not_found"]);
+    for (const route of ["update/check", "update/snooze", "agents", "agents/notes", "settings", "cards/marks", "voice/key"]) {
       const path = `/api/inbox/m/${machine}/${route}`;
       expect([route, ...(await answerOf(await call(w, "owner", { path })))]).toEqual([route, 404, "device_route_not_found"]);
       expect([route, ...(await answerOf(await call(w, "owner", { path, body: { key: KEY, auto_update: true, reach: true, agent: "codex" } })))]).toEqual([route, 404, "not_found"]);

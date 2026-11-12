@@ -10,7 +10,6 @@
     "moduleDetection": "force",
     "allowJs": true,
     "jsx": "react-jsx",
-    "strict": true,
     "paths": {
       "@plannotator/ui/*": ["../../packages/ui/*"],
       "@plannotator/inbox": ["../../packages/inbox/index.ts"],

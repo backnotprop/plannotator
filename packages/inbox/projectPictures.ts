@@ -56,16 +56,17 @@ export function useKnownProjects(): number {
 }
 
 /**
- * The project picture's address on this Inbox, or null when there is nothing to ask for: no picture set and both
- * picture switches off, or a linked machine's project (its pictures stay on that machine). The query is only the
- * browser's cache key: it changes when a picture is set or taken away, or a switch moves. Which pictures the Inbox
- * may use it reads from the saved look itself.
+ * The project picture's address, or null when there is nothing to ask for: no picture set and both picture switches
+ * off. A linked machine's project asks that machine, through this Inbox's forward (`inboxUrl`). `v` is the browser's
+ * cache key: it changes when a picture is set or taken away, or a switch moves. `logo=1` asks for the repo's logo
+ * whatever the saved look says, so a look drawn before it is saved (the list dialog's Detailed card) shows its logos,
+ * and its picture is the one the list then keeps in the cache. GitHub pictures the Inbox takes from the saved look only.
  */
 export function projectPictureUrl(projectId: string, marks: MarksChoice): string | null {
-  if (!projectId || machineOf(projectId)) return null;
+  if (!projectId) return null;
   const set = projects.get(projectId)?.picture;
   if (set === undefined && !marks.logo && !marks.github) return null;
-  return inboxUrl(`/projects/${encodeURIComponent(projectId)}/picture`, `v=${set ?? 0}-${marks.logo ? 1 : 0}${marks.github ? 1 : 0}`);
+  return inboxUrl(`/projects/${encodeURIComponent(projectId)}/picture`, `v=${set ?? 0}-${marks.logo ? 1 : 0}${marks.github ? 1 : 0}${marks.logo ? '&logo=1' : ''}`, machineOf(projectId));
 }
 
 /** Tests only. */

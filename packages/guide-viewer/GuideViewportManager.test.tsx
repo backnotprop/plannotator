@@ -338,6 +338,73 @@ describe('GuideViewportProvider window', () => {
     expect(mountedIds()).not.toContain(ids[5]);
   });
 
+  /** End pressed and its scroll come to rest at the end of a scroll `height()` px tall. */
+  async function endPressed(height: () => number) {
+    const scroller = await renderInScroller();
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, get: height });
+    const frame = manualFrames();
+    DrivenIntersectionObserver.current!.deliver((id) => ids.slice(0, 5).includes(id));
+    await frame();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'End' }));
+    await new Promise((done) => setTimeout(done, 40));
+    await scrollTo(scroller, height() - 1_000);
+    DrivenIntersectionObserver.current!.deliver((id) => ids.slice(35).includes(id));
+    // Moving, one still frame, the stop.
+    for (let i = 0; i < 3; i++) await frame();
+    return { scroller, frame };
+  }
+
+  // Guards End on a long review: the files at the end draw taller or shorter than their estimates after the browser
+  // has aimed, and the view was left short of the end (the Inbox's review of 300 files, 50 to 100 px).
+  test.skipIf(!hasDom)('after End the view stays at the end while the files there change height', async () => {
+    let height = 16_000;
+    const { scroller, frame } = await endPressed(() => height);
+    expect(scroller.scrollTop).toBe(15_000);
+    height = 16_058;
+    await frame();
+    expect(scroller.scrollTop).toBe(15_058);
+    height = 16_066;
+    await frame();
+    expect(scroller.scrollTop).toBe(15_066);
+  });
+
+  // Guards the person's own scroll: End's hold never pulls them back down.
+  test.skipIf(!hasDom)('after End, a scroll back up with the wheel is left alone', async () => {
+    let height = 16_000;
+    const { scroller, frame } = await endPressed(() => height);
+    window.dispatchEvent(new Event('wheel'));
+    scroller.scrollTop = 14_600;
+    height = 16_058;
+    for (let i = 0; i < 3; i++) await frame();
+    expect(scroller.scrollTop).toBe(14_600);
+  });
+
+  // Guards a scrollbar drag, which has no event: the view goes up while the scroll is as tall as it was.
+  test.skipIf(!hasDom)('after End, a scroll back up with the scrollbar is left alone', async () => {
+    let height = 16_000;
+    const { scroller, frame } = await endPressed(() => height);
+    await frame();
+    scroller.scrollTop = 14_600;
+    await frame();
+    height = 16_058;
+    for (let i = 0; i < 3; i++) await frame();
+    expect(scroller.scrollTop).toBe(14_600);
+  });
+
+  // Guards a key that did something else (a caret brought into view): the reader is not thrown to the end.
+  test.skipIf(!hasDom)('End that leaves the view more than a view from the end holds nothing', async () => {
+    const scroller = await renderInScroller();
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, get: () => 16_000 });
+    const frame = manualFrames();
+    DrivenIntersectionObserver.current!.deliver((id) => ids.slice(0, 5).includes(id));
+    await frame();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'End' }));
+    await new Promise((done) => setTimeout(done, 40));
+    await scrollTo(scroller, 300);
+    for (let i = 0; i < 5; i++) await frame();
+    expect(scroller.scrollTop).toBe(300);
+  });
+
   test.skipIf(!hasDom)('End that moves nothing (a text field has it) does not hold the window up', async () => {
     await renderInScroller();
     const frame = manualFrames();

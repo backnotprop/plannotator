@@ -222,6 +222,9 @@ async function moreUnreadItem(): Promise<HTMLElement | null> {
   return document.querySelector<HTMLElement>('[data-thread-menu] [data-thread-unread-item]');
 }
 
+/** The open ⋯ menu's Mark read item, or null. */
+const moreReadItem = () => document.querySelector<HTMLElement>('[data-thread-menu] [data-thread-read-item]');
+
 /** After Mark unread: the thread closed, the row back in New and bold, the toast up, nothing written to the thread. */
 async function expectBackInNew(threadId: string, messagesBefore: number) {
   expect(posted.at(-1)!.path).toBe(`/api/inbox/threads/${threadId}/mark-unread`);
@@ -234,18 +237,16 @@ async function expectBackInNew(threadId: string, messagesBefore: number) {
   expect((await threadOf(threadId)).thread.messages.length).toBe(messagesBefore);
 }
 
-test.skipIf(!hasDom)("a thread read by opening it: the header's Mark read is Mark unread, ⋯ More does not repeat it, E stays idle, and Undo reads it again", async () => {
+test.skipIf(!hasDom)("a thread read by opening it: ⋯ More offers Mark unread and no Mark read, E stays idle, and Undo reads it again", async () => {
   const id = ids.news[0]!;
   // Looked at before this window loads: it is drawn in Quiet, not held in New.
   await loopback(`/api/inbox/threads/${id}/seen`, 'POST', '{}');
   expect(await serverSection(id)).toBe('quiet');
   await renderApp(`#thread=${id}`);
-  await until(() => !!head()!.querySelector('[data-mark-unread]'), 'Mark unread in the header');
-  expect(head()!.querySelector('[data-mark-read]')).toBeNull();
-  const button = head()!.querySelector<HTMLButtonElement>('[data-mark-unread]')!;
-  expect(button.disabled).toBe(false);
-  // The header's button is already on screen: ⋯ More does not offer it twice.
-  expect(await moreUnreadItem()).toBeNull();
+  await until(() => !!head()?.querySelector('[data-thread-more]'), 'the header');
+  expect(await moreUnreadItem()).not.toBeNull();
+  // Nothing waits here: no Mark read beside it.
+  expect(moreReadItem()).toBeNull();
   await press(head()!.querySelector<HTMLElement>('[data-thread-more]')!);
   await until(() => !document.querySelector('[data-thread-menu]'), 'the ⋯ menu to close');
   // E is Mark read's key: it does nothing on a thread nothing waits in, as before.
@@ -256,6 +257,7 @@ test.skipIf(!hasDom)("a thread read by opening it: the header's Mark read is Mar
   expect(posted.length).toBe(writes);
 
   const messages = (await threadOf(id)).thread.messages.length;
+  const button = (await moreUnreadItem())!;
   await act(async () => button.click());
   await expectBackInNew(id, messages);
   await act(async () => {
@@ -267,21 +269,23 @@ test.skipIf(!hasDom)("a thread read by opening it: the header's Mark read is Mar
   expect(typeof posted.at(-1)!.body.through_seq).toBe('number');
 });
 
-test.skipIf(!hasDom)("a plain update opened from New, its row held in New: the header's button is Mark unread (the owner, 2026-11-02), which closes it and leaves it unread", async () => {
+test.skipIf(!hasDom)("a plain update opened from New, its row held in New: ⋯ More's Mark unread (the owner, 2026-11-02) closes it and leaves it unread", async () => {
   const id = ids.news[0]!;
   expect(await serverSection(id)).toBe('new');
-  await renderApp(`#thread=${id}`);
+  // Opened from the list, as a person opens it. Opened by address, the list's first read could land after the look
+  // and draw the row in Quiet, never held in New, so the header's button raced the read (a flaky failure).
+  await renderList(id);
+  await until(() => sectionOfRow(id) === 'new', 'the row in New');
+  await act(async () => rowButton(id)!.click());
+  await until(() => !!head(), 'the thread header');
+  await until(() => posted.some((p) => p.path.endsWith('/seen')), 'the look sent');
   await until(async () => (await serverSection(id)) === 'quiet', 'the look');
-  // Held in New (held.ts), read on the server: the header says Mark unread, not Mark read (v0.28.45 and before:
-  // Mark read, with Mark unread only in ⋯ More). Labels compared as text: an action label, pinned on purpose.
-  await until(() => sectionOfRow(id) === 'new' && head()!.querySelector('[data-mark-unread]')?.getAttribute('aria-label') === 'Mark unread', 'Mark unread in the header');
-  expect(head()!.querySelector('[data-mark-read]') === null).toBe(true);
-  // The header's button is on screen: ⋯ More does not offer it twice.
-  expect((await moreUnreadItem()) === null).toBe(true);
-  await press(head()!.querySelector<HTMLElement>('[data-thread-more]')!);
-  await until(() => !document.querySelector('[data-thread-menu]'), 'the ⋯ menu to close');
+  // Held in New (held.ts), read on the server: ⋯ More offers Mark unread.
+  await until(() => sectionOfRow(id) === 'new', 'the row held in New');
   const messages = (await threadOf(id)).thread.messages.length;
-  await act(async () => head()!.querySelector<HTMLButtonElement>('[data-mark-unread]')!.click());
+  const item = await moreUnreadItem();
+  expect(item === null).toBe(false);
+  await act(async () => item!.click());
   await expectBackInNew(id, messages);
   // It stays unread: nothing looks at it again.
   await act(async () => {
@@ -323,13 +327,13 @@ test.skipIf(!hasDom)("the row's hover action toggles: Mark read on a row that wa
   expect(rowButton(id)!.classList.contains('ib-u')).toBe(true);
 });
 
-test.skipIf(!hasDom)('a thread marked read keeps its pressed Read button; ⋯ More marks it unread, its question still set aside', async () => {
+test.skipIf(!hasDom)('a thread marked read: ⋯ More offers Move back to the top and Mark unread, which marks it unread, its question still set aside', async () => {
   const id = ids.waiting;
   await loopback(`/api/inbox/threads/${id}/read`, 'POST', '{}');
   await renderApp(`#thread=${id}`);
-  await until(() => head()!.querySelector('[data-mark-read]')?.getAttribute('aria-pressed') === 'true', 'the pressed Read button');
-  expect(head()!.querySelector('[data-mark-unread]')).toBeNull();
+  await until(() => !!head()?.querySelector('[data-thread-more]'), 'the header');
   const item = await moreUnreadItem();
+  expect(document.querySelector('[data-thread-menu] [data-thread-move-back-item]')).not.toBeNull();
   expect(item).not.toBeNull();
   const messages = (await threadOf(id)).thread.messages.length;
   await act(async () => item!.click());

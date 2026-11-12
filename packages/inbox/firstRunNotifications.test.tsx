@@ -59,12 +59,12 @@ const posts: { path: string; body: Record<string, unknown> }[] = [];
 
 const NOTE = '<!-- plannotator-inbox:start v1 -->\n## Plannotator Inbox\n<!-- plannotator-inbox:end -->';
 const CODEX: InboxAgentRow = {
-  id: 'codex',
-  label: 'Codex',
+  id: 'qwen',
+  label: 'Qwen Code',
   detected: true,
   reach: { kind: 'mcp', on: true, state: 'connected', path: null, locked: false, reason: null },
   reminder: null,
-  note: { agent: 'codex', path: '~/.codex/AGENTS.md', target: null, state: 'absent', create: false, created: false, reason: null },
+  note: { agent: 'qwen', path: '~/.qwen/QWEN.md', target: null, state: 'absent', create: false, created: false, reason: null },
 } as InboxAgentRow;
 const model = (over: Partial<InboxAgentsModel> = {}): InboxAgentsModel => ({
   agents: [CODEX],
@@ -145,7 +145,7 @@ beforeEach(async () => {
     if (method === 'POST') posts.push({ path, body: body ? (JSON.parse(body) as Record<string, unknown>) : {} });
     // This computer's agents: a canned model (the note dialog's candidates), and its answer.
     if (path.startsWith('/api/inbox/agents/notes')) {
-      agentsModel = { ...agentsModel, notes_offered: true, notes_asked: ['codex'] };
+      agentsModel = { ...agentsModel, notes_offered: true, notes_asked: ['qwen'] };
       return Response.json({ ...agentsModel, results: [] });
     }
     // Over the tailnet the agents are local only, as the real listener answers.
@@ -281,7 +281,7 @@ test.skipIf(!hasDom)('the note dialog first, never with the ask; after it closes
 }, 30_000);
 
 test.skipIf(!hasDom)('with nobody to ask about, the ask is on the first-run screen at once; Turn on asks the browser once and the line goes', async () => {
-  agentsModel = model({ notes_asked: ['codex'], notes_offered: true });
+  agentsModel = model({ notes_asked: ['qwen'], notes_offered: true });
   const el = await renderApp();
   await until(() => firstRunAsk(el) !== null, 'the first-run ask');
   expect(noteDialog()).toBeNull();
@@ -294,7 +294,7 @@ test.skipIf(!hasDom)('with nobody to ask about, the ask is on the first-run scre
 }, 30_000);
 
 test.skipIf(!hasDom)('Not now on the first-run screen is the same "Not now": it stays dismissed, and the list does not ask either', async () => {
-  agentsModel = model({ notes_asked: ['codex'], notes_offered: true });
+  agentsModel = model({ notes_asked: ['qwen'], notes_offered: true });
   const el = await renderApp();
   await until(() => firstRunAsk(el) !== null, 'the first-run ask');
   await act(async () => buttonIn(firstRunAsk(el)!, 'Not now')!.click());
@@ -312,7 +312,7 @@ test.skipIf(!hasDom)('Not now on the first-run screen is the same "Not now": it 
 
 test.skipIf(!hasDom)('blocked: the first-run screen says the first question cannot notify, quietly, with How to allow', async () => {
   permission = 'denied';
-  agentsModel = model({ notes_asked: ['codex'], notes_offered: true });
+  agentsModel = model({ notes_asked: ['qwen'], notes_offered: true });
   const el = await renderApp();
   await until(() => firstRunAsk(el) !== null, 'the blocked line');
   expect(firstRunAsk(el)!.getAttribute('data-notification-ask')).toBe('blocked');
@@ -345,7 +345,7 @@ test.skipIf(!hasDom)('the ask above the list waits for the note dialog too, and 
 
 test.skipIf(!hasDom)('moved: allowed at another port of this computer, the first-run screen says so with Allow', async () => {
   setUrl('http://localhost:61000/');
-  agentsModel = model({ notes_asked: ['codex'], notes_offered: true });
+  agentsModel = model({ notes_asked: ['qwen'], notes_offered: true });
   await loopback('/api/inbox/settings', 'POST', JSON.stringify({ notifications: { enabled: true, allowed_origin: 'http://localhost:52817' } }));
   const el = await renderApp();
   await until(() => firstRunAsk(el) !== null, 'the moved line');
@@ -356,7 +356,18 @@ test.skipIf(!hasDom)('moved: allowed at another port of this computer, the first
   expect(buttonIn(line, 'Allow')).toBeDefined();
 }, 30_000);
 
-test.skipIf(!hasDom)('over the tailnet: the first-run screen asks nothing (another device; the first run is set up on this computer)', async () => {
+test.skipIf(!hasDom)("the owner over the tailnet (their phone or another computer): the first-run screen asks as on this computer", async () => {
+  agentsModel = model({ notes_asked: ['qwen'], notes_offered: true });
+  settingsOver = (settings) => {
+    settings.via = 'tailnet';
+    settings.guest = false;
+  };
+  const el = await renderApp();
+  await until(() => firstRunAsk(el) !== null, 'the first-run ask');
+  expect(buttonIn(firstRunAsk(el)!, 'Turn on')).toBeDefined();
+}, 30_000);
+
+test.skipIf(!hasDom)("a tailnet guest's page: the first-run screen asks nothing (the first run is the owner's)", async () => {
   tailnetPage = true;
   settingsOver = (settings) => {
     settings.via = 'tailnet';

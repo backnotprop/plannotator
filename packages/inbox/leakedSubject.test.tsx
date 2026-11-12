@@ -110,22 +110,18 @@ async function until(check: () => boolean, what: string) {
 }
 
 test.skipIf(!hasDom)('an old leaked subject shows as its first line in the list row and the thread header', async () => {
-  window.location.hash = '';
+  window.location.hash = `#thread=${leaked}`;
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
     root.render(<InboxApp />);
   });
-  await until(() => host!.querySelector(`[data-row="${leaked}"]`) !== null, 'the list row');
-  const row = host.querySelector<HTMLElement>(`[data-row="${leaked}"]`)!;
-  const rowText = row.textContent ?? '';
-  expect(rowText).toContain(SHOWN);
-  const open = row.querySelector<HTMLButtonElement>('button[data-thread-id]')!;
-  act(() => open.click());
-  await until(() => host!.querySelector('.ib-subject') !== null, 'the thread header');
+  await until(() => host!.querySelector('.ib-subject') !== null && host!.querySelector(`[data-row="${leaked}"]`) !== null, 'the row and the thread');
+  const row = host.querySelector(`[data-row="${leaked}"]`)!;
+  expect(row.textContent).toContain(SHOWN);
   expect(host.querySelector('.ib-subject')!.textContent).toBe(SHOWN);
-  const everything = `${rowText}\n${host.textContent ?? ''}`;
+  const everything = host.textContent ?? '';
   expect(everything).not.toContain('</subject>');
   expect(everything).not.toContain('<parameter');
   expect(everything).not.toContain('ws-rollup-2026-10-20-a');

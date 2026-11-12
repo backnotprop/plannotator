@@ -16,6 +16,10 @@ import { CardPanel } from './CardPanel';
 import { CardMenu } from './CardMenu';
 import type { InboxToastModel } from '../components/Toast';
 import { shortcutAria } from '../shortcuts/hint';
+import { useShortcutScope } from '@plannotator/ui/shortcuts';
+import { isGridKey, laneStep, type GridKey } from '../gridMove';
+import { inboxBoardShortcuts } from '../shortcuts/grid.shortcuts';
+import { isComposingKey, keyTarget, modalOpen } from '../shortcuts/guards';
 import { inboxListShortcuts } from '../shortcuts/list.shortcuts';
 import { OnceButton } from './OnceButton';
 import { RefMark, markLabel } from './RefMark';
@@ -66,9 +70,6 @@ import {
 } from './model';
 import { newUuid } from '../uuid';
 import { noteOneTimeDialogShown } from '../snoozeIntro';
-import { cardStepLists, presenceClass, stepsCount, stepsDoneWords } from '../steps/model';
-import { StepsPie } from '../steps/StepsMarks';
-import type { InboxStepsWire } from '@plannotator/core/inbox-types';
 
 export type { BoardMove } from './model';
 
@@ -163,7 +164,7 @@ export function BoardPage(props: BoardPageProps) {
   const counts = boardCounts(cards);
   const drops = unseenDrops(cards);
   const [creating, setCreating] = useState<null | 'backlog' | 'send'>(null);
-  /** The Initiatives dialog (the filter's New initiative… or Edit initiatives…). */
+  /** The Tags dialog (the filter's New tag… or Edit tags…). */
   const [managing, setManaging] = useState<null | 'new' | 'edit'>(null);
   const [intro, setIntro] = useState(false);
   const claimed = useRef(false);
@@ -200,8 +201,8 @@ export function BoardPage(props: BoardPageProps) {
     try {
       const { card: changed } = await inboxApi.setCardInitiative(card.id, next);
       props.onChanged(changed);
-      const name = next ? (initiatives.find((i) => i.id === next)?.name ?? 'the initiative') : null;
-      setSaid(name ? `“${card.title}” is in ${name} now.` : `“${card.title}” is in no initiative now.`);
+      const name = next ? (initiatives.find((i) => i.id === next)?.name ?? 'the tag') : null;
+      setSaid(name ? `“${card.title}” is in ${name} now.` : `“${card.title}” has no tag now.`);
     } catch {
       setFailed(`“${card.title}” did not change. Try again.`);
     }
@@ -453,6 +454,36 @@ export function BoardPage(props: BoardPageProps) {
 
   // The lane marks: the state of each card's linked PR or issue, for the cards on screen only.
   const pageRef = useRef<HTMLElement | null>(null);
+  // Arrow keys between the cards (approval "inbox-keyboard-keys-2026-11-07", item 6; gridMove.ts), only while a card's
+  // button has focus: ↑ ↓ within its lane, ← → the nearest card in the lane beside, Home End the lane's ends. Enter
+  // opens and Shift+F10 opens its menu, as before.
+  const cardKey = {
+    when: (event: KeyboardEvent) => {
+      if (event.defaultPrevented || isComposingKey(event) || modalOpen() || !isGridKey(event.key)) return false;
+      const target = keyTarget(event);
+      return !!target && !!pageRef.current?.querySelector('.ib-bmain')?.contains(target) && target.matches('.ib-bcard[data-card-id] button[data-card-open]');
+    },
+    handle: (event: KeyboardEvent) => {
+      const main = pageRef.current?.querySelector('.ib-bmain');
+      const target = keyTarget(event);
+      if (!main || !target) return;
+      // The lists on screen that hold cards (the lanes, the Done or Cancelled list, a phone's groups), in order.
+      const shown = (el: Element) => el.getClientRects().length > 0;
+      const lists = [...main.querySelectorAll<HTMLElement>('[data-lane], .ib-blist')].filter(shown);
+      const buttons = lists.map((list) => [...list.querySelectorAll<HTMLElement>('.ib-bcard[data-card-id] button[data-card-open]')].filter(shown));
+      const lane = buttons.findIndex((cards) => cards.includes(target as HTMLElement));
+      if (lane < 0) return;
+      const to = laneStep(
+        buttons.map((cards) => cards.map((card) => card.getBoundingClientRect())),
+        { lane, card: buttons[lane]!.indexOf(target as HTMLElement) },
+        event.key as GridKey,
+      );
+      const next = to ? buttons[to.lane]?.[to.card] : null;
+      next?.focus({ preventScroll: true });
+      next?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    },
+  };
+  useShortcutScope({ scope: inboxBoardShortcuts, handlers: { move: cardKey, ends: cardKey } });
   // A narrow page (a narrow window, or a wide sidebar): the Project chip takes a row of its own under the
   // header, as on a phone, so it is never cut to a few letters.
   const [narrowHead, setNarrowHead] = useState(false);
@@ -472,8 +503,6 @@ export function BoardPage(props: BoardPageProps) {
     const mark = marks.get(card.id);
     return mark && mark.url === ref.url ? mark : { kind: ref.kind === 'issue' ? 'issue' : 'pr', ref: ref.ref, url: ref.url, state: 'unknown', title: null };
   };
-  // The checklist (approval "inbox-thread-steps", part 4): the lists of the card's threads, while the switch is on.
-  const stepsOf = (card: InboxCardWire) => cardStepLists(card.threads, model?.steps);
 
   const common: CardCommon = {
     visitLook: props.visitLook,
@@ -485,7 +514,6 @@ export function BoardPage(props: BoardPageProps) {
     menuKeys,
     rowOf: props.rowOf,
     markOf,
-    stepsOf,
     projectOfCard: (card) => {
       if (!cardsShowProject) return null;
       const name = names.get(card.project_id);
@@ -577,7 +605,6 @@ export function BoardPage(props: BoardPageProps) {
       phone={phone}
       now={now}
       rowOf={props.rowOf}
-      steps={stepsOf(open)}
       onClose={() => props.onOpenCard(null)}
       onMove={async (change, fromMenu) => void (await move(open, change, fromMenu))}
       dropAsk={dropAsk?.id === open.id ? dropAsk.n : 0}
@@ -770,8 +797,6 @@ interface CardCommon {
   rowOf: (threadId: string) => InboxListRow | null;
   /** The card's lane mark (its linked PR or issue), null when it links neither. */
   markOf: (card: InboxCardWire) => InboxCardMark | null;
-  /** The card's checklists, the latest first (none while the switch is off): the first one's pie is on the card. */
-  stepsOf: (card: InboxCardWire) => InboxStepsWire[];
   /** The card's project for its head row, or null while the Board shows one project's cards. */
   projectOfCard: (card: InboxCardWire) => { name: string; root: string } | null;
   onOpen: (card: InboxCardWire) => void;
@@ -932,7 +957,6 @@ function BoardCard({
   menuKeys,
   rowOf,
   markOf,
-  stepsOf,
   projectOfCard,
   onOpen,
   onOpenThread,
@@ -947,12 +971,8 @@ function BoardCard({
   const delivery = sent && card.sent ? (rowOf(card.sent.thread_id)?.delivery ?? null) : null;
   const age = cardAge(card.heard_at, now);
   const mark = markOf(card);
-  // The checklist's mark (approval "inbox-thread-steps", part 4): the pie alone, no count; the opened card has the number.
-  const plan = stepsOf(card)[0] ?? null;
-  const planCount = plan ? stepsCount(plan) : null;
-  const planWords = plan ? `Checklist: ${stepsDoneWords(plan)}` : null;
   const cardProject = projectOfCard(card);
-  const label = cardLabel(card, unread, now, cardProject?.name ?? null) + (sent ? `. Sent to ${sent}` : '') + (mark ? `. ${markLabel(mark)}` : '') + (planWords ? `. ${planWords}` : '');
+  const label = cardLabel(card, unread, now, cardProject?.name ?? null) + (sent ? `. Sent to ${sent}` : '') + (mark ? `. ${markLabel(mark)}` : '');
   const thread = line?.you ? youThread(card, rowOf) : null;
   // "Waiting on you" (columns v2, display only): a card before In review whose linked thread waits on the person.
   const waiting = line?.you ? null : waitingThread(card, rowOf);
@@ -965,13 +985,6 @@ function BoardCard({
   const meta = (
     <span className="ib-bc-meta">
       {mark && <RefMark mark={mark} />}
-      {plan && planCount && planWords && (
-        <Tip content={planWords}>
-          <span className={`ib-bc-plan ${presenceClass(plan.presence)}`} data-card-steps={planCount.text}>
-            <StepsPie done={planCount.done} total={planCount.total} size={13} />
-          </span>
-        </Tip>
-      )}
       <BoardProjectMark projectId={card.project_id} />
       <Tip content={owner === 'You' ? 'Your card' : owner}>
         <span className="ib-bc-who" data-host={card.agent?.kind === 'agent' ? card.agent.host : 'you'}>
@@ -1331,7 +1344,6 @@ function OpenedCard({
   phone,
   now,
   rowOf,
-  steps,
   onClose,
   onMove,
   dropAsk,
@@ -1350,7 +1362,6 @@ function OpenedCard({
   phone: boolean;
   now: number;
   rowOf: (threadId: string) => InboxListRow | null;
-  steps: readonly InboxStepsWire[];
   onClose: () => void;
   /** `fromMenu`: a Drop… the card's right-click menu started (its toast). */
   onMove: (move: BoardMove, fromMenu?: boolean) => Promise<void>;
@@ -1447,7 +1458,6 @@ function OpenedCard({
           : null
       }
       rowOf={rowOf}
-      steps={steps}
       phone={phone}
       now={now}
       onClose={onClose}

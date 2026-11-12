@@ -213,6 +213,8 @@ describe("Pi's launch host, against the fake pi", () => {
     expect(note.author).toMatchObject({ kind: "agent", host: "pi", session, name: "Pi" });
     expect(note.body).toStartWith("Pi asked something the Inbox can't show yet (“⚠️ Dangerous command: :::question - \\[ \\] Yes \\`rm -rf \\~\\` Allow? xxx");
     expect(note.body).toEndWith("…”); answered Cancel.");
+    // A dialog's note is no failed turn: nothing notifies for it.
+    expect(note.turn_error).toBeUndefined();
     // One line, no control or invisible character, no block of its own: it can never become a question.
     expect(note.body).not.toContain("\n");
     expect(note.body).not.toContain("‮");
@@ -227,6 +229,8 @@ describe("Pi's launch host, against the fake pi", () => {
     const note = await until("the error note in the thread", () => agentNotes(root)[0]);
     expect(note.author).toMatchObject({ kind: "agent", host: "pi", session, name: "Pi" });
     expect(note.body).toBe(`Pi's turn ended with an error: ${error}`);
+    // Marked for the window's notification ("Pi couldn't answer").
+    expect(note.turn_error).toBe(true);
     // The runs Pi retried say nothing of their own.
     await Bun.sleep(2_000);
     expect(agentNotes(root)).toHaveLength(1);

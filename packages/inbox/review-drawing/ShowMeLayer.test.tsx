@@ -50,6 +50,27 @@ function state(over: Partial<ShowMeState>): ShowMeState {
 const board = (el: HTMLElement) => el.querySelector('.shp-drawn-host')!.shadowRoot!.querySelector('.board') as HTMLElement;
 
 describe.skipIf(!hasDom)('Show me over the code review', () => {
+  test('a Show me from a board waits on the board and names the part, and the review\'s words stay', () => {
+    const props = { agent: 'Claude Code', onWords: () => {}, onSend: () => {}, onStop: () => {}, onClose: () => {} };
+    const part = { board: 'shp_a', name: 'The next attempt' };
+    const el = mount(<layer.ShowMeBox state={state({ drawing: true, box: { place: { file: null, lines: null, part }, words: 'why', turn: 'ask_1' } })} {...props} />);
+    expect(el.querySelector('[data-show-me-box]')!.hasAttribute('data-over-board')).toBe(true);
+    expect(el.querySelector('[data-show-me-place]')!.textContent).toBe('The next attempt');
+    expect(el.querySelector('[role="status"]')!.textContent).toContain('It opens here when it’s ready.');
+    act(() => root!.render(<layer.ShowMeBox state={state({ drawing: true, box: { place: { file: null, lines: null }, words: '', turn: 'ask_1' } })} {...props} />));
+    expect(el.querySelector('[data-show-me-box]')!.hasAttribute('data-over-board')).toBe(false);
+    expect(el.querySelector('[role="status"]')!.textContent).toContain('It opens over the review when it’s ready.');
+  });
+
+  test('before the thread\'s read names the agent, the box waits for the name: no stand-in word for it', () => {
+    const props = { onWords: () => {}, onSend: () => {}, onStop: () => {}, onClose: () => {} };
+    const drawing = state({ drawing: true, box: { place: { file: null, lines: null, part: { board: 'shp_a', name: 'The next attempt' } }, words: '', turn: 'ask_1' } });
+    const el = mount(<layer.ShowMeBox state={drawing} agent={null} {...props} />);
+    expect(el.querySelector('[data-show-me-box]')).toBeNull();
+    act(() => root!.render(<layer.ShowMeBox state={drawing} agent="Codex" {...props} />));
+    expect(el.querySelector('[role="status"]')!.textContent).toBe('Codex is drawing it. It opens here when it’s ready.');
+  });
+
   test('the box names the lines and sends; while drawn it offers Stop and no second Show me', () => {
     let sent = 0;
     let stopped = 0;
@@ -126,5 +147,20 @@ describe.skipIf(!hasDom)('Show me over the code review', () => {
     act(() => el.querySelector<HTMLButtonElement>('.ib-ov-fig-h button')!.click());
     expect(el.querySelector('.shp-drawn-host')).toBeNull();
     expect(el.querySelector('[data-overview-figure]')!.getAttribute('data-overview-figure')).toBe('hidden');
+  });
+  test("a chapter's picture is capped at 320px in the drawing's aspect, and Expand opens it full size until Escape", () => {
+    const wide = { ...PICTURE, width: 1200, height: 300 };
+    const el = mount(<figure.ChapterFigure drawn={wide} meta="drawn by Claude Code with the guide" onCode={() => {}} />);
+    const box = el.querySelector<HTMLElement>('.ib-ch-fig-box')!;
+    expect(box.style.maxHeight).toBe('320px');
+    expect(box.style.aspectRatio.replace(/\s/g, '')).toBe('1200/300');
+    // No Hide of its own: the chapter's Diagram header folds it.
+    expect(el.querySelector('[aria-expanded]')).toBeNull();
+    act(() => el.querySelector<HTMLButtonElement>('[data-chapter-figure-expand]')!.click());
+    const pop = document.querySelector('[data-chapter-figure-popout]')!;
+    expect(pop.matches('[data-popover-layer]')).toBe(true);
+    expect(pop.querySelector('.shp-drawn-host')).not.toBeNull();
+    act(() => void window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(document.querySelector('[data-chapter-figure-popout]')).toBeNull();
   });
 });

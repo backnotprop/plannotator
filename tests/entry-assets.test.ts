@@ -166,7 +166,7 @@ describe('review entry assets', () => {
   });
 
   // The Inbox window's guided review (PLAN step 5) reaches the guide chain and
-  // review-editor's diff renderer through GuidePane's one dynamic import of
+  // review-editor's diff renderer through lazyParts.tsx's one dynamic import of
   // `#guide-reader` (packages/inbox/guide/GuideReader.tsx). That import is
   // where the window's build splits (build/pack-inbox.ts), so the reader's
   // bytes load on the first Open, never at page load (#2593). A static import
@@ -197,8 +197,9 @@ describe('review entry assets', () => {
           : /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) ? [`${dir}/${entry.name}`] : [],
       );
     // Shape's board (its Code view is a guided review) is the same kind of lazy module: `#shape-board`. So is the
-    // Post to GitHub/GitLab dialog of a pull request's review (the review app's own): `#platform-post`.
-    const readers = ['packages/inbox/guide/GuideReader.tsx', 'packages/inbox/guide/SurfaceGuideReader.tsx', 'packages/inbox/shape/ShapeBoard.tsx', 'packages/inbox/guide/PlatformPost.tsx'];
+    // Post to GitHub/GitLab dialog of a pull request's review (the review app's own): `#platform-post`. The PR page's
+    // All files (the review app's tree and file view) rides the reader's chunk, re-exported by GuideReader.tsx.
+    const readers = ['packages/inbox/guide/GuideReader.tsx', 'packages/inbox/guide/SurfaceGuideReader.tsx', 'packages/inbox/shape/ShapeBoard.tsx', 'packages/inbox/guide/PlatformPost.tsx', 'packages/inbox/guide/PullRepoParts.tsx'];
     const eager = walk('packages/inbox').filter((path) => !readers.includes(path) && heavy.test(read(path)));
     expect(eager).toEqual([]);
     // The window's parts (lazyParts.tsx): fetched in idle time, each through its dynamic import only.

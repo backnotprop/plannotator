@@ -874,10 +874,11 @@
       "created": [
         "m6"
       ],
-      "lands_in": "t3",
+      "lands_in": "t4",
       "expect": {
         "sections": {
           "stopped": [
+            "t4",
             "t3"
           ],
           "holding": [],
@@ -892,6 +893,7 @@
         },
         "sections_exclude_archived": {
           "stopped": [
+            "t4",
             "t3"
           ],
           "holding": [],
@@ -906,8 +908,8 @@
         },
         "archived": [],
         "counts": {
-          "waiting": 2,
-          "unread": 2
+          "waiting": 3,
+          "unread": 3
         },
         "threads": {
           "t1": {
@@ -938,15 +940,27 @@
           "t3": {
             "section": "stopped",
             "unread": true,
-            "unseen": 2,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m5",
+            "questions": {
+              "m5/q-4c7ff6e3": "open",
+              "m5/q-24de5340": "open"
+            }
+          },
+          "t4": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 1,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
             "last": "m6",
             "questions": {
-              "m5/q-4c7ff6e3": "open",
-              "m5/q-24de5340": "open",
               "m6/q-eeceb667": "open"
             }
           }
@@ -968,6 +982,7 @@
       "expect": {
         "sections": {
           "stopped": [
+            "t4",
             "t3"
           ],
           "holding": [],
@@ -981,6 +996,7 @@
         },
         "sections_exclude_archived": {
           "stopped": [
+            "t4",
             "t3"
           ],
           "holding": [],
@@ -994,8 +1010,8 @@
         },
         "archived": [],
         "counts": {
-          "waiting": 3,
-          "unread": 3
+          "waiting": 4,
+          "unread": 4
         },
         "threads": {
           "t1": {
@@ -1028,15 +1044,27 @@
           "t3": {
             "section": "stopped",
             "unread": true,
-            "unseen": 2,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m5",
+            "questions": {
+              "m5/q-4c7ff6e3": "open",
+              "m5/q-24de5340": "open"
+            }
+          },
+          "t4": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 1,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
             "last": "m6",
             "questions": {
-              "m5/q-4c7ff6e3": "open",
-              "m5/q-24de5340": "open",
               "m6/q-eeceb667": "open"
             }
           }
@@ -1055,6 +1083,7 @@
       "expect": {
         "sections": {
           "stopped": [
+            "t4",
             "t3"
           ],
           "holding": [],
@@ -1069,6 +1098,7 @@
         },
         "sections_exclude_archived": {
           "stopped": [
+            "t4",
             "t3"
           ],
           "holding": [],
@@ -1083,8 +1113,8 @@
         },
         "archived": [],
         "counts": {
-          "waiting": 2,
-          "unread": 3
+          "waiting": 3,
+          "unread": 4
         },
         "threads": {
           "t1": {
@@ -1117,15 +1147,27 @@
           "t3": {
             "section": "stopped",
             "unread": true,
-            "unseen": 2,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m5",
+            "questions": {
+              "m5/q-4c7ff6e3": "open",
+              "m5/q-24de5340": "open"
+            }
+          },
+          "t4": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 1,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
             "last": "m6",
             "questions": {
-              "m5/q-4c7ff6e3": "open",
-              "m5/q-24de5340": "open",
               "m6/q-eeceb667": "open"
             }
           }
@@ -1142,6 +1184,7 @@
       "expect": {
         "sections": {
           "stopped": [
+            "t4",
             "t3"
           ],
           "holding": [],
@@ -1156,6 +1199,7 @@
         },
         "sections_exclude_archived": {
           "stopped": [
+            "t4",
             "t3"
           ],
           "holding": [],
@@ -1170,8 +1214,8 @@
         },
         "archived": [],
         "counts": {
-          "waiting": 2,
-          "unread": 3
+          "waiting": 3,
+          "unread": 4
         },
         "threads": {
           "t1": {
@@ -1204,15 +1248,27 @@
           "t3": {
             "section": "stopped",
             "unread": true,
-            "unseen": 2,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m5",
+            "questions": {
+              "m5/q-4c7ff6e3": "open",
+              "m5/q-24de5340": "open"
+            }
+          },
+          "t4": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 1,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
             "last": "m6",
             "questions": {
-              "m5/q-4c7ff6e3": "open",
-              "m5/q-24de5340": "open",
               "m6/q-eeceb667": "open"
             }
           }
@@ -1229,6 +1285,7 @@
       "expect": {
         "sections": {
           "stopped": [
+            "t4",
             "t3"
           ],
           "holding": [],
@@ -1243,6 +1300,7 @@
         },
         "sections_exclude_archived": {
           "stopped": [
+            "t4",
             "t3"
           ],
           "holding": [],
@@ -1257,8 +1315,8 @@
         },
         "archived": [],
         "counts": {
-          "waiting": 2,
-          "unread": 3
+          "waiting": 3,
+          "unread": 4
         },
         "threads": {
           "t1": {
@@ -1291,15 +1349,27 @@
           "t3": {
             "section": "stopped",
             "unread": true,
-            "unseen": 2,
+            "unseen": 1,
+            "read": false,
+            "archived": false,
+            "agent_after_archive": false,
+            "back_from_archive": false,
+            "last": "m5",
+            "questions": {
+              "m5/q-4c7ff6e3": "open",
+              "m5/q-24de5340": "open"
+            }
+          },
+          "t4": {
+            "section": "stopped",
+            "unread": true,
+            "unseen": 1,
             "read": false,
             "archived": false,
             "agent_after_archive": false,
             "back_from_archive": false,
             "last": "m6",
             "questions": {
-              "m5/q-4c7ff6e3": "open",
-              "m5/q-24de5340": "open",
               "m6/q-eeceb667": "open"
             }
           }

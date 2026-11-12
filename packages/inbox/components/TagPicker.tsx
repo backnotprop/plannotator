@@ -76,7 +76,7 @@ import type { TagMode } from '../api';
  * An iPhone with the keyboard up (`data-ib-keyboard-pin`): the thread's foot is a short box that scrolls, and the
  * picker drawn above the field opened behind the header, cut off (approval "inbox-reply-recipient", "fix with it").
  * There it is placed on the screen instead: as wide as the field, above it up to the header, never past it; with no
- * room above the field, over the box from Send's row up. Elsewhere it keeps its place in the page.
+ * room above the field, over the box from its row (Send's) up. Elsewhere it keeps its place in the page.
  */
 function useKeyboardSpot(): { ref: RefObject<HTMLDivElement | null>; style: CSSProperties | undefined } {
   const ref = useRef<HTMLDivElement | null>(null);
@@ -92,9 +92,9 @@ function useKeyboardSpot(): { ref: RefObject<HTMLDivElement | null>; style: CSSP
     }
     const headBottom = foot.closest('.ib-pane')?.querySelector('.ib-phead')?.getBoundingClientRect().bottom ?? 0;
     // Room above the field: there. With the keyboard leaving ~257 px the field starts under the header, so the list
-    // covers the box instead, from just above Send's row up to the header (as the recipient list does).
+    // covers the box instead, from just above the box's row (Send's) up to the header (as the recipient list does).
     const above = Math.round(field.top - 10);
-    const row = foot.querySelector('[data-reply-row] .ib-footbtns')?.getBoundingClientRect();
+    const row = foot.querySelector('[data-reply-row]')?.getBoundingClientRect();
     const top = above - headBottom - 8 >= 120 || !row ? above : Math.round(row.top - 6);
     const left = Math.round(field.left);
     const room = Math.max(88, top - headBottom - 8);
@@ -152,7 +152,7 @@ export function TagPicker({
                       onSelect(index);
                     }}
                   >
-                    <HostMark host={option?.host ?? null} big />
+                    <HostMark host={option?.host ?? null} big agent={person.id} />
                     <span className="ib-tg-ol">
                       <span className="ib-tg-on">{person.label}</span>
                       <span className="ib-tg-od">{blocked ? TAG_UPDATE_WORDS : person.detail}</span>
@@ -185,7 +185,7 @@ export function TagStack({ participants }: { participants: readonly { host: stri
   return (
     <span className="ib-tg-stack" aria-hidden="true" data-tag-stack={participants.length}>
       {shown.map((p) => (
-        <HostMark key={p.session} host={p.host} />
+        <HostMark key={p.session} host={p.host} agent={p.session} />
       ))}
       {more > 0 && <span className="ib-tg-plus">+{more}</span>}
     </span>
@@ -214,7 +214,7 @@ export function TagNotes({
         <span className="ib-tg-goes-l">Goes to</span>
         {recipients.map((r) => (
           <span key={r.id} className="ib-tg-to" data-tag-recipient={r.id}>
-            <HostMark host={r.host} />
+            <HostMark host={r.host} agent={r.id} />
             <span>
               {r.label}
               {r.owner && <i> owns this thread</i>}

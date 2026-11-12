@@ -230,7 +230,7 @@ export function parseEventStreamText(text: string): InboxEventFrame[] {
   }
   return frames;
 }
-const INBOX_EVENT_FRAME_NAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'snoozes', 'rows', 'capabilities', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
+const INBOX_EVENT_FRAME_NAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'artifact-pins', 'tags', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
 
 async function defaultCatchUp(cursor: number): Promise<InboxEventFrame[]> {
   const res = await fetch(inboxUrl(`/events?cursor=${cursor}&once=1`), { headers: { Accept: 'text/event-stream' }, cache: 'no-store' });
@@ -342,8 +342,8 @@ export function subscribeSharedInboxEvents(
   let departed = false;
   const tabHandlers: InboxEventHandlers = {
     ...handlers,
-    onConnect: () => {
-      if (!departed) handlers.onConnect?.();
+    onConnect: (hello) => {
+      if (!departed) handlers.onConnect?.(hello);
     },
   };
   let closeStream: (() => void) | null = null;

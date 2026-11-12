@@ -241,7 +241,7 @@ import { exitOnUnknownSubcommand } from "./unknown-subcommand";
 import { completeAnnotateCommand } from "./annotate-command";
 import { ensureInboxRunning, runInboxCommand, selfCommand as inboxSelfCommand } from "./inbox-command";
 import { runCardCommand } from "./card-command";
-import { runShapeCommand, runShapeSwitch, SHAPE_OFF_TEXT } from "./shape-command";
+import { runShapeCommand, runShapeSwitch, SHAPE_OFF_TEXT, shapeCommandFolder } from "./shape-command";
 // @ts-expect-error a text import of the optional helper file
 import SHAPE_KIT from "@plannotator/core/shape-kit.mjs" with { type: "text" };
 import { shapeBoardsOn } from "@plannotator/shared/shape/switch";
@@ -252,6 +252,8 @@ import { runShapeFrame } from "./shape-frame";
 import { isShapeAnimateHelp, SHAPE_ANIMATE_HELP } from "@plannotator/core/shape-animate";
 import { runInboxCallCommand } from "./inbox-call-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
+import { runInboxPullsCommand } from "./inbox-pulls-command";
+import { runInboxExportDecisionsCommand } from "./inbox-export-decisions-command";
 import { runFeedbackCommand } from "./feedback-command";
 import { formatInboxHelp } from "./inbox-help";
 import { writeWholeToStdout } from "./write-whole-stdout";
@@ -306,6 +308,11 @@ const shapeHtmlGzip = () => (shapeHtmlGz ??= readFileSync(shapeHtmlGzPath as unk
 
 // Code review's diagram engine: embedded too, read on first need.
 import { loadEmbeddedDiagramEngine } from "./diagram-engine";
+import { INBOX_CHECK_CHILD_ENV, runInboxCheckChild } from "@plannotator/shared/inbox/store-log/sqlite/check-child";
+
+// The second half of an Inbox move's check (check-child.ts): this program, run again by the Inbox while it moves
+// its records into SQLite. Nothing else, before any startup work.
+if (process.env[INBOX_CHECK_CHILD_ENV]) process.exit(await runInboxCheckChild(process.env));
 
 // The optional T3 Code hook (`t3-hook` with no arguments) runs on EVERY Bash
 // call of a Claude session that loads it. Only an Agent SDK session can be a
@@ -355,7 +362,12 @@ const rawArgs = process.argv.slice(2);
 // agent that still calls them is told where to go. Before the review parse, which would take `draw` for a ref. Only
 // while the person has Code review on, and only arguments of the old command's own shape: otherwise (off included)
 // the review parse takes them. Read quietly: a broken config.json is Code review off, and the parse warns once.
-if (isReviewDrawCommand(rawArgs, () => loadConfig({ quiet: true }).inboxCodeReview === true)) {
+// Shape off too (approval "code-review-029-shape-off"): the refusal points at Shape, so it is given only with both on;
+// otherwise the review parse takes the words, as with Code review off.
+if (isReviewDrawCommand(rawArgs, () => {
+  const config = loadConfig({ quiet: true });
+  return config.inboxCodeReview === true && config.inboxShape === true;
+})) {
   process.stderr.write(`${INBOX_REVIEW_DRAW_GONE}\n`);
   process.exit(1);
 }
@@ -364,8 +376,9 @@ if (isReviewDrawCommand(rawArgs, () => loadConfig({ quiet: true }).inboxCodeRevi
 // strict-annotate parse, which takes `--file`-style flags for itself.
 {
   const args = rawArgs;
-  // Off unless the person turned Shape on, or Code review, whose Show me makes a board (Settings → Capabilities):
-  // no command and no help, so an agent learns nothing of it (the same switches hide the Pebble and the routes).
+  // Off unless the person turned Shape on (Settings → Capabilities; Code review alone brings none of it, approval
+  // "code-review-029-shape-off"): no command and no help, so an agent learns nothing of it (the same switch hides the
+  // Pebble and the routes).
   // `shape on|off` is the switch itself, so it runs either way (`on --help` still gets the off line).
   if (args[0] === "shape" && (args[1] === "on" || args[1] === "off") && !hasHelpFlag(args.slice(2))) {
     process.exit(runShapeSwitch(args.slice(1)));
@@ -414,7 +427,7 @@ if (isReviewDrawCommand(rawArgs, () => loadConfig({ quiet: true }).inboxCodeRevi
     process.exit(
       await runShapeCommand(args.slice(1), {
         dataDir: getPlannotatorDataDir(),
-        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        cwd: shapeCommandFolder(process.env),
         env: process.env,
       }),
     );
@@ -450,6 +463,35 @@ if (isReviewDrawCommand(rawArgs, () => loadConfig({ quiet: true }).inboxCodeRevi
         env: process.env,
         askAiChild: isAskAiChild(process.env),
         ensureRunning: () => ensureInboxRunning(callDataDir),
+      }),
+    );
+  }
+}
+// `plannotator inbox pulls ls|add|rm <thread> [<ref>...]`: a thread's PRs, sugar over `inbox call thread_pulls` (inbox-pulls-command.ts).
+{
+  const args = rawArgs;
+  if (args[0] === "inbox" && args[1] === "pulls") {
+    const pullsDataDir = getPlannotatorDataDir();
+    process.exit(
+      await runInboxPullsCommand(args.slice(2), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
+        askAiChild: isAskAiChild(process.env),
+        ensureRunning: () => ensureInboxRunning(pullsDataDir),
+      }),
+    );
+  }
+}
+// `plannotator inbox export-decisions --thread <id> [--format md|html] [--out <file>] [--pr <ref>]`: a thread's
+// decisions as a file, or posted on one of its PRs (inbox-export-decisions-command.ts).
+{
+  const args = rawArgs;
+  if (args[0] === "inbox" && args[1] === "export-decisions") {
+    const exportDataDir = getPlannotatorDataDir();
+    process.exit(
+      await runInboxExportDecisionsCommand(args.slice(2), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        ensureRunning: () => ensureInboxRunning(exportDataDir),
       }),
     );
   }
@@ -1464,6 +1506,7 @@ if (args[0] === "sessions") {
             env: ghAccountEnv ? childEnv({ ...opts.env, ...ghAccountEnv }) : (opts.env ?? childEnv()),
             stdout: "ignore",
             stderr: "pipe",
+            windowsHide: true,
           });
           warmupProcs.add(proc);
           try {
@@ -1560,14 +1603,14 @@ if (args[0] === "sessions") {
           if (isSameRepo) {
             try {
               for (const entry of worktreePool?.entries() ?? []) {
-                Bun.spawnSync(["git", "worktree", "remove", "--force", entry.path], { cwd: repoDir, env: childEnv() });
+                Bun.spawnSync(["git", "worktree", "remove", "--force", entry.path], { cwd: repoDir, env: childEnv(), windowsHide: true });
               }
             } catch {}
             // Clear any registration left by a worktree add that completed
             // after the kill (or by a not-ready entry the loop can't see).
-            try { Bun.spawnSync(["git", "worktree", "prune"], { cwd: repoDir, env: childEnv() }); } catch {}
+            try { Bun.spawnSync(["git", "worktree", "prune"], { cwd: repoDir, env: childEnv(), windowsHide: true }); } catch {}
           }
-          try { Bun.spawnSync(["rm", "-rf", warmupSessionDir], { env: childEnv() }); } catch {}
+          try { Bun.spawnSync(["rm", "-rf", warmupSessionDir], { env: childEnv(), windowsHide: true }); } catch {}
         });
 
         console.error(isSameRepo

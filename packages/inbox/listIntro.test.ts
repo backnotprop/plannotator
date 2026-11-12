@@ -1,18 +1,19 @@
 /**
- * When a load may ask for the one-time list options dialog (approval "inbox-list-options-intro"). What regresses: the
+ * When a load may ask for "Choose how your list looks" (approval "inbox-rows-dialog"; first "inbox-list-options-intro"),
+ * and the demo it plays. What regresses: the
  * dialog on the same load as the tour or another one-time dialog, over a reply or another dialog, on a page that is
  * not the Inbox's (Settings, the Board), over a file, document, guided review or Artifacts view (side by side or full
  * screen), over a search or a new message, through the tailnet, on a short list, or before this load's other dialogs
  * are decided; and, since the owner's note (2026-10-31, "it should show if I have a thread open"), a thread open
- * keeping it away; and the preview offering to turn on an option that is on already (smaller thread names, a default).
+ * keeping it away; a list under five threads bringing it up (q-2c590791); and the demo's moments drifting from the
+ * approved timeline (letters 0.3 s, logos 0.9 s, the turn 1.5 s, back with the notes card 2.2 s, held 2.6 s).
  */
 import { describe, expect, test } from 'bun:test';
-import { listIntroMayAsk, listIntroPreview, listIntroPageClear, listIntroWanted, type ListIntroLoad } from './listIntro';
-import { LIST_LOOK_DEFAULT, LIST_LOOK_OFF, LIST_LOOK_OPTIONS } from './listLook';
+import { LIST_INTRO_MIN_ROWS, ROWS_INTRO_END_MS, listIntroMayAsk, listIntroPageClear, listIntroWanted, rowsIntroScene, type ListIntroLoad } from './listIntro';
 
 const ready: ListIntroLoad = {
   due: true,
-  local: true,
+  owner: true,
   listLoaded: true,
   firstRun: false,
   rows: 5,
@@ -37,15 +38,16 @@ describe('the list options dialog: when a load may ask for it', () => {
     }
   });
 
-  test('not due (a new user, or already shown), through the tailnet, on first run or before the list loads: never', () => {
-    for (const load of [{ ...ready, due: false }, { ...ready, local: false }, { ...ready, firstRun: true }, { ...ready, listLoaded: false }]) {
+  test("not due (a new user, or already shown), on a tailnet guest's page, on first run or before the list loads: never", () => {
+    for (const load of [{ ...ready, due: false }, { ...ready, owner: false }, { ...ready, firstRun: true }, { ...ready, listLoaded: false }]) {
       expect(listIntroWanted(load)).toBe(false);
     }
   });
 
-  test('a list of fewer than three rows waits for a later load', () => {
-    expect(listIntroWanted({ ...ready, rows: 2 })).toBe(false);
-    expect(listIntroWanted({ ...ready, rows: 3 })).toBe(true);
+  test('a list of fewer than five threads waits for a later load; five or more asks', () => {
+    expect(LIST_INTRO_MIN_ROWS).toBe(5);
+    for (const rows of [0, 3, 4]) expect(listIntroWanted({ ...ready, rows })).toBe(false);
+    for (const rows of [5, 40]) expect(listIntroWanted({ ...ready, rows })).toBe(true);
   });
 
   test('the Inbox page, a thread open or not (on a phone or a desktop); never Settings, the Board, a search or a new message', () => {
@@ -85,14 +87,16 @@ describe('the list options dialog: when a load may ask for it', () => {
     expect(listIntroWanted({ ...ready, settled: false, othersSettled: false, updating: true })).toBe(true);
   });
 
-  test('the preview turns on every option of the ⋮ menu that is off, in its order, then goes back last', () => {
-    const all = listIntroPreview(LIST_LOOK_OFF);
-    expect(all.map((step) => step.key)).toEqual([...LIST_LOOK_OPTIONS.map((option) => option.key), null]);
-    const at = all.map((step) => step.at);
-    expect([...at].sort((a, b) => a - b)).toEqual(at);
-    // The defaults (smaller names on, since 2026-11-05): never offered as turning on, and no gap where it was.
-    const defaults = listIntroPreview(LIST_LOOK_DEFAULT);
-    expect(defaults.map((step) => step.key)).toEqual(['highlight', 'compact', 'hideAgents', null]);
-    expect(defaults.at(-1)!.at - defaults.at(-2)!.at).toBe(all.at(-1)!.at - all.at(-2)!.at);
+  test('the demo: no marks, then letters, logos, the turn to the projects, back to the stacked look with the notes card, then it holds', () => {
+    const at = (t: number) => rowsIntroScene(t);
+    expect(at(0)).toEqual({ marks: 'off', logos: false, card: false, held: false });
+    expect(at(299).marks).toBe('off');
+    expect(at(300)).toEqual({ marks: 'both', logos: false, card: false, held: false });
+    expect(at(900)).toEqual({ marks: 'both', logos: true, card: false, held: false });
+    expect(at(1500)).toEqual({ marks: 'projects', logos: true, card: false, held: false });
+    expect(at(2200)).toEqual({ marks: 'both', logos: true, card: true, held: false });
+    // It ends on the stacked look and holds it: no Inline flip, no reset afterwards.
+    expect(ROWS_INTRO_END_MS).toBe(2600);
+    for (const t of [2600, 5000, 60_000]) expect(at(t)).toEqual({ marks: 'both', logos: true, card: true, held: true });
   });
 });

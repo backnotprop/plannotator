@@ -14,7 +14,7 @@ import { isAbsolute, join, resolve, win32 } from "path";
 import { existsSync, readdirSync, type Dirent } from "fs";
 import { readdir } from "node:fs/promises";
 
-import { buildAnnotatableTextRegex } from "./annotatable";
+import { buildAnnotatableTextRegex, isSecretEnvPath } from "./annotatable";
 import { getExtraMarkdownExtensions } from "./markdown-extensions";
 import { CODE_FILE_REGEX as CODE_FILE_BASENAME_REGEX } from "./code-file";
 export { CODE_FILE_REGEX, isCodeFilePath } from "./code-file";
@@ -484,8 +484,10 @@ function resolveMarkdownFileCore(
 	const isBareFilename = !searchInput.includes("/");
 	const targetLookupKey = getLookupKey(searchInput, isBareFilename);
 
-	// Restrict to annotatable plain-text files (markdown + config formats)
-	if (!isSearchableMarkdownPath(normalizedInput, extra)) {
+	// Restrict to annotatable plain-text files (markdown + config formats).
+	// A `.env` file (isSecretEnvPath) is taken only as the explicit path below
+	// (steps 1 and 2), never by the name search: the walk never lists one.
+	if (!isSearchableMarkdownPath(normalizedInput, extra) && !isSecretEnvPath(normalizedInput)) {
 		return { kind: "not_found", input };
 	}
 

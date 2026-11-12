@@ -57,15 +57,7 @@ function send(url: string, method: string, path: string, headers: Record<string,
   return new Promise((resolve, reject) => {
     const req = request(
       new URL(path, url),
-      {
-        method,
-        agent: false,
-        headers: {
-          "content-type": "text/plain",
-          ...(body === undefined ? {} : { "content-length": String(Buffer.byteLength(body)) }),
-          ...headers,
-        },
-      },
+      { method, headers: { "content-type": "text/plain", ...headers } },
       (res) => {
         let text = "";
         res.setEncoding("utf8");

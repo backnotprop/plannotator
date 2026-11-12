@@ -2,10 +2,12 @@
 // the agent's SVG (already sanitized and drawn by ShapeDrawn), measures where
 // it is drawn, and sets only a short list of things on it: its `transform`
 // attribute, and its style's opacity, color (the piece's currentColor),
-// filter (lit), stroke dashes (draw), and its words. Each is put back as it
+// filter (lit; in the technical look, a shape's stroke or a box's border
+// colour), stroke dashes (draw), and its words. Each is put back as it
 // was when the player goes. No script from the board runs; the board is data.
 import type { ShapeScene } from '@plannotator/core/shape-scene';
 import { colourCss, lookAt, places, type Geo, type PieceLook, type Pt } from './timeline';
+import { ownLine } from '../litLine';
 
 const GEOMETRY = 'path, line, polyline, polygon, circle, ellipse, rect';
 const LIT = 'drop-shadow(0 0 2.5px var(--mark)) drop-shadow(0 0 7px color-mix(in oklab, var(--mark) 55%, transparent))';
@@ -15,8 +17,12 @@ interface Piece {
   svg: boolean;
   /** As found: put back when the player goes or measures again. */
   was: { transform: string | null; opacity: string; color: string; text: string | null; dashes: { el: SVGGeometryElement; da: string; dof: string }[] };
-  /** What `lit` sets its filter on, each with the filter it had: the piece, or (shapes only) its shapes without its words. */
-  lit: { el: HTMLElement | SVGElement; filter: string }[];
+  /**
+   * What `lit` changes, each with what it had: the piece, or (shapes only) its shapes without its words.
+   * `line`: in the technical look, a shape with a stroke or a box with a border takes the mark colour on that
+   * line (one border); only one with no line of its own gets the outline filter.
+   */
+  lit: { el: HTMLElement | SVGElement; filter: string; line: 'stroke' | 'border' | null; colour: string }[];
   /** Its centre in its own coordinates, and as drawn in the scene SVG's. */
   local: Pt;
   home: Pt;
@@ -40,7 +46,8 @@ export class SceneDom implements Geo {
 
   /**
    * `lit`: the filter a lit piece gets (the technical look passes a thin outline in place of the glow).
-   * `litShapesOnly`: a lit group outlines its shapes and leaves its words alone, so letters never smudge.
+   * `litShapesOnly` (the technical look): a lit group lights its shapes and leaves its words alone, so letters
+   * never smudge, and a shape's own stroke (a box's own border) takes the mark colour in place of a second outline.
    */
   constructor(private slot: HTMLElement, private scene: ShapeScene, private lit: string = LIT, private litShapesOnly = false) {}
 
@@ -114,13 +121,16 @@ export class SceneDom implements Geo {
         const pm = parent ? this.toRoot(parent) : null;
         parentInv = pm ? pm.inverse() : null;
       }
-      const shapes = this.litShapesOnly && svg && el.tagName.toLowerCase() !== 'text' && el.querySelector('text') ? geoms.filter((g) => !g.closest('text')) : [];
+      const shapes = this.litShapesOnly && svg && el.tagName.toLowerCase() !== 'text' && !el.matches(GEOMETRY) ? geoms.filter((g) => !g.closest('text, [data-icon], [data-logo], [data-brand]')) : [];
       const litEls: (HTMLElement | SVGElement)[] = shapes.length ? shapes : [el as HTMLElement | SVGElement];
       this.pieces.set(id, {
         el,
         svg,
         was: { transform: el.getAttribute('transform'), opacity: style.opacity, color: style.color, text: textEl ? textEl.textContent : null, dashes: lines.map((l) => ({ el: l.el, da: l.el.style.strokeDasharray, dof: l.el.style.strokeDashoffset })) },
-        lit: litEls.map((l) => ({ el: l, filter: l.style.filter })),
+        lit: litEls.map((l) => {
+          const line = this.litShapesOnly && (svg ? l.matches(GEOMETRY) : true) ? ownLine(l) : null;
+          return { el: l, filter: l.style.filter, line, colour: line === 'stroke' ? l.style.stroke : line === 'border' ? l.style.borderColor : '' };
+        }),
         local,
         home,
         parentInv,
@@ -189,7 +199,7 @@ export class SceneDom implements Geo {
     }
     if (look.opacity !== undefined) style.opacity = String(Math.max(0, Math.min(1, look.opacity)));
     if (look.color) style.color = colourCss(look.color);
-    if (look.lit !== undefined) for (const l of piece.lit) l.el.style.filter = look.lit ? this.lit : l.filter;
+    if (look.lit !== undefined) for (const l of piece.lit) this.light(l, look.lit);
     if (look.text !== undefined && piece.textEl && piece.textEl.textContent !== look.text) piece.textEl.textContent = look.text;
     if (look.draw !== undefined) {
       for (const { el: g, len } of piece.lines) {
@@ -198,6 +208,14 @@ export class SceneDom implements Geo {
         g.style.strokeDashoffset = String(len * (1 - Math.max(0, Math.min(1, look.draw))));
       }
     }
+  }
+
+  /** Lights one element (or puts it back): its own line in the mark colour where it has one, else the lit filter. */
+  private light(l: Piece['lit'][number], on: boolean) {
+    const style = l.el.style;
+    if (!l.line) style.filter = on ? this.lit : l.filter;
+    else if (on || l.colour) style.setProperty(l.line === 'stroke' ? 'stroke' : 'border-color', on ? 'var(--mark)' : l.colour);
+    else style.removeProperty(l.line === 'stroke' ? 'stroke' : 'border-color');
   }
 
   /** Everything back as the board drew it. */
@@ -209,7 +227,7 @@ export class SceneDom implements Geo {
       else el.setAttribute('transform', was.transform);
       style.opacity = was.opacity;
       style.color = was.color;
-      for (const l of piece.lit) l.el.style.filter = l.filter;
+      for (const l of piece.lit) this.light(l, false);
       if (piece.textEl && was.text !== null && piece.textEl.textContent !== was.text) piece.textEl.textContent = was.text;
       for (const d of was.dashes) {
         d.el.style.strokeDasharray = d.da;

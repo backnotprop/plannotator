@@ -213,6 +213,10 @@ export interface PRThreadComment {
   createdAt: string;
   url: string;
   diffHunk?: string;
+  /** The forge hides it (GitHub's minimized comment). */
+  isMinimized?: boolean;
+  /** Why, in the forge's words ("OFF_TOPIC", "outdated"), when it is hidden and says. */
+  minimizedReason?: string;
 }
 
 export interface PRReviewThread {
@@ -223,6 +227,8 @@ export interface PRReviewThread {
   line: number | null;
   startLine: number | null;
   diffSide: 'LEFT' | 'RIGHT' | null;
+  /** The side of `startLine` (GitHub), when the forge says: a range can start on a removed line and end on an added one. */
+  startDiffSide?: 'LEFT' | 'RIGHT' | null;
   comments: PRThreadComment[];
 }
 
@@ -237,8 +243,20 @@ export interface PRContext {
   comments: PRComment[];
   reviews: PRReview[];
   reviewThreads: PRReviewThread[];
+  /** The forge failed while `reviewThreads` was read: there may be more than this holds. */
+  threadsIncomplete?: boolean;
   checks: PRCheck[];
   linkedIssues: PRLinkedIssue[];
+  /** Who has been asked to review and has not yet, as far as the forge says. Absent when this read did not ask. */
+  requestedReviewers?: PRRequestedReviewer[];
+}
+
+export interface PRRequestedReviewer {
+  /** A person's or an app's login; a team as `org/team`. */
+  login: string;
+  avatarUrl?: string;
+  isBot?: boolean;
+  isTeam?: boolean;
 }
 
 export interface PRReviewFileComment {
@@ -251,10 +269,9 @@ export interface PRReviewFileComment {
 }
 
 /**
- * The review event a platform submission carries (#1611). GitHub maps these
- * to `APPROVE` / `COMMENT` / `REQUEST_CHANGES`. GitLab has no request-changes
- * review, so it posts `request_changes` exactly like `comment` (a note plus
- * discussions); only `approve` adds a mutation there.
+ * The review event a platform submission carries. GitHub maps these to
+ * `APPROVE` / `COMMENT` / `REQUEST_CHANGES`. GitLab posts a note plus
+ * discussions, then `approve` or `request_changes` sets the decision separately.
  */
 export type PRReviewAction = "approve" | "comment" | "request_changes";
 
@@ -303,7 +320,7 @@ export interface PRReviewCommentFailure {
 export interface PRReviewRetry {
   /**
    * `approve` / `request_changes` when the decision mutation itself failed
-   * (GitLab approve, Bitbucket approve or request-changes); `comment` when only
+   * (GitLab or Bitbucket approve or request-changes); `comment` when only
    * inline comments (and possibly the unposted general comment) remain.
    */
   action: PRReviewAction;
@@ -315,6 +332,11 @@ export interface PRReviewRetry {
 /** A platform review for which every requested mutation completed. */
 export interface PRReviewSubmissionComplete {
   status: "complete";
+  /**
+   * What went when it is not what was asked: `comment` when a GitLab older
+   * than 18.9 has no request-changes, so the review stays a plain comment.
+   */
+  postedAs?: "comment";
 }
 
 /**
@@ -332,6 +354,8 @@ export interface PRReviewSubmissionPartial {
   /** Why the general comment failed (Bitbucket; `retry.body` then carries it). */
   reviewBodyError?: string;
   recoveryFile?: string;
+  /** As `PRReviewSubmissionComplete.postedAs`: the decision already went as a comment. */
+  postedAs?: "comment";
   retry: PRReviewRetry;
 }
 
@@ -396,13 +420,15 @@ export interface PRPlatformCapabilities {
   /** Prefix of the change number in labels: "#" or "!". */
   numberPrefix: "#" | "!";
   /**
-   * The platform records a real request-changes decision (#1611). GitHub:
-   * REQUEST_CHANGES review; Bitbucket: `POST /request-changes`. GitLab has
-   * none, so `request_changes` posts exactly like `comment` there.
+   * The platform records a real request-changes decision. GitHub:
+   * REQUEST_CHANGES review; GitLab: `mergeRequestRequestChanges`; Bitbucket:
+   * `POST /request-changes`.
    */
   requestChanges: boolean;
-  /** The platform refuses approve / request-changes from the PR author. */
+  /** The platform always refuses approve from the PR author (GitHub only). */
   selfReviewBlocked: boolean;
+  /** The platform refuses request-changes from the PR author (GitHub only). */
+  selfRequestChangesBlocked: boolean;
   /** File-scoped comments post as file-level threads (else folded into the body). */
   fileLevelComments: boolean;
   /** Per-file "viewed" state syncs to the platform. */
@@ -431,6 +457,7 @@ const PLATFORM_CAPABILITIES: Record<Platform, PRPlatformCapabilities> = {
     numberPrefix: "#",
     requestChanges: true,
     selfReviewBlocked: true,
+    selfRequestChangesBlocked: true,
     fileLevelComments: true,
     viewedSync: true,
     artifacts: true,
@@ -442,8 +469,12 @@ const PLATFORM_CAPABILITIES: Record<Platform, PRPlatformCapabilities> = {
     label: "GitLab",
     changeLabel: "MR",
     numberPrefix: "!",
-    requestChanges: false,
-    selfReviewBlocked: true,
+    requestChanges: true,
+    // GitLab lets an author approve their own MR unless the project forbids
+    // it; then GitLab refuses and the review shows its answer. Nothing mutes.
+    selfReviewBlocked: false,
+    // An MR author may mark their own MR as needing changes.
+    selfRequestChangesBlocked: false,
     fileLevelComments: false,
     viewedSync: false,
     artifacts: true,
@@ -459,6 +490,7 @@ const PLATFORM_CAPABILITIES: Record<Platform, PRPlatformCapabilities> = {
     // Bitbucket Cloud lets an author approve their own PR (the approval just
     // does not count toward merge checks), so nothing is muted.
     selfReviewBlocked: false,
+    selfRequestChangesBlocked: false,
     // Bitbucket supports file comments, but posting them one by one outside the
     // partial-retry contract is not worth the risk yet: they fold into the body.
     fileLevelComments: false,

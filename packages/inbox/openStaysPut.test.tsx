@@ -350,7 +350,9 @@ test.skipIf(!hasDom)('Show lights exactly the rows it brought in, after they sli
   expect(order(el).filter((id) => before.includes(id) && id !== moved).every((id) => !lit().includes(id))).toBe(true);
   await wait(SHOW_LIT_MS);
   expect(lit()).toEqual([]);
-});
+// Its own time: the test waits out the light (about 5 s), right at the default 5 s limit. Over it, the runner killed
+// the Inbox this whole file shares, and every test after it failed waiting for a list.
+}, 15_000);
 
 // The failure this guards (design record "inbox-new-in-open-thread", the
 // /seen race): the look sent when a thread opens marked the thread seen up to
@@ -463,8 +465,9 @@ test.skipIf(!hasDom)('Mark read inside an open thread: the toast says the row wi
   act(() => (el.querySelector('[data-inbox-notice]') as HTMLButtonElement).click());
   await until(() => rowOf(el, asked) !== null, 'Show');
   await openRow(el, asked, null);
-  await until(() => el.querySelector('[data-mark-read]') !== null && !(el.querySelector('[data-mark-read]') as HTMLButtonElement).disabled, 'Mark read');
-  act(() => (el.querySelector('[data-mark-read]') as HTMLButtonElement).click());
+  await until(async () => (await headerReads(el)).includes('Mark read'), 'Mark read');
+  const markRead = (await moreMenu(el)).querySelector<HTMLElement>('[data-thread-read-item]')!;
+  act(() => markRead.click());
   await until(() => document.querySelector('[data-inbox-toast]') !== null, 'the toast');
   expect(document.querySelector('[data-inbox-toast]')!.textContent).toContain('Moves to Quiet');
   // Unlike a seen update held in New (below), this one is written: its question closes on the server.
@@ -477,17 +480,35 @@ test.skipIf(!hasDom)('Mark read inside an open thread: the toast says the row wi
 
 // A plain update the person opened: the look puts it in Quiet on the server, but the list holds it in New
 // while a thread is open. Mark read stays on it there (the row menu, E) and moves the row to Quiet now; the
-// row's hover action and the header's button are Mark unread (the owner, 2026-11-02: "I opened it. I still
+// row's hover action is Mark unread, and the header's ⋯ offers it (the owner, 2026-11-02: "I opened it. I still
 // want the ability to mark it unread").
-const header = (el: HTMLElement) => el.querySelector<HTMLButtonElement>('section.ib-pane [data-mark-read]')!;
-const unreadHeader = (el: HTMLElement) => el.querySelector<HTMLButtonElement>('section.ib-pane [data-mark-unread]');
 const hoverAction = (el: HTMLElement, id: string) => el.querySelector<HTMLButtonElement>(`.ib-lbody [data-row="${id}"] [data-row-mark-read]`);
 const hoverUnread = (el: HTMLElement, id: string) => el.querySelector<HTMLButtonElement>(`.ib-lbody [data-row="${id}"] [data-row-mark-unread]`);
 /** The row's hover action, by its label (an action label, pinned on purpose), or null when it has none. */
 const hoverLabel = (el: HTMLElement, id: string) => el.querySelector(`.ib-lbody [data-row="${id}"] > .ib-ract`)?.textContent?.trim() ?? null;
 const isBold = (el: HTMLElement, id: string) => rowOf(el, id)?.classList.contains('ib-u') ?? null;
-/** The header's Mark read / Mark unread button, by its name (an icon: its aria-label; action labels, pinned on purpose), or null. */
-const headerLabel = (el: HTMLElement) => el.querySelector('section.ib-pane :is([data-mark-read], [data-mark-unread])')?.getAttribute('aria-label') ?? null;
+/** Open the thread header's ⋯ More; the open menu. */
+async function moreMenu(el: HTMLElement): Promise<HTMLElement> {
+  const more = el.querySelector<HTMLElement>('section.ib-pane [data-thread-more]')!;
+  await act(async () => {
+    more.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }));
+    more.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    more.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, pointerType: 'mouse' }));
+    more.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
+    more.click();
+  });
+  await until(() => document.querySelector('[data-thread-menu]') !== null, 'the ⋯ menu');
+  return document.querySelector<HTMLElement>('[data-thread-menu]')!;
+}
+/** The read actions the header's ⋯ offers, by their labels (action labels, pinned on purpose); the menu shut again after. */
+async function headerReads(el: HTMLElement): Promise<string[]> {
+  if (!el.querySelector('section.ib-pane [data-thread-more]')) return [];
+  const menu = await moreMenu(el);
+  const labels = [...menu.querySelectorAll('[data-thread-read-item], [data-thread-move-back-item], [data-thread-unread-item]')].map((item) => item.textContent?.trim() ?? '');
+  await act(async () => el.querySelector<HTMLElement>('section.ib-pane [data-thread-more]')!.click());
+  await until(() => document.querySelector('[data-thread-menu]') === null, 'the ⋯ menu shut');
+  return labels;
+}
 const quietCount = (el: HTMLElement) => el.querySelector('[data-section-id="quiet"] .ib-n')?.textContent ?? '0';
 const toastEl = () => document.querySelector<HTMLElement>('[data-inbox-toast]');
 const pressKey = (key: string) =>
@@ -523,7 +544,7 @@ test.skipIf(!hasDom)('a seen update held in New keeps Mark read in the row menu 
   expect(quietCount(el)).toBe('0');
 
   // The header: Mark unread in Mark read's place (the owner, 2026-11-02), as on the row.
-  expect(headerLabel(el)).toBe('Mark unread');
+  expect(await headerReads(el)).toContain('Mark unread');
 
   // E, then Z.
   pressKey('e');
@@ -596,7 +617,7 @@ test.skipIf(!hasDom)("the owner's report (2026-11-02): the open row and the row 
   expect(hoverLabel(el, first!)).toBe('Mark unread');
   expect(isBold(el, first!)).toBe(false);
   // The header says the same (before: Mark read).
-  expect(headerLabel(el)).toBe('Mark unread');
+  expect(await headerReads(el)).toContain('Mark unread');
   release();
   seenGate = null;
   await until(async () => (await serverSection(first!)) === 'quiet', 'the look on the server');
@@ -604,7 +625,7 @@ test.skipIf(!hasDom)("the owner's report (2026-11-02): the open row and the row 
   // The look landed and the list was read: still Mark unread, the row still held in New.
   expect(sectionOfRow(el, first!)).toBe('new');
   expect(hoverLabel(el, first!)).toBe('Mark unread');
-  expect(headerLabel(el)).toBe('Mark unread');
+  expect(await headerReads(el)).toContain('Mark unread');
 
   // Move to another thread: the row just left keeps Mark unread (v0.28.45: Mark read).
   await openRow(el, second!);
@@ -721,7 +742,7 @@ test.skipIf(!hasDom)('E pressed before the look reaches the server takes the sam
   // The look has not landed: the server still has it in New, unseen.
   expect(await serverSection(first)).toBe('new');
   // The header reads it as looked at already, as the row does: Mark unread. E stays Mark read's.
-  expect(headerLabel(el)).toBe('Mark unread');
+  expect(await headerReads(el)).toContain('Mark unread');
   pressKey('e');
   await wait(150);
   // Mark read waits for the look: nothing written, nothing moved yet.
@@ -731,9 +752,8 @@ test.skipIf(!hasDom)('E pressed before the look reaches the server takes the sam
   seenGate = null;
   await movedNow(el, first, 'E after the look landed');
   expect(posted.filter((path) => path.endsWith('/read'))).toEqual([]);
-  // Never marked read (no pressed Read): read by opening, so the header offers Mark unread.
-  expect(el.querySelector('section.ib-pane [data-mark-read]')).toBeNull();
-  expect(unreadHeader(el)).not.toBeNull();
+  // Never marked read (no Move back): read by opening, so the header's ⋯ offers Mark unread.
+  expect(await headerReads(el)).toEqual(['Mark unread']);
   expect(await serverSection(first)).toBe('quiet');
 });
 
@@ -752,7 +772,7 @@ test.skipIf(!hasDom)('a look that never lands holds Mark read back only so long:
   await until(() => toastEl()?.textContent?.includes('Marked read') === true, 'the toast');
   expect(toastEl()!.textContent).toContain('Moves to Quiet');
   expect(sectionOfRow(el, first)).toBe('new');
-  await until(() => header(el).getAttribute('aria-pressed') === 'true', 'the pressed header');
+  await until(async () => (await headerReads(el)).includes('Move back to the top'), 'Move back in the header ⋯');
 }, 15_000);
 
 test.skipIf(!hasDom)('a row already in Quiet offers no Mark read: not in the header, on hover, in the menu, nor E', async () => {
@@ -765,9 +785,8 @@ test.skipIf(!hasDom)('a row already in Quiet offers no Mark read: not in the hea
   act(() => el.querySelector<HTMLButtonElement>('[data-section-id="quiet"] button.ib-band')!.click());
   await until(() => sectionOfRow(el, first) === 'quiet', 'Quiet unfolded');
   await openRow(el, first, null);
-  // The header's place is Mark unread's (markRead.ts `canMarkUnread`), not a disabled Mark read.
-  expect(el.querySelector('section.ib-pane [data-mark-read]')).toBeNull();
-  expect(unreadHeader(el)).not.toBeNull();
+  // The header's ⋯ offers Mark unread (markRead.ts `canMarkUnread`), and no Mark read.
+  expect(await headerReads(el)).toEqual(['Mark unread']);
   expect(hoverAction(el, first)).toBeNull();
   expect(await rowMenu(el, first)).not.toContain('read');
   await closeMenu();

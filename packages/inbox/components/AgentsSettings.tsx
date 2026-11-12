@@ -5,6 +5,7 @@ import {
   type InboxAgentId,
   type InboxAgentRow,
   type InboxAgentsModel,
+  type InboxCodexAccount,
   type InboxHostSessions,
   type InboxOpenSession,
   type InboxToolHostId,
@@ -14,9 +15,11 @@ import { CURSOR_RULES_PLACE, noteCopiedByHand, noteWithoutMarkers } from '../age
 import { HARNESSES, type ConnectContext } from '../harnesses';
 import { HostMark, Icon } from '../icons';
 import { ConnectPicker } from './ConnectPicker';
+import { LaunchSettingsFile } from './LaunchSettingsFile';
 import { CommandLine, CopyCommand, Fold, OpenCodeQuiet, OpenCodeWords, openCodeCommand, ReloadCopy, ReloadLead, type ReloadSpec } from './RestartNote';
 import type { InboxReloadRuntime } from '@plannotator/core/inbox-types';
 import { clockTime, dayWords, formatCount } from '../format';
+import { codexAccountLine } from '../codexAccount';
 
 /** Whether any host has an open session that needs a restart or an update: Settings' Agents dot. */
 export function agentsNeedRestart(model: InboxAgentsModel | null | undefined): boolean {
@@ -271,14 +274,12 @@ function stateOf(row: InboxAgentRow): { text: string; tone: 'on' | 'off' | 'bad'
  * Plannotator's own connection puts it into the session as a new turn; an
  * agent reached through MCP (or OpenCode 1, which has the tool but no wake)
  * reads it when it next checks. Null when the agent does not reach the Inbox,
- * or when it is not known (Claude Code on Windows).
+ * or when it is not known.
  */
-export function repliesOf(row: InboxAgentRow, platform?: ConnectContext['platform']): { text: string; wakes: boolean } | null {
+export function repliesOf(row: InboxAgentRow): { text: string; wakes: boolean } | null {
   if (!row.reach.on) return null;
   if (row.reach.kind === 'tool') {
     if (row.tool?.mod_off) return null;
-    // Claude Code's mod stands down on Windows (no /bin/sh), so nothing wakes it there: say no more than the Reaches row.
-    if (row.id === 'claude-code' && platform === 'windows') return null;
     if (row.id === 'opencode' && row.plugin?.generation === '1') return { text: "seen when it checks the Inbox; OpenCode 1 can't be woken", wakes: false };
     return { text: 'arrive as a new turn', wakes: true };
   }
@@ -293,12 +294,54 @@ const NO_NOTE_FILE: Partial<Record<InboxAgentId, string>> = {
   kiro: 'Kiro CLI has no global instructions file, so there is no file to add a note to.',
 };
 
-function Row({ k, v, r, sub, warn, na, data }: { k: string; v: ReactNode; r?: ReactNode; sub?: ReactNode; warn?: boolean; na?: boolean; data?: Record<`data-${string}`, string> }) {
+/**
+ * What a switch left off means for that agent, one quiet line under its row
+ * while it is off (owner, 2026-11-07: "If they turn off the Inbox tool, then
+ * it's game over. … Let 'em know. Even reminders."). No dialog, no confirm.
+ * Only under an agent found on this computer (owner, 2026-11-09): an agent the
+ * page marks "Not found on this computer" gets none.
+ */
+export const offWords = {
+  reach: (label: string) => `Off: ${label} can't send you messages or read your replies here.`,
+  /** The Inbox tool off while its MCP server still reaches the Inbox (Claude Code or Pi connected through MCP). */
+  toolBesideMcp: (label: string) => `Off: ${label} reaches you only through its MCP server above.`,
+  reminder: (label: string) => `Off: ${label} isn't told the Inbox exists when a session starts, so it rarely uses it.`,
+  note: (label: string) => `Off: ${label} isn't told when to send you decisions and finished work.`,
+};
+
+type OffKind = 'reach' | 'tool' | 'reminder' | 'note';
+
+export function Row({
+  k,
+  v,
+  r,
+  sub,
+  warn,
+  na,
+  off,
+  data,
+}: {
+  k: string;
+  v: ReactNode;
+  r?: ReactNode;
+  sub?: ReactNode;
+  warn?: boolean;
+  na?: boolean;
+  /** The off line: what this switch being off means, shown only while it is off. */
+  off?: { kind: OffKind; text: string } | null;
+  data?: Record<`data-${string}`, string>;
+}) {
   return (
     <div className={`ib-agrow${na ? ' ib-agna' : ''}`} {...data}>
       <span className="ib-agk">{k}</span>
       <span className="ib-agv">{v}</span>
       <span className="ib-agr">{r}</span>
+      {off && (
+        <span className="ib-agsub" data-agent-off={off.kind}>
+          <Icon name="info" />
+          <span>{off.text}</span>
+        </span>
+      )}
       {sub && (
         <span className={`ib-agsub${warn ? ' ib-agwarn' : ''}`}>
           <Icon name={warn ? 'warn' : 'info'} />
@@ -309,6 +352,43 @@ function Row({ k, v, r, sub, warn, na, data }: { k: string; v: ReactNode; r?: Re
   );
 }
 
+/**
+ * Codex's account, read-only (`GET /api/inbox/codex/account`, asked once when the row shows): the plan or API key and
+ * how much of its limits is used, or that Codex is not signed in and the command that signs in. Plannotator never
+ * signs in for the person. No row until the read answers, nor when it could not be read.
+ */
+function CodexAccountRow() {
+  const [account, setAccount] = useState<InboxCodexAccount | null>(null);
+  useEffect(() => {
+    let live = true;
+    inboxApi
+      .codexAccount()
+      .then((read) => live && setAccount(read.account))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
+  const line = codexAccountLine(account);
+  if (!line) return null;
+  return (
+    <Row
+      k="Account"
+      v={line.value}
+      sub={
+        line.signIn ? (
+          <>
+            Run <code>codex login</code> in Terminal to sign in.
+          </>
+        ) : (
+          line.limits
+        )
+      }
+      data={{ 'data-codex-account': account?.state === 'signed_in' ? account.kind : 'signed_out' }}
+    />
+  );
+}
+
 function AgentGroup({
   row,
   noteText,
@@ -316,14 +396,14 @@ function AgentGroup({
   pending,
   busy,
   sessions,
-  platform,
   extra,
+  settling,
 }: {
   row: InboxAgentRow;
+  /** A run is still connecting the agents (`model.connecting`): the switches may still turn on, so no off line yet. */
+  settling?: boolean;
   /** Rows after its own (Claude Code: "Start new sessions with full permissions", launch only). */
   extra?: ReactNode;
-  /** This computer's platform (the window's), for what wakes a session. */
-  platform?: ConnectContext['platform'];
   noteText: string;
   onChange: (change: Change) => void;
   pending: Set<string>;
@@ -336,8 +416,11 @@ function AgentGroup({
   const base = row.detected ? stateOf(row) : { text: 'Not found on this computer', tone: 'off' as const };
   const needs = row.id === 'claude-code' || row.id === 'pi' || row.id === 'opencode' ? sessionsState(row.id, sessions) : null;
   const state = needs ? { text: `${base.text} · ${needs}`, tone: 'bad' as const } : base;
+  // An off line shows only under an agent found on this computer (the header's status is not "Not found on this
+  // computer"), and only once that is known and settled: never in, then out.
+  const offLine = (kind: OffKind, text: string) => (row.detected === true && !settling ? { kind, text } : null);
   // DeepSeek Harness decides once, when it starts (its plugin), never per session.
-  const next = row.id === 'dsh' ? 'when DeepSeek Harness next starts' : `${row.label}'s next session`;
+  const next = row.id === 'dsh' ? 'when DeepSeek Harness next starts' : row.id === 'openclaw' ? "OpenClaw's next message" : `${row.label}'s next session`;
   const reach = row.reach;
   const reachValue =
     reach.kind === 'tool' ? (
@@ -381,7 +464,7 @@ function AgentGroup({
   const modOff = row.tool?.mod_off === true;
   // Claude Code's MCP entry is one the person added by hand (`claude mcp add`): Plannotator never writes or removes it.
   const handMcp = row.id === 'claude-code' && reach.kind === 'mcp';
-  const replies = repliesOf(row, platform);
+  const replies = repliesOf(row);
   const reachSwitchable = (reach.kind === 'tool' || reach.kind === 'mcp') && reach.state !== 'foreign' && reach.state !== 'unreadable' && !modOff && !handMcp;
   const note = row.note;
   const noteOn = note?.state === 'added' || note?.state === 'edited';
@@ -427,6 +510,8 @@ function AgentGroup({
       <Row
         k="Reaches the Inbox"
         v={reachValue}
+        // Connected under another QWEN_HOME still reaches the Inbox from there: its value says where, so no off line.
+        off={reachSwitchable && !reach.on && reach.state !== 'elsewhere' ? offLine('reach', offWords.reach(row.label)) : null}
         sub={modOff && reach.kind === 'tool' ? reach.reason : reach.kind === 'tool' ? cost : null}
         warn={modOff && reach.kind === 'tool'}
         r={
@@ -443,6 +528,7 @@ function AgentGroup({
         <Row
           k="The Inbox tool"
           sub={cost}
+          off={row.tool.on ? null : offLine('tool', reach.on ? offWords.toolBesideMcp(row.label) : offWords.reach(row.label))}
           v={
             <>
               the <code>plannotator_inbox</code> tool, with Plannotator&apos;s {row.id === 'pi' ? 'extension' : 'plugin'}
@@ -460,6 +546,8 @@ function AgentGroup({
         <Row
           k="Reminder at session start"
           v={row.reminder.needs_tool ? 'Needs the tool' : 'one line when a session starts'}
+          // "Needs the tool" already says why; the tool's own off line says what that means.
+          off={!row.reminder.on && !row.reminder.needs_tool ? offLine('reminder', offWords.reminder(row.label)) : null}
           r={
             <>
               {pending.has(`${row.id}:reminder`) && <span className="ib-agpending">{next}</span>}
@@ -495,6 +583,7 @@ function AgentGroup({
                 </>
               ) : null
             }
+            off={note.state === 'absent' ? offLine('note', offWords.note(row.label)) : null}
             sub={noteSub}
             warn={(note.state === 'unavailable' || note.state === 'damaged' || note.state === 'refused') && noteSub !== null}
           />
@@ -539,15 +628,15 @@ export function AgentsSettings({
   model: InboxAgentsModel;
   onModel: (next: InboxAgentsModel) => void;
   context: ConnectContext | null;
-  /** Starting agents from New message (`SettingsModel.launch`, only while `inboxLaunch.enabled`). Absent: no row. */
+  /** Starting agents from New message (`SettingsModel.launch`): its switch, and while on the launch rows. Absent: no launch rows. */
   launch?: InboxLaunchSettings | null;
 }) {
   const [launchState, setLaunchState] = useState(launch ?? null);
   const [launchBusy, setLaunchBusy] = useState(false);
-  useEffect(() => setLaunchState(launch ?? null), [launch?.enabled, launch?.full_permissions, launch?.follows, launch?.needs_consent, launch?.bypass_off, launch?.own_mode, launch?.scratch_dir]);
-  // Shown: the switch as it stands now (never set, it follows the login shell, read again here).
+  useEffect(() => setLaunchState(launch ?? null), [launch?.enabled, launch?.full_permissions, launch?.follows, launch?.needs_consent, launch?.bypass_off, launch?.own_mode, launch?.scratch_dir, launch?.settings_file]);
+  // Shown: the switches as they stand now (full permissions never set: it follows the login shell, read again here).
   useEffect(() => {
-    if (!launch?.enabled) return;
+    if (!launch) return;
     let live = true;
     inboxApi
       .launchSettingsRead()
@@ -557,6 +646,39 @@ export function AgentsSettings({
       live = false;
     };
   }, [launch?.enabled]);
+  // "Start agents from New message": config.json `inboxLaunch.enabled`, read live (New message's New session rows follow).
+  const toggleEnabled = async () => {
+    if (!launchState || launchBusy) return;
+    setLaunchBusy(true);
+    setError(null);
+    try {
+      const next = (await inboxApi.launchEnabled(!launchState.enabled)).launch;
+      setLaunchState(next);
+      // Turned on: the full-permissions row as a launch would start now (the login shell, read once it was on).
+      if (next.enabled) {
+        void inboxApi
+          .launchSettingsRead()
+          .then((read) => setLaunchState((was) => (was?.enabled ? read.launch : was)))
+          .catch(() => {});
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setLaunchBusy(false);
+    }
+  };
+  // Windows (`unsupported`): no switch; launch there is config.json only.
+  const enabledRow = launchState && !launchState.unsupported ? (
+    <div className="ib-agent ib-aglaunch" data-launch-enabled-group="">
+      <Row
+        k="Start agents from New message"
+        v="Claude Code, Codex and Pi"
+        sub="New message can start Claude Code, Codex or Pi in a folder you pick. Turn off to only message sessions that are already running."
+        data={{ 'data-launch-enabled-row': launchState.enabled ? 'on' : 'off' }}
+        r={<Switch on={launchState.enabled} label="Start agents from New message" busy={launchBusy} onClick={() => void toggleEnabled()} />}
+      />
+    </div>
+  ) : null;
   const toggleFull = async () => {
     if (!launchState || launchBusy) return;
     setLaunchBusy(true);
@@ -726,6 +848,7 @@ export function AgentsSettings({
         </p>
       )}
       <div className="ib-agents">
+        {enabledRow}
         {shown.map((row) => (
           <AgentGroup
             key={row.id}
@@ -733,9 +856,10 @@ export function AgentsSettings({
             noteText={model.note_text}
             pending={pending}
             busy={busy.has(row.id)}
+            settling={model.connecting}
             onChange={(input) => void change(row.id, input)}
-            {...(context ? { platform: context.platform } : {})}
-            {...(row.id === 'claude-code' && launchRow ? { extra: <>{launchRow}{scratchRow}</> } : {})}
+            {...(row.id === 'claude-code' && launchRow ? { extra: <>{launchRow}{launchState?.enabled && <LaunchSettingsFile launch={launchState} busy={launchBusy} onLaunch={setLaunchState} onError={setError} />}{scratchRow}</> } : {})}
+            {...(row.id === 'codex' && row.detected ? { extra: <CodexAccountRow /> } : {})}
             {...(model.sessions && (row.id === 'claude-code' || row.id === 'pi' || row.id === 'opencode') && model.sessions[row.id] ? { sessions: model.sessions[row.id] } : {})}
           />
         ))}

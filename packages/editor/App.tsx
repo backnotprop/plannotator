@@ -377,8 +377,10 @@ import { scrollableEditSurface } from './editScroll';
 import { configurePlannotatorUI } from '@plannotator/ui/configure';
 
 // Plannotator's own plan review and annotate: the selection toolbar's Copy
-// copies rich text; @plannotator/ui hosts keep plain Copy unless they opt in.
-configurePlannotatorUI({ richCopy: true });
+// copies rich text, and on a touch screen the toolbar sits below the selection
+// (clear of iOS's edit menu), inside the screen, with thumb-sized buttons;
+// @plannotator/ui hosts keep both unchanged unless they opt in.
+configurePlannotatorUI({ richCopy: true, touchSelectionToolbar: true });
 
 type NoteAutoSaveResults = {
   obsidian?: boolean;
@@ -587,7 +589,6 @@ const App: React.FC = () => {
   const [showSourceFileEditWarning, setShowSourceFileEditWarning] = useState(false);
   const [sourceFileEditWarningAction, setSourceFileEditWarningAction] = useState<SourceFileEditWarningAction>('send-feedback');
   const sourceFileEditWarningContinuationRef = useRef<(() => void | Promise<void>) | null>(null);
-  const [showAgentWarning, setShowAgentWarning] = useState(false);
   // The decision-control note flow (#1436 mechanism): the note is committed
   // into `annotations` as a GLOBAL_COMMENT and submitted one render later,
   // because the payload builders close over `allAnnotations`. The route is
@@ -614,11 +615,11 @@ const App: React.FC = () => {
   // render-assigned ref (same pattern as headerHandlersRef) so keyboard and
   // header share literally one submitPrimaryDecision.
   const submitPrimaryDecisionRef = useRef<() => void>(() => {});
+  const [decisionNoteRequest, setDecisionNoteRequest] = useState(0);
   // The `document-view` scope is registered above `handleEditToggle`; the
   // handler is read through a render-assigned ref (same pattern as above) so
   // the chord and the card's `Edit` control share one enter path.
   const handleEditToggleRef = useRef<() => void>(() => {});
-  const [agentWarningMessage, setAgentWarningMessage] = useState('');
   const [isPanelOpen, setIsPanelOpen] = useState(() => window.innerWidth >= 768);
   const [rightSidebarTab, setRightSidebarTab] = useState<'annotations' | 'ai'>('annotations');
   const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false);
@@ -1788,7 +1789,7 @@ const App: React.FC = () => {
     if (document.querySelector('[data-plannotator-confirm-dialog="true"]')) return true;
     if (showExport || showImport ||
         showSourceFileEditWarning ||
-        showExitWarning || showAgentWarning || showPermissionModeSetup || pendingPasteImage) return true;
+        showExitWarning || showPermissionModeSetup || pendingPasteImage) return true;
     return submitted || isSubmitting || isExiting;
   }, [
     archive.archiveMode,
@@ -1797,7 +1798,6 @@ const App: React.FC = () => {
     showImport,
     showSourceFileEditWarning,
     showExitWarning,
-    showAgentWarning,
     showPermissionModeSetup,
     pendingPasteImage,
     submitted,
@@ -4977,7 +4977,7 @@ const App: React.FC = () => {
       // Don't intercept if any modal is open
       if (showExport || showImport ||
           showSourceFileEditWarning ||
-          showExitWarning || showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
+          showExitWarning || showPermissionModeSetup || pendingPasteImage) return;
 
       // Don't intercept if already submitted, submitting, or exiting
       if (submitted || isSubmitting || isExiting || goalSetupAction.isSubmitting) return;
@@ -5009,6 +5009,12 @@ const App: React.FC = () => {
 
       e.preventDefault();
 
+      // Mod+Shift+Enter opens the note composer instead of submitting.
+      if (e.shiftKey) {
+        setDecisionNoteRequest((n) => n + 1);
+        return;
+      }
+
       // Mod+Enter always equals the visible header primary, in annotate and
       // plan review alike: one submitPrimaryDecision for keyboard, header and
       // compact (spec §4; #1057 brought plan review onto it).
@@ -5018,7 +5024,7 @@ const App: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
-    showExport, showImport, showSourceFileEditWarning, showExitWarning, showAgentWarning,
+    showExport, showImport, showSourceFileEditWarning, showExitWarning,
     showPermissionModeSetup, pendingPasteImage,
     submitted, isSubmitting, isExiting, goalSetupAction.isSubmitting, isApiMode, documentReadOnly, isEditingMarkdown, linkedDocHook.isActive, annotations.length, codeAnnotations.length, externalAnnotations.length, annotateMode,
     hasFeedbackToSend, goalSetupMode, goalSetupAction.canSubmit, isAgentTerminalReady,
@@ -6230,7 +6236,7 @@ const App: React.FC = () => {
 
       if (showExport ||
           showSourceFileEditWarning ||
-          showExitWarning || showAgentWarning || showPermissionModeSetup || pendingPasteImage) return;
+          showExitWarning || showPermissionModeSetup || pendingPasteImage) return;
 
       if (submitted || !isApiMode) return;
 
@@ -6267,7 +6273,7 @@ const App: React.FC = () => {
     window.addEventListener('keydown', handleSaveShortcut);
     return () => window.removeEventListener('keydown', handleSaveShortcut);
   }, [
-    showExport, showSourceFileEditWarning, showExitWarning, showAgentWarning,
+    showExport, showSourceFileEditWarning, showExitWarning,
     showPermissionModeSetup, pendingPasteImage,
     submitted, isApiMode, documentReadOnly, isEditingMarkdown, handleSaveEditedSourceFile, displayedMarkdown, annotationsOutput,
   ]);
@@ -6285,7 +6291,7 @@ const App: React.FC = () => {
     const handlePrintShortcut = (e: KeyboardEvent) => {
       const blocked = showExport ||
           showSourceFileEditWarning ||
-          showExitWarning || showAgentWarning || showPermissionModeSetup || !!pendingPasteImage || submitted;
+          showExitWarning || showPermissionModeSetup || !!pendingPasteImage || submitted;
       if (!shouldPrintOnKey(e, blocked)) return;
 
       e.preventDefault();
@@ -6295,7 +6301,7 @@ const App: React.FC = () => {
     window.addEventListener('keydown', handlePrintShortcut);
     return () => window.removeEventListener('keydown', handlePrintShortcut);
   }, [
-    showExport, showSourceFileEditWarning, showExitWarning, showAgentWarning,
+    showExport, showSourceFileEditWarning, showExitWarning,
     showPermissionModeSetup, pendingPasteImage, submitted, handlePrint,
   ]);
 
@@ -6345,36 +6351,22 @@ const App: React.FC = () => {
 
   // --- Plan review's decision control (#1057) -----------------------------
   // Every plan approval goes through requestPlanApprove, so the unsaved file
-  // edit warning and OpenCode's "Agent Not Found" check run on every approve
-  // path (the primary, Approve with notes, the discard confirm, a note). The
-  // Agent Not Found dialog's "Approve Anyway" runs the captured continuation,
-  // so a confirmed discard stays a bare approval there too. Both resolve true
-  // only once the decision is recorded.
-  const agentWarningContinuationRef = useRef<(() => void) | null>(null);
+  // edit warning runs on every approve path (the primary, Approve with notes,
+  // the discard confirm, a note). It resolves true only once the decision is
+  // recorded. An OpenCode agent set to run after approval that OpenCode does
+  // not have never holds the approval up: OpenCode approves without
+  // switching and its toast names the agent it could not find (agent-switch.ts).
   const requestPlanApprove = useCallback((options?: { discardFeedback?: boolean }): Promise<boolean> =>
     new Promise<boolean>((resolve) => {
       const approve = () => {
-        const h = headerHandlersRef.current;
-        if (origin === 'opencode') {
-          const warning = h.getAgentWarning();
-          if (warning) {
-            agentWarningContinuationRef.current = () => {
-              void headerHandlersRef.current.handleApprove(options);
-            };
-            setAgentWarningMessage(warning);
-            setShowAgentWarning(true);
-            resolve(false);
-            return;
-          }
-        }
-        void h.handleApprove(options).then(resolve);
+        void headerHandlersRef.current.handleApprove(options).then(resolve);
       };
       if (maybeConfirmUnsavedSourceFileEdits('approve', approve)) {
         resolve(false);
         return;
       }
       approve();
-    }), [maybeConfirmUnsavedSourceFileEdits, origin]);
+    }), [maybeConfirmUnsavedSourceFileEdits]);
 
   // Deny carries every kind of feedback (direct edits included): on Claude
   // Code's classic hook it is the only channel whose output reaches the agent.
@@ -6407,11 +6399,11 @@ const App: React.FC = () => {
     if (pendingDispatchInFlightRef.current) return;
     const { route, approvalFraming } = pending;
     if (!annotateMode) {
-      // Plan review: the request helpers own the unsaved-edit and agent
-      // warnings. A note queued on 'approve' rides the approval's notes.
+      // Plan review: the request helpers own the unsaved-edit warning. A note
+      // queued on 'approve' rides the approval's notes.
       // Unlike annotate (L3), a plan decision is NEVER left armed: after a
-      // refusal (409 plan_revised), a cancelled warning (Agent Not Found,
-      // unsaved file edits) or a failed POST, the note is an ordinary general
+      // refusal (409 plan_revised), a cancelled warning (unsaved file edits)
+      // or a failed POST, the note is an ordinary general
       // comment and the primary means what its label says (Send Feedback),
       // so the reviewer decides again from scratch. A warning confirmed later
       // runs its own continuation, which posts the decision on its own.
@@ -7559,6 +7551,7 @@ const App: React.FC = () => {
           questionProgress={headerQuestionProgress}
           annotateDecision={annotateMode ? annotateDecision : undefined}
           planDecision={annotateMode ? undefined : planDecision}
+          decisionNoteRequest={decisionNoteRequest}
           callbackConfig={callbackConfig}
           taterMode={taterMode}
           mobileSettingsOpen={mobileSettingsOpen}
@@ -8350,32 +8343,6 @@ const App: React.FC = () => {
             showCancel
           />
         )}
-
-        {/* OpenCode agent not found warning dialog */}
-        <ConfirmDialog
-          isOpen={showAgentWarning}
-          onClose={() => {
-            agentWarningContinuationRef.current = null;
-            setShowAgentWarning(false);
-          }}
-          onConfirm={() => {
-            const approve = agentWarningContinuationRef.current ?? (() => { void handleApprove(); });
-            agentWarningContinuationRef.current = null;
-            setShowAgentWarning(false);
-            approve();
-          }}
-          title="Agent Not Found"
-          message={agentWarningMessage}
-          subMessage={
-            <>
-              You can change the agent in <strong>Settings</strong>, or approve anyway and OpenCode will use the default agent.
-            </>
-          }
-          confirmText="Approve Anyway"
-          cancelText="Cancel"
-          variant="warning"
-          showCancel
-        />
 
         {/* Shared URL load failure warning */}
         <ConfirmDialog

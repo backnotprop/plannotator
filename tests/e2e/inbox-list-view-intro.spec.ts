@@ -83,6 +83,14 @@ test.afterAll(async () => {
 const dialog = (page: Page) => page.locator('dialog[data-dialog="list-view-intro"]');
 
 /** Headless Chromium's "blocks notifications" line: hidden first, as a person would. */
+/**
+ * This spec proves the leave moment ("back on the list"), so the page is never idle (idleClock.ts: 20 s without input
+ * is also the moment, and Playwright tells every page it is focused): a pointer move every 3 s, from the first paint.
+ */
+const neverIdle = () => {
+  setInterval(() => window.dispatchEvent(new Event('pointermove')), 3_000);
+};
+
 async function settled(page: Page): Promise<void> {
   await expect(page.locator('.ib-listcol .ib-lbody [data-thread-id]').first()).toBeVisible();
   const hide = page.locator('.ib-listcol').getByRole('button', { name: 'Hide', exact: true });
@@ -115,6 +123,8 @@ test('a minute in, back on the grouped list after reading a thread: the choice, 
   const video = process.env.PLANNOTATOR_LIST_VIEW_VIDEO ? { dir: join(shots, 'video'), size: { width: 1280, height: 800 } } : undefined;
   const desk = await browser.newContext({ viewport: video ? { width: 1280, height: 800 } : { width: 1440, height: 900 }, colorScheme: 'light', recordVideo: video });
   const phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, colorScheme: 'light' });
+  await desk.addInitScript(neverIdle);
+  await phoneContext.addInitScript(neverIdle);
   const page = await desk.newPage();
   const phone = await phoneContext.newPage();
   try {

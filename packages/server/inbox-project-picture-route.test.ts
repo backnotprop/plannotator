@@ -2,7 +2,7 @@
  * A project's letter-mark picture through the Inbox's real door: `GET` and `POST /api/inbox/projects/:id/picture`
  * on a running Inbox (temp data dir and HOME, loopback, a scripted GitHub and tailscale: nothing real is asked).
  * What can regress: the switches taken from the request instead of config.json (a page turning GitHub on by
- * itself), an SVG served without its sandbox headers, the 404 the window draws letters on, a tailnet guest
+ * itself; only the repo's logo, a local file, may be asked for with `logo=1`, for the list dialog's Detailed card), an SVG served without its sandbox headers, the 404 the window draws letters on, a tailnet guest
  * reading or setting a picture, and a refusal that is not one of the approved words (a phone photo's data URL
  * once got a developer's sentence in the toast).
  */
@@ -91,7 +91,7 @@ async function world(config: Record<string, unknown>, tailscale?: { magic: strin
   const base = `http://127.0.0.1:${server.port}`;
   const path = `/api/inbox/projects/${project.id}/picture`;
   // The window's own cache key asks for everything: the answer must still follow config.json.
-  const get = (headers: Record<string, string> = {}) => fetch(`${base}${path}?v=0-11`, { headers });
+  const get = (headers: Record<string, string> = {}, query = "v=0-11") => fetch(`${base}${path}?${query}`, { headers });
   const post = (picture: unknown, headers: Record<string, string> = {}) =>
     fetch(`${base}${path}`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify({ picture }) });
   return { server, project, path, get, post, github, writeConfig };
@@ -105,6 +105,13 @@ describe("GET /api/inbox/projects/:id/picture", () => {
     const none = await w.get();
     expect(none.status).toBe(404);
     expect((await errorOf(none)).code).toBe("no_picture");
+    expect(w.github).toEqual([]);
+
+    // The list dialog's Detailed card asks for the repo's logo before the look is saved: served, from the folder;
+    // the request still never turns GitHub on.
+    const asked = await w.get({}, "v=0-11&logo=1&github=1&githubPictures=1");
+    expect(asked.status).toBe(200);
+    expect(await asked.text()).toBe(SVG);
     expect(w.github).toEqual([]);
 
     w.writeConfig({ inboxRows: ["marksProjects", "repoLogo"], inboxRowsDefaults: 99 });
@@ -180,7 +187,7 @@ describe("POST /api/inbox/projects/:id/picture", () => {
 });
 
 describe("over the tailnet", () => {
-  test("a guest the owner allowed can neither read nor set a picture (403 local only); the owner can", async () => {
+  test("a guest the owner allowed reads and sets a picture as the owner does (owner ruling 2026-11-11: a picture is a logo)", async () => {
     const MAGIC = "macbook-pro.tail0000.ts.net";
     const OWNER = "ramos@example.com";
     const GUEST = "guest@example.com";
@@ -191,16 +198,14 @@ describe("over the tailnet", () => {
     const at = `http://127.0.0.1:${listener}${w.path}`;
 
     const read = await fetch(at, { headers: headers(GUEST) });
-    expect(read.status).toBe(403);
-    expect((await errorOf(read)).code).toBe("local_only");
+    expect(read.status).toBe(200);
+    expect(read.headers.get("content-type")).toBe("image/svg+xml");
     const write = await fetch(at, { method: "POST", headers: headers(GUEST), body: JSON.stringify({ serverSession: w.server.serverSession, picture: dataUrl(PNG, "image/png") }) });
-    expect(write.status).toBe(403);
-    expect((await errorOf(write)).code).toBe("local_only");
-    // The repo logo still shows: the guest's write changed nothing.
-    expect((await w.get()).headers.get("content-type")).toBe("image/svg+xml");
+    expect(write.status).toBe(200);
+    expect((await w.get()).headers.get("content-type")).toBe("image/png");
 
     const owner = await fetch(at, { headers: headers(OWNER) });
     expect(owner.status).toBe(200);
-    expect(owner.headers.get("content-type")).toBe("image/svg+xml");
+    expect(owner.headers.get("content-type")).toBe("image/png");
   });
 });

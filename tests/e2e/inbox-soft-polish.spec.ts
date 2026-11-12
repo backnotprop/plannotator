@@ -91,7 +91,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   writeFileSync(join(project, 'docs', 'retry-plan.md'), '# Retry plan\n\nRetry once with the same key.\n');
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const first = await claude.send({ project_path: project, subject: 'Refund worker: retry a 409?', thread: 'refunds', body: ASK, attachments: [`docs/${LONG}`, `docs/${RTL}`, 'docs/retry-plan.md'] });
-  // Each in a thread of its own (one session's plain sends would share its default thread).
+  // Each in a thread of its own, under its own name.
   for (const subject of ['Nightly build is green', 'Ledger ownership', 'Rotate the processor key?', 'Idempotency cache and paging']) {
     await new Promise((r) => setTimeout(r, 15));
     await claude.send({ project_path: project, subject, thread: subject.toLowerCase().replace(/\W+/g, '-').replace(/-$/, ''), body: `${subject}. Details in the runbook.` });
@@ -139,7 +139,7 @@ test("rows have no line between them at today's pitch; the hover pill still mark
 test('beside an open thread the two-line rows have no line either', async () => {
   const { page } = world;
   await page.goto(`${world.url}#thread=${world.thread}`);
-  await expect(page.locator('[data-mark-read]')).toBeVisible();
+  await expect(page.locator('section.ib-pane [data-thread-more]')).toBeVisible();
   const rows = page.locator('.ib-nrow');
   await expect(rows.first()).toBeVisible();
   for (const line of await rows.evaluateAll((els) => els.map((e) => getComputedStyle(e).borderBottomColor))) expect(line).toBe('rgba(0, 0, 0, 0)');
@@ -156,19 +156,15 @@ test('beside an open thread the two-line rows have no line either', async () => 
   await shot(page, '2-thread');
 });
 
-// The read button is an icon since the approval "inbox-thread-header" (2026-11-02): its E moved into its tooltip.
-test("Mark read's E is a keycap in its tooltip; the icon button fills on hover in both looks", async () => {
+// The header's controls are icon buttons (approval "inbox-thread-header"); Mark read and its E live in the ⋯ menu.
+test("the header's icon buttons fill on hover in both looks", async () => {
   const { page } = world;
   await page.goto(`${world.url}#thread=${world.thread}`);
-  const button = page.locator('[data-mark-read]');
+  const button = page.locator('section.ib-pane [data-thread-more]');
   await expect(button).toBeEnabled();
-  await expect(button.locator('.ib-kbd')).toHaveCount(0);
   await button.hover();
-  const tip = page.locator('[data-side].bg-popover');
-  await expect(tip).toContainText('Mark read');
-  await expect(tip.locator('kbd')).toHaveText('E');
   await expect.poll(() => button.evaluate((b) => getComputedStyle(b).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
-  await page.locator('.ib-phead').screenshot({ path: join(proofDir, '3-mark-read-hover.png') });
+  await page.locator('.ib-phead').screenshot({ path: join(proofDir, '3-header-hover.png') });
   await page.mouse.move(700, 880);
   // Soft's `hbtns` switch now reaches the header only through the icon buttons' hover (`--ib-hb-hover-s`): the labelled
   // `.ib-hbtn` buttons are gone.
@@ -182,7 +178,7 @@ test("Mark read's E is a keycap in its tooltip; the icon button fills on hover i
 test("a tile's Open holds no room, at rest or shown (hover, keyboard focus): it lies over the tile's end and the name is cut the same either way, left to right and right to left", async () => {
   const { page } = world;
   await page.goto(`${world.url}#thread=${world.thread}`);
-  await expect(page.locator('[data-mark-read]')).toBeVisible();
+  await expect(page.locator('section.ib-pane [data-thread-more]')).toBeVisible();
   for (const name of [LONG, RTL]) {
     const tile = page.locator(`.ib-atts .ib-att-t:has(.ib-fname[data-name="${name}"])`).last();
     await expect(tile).toBeVisible();
@@ -240,7 +236,7 @@ test("a tile's Open holds no room, at rest or shown (hover, keyboard focus): it 
 test('layout corners are one step smaller; buttons keep theirs', async () => {
   const { page } = world;
   await page.goto(`${world.url}#thread=${world.thread}`);
-  await expect(page.locator('[data-mark-read]')).toBeVisible();
+  await expect(page.locator('section.ib-pane [data-thread-more]')).toBeVisible();
   const r = (selector: string, pseudo?: string) => page.locator(selector).first().evaluate((e, p) => getComputedStyle(e, p ?? null).borderTopLeftRadius, pseudo);
   expect(await r('.ib-main > .ib-pane')).toBe('10px');
   expect(await r('.ib-main > .ib-listcol')).toBe('10px');
@@ -249,7 +245,7 @@ test('layout corners are one step smaller; buttons keep theirs', async () => {
   expect(await r('.ib-att-t')).toBe('10px');
   expect(await r('.pn-inbox fieldset.question-block')).toBe('12px');
   // Buttons are not layout: the header's and the foot's keep their corners.
-  expect(await r('[data-mark-read]')).toBe('10px');
+  expect(await r('section.ib-pane [data-thread-more]')).toBe('10px');
   expect(await r('.ib-pfoot .ib-btn')).toBe('999px');
 });
 

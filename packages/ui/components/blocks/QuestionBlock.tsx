@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   canonicalQuestionAnswer,
   emptyQuestionAnswer,
@@ -78,6 +78,14 @@ const DRAG_THRESHOLD_TOUCH = 10;
 /** A second click on the same choice within this window is a double-click:
  *  it selects a word, so the pick its first click made is taken back. */
 const DOUBLE_CLICK_REVERT_MS = 800;
+/**
+ * The choice row the last click on any card landed on. The browser counts a
+ * click as the second of a double-click by time and place alone, and a touch
+ * tap counts within about 100px: on a phone, a quick tap on the next card's
+ * answer arrives with `detail` 2. Only a second click on this same row is a
+ * double-click.
+ */
+let lastRowClick: EventTarget | null = null;
 
 const now = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
 
@@ -120,6 +128,12 @@ const Tag: React.FC<{ tone: 'rec' | 'ok' | 'skip' | 'open' | 'warn'; children: R
 const CheckGlyph = () => (
   <svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
     <path d="m3.5 8.5 3 3 6-7" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+const ChevronRightGlyph = () => (
+  <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true" className="shrink-0 transition-transform duration-150 ease-out group-aria-expanded:rotate-90 motion-reduce:transition-none">
+    <path d="m6 3.5 4.5 4.5L6 12.5" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
 
@@ -264,6 +278,12 @@ export interface QuestionBlockProps {
    *  <an earlier question>"), given the question. Return null for none.
    *  Absent: nothing is drawn there (today's card). */
   renderBelowPrompt?: (question: IndexedQuestion) => React.ReactNode;
+  /** Host content right after the choices (and Other), before Why (the
+   *  Plannotator Inbox's "Try prototype" tab). When it draws something, the
+   *  choices sit in a box marked `data-question-tray` with the host's content
+   *  right after it, so a host's CSS can draw them as one shape. Return null
+   *  for nothing. Absent: today's card. Not drawn on a text question. */
+  renderAfterChoices?: (question: IndexedQuestion) => React.ReactNode;
   onOpenLinkedDoc?: (path: string) => void;
   onOpenCodeFile?: (path: string) => void;
   imageBaseDir?: string;
@@ -315,6 +335,34 @@ export interface QuestionStatusLabel {
   tone?: 'ok' | 'open' | 'skip';
 }
 
+/** The choices as they are, or (a host's `renderAfterChoices` drew something) in a tray box with that content right after it. */
+const TrayIf: React.FC<{ on: boolean; after: React.ReactNode; children: React.ReactNode }> = ({ on, after, children }) =>
+  on ? (
+    <div className="mt-2.5" data-question-tray-host="">
+      <div data-question-tray="">{children}</div>
+      {after}
+    </div>
+  ) : (
+    <>{children}</>
+  );
+
+/**
+ * Fits the Other field to its lines: one at least (`rows={1}`: its height, padding, border and any min-height
+ * as a one-line field), its CSS max-height at most, scrolling past that. Returns where the "+" mark goes
+ * beside a field of several lines (centred on the first line, where a one-line field centres it), else null.
+ */
+function fitOtherField(field: HTMLTextAreaElement): number | null {
+  field.style.height = '';
+  field.style.overflowY = '';
+  const one = field.offsetHeight;
+  // Its border (no scrollbar while it is one line or growing: its overflow is hidden).
+  const full = field.scrollHeight + (field.offsetHeight - field.clientHeight);
+  if (full <= one + 1) return null;
+  field.style.height = `${full}px`;
+  if (field.scrollHeight > field.clientHeight + 1) field.style.overflowY = 'auto';
+  return one > 15 ? (one - 15) / 2 : null;
+}
+
 export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   blockId,
   indexed,
@@ -331,6 +379,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   statusTag = 'card',
   statusLabel,
   renderBelowPrompt,
+  renderAfterChoices,
   onOpenLinkedDoc,
   onOpenCodeFile,
   imageBaseDir,
@@ -383,6 +432,8 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   // Save mode: the unsaved draft (null = the reviewer emptied it). Absent
   // means the card shows the host's answer.
   const [draft, setDraft] = useState<{ answer: QuestionAnswer | null } | null>(null);
+  // The Trade-offs table (option lines' Pros and Cons): closed until the person opens it.
+  const [tradeoffsOpen, setTradeoffsOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const answer: QuestionAnswer | undefined = saveMode && draft ? draft.answer ?? undefined : savedAnswer;
   const dirty = saveMode && !!draft && !sameAnswer(draft.answer, savedAnswer);
@@ -422,8 +473,11 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     setNotePinned(null);
   };
   const hostFooter = renderFooter?.(indexed, savedAnswer);
+  const afterChoices = question.kind === 'text' ? null : renderAfterChoices?.(indexed);
+  const hasAfterChoices = afterChoices !== null && afterChoices !== undefined && afterChoices !== false;
   const hasHostFooter = hostFooter !== null && hostFooter !== undefined && hostFooter !== false;
   const uid = useId().replace(/:/g, '');
+  const tradeoffsId = `q-tradeoffs-${uid}`;
   const promptId = `q-prompt-${uid}`;
   const contextId = `q-context-${uid}`;
   const stakesId = `q-stakes-${uid}`;
@@ -613,10 +667,13 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     const press = pressRef.current;
     pressRef.current = null;
     if (event.target instanceof HTMLInputElement) return;
+    const row = event.currentTarget;
+    const again = lastRowClick === row;
+    lastRowClick = row;
     // A double-click selects a word to annotate, never picks: the second
     // click is cancelled, and the pick the first click made (if any, on this
     // choice, just now) is taken back.
-    if (event.detail >= 2) {
+    if (event.detail >= 2 && again) {
       event.preventDefault();
       const last = lastPickRef.current;
       lastPickRef.current = null;
@@ -648,6 +705,43 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     && (otherBy === 'row' || (otherBy === null && !otherFocused));
   const other = suggestionPicked ? '' : storedOther;
   const otherOn = other.trim() !== '';
+  // The Other field holds as many lines as its words take (typed or wrapped),
+  // from one (its height when it was a one-line field) up to its cap: fitted
+  // on each change, and again when its width changes (its words re-wrap).
+  const otherRef = useRef<HTMLTextAreaElement>(null);
+  const [otherGlyphTop, setOtherGlyphTop] = useState<number | null>(null);
+  const otherWidthRef = useRef(-1);
+  const fitOther = () => {
+    const field = otherRef.current;
+    setOtherGlyphTop(field ? fitOtherField(field) : null);
+    otherWidthRef.current = field ? field.clientWidth : -1;
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => fitOther(), [other, readOnly, otherOn]);
+  useEffect(() => {
+    const field = otherRef.current;
+    if (!field || typeof ResizeObserver === 'undefined') return;
+    let frame = 0;
+    const refit = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(fitOther);
+    };
+    // Only a new width re-wraps; the heights this fit sets come back here too.
+    const watch = new ResizeObserver(() => {
+      if (field.clientWidth !== otherWidthRef.current) refit();
+    });
+    watch.observe(field);
+    // A web font that arrives late re-wraps the words at the same width.
+    let live = true;
+    document.fonts?.ready.then(() => live && refit(), () => {});
+    return () => {
+      live = false;
+      cancelAnimationFrame(frame);
+      watch.disconnect();
+    };
+    // fitOther reads only refs; the field is new when these change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readOnly, otherOn]);
   // Picture choices: each choice's picture URL (null: none, or not shown).
   const pictures = question.choices.map((c) => (c.image ? pictureSrc(c.image.src) : null));
   const showTiles = pictureChoices
@@ -884,8 +978,9 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
         </>
       ) : (
         <>
+          <TrayIf on={hasAfterChoices} after={afterChoices}>
           <div
-            className={cx('mt-2.5 grid gap-0.5', skipped && 'opacity-55')}
+            className={cx(hasAfterChoices ? 'grid gap-0.5' : 'mt-2.5 grid gap-0.5', skipped && 'opacity-55')}
             role={inputType === 'radio' ? 'radiogroup' : 'group'}
             aria-labelledby={promptId}
           >
@@ -991,11 +1086,16 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                     question.kind === 'multi' ? 'rounded-[3px]' : 'rounded-full',
                     otherOn ? 'border-solid border-primary bg-primary text-primary-foreground' : 'border-dashed border-border text-muted-foreground',
                   )}
+                  // Several lines: the mark stays beside the first, where one line centres it.
+                  style={otherGlyphTop === null ? undefined : { alignSelf: 'flex-start', marginTop: otherGlyphTop }}
                 >
                   {otherOn ? <CheckGlyph /> : '+'}
                 </span>
-                <input
-                  type="text"
+                {/* One line tall, as the one-line field it replaced; it grows with its lines (wrapped or typed:
+                    Enter makes a new line, as in the note) up to a cap, then scrolls. A read-only card shows it whole. */}
+                <textarea
+                  ref={otherRef}
+                  rows={1}
                   value={other}
                   onChange={(e) => setOther(e.target.value)}
                   onFocus={() => {
@@ -1008,11 +1108,16 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                   disabled={readOnly}
                   placeholder={readOnly ? '' : 'Other…'}
                   aria-label={number > 0 ? `Other answer to question ${number}` : 'Other answer'}
-                  className="annotation-exclude min-w-0 flex-1 border-0 border-b border-transparent bg-transparent py-[3px] text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring"
+                  data-question-other=""
+                  className={cx(
+                    'annotation-exclude min-w-0 flex-1 resize-none overflow-hidden break-words border-0 border-b border-transparent bg-transparent py-[3px] text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring',
+                    !readOnly && 'max-h-48',
+                  )}
                 />
               </div>
             )}
           </div>
+          </TrayIf>
         </>
       )}
 
@@ -1023,6 +1128,62 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
           </span>{' '}
           {inline(question.why)}
         </p>
+      )}
+
+      {/* Trade-offs (option lines, approval "inbox-question-tradeoffs"): one quiet line under Why that opens into a
+          table, one row per option with its Pros and Cons side by side (stacked in a narrow card). No Recommended
+          tag here: the option above carries it. Drawn only when a choice has Pros or Cons, which only a host that
+          reads option lines (`questionOptionLines`) parses: every other card is unchanged. */}
+      {question.kind !== 'text' && question.choices.some((c) => c.pros?.length || c.cons?.length) && (
+        <div className="annotation-exclude" data-pinpoint-ignore="" data-question-part="tradeoffs">
+          <button
+            type="button"
+            className="group -ml-1.5 mt-1.5 inline-flex items-center gap-1 rounded-lg border-0 bg-transparent px-1.5 py-[3px] text-[12.5px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+            aria-expanded={tradeoffsOpen}
+            aria-controls={tradeoffsId}
+            onClick={() => setTradeoffsOpen((open) => !open)}
+            data-question-tradeoffs-toggle=""
+          >
+            <ChevronRightGlyph />
+            Trade-offs
+          </button>
+          <div
+            id={tradeoffsId}
+            hidden={!tradeoffsOpen}
+            role="table"
+            aria-label="Trade-offs"
+            className="mb-0.5 mt-1 grid gap-2.5 text-[12.5px] leading-[1.45] @min-[600px]/qcard:gap-2"
+            data-question-tradeoffs=""
+          >
+            <div role="row" className="hidden text-[12px] font-semibold text-foreground/85 @min-[600px]/qcard:grid @min-[600px]/qcard:grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,1fr)] @min-[600px]/qcard:gap-x-[18px]">
+              <span role="columnheader"><span className="sr-only">Option</span></span>
+              <span role="columnheader">Pros</span>
+              <span role="columnheader">Cons</span>
+            </div>
+            {question.choices.map((c, i) => (
+              <div
+                key={`${i}:${c.label}`}
+                role="row"
+                className="grid grid-cols-[minmax(0,1fr)] gap-y-0.5 @min-[600px]/qcard:grid-cols-[minmax(0,0.9fr)_minmax(0,1fr)_minmax(0,1fr)] @min-[600px]/qcard:gap-x-[18px]"
+                data-question-tradeoffs-row=""
+              >
+                <span role="rowheader" className="min-w-0 break-words text-[13px] font-[550] text-foreground">{inline(c.label)}</span>
+                {(['pros', 'cons'] as const).map((side) => (
+                  <span
+                    key={side}
+                    role="cell"
+                    className="grid min-w-0 grid-cols-[38px_minmax(0,1fr)] gap-2 text-muted-foreground @min-[600px]/qcard:block"
+                  >
+                    <b className="font-semibold text-foreground/85 @min-[600px]/qcard:sr-only">{side === 'pros' ? 'Pros' : 'Cons'}</b>
+                    <span className="min-w-0 break-words">
+                      {c[side]?.length ? inline(c[side]!.join('; ')) : <span aria-label="none">-</span>}
+                    </span>
+                  </span>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
       )}
 
       {noteOpen && (!readOnly || !!answer?.note?.trim()) && (

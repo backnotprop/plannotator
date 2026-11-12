@@ -45,6 +45,11 @@ export interface FakeClaudeConfig {
   answer?: string;
   /** The whole answer, in words, in place of the line tests read (screenshots). */
   body?: string;
+  /**
+   * The turn ends as one the API refused: no answer, and the session's transcript gets an `isApiErrorMessage` entry
+   * with this `error` kind and text (Claude Code 2.1.322's shape). Null or absent: it answers.
+   */
+  apiError?: { error: string; text: string } | null;
   /** A session's first poll waits this long (ms): the Inbox shows "Starting" meanwhile. */
   startDelayMs?: number;
   /** `--bg` answers (and the session exists) only after this long (ms). */
@@ -211,8 +216,11 @@ export function installFakeClaude(input: { bin: string; state: string; config?: 
     osascript() {
       const file = join(state, "osascript.log");
       if (!existsSync(file)) return [];
+      // Only finished runs: the fake writes each argument on its own and the newline last, so a read while it is
+      // still writing must not take a run cut short (its last element would be a stray "-e").
       return readFileSync(file, "utf8")
         .split("\n")
+        .slice(0, -1)
         .filter(Boolean)
         .map((line) => line.split("\u001f").filter((part, i, all) => i < all.length - 1 || part !== ""));
     },

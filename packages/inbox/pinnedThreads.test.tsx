@@ -263,15 +263,15 @@ test('the order a move makes, the state a pinned row shows, and the toast words'
 test.skipIf(!hasDom)('no section when nothing is pinned; Star thread leads the row menu and the thread appears in Pinned, above Projects', async () => {
   await renderApp();
   expect(pinnedSection()).toBeNull();
-  expect(document.querySelector('.ib-side-sec-l')!.textContent).toBe('Projects');
+  expect([...document.querySelectorAll('.ib-side-sec-l')].map((el) => el.textContent)).toEqual(['Agents', 'Projects']);
   await act(async () => {
     rowButton(ids.stopped)!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 300, clientY: 200 }));
   });
   await until(() => rowMenu()?.getAttribute('data-row-menu') === ids.stopped, 'the row menu');
   const items = [...rowMenu()!.querySelectorAll('[role="menuitem"]')].map((el) => el.textContent?.trim());
   expect(items[0]).toBe('Star thread');
-  // Its own group: a separator right after it.
-  expect(rowMenu()!.querySelector('[data-row-action="pin"] + [role="separator"]')).not.toBeNull();
+  // Its own group with Add tag: a separator right after them.
+  expect(rowMenu()!.querySelector('[data-row-action="pin"] + [data-add-tag-item] + [role="separator"]')).not.toBeNull();
   await act(async () => {
     rowMenu()!.querySelector<HTMLElement>('[data-row-action="pin"]')!.click();
   });
@@ -279,7 +279,7 @@ test.skipIf(!hasDom)('no section when nothing is pinned; Star thread leads the r
   expect(await serverPins()).toEqual([ids.stopped]);
   // Above Projects, labelled by its header, Pinned.
   const labels = [...document.querySelectorAll('.ib-side-sec-l')].map((el) => el.textContent);
-  expect(labels).toEqual(['Starred', 'Projects']);
+  expect(labels).toEqual(['Starred', 'Agents', 'Projects']);
   expect(pinnedSection()!.getAttribute('aria-labelledby')).toBe(document.querySelector('[data-sidebar-section="pinned"]')!.id);
   // The Count variant: Stopped as a pill; the name says subject, project, state; bold (it waits on the person).
   const pin = pinnedRow(ids.stopped)!;
@@ -330,11 +330,12 @@ test.skipIf(!hasDom)("the header ⋯ menu's Star thread pins and Unstar thread u
   await renderApp(`#thread=${ids.waiting}`);
   await until(() => !!document.querySelector('[data-thread-more]'), 'the header ⋯');
   expect(document.querySelector('[data-pin-toggle]')).toBeNull();
-  // First, in its own group with a separator after it: off a phone Snooze is the header's clock (approval
-  // "inbox-thread-header"), no longer in this menu.
+  // In its own group with Add tag, after the read action and Snooze (which lead the menu), with a separator on each side.
   const first = await openThreadMenu();
-  expect([...threadMenu()!.querySelectorAll('[role="menuitem"]')].slice(0, 2).map((el) => el.textContent?.trim())).toEqual(['Star thread', 'Copy thread']);
-  expect(first.nextElementSibling?.getAttribute('role')).toBe('separator');
+  expect([...threadMenu()!.querySelectorAll('[role="menuitem"]')].slice(0, 5).map((el) => el.textContent?.trim())).toEqual(['Mark read', 'Snooze', 'Star thread', 'Add tag', 'Copy thread']);
+  expect(first.previousElementSibling?.getAttribute('role')).toBe('separator');
+  expect(first.nextElementSibling?.hasAttribute('data-add-tag-item')).toBe(true);
+  expect(first.nextElementSibling?.nextElementSibling?.getAttribute('role')).toBe('separator');
   await act(async () => first.click());
   await until(() => !threadMenu(), 'the menu to close');
   await until(() => pinnedOrder().includes(ids.waiting), 'the pinned row');

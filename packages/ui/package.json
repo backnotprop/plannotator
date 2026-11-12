@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/ui",
-  "version": "0.62.0",
+  "version": "0.63.0",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
@@ -37,6 +37,7 @@
     "./theme": "./theme.css",
     "./styles.css": "./styles.css",
     "./contents-rail.css": "./contents-rail.css",
+    "./comment-card.css": "./comment-card.css",
     "./inbox-thread.css": "./inbox-thread.css"
   },
   "files": [
@@ -60,6 +61,7 @@
     "print.css",
     "styles.css",
     "contents-rail.css",
+    "comment-card.css",
     "inbox-thread.css",
     "plannotator.webp",
     "HANDOFF.md",
@@ -86,9 +88,9 @@
     "@fontsource-variable/inter": "^5.3.0",
     "@lezer/common": "^1.5.3",
     "@lezer/highlight": "^1.2.5",
-    "@pierre/diffs": "1.5.2",
+    "@pierre/diffs": "1.6.4",
     "@plannotator/atomic-editor": "^0.9.0",
-    "@plannotator/core": "0.25.21",
+    "@plannotator/core": "0.25.30",
     "@plannotator/markdown-editor": "^0.5.0",
     "@plannotator/web-highlighter": "^0.8.2",
     "@tanstack/react-table": "^8.21.3",

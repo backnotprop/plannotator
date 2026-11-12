@@ -224,6 +224,21 @@ describe.skipIf(!hasDom)('decision mode: the contract lines', () => {
     expect(seen.answers.map((a) => a.selected)).toEqual([['B · Total pinned with Pay']]);
   });
 
+  test('a picture two choices share opens as the choice zoomed, not the first one showing it', () => {
+    const shared = question({
+      choices: [
+        { label: 'A · Strip left', description: null, recommended: false, settled: false, image: { alt: 'Strip', src: 'strip.png' } },
+        { label: 'B · Strip right', description: null, recommended: false, settled: false, image: { alt: 'Strip', src: 'strip.png' } },
+        { label: 'C · Bar', description: null, recommended: false, settled: false, image: { alt: 'Bar', src: 'bar.png' } },
+      ],
+    });
+    const seen = render(decision(shared, { inline: ['strip', 'bar'].map((x) => ({ attachment_id: `att_${x}`, ref: `${x}.png`, name: `${x}.png`, media_type: 'image/png', width: 2800, height: 200 })), attachments: [] }));
+    press($$('[data-question-zoom]')[1]!);
+    press($$('[data-question-zoom]')[2]!);
+    const names = ['A · Strip left', 'B · Strip right', 'C · Bar'];
+    expect(seen.images).toEqual([{ names, index: 1 }, { names, index: 2 }]);
+  });
+
   test('a tile answers from the keyboard too: the arrows only move, Enter answers', () => {
     const seen = render(decision(DRAWERS, DRAWER_PICTURES));
     const radio = $$<HTMLInputElement>('[data-question-tile] input')[0]!;

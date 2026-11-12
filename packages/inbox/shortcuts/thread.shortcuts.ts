@@ -9,6 +9,7 @@ import { defineShortcutScope } from '@plannotator/ui/shortcuts';
 export const inboxThreadShortcuts = defineShortcutScope({
   id: 'inbox-thread',
   title: 'Thread',
+  lettersByCode: true,
   shortcuts: {
     markRead: {
       description: 'Mark read, or move back',
@@ -25,6 +26,26 @@ export const inboxThreadShortcuts = defineShortcutScope({
       hint: 'While the toast shows Undo.',
       preventDefault: true,
       displayOrder: 6,
+    },
+    // Shift+E and H (approval "inbox-keyboard-keys-2026-11-07", items 2 and 3). Snooze is H, not Gmail's B: B is the
+    // second key of G B (Go to the Board), so a G that lapsed would turn into a snooze; H is the approval's fallback.
+    archive: {
+      // App.tsx, beside E: the row the keyboard is on, else the open thread; Z undoes, as the toast's Undo.
+      description: 'Archive',
+      bindings: ['Shift+E'],
+      section: 'List',
+      hint: 'The row the keyboard is on, else the open thread. Z undoes.',
+      preventDefault: true,
+      displayOrder: 5.1,
+    },
+    snooze: {
+      // InboxList.tsx (a row the keyboard is on: its menu at the times) and Thread.tsx (the header ⋯ menu at the times).
+      description: 'Snooze…',
+      bindings: ['H'],
+      section: 'List',
+      hint: 'Opens the Snooze times; it never snoozes by itself. Where Snooze shows.',
+      preventDefault: true,
+      displayOrder: 5.2,
     },
     reply: {
       description: 'Reply',
@@ -94,6 +115,15 @@ export const inboxThreadShortcuts = defineShortcutScope({
       preventDefault: true,
       displayOrder: 5,
     },
+    artifacts: {
+      // Thread.tsx: the header's Artifacts button (approval "inbox-keyboard-keys-2026-11-07", item 1). O's sibling.
+      description: 'Artifacts: every file in the thread',
+      bindings: ['Shift+O'],
+      section: 'Files',
+      hint: 'Opens the grid, and again goes back to the thread. Arrow keys move between its tiles.',
+      preventDefault: true,
+      displayOrder: 5.1,
+    },
     openItems: {
       // Thread.tsx: the same list the "N open questions" button opens, with focus on its first row. Only where that
       // button shows; with the list open, Q is the menu's type-ahead (guards.ts: a key from inside a menu is its own).
@@ -112,6 +142,13 @@ export const inboxThreadShortcuts = defineShortcutScope({
       hint: 'The open file, else the newest one. F again, or Escape, goes back.',
       preventDefault: true,
       displayOrder: 6,
+    },
+    messageMenu: {
+      // CopyMenus.tsx MessageMenu: a message's ⋯ menu from its head (the context-menu key too), as rows and cards.
+      description: 'Message menu',
+      bindings: ['Shift+F10'],
+      section: 'Thread',
+      displayOrder: 8,
     },
     close: {
       // App.tsx: a guided review, then the Artifacts view, then full screen, then the thread.

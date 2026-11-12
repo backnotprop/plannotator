@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import type { AgentCapabilities } from '@plannotator/ui/types';
 import { GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS } from '@plannotator/shared/guide';
 import type { SavedGuideListEntry } from '@plannotator/shared/guide';
@@ -9,11 +9,9 @@ import { PI_THINKING, REVIEW_ENGINE_LABEL } from '@plannotator/ui/components/Age
 // Claude/Codex options come from the same discovered catalogs AgentsTab and
 // Ask AI use (useGuideLaunch → useModelCatalogs).
 import { effortSelectOptions, modelSelectOptions } from '@plannotator/ui/hooks/useModelCatalogs';
-import { groupModelOptions, labelWithinGroup, SEARCHABLE_THRESHOLD } from '@plannotator/ui/components/AgentControls';
 import { ModelSourceHint } from '@plannotator/ui/components/ModelSourceHint';
+import { InlinePicker, type InlinePickerOption as Option } from '@plannotator/ui/components/InlinePicker';
 import { useGuideLaunch } from '../../hooks/guide/useGuideLaunch';
-
-type Option = { value: string; label: string };
 
 /** "2d ago" style age for the previous-guides rows (local convention — same
  *  shape as PRCommentsTab's formatRelativeTime, taking epoch ms instead). */
@@ -28,108 +26,6 @@ function formatSavedAge(savedAt: number): string {
   if (hours < 24) return `${hours}h ago`;
   if (days < 30) return `${days}d ago`;
   return new Date(savedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
-
-/** Inline "Label: Value ▾" picker — the wireframe's compact select pill.
- *  Long catalogs (marker-engine model lists can run to hundreds) automatically
- *  gain a type-to-filter input, a wider popover, and provider group headers. */
-function InlinePicker({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  options: Option[];
-  onChange: (v: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const current = options.find((o) => o.value === value);
-  const searchable = options.length > SEARCHABLE_THRESHOLD;
-
-  const q = query.trim().toLowerCase();
-  const filtered = q
-    ? options.filter((o) => o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q))
-    : options;
-  const grouped = groupModelOptions(filtered);
-
-  const close = () => {
-    setOpen(false);
-    setQuery('');
-  };
-  const select = (v: string) => {
-    onChange(v);
-    close();
-  };
-
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => (open ? close() : setOpen(true))}
-        className="flex items-center gap-2 rounded-md border border-border/50 bg-background px-2.5 py-1.5 text-xs transition-colors hover:border-border"
-      >
-        <span className="text-muted-foreground">{label}:</span>
-        <span className="max-w-[260px] truncate text-foreground">{current?.label ?? value}</span>
-        <ChevronDown className={`text-muted-foreground/40 transition-transform ${open ? 'rotate-180' : ''}`} size={11} />
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={close} />
-          <div
-            className={`absolute left-0 top-full z-20 mt-1 rounded-lg border border-border/50 bg-popover shadow-xl ${
-              searchable ? 'w-[340px]' : 'min-w-[140px]'
-            }`}
-          >
-            {searchable && (
-              <div className="p-1 pb-0">
-                <input
-                  autoFocus
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  onKeyDown={(e) => {
-                    e.stopPropagation();
-                    if (e.key === 'Escape') close();
-                    if (e.key === 'Enter' && filtered.length > 0) select(filtered[0].value);
-                  }}
-                  placeholder="Type to filter…"
-                  className="w-full rounded-md border border-border/40 bg-background px-2.5 py-1.5 text-xs text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-border"
-                />
-              </div>
-            )}
-            <div className={`overflow-y-auto p-1 ${searchable ? 'max-h-80' : 'max-h-56'}`}>
-              {filtered.length === 0 && (
-                <div className="px-2.5 py-2 text-xs text-muted-foreground/50">No matches</div>
-              )}
-              {grouped.map((group) => (
-                <React.Fragment key={group.label ?? '__flat'}>
-                  {group.label && (
-                    <div className="px-2.5 pb-0.5 pt-1.5 font-mono text-[9px] uppercase tracking-wider text-muted-foreground/40">
-                      {group.label}
-                    </div>
-                  )}
-                  {group.options.map((o) => (
-                    <button
-                      key={o.value}
-                      type="button"
-                      onClick={() => select(o.value)}
-                      className={`flex w-full items-center rounded-md px-2.5 py-1.5 text-left text-xs transition-colors ${
-                        value === o.value ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
-                      }`}
-                    >
-                      <span className="min-w-0 flex-1 truncate">{labelWithinGroup(o.label, group.label)}</span>
-                    </button>
-                  ))}
-                </React.Fragment>
-              ))}
-            </div>
-          </div>
-        </>
-      )}
-    </div>
-  );
 }
 
 interface GuideFailure {
@@ -156,6 +52,8 @@ interface GuideEmptyStateProps {
   /** Open a persisted guide from the previous-guides list — receives the
    *  `saved:{id}` pseudo job id understood by the guide endpoints (#1112). */
   onOpenSavedGuide?: (jobId: string) => void;
+  /** AI features are off: only the saved guides, no launch (they are still served and readable). */
+  launchOff?: boolean;
 }
 
 /**
@@ -165,7 +63,7 @@ interface GuideEmptyStateProps {
  * (the same persisted guide settings AgentsTab's launch panel edits), and a
  * primary Generate button.
  */
-export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, launchJob, onBack, failure, onOpenFixedGuide, onOpenSavedGuide }) => {
+export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, launchJob, onBack, failure, onOpenFixedGuide, onOpenSavedGuide, launchOff = false }) => {
   // Engine/model resolution + launch-param shapes are shared with GuideView's
   // "Regenerate" hint via useGuideLaunch — this component keeps only the
   // picker UI on top of it.
@@ -403,6 +301,72 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
     }
   };
 
+  // The previous guides (#1112): under the launch controls, or alone while AI features are off.
+  const savedSection = savedGuides && savedGuides.length > 0 ? (
+    <div className="mt-10 max-w-[820px]">
+      <div className="mb-2.5 font-mono text-[10px] uppercase tracking-widest text-muted-foreground/60">
+        Previous guides
+      </div>
+      <div className="divide-y divide-border/30 overflow-hidden rounded-lg border border-border/50 bg-card/50">
+        {savedGuides.map((entry) => (
+          <div key={entry.id} className="group flex items-center gap-3 px-3.5 py-2.5">
+            {/* On a phone the title takes its own line under the chip and dates, so it is never cut to a letter. */}
+            <button
+              type="button"
+              onClick={() => onOpenSavedGuide?.(`saved:${entry.id}`)}
+              className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 text-left sm:flex-nowrap"
+            >
+              <span className="shrink-0 rounded border border-border/50 bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                {entry.label}
+              </span>
+              <span className="order-last line-clamp-2 min-w-0 basis-full text-[12.5px] text-foreground transition-colors group-hover:text-primary sm:order-none sm:line-clamp-none sm:flex-1 sm:basis-0 sm:truncate">
+                {entry.title}
+              </span>
+              <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground/60">
+                {formatSavedAge(entry.savedAt)}
+              </span>
+              <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground/60">
+                {entry.progress.reviewed}/{entry.progress.total}
+              </span>
+              {entry.moved && (
+                <span className="shrink-0 font-mono text-[10px] text-amber-600/80 dark:text-amber-500/70" title="The diff has changed since this guide was generated">
+                  diff changed
+                </span>
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleDeleteSaved(entry.id)}
+              aria-label={`Delete saved guide "${entry.title}"`}
+              className="shrink-0 rounded px-1 text-sm leading-none text-muted-foreground/40 transition-colors hover:text-destructive"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  ) : null;
+
+  if (launchOff) {
+    return (
+      <div className="w-full px-10 py-8">
+        <h1 className="text-[22px] font-semibold tracking-tight text-foreground">Saved guides</h1>
+        <p className="mt-2 max-w-[72ch] text-[13px] leading-relaxed text-muted-foreground">
+          AI features are off, so a new guide can't be started here. Your saved guides still open.
+        </p>
+        {savedSection}
+        <button
+          type="button"
+          onClick={onBack}
+          className="mt-6 rounded-md border border-border/50 px-3 py-2 text-[12.5px] text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+        >
+          Back to diff
+        </button>
+      </div>
+    );
+  }
+
   return (
     // Full-width page: this content sits in the header zone (where the guide
     // title lands once generated) rather than a centered island.
@@ -535,6 +499,11 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
                 />
                 <p className="mt-1 text-[11px] leading-snug text-muted-foreground/60">
                   Added on top of the built-in guide methodology for every guide you generate. Saved for next time.
+                  {instructions.length >= GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS - 1000 && (
+                    <span data-guide-instructions-count="" className="ml-1 whitespace-nowrap tabular-nums">
+                      {instructions.length.toLocaleString('en-US')} / {GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS.toLocaleString('en-US')}
+                    </span>
+                  )}
                 </p>
               </div>
             )}
@@ -561,50 +530,7 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
         </>
       )}
 
-      {savedGuides && savedGuides.length > 0 && (
-        <div className="mt-10 max-w-[820px]">
-          <div className="mb-2.5 font-mono text-[10px] uppercase tracking-widest text-muted-foreground/60">
-            Previous guides
-          </div>
-          <div className="divide-y divide-border/30 overflow-hidden rounded-lg border border-border/50 bg-card/50">
-            {savedGuides.map((entry) => (
-              <div key={entry.id} className="group flex items-center gap-3 px-3.5 py-2.5">
-                <button
-                  type="button"
-                  onClick={() => onOpenSavedGuide?.(`saved:${entry.id}`)}
-                  className="flex min-w-0 flex-1 items-center gap-3 text-left"
-                >
-                  <span className="shrink-0 rounded border border-border/50 bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-                    {entry.label}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-[12.5px] text-foreground transition-colors group-hover:text-primary">
-                    {entry.title}
-                  </span>
-                  <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground/60">
-                    {formatSavedAge(entry.savedAt)}
-                  </span>
-                  <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground/60">
-                    {entry.progress.reviewed}/{entry.progress.total}
-                  </span>
-                  {entry.moved && (
-                    <span className="shrink-0 font-mono text-[10px] text-amber-600/80 dark:text-amber-500/70" title="The diff has changed since this guide was generated">
-                      diff changed
-                    </span>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDeleteSaved(entry.id)}
-                  aria-label={`Delete saved guide "${entry.title}"`}
-                  className="shrink-0 rounded px-1 text-sm leading-none text-muted-foreground/40 transition-colors hover:text-destructive"
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {savedSection}
     </div>
   );
 };

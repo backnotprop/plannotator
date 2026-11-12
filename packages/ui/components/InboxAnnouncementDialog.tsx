@@ -13,9 +13,9 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dial
  * announcements it swallows Mod+Enter on the capture phase, so a keystroke
  * aimed at it cannot approve a plan or post a review behind it.
  *
- * The film is the marketing page's own file (`apps/marketing/public/assets/
- * inbox-film.mp4`, 1920x1080, ~14 MB, voice-led), served from
- * plannotator.ai/assets like the other announcements' footage. It never
+ * The film is the marketing page's own file (`inbox-film.mp4`, 1920x1080,
+ * ~14 MB, voice-led), hosted at plannotator.ai/assets like the other
+ * announcements' footage. It never
  * autoplays and is `preload="none"`: opening the dialog fetches only the poster
  * (~120 KB), and the film downloads when the reader presses play. Until then
  * the frame is the poster with one play button, as on the Inbox page; after

@@ -207,7 +207,10 @@ test('Add: the agent joins with the added wake, the thread says so, and a later 
   await expect(links(page)).toHaveText(['Ask instead']);
   await shot(page, '2-switched-add-desktop');
   await send(page);
-  await expect(page.locator('[data-thread-move="added"]')).toContainText('You added OpenCode to this thread');
+  // Two sessions in the thread now: one quiet line, the added session by its name.
+  const added = page.locator('[data-thread-move="added"]');
+  await expect(added).toHaveAttribute('data-quiet', '');
+  await expect(added).toHaveText(/^You added OpenCode · \S/);
   await expect(page.locator('[data-thread-owner]')).toHaveCount(0);
   const sent = await lastPersonMessage(world.tags.ids.t3);
   expect(sent.tags).toEqual([expect.objectContaining({ session: S.opencode, joined: true })]);

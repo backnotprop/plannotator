@@ -42,6 +42,7 @@ export type WideModeType = 'wide' | 'focus';
 export interface ImageAttachment {
   path: string;
   name: string;
+  kind?: 'file';
 }
 
 /** DOM-relative text position used to restore a document annotation selection. */
@@ -76,12 +77,6 @@ export interface ArtifactAnnotationMeta {
   anchor: ArtifactAnnotationAnchor;
 }
 
-/** Files supplied by a host composer; the host resolves their opaque ids. */
-export interface CommentFileAttachment {
-  id: string;
-  name: string;
-}
-
 export interface Annotation {
   id: string;
   blockId: string; // Legacy - not used with web-highlighter
@@ -93,7 +88,6 @@ export interface Annotation {
   createdA: number;
   author?: string; // Tater identity for collaborative sharing
   source?: string; // External tool identifier (e.g., "eslint") — set when annotation comes from external API
-  files?: CommentFileAttachment[];
   images?: ImageAttachment[]; // Attached images with human-readable names
   mentions?: readonly string[]; // opaque host ids named with `@` in the comment body, set ONLY when a host supplied a `mentionSource` to the composer and at least one token survived; the key is absent otherwise. Host data: the package never renders, exports, shares or archives it.
   isQuickLabel?: boolean; // true if created via quick label chip
@@ -325,7 +319,6 @@ export interface CodeAnnotation {
   lineEnd: number;
   side: 'old' | 'new'; // Maps to 'deletions' | 'additions' in @pierre/diffs
   text?: string;
-  files?: CommentFileAttachment[];
   images?: ImageAttachment[];
   suggestedCode?: string;
   originalCode?: string; // Original selected lines for suggestion diff
@@ -480,7 +473,9 @@ export interface DiffAnnotationMetadata {
    *  the projected metadata, not the full annotation. */
   copyText?: string;
   // AI marker fields (set when kind === 'ai-marker')
-  kind?: 'annotation' | 'ai-marker';
+  kind?: 'annotation' | 'ai-marker' | 'host-note' | 'context-note';
+  /** A host's context note (kind === 'context-note'; review-editor's `contextNotes`): never a comment. */
+  contextNoteId?: string;
   questionId?: string;
   promptPreview?: string;
   hasResponse?: boolean;

@@ -3,6 +3,7 @@ import { readInboxAttachmentKind, type InboxAttachmentState } from '@plannotator
 import { ImagePeek, type ImagePeekRow } from '@plannotator/ui/components/ImagePeek';
 import { Tooltip } from '@plannotator/ui/components/Tooltip';
 import { attachmentImageUrl, readableVersion } from '../attachments';
+import { drawnImageUrl, GALLERY_IMAGE_WIDTH } from '../images';
 import { Icon } from '../icons';
 import type { AttachmentStep } from '../stepping';
 import { changedLine } from './AttachmentTiles';
@@ -54,7 +55,8 @@ export function peekRows(steps: readonly AttachmentStep[], counts: ReadonlyMap<s
     row.items.push({
       key: attachment.id,
       name: attachment.name,
-      thumb: isImage ? attachmentImageUrl(attachment, readableVersion(attachment)) : null,
+      // A cell is a few hundred pixels wide: a big screenshot loads as the gallery's smaller copy, never the original (images.ts).
+      thumb: isImage ? drawnImageUrl(attachmentImageUrl(attachment, readableVersion(attachment)), attachment.width, GALLERY_IMAGE_WIDTH) : null,
       tile: peekTile(attachment),
       count: counts.get(attachment.path) ?? 0,
       attached: !step.inline,

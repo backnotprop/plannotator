@@ -51,8 +51,6 @@ const AGENT = 'Claude Code (worktree agent-a0316994da8440ab5)';
 const AGENT_SHORT = 'Claude Code (worktree agent-a0316994da8…';
 const SUBJECT = 'Fix flaky tests/e2e/inbox-attachment-stepping-save.spec.ts on WebKit after the Bun 1.4.4 upgrade (retry worker race)';
 const FILE = 'Q3 Board Deck — FINAL (revised) v12 [approved by legal].md';
-/** What a phone's Looks good says before the agent's name. */
-const LOOKS_GOOD_NEWS = 'Read · Sends in 10 s';
 
 const STOPPED = [
   'The retry worker races the save on WebKit. I attached the deck the board asked about.',
@@ -209,15 +207,8 @@ async function heightOf(toast: Locator): Promise<number> {
 
 const pane = (page: Page) => page.locator('section.ib-pane');
 const toastOf = (page: Page) => page.locator('[data-inbox-toast]');
-/** Mark read: the header's button; on a phone, the first item of the ⋯ sheet (approval "inbox-thread-header"). */
-async function pressMarkRead(page: Page, phone: boolean): Promise<void> {
-  if (!phone) {
-    const read = page.locator('[data-mark-read]');
-    await expect(read).toHaveAttribute('aria-pressed', 'false');
-    await read.click();
-    return;
-  }
-  await expect(pane(page).locator('.ib-phead [data-mark-read]')).toHaveCount(0);
+/** Mark read: the first item of the header's ⋯ menu (a phone's sheet), desktop and phone alike. */
+async function pressMarkRead(page: Page, _phone: boolean): Promise<void> {
   await pane(page).locator('[data-thread-more]').click();
   await page.locator('[data-thread-menu] [data-thread-read-item]').click();
 }
@@ -239,11 +230,10 @@ for (const vp of VIEWPORTS) {
       await expect(toast.locator('.ib-tdetail')).toHaveText(vp.phone ? `Stopped · ${AGENT_SHORT}` : `${AGENT_SHORT} was stopped`);
       await expectFits(page, toast, 'stopped Mark read');
       if (vp.phone) expect(await newsShows(toast.locator('.ib-tdetail'), 'Stopped'), 'stopped Mark read: the news').toBe('shows');
-      // The Inbox stored the name cut at 40 (the server's cap): the thread shows that, and the live region says the
-      // whole sentence, whatever the toast's line cuts.
-      await expect(page.locator('[data-inbox-live]')).toContainText(`Marked read. ${AGENT_SHORT} was stopped.`);
-      await expect(pane(page)).toContainText(AGENT_SHORT);
-      await expect(pane(page)).not.toContainText(AGENT);
+      // The Inbox stores the name whole: the thread shows it, the toast shortens it, and the live region says the
+      // whole sentence with the whole name, whatever the toast's line cuts.
+      await expect(page.locator('[data-inbox-live]')).toContainText(`Marked read. ${AGENT} was stopped.`);
+      await expect(pane(page)).toContainText(AGENT);
       await page.screenshot({ path: join(proofDir, `${vp.name}-stopped-mark-read.png`) });
       if (vp.phone) {
         // Clear of the thread's foot (Reply).
@@ -271,32 +261,28 @@ for (const vp of VIEWPORTS) {
         await toast.getByRole('button', { name: /Undo/ }).click();
       }
 
-      // Looks good: "Goes to <the agent, cut> in 10 s · Moves to Quiet".
+      // Looks good draws no toast (approval "inbox-reaction-tray": the line under the message says it); the live region does.
       await openThread(page, world.threads.merged, /Merged the payouts table/);
       const ack = pane(page).locator('[data-ack]');
       await ack.click();
-      // A phone puts the name last.
-      await expect(toast.locator('.ib-tdetail')).toHaveText(vp.phone ? `${LOOKS_GOOD_NEWS} · ${AGENT_SHORT}` : `Goes to ${AGENT_SHORT} in 10 s · Moves to Quiet`);
-      await expectFits(page, toast, 'Looks good');
-      if (vp.phone) expect(await newsShows(toast.locator('.ib-tdetail'), LOOKS_GOOD_NEWS), 'Looks good: the news').toBe('shows');
-      await expect(page.locator('[data-inbox-live]')).toContainText(`Goes to ${AGENT_SHORT} in 10 seconds and moves to Quiet.`);
-      await page.screenshot({ path: join(proofDir, `${vp.name}-looks-good.png`) });
-      await toast.getByRole('button', { name: /Undo/ }).click();
+      await expect(ack).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.locator('[data-inbox-live]')).toContainText(`Goes to ${AGENT} in 10 seconds and moves to Quiet.`);
+      await expect(toast).toHaveCount(0);
+      await ack.click();
       await expect(ack).toHaveAttribute('aria-pressed', 'false');
 
-      // Draft saved: the Drafts chip on screen beside the words.
+      // Draft saved: the Reopen chip on screen beside the words.
       await page.goto(world.url);
       await page.locator('[data-open-compose]:visible').first().click();
       const dialog = page.locator('dialog[data-compose]');
       await dialog.locator('[data-compose-text] textarea').fill(`A draft for ${PROJECT}, kept from ${vp.name} px.`);
-      // Closing asks to keep or discard (a phone's sheet has Cancel; a window, Escape).
+      // Closing keeps it as a draft, with no question (a phone's sheet has Cancel; a window, Escape).
       if (vp.phone) await dialog.locator('[data-compose-cancel]').click();
       else await page.keyboard.press('Escape');
-      await dialog.locator('[data-compose-keep]').click();
       await expect(dialog).toHaveCount(0);
       await expect(toast).toContainText('Draft saved');
       await expectFits(page, toast, 'Draft saved');
-      await expect(toast.locator('[data-toast-action]')).toHaveText('Drafts');
+      await expect(toast.locator('[data-toast-action]')).toHaveText('Reopen');
       // One line is as tall as before (40 px).
       if (!vp.phone) expect(await heightOf(toast), 'Draft saved: one line, height').toBe(40);
       await page.screenshot({ path: join(proofDir, `${vp.name}-draft-saved.png`) });
@@ -359,9 +345,8 @@ test('a touch tablet (768, coarse pointer): the desktop toast, no key hint, 44 p
   try {
     await openThread(page, world.threads.stopped, /Fix flaky tests/);
     expect(await page.evaluate(() => matchMedia('(pointer: coarse) and (hover: none)').matches)).toBe(true);
-    const read = page.locator('[data-mark-read]');
-    await expect(read).toHaveAttribute('aria-pressed', 'false');
-    await read.click();
+    await pane(page).locator('[data-thread-more]').tap();
+    await page.locator('[data-thread-menu] [data-thread-read-item]').tap();
     const toast = toastOf(page);
     await expectFits(page, toast, 'tablet Mark read');
     await expect(toast).not.toHaveClass(/ib-toast-phone/);

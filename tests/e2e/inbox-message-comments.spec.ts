@@ -10,7 +10,8 @@
  *    highlight; the reply box's chip counts it and lists it under the message;
  *  - Send carries it, and the agent's read_thread returns the quote and the
  *    comment under "Feedback on your message from <time> (<message id>)";
- *  - the person's own message and a question card's words open no toolbar;
+ *  - the person's own message and a question card's words open the toolbar too
+ *    (approval "inbox-annotate-own-and-questions"; no Delete on the person's own words);
  *  - on a phone-wide window (390 px) the same, and the toolbar stays in the window.
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
@@ -236,7 +237,7 @@ test("a comment on words in an agent's message: toolbar, composer, highlight, ch
   expect(world.errors).toEqual([]);
 });
 
-test("the person's own message and a question card's words open no toolbar", async () => {
+test("the person's own message and a question card's words open the toolbar (approval inbox-annotate-own-and-questions)", async () => {
   const { page, claude, project } = world;
   const sent = await claude.send({ project_path: project, subject: 'Rounding', thread: 'rounding', body: QUESTION });
   await page.goto(`${world.url}#thread=${sent.thread_id}`);
@@ -247,14 +248,14 @@ test("the person's own message and a question card's words open no toolbar", asy
   await page.mouse.down();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 6 });
   await page.mouse.up();
-  await page.waitForTimeout(300);
-  await expect(toolbar(page)).toHaveCount(0);
-  // The agent's own words above the card still take a comment.
+  await expect(toolbar(page)).toBeVisible();
+  await page.keyboard.press('Escape');
+  // The agent's own words above the card take a comment as before.
   await dragSelect(page, sent.message_id as string, 'before I merge');
   await expect(toolbar(page)).toBeVisible();
   await page.keyboard.press('Escape');
 
-  // The person's own reply: no toolbar.
+  // The person's own reply: the toolbar, without Delete.
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Reply' }).click();
   await page.locator('.ib-rbox textarea').fill('Holding this one until Monday.');
   await page.locator('section.ib-pane').getByRole('button', { name: 'Send', exact: true }).click();
@@ -262,8 +263,10 @@ test("the person's own message and a question card's words open no toolbar", asy
   await expect(mine).toContainText('Holding this one');
   const id = await mine.getAttribute('data-message-id');
   await dragSelect(page, id!, 'Holding this one');
-  await page.waitForTimeout(300);
-  await expect(toolbar(page)).toHaveCount(0);
+  await expect(toolbar(page)).toBeVisible();
+  await expect(toolbar(page).getByRole('button', { name: 'Comment' })).toBeVisible();
+  await expect(toolbar(page).getByRole('button', { name: 'Delete' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
 });
 
 test('on a phone-wide window: the same toolbar, composer, highlight and chip, inside the window', async ({ browser }) => {
@@ -289,8 +292,9 @@ test('on a phone-wide window: the same toolbar, composer, highlight and chip, in
     await expect(page.locator(`[data-message-id="${id}"] mark.annotation-highlight`)).toHaveText('dead-letter queue');
     await page.locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).first().click();
     await shot(page, '08-phone-highlighted');
-    // A phone's reply box names its comments in one line, which opens their list (approval "inbox-reply-foot-phone").
-    await page.locator('section.ib-pane .ib-rfoot [data-foot-summary]').click();
+    // A phone's reply box names its comments in one line over its row, which opens their list (approvals
+    // "inbox-reply-foot-phone", "inbox-reply-box").
+    await page.locator('section.ib-pane .ib-rbox [data-reply-line] [data-foot-summary]').click();
     await expect(page.locator('.ib-annpop [data-annotation-row]')).toContainText('"dead-letter queue"');
     await shot(page, '09-phone-chip');
     await page.locator('.ib-annpop').getByRole('button', { name: 'Close the list' }).click();

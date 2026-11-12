@@ -1,7 +1,7 @@
 /**
  * Plannotator Inbox registry: `${dataDir}/inbox/inbox.json`.
  *
- * `{ v, pid, port, url, version, token, serverSession, startedAt, tailnet?, lan?, tailscale? }`, mode
+ * `{ v, pid, port, url, version, token, serverSession, startedAt, follows?, home?, tailnet?, lan?, tailscale? }`, mode
  * 0600, written by the Inbox server when it starts and LEFT IN PLACE when it
  * exits, so a person who ran the Inbox once has it found by every agent
  * session, and a caller can start it again on the port it last had.
@@ -27,6 +27,7 @@ import { join, resolve } from "node:path";
 import { isInboxHealth, type InboxHealth } from "@plannotator/core/inbox-types";
 import { inboxDir } from "./schema";
 import { proveInboxProcess } from "./process-proof";
+import { inboxUpgradeRunning } from "./store-log/sqlite/upgrade-marker";
 
 export const INBOX_REGISTRY_FILE = "inbox.json";
 export const INBOX_START_LOCK = "start.lock";
@@ -64,7 +65,45 @@ export interface InboxRegistryEntry {
    * its tailnet-only loopback listener), kept after a stop whose take-down
    * failed so the next start or `uninstall --purge` can take it down.
    */
-  tailscale?: { url: string | null; error: string | null; https_port?: number; proxy_port?: number };
+  /**
+   * `relay_port` (additive): the prototype relay's mapping (inbox-tailscale.ts), `tailscale serve --https=<relay_port>`
+   * pointed at the loopback listener on the same port number; recorded before it is made, taken down like the window's.
+   */
+  tailscale?: { url: string | null; error: string | null; https_port?: number; proxy_port?: number; relay_port?: number };
+  /**
+   * The runs of this data folder before this one (additive): their `serverSession`s, newest first, at most
+   * `INBOX_SESSION_LINEAGE_MAX` (`inboxSessionLineage`). A window left open across a restart proves with it that
+   * the Inbox now answering is the same data it loaded from, and keeps writing without a reload.
+   */
+  follows?: string[];
+  /** The `inbox/` folder this entry was written in, as device and inode (additive; `inboxHome`): a copy has another. */
+  home?: string;
+}
+
+/** How many earlier runs an entry names (`follows`): a window that slept through more restarts than this reloads, as before. */
+export const INBOX_SESSION_LINEAGE_MAX = 8;
+
+/** The `inbox/` folder's identity (device:inode), or null where it cannot be read. A copied or restored folder has another. */
+export function inboxHome(dataDir: string): string | null {
+  try {
+    const stat = statSync(inboxDir(dataDir));
+    // Not the birth time: where the filesystem keeps none it reads as the change time, which every write here moves.
+    return `${stat.dev}:${stat.ino}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The earlier runs a starting Inbox follows: the last entry's session, then the runs that one followed. Only when
+ * that entry was written in this very folder (`home`): an entry with no `home` (an older Inbox wrote it), another
+ * folder's (the data dir was copied, or restored from a backup) or an unreadable folder starts the line again, so
+ * a window of the other Inbox is never taken for this one's.
+ */
+export function inboxSessionLineage(previous: Pick<InboxRegistryEntry, "serverSession" | "follows" | "home"> | null, home: string | null): string[] {
+  if (!previous || !home || previous.home !== home) return [];
+  const earlier = Array.isArray(previous.follows) ? previous.follows.filter((s): s is string => typeof s === "string" && s !== "") : [];
+  return [previous.serverSession, ...earlier].slice(0, INBOX_SESSION_LINEAGE_MAX);
 }
 
 export function inboxRegistryPath(dataDir: string): string {
@@ -286,7 +325,8 @@ export function acquireInboxStartLock(dataDir: string): (() => void) | null {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       try {
-        if (Date.now() - statSync(lock).mtimeMs <= INBOX_START_LOCK_STALE_MS) return null;
+        // Never stale while the Inbox it started moves into SQLite: a second Inbox would start beside it.
+        if (Date.now() - statSync(lock).mtimeMs <= INBOX_START_LOCK_STALE_MS || inboxUpgradeRunning(dataDir)) return null;
         rmSync(lock, { recursive: true, force: true });
       } catch {
         // Gone in between: try again.
@@ -297,12 +337,13 @@ export function acquireInboxStartLock(dataDir: string): (() => void) | null {
 }
 
 /** Wait until `check` answers non-null, polling; null on timeout. */
-export async function waitForInbox<T>(check: () => Promise<T | null>, timeoutMs: number, intervalMs = 100): Promise<T | null> {
+export async function waitForInbox<T>(check: () => Promise<T | null>, timeoutMs: number, intervalMs = 100, keepWaiting?: () => boolean): Promise<T | null> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const value = await check();
     if (value !== null) return value;
-    if (Date.now() >= deadline) return null;
+    // `keepWaiting`: past the deadline, wait on while it says so (an Inbox still moving into SQLite).
+    if (Date.now() >= deadline && !keepWaiting?.()) return null;
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
 }

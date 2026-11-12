@@ -22,6 +22,10 @@
  *     respawns it once, Starting again (12), delivered once → no line (10);
  *     Delete runs stop and rm, removes launch/<id>/, never purge. The login
  *     shell ran for the composer, the start and the respawn.
+ *  2b. A turn that ends in an API error (16, after 9): one note in Claude
+ *     Code's own words, "couldn't answer" with Try again, which sends the
+ *     message to the session again; its good answer clears the line and the
+ *     note stays.
  *  3. Full permissions (Settings → Agents): bypass mode on argv, Claude's env
  *     switch in the file, "Full permissions" in the header.
  *  4. A replayed Send (same key) starts `--bg` once.
@@ -34,11 +38,13 @@
  *     failure, and the same reply does not respawn it again.
  *  9. Delete while `--bg` is still running: the session it makes is stopped
  *     and removed, never left running unseen.
+ *  3b. Model and effort: picked on To's line they go on `--bg` and into the
+ *     header; the next New message starts on them; Default sends neither.
  * 10. Phone: the To picker (01), the To sentence (02), the working line (06),
  *     the permission prompt without Open in Terminal (08), no Delete in ⋯.
  *
  * Pictures: LAUNCH_SHOTS_DIR (default .local/proof/launch-pr1), wide light at
- * 2x, plus 02 and 06 dark, and 01, 02, 06 and 08 on a phone. Build the binary first (see
+ * 2x, plus 02, 06 and 16 dark, and 01, 02, 06 and 08 on a phone. Build the binary first (see
  * inbox.spec.ts), then `bunx playwright test -c tests/e2e/playwright.config.ts inbox-launch-claude.spec.ts`.
  */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
@@ -48,6 +54,7 @@ import { join, resolve } from 'node:path';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
 import { FAKE_LOGIN_CLAUDE_VALUE, installFakeClaude, type FakeClaude } from '../helpers/fake-claude';
+import { installFakeCodexLaunch } from '../helpers/fake-codex-launch';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
@@ -197,7 +204,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   writeConfig({ inboxLaunch: { enabled: false } });
   const env: Record<string, string> = {
     // Only the fakes and the system's own tools: never the agents installed on the machine running the spec.
-    PATH: `${bin}:/usr/bin:/bin`,
+    PATH: `${bin}:${join(root, 'codex', 'bin')}:/usr/bin:/bin`,
     HOME: home,
     SHELL: fake.shell,
     PLANNOTATOR_DATA_DIR: dataDir,
@@ -439,9 +446,11 @@ test('the journey: To rows, the To sentence, the folder menu; Send writes the th
   await shot(page, '10-replied');
   expect(fake.calls().filter((c) => c.argv[0] === 'respawn')).toHaveLength(1);
   expect(fake.starts()).toHaveLength(1);
-  // The login shell was read off the Send's wait: ahead when the composer picked "Start Claude Code", by the start
-  // for its own env, and by the respawn for its own (either may start Claude's supervisor). Never for a status read or the stop.
-  expect(fake.logins()).toBe(3);
+  // The login shell was read off the Send's wait: once ahead the first time New message opened with launch on (the
+  // test above; since 0.29 that read replaces the one at Inbox start, warmLogin in inbox-launch.ts), again when the
+  // composer picked "Start Claude Code", by the start for its own env, and by the respawn for its own (either may
+  // start Claude's supervisor). Never for a status read or the stop.
+  expect(fake.logins()).toBe(4);
   // Delivered once: one answer to the reply, and the reply was handed over once.
   const thread = (await page.evaluate(async (id) => (await fetch(`/api/inbox/threads/${id}`)).json(), threadId)) as { thread: { messages: { id: string; author: { kind: string }; reply_to?: string | null; delivery?: unknown }[] } };
   const reply = thread.thread.messages.filter((m) => m.author.kind === 'person').at(-1)!;
@@ -489,6 +498,53 @@ test('full permissions: with the person\'s bypass consent, Settings → Agents s
   } finally {
     writeFileSync(userSettings, ownSettings);
   }
+});
+
+test('model and effort: picked on To\'s line, they go on --bg and show in the header; the next New message starts on them; Default sends neither', async () => {
+  const { page, fake } = world;
+  fake.configure({ startDelayMs: 0, hold: false });
+  await page.goto(world.url);
+  const send = async (words: string, pick: (d: ReturnType<typeof dialog>) => Promise<void>) => {
+    await openCompose(page);
+    const d = dialog(page);
+    await d.locator('[data-compose-to]').click();
+    await d.locator('[data-compose-start="claude-code"]').click();
+    await pick(d);
+    await d.getByRole('textbox', { name: 'Message' }).fill(words);
+    const before = fake.starts().length;
+    const answer = page.waitForResponse((r) => r.url().endsWith('/api/inbox/messages') && r.request().method() === 'POST');
+    await d.locator('[data-compose-send]').click();
+    const threadId = ((await (await answer).json()) as { thread_id: string }).thread_id;
+    return { threadId, start: await waitFor('claude --bg', () => fake.starts()[before]) };
+  };
+  const first = await send('Tidy the README.', async (d) => {
+    await expect(d.locator('[data-compose-choice]')).toHaveText('Default model');
+  });
+  expect(first.start.argv).not.toContain('--model');
+  expect(first.start.argv).not.toContain('--effort');
+  const picked = await send('Plan the migration.', async (d) => {
+    await d.locator('[data-compose-choice]').click();
+    await d.locator('[data-compose-choice-menu="model"] [data-compose-choice-value="opus"]').click();
+    await d.locator('[data-compose-choice-menu="effort"] [data-compose-choice-value="high"]').click();
+    await page.keyboard.press('Escape');
+    await expect(d.locator('[data-compose-choices]')).toHaveCount(0);
+    await expect(d.locator('[data-compose-choice]')).toHaveText('opus · high');
+  });
+  const at = picked.start.argv.indexOf('--model');
+  expect(picked.start.argv.slice(at, at + 4)).toEqual(['--model', 'opus', '--effort', 'high']);
+  expect(picked.start.settings!.model).toBeUndefined();
+  await openThread(page, picked.threadId);
+  await expect(pane(page).locator('[data-launched] [data-launch-choice]')).toHaveText('opus · high');
+  await page.goto(world.url);
+  const back = await send('One more pass.', async (d) => {
+    await expect(d.locator('[data-compose-choice]')).toHaveText('opus · high');
+    await d.locator('[data-compose-choice]').click();
+    await d.locator('[data-compose-choice-menu="model"] [data-compose-choice-value="default"]').click();
+    await d.locator('[data-compose-choice-menu="effort"] [data-compose-choice-value="default"]').click();
+    await page.keyboard.press('Escape');
+  });
+  expect(back.start.argv).not.toContain('--model');
+  expect(back.start.argv).not.toContain('--effort');
 });
 
 test('a replayed Send (same idempotency key) answers the same thread and starts --bg once', async () => {
@@ -675,7 +731,53 @@ test('Delete while --bg is still running: the session it makes is stopped and re
   }
 });
 
-test('phone: the To picker, the To sentence, the working line, the permission prompt; no Open in Terminal or Delete', async ({ browser }) => {
+test('a turn that ends in an API error: one note with Claude Code\'s own words, "couldn\'t answer" with Try again, which sends the message again; the next good turn clears the line', async () => {
+  const { page, fake } = world;
+  const error = 'Credit balance too low · Add funds: https://platform.claude.com/settings/billing';
+  fake.configure({ startDelayMs: 0, hold: false, workMs: 300, apiError: { error: 'billing_error', text: error } });
+  try {
+    await page.goto(world.url);
+    const words = 'Tighten the retry backoff in the sync worker.';
+    const threadId = await launchFrom(page, words);
+    await openThread(page, threadId);
+    const p = pane(page);
+    const notes = p.locator('article.ib-message[data-author="agent"]');
+    // The window sets a message's apostrophe as ’ (smart punctuation); the stored words keep the plain one.
+    const errorNotes = notes.filter({ hasText: 'Claude Code’s turn ended with an error:' });
+    await expect(errorNotes).toHaveCount(1, { timeout: 30_000 });
+    await expect(errorNotes).toContainText(error);
+    const agentBodies = async () =>
+      ((await page.evaluate(async (id) => (await fetch(`/api/inbox/threads/${id}`)).json(), threadId)) as { thread: { messages: { author: { kind: string }; body: string }[] } }).thread.messages
+        .filter((m) => m.author.kind === 'agent')
+        .map((m) => m.body);
+    expect(await agentBodies()).toEqual([`Claude Code's turn ended with an error: ${error}`]);
+    const line = p.locator('[data-run="failed"]');
+    await expect(line).toHaveText(/^Claude Code couldn't answer\. Your message is kept\.\s*Try again$/);
+    await shot(page, '16-turn-error');
+    await shot(page, '16-turn-error-dark', { scheme: 'dark' });
+    // Read again and again (every sweep, the window's reloads): still one note.
+    await page.reload();
+    await expect(line).toBeVisible();
+    await expect(notes).toHaveCount(1);
+
+    // Try again: the same message goes to the same session once more; it answers, and the line goes. The note stays.
+    fake.configure({ apiError: null });
+    const root = (await page.evaluate(async (id) => (await fetch(`/api/inbox/threads/${id}`)).json(), threadId)) as { thread: { messages: { id: string }[] } };
+    const rootId = root.thread.messages[0]!.id;
+    expect(fake.delivered().filter((id) => id === rootId)).toHaveLength(1);
+    await line.locator('[data-run-retry]').click();
+    await waitFor('the message taken again', () => fake.delivered().filter((id) => id === rootId).length === 2);
+    await expect(notes).toHaveCount(2, { timeout: 30_000 });
+    await expect(notes.last()).toContainText(`Done: ${words}`);
+    await expect(p.locator('[data-run]')).toHaveCount(0);
+    await expect(errorNotes).toHaveCount(1);
+    expect((await agentBodies()).filter((body) => body.startsWith("Claude Code's turn ended with an error:"))).toHaveLength(1);
+  } finally {
+    fake.configure({ apiError: null, workMs: 800 });
+  }
+});
+
+test('phone: the To picker, the To sentence, the working line, the permission prompt; Delete, and no Open in Terminal', async ({ browser }) => {
   const { fake } = world;
   const phone = await browser.newContext({ viewport: PHONE, deviceScaleFactor: 3, isMobile: true, hasTouch: true, colorScheme: 'light' });
   const page = await phone.newPage();
@@ -708,11 +810,46 @@ test('phone: the To picker, the To sentence, the working line, the permission pr
     await expect(waiting.locator('[data-run-stop]')).toBeVisible();
     await expect(waiting.locator('[data-run-open]')).toHaveCount(0);
     await shot(page, '08-permission-prompt-v1-phone');
-    // ⋯ on a phone: no Open in Terminal, no Delete.
+    // ⋯ on a phone: no Open in Terminal (it would open on the Mac's screen); Delete as on the computer.
     await page.locator('[data-thread-more]').click();
-    await expect(page.locator('[data-thread-menu] [data-launch-item]')).toHaveText(['Copy attach command', 'Stop Claude Code']);
+    await expect(page.locator('[data-thread-menu] [data-launch-item]')).toHaveText(['Copy attach command', 'Stop Claude Code', 'Delete Claude Code session…']);
   } finally {
     fake.configure({ hold: false, waiting: false });
     await phone.close();
+  }
+});
+
+test('Codex: its own models with each one\'s levels; the pick goes on thread/start and shows in the header', async () => {
+  const { page } = world;
+  mkdirSync(join(world.home, '.codex'), { recursive: true });
+  writeFileSync(join(world.home, '.codex', 'config.toml'), '[mcp_servers.plannotator-inbox]\ncommand = "plannotator"\nargs = ["inbox", "mcp"]\n');
+  const codex = installFakeCodexLaunch(join(world.root, 'codex'));
+  try {
+    await page.goto(world.url);
+    await openCompose(page);
+    const d = dialog(page);
+    await d.locator('[data-compose-to]').click();
+    await d.locator('[data-compose-start="codex"]').first().click({ timeout: 20_000 });
+    await expect(d.locator('[data-compose-choice]')).toHaveText('Default model', { timeout: 10_000 });
+    await d.locator('[data-compose-choice]').click();
+    await d.locator('[data-compose-choice-menu="effort"] [data-compose-choice-value="ultra"]').click();
+    await d.locator('[data-compose-choice-menu="model"] [data-compose-choice-value="gpt-5.5"]').click();
+    await expect(d.locator('[data-compose-choice-menu="effort"] [data-compose-choice-value]')).toHaveText(['Default', 'low', 'medium', 'high', 'xhigh']);
+    await expect(d.locator('[data-compose-choice]')).toHaveText('gpt-5.5');
+    await d.locator('[data-compose-choice-menu="effort"] [data-compose-choice-value="high"]').click();
+    await page.keyboard.press('Escape');
+    await expect(d.locator('[data-compose-choice]')).toHaveText('gpt-5.5 · high');
+    await d.getByRole('textbox', { name: 'Message' }).fill('Bump the parser.');
+    const answer = page.waitForResponse((r) => r.url().endsWith('/api/inbox/messages') && r.request().method() === 'POST');
+    await d.locator('[data-compose-send]').click();
+    const { thread_id } = (await (await answer).json()) as { thread_id: string };
+    const started = await waitFor('thread/start', () => codex.rpc('thread/start')[0]);
+    expect(started.params.model).toBe('gpt-5.5');
+    expect(started.params.config.model_reasoning_effort).toBe('high');
+    await openThread(page, thread_id);
+    await expect(pane(page).locator('[data-launched] [data-launch-choice]')).toHaveText('gpt-5.5 · high');
+  } finally {
+    rmSync(join(world.home, '.codex'), { recursive: true, force: true });
+    for (const start of codex.starts()) if (codex.alive(start.pid)) process.kill(start.pid, 'SIGKILL'); // inbox-guard: own child (the fake codex)
   }
 });

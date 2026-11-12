@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import { ShortcutHint, useShortcutAria } from '../shortcuts/hint';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
-import { inboxAttachmentKindLabel, inboxVideoMeta, isInboxAnnotatableKind, readInboxAttachmentKind, type InboxAttachmentState } from '@plannotator/core/inbox-types';
+import { inboxAttachmentKindLabel, inboxVideoMeta, isInboxAnnotatableKind, isInboxTimedKind, readInboxAttachmentKind, type InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { imageFitsWithin, readableVersion, WIDE_IMAGE_RATIO } from '../attachments';
 import { useInboxFileSource } from '../fileSource';
+import { drawnImageUrl, GALLERY_IMAGE_WIDTH, TILE_IMAGE_WIDTH } from '../images';
 import { formatBytes, plural, shortTime, whenTime } from '../format';
 import { Icon, type IconName } from '../icons';
 import { FileName } from './FileName';
-import { OpenInTileMenu, type OpenInSurface } from './OpenIn';
+import { TileMenu, type OpenInSurface } from './OpenIn';
 import { Tip } from './Tip';
 import { ReuseButton, useReuse } from '../reuse';
 
@@ -24,6 +25,8 @@ export function iconOf(attachment: InboxAttachmentState): IconName {
       return 'photo';
     case 'video':
       return 'film';
+    case 'audio':
+      return 'music';
     case 'file':
       return 'cube';
     default:
@@ -31,16 +34,30 @@ export function iconOf(attachment: InboxAttachmentState): IconName {
   }
 }
 
-/** "1280 × 800, 79 KB" for an image; "MP4 video · 7:41 · 1920 × 1080 · 461 MB" for a video; "PDF, 2.3 MB" otherwise. */
+/** "1280 × 800, 79 KB" for an image; "MP4 video · 7:41 · 1920 × 1080 · 461 MB" for a video; "MP3 audio · 1:23 · 1.9 MB" for a recording; "PDF, 2.3 MB" otherwise. */
 /** The line under a file's name as two parts: words, then its separator and size. A narrow tile cuts only the words. */
 function sizeParts(attachment: InboxAttachmentState): { words: string; size: string } {
   const size = formatBytes(attachment.current?.size ?? attachment.size);
   const kind = readInboxAttachmentKind(attachment.kind);
-  if (kind === 'video') {
+  if (kind === 'video' || kind === 'audio') {
     return { words: [inboxAttachmentKindLabel(attachment.kind, attachment.name, attachment.media_type), inboxVideoMeta(attachment)].filter(Boolean).join(' · '), size: ` · ${size}` };
   }
   if (kind === 'image' && attachment.width && attachment.height) return { words: `${attachment.width} × ${attachment.height}`, size: `, ${size}` };
   return { words: inboxAttachmentKindLabel(attachment.kind, attachment.name, attachment.media_type), size: `, ${size}` };
+}
+
+/**
+ * A video's or a recording's line as whole parts, in the order a narrow tile
+ * keeps them: `keep` loses its first part before its last (the kind, then the
+ * length, never the comment count) and `drop` goes before any of `keep` does,
+ * its last part first (the size, then the frame). No part is ever cut.
+ */
+function timedParts(attachment: InboxAttachmentState, count: number): { keep: string[]; drop: string[] } {
+  const frame = inboxVideoMeta({ width: attachment.width, height: attachment.height });
+  return {
+    keep: [inboxAttachmentKindLabel(attachment.kind, attachment.name, attachment.media_type), inboxVideoMeta({ duration_ms: attachment.duration_ms }), count > 0 ? plural(count, 'comment') : ''].filter(Boolean),
+    drop: [frame, formatBytes(attachment.current?.size ?? attachment.size)].filter(Boolean),
+  };
 }
 
 export function sizeLine(attachment: InboxAttachmentState): string {
@@ -72,22 +89,29 @@ export function opensInWindow(attachment: Pick<InboxAttachmentState, 'kind'>): b
  * each image as wide as its shape asks, at most 240 px tall; a tall
  * screenshot shows its top, cropped with a fade. The frame and its caption
  * are one button that opens the image beside the thread. Images load only
- * from the attachment's own route (`<img src>`, so an SVG never runs).
+ * from the attachment's own route (`<img src>`, so an SVG never runs). A
+ * right-click on one opens its tile's menu (TileMenu: Download, Copy image,
+ * the rest of the tile's list); it has no ⋯ of its own.
  */
 export function ImageGallery({
   images,
   annotationCounts,
   onOpen,
+  openIn,
+  onOpenAs,
 }: {
   images: readonly InboxAttachmentState[];
   annotationCounts: ReadonlyMap<string, number>;
   onOpen: (attachment: InboxAttachmentState) => void;
+  /** Where the window is, for the menu's Open in list (as the tiles'). */
+  openIn?: OpenInSurface;
+  onOpenAs?: (attachment: InboxAttachmentState, view: 'full' | 'side') => void;
 }) {
   if (images.length === 0) return null;
   return (
     <div className="ib-gallery" data-image-gallery="">
       {images.map((image) => (
-        <GalleryImage key={image.id} image={image} count={annotationCounts.get(image.path) ?? 0} onOpen={onOpen} />
+        <GalleryImage key={image.id} image={image} count={annotationCounts.get(image.path) ?? 0} onOpen={onOpen} openIn={openIn} onOpenAs={onOpenAs} />
       ))}
     </div>
   );
@@ -96,7 +120,19 @@ export function ImageGallery({
 /** Tall images are cropped to this width-to-height ratio in the row. */
 const TALL_RATIO = 0.62;
 
-function GalleryImage({ image, count, onOpen }: { image: InboxAttachmentState; count: number; onOpen: (attachment: InboxAttachmentState) => void }) {
+function GalleryImage({
+  image,
+  count,
+  onOpen,
+  openIn,
+  onOpenAs,
+}: {
+  image: InboxAttachmentState;
+  count: number;
+  onOpen: (attachment: InboxAttachmentState) => void;
+  openIn?: OpenInSurface;
+  onOpenAs?: (attachment: InboxAttachmentState, view: 'full' | 'side') => void;
+}) {
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const [failed, setFailed] = useState(false);
   const width = natural?.width ?? image.width ?? 4;
@@ -106,8 +142,9 @@ function GalleryImage({ image, count, onOpen }: { image: InboxAttachmentState; c
   const tall = ratio < TALL_RATIO;
   const wide = ratio > WIDE_IMAGE_RATIO;
   const source = useInboxFileSource();
-  const reuse = useReuse();
   const src = source.imageUrl(image, readableVersion(image));
+  // A frame is at most a few hundred pixels wide: a big screenshot loads as a smaller copy (images.ts).
+  const shownSrc = drawnImageUrl(src, image.width, GALLERY_IMAGE_WIDTH);
   const changed = changedLine(image, true);
   // A changed image keeps its comment count beside the changed line.
   const detail = `${changed ?? sizeLine(image)}${count > 0 ? `, ${plural(count, 'comment')}` : ''}`;
@@ -117,13 +154,12 @@ function GalleryImage({ image, count, onOpen }: { image: InboxAttachmentState; c
     <button
       type="button"
       className="ib-gal-item"
-      style={reuse ? undefined : frame}
       onClick={() => onOpen(image)}
       aria-label={label}
       data-gallery-image={image.id}
       data-attachment-name={image.name}
     >
-      <span className={`ib-gal-frame${tall ? ' ib-tall' : ''}${wide ? ' ib-wide' : ''}`} style={{ aspectRatio: String(shown) }} data-src={src}>
+      <span className={`ib-gal-frame${tall ? ' ib-tall' : ''}${wide ? ' ib-wide' : ''}`} style={{ aspectRatio: String(shown) }} data-src={shownSrc}>
         {failed ? (
           <span className="ib-gal-fail">
             <Icon name="photo" size={20} />
@@ -131,7 +167,7 @@ function GalleryImage({ image, count, onOpen }: { image: InboxAttachmentState; c
           </span>
         ) : (
           <img
-            src={src}
+            src={shownSrc}
             alt=""
             loading="lazy"
             decoding="async"
@@ -151,13 +187,20 @@ function GalleryImage({ image, count, onOpen }: { image: InboxAttachmentState; c
       </span>
     </button>
   );
-  // The button is the frame's sibling (a button in a button is invalid). No reuse here: the frame as it was.
-  if (!reuse) return item;
+  // The add-to-reply button is the frame's sibling (a button in a button is invalid); the wrapper takes the frame's size.
   return (
-    <div className={`ib-gal-w${count > 0 ? ' ib-gal-w-count' : ''}`} style={frame}>
-      {item}
-      <ReuseButton file={image} surface="gallery" />
-    </div>
+    <TileMenu
+      attachment={image}
+      surface={openIn}
+      onOpenAs={onOpenAs ? (view) => onOpenAs(image, view) : undefined}
+      render={(_more, status) => (
+        <div className={`ib-gal-w${count > 0 ? ' ib-gal-w-count' : ''}`} style={frame}>
+          {item}
+          <ReuseButton file={image} surface="gallery" />
+          {status}
+        </div>
+      )}
+    />
   );
 }
 
@@ -185,7 +228,7 @@ export function AttachmentTiles({
   attachments: readonly InboxAttachmentState[];
   annotationCounts: ReadonlyMap<string, number>;
   onOpen: (attachment: InboxAttachmentState) => void;
-  /** The file open beside the thread: its tile says "Open beside" (`aria-current`); the thread does not scroll to it. */
+  /** The file open beside the thread: its tile is marked (`aria-current`, the highlight) and keeps its words; the thread does not scroll to it. */
   openId?: string | null;
   /** Where the tiles sit: at the foot of the message (with their heading and the image gallery), or in the header's band. */
   placement?: 'foot' | 'header';
@@ -210,7 +253,7 @@ export function AttachmentTiles({
           {plural(attachments.length, 'attachment')}
         </div>
       )}
-      <ImageGallery images={images} annotationCounts={annotationCounts} onOpen={onOpen} />
+      <ImageGallery images={images} annotationCounts={annotationCounts} onOpen={onOpen} openIn={openIn} onOpenAs={onOpenAs} />
       <div className="ib-atts ib-tiles">
         {attachments.map((attachment) => {
           const count = annotationCounts.get(attachment.path) ?? 0;
@@ -220,16 +263,18 @@ export function AttachmentTiles({
           const changed = changedLine(attachment, true);
           const changedLong = changedLine(attachment);
           const isImage = readInboxAttachmentKind(attachment.kind) === 'image';
-          const isVideo = readInboxAttachmentKind(attachment.kind) === 'video';
-          // A video's caption keeps one separator throughout: "WebM video · 81.8 KB · 2 comments".
+          // A video or a recording: played, with comments at moments.
+          const isVideo = isInboxTimedKind(attachment.kind);
+          // A video's (and a recording's) caption keeps one separator throughout: "WebM video · 0:12 · 2 comments · 81.8 KB".
           const counted = count > 0 ? (isVideo ? ` · ${plural(count, 'comment')}` : `, ${plural(count, 'annotation')}`) : '';
+          const timed = isVideo ? timedParts(attachment, count) : null;
           const detail = `${changed ?? sizeLine(attachment)}${counted}`;
           const detailLong = `${changedLong ?? sizeLine(attachment)}${counted}`;
           // The header's band shows the same tiles while the foot's are on the page: ids stay unique.
           const detailId = `ib-${header ? 'hatt' : 'att'}-detail-${attachment.id}`;
           const icon = isImage ? (
             <span className="ib-fi ib-thumb">
-              <img src={source.imageUrl(attachment, readableVersion(attachment))} alt="" loading="lazy" decoding="async" draggable={false} data-small={imageFitsWithin(attachment, 30) ? '' : undefined} />
+              <img src={drawnImageUrl(source.imageUrl(attachment, readableVersion(attachment)), attachment.width, TILE_IMAGE_WIDTH)} alt="" loading="lazy" decoding="async" draggable={false} data-small={imageFitsWithin(attachment, 30) ? '' : undefined} />
             </span>
           ) : (
             <span className="ib-fi">
@@ -248,6 +293,20 @@ export function AttachmentTiles({
                     </span>
                   </span>
                 </Tip>
+              ) : timed ? (
+                // The count sits before the size, so a narrow tile drops whole parts from the ends and cuts none (inbox.css, .ib-kd-timed).
+                <span className="ib-kd ib-kd-split ib-kd-timed" id={detailId}>
+                  <span className="ib-kd-keep">
+                    {timed.keep.map((part, index) => (
+                      <span key={index}>{index < timed.keep.length - 1 ? `${part} · ` : part}</span>
+                    ))}
+                  </span>
+                  <span className="ib-kd-drop">
+                    {timed.drop.map((part, index) => (
+                      <span key={index}>{` · ${part}`}</span>
+                    ))}
+                  </span>
+                </span>
               ) : (
                 <span className="ib-kd ib-kd-split" id={detailId}>
                   <span className="ib-kd-w">{sizeParts(attachment).words}</span>
@@ -258,16 +317,27 @@ export function AttachmentTiles({
             </span>
           );
           // The ⋯ is the tile button's sibling (a button inside a button is invalid), in a wrapper the grid lays out.
-          const withMenu = (tile: React.ReactElement) =>
-            openIn === 'apps' || reuse ? (
-              <div className={`ib-att-w${reuse ? ' ib-att-w-reuse' : ''}${openIn === 'apps' ? ' ib-att-w-more' : ''}`} key={attachment.id} data-open-in-tile={openIn === 'apps' ? attachment.id : undefined}>
-                {tile}
-                <ReuseButton file={attachment} surface="tile" />
-                {openIn === 'apps' && <OpenInTileMenu attachment={attachment} version={readableVersion(attachment)} onOpenAs={onOpenAs && opensInWindow(attachment) ? (view) => onOpenAs(attachment, view) : undefined} />}
-              </div>
-            ) : (
-              tile
-            );
+          // A right-click anywhere on the tile opens the ⋯'s list (Download in it), with or without the ⋯ (TileMenu).
+          const withMenu = (tile: React.ReactElement) => (
+            <TileMenu
+              key={attachment.id}
+              attachment={attachment}
+              surface={openIn}
+              onOpenAs={onOpenAs && opensInWindow(attachment) ? (view) => onOpenAs(attachment, view) : undefined}
+              render={(more, status) =>
+                more || reuse ? (
+                  <div className={`ib-att-w${reuse ? ' ib-att-w-reuse' : ''}${more ? ' ib-att-w-more' : ''}`} data-open-in-tile={more ? attachment.id : undefined}>
+                    {tile}
+                    <ReuseButton file={attachment} surface="tile" />
+                    {more}
+                    {status}
+                  </div>
+                ) : (
+                  tile
+                )
+              }
+            />
+          );
           if (!opensInWindow(attachment)) {
             // A download: the whole tile is the link, never a viewer on this origin.
             return withMenu(
@@ -300,7 +370,7 @@ export function AttachmentTiles({
               className={`ib-att-t${isOpen ? ' ib-open-beside' : ''}`}
               key={attachment.id}
               onClick={() => onOpen(attachment)}
-              aria-label={isOpen ? `${attachment.name}, open beside the thread` : `${isVideo ? 'Play' : 'Open'} ${attachment.name}`}
+              aria-label={`${isVideo ? 'Play' : 'Open'} ${attachment.name}`}
               aria-current={isOpen ? 'true' : undefined}
               aria-describedby={detailId}
               aria-keyshortcuts={attachment.id === newestId ? newestKeys : undefined}
@@ -312,7 +382,7 @@ export function AttachmentTiles({
               {text}
               {attachment.id === newestId && <ShortcutHint scope={inboxThreadShortcuts} action="openNewest" className="ib-kbd ib-att-kbd" />}
               <span className="ib-open" aria-hidden="true">
-                {isOpen ? 'Open beside' : isVideo ? 'Play' : 'Open'}
+                {isVideo ? 'Play' : 'Open'}
               </span>
             </button>,
           );

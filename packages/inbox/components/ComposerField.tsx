@@ -32,7 +32,6 @@
  */
 import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { MentionAutocompleteMenu } from '@plannotator/ui/components/MentionAutocomplete';
 import { ComposerTokenTextarea } from '@plannotator/ui/components/ComposerTokenTextarea';
 import { HumanOnlySkillNotice, SkillReferenceMenu } from '@plannotator/ui/components/SkillReferenceMenu';
 import { useMentionAutocomplete } from '@plannotator/ui/hooks/useMentionAutocomplete';
@@ -47,6 +46,7 @@ import type { VoiceHandle } from '../voice';
 import { textareaField } from '../voiceField';
 import { isPhone, isTouchScreen } from '../phone';
 import { inboxSkillFilter } from '../skills';
+import { builtinSkillIcon } from './BuiltinSkillIcon';
 import { hashtagMenuLeft, useHashtagPicker, useInitiativeTags } from '../hashtags';
 
 /** The chip class a tag gets in the composer's highlight layer (inbox.css: colour, background and box-shadow only). */
@@ -75,6 +75,18 @@ export interface InboxComposerTags {
   note?: (props: { id: string; tagged: readonly TagOption[]; focusField: () => void }) => React.ReactNode;
 }
 
+/**
+ * A command of the Inbox's own in the `/` list (the reply box's `/side`): a window action, not a skill. Picking it
+ * sends nothing to the agent: the typed `/…` leaves the words and `run` gets what is left.
+ */
+export interface ComposerCommand {
+  /** The name typed after `/`. */
+  name: string;
+  /** The list's one line. */
+  description: string;
+  run: (words: string) => void;
+}
+
 export interface InboxComposerFieldProps {
   value: string;
   onChange: (value: string) => void;
@@ -84,21 +96,23 @@ export interface InboxComposerFieldProps {
   textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
   placeholder: string;
   ariaLabel: string;
-  autoFocus?: boolean;
   ariaDescribedBy?: string;
   /** What the human-only line says the instructions go with: "your reply", "your message". */
   destination: string;
   /** Tag agents with `@` (the reply box). Absent: `@` is plain text, as before. */
   tags?: InboxComposerTags;
-  mentionSource?: MentionSource;
   /** Open the picker at the caret's line, inside the open dialog that holds the field (see the header). */
   caretMenu?: CaretMenuOptions;
   /** Escape closes an open picker even before a query was typed (compose: Escape would ask about a draft). */
   escapeClosesMenu?: boolean;
   /** Voice dictation (voice.ts): the host's session, whose button sits in the host's toolbar. */
   voice?: VoiceHandle;
+  /** The voice note opens and closes in one motion (the reply box, approval "inbox-reply-box"). */
+  voiceNoteGlide?: boolean;
   /** Which skills this field offers and paints (skills.ts `inboxSkillFilter`); all by default. Keep its identity stable. */
   skillFilter?: (entry: SkillCatalogEntry) => boolean;
+  /** The Inbox's own commands this field lists with the skills after a `/` (`ComposerCommand`). Absent: none. Keep its identity stable. */
+  commands?: readonly ComposerCommand[];
 }
 
 const NO_PEOPLE: readonly MentionPerson[] = [];
@@ -112,15 +126,15 @@ export function InboxComposerField({
   textareaRef,
   placeholder,
   ariaLabel,
-  autoFocus,
   ariaDescribedBy,
   destination,
   tags,
-  mentionSource,
   caretMenu,
   escapeClosesMenu = false,
   voice,
+  voiceNoteGlide = false,
   skillFilter = OUTSIDE_A_REVIEW,
+  commands,
 }: InboxComposerFieldProps) {
   const innerRef = useRef<HTMLTextAreaElement | null>(null);
   const attach = useCallback(
@@ -138,6 +152,12 @@ export function InboxComposerField({
     return voiceSession.attach(textareaField(innerRef.current, isTouchScreen));
   }, [voiceSession]);
   const voiceLive = voice ? voiceHidesCaret(voice.view) : false;
+  // The commands as the list's rows: the built-ins' own row ("Plannotator" at its right end), and never a reference.
+  const commandRows = useMemo<SkillCatalogEntry[] | undefined>(
+    () => (commands?.length ? commands.map((command) => ({ name: command.name, root: 'plannotator', description: command.description, humanOnly: false })) : undefined),
+    [commands],
+  );
+  const runCommand = useCallback((row: SkillCatalogEntry, words: string) => commands?.find((command) => command.name === row.name)?.run(words), [commands]);
   const skills = useSkillReferenceAutocomplete({
     text: value,
     setText: onChange,
@@ -145,6 +165,10 @@ export function InboxComposerField({
     enabled: true,
     bareEscapeDismisses: escapeClosesMenu,
     catalogFilter: skillFilter,
+    commands: commandRows,
+    onCommand: runCommand,
+    // Plannotator's built-ins are one group at the top of the list (the owner, 2026-11-09), whatever was typed.
+    hostRowsFirst: true,
   });
   const [announce, setAnnounce] = useState('');
   const options = tags?.options;
@@ -164,8 +188,8 @@ export function InboxComposerField({
             // A session on an older Plannotator: nothing is inserted; say why.
             onPickBlocked: (person) => setAnnounce(`${person.label}: ${TAG_UPDATE_WORDS}.`),
           }
-        : mentionSource,
-    [options, people, onTagsChange, mentionSource],
+        : undefined,
+    [options, people, onTagsChange],
   );
   const mention = useMentionAutocomplete({ text: value, setText: onChange, textareaRef: innerRef, source });
   // `#` names an initiative (approval "board-hashtags"): the skill list's menu, the skill list's keys.
@@ -225,6 +249,8 @@ export function InboxComposerField({
               items={skills.menu!.items}
               activeIndex={skills.menu!.activeIndex}
               onSelect={skills.select}
+              groupHostRows
+              rowIcon={builtinSkillIcon}
               boundary={boundary}
               prefer={caretMenu?.prefer ?? 'above'}
               maxListHeight={maxListHeight}
@@ -255,7 +281,6 @@ export function InboxComposerField({
           )}
         </FloatingSkillMenu>
       ) : null}
-      {!options && source && <MentionAutocompleteMenu id={tagListboxId} menu={tagMenu} onSelect={mention.select} />}
       {tagMenu && options && <TagPicker id={tagListboxId} menu={tagMenu} options={options} onSelect={select} />}
       <ComposerTokenTextarea
         textareaRef={attach}
@@ -294,11 +319,10 @@ export function InboxComposerField({
         listboxId={listboxId}
         listboxOpen={skillMenuShown || hashMenuShown || tagMenu !== null}
         activeOptionId={activeOption}
-        inputProps={{ autoFocus, 'aria-label': ariaLabel, 'aria-describedby': describedBy, rows: 2 }}
+        inputProps={{ 'aria-label': ariaLabel, 'aria-describedby': describedBy, rows: 2 }}
       />
-      {voice && <VoiceNote voice={voice} />}
+      {voice && <VoiceNote voice={voice} glide={voiceNoteGlide} />}
       <HumanOnlySkillNotice skills={skills.humanOnlyReferences} destination={destination} />
-      {!options && source?.renderNotice?.(mention.mentions)}
       {options && showNotes && (tags?.note ? tags.note({ id: notesId, tagged, focusField: () => innerRef.current?.focus() }) : <TagNotes id={notesId} tagged={tagged} owner={owner} />)}
       {options && (
         <div className="ib-sr" role="status" aria-live="polite" data-tag-live="">
@@ -319,7 +343,7 @@ export function InboxComposerField({
  * edge (only the last row's bottom showed) and hidden behind the header.
  */
 function skillMenuHost(field: HTMLElement): HTMLElement {
-  return field.closest<HTMLElement>('dialog[open]') ?? field.closest<HTMLElement>('.pn-inbox:not(.ib-global-comment)') ?? field.ownerDocument.body;
+  return field.closest<HTMLElement>('dialog[open]') ?? field.closest<HTMLElement>('.pn-inbox') ?? field.ownerDocument.body;
 }
 
 /** The space the list keeps from the field above it (inbox.css once set it with a margin: 8 px, 10 on a phone); the menu's own gap is 6. */

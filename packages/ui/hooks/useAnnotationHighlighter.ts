@@ -10,6 +10,7 @@ import Highlighter from '@plannotator/web-highlighter';
 import type { Annotation, EditorMode, HostDraft, ImageAttachment } from '../types';
 import { metaWithBelowTitle, metaWithoutBelowTitle, snapRangeOutOfBelowTitle } from '../utils/belowTitleSlot';
 import { AnnotationType } from '../types';
+import { caretAtPoint, type CaretPosition } from '../utils/caretAtPoint';
 import type { QuickLabel } from '../utils/quickLabels';
 import {
   dropEmptyNodes,
@@ -20,7 +21,11 @@ import { getIdentity } from '../utils/identity';
 import { annotationOwnsHighlight } from '../utils/annotationOwnsHighlight';
 import { transformPlainText } from '../utils/inlineTransforms';
 import { richCopySourceFromRange, type RichCopySource } from '../utils/richClipboard';
-import { TOUCH_PRIMARY_QUERY, TOUCH_SELECTION_SETTLE_MS } from '../utils/touchSelection';
+import { useHighlightCopy } from '../utils/highlightCopy';
+import { TOUCH_PRIMARY_QUERY, touchHighlightDueAt } from '../utils/touchSelection';
+import { restoreSelection, sameSelection, saveSelection, type SavedSelection } from '../utils/selectionTextOffsets';
+import type { ShelvedCommentDraft } from '../utils/commentDraftShelf';
+import { unionToolbarRect, type ToolbarRect } from '../utils/touchToolbarPlacement';
 
 // --- Exported state types ---
 
@@ -31,6 +36,15 @@ export interface ToolbarState {
   /** Builds the selection's rich-text copy when the toolbar button is pressed
    *  (synchronous in the markdown Viewer, a bridge round trip on HTML surfaces). */
   getRichCopy?: () => RichCopySource | Promise<RichCopySource>;
+  /** The whole selection's rect when `element` is only its start (several
+   *  marks; a 1px anchor over an HTML frame). The touch toolbar goes below it
+   *  (`AnnotationToolbar` `touchAnchorRect`). Absent: `element`'s rect. */
+  getAnchorRect?: () => ToolbarRect | null;
+  /** A selection made with a finger whose END was the one moving: the touch
+   *  toolbar goes above it when there is room, clear of the end handle and of
+   *  the lines the finger may drag on to (`AnnotationToolbar` `touchSide`).
+   *  Absent: below, as before. */
+  touchSide?: 'above';
 }
 
 export interface CommentPopoverState {
@@ -234,6 +248,16 @@ const escapeAttrValue = (value: string): string => {
 // web-highlighter 0.8.x accepts only class, ID, and tag exclusions.
 const ANNOTATION_EXCLUDED_SELECTOR = '.annotation-exclude';
 
+/** Everything the highlighter's painter skips (its `exceptSelectors`). */
+const PAINT_SKIPPED_SELECTORS = [
+  '.annotation-toolbar',
+  'button',
+  '.math-annotatable',
+  '.katex',
+  ANNOTATION_EXCLUDED_SELECTOR,
+];
+const PAINT_SKIPPED_SELECTOR = PAINT_SKIPPED_SELECTORS.join(',');
+
 const isAnnotationExcludedTextNode = (node: Node): boolean =>
   Boolean(node.parentElement?.closest(ANNOTATION_EXCLUDED_SELECTOR));
 
@@ -288,6 +312,27 @@ const boundaryResolves = (node: Node, offset: number): boolean => {
 const isSerializableRange = (range: Range): boolean =>
   boundaryResolves(range.startContainer, range.startOffset)
   && boundaryResolves(range.endContainer, range.endOffset);
+
+/**
+ * Whether a range that reaches outside `container` carries words from there.
+ *
+ * web-highlighter does not check containment. A drag that starts in a panel
+ * AFTER the document and ends in the document is, in document order, a range
+ * from the release point to the panel: the painter never meets its end and
+ * paints to the end of the document, and the quote ends with the panel's
+ * words. One that starts BEFORE the document paints only its last text node.
+ * Neither is a selection of the document.
+ *
+ * Not plain containment: a triple-click on the LAST block ends at offset 0 of
+ * the element after the document, so its common ancestor is outside too, yet
+ * every word in it is the document's and it highlights correctly.
+ */
+const carriesTextFromOutside = (container: HTMLElement, range: Range): boolean => {
+  const inside = range.cloneRange();
+  if (!container.contains(inside.startContainer)) inside.setStart(container, 0);
+  if (!container.contains(inside.endContainer)) inside.setEnd(container, container.childNodes.length);
+  return compactText(inside.toString()) !== compactText(range.toString());
+};
 
 /**
  * One line per page load: a highlighter failure is degraded UX (the selection
@@ -529,6 +574,93 @@ const snapRangeStartPastExcluded = (range: Range): boolean => {
     return true;
   }
   return false;
+};
+
+/** The outermost element around `node`, inside `container`, that the painter skips. */
+const paintSkippedAncestor = (container: Element, node: Node | null): Element | null => {
+  let skipped: Element | null = null;
+  let element = node?.nodeType === Node.ELEMENT_NODE ? (node as Element) : node?.parentElement ?? null;
+  while (element && element !== container && container.contains(element)) {
+    if (element.matches(PAINT_SKIPPED_SELECTOR)) skipped = element;
+    element = element.parentElement;
+  }
+  return skipped;
+};
+
+/**
+ * Move a range's end off any element the painter skips, back onto the end of
+ * the last text before it that can be painted. The end-side twin of
+ * {@link snapRangeStartPastExcluded}.
+ *
+ * web-highlighter stops painting when its walk MEETS the end node, and the
+ * walk never enters a skipped element (`painter/dom.ts` skips it before the
+ * "are we at the end node" check). An end inside one (a release on a button in
+ * the text, a code block's Copy button, a formula, an alert's hidden type
+ * word) or right at one (an element boundary whose next child is skipped) is
+ * therefore never met, and every text node from the start to the end of the
+ * document is painted. Pulling the end back changes nothing that could have
+ * been painted, and takes the half-selected chrome out of the quote.
+ *
+ * A range wholly inside one skipped element is left alone, and so is one with
+ * no paintable text between its start and that element. Returns whether the
+ * range was changed.
+ */
+const snapRangeEndBeforeSkipped = (container: Element, range: Range): boolean => {
+  const { endContainer, endOffset } = range;
+  // An element boundary addresses the child at its offset (`formatDomNode`).
+  const endNode = endContainer.nodeType === Node.ELEMENT_NODE
+    ? endContainer.childNodes[endOffset] ?? endContainer
+    : endContainer;
+  if (!container.contains(endNode)) return false;
+  const skipped = paintSkippedAncestor(container, endNode);
+  if (!skipped || skipped.contains(range.commonAncestorContainer)) return false;
+
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  let last: Text | null = null;
+  let node: Node | null;
+  while ((node = walker.nextNode())) {
+    if (skipped.contains(node)) break;
+    if (!(skipped.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_PRECEDING)) break;
+    const text = node as Text;
+    if (!text.length || paintSkippedAncestor(container, text)) continue;
+    last = text;
+  }
+  if (!last) return false;
+  // Never before the range's own start.
+  if (range.comparePoint(last, last.length) !== 0) return false;
+  if (last === range.startContainer && range.startOffset >= last.length) return false;
+  range.setEnd(last, last.length);
+  return true;
+};
+
+/**
+ * How much bigger than the last one a selection inside the document may be for
+ * a release outside to still trust it: four times, plus a couple of thousand
+ * characters. A real drag grows a selection by lines; a browser running it on
+ * to the document's last words grows it by the document.
+ */
+const selectionRanAway = (length: number, last: number): boolean => length > last * 4 + 2000;
+
+/** Pointer travel, in CSS px, under which a press and its release are a click, not a drag. */
+const DRAG_SLOP_PX = 4;
+
+/** A press on these is theirs (a click, a native drag, typing), never the start of a text selection to repair. */
+const NOT_A_TEXT_PRESS = 'a, button, input, textarea, select, label, summary, img, svg, canvas, video, [role="button"], [draggable="true"], [contenteditable]:not([contenteditable="false"])';
+
+/** The text position under a point, when it is text of `container` that can be painted. */
+const textCaretAt = (container: Element, x: number, y: number): CaretPosition | null => {
+  const caret = caretAtPoint(x, y);
+  if (!caret || caret.node.nodeType !== Node.TEXT_NODE || !container.contains(caret.node)) return null;
+  if (paintSkippedAncestor(container, caret.node)) return null;
+  return caret;
+};
+
+/** A press on an element's own scrollbar: its point lies outside the element's content box. */
+const isScrollbarPress = (event: MouseEvent): boolean => {
+  const target = event.target instanceof HTMLElement ? event.target : null;
+  if (!target || target.clientWidth === 0) return false;
+  if (target.scrollWidth <= target.clientWidth && target.scrollHeight <= target.clientHeight) return false;
+  return event.offsetX >= target.clientWidth || event.offsetY >= target.clientHeight;
 };
 
 /** A resolved restore boundary: web-highlighter's own `DomNode` shape. */
@@ -781,6 +913,27 @@ export interface UseAnnotationHighlighterOptions {
    * from this hook's state. Absent: unchanged.
    */
   onHostDraft?: (draft: HostDraft | null) => void;
+  /**
+   * Opt-in (visible comment drafts): where a composer's words are kept. With a
+   * shelf, a composer closed with words keeps the selection's highlight as a
+   * draft mark (class `comment-draft`, listed in `commentDrafts`) instead of
+   * removing it, and so does one left open as other words are selected. Each
+   * composer opened on a selection is put on the shelf, and the drafts on it
+   * whose words still wait are painted again as the highlighter starts (the
+   * same document mounted again). Absent: a close removes the highlight, as
+   * always.
+   */
+  commentDraftShelf?: CommentDraftShelf;
+}
+
+/** Visible comment drafts' store, as the hook uses it (the Viewer builds one over `utils/commentDraftShelf`). */
+export interface CommentDraftShelf {
+  /** Whether this composer's words wait (its draft store holds them). */
+  keeps: (popover: CommentPopoverState) => boolean;
+  /** Remember what a composer is on, so another mount can paint it again. */
+  put: (draft: ShelvedCommentDraft) => void;
+  /** The drafts whose words still wait, oldest first. */
+  list: () => ShelvedCommentDraft[];
 }
 
 /** The outcome of one `applyAnnotations` pass. */
@@ -850,7 +1003,26 @@ export interface UseAnnotationHighlighterReturn {
   applyAnnotations: (annotations: Annotation[]) => void;
   /** For a host that composes on a touch screen: the page selection as a draft now (see `ViewerHandle.takeSelection`). */
   takeSelection?: () => boolean;
+  /** Composers kept as draft marks (`commentDraftShelf`), oldest first. Empty without that option. */
+  commentDrafts: CommentPopoverState[];
+  /** Open the composer of a draft mark again (by its highlight id); an open composer closes first, as a close. */
+  reopenCommentDraft: (id: string) => void;
+  /**
+   * Open the comment composer again on a text selection comment's quote,
+   * holding its words (see `ViewerHandle.reopenComment`). Waits for the
+   * highlighter when it does not exist yet. False while disabled.
+   */
+  reopenComment: (annotation: Annotation, onMissing?: () => void) => boolean;
+  /**
+   * The text selection comment being written, as the comment its submit
+   * would add (its words empty), without adding it or closing anything (see
+   * `ViewerHandle.peekComment`). Null when no such composer is open.
+   */
+  peekComment: () => Annotation | null;
 }
+
+/** The class a draft mark's highlight carries (`commentDraftShelf`). */
+export const COMMENT_DRAFT_CLASS = 'comment-draft';
 
 /**
  * Own pointer and caller-supplied range annotations for a Markdown container.
@@ -870,6 +1042,7 @@ export function useAnnotationHighlighter({
   onRestoreMismatch,
   onRestoreReport,
   onHostDraft,
+  commentDraftShelf,
 }: UseAnnotationHighlighterOptions): UseAnnotationHighlighterReturn {
   const highlighterRef = useRef<Highlighter | null>(null);
   const modeRef = useRef<EditorMode>(mode);
@@ -889,7 +1062,32 @@ export function useAnnotationHighlighter({
 
   const [toolbarState, setToolbarState] = useState<ToolbarState | null>(null);
   const [commentPopover, setCommentPopover] = useState<CommentPopoverState | null>(null);
+  // The open composer, read from callbacks and listeners (visible drafts, `peekComment`).
+  const commentPopoverRef = useRef(commentPopover);
+  commentPopoverRef.current = commentPopover;
+  const commentDraftShelfRef = useRef(commentDraftShelf);
+  commentDraftShelfRef.current = commentDraftShelf;
+  const [commentDrafts, setCommentDrafts] = useState<CommentPopoverState[]>([]);
+  const commentDraftsRef = useRef(commentDrafts);
+  commentDraftsRef.current = commentDrafts;
+  /** Keep the open composer on highlight `id` as a draft mark when its words wait; false: nothing was kept. */
+  const keepAsDraftMarkRef = useRef<(id: string) => boolean>(() => false);
+  /** Paint the shelf's waiting drafts as draft marks (the highlighter has just started). */
+  const paintShelvedDraftsRef = useRef<() => void>(() => {});
   const [quickLabelPicker, setQuickLabelPicker] = useState<QuickLabelPickerState | null>(null);
+
+  // Ctrl+C / Cmd+C while the highlight stands in for the selection: the
+  // toolbar is up (web-highlighter cleared the selection on mouseup), or that
+  // selection's composer is open (its textarea has the focus). The words go
+  // into the copy event as plain text (`utils/highlightCopy`); the person's
+  // own selection, in a field or in the page, copies natively. Every host of
+  // this hook gets it (the Viewer, code review's markdown preview, PR
+  // description and PR artifacts). A host that composes elsewhere
+  // (`onHostDraft`) owns its composer, so only the toolbar stage copies there.
+  useHighlightCopy(
+    toolbarState?.selectionText
+      || (commentPopover && onHostDraft === undefined ? commentPopover.selectedText : null),
+  );
 
   // Keep refs in sync
   useEffect(() => { modeRef.current = mode; }, [mode]);
@@ -925,6 +1123,15 @@ export function useAnnotationHighlighter({
   hostComposesRef.current = onHostDraft !== undefined;
   const takeTouchSelectionRef = useRef<() => boolean>(() => false);
   const takeSelection = useCallback(() => takeTouchSelectionRef.current(), []);
+
+  // `reopenComment`: the words a reopened comment's composer opens with (read
+  // by the CREATE handler's comment branch while the range is painted), and
+  // whether that branch opened it. Requests made before the highlighter
+  // exists wait in the queue and run once it does.
+  const reopenTextRef = useRef<string | null>(null);
+  const reopenOpenedRef = useRef(false);
+  const reopenQueueRef = useRef<Array<{ annotation: Annotation; onMissing?: () => void }>>([]);
+  const reopenNowRef = useRef<(annotation: Annotation, onMissing?: () => void) => void>(() => {});
 
   // Track mouse position for quick label picker
   useEffect(() => {
@@ -1547,13 +1754,7 @@ export function useAnnotationHighlighter({
 
     const highlighter = new Highlighter({
       $root: containerRef.current,
-      exceptSelectors: [
-        '.annotation-toolbar',
-        'button',
-        '.math-annotatable',
-        '.katex',
-        ANNOTATION_EXCLUDED_SELECTOR,
-      ],
+      exceptSelectors: PAINT_SKIPPED_SELECTORS,
       wrapTag: 'mark',
       style: { className: 'annotation-highlight' },
     });
@@ -1589,6 +1790,11 @@ export function useAnnotationHighlighter({
       return [start, end];
     });
 
+    /** The selection string of a drag let go outside the document, while its highlight is made. */
+    let releasedOutsideQuote: string | null = null;
+    /** While the touch bridge paints a finger's selection: where its toolbar goes first (ToolbarState.touchSide). */
+    let touchSideForCreate: 'above' | undefined;
+
     highlighter.on(Highlighter.event.CREATE, ({ sources, type }: { sources: any[]; type?: string }) => {
       if (type === 'from-store') return;
       // Store positions as if a host's `belowTitle` slot were not there, so
@@ -1607,6 +1813,10 @@ export function useAnnotationHighlighter({
           // Repair the quote before anything reads it: the popover preview,
           // the comment draft key, and the annotation's own `originalText` all
           // come from `source.text`.
+          // A selection let go outside the document was painted from its
+          // range; its quote is the selection's own string, as for one let go
+          // inside.
+          if (releasedOutsideQuote !== null) source.text = releasedOutsideQuote;
           source.text = quoteWithoutExcludedText(
             pendingRangeRunsRef.current,
             source.text,
@@ -1627,8 +1837,9 @@ export function useAnnotationHighlighter({
             window.getSelection()?.removeAllRanges();
             return;
           }
-          // Clean up previous pending
-          if (pendingSourceRef.current) {
+          // Clean up previous pending. Visible drafts: a composer with words left open as other words are
+          // selected stays, as a draft mark with its badge.
+          if (pendingSourceRef.current && !keepAsDraftMarkRef.current(pendingSourceRef.current.id)) {
             highlighter.remove(pendingSourceRef.current.id);
           }
           clearPendingSelection();
@@ -1644,10 +1855,14 @@ export function useAnnotationHighlighter({
             window.getSelection()?.removeAllRanges();
           } else if (effectiveMode === 'comment') {
             pendingSourceRef.current = source;
+            // A comment reopened by its host (`reopenComment`) comes back with its words.
+            const reopened = reopenTextRef.current;
+            if (reopened !== null) reopenOpenedRef.current = true;
             setCommentPopover({
               anchorEl: doms[0] as HTMLElement,
               contextText: source.text.slice(0, 80),
               selectedText: source.text,
+              ...(reopened !== null ? { initialText: reopened } : {}),
               source,
               draftKey: commentDraftTargetKey(source, source.text),
               blockIds: selectionBlockIds(highlighter, source),
@@ -1681,6 +1896,12 @@ export function useAnnotationHighlighter({
                 range.setEndAfter(last);
                 return richCopySourceFromRange(range, selectionText);
               },
+              // The marks split at every text node: the touch toolbar goes
+              // below all of them, not under the first.
+              getAnchorRect: () => unionToolbarRect(
+                marks.filter((m) => m.isConnected).flatMap((m) => Array.from(m.getClientRects())),
+              ),
+              ...(touchSideForCreate ? { touchSide: touchSideForCreate } : {}),
             });
           }
         }
@@ -1688,6 +1909,11 @@ export function useAnnotationHighlighter({
     });
 
     highlighter.on(Highlighter.event.CLICK, ({ id }: { id: string }) => {
+      // A draft mark (visible drafts) opens its composer again; it is no annotation yet.
+      if (commentDraftsRef.current.some((d) => d.source?.id === id)) {
+        reopenCommentDraftRef.current(id);
+        return;
+      }
       onSelectAnnotationRef.current?.(id);
     });
 
@@ -1695,11 +1921,32 @@ export function useAnnotationHighlighter({
     // the range it paints and quotes has to be corrected before that handler
     // runs: registered on the capture phase of the same element, and before
     // `run()` so registration order settles the at-target case too.
-    const handlePointerEndCapture = () => {
+    // The library's handler sits out one release (a listener removed during
+    // dispatch never runs) and listens again on the next task.
+    const sitOutThisRelease = () => {
+      if (!listening) return;
+      highlighter.stop();
+      listening = false;
+      window.setTimeout(() => {
+        if (disposed) return;
+        highlighter.run();
+        listening = true;
+      }, 0);
+    };
+    const handlePointerEndCapture = (event: Event) => {
       const container = containerRef.current;
       const selection = window.getSelection();
       if (!container || !selection || selection.isCollapsed || selection.rangeCount === 0) {
         pendingRangeRunsRef.current = null;
+        return;
+      }
+      // On a touch screen a finger's selection is the touch bridge's (below):
+      // highlighted once it is finished, with the selection kept. The library
+      // would paint it at the lift and take the selection away, and paint
+      // again a selection the bridge has already highlighted.
+      if (touchBridgeOwnsRelease(event, selection)) {
+        pendingRangeRunsRef.current = null;
+        sitOutThisRelease();
         return;
       }
       const range = selection.getRangeAt(0).cloneRange();
@@ -1721,18 +1968,9 @@ export function useAnnotationHighlighter({
         // card under text comments, a diagram): the selection is the
         // person's to copy. The library's own pointer-end handler paints
         // nothing for it and then removes the DOM selection anyway, so it
-        // sits this one event out (a listener removed during dispatch never
-        // runs) and listens again on the next task.
+        // sits this one event out.
         pendingRangeRunsRef.current = null;
-        if (listening) {
-          highlighter.stop();
-          listening = false;
-          window.setTimeout(() => {
-            if (disposed) return;
-            highlighter.run();
-            listening = true;
-          }, 0);
-        }
+        sitOutThisRelease();
         return;
       }
       if (isBlankQuote(selection.toString()) || !isSerializableRange(range)) {
@@ -1742,11 +1980,16 @@ export function useAnnotationHighlighter({
       }
       if (!container.contains(range.commonAncestorContainer)) {
         pendingRangeRunsRef.current = null;
+        // Collapsed for the same reason as the blank quote above: the
+        // library's handler paints whatever selection it finds, and then
+        // removes it either way.
+        if (carriesTextFromOutside(container, range)) selection.removeAllRanges();
         return;
       }
       const snappedOutOfSlot = snapRangeOutOfBelowTitle(container, range);
       const snappedPastExcluded = snapRangeStartPastExcluded(range);
-      if (snappedOutOfSlot || snappedPastExcluded) {
+      const snappedBeforeSkipped = snapRangeEndBeforeSkipped(container, range);
+      if (snappedOutOfSlot || snappedPastExcluded || snappedBeforeSkipped) {
         selection.removeAllRanges();
         selection.addRange(range);
       }
@@ -1756,6 +1999,238 @@ export function useAnnotationHighlighter({
     const container = containerRef.current;
     container.addEventListener('mouseup', handlePointerEndCapture, true);
     container.addEventListener('touchend', handlePointerEndCapture, true);
+
+    // A drag that starts in the document and is let go OUTSIDE it (left of the
+    // text, below the card, over a panel, outside the window). The library
+    // hears a release on its root only, so the selection used to stay on
+    // screen with no highlight. A press in the document is followed to its
+    // release anywhere; a release inside is the library's, as always, and one
+    // outside commits a selection here: the same checks and snaps as the
+    // guard above, then the library's `fromRange` (the same CREATE event), then
+    // the selection removed as the library's own handler does.
+    //
+    // WHICH selection: never more than the person saw selected in the document.
+    // With the pointer over something else on the page (a panel after the
+    // document or before it, off the side of the window) the browser runs its
+    // selection on to the END or the START of the document and into that other
+    // thing. Committing that highlighted, or in redline deleted, the rest of
+    // the document in one drag. So every selection that lies wholly inside the
+    // document during the press is remembered (`seenInside`); a release
+    // outside commits the browser's selection only while it too lies wholly
+    // inside and has not suddenly grown many times over, and otherwise the
+    // last one remembered. With none remembered, nothing is made and the
+    // selection is left as it is.
+    // The press itself: where it started and whether the pointer ever went a drag's distance from there.
+    let pressed: { x: number; y: number; moved: boolean; plain: boolean } | null = null;
+    //
+    // Off to the SIDE of the document (left or right of its box) even a
+    // selection wholly inside it is not trusted: with nothing selectable
+    // beside the document the browser's runaway selection ends on the
+    // document's own first or last words. There the highlight is what was
+    // selected while the pointer was still over the document
+    // (`seenUnderPointer`), stretched at most to the edge of the line the
+    // pointer is level with (a caret looked up just inside the document's box),
+    // and in redline not stretched at all. Above or below the document the
+    // browser's selection grows as the page scrolls, and is trusted as said.
+    type SeenSelection = { anchorNode: Node; anchorOffset: number; focusNode: Node; focusOffset: number; length: number };
+    let seenInside: SeenSelection | null = null;
+    let seenUnderPointer: SeenSelection | null = null;
+    let pointerOverDocument = true;
+    /** Where the pointer last was with the button down, for a release the page never hears. */
+    let lastPressPoint: { x: number; y: number } | null = null;
+    const stillThere = (seen: SeenSelection) =>
+      seen.anchorNode.isConnected && seen.focusNode.isConnected
+      && seen.anchorOffset <= (seen.anchorNode.nodeValue?.length ?? seen.anchorNode.childNodes.length)
+      && seen.focusOffset <= (seen.focusNode.nodeValue?.length ?? seen.focusNode.childNodes.length);
+    const noteSelectionInside = () => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed || selection.rangeCount === 0) return;
+      const { anchorNode, focusNode } = selection;
+      if (!anchorNode || !focusNode || !container.contains(anchorNode) || !container.contains(focusNode)) return;
+      const length = selection.getRangeAt(0).toString().length;
+      if (seenInside && selectionRanAway(length, seenInside.length)) return;
+      const seen = { anchorNode, anchorOffset: selection.anchorOffset, focusNode, focusOffset: selection.focusOffset, length };
+      seenInside = seen;
+      if (pointerOverDocument) seenUnderPointer = seen;
+    };
+    /** At most this many characters past what was selected under the pointer: the rest of a line or two. */
+    const LINE_EDGE_STRETCH = 400;
+    const commitReleasedOutside = (seen: SeenSelection | null, underPointer: SeenSelection | null, at: { x: number; y: number } | null) => {
+      const selection = window.getSelection();
+      if (disposed || !listening || !selection || selection.isCollapsed || selection.rangeCount === 0) return;
+      const box = container.getBoundingClientRect();
+      if (at && (at.x < box.left || at.x > box.right)) {
+        // Off to the side.
+        if (!underPointer || !stillThere(underPointer)) return;
+        const { anchorNode, anchorOffset, focusNode, focusOffset, length } = underPointer;
+        const edge = (pendingModeOverrideRef.current ?? modeRef.current) === 'redline' ? null : textCaretAt(
+          container,
+          Math.min(Math.max(at.x, box.left + 1), box.right - 1),
+          Math.min(Math.max(at.y, Math.max(box.top, 0) + 1), Math.min(box.bottom, window.innerHeight) - 1),
+        );
+        if (edge) {
+          selection.setBaseAndExtent(anchorNode, anchorOffset, edge.node, edge.offset);
+          const stretched = selection.rangeCount > 0 ? selection.getRangeAt(0).toString().length : 0;
+          if (stretched < length || stretched > length + LINE_EDGE_STRETCH) selection.setBaseAndExtent(anchorNode, anchorOffset, focusNode, focusOffset);
+        } else {
+          selection.setBaseAndExtent(anchorNode, anchorOffset, focusNode, focusOffset);
+        }
+        if (selection.isCollapsed || selection.rangeCount === 0) return;
+      } else {
+        const live = selection.getRangeAt(0);
+        const liveInside = container.contains(live.startContainer) && container.contains(live.endContainer);
+        if (!liveInside || (seen && selectionRanAway(live.toString().length, seen.length))) {
+          if (!seen || !stillThere(seen)) return;
+          selection.setBaseAndExtent(seen.anchorNode, seen.anchorOffset, seen.focusNode, seen.focusOffset);
+          if (selection.isCollapsed || selection.rangeCount === 0) return;
+        }
+      }
+      const range = selection.getRangeAt(0).cloneRange();
+      if (rangeInsideExcluded(container, range)) return;
+      snapRangeOutOfBelowTitle(container, range);
+      snapRangeStartPastExcluded(range);
+      snapRangeEndBeforeSkipped(container, range);
+      // Nothing to quote, or a shape the library cannot serialize (#881): the
+      // selection stays the person's, as before.
+      if (range.collapsed || isBlankQuote(range.toString()) || !isSerializableRange(range)) return;
+      selection.removeAllRanges();
+      selection.addRange(range.cloneRange());
+      releasedOutsideQuote = selection.toString() || null;
+      pendingRangeRunsRef.current = rangeTextPieces(range);
+      try {
+        if (highlighter.fromRange(range)) window.getSelection()?.removeAllRanges();
+      } catch (error) {
+        pendingRangeRunsRef.current = null;
+        warnHighlighterFailure('painting a selection released outside the document', error);
+      } finally {
+        releasedOutsideQuote = null;
+      }
+    };
+
+    // The same press, for a drag the browser leaves as a moving caret.
+    // Chromium does that after a press at some fractional x positions (a
+    // trackpad, a Retina screen): the caret follows the pointer, nothing is
+    // selected, and the release finds nothing to highlight. Once a real drag
+    // (past DRAG_SLOP_PX) has shown a collapsed selection on two moves in a
+    // row while the pointer is over other text than the press, the selection
+    // is set from the press to the pointer here, and the browser's own move
+    // handling is cancelled so it does not put its caret back. A drag the
+    // browser IS selecting is never touched, and a click never becomes one.
+    let caretDrag: {
+      x0: number;
+      y0: number;
+      anchor: CaretPosition;
+      moved: boolean;
+      caretMoves: number;
+      driving: boolean;
+    } | null = null;
+    const driveCaretDrag = (x: number, y: number) => {
+      const selection = window.getSelection();
+      const focus = textCaretAt(container, x, y);
+      if (!caretDrag || !selection || !focus || !caretDrag.anchor.node.isConnected) return;
+      selection.setBaseAndExtent(caretDrag.anchor.node, caretDrag.anchor.offset, focus.node, focus.offset);
+    };
+    const followCaretDrag = (event: MouseEvent) => {
+      const drag = caretDrag;
+      if (!drag || !listening) return;
+      if (!drag.moved && Math.hypot(event.clientX - drag.x0, event.clientY - drag.y0) >= DRAG_SLOP_PX) drag.moved = true;
+      if (!drag.moved) return;
+      if (!drag.driving) {
+        // The selection read here is the one the browser made of the move before.
+        const selection = window.getSelection();
+        const collapsed = !selection || selection.rangeCount === 0 || selection.isCollapsed;
+        const focus = textCaretAt(container, event.clientX, event.clientY);
+        const elsewhere = !!focus && (focus.node !== drag.anchor.node || focus.offset !== drag.anchor.offset);
+        drag.caretMoves = collapsed && elsewhere ? drag.caretMoves + 1 : 0;
+        if (drag.caretMoves < 2) return;
+        drag.driving = true;
+      }
+      driveCaretDrag(event.clientX, event.clientY);
+      event.preventDefault();
+    };
+
+    const endPress = () => {
+      caretDrag = null;
+      seenInside = null;
+      seenUnderPointer = null;
+      pointerOverDocument = true;
+      lastPressPoint = null;
+      pressed = null;
+      document.removeEventListener('mouseup', handlePressRelease, true);
+      document.removeEventListener('mousemove', handlePressMove, true);
+      document.removeEventListener('selectionchange', noteSelectionInside);
+    };
+    const handlePressRelease = (event: MouseEvent) => {
+      if (event.button !== 0) return;
+      // Once more, where the pointer was let go, before anything reads the selection.
+      if (caretDrag?.driving && listening) driveCaretDrag(event.clientX, event.clientY);
+      noteSelectionInside();
+      const seen = seenInside;
+      const underPointer = seenUnderPointer;
+      const at = { x: event.clientX, y: event.clientY };
+      const press = pressed;
+      endPress();
+      // A click with a wobble is not a drag: the pointer never went a drag's
+      // distance from the press, and the browser selected a letter or two.
+      // Collapsed here, before the library's handler reads it, it makes
+      // nothing (it used to make a one-letter highlight, often with no toolbar).
+      const selection = window.getSelection();
+      if (press?.plain && !press.moved && selection && !selection.isCollapsed && selection.toString().length <= 2
+        && container.contains(selection.anchorNode) && container.contains(selection.focusNode)) {
+        selection.removeAllRanges();
+        return;
+      }
+      if (event.target instanceof Node && container.contains(event.target)) return;
+      // After every other listener of this release, like the library's own
+      // handler for a release inside: as the event ends its way up, or on the
+      // next task when something stopped it.
+      let done = false;
+      const commit = () => {
+        if (done) return;
+        done = true;
+        window.removeEventListener('mouseup', commit);
+        commitReleasedOutside(seen, underPointer, at);
+      };
+      window.addEventListener('mouseup', commit);
+      window.setTimeout(commit, 0);
+    };
+    // A release the page never hears (over a frame): the first move with the
+    // button up ends the drag.
+    const handlePressMove = (event: MouseEvent) => {
+      if (event.buttons & 1) {
+        if (pressed && !pressed.moved && Math.hypot(event.clientX - pressed.x, event.clientY - pressed.y) >= DRAG_SLOP_PX) pressed.moved = true;
+        // The selection read at this move is the one the browser made of the move before.
+        noteSelectionInside();
+        pointerOverDocument = event.target instanceof Node && container.contains(event.target);
+        lastPressPoint = { x: event.clientX, y: event.clientY };
+        followCaretDrag(event);
+        return;
+      }
+      noteSelectionInside();
+      const seen = seenInside;
+      const underPointer = seenUnderPointer;
+      const at = lastPressPoint;
+      endPress();
+      commitReleasedOutside(seen, underPointer, at);
+    };
+    const handlePressStart = (event: MouseEvent) => {
+      // The main button only; Ctrl+click is the context menu on a Mac.
+      if (event.button !== 0 || event.ctrlKey) return;
+      endPress();
+      document.addEventListener('mouseup', handlePressRelease, true);
+      document.addEventListener('mousemove', handlePressMove, true);
+      document.addEventListener('selectionchange', noteSelectionInside);
+      // Multi-clicks and Shift+click select without moving: only a single plain press can be a wobbling click.
+      pressed = { x: event.clientX, y: event.clientY, moved: false, plain: event.detail <= 1 && !event.shiftKey };
+      // A single plain press on text: multi-clicks, modified presses, controls,
+      // links and scrollbars keep the browser's own handling.
+      const target = event.target instanceof Element ? event.target : null;
+      if (event.detail > 1 || event.shiftKey || event.altKey || event.metaKey) return;
+      if (!target || target.closest(NOT_A_TEXT_PRESS) || isScrollbarPress(event)) return;
+      const anchor = textCaretAt(container, event.clientX, event.clientY);
+      if (anchor) caretDrag = { x0: event.clientX, y0: event.clientY, anchor, moved: false, caretMoves: 0, driving: false };
+    };
+    container.addEventListener('mousedown', handlePressStart, true);
 
     // On a touch screen a host that composes takes the selection when the
     // person chooses its Comment (takeSelection); the library painting it at
@@ -1802,7 +2277,12 @@ export function useAnnotationHighlighter({
       const source = mathSourceFromElement(mathElement);
       if (!source) return;
 
-      if (pendingSourceRef.current && !isMathAnnotationSource(pendingSourceRef.current)) {
+      // Visible drafts: a composer with words left open stays as a draft mark, as for other words selected.
+      if (
+        pendingSourceRef.current &&
+        !isMathAnnotationSource(pendingSourceRef.current) &&
+        !keepAsDraftMarkRef.current(pendingSourceRef.current.id)
+      ) {
         highlighter.remove(pendingSourceRef.current.id);
       }
       clearPendingSelection();
@@ -1854,7 +2334,6 @@ export function useAnnotationHighlighter({
     containerRef.current.addEventListener('mouseup', handleMathMouseUp, true);
 
     // Mobile bridge
-    let selectionTimer: ReturnType<typeof setTimeout>;
     // The page's selection, painted as a pending highlight; false when there is none to take.
     const takeTouchSelection = (): boolean => {
       const sel = window.getSelection();
@@ -1868,6 +2347,7 @@ export function useAnnotationHighlighter({
       if (isBlankQuote(sel.toString()) || !isSerializableRange(range)) return false;
       snapRangeOutOfBelowTitle(containerRef.current, range);
       snapRangeStartPastExcluded(range);
+      snapRangeEndBeforeSkipped(containerRef.current, range);
       pendingRangeRunsRef.current = rangeTextPieces(range);
       try {
         highlighter.fromRange(range);
@@ -1879,27 +2359,171 @@ export function useAnnotationHighlighter({
       }
     };
     takeTouchSelectionRef.current = takeTouchSelection;
+
+    // --- Touch: a finger's selection is highlighted once it is finished, and stays selected ---
+    // The rules and their reasons: utils/touchSelection.ts. While the finger is
+    // on the screen nothing is painted; every change to the selection starts
+    // the wait again; the highlight is painted under the selection and the
+    // selection is put back over the same words (utils/selectionTextOffsets.ts),
+    // so its handles stay and a handle dragged later makes one new highlight,
+    // replacing this one, once that drag is finished too.
+    const clock = () => performance.now();
+    let touches = 0;
+    const pointersDown = new Set<number>();
+    let lastTouchAt = 0;
+    let liftAt: number | null = null;
+    let lastChangeAt = 0;
+    let restTimer: ReturnType<typeof setTimeout> | undefined;
+    /** The selection as it was put back over the highlight just painted: not painted again while it is the same. */
+    let committed: { saved: SavedSelection; sourceId: string } | null = null;
+    const fingerDown = () => touches > 0 || pointersDown.size > 0;
+    const dueAt = () => touchHighlightDueAt({ fingerDown: fingerDown(), lastTouchAt, liftAt, lastChangeAt });
+    const committedStillSelected = (selection: Selection): boolean => {
+      const root = containerRef.current;
+      if (!committed || !root) return false;
+      // Its highlight was closed, made into an annotation or replaced: the selection is new again.
+      if (pendingSourceRef.current?.id !== committed.sourceId) {
+        committed = null;
+        return false;
+      }
+      return sameSelection(root, selection, committed.saved);
+    };
+    const touchBridgeOwnsRelease = (event: Event, selection: Selection) =>
+      isTouchPrimary && !hostComposesRef.current && (event.type === 'touchend' || committedStillSelected(selection));
+    /** Which end of the selection the finger moved last: the toolbar keeps clear of it. */
+    const movedEnd = (saved: SavedSelection | null): 'start' | 'end' => {
+      const order = (s: SavedSelection) => {
+        const { offset: a } = s.anchor;
+        const { offset: f } = s.focus;
+        return a === null || f === null ? null : { start: Math.min(a, f), end: Math.max(a, f), focusAtEnd: f >= a };
+      };
+      const now = saved ? order(saved) : null;
+      if (!now) return 'end';
+      const before = committed ? order(committed.saved) : null;
+      if (before && now.start !== before.start && now.end === before.end) return 'start';
+      if (before && now.end !== before.end) return 'end';
+      return now.focusAtEnd ? 'end' : 'start';
+    };
+    const commitTouchSelection = () => {
+      const root = containerRef.current;
+      const selection = window.getSelection();
+      if (!root || !selection || selection.isCollapsed || selection.rangeCount === 0) return;
+      if (committedStillSelected(selection)) return;
+      const saved = saveSelection(root, selection);
+      const before = pendingSourceRef.current;
+      touchSideForCreate = movedEnd(saved) === 'end' ? 'above' : undefined;
+      let took = false;
+      try {
+        took = takeTouchSelection();
+      } finally {
+        touchSideForCreate = undefined;
+      }
+      const created = pendingSourceRef.current;
+      // Nothing painted, or painted straight into an annotation (redline): nothing to keep selected.
+      if (!took || !saved || !created || created === before || typeof created.id !== 'string') {
+        committed = null;
+        return;
+      }
+      if (!restoreSelection(root, selection, saved)) {
+        committed = null;
+        return;
+      }
+      const kept = saveSelection(root, selection);
+      committed = kept ? { saved: kept, sourceId: created.id } : null;
+    };
+    const armTouchHighlight = () => {
+      clearTimeout(restTimer);
+      if (disposed || hostComposesRef.current) return;
+      restTimer = setTimeout(onTouchRest, Math.max(0, dueAt() - clock()));
+    };
+    const onTouchRest = () => {
+      restTimer = undefined;
+      if (disposed || hostComposesRef.current) return;
+      // A finger went down, or the selection changed, since this was armed.
+      if (dueAt() > clock()) {
+        armTouchHighlight();
+        return;
+      }
+      commitTouchSelection();
+    };
     const handleSelectionChange = isTouchPrimary
       ? () => {
-          clearTimeout(selectionTimer);
-          if (hostComposesRef.current) return;
-          selectionTimer = setTimeout(takeTouchSelection, TOUCH_SELECTION_SETTLE_MS);
+          if (hostComposesRef.current) {
+            clearTimeout(restTimer);
+            return;
+          }
+          const selection = window.getSelection();
+          if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+            // Nothing selected: nothing to paint, and a later selection of the same words is new.
+            clearTimeout(restTimer);
+            committed = null;
+            return;
+          }
+          lastChangeAt = clock();
+          armTouchHighlight();
         }
       : null;
+    /** A finger is up when the last one lifts; a lift (not a cancel) is the person letting go. */
+    const fingersChanged = (wasDown: boolean, lifted: boolean) => {
+      if (!wasDown || fingerDown()) return;
+      if (lifted) liftAt = lastTouchAt;
+      armTouchHighlight();
+    };
+    const handleTouch = (event: TouchEvent) => {
+      lastTouchAt = clock();
+      const wasDown = fingerDown();
+      touches = event.touches?.length ?? 0;
+      // The touch list is every finger on the screen: no pointer is still down without one.
+      if (touches === 0) pointersDown.clear();
+      fingersChanged(wasDown, event.type === 'touchend');
+    };
+    const handlePointer = (event: PointerEvent) => {
+      if (event.type === 'pointermove' && !pointersDown.has(event.pointerId)) return;
+      lastTouchAt = clock();
+      const wasDown = fingerDown();
+      if (event.type === 'pointerdown') pointersDown.add(event.pointerId);
+      else if (event.type !== 'pointermove') pointersDown.delete(event.pointerId);
+      fingersChanged(wasDown, event.type === 'pointerup');
+    };
+    /** The page put away (another app, another tab): no finger is on it any more. */
+    const forgetFingers = () => {
+      const wasDown = fingerDown();
+      touches = 0;
+      pointersDown.clear();
+      fingersChanged(wasDown, false);
+    };
+    const TOUCH_EVENTS = ['touchstart', 'touchmove', 'touchend', 'touchcancel'] as const;
+    const POINTER_EVENTS = ['pointerdown', 'pointermove', 'pointerup', 'pointercancel'] as const;
+    const watching = { capture: true, passive: true } as const;
 
     if (handleSelectionChange) {
       document.addEventListener('selectionchange', handleSelectionChange);
+      for (const type of TOUCH_EVENTS) document.addEventListener(type, handleTouch, watching);
+      for (const type of POINTER_EVENTS) document.addEventListener(type, handlePointer, watching);
+      window.addEventListener('blur', forgetFingers);
     }
+
+    // Visible drafts waiting from another mount of this document come back as draft marks.
+    paintShelvedDraftsRef.current();
+    // Comments a host asked to reopen before this highlighter existed.
+    const queued = reopenQueueRef.current;
+    reopenQueueRef.current = [];
+    for (const request of queued) reopenNowRef.current(request.annotation, request.onMissing);
 
     return () => {
       if (handleSelectionChange) {
-        clearTimeout(selectionTimer);
+        clearTimeout(restTimer);
         document.removeEventListener('selectionchange', handleSelectionChange);
+        for (const type of TOUCH_EVENTS) document.removeEventListener(type, handleTouch, watching);
+        for (const type of POINTER_EVENTS) document.removeEventListener(type, handlePointer, watching);
+        window.removeEventListener('blur', forgetFingers);
       }
       containerRef.current?.removeEventListener('mousedown', handleMathMouseDown, true);
       containerRef.current?.removeEventListener('mouseup', handleMathMouseUp, true);
       container.removeEventListener('mouseup', handlePointerEndCapture, true);
       container.removeEventListener('touchend', handlePointerEndCapture, true);
+      container.removeEventListener('mousedown', handlePressStart, true);
+      endPress();
       disposed = true;
       highlighter.dispose();
     };
@@ -1922,6 +2546,7 @@ export function useAnnotationHighlighter({
     const painted = range.cloneRange();
     snapRangeOutOfBelowTitle(container, painted);
     snapRangeStartPastExcluded(painted);
+    snapRangeEndBeforeSkipped(container, painted);
     pendingRangeRunsRef.current = rangeTextPieces(painted);
 
     const selection = window.getSelection();
@@ -1959,7 +2584,12 @@ export function useAnnotationHighlighter({
     if (!source) return;
 
     const highlighter = highlighterRef.current;
-    if (pendingSourceRef.current && highlighter && !isMathAnnotationSource(pendingSourceRef.current)) {
+    if (
+      pendingSourceRef.current &&
+      highlighter &&
+      !isMathAnnotationSource(pendingSourceRef.current) &&
+      !keepAsDraftMarkRef.current(pendingSourceRef.current.id)
+    ) {
       highlighter.remove(pendingSourceRef.current.id);
     }
     clearPendingSelection();
@@ -2166,15 +2796,116 @@ export function useAnnotationHighlighter({
   };
 
   const handleCommentClose = useCallback(() => {
-    setCommentPopover(prev => {
-      if (prev?.source && highlighterRef.current && !isMathAnnotationSource(prev.source)) {
-        highlighterRef.current.remove(prev.source.id);
+    if (!commentDraftShelfRef.current) {
+      setCommentPopover(prev => {
+        if (prev?.source && highlighterRef.current && !isMathAnnotationSource(prev.source)) {
+          highlighterRef.current.remove(prev.source.id);
+        }
+        return null;
+      });
+      clearPendingSelection();
+      window.getSelection()?.removeAllRanges();
+      return;
+    }
+    // Visible drafts: words left in the composer keep their highlight, as a draft mark, so they can be found again.
+    const prev = commentPopoverRef.current;
+    const highlighter = highlighterRef.current;
+    if (prev?.source && highlighter && !isMathAnnotationSource(prev.source)) {
+      const id: string = prev.source.id;
+      if (!keepAsDraftMarkRef.current(id)) {
+        highlighter.remove(id);
+        setCommentDrafts((list) => list.filter((d) => d.source?.id !== id));
       }
-      return null;
-    });
+    }
+    setCommentPopover(null);
     clearPendingSelection();
     window.getSelection()?.removeAllRanges();
   }, [clearPendingSelection]);
+
+  keepAsDraftMarkRef.current = (id: string) => {
+    const shelf = commentDraftShelfRef.current;
+    const open = commentPopoverRef.current;
+    const highlighter = highlighterRef.current;
+    if (!shelf || !highlighter || !open?.source || open.source.id !== id || isMathAnnotationSource(open.source)) return false;
+    if (!shelf.keeps(open)) return false;
+    highlighter.addClass(COMMENT_DRAFT_CLASS, id);
+    setCommentDrafts((list) => [...list.filter((d) => d.source?.id !== id), open]);
+    return true;
+  };
+
+  // Visible drafts: each composer opened on a selection goes on the shelf (what it is on), so its words come back
+  // as a draft mark on another mount; a draft mark on the same words (picked again by hand) gives way to it.
+  useEffect(() => {
+    const shelf = commentDraftShelfRef.current;
+    const open = commentPopover;
+    if (!shelf || !open?.source || isMathAnnotationSource(open.source)) return;
+    const { startMeta, endMeta } = open.source;
+    if (startMeta && endMeta) shelf.put({ draftKey: open.draftKey, startMeta, endMeta, text: open.source.text ?? open.selectedText });
+    const twins = commentDraftsRef.current.filter((d) => d.draftKey === open.draftKey && d.source?.id !== open.source.id);
+    if (twins.length === 0) return;
+    for (const twin of twins) {
+      try { highlighterRef.current?.remove(twin.source.id); } catch (error) {
+        warnHighlighterFailure('removal of a draft mark picked again', error);
+      }
+    }
+    setCommentDrafts((list) => list.filter((d) => !twins.includes(d)));
+  }, [commentPopover]);
+
+  paintShelvedDraftsRef.current = () => {
+    const shelf = commentDraftShelfRef.current;
+    const highlighter = highlighterRef.current;
+    const root = containerRef.current;
+    if (!shelf || !highlighter || !root) return;
+    const openKey = commentPopoverRef.current?.draftKey;
+    const painted: CommentPopoverState[] = [];
+    for (const draft of shelf.list()) {
+      if (draft.draftKey === openKey) continue;
+      const id = annotationId();
+      let doms: HTMLElement[] = [];
+      try {
+        highlighter.fromStore(metaWithBelowTitle(root, draft.startMeta), metaWithBelowTitle(root, draft.endMeta), draft.text, id);
+        doms = (highlighter.getDoms(id) ?? []) as HTMLElement[];
+      } catch {}
+      // The words moved or are gone (the document changed): no mark; the words still wait for the same selection.
+      if (doms.length === 0 || compactText(paintedTextOf(doms)) !== compactText(draft.text)) {
+        if (doms.length > 0) {
+          try { highlighter.remove(id); } catch {}
+        }
+        continue;
+      }
+      highlighter.addClass(COMMENT_DRAFT_CLASS, id);
+      const source = { id, startMeta: draft.startMeta, endMeta: draft.endMeta, text: draft.text };
+      painted.push({
+        anchorEl: doms[0],
+        contextText: draft.text.slice(0, 80),
+        selectedText: draft.text,
+        source,
+        draftKey: draft.draftKey,
+        blockIds: selectionBlockIds(highlighter, source),
+        ...withStartOffset(selectionSourceOffset(highlighter, source)),
+      });
+    }
+    if (painted.length > 0 || commentDraftsRef.current.length > 0) setCommentDrafts(painted);
+  };
+
+  const reopenCommentDraft = useCallback((id: string) => {
+    const draft = commentDraftsRef.current.find((d) => d.source?.id === id);
+    const highlighter = highlighterRef.current;
+    if (!draft || !highlighter) return;
+    if (commentPopoverRef.current) handleCommentClose();
+    setToolbarState((open) => {
+      if (open?.source && !isMathAnnotationSource(open.source) && open.source.id !== id) highlighter.remove(open.source.id);
+      return null;
+    });
+    highlighter.removeClass(COMMENT_DRAFT_CLASS, id);
+    const doms = highlighter.getDoms(id) as HTMLElement[] | undefined;
+    const anchorEl = doms?.find((el) => el.isConnected) ?? draft.anchorEl;
+    pendingSourceRef.current = draft.source;
+    setCommentDrafts((list) => list.filter((d) => d.source?.id !== id));
+    setCommentPopover({ ...draft, anchorEl, initialText: undefined });
+  }, [handleCommentClose]);
+  const reopenCommentDraftRef = useRef(reopenCommentDraft);
+  reopenCommentDraftRef.current = reopenCommentDraft;
 
   const handleFloatingQuickLabel = useCallback((label: QuickLabel) => {
     if (!quickLabelPicker?.source) return;
@@ -2214,6 +2945,101 @@ export function useAnnotationHighlighter({
     setQuickLabelPicker(null);
     window.getSelection()?.removeAllRanges();
   }, [clearPendingSelection, quickLabelPicker]);
+
+  // --- A comment reopened by its host (ViewerHandle.reopenComment) ---
+  // Its pending highlight is painted from the stored positions when they
+  // still lead to its quote, else from a search for the quote (the creation
+  // pipeline then opens the composer), and the composer opens holding the
+  // words. Nothing is saved: the composer's own submit and close act on it.
+  reopenNowRef.current = (annotation, onMissing) => {
+    const highlighter = highlighterRef.current;
+    const root = containerRef.current;
+    if (!highlighter || !root) {
+      onMissing?.();
+      return;
+    }
+    const words = annotation.text ?? '';
+    const previous = pendingSourceRef.current;
+    if (previous && !isMathAnnotationSource(previous)) {
+      try { highlighter.remove(previous.id); } catch {}
+    }
+    clearPendingSelection();
+    setToolbarState(null);
+    setQuickLabelPicker(null);
+    setCommentPopover(null);
+    if (isBlankQuote(annotation.originalText)) {
+      onMissing?.();
+      return;
+    }
+    if (annotation.startMeta && annotation.endMeta) {
+      const id = annotationId();
+      let doms: HTMLElement[] = [];
+      try {
+        highlighter.fromStore(
+          metaWithBelowTitle(root, annotation.startMeta),
+          metaWithBelowTitle(root, annotation.endMeta),
+          annotation.originalText,
+          id,
+        );
+        doms = (highlighter.getDoms(id) ?? []) as HTMLElement[];
+      } catch {}
+      if (doms.length > 0 && compactText(paintedTextOf(doms)) === compactText(annotation.originalText)) {
+        const source = { id, startMeta: annotation.startMeta, endMeta: annotation.endMeta, text: annotation.originalText };
+        pendingSourceRef.current = source;
+        setCommentPopover({
+          anchorEl: doms[0],
+          contextText: source.text.slice(0, 80),
+          selectedText: source.text,
+          initialText: words,
+          source,
+          draftKey: commentDraftTargetKey(source, source.text),
+          blockIds: selectionBlockIds(highlighter, source),
+          ...withStartOffset(selectionSourceOffset(highlighter, source)),
+        });
+        return;
+      }
+      if (doms.length > 0) {
+        try { highlighter.remove(id); } catch {}
+      }
+    }
+    const range = findTextInDOM(annotation.originalText);
+    if (!range) {
+      onMissing?.();
+      return;
+    }
+    reopenTextRef.current = words;
+    reopenOpenedRef.current = false;
+    try {
+      highlightRange(range, 'comment');
+    } finally {
+      reopenTextRef.current = null;
+    }
+    if (!reopenOpenedRef.current) onMissing?.();
+    reopenOpenedRef.current = false;
+  };
+  const reopenComment = useCallback((annotation: Annotation, onMissing?: () => void): boolean => {
+    if (!enabled) return false;
+    if (!highlighterRef.current || !containerRef.current) {
+      reopenQueueRef.current.push({ annotation, onMissing });
+      return true;
+    }
+    reopenNowRef.current(annotation, onMissing);
+    return true;
+  }, [containerRef, enabled]);
+
+  // --- The comment being written, read without touching it (ViewerHandle.peekComment) ---
+  const buildAnnotationRef = useRef(buildAnnotationFromSource);
+  buildAnnotationRef.current = buildAnnotationFromSource;
+  const peekComment = useCallback((): Annotation | null => {
+    const open = commentPopoverRef.current;
+    const highlighter = highlighterRef.current;
+    if (!open?.source || !highlighter || isMathAnnotationSource(open.source)) return null;
+    try {
+      return buildAnnotationRef.current(highlighter, open.source, AnnotationType.COMMENT, '');
+    } catch {
+      return null;
+    }
+  }, []);
 
   // --- The composer handed to the host (onHostDraft) ---
   // The toolbar and composer states still drive everything here; the host is
@@ -2294,5 +3120,9 @@ export function useAnnotationHighlighter({
     clearAllHighlights,
     applyAnnotations: applyAnnotationsInternal,
     takeSelection,
+    commentDrafts,
+    reopenCommentDraft,
+    reopenComment,
+    peekComment,
   };
 }

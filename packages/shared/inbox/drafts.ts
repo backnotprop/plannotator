@@ -17,6 +17,7 @@
 
 import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { parseInboxGitUrl } from "@plannotator/core/inbox-git-url";
 import {
   INBOX_CARD_TITLE_MAX,
   INBOX_DRAFT_BODY_MAX,
@@ -159,6 +160,47 @@ function checkPulls(value: unknown): InboxDraft["pulls"] | null {
   return { keys: [...(pulls.keys as string[])], projects: [...(pulls.projects as string[])], ask_line: pulls.ask_line };
 }
 
+/** A draft's folder pick (`InboxDraft.start`): `{ agent, machine, folder: "~/…" or "/…", name, create? }`, or null. */
+function checkStart(value: unknown): InboxDraft["start"] | null {
+  if (value === null || value === undefined) return null;
+  const start = value as Record<string, unknown>;
+  const text = (v: unknown, max: number) => typeof v === "string" && v.length > 0 && v.length <= max;
+  if (
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    !text(start.agent, 64) ||
+    !(start.machine === null || isInboxId("ibx", start.machine)) ||
+    !text(start.folder, 4096) ||
+    // A folder in home (`~/…`) or anywhere else by its full path (a drive: `/Volumes/…`); the Send checks it again.
+    !/^(~\/|\/)/.test(start.folder as string) ||
+    (start.folder as string).split("/").some((segment) => segment === ".." || segment === ".") ||
+    !text(start.name, 255) ||
+    !(start.create === undefined || start.create === true) ||
+    !checkStartClone(start.clone)
+  ) {
+    throw new InboxError("validation_error", "start: { agent, machine, folder: \"~/…\" or \"/…\", name, create?, clone?: { url, branch? } } or null.", { field: "start" });
+  }
+  const clone = start.clone as { url: string; branch?: string } | undefined;
+  return {
+    agent: start.agent as string,
+    machine: start.machine as string | null,
+    folder: start.folder as string,
+    name: start.name as string,
+    ...(start.create === true ? { create: true as const } : {}),
+    ...(clone ? { clone: { url: clone.url, ...(clone.branch ? { branch: clone.branch } : {}) } } : {}),
+  };
+}
+
+/** A draft's clone pick: a git URL the launch reads (checked again at Send), and a branch that can't read as an option. */
+function checkStartClone(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const clone = value as Record<string, unknown>;
+  const repo = typeof clone.url === "string" && clone.url.length <= 2048 ? parseInboxGitUrl(clone.url) : null;
+  if (!repo || repo.kind !== "repo") return false;
+  return clone.branch === undefined || (typeof clone.branch === "string" && clone.branch.length > 0 && clone.branch.length <= 255 && !clone.branch.startsWith("-") && !/[\s\x00-\x1f]/.test(clone.branch));
+}
+
 /** A long paste's place in a draft's words (`InboxDraftPasted`), checked; null when the file is not one. */
 function checkPasted(value: unknown, index: number, bodyLength: number, list = "files"): InboxDraftPasted | null {
   if (value === undefined || value === null) return null;
@@ -246,7 +288,7 @@ export function checkInboxDraftIds(input: unknown, list: string): string[] {
 export function saveInboxDraft(
   inboxDirPath: string,
   id: unknown,
-  input: { body?: unknown; to?: unknown; project?: unknown; files?: unknown; base?: unknown; thread_name?: unknown; card?: unknown; pulls?: unknown; board_request?: unknown },
+  input: { body?: unknown; to?: unknown; project?: unknown; files?: unknown; base?: unknown; thread_name?: unknown; card?: unknown; pulls?: unknown; board_request?: unknown; start?: unknown },
   at: string,
 ): InboxDraft {
   if (!isInboxId("drf", id)) throw new InboxError("validation_error", "id: a draft id (drf_…).", { field: "id" });
@@ -264,6 +306,7 @@ export function saveInboxDraft(
   const project = checkProject(input.project);
   const card = checkCard(input.card);
   const pulls = checkPulls(input.pulls);
+  const start = checkStart(input.start);
   const base = input.base === undefined ? null : input.base;
   if (base !== null && typeof base !== "string") throw new InboxError("validation_error", "base: the updated_at you read, or null to create.", { field: "base" });
   const existing = readInboxDraft(inboxDirPath, id);
@@ -291,6 +334,7 @@ export function saveInboxDraft(
     ...(pulls ? { pulls } : {}),
     // Compose's Board chip, kept as it was left (approval "inbox-compose-board-chip").
     ...(input.board_request === true ? { board_request: true as const } : {}),
+    ...(start ? { start } : {}),
   };
   const dir = draftsDir(inboxDirPath);
   mkdirSync(dir, { recursive: true, mode: 0o700 });

@@ -1,10 +1,12 @@
-import { forwardRef, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { ContextMenu } from '@base-ui/react/context-menu';
 import { Menu } from '@base-ui/react/menu';
 import type { InboxListGroupId, InboxListRow } from '@plannotator/core/inbox-types';
 import { focusAfterSwap, SnoozeTimes, type SnoozeView } from '@plannotator/ui/components/inbox-thread/SnoozeMenu';
 import { Icon, type IconName } from '../icons';
 import { rowMenuActions, type RowMenuAction } from '../rowMenu';
+import { useThreadTags } from '../threadTags';
+import { AddTagItem, AddTagList } from './AddTagMenu';
 import { useContextMenuTrigger } from './useContextMenuTrigger';
 
 export interface ThreadRowMenuProps {
@@ -19,11 +21,17 @@ export interface ThreadRowMenuProps {
   onSnooze?: (row: InboxListRow, until: string) => void;
   /** Whether this row can be snoozed (a linked machine on an older Inbox keeps no snoozes). Absent: every row can. */
   snoozesOf?: (row: InboxListRow) => boolean;
+  /** H on a row (InboxList.tsx): each new request opens that row's menu at its Snooze times. */
+  snoozeRequest?: { id: string; n: number } | null;
+  /** The machine that must update before this row can be snoozed: Snooze stays, and says so. */
+  snoozeBlockedOf?: (row: InboxListRow) => { name: string } | null;
+  onSnoozeBlocked?: (row: InboxListRow) => void;
   /**
    * Whether a thread is pinned to the sidebar (approval "inbox-pinned-threads"): Pin thread or Unpin
-   * thread leads the menu, in its own group. Absent (an older Inbox keeps no pins): no item.
+   * thread leads the menu, in its own group. Absent (an older Inbox keeps no pins), or null for a row whose machine
+   * takes no star from this one: no item.
    */
-  pinnedOf?: (threadId: string) => boolean;
+  pinnedOf?: (row: InboxListRow) => boolean | null;
   onAction: (row: InboxListRow, action: RowMenuAction) => void;
   /** The row whose menu is open (its muted background), or null when it closes. */
   onTarget: (threadId: string | null) => void;
@@ -34,6 +42,8 @@ export interface ThreadRowMenuProps {
    * where focus goes when the thread closes is App's rule, not the menu's.
    */
   held: boolean;
+  /** A phone: the menu (a held row's, or a right-click's) is a sheet from the bottom edge, the thread's name over it. */
+  phone?: boolean;
   children: ReactNode;
 }
 
@@ -63,12 +73,13 @@ function rowElementOf(target: EventTarget | null): HTMLElement | null {
  * The thread rows' right-click menu: one menu for the whole list (its body is
  * the trigger), aimed at the row the right-click (or the platform's
  * context-menu key, or Shift+F10, on a focused row) lands on. Pin thread (or
- * Unpin thread) in its own group, then Copy thread, Copy link, Copy thread ID, then Snooze
+ * Unpin thread) and Add tag (its tags swap in place; in a tag's list, Remove from <tag> too) in their own group, then Copy thread, Copy link, Copy thread ID, then Snooze
  * (the menu swaps in place for its times), Mark read (or Mark unread, or Move back) and Archive where they apply.
  * Anywhere else in the list the browser's own menu shows. Opening it never
  * opens the thread or moves the selection. Escape, Tab and an item put focus
  * on the row (wherever focus was before the right-click); a write that takes
- * the row off screen puts it on the row now in its slot. A touch never opens it (no long press: phones have no menu here).
+ * the row off screen puts it on the row now in its slot. On a touch screen a finger held on a row opens it
+ * (`useContextMenuTrigger`'s `longPress`): a sheet from the bottom edge on a phone, the menu under the row elsewhere.
  * The look is the project menu's (`.ib-pm`); the trigger's rules are
  * `useContextMenuTrigger`'s, shared with the Board's card menu.
  */
@@ -87,35 +98,68 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
     buttonFor,
     // A row that left the rows on screen: the row now in its slot, else the first band.
     slotOf: () => ({ order: rowOrder(), fallback: () => body.current?.querySelector<HTMLElement>('button.ib-band') ?? null }),
-    // What a write (Mark read, Mark unread, Move back, Archive) changes on a row: once it differs, the write has landed.
+    // What a write (Mark read, Mark unread, Move back, Archive, Remove from) changes on a row: once it differs, the write has landed.
     stateOf: (id) => {
       const row = props.rowOf(id);
-      return row ? `${row.section}|${row.unread}|${row.read_at ?? ''}|${row.resolved_at ?? ''}|${row.snoozed?.until ?? ''}` : '';
+      return row ? `${row.section}|${row.unread}|${row.read_at ?? ''}|${row.resolved_at ?? ''}|${row.snoozed?.until ?? ''}|${row.tags?.join(',') ?? ''}` : '';
     },
     disabled: props.disabled,
     held: props.held,
     onTarget: props.onTarget,
+    longPress: true,
   });
   const target = menu.targetId ? props.rowOf(menu.targetId) : null;
-  const actions = target ? rowMenuActions(target, props.canMarkRead, props.pinnedOf ? props.pinnedOf(target.thread_id) : null, props.sectionOf?.(target.thread_id) ?? null, props.onSnooze !== undefined && (props.snoozesOf?.(target) ?? true)) : [];
+  const actions = target ? rowMenuActions(target, props.canMarkRead, props.pinnedOf ? props.pinnedOf(target) : null, props.sectionOf?.(target.thread_id) ?? null, props.onSnooze !== undefined && ((props.snoozesOf?.(target) ?? true) || !!props.snoozeBlockedOf?.(target))) : [];
+  const snoozeBlocked = target ? (props.snoozeBlockedOf?.(target) ?? null) : null;
   const pinning = actions.filter((a) => a === 'pin' || a === 'unpin');
   const copies = actions.filter((a) => a === 'copy-thread' || a === 'copy-link' || a === 'copy-id');
   const writes = actions.filter((a) => a === 'snooze' || a === 'unsnooze' || a === 'read' || a === 'mark-unread' || a === 'unread' || a === 'archive');
-  // Snooze swaps the menu in place for its times (approval "inbox-snooze"); the next menu opens as the menu again.
+  // Snooze swaps the menu in place for its times (approval "inbox-snooze"), and Add tag for its tags; the next menu
+  // opens as the menu again.
   const [snoozeView, setSnoozeView] = useState<SnoozeView | null>(null);
   const shownView = target ? snoozeView : null;
+  const [tagView, setTagView] = useState(false);
+  const shownTags = !!target && tagView;
   useLayoutEffect(() => {
-    if (!menu.open) setSnoozeView(null);
+    if (menu.open) return;
+    setSnoozeView(null);
+    setTagView(false);
   }, [menu.open]);
-  // Back from the times: focus goes to Snooze again, where it was, not to the item now at its old index.
-  const backed = useRef(false);
+  // Back from a swapped-in list: focus goes to the item that opened it, not to the item now at its old index.
+  const backed = useRef<string | null>(null);
   useLayoutEffect(() => {
-    if (shownView !== null || !backed.current) return;
-    backed.current = false;
-    return focusAfterSwap(() => document.querySelector<HTMLElement>(`[data-row-menu="${target?.thread_id ?? ''}"] [data-row-action="snooze"]`));
-  }, [shownView, target?.thread_id]);
+    if (shownView !== null || shownTags || !backed.current) return;
+    const item = backed.current;
+    backed.current = null;
+    return focusAfterSwap(() => document.querySelector<HTMLElement>(`[data-row-menu="${target?.thread_id ?? ''}"] ${item}`));
+  }, [shownView, shownTags, target?.thread_id]);
+  const tags = useThreadTags();
+  // In a tag's list (approval "inbox-thread-tags"), a row in it offers Remove from <tag>.
+  const listed = tags?.listed ?? null;
+  const removable = target && listed && tags?.tagsOf(target.thread_id).includes(listed.id) ? listed : null;
+  // H: the row's menu, opened as Shift+F10 opens it (a `contextmenu` at the row), straight at the times.
+  // Only a new request opens it, and the times show only when the menu took the `contextmenu` (Base UI cancels the
+  // one it opens on): a row the trigger refuses leaves the next right-click at the menu.
+  const request = props.snoozeRequest;
+  const seenRequest = useRef(request?.n ?? 0);
+  useEffect(() => {
+    if (!request || request.n === seenRequest.current) return;
+    seenRequest.current = request.n;
+    const button = buttonFor(request.id);
+    if (!button) return;
+    const rect = button.getBoundingClientRect();
+    const opened = !button.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: rect.left + 24, clientY: rect.bottom }));
+    if (opened) setSnoozeView('times');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request?.id, request?.n]);
   const item = (action: RowMenuAction) =>
-    action === 'snooze' ? (
+    action === 'snooze' && snoozeBlocked ? (
+      <Menu.Item key={action} className="ib-pmi" label={`Snooze: update ${snoozeBlocked.name} first`} data-row-action="snooze" data-snooze-blocked="" onClick={() => target && props.onSnoozeBlocked?.(target)}>
+        <Icon name="clock" size={15} />
+        {LABELS.snooze.label}
+        <span className="ib-zsub ib-zneeds">Update {snoozeBlocked.name}</span>
+      </Menu.Item>
+    ) : action === 'snooze' ? (
       <Menu.Item key={action} className="ib-pmi" label={LABELS.snooze.label} closeOnClick={false} data-row-action="snooze" onClick={() => setSnoozeView('times')}>
         <Icon name="clock" size={15} />
         {LABELS.snooze.label}
@@ -147,14 +191,21 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
         {props.children}
       </ContextMenu.Trigger>
       <ContextMenu.Portal container={portal ?? undefined}>
-        <ContextMenu.Positioner className="ib-pm-pos">
+        {props.phone && <ContextMenu.Backdrop className="ib-pm-scrim" />}
+        <ContextMenu.Positioner className="ib-pm-pos" data-phone={props.phone ? '' : undefined}>
           <ContextMenu.Popup className="ib-pm" aria-label={target?.subject ?? 'Thread'} data-row-menu={target?.thread_id} {...menu.popup}>
+            {/* The popup is named already (aria-label): the title is for the eye only, on a phone's sheet (the thread's ⋯ sheet's). */}
+            {target && (
+              <div className="ib-pm-title" dir="auto" aria-hidden="true">
+                {target.subject ?? '(no subject)'}
+              </div>
+            )}
             {shownView && target ? (
               <SnoozeTimes
                 view={shownView}
                 onView={setSnoozeView}
                 onBack={() => {
-                  backed.current = true;
+                  backed.current = '[data-row-action="snooze"]';
                   setSnoozeView(null);
                 }}
                 onPick={(until) => {
@@ -164,11 +215,32 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
                 }}
                 onClose={menu.close}
               />
+            ) : shownTags && target ? (
+              <AddTagList
+                threadId={target.thread_id}
+                onBack={() => {
+                  backed.current = '[data-add-tag-item]';
+                  setTagView(false);
+                }}
+              />
             ) : (
               <>
-                {/* Pin thread first, in its own group (approval "inbox-pinned-threads"). */}
+                {/* Pin thread first, then Add tag (and Remove from, in a tag's list), in their own group. */}
                 {pinning.map(item)}
-                {pinning.length > 0 && <Menu.Separator className="ib-pm-sep" />}
+                {target && <AddTagItem threadId={target.thread_id} onOpen={() => setTagView(true)} />}
+                {removable && target && (
+                  <Menu.Item className="ib-pmi" label={`Remove from ${removable.name}`} onClick={() => {
+                      // Out of the tag's list: focus goes to the row now in its slot.
+                      menu.follow(target.thread_id);
+                      tags?.set(target.thread_id, removable, false);
+                    }} data-tag-remove={removable.id}>
+                    <Icon name="minus" size={15} />
+                    <span className="ib-tagm-l" dir="auto">
+                      Remove from {removable.name}
+                    </span>
+                  </Menu.Item>
+                )}
+                {(pinning.length > 0 || (target && tags?.can(target.thread_id))) && <Menu.Separator className="ib-pm-sep" />}
                 {copies.map(item)}
                 {writes.length > 0 && <Menu.Separator className="ib-pm-sep" />}
                 {writes.map(item)}

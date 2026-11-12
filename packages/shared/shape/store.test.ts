@@ -51,7 +51,9 @@ describe("shape versions", () => {
     expect(result.v).toBe(1);
     expect(result.created).toBe(true);
     expect(existsSync(join(dataDir, "shapes", inboxProjectKey(project.name, project.root), result.id, "shape.json"))).toBe(true);
-    expect(store.read(result.id)?.parts.map((p) => `${p.view}/${p.id}`)).toEqual(["header/title", "header/claim", "picture/p-whistle", "know/know-1"]);
+    // views.know is kept, but is not a part: nothing shows it.
+    expect(store.read(result.id)?.parts.map((p) => `${p.view}/${p.id}`)).toEqual(["header/title", "header/claim", "picture/p-whistle"]);
+    expect(store.read(result.id)?.views.know).toBe("It whistles once per boil.");
   });
 
   test("an update needs the base it drew from, and a stale base is refused with the latest attached", () => {
@@ -315,12 +317,13 @@ describe("a board saved with Requirements", () => {
     expect([readFileSync(join(folder, "versions.jsonl"), "utf8"), readFileSync(join(folder, "chat.jsonl"), "utf8")]).toEqual(before);
   });
 
-  test("the next version replaces it: the old lines read as removed from What to know", () => {
+  test("the next version replaces it: neither its old lines nor the new views.know are a change (neither is shown)", () => {
     const { store, id } = saved();
     const next = store.update({ id, base: 1, board: board(), project, session });
     expect(next.ok).toBe(true);
     const diff = diffShapeVersions(store.read(id, 1)!, store.read(id, 2)!);
-    expect(diff.changes.filter((c) => c.view === "know").map((c) => `${c.kind} ${c.id}`).sort()).toEqual(["added know-1", "removed r-once"]);
+    expect(diff.changes.filter((c) => c.view === "know")).toEqual([]);
+    expect(diff.views).not.toContain("know");
   });
 });
 

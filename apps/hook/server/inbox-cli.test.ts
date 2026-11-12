@@ -26,7 +26,7 @@ import { INBOX_AGENT_NAME, INBOX_HOST } from "../hooks/mod/inbox";
 import { OPENCODE_INBOX_AGENT_NAME, OPENCODE_INBOX_HOST } from "../../opencode-plugin/inbox";
 import { DSH_INBOX_AGENT_NAME, DSH_INBOX_HOST } from "../../dsh-plugin/inbox";
 import { CLINE_INBOX_AGENT_NAME, CLINE_INBOX_HOST } from "../../cline-plugin/inbox";
-import { detachedInboxEnv } from "./inbox-command";
+import { detachedInboxEnv, inboxThreadRef } from "./inbox-command";
 import { fillInboxToolArguments, inboxCallHostSession, inboxHostSessionFromEnv, inboxQwenShimContext, INBOX_SESSION_HOST_NAMES, runInboxMcpShim } from "./inbox-mcp-shim";
 import { stubbedAgentClis } from "../../../tests/helpers/agent-cli-guard";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
@@ -450,7 +450,7 @@ describe("plannotator inbox mcp inside an agent session", () => {
     expect(INBOX_SESSION_HOST_NAMES[piHost!]).toBe(piName!);
     // Codex, Qwen Code and T3 Code have no plannotator_inbox tool: the Inbox wakes them itself (`codex queue`, Qwen's
     // cross-session messaging, T3's MCP API), and the shim sends as their session.
-    expect(Object.keys(INBOX_SESSION_HOST_NAMES).sort()).toEqual(["claude-code", "cline", "codex", "dsh", "opencode", "pi", "qwen", "t3"]);
+    expect(Object.keys(INBOX_SESSION_HOST_NAMES).sort()).toEqual(["claude-code", "cline", "codex", "dsh", "hermes", "openclaw", "opencode", "pi", "qwen", "t3"]);
     expect(INBOX_SESSION_HOST_NAMES.codex).toBe("Codex");
     expect(INBOX_SESSION_HOST_NAMES.qwen).toBe("Qwen Code");
     // A Qwen session in the tag is a Qwen session id, never anything else.
@@ -607,8 +607,8 @@ describe("plannotator inbox mcp inside an agent session", () => {
     };
     expect(await author(registry.port, sent.thread_id, 0)).toEqual({ kind: "agent", host: "claude-code", session: CLAUDE_SESSION, name: "Claude Code" });
 
-    // The mod's plannotator_inbox tool fills exactly these (apps/hook/hooks/mod/inbox.ts): its message joins the
-    // same default thread with a byte-identical author, so the store reads both as one session.
+    // The mod's plannotator_inbox tool fills exactly these (apps/hook/hooks/mod/inbox.ts): its reply has a
+    // byte-identical author, so the store reads both as one session.
     const viaTool = await fetch(`http://127.0.0.1:${registry.port}/mcp`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
@@ -618,16 +618,16 @@ describe("plannotator inbox mcp inside an agent session", () => {
         method: "tools/call",
         params: {
           name: "send_message",
-          arguments: { body: "From the tool.", project_path: project, agent_session: CLAUDE_SESSION, agent_host: INBOX_HOST, agent_name: INBOX_AGENT_NAME },
+          arguments: { body: "From the tool.", reply_to: sent.message_id, project_path: project, agent_session: CLAUDE_SESSION, agent_host: INBOX_HOST, agent_name: INBOX_AGENT_NAME },
         },
       }),
     });
     expect(viaTool.status).toBe(200);
     expect(await viaTool.text()).toContain(sent.thread_id);
 
-    // A second process with the same tag (another command of the same session) joins the same thread.
+    // A second process with the same tag (another command of the same session) writes as the same session.
     const second = await shim(box, join(project, "worker"), tag);
-    const again = (await second.callTool({ name: "send_message", arguments: { body: "And the migration?", idempotency_key: "tag-2" } })).structuredContent as {
+    const again = (await second.callTool({ name: "send_message", arguments: { body: "And the migration?", reply_to: sent.message_id, idempotency_key: "tag-2" } })).structuredContent as {
       message_id: string;
       thread_id: string;
     };
@@ -1031,6 +1031,90 @@ describe("plannotator inbox --open (the /plannotator-inbox commands)", () => {
       expect(result.stdout).toBe("");
       expect(result.stderr).toContain(other);
     }
+    expect(readInboxRegistry(box.dataDir)).toBeNull();
+    expect(existsSync(box.browserMarker)).toBe(false);
+  }, 30_000);
+});
+
+describe("plannotator inbox --open <thread> (issue #2506)", () => {
+  test("takes a thread or message id, or a link with #thread=; nothing else", () => {
+    expect(inboxThreadRef("msg_abc-123")).toBe("msg_abc-123");
+    expect(inboxThreadRef("http://localhost:4111/#thread=msg_abc")).toBe("msg_abc");
+    expect(inboxThreadRef("http://localhost:4111/#thread=msg_abc&msg=msg_def")).toBe("msg_abc");
+    expect(inboxThreadRef("#thread=msg_abc")).toBe("msg_abc");
+    expect(inboxThreadRef("http://localhost:4111/#settings")).toBeNull();
+    expect(inboxThreadRef("not a thread")).toBeNull();
+    expect(inboxThreadRef("")).toBeNull();
+  });
+
+  test("with no window open, opens one at the thread; with one open, that window shows it and no tab opens; an unknown thread fails", async () => {
+    const box = sandbox();
+    const registry = (await background(box)).registry!;
+    const project = gitProject(box);
+    const sent = Bun.spawnSync([process.execPath, "run", entry, "inbox", "call", "send_message", '{"body":"Built.","subject":"Ledger"}'], {
+      cwd: project,
+      env: { ...box.env, PLANNOTATOR_SESSION_TAG: "claude-code:ses_open" },
+    });
+    const { thread_id: thread, message_id: message } = JSON.parse(sent.stdout.toString()) as { thread_id: string; message_id: string };
+    const threadUrl = `${registry.url}#thread=${thread}`;
+
+    // No window open: a new one opens at the thread, as bare --open does today.
+    const none = await cli(box, ["inbox", "--open", thread]);
+    expect(none.code).toBe(0);
+    expect(none.stdout).toBe(`${threadUrl}\n`);
+    expect(await browserOpened(box)).toBe(threadUrl);
+    rmSync(box.browserMarker);
+
+    // A window open on this computer (its event stream, focused): it hears the thread, and no tab opens.
+    const controller = new AbortController();
+    cleanups.push(() => controller.abort());
+    let heard = "";
+    const held: Response[] = [];
+    void fetch(`http://127.0.0.1:${registry.port}/api/inbox/events?cursor=0&window=w-open-test-1&permission=default`, { signal: controller.signal })
+      .then(async (res) => {
+        held.push(res);
+        const reader = res.body!.getReader();
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) return;
+          heard += new TextDecoder().decode(value);
+        }
+      })
+      .catch(() => {});
+    const deadline = Date.now() + 5_000;
+    while (!heard.includes("event: hello") && Date.now() < deadline) await Bun.sleep(20);
+    await fetch(`http://127.0.0.1:${registry.port}/api/inbox/window`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ window: "w-open-test-1", permission: "default", used: true }),
+    });
+    const shown = await cli(box, ["inbox", "--open", threadUrl]);
+    expect(shown.code).toBe(0);
+    expect(shown.stdout).toBe(`${threadUrl}\n`);
+    const until = Date.now() + 3_000;
+    while (!heard.includes("event: show") && Date.now() < until) await Bun.sleep(20);
+    expect(heard).toContain(`event: show\ndata: ${JSON.stringify({ thread_id: thread, window: "w-open-test-1" })}`);
+    // The message id names the same thread.
+    expect((await cli(box, ["inbox", "--open", message])).stdout).toBe(`${threadUrl}\n`);
+    await Bun.sleep(300);
+    expect(existsSync(box.browserMarker)).toBe(false);
+
+    // An unknown thread: exit 1, said on stderr, nothing opened.
+    const unknown = await cli(box, ["inbox", "--open", "msg_nothere"]);
+    expect(unknown.code).toBe(1);
+    expect(unknown.stdout).toBe("");
+    expect(unknown.stderr).toContain("msg_nothere");
+    await Bun.sleep(300);
+    expect(existsSync(box.browserMarker)).toBe(false);
+    expect(held.length).toBe(1);
+  }, 60_000);
+
+  test("refuses an argument that is not a thread, starting nothing", async () => {
+    const box = sandbox();
+    const result = await cli(box, ["inbox", "--open", "not-a/thread"]);
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("--open");
     expect(readInboxRegistry(box.dataDir)).toBeNull();
     expect(existsSync(box.browserMarker)).toBe(false);
   }, 30_000);

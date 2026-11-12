@@ -261,7 +261,7 @@ test('the link is the Inbox one address plus #thread=, and the items follow the 
 test.skipIf(!hasDom)('a right-click opens the menu on that row, without opening the thread; Copy link writes its address', async () => {
   await renderApp();
   await openMenu(ids.waiting);
-  expect(items()).toEqual(['Star thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Archive']);
+  expect(items()).toEqual(['Star thread', 'Add tag', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Archive']);
   expect(menu()!.querySelector('[role="separator"]')).not.toBeNull();
   // The row keeps a muted background while its menu is open; nothing opened, nothing selected.
   expect(rowWrap(ids.waiting)!.hasAttribute('data-menu')).toBe(true);
@@ -328,7 +328,7 @@ test.skipIf(!hasDom)('Mark read leaves the row in place, read, with its toast; i
   });
   await until(() => !!rowButton(ids.waiting), 'the row in Quiet');
   await openMenu(ids.waiting);
-  expect(items()).toEqual(['Star thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark unread', 'Move back', 'Archive']);
+  expect(items()).toEqual(['Star thread', 'Add tag', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark unread', 'Move back', 'Archive']);
   const before = JSON.parse((await loopback(`/api/inbox/threads/${ids.waiting}`)).text) as { thread: { messages: { questions?: { state: string }[] }[] } };
   await choose('mark-unread');
   expect(posted.some((p) => p.path === `/api/inbox/threads/${ids.waiting}/mark-unread`)).toBe(true);
@@ -365,7 +365,7 @@ test.skipIf(!hasDom)('a row Mark unread brought back keeps Move back in its menu
   await loopback(`/api/inbox/threads/${ids.waiting}/mark-unread`, 'POST', '{}');
   await renderApp();
   await openMenu(ids.waiting);
-  expect(items()).toEqual(['Star thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Move back', 'Archive']);
+  expect(items()).toEqual(['Star thread', 'Add tag', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Move back', 'Archive']);
   await choose('unread');
   await until(async () => (await serverSections()).get(ids.waiting) === 'waiting', 'the question reopened');
   const thread = JSON.parse((await loopback(`/api/inbox/threads/${ids.waiting}`)).text) as { thread: { messages: { questions?: { state: string }[] }[] } };
@@ -718,14 +718,23 @@ test.skipIf(!hasDom)("with a thread open: Snooze from another row moves only tha
   expect((await serverSections()).get(ids.waiting)).toBe('waiting');
 });
 
-test.skipIf(!hasDom)("Snooze from the open thread's header clock: its row leaves for the Snoozed band at once and the thread stays open, saying until when", async () => {
+/** The open thread's ⋯ More, swapped to Snooze's times. */
+async function headerSnooze() {
+  await act(async () => {
+    document.querySelector<HTMLElement>('section.ib-pane [data-thread-more]')!.click();
+  });
+  await until(() => !!document.querySelector('[data-thread-menu] [data-thread-snooze-item]'), 'Snooze in the ⋯ menu');
+  await act(async () => {
+    document.querySelector<HTMLElement>('[data-thread-menu] [data-thread-snooze-item]')!.click();
+  });
+}
+
+test.skipIf(!hasDom)("Snooze from the open thread's ⋯ menu: its row leaves for the Snoozed band at once and the thread stays open, saying until when", async () => {
   await renderApp(`#thread=${ids.waiting}`);
-  await until(() => !!document.querySelector('section.ib-pane [data-thread-snooze]'), 'the header clock');
+  await until(() => !!document.querySelector('section.ib-pane [data-thread-more]'), 'the header ⋯');
   await until(() => !!rowButton(ids.waiting), 'the open row');
   const before = placedRows();
-  await act(async () => {
-    document.querySelector<HTMLElement>('section.ib-pane [data-thread-snooze]')!.click();
-  });
+  await headerSnooze();
   await snoozeTomorrow('[data-thread-snooze-menu]');
   await until(() => !rowButton(ids.waiting), 'the row to leave');
   expect(placedRows()).toEqual(before.filter((id) => id !== ids.waiting));
@@ -736,15 +745,13 @@ test.skipIf(!hasDom)("Snooze from the open thread's header clock: its row leaves
 
 test.skipIf(!hasDom)('Snooze the open thread, then Unsnooze in it: its row comes back between the same neighbours at once, the band as it was', async () => {
   await renderApp(`#thread=${ids.waiting}`);
-  await until(() => !!document.querySelector('section.ib-pane [data-thread-snooze]'), 'the header clock');
+  await until(() => !!document.querySelector('section.ib-pane [data-thread-more]'), 'the header ⋯');
   await until(() => !!rowButton(ids.waiting), 'the open row');
   const before = placedRows();
   // Another test's world may have left a snooze: the band's count, not its absence.
   const band = () => snoozedBand()?.textContent ?? null;
   const bandBefore = band();
-  await act(async () => {
-    document.querySelector<HTMLElement>('section.ib-pane [data-thread-snooze]')!.click();
-  });
+  await headerSnooze();
   await snoozeTomorrow('[data-thread-snooze-menu]');
   await until(() => !rowButton(ids.waiting), 'the row to leave');
   await until(() => !!document.querySelector('section.ib-pane [data-unsnooze]'), 'Unsnooze in the thread');

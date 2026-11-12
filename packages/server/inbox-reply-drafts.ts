@@ -31,7 +31,6 @@
  * forwards the GET only (read-only, contract 7.62).
  */
 
-import { createHash } from "node:crypto";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest } from "./inbox-cross-site";
@@ -49,30 +48,24 @@ export function createInboxReplyDrafts(options: {
   const { store, serverSession, json } = options;
 
   const route = async (req: Request, url: URL): Promise<Response | null> => {
-    const commentMatch = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/comment-draft(\/delete)?$/.exec(url.pathname);
-    const match = commentMatch ?? INBOX_REPLY_DRAFT_PATH.exec(url.pathname);
+    const match = INBOX_REPLY_DRAFT_PATH.exec(url.pathname);
     if (!match) return null;
-    const message = commentMatch ? store.message(match[1]!) : null;
-    if (commentMatch && !message) return json({ error: "No such message.", code: "message_not_found" }, 404);
-    const threadId = message?.thread_id ?? match[1]!;
-    const comment = commentMatch ? `${message!.id}:${url.searchParams.get("scope") ?? "global"}` : null;
-    const target = comment ? createHash("sha256").update(comment).digest("hex") : undefined;
+    const threadId = match[1]!;
     if (!match[2] && req.method === "GET") {
       if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
       if (!store.thread(threadId)) return json({ error: `No thread ${threadId}.`, code: "thread_not_found" }, 404);
-      return json({ serverSession, draft: store.replyDraft(threadId, target) });
+      return json({ serverSession, draft: store.replyDraft(threadId) });
     }
     if (req.method !== "POST") return json({ error: match[2] ? "Use POST." : "Use GET or POST." }, 405);
     const body = await options.readBody(req);
     if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
     if (match[2]) {
       if (!store.thread(threadId)) return json({ error: `No thread ${threadId}.`, code: "thread_not_found" }, 404);
-      const existing = store.replyDraft(threadId, target);
-      const deleted = body.base !== undefined && existing?.updated_at !== body.base ? false : store.deleteReplyDraft(threadId, target);
+      const deleted = store.deleteReplyDraft(threadId);
       if (deleted) options.onChange(threadId);
       return json({ ok: true, deleted });
     }
-    const draft = store.saveReplyDraft(threadId, body, target);
+    const draft = store.saveReplyDraft(threadId, body);
     options.onChange(threadId);
     return json({ draft });
   };

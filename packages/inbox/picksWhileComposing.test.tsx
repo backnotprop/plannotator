@@ -277,8 +277,8 @@ test.skipIf(!hasDom)('picks made while the reply box is open save, and the box l
   // The last two stay open by default (approval "inbox-explicit-skip"), then Send: the words once, every answer once.
   expect(el.querySelector('[data-skip-chip]')?.getAttribute('data-skip-chip')).toBe('keep');
   await until(async () => (await serverQuestions(message))[0]!.answer?.selected?.[0] === 'A dense table', 'the changed pick saved');
-  const sends = [...el.querySelectorAll('.ib-rbox ~ .ib-acts button, .ib-acts button')].filter((b) => b.textContent?.trim() === 'Send');
-  act(() => (sends.at(-1) as HTMLButtonElement).click());
+  // The box's own Send (approval "inbox-reply-box", T6: Send sits in the box's row).
+  act(() => (el.querySelector('.ib-rbox [data-reply-send]') as HTMLButtonElement).click());
   await until(async () => (await personReplies(message)).length === 1, 'the reply');
   const body = (await personReplies(message))[0]!.body;
   expect(body.split('Cards because the list is short.').length).toBe(2);
