@@ -720,6 +720,17 @@ for (const phone of [
         await markRead();
         await expect(readLine).toBeVisible();
         await expect(toast).toBeVisible();
+        // A raw tap does not wait for the toast to hold still, as a click does. The toast comes up over the foot as it
+        // was; the foot then loses the reply box's line for the question Mark read closed, and the toast drops to 8 px
+        // above it, which can be after the read line shows. Tap where it rests.
+        const gap = () =>
+          page.evaluate(() => {
+            const foot = document.querySelector('section.ib-pane .ib-pfoot')!.getBoundingClientRect();
+            const box = document.querySelector('[data-inbox-toast]')!.getBoundingClientRect();
+            return Math.round(foot.top - box.bottom);
+          });
+        await expect.poll(gap).toBeGreaterThanOrEqual(0);
+        await expect.poll(gap).toBeLessThanOrEqual(12);
         const undoBox = (await toast.locator('[data-toast-undo]').boundingBox())!;
         await page.touchscreen.tap(undoBox.x + undoBox.width + px, undoBox.y + undoBox.height / 2);
       };
