@@ -206,9 +206,9 @@ export function withReminderSession(record: Record<string, number>, sessionId: s
  * is, a custom text's backslashes, leading `-`, `%`, quotes and `$(...)`
  * included, and nothing in it runs.
  */
-export function inboxReminderEnvValue(on: boolean, toolName: string | null, custom: string | null = null): string | undefined {
+export function inboxReminderEnvValue(on: boolean, toolName: string | null, custom: string | null = null, rules: string | null = null): string | undefined {
   if (!on || !toolName) return undefined
-  return inboxReminderFor(custom, toolName)
+  return inboxReminderFor(custom, toolName, { rules })
 }
 
 /**

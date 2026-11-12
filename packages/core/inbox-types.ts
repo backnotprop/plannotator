@@ -3477,6 +3477,12 @@ export interface InboxPromptsSettings {
    * `text` null: none (Default). Absent from an older Inbox.
    */
   guide?: { text: string | null; max: number };
+  rules?: {
+    shared: string | null;
+    runtimes: Record<InboxPromptHost, string | null>;
+    room: { shared: number; runtimes: Record<InboxPromptHost, number> };
+    dropped: InboxPromptHost[];
+  };
 }
 
 /**
@@ -3486,7 +3492,8 @@ export interface InboxPromptsSettings {
 export interface InboxPromptsChange {
   inbox?: {
     reminder?: string | null;
-    runtimes?: Partial<Record<InboxPromptHost, { reminder?: string | null }>>;
+    rules?: string | null;
+    runtimes?: Partial<Record<InboxPromptHost, { reminder?: string | null; rules?: string | null }>>;
   };
   guide?: string | null;
 }

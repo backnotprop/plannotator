@@ -699,15 +699,43 @@ export function inboxReminderCustomText(config: unknown, host: string): string |
   return usable(record(record(inbox.runtimes)?.[host])?.reminder) ?? usable(inbox.reminder)
 }
 
+function withToolName(text: string, toolName: string): string {
+  return text.replace(/(^|[^A-Za-z0-9_])plannotator_inbox(?![A-Za-z0-9_])/g, (_match: string, before: string) => before + toolName)
+}
+
+export const INBOX_RULES_LEAD =
+  "The person's own rules for how you use the Plannotator Inbox. They come from the person, so where they differ from the lines above (being proactive included), follow these:"
+
+export const INBOX_RULES_MARGIN = 100
+
+export function inboxReminderRulesText(config: unknown, host: string): string | null {
+  const record = (value: unknown): Record<string, unknown> | null =>
+    value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null
+  const usable = (value: unknown): string | null => (typeof value === 'string' && value.trim() !== '' ? value.trim() : null)
+  const inbox = record(record(record(config)?.prompts)?.inbox)
+  if (!inbox) return null
+  return usable(record(record(inbox.runtimes)?.[host])?.rules) ?? usable(inbox.rules)
+}
+
+export function inboxRulesRoom(reminder: string): number {
+  return Math.max(0, INBOX_REMINDER_MAX_CHARS - reminder.length - INBOX_RULES_LEAD.length - 3 - INBOX_RULES_MARGIN)
+}
+
+export function inboxReminderWithRules(reminder: string, rules: string | null | undefined, toolName: string = INBOX_TOOL_NAME): string {
+  if (typeof rules !== 'string' || rules.trim() === '') return reminder
+  const text = `${reminder}\n\n${INBOX_RULES_LEAD}\n${withToolName(rules.trim(), toolName)}`
+  return text.length <= INBOX_REMINDER_MAX_CHARS ? text : reminder
+}
+
 /**
  * The reminder a host sends: the person's own text when there is one (it
  * REPLACES the line, for hosts with the wake and without it alike, every
  * whole word `plannotator_inbox` in it renamed to the tool as the host
  * registered it), else exactly `inboxReminderText(toolName, options)`.
  */
-export function inboxReminderFor(custom: string | null | undefined, toolName: string = INBOX_TOOL_NAME, options: { wakes?: boolean } = {}): string {
-  if (typeof custom !== 'string' || custom.trim() === '') return inboxReminderText(toolName, options)
-  return custom.replace(/(^|[^A-Za-z0-9_])plannotator_inbox(?![A-Za-z0-9_])/g, (_match: string, before: string) => before + toolName)
+export function inboxReminderFor(custom: string | null | undefined, toolName: string = INBOX_TOOL_NAME, options: { wakes?: boolean; rules?: string | null } = {}): string {
+  const reminder = typeof custom !== 'string' || custom.trim() === '' ? inboxReminderText(toolName, options) : withToolName(custom, toolName)
+  return inboxReminderWithRules(reminder, options.rules, toolName)
 }
 
 /**
