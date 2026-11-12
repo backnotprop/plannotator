@@ -37,7 +37,7 @@ import {
 import { INBOX_REF_LINK_POINTER } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
-import { shortTime } from "./inbox-mcp-read";
+import { sessionWho, shortTime, type SessionNameOf } from "./inbox-mcp-read";
 import { guarded, okComplete, PROJECT_PATH_DESCRIPTION } from "./inbox-mcp-result";
 import type { InboxMcpContext } from "./inbox-mcp";
 
@@ -64,7 +64,7 @@ function columnInput(value: unknown): unknown {
 }
 
 /** One card as one line of text: every fact an agent acts on. `initiativeName` names its initiative (a live one; the wire nulls a deleted one). */
-export function cardLineText(card: InboxCardWire, initiativeName: (id: string) => string | null = () => null): string {
+export function cardLineText(card: InboxCardWire, initiativeName: (id: string) => string | null = () => null, names?: SessionNameOf): string {
   const parts = [`- ${card.id}`, JSON.stringify(card.title), INBOX_CARD_COLUMN_LABELS[card.column]];
   const initiative = card.initiative ? initiativeName(card.initiative) : null;
   if (initiative) parts.push(`initiative ${JSON.stringify(initiative)}`);
@@ -78,7 +78,10 @@ export function cardLineText(card: InboxCardWire, initiativeName: (id: string) =
   const refs = inboxCardRefsOf(card);
   if (refs.length > 0) parts.push(`links ${refs.map((ref) => (ref.kind === "pr" ? ref.ref : `${ref.ref} (${ref.kind})`)).join(", ")}`);
   if (card.notes) parts.push(`notes ${JSON.stringify(card.notes.length > 300 ? `${card.notes.slice(0, 300)}…` : card.notes)}`);
-  if (card.agent?.kind === "agent") parts.push(`agent ${inboxAgentName(card.agent)}${card.agent.session ? ` (${card.agent.session})` : ""}`);
+  if (card.agent?.kind === "agent") {
+    const session = card.agent.session;
+    parts.push(`agent ${session ? sessionWho(inboxAgentName(card.agent), session, names?.(session)) : inboxAgentName(card.agent)}`);
+  }
   return parts.join(" · ");
 }
 
@@ -219,7 +222,7 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
       : tagDecided ? inboxCardInitiativeTaggedNote(inName)
       : null;
     return {
-      text: `${verb}:\n${cardLineText(wire, initiativeName)}${hint ? `\n${hint}` : ""}${nudge ? `\n${nudge}` : ""}`,
+      text: `${verb}:\n${cardLineText(wire, initiativeName, context.sessionName)}${hint ? `\n${hint}` : ""}${nudge ? `\n${nudge}` : ""}`,
       structured: { card: wire, ...extra, ...(hint ? { title_hint: hint } : {}), ...(nudge ? { initiative_hint: nudge } : {}) },
     };
   };
@@ -238,7 +241,7 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
       ? "\nA card the person put in Backlog is not asked for yet: leave its work alone until they send it to you."
       : "";
     const summary = cardInitiativesSummary(store);
-    const lines = cards.map((card) => cardLineText(card, initiativeName)).join("\n");
+    const lines = cards.map((card) => cardLineText(card, initiativeName, context.sessionName)).join("\n");
     return {
       text: `${cards.length > 0 ? `${head}\n${lines}${parked}` : head}${summary.line ? `\n${summary.line}` : ""}`,
       structured: { project: { id: project.id, name: project.name, root: project.root }, cards, total: cards.length, initiatives: summary.initiatives },

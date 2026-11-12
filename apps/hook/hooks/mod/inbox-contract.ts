@@ -1510,6 +1510,9 @@ export const INBOX_HELD_POLL_FIELD = 'held'
  */
 export const INBOX_CONTINUES_POLL_FIELD = 'continues'
 
+/** Kept apart from `label`: only list rows show a generated title. Empty or absent clears it. */
+export const INBOX_TITLE_POLL_FIELD = 'title'
+
 /**
  * On a poll, the connection's tick goes on polling while a steer waits for the running turn. A connection without it
  * (from before that) stops polling until the steer goes in, so the Inbox counts a session it handed one as there.
