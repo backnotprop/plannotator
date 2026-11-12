@@ -94,6 +94,8 @@ async function until(check: () => boolean, what: string) {
 test('the tip names the project, its machine when it is another, and that it waits while asleep; the last agent is the newest launched row\'s', () => {
   expect(newSessionTip('billing-svc', null, false)).toBe('New session in billing-svc');
   expect(newSessionTip('infra', 'Mac mini', true)).toBe("New session in infra · Mac mini, starts when it's back");
+  // The window's name for another machine's project already carries that machine: named once.
+  expect(newSessionTip('infra · Mac mini', 'Mac mini', true)).toBe("New session in infra · Mac mini, starts when it's back");
   const rows = [
     { created_at: '2026-11-07T09:00:00Z', run: null, addressee: { host: 'pi' } },
     { created_at: '2026-11-07T10:00:00Z', run: 'working', addressee: { host: 'claude-code' } },
@@ -110,12 +112,20 @@ test('"+" shows only while launch is on and never on a tailnet guest\'s page; a 
   expect(projectPlusOn(false, false)).toBe(false);
   expect(projectPlusOn(undefined, false)).toBe(false);
   const bill = { id: 'prj_bill', root: '/Users/me/code/billing-svc' };
-  // Not read yet, or an asleep machine never read: shown (it starts when that machine is back, F4).
+  // Not read yet while awake (New message reads it), or asleep and read: shown (it starts when that machine is back, F4).
   expect(projectCanStart(bill, null)).toBe(true);
+  expect(projectCanStart(bill, null, true, { read: false, asleep: false })).toBe(true);
   expect(projectCanStart(bill, HERE)).toBe(true);
+  expect(projectCanStart(bill, HERE, true, { read: true, asleep: true })).toBe(true);
+  // Asleep and never read on this page: nothing says what could start there, so no "+".
+  expect(projectCanStart(bill, null, true, { read: false, asleep: true })).toBe(false);
   // No agent to start there, launch off there, or the folder gone (a failed clone's project): no "+".
   expect(projectCanStart(bill, { ...HERE, agents: [] })).toBe(false);
   expect(projectCanStart(bill, null, false)).toBe(false);
+  // Its last read decides over its health, which is as of the link's last connect: turned on there since, shown;
+  // turned off there since (a read with no launch block), not.
+  expect(projectCanStart(bill, HERE, false, { read: true, asleep: false })).toBe(true);
+  expect(projectCanStart(bill, undefined, true, { read: true, asleep: false })).toBe(false);
   expect(projectCanStart(bill, { ...HERE, projects: [{ id: 'prj_bill', name: 'billing-svc', root: bill.root, exists: false }] })).toBe(false);
 });
 
