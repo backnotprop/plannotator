@@ -800,6 +800,34 @@ export function clinePluginInstalled(e: AgentEnvironment, cwd: string = process.
   return clinePluginsFolderHasPlugin(global) || (workspace !== global && clinePluginsFolderHasPlugin(workspace));
 }
 
+export const OPENCLAW_PLUGIN_PACKAGE = "@plannotator/openclaw";
+
+export function openclawStateDir(e: AgentEnvironment): string {
+  const explicit = envDir(e, "OPENCLAW_STATE_DIR");
+  if (explicit) return explicit;
+  const home = envDir(e, "OPENCLAW_HOME") ?? e.homeDir;
+  const profile = e.env.OPENCLAW_PROFILE?.trim().toLowerCase();
+  return join(home, profile && profile !== "default" ? `.openclaw-${profile}` : ".openclaw");
+}
+
+function namesOpenClawPlugin(manifest: string): boolean {
+  const read = readAgentFile(manifest);
+  if (read.kind !== "file") return false;
+  try {
+    return (JSON.parse(read.text) as { name?: unknown }).name === OPENCLAW_PLUGIN_PACKAGE;
+  } catch {
+    return false;
+  }
+}
+
+export function openclawPluginInstalled(e: AgentEnvironment): boolean {
+  const state = openclawStateDir(e);
+  const projects = join(state, "npm", "projects");
+  if (listDir(projects).some((project) => namesOpenClawPlugin(join(projects, project, "node_modules", "@plannotator", "openclaw", "package.json")))) return true;
+  const extensions = join(state, "extensions");
+  return listDir(extensions).some((id) => namesOpenClawPlugin(join(extensions, id, "package.json")));
+}
+
 const CLAUDE_PLUGIN_ID = /^plannotator@/;
 
 /** One Claude Code settings file, parsed (null: missing or unreadable). */
@@ -1246,6 +1274,16 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
     // DSH's own folder, never `dsh` on PATH: Debian and Ubuntu ship an unrelated `dsh` (distributed shell). Never run.
     detect: (e) => dshPluginInstalled(e) || isDir(join(dshHome(e), "profiles")),
     way: async (e) => (dshPluginInstalled(e) ? { kind: "tool", host: "dsh" } : { kind: "manual", why: "add Plannotator's DeepSeek Harness plugin (dsh plugin --profile <profile> add @plannotator/dsh)" }),
+    file: () => null,
+    raw: () => null,
+  },
+  {
+    id: "openclaw",
+    detect: (e) => openclawPluginInstalled(e) || !!e.which("openclaw") || isDir(openclawStateDir(e)),
+    way: async (e) =>
+      openclawPluginInstalled(e)
+        ? { kind: "tool", host: "openclaw" }
+        : { kind: "manual", why: `add Plannotator's OpenClaw plugin (openclaw plugins install ${OPENCLAW_PLUGIN_PACKAGE})` },
     file: () => null,
     raw: () => null,
   },

@@ -244,6 +244,9 @@ const TAB_GLYPHS: Partial<Record<string, string>> = {
   hermes: 'M8 5v15 M16 5v15 M8 13.5h8 M8 8C6 7.6 4 6.8 2.5 5.2C3.3 8 5.4 9.8 8 10.4 M16 8c2-.4 4-1.2 5.5-2.8c-.8 2.8-2.9 4.6-5.5 5.2',
   cline:
     'M9.6 5.3A2.55 2.55 0 1 1 14.4 5.3H17.9A2.4 2.4 0 0 1 20.3 7.7V10.6L22.9 13.6 20.3 16.7V19.6A2.4 2.4 0 0 1 17.9 22H6.1A2.4 2.4 0 0 1 3.7 19.6V16.7L1.1 13.6 3.7 10.6V7.7A2.4 2.4 0 0 1 6.1 5.3Z M8.9 11.6v4 M15.1 11.6v4',
+  // OpenClaw lobster mark, from openclaw/openclaw ui/src/components/icon-data-tools.ts, MIT, Copyright (c) 2026 OpenClaw Foundation.
+  openclaw:
+    'M9.6 21.4V19.6C7.2 18.6 4.8 14.8 4.8 10.6 4.8 6.6 7.6 3.4 12 3.4S19.2 6.6 19.2 10.6C19.2 14.8 16.8 18.6 14.4 19.6V21.4 M9.6 19.6C11.2 20.2 12.8 20.2 14.4 19.6 M4.8 9.6C2.4 8.8 1.4 10.6 2.2 12.4 3 14 4.6 13.4 5.2 11.8 M19.2 9.6C21.6 8.8 22.6 10.6 21.8 12.4 21 14 19.4 13.4 18.8 11.8 M9.4 3.8 7.4 1.8 M14.6 3.8 16.6 1.8 M9.8 8.4V8.6 M14.2 8.4V8.6',
 };
 
 export function TabGlyph({ harness }: { harness: string }) {
@@ -270,6 +273,7 @@ function ownMark(host: string | null | undefined): React.ReactNode | null {
     case 'vscode':
     case 'dsh':
     case 'cline':
+    case 'openclaw':
     case 'hermes':
       return (
         <svg className="ib-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">

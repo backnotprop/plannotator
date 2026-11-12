@@ -2921,6 +2921,11 @@ New classes: `.shp-title-row`, `.shp-head-side`, `.shp-drawing`, `.shp-finished`
 - **`AnnotationToolbar` `showDelete?: boolean`**: shows Delete on a `commentOnly` toolbar. Absent: Delete follows `commentOnly` as before.
 - A host that passes neither sees no change.
 
+## Comments on a question card's words: `Viewer` `questionTextComments` (unreleased; additive, opt-in, no core change)
+
+- **`Viewer` `questionTextComments?: boolean`** (default `false`), with `textComments` (and `answerOnly`, not `readOnly`): `QuestionBlock` cards are no longer wrapped `annotation-exclude`, so their prompt, context and each choice's label and description take the comment-only toolbar, its composer and highlights like any other words. The card's chrome (eyebrow, tags, footer, Other, a picture choice's picture) stays excluded inside `QuestionBlock`, and a host's own `renderQuestionCard` card stays wrapped. A plain click or tap on a choice still picks it in one press; `QuestionBlock`'s existing click guard cancels the pick after a drag or while a selection shows. A comment is an ordinary `COMMENT` row from `onAddAnnotation`: it never answers the question.
+- A host that does not pass it sees no change. The Plannotator Inbox passes it (approval `inbox-annotate-own-and-questions`).
+
 ## Shape: dark contrast (unreleased; additive)
 
 Shape boards can now show any picture: a file on this computer or a web picture, which `plannotator shape update` copies into the board's `files/` (#2756). The board itself still names only `files/<name>`. Nothing changes in the allowlist or in how `resolveSrc` / `assetUrl` resolve a picture.

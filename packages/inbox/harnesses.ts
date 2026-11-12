@@ -24,6 +24,7 @@ export type HarnessId =
   | 'pi'
   | 'opencode'
   | 'dsh'
+  | 'openclaw'
   | 'hermes'
   | 'zed'
   | 'kiro'
@@ -51,6 +52,7 @@ export const HARNESSES: readonly Harness[] = [
   { id: 'pi', label: 'Pi' },
   { id: 'opencode', label: 'OpenCode' },
   { id: 'dsh', label: 'DeepSeek Harness' },
+  { id: 'openclaw', label: 'OpenClaw' },
   { id: 'hermes', label: 'Hermes Agent' },
   { id: 'zed', label: 'Zed' },
   { id: 'kiro', label: 'Kiro' },
@@ -88,12 +90,15 @@ const SERVER = 'plannotator-inbox';
 const CLINE_PLUGIN = '@plannotator/cline';
 /** Plannotator's DeepSeek Harness plugin package (apps/dsh-plugin). */
 const DSH_PLUGIN = '@plannotator/dsh';
+const OPENCLAW_PLUGIN = '@plannotator/openclaw';
 
 /** When a DSH tool switch takes effect: the plugin decides once, when DSH starts, never per session. */
 export const DSH_APPLIES = 'It applies when DeepSeek Harness next starts.';
 
 /** When Cline's tool switch takes effect: the plugin decides at each session's setup, never in a running one. */
 export const CLINE_APPLIES = 'It applies to Cline sessions started from now on.';
+
+export const OPENCLAW_APPLIES = 'It applies from the next message in each OpenClaw chat.';
 
 /** POSIX single-quoting where a word needs it; plain words stay bare. */
 export function shellWord(word: string): string {
@@ -271,6 +276,11 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
           summary: 'for DSH Desktop: open and quit it once before you run this',
           body: { kind: 'code', text: `dsh plugin --profile desktop add ${DSH_PLUGIN}` },
         },
+      };
+    case 'openclaw':
+      return {
+        artefacts: [{ kind: 'code', text: `openclaw plugins install ${OPENCLAW_PLUGIN}` }],
+        note: `Plannotator's OpenClaw plugin. Its Inbox tool starts off: turn it on for OpenClaw in Settings > Agents. ${OPENCLAW_APPLIES} Only your own chats get it: OpenClaw on this computer and your direct messages, never a group. Your replies then come back into the same chat by themselves.`,
       };
     case 'hermes':
       return {

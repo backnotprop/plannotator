@@ -76,7 +76,7 @@ class PluginTest(unittest.TestCase):
     def test_local_sessions_get_the_tool_signed_as_their_own_session(self):
         hermes = self.start()
         self.assertIn("plannotator_inbox", hermes.tools)
-        self.assertEqual(requests(self.log)[0]["argv"], ["inbox", "connection", "--host", "hermes", "--plugin-version", "0.1.0"])
+        self.assertEqual(requests(self.log)[0]["argv"], ["inbox", "connection", "--host", "hermes", "--plugin-version", "0.28.62"])
         for surface in ("cli", "tui", "desktop"):
             result = self.call(hermes, f"ses_{surface}", surface)
             self.assertEqual(json.loads(result)["signed"], f"ses_{surface}")

@@ -1768,7 +1768,7 @@ export function resolvePlanReview(config: PlannotatorConfig, env: NodeJS.Process
  * `dsh` is the DeepSeek Harness plugin (`@plannotator/dsh`), `cline` the
  * Cline plugin (`@plannotator/cline`).
  */
-export type InboxToolHost = "claude-code" | "pi" | "opencode" | "dsh" | "cline" | "hermes";
+export type InboxToolHost = "claude-code" | "pi" | "opencode" | "dsh" | "cline" | "openclaw" | "hermes";
 
 /**
  * Whether each host registers the Inbox's `plannotator_inbox` tool when
@@ -1785,10 +1785,11 @@ export const INBOX_TOOL_DEFAULTS: Readonly<Record<InboxToolHost, boolean>> = {
   opencode: AGENT_TOOL_DEFAULTS.opencode,
   dsh: AGENT_TOOL_DEFAULTS.dsh,
   cline: false,
+  openclaw: false,
   hermes: false,
 };
 
-export const INBOX_TOOL_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode", "dsh", "cline", "hermes"];
+export const INBOX_TOOL_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode", "dsh", "cline", "openclaw", "hermes"];
 
 /**
  * The hosts that give a session the Inbox reminder (INBOX_REMINDER_TEXT) with

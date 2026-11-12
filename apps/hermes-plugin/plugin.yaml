@@ -1,5 +1,5 @@
 name: plannotator
-version: 0.1.0
+version: 0.28.62
 description: Plannotator Inbox for Hermes Agent. The agent sends you messages and questions in the Inbox, and your replies come back into the session that asked.
 author: Plannotator
 license: MIT OR Apache-2.0

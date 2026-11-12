@@ -9,6 +9,7 @@ packages/ui/annotationDraftPersistence.test.tsx
 packages/ui/codeAnnotationDraftPersistence.test.tsx
 packages/ui/utils/richClipboard.test.ts
 packages/ui/components/Viewer.richCopy.test.tsx
+packages/ui/components/Viewer.questionTextComments.test.tsx
 packages/ui/components/html-viewer/htmlRichCopy.test.tsx
 packages/ui/components/html-viewer/srcdoc.test.ts
 packages/ui/components/html-viewer/htmlPinpointProtocol.test.tsx
@@ -146,6 +147,7 @@ packages/inbox/endedSession.test.tsx
 packages/inbox/listRowEnded.test.tsx
 packages/inbox/multiAgentNames.test.tsx
 packages/inbox/replyRecipient.test.tsx
+packages/inbox/replyQuote.test.tsx
 packages/inbox/phoneComposer.test.tsx
 packages/inbox/compose.test.tsx
 packages/inbox/decisionAsk.test.tsx
