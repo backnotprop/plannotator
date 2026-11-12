@@ -25,7 +25,7 @@ afterEach(() => {
   for (const restore of restores.splice(0).reverse()) restore();
 });
 
-const PROJECT: InboxProject = { id: 'prj_01M4H6G73M9H3Z32T859E72DPZ', root: '/work/launch-site', name: 'launch-site', repo: null } as InboxProject;
+const PROJECT: InboxProject = { id: 'prj_01M4H6G73M9H3Z32T859E72DPZ', key: 'launch-site-abcdef', name: 'launch-site', root: '/work/launch-site', created_at: '2026-11-12T10:00:00.000Z' };
 const MESSAGE_ID = 'msg_01M4H6G73M9H3Z32T859E72DPY';
 
 function file(n: number, name: string): InboxAttachmentState {
