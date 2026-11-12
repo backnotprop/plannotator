@@ -480,6 +480,17 @@ export function startBlock(
   return agents.length ? { project, agents } : null;
 }
 
+/**
+ * To's "<agent> New session" when the caption's project is on a machine without that agent (To offers every
+ * machine's agents): the project it starts in instead, from `groups` (the folder menu's for that agent). An awake
+ * machine's first, as the default start; the same folder, else a project of the same name, first of all. Null: no
+ * machine offers one.
+ */
+export function projectWithAgent(groups: readonly LaunchGroup[], picked: { root: string; name: string }): MachineLaunchProject | null {
+  const projects = [...groups.filter((g) => !g.asleep), ...groups.filter((g) => g.asleep)].flatMap((g) => g.projects);
+  return projects.find((p) => p.root === picked.root) ?? projects.find((p) => p.name === picked.name) ?? projects[0] ?? null;
+}
+
 /** The folder menu's rows for its filter: name or path. */
 export function filterLaunchProjects(projects: readonly LaunchProject[], query: string): LaunchProject[] {
   const all = queryWords(query);
@@ -555,7 +566,9 @@ export function lastLaunchAgent(rows: readonly { created_at: string; run?: unkno
 
 /** "+" on a project row's tip and name (F1, F4): the project, its machine when it is another, and that it waits while asleep. */
 export function newSessionTip(name: string, machineName: string | null, asleep: boolean): string {
-  return `New session in ${name}${machineName ? ` · ${machineName}` : ''}${asleep ? ", starts when it's back" : ''}`;
+  // The window's project names already carry another machine's name wherever it shows several (`machineProjectNames`).
+  const named = !machineName || name.endsWith(` · ${machineName}`) ? name : `${name} · ${machineName}`;
+  return `New session in ${named}${asleep ? ", starts when it's back" : ''}`;
 }
 
 /** "+" on project rows at all (F1-F7): while agents can be started from New message here, and never on a tailnet guest's page (a guest can't start one). */
@@ -566,12 +579,19 @@ export function projectPlusOn(launchEnabled: boolean | undefined, guestPage: boo
 /**
  * "+" on one project row: hidden where it can't start anything, so a press never opens New message with an empty To
  * or a folder to pick again. That machine's launch block (this computer's, or a linked machine's last read): no
- * agent to start there, or the project's folder isn't there any more. A linked machine with launch off (`launch:
- * false`) has none either. Not read yet, or asleep: shown (F4: it starts when the machine is back).
+ * agent to start there, or the project's folder isn't there any more. A linked machine with launch off has none
+ * either: its last read says so when there is one (a read with no launch block), else its health (`launch: false`,
+ * as of the link's last connect). Not read yet: shown while awake (New message reads it), not while asleep, since
+ * nothing says what could start there. Asleep and read: shown (F4: it starts when the machine is back).
  */
-export function projectCanStart(project: { id: string; root: string }, block: InboxComposeLaunch | null | undefined, machineLaunch?: boolean | null): boolean {
-  if (machineLaunch === false) return false;
-  if (!block) return true;
+export function projectCanStart(
+  project: { id: string; root: string },
+  block: InboxComposeLaunch | null | undefined,
+  machineLaunch?: boolean | null,
+  linked?: { read: boolean; asleep: boolean },
+): boolean {
+  if (linked?.read ? !block : machineLaunch === false) return false;
+  if (!block) return !linked?.asleep;
   if (block.agents.length === 0) return false;
   const known = block.projects.find((p) => p.id === project.id) ?? block.projects.find((p) => p.root === project.root);
   return known?.exists !== false;

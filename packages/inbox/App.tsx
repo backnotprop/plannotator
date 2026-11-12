@@ -5132,8 +5132,11 @@ function Inbox() {
   };
 
   const projects = latest?.projects ?? [];
-  /** Settings → Activity reads this Inbox's own store: its own projects only (not a linked machine's). */
-  const activityProjects = useMemo(() => projects.filter((p) => !p.machine || p.machine === selfMachineId()), [projects]);
+  /**
+   * This Inbox's own projects, not a linked machine's: Settings → Activity reads its own store, and the Board's cards
+   * are made in it (no forward route makes one in another machine's project).
+   */
+  const ownProjects = useMemo(() => projects.filter((p) => !p.machine || p.machine === selfMachineId()), [projects]);
   // A project that was combined (here, in another window, by an agent) has no page of its own: its link opens the project it went into.
   const combinedHead = route.project ? projects.find((project) => project.combined?.some((member) => member.id === route.project))?.id : undefined;
   useEffect(() => {
@@ -6932,7 +6935,7 @@ function Inbox() {
         archived={<ArchivedBlock refreshKey={latest?.cursor ?? null} onUnarchive={unarchiveFromSettings} />}
         activity={
           <ActivityChart
-            projects={activityProjects}
+            projects={ownProjects}
             names={projectNames}
             project={routeOf(settingsReturn.current).project ?? null}
             phone={phone}
@@ -7036,9 +7039,9 @@ function Inbox() {
         error={cardsError}
         visitLook={boardVisit ? boardVisit.look : (cards?.seen_seq ?? null)}
         handled={boardVisit?.handled ?? EMPTY_SET}
-        projects={projects}
+        projects={ownProjects}
         // The filtered project, else the project of the card heard from last, else the first.
-        defaultProject={newCardProject(boardFilter, projects, cards?.cards ?? [])}
+        defaultProject={newCardProject(boardFilter, ownProjects, cards?.cards ?? [])}
         home={settings?.home ?? null}
         mcpCommand={settings?.mcp_command ?? null}
         phone={phone}
@@ -7730,7 +7733,10 @@ function Inbox() {
             // "+" on a project row (F1-F7): while agents can be started from New message, and not on a guest's page.
             onProjectNewSession={plusOn ? (projectId, machine) => openCompose({ start: { projectId, machine, agent: composeLastAgent } }) : undefined}
             // Hidden on a row that can't start anything: no agent on that machine, launch off there, or its folder gone.
-            projectCanStart={(project, machine, machineLaunch) => projectCanStart(project, machine ? machineLaunchesKept().get(machine)?.launch : plusHere, machineLaunch)}
+            projectCanStart={(project, machine, machineLaunch, asleep) => {
+              const read = machine ? machineLaunchesKept().get(machine) : undefined;
+              return projectCanStart(project, machine ? read?.launch : plusHere, machineLaunch, machine ? { read: !!read, asleep } : undefined);
+            }}
             announce={say}
             // Not on a tailnet guest's page: the update routes answer it 403 local_only.
             update={pageUpdate}
