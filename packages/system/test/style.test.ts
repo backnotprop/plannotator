@@ -2,12 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-// The drawing's look follows the Inbox's rules: every size a token
-// (var(--ib-fs-N, Npx)) so the person's Text size reaches the drawing; no
-// uppercase tracked labels; no bar down a card's left side; plain CSS with
-// sys- classes (no Tailwind, nothing that collides with the Inbox's own
-// classes); and none of G's off switches carried over.
-
 const src = join(import.meta.dir, '..', 'src');
 const walk = (dir: string): string[] =>
   readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]));
@@ -30,7 +24,6 @@ describe('system.css', () => {
 
   test('every rule names only sys- classes, so nothing reaches into the Inbox and nothing of the Inbox is restyled', () => {
     const classes = [...css.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)].map((m) => m[1]!);
-    // .light is the Inbox's theme mode, read and never styled
     expect(classes.filter((c) => c !== 'sys' && !c.startsWith('sys-') && c !== 'light')).toEqual([]);
   });
 
@@ -47,7 +40,6 @@ describe('the components', () => {
     for (const [f, text] of tsx) {
       for (const m of text.matchAll(/className=(?:"([^"]*)"|\{([^}]*(?:\{[^}]*\}[^}]*)*)\})/g)) {
         const literal = m[1] ?? '';
-        // a literal compared against (v === 'rowx') is data, not a class
         const expr = (m[2] ?? '').replace(/[!=]==\s*(['"])[^'"]*\1/g, '');
         const words = [literal, ...[...expr.matchAll(/'([^']*)'|"([^"]*)"|`([^`$]*)/g)].map((x) => x[1] ?? x[2] ?? x[3] ?? '')].join(' ').split(/\s+/).filter(Boolean);
         for (const w of words) if (w !== 'sys' && !w.startsWith('sys-')) bad.push(`${f.slice(src.length)}: ${w}`);

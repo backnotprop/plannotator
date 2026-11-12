@@ -2,11 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
-// The Inbox window imports @plannotator/system. If anything it reaches imports
-// node:fs, git or a Bun API, the window's bundle breaks. Walk the import graph
-// from the browser entry and fail on the first Node or Bun import.
-
-/** Every module a source names: `import x from`, `export … from`, `import 'side-effect'`, `import('dynamic')`, `require()`; either quote. */
 function specifiers(text: string): string[] {
   const out: string[] = [];
   const patterns = [
@@ -44,7 +39,6 @@ describe('the browser entry', () => {
   test('the React entry (the drawing, SystemThumb, SystemView) reaches no Node or Bun code', () => {
     const seen = new Set<string>();
     expect(graph(join(import.meta.dir, '..', 'src', 'react.ts'), seen)).toEqual([]);
-    // the walk did reach the drawing, not only the entry file
     expect([...seen].some((f) => f.endsWith('SystemView.tsx'))).toBe(true);
     expect([...seen].some((f) => f.endsWith('route.ts'))).toBe(true);
   });

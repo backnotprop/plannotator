@@ -19,7 +19,6 @@ const commit = (root: string, msg = 'step') => {
   return git(root, 'rev-parse', 'HEAD').trim();
 };
 
-/** A git repo with the small drawing in its working tree (not committed) and its cited files committed. */
 function smallRepo(code: Record<string, string> = { 'src/main.ts': '', 'src/api/index.ts': '' }) {
   const root = temp();
   git(root, 'init', '-q');
@@ -43,7 +42,6 @@ describe('check', () => {
     expect(await check({ dir, root, at: sha })).toEqual({ errors: [], warnings: [], missing: [] });
     git(root, 'rm', '-q', 'src/main.ts');
     const later = commit(root);
-    // the working tree no longer has it, but the drawing was checked at sha
     expect((await check({ dir, root, at: sha })).missing).toEqual([]);
     expect((await check({ dir, root, at: later })).missing).toEqual(['src/main.ts']);
   });
@@ -78,7 +76,6 @@ describe('check', () => {
       { file: 'system.yaml', field: 'parts.app.code', message: 'src/main.ts is a symlink; cite the file it points to' },
       { file: 'system.yaml', field: 'parts.api.code', message: 'src/api is a symlink; cite the file it points to' },
     ]);
-    // the line cites src/api/index.ts, which is not in the tree at all
     expect(r.missing).toEqual(['src/api/index.ts']);
   });
 
@@ -101,7 +98,6 @@ describe('check', () => {
     const root = join(top, 'app');
     const dir = join(root, '.plannotator', 'system');
     writeTree(dir, smallDrawing());
-    // src/main.ts is at the top of the repo, not in app/: it is missing
     expect((await check({ dir, root, at: sha })).missing).toEqual(['src/main.ts']);
   });
 
@@ -123,7 +119,6 @@ describe('check', () => {
     const c = await check({ dir: r.dir, root: r.root, at: r.sha });
     expect(c.errors).toEqual([]);
     expect(c.warnings).toEqual([expect.objectContaining({ file: 'system.yaml', field: 'wanted', message: expect.stringContaining('Sheet F-201') })]);
-    // it asks for the sheet to be drawn, never for it to be dropped to make the check pass
     expect(c.warnings[0]!.message).toBe('Sheet F-201 is listed under wanted, but no file draws it yet. Draw it, then remove it from wanted.');
     expect(c.warnings[0]!.message).not.toMatch(/take it out|leave it out|drop|instead|decided/i);
   });

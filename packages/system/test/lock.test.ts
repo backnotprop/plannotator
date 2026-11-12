@@ -4,8 +4,6 @@ import { dirname, join } from 'node:path';
 import { takeLock } from '../src/node/index.ts';
 import { tempDir } from './helpers.ts';
 
-// tick.lock: taken by every tick and, for its whole run, by the Inbox's first draw.
-
 const cleanups: (() => void)[] = [];
 afterEach(() => cleanups.splice(0).forEach((f) => f()));
 const lockPath = () => {
@@ -16,7 +14,6 @@ const lockPath = () => {
 const DEAD = 99999999;
 const ago = (ms: number) => new Date(Date.now() - ms);
 const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
-/** Timings for tests: a stale heartbeat is one older than a second, looked at again 50 ms later. */
 const FAST = { heartbeatMs: 20, settleMs: 5, staleSettleMs: 50, staleMs: 1000 };
 
 test('an empty lock (a taker between making the file and writing it) is held, not broken', async () => {
@@ -30,7 +27,7 @@ test('a release lets go of its own lock only: a lock taken over and taken again 
   const path = lockPath();
   const first = await takeLock(path);
   expect(first).not.toBeNull();
-  unlinkSync(path); // broken by another taker, as a stale lock is
+  unlinkSync(path);
   const second = await takeLock(path);
   expect(second).not.toBeNull();
   await first!();
@@ -52,7 +49,6 @@ test('takers of a dead lock at once: exactly one gets it', async () => {
 test('two takers that both read the same dead lock: the break guard lets only one remove it, whatever the order', async () => {
   const path = lockPath();
   writeFileSync(path, String(DEAD));
-  // both takers reach the removal before either removes; the second removes after the first has made its own lock
   let arrived = 0;
   let order = 0;
   const bothThere = async () => {
@@ -73,7 +69,6 @@ test('a breaker whose guard was taken over while it paused removes nothing and l
   const path = lockPath();
   const guard = `${path}.break`;
   writeFileSync(path, String(DEAD));
-  // another taker found this one's guard stale and took the guard over
   const beforeBreak = async () => writeFileSync(guard, 'another-breaker');
   expect(await takeLock(path, { ...FAST, beforeBreak })).toBeNull();
   expect(readFileSync(guard, 'utf8')).toBe('another-breaker');
@@ -95,8 +90,7 @@ test('a live holder whose heartbeat lands more than one beat late (a busy wake, 
   const path = lockPath();
   const holder = await takeLock(path, { heartbeatMs: 150 });
   expect(holder).not.toBeNull();
-  utimesSync(path, ago(10_000), ago(10_000)); // as after a Mac's sleep: the next beat is 150 ms away
-  // the taker expects a beat every 50 ms; the second look waits two and a half beats and more, not one
+  utimesSync(path, ago(10_000), ago(10_000));
   expect(await takeLock(path, { heartbeatMs: 50, settleMs: 10, staleSettleMs: 400, staleMs: 1000 })).toBeNull();
   expect(holder!.lost).toBe(false);
   await holder!();
@@ -160,7 +154,7 @@ test('a lock file that cannot be read for a moment (not gone, not another token)
   const path = lockPath();
   const holder = await takeLock(path, { heartbeatMs: 60_000 });
   expect(holder).not.toBeNull();
-  chmodSync(path, 0o000); // the read fails with EACCES, as EMFILE or a sharing violation would
+  chmodSync(path, 0o000);
   try {
     expect(await holder!.check()).toBe(true);
     expect(holder!.lost).toBe(false);
