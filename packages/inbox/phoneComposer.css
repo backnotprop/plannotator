@@ -152,6 +152,9 @@
   .pn-inbox .ib-pfoot .ib-rbox .ib-rscroll, :root[data-ib-keyboard-pin] .pn-inbox .ib-pfoot .ib-rbox .ib-rscroll { max-height: calc(var(--ib-vvh, 100dvh) * 0.4); }
   :root .pn-inbox .ib-pfoot .ib-rclose { top: 10px; right: calc(10px + var(--ib-rsb, 0px)); width: 36px; height: 36px; background: transparent; }
   .pn-inbox .ib-pfoot .ib-rclose::after { content: ''; position: absolute; inset: -4px; }
+  /* The quote line (approval "inbox-reply-quote"): one line, clear of the close chevron. */
+  .pn-inbox .ib-pfoot .ib-rquote { padding: 14px 52px 0 18px; }
+  .pn-inbox .ib-pfoot .ib-rbox:has(> .ib-rquote) .ib-rscroll :is(.ib-rtext, .ib-rmirror) { padding-top: 8px; }
   .pn-inbox .ib-pfoot .ib-rline { padding: 0 10px 0 8px; }
   /* The row: every control 36 px and round, 44 px to the touch. */
   .pn-inbox .ib-rrow[data-phone] { gap: 8px; padding: 8px 10px 10px; }
