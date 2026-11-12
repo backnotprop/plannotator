@@ -2593,10 +2593,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const taggable = useTaggable(thread.thread_id, (box.open || !!file || multiAgent) && !resolved);
   // Each session's label (issue #2450): an agent message's author reads it, as the list read it.
   const sessionLabels = useSessionLabels();
+  const tagOwner = wordsAsking?.session ?? taggable?.owner?.session ?? null;
   // The names the person gave agents (Rename… in the sidebar): display only. An `@` row keeps its label, the token
   // the agent reads, and says the given name first on its second line.
   const agentNames = useAgentNames();
-  const tagOwner = wordsAsking?.session ?? taggable?.owner?.session ?? null;
   const tagOpts: TagOption[] = useMemo(
     () =>
       tagOptions(taggable, tagOwner, thread.project.id, whenTime).map((option) => {
