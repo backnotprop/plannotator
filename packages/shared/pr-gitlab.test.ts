@@ -519,6 +519,7 @@ describe("submitGlMRReview", () => {
     options: {
       diffRefsReject?: boolean;
       approvalReject?: boolean;
+      approval?: CommandResult;
       graphql?: CommandResult;
       noUser?: boolean;
     } = {},
@@ -571,6 +572,7 @@ describe("submitGlMRReview", () => {
           if (endpoint.endsWith("/approve") && options.approvalReject) {
             throw new Error("spawn glab ENOENT");
           }
+          if (endpoint.endsWith("/approve") && options.approval) return options.approval;
           return { stdout: "", stderr: `unexpected endpoint: ${endpoint}`, exitCode: 1 };
         },
       },
@@ -740,37 +742,40 @@ describe("submitGlMRReview", () => {
     });
   });
 
-  test("reports repeated approval-only spawn failures consistently as partial", async () => {
+  // Like Bitbucket: a decision that fails before anything else landed changed
+  // nothing, so it is an error the review stays open on, with no retry locked to it.
+  test("throws an approval-only spawn failure, unchanged on retry", async () => {
     const { runtime } = makeSubmissionRuntime(new Set(), { approvalReject: true });
 
-    const first = await submitGlMRReview(
-      runtime,
-      REF,
-      "head",
-      "approve",
-      "",
-      [],
-    );
-    const retry = await submitGlMRReview(
-      runtime,
-      REF,
-      "head",
-      "approve",
-      "",
-      [],
-    );
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await expect(submitGlMRReview(runtime, REF, "head", "approve", "", [])).rejects.toThrow(
+        "Failed to approve MR: spawn glab ENOENT",
+      );
+    }
+  });
 
-    const expected = {
+  // What glab gives when GitLab refuses an author's approval on a project that forbids it.
+  const refused: CommandResult = {
+    stdout: JSON.stringify({ message: "401 Unauthorized" }),
+    stderr: "glab: 401 Unauthorized (HTTP 401)",
+    exitCode: 1,
+  };
+
+  test("a refused approval carries GitLab's answer: thrown alone, partial after comments posted", async () => {
+    const alone = makeSubmissionRuntime(new Set(), { approval: refused });
+    const error = await submitGlMRReview(alone.runtime, REF, "head", "approve", "", []).catch((e: Error) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toStartWith("GitLab refused the approval (401 Unauthorized).");
+
+    const withComments = makeSubmissionRuntime(new Set(), { approval: refused });
+    const result = await submitGlMRReview(withComments.runtime, REF, "head", "approve", "", comments);
+    expect(result).toMatchObject({
       status: "partial",
-      postedFileCommentCount: 0,
-      failedFileComments: [],
-      reviewBodyPosted: false,
+      postedFileCommentCount: 2,
       approval: "failed",
-      approvalError: "Failed to approve MR: spawn glab ENOENT",
+      approvalError: (error as Error).message,
       retry: { action: "approve", fileComments: [] },
-    };
-    expect(first).toEqual(expected);
-    expect(retry).toEqual(expected);
+    });
   });
 
   const graphqlOk = (data: unknown): CommandResult => ({ stdout: JSON.stringify({ data }), stderr: "", exitCode: 0 });

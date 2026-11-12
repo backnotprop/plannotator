@@ -26,6 +26,7 @@ This starts the Inbox and opens it in your browser. If it is already running, th
 | `plannotator inbox --background` | Start it detached without opening a browser, print its URL and exit. Agents run this form |
 | `plannotator inbox --no-open` | Run it in this terminal without opening a browser |
 | `plannotator inbox --open` | Open it in the browser and print its URL, starting it in the background first if it is not running. It returns at once. Over SSH it opens no browser on the remote machine and says how to reach the Inbox |
+| `plannotator inbox --open <thread>` | Show that thread in the Inbox window you already have open, as if you clicked its row (Back returns). Takes a thread id, a message id or a `#thread=` link. With no window open, it opens one at the thread. For a status-bar widget or a script |
 | `plannotator inbox --tailscale` | Also publish it [over your tailnet](#over-your-tailnet) until it stops. Works with the forms above. If the Inbox is already running, it is asked to publish |
 | `plannotator inbox mcp` | The stdio MCP server for agents. It starts a stopped Inbox without opening a browser tab |
 | `plannotator inbox call <action> [<json> \| -]` | Run one Inbox action from a script and print its result as JSON, so an agent can make many fixes in one go. `-` reads the JSON from stdin. It starts a stopped Inbox the same way |
@@ -298,7 +299,7 @@ You can replace the line with your own, in **Settings → Prompts** or in `~/.pl
 
 - `prompts.inbox.reminder` is for every agent. `prompts.inbox.runtimes.<agent>.reminder` (`claude-code`, `pi` or `opencode`) is for one agent and wins over the shared text.
 - Your text replaces the whole line, on every host, OpenCode 1 included. Each `plannotator_inbox` in it becomes the tool's name in that agent (on Claude Code, its full `mcp__…` name).
-- Empty or blank text counts as unset. At most 4,128 characters; longer text is refused when you save it, and ignored if written by hand (Settings → Prompts says so, with Reset to default).
+- Empty or blank text counts as unset. At most 9,000 characters (Claude Code puts at most 10,000 characters of hook text in context, and a compaction adds your open threads); longer text is refused when you save it, and ignored if written by hand (Settings → Prompts says so, with Reset to default).
 - With no `prompts.inbox` set, every agent gets the line above, exactly as before.
 - Like the switch, it is read when a session starts: a change applies to each agent's next session.
 - After a compaction on Claude Code, the plugin adds your line again, exactly as you wrote it.

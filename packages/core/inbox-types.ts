@@ -24,6 +24,7 @@ import type { InboxInitiative } from "./inbox-initiatives";
 import type { InboxReviewVerdictRecord } from "./inbox-review";
 import type { InboxReviewSource } from "./inbox-reviews";
 import type { InboxTidyMark } from "./inbox-tidy";
+import type { InboxLaunchChoices } from "./inbox-launch-choice";
 import type { InboxRowSnooze } from "./inbox-snooze";
 import { INBOX_CODEX_QUEUE_MIN_VERSION } from "./inbox-codex";
 import { INBOX_QWEN_WAKE_MIN_VERSION } from "./inbox-qwen";
@@ -891,8 +892,8 @@ export interface InboxTag {
   handed_away?: boolean;
 }
 
-/** The most sessions one reply may tag. */
-export const INBOX_TAGS_MAX = 8;
+/** How many sessions one reply may tag: any number (through 0.28.61, at most 8, for no stated reason). Kept so an importer still builds. */
+export const INBOX_TAGS_MAX = Number.POSITIVE_INFINITY;
 
 /**
  * Who a person's last message went to, for the Sent row (`InboxListRow.sent.recipients`):
@@ -1126,6 +1127,9 @@ export interface InboxLaunchRecord {
    * too): no Full permissions.
    */
   bypass_available?: true;
+  /** Fixed at Send, so Try again and every restart start the same. */
+  model?: string;
+  effort?: string;
   error?: InboxLaunchError | null;
   /** The ⋯ menu's Delete removed the session and its files; the thread stays, with no run line. */
   deleted_at?: string;
@@ -3124,7 +3128,7 @@ export interface InboxReplyDraft {
   recipients?: string[];
 }
 
-/** The most sessions a reply draft names as its recipients: the one it answers and as many tags as a reply takes. */
+/** How many sessions a reply draft names as its recipients: the one it answers and as many tags as a reply takes (any number). */
 export const INBOX_REPLY_DRAFT_RECIPIENTS_MAX = INBOX_TAGS_MAX + 1;
 
 /** A session id as a tag (and a reply draft's recipient) names it. */
@@ -3259,7 +3263,7 @@ export interface InboxAgent {
   launch?: { id: string; thread_id: string };
   /** `claude-code`, `codex`, `pi`, ... (`InboxAuthor.host`); null when nothing said. */
   host: string | null;
-  /** Its title as its connection last said it (the To picker's name). Only for this computer's owner; absent when none. */
+  /** Its title as its connection last said it (the To picker's name). Absent when none. */
   label?: string;
   /** The project it works in (`id` null for a folder the Inbox has no project for); null when it never said where. */
   project: { id: string | null; name: string } | null;
@@ -3333,7 +3337,7 @@ export interface InboxComposeLaunch {
    * the folders the agent does not trust and the owner can trust from here, by project id, the scratch root under
    * `INBOX_SCRATCH_PICK`. No entry for a trusted folder, the home folder, the root or a folder above home.
    */
-  agents: { agent: InboxLaunchAgent; name: string; scratch_trusted?: boolean; untrusted?: Record<string, InboxLaunchUntrusted> }[];
+  agents: { agent: InboxLaunchAgent; name: string; scratch_trusted?: boolean; untrusted?: Record<string, InboxLaunchUntrusted>; choices?: InboxLaunchChoices }[];
   /** `slow`: the project is on a network drive that isn't answering now (approval "inbox-launch-any-folder"). */
   projects: { id: string; name: string; root: string; exists: boolean; slow?: true }[];
   /**
@@ -3467,14 +3471,31 @@ export interface InboxPromptsSettings {
   };
   /** The plan, review and annotate prompts, in the order the page lists them. */
   others: InboxPromptItem[];
+  /**
+   * Guided Review standing instructions (`${dataDir}/guide-instructions.md`, the file the review UI's
+   * guide launch and VS Code edit too): added after the built-in method in every guide's brief.
+   * `text` null: none (Default). Absent from an older Inbox.
+   */
+  guide?: { text: string | null; max: number };
+  rules?: {
+    shared: string | null;
+    runtimes: Record<InboxPromptHost, string | null>;
+    room: { shared: number; runtimes: Record<InboxPromptHost, number> };
+    dropped: InboxPromptHost[];
+  };
 }
 
-/** `POST /api/inbox/settings` `{ prompts: { inbox: … } }`: a string sets the text, null (or blank) deletes the key. */
+/**
+ * `POST /api/inbox/settings` `{ prompts: { inbox?: …, guide? } }`, at least one: a string sets the
+ * text, null (or blank) deletes the key (`guide`: the file).
+ */
 export interface InboxPromptsChange {
-  inbox: {
+  inbox?: {
     reminder?: string | null;
-    runtimes?: Partial<Record<InboxPromptHost, { reminder?: string | null }>>;
+    rules?: string | null;
+    runtimes?: Partial<Record<InboxPromptHost, { reminder?: string | null; rules?: string | null }>>;
   };
+  guide?: string | null;
 }
 
 /** Who turns a voice clip into text: Codex's ChatGPT login, or an OpenAI API key. */
