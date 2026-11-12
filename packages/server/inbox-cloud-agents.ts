@@ -1,23 +1,3 @@
-/**
- * Paired cloud agents (step 1 of "Pair a cloud agent"; the wake is
- * inbox-cloud-wake.ts, the pure parts @plannotator/core/inbox-cloud).
- *
- * Each agent's webhook address and key live in `inbox/cloud-agents.json`
- * (0600), never in config.json, a log, an error, an event frame or an API
- * answer: the window only learns that a key is set. Remove deletes the entry,
- * key and address included, and revokes its agent device, at once.
- *
- * The window's routes, the owner's alone (this computer, or the owner's login
- * over the tailnet; never a tailnet guest, another site's page or the phone's
- * door, whose allowlist has no settings route):
- *
- *   GET  /api/inbox/cloud-agents                   `{ agents, projects }`
- *   POST /api/inbox/cloud-agents                   `{ name, preset, url, key, project_id? }`: pair; answers the pairing string once
- *   POST /api/inbox/cloud-agents/:session/test     fire the webhook once: `{ test: { started, run_url?, words } }`
- *   POST /api/inbox/cloud-agents/:session/key      `{ key }`: a new key; held wakes go again
- *   POST /api/inbox/cloud-agents/:session/remove   unpair: the key is deleted at once
- */
-
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -40,7 +20,6 @@ import { postCloudWebhook } from "./inbox-cloud-post";
 
 export const INBOX_CLOUD_AGENTS_FILE = "cloud-agents.json";
 
-/** One paired agent as stored (0600). `url` and `key` never leave this module except in the wake's request. */
 export interface InboxCloudAgent {
   session: string;
   name: string;
@@ -80,7 +59,6 @@ function writeCloudAgents(dataDir: string, agents: InboxCloudAgent[]): void {
   writeAgentFileAtomic(cloudAgentsPath(dataDir), `${JSON.stringify(file, null, 2)}\n`, 0o600);
 }
 
-/** A webhook address the Inbox may POST a key to: https, or http on this computer only (a local stub). */
 export function cloudWebhookUrl(value: unknown): URL | null {
   if (typeof value !== "string") return null;
   let url: URL;
@@ -94,7 +72,6 @@ export function cloudWebhookUrl(value: unknown): URL | null {
   return url.protocol === "http:" && (url.hostname === "127.0.0.1" || url.hostname === "localhost" || url.hostname === "[::1]") ? url : null;
 }
 
-/** A pasted key, trimmed: "Bearer " pasted along is dropped; no spaces or line breaks inside. */
 export function cloudKey(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const key = value.trim().replace(/^Authorization:\s*/i, "").replace(/^Bearer\s+/i, "").trim();
@@ -115,7 +92,6 @@ export function createInboxCloudAgents(options: {
   store: InboxStore;
   dataDir: string;
   now?: () => Date;
-  /** A wake engine's hooks: an agent was paired, re-keyed or removed. */
   onChange?: (agents: InboxCloudAgent[]) => void;
   fetch?: typeof fetch;
   timeoutMs?: number;
@@ -151,7 +127,6 @@ export function createInboxCloudAgents(options: {
     key_rejected_at: agent.key_rejected_at,
   });
 
-  /** The projects a person sees, the most recently active first (the pair form's list). */
   const projects = () =>
     store
       .listProjects()
@@ -213,14 +188,12 @@ export function createInboxCloudAgents(options: {
     return true;
   };
 
-  /** The routine refused the key: said once, on the agent, until a new key is pasted. */
   const markKeyRejected = (session: string) => {
     const agent = agents.find((candidate) => candidate.session === session);
     if (!agent || agent.key_rejected_at) return;
     save(agents.map((candidate) => (candidate.session === session ? { ...candidate, key_rejected_at: now().toISOString() } : candidate)));
   };
 
-  /** Settings' Send a test: one POST, and plain words for what happened. Never the address, the key or the routine's own words. */
   const test = async (session: string): Promise<{ started: boolean; run_url?: string; words: string }> => {
     const agent = find(session);
     const sent = await postCloudWebhook(agent, inboxCloudTestBody(agent.preset, agent.name), { fetch: options.fetch, timeoutMs: options.timeoutMs });

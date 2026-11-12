@@ -34,6 +34,8 @@
  *     failure, and the same reply does not respawn it again.
  *  9. Delete while `--bg` is still running: the session it makes is stopped
  *     and removed, never left running unseen.
+ *  3b. Model and effort: picked on To's line they go on `--bg` and into the
+ *     header; the next New message starts on them; Default sends neither.
  * 10. Phone: the To picker (01), the To sentence (02), the working line (06),
  *     the permission prompt without Open in Terminal (08), no Delete in ⋯.
  *
@@ -493,6 +495,53 @@ test('full permissions: with the person\'s bypass consent, Settings → Agents s
   }
 });
 
+test('model and effort: picked on To\'s line, they go on --bg and show in the header; the next New message starts on them; Default sends neither', async () => {
+  const { page, fake } = world;
+  fake.configure({ startDelayMs: 0, hold: false });
+  await page.goto(world.url);
+  const send = async (words: string, pick: (d: ReturnType<typeof dialog>) => Promise<void>) => {
+    await openCompose(page);
+    const d = dialog(page);
+    await d.locator('[data-compose-to]').click();
+    await d.locator('[data-compose-start="claude-code"]').click();
+    await pick(d);
+    await d.getByRole('textbox', { name: 'Message' }).fill(words);
+    const before = fake.starts().length;
+    const answer = page.waitForResponse((r) => r.url().endsWith('/api/inbox/messages') && r.request().method() === 'POST');
+    await d.locator('[data-compose-send]').click();
+    const threadId = ((await (await answer).json()) as { thread_id: string }).thread_id;
+    return { threadId, start: await waitFor('claude --bg', () => fake.starts()[before]) };
+  };
+  const first = await send('Tidy the README.', async (d) => {
+    await expect(d.locator('[data-compose-choice]')).toHaveText('Default model');
+  });
+  expect(first.start.argv).not.toContain('--model');
+  expect(first.start.argv).not.toContain('--effort');
+  const picked = await send('Plan the migration.', async (d) => {
+    await d.locator('[data-compose-choice]').click();
+    await d.locator('[data-compose-choice-menu="model"] [data-compose-choice-value="opus"]').click();
+    await d.locator('[data-compose-choice-menu="effort"] [data-compose-choice-value="high"]').click();
+    await page.keyboard.press('Escape');
+    await expect(d.locator('[data-compose-choices]')).toHaveCount(0);
+    await expect(d.locator('[data-compose-choice]')).toHaveText('opus · high');
+  });
+  const at = picked.start.argv.indexOf('--model');
+  expect(picked.start.argv.slice(at, at + 4)).toEqual(['--model', 'opus', '--effort', 'high']);
+  expect(picked.start.settings!.model).toBeUndefined();
+  await openThread(page, picked.threadId);
+  await expect(pane(page).locator('[data-launched] [data-launch-choice]')).toHaveText('opus · high');
+  await page.goto(world.url);
+  const back = await send('One more pass.', async (d) => {
+    await expect(d.locator('[data-compose-choice]')).toHaveText('opus · high');
+    await d.locator('[data-compose-choice]').click();
+    await d.locator('[data-compose-choice-menu="model"] [data-compose-choice-value="default"]').click();
+    await d.locator('[data-compose-choice-menu="effort"] [data-compose-choice-value="default"]').click();
+    await page.keyboard.press('Escape');
+  });
+  expect(back.start.argv).not.toContain('--model');
+  expect(back.start.argv).not.toContain('--effort');
+});
+
 test('a replayed Send (same idempotency key) answers the same thread and starts --bg once', async () => {
   const { page, fake } = world;
   await page.goto(world.url);
@@ -677,7 +726,7 @@ test('Delete while --bg is still running: the session it makes is stopped and re
   }
 });
 
-test('phone: the To picker, the To sentence, the working line, the permission prompt; no Open in Terminal or Delete', async ({ browser }) => {
+test('phone: the To picker, the To sentence, the working line, the permission prompt; Delete, and no Open in Terminal', async ({ browser }) => {
   const { fake } = world;
   const phone = await browser.newContext({ viewport: PHONE, deviceScaleFactor: 3, isMobile: true, hasTouch: true, colorScheme: 'light' });
   const page = await phone.newPage();
@@ -710,9 +759,9 @@ test('phone: the To picker, the To sentence, the working line, the permission pr
     await expect(waiting.locator('[data-run-stop]')).toBeVisible();
     await expect(waiting.locator('[data-run-open]')).toHaveCount(0);
     await shot(page, '08-permission-prompt-v1-phone');
-    // ⋯ on a phone: no Open in Terminal, no Delete.
+    // ⋯ on a phone: no Open in Terminal (it would open on the Mac's screen); Delete as on the computer.
     await page.locator('[data-thread-more]').click();
-    await expect(page.locator('[data-thread-menu] [data-launch-item]')).toHaveText(['Copy attach command', 'Stop Claude Code']);
+    await expect(page.locator('[data-thread-menu] [data-launch-item]')).toHaveText(['Copy attach command', 'Stop Claude Code', 'Delete Claude Code session…']);
   } finally {
     fake.configure({ hold: false, waiting: false });
     await phone.close();

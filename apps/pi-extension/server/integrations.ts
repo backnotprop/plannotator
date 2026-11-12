@@ -45,6 +45,7 @@ function detectProjectNameSync(): string | null {
 	try {
 		const toplevel = execSync("git rev-parse --show-toplevel", {
 			env: process.env,
+			windowsHide: true,
 			encoding: "utf-8",
 			stdio: ["pipe", "pipe", "pipe"],
 		}).trim();
@@ -168,6 +169,7 @@ export async function saveToBear(
 		const hashtags = buildHashtags(customTags, tags ?? []);
 		const content = buildBearContent(body, hashtags, tagPosition);
 		const url = `bear://x-callback-url/create?title=${encodeURIComponent(title)}&text=${encodeURIComponent(content)}&open_note=no`;
+		// windows-hide-guard: macOS only (open).
 		spawn("open", [url], { stdio: "ignore" });
 		return { success: true };
 	} catch (err) {
@@ -193,6 +195,7 @@ export async function saveToOctarine(
 		const frontmatter = generateOctarineFrontmatter(tags);
 		const content = `${frontmatter}\n\n${plan}`;
 		const url = `octarine://create?path=${encodeURIComponent(path)}&content=${encodeURIComponent(content)}&workspace=${encodeURIComponent(workspace)}&fresh=true&openAfter=false`;
+		// windows-hide-guard: macOS only (open).
 		spawn("open", [url], { stdio: "ignore" });
 		return { success: true, path };
 	} catch (err) {

@@ -36,9 +36,9 @@
 
 import { homedir } from "node:os";
 import { basename } from "node:path";
-import { INBOX_AUTO_SEND_AFTER_MS, INBOX_TAGS_MAX, type InboxHostSessions, type InboxMessage, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
+import { INBOX_AUTO_SEND_AFTER_MS, type InboxHostSessions, type InboxMessage, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
-import { INBOX_ASK_POLL_FIELD, INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_CONTINUES_POLL_FIELD, INBOX_HELD_POLL_FIELD, INBOX_RELOAD_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD } from "@plannotator/shared/inbox/connection";
+import { INBOX_ASK_POLL_FIELD, INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_CONTINUES_POLL_FIELD, INBOX_HELD_POLL_FIELD, INBOX_RELOAD_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD, INBOX_TITLE_POLL_FIELD } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { graphemesOf, inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -61,7 +61,7 @@ export interface InboxLiveSession {
   wrote_thread: boolean;
   /** Its connection can deliver into a running turn (Send now); false when it does not say. */
   send_now: boolean;
-  /** The session's label (issue #2450), on the window's route for this computer's owner only; absent when it has none. */
+  /** The session's label (issue #2450), on the window's route; absent when it has none. */
   label?: string;
 }
 
@@ -168,6 +168,8 @@ interface SeenSession {
   tags: boolean;
   /** The title its latest poll sent (`label`, cleaned). Display only: nothing routes on it, and no MCP call reaches it. */
   label?: string | null;
+  /** The title its host generated, as its latest poll sent it (INBOX_TITLE_POLL_FIELD, cleaned as `label`). Display only: list rows. */
+  title?: string | null;
   /** Its poll said it can answer Ask AI live (`ask`). */
   ask?: boolean;
   /** The working folder its poll named (`project_path`), as sent; null when it sent none. */
@@ -189,7 +191,6 @@ interface SeenSession {
    * thread is not known to have ended. Its id, for that check.
    */
   wakeOnly?: string;
-  /** A paired cloud agent (packages/server/inbox-cloud-wake.ts): live for as long as it stays paired. */
   pinned?: boolean;
 }
 
@@ -384,7 +385,7 @@ export function createInboxLiveSessions(options: {
     const entry = mcpEntry(session);
     entry.lastSeen = now();
     if (typeof who.host === "string" && who.host.trim() && who.host.length <= 64) entry.host = who.host.trim();
-    if (typeof who.name === "string" && who.name.trim() && who.name.length <= 80) entry.name = inboxStoredAgentName(who.name) ?? undefined;
+    if (typeof who.name === "string" && who.name.trim()) entry.name = inboxStoredAgentName(who.name) ?? undefined;
   };
   /**
    * project_path to its project's root. The Inbox passes its shared
@@ -495,8 +496,8 @@ export function createInboxLiveSessions(options: {
   /**
    * Every session's label as its latest poll sent it (issue #2450: the `@` picker, the list rows' agents, a
    * message's author): live sessions and the ones that ended while this Inbox ran, so a finished thread keeps
-   * its names until the Inbox restarts. Display only, like the To picker's: nothing routes on it, nothing is
-   * stored, and no MCP read carries it. The routes give it to this computer's owner only (`isOwnerRequest`).
+   * its names until the Inbox restarts. Display only, like the To picker's: nothing routes on it and nothing is
+   * stored; an agent reads it only beside a session's id.
    * No prototype, so a session id like "__proto__" or "constructor" is a plain key.
    */
   const labels = (): Record<string, string> => {
@@ -504,8 +505,14 @@ export function createInboxLiveSessions(options: {
     for (const [session, entry] of sessions) if (entry.label) out[session] = entry.label;
     return out;
   };
+  const titles = (): Record<string, string> => {
+    const out = Object.create(null) as Record<string, string>;
+    for (const [session, entry] of sessions) if (entry.title) out[session] = entry.title;
+    return out;
+  };
   /** One session's label (`labels`); null when it has none. */
   const labelOf = (session: string): string | null => sessions.get(session)?.label ?? null;
+  const titleOf = (session: string): string | null => sessions.get(session)?.title ?? null;
   /** Bumped each time a poll changes a label: the windows read the rows again (`event: deliveries`, `labels`). */
   let labelChanges = 0;
   const labelVersion = () => labelChanges;
@@ -541,6 +548,9 @@ export function createInboxLiveSessions(options: {
     const label = cleanInboxSessionLabel(body.label);
     if ((entry.label ?? null) !== label) labelChanges += 1;
     entry.label = label;
+    const title = cleanInboxSessionLabel(body[INBOX_TITLE_POLL_FIELD]);
+    if ((entry.title ?? null) !== title) labelChanges += 1;
+    entry.title = title;
     entry.ask = body[INBOX_ASK_POLL_FIELD] === true;
     // What the session loaded (additive poll fields; an older connection sends neither).
     entry.plugin = parseLoadedPlugin(body.plugin);
@@ -664,10 +674,6 @@ export function createInboxLiveSessions(options: {
     sessions.set(session, entry);
   };
 
-  /**
-   * A paired cloud agent (packages/server/inbox-cloud-wake.ts): live in its project while it stays paired, under its
-   * name (`label`), so New message's To lists it. `root` null unpins it (Remove).
-   */
   const pinCloud = (session: string, root: string | null, name: string, host = "cloud"): void => {
     if (root === null) {
       if (sessions.get(session)?.pinned) sessions.delete(session);
@@ -882,7 +888,7 @@ export function createInboxLiveSessions(options: {
   /**
    * What the Agents section reads from the sessions, as one string (`event: deliveries`' `agents`): which are listed,
    * live, busy or idle, and where they work. Never the time they were last heard, which every poll moves, nor a label:
-   * a label's change says `labels` to the owner's windows (which read the list for it), and nothing to a guest's.
+   * a label's change says `labels` to the windows (which read the list for it).
    */
   const agentsSignature = (since: number): string =>
     agentSessions(since)
@@ -939,7 +945,6 @@ export function createInboxLiveSessions(options: {
    */
   const tagTargets = (value: unknown): InboxTag[] => {
     if (!Array.isArray(value)) throw new InboxError("validation_error", "tags: a list of { host, session }.", { field: "tags" });
-    if (value.length > INBOX_TAGS_MAX) throw new InboxError("validation_error", `tags: at most ${INBOX_TAGS_MAX} sessions.`, { field: "tags" });
     const out: InboxTag[] = [];
     const old: string[] = [];
     const missing: string[] = [];
@@ -1248,31 +1253,27 @@ export function createInboxLiveSessions(options: {
     });
 
   /**
-   * The window's routes; null when the path is not one of them. `owner`: this computer's owner asks (this
-   * computer, the owner's tailnet login, their phone): only then does a session carry its `label`.
+   * The window's routes; null when the path is not one of them.
    * `byGuest`: the request is a tailnet guest's (`isGuest`), so a new message it writes is marked `by_guest`.
    */
-  const route = async (req: Request, path: string, owner = false, byGuest = false): Promise<Response | null> => {
+  const route = async (req: Request, path: string, byGuest = false): Promise<Response | null> => {
     const sessionsMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/sessions$/.exec(path);
     if (sessionsMatch) {
       if (req.method !== "GET") return answer({ error: "Use GET." }, 405);
       const found = liveFor(sessionsMatch[1]!);
       // Send to another session's rows (issue #2450): the label, absent when the session has none.
-      const live = owner
-        ? {
-            ...found,
-            sessions: found.sessions.map((session) => {
-              const label = labelOf(session.session);
-              return label ? { ...session, label } : session;
-            }),
-          }
-        : found;
+      const live = {
+        ...found,
+        sessions: found.sessions.map((session) => {
+          const label = labelOf(session.session);
+          return label ? { ...session, label } : session;
+        }),
+      };
       const asker = new URL(req.url).searchParams.get("asker");
       const recipients = (new URL(req.url).searchParams.get("recipients") ?? "")
         .split(",")
         .map((session) => session.trim())
-        .filter((session) => session !== "")
-        .slice(0, INBOX_TAGS_MAX);
+        .filter((session) => session !== "");
       return answer({
         serverSession,
         home: homedir(),
@@ -1425,7 +1426,9 @@ export function createInboxLiveSessions(options: {
     tagTargets,
     wakesTagged,
     labels,
+    titles,
     labelOf,
+    titleOf,
     labelVersion,
   };
 }

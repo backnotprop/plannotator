@@ -1,12 +1,3 @@
-/**
- * Pair a cloud agent, end to end (packages/inbox/cloud/, packages/server/inbox-cloud-*.ts): Settings → Devices →
- * Pair a cloud agent, the block to paste, Send a test (a run started, its link), then New message to the agent and
- * the thread's "Woke Nightly fixer · run started" line.
- *
- * The routine's webhook is a stub server in this spec on loopback; no outside service is called. The Inbox is the
- * compiled binary under a temp HOME and PLANNOTATOR_DATA_DIR (see inbox.spec.ts for the build). CLOUD_WAKE_SHOTS_DIR:
- * where to write PNGs (none when unset).
- */
 
 import { expect, test } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
@@ -93,7 +84,6 @@ test('pair a routine, send a test, write to it from New message: the thread says
   expect(seen).toHaveLength(1);
   expect(seen[0]!.authorization).toBe(`Bearer ${KEY}`);
   if (shotsDir) await page.screenshot({ path: join(shotsDir, 'e2e-02-paired.png') });
-  // The window never learns the key or the address.
   expect(await page.content()).not.toContain(KEY);
   await paired.locator('[data-cloud-done]').click();
   await expect(section.locator('[data-cloud-agent]')).toContainText('Nightly fixer');

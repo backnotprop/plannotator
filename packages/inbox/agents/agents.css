@@ -231,7 +231,3 @@
 .am-sets-art > img:not([src]) { visibility: hidden; }
 .am-sets-art[data-mono] { width: 28px; height: 28px; margin: 2px; }
 .am-sets-art[data-mono]:not([style*="--set-src"]) > .am-sets-mono { visibility: hidden; }
-/* Grok Bot's rig (rigs.ts): the circle in the text colour, the eyes in the sidebar's ground, as x.ai/bot fills them
-   with its foreground and background. */
-.am-gk-b { fill: var(--foreground); }
-.am-gk-e { fill: var(--ib-ground, var(--background)); }

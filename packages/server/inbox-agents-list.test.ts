@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { INBOX_AGENTS_LISTED_MAX, type InboxAgentsGroup } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
-import { inboxAgentsGroup, inboxAgentsWithoutLabels, inboxMergedAgents, inboxPeerAgentsGroup, inboxStartOfDay, type InboxAgentsEvidence } from "./inbox-agents-list";
+import { inboxAgentsGroup, inboxMergedAgents, inboxPeerAgentsGroup, inboxStartOfDay, type InboxAgentsEvidence } from "./inbox-agents-list";
 import { createInboxLiveSessions } from "./inbox-sessions";
 
 const roots: string[] = [];
@@ -119,12 +119,11 @@ describe("who is listed, and how", () => {
     expect(group.agents[0]).toMatchObject({ session: "launch:lch_starting", project: { id: "prj_ledger", name: "ledger" } });
   });
 
-  test("labels only for this computer's owner", () => {
+  test("labels only when asked", () => {
     const sessions = [{ session: "ses-a", host: "pi", root: null, startedAt: 1, lastSeen: 2, live: true, busy: false, label: "Secret plan" }];
     expect(inboxAgentsGroup(evidence({ sessions, labels: false })).agents[0]!.label).toBeUndefined();
     const owned = [inboxAgentsGroup(evidence({ sessions }))];
     expect(owned[0]!.agents[0]!.label).toBe("Secret plan");
-    expect(inboxAgentsWithoutLabels(owned)[0]!.agents[0]!.label).toBeUndefined();
   });
 });
 

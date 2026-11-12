@@ -345,7 +345,7 @@ describe("the list (rule 5)", () => {
     const { peer } = link(d.url, { onDeliveries: (change) => void told.push(change) });
     peer.start();
     await until("told", () => told.length === 1);
-    expect(told).toEqual([{ sessions: false, agents: true }]);
+    expect(told).toEqual([{ sessions: false, agents: true, labels: false }]);
     expect(peer.list!.agents).toMatchObject({ machine: B, total: 1, agents: [{ id: "ses_1", state: "working" }] });
   });
 

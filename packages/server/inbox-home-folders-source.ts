@@ -13,6 +13,7 @@ export function homeFoldersSource(): string {
     env: { ...process.env, BUN_BE_BUN: "1" },
     stdout: "pipe",
     stderr: "pipe",
+    windowsHide: true,
   });
   if (!built.success) throw new Error(`The folder rules didn't bundle: ${built.stderr.toString()}`);
   return built.stdout.toString();
