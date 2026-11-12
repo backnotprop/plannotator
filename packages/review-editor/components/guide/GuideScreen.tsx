@@ -51,6 +51,8 @@ interface GuideScreenProps {
    *  The guide hides the dock, and with it the dock strip's controls; an open
    *  guide draws Split/Unified, Collapse all and the gear here instead. */
   barSlot?: HTMLElement | null;
+  /** AI features are off: the landing page lists the saved guides only, with no launch. */
+  launchOff?: boolean;
 }
 
 /**
@@ -72,6 +74,7 @@ export const GuideScreen: React.FC<GuideScreenProps> = ({
   onClose,
   onOpenFixedGuide,
   onOpenSavedGuide,
+  launchOff = false,
   onMarkFilesViewed,
   onAddGlobalComment,
   onShowGlobalComment,
@@ -222,7 +225,7 @@ export const GuideScreen: React.FC<GuideScreenProps> = ({
     );
   }
 
-  return <GuideEmptyState capabilities={capabilities} launchJob={launchJob} onBack={onClose} onOpenSavedGuide={onOpenSavedGuide} />;
+  return <GuideEmptyState capabilities={capabilities} launchJob={launchJob} onBack={onClose} onOpenSavedGuide={onOpenSavedGuide} launchOff={launchOff} />;
 };
 
 function ActiveGuide({

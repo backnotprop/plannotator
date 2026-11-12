@@ -119,8 +119,13 @@ exists in every state; composer rows open `DecisionNoteDialog`. Platform (PR) mo
 same ghost-X + `DecisionControl` shape from `buildDecisionSpec`'s platform arm, with **no
 composer items ever**: every menu action opens the existing `ReviewSubmissionDialog` (per-target
 state, retry, "leave PR open" toggle — whose general-comment textarea is the only note field on
-that side), and the self-approval mute is preserved — muted primary/items with the "You can't
-approve your own {PR/MR}" reason.
+that side), and the self-approval mute is preserved on GitHub only (`selfReviewBlocked`) — muted
+primary/items with the "You can't approve your own PR" reason. GitLab and Bitbucket leave Approve
+live on your own PR/MR and let the forge decide: GitLab accepts an author's approval unless the
+project forbids it, and then answers 401; `submitGlMRReview` turns that into "GitLab refused the
+approval (<GitLab's message>) …". A refused decision with nothing else posted is thrown (like
+Bitbucket), so the dialog shows it as a plain failure and the review stays open with no retry
+locked to Approve; after comments landed it is a `partial` whose retry is the decision alone.
 
 **Request changes is a real review event (#1611).** `PRReviewAction` (`packages/shared/pr-types.ts`)
 is `'approve' | 'comment' | 'request_changes'`, carried end to end: `resolvePlatformDecisionAction`
@@ -131,9 +136,15 @@ Request changes, while the primary `Post Comments` keeps the plain comment flow 
 else is `400`, never a silent COMMENT), and `submitGhPRReview` maps it to `REQUEST_CHANGES` on the
 single create-review call AND on the pending-review → `/events` submit path (#1600), with the
 same `See inline comments.` placeholder COMMENT gets when the body is empty (GitHub requires a
-body on both). GitLab has no request-changes review: `request_changes` posts exactly what
-`comment` posts, the menu subtitles say so (`requestChangesSupported: false` on the spec's
-platform input), and the dialog's Request changes option is disabled with that reason. GitHub
+body on both). GitLab posts the note and discussions first, then in one GraphQL request appends you as a reviewer (`mergeRequestSetReviewers`, `APPEND`) and sets the reviewer state with
+the `mergeRequestRequestChanges` GraphQL mutation (a failure there is a `partial` whose retry is
+`request_changes` alone). GitLab before 18.9 has no `mergeRequestRequestChanges` and rejects the
+whole request with an `undefinedField` error on it, so nothing changes there: the review stays the
+plain comment it already posted and the result carries `postedAs: "comment"`, which the review
+app's agent status line and the Inbox's posted words follow ("Review posted on GitLab"). Any other
+error is still a failure. A platform without a request-changes decision sets
+`requestChangesSupported: false` on the spec's platform input. The menu subtitles then say it
+posts as a comment, and the dialog's Request changes option is disabled with that reason. GitHub
 refuses REQUEST_CHANGES on your own PR like APPROVE, so with `requestChangesSupported: true` and
 `selfAuthored` the empty-state `Request changes…` mutes with its own reason and a live
 `Comment…` row (`note-with-feedback`, compact id `comment`) keeps the state from being a dead
@@ -728,6 +739,26 @@ guard matches an absolute context reference whose scheme, host case or default p
 from the requested URL, but compares its path as written: a reference with a dot segment or
 a backslash never authorizes the URL it resolves to. No additional listener or
 Tailscale-specific URL is needed.
+
+**Pictures and videos in PR text open in Artifacts** (owner, 2026-11-11: "Artifacts panel for both").
+In the PR description and the Comments tab (`PRMediaScope`, wrapped around `AnnotatableDescription`'s
+`RenderedMarkdown` and `MarkdownBody` with `prMedia`), a picture the Artifacts list holds, and a link to a
+video it holds (GitHub saves a pasted video as a bare `user-attachments/assets/<id>` link), open the
+Artifacts panel at that item: `openPRArtifact(id)` on `ReviewStateContext` opens the panel and leaves
+`prArtifactFocus`, which the panel shows (un-hiding it, turning Hide resolved off for it), puts focus on
+its row, and clears (`onPRArtifactFocusHandled`), so a later reopen starts on the gallery. A selected
+note on another artifact is deselected first, or it would pull the panel back. Matching is the list's
+own dedupe rule (`findPRArtifactByUrl`), through the proxy's `url` parameter for a proxied picture
+(`prMediaTarget.ts`). Any other picture (another host, a picture the list does not collect) opens in
+place in ui's `ImageLightbox`; a picture that is a link's face keeps the link and loses the zoom cursor.
+Pictures become `role="button"` with `tabindex="0"`, pressed with Enter or Space (no new shortcut); a
+video link opens on a plain click, while Cmd/Ctrl/Shift/middle click still open GitHub. A click on a
+playing `<video>` stays the player's: the comments' `.mp4` player has an **Open in Artifacts** button
+under it (`OpenInArtifactsButton`), and a raw-HTML `<video>` in the description plays in place (open it
+from the list). The scope only adds attributes after render, never moves a node, so the highlighter and
+React keep their DOM. A screenshot GitHub wrote as an `<img>` tag inside a description's table cell or sentence renders through the same picture path (ui's `InlineImageTagsContext`, on for a github.com PR's description; comments already render such cells as sanitized HTML). Commit messages are not wrapped. Under 640 px the panel's list is icons only (names, group labels and the header's Add note / Source / Open words are `max-sm:sr-only`), so the item and its name keep the room. Test: `PRMediaScope.test.tsx` (DOM).
+
+**The proxy's fetch is strict** (`fetchPRArtifactContent`, `packages/shared/pr-artifact-document.ts`, vendored to Pi, so both runtimes). Redirects are followed by hand, at most 4. For a PR on github.com each hop must land on `github.com`, `raw.githubusercontent.com`, `user-images` / `private-user-images.githubusercontent.com`, or GitHub's upload bucket (exactly `^github-production-user-asset-[0-9a-z]+\.s3\.amazonaws\.com$`) over https; `media.githubusercontent.com` only as the Git LFS hand-off from `raw.githubusercontent.com` for the PR's own repository (`/media/<owner>/<repo>/`), never with the token; GitLab and GitHub Enterprise keep the public-https rule, since their object storage hands off to a host each instance configures. The sign-in goes only to the first request's origin, never across a redirect: a private `github.com/user-attachments/assets/<id>` needs it there and then 302s to a signed S3 URL that needs none (checked live). A request without `source` (a picture or video) must answer PNG, JPEG, GIF, WebP, AVIF, MP4, QuickTime or WebM, else `415`; a resource an HTML or Markdown artifact pulls in (`source`) keeps its type (CSS, scripts, fonts).
 
 **Model lists come from the installed tools, not hand lists.** Claude's list is the SDK's `supportedModels()` against the installed `claude` (a throwaway process with no prompt, `settingSources: []` so no user hooks run, no MCP servers, 10s cap, ~0.5s measured); Codex's is the app-server `model/list`. Both run lazily behind the provider initializer (`?activate=` or the first session), never at startup; a success is kept for the process, a failure may be retried after 60s (`createBestEffortOnce`), and the capabilities answer marks each such provider's list `modelsSource: 'fallback' | 'discovered'` so the client forgets a fallback answer and retries on its next load. The same discovery captures the tool version once (`claude --version` run alongside it; codex from the app-server initialize `userAgent`, via `cliVersionFrom`), kept even when discovery fails, and the answer carries it as an optional `toolVersion`; every Claude/Codex model picker (Agents tab launchers, Guided Review, Ask AI bars, Settings) shows a muted `ModelSourceHint` line ("From your installed Codex 0.155.1", or the built-in-list variant on `fallback`) only when `toolVersion` is present, so a host that omits it gets no hint. Both runtimes share `createDeferredModelDiscovery`: an `?activate=` probe waits for discovery, and so does a session for every provider except Claude, whose sessions resolve the model against the current list while discovery finishes in the background, so the first Ask AI answer does not wait on it — except when that list is still the fallback and lacks the requested pick (e.g. `opus[1m]`), where the session waits for discovery rather than silently running a different model once. One shape, `CatalogModel` in `packages/core/model-catalog.ts` (id, label, efforts + default effort, fast mode, `resolvedId`), serves Ask AI AND the review / Code Tour / Guided Review launchers: `useModelCatalogs` (`packages/ui/hooks/`) fetches the same `/api/ai/capabilities?activate=` answer for the ONE engine a launcher is set to, and `useAgentSettings` resolves saved picks against it at read time (the cookie is never rewritten). ONE resolver, `resolveModelChoice`, is used by the launchers, Ask AI's client (`aiProvider.ts`) and the AI session endpoint: exact id → the alias whose `resolvedId` covers it → the same family's alias (`claude-opus-5` → `opus`) → the surface default (Claude `opus` for review, `sonnet` for tour/guide; Codex `''` = the model the Codex list marks default, except Guided Review, which prefers `gpt-6-luna` when offered: `PREFERRED_GUIDE_CODEX_MODEL`) → the catalog default; it never moves a pick onto a `[1m]` id unless the pick was one. Efforts clamp to the model's own levels, launches wait until the catalog settles, and a loading row shows meanwhile. The Claude catalog drops the SDK's `default` pointer row and adds a bare latest alias per family offered, and always offers `opus` / `sonnet` / `haiku` (some CLIs, e.g. Claude Code 2.1.141, name Opus only through the `default` row, whose description then supplies the version); alias labels carry the version parsed from the row's `resolvedModel` (`claudeModelVersion`: "Opus 5.5 (latest)"), since the SDK's `displayName` has none. Codex fast mode is dropped when resolution replaces a saved model with a different one; changing Fast or reasoning then re-keys the section to the model shown. Codex fast support is read from `serviceTiers` (a `priority`/`fast` tier) as well as the deprecated `additionalSpeedTiers`. The only static lists are the small `CLAUDE_FALLBACK_MODELS` / `CODEX_FALLBACK_MODELS`, used when discovery fails.
 

@@ -472,6 +472,25 @@ slot and mentions on the edit box (0.45.0)".
   Enter or click outside to accept" (the Inbox: "Enter or ✓ adds to your
   reply · Esc cancels"). Omit it and the line is as before.
 
+### Comment picture uploads per subtree (`CommentUploadContext`; next ui)
+
+`utils/upload` exports `CommentUploadContext`, a React context holding an
+`UploadTransport`. A host whose pictures go to a different place per document
+(the Inbox: the machine a thread is on) provides one around those comment
+boxes. Under it the picture button (`AttachmentsButton`) uploads only through
+it, names the file after the picture (`pictureFileName`: `login-mockup.png`),
+passes `{ onProgress, signal }` as `upload`'s new optional second argument,
+shows "Uploading picture 42%", says "Picture not added" with Retry and × when
+the upload fails, offers no typed path or URL, and holds the comment's Submit
+while a picture is pending (`onPendingChange`). `ImageAnnotator` takes `sourceBlob` (the
+picture's bytes, accepted as they are when nothing is drawn, instead of a
+`fetch` of its `blob:` URL, which a `connect-src 'self'` page refuses); the
+button passes it under the context. `comment-card.css` puts the status on its
+own line over the card's tools. `restoreCommentDraft` takes
+the pictures too (third argument, default none). Without a provider
+(Plannotator's apps) nothing changes: the configured `uploadTransport`, the
+path field and the old upload are as before.
+
 ### WebMCP provider (`@plannotator/ui/webmcp`; 0.32.0)
 
 The engine that lets a browser-integrated agent (Chrome/Edge WebMCP, `document.modelContext`) call in-page tools on a document surface. Feature-detected once; a browser without the API sees no registration, no DOM, no network, no timers. Seam: `configurePlannotatorUI({ webmcp: { enabled, namePrefix } })`, default enabled with the `plannotator.` prefix; pass `enabled: false` to keep a host page tool-free, or your own prefix to namespace the tools beside your own. There is deliberately no confirmation seam: the catalog is read-and-comment only (no approve / submit / close tools), and the agent may only edit or remove comments stamped `source: "browser-agent"`.

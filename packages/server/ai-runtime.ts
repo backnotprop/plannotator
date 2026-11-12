@@ -19,8 +19,20 @@ import {
 import { resolveWindowsCommandShim } from "@plannotator/ai/providers/command-path";
 import { isLoopbackHostHeader } from "@plannotator/shared/loopback-host";
 import { cameThroughTailscale } from "@plannotator/shared/tailnet-audience";
-import { getLocalUrlHostname, isRemoteSession } from "./remote";
+import { getLocalUrlHostname, isRemoteSession, isSshDetectedRemote } from "./remote";
 import type { SessionTailnetGate } from "./session-tailnet";
+import { isSshTunnelRequest } from "./this-machine";
+
+/**
+ * A remote session only SSH turned on: its own tunnel (a loopback peer, see
+ * this-machine.ts) asks the agent session as a local tab does; every other
+ * address is a "peer" and gets Ask AI through the agent SDKs only, which is
+ * what remote mode gives.
+ */
+const sshTunnelGate: SessionTailnetGate = {
+  audience: (req) => (isSshTunnelRequest(req) ? "local" : "peer"),
+  askAllowed: (req, localAllowed) => isSshTunnelRequest(req) && localAllowed(req),
+};
 
 export interface AIRuntime {
   endpoints: AIEndpoints;
@@ -251,8 +263,11 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
 
   // Off in remote mode, in-process or pulled: anyone who can reach the session
   // URL could otherwise type into the agent session (same reasoning as the
-  // agent terminal).
-  const remote = isRemoteSession();
+  // agent terminal). A remote session only SSH turned on keeps the bridge, and
+  // answers it only for its own tunnel (`sshTunnelGate` below), so the rest of
+  // the network gets exactly what remote mode gives.
+  const sshOnly = isSshDetectedRemote();
+  const remote = isRemoteSession() && !sshOnly;
   const inProcessBridge = remote ? undefined : options.sessionBridge;
   const envPull = options.pullSessionBridge === undefined ? takeEnvPullSessionBridgeConfig() : undefined;
   const pullConfig = remote || inProcessBridge ? undefined : (options.pullSessionBridge ?? envPull);
@@ -280,7 +295,7 @@ export async function createAIRuntime(options: CreateAIRuntimeOptions = {}): Pro
   // A tailnet-published session with a bridge: who may ask the agent session
   // is decided per request. Without one (or without a bridge) the guard is
   // exactly the local one.
-  const tailnet = bridgeProvider ? options.tailnet : undefined;
+  const tailnet = bridgeProvider ? (options.tailnet ?? (sshOnly ? sshTunnelGate : undefined)) : undefined;
   const servedPullBridge = pullBridge
     ? {
         // The host's own channel: this machine only, whatever Host is claimed.

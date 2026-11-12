@@ -2,7 +2,7 @@
  * The Snooze announcement's "Try it" (approval "inbox-snooze-announce"): it opens the REAL Snooze menu, as the
  * person's own click would, and stops there. It never picks a time, so it never snoozes anything by itself.
  *
- *  - A thread open, off a phone: that thread's header clock (its "Snooze until" menu).
+ *  - A thread open, off a phone: that thread's header ⋯ menu, swapped to its times.
  *  - A thread open, on a phone: that thread's ⋯ sheet, swapped to its times.
  *  - No thread open, off a phone: the right-click menu of the row just left, swapped to its times.
  *  - No thread open, on a phone: the thread just left opens again, then its ⋯ sheet, swapped to its times.
@@ -47,7 +47,7 @@ function press(el: HTMLElement): void {
 
 const pane = (root: ParentNode) => root.querySelector<HTMLElement>('section.ib-pane');
 
-/** The open thread's ⋯ sheet, swapped to its times. */
+/** The open thread's ⋯ menu (a phone's sheet), swapped to its times. */
 async function sheet(root: ParentNode): Promise<boolean> {
   const more = await until(() => pane(root)?.querySelector<HTMLElement>('[data-thread-more]'));
   if (!more) return false;
@@ -56,14 +56,6 @@ async function sheet(root: ParentNode): Promise<boolean> {
   if (!item) return false;
   press(item);
   return (await until(() => root.querySelector('[data-thread-menu] [data-snooze-choice]'))) !== null;
-}
-
-/** The open thread's header clock. */
-async function clock(root: ParentNode): Promise<boolean> {
-  const button = pane(root)?.querySelector<HTMLElement>('[data-thread-snooze]');
-  if (!button) return false;
-  press(button);
-  return (await until(() => root.querySelector('[data-thread-snooze-menu] [data-snooze-choice]'))) !== null;
 }
 
 /** The row's right-click menu, swapped to its times. */
@@ -84,7 +76,7 @@ async function rowMenu(root: ParentNode, threadId: string): Promise<boolean> {
 export async function openSnoozeMenu(target: SnoozeTryTarget): Promise<boolean> {
   const { root, phone, openThread, left } = target;
   if (openThread) {
-    if (phone ? await sheet(root) : await clock(root)) return true;
+    if (await sheet(root)) return true;
     // That thread offers no Snooze (archived, say): the row just left, off a phone.
     return !phone && left !== null && left !== openThread ? rowMenu(root, left) : false;
   }

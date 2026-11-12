@@ -1501,6 +1501,7 @@ if (args[0] === "sessions") {
             env: ghAccountEnv ? childEnv({ ...opts.env, ...ghAccountEnv }) : (opts.env ?? childEnv()),
             stdout: "ignore",
             stderr: "pipe",
+            windowsHide: true,
           });
           warmupProcs.add(proc);
           try {
@@ -1597,14 +1598,14 @@ if (args[0] === "sessions") {
           if (isSameRepo) {
             try {
               for (const entry of worktreePool?.entries() ?? []) {
-                Bun.spawnSync(["git", "worktree", "remove", "--force", entry.path], { cwd: repoDir, env: childEnv() });
+                Bun.spawnSync(["git", "worktree", "remove", "--force", entry.path], { cwd: repoDir, env: childEnv(), windowsHide: true });
               }
             } catch {}
             // Clear any registration left by a worktree add that completed
             // after the kill (or by a not-ready entry the loop can't see).
-            try { Bun.spawnSync(["git", "worktree", "prune"], { cwd: repoDir, env: childEnv() }); } catch {}
+            try { Bun.spawnSync(["git", "worktree", "prune"], { cwd: repoDir, env: childEnv(), windowsHide: true }); } catch {}
           }
-          try { Bun.spawnSync(["rm", "-rf", warmupSessionDir], { env: childEnv() }); } catch {}
+          try { Bun.spawnSync(["rm", "-rf", warmupSessionDir], { env: childEnv(), windowsHide: true }); } catch {}
         });
 
         console.error(isSameRepo
