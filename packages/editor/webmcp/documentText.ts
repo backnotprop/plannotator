@@ -1,19 +1,11 @@
-/**
- * Pure helpers behind the document tool catalog: outline, section ranges,
- * block-boundary windowing, quote resolution and context excerpts. No DOM,
- * no React, so every anchoring rule is unit-testable with parsed blocks.
- */
 import type { Annotation, Block } from '@plannotator/ui/types';
 
 export interface OutlineEntry {
-  /** Stable heading slug the tools accept as `section`. */
   id: string;
   level: number;
   title: string;
   line: number;
-  /** Annotations anchored inside the section (heading inclusive, up to the next heading of the same or higher level). */
   annotations: number;
-  /** Parser block id backing this heading. */
   blockId: string;
 }
 
@@ -33,13 +25,11 @@ export function slugifyHeading(title: string): string {
   return slug || 'section';
 }
 
-/** Index of the nearest heading block at or before `blockIndex`, or -1. */
 function headingIndexFor(blocks: readonly Block[], blockIndex: number): number {
   for (let i = blockIndex; i >= 0; i--) if (blocks[i]?.type === 'heading') return i;
   return -1;
 }
 
-/** Block index range `[start, end)` of the section headed by block `headingIndex`. */
 export function sectionRangeAt(blocks: readonly Block[], headingIndex: number): { start: number; end: number } {
   const level = blocks[headingIndex]?.level ?? 1;
   let end = blocks.length;
@@ -83,7 +73,6 @@ export function findSection(outline: readonly OutlineEntry[], sectionId: string)
     ?? null;
 }
 
-/** The section (from the outline) containing `blockId`, or null for unanchored / document-level. */
 export function sectionForBlock(blocks: readonly Block[], outline: readonly OutlineEntry[], blockId: string | undefined): OutlineEntry | null {
   if (!blockId) return null;
   const index = blocks.findIndex((b) => b.id === blockId);
@@ -94,7 +83,6 @@ export function sectionForBlock(blocks: readonly Block[], outline: readonly Outl
   return outline.find((entry) => entry.blockId === headingId) ?? null;
 }
 
-/** Character offset at which each 1-based line starts. */
 export function lineStartOffsets(text: string): number[] {
   const offsets = [0];
   for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 10) offsets.push(i + 1);
@@ -106,7 +94,6 @@ function offsetOfLine(offsets: number[], line: number, total: number): number {
   return offsets[line - 1] ?? total;
 }
 
-/** The text of one section as a slice of the full document, with its absolute offset. */
 export function sectionSlice(text: string, blocks: readonly Block[], section: OutlineEntry): { text: string; offset: number } {
   const headingIndex = blocks.findIndex((b) => b.id === section.blockId);
   if (headingIndex < 0) return { text: '', offset: 0 };
@@ -123,15 +110,9 @@ export interface TextWindow {
   length: number;
   total: number;
   truncated: boolean;
-  /** Absolute offset to continue from, present only when truncated. */
   nextOffset?: number;
 }
 
-/**
- * Window `text` from `offset` to at most `maxChars`, cutting at the last
- * block boundary (a block's first character) inside the budget when one
- * exists past the start, else hard-cutting.
- */
 export function windowText(text: string, blocks: readonly Block[], offset: number, maxChars: number, base = 0): TextWindow {
   const total = text.length;
   const start = Math.max(0, Math.min(offset, total));
@@ -155,9 +136,7 @@ export interface QuoteMatch {
   blockIndex: number;
   startOffset: number;
   endOffset: number;
-  /** The exact document text matched (whitespace as in the block). */
   originalText: string;
-  /** About 120 characters either side of the match. */
   context: string;
 }
 
@@ -191,11 +170,6 @@ export function contextAround(content: string, start: number, end: number, radiu
   return `${before}${content.slice(from, to).replace(/\s+/g, ' ')}${after}`;
 }
 
-/**
- * Anchor a quote on the blocks: exact substring first, then a whitespace-
- * tolerant match. Two blocks matching without a section is `ambiguous`
- * with both contexts as candidates; `section` restricts the search.
- */
 export function resolveQuote(
   blocks: readonly Block[],
   quote: string,
@@ -233,7 +207,6 @@ export function resolveQuote(
   return { status: 'ambiguous', candidates: matches };
 }
 
-/** Context for an existing annotation: the block text around its quote, or the quote itself. */
 export function contextForAnnotation(blocks: readonly Block[], annotation: Annotation): string {
   const block = blocks.find((b) => b.id === annotation.blockId);
   const quote = annotation.originalText ?? '';
@@ -249,7 +222,6 @@ export function capText(text: string | undefined, max = ANNOTATION_TEXT_MAX): { 
   return { text: value.slice(0, max), truncated: true };
 }
 
-/** Plain text of an HTML document, for quote verification on raw-HTML surfaces. */
 export function htmlToPlainText(html: string): string {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')

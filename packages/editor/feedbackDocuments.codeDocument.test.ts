@@ -1,8 +1,3 @@
-/**
- * Config and data files (`renderAs: "code"`) become ONE code block in their
- * own language, never the markdown parse. Through the markdown parser a TOML
- * comment is a heading and a backticked name a code chip (#1099's first pass).
- */
 import { describe, expect, test } from "bun:test";
 import { blocksForDocument, blocksForRenderAs } from "./feedbackDocuments";
 import { CODE_DOCUMENT_HIGHLIGHT_LIMIT } from "@plannotator/ui/utils/parser";
@@ -25,7 +20,6 @@ describe("config files as code documents", () => {
   });
 
   test("the markdown parse of the same text is what this replaces", () => {
-    // The regression: comments as headings.
     const markdown = blocksForRenderAs(TOML, "markdown", false);
     expect(markdown.some((b) => b.type === "heading")).toBe(true);
   });

@@ -1,10 +1,3 @@
-/**
- * Indicator policy (DOM-gated): nothing in the header may appear merely
- * because the browser exposes WebMCP (`webmcpAvailable`); the "Agent"
- * affordance renders only once `agentConnected` (first successful tool
- * call) is true. Pins the maintainer ruling against a "Tools available"
- * chip creeping back in.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';

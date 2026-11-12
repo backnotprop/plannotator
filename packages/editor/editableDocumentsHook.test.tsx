@@ -268,9 +268,6 @@ describe('useEditableDocuments conflict actions', () => {
 });
 
 describe('useEditableDocuments return identity', () => {
-  // App.tsx keys effects (via getLinkedDocumentMarkdown → getDocAnnotations →
-  // the skill-prime effect) on this object. A fresh literal every render made
-  // those effects re-fire unconditionally, which fed a re-render loop.
   test.skipIf(!hasDom)('stable across unrelated re-renders, new only after a document mutation', async () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
@@ -294,13 +291,11 @@ describe('useEditableDocuments return identity', () => {
       forceRender();
     });
     expect(seen.length).toBeGreaterThanOrEqual(2);
-    // A re-render with no document state change keeps the same identity.
     expect(seen[seen.length - 1]).toBe(seen[0]);
 
     await act(async () => {
       seen[seen.length - 1].openDocument({ key: KEY, text: 'a\n', sourceSave: SOURCE_A });
     });
-    // A real state change still produces a new object so consumers react.
     const after = seen[seen.length - 1];
     expect(after).not.toBe(seen[0]);
     expect(after.version).toBeGreaterThan(seen[0].version);

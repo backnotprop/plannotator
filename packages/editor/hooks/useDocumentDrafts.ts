@@ -1,27 +1,3 @@
-/**
- * Per-document draft copies for local-file, folder, URL and last-message
- * annotate sessions and for plan review (server:
- * packages/shared/annotate-draft.ts, `/api/draft/document`). In plan review
- * and the URL / last-message sessions the server also lists the copies, and a
- * recovered session draft carries them (`adoptRestoredCopies` below, #1545).
- *
- * The session draft (useAnnotationDraft) carries the session's ROOT document.
- * Every other document the reviewer comments on — a folder session's files, a
- * single-file session's linked documents — is saved under that file's path,
- * so the comments survive a crash and come back when the file is opened again
- * in any session, alone or in a folder, even after an agent edited it. Each
- * document's saved comments are merged in the first time it is opened in this
- * session (ids the session already holds are skipped) and re-anchor by text;
- * one whose text is gone gets the Unanchored chip and still exports.
- *
- * Every request names this page (`?client=<clientId>`), and so does the
- * decision (App). The server then clears only the copies this page read,
- * wrote or restored: a copy an earlier page wrote (a tab that was reloaded
- * or crashed) and this page never saw is not deleted by this page's send.
- *
- * Inert unless the server advertised `documentDrafts` on /api/plan.
- */
-
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import type { Annotation, ImageAttachment } from '@plannotator/ui/types';
 import type { FeedbackDocuments } from '@plannotator/ui/hooks/useLinkedDoc';
@@ -34,13 +10,9 @@ const HIGHLIGHT_REAPPLY_DELAY = 100;
 
 export interface UseDocumentDraftsOptions {
   enabled: boolean;
-  /** This page load's id (`?client=`); the decision sends the same one. */
   clientId: string;
-  /** A decision was sent (or is in flight): stop writing. */
   submitted: boolean;
-  /** The open linked/folder document, or null while the root is open. */
   activePath: string | null;
-  /** A single-file session's own file: saved by the session draft, never here. */
   rootPath: string | null;
   getFeedbackDocuments: () => FeedbackDocuments;
   annotations: Annotation[];
@@ -49,36 +21,14 @@ export interface UseDocumentDraftsOptions {
   setGlobalAttachments: (attachments: ImageAttachment[]) => void;
   updateStoredAnnotations: (filepath: string, update: (annotations: Annotation[]) => Annotation[]) => boolean;
   viewerRef: RefObject<ViewerHandle | null>;
-  /** Called before saved comments are merged into the open document. */
   onBeforeMerge?: () => void;
-  /** Saved comments were merged into a document. */
   onRestored?: (path: string, count: number) => void;
 }
 
 export interface UseDocumentDraftsResult {
-  /**
-   * Documents the server will not keep a path copy for: outside the session's
-   * roots (an Obsidian vault document), a symlink alias of the session's own
-   * file, or not a regular file. The host keeps their comments in the session
-   * draft instead, so they stay crash-recoverable.
-   */
   unbackedPaths: ReadonlySet<string>;
-  /** Send a pending (debounced) write now, if there is one (see
-      useAnnotationDraft's flushPendingSave). */
   flushPendingWrite: () => void;
-  /**
-   * The session draft brought these documents' copies back (Draft
-   * Recovered). Each copy counts as read, exactly as the server holds it, so
-   * opening the document does not merge it a second time and an unchanged
-   * copy is not written back. Each is also read once more under this page's
-   * id (the body is ignored), so this page's decision clears it.
-   */
   adoptRestoredCopies: (documents: ReadonlyArray<DocumentDraftState & { path: string }>) => void;
-  /**
-   * The reviewer dismissed a recovered draft: clear these documents' copies
-   * too, so they do not come back when a document is opened. A document this
-   * page already read is left alone: its comments are on screen.
-   */
   discardCopies: (paths: readonly string[]) => void;
 }
 
@@ -90,15 +40,12 @@ export function useDocumentDrafts(options: UseDocumentDraftsOptions): UseDocumen
   const latest = useRef(options);
   latest.current = options;
 
-  /** Documents whose saved copy was read (found or not). */
   const loadedRef = useRef(new Set<string>());
   const inFlightRef = useRef(new Set<string>());
-  /** What the server holds for each document, as last sent by this page. */
   const lastSentRef = useRef(new Map<string, string>());
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const writingRef = useRef(false);
   const rerunRef = useRef(false);
-  /** The server refused a write because the review is decided. */
   const closedRef = useRef(false);
 
   const [unbackedPaths, setUnbackedPaths] = useState<ReadonlySet<string>>(() => new Set());
@@ -129,9 +76,6 @@ export function useDocumentDrafts(options: UseDocumentDraftsOptions): UseDocumen
       current.onRestored?.(path, count);
       return;
     }
-    // The reviewer moved on before the copy arrived: merge into the stored
-    // document instead (attachments of a stored document are not editable
-    // from here, so only comments merge on this path).
     let added = 0;
     current.updateStoredAnnotations(path, (held) => {
       const additions = documentDraftAdditions({ annotations: held, globalAttachments: [] }, saved);
@@ -141,7 +85,6 @@ export function useDocumentDrafts(options: UseDocumentDraftsOptions): UseDocumen
     if (added > 0) current.onRestored?.(path, added);
   }, []);
 
-  // Read a document's saved copy the first time it is opened.
   useEffect(() => {
     if (!enabled || !activePath) return;
     if (rootPath && activePath === rootPath) return;
@@ -155,16 +98,13 @@ export function useDocumentDrafts(options: UseDocumentDraftsOptions): UseDocumen
           return;
         }
         if (res.status === 400 || res.status === 403) {
-          // Never loaded, so never written here: the session draft carries it.
           setUnbackedPaths((prev) => (prev.has(path) ? prev : new Set([...prev, path])));
           return;
         }
-        if (!res.ok) return; // retried the next time the document opens
+        if (!res.ok) return;
         const body = (await res.json().catch(() => null)) as { annotations?: unknown; globalAttachments?: unknown } | null;
         if (!body) return;
         loadedRef.current.add(path);
-        // The copy is what the server holds now: sending it back unchanged is
-        // pointless, and anything the merge adds still differs from it.
         lastSentRef.current.set(path, JSON.stringify([
           Array.isArray(body.annotations) ? body.annotations : [],
           Array.isArray(body.globalAttachments) ? body.globalAttachments : [],
@@ -220,7 +160,6 @@ export function useDocumentDrafts(options: UseDocumentDraftsOptions): UseDocumen
       });
   }, []);
 
-  // Debounced write whenever any document's comments change.
   useEffect(() => {
     if (!canWrite) {
       if (timerRef.current) {
@@ -236,7 +175,6 @@ export function useDocumentDrafts(options: UseDocumentDraftsOptions): UseDocumen
     }, DEBOUNCE_MS);
   }, [canWrite, getFeedbackDocuments, writeNow]);
 
-  // Flush a pending write when the page is hidden or closed.
   useEffect(() => {
     const flush = () => {
       if (timerRef.current === null) return;
@@ -267,8 +205,6 @@ export function useDocumentDrafts(options: UseDocumentDraftsOptions): UseDocumen
     for (const doc of documents) {
       loadedRef.current.add(doc.path);
       lastSentRef.current.set(doc.path, JSON.stringify([doc.annotations, doc.globalAttachments]));
-      // The session draft's load names no page: read the copy under this
-      // page's id so this page's decision clears it.
       fetch(`/api/draft/document?path=${encodeURIComponent(doc.path)}&${clientRef.current}`).catch(() => {});
     }
   }, []);

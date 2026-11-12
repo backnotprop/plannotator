@@ -94,7 +94,6 @@ function useCompactTouchMedia(): void {
 
 async function mountApp(planResponse: PlanResponse): Promise<void> {
   globalThis.fetch = stubFetch(planResponse);
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -157,7 +156,6 @@ describe.if(hasDom)("terminal tools announcement in the plan editor", () => {
   });
 
   test("defers behind the look-and-feel chooser without spending the announcement", async () => {
-    // No look-and-feel marker: that chooser owns this session.
     await mountApp(PLAN);
 
     expect(document.querySelector('[aria-labelledby="plan-look-choice-title"]')).not.toBeNull();

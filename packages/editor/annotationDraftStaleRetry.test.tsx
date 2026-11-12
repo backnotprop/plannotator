@@ -1,22 +1,3 @@
-/**
- * Session draft saves the server refuses (useAnnotationDraft + the default
- * /api/draft transport).
- *
- *  - Stale: two sessions on the same file. Session A (text v1) and session B
- *    (text v2, restored from A's path copy at generation 20). A's feedback at
- *    generation 25 deletes the path copy and B's content copy and tombstones
- *    them. Without the retry B's next saves (21..25) were silently refused,
- *    and a crash then lost B's comments. The client adopts the server's
- *    generation and saves again.
- *  - Decided: the session itself was decided (another tab sent it). Its
- *    refusal is never retried, or the sent comments would come back.
- *
- * The fetch shim routes /api/draft to REAL annotate draft sessions
- * (packages/shared/annotate-draft.ts, saveRequest shapes the response) over a
- * temp PLANNOTATOR_DATA_DIR, so the refusals are the server's own.
- *
- * Requires DOM (happy-dom) — runs under DOM_TESTS=1.
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -73,7 +54,6 @@ function sandboxFile(): string {
   return filePath;
 }
 
-/** Route /api/draft to `session`; returns the generations POSTed. */
 function serve(session: AnnotateDraftSession): number[] {
   const posted: number[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -107,15 +87,12 @@ describe.if(hasDom)('session draft saves the server refuses', () => {
     const filePath = sandboxFile();
     const sessionA = createAnnotateDraftSession({ contentKey: contentHash('v1'), filePath });
     const sessionB = createAnnotateDraftSession({ contentKey: contentHash('v2'), filePath });
-    // A saved at generation 20; B restores from that path copy.
     sessionA.save({ annotations: [comment('from-a')], globalAttachments: [], draftGeneration: 20, ts: 1 });
     const posted = serve(sessionB);
     await mountHarness();
 
-    // A decides at generation 25 while B is still open.
     sessionA.settle(25);
 
-    // B's reviewer adds a comment: the save at 21 is refused, then retried above 25.
     await act(async () => { root?.render(<Harness annotations={[comment('from-b')]} />); });
     await tick(700);
 
@@ -134,7 +111,6 @@ describe.if(hasDom)('session draft saves the server refuses', () => {
     const posted = serve(session);
     await mountHarness();
 
-    // Another tab of this review sent the decision.
     session.settle(6);
 
     await act(async () => { root?.render(<Harness annotations={[comment('already-sent')]} />); });
@@ -151,8 +127,6 @@ describe.if(hasDom)('session draft saves the server refuses', () => {
     const posted = serve(session);
     await mountHarness();
 
-    // The reviewer types; the debounced save has not fired yet when the
-    // agent closes the session (App flushes on the session-closed event).
     await act(async () => { root?.render(<Harness annotations={[comment('typed-at-close')]} />); });
     session.closeKeepingDraft();
     await act(async () => { flushPendingSave(); });

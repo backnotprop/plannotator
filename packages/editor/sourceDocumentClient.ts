@@ -8,7 +8,6 @@ export type SourceSaveProbeResult =
   | { status: 'unavailable' };
 
 export interface HtmlVersionDiffFields {
-  /** The previous-version page rendered with inline ins/del highlights. */
   diffHtml?: string;
   previousPlan?: string | null;
   versionInfo?: { version: number; totalVersions: number; project: string };
@@ -37,11 +36,6 @@ export type SourceDocumentSnapshotResult =
   | { status: 'missing' }
   | { status: 'unavailable' };
 
-/**
- * A rendered-HTML document read from /api/doc. The version-diff fields are
- * present only when the server served the session's ROOT document (it
- * recomputes them against the bytes just read); linked docs carry none.
- */
 export interface HtmlDocumentSnapshot extends HtmlVersionDiffFields {
   rawHtml: string;
   filepath: string;

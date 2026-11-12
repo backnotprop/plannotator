@@ -1,20 +1,3 @@
-/**
- * DIFF DEMO PLAN — V3 (diff-engine stress test)
- *
- * Opt-in dev fixture. NOT the default demo — this content is only served
- * when the dev server is launched with `VITE_DIFF_DEMO=1 bun run dev:hook`.
- * Without the flag, the editor renders packages/editor/demoPlan.ts (the
- * project's original Real-time Collaboration plan). The toggle lives in
- * packages/editor/App.tsx and the symmetric V2 toggle lives in
- * apps/hook/dev-mock-api.ts (same env var, same code path).
- *
- * Purpose: 20 numbered cases covering every code path in the word-level
- * inline diff engine. Full paragraphs, complete code blocks, real lists,
- * real tables, realistic plan shapes — not line-by-line fixtures. Each
- * case has an identical "What to watch for" blockquote label in V2 and V3,
- * so the diff view cleanly isolates each case. Cases ①–⑮ exercise
- * expected behaviors; ⑯–⑳ document known limitations.
- */
 export const DIFF_DEMO_PLAN_CONTENT = `# Auth Service Refactor — Diff Demo
 
 This is a realistic plan document being used to exercise the word-level diff engine. Each case below is a real chunk of plan content — full paragraphs, complete code blocks, checklist items, tables — not line-by-line test fixtures. The blockquote label above each case explains in plain language what you should see when you click the **+N/−M** diff badge at the top of the page. Eighteen cases total: the first fifteen demonstrate expected behaviors; the last three surface known limitations discovered during an adversarial audit.

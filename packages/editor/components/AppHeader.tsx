@@ -20,38 +20,23 @@ import { Tooltip } from '@plannotator/ui/components/Tooltip';
 import { StartCutPath } from '@plannotator/ui/components/StartCutPath';
 import { BundleSwitcher, type BundleSwitcherProps } from './BundleSwitcher';
 
-/** Plannotator's refresh strings for the published control: the document
- * is a file on disk, so the refresh says so. */
 export const PLANNOTATOR_HTML_REFRESH_LABELS = {
   refreshTitle: 'Refresh HTML from disk',
   refreshingTitle: 'Refreshing HTML from disk',
 } as const;
 
 interface AppHeaderProps {
-  /** Mobile document-scroll surfaces let Safari own the top edge and scroll
-   * this header with the page. Desktop keeps the incumbent sticky header. */
   sticky?: boolean;
-  /** HTML annotate surface (raw HTML or live app): shows the pen toggle. */
   htmlSurface?: boolean;
-  /** Interact/Annotate toggle for HTML and live-app surfaces: armed means
-   *  clicks annotate; unarmed hands the page back its native interaction
-   *  (text drag-selection commenting stays live either way). */
   htmlAnnotateArmed?: boolean;
   onToggleHtmlAnnotate?: () => void;
-  /** Floating tools (sidebar tongue tabs + comment/attachments cluster) are
-   *  fully removed from the DOM while hidden; this button is the way back. */
   htmlToolsHidden?: boolean;
   onToggleHtmlTools?: () => void;
   canRefreshHtml?: boolean;
   isRefreshingHtml?: boolean;
   onRefreshHtml?: () => void;
-  /** Leave a linked HTML document. Passed only while one is open; the sidebar's
-   *  own "Back to …" header is not reachable when the sidebar stays closed. */
   onHtmlLinkedDocBack?: () => void;
-  /** "Back to <root file name>" for the control's tooltip and accessible name. */
   htmlLinkedDocBackDescription?: string;
-  /** Compact touch layouts replace the brand mark with a task-focused entry
-   * into the full-stage document navigator. Desktop never receives it. */
   compactTouchLayout?: boolean;
   compactNavigatorAvailable?: boolean;
   compactNavigatorOpen?: boolean;
@@ -59,15 +44,8 @@ interface AppHeaderProps {
   compactDocumentTitle?: string;
   compactSessionActions?: CompactPlanAction[];
   compactDocumentActions?: CompactPlanAction[];
-  /** A review of several files: the "2 of 3 · mock.html ‹ ›" switcher beside
-   *  the logo. Desktop only; the compact shell names the position in its
-   *  title and offers previous/next in its Options menu. */
   bundleSwitcher?: BundleSwitcherProps;
-  /** The open document's name beside the logo ("Plannotator / notes.md"),
-   *  its full path or URL in a tooltip. Desktop only, and not drawn beside
-   *  a `bundleSwitcher`, which already names the open file. */
   documentName?: { name: string; title?: string; cutsFromStart?: boolean };
-  // Mode flags (stable after mount)
   isApiMode: boolean;
   annotateMode: boolean;
   archiveMode: boolean;
@@ -78,7 +56,6 @@ interface AppHeaderProps {
   isSharedSession: boolean;
   origin: Origin | null;
 
-  // Dynamic state
   isSubmitting: boolean;
   isExiting: boolean;
   isPanelOpen: boolean;
@@ -89,59 +66,35 @@ interface AppHeaderProps {
   linkedDocIsActive: boolean;
   callbackShareUrlReady: boolean;
   canShareCurrentSession: boolean;
-  /** `:::question` progress: the "N/M answered" chip beside the decision
-   *  control. Absent (or total 0): no chip. */
   questionProgress?: { done: number; total: number; hasOpen: boolean; onJump: () => void };
-  /** Plan review's decision control (#1057): the same DecisionControl as
-   *  annotate, without the ghost Close (a plan review ends with a decision).
-   *  App owns the spec and every handler; `menuFooter` carries the OpenCode
-   *  agent picker or Claude Code's permission-mode line. */
   planDecision?: {
     spec: DecisionSpec;
     handlers: Record<DecisionActionId, DecisionHandler>;
     menuFooter?: DecisionControlProps['menuFooter'];
   };
-  /** The unified annotate decision control (spec + handlers + close title).
-   *  App owns the spec derivation and every handler; the header only mounts
-   *  the control beside the ghost Close. Absent outside annotate mode. */
   annotateDecision?: {
     spec: DecisionSpec;
     handlers: Record<DecisionActionId, DecisionHandler>;
     closeTitle: string;
-    /** Framed surfaces (raw-HTML srcdoc / live-app proxy): iframe focus
-     *  dismisses the popover since clicks never reach the parent document. */
     dismissOnIframeFocus?: boolean;
   };
-  /** Bumped by Mod+Shift+Enter to open the decision control's note composer. */
   decisionNoteRequest?: number;
 
-  // Callback config (null when no bot callback)
   callbackConfig: CallbackConfig | null;
 
-  // Settings props
   taterMode: boolean;
   mobileSettingsOpen: boolean;
   gitUser: string | undefined;
-  /** Present when the server advertises the auto-update setting; Settings shows its switch. */
   autoUpdateSetting?: { env?: boolean };
   updateCheckSetting?: UpdateCheckSetting;
-  /** "Open Plannotator at plannotator.localhost" (#2184); Settings shows its row when present. */
   cookieHostSetting?: CookieHostSetting;
-  /** The `plannotator` agent tool switch (parseAgentToolSetting of serverConfig); Settings shows its row. */
   agentToolSetting?: AgentToolSetting;
   onAgentToolChange?: (enabled: boolean) => Promise<void>;
-  /** This session offers the Agent TUI, so Settings shows its Position row. */
   agentTerminalAvailable: boolean;
-  /** The browser exposes WebMCP, so Settings shows the "Agent tools" opt-out.
-   *  Nothing in the header renders for this alone. */
   webmcpAvailable?: boolean;
-  /** The open document is markdown or text, so Settings offers Text size and Document font (raw HTML and diagram files draw themselves). */
   documentTextSizeAvailable?: boolean;
-  /** A browser agent has completed at least one tool call in this session.
-   *  Only then does the unobtrusive "Agent" indicator appear. */
   agentConnected?: boolean;
 
-  // Handlers — App owns all decision logic, header just calls these
   onCallbackFeedback: () => void;
   onCallbackApprove: () => void;
   onAnnotateExit: () => void;
@@ -154,7 +107,6 @@ interface AppHeaderProps {
   onTaterModeChange: (enabled: boolean) => void;
   onIdentityChange: (oldId: string, newId: string) => void;
   onUIPreferencesChange: (prefs: UIPreferences) => void;
-  /** Settings changed Claude Code's permission mode (plan review). */
   onPermissionModeChange?: (mode: PermissionMode) => void;
   onOpenSettings: () => void;
   onCloseSettings: () => void;
@@ -169,7 +121,6 @@ interface AppHeaderProps {
   onSaveToOctarine: () => void;
   onSaveToNotion?: () => void;
 
-  // PlanHeaderMenu config
   appVersion: string;
   updateInfo?: UpdateInfo | null;
   isWSL?: boolean;
@@ -309,7 +260,6 @@ export const AppHeader = React.memo<AppHeaderProps>(({
       )}
 
       <div className={`flex items-center gap-1 md:gap-2 ${compactTouchLayout ? 'justify-end' : 'shrink-0'}`}>
-        {/* Bot callback buttons — only shown when ?cb=&ct= params are present */}
         {!compactTouchLayout && callbackConfig && !isApiMode && isSharedSession && (
           <>
             <div className="w-px h-5 bg-border/50 mx-1 hidden md:block" />
@@ -416,13 +366,6 @@ export const AppHeader = React.memo<AppHeaderProps>(({
           </>
         )}
 
-        {/* HTML and live-app surfaces only: back (while a linked document is
-            open), the eye (show/hide tools, the only way back from hidden),
-            the refresh, and the Interact/Annotate pen, in that order. The
-            published control carries the markup; the compact touch shell
-            offers the same actions in its Options menu instead
-            (compactDocumentActions in App: Back to <file>, Show/Hide tools,
-            Interact/Annotate, Refresh from disk). */}
         {htmlSurface && (onToggleHtmlTools || onToggleHtmlAnnotate || onHtmlLinkedDocBack) && (
           <HtmlSurfaceControls
             compact={compactTouchLayout}
@@ -439,10 +382,6 @@ export const AppHeader = React.memo<AppHeaderProps>(({
           />
         )}
 
-        {/* WebMCP activity indicator. Deliberately absent until a browser
-            agent has completed a tool call: the API merely existing must not
-            change the page (maintainer ruling). Non-interactive; the opt-out
-            lives in Settings. */}
         {!compactTouchLayout && agentConnected && (
           <span
             data-webmcp-indicator="true"
@@ -454,7 +393,6 @@ export const AppHeader = React.memo<AppHeaderProps>(({
           </span>
         )}
 
-        {/* Annotations panel toggle */}
         {!compactTouchLayout && !goalSetupMode && (
           <button
             onClick={onAnnotationPanelToggle}
@@ -493,7 +431,6 @@ export const AppHeader = React.memo<AppHeaderProps>(({
           </button>
         )}
 
-        {/* Settings dialog (controlled, button hidden — opened from PlanHeaderMenu) */}
         <div className="hidden">
           <Settings
             taterMode={taterMode}
@@ -582,11 +519,6 @@ export const CompactPlanNavigatorTrigger = ({
   </button>
 );
 
-/** "/ notes.md" after the logo: the name cut with an ellipsis when the header
- *  runs short, the full path in the app's tooltip (and to screen readers).
- *  A path (a folder session's folder) is cut from the start instead, so the
- *  folder's own name stays whole. The tooltip wraps a long path rather than
- *  running off a narrow window. */
 const HeaderDocumentName: React.FC<{ name: string; title?: string; cutsFromStart?: boolean }> = ({ name, title, cutsFromStart }) => {
   const descriptionId = React.useId();
   const label = (

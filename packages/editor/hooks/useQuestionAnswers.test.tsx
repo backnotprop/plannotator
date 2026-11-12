@@ -1,15 +1,3 @@
-/**
- * Answers to `:::question` blocks in the annotation undo history, driven
- * through the real card (BlockRenderer → QuestionBlock) and the real
- * `useUndoHistory`.
- *
- * What regresses if this fails: Mod+Z skips answers (or undoes a whole
- * sentence one letter at a time), a quick second pick merges into the first,
- * or the double-click-a-word guard leaves a stray pick (or a stray history
- * entry) behind.
- *
- * DOM-gated (DOM_TESTS=1).
- */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { useRef, useState } from 'react';
 import { act } from 'react';

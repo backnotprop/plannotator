@@ -6,8 +6,6 @@ import {
 } from '@plannotator/ui/hooks/useHtmlRefresh';
 import { fetchHtmlDocumentSnapshot, type HtmlVersionDiffFields } from '../sourceDocumentClient';
 
-/** What a refresh hands the app: the bytes plus, for the root document, the
- * version-diff fields the server recomputed against them. */
 export interface HtmlRefreshedDocument extends HtmlVersionDiffFields {
   rawHtml: string;
 }
@@ -16,7 +14,6 @@ interface UseHtmlRefreshOptions {
   enabled: boolean;
   activePath: string | null;
   onSnapshot: (document: HtmlRefreshedDocument) => void;
-  /** The ids the remounted viewer could not re-anchor, once per refresh. */
   onUnanchored?: (missingIds: string[]) => void;
 }
 
@@ -28,12 +25,6 @@ interface UseHtmlRefreshResult {
   reportAnnotationRestore: (missingIds: string[]) => void;
 }
 
-/**
- * Plannotator's binding of the published `useHtmlRefresh`: the snapshot
- * comes from `/api/doc` through `fetchHtmlDocumentSnapshot` (which, for the
- * session's root document, also carries the recomputed version diff), URL
- * sessions (http(s) paths) cannot refresh, and every outcome toasts.
- */
 export function useHtmlRefresh({
   enabled,
   activePath,

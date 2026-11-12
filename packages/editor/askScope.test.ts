@@ -1,10 +1,3 @@
-/**
- * `askScopeFromContext`: the composer context → Ask AI scope mapping both of
- * App's Ask AI paths use (#1731). Failure to catch: a single-line selection
- * whose host sends only `lineStart` asking with no line, or a converted
- * HTML/URL source sending converted-markdown line numbers that do not exist
- * in the file the agent reads.
- */
 import { describe, expect, test } from 'bun:test';
 import { askScopeFromContext } from './askScope';
 

@@ -1,13 +1,3 @@
-/**
- * The collapsed sidebar tabs stay beside the annotate Agent TUI (DOM-gated).
- *
- * What regresses if this fails: opening the Agent TUI docked left hides the
- * left rail (the agent toggle, Contents, Files), so the reviewer loses the
- * one-click way back to those panels and to closing the terminal; or the rail
- * stays but sits under the terminal at the window's left edge instead of at
- * the terminal's edge; or the document stops reserving the rail's 30px and
- * the rail covers the first column of text.
- */
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -36,7 +26,6 @@ const originalInnerWidth = hasDom ? window.innerWidth : 0;
 const originalUrl = hasDom ? window.location.href : "";
 const originalWebSocket = globalThis.WebSocket;
 
-/** Never connects: the panel may spawn its agent when it opens. */
 class InertWebSocket extends EventTarget {
   static readonly CONNECTING = 0;
   static readonly OPEN = 1;
@@ -55,7 +44,6 @@ class InertWebSocket extends EventTarget {
   close(): void {}
 }
 
-/** The panel builds its WebSocket URL from the page URL, which is about:blank here. */
 function setPageUrl(url: string): void {
   (window as unknown as { happyDOM?: { setURL(url: string): void } }).happyDOM?.setURL(url);
 }
@@ -67,7 +55,6 @@ const memoryBackend: StorageBackend = {
   removeItem: (key) => void memory.delete(key),
 };
 
-/** A wide desktop window with a fine pointer: no media query matches. */
 function desktopMatchMedia(query: string): MediaQueryList {
   return {
     matches: false,
@@ -131,12 +118,10 @@ async function settle(): Promise<void> {
 
 const rail = () => document.querySelector<HTMLElement>('[data-sidebar-tabs="true"]');
 const agentTab = () => rail()?.querySelector<HTMLButtonElement>('button[aria-pressed]') ?? null;
-/** The z-index a Tailwind `z-N` / `z-[N]` class gives, or 0. */
 function zIndexOf(element: Element | null | undefined): number {
   const match = element?.className.toString().match(/(?:^|\s)z-\[?(\d+)\]?(?:\s|$)/);
   return match ? Number(match[1]) : 0;
 }
-/** The left-docked terminal's resize handle: the box around its hover track. */
 const terminalResizeHandle = () => document.querySelector('[data-resize-track="left"]')?.parentElement ?? null;
 const documentArea = () => document.querySelector<HTMLElement>('main[data-print-region="document"]');
 
@@ -151,7 +136,6 @@ async function mount(serverConfig: Record<string, unknown> = {}): Promise<void> 
   ]) memory.set(key, key.includes("look-feel") || key.includes("vim") ? "2" : "1");
   window.matchMedia = desktopMatchMedia;
   setPageUrl("http://plannotator.invalid/");
-  // SAFETY: the panel only constructs the socket and assigns its handlers.
   globalThis.WebSocket = InertWebSocket as unknown as typeof WebSocket;
   Object.defineProperty(window, "innerWidth", { configurable: true, value: 1440 });
   const plan = annotatePlan(serverConfig);
@@ -162,7 +146,6 @@ async function mount(serverConfig: Record<string, unknown> = {}): Promise<void> 
     if (url.pathname.startsWith("/api/draft")) return Response.json({ error: "Not found" }, { status: 404 });
     return Response.json({});
   }) as typeof fetch;
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -172,7 +155,6 @@ async function mount(serverConfig: Record<string, unknown> = {}): Promise<void> 
   });
   const collapse = () => document.querySelector<HTMLButtonElement>('button[title="Collapse sidebar"]');
   for (let attempt = 0; attempt < 30 && !agentTab() && !collapse(); attempt += 1) await settle();
-  // The left sidebar opens on load; the rail shows once it is collapsed.
   if (!agentTab() && collapse()) await act(async () => collapse()!.click());
   for (let attempt = 0; attempt < 10 && !agentTab(); attempt += 1) await settle();
   if (!agentTab()) throw new Error("the sidebar rail with the Agent toggle did not render");
@@ -215,15 +197,12 @@ describe.if(hasDom)("sidebar tabs beside the Agent TUI", () => {
 
     expect(rail()).not.toBeNull();
     expect(rail()!.style.left).toContain("--agent-terminal-w");
-    // 2px off the terminal's edge, and above its resize handle, whose grab
-    // zone reaches 8px past the edge and would otherwise cover the buttons.
     expect(rail()!.style.left).toContain("+ 2px");
     const handle = terminalResizeHandle();
     expect(handle).not.toBeNull();
     expect(zIndexOf(rail())).toBeGreaterThan(zIndexOf(handle));
     expect(documentArea()?.className).toContain("lg:pl-[30px]");
 
-    // The rail's own toggle closes the terminal again.
     await act(async () => agentTab()!.click());
     await settle();
     expect(agentTab()?.getAttribute("aria-pressed")).toBe("false");

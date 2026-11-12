@@ -7,7 +7,6 @@ const state = (...ids: string[]): DocumentDraftState => ({ annotations: ids.map(
 
 describe('planDocumentDraftWrites', () => {
   test('never writes a document whose saved copy has not been read yet', () => {
-    // Writing it would replace an earlier session's comments with this subset.
     const { writes } = planDocumentDraftWrites({
       documents: new Map([['/d/a.md', state('mine')]]),
       lastSent: new Map(),

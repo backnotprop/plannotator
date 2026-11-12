@@ -6,12 +6,6 @@ interface CompactAnnotationControlsProps {
   onInputMethodChange: (method: InputMethod) => void;
 }
 
-/**
- * Reading-first entry into the existing Plan annotation engine. Compact touch
- * always uses Markup semantics; this control only chooses how a target is
- * acquired. Compact method changes remain session-only, so the persisted
- * desktop action and input-method preferences stay untouched.
- */
 export const CompactAnnotationControls: React.FC<CompactAnnotationControlsProps> = ({
   inputMethod,
   onInputMethodChange,

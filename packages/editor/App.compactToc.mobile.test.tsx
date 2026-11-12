@@ -1,14 +1,3 @@
-/**
- * Compact navigator "jump to heading" (DOM_TESTS=1)
- *
- * The compact navigator renders the SAME TableOfContents as the desktop rail,
- * and that component resolves its scroll target from ScrollViewportContext.
- * When the overlay rendered outside App's ScrollViewportProvider the context
- * was null, so every heading tap silently did nothing. This mounts the real
- * app in the compact touch shell and pins that a TOC activation still scrolls
- * the viewport.
- */
-
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -45,8 +34,6 @@ function seedAnnouncementsSeen(): void {
   memory.set("plannotator-plan-ai-announcement-seen", "1");
 }
 
-// SAFETY: implements the MediaQueryList surface the shell hooks consume.
-// Coarse-pointer matches put the app in its compact touch layout.
 function coarseMatchMedia(query: string): MediaQueryList {
   return {
     matches: query.includes("pointer: coarse"),
@@ -132,7 +119,6 @@ describe.if(hasDom)("compact navigator table of contents", () => {
     seedAnnouncementsSeen();
     window.matchMedia = coarseMatchMedia as typeof window.matchMedia;
     globalThis.fetch = planFetch;
-    // SAFETY: the App only uses EventSource's constructor, handlers, and close.
     globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;
 
     host = document.createElement("div");
@@ -155,8 +141,6 @@ describe.if(hasDom)("compact navigator table of contents", () => {
     ).find((button) => button.textContent?.includes("Beta section"));
     if (!tocButton) throw new Error("compact navigator did not render the plan's headings");
 
-    // The heading has to exist in the document under the overlay, otherwise the
-    // no-op being guarded against would be indistinguishable from a miss.
     expect(document.querySelector("[data-block-id]")).not.toBeNull();
 
     const scrollCalls: unknown[] = [];

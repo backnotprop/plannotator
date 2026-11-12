@@ -50,7 +50,6 @@ class SilentEventSource {
 
 interface Session {
   readonly mode?: "annotate" | "archive";
-  /** Answer capabilities with a connected "Ask this session" bridge. */
   readonly bridge?: boolean;
 }
 
@@ -119,7 +118,6 @@ async function settle(): Promise<void> {
 
 async function mountApp(session: Session = {}): Promise<void> {
   globalThis.fetch = stubFetch(session);
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -128,7 +126,6 @@ async function mountApp(session: Session = {}): Promise<void> {
   for (let attempt = 0; attempt < 20 && !document.body.textContent?.includes("Session document"); attempt += 1) {
     await settle();
   }
-  // Capabilities land after the plan; give them a few ticks.
   for (let attempt = 0; attempt < 10; attempt += 1) await settle();
 }
 
@@ -140,10 +137,6 @@ async function unmountApp(): Promise<void> {
   if (hasDom) document.body.replaceChildren();
 }
 
-/**
- * Booleans, not elements: a failed toBeNull() on a Base UI dialog element
- * crashes bun's diff printer instead of reporting the failure.
- */
 function isOpen(selector: string): boolean {
   return document.querySelector(selector) !== null;
 }
@@ -161,7 +154,6 @@ function gotIt(selector: string): HTMLButtonElement {
   return button;
 }
 
-/** A browser that has answered every dialog ahead of the Inbox announcement. */
 function seedEarlierChainSeen(): void {
   memory.set(LOOK_AND_FEEL_KEY, "true");
   memory.set(PERMISSION_MODE_KEY, "true");

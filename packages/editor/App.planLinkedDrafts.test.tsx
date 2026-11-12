@@ -1,20 +1,3 @@
-/**
- * Plan review with linked documents: a recovered draft brings back every
- * document's comments, each on its own document (#1545).
- *
- * What regresses if this fails:
- *  - Draft Recovered counts only the plan's comments, and a linked
- *    document's comments never come back (or come back on the plan);
- *  - the restored copy is read and merged a second time when the document is
- *    opened, or written back unchanged;
- *  - opening a linked document with no comments makes the plan's draft go
- *    empty, which deletes it;
- *  - Dismiss leaves the linked documents' copies behind, so dismissed
- *    comments come back when a document is opened.
- *
- * Requires DOM (happy-dom) — runs under DOM_TESTS=1.
- */
-
 import { afterAll, afterEach, describe, expect, test } from "bun:test";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -100,7 +83,6 @@ const DESIGN_COMMENT = {
 interface Recorded { method: string; path: string; search: string; body?: string }
 const requests: Recorded[] = [];
 
-/** What GET /api/draft answers in the current test. */
 let sessionDraft: unknown = null;
 
 const fakeFetch: typeof fetch = async (input, init) => {
@@ -149,7 +131,6 @@ async function mount(): Promise<void> {
   setStorageBackend(memoryBackend);
   seedAnnouncementsSeen();
   globalThis.fetch = fakeFetch;
-  // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = SilentEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -183,7 +164,6 @@ async function clickLink(text: string): Promise<void> {
   const link = Array.from(document.querySelectorAll("a")).find((a) => a.textContent?.includes(text));
   if (!link) throw new Error(`link "${text}" not rendered`);
   await act(async () => { link.click(); });
-  // Past the 500ms debounce of both draft writers.
   for (let attempt = 0; attempt < 14; attempt += 1) await settle(60);
 }
 
@@ -213,7 +193,6 @@ describe.if(hasDom)("plan review: linked documents in a recovered draft", () => 
     await answerBanner("Restore");
     for (let attempt = 0; attempt < 10; attempt += 1) await settle(60);
 
-    // The plan's own draft carries the plan's comment and never the design's.
     const saves = sessionSaves();
     expect(saves.length).toBeGreaterThan(0);
     for (const save of saves) {
@@ -223,8 +202,6 @@ describe.if(hasDom)("plan review: linked documents in a recovered draft", () => 
 
     const since = requests.length;
     await clickLink("the design");
-    // The design's comment is on the design (shown in its panel), already
-    // restored: its copy is not read and merged again, nor written back.
     expect(document.body.textContent).toContain("DESIGN_COMMENT_SENTINEL");
     expect(requests.slice(since).some((r) => r.path === "/api/draft/document" && r.method === "GET")).toBe(false);
     expect(documentWrites(since)).toEqual([]);
