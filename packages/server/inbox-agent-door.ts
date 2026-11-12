@@ -216,7 +216,7 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
     if (identity) throw new DoorRefusal("identity_forced", `${identity}: not taken here. The Inbox names a cloud agent from its pairing.`);
     if ("project_path" in args) throw new DoorRefusal("project_forced", "project_path: not taken here. A cloud agent's threads go in the project chosen when it was paired.");
     const unknown = Object.keys(args).find((field) => !FIELDS[tool].includes(field));
-    if (unknown) throw new DoorRefusal("validation_error", `${unknown}: not taken through the agent door.`);
+    if (unknown) throw new DoorRefusal("validation_error", `${unknown}: not taken through the agent door. ${tool} takes: ${FIELDS[tool].join(", ") || "no fields"}.`);
 
     if (tool === "search") return search(session, args);
 

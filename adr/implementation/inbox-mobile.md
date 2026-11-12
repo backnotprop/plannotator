@@ -1457,6 +1457,10 @@ A version 1 string still works at the door on this computer (`PLANNOTATOR_PAIRIN
 
 Remove (`POST /api/inbox/cloud-agents/:session/remove`) revokes the device at once (the next call is `401 device_revoked`), deletes its secret file and the webhook address and key. Its messages stay in their threads. The window's device list (`GET /api/inbox/devices`) leaves agent devices out; they show under Cloud agents.
 
+### Shown once, in Settings
+
+Settings shows the pairing string once, inside what the person hands the agent (`setup` in the pair answer): one message for Grok Bot and Other ("Set up Plannotator Inbox for me by following the instructions at https://plannotator.ai/inbox/cloud-agent.md", then the string), or for a Claude Code routine the environment variable line, the Allowed domains and one line for its instructions. It is kept only in the window's memory until Done; nothing reads it back. `POST /api/inbox/cloud-agents/:session/pairing` revokes the agent's device and mints a new one for the same session, so its threads stay its own and the old string answers `device_revoked` at once. A pairing without a relay (version 1) gives no setup: Settings says the relay could not be reached and offers Try again. The webhook is optional: an agent with none is never woken and polls its signal.
+
 ### The agent door
 
 `POST /api/inbox/agent/call`, `Authorization: Bearer <the pairing's token>`, body `{ "tool": "<name>", "arguments": { … } }`. The checks, in order:
@@ -1496,4 +1500,4 @@ As before the door: the person's New message to the agent, a reply to its messag
 
 ### Not yet
 
-Files from the Inbox to the agent, guided reviews (`get_guide_brief`, `submit_guide`), and the Settings screen showing the pairing string with the routine's prompt. The relay itself is owner-deployed; until it is, pairing gives a version 1 string. `PLANNOTATOR_PAIRING_DOOR` (`http://127.0.0.1:<port>`) still sends `plannotator inbox call` to the door on this computer instead of the relay, for tests and a local stand-in routine.
+Files from the Inbox to the agent, and guided reviews (`get_guide_brief`, `submit_guide`). The relay itself is owner-deployed; until it is, pairing gives a version 1 string. `PLANNOTATOR_PAIRING_DOOR` (`http://127.0.0.1:<port>`) still sends `plannotator inbox call` to the door on this computer instead of the relay, for tests and a local stand-in routine.

@@ -34,7 +34,9 @@ Every `plannotator inbox call` reads the pairing string from the environment var
 
     plannotator inbox call whoami
 
-It works when it prints one line of JSON with your `name`. The person's Settings then shows "Connected". Tell the person in one line, for example: "Connected to your Plannotator Inbox as Nightly fixer."
+It works when it exits 0 and prints one line of JSON with your `name`. The person's Settings then shows "Connected". Tell the person in one line, for example: "Connected to your Plannotator Inbox as Nightly fixer."
+
+Then do step 5 once right away: the person may have written to you already.
 
 Otherwise it prints one line `<code>: <what is wrong>`:
 
@@ -61,7 +63,8 @@ Pick what your platform has. Be honest with the person about which one you set u
 **Polling (no webhook).** `signal_url` answers `{"signal":"..."}`; the value changes when the person writes in one of your threads. Read it with `curl -fsS "$SIGNAL_URL"`. At most 20 reads a minute.
 
 - **Fast check:** only if your platform has a way to run a small check every 10 seconds or so (a long-running process, a heartbeat), read the signal every 10 seconds, and when the value differs from the last one you saw, do step 5. Neither Claude Code routines nor Grok Bot document such a hook; do not invent one.
-- **Scheduled check (fallback):** a schedule every 5 minutes that reads the signal, compares it with the value saved last time (in a file), and does step 5 only when it changed. Grok Bot accepts schedules in plain words ("every 5 minutes"); the shortest interval it allows is not documented. Claude Code routines cannot run more often than hourly; use the wake there.
+- **Scheduled check (fallback):** a schedule that starts a run of you every 5 minutes. Each run reads the signal, compares it with the value saved last time (in a file), and does step 5 only when it changed. It must start you, the agent: a plain cron job that runs a script cannot answer the person, so do not set one up as if it could. Grok Bot accepts schedules in plain words ("every 5 minutes"); the shortest interval it allows is not documented. Claude Code routines cannot run more often than hourly; use the wake there.
+- If your platform has neither a wake nor a schedule that starts you, say so plainly: you will see the person's messages only when they start you.
 
 ## 5. Read and answer
 
@@ -85,6 +88,7 @@ Do what the person asked, with your own tools and repositories. Then answer in t
       - No
       :::
 
+- If read_thread says `name_this_thread: true`, add `"thread": "<a few words>"` to that reply: it names the thread.
 - Files: `"attachments": ["report.md", "shot.png"]`, paths on your machine; they are sent as bytes and show below your message.
 - If `send_message` prints `"queued": true`, the person's computer is asleep. It is posted once when the computer is back. Do not send it again.
 - A wake that says it is a test from Settings needs nothing: end the run.

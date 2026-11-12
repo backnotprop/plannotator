@@ -42,4 +42,7 @@
 @media (pointer: coarse) {
   .ib-cl-sub .ib-btn, .ib-cl-row .ib-btn, .ib-cl-copy-b, .ib-cl-foot .ib-btn { min-height: 44px; }
   .pn-inbox .ib-cl-link { min-height: 44px; }
+  .pn-inbox [data-settings-cloud] .ib-btn, .pn-inbox [data-settings-cloud] .ib-seg-o { min-height: 44px; }
+  .pn-inbox [data-settings-cloud] .ib-mfield .ib-fbk-contact, .pn-inbox [data-settings-cloud] .ib-cl-inline .ib-fbk-contact { height: 44px; font-size: var(--ib-fs-16-in, 16px); }
+  .pn-inbox [data-settings-cloud] .ib-del-l { min-height: 44px; padding: 0 4px; }
 }
