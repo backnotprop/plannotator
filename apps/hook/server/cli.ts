@@ -215,11 +215,12 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
     "  plannotator guide import --guide <guide.json> --patch <diff.patch> | --snapshot <snapshot.json> [--pr <url>]",
     "  plannotator sessions",
     "  plannotator data-dir",
-    "  plannotator inbox [--background | --no-open | --open] [--tailscale]",
+    "  plannotator inbox [--background | --no-open | --open [<thread>]] [--tailscale]",
     "  plannotator inbox mcp [--t3]",
     "  plannotator inbox status [--json] | stop | restart",
     "  plannotator inbox projects [combine <project id> --into <project id> | undo <project id>] [--json]",
     "  plannotator inbox call [--session <id>] <action> [<json> | -]",
+  "  plannotator inbox connection --host <host> [--plugin-version <v>] [--no-wake]",
     "  plannotator t3 login | logout --url <T3 MCP URL>",
     ...(options.board === true ? ["  plannotator card <create|move|say|link|ship|drop|list|initiative_delete> ..."] : []),
     `  plannotator feedback --stdin [--category <bug|idea|other>] [--contact '<text>'] <<'${FEEDBACK_HEREDOC_END}'`,
@@ -516,6 +517,23 @@ export const INBOX_PROJECTS_USAGE = [
   "Run 'plannotator inbox --help' for when to use it.",
 ].join("\n");
 
+/** `plannotator inbox export …` (inbox-export-command.ts): the Inbox as JSONL files, on the person's request. */
+export const INBOX_EXPORT_USAGE = [
+  "Usage:",
+  "  plannotator inbox export --jsonl <folder> [--json]",
+  "",
+  "Writes the whole Inbox (every project's messages, questions, cards, steps and",
+  "PRs, and the initiatives) into <folder> as JSONL files, one line per change:",
+  "projects/<project>/*.jsonl, initiatives.jsonl and seq.json, the layout the",
+  "Inbox keeps in <data dir>/inbox. Attachments and pictures are not copied.",
+  "<folder> must be new or empty; a relative path is taken from this folder.",
+  "It only reads the Inbox: a running Inbox keeps running, and nothing changes.",
+  "",
+  "stdout: what was written (one JSON object with --json: folder, from, lines).",
+  "Exit 0 written (or nothing to write), 1 refused (<code>: <message> on stderr),",
+  "2 bad usage.",
+].join("\n");
+
 /** What `plannotator inbox call` runs: the Inbox tool's actions. */
 export const INBOX_CALL_ACTIONS: readonly string[] = INBOX_TOOL_ACTIONS;
 
@@ -553,7 +571,7 @@ export const INBOX_CALL_USAGE = [
  */
 export const INBOX_COMMAND_USAGE = [
   "Usage:",
-  "  plannotator inbox [--background | --no-open | --open] [--tailscale]",
+  "  plannotator inbox [--background | --no-open | --open [<thread>]] [--tailscale]",
   "  plannotator inbox mcp [--t3]",
   "  plannotator inbox status [--json]",
   "  plannotator inbox stop",
@@ -562,6 +580,7 @@ export const INBOX_COMMAND_USAGE = [
   "  plannotator inbox projects combine <project id> --into <project id> [--json]",
   "  plannotator inbox projects undo <project id> [--json]",
   INBOX_ROWS_USAGE_LINE,
+  "  plannotator inbox export --jsonl <folder> [--json]",
   "  plannotator inbox icon set <file> --request <id> [--json]",
   "  plannotator inbox call [--session <id>] <action> [<json> | -]",
   "  plannotator inbox pulls ls|add|rm [--session <id>] <thread> [<ref>... | --all]",
@@ -580,6 +599,7 @@ export const INBOX_COMMAND_USAGE = [
   "                                  detached first when it is not running. Never blocks:",
   "                                  what the /plannotator-inbox commands run, and how to",
   "                                  find the Inbox's address for the person.",
+  "  plannotator inbox --open <thread>  Show that thread in the open Inbox window, or open one.",
   "  plannotator inbox --tailscale   Also publish it over the person's tailnet for this",
   "                                  run (tailscale serve, HTTPS, never funnel), for the",
   "                                  Tailscale login that owns this machine only. With",
@@ -601,6 +621,9 @@ export const INBOX_COMMAND_USAGE = [
   "                                  --tailscale is published again.",
   "  plannotator inbox projects      List the projects, combine one into another, undo a",
   "                                  combine: when the person asks to clean them up.",
+  "  plannotator inbox export        Write the whole Inbox into a new folder as JSONL files,",
+  "                                  when the person asks for a copy of it (see",
+  "                                  'plannotator inbox export --help').",
   "  plannotator inbox icon set      Hand back an animated agent icon, only when an Inbox",
   "                                  message asked you to (its request id starts ia_).",
   "  plannotator inbox call          Run one Inbox action from a script: JSON in, one JSON",
@@ -610,6 +633,9 @@ export const INBOX_COMMAND_USAGE = [
   "  plannotator inbox export-decisions",
   "                                  A thread's decisions as a file; --pr puts them on",
   "                                  one of its PRs, updated in place when run again.",
+  "  plannotator inbox connection    The Inbox connection for an agent plugin written in",
+  "                                  another language (Hermes Agent's): JSON lines on",
+  "                                  stdin and stdout. Started by that plugin, never by you.",
   ...INBOX_LINK_USAGE,
   "  plannotator inbox --notes <ids> Add the Inbox note to these agents' instructions",
   "                                  files (claude-code, codex, gemini, qwen, pi,",
@@ -877,8 +903,8 @@ export function isSubcommandHelpInvocation(args: string[]): string | null {
   if (!sub) return null;
   const canonical = SUBCOMMAND_HELP_ALIASES[sub] ?? sub;
   if (!(canonical in SUBCOMMAND_HELP)) return null;
-  // `inbox projects --help` is that command's own usage, not the whole guide.
-  if (canonical === "inbox" && (args[1] === "projects" || args[1] === "rows" || args[1] === "icon")) return null;
+  // `inbox projects --help` (and rows, export, icon) is that command's own usage, not the whole guide.
+  if (canonical === "inbox" && (args[1] === "projects" || args[1] === "rows" || args[1] === "export" || args[1] === "icon" || args[1] === "connection")) return null;
   return hasHelpFlag(args.slice(1)) ? canonical : null;
 }
 

@@ -61,8 +61,12 @@ export const INBOX_LINE_WORDS = 120;
 export const INBOX_EXPAND_MAX = 50;
 
 
-/** An author as an agent reads it: the person, or an agent by the name the person sees. */
-export type AgentAuthor = { kind: "person" } | { kind: "agent"; name: string };
+/**
+ * An author as an agent reads it: the person, or an agent by the name the person sees, with `you: true`
+ * on the reader's own messages (the session that reads is the session that wrote), so two sessions of
+ * one agent in a thread read apart. Worked out at read time; nothing stored changes.
+ */
+export type AgentAuthor = { kind: "person" } | { kind: "agent"; name: string; you?: true };
 
 /** A question's answer without the copies of its key, kind and prompt. */
 export interface AgentAnswer {
@@ -154,6 +158,8 @@ export interface AgentMessage {
 export interface AgentTagged {
   agent: string;
   session: string;
+  /** The session's name as the person's window shows it (their rename, else its generated title); absent when it has none. */
+  name?: string;
   you: boolean;
 }
 
@@ -161,7 +167,19 @@ export interface AgentTagged {
 export interface AgentAddressee {
   host: string;
   session: string;
+  /** The session's name as the person's window shows it; absent when it has none. */
+  name?: string;
   you: boolean;
+}
+
+export type SessionNameOf = (session: string) => string | null;
+
+/**
+ * Another session as an agent reads it: `Pi (pi-0193)`, and with the name the person's window shows for it,
+ * `"docs sweep" (Pi pi-0193)`. The name is quoted: it is display text, never an id.
+ */
+export function sessionWho(agent: string, session: string, name: string | null | undefined): string {
+  return name ? `${JSON.stringify(name)} (${agent} ${session})` : `${agent} (${session})`;
 }
 
 export interface AgentMessageLine {
@@ -193,6 +211,7 @@ export interface ThreadReadInput {
   message_id?: string;
   /** The reader's session: a message addressed to it says `you`. */
   caller?: string | null;
+  names?: SessionNameOf;
 }
 
 export interface ThreadWindowResult {
@@ -203,7 +222,8 @@ export interface ThreadWindowResult {
     resolved_at: string | null;
     project: { id: string; name: string; root: string };
     message_count: number;
-    participants: { kind: "person" | "agent"; name: string; messages: number }[];
+    /** `you: true` on the reader's own session (its messages counted apart from another session of the same agent). */
+    participants: { kind: "person" | "agent"; name: string; messages: number; you?: true }[];
     /** Every question still waiting on the person (open, or picked and not sent). */
     open_questions: AgentOpenQuestion[];
     /** Shown in full, oldest first: the window, the person's earlier messages, and any expanded or asked-for message. */
@@ -266,37 +286,45 @@ export function clip(text: string, max: number): string {
   return `${(space > max * 0.6 ? head.slice(0, space) : head).trimEnd()}…`;
 }
 
-export function agentAuthor(author: InboxMessageWire["author"]): AgentAuthor {
-  return author.kind === "person" ? { kind: "person" } : { kind: "agent", name: inboxAgentName(author) };
+export function agentAuthor(author: InboxMessageWire["author"], caller: string | null = null): AgentAuthor {
+  if (author.kind === "person") return { kind: "person" };
+  const you = !!caller && author.session === caller;
+  return { kind: "agent", name: inboxAgentName(author), ...(you ? { you: true as const } : {}) };
 }
 
+/** `the person`, `Claude Code`, or the reader's own `Claude Code (you)`. */
 function authorName(author: AgentAuthor): string {
-  return author.kind === "person" ? "the person" : author.name;
+  if (author.kind === "person") return "the person";
+  return author.you ? `${author.name} (you)` : author.name;
 }
 
 /** `to you`, or `to another session (Claude Code ses_…)`: a person's message meant for one session. */
 function addresseeWords(to: AgentAddressee | undefined): string | null {
   if (!to) return null;
-  return to.you ? "to you" : `to another session (${INBOX_HOST_NAMES[to.host] ?? to.host} ${to.session})`;
+  if (to.you) return "to you";
+  const agent = INBOX_HOST_NAMES[to.host] ?? to.host;
+  return to.name ? `to another session ${sessionWho(agent, to.session, to.name)}` : `to another session (${agent} ${to.session})`;
 }
 
 /** `tagged you, Pi (pi-0193)`: the sessions a person's reply tags, the reader first as `you`. */
 function taggedWords(tagged: readonly AgentTagged[] | undefined): string | null {
   if (!tagged?.length) return null;
   const you = tagged.filter((t) => t.you);
-  const others = tagged.filter((t) => !t.you).map((t) => `${t.agent} (${t.session})`);
+  const others = tagged.filter((t) => !t.you).map((t) => sessionWho(t.agent, t.session, t.name));
   return `tagged ${[...(you.length > 0 ? ["you"] : []), ...others].join(", ")}`;
 }
 
 /** The tags a wire message carries as `store.agentThread` writes them (`tagged`), with the reader marked. */
-function taggedOf(message: InboxMessageWire, caller: string | null): AgentTagged[] | undefined {
+function taggedOf(message: InboxMessageWire, caller: string | null, names?: SessionNameOf): AgentTagged[] | undefined {
   const tagged = (message as { tagged?: unknown }).tagged;
   if (!Array.isArray(tagged) || tagged.length === 0) return undefined;
-  return tagged.flatMap((t) =>
-    t && typeof t === "object" && typeof (t as { session?: unknown }).session === "string"
-      ? [{ agent: String((t as { agent?: unknown }).agent ?? "An agent"), session: (t as { session: string }).session, you: !!caller && (t as { session: string }).session === caller }]
-      : [],
-  );
+  return tagged.flatMap((t) => {
+    if (!t || typeof t !== "object" || typeof (t as { session?: unknown }).session !== "string") return [];
+    const session = (t as { session: string }).session;
+    const you = !!caller && session === caller;
+    const name = you ? null : (names?.(session) ?? null);
+    return [{ agent: String((t as { agent?: unknown }).agent ?? "An agent"), session, ...(name ? { name } : {}), you }];
+  });
 }
 
 export function agentAnswer(answer: QuestionAnswer | null | undefined): AgentAnswer | undefined {
@@ -420,11 +448,14 @@ export type AgentMessageForm = "window" | "earlier" | "whole";
 
 /** A message in full, as read_thread shows it. */
 /** Who a person's message is addressed to, if anyone. */
-function addressee(message: InboxMessageWire, caller: string | null): AgentAddressee | undefined {
-  return message.to ? { host: message.to.host, session: message.to.session, you: !!caller && message.to.session === caller } : undefined;
+function addressee(message: InboxMessageWire, caller: string | null, names?: SessionNameOf): AgentAddressee | undefined {
+  if (!message.to) return undefined;
+  const you = !!caller && message.to.session === caller;
+  const name = you ? null : (names?.(message.to.session) ?? null);
+  return { host: message.to.host, session: message.to.session, ...(name ? { name } : {}), you };
 }
 
-export function agentMessage(message: InboxMessageWire, form: AgentMessageForm = "window", caller: string | null = null): AgentMessage {
+export function agentMessage(message: InboxMessageWire, form: AgentMessageForm = "window", caller: string | null = null, names?: SessionNameOf): AgentMessage {
   const source = form === "earlier" ? withoutAnswersSection(message) : message.body;
   const total = byteLength(message.body);
   const over = form !== "whole" && byteLength(source) > INBOX_BODY_CUT_BYTES;
@@ -434,7 +465,7 @@ export function agentMessage(message: InboxMessageWire, form: AgentMessageForm =
   const ack = message.ack && typeof message.ack === "object" ? message.ack : null;
   return {
     id: message.id,
-    author: agentAuthor(message.author),
+    author: agentAuthor(message.author, caller),
     created_at: message.created_at,
     reply_to: message.reply_to,
     body,
@@ -443,8 +474,8 @@ export function agentMessage(message: InboxMessageWire, form: AgentMessageForm =
     ...(message.attachments?.length ? { attachments: message.attachments.map((a) => ({ name: a.name, kind: a.kind, size: a.size, path: a.path })) } : {}),
     ...(ack ? { ack: { label: ack.label, at: ack.at, reaction: agentReaction(ack.reaction) } } : {}),
     ...(message.guide ? { guide: { title: message.guide.title } } : {}),
-    ...(message.to ? { to: addressee(message, caller) } : {}),
-    ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller) } : {}),
+    ...(message.to ? { to: addressee(message, caller, names) } : {}),
+    ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller, names) } : {}),
     ...(message.board_request === true ? { board_request: true as const } : {}),
     ...(message.decision_ask === true ? { decision_ask: true as const } : {}),
     ...(message.rows_ask === true ? { rows_ask: true as const } : {}),
@@ -461,11 +492,11 @@ function firstWords(message: InboxMessageWire): string {
   return clip(text, INBOX_LINE_WORDS);
 }
 
-export function agentMessageLine(message: InboxMessageWire, caller: string | null = null): AgentMessageLine {
+export function agentMessageLine(message: InboxMessageWire, caller: string | null = null, names?: SessionNameOf): AgentMessageLine {
   const n = numbering(message.questions ?? []);
   return {
     id: message.id,
-    author: agentAuthor(message.author),
+    author: agentAuthor(message.author, caller),
     created_at: message.created_at,
     reply_to: message.reply_to,
     words: firstWords(message),
@@ -475,8 +506,8 @@ export function agentMessageLine(message: InboxMessageWire, caller: string | nul
     ...(message.guide ? { guide: message.guide.title } : {}),
     ...(message.ack ? { ack: true as const } : {}),
     ...(message.ack ? { reaction: inboxAckReaction(message.ack.reaction).emoji } : {}),
-    ...(message.to ? { to: addressee(message, caller) } : {}),
-    ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller) } : {}),
+    ...(message.to ? { to: addressee(message, caller, names) } : {}),
+    ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller, names) } : {}),
     ...(message.board_request === true ? { board_request: true as const } : {}),
     ...(inboxViewingLine(message) ? { viewing: inboxViewingLine(message) } : {}),
   };
@@ -573,9 +604,9 @@ export function windowedThread(
       .map((card) => ({ id: card.id, title: card.title }));
   const messages = all
     .filter((m) => full.has(m.id))
-    .map((m) => agentMessage(m, formOf(m.id), caller))
+    .map((m) => agentMessage(m, formOf(m.id), caller, input.names))
     .map((m) => (m.board_request ? { ...m, board_cards: linkedCards() } : m));
-  const earlier = inRange.filter((m) => !full.has(m.id)).map((m) => agentMessageLine(m, caller));
+  const earlier = inRange.filter((m) => !full.has(m.id)).map((m) => agentMessageLine(m, caller, input.names));
   const leftOut = all.filter((m) => !shown.has(m.id));
   // The questions of messages left out, without repeating what the reader has:
   // open and picked ones are in the header; for a message older than `after`
@@ -609,11 +640,12 @@ export function windowedThread(
     }
   }
 
-  const participants = new Map<string, { kind: "person" | "agent"; name: string; messages: number }>();
+  const participants = new Map<string, { kind: "person" | "agent"; name: string; messages: number; you?: true }>();
   for (const message of all) {
-    const author = agentAuthor(message.author);
+    const author = agentAuthor(message.author, caller);
     const name = authorName(author);
-    const entry = participants.get(`${author.kind}:${name}`) ?? { kind: author.kind, name, messages: 0 };
+    const you = author.kind === "agent" && author.you === true;
+    const entry = participants.get(`${author.kind}:${name}`) ?? { kind: author.kind, name: author.kind === "agent" ? author.name : name, messages: 0, ...(you ? { you: true as const } : {}) };
     entry.messages += 1;
     participants.set(`${author.kind}:${name}`, entry);
   }
@@ -748,7 +780,7 @@ export function windowedThreadText(result: ThreadWindowResult, order: readonly s
   const facts = [
     thread.thread_name ? `Name: ${thread.thread_name}` : null,
     `Project: ${thread.project.name} (${thread.project.root})`,
-    `From: ${thread.participants.map((p) => `${p.name} ${p.messages}`).join(", ")}`,
+    `From: ${thread.participants.map((p) => `${p.you ? `${p.name} (you)` : p.name} ${p.messages}`).join(", ")}`,
     thread.resolved_at ? `Resolved ${shortTime(thread.resolved_at)}` : null,
     result.url,
   ].filter((part): part is string => part !== null);

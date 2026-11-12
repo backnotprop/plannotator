@@ -690,7 +690,7 @@ describe("the window's routes: settings, restart, favicon", () => {
       expect(settings.mcp_url).toBe(`http://127.0.0.1:${server.port}/mcp`);
       expect(settings.port).toBe(server.port);
       // Nothing set: the defaults, on for the Claude Code mod, off on Pi, OpenCode and DeepSeek Harness.
-      expect(settings.inbox_tool).toEqual({ hosts: { "claude-code": true, pi: false, opencode: false, dsh: false, cline: false }, env: null });
+      expect(settings.inbox_tool).toEqual({ hosts: { "claude-code": true, pi: false, opencode: false, dsh: false, cline: false, openclaw: false, hermes: false }, env: null });
 
       const storage = await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings/storage`);
       expect(storage.status).toBe(200);
@@ -739,7 +739,7 @@ describe("the window's routes: settings, restart, favicon", () => {
 
       const saved = await post(server, "/api/inbox/settings", { serverSession: server.serverSession, inbox_tool: { pi: true } });
       expect(saved.status).toBe(200);
-      expect((await saved.json()).inbox_tool.hosts).toEqual({ "claude-code": true, pi: true, opencode: false, dsh: false, cline: false });
+      expect((await saved.json()).inbox_tool.hosts).toEqual({ "claude-code": true, pi: true, opencode: false, dsh: false, cline: false, openclaw: false, hermes: false });
       await post(server, "/api/inbox/settings", { serverSession: server.serverSession, inbox_tool: { "claude-code": false } });
       // Each host keeps its own choice; an unset host keeps its default.
       expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxTool).toEqual({ pi: true, "claude-code": false });
@@ -895,6 +895,13 @@ describe("the window's routes: settings, restart, favicon", () => {
       // A choice made in plan review (config.json written by POST /api/config) is what the Inbox reads.
       writeFileSync(join(dataDir, "config.json"), JSON.stringify({ ...onDisk(), favicon: "totman" }));
       expect(await read()).toBe("totman");
+      // The installed app's manifest and touch icon follow the same choice (inbox-app-icons.ts).
+      const manifest = await fetch(`${base}/manifest.webmanifest`);
+      expect(manifest.headers.get("content-type")).toBe("application/manifest+json; charset=utf-8");
+      const [face] = (await manifest.json()).icons as { src: string }[];
+      expect(face.src).toBe("/app-icon/face-256.png");
+      const touch = new Uint8Array(await (await fetch(`${base}/apple-touch-icon.png`)).arrayBuffer());
+      expect(touch).toEqual(new Uint8Array(await (await fetch(`${base}${face.src}`)).arrayBuffer()));
       // A config.json that still says "classic" (0.28.57's P): read as unset, Glass, and the file is left as it is.
       writeFileSync(join(dataDir, "config.json"), JSON.stringify({ ...onDisk(), favicon: "classic" }));
       expect(await read()).toBe("glass");

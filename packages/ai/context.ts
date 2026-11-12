@@ -58,7 +58,7 @@ export function buildForkPreamble(ctx: AIContext): string {
         lines.push(`Project: ${ctx.plan.project}`);
       }
       lines.push("");
-      lines.push(truncate(ctx.plan.plan, MAX_PLAN_CHARS));
+      lines.push(bounded(ctx.plan.plan));
       if (ctx.plan.annotations) {
         lines.push("");
         lines.push("## User Annotations So Far");
@@ -84,7 +84,7 @@ export function buildForkPreamble(ctx: AIContext): string {
       lines.push("");
       lines.push("## Diff Patch");
       lines.push("```diff");
-      lines.push(truncate(ctx.review.patch, MAX_DIFF_CHARS));
+      lines.push(bounded(ctx.review.patch));
       lines.push("```");
       if (ctx.review.annotations) {
         lines.push("");
@@ -108,7 +108,7 @@ export function buildForkPreamble(ctx: AIContext): string {
         lines.push("Note: this content was converted before annotation, so source line numbers may not match the original document.");
       }
       lines.push("");
-      lines.push(truncate(ctx.annotate.content, MAX_PLAN_CHARS));
+      lines.push(bounded(ctx.annotate.content));
       if (ctx.annotate.annotations) {
         lines.push("");
         lines.push("## User Annotations So Far");
@@ -141,8 +141,21 @@ export function buildEffectivePrompt(
 // Internals
 // ---------------------------------------------------------------------------
 
-const MAX_PLAN_CHARS = 60_000;
-const MAX_DIFF_CHARS = 40_000;
+/**
+ * The plan, document and diff go in whole up to this many characters (about
+ * 75,000 tokens): every provider sends the prompt over a pipe or HTTP, and it
+ * fits the smallest context the Ask AI agents run (128,000 tokens) with room
+ * for the conversation. Past it the text is cut with a marker the model
+ * reads, as before, so a document as big as annotate takes (2 MB) still gets
+ * an answer instead of the provider's "too long" error. (Through 0.28.61 the
+ * cut was at 60,000, and 40,000 for a diff.)
+ */
+const MAX_CONTEXT_CHARS = 300_000;
+
+function bounded(text: string): string {
+  if (text.length <= MAX_CONTEXT_CHARS) return text;
+  return `${text.slice(0, MAX_CONTEXT_CHARS)}\n\n... [truncated for context window: ${MAX_CONTEXT_CHARS.toLocaleString("en-US")} of ${text.length.toLocaleString("en-US")} characters shown]`;
+}
 
 /**
  * Leading instruction for every Ask AI session. Ask AI is a chat assistant —
@@ -153,11 +166,6 @@ const ANSWER_DIRECTLY =
   "You are a helpful assistant inside Plannotator. Respond to the user's message directly and concisely. " +
   "The material below is context for what the user is looking at — do NOT review, summarize, or critique it unless the user's message asks you to. " +
   "Only investigate further (read files, run git) if the user's question actually requires it.";
-
-function truncate(text: string, max: number): string {
-  if (text.length <= max) return text;
-  return `${text.slice(0, max)}\n\n... [truncated for context window]`;
-}
 
 function buildPlanReviewPrompt(
   ctx: Extract<AIContext, { mode: "plan-review" }>
@@ -180,12 +188,12 @@ function buildPlanReviewPrompt(
   }
 
   sections.push("");
-  sections.push(truncate(ctx.plan.plan, MAX_PLAN_CHARS));
+  sections.push(bounded(ctx.plan.plan));
 
   if (ctx.plan.previousPlan) {
     sections.push("");
     sections.push("## Previous Plan Version (for reference)");
-    sections.push(truncate(ctx.plan.previousPlan, MAX_PLAN_CHARS / 2));
+    sections.push(bounded(ctx.plan.previousPlan));
   }
 
   if (ctx.plan.annotations) {
@@ -243,7 +251,7 @@ function buildAnnotatePrompt(
   }
 
   sections.push("");
-  sections.push(truncate(ctx.annotate.content, MAX_PLAN_CHARS));
+  sections.push(bounded(ctx.annotate.content));
 
   if (ctx.annotate.annotations) {
     sections.push("");

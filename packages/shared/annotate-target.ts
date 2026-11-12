@@ -402,7 +402,7 @@ export function resolveAnnotateBundleFiles(
         ok: false,
         message:
           (refusedEnv
-            ? `File refused: ${path} (.env files are never annotated: they commonly hold secrets)\n`
+            ? `File refused: ${path} (a .env file opens only on its own, by its path: it may hold secrets)\n`
             : `File type not supported: ${ext} (${path})\n`) +
           `Every file in a review of several files must be one annotate opens. Supported types: ${getAnnotatableExtensionsHint()}`,
       };

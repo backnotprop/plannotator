@@ -72,7 +72,7 @@ function loopback(path: string, method = 'GET', body?: string): Promise<{ status
 
 const frame = (name: string, data: object) => frames.get(name)?.(new MessageEvent(name, { data: JSON.stringify(data) }));
 
-const TESTS = 9;
+const TESTS = 10;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -226,24 +226,40 @@ async function closePane() {
 test.skipIf(!hasDom)('a run of saves reads nothing until the last one lands, then the list and the drafts once, never the thread or its files', async () => {
   const field = await open();
   slow = true;
-  let words = '';
+  // The first letter answers the question (open → picked): it saves at once, and its run reads what shows the pick.
+  type(field, 'w');
+  await until(() => saves === 1, 'the first save');
+  await until(() => count('/api/inbox/drafts') > 0, 'the read after the first save');
+  await wait(SAVE_MS + 120);
+  // One save's echo is not a whole re-read: the list once, the drafts once (the pick is unsent work), and nothing of
+  // the thread, whose pane drew the save's answer already.
+  expect(count('/api/inbox/threads')).toBe(1);
+  expect(count('/api/inbox/drafts')).toBe(1);
+  expect(count(threadRoute())).toBe(0);
+  expect(count(`${threadRoute()}/attachments`)).toBe(0);
+});
+
+test.skipIf(!hasDom)('words typed in an answer already picked save once after the pause and read nothing: no row or draft label moved', async () => {
+  const field = await open();
+  type(field, 'w');
+  await until(() => saves === 1 && count('/api/inbox/drafts') > 0, 'the first save and its reads');
+  await wait(SAVE_MS + 120);
+  reads = [];
+  slow = true;
+  let words = 'w';
   for (let i = 0; i < 24; i += 1) {
     words += 'w';
     type(field, words);
     await wait(25);
   }
-  expect(saves).toBeGreaterThanOrEqual(3);
-  // Saves went through, and the window read nothing for them.
+  // No save while the person types (typedAnswers.ts), then one with the last words.
+  expect(saves).toBe(1);
+  await until(() => saves === 2, 'the save after the pause');
+  await until(() => (lastPicked as { answer?: { other?: string } } | null)?.answer?.other === words, 'the last words saved');
+  await wait(SAVE_MS + 300);
+  expect(field.value).toBe(words);
+  // The question stayed picked: nothing the list, the decisions or the drafts show moved, so nothing is read.
   expect(reads.filter((path) => (path.startsWith('/api/inbox/threads') && !path.endsWith('/ask')) || path === '/api/inbox/drafts' || path === '/api/inbox/decisions')).toEqual([]);
-
-  await until(() => field.value === words && count('/api/inbox/drafts') > 0, 'the read after the last save');
-  await wait(SAVE_MS + 120);
-  // One save's echo is not a whole re-read: the list once, the drafts once (the pick is unsent work), and nothing of
-  // the thread, whose pane drew each save's answer already.
-  expect(count('/api/inbox/threads')).toBe(1);
-  expect(count('/api/inbox/drafts')).toBe(1);
-  expect(count(threadRoute())).toBe(0);
-  expect(count(`${threadRoute()}/attachments`)).toBe(0);
 });
 
 test.skipIf(!hasDom)("a save's record that comes after its answer reads nothing more, and a list read with nothing new draws nothing", async () => {

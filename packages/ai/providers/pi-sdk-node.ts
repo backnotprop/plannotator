@@ -82,6 +82,7 @@ export class PiProcessNode {
 				// otherwise take it for a person's session (ask-ai-env.ts).
 				env: askAiChildEnv(),
 				stdio: ["pipe", "pipe", "ignore"],
+				windowsHide: true,
 			});
 		} catch (err) {
 			const error = err instanceof Error ? err : new Error(String(err));

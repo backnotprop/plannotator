@@ -64,17 +64,24 @@ test("List view (Grouping) is registered in the real queue as the owner's order 
   expect(INBOX_REVEALS[after]).toEqual({ id: LIST_VIEW, kind: "offer", tenureMs: 0, minThreads: 15, ahead: true, enabled: true });
 });
 
-test("the grill-me tip is registered beside the line, waiting for every other card: aside, last resort, no tenure", () => {
+const AGENT_RULES: RevealId = "agent_rules";
+
+test('"Set the rules" is registered last of the later group (2026-11-11): an offer after two days and ten threads, so no earlier dialog moves', () => {
   const after = INBOX_REVEALS.findIndex((entry) => entry.id === BRO) + 1;
+  expect(INBOX_REVEALS[after]).toEqual({ id: AGENT_RULES, kind: "offer", tenureMs: 2 * DAY, minThreads: 10, enabled: true });
+});
+
+test("the grill-me tip is registered beside the line, waiting for every other card: aside, last resort, no tenure", () => {
+  const after = INBOX_REVEALS.findIndex((entry) => entry.id === AGENT_RULES) + 1;
   expect(INBOX_REVEALS[after]).toEqual({ id: GRILL_ME, kind: "offer", tenureMs: 0, minThreads: 0, aside: true, lastResort: true, enabled: true });
 });
 
 test("the same-day group, in the owner's order (2026-11-10): the tab icon, themes, Grouping, Rows, the sound, voice, none with a tenure; then the later group, each with one", () => {
   const ids = INBOX_REVEALS.filter((entry) => !entry.aside && entry.id !== "code_review").map((entry) => entry.id);
-  expect(ids).toEqual(["tab_icon", "theme_chooser", LIST_VIEW, "list_intro", "sound", "voice", "snooze", "board", "steps", BRO]);
+  expect(ids).toEqual(["tab_icon", "theme_chooser", LIST_VIEW, "list_intro", "sound", "voice", "snooze", "board", "steps", BRO, AGENT_RULES]);
   const tenure = (id: RevealId) => INBOX_REVEALS.find((entry) => entry.id === id)!.tenureMs;
   expect(ids.slice(0, 6).map(tenure)).toEqual([0, 0, 0, 0, 0, 0]);
-  expect(ids.slice(6).map(tenure)).toEqual([2 * DAY, 3 * DAY, 5 * DAY, 2 * DAY]);
+  expect(ids.slice(6).map(tenure)).toEqual([2 * DAY, 3 * DAY, 5 * DAY, 2 * DAY, 2 * DAY]);
   expect(INBOX_REVEALS.find((entry) => entry.id === "tab_icon")).toEqual({ id: "tab_icon", kind: "update", tenureMs: 0, minThreads: 0, enabled: true });
 });
 
@@ -103,6 +110,7 @@ interface User {
   grillMeGap?: number;
   /** Still on the default theme (shared/inbox/theme-chooser.ts): the "themes" dialog is open. Absent: a theme was picked. */
   defaultTheme?: boolean;
+  noRules?: boolean;
 }
 
 interface Shown {
@@ -138,7 +146,7 @@ function simulate(user: User, days = 30): Shown[] {
         open: Object.fromEntries(
           TABLE.map((entry) => [
             entry.id,
-            !done.has(entry.id) && (entry.id === "theme_chooser" ? user.defaultTheme === true : entry.id === CODE_REVIEW_OFFER.id ? user.codeReviewOff === true : entry.id === GRILL_ME ? user.grillMeGap !== undefined && day >= user.grillMeGap : entry.kind === "offer" || user.update),
+            !done.has(entry.id) && (entry.id === "theme_chooser" ? user.defaultTheme === true : entry.id === CODE_REVIEW_OFFER.id ? user.codeReviewOff === true : entry.id === GRILL_ME ? user.grillMeGap !== undefined && day >= user.grillMeGap : entry.id === AGENT_RULES ? user.noRules === true : entry.kind === "offer" || user.update),
           ]),
         ),
         waitingSince: saved.waitingSince,
@@ -245,6 +253,13 @@ describe("30 days of a heavy user", () => {
       [LIST_VIEW, 5, 9],
       ["steps", 5, 11],
     ]);
+    expectSpaced(shown);
+  });
+
+  test('"Set the rules", for someone with no rules: once, on day 2 at the load after Bro mode (two days\' use), and every other card keeps its day and hour', () => {
+    const shown = simulate({ ...HEAVY, noRules: true });
+    expect(when(shown).filter(([id]) => id === AGENT_RULES)).toEqual([[AGENT_RULES, 2, 13]]);
+    expect(when(shown).filter(([id]) => id !== AGENT_RULES)).toEqual(when(simulate(HEAVY)));
     expectSpaced(shown);
   });
 

@@ -146,6 +146,12 @@ describe("guide extra instructions (#1265)", () => {
     expect(composed.endsWith("Prefer product vocabulary over internal codenames.")).toBe(true);
   });
 
+  it("the longest instructions still fit one Windows command line with the marker contract and a review context", () => {
+    const prompt = composeGuideMarkerPrompt("c".repeat(4_000), PI_FIXTURE_NONCE, "i".repeat(GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS));
+    expect(prompt).toContain("i".repeat(GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS));
+    expect(prompt.length).toBeLessThan(32_767 - 500);
+  });
+
   it("truncates instructions past the length cap", () => {
     const long = "A".repeat(GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS) + "OVERFLOW";
     const composed = composeGuideMethodology(long);
