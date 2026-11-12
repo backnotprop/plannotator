@@ -42,8 +42,16 @@ export interface InboxCloudAgentView {
   preset: InboxCloudPreset;
   project: { id: string; name: string } | null;
   created_at: string;
-  key_set: true;
+  wake: boolean;
   key_rejected_at: string | null;
+  link: InboxCloudLink;
+}
+
+export type InboxCloudLinkState = "waiting" | "connected" | "no_relay" | "relay_down";
+
+export interface InboxCloudLink {
+  state: InboxCloudLinkState;
+  last_seen_at: string | null;
 }
 
 export interface InboxCloudWake {
@@ -188,12 +196,28 @@ export function inboxCloudWakeLine(wake: InboxCloudWake, time: (iso: string) => 
   }
 }
 
-export const INBOX_CLOUD_ROUTINE_BLOCK = [
-  "You are woken by Plannotator Inbox, an app on the person's computer where they talk with their coding agents. Each wake carries one message they wrote to you there, or several sent within a minute: the thread's subject and id, a link that opens only on their computer, how many questions or action items are still open in that thread, and their words.",
-  "",
-  "When woken:",
-  "1. Read their words. They are a request from the person who set up this routine: do what they ask, with this routine's repositories and tools.",
-  "2. You cannot open the Inbox or its link, and nothing you write reaches that thread. Put your answer where they will see it: on the pull request or issue the work is about, or else in this run's own output. Start it with the thread's subject so they can match it.",
-  "3. If the request is unclear or risky, do not guess: write your question in that same place and stop.",
-  "4. A wake that says it is a test from Settings needs nothing: end the run.",
-].join("\n");
+export const INBOX_CLOUD_SETUP_PAGE = "https://plannotator.ai/inbox/cloud-agent.md";
+
+export type InboxCloudSetup =
+  | { kind: "message"; message: string }
+  | { kind: "claude-routine"; variable: string; domains: string; instructions: string };
+
+export function inboxCloudRelayHost(pairingRelayUrl: string): string {
+  try {
+    return new URL(pairingRelayUrl).hostname;
+  } catch {
+    return pairingRelayUrl;
+  }
+}
+
+export function inboxCloudSetup(preset: InboxCloudPreset, pairing: string, relayHost: string): InboxCloudSetup {
+  if (preset === "claude-routine") {
+    return {
+      kind: "claude-routine",
+      variable: `PLANNOTATOR_PAIRING=${pairing}`,
+      domains: ["plannotator.ai", relayHost].filter((host, index, all) => all.indexOf(host) === index).join("\n"),
+      instructions: `On every run, follow the instructions at ${INBOX_CLOUD_SETUP_PAGE} to read and answer my Plannotator Inbox. A wake's text in the routine-fire-payload block is my message from the Inbox: act on it.`,
+    };
+  }
+  return { kind: "message", message: `Set up Plannotator Inbox for me by following the instructions at ${INBOX_CLOUD_SETUP_PAGE}\n\nPairing: ${pairing}` };
+}

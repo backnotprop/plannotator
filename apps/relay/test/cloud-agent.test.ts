@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decryptWithKey, deriveRelayKeys, deriveRelaySignalToken, encryptWithKey } from "@plannotator/core/crypto";
+import { INBOX_CLOUD_SETUP_PAGE } from "@plannotator/core/inbox-cloud";
 import { decodeInboxAgentPairing, type InboxAgentPairing } from "../../../packages/shared/inbox/agent-pairing";
 import { SimAgent } from "../../../scripts/inbox-sim";
 import { NO_BROWSER } from "../../../tests/helpers/no-browser";
@@ -38,6 +39,7 @@ describe("a paired cloud agent reaches the Inbox through the relay, under wrangl
   const outputs: string[] = [];
   let routineRoot = "";
   let hook: ReturnType<typeof Bun.serve>;
+  let pairAnswer: Json = {};
 
   const startTheInbox = () => {
     expect(realpathSync(w.root).startsWith(realpathSync(tmpdir()))).toBe(true);
@@ -136,6 +138,7 @@ describe("a paired cloud agent reaches the Inbox through the relay, under wrangl
     localThread = (await local.send({ project_path: w.project, subject: "Launch plan", body: PRIVATE })) as { thread_id: string; message_id: string };
     const paired = await win("/api/inbox/cloud-agents", { name: "Nightly fixer", preset: "grok-bot", url: `http://127.0.0.1:${hook.port}/hook`, key: KEY });
     expect(paired.status).toBe(200);
+    pairAnswer = paired.json;
     pairingString = paired.json.pairing;
     session = paired.json.agent.session;
     pairing = decodeInboxAgentPairing(pairingString) as typeof pairing;
@@ -168,6 +171,25 @@ describe("a paired cloud agent reaches the Inbox through the relay, under wrangl
     });
     expect(push.status).toBe(403);
   });
+
+  const linkOf = async (agentSession: string) => ((await win("/api/inbox/cloud-agents")).json.agents as Json[]).find((agent) => agent.session === agentSession)?.link as Json;
+  const pairingsIn = (text: string) => text.match(/plannotator-pairing-\d\.[A-Za-z0-9_-]+/g) ?? [];
+
+  test("Settings' message carries the v2 pairing string exactly once and never the webhook key; the agent shows waiting until its first whoami through the relay, then connected", async () => {
+    expect(pairAnswer.setup.kind).toBe("message");
+    const message = pairAnswer.setup.message as string;
+    expect(message).toContain(INBOX_CLOUD_SETUP_PAGE);
+    expect(pairingsIn(message)).toEqual([pairingString]);
+    expect(decodeInboxAgentPairing(pairingsIn(message)[0])?.relay).toEqual(pairing.relay);
+    expect(JSON.stringify(pairAnswer)).not.toContain(KEY);
+    expect(pairAnswer.agent.wake).toBe(true);
+
+    expect(await linkOf(session)).toEqual({ state: "waiting", last_seen_at: null });
+    expect(cli("whoami").code).toBe(0);
+    const link = await linkOf(session);
+    expect(link.state).toBe("connected");
+    expect(Date.parse(link.last_seen_at)).toBeGreaterThan(Date.parse(pairAnswer.agent.created_at) - 1);
+  }, 30_000);
 
   test("end to end: the person replies in the agent's thread, the webhook wakes a stand-in routine holding only the pairing string, and its answer lands in the thread under the agent's name", async () => {
     const whoami = cli("whoami");
@@ -340,4 +362,51 @@ describe("a paired cloud agent reaches the Inbox through the relay, under wrangl
     const relayOwnLines = relay.log().split("\n").filter((line) => !line.startsWith("[wrangler:info] GET /v1/mailboxes/"));
     for (const place of [storageBytes(relay).toString("latin1"), relayOwnLines.join("\n"), inboxLog()]) expect(place.includes(signalToken)).toBe(false);
   });
+
+  test("a polling agent pairs with no webhook, connects and sees the signal move with no wake; a new pairing revokes the old string at once", async () => {
+    const before = wakes.length;
+    const paired = await win("/api/inbox/cloud-agents", { name: "Poller", preset: "other" });
+    expect(paired.status).toBe(200);
+    expect(paired.json.agent.wake).toBe(false);
+    const first = pairingsIn(paired.json.setup.message as string);
+    expect(first).toHaveLength(1);
+    const firstPairing = decodeInboxAgentPairing(first[0])!;
+    expect(firstPairing.relay).toEqual(pairing.relay);
+    const poller = paired.json.agent.session as string;
+
+    expect(cli("whoami", undefined, { PLANNOTATOR_PAIRING: first[0]! }).code).toBe(0);
+    expect((await linkOf(poller)).state).toBe("connected");
+    const pollToken = await deriveRelaySignalToken(firstPairing.secret, firstPairing.device_id);
+    const pollSignal = () => fetch(`${firstPairing.relay!.url}/v1/mailboxes/${firstPairing.relay!.mailbox_id}/signals/${pollToken}`).then((r) => r.json() as Promise<Json>);
+    const quiet = (await pollSignal()).signal;
+    const sent = await win("/api/inbox/messages", { to: { session: poller }, body: "Poll me: anything new on the export?", idempotency_key: "poll-1" });
+    expect(sent.status).toBe(200);
+    await until(async () => (await pollSignal()).signal, (value) => value !== quiet, "the poller's signal to move");
+    const listed = cli("read_thread", {}, { PLANNOTATOR_PAIRING: first[0]! });
+    expect(listed.code).toBe(0);
+    expect(listed.stdout).toContain(sent.json.thread_id);
+    await sleep(500);
+    expect(wakes.length).toBe(before);
+    expect((await win(`/api/inbox/cloud-agents/${poller}/test`, {})).json.test.started).toBe(false);
+
+    const renewed = await win(`/api/inbox/cloud-agents/${poller}/pairing`, {});
+    expect(renewed.status).toBe(200);
+    const second = pairingsIn(renewed.json.setup.message as string);
+    expect(second).toHaveLength(1);
+    expect(second[0]).not.toBe(first[0]);
+    expect(renewed.json.agent.link.state).toBe("waiting");
+    const old = cli("whoami", undefined, { PLANNOTATOR_PAIRING: first[0]! });
+    expect(old.code).toBe(1);
+    expect(old.stderr).toStartWith("pairing_removed: ");
+    expect(cli("whoami", undefined, { PLANNOTATOR_PAIRING: second[0]! }).code).toBe(0);
+    expect((await linkOf(poller)).state).toBe("connected");
+    expect(cli("read_thread", { thread_id: sent.json.thread_id }, { PLANNOTATOR_PAIRING: second[0]! }).code).toBe(0);
+
+    const claude = await win("/api/inbox/cloud-agents", { name: "Routine", preset: "claude-routine" });
+    expect(claude.json.setup.kind).toBe("claude-routine");
+    expect(pairingsIn(claude.json.setup.variable)).toHaveLength(1);
+    expect(claude.json.setup.variable).toStartWith("PLANNOTATOR_PAIRING=plannotator-pairing-2.");
+    expect((claude.json.setup.domains as string).split("\n")).toContain(new URL(relay.url).hostname);
+    expect(pairingsIn(claude.json.setup.instructions)).toEqual([]);
+  }, 60_000);
 });
