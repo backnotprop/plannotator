@@ -196,7 +196,8 @@ test('a healthy Send on this computer: press, the reply on both sides, clear, wi
   expect(lines.filter((l) => l.id === end.id && l.side === 'window').map((l) => l.ev)).toEqual(['req_start', 'req_head', 'req_end']);
   const order = [...lines].sort((a, b) => Number(a.seq ?? 0) - Number(b.seq ?? 0)).filter((l) => l.side === 'window' && l.id === end.id || l.ev === 'send_press' || l.ev === 'send_clear').map((l) => l.ev);
   expect(order).toEqual(['send_press', 'req_start', 'req_head', 'req_end', 'send_clear']);
-  expect(windowEv(lines, 'page_load').at(-1)?.protocol).toBeTruthy();
+  // The reload revalidates the cached page (304), so its HTTP version comes on the first answer over the network.
+  expect(windowEv(lines, 'page_load').at(-1)?.protocol ?? windowEv(lines, 'protocol').at(-1)?.protocol).toBeTruthy();
 });
 
 test('the reply never arrived: after a refresh the file shows the window started it and the server never saw it', async ({ browser }) => {

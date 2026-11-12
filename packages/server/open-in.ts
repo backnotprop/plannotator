@@ -87,6 +87,7 @@ function runArgv(
 
     let child: ReturnType<typeof spawn>;
     try {
+      // windows-hide-guard: starts the app window the person asked for, which windowsHide would start hidden.
       child = spawn(cmd, args, {
         detached: true,
         stdio: ["ignore", "ignore", "pipe"],
@@ -173,6 +174,7 @@ function spawnDetached(
   friendlyName: string,
 ): Promise<OpenInLaunchResult> {
   try {
+    // windows-hide-guard: starts the app window the person asked for, which windowsHide would start hidden.
     Bun.spawn([cmd, ...args], { env: childEnv(), stdout: "ignore", stderr: "ignore" });
     return Promise.resolve({ ok: true });
   } catch (err) {

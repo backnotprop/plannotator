@@ -17,7 +17,7 @@ import { describeTailscaleFailure, type TailscaleRunner } from "@plannotator/sha
 import { writeReleaseNotes } from "@plannotator/shared/update-check";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { fetchReleaseImagesFor } from "./inbox-whats-new-images";
-import { takeDownInboxTailscale } from "./inbox-tailscale";
+import { takeDownInboxTailscale, type InboxTailscaleTimers } from "./inbox-tailscale";
 import { inboxLiveSiteId } from "./inbox-live";
 
 type Json = Record<string, any>;
@@ -69,6 +69,7 @@ function fakeTailscale(options: { tagged?: boolean } = {}) {
       if (down.status) return fail;
       return ok(
         JSON.stringify({
+          BackendState: "Running",
           Self: { DNSName: `${MAGIC}.`, UserID: 42, ...(self.tagged ? { Tags: ["tag:server"] } : {}) },
           User: { "42": { ID: 42, LoginName: self.tagged ? "tagged-devices" : OWNER, DisplayName: "Ramos" } },
         }),
@@ -153,7 +154,7 @@ describe("Inbox over your tailnet", () => {
     expect((await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/threads`, { headers: { Host: `${MAGIC}:${inbox.port}` } })).status).toBe(403);
   });
 
-  test("the window page (#2032): compressed through the tailnet (br and gzip, Vary, a weak ETag and 304, private no-cache), unchanged on loopback, and the listener's checks still run first", async () => {
+  test("the window page (#2032): compressed through the tailnet (br and gzip, Vary, a weak ETag and 304, private no-cache), the same on loopback, and the listener's checks still run first", async () => {
     const dataDir = world({ inboxTailscale: true });
     const ts = fakeTailscale();
     const page = `<!doctype html><title>Inbox</title>${"<p>the window, a large single-file page</p>\n".repeat(20000)}`;
@@ -212,19 +213,26 @@ describe("Inbox over your tailnet", () => {
     expect((await raw("/", { "Accept-Encoding": "br", "If-None-Match": etag }, "GET", null)).status).toBe(403);
     expect((await raw("/", { "Accept-Encoding": "br", "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty" })).status).toBe(403);
 
-    // The data routes stay no-store and uncompressed.
+    // The data routes stay no-store, and a JSON read takes the same encoding path as on loopback (inbox-encoding.ts).
+    const project = inbox.store.ensureProject({ name: "shop", root: dataDir });
+    for (let i = 0; i < 8; i++) {
+      inbox.store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: "s1", name: "Claude Code" }, subject: `Thread ${i}`, body: "Words for the list. ".repeat(40) });
+    }
     const threads = await raw("/api/inbox/threads", { "Accept-Encoding": "br" });
     expect(threads.headers.get("cache-control")).toBe("no-store");
-    expect(threads.headers.get("content-encoding")).toBeNull();
+    expect(threads.headers.get("content-encoding")).toBe("br");
+    expect(threads.headers.get("vary")).toBe("Accept-Encoding");
+    expect(threads.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(JSON.parse(brotliDecompressSync(Buffer.from(await threads.arrayBuffer())).toString("utf8"))).toBeTruthy();
 
-    // The window's own loopback port: exactly as before.
+    // The window's own loopback port answers the same page the same way: one tag, compressed, revalidated.
     const local = await fetch(`http://127.0.0.1:${inbox.port}/`, { headers: { "Accept-Encoding": "gzip, deflate, br" }, decompress: false } as RequestInit);
     expect(local.status).toBe(200);
-    expect(local.headers.get("content-encoding")).toBeNull();
-    expect(local.headers.get("vary")).toBeNull();
-    expect(local.headers.get("etag")).toBeNull();
-    expect(local.headers.get("cache-control")).toBe("no-store");
-    expect(await local.text()).toBe(page);
+    expect(local.headers.get("content-encoding")).toBe("br");
+    expect(local.headers.get("vary")).toBe("Accept-Encoding");
+    expect(local.headers.get("etag")).toBe(etag);
+    expect(local.headers.get("cache-control")).toBe("private, no-cache");
+    expect(brotliDecompressSync(Buffer.from(await local.arrayBuffer())).toString("utf8")).toBe(page);
   });
 
   test("the window's packed scripts (#2593) pass the same listener checks as the page and go out compressed, as the page does", async () => {
@@ -250,10 +258,10 @@ describe("Inbox over your tailnet", () => {
     expect((await raw("/assets/entry-a.js", {}, "someone@example.com")).status).toBe(403);
     expect((await raw("/assets/entry-a.js", { Host: `127.0.0.1:${inbox.port}` })).status).toBe(403);
     expect((await raw("/assets/entry-a.js", { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "script" })).status).toBe(403);
-    // On loopback, uncompressed.
+    // On loopback, compressed the same way.
     const local = await fetch(`http://127.0.0.1:${inbox.port}/assets/entry-a.js`, { headers: { "Accept-Encoding": "gzip, deflate, br" }, decompress: false } as RequestInit);
-    expect(local.headers.get("content-encoding")).toBeNull();
-    expect(await local.text()).toBe(entry);
+    expect(local.headers.get("content-encoding")).toBe("br");
+    expect(brotliDecompressSync(Buffer.from(await local.arrayBuffer())).toString("utf8")).toBe(entry);
   });
 
   test("through the tailnet the connection surface is unreachable, even with the token and a loopback Host claim, and the window's guards still apply", async () => {
@@ -283,13 +291,12 @@ describe("Inbox over your tailnet", () => {
     // A link that opens the Inbox still works.
     expect((await throughServe(inbox, "/", { headers: { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate" } })).status).toBe(200);
 
-    // The tailnet cannot widen the exposure: the switch cannot be turned on from there, nor a phone paired.
+    // The owner over the tailnet has the switch as on the computer (owner ruling 2026-11-11); the page still says where it is.
     const settings = (await (await throughServe(inbox, "/api/inbox/settings")).json()) as Json;
     expect(settings.via).toBe("tailnet");
     expect(settings.tailscale.url).toBe(`https://${MAGIC}:${inbox.port}/`);
     const on = await throughServe(inbox, "/api/inbox/settings", { method: "POST", headers: own, body: JSON.stringify({ tailscale: { on: true } }) });
-    expect(await codeOf(on)).toEqual([403, "local_only"]);
-    expect(await codeOf(await throughServe(inbox, "/api/inbox/pairing", { method: "POST", headers: own, body: "{}" }))).toEqual([403, "local_only"]);
+    expect(on.status).toBe(200);
     expect(((await (await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/settings`)).json()) as Json).via).toBe("local");
 
   });
@@ -487,6 +494,63 @@ describe("Inbox over your tailnet", () => {
     expect(registryOf(dataDir).tailscale).toMatchObject({ url: null, error: state.error });
     const settings = (await (await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/settings`)).json()) as Json;
     expect(settings.tailscale.error).toBe(state.error);
+  });
+
+  test("published by itself once Tailscale is back: every window's stream hears the new state, an agent's stream nothing", async () => {
+    const dataDir = world({ inboxTailscale: true });
+    const ts = fakeTailscale();
+    ts.down.status = true;
+    // The retry's clock, driven here (INBOX_TAILSCALE_REPUBLISH).
+    const pending: (() => void)[] = [];
+    const timers: InboxTailscaleTimers = { set: (fn) => pending.push(fn), clear: () => void pending.splice(0) };
+    const inbox = await start(dataDir, ts.run, { tailscaleTimers: timers });
+    expect(inbox.tailscale.state().url).toBeNull();
+    expect(inbox.tailscale.retrying()).toBe(true);
+
+    const frames = (response: Response) => {
+      const seen: Json[] = [];
+      const said = { hello: false };
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      const done = (async () => {
+        for (;;) {
+          const { value, done } = await reader.read().catch(() => ({ value: undefined, done: true }));
+          if (done) return;
+          buffer += decoder.decode(value, { stream: true });
+          let cut: number;
+          while ((cut = buffer.indexOf("\n\n")) >= 0) {
+            const block = buffer.slice(0, cut);
+            buffer = buffer.slice(cut + 2);
+            const event = /^event: (.+)$/m.exec(block)?.[1];
+            if (event === "hello") said.hello = true;
+            if (event === "tailscale") seen.push(JSON.parse(/^data: (.*)$/m.exec(block)![1]!) as Json);
+          }
+        }
+      })();
+      return { seen, said, stop: async () => (await reader.cancel().catch(() => {}), await done) };
+    };
+    const until = async (ready: () => boolean) => {
+      const end = Date.now() + 5_000;
+      while (!ready()) {
+        if (Date.now() > end) throw new Error("timed out waiting for the event stream");
+        await Bun.sleep(5);
+      }
+    };
+    const window = frames(await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/events?window=ts-window`, { headers: { "Sec-Fetch-Site": "same-origin" } }));
+    const agent = frames(await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/events`));
+    await until(() => window.said.hello && agent.said.hello);
+
+    ts.down.status = false;
+    for (const fn of pending.splice(0)) fn();
+    await until(() => window.seen.length >= 1);
+    const url = `https://${MAGIC}:${inbox.port}/`;
+    expect(window.seen[0]!.tailscale).toMatchObject({ on: true, url, error: null });
+    expect(inbox.tailscale.retrying()).toBe(false);
+    const settings = (await (await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/settings`)).json()) as Json;
+    expect(settings.tailscale.url).toBe(url);
+    expect(agent.seen).toHaveLength(0);
+    await Promise.all([window.stop(), agent.stop()]);
   });
 
   test("a mapping someone else made on the Inbox's port is never replaced", async () => {
@@ -874,7 +938,7 @@ describe("running-app prototypes on the owner's phone, through the prototype rel
 
 // Who may use the update control, the agents and the other owner settings is inbox-tailnet-owner.test.ts.
 describe("what the owner reads through the tailnet, and what a page there never claims", () => {
-  test("What's new and its images answer the owner over the tailnet, read only; another allowed login is refused, there and at the update control", async () => {
+  test("What's new and its images answer the owner over the tailnet and another allowed login, read only; the update control stays the owner's", async () => {
     const GUEST = "guest@example.com";
     const dataDir = world({ inboxTailscale: true, inboxTailscaleAllow: [GUEST] });
     let githubRequests = 0;
@@ -930,9 +994,9 @@ describe("what the owner reads through the tailnet, and what a page there never 
       expect((await throughServe(inbox, page, { method: "POST", headers: own, body: "{}" })).status).toBe(405);
       expect((await throughServe(inbox, image, { method: "POST", headers: own, body: "{}" })).status).toBe(405);
 
-      // Another allowed login is refused, for both routes.
-      expect(await codeOf(await throughServe(inbox, page, { login: GUEST, headers: own }))).toEqual([403, "owner_only"]);
-      expect(await codeOf(await throughServe(inbox, image, { login: GUEST, headers: own }))).toEqual([403, "owner_only"]);
+      // Another allowed login reads them too: public release notes (owner ruling 2026-11-11).
+      expect((await throughServe(inbox, page, { login: GUEST, headers: own })).status).toBe(200);
+      expect((await throughServe(inbox, image, { login: GUEST, headers: own })).status).toBe(200);
 
       // The window is told who is a guest.
       const settings = async (login: string | null) =>
@@ -953,7 +1017,7 @@ describe("what the owner reads through the tailnet, and what a page there never 
     }
   });
 
-  test("the one-time sound dialog is never claimed through the tailnet; it waits for a page on this computer", async () => {
+  test("the one-time sound dialog is claimed by the owner's page over the tailnet as on this computer, once", async () => {
     const dataDir = world({ inboxTailscale: true });
     writeFileSync(join(dataDir, "update-state.json"), JSON.stringify({ inboxVersion: "0.28.9" }));
     const ts = fakeTailscale();
@@ -964,13 +1028,13 @@ describe("what the owner reads through the tailnet, and what a page there never 
     const own = { Origin: `https://${MAGIC}:${inbox.port}`, "Content-Type": "application/json" };
     const remote = await throughServe(inbox, "/api/inbox/sound/dialog", { method: "POST", headers: own, body: JSON.stringify({ serverSession: inbox.serverSession }) });
     expect(remote.status).toBe(200);
-    expect(((await remote.json()) as Json).show).toBe(false);
-    expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxSound).toEqual({ dialogDueFor: "0.28.10" });
+    expect(((await remote.json()) as Json).show).toBe(true);
+    expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxSound).toMatchObject({ dialogShownFor: "0.28.10" });
     const local = await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/sound/dialog`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ serverSession: inbox.serverSession }),
     });
-    expect(((await local.json()) as Json).show).toBe(true);
+    expect(((await local.json()) as Json).show).toBe(false);
   });
 });

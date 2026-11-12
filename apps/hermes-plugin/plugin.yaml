@@ -1,0 +1,12 @@
+name: plannotator
+version: 0.28.62
+description: Plannotator Inbox for Hermes Agent. The agent sends you messages and questions in the Inbox, and your replies come back into the session that asked.
+author: Plannotator
+license: MIT OR Apache-2.0
+homepage: https://github.com/backnotprop/plannotator/tree/main/apps/hermes-plugin
+provides_tools:
+  - plannotator_inbox
+provides_hooks:
+  - pre_llm_call
+  - on_session_end
+  - on_session_finalize

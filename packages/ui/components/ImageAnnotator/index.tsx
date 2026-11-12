@@ -29,6 +29,7 @@ interface ImageAnnotatorProps {
   escapeCancels?: boolean;
   /** Optional: the line under the image in place of "Press Esc or Enter or click outside to accept". */
   hint?: React.ReactNode;
+  sourceBlob?: Blob;
 }
 
 export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
@@ -39,6 +40,7 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
   initialName = '',
   escapeCancels = false,
   hint,
+  sourceBlob,
 }) => {
   const [state, setState] = useState<StrokeHistoryState>(DEFAULT_STROKE_HISTORY_STATE);
   const [saving, setSaving] = useState(false);
@@ -122,8 +124,7 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
 
       // If no drawings, just pass through original image
       if (!hasDrawings) {
-        const response = await fetch(imageSrc);
-        const blob = await response.blob();
+        const blob = sourceBlob ?? (await (await fetch(imageSrc)).blob());
         await onAccept(blob, false, finalName);
         onClose();
         return;
