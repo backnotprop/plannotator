@@ -104,7 +104,6 @@ export function parseLinearRefAnswer(body: unknown): LinearCardData | "not_found
   const stateType = str(state.type);
   const team = obj(item.team);
   const description = cut(str(item.description), FORGE_REF_BODY_MAX);
-  // Linear lists a connection newest first with `first` (oldest first with `last`): `comments(first: 1)` is the latest.
   const last = nodes(item.comments).at(0);
   const assignee = personOf(item.assignee);
   const linked: ForgeRefLinked[] = nodes(item.attachments).flatMap((a) => {

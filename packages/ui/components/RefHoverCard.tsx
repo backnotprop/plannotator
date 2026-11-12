@@ -842,8 +842,6 @@ export function useRefHoverCards(
   if (!card || typeof document === 'undefined') return null;
   const container = tooltipContainerOf(card.anchor) ?? document.body;
   const sheet = card.via === 'tap';
-  // A provider names its own card ("Linear issue ENG-123"); a forge card is named by what the answer says it is
-  // (a `#12` link that turns out to be a pull request is "Pull request #12"), else by the link.
   const provided = providedRefCardLabel(card.target);
   const label = card.result?.ok
     ? `${provided ?? `${refKindName(card.result.data)} ${forgeRefLabel(card.result.data)}`}: ${card.result.data.title}`

@@ -151,7 +151,6 @@ test("the key goes only to api.linear.app's authorization header: never in an av
     consoleMethods.forEach((m, i) => (console[m] = originals[i]!));
   }
   expect((answers[0] as { ok: boolean }).ok).toBe(true);
-  // The avatar was fetched (from Linear's own host), so the no-key fetch path ran.
   const avatarFetches = seen.filter((s) => s.url !== LINEAR_API_URL);
   expect(avatarFetches.map((s) => s.url)).toEqual(["https://public.linear.app/avatars/ada.png"]);
   for (const s of seen) {
