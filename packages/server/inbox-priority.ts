@@ -12,8 +12,9 @@
  * stream never see it. The list model carries each row's `priority`, and a
  * change tells every window (`event: priority`, as `event: pins` does). The
  * phone's door carries the same write (`POST threads/:id/priority` under an
- * `idempotency_key`, contract 7.66); a linked machine's forward never does
- * (`local` in inbox-outbox.ts): the add stays on the computer that made it.
+ * `idempotency_key`, contract 7.66), applied on this computer (`local` in
+ * inbox-outbox.ts). It is offered on this computer's own threads only: a
+ * linked machine's rows carry no `priority`, since nothing forwards it there.
  */
 
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";

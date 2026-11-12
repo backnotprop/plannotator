@@ -457,7 +457,7 @@ describe("rule 8: every door write is classified, and only small JSON is held", 
     // A star is on the door for a phone and stays on the computer that holds it: never forwarded to a linked machine.
     expect(doorWriteKind("threads/msg_1/pin")).toBeNull();
     expect(doorWriteKind("pins")).toBeNull();
-    // So is the person's Priority.
+    // The person's Priority is applied here too: it is offered on this computer's own threads only.
     expect(doorWriteKind("threads/msg_1/priority")).toBeNull();
   });
 

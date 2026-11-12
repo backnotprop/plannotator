@@ -1778,8 +1778,8 @@ export interface InboxListRow extends InboxThreadSummary {
    * always null: no agent can set one. Like `pinned_at`, only on the list model the window
    * and the phone read, never on anything an agent reads. Every row from an
    * Inbox that keeps priority carries the key; absent from an older Inbox (no
-   * menu item, no group) and on a linked machine's row (an add stays on the
-   * computer that made it).
+   * menu item, no group) and on a linked machine's row (Priority is not
+   * forwarded to the machine that owns the thread, so none is offered there).
    */
   priority?: InboxRowPriority | null;
   /**

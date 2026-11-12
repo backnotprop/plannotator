@@ -1274,7 +1274,7 @@ Each row of `GET threads` carries an additive `priority` (section 2): `{ "person
 - `POST threads/:id/priority` `{ idempotency_key, priority: boolean }`: add the thread (an add on a thread already in keeps its first `at`) or remove it. `404 thread_not_found` for an id that is not a thread's root; `409 thread_resolved` for an add on an archived thread; `422 validation_error` without a boolean `priority`.
 - `POST threads/:id/priority` `{ idempotency_key, restore: { at, off_at } }`: an Undo. It writes back exactly the `before` an earlier answer gave (`at` and `off_at` each an ISO time or null).
 
-Each answers `{ "before": { "at", "off_at" } }`, the thread's entry before the write. An archive ends it; Archive's Undo does not bring it back by itself, so an app that offers that Undo sends the `restore` too. Like a star it is the computer's own: no store line, nothing on the event stream or the relay, the app reads `GET threads` again after its write; the computer's windows are told (`event: priority`). A linked machine never forwards it.
+Each answers `{ "before": { "at", "off_at" } }`, the thread's entry before the write. An archive ends it; Archive's Undo does not bring it back by itself, so an app that offers that Undo sends the `restore` too. It makes no store line, so nothing comes down the event stream or the relay for it; the app reads `GET threads` again after its write, and the computer's windows are told (`event: priority`). It is applied on the computer the phone reached, for that computer's own threads: a linked machine's rows carry no `priority`, and the door answers `404 thread_not_found` for a thread the computer does not hold.
 
 ```sh
 curl -sS -X POST "$INBOX/api/inbox/device/threads/msg_01K70000000000000000000020/priority" \

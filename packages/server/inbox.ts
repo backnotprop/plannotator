@@ -1695,7 +1695,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A linked machine never lists an id this store holds (archived and pinned included): its row is dropped, never merged.
     // The same clock over its rows: a machine asleep past a thread's `until` still gives that thread back.
     // A linked machine's row loses its `steps_waiting`: this window never shows that machine's checklists.
-    // It loses its `priority` too: an add stays on the computer that made it, so this window offers none there.
+    // It loses its `priority` too: Priority is not forwarded to the machine that owns the thread, so none is offered.
     const rows: InboxListRow[] = merged
       ? [...own.map((row) => ({ ...row, machine: machines.selfId })), ...machines.rows().filter((row) => !store.message(row.thread_id)).map((row) => inboxRowAsOf(withoutPriority(withoutStepsWaiting(row)), now))]
       : own;
