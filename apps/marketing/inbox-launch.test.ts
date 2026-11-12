@@ -129,29 +129,22 @@ describe('Plannotator Inbox launch switch', () => {
   });
 
   // The agents overview and every agent's setup page read
-  // src/lib/inbox-agents.ts: each agent has its page, a row in the overview's
-  // table (in tier order) linking to it, its answers in the row in the
-  // columns' order, a place in the sitemap, and every command its page names
-  // behind a copy button.
+  // src/lib/inbox-agents.ts: each agent has its page, a row under its tier in
+  // the overview linking to it with its difference line, a place in the
+  // sitemap, and every command its page names behind a copy button.
   test('on: the agents overview and one page per agent are built from one list', async () => {
     const overview = await read(dist.on, agentsPath);
     expect(overview).toContain('<title>Set up your agent with the Plannotator Inbox</title>');
     expect(await read(dist.on, 'inbox/index.html')).toContain('href="/inbox/agents/"');
     const sitemap = await read(dist.on, 'sitemap-0.xml');
     expect(sitemap).toContain('<loc>https://plannotator.ai/inbox/agents/</loc>');
-    const rows = overview.match(/<tr[^>]*class="ag-row[^"]*"[^>]*>[\s\S]*?<\/tr>/g) ?? [];
+    const rows = overview.match(/<li class="ag-row[^"]*"[^>]*>[\s\S]*?<\/li>/g) ?? [];
     expect(rows).toHaveLength(AGENTS.length);
-    const cols = [...COLUMNS.inbox, ...COLUMNS.plannotator];
     const ordered = TIERS.flatMap((t) => AGENTS.filter((a) => a.tier === t.id));
     ordered.forEach((agent, i) => {
       const href = `/inbox/agents/${agent.slug}/`;
       expect(rows[i]).toContain(`href="${href}"`);
-      const cells = (rows[i].match(/<td\b[\s\S]*?<\/td>/g) ?? []).map(text);
-      const want = cols.map((c) => {
-        const cell = cellOf(agent, c.key);
-        return cell.short ?? cell.label;
-      });
-      expect(cells).toEqual(want);
+      expect(text(rows[i].match(/<p\b[\s\S]*?<\/p>/)?.[0] ?? '')).toBe(agent.diff);
       expect(sitemap).toContain(`<loc>https://plannotator.ai${href}</loc>`);
     });
     for (const [i, path] of agentPaths.entries()) {
@@ -164,6 +157,19 @@ describe('Plannotator Inbox launch switch', () => {
       const codes = [...a.setup, ...a.other.flatMap((o) => o.steps), a.check, ...a.trouble].map((s) => s.code).filter(Boolean);
       expect(codes.length, path).toBeGreaterThan(0);
       for (const code of codes) expect(copies, path).toContain(code);
+    }
+  });
+
+  // Each tier's line on the overview says what every agent in it has. The
+  // keys behind it must be exactly the columns where none of the tier's
+  // agents answers no, so the words can't claim what one of them lacks.
+  test('every tier baseline is what all of its agents have', () => {
+    const cols = [...COLUMNS.inbox, ...COLUMNS.plannotator].map((c) => c.key);
+    for (const tier of TIERS) {
+      const agents = AGENTS.filter((a) => a.tier === tier.id);
+      expect(agents.length, tier.id).toBeGreaterThan(0);
+      const shared = cols.filter((k) => agents.every((a) => cellOf(a, k).level !== 'no'));
+      expect([...tier.has].sort(), tier.id).toEqual([...shared].sort());
     }
   });
 });

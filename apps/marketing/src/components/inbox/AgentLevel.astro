@@ -1,17 +1,14 @@
 ---
 // One capability's answer: a mark for how far it works, then its words.
-// The mark is decoration; the words say it (see the legend on /inbox/agents/).
+// The mark is decoration; the words say it.
 import type { Level } from '../../lib/inbox-agents';
 
 interface Props {
   level: Level;
   label: string;
-  /** The table's form: yes and no show the mark alone (the words stay for screen readers). */
-  compact?: boolean;
 }
 
-const { level, label, compact = false } = Astro.props;
-const quiet = compact && level !== 'part';
+const { level, label } = Astro.props;
 ---
 <span class:list={['ag-level', `ag-level-${level}`]}>
   <span class="ag-mark" aria-hidden="true">
@@ -25,7 +22,7 @@ const quiet = compact && level !== 'part';
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><path d="M4.5 8h7" /></svg>
     )}
   </span>
-  <span class:list={['ag-level-text', quiet && 'sr-only']}>{label}</span>
+  <span class="ag-level-text">{label}</span>
 </span>
 
 <style>

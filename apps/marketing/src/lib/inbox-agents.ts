@@ -24,10 +24,8 @@ export type Level = 'yes' | 'part' | 'no';
 
 export interface Cell {
   level: Level;
-  /** A few words: the agent page's list, and screen readers in the table. */
+  /** A few words for the agent page's list. */
   label: string;
-  /** The table's text for a `part` cell, when the label is too long for it. */
-  short?: string;
   /** One or two sentences behind the label. Not shown on the pages. */
   detail: string;
   /** Where the fact comes from (not shown). */
@@ -58,6 +56,8 @@ export interface Agent {
   tier: Tier;
   /** One sentence under the name on the setup page. */
   lede: string;
+  /** The overview's line under the name: what it has beyond its tier's baseline, or lacks next to its peers. */
+  diff: string;
   inbox: { tool: Cell; reply: Cell; start: Cell; permissions: Cell };
   plannotator: { plan: Cell; review: Cell; annotate: Cell; ask: Cell };
   /** The recommended setup, in order. */
@@ -77,28 +77,61 @@ export interface Agent {
   docs?: string;
 }
 
-export const TIERS: { id: Tier; name: string; short: string }[] = [
-  { id: 'plugin', name: 'Native plug-in', short: 'Inbox built in and your reply wakes it' },
-  { id: 'hooks', name: 'Hooks and MCP', short: 'Plannotator’s hooks and commands plus the Inbox through MCP' },
-  { id: 'mcp', name: 'MCP only', short: 'Inbox through MCP and it reads your reply when it checks' },
-];
-
 export const COLUMNS = {
   inbox: [
-    { key: 'tool', name: 'Inbox tool', means: 'How the agent reaches the Inbox.' },
-    { key: 'reply', name: 'Reply wakes it', means: 'Your answer in the Inbox arrives in the session as its next turn.' },
-    { key: 'start', name: 'Start from Inbox', means: 'Start a new session of the agent from New message.' },
-    { key: 'permissions', name: 'Permission cards', means: "Allow or deny the agent's permission prompts in the Inbox." },
+    { key: 'tool', name: 'Inbox tool' },
+    { key: 'reply', name: 'Reply wakes it' },
+    { key: 'start', name: 'Start from Inbox' },
+    { key: 'permissions', name: 'Permission cards' },
   ],
   plannotator: [
-    { key: 'plan', name: 'Plan review', means: 'The agent’s plan opens in Plannotator when it leaves plan mode.' },
-    { key: 'review', name: 'Code review', means: 'Review the agent’s changes or a pull request and send it your comments.' },
-    { key: 'annotate', name: 'Annotate', means: 'Mark up a file or a page or the agent’s last reply.' },
-    { key: 'ask', name: 'Ask this session', means: 'Ask a question in a review and the session that opened it answers.' },
+    { key: 'plan', name: 'Plan review' },
+    { key: 'review', name: 'Code review' },
+    { key: 'annotate', name: 'Annotate' },
+    { key: 'ask', name: 'Ask this session' },
   ],
 } as const;
 
 export type ColumnKey = (typeof COLUMNS)['inbox'][number]['key'] | (typeof COLUMNS)['plannotator'][number]['key'];
+
+export interface TierInfo {
+  id: Tier;
+  name: string;
+  /** One line about the tier, on each agent's setup page. */
+  short: string;
+  /** What every agent in the tier has: the columns where none of them is `no`. inbox-launch.test.ts checks it. */
+  has: ColumnKey[];
+  /** `has` in words, the overview's line under the tier name. */
+  baseline: string;
+  /** A second line under the baseline, when the whole tier shares it. */
+  note?: string;
+}
+
+export const TIERS: TierInfo[] = [
+  {
+    id: 'plugin',
+    name: 'Native plug-in',
+    short: 'Inbox built in and your reply wakes it',
+    has: ['tool', 'reply'],
+    baseline: 'Inbox built in and your reply wakes it',
+    note: 'The tool starts off except on Claude Code',
+  },
+  {
+    id: 'hooks',
+    name: 'Hooks and MCP',
+    short: 'Plannotator’s hooks and commands plus the Inbox through MCP',
+    has: ['tool', 'review', 'annotate'],
+    baseline: 'Inbox through MCP plus code review and annotate',
+  },
+  {
+    id: 'mcp',
+    name: 'MCP only',
+    short: 'Inbox through MCP and it reads your reply when it checks',
+    has: ['tool'],
+    baseline: 'Inbox through MCP',
+    note: 'Nothing wakes it: it reads your reply when it checks',
+  },
+];
 
 export const cellOf = (agent: Agent, key: ColumnKey): Cell =>
   key in agent.inbox ? agent.inbox[key as keyof Agent['inbox']] : agent.plannotator[key as keyof Agent['plannotator']];
@@ -181,16 +214,15 @@ const notWoken = (src: string): Cell => ({
   detail: 'Nothing wakes it. It sees your reply the next time it reads the thread, and the Inbox marks the reply unread until then.',
   src,
 });
-const offAtFirst = (detail: string, src: string): Cell => ({ level: 'part', label: 'Built in, off at first', short: 'Turn on', detail, src });
+const offAtFirst = (detail: string, src: string): Cell => ({ level: 'part', label: 'Built in, off at first', detail, src });
 const mcpTool = (detail: string, src: string): Cell => ({ level: 'yes', label: 'MCP', detail, src });
 const mcpByHand = (name: string): Cell => ({
   level: 'part',
   label: 'MCP by hand',
-  short: 'By hand',
   detail: `Add \`plannotator inbox mcp\` to ${name} as an MCP server named \`plannotator-inbox\`. The Inbox doesn’t connect ${name} for you.`,
   src: 'IB:310-312 (any MCP client); AG has no entry for this agent; HELP has no line for it',
 });
-const launchedOnly = (detail: string, src: string): Cell => ({ level: 'part', label: 'Sessions it started', short: 'Inbox-started', detail, src });
+const launchedOnly = (detail: string, src: string): Cell => ({ level: 'part', label: 'Sessions it started', detail, src });
 const noPlan = (src: string): Cell => ({ level: 'no', label: 'No', detail: 'Plannotator doesn’t open its plans yet.', src });
 const filesOnly = (detail: string, src: string): Cell => ({ level: 'part', label: 'Files', detail, src });
 const byHandMcp = (name: string) => ({
@@ -204,6 +236,7 @@ export const AGENTS: Agent[] = [
     name: 'Claude Code',
     tier: 'plugin',
     lede: 'The plugin gives Claude Code the Inbox tool and plan review. Your reply arrives as its next turn.',
+    diff: 'Starts from the Inbox with permission cards · plan and code review · annotate · Ask this session',
     inbox: {
       tool: {
         level: 'yes',
@@ -342,6 +375,7 @@ export const AGENTS: Agent[] = [
     name: 'Pi',
     tier: 'plugin',
     lede: 'The extension gives Pi the Inbox tool and plan review. Your reply arrives once Pi is idle.',
+    diff: 'Starts from the Inbox · plan and code review · annotate · Ask this session',
     inbox: {
       tool: offAtFirst(
         'The extension gives Pi a `plannotator_inbox` tool. It is off until you turn it on in the Inbox’s Settings, because Pi sends every tool with each request (about 2,750 tokens for this one).',
@@ -422,6 +456,7 @@ export const AGENTS: Agent[] = [
     name: 'OpenCode',
     tier: 'plugin',
     lede: 'The plugin gives OpenCode the Inbox tool and plan review. On OpenCode 2 your reply arrives as its next turn.',
+    diff: 'Plan and code review · annotate · OpenCode 1 isn’t woken · Ask this session on OpenCode 2',
     inbox: {
       tool: offAtFirst(
         'The plugin gives OpenCode a `plannotator_inbox` tool. It is off until you turn it on in the Inbox’s Settings, because OpenCode sends every tool with each request.',
@@ -430,7 +465,6 @@ export const AGENTS: Agent[] = [
       reply: {
         level: 'part',
         label: 'Wakes OpenCode 2',
-        short: 'OpenCode 2',
         detail: 'On OpenCode 2 your reply arrives as a new turn once the session is idle. OpenCode 1 has the tool but sees your reply only when it reads the thread.',
         src: 'IB:223; WAKE',
       },
@@ -500,6 +534,7 @@ export const AGENTS: Agent[] = [
     name: 'DeepSeek Harness',
     tier: 'plugin',
     lede: 'The plugin gives DeepSeek Harness the Inbox tool and plan review. Your reply arrives once it is idle.',
+    diff: 'Plan and code review · annotate',
     inbox: {
       tool: offAtFirst(
         'The plugin gives the agent a `plannotator_inbox` tool. It is off until you turn it on in the Inbox’s Settings, because DeepSeek Harness sends every tool with each request.',
@@ -558,6 +593,7 @@ export const AGENTS: Agent[] = [
     name: 'Cline',
     tier: 'plugin',
     lede: 'The plugin gives every Cline session the Inbox tool. Your reply arrives once the session is idle.',
+    diff: 'Inbox only',
     inbox: {
       tool: offAtFirst(
         'The plugin gives Cline a `plannotator_inbox` tool. It is off until you turn it on in the Inbox’s Settings, because Cline sends every tool with each request.',
@@ -612,12 +648,12 @@ export const AGENTS: Agent[] = [
     name: 'Codex',
     tier: 'hooks',
     lede: 'Codex reaches the Inbox through MCP and a hook reviews its plans. On Codex 0.149 or newer your reply arrives as its next turn.',
+    diff: 'Starts from the Inbox with permission cards · reply wakes 0.149 and newer · plan review at the end of a turn',
     inbox: {
       tool: mcpTool('`plannotator inbox` adds the `plannotator-inbox` MCP server to Codex for you. The Codex app and IDE extension share it.', 'IB:77; AG (codex)'),
       reply: {
         level: 'part',
         label: 'Wakes Codex 0.149+',
-        short: '0.149+',
         detail: 'With Codex 0.149 or newer your reply arrives in the thread that asked as its next turn, never in the middle of one. An older Codex sees it when it reads the thread.',
         src: 'IB:325; WAKE; packages/server/inbox-codex-wake.ts',
       },
@@ -631,7 +667,6 @@ export const AGENTS: Agent[] = [
       plan: {
         level: 'part',
         label: 'At the end of a turn',
-        short: 'End of turn',
         detail: 'Codex has no plan mode exit to catch, so a Stop hook opens the plan once the turn ends. Send feedback and Codex revises the plan in the same turn.',
         src: 'apps/codex/README.md:5,65,72; docs/agent-guides/opencode-t3-and-codex.md:253',
       },
@@ -708,18 +743,17 @@ export const AGENTS: Agent[] = [
     name: 'T3 Code',
     tier: 'hooks',
     lede: 'Claude threads in T3 Code reach the Inbox through MCP. Your reply arrives in the thread as a new turn.',
+    diff: 'Sign in to T3 first · reply wakes Claude threads · reviews and Ask this session with the opt-in hook',
     inbox: {
       tool: {
         level: 'part',
         label: 'MCP after sign-in',
-        short: 'Sign in',
         detail: 'Sign Plannotator in to T3 once. Then `plannotator inbox mcp --t3` gives Claude threads in T3 the Inbox.',
         src: 'INST:368-379',
       },
       reply: {
         level: 'part',
         label: 'Wakes Claude threads',
-        short: 'Claude threads',
         detail: 'In a T3 thread that runs Claude your reply arrives as a new turn. Other agents in T3 see it when they read the thread.',
         src: 'INST:379; WAKE (t3); packages/server/inbox-t3-wake.ts',
       },
@@ -730,28 +764,24 @@ export const AGENTS: Agent[] = [
       plan: {
         level: 'part',
         label: 'Not verified in T3',
-        short: 'Not verified',
         detail: 'The T3 hook doesn’t route plan review. The Claude plugin’s own plan hook is left as it is, and whether it opens from a T3 thread isn’t verified.',
         src: 'packages/t3-code/README.md:70 (no ExitPlanMode routing; existing plan hooks keep working)',
       },
       review: {
         level: 'part',
         label: 'With the T3 hook',
-        short: 'Opt-in hook',
         detail: 'Install with `--with-t3` and `/plannotator-review` in a T3 thread sends your comments back to that thread.',
         src: 'packages/t3-code/README.md:9-15; SH:132',
       },
       annotate: {
         level: 'part',
         label: 'With the T3 hook',
-        short: 'Opt-in hook',
         detail: 'With the `--with-t3` hook, annotate and last route back to the T3 thread.',
         src: 'packages/t3-code/README.md:3; packages/t3-code/hook-routing.ts',
       },
       ask: {
         level: 'part',
         label: 'With the T3 hook',
-        short: 'Opt-in hook',
         detail: 'With the `--with-t3` hook, Ask this session sends your question into the T3 thread and shows its answer in the review.',
         src: 'packages/t3-code/README.md:3',
       },
@@ -812,12 +842,12 @@ export const AGENTS: Agent[] = [
     name: 'Qwen Code',
     tier: 'hooks',
     lede: 'An extension opens Qwen Code’s plans in Plannotator and it reaches the Inbox through MCP. On macOS and Linux your reply arrives as its next turn.',
+    diff: 'Plan review · reply wakes it on macOS and Linux',
     inbox: {
       tool: mcpTool('`plannotator inbox` adds one `plannotator-inbox` key to Qwen’s `settings.json` and keeps your comments in it.', 'IB:79,88; AG (qwen)'),
       reply: {
         level: 'part',
         label: 'Wakes it on macOS and Linux',
-        short: 'macOS and Linux',
         detail: 'With Qwen Code 0.24 or newer in a terminal on macOS or Linux your reply arrives as its next turn. Plannotator registers itself as a trusted sender in Qwen Code to do that.',
         src: 'IB:327-332; WAKE; packages/server/inbox-qwen-wake.ts',
       },
@@ -828,7 +858,6 @@ export const AGENTS: Agent[] = [
       plan: {
         level: 'part',
         label: 'Yes, approve twice',
-        short: 'Approve twice',
         detail: 'When the agent leaves plan mode the plan opens in Plannotator. After you approve Qwen Code asks you to confirm in the terminal too.',
         src: 'apps/qwen-code/README.md (Plan review in Qwen Code)',
       },
@@ -868,6 +897,7 @@ export const AGENTS: Agent[] = [
     name: 'Gemini CLI',
     tier: 'hooks',
     lede: 'A hook opens Gemini CLI’s plans in Plannotator and it reaches the Inbox through MCP.',
+    diff: 'Plan review · annotate files only',
     inbox: {
       tool: mcpTool('`plannotator inbox` adds the `plannotator-inbox` MCP server to Gemini CLI for you (Gemini CLI 0.1.19 or newer).', 'IB:78; AG (gemini)'),
       reply: notWoken('WAKE (gemini not in it); SET:287'),
@@ -914,6 +944,7 @@ export const AGENTS: Agent[] = [
     name: 'GitHub Copilot CLI',
     tier: 'hooks',
     lede: 'The plugin opens Copilot CLI’s plans in Plannotator. You connect the Inbox by hand.',
+    diff: 'Plan review · connect the Inbox by hand',
     inbox: {
       tool: mcpByHand('Copilot CLI'),
       reply: notWoken('WAKE (copilot not in it)'),
@@ -953,6 +984,7 @@ export const AGENTS: Agent[] = [
     name: 'Amp',
     tier: 'hooks',
     lede: 'The plugin adds review and annotate to Amp’s command palette and it reaches the Inbox through MCP.',
+    diff: 'No plan review',
     inbox: {
       tool: mcpTool('`plannotator inbox` adds the `plannotator-inbox` MCP server to Amp for you.', 'IB:80; AG (amp)'),
       reply: notWoken('WAKE (amp not in it); SET:287'),
@@ -990,6 +1022,7 @@ export const AGENTS: Agent[] = [
     name: 'Factory Droid',
     tier: 'hooks',
     lede: 'The plugin adds review and annotate commands to Droid. You connect the Inbox by hand.',
+    diff: 'No plan review · connect the Inbox by hand',
     inbox: {
       tool: mcpByHand('Droid'),
       reply: notWoken('WAKE (droid not in it)'),
@@ -1023,6 +1056,7 @@ export const AGENTS: Agent[] = [
     name: 'Kiro CLI',
     tier: 'hooks',
     lede: 'Plannotator adds review and annotate skills to Kiro CLI and it reaches the Inbox through MCP.',
+    diff: 'No plan review · annotate files only',
     inbox: {
       tool: mcpTool('`plannotator inbox` adds one `plannotator-inbox` key to `~/.kiro/settings/mcp.json` for you.', 'IB:81; AG (kiro)'),
       reply: notWoken('WAKE (kiro not in it); SET:287'),
@@ -1056,6 +1090,7 @@ export const AGENTS: Agent[] = [
     name: 'Mistral Vibe',
     tier: 'hooks',
     lede: 'A hook opens Vibe’s plans in Plannotator and skills add review and annotate. You connect the Inbox by hand.',
+    diff: 'Plan review · connect the Inbox by hand',
     inbox: {
       tool: mcpByHand('Vibe'),
       reply: notWoken('WAKE (vibe not in it)'),
@@ -1092,6 +1127,7 @@ export const AGENTS: Agent[] = [
     name: 'Cursor',
     tier: 'mcp',
     lede: 'Cursor reaches the Inbox through MCP. It sends you messages and questions and reads your answers when it checks.',
+    diff: 'Inbox only · connected for you',
     inbox: {
       tool: mcpTool('`plannotator inbox` adds one `plannotator-inbox` key to `~/.cursor/mcp.json` for you.', 'IB:81; AG (cursor)'),
       reply: notWoken('WAKE (cursor not in it); IB:132 (Not woken)'),
@@ -1134,6 +1170,7 @@ export const AGENTS: Agent[] = [
     name: 'Any MCP agent',
     tier: 'mcp',
     lede: 'VS Code and Windsurf and Zed and Goose and JetBrains and the Claude app reach the Inbox through MCP. So does any agent that speaks MCP.',
+    diff: 'Inbox only · you add it in most apps',
     inbox: {
       tool: mcpTool('Add `plannotator inbox mcp` as a stdio MCP server named `plannotator-inbox`. The Inbox’s first screen and Settings give the exact step for each app.', 'IB:310-323; AG (windsurf, claude-app)'),
       reply: notWoken('IB:340'),
