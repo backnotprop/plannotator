@@ -28,7 +28,7 @@ import { isFaviconStyle, type FaviconStyle } from './favicon';
 import { isAnnotateAgentTerminalSide, type AnnotateAgentTerminalSide } from './agent-terminal';
 import { parseAgentSwitchConfig, agentSwitchConfigValue, type AgentSwitchConfigValue } from './agent-switch';
 import { isLocalhostSubdomain } from './loopback-host';
-import { INBOX_TOOL_NAME, inboxReminderCustomText, inboxReminderFor } from './inbox/connection';
+import { INBOX_TOOL_NAME, inboxReminderCustomText, inboxReminderFor, inboxReminderRulesText } from './inbox/connection';
 export type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, JjDefaultDiffType, ReviewDefaults, ThemeConfig, FaviconStyle };
 
 /** Single conventional comment label entry stored in config.json */
@@ -91,7 +91,8 @@ export interface PromptConfig {
    */
   inbox?: {
     reminder?: string;
-    runtimes?: Partial<Record<InboxToolHost, { reminder?: string }>>;
+    rules?: string;
+    runtimes?: Partial<Record<InboxToolHost, { reminder?: string; rules?: string }>>;
   };
 }
 
@@ -650,11 +651,12 @@ export interface PlannotatorConfig {
     notNowAt?: string;
     shownLoad?: string;
     agentNote?: { shownFor?: string[] };
-    waitingSince?: { theme_chooser?: string; code_review?: string; sound?: string; list_intro?: string; voice?: string; tab_icon?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; list_view?: string };
+    waitingSince?: { theme_chooser?: string; code_review?: string; sound?: string; list_intro?: string; voice?: string; tab_icon?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; agent_rules?: string; list_view?: string };
     /** Code review's day-0 offer (approval "code-review-offer-card"): claimed once, as the Board's. */
     code_review?: { shownAt?: string; key?: string };
     board?: { shownAt?: string; key?: string };
     steps?: { shownAt?: string; key?: string };
+    agent_rules?: { shownAt?: string; key?: string };
     /** The Bro mode offer (approval "bro-mode"): claimed once, as the Board's. */
     bro?: { shownAt?: string; key?: string };
     /** The grill-me tip (shared/inbox/grill-me-tip.ts): claimed once, as the Board's; nothing to turn on. */
@@ -739,7 +741,7 @@ export interface PlannotatorConfig {
    * absolute path; default `<dataDir>/scratch`). Moving it applies to new
    * folders only.
    */
-  inboxLaunch?: { enabled?: boolean; fullPermissions?: boolean; model?: string; scratchDir?: string };
+  inboxLaunch?: { enabled?: boolean; fullPermissions?: boolean; model?: string; settingsFile?: string; scratchDir?: string };
   /**
    * Inject a Plannotator Flavored Markdown reminder into every EnterPlanMode
    * call so the agent is aware it can enrich plans with code-file links,
@@ -1210,7 +1212,7 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
  */
 export function detectGitUser(cwd?: string): string | null {
   try {
-    const name = execSync("git config user.name", { cwd, env: childEnv(), encoding: "utf-8", timeout: 3000 }).trim();
+    const name = execSync("git config user.name", { cwd, env: childEnv(), encoding: "utf-8", timeout: 3000, windowsHide: true }).trim();
     return name || null;
   } catch {
     return null;
@@ -1426,12 +1428,13 @@ function parseLaunchFlag(value: unknown): boolean | undefined {
  * there): only an explicit true turns it on. Any false-like value (`false`, `0`, `"false"`, `"0"`, `"off"`, `"no"`),
  * in `enabled` or as `inboxLaunch` itself, is off. A config.json that does not parse reads as `{}` (`loadConfig`),
  * so as the default. `model` only when it is a plain model name;
+ * `settingsFile` (Claude settings file) as typed, read at each start;
  * `scratchDir` only when it is an absolute path other than `/` (null: the default, `<dataDir>/scratch`).
  */
 export function resolveInboxLaunch(
   config: PlannotatorConfig,
   platform: NodeJS.Platform = process.platform,
-): { enabled: boolean; fullPermissions: boolean | null; model: string | null; scratchDir: string | null } {
+): { enabled: boolean; fullPermissions: boolean | null; model: string | null; settingsFile: string | null; scratchDir: string | null } {
   const raw: unknown = config.inboxLaunch;
   const value = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as NonNullable<PlannotatorConfig["inboxLaunch"]>) : {};
   // `"inboxLaunch": false` (or "off") by hand: the whole feature off.
@@ -1441,6 +1444,7 @@ export function resolveInboxLaunch(
     // null: the person never set the switch (a launch follows their login shell).
     fullPermissions: parseConfigBoolean(value.fullPermissions) ?? null,
     model: typeof value.model === "string" && LAUNCH_MODEL.test(value.model) ? value.model : null,
+    settingsFile: typeof value.settingsFile === "string" && value.settingsFile.trim() ? value.settingsFile.trim() : null,
     scratchDir: typeof value.scratchDir === "string" && isAbsolute(value.scratchDir) && resolve(value.scratchDir) !== resolve("/") ? resolve(value.scratchDir) : null,
   };
 }
@@ -1885,7 +1889,7 @@ export function resolveInboxReminderText(
   host: InboxToolHost,
   options: { wakes?: boolean; toolName?: string } = {},
 ): string {
-  return inboxReminderFor(inboxReminderCustomText(config, host), options.toolName ?? INBOX_TOOL_NAME, { wakes: options.wakes });
+  return inboxReminderFor(inboxReminderCustomText(config, host), options.toolName ?? INBOX_TOOL_NAME, { wakes: options.wakes, rules: inboxReminderRulesText(config, host) });
 }
 
 /**

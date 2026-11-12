@@ -21,6 +21,7 @@ import { getIdentity } from '../utils/identity';
 import { annotationOwnsHighlight } from '../utils/annotationOwnsHighlight';
 import { transformPlainText } from '../utils/inlineTransforms';
 import { richCopySourceFromRange, type RichCopySource } from '../utils/richClipboard';
+import { useHighlightCopy } from '../utils/highlightCopy';
 import { TOUCH_PRIMARY_QUERY, TOUCH_SELECTION_SETTLE_MS } from '../utils/touchSelection';
 import type { ShelvedCommentDraft } from '../utils/commentDraftShelf';
 import { unionToolbarRect, type ToolbarRect } from '../utils/touchToolbarPlacement';
@@ -1068,6 +1069,19 @@ export function useAnnotationHighlighter({
   /** Paint the shelf's waiting drafts as draft marks (the highlighter has just started). */
   const paintShelvedDraftsRef = useRef<() => void>(() => {});
   const [quickLabelPicker, setQuickLabelPicker] = useState<QuickLabelPickerState | null>(null);
+
+  // Ctrl+C / Cmd+C while the highlight stands in for the selection: the
+  // toolbar is up (web-highlighter cleared the selection on mouseup), or that
+  // selection's composer is open (its textarea has the focus). The words go
+  // into the copy event as plain text (`utils/highlightCopy`); the person's
+  // own selection, in a field or in the page, copies natively. Every host of
+  // this hook gets it (the Viewer, code review's markdown preview, PR
+  // description and PR artifacts). A host that composes elsewhere
+  // (`onHostDraft`) owns its composer, so only the toolbar stage copies there.
+  useHighlightCopy(
+    toolbarState?.selectionText
+      || (commentPopover && onHostDraft === undefined ? commentPopover.selectedText : null),
+  );
 
   // Keep refs in sync
   useEffect(() => { modeRef.current = mode; }, [mode]);

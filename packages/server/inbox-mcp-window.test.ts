@@ -78,6 +78,19 @@ function olderConnectionText(result: Result): string {
 }
 
 describe("read_thread reads a window", () => {
+  test("two sessions of one agent in a thread: the reader's own messages say you, the other's do not; nothing stored changes", async () => {
+    const w = await world();
+    const first = (await call(w.client, "send_message", { project_path: w.project, agent_session: "ses_mine", agent_name: "Claude Code", agent_host: "claude-code", body: "I started the migration." })).structuredContent;
+    await call(w.client, "send_message", { project_path: w.project, agent_session: "ses_other", agent_name: "Claude Code", agent_host: "claude-code", body: "I took the API half.", reply_to: first.message_id });
+    const read = await call(w.client, "read_thread", { thread_id: first.thread_id, project_path: w.project, agent_session: "ses_mine" });
+    const authors = read.structuredContent.thread.messages.map((m: any) => m.author);
+    expect(authors).toEqual([{ kind: "agent", name: "Claude Code", you: true }, { kind: "agent", name: "Claude Code" }]);
+    expect(read.content[0]!.text).toContain(`[${first.message_id} · Claude Code (you)`);
+    const theirs = await call(w.client, "read_thread", { thread_id: first.thread_id, project_path: w.project, agent_session: "ses_other" });
+    expect(theirs.structuredContent.thread.messages.map((m: any) => !!m.author.you)).toEqual([false, true]);
+    expect(w.server.store.message(first.message_id)!.author).toMatchObject({ kind: "agent", session: "ses_mine", name: "Claude Code" });
+  });
+
   test("a 60-message thread: the transcript stays small, and each message past the window adds at most a line", async () => {
     const w = await world();
     const sizes: number[] = [];
@@ -141,7 +154,8 @@ describe("read_thread reads a window", () => {
       [seeded.lastAgentMessageId, "open", ["Yes", "No"]],
     ]);
     expect(thread.participants).toEqual([
-      { kind: "agent", name: "Claude Code", messages: 10 },
+      // The seeded agent's session is the reader's own.
+      { kind: "agent", name: "Claude Code", messages: 10, you: true },
       { kind: "person", name: "the person", messages: 9 },
     ]);
     // The transcript: the summary line first, the open questions, every message once, oldest first.

@@ -10,6 +10,10 @@
  *                                   detached first when it is not running;
  *                                   print the URL, exit 0 (never blocks: what
  *                                   the /plannotator-inbox commands run)
+ *   plannotator inbox --open <thread>
+ *                                   show that thread in the Inbox window open
+ *                                   on this computer (the one used last), or
+ *                                   open one at it; print its URL, exit 0
  *   plannotator inbox --tailscale   also publish it over the tailnet for this
  *                                   run (with any of the above; a running
  *                                   Inbox is asked to publish), for the
@@ -294,6 +298,42 @@ async function publishRunningInbox(entry: InboxRegistryEntry): Promise<void> {
     if (body.tailscale?.url && body.tailscale.source === "flag") reportFlagScope();
   } catch (error) {
     process.stderr.write(`Could not reach the running Inbox: ${error instanceof Error ? error.message : String(error)}\n`);
+  }
+}
+
+/**
+ * The thread `--open` names: a thread or message id (`msg_…`), or a link
+ * with `#thread=` (the Inbox's own, or the one the agent tools hand out).
+ * Null when it is none of these.
+ */
+export function inboxThreadRef(arg: string): string | null {
+  const value = arg.trim();
+  const hash = value.indexOf("#");
+  const id = hash === -1 ? value : new URLSearchParams(value.slice(hash + 1)).get("thread");
+  return id && /^[A-Za-z0-9_-]{1,128}$/.test(id) ? id : null;
+}
+
+/**
+ * `--open <thread>`: ask the running Inbox to show the thread in the window
+ * the person used last on this computer, through its token-guarded
+ * connection route. `shown: false`: no window is open (or the Inbox predates
+ * the route), and the caller opens one at the thread. `unknown`: no such
+ * thread, in words for stderr.
+ */
+async function showInRunningInbox(entry: InboxRegistryEntry, thread: string): Promise<{ shown: boolean; thread: string | null; unknown: string | null }> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${entry.port}/api/inbox/control/show`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${entry.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ thread }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const body = (await response.json().catch(() => ({}))) as { shown?: unknown; thread?: unknown; code?: unknown; error?: unknown };
+    if (body.code === "thread_unknown") return { shown: false, thread: null, unknown: typeof body.error === "string" ? body.error : `No thread ${thread} in this Inbox.` };
+    if (!response.ok) return { shown: false, thread: null, unknown: null };
+    return { shown: body.shown === true, thread: typeof body.thread === "string" ? body.thread : null, unknown: null };
+  } catch {
+    return { shown: false, thread: null, unknown: null };
   }
 }
 
@@ -758,11 +798,22 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
   let background = false;
   let noOpen = false;
   let open = false;
+  /** `--open <thread>`: the thread to show (a thread or message id, or a `#thread=` link). */
+  let thread: string | null = null;
   let tailscale = false;
-  for (const arg of args) {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
     if (arg === "--background") background = true;
     else if (arg === "--no-open") noOpen = true;
-    else if (arg === "--open") open = true;
+    else if (arg === "--open") {
+      open = true;
+      const next = args[i + 1];
+      if (next !== undefined && !next.startsWith("--")) {
+        thread = inboxThreadRef(next);
+        if (!thread) usageError(`--open takes a thread id, a message id or a #thread= link, not ${next}`);
+        i++;
+      }
+    }
     else if (arg === "--tailscale") tailscale = true;
     else if (arg === "--notes") usageError("--notes goes first and alone: plannotator inbox --notes codex,gemini");
     else usageError(`Unknown inbox option: ${arg}`);
@@ -781,13 +832,25 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
       // Stdout stays the local URL alone (agents read it); the tailnet goes to stderr.
       if (tailscale && (before.state === "running" || before.state === "busy")) await publishRunningInbox(entry);
       else reportTailnet(readInboxRegistry(dataDir)?.tailscale ?? entry.tailscale, tailscale);
+      // --open <thread>: the window open on this computer shows the thread; with none open, a new one opens at it.
+      let url = entry.url;
+      let opened = false;
+      if (open && thread) {
+        const shown = await showInRunningInbox(entry, thread);
+        if (shown.unknown) {
+          process.stderr.write(`${shown.unknown}\n`);
+          process.exit(1);
+        }
+        url = `${entry.url}#thread=${encodeURIComponent(shown.thread ?? thread)}`;
+        opened = shown.shown;
+      }
       // --open: the person asked for the window (the /plannotator-inbox
       // commands). The opener is never waited for: a browser it starts may
       // hold its output open for as long as it runs.
-      if (open && (await openBrowserDetached(entry.url, { isRemote: isRemoteSession() })) === "remote") {
+      if (open && !opened && (await openBrowserDetached(url, { isRemote: isRemoteSession() })) === "remote") {
         process.stderr.write(`${inboxRemoteOpenHint(entry.port)}\n`);
       }
-      process.stdout.write(`${entry.url}\n`);
+      process.stdout.write(`${url}\n`);
       process.exit(0);
     } catch (error) {
       process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefO
 import { KeyboardSettings } from './KeyboardSettings';
 import { INBOX_SOUND_MAX_VOLUME, INBOX_SOUND_MIN_VOLUME, INBOX_TEXT_SIZES } from '@plannotator/core/inbox-types';
 import type { InboxSound } from '../sound';
-import type { AgentToolHost, InboxCookieHost, InboxExperimentalSettings, InboxStorageModel, MachineView, SettingsModel } from '../api';
+import { tailnetGuest, type AgentToolHost, type InboxCookieHost, type InboxExperimentalSettings, type InboxStorageModel, type MachineView, type SettingsModel } from '../api';
 import { cookieHostDescription } from '@plannotator/ui/hooks/useCookieHostSetting';
 import { formatBytes, formatCount, plural, tildePath } from '../format';
 import { HARNESSES, type ConnectContext } from '../harnesses';
@@ -307,7 +307,7 @@ function GeneralSection({
   onToggleMarkReadWarning,
 }: {
   onToggleCookieHost?: (next: boolean) => void;
-  /** The Mark read warning's switch (absent for a tailnet guest, or from an Inbox without it: no row). */
+  /** The Mark read warning's switch (absent from an Inbox without it: no row). */
   onToggleMarkReadWarning?: (next: boolean) => void;
   onTakeTour?: () => void;
   updateRow?: ReactNode;
@@ -431,7 +431,7 @@ function GeneralSection({
                 <span className="ib-l" id="ib-favicon-label">
                   Favicon
                 </span>
-                <span className="ib-desc">The icon on this tab. Also plan review, code review and annotate.</span>
+                <span className="ib-desc">The icon on this tab and on the installed app. Also plan review, code review and annotate.</span>
               </span>
               <span className="ib-ctl">
                 <span className="ib-seg" role="radiogroup" aria-labelledby="ib-favicon-label">
@@ -1060,6 +1060,7 @@ export function SettingsPage(props: SettingsPageProps) {
   const phonesOn = settings?.phones === true;
   const phones = usePhones(phonesOn);
   const via = settings?.via ?? 'local';
+  const guest = tailnetGuest(settings);
   const { mode } = useInboxTheme();
   const palettes = useInboxPalettes();
   const heading = useRef<HTMLHeadingElement>(null);
@@ -1215,7 +1216,7 @@ export function SettingsPage(props: SettingsPageProps) {
             onToggleCookieHost={props.onToggleCookieHost}
             onTakeTour={props.onTakeTour}
             updateRow={props.updateRow}
-            onToggleMarkReadWarning={settings.guest ? undefined : props.onToggleMarkReadWarning}
+            onToggleMarkReadWarning={props.onToggleMarkReadWarning}
           />
         );
         break;
@@ -1244,6 +1245,7 @@ export function SettingsPage(props: SettingsPageProps) {
             phones={phonesOn ? phones : null}
             tailscale={settings.tailscale}
             via={via}
+            guest={guest}
             tailscaleBusy={tailscaleBusy}
             onToggleTailscale={onToggleTailscale}
             pairing={pairing && phonesOn}
@@ -1252,7 +1254,7 @@ export function SettingsPage(props: SettingsPageProps) {
         );
         break;
       case 'machines':
-        body = <MachinesSection machines={machines} via={via} onChanged={() => props.onMachinesChanged?.()} onMachineUpdate={props.onMachineUpdate} />;
+        body = <MachinesSection machines={machines} guest={guest} onChanged={() => props.onMachinesChanged?.()} onMachineUpdate={props.onMachineUpdate} />;
         break;
       case 'archived':
         body = archived ?? (

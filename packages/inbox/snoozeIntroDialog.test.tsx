@@ -1,7 +1,7 @@
 /**
  * The one-time Snooze announcement in a DOM (approval "inbox-snooze-announce"): the page's calm-moment gate
  * (snoozeIntro.ts `useSnoozeIntro`) driving the real dialog (components/SnoozeIntro.tsx), and Try it against the real
- * Snooze menus (snoozeIntroTry.ts with the real ThreadSnooze, the ⋯ sheet and the row's right-click menu).
+ * Snooze menus (snoozeIntroTry.ts with the real header ⋯ menu, the ⋯ sheet and the row's right-click menu).
  *
  * What regresses: the dialog showing on load, or with any one blocker present (a thread left too soon, too young a
  * page, a thread answered or typed in, too few read-and-left rows or rows, the tour or another dialog this load, a
@@ -19,7 +19,7 @@ const hasDom = typeof document !== 'undefined';
 const { SnoozeIntro } = (hasDom ? await import('./components/SnoozeIntro') : {}) as typeof import('./components/SnoozeIntro');
 const intro = (hasDom ? await import('./snoozeIntro') : {}) as typeof import('./snoozeIntro');
 const { openSnoozeMenu } = (hasDom ? await import('./snoozeIntroTry') : {}) as typeof import('./snoozeIntroTry');
-const { ThreadSnooze, ThreadMore } = (hasDom ? await import('./components/CopyMenus') : {}) as typeof import('./components/CopyMenus');
+const { ThreadMore } = (hasDom ? await import('./components/CopyMenus') : {}) as typeof import('./components/CopyMenus');
 const { ThreadRowMenu } = (hasDom ? await import('./components/RowMenu') : {}) as typeof import('./components/RowMenu');
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -320,7 +320,7 @@ describe.skipIf(!hasDom)('Try it opens the real Snooze menu and snoozes nothing'
     return host;
   }
 
-  test('a thread open: its header clock, from the dialog’s Try it', async () => {
+  test('a thread open: its header ⋯ menu at the times, from the dialog’s Try it', async () => {
     const picked: string[] = [];
     const snooze = { snoozed: false, onPick: (until: string) => picked.push(until), onUnsnooze: () => picked.push('unsnooze') };
     let opened: Promise<boolean> | null = null;
@@ -329,7 +329,7 @@ describe.skipIf(!hasDom)('Try it opens the real Snooze menu and snoozes nothing'
       return (
         <>
           <section className="ib-pane">
-            <ThreadSnooze snooze={snooze} />
+            <ThreadMore thread={THREAD} linkOf={() => ''} phone={false} snooze={snooze} />
           </section>
           {open && (
             <SnoozeIntro
@@ -350,7 +350,7 @@ describe.skipIf(!hasDom)('Try it opens the real Snooze menu and snoozes nothing'
       dialog()!.querySelector<HTMLButtonElement>('[data-snooze-intro-try]')!.click();
       expect(await opened!).toBe(true);
     });
-    expect(document.querySelectorAll('[data-thread-snooze-menu] [data-snooze-choice]').length).toBeGreaterThan(1);
+    expect(document.querySelectorAll('[data-thread-menu] [data-snooze-choice]').length).toBeGreaterThan(1);
     await wait(100);
     expect(picked).toEqual([]);
     expect(posts.filter((p) => p.includes('/snooze'))).toEqual([]);
