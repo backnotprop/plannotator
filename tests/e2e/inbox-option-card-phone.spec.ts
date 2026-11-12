@@ -1,32 +1,3 @@
-/**
- * A picture on a phone keeps clear of what floats over it (approval
- * "inbox-option-card-phone", 2026-11-01), proved against the compiled binary
- * under a temp data dir. Standing up, Fit and the pan's limits work between the
- * size bar and the option card (or the toolbar on a plain picture), so the
- * whole picture can always be seen, with no gap or overlap at the pan's stop.
- * Everything the fingers could do before still works: a pinch in and out (one
- * finger under the card included), a pan to all four edges at Actual size and
- * zoomed, a tall picture or a panorama zoomed below its Fit, a double tap, a
- * swipe between pictures and a drag down to close. A zoomed picture still
- * slides under the bars. Hide takes the card too and gives the picture the
- * whole screen, and so does the comment box's ⌄, the same gather into the
- * corner control (approval "inbox-fullscreen-gather"; one tap on it brings
- * the toolbar, the card and the picture back, with no jump). The card is one row and one height (approval
- * "inbox-option-card-lean": the letter and the name, no arrows on a phone, no
- * question, dots or end note), a long name giving way with an ellipsis, and the
- * last option is said in the live region on the step onto it. A phone on its
- * side stays as it was; a desktop has its own spec.
- *
- * Chromium: real touches, through the DevTools protocol. WebKit has no way to
- * send them from Playwright (phone-touch.ts): its checks use the mouse for a
- * pan and hand-made pointer events for a pinch, so they prove the layout and
- * the arithmetic in WebKit, not a finger on Safari.
- *
- * Build the binary first (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-option-card-phone.spec.ts`.
- * PNGs land in PLANNOTATOR_OPTION_CARD_SHOTS (default .local/proof/option-card-phone).
- */
-
 import { chromium, devices, expect, test, webkit, type Browser, type Locator, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -108,7 +79,6 @@ interface Box {
   height: number;
 }
 
-/** Everything on screen that matters, as drawn; null for what is not there or hidden. */
 function layout(page: Page) {
   return page.evaluate(() => {
     const box = (selector: string) => {
@@ -131,16 +101,11 @@ function layout(page: Page) {
 
 type Layout = Awaited<ReturnType<typeof layout>>;
 
-/**
- * Where the picture's clear space ends: the card's top, or the toolbar's, under the size bar. Gathered into the corner
- * control (approval "inbox-fullscreen-gather"), the size bar, the card and the toolbar all go: the whole stage is clear.
- */
 const floor = (l: Layout) => (l.card ?? l.toolbar)?.top ?? l.stage.bottom;
 const ceiling = (l: Layout) => l.sizeBar?.bottom ?? l.stage.top;
 const same = (a: Box, b: Box) => {
   for (const side of ['top', 'bottom', 'left', 'right'] as const) expect(Math.abs(a[side] - b[side]), side).toBeLessThan(1.5);
 };
-/** The whole picture is in the clear space: nothing floats over any of it. */
 const inTheClear = (l: Layout) => {
   expect(l.image.top).toBeGreaterThanOrEqual(ceiling(l) - 0.5);
   expect(l.image.bottom).toBeLessThanOrEqual(floor(l) + 0.5);
@@ -148,11 +113,6 @@ const inTheClear = (l: Layout) => {
 
 const settled = (page: Page, ms = 320) => page.waitForTimeout(ms);
 
-/**
- * Nothing is moving: no transition running, and the picture where it was three frames ago. Counted in frames, not
- * time, so a slow renderer (WebKit on a CI runner) is measured as late as it needs: a fixed wait there reads the
- * card halfway through its fade.
- */
 const atRest = (page: Page) =>
   page.evaluate(async () => {
     const image = document.querySelector('.ib-imgstage .ib-zoomimg')!;
@@ -180,18 +140,14 @@ async function openChoice(page: Page, url: string, thread: string, letter: strin
   await atRest(page);
 }
 
-/** The picture's middle, on the stage, where a finger lands without touching a button. */
 const middle = (l: Layout): Point => ({ x: (l.stage.left + l.stage.right) / 2, y: (ceiling(l) + floor(l)) / 2 });
 
-/** One finger drags the same way, again and again, until the picture is at the edge asked for. */
 async function panTo(page: Page, touch: Finger, side: 'top' | 'bottom' | 'left' | 'right') {
   const dx = side === 'left' ? 90 : side === 'right' ? -90 : 0;
   const dy = side === 'top' ? 90 : side === 'bottom' ? -90 : 0;
   let last = await layout(page);
   const at = middle(last);
   for (let i = 0; i < 40; i++) {
-    // Sideways, a drag from the edge steps to the next file, and one that reaches the edge hands the rest of itself to
-    // the swipe: slowly, so it is no flick, and long enough for the picture to spring back before it is measured.
     const sideways = dx !== 0;
     const room = side === 'left' ? last.stage.left - last.image.left : side === 'right' ? last.image.right - last.stage.right : Infinity;
     if (room <= 0.5) break;
@@ -205,7 +161,6 @@ async function panTo(page: Page, touch: Finger, side: 'top' | 'bottom' | 'left' 
   return last;
 }
 
-/** A picture larger than the clear space reaches all four stops, each exactly at the clear space's or the stage's edge. */
 async function panAllFour(page: Page, touch: Finger, file: string) {
   const bottom = await panTo(page, touch, 'bottom');
   expect(Math.abs(bottom.image.bottom - floor(bottom)), 'the bottom stops at the floating row').toBeLessThan(1);
@@ -218,7 +173,6 @@ async function panAllFour(page: Page, touch: Finger, file: string) {
   await expect(pane(page)).toHaveAttribute('aria-label', new RegExp(`^${file}`));
 }
 
-/** Two fingers either side of `at`, their distance going from `from` to `to`. */
 const spread = (page: Page, at: Point, from: number, to: number) =>
   pinch(
     page,
@@ -240,23 +194,12 @@ async function doubleTap(page: Page, at: Point) {
 }
 
 interface TapSeen {
-  /** The tap's click reached the button. */
   click: boolean;
-  /** Where the tap's click went instead, if anywhere. */
   elsewhere: string | null;
-  /** A touch or pointer event of the tap that the page cancelled. */
   cancelled: string | null;
-  /** Every touch, pointer and click event the page got, for the log. */
   events: string[];
 }
 
-/**
- * A real tap on a button, proved by the click it makes. On a busy CI runner Chromium now and then makes no click from a
- * tap that reached the button (Playwright saw the touch land on it, and Fit and the tools' buttons act on any click they
- * get), so the state the tap should bring never came. That tap is sent again. What a person would feel is never sent
- * again: the page cancelling the tap's touch, or its click landing on something else, fails here. Counted in frames, as
- * `atRest` is: a click comes in the frames after the touch ends.
- */
 async function tapButton(button: Locator) {
   for (let attempt = 1; ; attempt++) {
     await button.evaluate((el) => {
@@ -276,7 +219,6 @@ async function tapButton(button: Locator) {
               if (tap.target.contains(target)) tap.seen.click = true;
               else tap.seen.elsewhere ??= name;
             } else if (!type.endsWith('cancel')) {
-              // Asked once the event has been through every listener: whether the page cancelled it.
               setTimeout(() => {
                 if (event.defaultPrevented) tap.seen.cancelled ??= `${type} on ${name}`;
               });
@@ -300,7 +242,6 @@ async function tapButton(button: Locator) {
   }
 }
 
-/** The size bar's button (Fit to Actual size, anything else to Fit), once the picture has got there. */
 async function tapFit(page: Page) {
   const was = await zoomStage(page).getAttribute('data-image-zoom-stage');
   await tapButton(page.locator('[data-image-fit]'));
@@ -308,7 +249,6 @@ async function tapFit(page: Page) {
   await atRest(page);
 }
 
-/** A tap that moves the tools to `state`, once the pane is there and what fades or refits with it has finished. */
 async function tapTools(page: Page, button: string, state: 'tucked' | 'pinned') {
   await tapButton(page.locator(button));
   await expect(page.locator(`[data-tools="${state}"]`)).toHaveCount(1);
@@ -331,7 +271,6 @@ for (const { name, width, height } of [
   { name: 'a phone at full height', width: 390, height: 844 },
 ])
   test(`real touches, ${name} (${width} × ${height}): a picture is never left under the card, and every gesture still works`, async () => {
-    // Every gesture, one finger at a time: about two minutes on a laptop, longer on a CI runner.
     test.setTimeout(480_000);
     const { root, url, agent, thread } = await world();
     const browser: Browser = await chromium.launch();
@@ -343,14 +282,12 @@ for (const { name, width, height } of [
       const touch = await finger(page, 'chromium');
       const tag = `${width}x${height}`;
 
-      // Fit: the whole picture, above the card.
       await openChoice(page, url, thread, 'A');
       const fit = await layout(page);
       inTheClear(fit);
       expect(fit.image.width).toBeGreaterThan(fit.stage.width - 30);
       await shot(page, `${tag}-A-fit`);
 
-      // Actual size: all four stops, exactly at the rows (no gap, no overlap).
       await tapFit(page);
       await panAllFour(page, touch, 'opt-a.png');
       await panTo(page, touch, 'bottom');
@@ -358,7 +295,6 @@ for (const { name, width, height } of [
       await tapFit(page);
       same((await layout(page)).image, fit.image);
 
-      // A pinch in, and the picture slides under the bars.
       const at = middle(fit);
       await spread(page, at, 90, 320);
       await settled(page);
@@ -371,7 +307,6 @@ for (const { name, width, height } of [
       await panAllFour(page, touch, 'opt-a.png');
       await shot(page, `${tag}-A-pinched-all-four`);
 
-      // A pinch out: back to Fit, where it stops for a picture Fit shows whole.
       await spread(page, at, 320, 50);
       await settled(page);
       await spread(page, at, 200, 60);
@@ -380,7 +315,6 @@ for (const { name, width, height } of [
       await expect(zoomStage(page)).toHaveAttribute('data-image-zoom-stage', 'fit');
       same(out.image, fit.image);
 
-      // A second finger under the card still reaches the picture.
       const card = fit.card!;
       await pinch(
         page,
@@ -398,7 +332,6 @@ for (const { name, width, height } of [
       await tapFit(page);
       same((await layout(page)).image, fit.image);
 
-      // A double tap: 2× about the finger, and back.
       await doubleTap(page, at);
       await expect(zoomStage(page)).toHaveAttribute('data-image-zoom-stage', 'zoom');
       expect((await layout(page)).scale).toBeGreaterThanOrEqual(fit.scale * 2 - 1);
@@ -406,7 +339,6 @@ for (const { name, width, height } of [
       await expect(zoomStage(page)).toHaveAttribute('data-image-zoom-stage', 'fit');
       same((await layout(page)).image, fit.image);
 
-      // A swipe: the next picture comes in level with where it will land, and lands there.
       await touch.down(fit.stage.right - 60, at.y, -fit.stage.width * 0.4, 0, 6);
       const incoming = await page.locator('.ib-imgpeek[data-image-peek="next"] img').evaluate((el) => {
         const { top, bottom } = el.getBoundingClientRect();
@@ -420,15 +352,11 @@ for (const { name, width, height } of [
       expect(Math.abs(incoming.top - landed.image.top)).toBeLessThan(1.5);
       expect(Math.abs(incoming.bottom - landed.image.bottom)).toBeLessThan(1.5);
 
-      // The composer's other states keep the picture clear of the card too.
       await page.getByRole('radio', { name: /Reply/ }).first().tap();
       await settled(page);
       inTheClear(await layout(page));
       await page.getByRole('radio', { name: /Comment/ }).first().tap();
       await settled(page);
-      // The comment box's ⌄ gathers the tools into the corner control, the card with them (the owner: "I also want
-      // that options panel to go away"; approval "inbox-fullscreen-gather"): the picture gets the whole screen, a pinch
-      // and a swipe still work, and one tap on the corner control brings the card and the picture back, with no jump.
       const beforeGather = await layout(page);
       await tapTools(page, '.ib-fcomp-min', 'tucked');
       const gathered = await layout(page);
@@ -449,7 +377,6 @@ for (const { name, width, height } of [
       await tapTools(page, '[data-full-view-handle]', 'pinned');
       same((await layout(page)).image, beforeGather.image);
       same((await layout(page)).card!, beforeGather.card!);
-      // A swipe while gathered steps to the next option, and one tap brings the tools back with its card.
       await tapTools(page, '.ib-fcomp-min', 'tucked');
       const hiddenAt = await layout(page);
       await touch.down(hiddenAt.stage.right - 60, middle(hiddenAt).y, -hiddenAt.stage.width * 0.5, 0);
@@ -460,14 +387,12 @@ for (const { name, width, height } of [
       await expect(caption(page)).toHaveAttribute('data-option-caption', 'C');
       await expect(caption(page)).toBeVisible();
 
-      // A tall picture reads from the top, reaches its end, and zooms below its Fit: the whole of it, in the clear.
       await openChoice(page, url, thread, 'D');
       const tall = await layout(page);
       expect(Math.abs(tall.image.top - ceiling(tall))).toBeLessThan(1);
       const end = await panTo(page, touch, 'bottom');
       expect(Math.abs(end.image.bottom - floor(end)), 'a tall picture reaches its end').toBeLessThan(1);
       await shot(page, `${tag}-D-tall-end`);
-      // Back up a little: off its stop, so the new room cannot move it.
       for (let i = 0; i < 3; i++) {
         await touch.down(middle(end).x, middle(end).y - 45, 0, 90, 6);
         await touch.up();
@@ -475,7 +400,6 @@ for (const { name, width, height } of [
       }
       const held = await layout(page);
       expect(held.image.top).toBeGreaterThan(end.image.top + 200);
-      // Where the person panned to holds when the room changes: Hide (and ⌄) refit only a picture resting at Fit.
       await hideTools(page);
       expect(Math.abs((await layout(page)).image.top - held.image.top), 'Hide does not snap a panned picture back').toBeLessThan(1.5);
       await tapTools(page, '[data-full-view-handle]', 'pinned');
@@ -489,7 +413,6 @@ for (const { name, width, height } of [
       expect(small.scale).toBeLessThan(tall.scale);
       inTheClear(small);
 
-      // A panorama: Fit by its height, a pan to its far end, then below its Fit, the whole of it.
       await openChoice(page, url, thread, 'E');
       const pano = await layout(page);
       inTheClear(pano);
@@ -504,7 +427,6 @@ for (const { name, width, height } of [
       expect(wholePano.scale).toBeLessThan(pano.scale);
       expect(wholePano.image.width).toBeLessThanOrEqual(wholePano.stage.width + 0.5);
 
-      // The picture standing up gets the room Hide gives, and the card goes with the tools.
       await openChoice(page, url, thread, 'C');
       const tools = await layout(page);
       inTheClear(tools);
@@ -517,12 +439,10 @@ for (const { name, width, height } of [
       expect(Math.abs(hidden.image.top - hidden.stage.top - (hidden.stage.bottom - hidden.image.bottom)), 'centred on the whole stage').toBeLessThan(1);
       expect(Math.min(hidden.image.top - hidden.stage.top, hidden.image.left - hidden.stage.left)).toBeLessThan(14);
       await shot(page, `${tag}-C-hidden`);
-      // One tap on the corner control brings everything back: the toolbar, the card, and the picture where it was.
       await tapTools(page, '[data-full-view-handle]', 'pinned');
       await expect(caption(page)).toBeVisible();
       same((await layout(page)).image, tools.image);
 
-      // A plain picture gets the same: the toolbar is the floor.
       await tapButton(pill(page));
       await page.locator('[data-image-peek-sheet]').getByRole('gridcell', { name: /^plain\.png/ }).click();
       await expect(caption(page)).toHaveCount(0);
@@ -542,7 +462,6 @@ for (const { name, width, height } of [
       expect(Math.abs(plainHidden.image.top - plainHidden.stage.top - (plainHidden.stage.bottom - plainHidden.image.bottom))).toBeLessThan(1);
       await tapTools(page, '[data-full-view-handle]', 'pinned');
 
-      // A drag down closes, back to the thread.
       const close = await layout(page);
       await touch.down(middle(close).x, close.stage.top + close.stage.height * 0.3, 0, close.stage.height * 0.4);
       await touch.up();
@@ -566,14 +485,12 @@ test('a picture opens where it stays: it does not slide into place once the rows
     await page.goto(`${url}#thread=${thread}`);
     const zoom = page.getByRole('button', { name: 'Zoom: Option A' }).first();
     await zoom.scrollIntoViewIfNeeded();
-    // Every frame from the tap on: where the picture is drawn.
     await page.evaluate(() => {
       const tops: number[] = [];
       (window as unknown as { __tops: number[] }).__tops = tops;
       const frame = () => {
         const image = document.querySelector<HTMLImageElement>('.ib-imgstage .ib-zoomimg');
         const top = image?.getBoundingClientRect().top ?? 0;
-        // (At 0 it is not laid out yet.)
         if (top > 0) tops.push(top);
         requestAnimationFrame(frame);
       };
@@ -614,7 +531,6 @@ for (const [width, height] of [
       for (const gone of ['[data-option-step]', '.ib-optcap-q', '.ib-optcap-prompt', '.ib-optcap-dots', '[data-option-end]']) await expect(caption(page).locator(gone)).toHaveCount(0);
       await shot(page, `${width}x${height}-B-lean`);
 
-      // A swipe onto the last option: the card is where it was, and the live region says where the other files are.
       await openChoice(page, url, thread, 'D');
       const touch = await finger(page, 'chromium');
       const tall = await layout(page);
@@ -627,16 +543,13 @@ for (const [width, height] of [
       expect(last.top).toBe(recommended.top);
       await shot(page, `${width}x${height}-E-lean`);
 
-      // A swipe past the end (the panorama panned to its far end first) says it again, as the pane always has.
       const l = await panTo(page, touch, 'right');
       await touch.down(l.stage.right - 60, middle(l).y, -l.stage.width * 0.5, 0);
       await touch.up();
       await expect(page.locator('[data-step-live]')).toHaveText('Last option');
       expect((await layout(page)).card!.height).toBe(recommended.height);
 
-      // The largest text size, and a very long name: the name gives way with an ellipsis, the letter and the card stay whole.
       await page.evaluate(() => document.documentElement.style.setProperty('--inbox-text-size', '15'));
-      // The name everywhere it is drawn (the visible row and the unseen row that sets the card's width).
       await caption(page).evaluate((card) => {
         for (const el of card.querySelectorAll('.ib-optcap-label')) el.textContent = 'A very long choice name that goes on and on about where the quiet link should sit on a waiting thread';
       });
@@ -666,7 +579,6 @@ for (const [width, height] of [
 test('in WebKit (mouse and hand-made pointers, not a finger): the clear space, the pan stops, a pinch and Hide', async () => {
   test.setTimeout(480_000);
   const { root, url, agent, thread } = await world();
-  // (WebKit launches without the config's Chromium flags, which Linux WebKit exits on.)
   const browser: Browser = await webkit.launch({ args: [] });
   try {
     for (const [width, height] of [
@@ -705,7 +617,6 @@ test('in WebKit (mouse and hand-made pointers, not a finger): the clear space, t
       await tapFit(page);
       same((await layout(page)).image, fit.image);
 
-      // A pinch by hand-made pointer events: in, and out again to Fit.
       const pointers = (from: number, to: number) =>
         page.evaluate(
           async ({ x, y, from, to }) => {
@@ -782,7 +693,6 @@ test('under reduced motion a phone\'s Hide and ⌄ take the card with no fade, a
     const page = await context.newPage();
     await openChoice(page, url, thread, 'B');
     const fade = () => page.locator('.ib-optcap').evaluate((el) => getComputedStyle(el).transitionDuration);
-    // Gathered under reduced motion, what floats only fades out where it sits (approval "inbox-fullscreen-gather"): no travel.
     const moved = () =>
       page.evaluate(() => [...document.querySelectorAll<HTMLElement>('.ib-fvbar, .ib-fcomp, .ib-imgbar')].map((el) => getComputedStyle(el).transform).filter((t) => t !== 'none' && !/^matrix\(1, 0, 0, 1, (-?[\d.]+), 0\)$/.test(t)));
     expect(await fade()).toBe('0s');

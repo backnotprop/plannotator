@@ -1,14 +1,3 @@
-/**
- * A scripted phone on the same Wi-Fi: one HTTP/1.1 request over a TLS socket
- * whose certificate is pinned by SHA-256, as the iPhone app checks it
- * (adr/implementation/inbox-mobile.md, section 3: the leaf certificate's
- * SHA-256 equals the fingerprint the phone holds; no host name, chain or
- * dates). The pin is checked when the handshake ends, before a byte of the
- * request is written: a wrong fingerprint sends nothing.
- *
- * The request line goes out exactly as given (no URL normalization), so a
- * door review can send encoded path tricks and any Host or Origin header.
- */
 import { createHash } from "node:crypto";
 import tls from "node:tls";
 
@@ -22,18 +11,14 @@ export interface PinnedAnswer {
   status: number;
   headers: Record<string, string>;
   text: string;
-  /** The SHA-256 of the certificate the server presented. */
   presented: string;
 }
 
-/** Connect, check the pin, then hand back the open socket. Rejects with PinMismatchError on a wrong certificate. */
 export function pinnedSocket(address: string, fingerprint: string): Promise<tls.TLSSocket> {
   const at = address.lastIndexOf(":");
   const host = address.slice(0, at);
   const port = Number(address.slice(at + 1));
   return new Promise((resolve, reject) => {
-    // The phone holds a fingerprint, not a CA: the pin below replaces the chain check (contract section 3).
-    // nosemgrep: plannotator.network.tls-verification-disabled
     const socket = tls.connect({ host, port, rejectUnauthorized: false }, () => {
       const presented = createHash("sha256").update(socket.getPeerCertificate().raw).digest("hex");
       if (presented !== fingerprint) {
@@ -61,10 +46,6 @@ function decodeChunked(body: Buffer): Buffer {
   return Buffer.concat(parts);
 }
 
-/**
- * One request through the pinned socket. `headers` are sent as given; Host
- * defaults to the address and `Connection` to `close`.
- */
 export async function pinnedRequest(
   address: string,
   fingerprint: string,
@@ -72,7 +53,6 @@ export async function pinnedRequest(
 ): Promise<PinnedAnswer> {
   const socket = await pinnedSocket(address, fingerprint);
   const presented = createHash("sha256").update(socket.getPeerCertificate().raw).digest("hex");
-  // Connection: close unless the caller sends its own (a WebSocket upgrade's `Connection: Upgrade`).
   const headers: Record<string, string> = { Host: address, Connection: "close", ...init.headers };
   if (init.body !== undefined) headers["Content-Length"] = String(Buffer.byteLength(init.body));
   const head = [`${init.method ?? "GET"} ${init.path} HTTP/1.1`, ...Object.entries(headers).map(([k, v]) => `${k}: ${v}`), "", ""].join("\r\n");
@@ -92,7 +72,6 @@ export async function pinnedRequest(
   };
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    // A whole answer (by Content-Length) ends the exchange even when the server keeps the socket open.
     socket.on("data", (chunk: Buffer) => {
       chunks.push(chunk);
       if (parse(Buffer.concat(chunks))?.complete) socket.destroy();

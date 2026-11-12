@@ -1,26 +1,3 @@
-/**
- * Picture choices and the question contract lines (approval
- * "inbox-decision-mode", agent contract lines), proved in a real browser
- * against the compiled binary. Nothing is mocked: the binary runs
- * `plannotator inbox --background` under a temp PLANNOTATOR_DATA_DIR and
- * HOME, and a Claude Code agent asks through `plannotator inbox mcp`
- * (scripts/inbox-sim.ts) with two real PNGs beside the project.
- *
- * Desktop (Chromium, 1440): the card shows Stakes, the Can't be undone tag,
- * the Shows chip and Why; the choices are picture tiles whose pictures load
- * from the message image route; the zoom button opens the thread's viewer
- * without picking; a click on a picture picks it; Send; the agent's
- * read_thread gets the plain label. Then an iPhone 15 in WebKit does the
- * same on a second question (its two choices one a row). Last, images the Inbox refuses to serve (a
- * hidden folder of the home folder: 403 image_hidden; a missing file: 404)
- * show as their alt text, never a broken-image icon, and a card whose
- * pictures are refused falls back to text rows, on the desktop and on the
- * iPhone. Screenshots, light and dark, land in
- * PLANNOTATOR_QUESTION_CONTRACT_SHOTS (default .local/proof/question-contract/).
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- */
-
 import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -83,7 +60,6 @@ function registry(): { port: number } {
   return JSON.parse(readFileSync(join(world.dataDir, 'inbox', 'inbox.json'), 'utf8'));
 }
 
-/** What the person sent on the thread's newest answered question, as the agent reads it. */
 async function sentSelection(agent: SimAgent, threadId: string): Promise<string[]> {
   const thread = await agent.readThread(threadId);
   const questions = (thread.messages as { questions?: { state: string; answer?: { selected?: string[] } }[] }[]).flatMap((m) => m.questions ?? []);
@@ -117,7 +93,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   writeFileSync(join(project, 'shots', 'drawer-a.png'), png(640, 480, [37, 99, 235]));
   writeFileSync(join(project, 'shots', 'drawer-b.png'), png(640, 480, [22, 163, 74]));
   writeFileSync(join(project, 'shots', 'both.png'), png(960, 400, [217, 119, 6]));
-  // Refused images: a hidden folder of the home folder, HOME being `root` (the route answers 403 image_hidden).
   mkdirSync(join(root, '.secret'), { recursive: true });
   for (const name of ['shot.png', 'raw.png', 'both.png', 'a.png']) writeFileSync(join(root, '.secret', name), png(640, 480, [190, 18, 60]));
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
@@ -156,13 +131,11 @@ test('desktop: tiles pick, zoom is separate, the contract lines show, and the ag
 
   const tiles = card.locator('[data-question-tile]');
   await expect(tiles).toHaveCount(2);
-  // The pictures load from the message image route.
   for (const i of [0, 1]) {
     await expect.poll(() => tiles.nth(i).locator('img[data-question-picture]').evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(640);
   }
   await shot(page, 'desktop-card', card);
 
-  // Zoom opens the thread's viewer and does not pick.
   await tiles.nth(0).locator('[data-question-zoom]').click();
   await expect(page.locator('.ib-view')).toBeVisible();
   await shot(page, 'desktop-zoom');
@@ -171,7 +144,6 @@ test('desktop: tiles pick, zoom is separate, the contract lines show, and the ag
   await page.goto(`${world.url}#thread=${threadId}`);
   await expect(card.locator('input:checked')).toHaveCount(0);
 
-  // The picture picks.
   await tiles.nth(1).locator('img[data-question-picture]').click();
   await expect(tiles.nth(1).locator('input')).toBeChecked();
   await expect(pane.locator('[data-foot-status] [data-draft-foot]')).toContainText('1 pick');
@@ -198,14 +170,12 @@ test('iPhone (WebKit): one tile a row, a tap picks, Send, the agent gets the lab
     await expect(card).toBeVisible();
     const tiles = card.locator('[data-question-tile]');
     await expect(tiles).toHaveCount(2);
-    // Under 560 px of room the choices stack (approval "picture-choices-layout"), each the grid's full width.
     const [a, b, grid] = await Promise.all([tiles.nth(0).boundingBox(), tiles.nth(1).boundingBox(), card.locator('[data-question-tiles]').boundingBox()]);
     expect(b!.y).toBeGreaterThanOrEqual(a!.y + a!.height);
     expect(Math.abs(a!.width - grid!.width)).toBeLessThanOrEqual(1);
     for (const i of [0, 1]) {
       await expect.poll(() => tiles.nth(i).locator('img[data-question-picture]').evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth)).toBe(640);
     }
-    // The zoom button keeps a 44 px target.
     const zoom = await tiles.nth(0).locator('[data-question-zoom]').evaluate((el) => {
       const r = el.getBoundingClientRect();
       const before = getComputedStyle(el, '::before');
@@ -239,7 +209,6 @@ test('iPhone (WebKit): one tile a row, a tap picks, Send, the agent gets the lab
   }
 });
 
-/** A body naming images the Inbox refuses: a hidden folder of the home folder, and a file that is not there. */
 function refusedBody(root: string): string {
   const hidden = (name: string) => join(root, '.secret', name);
   return [
@@ -261,16 +230,13 @@ function refusedBody(root: string): string {
   ].join('\n');
 }
 
-/** The message body the refused images are in. */
 const bodyOf = (messageId: string) => `section.ib-pane .ib-body[data-message-id="${messageId}"]`;
 
-/** Waits until every image the message drew has loaded or failed, and the window has drawn what follows. */
 async function settled(page: Page, messageId: string): Promise<void> {
   await expect.poll(() => page.locator(bodyOf(messageId)).locator('img').evaluateAll((imgs) => imgs.every((img) => (img as HTMLImageElement).complete))).toBe(true);
   await page.waitForTimeout(400);
 }
 
-/** What a refused body must look like: no broken <img>, the alt text in chips, text rows on the card. */
 async function expectQuiet(page: Page, messageId: string): Promise<void> {
   const body = page.locator(bodyOf(messageId));
   const broken = await body.locator('img').evaluateAll((imgs) => imgs.filter((img) => img.getClientRects().length > 0 && (img as HTMLImageElement).naturalWidth === 0).map((img) => (img as HTMLImageElement).alt || img.getAttribute('src')));
@@ -287,7 +253,6 @@ test('refused images show as their alt text, never a broken image; the card fall
   const sent = await claude.send({ project_path: project, subject: 'Scratch screenshots', thread: 'scratch-screenshots', body: refusedBody(root) }, { wakes: true });
   const threadId = sent.thread_id as string;
   const messageId = (sent.message as { id?: string } | undefined)?.id ?? (sent.message_id as string);
-  // The route really refuses them.
   const port = registry().port;
   const hiddenAnswer = await fetch(`http://127.0.0.1:${port}/api/inbox/messages/${messageId}/image?path=${encodeURIComponent(join(root, '.secret', 'shot.png'))}`);
   expect(hiddenAnswer.status).toBe(403);

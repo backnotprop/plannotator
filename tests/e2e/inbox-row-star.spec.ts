@@ -1,12 +1,3 @@
-/**
- * The star a list row shows, with real clicks and taps against the compiled binary: a press unstars without opening the
- * thread or marking it read, a double press included; the reach goes by the pointer's type, not the window's width; the
- * star does nothing on hover. And when it pops: once, not after a reload, not for a star from elsewhere, not under
- * reduced motion, not for a star that failed.
- *
- * Under a temp HOME and PLANNOTATOR_DATA_DIR; agents write through `plannotator inbox mcp`.
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-row-star.spec.ts`.
- */
 import { devices, expect, test, webkit, type Browser, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -53,7 +44,6 @@ const serverUnread = (page: Page, id: string) =>
     return [found.unread, found.unseen];
   }, id);
 
-/** The page with only these threads starred, freshly loaded. */
 async function load(page: Page, starred: string[], selector = '.ib-lbody [data-thread-id]') {
   await page.goto(url);
   await page.locator(selector).first().waitFor();
@@ -64,7 +54,6 @@ async function load(page: Page, starred: string[], selector = '.ib-lbody [data-t
   for (const id of starred) await expect(star(page, id)).toBeVisible();
 }
 
-/** Counts every start of the pop, on the row's star and the sidebar's. */
 const COUNT_POPS = () => {
   (window as unknown as { __pops: string[] }).__pops = [];
   document.addEventListener('animationstart', (event) => {
@@ -160,7 +149,6 @@ test.describe('a mouse', () => {
     const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
     await page.mouse.click(x, y);
     await page.waitForTimeout(500);
-    // One press the system counts as the double's second (`mouse.click` with a clickCount sends the first press again).
     await page.mouse.down({ clickCount: 2 });
     await page.mouse.up({ clickCount: 2 });
     await page.waitForTimeout(500);
@@ -211,7 +199,6 @@ test.describe('a mouse', () => {
     const page = await context.newPage();
     await load(page, [ids.d], '.ib-mrow');
     const box = (await star(page, ids.d).boundingBox())!;
-    // 9 px above the star: inside a touch's reach, outside a mouse's. The thread opens.
     await page.mouse.click(box.x + box.width / 2, box.y - 9);
     await expect.poll(() => threadOpen(page)).toBe(true);
     expect(await serverPins(page)).toEqual([ids.d]);
@@ -233,7 +220,6 @@ test.describe('the pop', () => {
     await starFromRowMenu(page, ids.a);
     await expect(star(page, ids.a)).toBeVisible();
     await page.waitForTimeout(2000);
-    // The list redraws for another reason, past the moment: nothing plays again.
     await setPin(page, ids.b, true);
     await expect(star(page, ids.b)).toBeVisible();
     await page.waitForTimeout(500);
@@ -281,7 +267,6 @@ test.describe('the pop', () => {
     await page.route(`**/api/inbox/threads/${ids.b}/pin`, (route) => route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"nope"}' }));
     await starFromRowMenu(page, ids.b);
     await page.waitForTimeout(500);
-    // Something redraws the sidebar inside the moment.
     await setPin(page, ids.c, true);
     await expect(star(page, ids.c)).toBeVisible();
     await page.waitForTimeout(400);
@@ -293,7 +278,6 @@ test.describe('the pop', () => {
 test.describe('a phone', () => {
   let phone: Browser | null = null;
   test.beforeAll(async () => {
-    // No args: the config's Chromium flags (--use-mock-keychain, --password-store=basic) reach every launch, and Linux WebKit exits on them.
     phone = await webkit.launch({ args: [] });
   });
   test.afterAll(async () => {
@@ -310,7 +294,6 @@ test.describe('a phone', () => {
     await expect(page.locator('[data-inbox-toast]')).toContainText('Unstarred');
     expect(await threadOpen(page)).toBe(false);
 
-    // A double tap.
     await load(page, [ids.a], '.ib-mrow');
     box = (await star(page, ids.a).boundingBox())!;
     [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
@@ -322,14 +305,12 @@ test.describe('a phone', () => {
     expect(await threadOpen(page)).toBe(false);
     expect(await serverPins(page)).toEqual([]);
 
-    // Past the target: the row.
     await load(page, [ids.a], '.ib-mrow');
     box = (await star(page, ids.a).boundingBox())!;
     await page.touchscreen.tap(box.x - 24, box.y + box.height / 2);
     await expect.poll(() => threadOpen(page)).toBe(true);
     expect(await serverPins(page)).toEqual([ids.a]);
 
-    // An unstarred row has no star and opens.
     await load(page, [ids.a], '.ib-mrow');
     await expect(row(page, ids.b).locator('.ib-pinmark')).toHaveCount(0);
     await context.close();

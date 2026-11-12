@@ -1,28 +1,3 @@
-/**
- * The Inbox with the worst realistic data (the stress test of 2026-10-12 and
- * its fix plan, PR 1): scripts/inbox-worst-case.ts fills a throwaway Inbox
- * with non-Latin project folders, two folders named "api", a 54-character
- * project name, right-to-left text, long and near-identical file names, a
- * changed file with comments, a message table and a tall screenshot, a
- * thread over four days and one from last year,
- * 46 projects and 50 live agent sessions. Every screen is loaded at the
- * widths people use (1440, 1280, 1024, an iPad upright, a phone, a phone on
- * its side, and 200% zoom as 720 by 450) and checked for shapes, not pixels:
- *
- * - the page never scrolls sideways;
- * - a primary button is inside the window;
- * - tiles in one grid keep one height, and a changed file keeps its count;
- * - the list's header stays 60 px with a long project name and folder, and
- *   the sidebar's Inbox stays 32 px with 46 projects;
- * - a shortened name has its full text as its hover text;
- * - project names are the folders' own, times say their day and year.
- *
- * Each later fix adds its own check here (a break not fixed yet is a
- * `test.fixme` with the fix plan's row). Build the binary first (see
- * inbox.spec.ts), then `bun run test:e2e:inbox`. PNGs land in
- * .local/proof/worst-case/.
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -99,7 +74,6 @@ async function open(browser: Browser, w: Width, hash = '', colorScheme: 'light' 
   return { context, page };
 }
 
-/** The shapes every screen keeps: nothing scrolls the page sideways, and a visible primary button is inside the window. */
 async function shapes(page: Page): Promise<string[]> {
   return page.evaluate(() => {
     const out: string[] = [];
@@ -113,7 +87,6 @@ async function shapes(page: Page): Promise<string[]> {
       const r = el.getBoundingClientRect();
       if (r.width === 0 || style.visibility === 'hidden') continue;
       if (el.closest('pre, code, table, [data-code-view], .ib-cmd, .ib-docarea, .ib-imgstage, .ib-gbody')) continue;
-      // Drawn past the window, and not clipped by a box of its own (a name cut with "…" is clipped by its cell).
       let clipped = false;
       for (let up = el.parentElement; up && !up.classList.contains('ib-shell'); up = up.parentElement) {
         if (getComputedStyle(up).overflowX !== 'visible' && up.getBoundingClientRect().right <= W + 1) {
@@ -139,15 +112,12 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: join(proofDir, `${name}.png`) });
 }
 
-// Every width in light, and the widest and a phone in dark too.
 for (const [w, scheme] of [...WIDTHS.map((w) => [w, 'light'] as const), [WIDTHS[0]!, 'dark'] as const, [WIDTHS[4]!, 'dark'] as const]) {
   test(`${w.name}${scheme === 'dark' ? ' dark' : ''}: the list, a thread with files, a message table and Settings hold their shapes`, async ({ browser }) => {
     const { context, page } = await open(browser, w, '', scheme);
     try {
-      // The list, and the real project names (rows 1 to 5).
       expect(await shapes(page)).toEqual([]);
       await shot(page, `${w.name}-${scheme}-list`);
-      // The thread with files: tiles keep one height and the changed file keeps its count (rows 16 to 19).
       await page.goto(`${world.url}/#thread=${world.seed.threads.files}`);
       await page.waitForSelector('section.ib-pane .ib-atts.ib-tiles');
       await page.waitForTimeout(400);
@@ -157,14 +127,12 @@ for (const [w, scheme] of [...WIDTHS.map((w) => [w, 'light'] as const), [WIDTHS[
       expect([...heights], 'tiles in one grid have one height').toHaveLength(1);
       await expect(page.locator(`section.ib-pane .ib-atts.ib-tiles [data-attachment-name="${world.seed.files.changed}"]`).last()).toContainText('2 annotations');
       await shot(page, `${w.name}-${scheme}-files`);
-      // A message with a table and a tall screenshot (rows 8, 33).
       await page.goto(`${world.url}/#thread=${world.seed.threads.kitchen}`);
       await page.waitForSelector('section.ib-pane .ib-body table');
       await page.waitForTimeout(600);
       expect(await shapes(page)).toEqual([]);
       const cell = await page.locator('section.ib-pane .ib-body td').first().evaluate((el) => el.getBoundingClientRect().width);
       expect(cell, 'a table cell keeps a word whole').toBeGreaterThan(40);
-      // A full-page capture (390 by 4000) shows its top down to 70% of the window (never under 320 px); "Show all" opens it in place.
       const img = page.locator('section.ib-pane .ib-body img[data-ib-cut]');
       await expect(img).toHaveCount(1);
       const cut = (await img.boundingBox())!;
@@ -181,7 +149,6 @@ for (const [w, scheme] of [...WIDTHS.map((w) => [w, 'light'] as const), [WIDTHS[
         expect(page.url(), 'Show all opens nothing else').toBe(at);
         await expect(page.locator('section.ib-pane .ib-body').getByRole('button', { name: 'Show less of The checkout page on a phone' })).toBeVisible();
       }
-      // Settings: Storage keeps its sizes and Delete in view (rows 64, 65); Archived keeps Unarchive on its row (row 67).
       await page.goto(`${world.url}/#settings/storage`);
       await page.waitForSelector('[data-store-project]');
       await page.locator('[data-store-project] .ib-fold', { hasText: 'billing-svc' }).first().click();
@@ -212,17 +179,11 @@ test('the names: real folder names, a parent folder for two "api", days and year
   try {
     const sidebar = await page.locator('.ib-side .ib-proj .ib-name').allTextContents();
     for (const name of ['請求サービス', 'خدمة-الفواتير', 'dịch-vụ-thanh-toán', 'платёжный-сервис', 'api · work', 'api · personal', 'northwind-industries-holdings-platform-billing-service']) expect(sidebar).toContain(name);
-    // With 46 projects the nav items keep their 32 px (row 28).
     for (const height of await page.locator('.ib-side > .ib-nav').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height))) expect(height).toBe(32);
-    // Last year's thread says its year (row 12).
     await page.goto(`${world.url}/#project=${world.ids.billing}`);
     await page.waitForSelector(`[data-thread-id="${world.seed.threads.lastYear}"]`);
     await expect(page.locator(`[data-thread-id="${world.seed.threads.lastYear}"] .ib-t`)).toHaveText(new RegExp(`, ${new Date().getFullYear() - 1}$`));
-    // No subject is cut inside a character (row 26).
     for (const subject of await page.locator('.ib-lbody :is(.ib-title, .ib-pv)').allTextContents()) expect(subject).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/);
-    // Hovered, what the list cuts with "…" (the title, the preview, the project) shows its full text in
-    // ui's tooltip, only while cut, and nothing in the list carries a native title (row 23; inbox-polish, item 3;
-    // the owner's "an actual component tooltip", 2026-10-17).
     const items = await page.evaluate(() =>
       [...document.querySelectorAll<HTMLElement>('.ib-lbody .ib-title, .ib-lbody .ib-pv, .ib-lbody .ib-p')].map((el) => ({
         project: el.classList.contains('ib-p'),
@@ -238,15 +199,12 @@ test('the names: real folder names, a parent folder for two "api", days and year
       if (project && cutIndex < 0) continue;
       expect(cutIndex, 'a cut title, preview or label').toBeGreaterThanOrEqual(0);
       await page.locator('.ib-lbody :is(.ib-title, .ib-pv, .ib-p)').nth(cutIndex).hover();
-      // ui's tooltip (portaled into the window's root, out of the row) holds the whole text.
       await expect(page.locator('[data-pn-tooltip]').getByText(items[cutIndex]!.text!, { exact: true })).toBeVisible();
       await page.mouse.move(1, 1);
     }
-    // A long project name and its folder stay in the 60 px header (row 25).
     await page.goto(`${world.url}/#project=${world.ids.long}&thread=${world.seed.threads.multiDay}`);
     await page.waitForSelector('section.ib-pane');
     expect((await page.locator('.ib-lhead').boundingBox())!.height).toBe(60);
-    // Yesterday's message says its day (row 10).
     await expect(page.locator('section.ib-pane :is(.ib-tm, .ib-fl-tm)').first()).toContainText(/[A-Z][a-z]{2} \d{1,2}, \d{1,2}:\d{2} [AP]M/);
   } finally {
     await context.close();
@@ -254,7 +212,6 @@ test('the names: real folder names, a parent folder for two "api", days and year
 });
 
 test('things that grow: the reply chooser with 50 sessions, the compose To picker, a long draft', async ({ browser }) => {
-  // The session that asked counts as live for a while after the Inbox starts.
   await new Promise((r) => setTimeout(r, Math.max(0, world.startedAt + INBOX_ASKER_RESTART_GRACE_MS + 10_000 - Date.now())));
   for (const [w, thread] of [
     [WIDTHS[2]!, world.seed.threads.ended],
@@ -266,13 +223,9 @@ test('things that grow: the reply chooser with 50 sessions, the compose To picke
       await page.locator('.ib-pfoot .ib-btn', { hasText: 'Reply' }).first().click();
       await page.locator('.ib-rtext').fill('Wait for Monday.');
       await page.locator('.ib-pfoot .ib-btn.ib-pri', { hasText: 'Send' }).click();
-      // The recipient pill's list takes the old chooser's place (approval "inbox-reply-recipient"). At 1024 it is the
-      // pill's own list; the 720 px window is a phone's layout, where it is the bottom sheet (approval
-      // "inbox-phone-composer-picker"), a dialog whose rows scroll in the listbox inside it.
       await page.waitForSelector('[data-recipient-list]');
       await page.waitForTimeout(300);
       if (w.width < 768) await expect(page.locator('[data-recipient-list]')).toHaveAttribute('role', 'dialog');
-      // The list starts inside the window and scrolls; Send stays in the window (row 6).
       const list = (await page.locator('[data-recipient-list]').boundingBox())!;
       expect(list.y).toBeGreaterThanOrEqual(0);
       expect(list.y + list.height, 'the list ends inside the window').toBeLessThanOrEqual(w.height);
@@ -285,8 +238,6 @@ test('things that grow: the reply chooser with 50 sessions, the compose To picke
       await context.close();
     }
   }
-  // Compose's To picker over the 50 live sessions (row 35, once New message's list; the in-thread
-  // button is off since approval "inbox-acknowledge"): the list starts inside the window and scrolls.
   const { context, page } = await open(browser, WIDTHS[2]!, `thread=${world.seed.threads.kitchen}`);
   try {
     await page.locator('.ib-side [data-open-compose]').click();
@@ -313,11 +264,9 @@ test('a long file name never widens the window: stepping to it, the header (rows
     await page.locator(`section.ib-pane .ib-atts.ib-tiles [data-attachment-name="${world.seed.files.arabic}"]`).first().click();
     await page.waitForSelector('section.ib-view', { timeout: 20_000 });
     await page.getByRole('button', { name: /Global comment/ }).first().click();
-    // The comment popover is portalled out of the pane.
     const box = page.getByPlaceholder(/comment/i).last();
     await box.waitFor({ timeout: 10_000 });
     await box.fill('Not saved yet.');
-    // A comment being written never stops a step: Next goes to the long name on that press (the words wait for this file).
     await page.locator('[data-step-next]').click();
     await expect(page.locator('section.ib-view .ib-fname', { hasText: world.seed.files.long }).first()).toBeVisible({ timeout: 10_000 });
     await expect(page.locator('[data-step-guard]')).toHaveCount(0);
@@ -332,7 +281,6 @@ test('message HTML keeps its own alignment; an Arabic paragraph reads right to l
   const { context, page } = await open(browser, WIDTHS[0]!, `thread=${world.seed.threads.centered}`);
   try {
     await page.waitForSelector('section.ib-pane .ib-body p');
-    /** Where a paragraph's text sits in its box: the gap left and right of the text's own extent. */
     const placement = (match: string) =>
       page.locator('section.ib-pane .ib-body p', { hasText: match }).first().evaluate((p) => {
         const range = document.createRange();
@@ -342,7 +290,6 @@ test('message HTML keeps its own alignment; an Arabic paragraph reads right to l
         const style = getComputedStyle(p);
         return { left: text.left - box.left - parseFloat(style.paddingLeft), right: box.right - parseFloat(style.paddingRight) - text.right, align: style.textAlign };
       });
-    // `<p align="center">` and a `<p>` inside `<div align="center">`: centred, as the message's HTML says.
     for (const match of ['Centered by its own attribute.', 'Centered by its parent.']) {
       const at = await placement(match);
       expect(at.align, match).toMatch(/center/);
@@ -388,7 +335,6 @@ test('a file name cut in two copies whole, and reads whole to a screen reader (r
   }
 });
 
-/** Open a thread's file named `name` by its link (a PDF's tile downloads; the pane still shows it when stepped to or linked). */
 async function openFile(page: Page, thread: string, name: string): Promise<void> {
   const model = (await (await fetch(`${world.url}/api/inbox/threads/${thread}/attachments`)).json()) as { attachments: { id: string; name: string }[] };
   const id = model.attachments.find((a) => a.name === name)?.id;
@@ -398,12 +344,10 @@ async function openFile(page: Page, thread: string, name: string): Promise<void>
   await page.waitForTimeout(500);
 }
 
-// 944: the narrowest window with a file beside its thread (a 440 px thread, a 480 px file and the panes' three 8 px gutters).
 for (const width of [944, 1024, 1180, 1280]) {
   test(`${width}: a file beside the thread keeps a readable column; the comments fold into a button below 1280 (rows 45 to 47, 50)`, async ({ browser }) => {
     const { context, page } = await open(browser, { name: String(width), width, height: 800 });
     try {
-      // A YAML file (drawn as code, row 44) beside the thread.
       await openFile(page, world.seed.threads.kinds, world.seed.kinds.yaml);
       await page.waitForSelector('section.ib-view [data-code-view]');
       expect(await shapes(page)).toEqual([]);
@@ -413,7 +357,6 @@ for (const width of [944, 1024, 1180, 1280]) {
       const pane = (await view.boundingBox())!;
       const doc = (await view.locator('.ib-docarea').boundingBox())!;
       if (folded) {
-        // The file takes the whole pane; the panel opens over it from the header's button, and closes.
         expect(doc.width).toBeGreaterThan(pane.width - 4);
         await expect(view.locator('.ib-apanel')).toBeHidden();
         const button = view.locator('[data-annotations-sheet]');
@@ -423,7 +366,6 @@ for (const width of [944, 1024, 1180, 1280]) {
         await expect(view.locator('.ib-apanel')).toHaveAttribute('id', (await button.getAttribute('aria-controls'))!);
         expect((await view.locator('.ib-apanel').boundingBox())!.width).toBeLessThanOrEqual(301);
         await shot(page, `fold-${width}-sheet`);
-        // Its close, and Escape from inside it, close it and give focus back to the button.
         await view.getByRole('button', { name: 'Close the comments' }).click();
         await expect(view.locator('.ib-apanel')).toBeHidden();
         await expect(button).toBeFocused();
@@ -432,7 +374,6 @@ for (const width of [944, 1024, 1180, 1280]) {
         await page.keyboard.press('Escape');
         await expect(view.locator('.ib-apanel')).toBeHidden();
         await expect(button).toBeFocused();
-        // The file stays open: Escape went to the sheet only.
         await expect(view).toBeVisible();
       } else {
         await expect(view.locator('[data-annotations-sheet]')).toHaveCount(0);
@@ -441,7 +382,6 @@ for (const width of [944, 1024, 1180, 1280]) {
       expect(doc.width, 'the file keeps a readable column').toBeGreaterThanOrEqual(480);
       await shot(page, `fold-${width}-yaml`);
 
-      // A markdown file: the viewer's Global comment never sits on the toolstrip (row 46).
       await openFile(page, world.seed.threads.files, world.seed.files.changed);
       await page.waitForSelector('section.ib-view .ib-toolstrip');
       const strip = (await page.locator('section.ib-view .ib-toolstrip').boundingBox())!;
@@ -449,15 +389,12 @@ for (const width of [944, 1024, 1180, 1280]) {
       const overlaps = strip.x < actions.x + actions.width && actions.x < strip.x + strip.width && strip.y < actions.y + actions.height && actions.y < strip.y + strip.height;
       expect(overlaps, 'Global comment clears the toolstrip').toBe(false);
 
-      // A PDF: no panel beside it, and the card's words keep a readable width (row 47).
       await openFile(page, world.seed.threads.kinds, world.seed.kinds.pdf);
       await page.waitForSelector('section.ib-view [data-download-card]');
       await expect(page.locator('section.ib-view .ib-apanel')).toBeHidden();
       expect((await page.locator('section.ib-view [data-download-card] .ib-att-text').boundingBox())!.width).toBeGreaterThan(200);
       await shot(page, `fold-${width}-pdf`);
 
-      // Full screen: the PDF fills the window under its toolbar, which stays whole inside it (row 50); a file
-      // that takes no comments has no count in it.
       await page.locator('section.ib-view').getByRole('button', { name: 'Full screen' }).click();
       await page.waitForTimeout(300);
       expect(await shapes(page)).toEqual([]);
@@ -473,9 +410,7 @@ for (const width of [944, 1024, 1180, 1280]) {
 }
 
 test('a guided review at 1024 and 900 keeps its diffs readable, with its comments a button away (row 48)', async ({ browser }) => {
-  // The full-window review (every guide opens it): its comments fold into the header's button below 1,500 px.
   for (const width of [900, 1024, 1440, 1600]) {
-    // The guide rides the thread's first message, whose id is the thread's.
     const { context, page } = await open(browser, { name: String(width), width, height: 800 }, `thread=${world.seed.threads.guide}&guide=${world.seed.threads.guide}`);
     try {
       await expect(page.locator('section.ib-viewer .ib-gbody')).toContainText('Guard the refresh entry point', { timeout: 20_000 });
@@ -492,7 +427,6 @@ test('a guided review at 1024 and 900 keeps its diffs readable, with its comment
         await viewer.getByRole('button', { name: 'Close the comments' }).click();
         await expect(viewer.locator('.ib-gpanel')).toBeHidden();
         await expect(button).toBeFocused();
-        // Escape closes the sheet first; the guide stays open.
         await button.click();
         await viewer.getByRole('button', { name: 'Close the comments' }).focus();
         await page.keyboard.press('Escape');
@@ -500,8 +434,6 @@ test('a guided review at 1024 and 900 keeps its diffs readable, with its comment
         await expect(button).toBeFocused();
         await expect(viewer).toBeVisible();
       } else {
-        // Wide: the panel docks beside the diff, and the same Comments button opens and closes it. It starts open only
-        // when the review already has comments; closed, nothing of it shows and the diff takes the width.
         await expect(viewer).not.toHaveClass(/\bib-fold\b/);
         const button = viewer.locator('[data-guide-comments-sheet]');
         const panel = viewer.locator('.ib-gpanel');
@@ -535,17 +467,14 @@ test('a panorama keeps a readable height, a 1×1 image stays one pixel, a minifi
     expect((await frame.boundingBox())!.height, 'a panorama is not a sliver').toBeGreaterThanOrEqual(120);
     const dot = await page.locator(`section.ib-pane [data-gallery-image][data-attachment-name="${world.seed.kinds.dot}"] img`).first().evaluate((img: HTMLImageElement) => {
       const r = img.getBoundingClientRect();
-      // object-fit: scale-down draws the image at its own size inside the box.
       return { fit: getComputedStyle(img).objectFit, natural: img.naturalWidth, box: r.width };
     });
     expect(dot.fit).toBe('scale-down');
     expect(dot.natural).toBe(1);
     await shot(page, 'images-1440');
-    // The panorama in the viewer: its own height, scrolling sideways.
     await page.locator(`section.ib-pane [data-gallery-image][data-attachment-name="${world.seed.kinds.pano}"]`).first().click();
     await page.waitForSelector('section.ib-view .ib-imgstage[data-wide="true"] img');
     await page.waitForTimeout(500);
-    // The image is moved with a transform (ui's ImageZoomStage): wider than the stage means there is more to pan to.
     const stage = await page.locator('section.ib-view .ib-imgstage').evaluate((el) => {
       const r = el.querySelector('img')!.getBoundingClientRect();
       return { scrolls: r.width > el.clientWidth, height: r.height };
@@ -553,7 +482,6 @@ test('a panorama keeps a readable height, a 1×1 image stays one pixel, a minifi
     expect(stage.scrolls).toBe(true);
     expect(stage.height).toBeGreaterThanOrEqual(120);
     await shot(page, 'pano-viewer-1440');
-    // The minified bundle: its one line wraps instead of running sideways.
     await openFile(page, world.seed.threads.kinds, world.seed.kinds.minified);
     await page.waitForSelector('section.ib-view [data-code-view] diffs-container');
     await page.waitForTimeout(1000);
@@ -573,7 +501,6 @@ test('a phone opens a PDF with no Comments button (row 61)', async ({ browser })
   try {
     await openFile(page, world.seed.threads.kinds, world.seed.kinds.pdf);
     await page.waitForSelector('section.ib-view [data-download-card]');
-    // A phone's file is full screen: its toolbar has no comment count for a PDF.
     await expect(page.locator('section.ib-view [data-full-view-bar]')).toBeVisible();
     await expect(page.locator('section.ib-view [data-full-view-comments]')).toHaveCount(0);
     await shot(page, 'phone-pdf');

@@ -1,22 +1,3 @@
-/**
- * The Plannotator Inbox window, proved in a real browser against the compiled
- * binary. Nothing is mocked: the binary runs `plannotator inbox --background`
- * under a temp PLANNOTATOR_DATA_DIR (and HOME), agents write through
- * `plannotator inbox mcp` with the MCP SDK's stdio client (scripts/inbox-sim.ts),
- * and Chromium drives the window the person sees.
- *
- * Build first (the same flags release.yml compiles with):
- *
- *   bun run --cwd apps/review build && bun run build:hook && \
- *     bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig \
- *     --define '__CLI_VERSION__="0.0.0-dev"' --outfile .local/plannotator
- *   bun run test:e2e:inbox
- *
- * PLANNOTATOR_E2E_BINARY names another binary; PNGs of every proved state, in
- * light and dark at 1440 by 900, land in .local/proof/ (PLANNOTATOR_E2E_PROOF_DIR)
- * with a contact sheet.
- */
-
 import { markTourDecided } from '../helpers/tour-decided';
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
@@ -50,10 +31,6 @@ function registry(): { pid: number; port: number; serverSession: string; url: st
   return JSON.parse(readFileSync(join(world.dataDir, 'inbox', 'inbox.json'), 'utf8'));
 }
 
-/**
- * One PNG per proved state, light then dark, at 1440 by 900. Taken under
- * reduced motion, so the Tater mark sits on its first frame as the record draws it.
- */
 async function shot(name: string): Promise<void> {
   const page = world.page;
   for (const scheme of ['light', 'dark'] as const) {
@@ -70,12 +47,10 @@ async function agent(name: string, host: string): Promise<SimAgent> {
   return sim;
 }
 
-/** The sidebar: Inbox, the project folders, Settings. */
 function side(page: Page) {
   return page.getByRole('complementary', { name: 'Inbox navigation' });
 }
 
-/** The thread ids of the list's rows, top to bottom. */
 async function rowOrder(page: Page): Promise<string[]> {
   return page.locator('.ib-lbody [data-thread-id]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-thread-id') ?? ''));
 }
@@ -84,12 +59,9 @@ test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(existsSync(builtBinary), `build the binary first: ${builtBinary}`).toBe(true);
-  // Only this spec's own captures: attachments and guided reviews keep theirs in proof/attachments/ and proof/guides/.
   mkdirSync(proofDir, { recursive: true });
   for (const file of readdirSync(proofDir)) if (file.endsWith('.png') || file === 'index.html') rmSync(join(proofDir, file));
   const root = inboxScratch('plannotator-inbox-e2e-');
-  // A copy the restart proof can replace on disk, as install.sh does.
-  // A long directory name of our own, so the code boxes must wrap the command on any runner.
   const binDir = join(root, 'a-long-install-directory-name-so-every-connect-command-has-to-wrap', 'bin');
   const binary = join(binDir, 'plannotator');
   mkdirSync(binDir, { recursive: true });
@@ -98,11 +70,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const dataDir = join(root, 'data');
   const home = join(root, 'home');
   mkdirSync(home);
-  // PATH: this world's own bin and the system's tools, never the agents installed on the machine running the
-  // spec (the first-run screen speaks about the agents it finds: none here). No test sandbox: Settings → Agents
-  // reads the Claude Code setup this spec writes under HOME, which the sandbox's agent home would hide.
   const env = { PATH: `${binDir}:/usr/bin:/bin`, HOME: home, PLANNOTATOR_DATA_DIR: dataDir };
-  // The first-run connect screen, not the tour's entry screen (inbox-tour.spec.ts proves that one).
   markTourDecided(dataDir);
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
@@ -139,7 +107,6 @@ test.afterAll(async () => {
     await world.context.close();
     writeContactSheet();
   } finally {
-    // Every Inbox this spec started, then its folders (inbox-scratch.ts).
     await removeInboxScratch();
   }
 });
@@ -155,14 +122,12 @@ function writeContactSheet(): void {
   );
 }
 
-/** Every visible code box shows its whole text: wrapped, never clipped or scrolled under Copy. */
 async function expectCodeUnclipped(page: Page): Promise<void> {
   const boxes = await page.locator('.ib-cbox pre:visible').evaluateAll((els) => els.map((el) => ({ text: el.textContent ?? '', scroll: el.scrollWidth, client: el.clientWidth })));
   expect(boxes.length).toBeGreaterThan(0);
   for (const box of boxes) expect(box.scroll, `clipped: ${box.text}`).toBeLessThanOrEqual(box.client);
 }
 
-/** Every heading and label the first run shows: headings, host names, tabs, buttons, links, file paths. */
 async function firstRunLabels(page: Page): Promise<string[]> {
   return page
     .locator('[data-inbox-empty]')
@@ -175,13 +140,11 @@ test('first run, nothing found: the first step offers Claude Code, Pi or OpenCod
   await page.goto(url);
   const empty = page.locator('[data-inbox-empty]');
   await expect(page.getByRole('heading', { name: 'No agent has written yet', exact: true })).toBeVisible();
-  // An Inbox an agent started (--background) connected nothing, and this scratch home has no agent: no note dialog.
   await expect(page.locator('dialog[data-dialog="agent-note"]')).toHaveCount(0);
   await expect(empty.getByRole('heading', { name: 'Try it', exact: true })).toBeVisible();
   await expect(empty.getByText('Send me a test message in my Plannotator Inbox.', { exact: true })).toBeVisible();
   await expect(page.getByText('Projects appear here when an agent writes from one.')).toBeVisible();
 
-  // The Tater mark is Workspaces' sprite: 24 frames over 3.5 s, its first frame under reduced motion.
   const tater = page.locator('[data-sprite="tater-sidebar"]');
   const motion = () => tater.evaluate((el) => {
     const style = getComputedStyle(el);
@@ -192,7 +155,6 @@ test('first run, nothing found: the first step offers Claude Code, Pi or OpenCod
   expect((await motion()).startsWith('none ')).toBe(true);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
 
-  // One next step (inbox-connect-next-step, variant C): Plannotator's own connections first.
   const step = empty.locator('.ib-cn');
   await expect(step.getByRole('heading', { name: 'Connect your first agent', exact: true })).toBeVisible();
   await expect(step.getByRole('radiogroup', { name: 'Your agent' }).getByRole('radio')).toHaveCount(3);
@@ -201,7 +163,6 @@ test('first run, nothing found: the first step offers Claude Code, Pi or OpenCod
   await step.getByRole('button', { name: 'Copy' }).first().click();
   await expect(step.getByRole('button', { name: 'Copied' })).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(install);
-  // MCP stays one fold away, with Claude Code's user-scope command naming the binary by its absolute path.
   const binary = realpathSync(world.binary);
   const mcp = step.getByRole('button', { name: 'Use MCP instead', exact: true });
   await expect(mcp).toHaveAttribute('aria-expanded', 'false');
@@ -212,10 +173,7 @@ test('first run, nothing found: the first step offers Claude Code, Pi or OpenCod
   await page.mouse.move(0, 0);
   await shot('1.2-first-run-first-step');
 
-  // One rhythm: the same gap between the heading, the step, the line saying which agents a reply wakes, Try it, the fold and the tour's quiet line
-  // (the tour was decided before this Inbox started: "Take the 2-minute tour" ends the screen).
   await expect(empty.locator('[data-tour-again]')).toBeVisible();
-  // The line carries no highlight of its own: the tour's highlight class and outline are for its targets only.
   await expect(empty.locator('[data-tour-again]')).not.toHaveClass(/ib-tour-mark/);
   await expect(empty.locator('[data-tour-again]')).toHaveCSS('outline-style', 'none');
   const boxes = await empty.evaluate((el) =>
@@ -226,7 +184,6 @@ test('first run, nothing found: the first step offers Claude Code, Pi or OpenCod
   expect(new Set(gaps).size).toBe(1);
   await expect(empty.locator('[data-wake-note]')).toContainText('Claude Code, Pi and OpenCode 2');
 
-  // Every other agent or editor, folded at the end: the picker without Plannotator's three hosts.
   const byHand = empty.getByRole('button', { name: 'Another agent or editor', exact: true });
   await expect(byHand).toHaveAttribute('aria-expanded', 'false');
   await expect(page.getByRole('tab', { name: 'Codex' })).toHaveCount(0);
@@ -235,7 +192,6 @@ test('first run, nothing found: the first step offers Claude Code, Pi or OpenCod
   await expect(page.getByRole('tab', { name: 'Claude Code' })).toHaveCount(0);
   await expect(page.getByRole('tab', { name: 'VS Code' })).toHaveAttribute('aria-selected', 'true');
 
-  // Codex: the command with Copy, one note, the folded Another way, no eyebrow repeating the name.
   const codex = page.getByRole('tab', { name: 'Codex' });
   await codex.click();
   await expect(codex).toHaveAttribute('aria-selected', 'true');
@@ -250,7 +206,6 @@ test('first run, nothing found: the first step offers Claude Code, Pi or OpenCod
   await expect(panel.getByRole('button', { name: 'Copied' })).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(command);
 
-  // Headers carry no comma: every heading and label, on every tab.
   for (const tab of await page.getByRole('tab').all()) {
     await tab.click();
     const panelNow = page.getByRole('tabpanel');
@@ -269,7 +224,6 @@ test('first run, nothing found: the first step offers Claude Code, Pi or OpenCod
   await page.getByRole('tab', { name: 'Claude app' }).click();
   const claudeApp = page.getByRole('tabpanel', { name: 'Claude app' });
   const json = JSON.parse((await claudeApp.locator('pre').textContent()) ?? '{}');
-  // The one note: merge, not replace; and the claude.ai connectors trap.
   await expect(claudeApp.locator('p.ib-cnote')).toHaveText(
     'Merge it into mcpServers in Claude > Settings > Developer > Edit Config, then quit and reopen Claude. claude.ai connectors cannot reach this computer.',
   );
@@ -289,7 +243,6 @@ test('agents write three threads in two projects; the rows land in the six secti
   expect(named.thread_name).toBe('refund-webhooks');
   world.threads = { stopped: stopped.thread_id, holding: holding.thread_id, named: named.thread_id };
 
-  // The server answers all six sections, in the approved order.
   const list = await (await page.request.get(`${world.url}api/inbox/threads`)).json();
   expect(list.sections.map((s: { label: string }) => s.label)).toEqual([
     'Stopped on you',
@@ -300,23 +253,17 @@ test('agents write three threads in two projects; the rows land in the six secti
     'Quiet',
   ]);
 
-  // The window had nothing on screen, so the rows come in without a Show. The
-  // three sends are separate events: when the first lands alone, the list puts
-  // it on screen and holds the rest behind "N new" (held order, proved below),
-  // so the rows on screen are the ones before the notice plus the ones it holds.
   const notice = page.locator('[data-inbox-notice]');
   await expect.poll(async () => (await notice.count()) > 0 || (await page.locator('.ib-lbody [data-thread-id]').count()) === 3).toBe(true);
   if (await notice.count()) await notice.click();
   const stoppedRow = page.locator(`[data-section-id="stopped"] [data-thread-id="${stopped.thread_id}"]`);
   await expect(stoppedRow).toBeVisible();
-  // One question mark, filled in the Stopped tint (approval "inbox-question-mark").
   await expect(stoppedRow.locator('.ib-qn[data-wait-step="stop"] .ib-sr')).toHaveText('Stopped on you: 2 questions');
   await expect(stoppedRow).toContainText('2 questions');
   await expect(stoppedRow).toContainText('billing-svc');
   const holdingRow = page.locator(`[data-section-id="holding"] [data-thread-id="${holding.thread_id}"]`);
   await expect(holdingRow.locator('.ib-qn[data-wait-step="hold"]')).toHaveCount(1);
   const namedRow = page.locator(`[data-section-id="waiting"] [data-thread-id="${named.thread_id}"]`);
-  // The thread's name is the row's title (approval "list-rows-mail-icons").
   await expect(namedRow.locator('.ib-title')).toHaveText('refund-webhooks');
   await expect(page.locator('.ib-band')).toHaveText([/^Stopped on you\s*1$/, /^Holding up work\s*1$/, /^Waiting on you\s*1$/]);
   await expect(side(page).getByRole('button', { name: /^Inbox/ })).toContainText('3');
@@ -325,7 +272,6 @@ test('agents write three threads in two projects; the rows land in the six secti
   await shot('1.1-list');
 });
 
-/** A row cell's left edge, in px. */
 async function leftOf(page: Page, selector: string): Promise<number> {
   const box = await page.locator(selector).first().boundingBox();
   expect(box, `no box for ${selector}`).not.toBeNull();
@@ -334,20 +280,17 @@ async function leftOf(page: Page, selector: string): Promise<number> {
 
 test('a project folder filters the list and the sections still apply', async () => {
   const { page } = world;
-  // Every project: the row starts with the agents' marks, the project label after them, in the same column.
   const named = `.ib-row[data-thread-id="${world.threads.named}"]`;
   const stoppedRow = `.ib-row[data-thread-id="${world.threads.stopped}"]`;
   const labelLeft = await leftOf(page, `${named} .ib-ags`);
   expect(await leftOf(page, '.ib-band')).toBe(labelLeft - 12);
   const marksRight = await page.locator(`${named} .ib-ags`).evaluate((el) => el.getBoundingClientRect().right);
-  // The project hugs the marks: the three-line row's 6px, no width reserved (the owner, 2026-10-31).
   const projectLeft = await page.locator(`${named} .ib-p`).evaluate((el) => el.getBoundingClientRect().left);
   expect(Math.abs(projectLeft - marksRight - 6)).toBeLessThanOrEqual(0.5);
   expect(await leftOf(page, `${named} .ib-p`)).toBeLessThan(await leftOf(page, `${named} .ib-subj`));
 
   await side(page).getByRole('button', { name: /^docs-site(?: \d+)?$/ }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'docs-site' })).toBeVisible();
-  // The header shows the name alone; the folder is the second line of the title's tooltip.
   await expect(page.locator('.ib-lhead .ib-path')).toHaveCount(0);
   await expect(page.locator('.ib-lhead')).not.toContainText('/');
   await page.getByRole('heading', { level: 1, name: 'docs-site' }).hover();
@@ -359,11 +302,6 @@ test('a project folder filters the list and the sections still apply', async () 
   await side(page).getByRole('button', { name: /^billing-svc(?: \d+)?$/ }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'billing-svc' })).toBeVisible();
   await expect(page.locator('.ib-band')).toHaveText([/^Stopped on you\s*1$/, /^Waiting on you\s*1$/]);
-  // One project: no project label. The agents' marks start the row as they do
-  // in every project's list (approval "list-rows-mail-icons"), and the title follows each
-  // row's own marks 6px later, the Inbox rows' gap, no blank column before it (the owner,
-  // 2026-10-31). The badge and the count have their own columns before the time, each on
-  // one right edge for every row.
   await expect(page.locator('.ib-row .ib-p')).toHaveCount(0);
   expect(await leftOf(page, `${named} .ib-ags`)).toBe(labelLeft);
   expect(await leftOf(page, `${stoppedRow} .ib-ags`)).toBe(labelLeft);
@@ -392,10 +330,8 @@ test('a row opens the thread as an email with the question cards, and no decisio
   await expect(pane.getByText('Question 2 of 2')).toBeVisible();
   await expect(pane.getByText('Waiting on this answer')).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`#thread=${world.threads.stopped}$`));
-  // Opening is a look: the row is no longer new to the person.
   await expect(page.locator(`.ib-nrow[data-thread-id="${world.threads.stopped}"]`)).toHaveAttribute('aria-current', 'true');
 
-  // Decisions were removed (2026-10): no card carries a decision tag, switch or row.
   await expect(pane.locator('[data-question-decision], [data-question-decision-tag], [data-question-decision-toggle], [data-question-decision-row]')).toHaveCount(0);
   await expect(side(page).getByRole('button', { name: /Decisions/ })).toHaveCount(0);
   await shot('2.1-thread');
@@ -417,23 +353,15 @@ test('a pick is saved at once and the agent reads it through read_thread', async
 
   await pane.getByText('Yes', { exact: true }).click();
   await expect(pane.getByText(/^Picked .* · in your draft$/)).toHaveCount(2);
-  // "Draft" replaces "Not sent" (approval "inbox-reply-drafts").
   await expect(page.locator('.ib-pfoot [data-draft-foot]')).toHaveText('Draft, 2 picks');
   await expect(page.locator('.ib-pfoot').getByRole('button', { name: 'Send' })).toBeVisible();
   await expect(page.locator('.ib-pfoot').getByRole('button', { name: 'Edit draft' })).toBeVisible();
-  // Answered, not sent: it waits only for Send. The row says "Draft" (approval "inbox-row-byline", option A), and
-  // "Draft · 2 picks" in its name.
   const row = page.locator(`.ib-nrow[data-thread-id="${world.threads.stopped}"]`);
   await expect(row).toHaveAttribute('data-section', 'new');
   await expect(row.locator('[data-draft-label]')).toHaveText('Draft');
   await expect(row).toHaveAccessibleName(/Draft · 2 picks/);
   await shot('3.1-answered-not-sent');
 
-  // The row's draft words (a wide row's words column) must end before the time's
-  // begins: in every project and in one,
-  // at full and narrower widths (every project below 900px of list draws the
-  // two-line row, whose count ends line 2 instead, inside the line). Measured on the text itself (a
-  // Range), since overflowing text spills past its cell's box.
   const wide = page.locator(`.ib-lbody [data-thread-id="${world.threads.stopped}"]`);
   const textGap = () =>
     wide.evaluate((el) => {
@@ -444,7 +372,6 @@ test('a pick is saved at once and the agent reads it through read_thread', async
       };
       const count = rect(el.querySelector('.ib-c .ib-cs')!);
       const time = rect(el.querySelector('.ib-t')!);
-      // A three-line row's count ends line 3 (approval "list-rows-mail-icons"), under the time: it must end inside that line.
       const l2 = el.querySelector('.ib-l3');
       const lineEnd = l2 ? Math.round(l2.getBoundingClientRect().right - count.right) : null;
       return { shape: el.className.split(' ')[0], list: document.querySelector('.ib-lbody')!.clientWidth, text: el.querySelector('.ib-c .ib-cs')!.textContent, full: el.querySelector('.ib-c')!.getAttribute('data-count-words'), gap: time.left - count.right, sameLine: Math.abs(count.top - time.top) < 4, lineEnd, last: l2 ? l2.lastElementChild === el.querySelector('.ib-c') : null };
@@ -457,9 +384,6 @@ test('a pick is saved at once and the agent reads it through read_thread', async
       const where = `at ${width}px (${folder})`;
       if (width === 1440) await expect.poll(async () => (await textGap()).shape, where).toBe('ib-row');
       if (width === 820) await expect.poll(async () => (await textGap()).shape, where).toBe(narrowShape);
-      // The folder click closes the thread and the list re-renders (and may
-      // switch between the wide and the two-line row): measure once the row's
-      // shape and gap hold still, at every width.
       await expect
         .poll(async () => {
           const first = await textGap();
@@ -468,8 +392,6 @@ test('a pick is saved at once and the agent reads it through read_thread', async
         }, where)
         .toBe(true);
       const measured = await textGap();
-      // A wide row in a list of 1150px or more draws the full words (the owner, 2026-10-29); a two-line row, and one
-      // project's wide row in a narrower list, "Draft" (option A).
       expect(measured.text).toBe(measured.shape === 'ib-row' && measured.list >= 1150 ? 'Draft · 2 picks' : 'Draft');
       expect(measured.full).toBe('Draft · 2 picks');
       if (measured.shape === 'ib-row') {
@@ -493,7 +415,6 @@ test('Send carries the picks and the words, read_thread returns them, and the th
   const [claude] = world.agents;
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Edit draft' }).click();
   const box = page.getByRole('textbox', { name: 'Reply to Claude Code' });
-  // The picks are listed in the box, never written into the words.
   await expect(box).toHaveValue('');
   await expect(page.locator('[data-reply-answers] [data-reply-answer]')).toHaveText([
     /Q1\s+Which way should the worker go on a Stripe 409\?\s+Retry with the same idempotency key/,
@@ -523,7 +444,6 @@ test('"N new" waits behind the notice, and the list moves only on an action', as
   const { page } = world;
   await page.keyboard.press('Escape');
   await expect(page.locator('section.ib-pane')).toHaveCount(0);
-  // Leaving the thread is an action: rows the person's own writes held in place take their places now. Let that land first.
   await expect
     .poll(async () => {
       const first = await rowOrder(page);
@@ -535,7 +455,6 @@ test('"N new" waits behind the notice, and the list moves only on an action', as
   const codex = await agent('Codex', 'codex');
   const news = await codex.send({ project_path: world.docs, body: DEMO_MESSAGES.news });
   await expect(page.locator('[data-inbox-notice]')).toContainText('1 new in docs-site');
-  // Held: nothing moved, and the new thread is not on screen yet.
   await page.waitForTimeout(500);
   expect(await rowOrder(page)).toEqual(before);
   await expect(page.locator(`[data-thread-id="${news.thread_id}"]`)).toHaveCount(0);
@@ -546,9 +465,6 @@ test('"N new" waits behind the notice, and the list moves only on an action', as
   await expect(page.locator('[data-inbox-notice]')).toHaveCount(0);
 });
 
-// The failure this guards: the held list kept a row's whole state, so after the
-// agent had the reply the row still said "Sent · Saved for <agent>" until a
-// reload, while the thread beside it had moved on.
 test("a Sent row follows the agent's read in place, without an action: its state changes, the order does not", async () => {
   const { page } = world;
   const claude2 = world.agents[2]!;
@@ -559,12 +475,10 @@ test("a Sent row follows the agent's read in place, without an action: its state
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
   const row = page.locator(`.ib-lbody [data-thread-id="${world.threads.named}"]`);
   await expect(row).toHaveAttribute('data-section', 'sent');
-  // The delivery glyph (approval "inbox-row-delivery"): saved, an agent reads it later.
   const tick = row.locator('.ib-tick');
   await expect(tick).toHaveAttribute('data-tick', 'saved');
   const before = await rowOrder(page);
 
-  // The agent reads the reply (as a wake's delivery would): the server lists the thread as Quiet.
   await claude2.readThread(world.threads.named!);
   await expect(row).toHaveAttribute('data-section', 'quiet');
   await expect(tick).toHaveAttribute('data-tick', 'delivered');
@@ -575,13 +489,11 @@ test("a Sent row follows the agent's read in place, without an action: its state
 
 test('Settings: in sections; Settings → Agents switches apply to the next session, the picker for the rest, the store on disk', async () => {
   const { page } = world;
-  // Plannotator's Claude Code plugin and Pi extension in this world's scratch home: both are found, each with its tool switch.
   mkdirSync(join(world.env.HOME!, '.claude'), { recursive: true });
   writeFileSync(join(world.env.HOME!, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'plannotator@plannotator': true } }));
   mkdirSync(join(world.env.HOME!, '.pi', 'agent'), { recursive: true });
   writeFileSync(join(world.env.HOME!, '.pi', 'agent', 'settings.json'), JSON.stringify({ packages: ['npm:@plannotator/pi-extension'] }));
   await side(page).getByRole('button', { name: 'Settings' }).click();
-  // A focused page (design of record inbox-settings-tabs): General first, the section nav beside it.
   await expect(page.getByRole('heading', { name: 'General', level: 1 })).toBeVisible();
   const nav = page.getByRole('navigation', { name: 'Settings sections' });
   await expect(nav.getByRole('link')).toHaveText(['General', 'Rows', 'Agents', 'Prompts', 'Devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Activity', 'Archived', 'Storage', 'About']);
@@ -595,7 +507,6 @@ test('Settings: in sections; Settings → Agents switches apply to the next sess
   await expect(piSwitch).toHaveAttribute('aria-checked', 'false');
   await expect(page.getByRole('switch', { name: 'Reminder at session start: Pi' })).toBeDisabled();
   await expect(page.getByText("A change applies to that agent's next session; sessions already running keep what they started with.")).toBeVisible();
-  // Phones stay hidden until the iPhone app ships (PLANNOTATOR_INBOX_PHONES is unset here): no block, no mention.
   await expect(page.locator('[data-settings-phones]')).toHaveCount(0);
   await expect(page.getByText('Phones reach it only on a path you turn on below.')).toHaveCount(0);
 
@@ -612,14 +523,12 @@ test('Settings: in sections; Settings → Agents switches apply to the next sess
   const store = page.locator('.ib-stbl');
   await expect(store.locator('[data-store-project="billing-svc"]')).toContainText('2 threads');
   await expect(store.locator('[data-store-project="docs-site"]')).toContainText('2 threads');
-  // Delete from Inbox, on threads and projects, is live since step 2 (proved in inbox-attachments.spec.ts).
   await expect(store.locator('[data-store-project="billing-svc"]').getByRole('button', { name: 'Delete from Inbox: billing-svc' })).toBeEnabled();
 
   await nav.getByRole('link', { name: 'Agents' }).click();
   await piSwitch.click();
   await expect(piSwitch).toHaveAttribute('aria-checked', 'true');
   await expect(page.getByText("Pi's next session").first()).toBeVisible();
-  // The switch moves at the click; the save lands when the POST answers.
   await expect
     .poll(() => {
       try {
@@ -631,16 +540,13 @@ test('Settings: in sections; Settings → Agents switches apply to the next sess
     .toEqual({ pi: true });
   await nav.getByRole('link', { name: 'Storage' }).click();
   await shot('7.2-settings-storage');
-  // The sidebar slid away for Settings; "← Inbox" is the way back.
   await page.locator('[data-settings-back]').click();
   await expect(page).not.toHaveURL(/#settings/);
 });
 
-// Late, in a project of its own, so its threads change no count above (review of #2374, finding 1).
 test("one project's list: three overlapping tiles, logos whole, with or without \"+N\", on one line, and the title 6px after each row's own tiles; at 780 and 768 every row keeps a readable title and its columns, and the tile holds on a hovered row", async () => {
   const { page } = world;
   const ops = scratchProject(join(world.root, 'src'), 'ops-console');
-  // Hosts this spec has already seen: a host new to it brings the agent-note dialog, over the Update test below.
   const [claudeA, claudeB, codexA, codexB, codexC, opencodeA, opencodeB] = [
     await agent('Claude Code', 'claude-code'),
     await agent('Claude Code', 'claude-code'),
@@ -651,19 +557,13 @@ test("one project's list: three overlapping tiles, logos whole, with or without 
     await agent('OpenCode', 'opencode'),
   ];
   const ask = (prompt: string) => [':::question', prompt, '', '- [ ] Yes', '- [ ] No', ':::'].join('\n');
-  // Three hosts, seven sessions (Claude Code twice, Codex three times, OpenCode twice): the widest run, three tiles and "+4".
   const trio = await claudeA!.send({ project_path: ops, thread: 'three-agents', subject: 'Three agents, each twice or more', body: ask('Keep the icons in their column?') });
   for (const a of [claudeB, codexA, codexB, codexC, opencodeA, opencodeB]) await a!.send({ project_path: ops, reply_to: trio.thread_id, body: 'Here too.' });
-  // Three hosts, one session each: the common run.
   const plain = await claudeA!.send({ project_path: ops, thread: 'three-plain', subject: 'Three agents, one session each', body: ask('Three tiles?') });
   for (const a of [codexA, opencodeA]) await a!.send({ project_path: ops, reply_to: plain.thread_id, body: 'Joined.' });
-  // One agent: the shortest run, beside the widest at a narrow width below.
   const solo = await claudeA!.send({ project_path: ops, thread: 'one-mark', subject: 'One agent', body: ask('One tile?') });
-  // The words that must stay (the longest, "Answered", on the widest run, and a draft) and the Undelivered pill, put
-  // on rows the server sent: each needs a live session or the reply box to arise for real (as inbox-row-badges.spec.ts does).
   const listRoute = '**/api/inbox/threads?archived=exclude*';
   await page.route(listRoute, async (route) => {
-    // Asked without `since`, the whole list: an answer of changed rows has no sections to put these on.
     const response = await route.fetch({ url: route.request().url().replace(/&since=[^&]*/, '') });
     const model = (await response.json()) as { sections: { threads: Record<string, unknown>[] }[] };
     for (const row of model.sections.flatMap((s) => s.threads)) {
@@ -674,8 +574,6 @@ test("one project's list: three overlapping tiles, logos whole, with or without 
     await route.fulfill({ response, json: model });
   });
 
-  // These sessions bring the agent-note dialog, decided once per load (docs/agent-guides/inbox-foundation.md, asked
-  // once per agent): answer it "Not now", or it stands over the hovers below and opens again over the Update test.
   const answerNote = async () => {
     const note = page.locator('dialog[data-dialog="agent-note"]');
     await note.waitFor({ state: 'visible', timeout: 8_000 }).catch(() => {});
@@ -697,8 +595,6 @@ test("one project's list: three overlapping tiles, logos whole, with or without 
   await expect(page.locator(`.ib-row[data-thread-id="${trio.thread_id}"] .ib-atile`)).toHaveCount(3);
   await expect(page.locator(`.ib-row[data-thread-id="${trio.thread_id}"] .ib-agplus`)).toHaveText('+4');
   await expect(page.locator(`.ib-row[data-thread-id="${plain.thread_id}"] .ib-agplus`)).toHaveCount(0);
-  // Each tile sits 5px on the one before it (the owner, 2026-10-31: "they should be overlapped"), no tile is cut, each
-  // logo is whole (at its right edge, where the next tile reaches, the logo is on top), and "+N" follows the last.
   const overlaps = (id: string) =>
     page.locator(`.ib-row[data-thread-id="${id}"] .ib-ags`).evaluate((run) => {
       const tiles = [...run.querySelectorAll('.ib-atile')];
@@ -725,8 +621,6 @@ test("one project's list: three overlapping tiles, logos whole, with or without 
   };
   expectOverlap(await overlaps(trio.thread_id), 'three tiles and "+4"', true);
   expectOverlap(await overlaps(plain.thread_id), 'three tiles', false);
-  // At 1440 and 1000 alike: the tiles' column is as wide as each row's run, on one line, and the title starts 6px
-  // after it, each row after its own run (the owner, 2026-10-31: no blank column).
   for (const width of [1440, 1000]) {
     await page.setViewportSize({ width, height: 900 });
     await page.waitForTimeout(150);
@@ -739,7 +633,6 @@ test("one project's list: three overlapping tiles, logos whole, with or without 
         return {
           id: (r as HTMLElement).dataset.threadId,
           drawn: marks.querySelectorAll('.ib-atile').length,
-          // The run's parts share one centre line; a wrapped part would sit a whole line off it.
           drift: Math.max(...parts.map((b) => (b.top + b.bottom) / 2)) - Math.min(...parts.map((b) => (b.top + b.bottom) / 2)),
           marksRight: Math.max(...parts.map((b) => b.right)),
           marksTop: Math.min(...parts.map((b) => b.top)),
@@ -755,22 +648,15 @@ test("one project's list: three overlapping tiles, logos whole, with or without 
       const where = `row ${r.id} at ${width}`;
       expect(r.drawn, where).toBe(3);
       expect(r.drift, `${where}: the run must stay on one line`).toBeLessThanOrEqual(1);
-      // Tiles, small gap, title: the title 6px after this row's own tiles, none spilling out of the row.
       expect(Math.abs(r.titleLeft - r.marksRight - 6), `${where}: the title 6px after the tiles`).toBeLessThanOrEqual(0.5);
       expect(r.marksRight, `${where}: the marks leave their cell`).toBeLessThanOrEqual(r.fromRight + 0.5);
       expect(r.marksTop, where).toBeGreaterThanOrEqual(r.rowTop);
       expect(r.marksBottom, where).toBeLessThanOrEqual(r.rowBottom);
     }
   }
-  // With room (the loop above ended at 1000) the pill is whole.
   const waitPill = page.locator(`.ib-row[data-thread-id="${plain.thread_id}"] [data-undelivered]`);
   await expect(waitPill).toBeVisible();
   expect(await waitPill.locator('.ib-bwt').evaluate((t) => t.scrollWidth > t.clientWidth + 0.5), 'the pill is cut at 1000').toBe(false);
-  // The narrowest desktop windows (780, 768: a list of 500 to 512px), with and without the pin's column: the tiles and
-  // "+N" stay whole on one line, its counts and time stay in line down the list, and nothing runs past the row. The
-  // words column gives way first: a row without words that must stay keeps a 96px title, and the pill leaves at 72px
-  // or less, never a letter, the clock and the spoken words staying. "Draft" and "Answered" stay whole, whatever the
-  // run; that row's title gives way for them, only as far as they need, down to 56px.
   const narrowRows = async (label: string) => {
     for (const width of [780, 768]) {
       await page.setViewportSize({ width, height: 900 });
@@ -814,7 +700,6 @@ test("one project's list: three overlapping tiles, logos whole, with or without 
         expect(r.drift, `${where}: the run must stay on one line`).toBeLessThanOrEqual(1);
         expect(r.wordsIn, `${where}: the words leave their column`).toBe(true);
         if (r.staying) expect(r.staying.cut, `${where}: "${r.staying.text}" is cut`).toBe(false);
-        // "Draft" needs little: its title keeps the rest, instead of a blank column beside the word.
         if (r.staying?.text === 'Draft') expect(r.title, `${where}: the title gave up more than "Draft" needs`).toBeGreaterThanOrEqual(95.5);
         expect(r.marksTop, where).toBeGreaterThanOrEqual(r.rowTop);
         expect(r.marksBottom, where).toBeLessThanOrEqual(r.rowBottom);
@@ -835,14 +720,10 @@ test("one project's list: three overlapping tiles, logos whole, with or without 
   await pin(true);
   await expect(page.locator('.ib-listcol.ib-pincol')).toHaveCount(1);
   await narrowRows('the pin column');
-  // The pill gone at 768: its words stay under the pointer, on the column. Not on the clock: this row offers Mark read,
-  // so hovering the row hides the clock and its tooltip with it.
   await expect(waitPill).toBeHidden();
   await page.locator(`.ib-row[data-thread-id="${plain.thread_id}"] .ib-cw .ib-cwords`).hover({ timeout: 10_000 });
   await expect(page.locator('[data-pn-tooltip]:not([data-closed])')).toContainText(/Undelivered 1[345] min/);
   await page.mouse.move(5, 5);
-  // A wide sidebar with the pin's column on: down to 496px the list keeps its wide rows with the words whole; under it
-  // the rows go three-line, so no column runs off. "Draft" and "Answered" are drawn whole either way.
   for (const [width, sidebarWidth, wide] of [[1000, 448, true], [1000, 520, false], [900, 448, false], [900, 520, false], [768, 520, false]] as const) {
     await page.context().addCookies([{ name: 'plannotator-inbox-sidebar-width', value: String(sidebarWidth), url: world.url }]);
     await page.setViewportSize({ width, height: 900 });
@@ -871,8 +752,6 @@ test("one project's list: three overlapping tiles, logos whole, with or without 
       expect(r.timeRight, `${where}: the time runs off the row`).toBeLessThanOrEqual(r.right + 0.5);
     }
   }
-  // A thread opened and closed on a list that thin (the thread covers the list there): its rows come back three-line.
-  // InboxList ignores this measure on the commit that closes a thread, and that must not leave a thin list wide.
   await answerNote();
   await page.locator(`.ib-nrow[data-thread-id="${trio.thread_id}"]`).click({ timeout: 10_000 });
   await expect(page.locator('section.ib-pane')).toBeVisible();
@@ -889,8 +768,6 @@ test("one project's list: three overlapping tiles, logos whole, with or without 
   await expect(page.locator('.ib-listcol.ib-pincol')).toHaveCount(0);
   await page.unroute(listRoute);
   await page.setViewportSize({ width: 1440, height: 900 });
-  // The tile on a hovered row, light and dark: the hover pill is the tile's own grey at 45%, so the tile needs its
-  // own step to hold on it. WCAG contrast, the colours resolved through a canvas.
   for (const colorScheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme });
     const row = page.locator(`.ib-row[data-thread-id="${solo.thread_id}"]`);
@@ -910,14 +787,12 @@ test("one project's list: three overlapping tiles, logos whole, with or without 
         const tile = paint(getComputedStyle(r.querySelector('.ib-atile')!).backgroundColor);
         return (Math.max(pill, tile) + 0.05) / (Math.min(pill, tile) + 0.05);
       });
-    // Polled: every colour eases (theme.css's global transition).
     await expect.poll(contrast, { message: `${colorScheme}: the tile on a hovered row` }).toBeGreaterThanOrEqual(1.15);
   }
   await page.mouse.move(5, 5);
   await page.emulateMedia({ colorScheme: 'light' });
   await shot('1.3-project-filter-agents');
   await side(page).getByRole('button', { name: /^Inbox/ }).click();
-  // Every project's list: the same three-tile rows draw their project 6px after their own tiles, never further.
   for (const id of [trio.thread_id, plain.thread_id]) {
     const row = page.locator(`.ib-row[data-thread-id="${id}"]`);
     await expect(row.locator('.ib-p')).toHaveText('ops-console');
@@ -927,8 +802,6 @@ test("one project's list: three overlapping tiles, logos whole, with or without 
   expectOverlap(await overlaps(trio.thread_id), 'every project, three tiles and "+4"', true);
 });
 
-// Before the restart, whose gap (the old Inbox gone, the new one not yet up)
-// the page's health polls see as refused connections, by design.
 test('no page errors and no CSP refusals along the way', async () => {
   expect(world.errors).toEqual([]);
 });
@@ -937,24 +810,20 @@ test('the Update button follows health ("ready"), and pressing it brings the new
   test.setTimeout(200_000);
   const { page } = world;
   const before = registry();
-  // install.sh renames a new binary over the running one; this stand-in answers --version.
   const real = `${world.binary}.real`;
   renameSync(world.binary, real);
   writeFileSync(world.binary, '#!/bin/sh\necho "plannotator 9.9.9"\n', { mode: 0o755 });
-  // The health tick (60 s) stats the file, sees it changed, and asks it.
   const button = page.locator('.ib-upd[data-update-state="ready"]');
   await expect(button).toBeVisible({ timeout: 90_000 });
   await expect(button.getByRole('button', { name: 'Update to 9.9.9', exact: true })).toBeVisible();
   await shot('1.6-restart-to-update');
 
-  // The real binary goes back on disk, then Restart starts it in this one's place.
   renameSync(real, world.binary);
   await button.getByRole('button', { name: 'Update to 9.9.9', exact: true }).click();
   await expect.poll(() => registry().serverSession, { timeout: 60_000 }).not.toBe(before.serverSession);
   const after = registry();
   expect(after.pid).not.toBe(before.pid);
   expect(after.port).toBe(before.port);
-  // The page reloaded onto the new Inbox: the same store (the holding row, unfolded; named is Quiet now), the update line gone.
   await expect(page.locator(`[data-thread-id="${world.threads.holding}"]`)).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('.ib-upd')).toHaveCount(0);
 });

@@ -1,20 +1,11 @@
-/**
- * Screenshots of the Inbox window during a real-host reload proof
- * (apps/opencode-plugin/inbox-reload-v2.test.ts, apps/pi-extension/inbox-reload.test.ts),
- * only when RELOAD_PROOF_SHOTS names a folder: a headless Chromium (Playwright's)
- * opens Settings → Agents on the proof's own Inbox, light and dark, desktop and
- * phone. Never the person's browser, never another Inbox.
- */
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
-/** The built Inbox window (`bun run build:hook`) for the proof's in-process Inbox, when screenshots are asked for. */
 export function builtInboxHtml(): { htmlContent?: string } {
   const file = resolve(import.meta.dir, "../../apps/hook/dist/inbox.html");
   return process.env.RELOAD_PROOF_SHOTS && existsSync(file) ? { htmlContent: readFileSync(file, "utf8") } : {};
 }
 
-/** `sidebar: false` for a fix the sidebar does not count (an update or a pin: only reloads are counted). */
 export async function shootAgents(inboxPort: number, name: string, options: { sidebar?: boolean } = {}): Promise<void> {
   const dir = process.env.RELOAD_PROOF_SHOTS;
   if (!dir) return;
@@ -35,7 +26,6 @@ export async function shootAgents(inboxPort: number, name: string, options: { si
           () => false,
         );
         if (!shown) {
-          // Kept for the record: what the window drew instead.
           await page.screenshot({ path: join(dir, `${name}-agents-${form}-${scheme}-MISSING.png`), fullPage: true });
           throw new Error(`Settings → Agents drew no reload box (${name}, ${form}, ${scheme})`);
         }

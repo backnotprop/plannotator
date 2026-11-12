@@ -70,7 +70,6 @@ describe("release version consistency check", () => {
     expect(result.stderr.toString()).toContain("apps/pi-extension/package.json: 1.2.4");
   });
 
-  // The Copilot marketplace entry sat at 0.17.0 for eleven minor releases.
   test("rejects a stale Copilot marketplace entry version", () => {
     const root = createFixture();
     writeMarketplace(root, "0.17.0");

@@ -1,30 +1,3 @@
-/**
- * The search palette's Type chip (approval "inbox-search-type-filter",
- * option B) in a real browser against the compiled binary, with four agents
- * writing a relay world through `plannotator inbox mcp`
- * (tests/e2e/inbox-search-type-world.ts):
- *
- *  - All types: the request, the groups, their order, their rows and caps
- *    are the server's plain first answer, as before the chip;
- *  - the Type menu lists each type with the total the answer carries;
- *  - Files picked: the Files group alone with every file (more than the
- *    cap), its heading kept, no Actions, the first row highlighted, the live
- *    region saying "10 files"; kept while the words change; with no words a
- *    quiet line;
- *  - All types again at every open, and on Clear filters;
- *  - by keyboard only: Tab to the chip, Enter, the arrows, Enter; Escape
- *    closes the menu and focus goes back to the chip;
- *  - a phone: the chip leads the sideways chip row and picks in the bottom
- *    menu sheet.
- *  - every filter set with the longest project name: one filter line at
- *    1440, 768, 390 and 320 px (filter row "Up": the order at the search
- *    box's end on a desktop, pinned at the line's end on a phone).
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * PNGs (desktop 1440×900 @2x, phone 390×844 @3x) land in
- * .local/proof/search-type-filter/ (PLANNOTATOR_E2E_PROOF_DIR).
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
@@ -48,7 +21,6 @@ let url = '';
 let world: TypeWorld;
 let context: BrowserContext;
 let page: Page;
-/** Every search request the page made, in order. */
 const requests: URL[] = [];
 
 async function shot(p: Page, name: string, scheme: 'light' | 'dark' = 'light'): Promise<void> {
@@ -69,7 +41,6 @@ async function settled(p: Page): Promise<void> {
   await expect(palette(p).locator('[data-search-indexing]')).toHaveCount(0);
 }
 
-/** The words typed have their answer drawn: no recent view, a result row, nothing dimmed. */
 async function answered(p: Page): Promise<void> {
   await expect(palette(p).locator('[data-search-group="recent"]')).toHaveCount(0);
   await expect(palette(p).locator('[data-result]').first()).toBeVisible();
@@ -82,7 +53,6 @@ async function openFromSidebar(p: Page): Promise<void> {
   await expect(input(p)).toBeFocused();
 }
 
-/** The result groups drawn (Actions left out), each with its result ids and its "Show all" row's words. */
 async function drawnGroups(p: Page): Promise<{ id: string; rows: string[]; more: string | null }[]> {
   return palette(p)
     .locator('[data-search-group]')
@@ -99,7 +69,6 @@ async function drawnGroups(p: Page): Promise<{ id: string; rows: string[]; more:
 
 const groupIds = (p: Page) => palette(p).locator('[data-search-group]').evaluateAll((g) => g.map((x) => x.getAttribute('data-search-group')));
 
-/** The server's own answer to a request, the window's route. */
 async function serverSearch(params: Record<string, string>): Promise<ServerAnswer> {
   const response = await fetch(new URL(`/api/inbox/search?${new URLSearchParams(params)}`, url), { headers: { Accept: 'application/json' } });
   expect(response.ok).toBe(true);
@@ -154,17 +123,14 @@ test('All types: the request, the groups, their order, rows and caps are the pla
   await input(page).fill('relay');
   await answered(page);
 
-  // The request is the one the palette sent before the chip: no group, no limit, no offset.
   const sent = lastSearch('relay');
   expect([sent.searchParams.get('group'), sent.searchParams.get('limit'), sent.searchParams.get('offset')]).toEqual([null, null, null]);
-  // The server's plain answer to it, drawn as it comes: the fixed order, each group's rows, "Show all" past a cap.
   const plain = await serverSearch({ q: 'relay' });
   const expected = GROUPS.filter((id) => (plain.groups[id] ?? []).length > 0).map((id) => {
     const rows = plain.groups[id]!.map((r) => r.id);
     return { id, rows, more: plain.totals[id] > rows.length ? `Show all ${plain.totals[id]} ${id}` : null };
   });
   expect(await drawnGroups(page)).toEqual(expected);
-  // The caps hold: six threads show five, ten files show five.
   expect(plain.totals.threads).toBe(6);
   expect(plain.totals.files).toBe(world.relayFiles);
   expect(expected.find((g) => g.id === 'threads')!.rows).toHaveLength(5);
@@ -187,7 +153,6 @@ test('the Type menu lists each type with the total the answer carries, and none 
   await expect(menu(page)).toHaveCount(0);
   await expect(palette(page)).toBeVisible();
 
-  // No words: the types, without counts.
   await input(page).fill('');
   await settled(page);
   await typeChip(page).click();
@@ -205,7 +170,6 @@ test('Files picked: the Files group alone with every file, heading kept, no Acti
   await expect.poll(() => groupIds(page)).toEqual(['files']);
   await settled(page);
 
-  // The request: the group's own page ("Show all"'s), on this query.
   const sent = lastSearch('relay');
   expect([sent.searchParams.get('group'), sent.searchParams.get('limit')]).toEqual(['files', '50']);
   const all = await serverSearch({ q: 'relay', group: 'files', limit: '50' });
@@ -213,7 +177,6 @@ test('Files picked: the Files group alone with every file, heading kept, no Acti
   expect(ids.length).toBe(world.relayFiles);
   expect(ids.length).toBeGreaterThan(5);
   expect(await drawnGroups(page)).toEqual([{ id: 'files', rows: ids, more: null }]);
-  // The heading stays and labels the group.
   const group = palette(page).locator('[data-search-group="files"]');
   await expect(group).toHaveAttribute('role', 'group');
   await expect(palette(page).locator(`#${await group.getAttribute('aria-labelledby')}`)).toHaveText('Files');
@@ -225,7 +188,6 @@ test('Files picked: the Files group alone with every file, heading kept, no Acti
   await shot(page, '03-files-picked', 'light');
   await shot(page, '03-files-picked', 'dark');
 
-  // Kept while the words change; with no words, a quiet line and no rows.
   await input(page).fill('relay latency');
   await settled(page);
   await expect.poll(() => lastSearch('relay latency')?.searchParams.get('group')).toBe('files');
@@ -272,7 +234,6 @@ test('by keyboard only: Tab to the chip, Enter, the arrows, Enter; Escape closes
   await expect(input(page)).toBeFocused();
   await page.keyboard.type('relay');
   await answered(page);
-  // With words, the order beside the search box comes first, then the Type chip.
   await page.keyboard.press('Tab');
   await expect(palette(page).locator('[data-search-sort] input[type="radio"]:checked')).toBeFocused();
   await page.keyboard.press('Tab');
@@ -288,7 +249,6 @@ test('by keyboard only: Tab to the chip, Enter, the arrows, Enter; Escape closes
   await expect(typeChip(page)).toHaveText('Files');
   await expect(typeChip(page)).toBeFocused();
   await expect.poll(() => groupIds(page)).toEqual(['files']);
-  // Open again, then Escape: the menu closes, the palette stays, focus is on the chip.
   await page.keyboard.press('Enter');
   await expect(menu(page)).toBeVisible();
   await expect(items.nth(3)).toBeFocused();
@@ -311,7 +271,6 @@ test('a phone: the Type chip leads the sideways chip row and picks in the bottom
     await answered(p);
     const row = palette(p).locator('.ib-sp-filters');
     expect(await row.locator('[data-chip]').first().getAttribute('data-chip')).toBe('type');
-    // The one row of chips scrolls sideways; no new row.
     expect(await row.evaluate((el) => el.scrollWidth > el.clientWidth && getComputedStyle(el).overflowX === 'auto')).toBe(true);
     const chipBox = (await typeChip(p).boundingBox())!;
     const projectBox = (await palette(p).locator('[data-chip="project"]').boundingBox())!;
@@ -320,7 +279,6 @@ test('a phone: the Type chip leads the sideways chip row and picks in the bottom
 
     await typeChip(p).tap();
     await expect(menu(p)).toBeVisible();
-    // The bottom sheet: across the width, at the bottom of the window.
     const sheet = (await menu(p).boundingBox())!;
     expect(sheet.width).toBeGreaterThan(360);
     expect(sheet.y + sheet.height).toBeGreaterThan(844 - 40);
@@ -336,11 +294,6 @@ test('a phone: the Type chip leads the sideways chip row and picks in the bottom
   }
 });
 
-// Last: it adds a project, which would change the counts above.
-// Filter row "Up" (approval "inbox-search-calm"): with every filter set and the longest project name, the filters and
-// Clear filters keep ONE line at 1440, 768, 390 and 320 px. On a desktop nothing scrolls or leaves the panel (the
-// project gives way, cut) and Best match | Newest sits at the search box's end; on a phone the filters scroll sideways
-// and the order is pinned, whole, at the line's end.
 test('every filter set with the longest project name: one filter line at 1440, 768, 390 and 320 px', async ({ browser }: { browser: Browser }) => {
   const longName = await world.longProject();
   for (const width of [1440, 768, 390, 320]) {
@@ -374,7 +327,6 @@ test('every filter set with the longest project name: one filter line at 1440, 7
           lines: new Set(parts.map((r) => Math.round(r.top + r.height / 2))).size,
           sortIn: sort.closest('.ib-sp-inrow') ? 'search box' : sort.closest('.ib-sp-pin') ? 'pinned' : 'elsewhere',
           sortInside: sort.getBoundingClientRect().right <= panel.right + 0.5 && sort.getBoundingClientRect().left >= panel.left - 0.5,
-          // A desktop's filters neither scroll nor pass the row's end; a phone's scroll sideways by design.
           scrolls: filters.scrollWidth > filters.clientWidth,
           past: isPhone ? 0 : parts.filter((r) => r.right > right + 0.5).length,
           projectCut: (() => { const fl = bar.querySelector<HTMLElement>('[data-chip="project"] .ib-sp-fl')!; return fl.scrollWidth > fl.clientWidth; })(),

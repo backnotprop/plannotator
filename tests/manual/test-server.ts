@@ -1,17 +1,3 @@
-// Manual QA: runs with your real HOME and Plannotator config on purpose. For an isolated test run, use `bun run test:sandbox`.
-/**
- * Test script for Plannotator server
- *
- * Usage:
- *   bun run tests/manual/test-server.ts [origin]
- *
- * Examples:
- *   bun run tests/manual/test-server.ts              # defaults to claude-code
- *   bun run tests/manual/test-server.ts opencode     # tests opencode origin
- *
- * Reads plan from stdin if provided, otherwise uses a sample plan.
- */
-
 import { startPlannotatorServer, handleServerReady } from "@plannotator/server";
 
 // @ts-ignore - Bun import attribute for text
@@ -20,7 +6,6 @@ import html from "../../apps/hook/dist/index.html" with { type: "text" };
 const origin = process.argv[2] || "claude-code";
 const sharingEnabled = process.env.PLANNOTATOR_SHARE !== "disabled";
 
-// Use sample plan (stdin reading was blocking)
 const plan = `# Test Plan: Sample Feature
 
 ## Overview

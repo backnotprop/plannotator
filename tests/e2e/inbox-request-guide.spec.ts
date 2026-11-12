@@ -1,21 +1,3 @@
-/**
- * Request guided review (the thread header's ⋯; packages/inbox/guideRequest.ts),
- * in a real Chromium against the compiled binary, with Claude Code writing
- * through `plannotator inbox mcp` (scripts/inbox-sim.ts) as a waking
- * connection:
- *
- *  - the item sits above Archive; a click puts the person's request in the
- *    thread with its Queued line, and the agent reads it as a reply to its
- *    latest message;
- *  - a half-written reply stays in the box, and Send still sends it;
- *  - a phone: the item is in the bottom sheet and works there;
- *  - an archived thread has no item.
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * Screenshots (light, dark, phone; the menu open and the request sent) land in
- * /tmp/request-guide-shots/ (or PLANNOTATOR_REQUEST_GUIDE_SHOTS).
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
@@ -31,7 +13,6 @@ const shots = resolve(process.env.PLANNOTATOR_REQUEST_GUIDE_SHOTS ?? '/tmp/reque
 
 const DRAFT = 'Also rename the flag to RETRY_SAME_KEY before you push.';
 
-/** A thread where Claude Code did code work: its plan, then what it changed. */
 function work(topic: string): { subject: string; plan: string; done: string } {
   return {
     subject: `${topic}: retry Stripe 409s with the same key`,
@@ -77,7 +58,6 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: join(shots, name) });
 }
 
-/** The thread open, the agent heard from just now (its session is live), the one-time banner out of the way. */
 async function openThread(page: Page, key: keyof World['threads']) {
   const { thread, last } = world.threads[key];
   await world.agent.readThread(thread);
@@ -87,7 +67,6 @@ async function openThread(page: Page, key: keyof World['threads']) {
   if (await hide.isVisible().catch(() => false)) await hide.click();
 }
 
-/** The agent's read of the thread: the person's request is a reply to its latest message, in the request's words. */
 async function requestAsRead(key: keyof World['threads']) {
   const { thread, last } = world.threads[key];
   const read = (await world.agent.readThread(thread)) as { messages: { id: string; reply_to: string | null; author: { kind: string }; body: string }[] };
@@ -135,7 +114,6 @@ test('the item sits above Archive; a click puts the request in the thread, Queue
   await openThread(page, 'light');
   await page.locator('[data-thread-more]').click();
   await expect(threadMenu(page)).toBeVisible();
-  // The read action and Snooze lead the menu (the owner, 2026-11-11); the rest follows in this order.
   await expect(threadMenu(page).locator('[role="menuitem"]:not(:is([data-thread-read-item], [data-thread-move-back-item], [data-thread-unread-item], [data-thread-snooze-item], [data-thread-unsnooze-item]))')).toHaveText(['Star thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Add a pull request…', 'Request guided review', 'Archive thread']);
   await requestItem(page).hover();
   await shot(page, 'desktop-light-menu-open.png');

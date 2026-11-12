@@ -1,21 +1,3 @@
-/**
- * A thread's links: the Links side of the Artifacts view, proved in a real
- * browser against the compiled binary under a temp data dir and scratch HOME,
- * with a scripted `gh` and `glab` (never the real ones).
- *
- * - The thread's bar has the shapes and nothing new, in every state.
- * - The view's header: the way back and an Artifacts / Links switch.
- * - The list: repositories then other links; a PR or an issue shows its state
- *   in its icon, neutral until it answers or if it cannot; only the rows on
- *   screen ask; a bare `#1290` takes the forge's title.
- * - Links and no artifacts: the shapes open on Links. Neither: no button.
- * - 40 links, long urls and non-Latin titles do not overflow, desktop and phone.
- *
- * Build the binary first (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-thread-links.spec.ts`.
- * PNGs land in PLANNOTATOR_E2E_SHOTS_DIR (default .local/proof/thread-links).
- */
-
 import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -43,13 +25,11 @@ interface World {
 }
 let world: World;
 
-/** A host whose start looks like GitHub; its real domain is its end. */
 const LOOKALIKE_HOST = 'github.com.acme-web-pull-5-secure-login-verify-your-account-now.evil.example';
 const LOOKALIKE = `https://${LOOKALIKE_HOST}/acme/web/pull/5`;
 
 const ago = (hours: number) => new Date(Date.now() - hours * 3_600_000).toISOString();
 
-/** GitHub's answer for a pull request, as much as the hover card's query asks. */
 function pull(number: number, title: string, state: 'OPEN' | 'MERGED' | 'CLOSED', isDraft = false): unknown {
   return {
     data: {
@@ -85,7 +65,6 @@ function pull(number: number, title: string, state: 'OPEN' | 'MERGED' | 'CLOSED'
   };
 }
 
-/** GitHub's answer for an issue. */
 function issue(number: number, title: string, state: 'OPEN' | 'CLOSED', stateReason: 'COMPLETED' | 'NOT_PLANNED' | null = null): unknown {
   return {
     data: {
@@ -126,7 +105,6 @@ async function png(browser: Browser, html: string): Promise<Buffer> {
   return bytes;
 }
 
-/** 40 links in one thread: every kind, three forges, long urls, odd titles, repeats, code. */
 const MANY = [
   'A big audit of the checkout work. The pull requests:',
   '',
@@ -187,7 +165,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const dataDir = join(root, 'data');
   const home = join(root, 'home');
   const trap = join(root, 'trap');
-  // The states, and the hover card, ask `gh` and `glab`: scripted ones, never the real ones.
   const forge = fakeForge(join(root, 'bin'));
   forge.github(1412, pull(1412, 'Move the drawer behind a flag', 'MERGED'));
   forge.github(1398, pull(1398, 'Sticky Pay button on phones', 'OPEN'));
@@ -246,7 +223,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     NO_BROWSER,
     PLANNOTATOR_BROWSER: '/usr/bin/true',
   };
-  // The Inbox's PATH finds the scripted CLIs first: the real ones are never reached.
   for (const cli of ['gh', 'glab']) {
     const found = spawnSync('sh', ['-c', `command -v ${cli}`], { env, encoding: 'utf8' });
     expect(found.stdout.trim()).toBe(join(forge.dir, cli));
@@ -263,7 +239,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   writeFileSync(join(project, 'docs', 'checkout-spec.md'), '# Checkout in one drawer\n\nThe three checkout pages become one drawer over the cart.\n\n## Steps\n\n1. Shipping\n2. Payment\n3. Review and pay\n');
   writeFileSync(join(project, 'design', 'drawer.html'), '<!doctype html><title>Drawer</title><h1>Checkout drawer</h1><p>Prototype.</p>');
 
-  // One session writes one thread.
   const agents: SimAgent[] = [];
   const session = async () => {
     const agent = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
@@ -335,10 +310,8 @@ const open = async (page: Page, thread: string, suffix = '') => {
   await expect(page.locator('section.ib-pane')).toBeVisible();
   await page.waitForTimeout(400);
 };
-/** The bar's buttons in order: the thread's bar is the same with or without links. */
 const barButtons = (page: Page) =>
   page.locator('section.ib-pane .ib-phead').evaluate((bar) => [...bar.querySelectorAll('button')].map((b) => b.getAttribute('aria-label') ?? b.textContent ?? ''));
-/** The pane's markup with what differs run to run taken out, to compare a closed thread against a build of main. */
 const dumpPane = async (page: Page, name: string) => {
   const dir = process.env.PLANNOTATOR_THREAD_LINKS_DUMP;
   if (!dir) return;
@@ -353,7 +326,6 @@ const dumpPane = async (page: Page, name: string) => {
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, `${name}.html`), clean);
 };
-/** Nothing runs past the screen's right edge. */
 const noOverflow = async (page: Page) => {
   const over = await page.locator('[data-links-view]').evaluate((view) => {
     const box = view.getBoundingClientRect();
@@ -391,7 +363,6 @@ test.describe('desktop', () => {
     await open(p, world.many, '&artifacts&links');
     await expect(stateOf(p, PR(1412))).toHaveAttribute('data-ref-state', 'merged');
     await p.waitForTimeout(1500);
-    // acme/api is far below this short window, and so is its #70, which nothing else in this file has asked for.
     expect(world.forge.calls()).toContain('gh number=1412');
     expect(world.forge.calls()).not.toContain('gh number=70');
     const body = p.locator('section.ib-pane .ib-artbody').first();
@@ -416,7 +387,6 @@ test.describe('desktop', () => {
     await chosen(page, 'Artifacts');
     await expect(page.locator('[data-artifacts-view] h2')).toBeFocused();
     await expect(page.locator('[data-artifacts-summary]')).toHaveCount(0);
-    // Nothing new in the bar with the view open.
     expect((await barButtons(page)).filter((name) => /link/i.test(name))).toEqual([]);
     await page.mouse.move(10, 700);
     await shot(page, '02-artifacts');
@@ -428,7 +398,6 @@ test.describe('desktop', () => {
     await chosen(page, 'Links');
     await expect(artifactsButton(page)).toHaveAttribute('aria-pressed', 'true');
 
-    // The state, from the scripted gh, in each icon's shape and colour.
     await expect(stateOf(page, PR(1412))).toHaveAttribute('data-ref-state', 'merged');
     await expect(stateOf(page, PR(1398))).toHaveAttribute('data-ref-state', 'open');
     await expect(stateOf(page, ISSUE(1290))).toHaveAttribute('data-ref-state', 'completed');
@@ -439,29 +408,23 @@ test.describe('desktop', () => {
         [PR(1412), PR(1398), 'https://github.com/acme/api/pull/77'],
       );
     await expect.poll(async () => new Set(await colours()).size, { message: 'merged, open and closed: three colours' }).toBe(3);
-    // A bare `#1290` takes the forge's title, and the words a message wrote stay.
     await expect(rowOf(page, ISSUE(1290))).toContainText('#1290');
     await expect(rowOf(page, ISSUE(1290))).toContainText('Rounding in the cart total');
-    // A host this computer is not signed in to: neutral, and nothing ran for it.
     await expect(stateOf(page, 'https://github.acme.dev/payments/ledger/pull/5120')).toHaveAttribute('data-ref-state', 'unknown');
     expect(world.forge.calls().filter((call) => call.includes('5120'))).toEqual([]);
     await page.mouse.move(10, 700);
     await shot(page, '03-links');
 
-    // Duplicates once: #1412 is linked three times, #1290 is a bare ref, acme/api#77 a cross-repo ref with a written url.
     await expect(page.locator('[data-link-repo="acme/web"] [data-thread-link]')).toHaveCount(5);
     await expect(page.locator('[data-link-repo="acme/api"] [data-thread-link]')).toHaveCount(1);
 
-    // A reload stays on this side.
     await page.reload();
     await expect(page.locator('[data-links-view]')).toBeVisible();
 
-    // A link opens in a new tab, like a link in a message.
     const first = rows(page).first();
     await expect(first).toHaveAttribute('target', '_blank');
     await expect(first).toHaveAttribute('rel', /noopener/);
 
-    // Back and forth, then each way back to the thread: from either side, focus on the shapes.
     await side(page, 'Artifacts').click();
     await expect(page.locator('[data-artifacts-view]')).toBeVisible();
     await expect(page.locator('[data-links-view]')).toHaveCount(0);
@@ -479,14 +442,12 @@ test.describe('desktop', () => {
     await page.keyboard.press('Escape');
     await expect(page.locator('[data-links-view]')).toHaveCount(0);
     await expect(artifactsButton(page)).toBeFocused();
-    // The shapes open on Artifacts again.
     await artifactsButton(page).click();
     await chosen(page, 'Artifacts');
     await page.keyboard.press('Escape');
   });
 
   test('the label waits for the artifacts: no "Links" that turns into the toggle', async ({ browser }: { browser: Browser }) => {
-    // A page of its own: the thread's files are read on its first draw, held here until released.
     const fresh = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
     const p = await fresh.newPage();
     let release!: () => void;
@@ -529,13 +490,11 @@ test.describe('desktop', () => {
       const label = await page.locator('[data-artifacts-side="Links"] .ib-artswitch-n, [data-artifacts-switch-one] .ib-artswitch-n').first().textContent();
       expect(Number(label)).toBe(await page.locator('[data-links-view] [data-thread-link]').count());
     }
-    // A repository linked on its own and through one of its PRs: one row, and the count says one.
     await open(page, world.lookalike);
     await artifactsButton(page).click();
     await expect(page.locator('[data-artifacts-switch-one]')).toHaveText('Links2');
     await expect(page.locator('[data-links-view] [data-thread-link]')).toHaveCount(2);
 
-    // The host is cut from its start: its end, the real domain, is on screen.
     const tail = page.locator('[data-links-view] [data-link-tail]').filter({ hasText: 'evil.example' });
     const ends = await tail.evaluate((el) => {
       const text = el.querySelector('bdi')!.firstChild as Text;
@@ -551,7 +510,6 @@ test.describe('desktop', () => {
       return { cut: el.scrollWidth > el.clientWidth + 1, lastIn: last.left >= box.left - 1 && last.right <= box.right + 1, firstIn: first.left >= box.left - 1 };
     });
     expect(ends).toEqual({ cut: true, lastIn: true, firstIn: false });
-    // Cut, so its whole address is the tooltip.
     await tail.hover();
     await expect(page.locator('[data-pn-tooltip]').filter({ hasText: LOOKALIKE })).toBeVisible();
     await page.mouse.move(10, 700);
@@ -582,7 +540,6 @@ test.describe('desktop', () => {
     await artifactsButton(page).click();
     await expect(page.locator('[data-links-view]')).toHaveCount(0);
     await expect(artifactsButton(page)).toBeFocused();
-    // One link, no state to read.
     await open(page, world.one);
     await artifactsButton(page).click();
     await expect(rows(page)).toHaveCount(1);
@@ -595,7 +552,6 @@ test.describe('desktop', () => {
     await expect(page.locator('[data-links-view]')).toBeVisible();
     await expect(stateOf(page, PR(1377))).toHaveAttribute('data-ref-state', 'draft');
     await expect(stateOf(page, ISSUE(1270))).toHaveAttribute('data-ref-state', 'not_planned');
-    // gh does not know this one: the same shape, neutral.
     await expect(stateOf(page, ISSUE(1276))).toHaveAttribute('data-ref-state', 'unknown');
     await page.mouse.move(10, 700);
     await shot(page, '04-forty');
@@ -605,7 +561,6 @@ test.describe('desktop', () => {
     expect(new Set(all).size).toBe(all.length);
     await page.locator('section.ib-pane .ib-artbody').first().evaluate((el) => el.scrollTo(0, el.scrollHeight));
     await page.waitForTimeout(300);
-    // GitLab's state and title, over the scripted glab.
     const mr = rowOf(page, 'https://gitlab.com/harbor/platform/tooling/-/merge_requests/231');
     await expect(mr.locator('svg.ib-refmark')).toHaveAttribute('data-ref-state', 'merged');
     await expect(mr).toContainText('Cache the build layers');
@@ -624,7 +579,6 @@ test.describe('desktop', () => {
     await expect(page.locator('[data-artifacts-switch-one]')).toHaveText(/^Artifacts\d+$/);
     await page.mouse.move(10, 700);
     await shot(page, '08-no-links');
-    // `&links` on a thread with no links is the artifacts.
     await open(page, world.noLinksFiles, '&artifacts&links');
     await expect(page.locator('[data-artifacts-view]')).toBeVisible();
     await expect(page.locator('[data-links-view]')).toHaveCount(0);
@@ -637,9 +591,7 @@ test('the row in a full-screen thread and beside a file', async ({ browser }: { 
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
   const page = await context.newPage();
   const pane = page.locator('section.ib-pane');
-  /** The row sits inside the pane, its chevron's glyph over the left edge of what is under it. */
   const rowFits = async (under: string) => {
-    // Polled: the pane animates its width on the way into full screen.
     await expect
       .poll(async () => {
         const glyph = (await page.locator('[data-artifacts-back] svg').boundingBox())!;
@@ -652,7 +604,6 @@ test('the row in a full-screen thread and beside a file', async ({ browser }: { 
     expect(row.x + row.width).toBeLessThanOrEqual(box.x + box.width);
   };
 
-  // The mouse rests in the pane: at the window's left edge a full-screen thread peeks the sidebar.
   await open(page, world.mixed, '&artifacts');
   await page.locator('.ib-listcol .ib-handle-hit').click();
   await expect(pane).toHaveAttribute('data-full', /.*/);
@@ -690,7 +641,6 @@ test.describe('phone', () => {
   let context: BrowserContext | undefined;
   let page: Page;
   test.beforeAll(async () => {
-    // No args: the chromium project's Chromium flags reach this launch too, and WebKit refuses them.
     own = await webkit.launch({ args: [] });
     context = await own.newContext({ ...devices['iPhone 15'], viewport: { width: 390, height: 844 } });
     page = await context.newPage();
@@ -717,7 +667,6 @@ test.describe('phone', () => {
     await page.waitForTimeout(500);
     await shot(page, 'phone-03-links', { reload: true });
     await noOverflow(page);
-    // Back from either side is the thread.
     await page.locator('[data-artifacts-phone-back]').tap();
     await expect(page.locator('[data-links-view]')).toHaveCount(0);
     await expect(page).toHaveURL(new RegExp(`#thread=${world.mixed}$`));

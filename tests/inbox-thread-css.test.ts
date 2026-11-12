@@ -3,21 +3,12 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { INBOX_CSS_PATH, parseSheet, renderInboxThreadCss, topLevel } from '../packages/ui/scripts/build-inbox-thread-css';
 
-// @plannotator/ui/inbox-thread.css is generated from the Inbox's own stylesheet
-// and loaded into another app's page. A rule in inbox.css that styles the
-// window as a whole (`body`, `html:has(.pn-inbox)`, `body:has(.pn-inbox) input`)
-// is right in the Inbox and wrong in a host, where it restyles pages that have
-// nothing to do with a thread, and only on some screens. These checks run the
-// generator over the real inbox.css and read the output from the outside, with
-// postcss, so a new rule in inbox.css cannot reach a host page unnoticed.
-
 const PARTS = resolve(import.meta.dir, '../packages/ui/components/inbox-thread');
 const source = readFileSync(INBOX_CSS_PATH, 'utf8');
 const generated = renderInboxThreadCss(source);
 
 interface FlatRule {
   selector: string;
-  /** The at-rules around the rule, outermost first. */
   within: string[];
   props: string[];
   body: string;
@@ -25,7 +16,6 @@ interface FlatRule {
 
 const atRuleName = (rule: { name: string; params: string }) => `@${rule.name} ${rule.params}`.replace(/\s+/g, ' ').trim();
 
-/** Every selector of every style rule, keyframe steps aside. */
 function flatRules(css: string): FlatRule[] {
   const out: FlatRule[] = [];
   parseSheet(css).walkRules((rule) => {
@@ -50,13 +40,11 @@ function atRules(css: string): string[] {
 
 const isPageElement = (compound: string) => /^(:root|html|body|#root)(?![\w-])/.test(compound);
 
-/** True unless what the selector matches has to be `.pn-inbox` or inside it. */
 function reachesOutside(selector: string): boolean {
   const tokens = topLevel(selector);
   return !tokens.some((token, i) => /\.pn-inbox(?![\w-])/.test(token) && tokens[i + 1] !== '+' && tokens[i + 1] !== '~');
 }
 
-/** A rule for the page's root that only sets the sheet's own tokens paints nothing there. */
 const onlySetsTokens = ({ props }: FlatRule) => props.every((name) => name.startsWith('--ib-'));
 
 function leaksOf(css: string): FlatRule[] {
@@ -186,7 +174,6 @@ describe('the host gets the Inbox\'s cascade', () => {
 });
 
 describe('every ib- class of the shared parts has a rule', () => {
-  // A hook, not a look: the Inbox draws these from the rules around them, so no rule exists to ship.
   const NO_RULE_IN_THE_INBOX: ReadonlySet<string> = new Set(['ib-skills-n']);
 
   const withoutComments = (code: string) => code.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');

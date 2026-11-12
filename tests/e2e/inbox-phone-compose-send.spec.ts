@@ -1,34 +1,3 @@
-/**
- * New message on a phone (approval .product/approved/inbox-phone-compose-send, option C; the row and To are approval
- * "inbox-phone-composer-picker"): Send sits at the bottom right on the row with attachments, Skills, To and the mic.
- * The words and that row are one card that ends 8 px above the keyboard; the head keeps its title with the keyboard up.
- *
- * The keyboard cannot exist in a headless browser, so it is a stand-in: WebKit replays the owner's iOS 26 readings
- * (the visual viewport loses the keyboard, `innerHeight` follows it, `clientHeight` does not), Chromium the Android
- * ones (only the visual viewport shrinks), as inbox-ios-keyboard-shell.spec.ts does. 390 x 660 less 403 is the owner's
- * iPhone; 320 x 568 less 353 is the same ~100 px past a 253 px keyboard. Nothing here shows what a real iPhone does.
- *
- * Proved here, against the compiled binary under a temp PLANNOTATOR_DATA_DIR (PLANNOTATOR_INBOX_CONNECT=0, no browser),
- * at 320 and 390 px in WebKit and Chromium:
- *
- * - One Send, in the foot, on screen and on top at its own centre with the keyboard up or down, the row's 8 px from the
- *   buttons on its left; a tap on it with the keyboard up sends.
- * - To is on screen in every state, in the foot's row, clear of the buttons on both its sides; the top bar keeps its
- *   title between Cancel and Save draft with the keyboard up.
- * - No gap: the message field runs to the foot, and the card to 8 px over the keyboard (or the sheet's bottom).
- * - The notes and tiles step aside for the words, but a refused file does not; the Thread row always stays.
- * - Save draft is at the top right only while nothing can be sent. Delete draft is off the sheet and on the Drafts page.
- * - A draft to an ended session keeps To's chevron in To and says "ended" whole.
- * - Under the keyboard's threshold Send still stays on screen: a strip of 78 px, and a browser that resizes the layout.
- * - While dictating the row stays one row with the clip and mic where they were.
- * - Chromium at 1440 x 900: none of it applies.
- *
- * Voice is never on in the server (/voice/status would start a real Codex): the page is told it is on, answered here.
- *
- * Build the binary first (see inbox.spec.ts). PLANNOTATOR_E2E_SHOTS_DIR names a folder for the pictures (default
- * .local/proof/phone-compose-send), the keyboard's stand-in drawn in grey.
- */
-
 import { chromium, devices, expect, test, webkit, type Browser, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
@@ -48,7 +17,6 @@ const SIZES = [
   { width: 390, height: 660, keyboard: 403 },
   { width: 320, height: 568, keyboard: 353 },
 ] as const;
-/** Dictating, the status has the least room here (Send is the round arrow at every width). */
 const TIGHT = [
   { width: 360, height: 640, keyboard: 383 },
   { width: 375, height: 667, keyboard: 410 },
@@ -92,7 +60,6 @@ test.beforeAll(async () => {
   const { port, token } = JSON.parse(readFileSync(join(dataDir, 'inbox', 'inbox.json'), 'utf8')) as { port: number; token: string };
   world = { url: started.stdout.trim(), agent, project, port, token, stop: false, loop: null };
 
-  // One live session, as the mod's connection holds it.
   const startedAt = Date.now() - 45 * 60_000;
   world.loop = (async () => {
     while (!world.stop) {
@@ -117,7 +84,6 @@ test.afterAll(async () => {
   }
 });
 
-/** The browser is told voice is on, so the mic is on the row. The server's voice stays off. */
 async function voiceOn(page: Page): Promise<void> {
   await page.route('**/api/inbox/settings*', async (route) => {
     if (route.request().method() !== 'GET') return route.fallback();
@@ -129,7 +95,6 @@ async function voiceOn(page: Page): Promise<void> {
   await page.route('**/api/inbox/voice/intro*', (route) => route.fulfill({ json: { show: false } }));
 }
 
-/** The stand-in for the keyboard: what each browser reports with one up. */
 type Keyboard = (page: Page, height: number) => Promise<void>;
 
 const iosKeyboardUp: Keyboard = async (page, height) => {
@@ -166,7 +131,6 @@ async function keyboardDown(page: Page): Promise<void> {
   await page.evaluate(() => {
     const vv = window.visualViewport!;
     delete (vv as unknown as Record<string, unknown>).height;
-    // Only iOS's readings replaced innerHeight; Chromium keeps its own on the window, and a delete would take it away.
     const stored = window as unknown as { e2eInnerHeight?: PropertyDescriptor };
     if (stored.e2eInnerHeight) Object.defineProperty(window, 'innerHeight', stored.e2eInnerHeight);
     vv.dispatchEvent(new Event('resize'));
@@ -178,7 +142,6 @@ async function openCompose(page: Page, pick = true): Promise<void> {
   await page.goto(world.url);
   await page.locator('.ib-lhead [data-open-compose]').click();
   const sheet = sheetOf(page);
-  // A phone's To: the pill in the foot's row. It opens the sheet, and a row of the sheet picks.
   await expect(sheet.locator('[data-compose-to]')).not.toHaveAttribute('data-loading', /.*/);
   if (!pick) return;
   await sheet.locator('[data-compose-to]').click();
@@ -186,7 +149,6 @@ async function openCompose(page: Page, pick = true): Promise<void> {
   await expect(sheet.locator(`.ib-cp-foot [data-compose-to="${SESSION}"]`)).toBeVisible();
 }
 
-/** The worst draft, kept once in this Inbox: two files, a long thread name, a long message. */
 let draftKept = false;
 async function openWorstDraft(page: Page): Promise<void> {
   if (!draftKept) {
@@ -241,7 +203,6 @@ interface Layout {
   send: Box;
 }
 
-/** Where each part is. A part that is not drawn is null. */
 async function read(page: Page): Promise<Layout> {
   return page.evaluate(() => {
     const dialog = document.querySelector('dialog[data-compose]')!;
@@ -262,7 +223,6 @@ async function read(page: Page): Promise<Layout> {
       bar: rect('.ib-cp-bar')!,
       title: rect('.ib-cp-bar h2'),
       cancel: rect('[data-compose-cancel]'),
-      // A phone's To is the pill in the foot's row ("No agent is running" is a span there).
       to: rect('.ib-cp-foot [data-compose-to]'),
       chevron: rect('.ib-cp-foot [data-compose-to] > svg.ib-apill-c'),
       card: rect('[data-compose-pcard]')!,
@@ -280,21 +240,18 @@ async function read(page: Page): Promise<Layout> {
   }) as Promise<Layout>;
 }
 
-/** One Send, on the foot's one row, in reach, and the row's 8 px from what is on its left. */
 function sendInReach(l: Layout, name: string): void {
   expect(l.sends, `${name}: one Send`).toBe(1);
   expect(l.send, `${name}: Send is drawn`).toBeTruthy();
   expect(l.sendOnTop, `${name}: nothing covers Send`).toBe(true);
   expect(l.send.bottom, `${name}: Send ends above the keyboard`).toBeLessThanOrEqual(l.seen + 0.5);
   expect(l.send.right, `${name}: Send is on screen`).toBeLessThanOrEqual(l.width);
-  // 36 px to the eye; its `::after` makes it 44 px to the touch (phoneComposer.css).
   expect(l.send.bottom - l.send.top, `${name}: Send is 36 px tall`).toBeGreaterThanOrEqual(35.5);
   expect(l.foot.bottom - l.foot.top, `${name}: the foot is one row`).toBeLessThanOrEqual(56);
   const left = Math.max(...[l.clip, l.skills, l.to, l.count, l.mic, l.saved].map((part) => part?.right ?? 0));
   expect(l.send.left - left, `${name}: Send's gap from the left-hand buttons`).toBeGreaterThanOrEqual(7.5);
 }
 
-/** To is on screen, in the foot's row, clear of the buttons on both its sides, whatever else steps aside. */
 function toOnScreen(l: Layout, name: string): void {
   expect(l.to, `${name}: To is drawn`).toBeTruthy();
   expect(l.to!.left, `${name}: To starts on screen`).toBeGreaterThanOrEqual(-0.5);
@@ -306,14 +263,9 @@ function toOnScreen(l: Layout, name: string): void {
   expect(l.to!.left, `${name}: To clears the buttons on its left`).toBeGreaterThanOrEqual(before - 0.5);
   const after = Math.min(...[l.saved, l.mic, l.send].map((part) => part?.left ?? Infinity));
   expect(l.to!.right, `${name}: To clears what is on its right`).toBeLessThanOrEqual(after + 0.5);
-  // The button's box can stay clear while what it holds runs out of it: the chevron is what would land on its neighbour.
   if (l.chevron) expect(l.chevron.right, `${name}: the chevron stays in To`).toBeLessThanOrEqual(l.to!.right + 0.5);
 }
 
-/**
- * The keyboard is up and the head does not fold: the top bar keeps its title, between Cancel and Save draft, and To
- * stays in the foot's row.
- */
 function headWhole(l: Layout, name: string): void {
   toOnScreen(l, name);
   expect(l.title, `${name}: the title stays with the keyboard up`).toBeTruthy();
@@ -325,20 +277,14 @@ function headWhole(l: Layout, name: string): void {
   expect(l.bar.bottom, `${name}: the top bar is over the card`).toBeLessThanOrEqual(l.card.top + 0.5);
 }
 
-/**
- * The owner's gap: the field runs to the foot, and the foot is the end of the card, which stops 8 px over the keyboard
- * or the sheet's bottom (the sheet's own box runs on under the keyboard).
- */
 function noGap(l: Layout, name: string): void {
   expect(l.text, `${name}: the field is drawn`).toBeTruthy();
   expect(l.foot.top - l.text!.bottom, `${name}: the gap under the field`).toBeLessThanOrEqual(12);
-  // The card's own 1 px border is all that is under the foot.
   expect(l.card.bottom - l.foot.bottom, `${name}: the foot ends the card`).toBeLessThanOrEqual(1.5);
   expect(l.card.bottom - l.foot.bottom, `${name}: the foot is inside the card`).toBeGreaterThanOrEqual(-0.5);
   expect(Math.abs(Math.min(l.seen, l.sheet.bottom) - 8 - l.card.bottom), `${name}: the card ends 8 px over the keyboard`).toBeLessThanOrEqual(1);
 }
 
-/** A picture of the whole window, with a grey box for the stand-in. In the dialog: a modal dialog is the top layer. */
 async function shot(page: Page, name: string, keyboard: boolean): Promise<void> {
   if (keyboard) {
     await page.evaluate(() => {
@@ -402,7 +348,6 @@ for (const engine of ENGINES) {
         sendInReach(closed, 'keyboard closed');
         noGap(closed, 'keyboard closed');
         toOnScreen(closed, 'keyboard closed');
-        // No To line under the top bar: To is the pill in the foot's row.
         await expect(sheet.locator('.ib-cp-head [data-compose-to]')).toHaveCount(0);
         await expect(sheet.locator('[data-compose-to]')).toHaveCount(1);
         expect(closed.thread, 'Thread is drawn').toBeTruthy();
@@ -416,20 +361,17 @@ for (const engine of ENGINES) {
         headWhole(open, 'keyboard open');
         await expect(sheet.locator('.ib-cp-bar h2')).toBeVisible();
         noGap(open, 'keyboard open');
-        // Thread stays with the keyboard up (the owner, 2026-11-02: hiding it lost the subject line).
         expect(open.thread, 'Thread stays').toBeTruthy();
         expect(open.thread!.top, 'Thread is under the head').toBeGreaterThanOrEqual(open.bar.bottom - 0.5);
         expect(open.thread!.bottom, 'Thread is over the foot').toBeLessThanOrEqual(open.foot.top + 0.5);
         await shot(page, `${engine.name}-${size.width}-keyboard-open`, true);
 
-        // Back as it was.
         await keyboardDown(page);
         const again = await read(page);
         noGap(again, 'keyboard closed again');
         expect(again.thread, 'Thread is back').toBeTruthy();
         toOnScreen(again, 'keyboard closed again');
 
-        // A finger on Send, with the keyboard up: it goes.
         await keyboardUp(page, engine.up, size.keyboard);
         await sheet.locator('.ib-cp-foot [data-compose-send]').tap();
         await expect(sheet).toHaveCount(0);
@@ -443,7 +385,6 @@ for (const engine of ENGINES) {
         await sheet.locator('[data-compose-text] textarea').focus();
         await expect(sheet.locator('[data-compose-delete]')).toHaveCount(0);
         await expect(sheet.locator('[data-compose-file="done"]')).toHaveCount(2);
-        // The foot's end of a long draft, where the tiles are.
         await sheet.locator('.ib-cp-body').evaluate((body) => {
           body.scrollTop = body.scrollHeight;
         });
@@ -478,7 +419,6 @@ for (const engine of ENGINES) {
         await expect(status).toHaveText('Choose an agent to send it.');
         await expect(field).toHaveAttribute('aria-describedby', (await status.getAttribute('id'))!);
         expect((await status.boundingBox())!.width, 'the status line is not on screen').toBeLessThanOrEqual(1);
-        // Nothing written: nothing to save, and Send says it cannot go.
         await expect(sheet.locator('[data-compose-save]')).toHaveCount(0);
         await expect(sheet.locator('[data-compose-send]')).toHaveAttribute('aria-disabled', 'true');
 
@@ -490,7 +430,6 @@ for (const engine of ENGINES) {
         sendInReach(open, 'nobody in To');
         headWhole(open, 'nobody in To');
 
-        // A pick: Save draft goes, Send can.
         await sheet.locator('[data-compose-to]').tap();
         await sheet.locator(`[data-compose-to-sheet] [data-compose-session="${SESSION}"]`).tap();
         await expect(sheet.locator('[data-compose-save]')).toHaveCount(0);
@@ -530,7 +469,6 @@ for (const engine of ENGINES) {
         await sheet.locator('[data-compose-cancel]').click();
         await expect(sheet).toHaveCount(0);
 
-        // The session is gone when the draft comes back.
         await page.route('**/api/inbox/sessions*', (route) => route.fulfill({ json: { projects: [] } }));
         await page.goto(`${world.url}#drafts`);
         await page.locator('[data-draft-id]', { hasText: words }).locator('.ib-draft-open').click();
@@ -547,13 +485,11 @@ for (const engine of ENGINES) {
         const open = await read(page);
         sendInReach(open, 'ended, keyboard open');
         headWhole(open, 'ended, keyboard open');
-        // The pill: the agent's mark, its name struck (not under 360 px), then "ended" whole, then the chevron.
         const detail = to.locator('.ib-apill-d');
         await expect(detail).toHaveText('ended', { useInnerText: true });
         const ended = await detail.evaluate((el) => ({ whole: el.scrollWidth <= el.clientWidth, right: el.getBoundingClientRect().right }));
         expect(ended.whole, '"ended" is not cut').toBe(true);
         expect(ended.right, '"ended" stops short of the chevron').toBeLessThanOrEqual(open.chevron!.left + 0.5);
-        // The narrowest phones: a struck letter says nothing. The mark says who, the button's name the rest.
         if (size.width === 320) await expect(to.locator('s'), 'no sliver of a name at 320').toBeHidden();
         else await expect(to.locator('s')).toBeVisible();
         await expect(to.locator('.ib-apill-m')).toBeVisible();
@@ -573,7 +509,6 @@ for (const engine of ENGINES) {
         await field.focus();
         await field.fill(MESSAGE);
         await engine.up(page, 78);
-        // The sheet keeps the whole window and pads its bottom by the strip: its card ends 8 px over it.
         const card = sheet.locator('[data-compose-pcard]');
         const cardBottom = async () => {
           const box = (await card.boundingBox())!;
@@ -646,10 +581,8 @@ for (const engine of ENGINES) {
           body: JSON.stringify(body),
         });
       const board = (on: boolean) => post('settings', { board: { on } });
-      // Only for this test: with the Board on the Thread row grows a chip the others do not expect.
       expect((await board(true)).ok).toBe(true);
       try {
-        // The first visit's dialog, claimed here so no page waits on it.
         expect((await post('board/intro', {})).ok).toBe(true);
         const made = await world.agent.card({ op: 'create', project_path: world.project, title: `The promo field, ${engine.name}` });
         const id = (made.card as { id: string }).id;
@@ -690,7 +623,6 @@ for (const engine of ENGINES) {
       await expect(sheet).toHaveCount(0);
       await keyboardDown(page);
 
-      // The same name again: the Send is refused beside the chip, and the chip's row comes back to say so.
       await openCompose(page);
       await field.fill(MESSAGE);
       await chip.focus();
@@ -704,7 +636,6 @@ for (const engine of ENGINES) {
       await expect(sheet.locator('.ib-cp-thread')).toBeVisible();
       await sheet.locator('.ib-cp-foot [data-compose-send]').tap();
       await expect(sheet.locator('[data-compose-thread-name-error]')).toBeVisible();
-      // The thread that has the name, as a pill, and the way through: one line, inside the sheet, whatever the name's length.
       const pill = sheet.locator('[data-compose-thread-pill]');
       const join = sheet.locator('[data-compose-thread-name-join]');
       await expect(pill).toBeVisible();
@@ -740,7 +671,6 @@ for (const engine of ENGINES) {
           expect(line.x + line.width, 'the status stops short of Send').toBeLessThanOrEqual(after.send.left + 0.5);
           const send = sheetOf(page).getByRole('button', { name: 'Send' });
           await expect(send).toBeDisabled();
-          // The round arrow at every width, its word kept as its name.
           expect(after.send.right - after.send.left, 'the bare arrow').toBeLessThanOrEqual(36.5);
           await sheetOf(page).locator('[data-voice-cancel]').click();
           await expect(page.locator('[data-voice-line]')).toHaveCount(0);
@@ -769,12 +699,10 @@ test.describe('Chromium at 1440 x 900 (the desktop)', () => {
     await sheet.locator(`[data-compose-session="${SESSION}"]`).click();
     const send = sheet.locator('.ib-cp-foot [data-compose-send]');
     await expect(send).toHaveClass('ib-btn ib-pri');
-    // No ⌘↵ on Send (approval "inbox-send-no-shortcut-hint"); the key is named in aria-keyshortcuts.
     await expect(send.locator('kbd, [data-shortcut-hint]')).toHaveCount(0);
     await expect(send).toHaveAttribute('aria-keyshortcuts', /^(Meta|Control)\+Enter$/);
     await expect(sheet.locator('.ib-cp-sendl')).toHaveCount(0);
 
-    // What reads as a keyboard on a phone is nothing here: To and Thread stay put.
     const to = await sheet.locator('.ib-cp-to').boundingBox();
     await androidKeyboardUp(page, 403);
     await expect.poll(() => page.evaluate(() => window.visualViewport!.height)).toBe(497);
@@ -787,7 +715,6 @@ test.describe('Chromium at 1440 x 900 (the desktop)', () => {
     await send.click();
     await expect(sheet).toHaveCount(0);
 
-    // A reopened draft keeps Delete draft.
     await page.locator('[data-open-compose]').first().click();
     await sheet.locator('[data-compose-text] textarea').fill('A draft to delete.');
     await page.keyboard.press('Escape');

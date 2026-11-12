@@ -1,21 +1,3 @@
-/**
- * Drop KaTeX's `woff` and `ttf` font fallbacks from the single-file builds
- * (#1617), keeping only `woff2`.
- *
- * `katex.min.css` lists every face as `woff2, woff, truetype`. A browser takes
- * the first format it supports and never fetches the rest, and every browser
- * Plannotator runs in supports woff2 (Chromium 36+, which includes the VS Code
- * webview and Electron; Firefox 39+; Safari 12+, while the app already needs
- * Safari 17.4+ for Mermaid 12). In a normal build the fallbacks cost nothing,
- * but the single-file builds inline every `url()` as base64, so they shipped
- * ~1.1 MB of fonts no browser reads, in both the plan and the review HTML.
- *
- * Only `@font-face` rules whose family is `KaTeX_*` are touched. The plugin
- * runs in Vite's normal phase, after Tailwind has inlined theme.css's
- * `@import` of the KaTeX stylesheet, and matches both the path form
- * (`url(fonts/X.woff)`) and the inlined data-URI form, so it does not depend
- * on whether assets are already inlined when it sees the CSS.
- */
 import type { Plugin } from 'vite';
 
 const FONT_FACE = /@font-face\s*\{[^}]*\}/g;
@@ -36,9 +18,6 @@ export function katexWoff2Only(): Plugin {
       const next = stripKatexFontFallbacks(code);
       return next === code ? null : { code: next, map: null };
     },
-    // A build that keeps assets as files (the packed hook and review builds)
-    // has already emitted the fallbacks by the time the CSS loses its last
-    // reference to them, so drop the now unreferenced files too.
     generateBundle(_options, bundle) {
       for (const name of Object.keys(bundle)) {
         if (/(^|\/)KaTeX_[^/]*\.(?:woff|ttf)$/.test(name)) delete bundle[name];

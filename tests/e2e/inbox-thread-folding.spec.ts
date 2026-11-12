@@ -1,22 +1,3 @@
-/**
- * Folding a thread (design record, not in this repo; variant "Land"), proved
- * in a real browser against the compiled binary. Claude Code and the person
- * go back and forth in docs-site through `plannotator inbox mcp`
- * (scripts/inbox-sim.ts) and the window's own routes: questions answered, a
- * file annotated, a guided review, replies the agent read. The person looks;
- * then one more message arrives. Seven messages, one new.
- *
- * Opened, the thread lands at "New since you looked" with the last read line
- * above it; the read run folds to lines, its middle behind "3 earlier
- * messages"; each line says what its message holds; opening a line keeps it
- * where it was; n, j and k move between messages; Expand all gives back the
- * fully open thread, and the "↓ 1 new" pill points down to the new message.
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * PNGs light and dark at 1440 by 900 land in .local/proof/thread-folding/
- * (or PLANNOTATOR_E2E_PROOF_DIR/thread-folding).
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -29,7 +10,6 @@ const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'thread-folding');
 
-/** A 160-odd character prompt with inline markdown: its folded line must still show the answer. */
 const LONG_PROMPT = 'Which search index should the docs site use for its first public release, given the **1.6 MB** index, the `astro build` step in CI and the review deadline this Friday?';
 const LONG_PLAIN = 'Which search index should the docs site use for its first public release, given the 1.6 MB index, the astro build step in CI and the review deadline this Friday';
 
@@ -147,7 +127,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-folding-e2e-');
   const dataDir = join(root, 'data');
-  // Nothing here may reach the real tailscale CLI: a trap fails loudly first on PATH.
   const trap = join(root, 'bin');
   mkdirSync(trap);
   writeFileSync(join(trap, 'tailscale'), "#!/bin/sh\necho 'inbox-thread-folding.spec: tailscale must not run' >&2\nexit 97\n");
@@ -168,16 +147,13 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   world = { root, dataDir, url, docs, claude, context, page, errors, threadId: '', ids: [] };
 
-  // 1. Claude Code asks two questions; 2. the person answers both.
   const ask = (await claude.send({ project_path: docs, subject: 'Search for the docs site', body: ASK })) as Sent;
   world.threadId = ask.thread_id;
   const [index, sections] = ask.questions;
   const r1 = await post(`/api/inbox/messages/${ask.message_id}/reply`, {
     idempotency_key: 'r1',
-    // No words of its own: its folded line shows the answers it sent.
     questions: [answer(index!, ['Pagefind']), answer(sections!, ['Guides', 'API reference'])],
   });
-  // 3. The plan as a file, one more question; 4. the person answers with two annotations on it.
   const plan = (await claude.send({ project_path: docs, body: PLAN, reply_to: ask.message_id, attachments: ['search-plan.md'] })) as Sent;
   for (const id of ['ann-1', 'ann-2']) {
     await post('/api/inbox/annotations', {
@@ -193,12 +169,10 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     feedback: '# Feedback on the attached files\n\nShow the section path on each result.',
     annotation_ids: ['ann-1', 'ann-2'],
   });
-  // 5. A guided review of the change; 6. the person's reply. The agent reads every reply.
   const { example } = await claude.guideBrief();
   const guide = (await claude.submitGuide({ project_path: docs, ...example, body: 'Both notes are in: results show the section path. Ready for a read, file by file.', reply_to: ask.message_id })) as Sent;
   const r3 = await post(`/api/inbox/messages/${guide.message_id}/reply`, { idempotency_key: 'r3', words: 'Read it, looks good. One thing: an empty result says only "No results".' });
   await claude.readThread(ask.thread_id);
-  // The person looks at the thread (the window's look), then 7. one more message arrives: new since that look.
   await post(`/api/inbox/threads/${ask.thread_id}/seen`, {});
   const latest = (await claude.send({ project_path: docs, body: LATEST, reply_to: ask.message_id })) as Sent;
   world.ids = [ask.message_id, r1.reply.id, plan.message_id, r2.reply.id, guide.message_id, r3.reply.id, latest.message_id];
@@ -210,7 +184,6 @@ test.afterAll(async () => {
     await world.claude.close().catch(() => {});
     await world.context.close();
   } finally {
-    // Every Inbox this spec started, then its folders (inbox-scratch.ts).
     await removeInboxScratch();
   }
 });
@@ -222,13 +195,11 @@ test('opened, the thread lands at "New since you looked" with the last read line
   await expect(pane().locator('[data-thread-meta]')).toContainText(/^7 messages.*1 new since you looked$/);
   const divider = pane().locator('[data-new-divider]');
   await expect(divider).toHaveText('New since you looked');
-  // The last read line just above the divider, both in view; the subject scrolled away into the header.
   await expect(article(ids[5]!)).toBeInViewport();
   await expect(divider).toBeInViewport();
   await expect(pane().locator('h2.ib-subject')).not.toBeInViewport();
   await expect(pane().locator('[data-header-subject]')).toHaveAttribute('data-on', '');
   await expect(pane().locator('[data-header-subject]')).toHaveText('Search for the docs site');
-  // The new message is open with its New pill and its question card; it is the last, so the pill is off.
   await expect(article(ids[6]!)).toHaveAttribute('data-new', '');
   await expect(article(ids[6]!)).toHaveAttribute('data-open', '');
   await expect(article(ids[6]!).locator('.ib-newtag')).toHaveText('New');
@@ -242,12 +213,9 @@ test('the read run folds: first and last two as lines, the middle behind "Show 3
   for (const id of [ids[0]!, ids[4]!, ids[5]!]) await expect(article(id)).toHaveAttribute('data-folded', '');
   for (const id of [ids[1]!, ids[2]!, ids[3]!]) await expect(article(id)).toHaveCount(0);
   await expect(pane().locator('[data-middle-fold]')).toHaveText('Show 3 earlier');
-  // Every question answered: the line shows the answers, not the first words.
   const first = article(ids[0]!);
-  // A long prompt is cut at a word, so the answer stays on the line; the whole prompt is the line's tooltip.
   const answers = first.locator('[data-snippet="answers"]');
   await expect(answers).toHaveText('Which search index should the docs site… → Pagefind · Which sections go in the index → Guides, API reference');
-  // The whole answers are its component tooltip, never a native title.
   await expect(answers).not.toHaveAttribute('title', /./);
   await answers.hover();
   await expect(world.page.locator('[data-side].bg-popover')).toHaveText(`${LONG_PLAIN}: Pagefind; Which sections go in the index: Guides, API reference`);
@@ -260,17 +228,14 @@ test('the read run folds: first and last two as lines, the middle behind "Show 3
   await expect(article(ids[4]!).locator('[data-snippet="words"]')).toHaveText(/^Both notes are in: results show the section path/);
   await expect(article(ids[4]!).locator('[data-holding]')).toHaveText(['Guided review']);
   await expect(article(ids[5]!).locator('[data-holding]')).toHaveText(['Delivered']);
-  // The fold opens to lines, not to full messages; the plan's line holds its file, the reply its annotations.
   await pane().locator('[data-middle-fold] button').click();
   await expect(pane().locator('[data-middle-fold]')).toHaveCount(0);
-  // Focus on the nearest message it showed (the reply just above the line below the fold), never the oldest.
   await expect(pane().locator(':focus')).toHaveAttribute('aria-label', /^You, /);
   await expect(article(ids[3]!).locator(':focus')).toHaveCount(1);
   await expect(article(ids[2]!).locator('[data-holding]')).toHaveText(['1 answered', '1']);
   await expect(article(ids[2]!).locator('[data-holding="files"]')).toHaveText('1');
   await expect(article(ids[3]!).locator('[data-holding="annotations"]')).toHaveText('2');
   await expect(article(ids[3]!).locator('[data-holding="delivered"]')).toHaveText('Delivered');
-  // Replies: the person's own words, without "Answered N questions." and the answers section; with no words, the answers.
   await expect(article(ids[3]!).locator('[data-snippet="words"]')).toHaveText('The plan is close. Two notes on the file.');
   await expect(article(ids[1]!).locator('[data-snippet="answers"]')).toHaveText('Which search index should the docs site… → Pagefind · Which sections go in the index → Guides, API reference');
   await shot('2-middle-fold-opened');
@@ -280,7 +245,6 @@ test('opening and folding a line keeps it where it was', async () => {
   const { page, ids } = world;
   const id = ids[4]!;
   const before = await top(id);
-  // The head row the person clicks (inbox-polish, item 5): the mark and the name stay exactly where they were.
   const box = async (selector: string) => (await article(id).locator(selector).first().boundingBox())!;
   const markBefore = await box('.ib-mk.ib-big');
   const nameBefore = await box('.ib-fl-nm');
@@ -293,7 +257,6 @@ test('opening and folding a line keeps it where it was', async () => {
   expect([markAfter.x, markAfter.y, markAfter.width, markAfter.height].map(Math.round)).toEqual([markBefore.x, markBefore.y, markBefore.width, markBefore.height].map(Math.round));
   expect(markAfter.width).toBe(24);
   expect(Math.round(nameAfter.x)).toBe(Math.round(nameBefore.x));
-  // The body lines up with the name.
   const body = (await article(id).locator('.ib-body').first().boundingBox())!;
   expect(Math.abs(body.x - nameAfter.x)).toBeLessThan(2);
   await expect(page.locator(':focus')).toHaveAttribute('aria-expanded', 'true');
@@ -302,8 +265,6 @@ test('opening and folding a line keeps it where it was', async () => {
   await expect(article(id)).toHaveAttribute('data-folded', '');
   expect(Math.abs((await top(id)) - before)).toBeLessThan(2);
   await expect(page.locator(':focus')).toHaveAttribute('aria-expanded', 'false');
-  // A 1280 or 1366 px window beside the list keeps the folded line one 44 px row (the two-line row is for a
-  // thread under 560 px of text: beside a file, or a phone).
   try {
     for (const width of [1280, 1366]) {
       await page.setViewportSize({ width, height: 900 });
@@ -327,13 +288,11 @@ test('keys: n goes to the first new message, Shift+K and Shift+J move between me
   await page.keyboard.press('Shift+J');
   await page.keyboard.press('Shift+J');
   expect(await page.locator(':focus').evaluate((el) => el.closest('[data-message-article]')?.getAttribute('data-message-article'))).toBe(ids[6]);
-  // Enter folds the focused message; Enter again opens it.
   await page.keyboard.press('Enter');
   await expect(article(ids[6]!)).toHaveAttribute('data-folded', '');
   await expect(article(ids[6]!).locator('[data-holding]')).toHaveText(['1 open question']);
   await page.keyboard.press('Enter');
   await expect(article(ids[6]!)).toHaveAttribute('data-open', '');
-  // Typing in the reply box is typing.
   await pane().locator('.ib-pfoot').getByRole('button', { name: 'Reply' }).click();
   const box = page.getByRole('textbox', { name: 'Reply to Claude Code' });
   await box.pressSequentially('njJ');
@@ -352,23 +311,15 @@ test("Expand all gives back today's fully open thread; scrolled up past the new 
   await expect(article(ids[0]!).getByText(/^Which search index should the docs site use for its first public release/)).toBeVisible();
   await expect(article(ids[3]!).locator('.ib-body')).toContainText('The plan is close.');
   await pane().locator('.ib-pbody').evaluate((el) => el.scrollTo({ top: 0 }));
-  // The new message has been on screen this visit (the tests above opened and
-  // read it), so scrolling back up above it never brings the pill back (the
-  // owner, 2026-10-16: "Why does this whole 'one new' thing keep showing, even
-  // though I've seen the whole message? Shows when I scroll up."). The pill
-  // pointing down to a message not yet on screen is proved in
-  // inbox-seen-on-sight.spec.ts.
   const pill = pane().locator('[data-new-pill]');
   await page.waitForTimeout(300);
   await expect(pill).toHaveAttribute('data-off', '');
   await expect(pane().locator('[data-header-subject]')).not.toHaveAttribute('data-on', '');
   await shot('4-expanded-scrolled-up');
-  // n still goes down to the first new message.
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.keyboard.press('n');
   await expect(pane().locator('[data-new-divider]')).toBeInViewport();
   await expect(pill).toHaveAttribute('data-off', '');
-  // Fold all: back to lines, the new message's included; the last stays open.
   await pane().locator('[data-expand-all]').click();
   await expect(pane().locator('[data-expand-all]')).toHaveAttribute('aria-label', 'Expand all messages');
   await expect(article(ids[6]!)).toHaveAttribute('data-open', '');
@@ -378,16 +329,13 @@ test("Expand all gives back today's fully open thread; scrolled up past the new 
 
 test('a pick folded says it is not sent; the reply that sends it is a look, so nothing above it is new any more; reopened, the thread opens at the top', async () => {
   const { page, ids } = world;
-  // A pick on the new question: the list and the thread update, the marks stay.
   await article(ids[6]!).getByText('On main and release tags', { exact: true }).click();
   await expect(pane().locator('.ib-pfoot [data-draft-foot]')).toContainText('Draft');
   await expect(article(ids[6]!)).toHaveAttribute('data-new', '');
-  // Folded by hand, its line says the pick is not sent.
   await article(ids[6]!).locator('[data-fold-head]').click();
   await expect(article(ids[6]!).locator('[data-holding]')).toHaveText(['1 pick in your draft']);
   await shot('5-pick-folded');
   await article(ids[6]!).locator('[data-fold-head]').click();
-  // Send: the person's reply is a look at everything before it.
   await pane().locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
   await expect(pane().locator('[data-thread-meta]')).toHaveText(/^8 messages/);
   await expect(pane().locator('[data-message-article][data-new]')).toHaveCount(0);
@@ -396,7 +344,6 @@ test('a pick folded says it is not sent; the reply that sends it is a look, so n
   await expect(pane().locator('[data-new-pill]')).toHaveCount(0);
   await expect(pane().locator('[data-thread-meta]')).not.toContainText('new since you looked');
   await shot('6-sent');
-  // Left and opened again: nothing new, the thread opens at the top.
   await pane().getByRole('button', { name: 'Close the thread' }).click();
   await expect(pane()).toHaveCount(0);
   await page.locator(`.ib-lbody [data-thread-id="${world.threadId}"]`).click();

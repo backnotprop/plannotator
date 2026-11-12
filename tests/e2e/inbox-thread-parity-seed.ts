@@ -1,28 +1,3 @@
-/**
- * The seeded data dir of the thread parity harness (scripts/inbox-thread-parity.ts):
- * one Inbox, filled once through its real routes (agents through `plannotator
- * inbox mcp`, the person through the window's own POSTs), then stopped. Each
- * capture run copies `data/` and starts its own Inbox on the copy, so the
- * reference binary and the branch binary read the same ids, timestamps,
- * looks and picks.
- *
- * The threads cover what the message parts draw (the seed text comes from the
- * specs that prove each part): a seven-message folding thread with answered
- * questions, an annotated file, a guided review and one new message; open,
- * picked and text questions with a reply draft; a replaced question and a
- * Re-ask; image, SVG, markdown, HTML and video files; action items; a settled
- * 👍; a reply that tags a second agent; worst-case text (right to left,
- * long tokens, a table, emoji); and a link choice answered (its raw markdown
- * in the folded line and "You answered", as today) beside picture choices.
- *
- * Live connection state (busy, Undelivered, Send now, restart) lives in the
- * Inbox's memory, never in the data dir, so a copy cannot carry it: the
- * capture polls as the seeded sessions itself (`sessions` in seed.json).
- *
- * Writes `<root>/seed.json`: the thread ids by name and `frozenAt`, the
- * instant every capture's page clock is fixed to.
- */
-
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -35,20 +10,14 @@ import { mp4 } from '../helpers/video-fixtures';
 const repo = resolve(__dirname, '../..');
 
 export interface ParitySeed {
-  /** The scratch root: `data/` (the seeded data dir) and `src/` (the projects, read by absolute path). */
   root: string;
   dataDir: string;
-  /** The page clock of every capture (ISO): two minutes after the last write. */
   frozenAt: string;
-  /** Thread ids by name, in capture order. */
   threads: Record<string, string>;
-  /** The agent session that asked in a thread, by thread name (the live captures poll as it). */
   sessions: Record<string, string>;
-  /** The binary that wrote the seed. */
   seededBy: string;
 }
 
-/** The environment of every process the harness starts: sandboxed, no browser, no network, no agents. */
 export function parityEnv(home: string, dataDir: string): Record<string, string> {
   refuseRealDataDir(dataDir, 'parityEnv');
   return {
@@ -60,7 +29,6 @@ export function parityEnv(home: string, dataDir: string): Record<string, string>
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',
     PLANNOTATOR_INBOX_PHONES: '0',
-    // No offer to add a note to an agent's instructions (the scratch HOME has a ~/.claude for the restart line).
     PLANNOTATOR_INBOX_NOTES: '0',
     PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_UPDATE_API_URL: 'http://127.0.0.1:9/releases/latest',
@@ -72,7 +40,6 @@ export function parityEnv(home: string, dataDir: string): Record<string, string>
 const q = (prompt: string, choices: string[], extra: string[] = []) => [':::question', prompt, ...extra, '', ...choices.map((c) => `- [ ] ${c}`), ':::'].join('\n');
 const text = (prompt: string) => [':::question-text', prompt, ':::'].join('\n');
 
-// The folding thread (inbox-thread-folding.spec.ts).
 const ASK = [
   'I looked at three ways to add search to the docs site. Short version: the site is static, about 240 pages, and every option works with the Astro build we already have.',
   '',
@@ -112,7 +79,6 @@ const LATEST = [
   q('When should the search index build?', ['On main and release tags', 'On every deploy'], ['', 'Stopped: the docs-search branch cannot merge without this.']),
 ].join('\n');
 
-// Replaced and Re-ask (inbox-replaced.spec.ts, inbox-reask.spec.ts).
 const WORKER = [
   'I checked the 409 row against the Stripe docs. Two things before I go on.',
   '',
@@ -126,7 +92,6 @@ const QUEUE = [
   q('How many times should the jobs queue retry a Stripe 409 before it dead-letters the job?', ['3 times over 10 minutes', 'Once, then dead-letter', 'Never retry; dead-letter at once'], ['', 'Stopped: the queue change cannot merge without this.']),
 ].join('\n');
 
-// Action items (inbox-actions.spec.ts).
 const ACTIONS = [
   'These are secrets, so only you can do them.',
   '',
@@ -148,7 +113,6 @@ const ACTIONS = [
   q('Publish 0.29 as latest, or as next first?', ['latest', 'next first'], ['', 'Recommended: next first']),
 ].join('\n');
 
-// Worst-case text (inbox-mobile.spec.ts, inbox-worst-case.spec.ts). Made-up strings, nothing like a real key.
 const LONG_URL = 'https://hooks.example.com/stripe/v1/refunds/reconcile/billing-svc/production/us-east-1/account-0001-placeholder-0002-placeholder-0003?sig=9f8e7d6c5b4a3928170615243342516071829304a5b6c7d8e9f0&replay=true';
 const WORST = [
   `The webhook endpoint is ${LONG_URL}`,
@@ -169,8 +133,6 @@ const WORST = [
   q('Which idempotency key format should the retry worker use?', [`idem_01HZX9QW3E5R7T9Y1U3I5O7P9A1S3D5F7G9H1J3K5L7Z9X1C3V5B7N9M1Q3W5E7R9T1Y3U5I7O9P1A3S5D7F9G1H3J5K7L9`, 'charge id plus attempt number'], ['Stopped: the retry worker cannot ship without this.']),
 ].join('\n');
 
-// Link choices (answered: today's folded line and "You answered" keep the raw markdown) and picture choices
-// (inbox-picture-choices.spec.ts).
 const LINKS = ['Two libraries fit. Pick one and I will wire it in.', '', q('Which search library should the docs use?', ['[Pagefind](https://pagefind.app)', '[Algolia DocSearch](https://docsearch.algolia.com)'])].join('\n');
 const DRAWERS = [
   'Two drawer designs for checkout.',
@@ -202,7 +164,6 @@ async function until(what: string, check: () => Promise<boolean>, ms = 60_000): 
   throw new Error(`seed: timed out waiting for ${what}`);
 }
 
-/** Fill a new Inbox under `root/data` with `binary`; stop it; return the manifest (also written to root/seed.json). */
 export async function seedThreadParity(binary: string, root: string, stop: (dataDir: string) => Promise<void>): Promise<ParitySeed> {
   const dataDir = join(root, 'data');
   const home = join(root, 'seed-home');
@@ -218,7 +179,6 @@ export async function seedThreadParity(binary: string, root: string, stop: (data
     return (await response.json()) as Record<string, any>;
   };
   const get = async (path: string): Promise<Record<string, any>> => (await (await fetch(`${url}${path}`)).json()) as Record<string, any>;
-  // The one-time notification line is not what these captures are about.
   await post('/api/inbox/settings', { notifications: { dismissed: true } });
 
   const docs = scratchProject(join(root, 'src'), 'docs-site');
@@ -242,7 +202,6 @@ export async function seedThreadParity(binary: string, root: string, stop: (data
   const sessions: Record<string, string> = {};
   const sessionOf = async (threadId: string) => ((await get(`/api/inbox/threads/${threadId}`)).thread.messages[0].author.session as string) ?? '';
   try {
-    // 1. Folding: seven messages, questions answered, an annotated file, a guided review, one new.
     const claude = await agent('Claude Code', 'claude-code');
     const ask = (await claude.send({ project_path: docs, subject: 'Search for the docs site', body: ASK })) as Sent;
     threads.folding = ask.thread_id;
@@ -270,7 +229,6 @@ export async function seedThreadParity(binary: string, root: string, stop: (data
     await post(`/api/inbox/threads/${ask.thread_id}/seen`, {});
     await claude.send({ project_path: docs, body: LATEST, reply_to: ask.message_id });
 
-    // 2. Questions: open (choice, multi, text), one picked into the draft, and a reply draft with words.
     const asker = await agent('Claude Code', 'claude-code');
     const first = (await asker.send({ project_path: billing, subject: 'Retry worker for failed Stripe charges', body: `I'm adding a retry worker.\n\n${q('Which queue backs the retry worker?', ['Postgres (pg-boss)', 'Redis'])}` })) as Sent;
     threads.questions = first.thread_id;
@@ -279,14 +237,12 @@ export async function seedThreadParity(binary: string, root: string, stop: (data
     await post(`/api/inbox/messages/${flag.message_id}/picks`, { questions: [answer(flag.questions[0]!, ['Yes'])] });
     await post(`/api/inbox/threads/${first.thread_id}/draft`, { body: 'Postgres is fine for now; we already run pg-boss for the mailer.', base: null });
 
-    // 3. Replaced and Re-ask: question 1 replaced by the queue question; Re-ask on what stays open.
     const replacer = await agent('Claude Code', 'claude-code');
     const worker = (await replacer.send({ project_path: billing, subject: 'Which way on a Stripe 409?', body: WORKER })) as Sent;
     threads.replaced = worker.thread_id;
     await replacer.send({ project_path: billing, body: QUEUE, reply_to: worker.message_id, supersedes: [`${worker.message_id}/${worker.questions[0]!.key}`] });
     await post(`/api/inbox/messages/${worker.message_id}/reask`, { idempotency_key: 'parity-reask' });
 
-    // 4. Files: an image, an SVG, markdown, HTML and a video, plus the image in the text.
     const filer = await agent('OpenCode', 'opencode');
     const files = (await filer.send({
       project_path: billing,
@@ -296,17 +252,14 @@ export async function seedThreadParity(binary: string, root: string, stop: (data
     })) as Sent;
     threads.files = files.thread_id;
 
-    // 5. Action items and a question beside them.
     const actor = await agent('Claude Code', 'claude-code');
     threads.actions = ((await actor.send({ project_path: billing, subject: 'Staging secrets and the deploy', body: ACTIONS })) as Sent).thread_id;
 
-    // 6. 👍 Looks good, settled (sent to the agent once its Undo window passed) and delivered (below).
     const pi = await agent('Pi', 'pi');
     const merged = (await pi.send({ project_path: docs, subject: 'Toast fix merged; CI is green', body: "Merged #1937. CI is green on `main` and the release branch picked it up.\n\nNothing needs you here. Next I'm looking at the stepping bug in full screen." })) as Sent;
     threads.ack = merged.thread_id;
     await post(`/api/inbox/messages/${merged.message_id}/ack`, { ack: true });
 
-    // 7. Delivery and tags: a reply the agent read (Delivered), one it has not (Sent) that tags another agent.
     const talker = await agent('Claude Code', 'claude-code');
     const talk = (await talker.send({ project_path: billing, subject: 'Nightly reconciliation', body: 'Starting the nightly reconciliation work. I will post progress here.' })) as Sent;
     threads.delivery = talk.thread_id;
@@ -316,11 +269,9 @@ export async function seedThreadParity(binary: string, root: string, stop: (data
     const piSession = ((await get(`/api/inbox/threads/${merged.thread_id}`)).thread.messages[0].author.session as string) ?? '';
     await post(`/api/inbox/messages/${batch.message_id}/reply`, { idempotency_key: 'd2', words: 'Thanks. Pi, can you look at the one mismatch?', tags: [{ host: 'pi', session: piSession, label: 'Pi' }] });
 
-    // 8. Worst case: right to left, long tokens, a table, code, emoji, a long choice.
     const worst = await agent('Codex', 'codex');
     threads.worst = ((await worst.send({ project_path: billing, subject: 'Webhook URL, key rotation and the nightly sync (נכשל / فشلت)', body: WORST })) as Sent).thread_id;
 
-    // 9. Choices: a link choice answered, then picture choices open.
     const chooser = await agent('Claude Code', 'claude-code');
     const links = (await chooser.send({ project_path: billing, subject: 'Search library and the checkout drawer', body: LINKS })) as Sent;
     threads.choices = links.thread_id;
@@ -331,12 +282,10 @@ export async function seedThreadParity(binary: string, root: string, stop: (data
 
     for (const name of ['delivery', 'replaced', 'ack']) sessions[name] = await sessionOf(threads[name]!);
 
-    // The 👍 settles once its Undo window has passed (the Inbox's sweep); wait so no copy settles it later.
     await until('the 👍 to settle', async () => {
       const t = (await get(`/api/inbox/threads/${merged.thread_id}`)).thread as { messages: { id: string; ack?: { settled_at: string | null } | null }[] };
       return Boolean(t.messages.find((m) => m.id === merged.message_id)?.ack?.settled_at);
     });
-    // Pi picks it up: the pill reads "Delivered to Pi" and the row's tick is Delivered.
     await pi.readThread(merged.thread_id);
   } finally {
     await Promise.all(agents.map((a) => a.close().catch(() => {})));

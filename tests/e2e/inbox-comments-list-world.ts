@@ -1,9 +1,3 @@
-/**
- * The world of inbox-comments-list.spec.ts and inbox-comments-list-webkit.spec.ts:
- * a scratch Inbox from the compiled binary, an agent writing through
- * `plannotator inbox mcp`, and a thread per test holding comments saved as the
- * window saves them, on the agent's message and on its attached files.
- */
 import { expect, type Locator, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -37,7 +31,6 @@ export interface ListWorld {
   url: string;
   agent: SimAgent;
   project: string;
-  /** A second agent (Codex), when asked for (`second`): a thread both write in has the recipient pill. */
   other?: SimAgent;
 }
 
@@ -46,14 +39,11 @@ export interface ListThread {
   message: string;
   plan: string;
   page: string;
-  /** The comment on the message's words. */
   onMessage: string;
-  /** The comment on the Markdown file's words. */
   onPlan: string;
   count: number;
 }
 
-/** `agentName`: the name the agent writes under (inbox-reply-foot-phone.spec.ts: a long one); `second`: a second agent's name. */
 export async function startWorld(options: { agentName?: string; second?: string } = {}): Promise<ListWorld> {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const root = inboxScratch('plannotator-inbox-comments-list-');
@@ -100,7 +90,6 @@ async function post(world: ListWorld, path: string, body: object): Promise<void>
 
 let threads = 0;
 
-/** A new thread with `spare` comments on the Markdown file ahead of the one on the message, so a long list has it far down. */
 export async function seededThread(world: ListWorld, spare = 0): Promise<ListThread> {
   const n = ++threads;
   const sent = await world.agent.send({ project_path: world.project, subject: `Retry worker ${n}`, thread: `retry-${n}`, body: BODY, attachments: ['docs/retry-plan.md', 'docs/admin-view.html'] });
@@ -119,7 +108,6 @@ export async function seededThread(world: ListWorld, spare = 0): Promise<ListThr
   return { thread, message: sent.message_id as string, plan, page: idOf('admin-view.html'), onMessage, onPlan, count: 2 + spare };
 }
 
-/** A thread the same agent wrote, with files but no comment. */
 export async function quietThread(world: ListWorld): Promise<string> {
   const n = ++threads;
   const sent = await world.agent.send({ project_path: world.project, subject: `Quiet ${n}`, thread: `quiet-${n}`, body: 'Nothing here needs you.', attachments: ['docs/retry-plan.md'] });
@@ -137,27 +125,18 @@ export const highlight = (page: Page, t: ListThread) => page.locator(`[data-mess
 export const cardChip = (page: Page) => page.locator('[data-fcomp]').locator('[data-fcomp-comments]');
 export const fileHighlight = (page: Page) => page.locator('[data-attachment-pane]').locator('[data-bind-id], [data-highlight-id]');
 
-/** Goes to a thread and waits for its comment's highlight, drawn after the message. */
 export async function openThread(page: Page, world: ListWorld, t: ListThread): Promise<void> {
   await page.goto(threadUrl(world, t));
   await clearSidebarPeek(page);
   await expect(highlight(page, t)).toBeVisible();
 }
 
-/**
- * With a file open in a wide window the sidebar is shut, and a pointer resting on the window's left 20 px slides
- * it in over the thread's foot, Send included (SidebarPeek). The spec's pointer starts at (0, 0), on that strip,
- * and CI's browser has delivered a move there with no input from the spec: the panel opened and, as the pointer
- * never entered or left it, stayed over Send. Moves the pointer across the panel and off it, so an open panel
- * shuts and a pending one never opens.
- */
 export async function pointerOffTheEdge(page: Page): Promise<void> {
   await page.mouse.move(120, 4);
   await page.mouse.move(page.viewportSize()!.width / 2, 4);
   await expect(page.locator('[data-sidebar-peek][data-visible]')).toHaveCount(0);
 }
 
-/** Where everything behind the list is, once a phone's pane has finished pushing in. */
 export async function layout(page: Page): Promise<string> {
   await page.evaluate(() => Promise.allSettled((document.querySelector('section.ib-pane')?.getAnimations() ?? []).map((animation) => animation.finished)));
   return page.evaluate(() =>
@@ -170,7 +149,6 @@ export async function layout(page: Page): Promise<string> {
   );
 }
 
-/** The whole of the box is in the window, and above the keyboard when `bottom` is where that starts. */
 export async function onScreen(page: Page, part: Locator, bottom?: number): Promise<void> {
   const box = await part.boundingBox();
   expect(box, 'it is drawn').not.toBeNull();
@@ -181,7 +159,6 @@ export async function onScreen(page: Page, part: Locator, bottom?: number): Prom
   expect(box!.y + box!.height).toBeLessThanOrEqual((bottom ?? view.height) + 0.5);
 }
 
-/** The row is inside the list's own scroll. */
 export async function rowShown(list: Locator, row: Locator): Promise<void> {
   const [outer, inner] = [await list.boundingBox(), await row.boundingBox()];
   expect(inner!.y).toBeGreaterThanOrEqual(outer!.y - 0.5);

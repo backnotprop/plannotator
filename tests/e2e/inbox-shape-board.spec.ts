@@ -1,19 +1,3 @@
-/**
- * A Shape board in a real browser, on the compiled binary, against what happy-dom cannot show: HTML inside an SVG's
- * foreignObject, computed styles, images loading, phone panning.
- *
- * What it proves:
- *  - the kit's `pick` works: a radio inside a drawing fades the other paths, with annotation off and on, and opens no box;
- *  - annotation is off until the crosshair (Comment): no box on a click; on, a click picks an SVG part, and nothing
- *    rings under the pointer (inbox-shape-box.spec.ts has the crosshair itself);
- *  - a nested SVG clips (a crop stays cropped), and a lone `class="dash"` is an outline, not a solid box;
- *  - a picture a drawing names is copied in and loads, on the board and on the grid's thumbnail;
- *  - a number shows its bubble on hover, with its picture and line;
- *  - `views.know` is not drawn: no tab, no words under the drawing; a board saved with Requirements still opens, without them;
- *  - a phone pans a canvas with no tall drawing.
- *
- * Build first: see inbox.spec.ts.
- */
 import { devices, expect, test, type Browser, type Page } from '@playwright/test';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -74,9 +58,7 @@ async function openBoard(browser: Browser, id: string, options: Parameters<Brows
   return { context, page, problems };
 }
 const view = (page: Page, name: string) => page.locator('.shp-dock').getByRole('button', { name, exact: true }).click();
-/** The Inbox's comment mode: the crosshair in Annotate's place. */
 const crosshair = (page: Page) => page.locator('.shp-dock').getByRole('button', { name: 'Comment', exact: true });
-/** Reads the live drawing, in its shadow root. */
 const drawing = <T,>(page: Page, fn: (root: ShadowRoot) => T) =>
   page.evaluate(`(${fn.toString()})(document.querySelector('.shp-view:not(.leaving) .shp-drawn-host').shadowRoot)`) as Promise<T>;
 
@@ -124,7 +106,6 @@ test('annotation is off until asked for; an SVG part can be picked once it is on
   await crosshair(page).click();
   await page.mouse.move(5, 5);
   await part.hover();
-  // The crosshair rings nothing under the pointer; the click still picks the part.
   await expect(page.locator('.shp-pin-hover')).toHaveCount(0);
   await part.click();
   await expect(page.locator('[data-comment-popover]')).toContainText('Path A box');
@@ -149,7 +130,6 @@ test('a nested svg clips, a lone dash is an outline, a kept picture loads, a num
   expect(styles.nested).toBe('hidden');
   expect(styles.fill).toBe('none');
   expect(styles.dasharray).not.toBe('none');
-  // A dashed shape with its own colours keeps them.
   expect(styles.ownFill).not.toBe('none');
   expect(styles.ownStroke).not.toBe(styles.loneStroke);
   expect(styles.href).toContain('/files/');
@@ -164,7 +144,6 @@ test('a nested svg clips, a lone dash is an outline, a kept picture loads, a num
   await expect(page.locator('.shp-surface')).toBeVisible();
   expect(problems).toEqual([]);
 
-  // The grid's thumbnail shows the same picture.
   await page.goto(`${w.url}#shapes`);
   await expect(page.locator('[data-shape-page] .shp-gcard').first()).toBeVisible();
   await page.waitForTimeout(1000);
@@ -180,7 +159,6 @@ test('views.know is not drawn: no tab, no words, the drawing is the last thing i
   await expect(page.locator('.shp-dock').getByRole('button', { name: 'What to know', exact: true })).toHaveCount(0);
   await expect(page.locator('.shp-know')).toHaveCount(0);
   await expect(page.locator('.shp-root')).not.toContainText('The first thing to know');
-  // Scrolled to its end, the Shape view holds the drawing and nothing after it.
   const last = await page.locator('.shp-view:not(.leaving)').evaluate((v) => {
     v.scrollTop = v.scrollHeight;
     return v.lastElementChild?.classList.contains('shp-drawn') ?? false;
@@ -189,7 +167,6 @@ test('views.know is not drawn: no tab, no words, the drawing is the last thing i
   await context.close();
   expect(problems).toEqual([]);
 
-  // What an older build left on disk.
   const id = store('old', { title: 'Old board', claim: 'Saved before What to know.', views: { picture: { html: '<p data-mark="p">Picture</p>' } }, refs: [{ n: 1, kind: 'link', title: 'R', target: 'https://example.com/r' }] });
   const shapes = join(w.dataDir, 'shapes');
   const file = readdirSync(shapes).map((p) => join(shapes, p, id, 'versions.jsonl')).find(existsSync)!;
@@ -211,7 +188,6 @@ test('a phone pans a canvas with no tall drawing', async ({ browser }) => {
   const { context, page, problems } = await openBoard(browser, store('phone', board), { ...phone });
   const frame = page.locator('.shp-view:not(.leaving) .shp-drawn.pan');
   await expect(frame).toHaveCount(1);
-  // A finger's number: the bubble's tap target on this board.
   expect(await drawing(page, (r) => getComputedStyle(r.querySelector('.shp-rb:not(.own)') ?? r.querySelector('.shp-rb')!).minWidth)).toBe('22px');
   const wider = await page.locator('.shp-view:not(.leaving)').evaluate((v) => {
     const scroller = [v, ...v.querySelectorAll('*')].find((el) => el.scrollWidth > el.clientWidth + 40 && /(auto|scroll)/.test(getComputedStyle(el).overflowX));

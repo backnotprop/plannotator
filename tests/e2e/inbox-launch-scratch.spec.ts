@@ -1,41 +1,3 @@
-/**
- * Launch, PR 3 (.ops/work/launch-plan/PLAN.md "Scratch folders"): "New scratch
- * folder" in compose's folder menu, proved in a real browser against the
- * compiled binary and its real launch endpoint. As in inbox-launch-claude.spec.ts,
- * the only fakes are the programs launch runs (tests/helpers/fake-claude/), here
- * with Claude's folder trust on (`trustCheck`: `--bg` fails in a folder that
- * HOME's .claude.json does not trust, itself or above). Temp HOME and
- * PLANNOTATOR_DATA_DIR, PLANNOTATOR_INBOX_CONNECT=0, NO_BROWSER; the real Claude
- * Code, the real home and the person's Inbox are never touched.
- *
- *  1. Send to a new scratch folder: it is made under the root (default
- *     `<dataDir>/scratch`), named by the thread's name, `-2` on a clash; Claude
- *     Code starts there and the project appears.
- *  2. Delete removes the folder and runs `claude purge` for it only: the other
- *     scratch folder and its session stay. A deleted launch's path is never
- *     given again, and a second Delete of it (a stale window) does nothing, so
- *     a folder made there later is never purged or removed. A Send the Inbox
- *     refuses leaves no folder and no project behind.
- *  3. A moved root (Settings → Agents) is used for the next launch. It is not
- *     trusted yet: a launch that stopped on it has Open in Terminal, which runs
- *     `claude` in the root; New message's Trust and start trusts the root once
- *     and starts, and Try again then starts the one that stopped.
- *  4. Scratch folders are plain folders, never repositories, so the root's trust
- *     covers them. One the agent made a repository needs its own trust (Claude keys
- *     trust on a repository's root, and checks it before a restart): the reply's
- *     restart is refused, Open in Terminal runs `claude` in that folder, Try again.
- *  5. A link never lets a scratch folder leave the root: a link already at the
- *     name is skipped (`-2`), and a folder swapped for a link to a folder outside
- *     is neither purged nor removed by Delete.
- *  6. Delete acts on the folder the Inbox made, once, and never purges past it:
- *     another folder made at the same path is kept; a double-click Delete purges
- *     once and answers both alike; a folder made a linked git worktree (its
- *     `.git` a file, which Claude's purge maps to the main repository, dropping
- *     that project's own entry) is removed but never purged.
- *
- * Pictures: LAUNCH_PR3_SHOTS_DIR (default .local/proof/launch-pr3), wide light at 2x.
- * Build the binary first, then `bunx playwright test -c tests/e2e/playwright.config.ts inbox-launch-scratch.spec.ts`.
- */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -61,7 +23,6 @@ interface World {
   context: BrowserContext;
   page: Page;
   errors: string[];
-  /** Threads the tests launched: name → { thread, launch, folder }. */
   launched: Record<string, { threadId: string; launchId: string; folder: string }>;
 }
 let world: World;
@@ -72,7 +33,6 @@ function git(dir: string): string {
   return realpathSync(dir);
 }
 
-/** Claude Code's trust record (HOME's .claude.json), as the person accepting its trust prompt writes it. */
 function trust(folders: string[]): void {
   const projects = Object.fromEntries(folders.map((f) => [f, { hasTrustDialogAccepted: true }]));
   writeFileSync(join(world.home, '.claude.json'), JSON.stringify({ projects }));
@@ -109,7 +69,6 @@ async function waitFor<T>(what: string, check: () => T | null | undefined | fals
   }
 }
 
-/** New message → To → "Claude Code New session" → the folder menu, open. */
 async function openFolderMenu(page: Page, words: string, threadName: string): Promise<void> {
   await page.goto(world.url);
   await page.locator('.ib-side [data-open-compose]').click();
@@ -123,7 +82,6 @@ async function openFolderMenu(page: Page, words: string, threadName: string): Pr
   await expect(d.locator('[data-compose-folders]')).toBeVisible();
 }
 
-/** Pick "New scratch folder" in the open menu and Send. Returns what the Send answered. */
 async function sendToScratch(page: Page): Promise<{ thread_id: string; launch: { id: string }; project: { name: string; root: string } }> {
   const d = dialog(page);
   await d.locator('[data-compose-folder-option="scratch"]').click();
@@ -171,10 +129,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   world = { root, home, dataDir, url: '', port: 0, fake, project: '', context: undefined as never, page: undefined as never, errors: [], launched: {} };
   markTourDecided(dataDir);
   writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxLaunch: { enabled: true, fullPermissions: false } }));
-  // The default scratch root is trusted through a folder above it (the data dir), as a child inherits a trusted parent's trust.
   trust([dataDir]);
   const env: Record<string, string> = {
-    // Only the fakes and the system's own tools: never the agents installed on the machine running the spec.
     PATH: `${bin}:/usr/bin:/bin`,
     HOME: home,
     SHELL: fake.shell,
@@ -196,8 +152,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   world.url = started.stdout.trim();
   world.port = registry.port;
   await fetch(`http://127.0.0.1:${world.port}/api/inbox/settings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ notifications: { dismissed: true } }) });
-  // One project the Inbox knows (the folder menu lists it above the scratch row).
-  // Not under ~/plannotator: on a case-insensitive disk that would be ~/Plannotator, the moved root's parent.
   world.project = git(join(home, 'code', 'plannotator'));
   await agentWrites(world.project, 'ses-pl', 'Reach agents on a remote machine over SSH: a sketch of the relay.');
 
@@ -222,7 +176,6 @@ test('Send to a new scratch folder: made under the root, named by the thread, -2
   const scratchRoot = join(world.dataDir, 'scratch');
   await openFolderMenu(page, 'Make the Settings search fuzzy, like the command palette.', 'Settings search');
   const row = dialog(page).locator('[data-compose-folder-option="scratch"]');
-  // Trusted through the data dir above it: the plain row, with the folder a Send would make.
   await expect(row).toContainText('New scratch folder');
   await expect(row).not.toContainText('trust it once');
   await expect(row).toContainText(`${scratchRoot}/settings-search`);
@@ -230,19 +183,15 @@ test('Send to a new scratch folder: made under the root, named by the thread, -2
   const folder = join(scratchRoot, 'settings-search');
   expect(first.project).toMatchObject({ root: folder, name: 'settings-search' });
   expect(lstatSync(folder).isDirectory()).toBe(true);
-  // A plain folder, never a repository: Claude's trust of the root (or a folder above) covers it.
   expect(existsSync(join(folder, '.git'))).toBe(false);
-  // Claude Code started in that folder, and its answer came back to the thread.
   const start = await waitFor('claude --bg', () => fake.starts().at(-1));
   expect(start.cwd).toBe(folder);
   await openThread(page, first.thread_id);
   await expect(pane(page).locator('article.ib-message[data-author="agent"]')).toHaveCount(1, { timeout: 30_000 });
   await expect(pane(page).locator('[data-launched]')).toContainText('settings-search');
-  // The project appears in the sidebar.
   await expect(page.locator('.ib-side').getByText('settings-search', { exact: true })).toBeVisible();
   world.launched.first = { threadId: first.thread_id, launchId: first.launch.id, folder };
 
-  // The same name again: the folder is taken, so it gets -2.
   await openFolderMenu(page, 'Try the other scorer in a second folder.', 'Settings search');
   const second = await sendToScratch(page);
   expect(second.project.root).toBe(`${folder}-2`);
@@ -259,25 +208,20 @@ test('Delete removes the scratch folder and runs claude purge for it only', asyn
   await deleteFromMenu(page, first!.threadId, 'delete-confirm-scratch');
   await waitFor('the folder removed', () => !existsSync(first!.folder));
   const purges = fake.calls().filter((c) => c.argv[0] === 'purge');
-  // A dry run first: purge runs only when its plan names this folder alone.
   expect(purges.map((c) => c.argv)).toEqual([
     ['purge', '--dry-run', first!.folder],
     ['purge', '--yes', first!.folder],
   ]);
   expect(existsSync(join(world.dataDir, 'inbox', 'launch', first!.launchId))).toBe(false);
-  // The other scratch folder and its session stay; the thread stays too.
   expect(lstatSync(second!.folder).isDirectory()).toBe(true);
   expect(fake.agents().some((a) => a.cwd === second!.folder)).toBe(true);
   await expect(pane(page).locator('[data-launched]')).toBeVisible();
 
-  // The same name once more: the deleted launch's path is never given again (one path, one launch), so it is -3.
   await openFolderMenu(page, 'Once more, in a third folder.', 'Settings search');
   const third = await sendToScratch(page);
   const thirdFolder = `${first!.folder}-3`;
   expect(third.project.root).toBe(thirdFolder);
   await waitFor('the third session', () => fake.agents().some((a) => a.cwd === thirdFolder));
-  // A folder made at the first's path later, then a second Delete of the first (a stale window): nothing is
-  // stopped, purged or removed, and the other launches keep their folders and sessions.
   mkdirSync(first!.folder);
   writeFileSync(join(first!.folder, 'keep.txt'), 'made later');
   const callsBefore = fake.calls().length;
@@ -294,7 +238,6 @@ test('Delete removes the scratch folder and runs claude purge for it only', asyn
   }
   rmSync(first!.folder, { recursive: true });
 
-  // A Send the Inbox refuses after the folder was made (a thread name too long): no folder and no project stay.
   const refused = await page.evaluate(async () => {
     const response = await fetch(new URL('/api/inbox/messages', location.href), {
       method: 'POST',
@@ -308,7 +251,6 @@ test('Delete removes the scratch folder and runs claude purge for it only', asyn
   const sessions = (await page.evaluate(async () => (await fetch(new URL('/api/inbox/sessions', location.href))).json())) as { launch: { projects: { root: string }[] } };
   expect(sessions.launch.projects.filter((p) => p.root.includes('xxxxxxxx'))).toEqual([]);
 
-  // Then the second and the third: each its own folder, purged once; the folder menu offers no removed folder again.
   await deleteFromMenu(page, second!.threadId);
   await waitFor('the second folder removed', () => !existsSync(second!.folder));
   await deleteFromMenu(page, third.thread_id);
@@ -327,7 +269,6 @@ test('Delete removes the scratch folder and runs claude purge for it only', asyn
 test('a moved root is used for the next launch: untrusted, a launch that stopped on it has Open in Terminal, and Trust and start trusts the root once', async () => {
   const { page, fake } = world;
   const moved = join(world.home, 'Plannotator', 'scratch');
-  // Settings → Agents: Scratch folders → Change → ~/Plannotator/scratch → Save.
   await page.goto(`${world.url}#settings/agents`);
   await page.reload();
   const settingsRow = page.locator('[data-launch-scratch-row]');
@@ -340,8 +281,6 @@ test('a moved root is used for the next launch: untrusted, a launch that stopped
   await settingsRow.scrollIntoViewIfNeeded();
   await shot(page, 'settings-scratch-folders');
 
-  // Not trusted yet (only the data dir is), and a Send with no press of the button: the start fails as untrusted,
-  // naming the root; Open in Terminal runs claude there, so one trust covers every scratch folder.
   const stopped = (await (
     await fetch(`http://127.0.0.1:${world.port}/api/inbox/messages`, {
       method: 'POST',
@@ -357,7 +296,6 @@ test('a moved root is used for the next launch: untrusted, a launch that stopped
   const ran = await waitFor('osascript', () => fake.osascript()[opened]);
   expect(ran.at(-1)).toBe(`cd '${moved}' && claude`);
 
-  // New message: the row stays plain (the button says it), and one press trusts the root and starts in its new folder.
   await openFolderMenu(page, 'Sketch the onboarding checklist as a small prototype.', 'Onboarding checklist');
   const row = dialog(page).locator('[data-compose-folder-option="scratch"]');
   await expect(row).not.toHaveAttribute('data-untrusted', '');
@@ -376,13 +314,11 @@ test('a moved root is used for the next launch: untrusted, a launch that stopped
   expect(fake.starts().at(-1)!.cwd).toBe(folder);
   world.launched.moved = { threadId: sent.thread_id, launchId: sent.launch.id, folder };
 
-  // The root's trust reaches the launch that stopped on it: Try again starts it in its own folder.
   await openThread(page, stopped.thread_id);
   await pane(page).locator('[data-run="failed"] [data-run-retry]').click();
   await expect(pane(page).locator('article.ib-message[data-author="agent"]')).toHaveCount(1, { timeout: 30_000 });
   expect(fake.starts().at(-1)!.cwd).toBe(stopped.project.root);
 
-  // Trusted now: the row reads plain (screen 03 with scratch).
   await openFolderMenu(page, 'Make the Settings search fuzzy, like the command palette.', 'Settings search');
   const plain = dialog(page).locator('[data-compose-folder-option="scratch"]');
   await expect(plain).not.toHaveAttribute('data-untrusted', '');
@@ -398,8 +334,6 @@ test('a scratch folder the agent made its own git repository needs its own trust
   const { moved } = world.launched;
   await openThread(page, moved!.threadId);
   const p = pane(page);
-  // Stop it, then the agent's folder becomes a repository (as `git init` there would): Claude keys its trust on
-  // that root now, and the scratch root's trust no longer covers it.
   await p.locator('[data-thread-more]').click();
   await page.locator('[data-launch-item="stop"]').click();
   await expect(p.locator('[data-run="stopped"]')).toBeVisible();
@@ -426,7 +360,6 @@ test('a link never takes a scratch folder out of the root: one at the name is sk
   const outside = join(world.root, 'outside');
   mkdirSync(outside, { recursive: true });
   writeFileSync(join(outside, 'keep.txt'), 'not the Inbox’s');
-  // A link already at the name the thread would take: never followed, the folder is -2.
   symlinkSync(outside, join(moved, 'release-notes'));
   await openFolderMenu(page, 'Draft the release notes for 0.26.', 'Release notes');
   const sent = await sendToScratch(page);
@@ -435,13 +368,10 @@ test('a link never takes a scratch folder out of the root: one at the name is sk
   const folder = sent.project.root;
   await waitFor('the session in -2', () => fake.agents().some((a) => a.cwd === folder));
 
-  // Its folder is swapped for a link to a folder outside the root: Delete removes the session but never purges or removes there.
   renameSync(folder, `${folder}.moved`);
   symlinkSync(outside, folder);
   const before = fake.calls().filter((c) => c.argv[0] === 'purge').length;
-  // The route answers after stop and rm.
   await deleteFromMenu(page, sent.thread_id);
-  // The toast says the folder was kept.
   await expect(page.getByText('its scratch folder was kept', { exact: true })).toBeVisible();
   expect(fake.calls().filter((c) => c.argv[0] === 'purge')).toHaveLength(before);
   expect(lstatSync(folder).isSymbolicLink()).toBe(true);
@@ -457,13 +387,11 @@ test('Delete acts on the folder the Inbox made, once, and never purges past it: 
     await openFolderMenu(page, words, name);
     const sent = await sendToScratch(page);
     const folder = sent.project.root;
-    // Started and answered (so the start is done, and Delete does the folder's part itself).
     await openThread(page, sent.thread_id);
     await expect(pane(page).locator('article.ib-message[data-author="agent"]')).toHaveCount(1, { timeout: 30_000 });
     return { ...sent, folder };
   };
 
-  // Another folder at the same path (the first removed by hand, a new one made there): kept, never purged.
   const swapped = await launch('Check the inode guard.', 'Inode check');
   rmSync(swapped.folder, { recursive: true });
   mkdirSync(swapped.folder);
@@ -475,7 +403,6 @@ test('Delete acts on the folder the Inbox made, once, and never purges past it: 
   expect(readdirSync(swapped.folder)).toEqual(['keep.txt']);
   expect(fake.agents().some((a) => a.cwd === swapped.folder)).toBe(false);
 
-  // A double click: both Deletes answer alike, and the folder is purged and removed once.
   const twice = await launch('Delete me twice at once.', 'Double click');
   before = purges().length;
   const answers = await page.evaluate(async (id) => {
@@ -495,8 +422,6 @@ test('Delete acts on the folder the Inbox made, once, and never purges past it: 
   ]);
   expect(existsSync(twice.folder)).toBe(false);
 
-  // The agent made its folder a linked worktree of a project (`git worktree add` writes a `.git` file): Claude's purge
-  // would drop that project's entry, so it is never purged; the folder itself goes as Delete says.
   const main = git(join(world.home, 'code', 'app'));
   const worktree = await launch('Work in a worktree of the app.', 'Worktree notes');
   writeFileSync(join(worktree.folder, '.git'), `gitdir: ${main}/.git/worktrees/worktree-notes\n`);

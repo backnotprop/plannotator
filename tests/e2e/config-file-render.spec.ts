@@ -1,16 +1,3 @@
-/**
- * Config files render as their own text (#1099's follow-up), proved in
- * Chromium against the compiled binary. Before, `plannotator annotate
- * config.toml` sent the file through the markdown pipeline: every `#` comment
- * became a heading and every backticked name a code chip. Now the file is
- * ONE code block highlighted as TOML, opened on its own or from a folder
- * session, and a selection on one of its lines still becomes a comment.
- *
- * The annotate CLI runs under a temp PLANNOTATOR_DATA_DIR and HOME, opens no
- * browser, and is closed with /api/exit. Build the binary first (see
- * inbox.spec.ts).
- */
-
 import { expect, test, type Page } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -46,7 +33,6 @@ const SEEN_COOKIES = [
   ['plannotator-plan-ai-announcement-seen', '1'],
 ];
 
-/** Runs `plannotator annotate <target>` and hands back its URL and process. */
 async function startAnnotate(root: string, target: string): Promise<{ child: ChildProcess; url: string }> {
   const readyFile = join(root, `ready-${Date.now()}.jsonl`);
   const env = {
@@ -83,17 +69,14 @@ async function stop(child: ChildProcess, url: string): Promise<void> {
 
 const documentCode = (page: Page) => page.locator('[data-block-id] pre code');
 
-/** The file is one TOML code block, highlighted, with no markdown headings. */
 async function expectTomlCodeBlock(page: Page): Promise<void> {
   await expect(documentCode(page)).toHaveCount(1);
   await expect(documentCode(page)).toHaveClass(/language-toml/);
   await expect(documentCode(page)).toHaveText(TOML);
-  // Shiki has run: the tokens carry their colours.
   await expect(documentCode(page).locator('span[style]').first()).toBeAttached();
   await expect(page.locator('[data-block-id] :is(h1, h2, h3, h4, h5, h6), :is(h1, h2, h3, h4, h5, h6)[data-block-id]')).toHaveCount(0);
 }
 
-/** Drags across `text` inside the code block, the way a reviewer selects it. */
 async function selectInCode(page: Page, text: string): Promise<void> {
   const box = await documentCode(page).evaluate((code, wanted) => {
     const walker = document.createTreeWalker(code, NodeFilter.SHOW_TEXT);
@@ -129,7 +112,6 @@ test('a .toml opened on its own is one TOML code block, and a line in it takes a
     await expectTomlCodeBlock(page);
 
     await selectInCode(page, 'localhost:5432');
-    // The selection toolbar's Comment, not the toolstrip's mode pill of the same name.
     await page.locator('button[title="Comment"]').click();
     const composer = page.locator('[data-comment-popover]');
     await composer.getByPlaceholder('Add a comment...').fill(COMMENT);
@@ -173,11 +155,9 @@ test('the version diff of a .toml is code in every rendered mode, and a changed 
   const root = inboxScratch('plannotator-config-render-diff-e2e-');
   mkdirSync(join(root, 'data'), { recursive: true });
   const file = join(root, 'config.toml');
-  // Version 1, recorded by a first session.
   writeFileSync(file, TOML);
   const first = await startAnnotate(root, file);
   await stop(first.child, first.url);
-  // Version 2: a comment and a value changed.
   writeFileSync(file, TOML.replace('(version 1)', '(version 2)').replace('localhost:5432', 'db:5432'));
   const { child, url } = await startAnnotate(root, file);
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -196,7 +176,6 @@ test('the version diff of a .toml is code in every rendered mode, and a changed 
       await expect(diff).toContainText('# each key named after its variable');
     }
 
-    // Classic: click the new database URL's block, then write the comment.
     const changed = diff.locator('.plan-diff-added').filter({ hasText: 'db:5432' }).first();
     await changed.click();
     const composer = page.locator('[data-comment-popover]');

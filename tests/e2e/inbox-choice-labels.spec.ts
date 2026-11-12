@@ -1,21 +1,3 @@
-/**
- * A question's choice label is the agent's inline markdown: a link to a file
- * it attached (`- [ ] [15% off](forecast-15.html)`), inline code, bold. The
- * live card draws it as markdown (the link opens the file beside the thread);
- * every line or row that draws a pick as text shows its words ("15% off"),
- * never the markdown: the folded line, the answers a sent reply carried, the
- * open questions list's Draft, the answers that go with the reply. The reply
- * the agent reads keeps each label exactly as written, so the agent matches it
- * to its choice.
- *
- * Proved in a real browser against the compiled binary: Claude Code asks
- * through `plannotator inbox mcp` (scripts/inbox-sim.ts), the person answers
- * through the window's routes. Build the binary first (see inbox.spec.ts),
- * then `bun run test:e2e:inbox`. PNGs light and dark at 1440 by 900, and on a
- * phone, land in .local/proof/choice-labels/ (or
- * PLANNOTATOR_E2E_PROOF_DIR/choice-labels).
- */
-
 import { expect, test, devices, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -51,7 +33,6 @@ const ASK = [
   ':::',
 ].join('\n');
 const PICKS = [[LINK], ['**Email**', '`push` notification', '[In-app banner](forecast-15.html)']];
-/** The answers as a line shows them: the labels' words. */
 const ANSWERS_LINE = 'Which discount should the promo run → 15% off · Which channels announce it → Email, push notification, In-app banner';
 
 const LATEST = [
@@ -64,7 +45,6 @@ const LATEST = [
   '- [ ] `everyone`',
   ':::',
   '',
-  // Left open: the open questions button shows only while a question is unanswered (approval "reply-bar-pairs").
   ':::question',
   'Send it on a Monday?',
   '',
@@ -113,7 +93,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   rmSync(proofDir, { recursive: true, force: true });
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-choice-labels-e2e-');
-  // Nothing here may reach the real tailscale CLI: a trap fails loudly first on PATH.
   const trap = join(root, 'bin');
   mkdirSync(trap);
   writeFileSync(join(trap, 'tailscale'), "#!/bin/sh\necho 'inbox-choice-labels.spec: tailscale must not run' >&2\nexit 97\n");
@@ -141,7 +120,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   world = { url, claude, context, page, errors, threadId: '', ids: [] };
 
-  // 1. Claude Code asks; 2. the person answers both, no words of their own (the reply's line shows the answers).
   const ask = (await claude.send({ project_path: project, subject: 'Spring promo', body: ASK, attachments: ['forecast-15.html'] })) as Sent;
   world.threadId = ask.thread_id;
   const reply = await post(`/api/inbox/messages/${ask.message_id}/reply`, {
@@ -149,7 +127,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     questions: ask.questions.map((q, i) => answer(q, PICKS[i]!)),
   });
   await claude.readThread(ask.thread_id);
-  // The person looks; 3. one more message arrives, its question picked and not sent.
   await post(`/api/inbox/threads/${ask.thread_id}/seen`, {});
   const latest = (await claude.send({ project_path: project, body: LATEST, reply_to: ask.message_id, attachments: ['forecast-15.html'] })) as Sent;
   await post(`/api/inbox/messages/${latest.message_id}/picks`, { questions: [answer(latest.questions[0]!, ['[Beta list](forecast-15.html)'])] });
@@ -173,10 +150,8 @@ test('the folded lines show the picked labels as words, never their markdown', a
   await expect(article(ids[0]!)).toHaveAttribute('data-folded', '');
   await expect(article(ids[1]!)).toHaveAttribute('data-folded', '');
   await shot(page, '1-folded-lines');
-  // The asking message and the reply that answered it: both lines show the answers.
   for (const id of [ids[0]!, ids[1]!]) {
     await expect(article(id).locator('[data-snippet="answers"]')).toHaveText(ANSWERS_LINE);
-    // The line's screen-reader label and tooltip read the same words.
     await expect(article(id).locator('[data-fold-head]')).toHaveAttribute('aria-label', /Which discount should the promo run: 15% off; Which channels announce it: Email, push notification, In-app banner$/);
   }
   await article(ids[0]!).locator('[data-snippet="answers"]').hover();
@@ -203,13 +178,11 @@ test('the live card draws the label as markdown: the link opens the attached fil
   await expect(link).toHaveAttribute('data-local-link', 'open');
   await expect(card.locator('[data-question-option]').filter({ hasText: 'everyone' }).locator('code')).toHaveText('everyone');
   await link.click();
-  // The second message's own copy of the file (the thread holds two).
   await expect(world.page.locator('[data-attachment-pane]')).toHaveAttribute('aria-label', /^forecast-15\.html, file 2 of 2$/);
 });
 
 test("the open questions list's Draft and the reply's answers show the pick as words", async () => {
   const { page } = world;
-  // The thread alone again, without the file beside it.
   await page.goto(`${world.url}#thread=${world.threadId}`);
   await expect(page.locator('[data-attachment-pane]')).toHaveCount(0);
   const foot = pane().locator('.ib-pfoot');

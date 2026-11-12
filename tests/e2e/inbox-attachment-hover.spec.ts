@@ -1,25 +1,3 @@
-/**
- * An attachment tile does not move when it is hovered or keyboard-focused
- * (owner, 2026-11-01: "on hover layoutshift and jumpy"). Proved in a real
- * browser against the compiled binary under a temp PLANNOTATOR_DATA_DIR:
- *
- *  - three image tiles (`1-one-pager-2x.png` ...) and a worst-case long name
- *    are sent as real PNG attachments; the tile, its name, its size line, its
- *    shortcut keycap and the tiles beside it keep exactly their boxes (and the
- *    thread keeps its scroll height) from rest to hover and to keyboard focus,
- *    in 3 columns, 2 columns, 1 column and beside an open file;
- *  - Open and the ⋯ show over the tile's right edge, inside it, while it is
- *    hovered or focused;
- *  - a name that fits at rest gets no full-name tooltip when hovered;
- *  - a screen without hover (a phone) shows Open with no hover at all.
- *
- * Rests and hovers are compared in the same run (the fonts differ between
- * machines), never against fixed pixels. Build the binary first (see
- * inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-attachment-hover.spec.ts`.
- * PNGs land in PLANNOTATOR_E2E_SHOTS_DIR (default .local/proof/attachment-hover).
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -41,7 +19,6 @@ const SIZES: [number, number][] = [
   [2200, 5684],
 ];
 
-/** A real grey PNG of this size (a solid fill compresses to a few KB; the Inbox reads the dimensions from it). */
 function png(width: number, height: number, grey: number): Buffer {
   const crcTable = Array.from({ length: 256 }, (_, n) => {
     let c = n;
@@ -64,8 +41,8 @@ function png(width: number, height: number, grey: number): Buffer {
   const head = Buffer.alloc(13);
   head.writeUInt32BE(width, 0);
   head.writeUInt32BE(height, 4);
-  head[8] = 8; // bit depth
-  head[9] = 0; // grey
+  head[8] = 8;
+  head[9] = 0;
   const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(width, grey)]);
   const raw = Buffer.concat(Array.from({ length: height }, () => row));
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', head), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
@@ -142,7 +119,6 @@ interface TileState {
   name: Box | null;
   kind: Box | null;
   chip: Box | null;
-  /** The name's start is cut at rest (its tooltip is for that). */
   open: { box: Box; opacity: number; position: string } | null;
   more: { box: Box; opacity: number } | null;
 }
@@ -154,7 +130,6 @@ interface Snapshot {
   kindLines: number[];
 }
 
-/** Every file tile of the thread in view: its boxes and the thread's scroll height. */
 async function snapshot(page: Page): Promise<Snapshot> {
   return page.evaluate(() => {
     const box = (el: Element | null | undefined): Box | null => {
@@ -194,22 +169,18 @@ const within = (a: number, b: number, tol = 0.5) => Math.abs(a - b) <= tol;
 const same = (a: Box | null, b: Box | null) => (a === null || b === null ? a === b : within(a.x, b.x) && within(a.y, b.y) && within(a.w, b.w) && within(a.h, b.h));
 
 async function park(page: Page): Promise<void> {
-  // The far corner: the window's left edge reveals the hidden sidebar over the tiles.
   const size = page.viewportSize()!;
   await page.mouse.move(size.width - 6, size.height - 6);
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 }
 
-/** Compares the tile `index` hovered, and focused from the keyboard, with rest: nothing moved, nothing resized. */
 async function proveStill(page: Page, index: number, label: string): Promise<{ rest: Snapshot; hover: Snapshot }> {
   await park(page);
   const id = (await snapshot(page)).tiles[index]!.id;
   const tileLoc = page.locator(`.ib-atts.ib-tiles [data-attachment-id="${id}"]`).last();
-  // In view, clear of the reply box at the pane's foot.
   await tileLoc.evaluate((el) => el.scrollIntoView({ block: 'center' }));
   await page.waitForTimeout(250);
   const rest = await snapshot(page);
-  // The pointer goes to the tile where it stands (no scrolling it into view: a scroll would move every tile alike and hide a shift).
   const at = (await tileLoc.boundingBox())!;
   await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
   await page.waitForTimeout(450);
@@ -225,7 +196,6 @@ async function proveStill(page: Page, index: number, label: string): Promise<{ r
     return out;
   };
   expect(shifts(rest, hover), `${label}: hovering tile ${index} moved something`).toEqual([]);
-  // Open sits inside the hovered tile, shown.
   const t = hover.tiles[index]!;
   expect(t.open, label).not.toBeNull();
   const under = await page.evaluate(([x, y]) => {
@@ -236,14 +206,12 @@ async function proveStill(page: Page, index: number, label: string): Promise<{ r
   expect(t.open!.box.x + t.open!.box.w, label).toBeLessThanOrEqual(t.tile.x + t.tile.w + 0.5);
   expect(t.open!.box.x, label).toBeGreaterThanOrEqual(t.tile.x);
   if (t.more) expect(t.more.opacity, `${label}: the ⋯ shows on hover`).toBe(1);
-  // The name that fits at rest has no tooltip; one that is cut at rest does.
   const cutAtRest = await tileLoc.evaluate((tile) => {
     const h = tile.querySelector('.ib-fname-h') as HTMLElement | null;
     return !!h && h.scrollWidth > h.clientWidth;
   });
   const tips = page.locator('[data-pn-tooltip]').filter({ hasText: /\.png/ });
   if (!cutAtRest) expect(await tips.count(), `${label}: no tooltip for a name that fits`).toBe(0);
-  // The keyboard: Tab-style focus shows Open the same way.
   await park(page);
   await page.keyboard.press('Shift');
   await tileLoc.focus({ timeout: 5000 });
@@ -317,7 +285,6 @@ test('beside an open file (the side-by-side pane): hovering another tile moves n
   await page.locator('.ib-atts.ib-tiles [data-attachment-name="retry-plan.md"]').last().click();
   await expect(page.locator('.ib-pane.ib-withfile')).toBeVisible();
   await expect(page.locator('.ib-pane.ib-withfile .ib-att-t[data-attachment-id]').first()).toBeVisible();
-  // The pane slides open: rest is after it has settled (two reads alike).
   await expect
     .poll(async () => {
       const a = await snapshot(page);

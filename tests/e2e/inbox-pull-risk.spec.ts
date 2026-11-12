@@ -1,23 +1,3 @@
-/**
- * PR risk ranking (approval "code-review-launch-build", item 4), proved in a real browser against the compiled binary,
- * with a temp PLANNOTATOR_DATA_DIR. `gh` and `pi` are fakes first on a PATH with no agents on it: nothing reaches a forge,
- * no real agent runs. The fake `pi` speaks Pi's RPC, so the whole road runs: dialog, config, list read, diff read, the
- * Ask AI provider, the strict parse, the file, the window.
- *
- * Proved, in order:
- *  1. Code review off: the route refuses and nothing shows.
- *  2. On with no rules: the Risk chip holds only the way to the dialog; no agent run.
- *  3. The dialog: Pi is the installed agent, its models come from Pi, the cheap one is picked; saving starts the judgments.
- *  4. The rows' marks, all three levels; an answer that makes no sense shows no mark; the agent ran with no tools, no
- *     saved session, its model by flag, and got the rules and the diff.
- *  5. The filter: High, Medium and up, remembered across a reload; what isn't judged is counted, not hidden in silence.
- *  6. The PR's page and its review show the mark and the sentence; a stack takes its highest layer.
- *  7. A restart redoes nothing.
- *  8. A phone: tapping a mark shows the sentence and doesn't open the row.
- *  9. Empty rules turn it all off again.
- *
- * Shots land in PLANNOTATOR_E2E_PROOF_DIR/pull-risk: 1440 and 390, light and dark.
- */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -42,10 +22,8 @@ const VERDICTS: Record<string, string> = {
   'Split the settings page': '{"risk":"low","why":"It only moves settings components."}',
   'Change who can open settings': '{"risk":"high","why":"It changes the permission check on the settings route."}',
 };
-/** About 9 MB: past the review page's 8 MB, and more than an argument can carry. The fake model refuses anything past 1 MB, with a model's words. */
 const BIG_LINES = 400_000;
 const REFUSAL = 'prompt is too long: 900000 tokens > 200000 maximum';
-/** #508: its run never answers, so it stays "being ranked" for the whole file. */
 const STILL_RANKING = 'Rename the ledger tables';
 const RULES = 'Anything in billing or charges.\nAnything that changes permissions.';
 
@@ -75,7 +53,6 @@ function ghPull(number: number, title: string, fields: Record<string, unknown> =
   };
 }
 
-/** A fake gh: the list, each PR's patch, its head. */
 function writeGh(dir: string) {
   const gh = [
     '#!/bin/sh',
@@ -84,10 +61,8 @@ function writeGh(dir: string) {
     '  echo \'{"hosts":{"github.com":[{"login":"dana","active":true,"state":"success","tokenSource":"keyring"}]}}\'; exit 0',
     'fi',
     'if [ "$1" = api ] && [ "$2" = graphql ]; then cat "$dir/gh-pulls.json"; exit 0; fi',
-    // The PR read around its patch: head and description as one JSON line (`| tojson`); a plain `.head.sha`, raw.
     'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then case "$6" in *tojson*) printf \'{"sha":"%040d","body":null}\\n\' "${4##*/}";; *) printf "%040d\\n" "${4##*/}";; esac; exit 0; fi',
     'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "${4##*/}" = 507 ]; then cat "$dir/big.patch"; exit 0; fi',
-    // #503: the forge won't serve it as one document, only file by file.
     'case "$4" in */pulls/503/files*) cat "$dir/files-503.json"; exit 0;; esac',
     'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "${4##*/}" = 503 ]; then echo "gh: Sorry, the diff exceeded the maximum number of lines (20000). (HTTP 406)" >&2; exit 1; fi',
     'if [ "$1" = api ] && [ "$2" = --hostname ]; then',
@@ -98,10 +73,8 @@ function writeGh(dir: string) {
   ].join('\n');
   writeFileSync(join(dir, 'gh'), gh);
   chmodSync(join(dir, 'gh'), 0o755);
-  // No glab: a CLI that isn't installed.
 }
 
-/** A fake pi speaking Pi's RPC: every start and every prompt goes in `<dir>/pi.log`; the answer comes from the prompt's title. */
 function writePi(dir: string) {
   const script = `
 const fs = require('fs');
@@ -214,7 +187,6 @@ test.beforeAll(async ({ browser }) => {
   );
   writePi(fakes);
   writeFileSync(join(fakes, 'big.patch'), `diff --git a/api.ts b/api.ts\n--- a/api.ts\n+++ b/api.ts\n@@ -1 +1,${BIG_LINES} @@\n${'+export const line = 1;\n'.repeat(BIG_LINES)}`);
-  // Installed, with no model list to give: they stay on the built-in catalog. They never run a judgment here.
   for (const cli of ['claude', 'codex']) {
     writeFileSync(join(fakes, cli), '#!/bin/sh\nexit 1\n');
     chmodSync(join(fakes, cli), 0o755);
@@ -246,9 +218,7 @@ test.beforeAll(async ({ browser }) => {
   git('remote', 'add', 'origin', `https://github.com/${REPO}.git`);
   for (const dir of ['claude', 'codex', 'xdg', 'home']) mkdirSync(join(root, dir), { recursive: true });
   env = {
-    // Fakes and the system's own folders only: no real agent can be found.
     PATH: `${fakes}:/usr/bin:/bin`,
-    // This Inbox's own: it never reads a person's real home.
     HOME: join(root, 'home'),
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_INBOX_CONNECT: '0',
@@ -257,7 +227,6 @@ test.beforeAll(async ({ browser }) => {
     NO_ANON_PING: '1',
     PLANNOTATOR_INBOX_NOTES: '0',
     PLANNOTATOR_TEST_SANDBOX: '1',
-    // The sandbox finds an agent only in a temp folder, and this one is where the fake `pi` is.
     TMPDIR: tmpdir(),
     CLAUDE_CONFIG_DIR: join(root, 'claude'),
     CODEX_HOME: join(root, 'codex'),
@@ -318,16 +287,13 @@ test('the dialog: the guided review\'s list; Sonnet on Claude, the newest Luna o
   await expect(modelList.getByRole('button').first()).toContainText('Sonnet');
   await dialog.locator('[data-pull-risk-rules-text]').fill(RULES);
   await shots('dialog', [1440, 390, 320]);
-  // A phone: the sheet takes the screen's width, the words only its inset, and every control a thumb's height.
   for (const width of [390, 320] as const) {
     await page.setViewportSize(VIEWPORTS[width]);
     const box = await dialog.boundingBox();
     expect(box!.width).toBe(width);
-    // 16 and the sheet's 1 px border. The padding drawn twice was 45.
     expect((await dialog.locator('[data-pull-risk-rules-text]').boundingBox())!.x).toBeLessThanOrEqual(17);
     expect((await modelList.getByRole('button').first().boundingBox())!.height).toBeGreaterThanOrEqual(44);
     expect((await dialog.locator('[data-pull-risk-save]').boundingBox())!.height).toBeGreaterThanOrEqual(44);
-    // Nothing to scroll for: Cancel, the last thing in the sheet, is on the screen.
     const cancel = await dialog.getByRole('button', { name: 'Cancel', exact: true }).boundingBox();
     expect(cancel!.y + cancel!.height).toBeLessThanOrEqual(VIEWPORTS[width].height);
   }
@@ -336,7 +302,6 @@ test('the dialog: the guided review\'s list; Sonnet on Claude, the newest Luna o
   await expect(modelList.getByRole('button', { name: 'Haiku (latest)' })).toBeVisible();
   await shots('dialog-dropdown', [1440, 390, 320]);
 
-  // Escape closes the list and keeps the dialog and its words.
   await page.keyboard.press('Escape');
   await expect(modelList.getByRole('button', { name: 'Haiku (latest)' })).toHaveCount(0);
   await expect(dialog.locator('[data-pull-risk-rules-text]')).toHaveValue(RULES);
@@ -350,24 +315,19 @@ test('the dialog: the guided review\'s list; Sonnet on Claude, the newest Luna o
   await expect(modelList.getByRole('button').first()).toContainText('Default');
   await expect(modelList).toHaveAttribute('data-pull-risk-model', '');
   await modelList.getByRole('button').first().click();
-  // A long list gets the guided review's filter box and its groups.
   await expect(modelList.getByPlaceholder('Type to filter…')).toBeVisible();
   await expect(modelList.getByRole('button', { name: 'Default', exact: true })).toBeVisible();
-  // Its group headings in plain case, not capitals.
   await expect(modelList.getByText('anthropic', { exact: true })).toHaveCSS('text-transform', 'none');
   await shots('dialog-dropdown-pi', [1440, 390, 320]);
-  // On the smallest phone the open list, its filter box included, stays on the screen.
   await page.setViewportSize(VIEWPORTS[320]);
   const openList = await modelList.locator('.absolute').boundingBox();
   expect(openList!.y).toBeGreaterThanOrEqual(0);
   expect(openList!.y + openList!.height).toBeLessThanOrEqual(VIEWPORTS[320].height);
   expect(openList!.x + openList!.width).toBeLessThanOrEqual(VIEWPORTS[320].width);
   await page.setViewportSize(VIEWPORTS[1440]);
-  // Escape in the filter box closes the list, and the dialog stays with its words.
   await modelList.getByPlaceholder('Type to filter…').press('Escape');
   await expect(modelList.getByPlaceholder('Type to filter…')).toHaveCount(0);
   await expect(dialog.locator('[data-pull-risk-rules-text]')).toHaveValue(RULES);
-  // Enter in the filter box stays in the list: half-written rules aren't saved, and nothing runs. No match, then a match.
   await dialog.locator('[data-pull-risk-rules-text]').fill('half-written ru');
   await modelList.getByRole('button').first().click();
   await modelList.getByPlaceholder('Type to filter…').fill('zzzzz');
@@ -386,7 +346,6 @@ test('the dialog: the guided review\'s list; Sonnet on Claude, the newest Luna o
   await modelList.getByRole('button', { name: /Sonnet 5/ }).click();
   await expect(modelList).toHaveAttribute('data-pull-risk-model', 'anthropic/claude-sonnet-5');
 
-  // Reading the models ran the agents, but no judgment ran before the save.
   expect(prompts()).toEqual([]);
   await dialog.locator('[data-pull-risk-save]').click();
   await expect(dialog).toHaveCount(0);
@@ -396,18 +355,15 @@ test('the rows: all three levels; an answer that makes no sense and a refused di
   await expect(row(501).locator('[data-pull-risk="high"]')).toBeVisible({ timeout: 30_000 });
   await expect(row(502).locator('[data-pull-risk="medium"]')).toBeVisible({ timeout: 30_000 });
   await expect(row(503).locator('[data-pull-risk="low"]')).toBeVisible({ timeout: 30_000 });
-  // A stack is one row, at its highest layer.
   await expect(row(506).locator('[data-pull-risk="high"]')).toBeVisible({ timeout: 30_000 });
   await expect.poll(() => prompts().length).toBe(8);
   await expect(row(504).locator('[data-pull-risk="failed"]')).toBeVisible({ timeout: 30_000 });
   await expect(row(504).locator('[data-pull-risk="failed"]')).toContainText('I would say this looks fine to me.');
 
-  // The forge refused #503 as one document: the agent read its per-file pages, and ranked it.
   const paged = prompts().find((l) => l.prompt!.includes('Title: Fix a typo in the README'))!.prompt!;
   expect(paged).toContain('+the paged page one');
   expect(paged).toContain('+the paged page two');
 
-  // The whole 9 MB reached the agent, and it refused: failed to rank, with its words. Not Low.
   const big = prompts().find((l) => l.prompt!.includes('Title: Regenerate the API client'))!.prompt!;
   expect(big.match(/export const line = 1;/g)).toHaveLength(BIG_LINES);
   const refused = row(507).locator('[data-pull-risk]');
@@ -420,7 +376,6 @@ test('the rows: all three levels; an answer that makes no sense and a refused di
 
   const judged = piLog().filter((l) => l.argv?.includes('--no-tools'));
   expect(judged).toHaveLength(8);
-  // Nothing of a diff is ever in an agent's argv.
   expect(judged.every((l) => l.argv!.join(' ').length < 2_000)).toBe(true);
   expect(judged[0]!.argv!.join(' ')).toContain('--no-tools --no-session --no-extensions --no-skills --no-context-files --provider anthropic --model claude-sonnet-5 --thinking low');
   const asked = prompts().find((l) => l.prompt!.includes('Title: Retry failed charges'))!.prompt!;
@@ -430,7 +385,6 @@ test('the rows: all three levels; an answer that makes no sense and a refused di
   await expect(page.locator('[data-pn-tooltip]')).toContainText('It changes the charge retry schedule');
   await page.mouse.move(0, 0);
   await shots('rows');
-  // The rules are in the config, never in the judgments' file.
   expect(readFileSync(join(dataDir, 'config.json'), 'utf8')).toContain('Anything in billing');
   expect(readFileSync(join(dataDir, 'inbox', 'pull-risk.json'), 'utf8')).not.toContain('Anything in billing');
 });
@@ -444,17 +398,14 @@ test('the filter: High, Medium and up, remembered; under High what it could not 
   await expect(page.locator('[data-pulls-risk-menu]')).toBeVisible();
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
   await page.screenshot({ path: join(proofDir, 'filter-menu-1440-light.png') });
-  // A key pressed first is the hard case: the browser then draws a ring on whatever gets the focus next.
   await page.keyboard.press('Escape');
   await pick('high');
   await expect(page.locator('[data-pulls-risk-menu]')).toHaveCount(0);
-  // After a click, no ring stays on the chip.
   expect(await page.locator('[data-pulls-risk-chip]').evaluate((el) => el.matches(':focus-visible'))).toBe(false);
   await expect(row(501)).toBeVisible();
   await expect(row(506)).toBeVisible();
   await expect(row(502)).toHaveCount(0);
   await expect(row(503)).toHaveCount(0);
-  // Two failed (#504, #507) and one still being ranked (#508): one line, no rows.
   for (const n of [504, 507, 508]) await expect(row(n)).toHaveCount(0);
   const notRanked = page.locator('[data-pulls-risk-not-ranked-toggle]');
   await expect(notRanked).toHaveText('3 not ranked');
@@ -475,7 +426,6 @@ test('the filter: High, Medium and up, remembered; under High what it could not 
   await pick('medium');
   await expect(row(502)).toBeVisible();
   await expect(row(503)).toHaveCount(0);
-  // Medium and up as before: a failed row stays in the list, and no count of High's.
   await expect(row(504)).toBeVisible();
   await expect(page.locator('[data-pulls-risk-not-ranked]')).toHaveCount(0);
   await pick('all');
@@ -513,7 +463,6 @@ test('a restart redoes nothing', async () => {
   await openPulls();
   await expect(row(501).locator('[data-pull-risk="high"]')).toBeVisible({ timeout: 30_000 });
   await page.waitForTimeout(1_000);
-  // Only the ones with no judgment are tried again.
   expect(prompts().filter((l) => !failed(l)).length).toBe(before);
 });
 
@@ -526,7 +475,6 @@ test("a phone: tapping a mark shows the sentence and doesn't open the row", asyn
   await mark.tap();
   await expect(tab.locator('[data-pn-tooltip]')).toContainText('It changes the charge retry schedule');
   await expect(tab.locator('[data-pulls-risk-line]')).toHaveCount(0);
-  // Past its fade: the picture has to show the sentence.
   await expect.poll(() => tab.locator('[data-pn-tooltip]').evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
   await tab.screenshot({ path: join(proofDir, 'tap-390-light.png') });
   await phone.close();

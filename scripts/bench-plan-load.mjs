@@ -89,7 +89,6 @@ try {
   process.exit(1);
 }
 
-// Served as the CLI serves it: the page, and the chunks packed behind it.
 const bundle = fs.readFileSync(htmlPath);
 const htmlSha256 = createHash("sha256").update(bundle).digest("hex");
 const app = openPackedApp(bundle.toString("utf8"));

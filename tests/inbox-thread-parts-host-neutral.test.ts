@@ -2,15 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 
-// The Inbox thread's parts in @plannotator/ui also draw in another app (the
-// commercial Workspaces), which has none of the Inbox's server, routes or
-// cookies. A part takes what it shows as props, so a host can feed it from its
-// own data. An import of the Inbox's own code, a request, or a read of the
-// page's address or cookies in this folder is the regression this guards: such
-// a part works in the Inbox and fails only in the other app. Moving a file here
-// also takes it out of tests/inbox-url-helper.test.ts, which scans packages/inbox;
-// the request rule below keeps that guarantee for the parts.
-
 const root = resolve(import.meta.dir, '..');
 const UI = join(root, 'packages/ui');
 const PARTS = join(UI, 'components/inbox-thread');
@@ -23,12 +14,10 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
-/** Drop block comments and `//` line comments (a `//` after a quote or colon, as in `https://`, is not one). */
 function withoutComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1');
 }
 
-/** Every module a file imports: `from '…'`, a bare `import '…'`, and `import('…')`. */
 function importsOf(source: string): string[] {
   const found = source.matchAll(/(?:\bfrom\s*|\bimport\s*\(?\s*)['"]([^'"]+)['"]/g);
   return [...found].map((match) => match[1]!);

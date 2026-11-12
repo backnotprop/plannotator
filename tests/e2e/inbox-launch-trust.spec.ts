@@ -1,23 +1,3 @@
-/**
- * The thread's Trust folder button (docs/agent-guides/inbox-launch.md, "Trusting a folder"): the fallback for a launch
- * that still stops on trust, clicked through in a real browser against the compiled binary. New message's own button
- * is inbox-launch-trust-compose.spec.ts. The only fake is the program launch runs: tests/helpers/fake-claude/ with
- * Claude's folder trust on, so `--bg` refuses until the key is in `$CLAUDE_CONFIG_DIR/.claude.json` and nothing passes by accident. Temp
- * HOME, CLAUDE_CONFIG_DIR and PLANNOTATOR_DATA_DIR, PLANNOTATOR_INBOX_CONNECT=0, NO_BROWSER; the real Claude Code, the
- * real `~/.claude.json` and the person's Inbox are never touched.
- *
- *  1. A folder with hooks and an MCP server: the start is refused, the line says what would run, one click saves the
- *     key (nothing else in the file changes) and starts it once, and the kept message reaches the session. The fake
- *     blocks on Claude's MCP approval prompt as the real one does, so the launch's own setting is what gets it through;
- *     the server the folder turned off stays off.
- *  2. A folder with none of these shows no warning line.
- *  3. A config that isn't JSON: the click says why, the file and the message stay, and it works once it is fixed.
- *  4. A phone, where Open in Terminal is hidden, still gets Trust folder.
- *  5. A folder that changes after the line was read: the click saves nothing and shows the new line; the next one works.
- *
- * Pictures: LAUNCH_TRUST_SHOTS_DIR (default .local/proof/launch-trust), wide light at 2x.
- * Build the binary first, then `bunx playwright test -c tests/e2e/playwright.config.ts inbox-launch-trust.spec.ts`.
- */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -77,10 +57,6 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 }
 
-/**
- * A launch that stops on trust, for the thread's own button: a Send with no press of Trust and start (New message's
- * own button trusts first: inbox-launch-trust-compose.spec.ts). The thread, open on its refused start.
- */
 async function sendTo(page: Page, name: string, words: string, threadName: string): Promise<{ threadId: string; folder: string }> {
   const inbox = `http://127.0.0.1:${world.port}/api/inbox`;
   const { launch } = (await (await fetch(`${inbox}/sessions`)).json()) as { launch: { projects: { id: string; name: string }[] } };
@@ -119,7 +95,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   markTourDecided(dataDir);
   writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxLaunch: { enabled: true, fullPermissions: false } }));
   const env: Record<string, string> = {
-    // Only the fakes and the system's own tools: never the agents installed on the machine running the spec.
     PATH: `${bin}:/usr/bin:/bin`,
     HOME: home,
     SHELL: fake.shell,
@@ -193,7 +168,6 @@ test('a folder with hooks and an MCP server: the line says so, one click saves t
   expect(fake.starts().at(-1)!.mcp).toEqual({ running: ['billing'], rejected: ['retired'], pending: [] });
   expect(fake.agents().filter((a) => a.cwd === folder)).toHaveLength(1);
 
-  // That one value: the rest of the file is byte for byte what it was.
   expect(projects()).toEqual({ [folder]: { hasTrustDialogAccepted: true } });
   const saved = readFileSync(world.config, 'utf8');
   expect(saved).toContain('"oauthAccount": {"emailAddress": "person@example.com"}');
@@ -242,7 +216,6 @@ test('a phone gets Trust folder, where Open in Terminal is hidden', async ({ bro
   const page = await phone.newPage();
   try {
     await page.goto(world.url);
-    // Sent from the wide window: compose on a phone is its own flow, and the click is what this test is for.
     const sent = await sendTo(world.page, 'garden', 'Plan the spring beds.', 'Spring beds');
     await page.goto(`${world.url}#thread=${sent.threadId}`);
     await page.reload();
@@ -264,8 +237,6 @@ test('a folder that changes after the line was read: the click saves nothing and
   await expect(line.locator('[data-run-trust]')).toBeVisible();
   await expect(line.locator('[data-run-trust-warning]')).toHaveCount(0);
 
-  // Changed once the click has sent its reading: changed earlier, a refresh can draw the new line first, and then the
-  // click rightly saves.
   await page.route(
     '**/api/inbox/launch/*/trust',
     async (route) => {

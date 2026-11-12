@@ -6,7 +6,6 @@ import { diffsWorkerCatalogs } from "./diffs-worker-catalogs";
 
 const CATALOGS = ["shiki/langs", "@pierre/theming/themes"];
 
-/** The module the plugin serves for `id` in the worker build, or null when it leaves `id` alone. */
 async function stubFor(id: string): Promise<Record<string, unknown> | null> {
   const plugin = diffsWorkerCatalogs();
   const resolved = plugin.resolveId(id);
@@ -19,8 +18,6 @@ async function stubFor(id: string): Promise<Record<string, unknown> | null> {
 }
 
 describe("diffsWorkerCatalogs", () => {
-  // The worker is built with inlineDynamicImports, so every inlined module runs
-  // when the worker starts: a stub that throws on import kills the pool.
   test("each catalog's stub loads, and any use of it throws", async () => {
     for (const id of CATALOGS) {
       const stub = await stubFor(id);
@@ -39,9 +36,6 @@ describe("diffsWorkerCatalogs", () => {
     }
   });
 
-  // If Pierre renames or drops one of these imports, the stub silently stops
-  // applying and the catalogs come back into the worker (~11 MB in the review
-  // app's entry chunk). Read the installed worker so a bump says so.
   test("Pierre's worker still imports each catalog it stubs", () => {
     const pkg = dirname(dirname(Bun.resolveSync("@pierre/diffs", join(import.meta.dir, "../packages/ui"))));
     const workerDir = join(pkg, "dist/worker");

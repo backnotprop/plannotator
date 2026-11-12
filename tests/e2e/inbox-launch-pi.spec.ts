@@ -1,37 +1,3 @@
-/**
- * Launch Pi from compose's To, proved in a real browser against the compiled
- * binary and its real launch endpoint. Nothing in the Inbox is mocked; the only
- * fakes are the programs launch runs, on a PATH of their own
- * (tests/helpers/fake-pi/): `pi` (`--version`, `--mode rpc --session-id`, its
- * session file, and Plannotator's Pi extension's bridge poll), `osascript`
- * (recorded, nothing opens) and a stand-in login shell. The real Pi, the real
- * home and the person's Inbox are never touched: temp HOME and
- * PLANNOTATOR_DATA_DIR, PLANNOTATOR_INBOX_CONNECT=0, PLANNOTATOR_UPDATE_CHECK=0,
- * NO_BROWSER.
- *
- *  1. The journey: the Pi row in To, Send starts one `pi --mode rpc
- *     --session-id <uuid>` in the project with the Inbox tool on and this
- *     Inbox's data dir; Working, then Pi's answer and no line; while it runs
- *     ⋯ has no Copy attach command; Stop ends it (stdin closed) and says who
- *     stopped it; a reply starts it again on the same session id and file,
- *     delivered once; Delete ends it and removes launch/<id>/.
- *  2. The Inbox stops: Pi stops with it, and after the restart the line says
- *     plainly that a Pi session runs only while the Inbox runs and a reply
- *     continues it; the reply does.
- *  3. An extension dialog over RPC: answered Cancel at once, and the thread
- *     shows a note from Pi saying so (escaped, one line).
- *     A turn that ends in a provider error: one note from Pi with its words.
- *  4. The way to Terminal for a working Pi: Stop, then ⋯'s Copy attach command
- *     (run here in a plain shell) runs Pi with the Inbox tool on; a reply goes
- *     to that Pi, nothing starts here and ⋯ has no Copy attach command; once it
- *     quit and the bridge lost it, a reply starts Pi here again.
- *  5. A Pi that runs but never connected: Open in Terminal, with Stop not
- *     offered there, ends it only once the Terminal command runs, and that
- *     command waits for it; the Terminal's Pi then takes the message.
- *
- * Build the binary first (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-launch-pi.spec.ts`.
- */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -49,7 +15,6 @@ const STOPPED_NOTE = 'A Pi session runs only while the Inbox runs. Your reply co
 interface World {
   root: string;
   home: string;
-  /** The fakes' folder (the spec's PATH). */
   bin: string;
   dataDir: string;
   env: Record<string, string>;
@@ -94,7 +59,6 @@ async function waitFor<T>(what: string, check: () => T | null | undefined | fals
 const dialog = (page: Page) => page.locator('dialog[data-compose]');
 const pane = (page: Page) => page.locator('section.ib-pane');
 
-/** New message → To → "Pi New session" → words → Send; the thread opened. */
 async function launch(page: Page, words: string): Promise<{ threadId: string; launchId: string }> {
   await page.goto(world.url);
   await page.locator('.ib-side [data-open-compose]').click();
@@ -150,7 +114,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   markTourDecided(dataDir);
   writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxLaunch: { enabled: true } }));
   const env: Record<string, string> = {
-    // Only the fakes and the system's own tools: never the agents installed on the machine running the spec.
     PATH: `${bin}:/usr/bin:/bin`,
     HOME: home,
     SHELL: fake.shell,
@@ -170,7 +133,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const project = join(home, 'notes-app');
   mkdirSync(project, { recursive: true });
   world.project = realpathSync(project);
-  // The project exists in the Inbox: an agent wrote from it once.
   const seeded = await fetch(`http://127.0.0.1:${world.port}/mcp`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
@@ -202,13 +164,11 @@ test('the journey: the Pi row, one RPC process per session, Working → answered
   expect(session).toMatch(/^[0-9a-f-]{36}$/);
   expect(start.argv.join(' ')).not.toContain('vault');
   expect(start.cwd).toBe(world.project);
-  // This Inbox, the Inbox tool on: the only Plannotator names it gets.
   expect(start.dataDir).toBe(world.dataDir);
   expect(start.inboxTool).toBe('1');
   expect(start.env.filter((name) => name.startsWith('PLANNOTATOR_'))).toEqual(['PLANNOTATOR_DATA_DIR', 'PLANNOTATOR_INBOX_TOOL']);
 
   await expect(p.locator('[data-run="working"]')).toContainText('Pi is working', { timeout: 20_000 });
-  // While the Inbox's process runs the session, no attach command: a second Pi on it would write the same file.
   const running = await menuItems(page);
   expect(running).toContain('Stop Pi');
   expect(running).not.toContain('Copy attach command');
@@ -218,15 +178,12 @@ test('the journey: the Pi row, one RPC process per session, Working → answered
   expect(first.author).toMatchObject({ host: 'pi', session, name: 'Pi' });
   expect(first.body).toContain('(context 0)');
 
-  // Stop: the process ends through its stdin; the line says who stopped it.
   await pane(page).locator('[data-thread-more]').click();
   await page.locator('[data-launch-item="stop"]').click();
   await expect(p.locator('[data-run="stopped"]')).toHaveText(/^You stopped Pi at \d{1,2}:\d{2} [AP]M\. Your reply starts it again\.$/);
   await waitFor('the process ended', () => fake.exits().some((exit) => exit.pid === start.pid && exit.why === 'stdin'));
-  // Stopped: now the attach command is offered.
   expect(await menuItems(page)).toContain('Copy attach command');
 
-  // A reply continues it: the same session id, the same session file, delivered once.
   await reply(page, 'Also update the README.');
   await expect(p.locator('[data-run="starting"]')).toHaveText('Starting Pi again…');
   await expect(p.locator('article.ib-message[data-author="agent"]')).toHaveCount(2, { timeout: 30_000 });
@@ -238,10 +195,8 @@ test('the journey: the Pi row, one RPC process per session, Working → answered
   const sentReply = read.thread.messages.filter((m) => m.author.kind === 'person').at(-1)!;
   const answers = read.thread.messages.filter((m) => m.author.kind === 'agent' && m.reply_to === sentReply.id);
   expect(answers).toHaveLength(1);
-  // It answered with the first turn still in its session: Pi reopened the file.
   expect(answers[0]!.body).toMatch(/\(context [1-9]\d*\)/);
 
-  // Delete: the process ends, the launch folder goes; the thread stays.
   const second = fake.starts()[1]!;
   await pane(page).locator('[data-thread-more]').click();
   await page.locator('[data-launch-item="delete"]').click();
@@ -282,14 +237,12 @@ test('an extension dialog over RPC: answered Cancel at once, and the thread says
   try {
     const { threadId } = await launch(page, 'Clean the build folder.');
     const p = pane(page);
-    // As the person reads it (the renderer curls the apostrophe; no backslash may show).
     const note = p.locator('article.ib-message[data-author="agent"]').filter({ hasText: 'Pi asked something the Inbox can' });
     await expect(note).toBeVisible({ timeout: 30_000 });
     await expect(note).toContainText('(“Dangerous command: rm -rf ./build Allow?”); answered Cancel.');
     await expect(note).not.toContainText('\\');
     const asked = await waitFor('the dialog answered', () => fake.dialogs().find((d) => d.title === title));
     expect(asked.response).toMatchObject({ cancelled: true });
-    // The turn went on with the cancel (the gate's "no"), and Pi answered.
     await expect(p.locator('article.ib-message[data-author="agent"]').filter({ hasText: '[dialog cancelled]' })).toBeVisible({ timeout: 30_000 });
     const read = await readThread(page, threadId);
     expect(read.thread.messages.filter((m) => m.body.startsWith('Pi asked something'))).toHaveLength(1);
@@ -298,7 +251,6 @@ test('an extension dialog over RPC: answered Cancel at once, and the thread says
   }
 });
 
-// Live check: the provider refused the model and the thread said only "Delivered to Pi".
 test('a turn that ends in a provider error: the thread shows Pi\'s own error in one note', async () => {
   const { page, fake } = world;
   const error = "Codex error: The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account.";
@@ -330,7 +282,6 @@ test('Stop, then Copy attach command: the Terminal\'s Pi takes the replies throu
     const start = fake.starts().at(-1)!;
     const session = start.argv[3]!;
     const ours = () => fake.starts().filter((call) => call.argv[3] === session);
-    // A running Pi has no attach command: Stop ends it, and Copy attach command comes.
     await p.locator('[data-thread-more]').click();
     await page.locator('[data-launch-item="stop"]').click();
     await expect(p.locator('[data-run="stopped"]')).toBeVisible({ timeout: 20_000 });
@@ -338,16 +289,12 @@ test('Stop, then Copy attach command: the Terminal\'s Pi takes the replies throu
     fake.configure({ hold: false });
     await p.locator('[data-thread-more]').click();
     await page.locator('[data-launch-item="attach"]').click();
-    // The toast only: the screen-reader live region repeats its words a moment later.
     await expect(page.locator('[data-inbox-toast]')).toContainText('the attach command');
     const command = await page.evaluate(() => navigator.clipboard.readText());
     expect(command.startsWith('/bin/sh -c ')).toBe(true);
-    // What the person runs in Terminal, run here in their shell: the fake on PATH and none of the Inbox's env.
     shell = spawn('/bin/sh', ['-c', command], { env: { PATH: `${world.bin}:/usr/bin:/bin`, HOME: world.home }, stdio: 'ignore' });
     const terminal = await waitFor('the Terminal\'s Pi', () => fake.terminals().find((call) => call.argv[1] === session));
     expect(terminal).toMatchObject({ argv: ['--session-id', session], cwd: world.project, dataDir: world.dataDir, inboxTool: '1' });
-    // A reply goes to the Terminal's Pi: it answers, nothing starts here (no restart line meanwhile), and ⋯
-    // offers no second Pi on the session.
     await reply(page, 'Now the cold start.');
     const answered = p.locator('article.ib-message[data-author="agent"]').filter({ hasText: 'Done: Now the cold start.' });
     for (const deadline = Date.now() + 30_000; (await answered.count()) === 0 && Date.now() < deadline; ) {
@@ -358,7 +305,6 @@ test('Stop, then Copy attach command: the Terminal\'s Pi takes the replies throu
     await expect(answered).toBeVisible();
     expect(ours()).toHaveLength(1);
     expect(await menuItems(page)).not.toContain('Copy attach command');
-    // It quit in Terminal. Once the bridge lost it, a reply starts Pi here again on the same session.
     process.kill(terminal.pid, 'SIGTERM'); // inbox-guard: own child (the fake pi this spec's Terminal command ran)
     await expect(p.locator('[data-run="stopped"]')).toBeVisible({ timeout: 120_000 });
     await reply(page, 'And the warm start.');
@@ -371,7 +317,6 @@ test('Stop, then Copy attach command: the Terminal\'s Pi takes the replies throu
   }
 });
 
-// The one state where Open in Terminal reaches a running Pi: this line offers no Stop, and a running Pi has no attach command.
 test('a Pi that runs but never connected: Open in Terminal ends it only once the terminal shows, and the Terminal\'s Pi takes the message', async () => {
   const { page, fake } = world;
   fake.configure({ noConnect: true });
@@ -383,14 +328,11 @@ test('a Pi that runs but never connected: Open in Terminal ends it only once the
     const start = fake.starts().at(-1)!;
     const session = start.argv[3]!;
     expect(fake.alive(start.pid)).toBe(true);
-    // The line's button: ⋯ has no Open in Terminal.
     await p.locator('[data-run-open]').click();
     const ran = await waitFor('osascript', () => fake.osascript().at(-1));
     const command = ran.at(-1)!;
     expect(command.startsWith('/bin/sh -c ')).toBe(true);
-    // The hand-over waits on the fake Pi this test started (a probe, never a signal).
     expect(command).toContain(`kill -0 ${start.pid}`);
-    // Terminal has not run it yet: the Inbox's Pi still has the session.
     await page.waitForTimeout(1_000);
     expect(fake.alive(start.pid)).toBe(true);
     shell = spawn('/bin/sh', ['-c', command], { env: { PATH: `${world.bin}:/usr/bin:/bin`, HOME: world.home }, stdio: 'ignore' });

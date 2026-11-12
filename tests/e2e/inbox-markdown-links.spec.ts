@@ -1,17 +1,3 @@
-/**
- * Relative Markdown links inside an attached Markdown file (#2230), proved in
- * a real browser against the compiled binary. An agent attaches
- * `docs/guide.md`; its links name a sibling (`peer.md#far-section`), a nested
- * file (`sub/deep.md`, whose own `../peer.md` leads back), a file outside the
- * folder and a hidden one. A click on the sibling opens it read-only in the
- * pane at its fragment, with its own image; a reload keeps it; its links
- * follow; the browser's Back steps back one document at a time to the
- * attached file; the thread stays open throughout. The outside and hidden
- * links open nothing and say why.
- *
- * Screenshots (light and dark) go to PLANNOTATOR_MD_LINKS_SHOTS when it is set.
- * Build the binary first (see inbox.spec.ts).
- */
 import { expect, test, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -25,7 +11,6 @@ import { forgetFileViewChoice } from './file-view';
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? '.local/plannotator');
 const shots = process.env.PLANNOTATOR_MD_LINKS_SHOTS ?? '';
 
-/** A one-colour PNG, `size` px square, so the linked document's image has something to load. */
 function png(size: number): Buffer {
   const table = Array.from({ length: 256 }, (_, n) => {
     let c = n;
@@ -117,7 +102,6 @@ test('a relative .md link in an attached Markdown file opens the linked document
     await expect(pane.locator('.ib-docscroll h1')).toHaveText('Guide');
     const note = pane.locator('[data-link-note="shown"]');
 
-    // Outside the attached file's folder, and hidden: nothing opens, a note says why, the thread stays.
     await pane.getByRole('link', { name: 'Outside notes', exact: true }).click();
     await expect(note).toContainText('outside.md is outside this page');
     await pane.getByRole('link', { name: 'Secret notes', exact: true }).click();
@@ -125,7 +109,6 @@ test('a relative .md link in an attached Markdown file opens the linked document
     await expect(page.locator('[data-linked-page]')).toHaveCount(0);
     expect(hashParams(page).get('thread')).toBe(thread);
 
-    // The sibling: read-only over the file, at its fragment, its image loaded from its own folder.
     await pane.getByRole('link', { name: 'Peer notes', exact: true }).click();
     const linked = page.locator('.ib-linkedframe');
     const peer = page.locator('[data-linked-page="peer.md"]');
@@ -143,24 +126,20 @@ test('a relative .md link in an attached Markdown file opens the linked document
     await expect.poll(() => linked.locator('img[alt="Peer shot"]').evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(64);
     await shot(page, '1-linked-sibling');
 
-    // A reload keeps the thread, the file and the linked document.
     await page.reload();
     await expect(peer).toBeVisible();
     await expect(linked.locator('h1')).toHaveText('Peer notes');
     expect(hashParams(page).get('thread')).toBe(thread);
 
-    // Its own links follow: a nested document, and from there `../peer.md` back up.
     await linked.getByRole('link', { name: 'Down to deep', exact: true }).click();
     await expect(page.locator('[data-linked-page="deep.md"]')).toBeVisible();
     expect(hashParams(page).get('linked')).toBe('sub/deep.md');
-    // It opens at its own top, not at the scroll the previous document was left at.
     await expect(linked.locator('h1')).toHaveText('Deep doc');
     expect(await linked.locator('.ib-docscroll').evaluate((el) => el.scrollTop)).toBe(0);
     await linked.getByRole('link', { name: 'Up to peer', exact: true }).click();
     await expect(peer).toBeVisible();
     expect(hashParams(page).get('linked')).toBe('peer.md');
 
-    // The browser's Back steps back one document at a time, to the attached file, in the same thread.
     await page.goBack();
     await expect(page.locator('[data-linked-page="deep.md"]')).toBeVisible();
     await page.goBack();

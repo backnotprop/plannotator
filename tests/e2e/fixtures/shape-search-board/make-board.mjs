@@ -1,6 +1,3 @@
-// A whiteboard of a real feature, drawn with the Shape kit as an agent would: adding a search engine to a browser.
-// Invented project; each engine a plain letter tile (make-logos.mjs), no engine's mark. The fixture for inbox-shape-box.spec.ts; written again with
-// `node tests/e2e/fixtures/shape-search-board/make-board.mjs "$PWD" tests/e2e/fixtures/shape-search-board`.
 const [repo, out] = process.argv.slice(2);
 const { box, text, part, pin, svg, board, dots, card, sticky, tag, pic, arrow, line } = await import(`${repo}/packages/core/shape-kit.mjs`);
 

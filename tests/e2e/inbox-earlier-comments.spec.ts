@@ -1,12 +1,3 @@
-/**
- * Earlier comments on a file, proved in Chromium against the compiled binary:
- *
- *  - they never ride a Send: a reply carries only the comments still waiting;
- *  - a list too long for the side-by-side column scrolls, and its last comment can be reached;
- *  - on a phone, opening the list at the foot of the sheet shows its first comment.
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- */
 import { expect, test, type Page } from '@playwright/test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -35,7 +26,6 @@ const comment = (attachment: string, id: string, text: string) =>
 
 let threads = 0;
 
-/** A plan commented and sent, then a new version of it from the agent: the state a person comes back to. */
 async function cameBack(earlier: number): Promise<ListThread & { second: string }> {
   const n = ++threads;
   const name = `plan-${n}.md`;
@@ -89,7 +79,6 @@ test('a list too long for the side-by-side column scrolls inside it, down to its
   await last.scrollIntoViewIfNeeded();
   const box = (await last.boundingBox())!;
   expect(box.y + box.height).toBeLessThanOrEqual(columnBox.y + columnBox.height + 0.5);
-  // The row stays where it can be pressed while its list scrolls.
   const row = (await page.locator('[data-earlier-row]').boundingBox())!;
   expect(row.y).toBeGreaterThanOrEqual(columnBox.y);
   await context.close();

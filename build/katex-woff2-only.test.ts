@@ -15,7 +15,6 @@ describe("stripKatexFontFallbacks", () => {
   test("every KaTeX face keeps exactly its woff2 source", () => {
     const before = fontFaces(katexCss);
     const after = fontFaces(stripKatexFontFallbacks(katexCss));
-    // Guards the regex against a KaTeX release that changes the src shape.
     expect(before.length).toBeGreaterThan(10);
     expect(after.length).toBe(before.length);
     for (const face of after) {

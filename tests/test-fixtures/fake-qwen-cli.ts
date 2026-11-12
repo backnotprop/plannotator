@@ -1,41 +1,10 @@
-/**
- * A fake `qwen` CLI for Ask AI tests that put `dir` on PATH (or pass the
- * script path as the executable). It never runs Qwen Code.
- *
- * Every run appends one JSON line to `log`: its argv, the prompt it read from
- * stdin, its cwd, $QWEN_HOME, Plannotator's switches, its pid and when it started (`at`, ms). What it does next comes from the
- * file `mode` in `dir` (read at each run, so a test can change it between
- * questions):
- *
- * - `answer` (default): an init line, two text deltas, the assistant line and
- *   a result line, the stream-json shape `qwen -o stream-json
- *   --include-partial-messages` writes. The answer is "pong".
- * - `wall-time`: a line on stderr, then exit 55 (qwen's `--max-wall-time`).
- * - `silent`: exit 1 with no output.
- * - `no-session`: every run prints "No saved session found" on stderr and
- *   exits 1, whatever its flags.
- * - `hang`: the init line, then waits (for abort tests).
- * - `linger`: the answer, then stays running for 30 s (a qwen that has not
- *   exited after its result line).
- * - `resume-fails`: a `--resume` run prints "No saved session found" on
- *   stderr and exits 1 (Qwen with chat recording off); any other run answers.
- * - `resume-startup-fails`: a `--resume` run prints a sign-in error on stderr
- *   and exits 1 (any startup failure other than a missing session).
- *
- * The script runs under the current Bun (process.execPath), so the test PATH
- * does not need node.
- */
 import { chmodSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export interface FakeQwen {
-  /** The `qwen` launcher to put on PATH or pass as the executable path. */
   bin: string;
-  /** One JSON line per run: `{ args, stdin, cwd, qwenHome, switches, pid, at }`. */
   log: string;
-  /** Write the mode the next run uses. */
   setMode(mode: "answer" | "wall-time" | "silent" | "no-session" | "hang" | "linger" | "resume-fails" | "resume-startup-fails"): void;
-  /** The fake's script path; its runs carry it in their command line. */
   script: string;
 }
 
@@ -44,7 +13,6 @@ export interface FakeQwenRun {
   stdin: string;
   cwd: string;
   qwenHome: string | null;
-  /** Plannotator's integration switches in the run's env (ask-ai-env.ts). */
   switches: Record<string, string | null>;
   pid: number;
   at: number;
@@ -119,7 +87,6 @@ process.stdin.on("end", () => {
   };
 }
 
-/** The runs the fake has logged so far. */
 export function fakeQwenRuns(log: string): FakeQwenRun[] {
   let text = "";
   try {

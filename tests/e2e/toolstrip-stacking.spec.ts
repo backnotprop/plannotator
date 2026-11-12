@@ -1,30 +1,3 @@
-/**
- * The annotation toolstrip (Select / Pinpoint / Markup) always paints above
- * the document it annotates, proved in a real Chromium against the compiled
- * binary. Stacking order cannot be checked in a DOM test (happy-dom does not
- * paint), so this asks the browser itself: after scrolling each kind of block
- * under the strip, `document.elementFromPoint` at points across the strip
- * must land on the strip, never on a table cell, a code block, a callout, a
- * diagram or the document card.
- *
- * Two surfaces:
- *  - The Inbox: a markdown file an agent attached, open beside the thread, full
- *    screen, in a window narrow enough that the file covers the thread, and on
- *    a phone. The Inbox draws its own floating strip (`.ib-toolstrip`) over the
- *    scrolling document; ui's Viewer wraps every document in a `relative z-50`
- *    layer, which used to escape the scroller and paint over the strip's
- *    `z-index: 3` (the owner's report, 2026-10-12: a table's rows drawn over
- *    the strip in DESIGN.md).
- *  - Annotate (the editor app, which plan review shares): the strip rides
- *    StickyHeaderLane, sticky above the Viewer's layer, at several widths.
- *
- * Nothing is mocked: `plannotator inbox --background` and `plannotator
- * annotate` run under a temp PLANNOTATOR_DATA_DIR and HOME. Build the binary
- * first (see inbox.spec.ts), then `bun run test:e2e:inbox`. Screenshots of
- * each checked state land in .local/proof/toolstrip-stacking/ (or
- * $PLANNOTATOR_E2E_PROOF_DIR/toolstrip-stacking).
- */
-
 import { devices, expect, test, type Browser, type BrowserContextOptions, type Page } from '@playwright/test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -40,7 +13,6 @@ const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo
 const rows = (n: number) =>
   Array.from({ length: n }, (_, i) => `| ${i + 1} | Notifications ${i + 1} | Switch, browser permission, blocked note |`).join('\n');
 
-/** A long design document with every block kind that has its own chrome or layer. */
 const DOC = [
   '# Inbox design',
   '',
@@ -90,7 +62,6 @@ const DOC = [
   ...Array.from({ length: 30 }, (_, i) => `Trailing paragraph ${i} so every block above can scroll to the top.`).flatMap((p) => [p, '']),
 ].join('\n');
 
-/** Each block kind, by a selector inside the scrolling document. */
 const BLOCKS: Array<{ name: string; selector: string }> = [
   { name: 'table', selector: 'table' },
   { name: 'code', selector: 'pre' },
@@ -100,17 +71,11 @@ const BLOCKS: Array<{ name: string; selector: string }> = [
 ];
 
 interface Probe {
-  /** Points across the strip whose topmost element is not inside the strip. */
   covered: string[];
-  /** Whether the block's box crossed the strip's box (the probe tested something). */
   overlapped: boolean;
   found: boolean;
 }
 
-/**
- * Scroll `scroller` so the first `blockSelector` sits under `stripSelector`,
- * then ask the browser what is on top at points across the strip.
- */
 async function probe(page: Page, scrollerSelector: string, stripSelector: string, blockSelector: string): Promise<Probe> {
   const placed = await page.evaluate(
     ({ scrollerSelector, stripSelector, blockSelector }) => {
@@ -119,7 +84,6 @@ async function probe(page: Page, scrollerSelector: string, stripSelector: string
       if (!scroller || !strip) return { found: false };
       const block = [...scroller.querySelectorAll(blockSelector)].find((el) => el.getBoundingClientRect().height > 30);
       if (!block) return { found: false };
-      // Twice: a sticky strip moves on the first scroll.
       for (let i = 0; i < 2; i++) {
         const s = strip.getBoundingClientRect();
         const b = block.getBoundingClientRect();
@@ -130,7 +94,6 @@ async function probe(page: Page, scrollerSelector: string, stripSelector: string
     { scrollerSelector, stripSelector, blockSelector },
   );
   if (!placed.found) return { covered: [], overlapped: false, found: false };
-  // Let a sticky header settle and any scroll-driven state paint.
   await page.waitForTimeout(150);
   return page.evaluate(
     ({ scrollerSelector, stripSelector, blockSelector }) => {
@@ -157,7 +120,6 @@ async function probe(page: Page, scrollerSelector: string, stripSelector: string
   );
 }
 
-/** Every block kind under the strip, one screenshot each; the table and the card must have crossed it. */
 async function checkSurface(page: Page, label: string, scroller: string, strip: string): Promise<void> {
   await expect(page.locator(strip)).toBeVisible();
   for (const block of BLOCKS) {
@@ -169,12 +131,8 @@ async function checkSurface(page: Page, label: string, scroller: string, strip: 
   }
 }
 
-/** A dialog still covers the strip: the table popout, which the Viewer portals into its own article. */
 async function checkTablePopoutCovers(page: Page, label: string, scroller: string, strip: string): Promise<void> {
   await probe(page, scroller, strip, 'table');
-  // The table's own toolbar floats above it: in full screen (no header) the probe leaves the table at the window's
-  // top edge, so give the toolbar room inside the window, and hover its first row (hovering a table taller than the
-  // window would scroll it back to the top).
   await page.locator(scroller).first().evaluate((el) => {
     el.scrollTop -= 80;
   });
@@ -194,9 +152,7 @@ async function checkTablePopoutCovers(page: Page, label: string, scroller: strin
   await expect(popout).toHaveCount(0);
 }
 
-/** The stepping bar's list of files opens up over the document and stays above it. */
 async function checkStepListAbove(page: Page, label: string): Promise<void> {
-  // Beside the thread the stepper's label opens it; in full screen, the toolbar's N/M.
   await page.locator('[data-attachment-stepper] [aria-haspopup="grid"], [data-full-view-position]').first().click();
   const list = page.locator('[data-step-list]');
   await expect(list).toBeVisible();
@@ -216,17 +172,8 @@ async function checkStepListAbove(page: Page, label: string): Promise<void> {
   await expect(list).toHaveCount(0);
 }
 
-/**
- * The move to (400, 400) before goto does not always survive the navigation: on CI's Linux Chromium the new
- * document can still take the pointer to be at (0, 0), on the peek's edge strip, and once the file closes the
- * sidebar the peek opens 600 ms later and floats over everything, a full-screen file included (seen on CI: the
- * sidebar's logo and title "painted over" the full-screen strip, and the peek over the thread beside a file).
- * The peek closes only when the pointer leaves it, so enter it and leave, then make sure it is gone.
- */
 async function closeSidebarPeek(page: Page): Promise<void> {
   const peek = page.locator('[data-sidebar-peek][data-visible]');
-  // Park the pointer away from the edge first, then outlast the peek's 600 ms rest, so a peek that was about to
-  // open has opened (or never will) before it is checked; then enter and leave it until it is gone.
   await page.mouse.move(700, 450);
   await page.waitForTimeout(800);
   await expect(async () => {
@@ -261,8 +208,6 @@ test('Inbox: the attached document never paints over the toolstrip, beside the t
     const fileUrl = `${url}#thread=${sent.thread_id}&file=${sent.attachments[0].id as string}`;
     const layouts: Array<{ label: string; options: BrowserContextOptions; full?: boolean }> = [
       { label: 'inbox-beside-1440', options: { viewport: { width: 1440, height: 900 } } },
-      // Full screen in a window narrow enough that the centred document reaches under the toolstrip (the floating
-      // comments panel no longer narrows the page).
       { label: 'inbox-full-1120', options: { viewport: { width: 1120, height: 900 } }, full: true },
       { label: 'inbox-beside-1280', options: { viewport: { width: 1280, height: 800 } } },
       { label: 'inbox-narrow-1000', options: { viewport: { width: 1000, height: 800 } } },
@@ -272,16 +217,12 @@ test('Inbox: the attached document never paints over the toolstrip, beside the t
       const context = await browser.newContext(layout.options);
       try {
         const page = await context.newPage();
-        // Playwright's pointer starts at (0, 0), on the sidebar peek's edge strip: once a file closes the
-        // sidebar, resting there 600 ms opens the peek over everything, full screen included. Rest it in the
-        // middle, where a person reading the file would.
         await page.mouse.move(400, 400);
         await page.goto(fileUrl);
         await expect(page.locator('[data-attachment-pane] .ib-docscroll table')).toBeVisible();
         if (layout.full) {
           await page.getByRole('button', { name: 'Full screen' }).click();
           await expect(page.locator('.ib-view.ib-full')).toBeVisible();
-          // The comments panel open, floating over the page: the strip stays above the document with it open too.
           await page.locator('[data-full-view-comments]').click();
           await expect(page.locator('.ib-view.ib-drawer')).toBeVisible();
         }
@@ -295,7 +236,6 @@ test('Inbox: the attached document never paints over the toolstrip, beside the t
     }
   } finally {
     await agent.close().catch(() => {});
-    // This test's Inbox, then its folder (inbox-scratch.ts).
     await removeInboxScratch(root);
   }
 });
@@ -329,7 +269,6 @@ test('Annotate (the editor plan review shares): the document never paints over t
     for (const layout of layouts) {
       const context = await browser.newContext(layout.options);
       try {
-        // The first-run dialogs (plan look, terminal tools, Ask this session, the agent tool) already answered.
         await context.addCookies(
           [
             ['plannotator-plan-look-choice-resolved', 'true'],
@@ -343,7 +282,6 @@ test('Annotate (the editor plan review shares): the document never paints over t
         await page.goto(url);
         await expect(page.locator('article table')).toBeVisible();
         await expect(page.getByRole('dialog')).toHaveCount(0);
-        // The document scrolls inside the app's scroll viewport, the ancestor of the article that scrolls.
         const scroller = await page.evaluate(() => {
           let el = document.querySelector('article')?.parentElement ?? null;
           while (el && !(el.scrollHeight > el.clientHeight && /auto|scroll/.test(getComputedStyle(el).overflowY))) el = el.parentElement;
@@ -358,7 +296,6 @@ test('Annotate (the editor plan review shares): the document never paints over t
       }
     }
   } finally {
-    // Close the session the way the reviewer's Close does, so the CLI exits by itself.
     if (url) await fetch(new URL('/api/exit', url), { method: 'POST' }).catch(() => {});
     if (child && child.exitCode === null) {
       await new Promise((done) => {

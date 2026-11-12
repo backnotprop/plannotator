@@ -1,31 +1,3 @@
-/**
- * The phone composer and its picker sheet (approval "inbox-phone-composer-picker"): the reply box and New message are
- * one rounded card 8 px from the edges and from the keyboard, with one row (paperclip, Skills, who gets the words, the
- * mic, a round Send), and who gets the words opens a bottom sheet.
- *
- * Proved against the compiled binary under a temp PLANNOTATOR_DATA_DIR, at 390 px in WebKit as an iPhone and Chromium
- * as a Pixel, with three live sessions held by the bridge's real long-poll (two with a long label):
- * - Reply, one agent: no recipient control (as on a computer), the row's order, a 36 px round Send still named
- *   "Send", every control 44 px to press, the card's 8 px margins, nothing scrolling sideways; with the keyboard up
- *   the card ends 8 px over it, Send in reach, and a long reply scrolls inside 40% of what is left.
- * - The sheet (a thread with two agents): a dialog that takes focus from the field and gives it back, a long label
- *   cut on one line, closed by Escape, the scrim and a drag down on its head; with reduced motion it does not slide.
- * - Reply, two agents: the pill is the recipient's mark and a chevron, named for a screen reader; a row picks one, a
- *   circle adds one, and Send reaches both. Two sessions of one agent: the same look, and the pill's name says which.
- * - New message: To in the foot's row, its sheet with the filter unfocused, the card 8 px over the keyboard with the
- *   title kept, the dialog's own ground under the keyboard. Chromium at 1440 x 900: none of it applies.
- *
- * What it cannot show. A keyboard cannot exist in automation, so it is a stand-in, as in
- * inbox-phone-compose-send.spec.ts: WebKit replays iOS readings (the visual viewport and `innerHeight` lose the
- * keyboard), Chromium the Android ones (only the visual viewport shrinks). Whether a real keyboard goes down or comes
- * back is read from focus alone. The drag is a mouse's pointer events, not a finger's. The 44 px press areas are read
- * with `elementFromPoint` 21 px above, below, left and right of each control's centre. Voice is never on in the
- * server: the page is told it is.
- *
- * Build the binary first (see inbox.spec.ts). PLANNOTATOR_E2E_SHOTS_DIR names a folder for the pictures (default
- * .local/proof/phone-composer), the keyboard's stand-in drawn in grey.
- */
-
 import { chromium, devices, expect, test, webkit, type Browser, type Locator, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
@@ -44,12 +16,10 @@ const SIZE = { width: 390, height: 660, keyboard: 403 } as const;
 const ONE = 'ses-composer-one';
 const TWO_A = 'ses-composer-two-claude';
 const TWO_B = 'ses-composer-two-pi';
-/** Longer than the Inbox keeps (60 characters), so every place that shows it has to cut it. */
 const LABEL = 'Rework the billing export so very large CSV files stream to disk without a pause';
 const LABEL_TWO = 'Keep the checkout total from jumping when the promo field opens on the smallest phones';
 const LINES = Array.from({ length: 14 }, (_, i) => `Line ${i + 1}: the promo field moves under the order summary.`).join('\n');
 
-/** One live session: the bridge's long-poll, keeping what the person sent it. */
 class Poll {
   readonly commands: InboxReplyCommand[] = [];
   private stopped = false;
@@ -68,7 +38,6 @@ class Poll {
       }
     })();
   }
-  /** Whether this session was handed words holding `words` in `thread` (null: any thread). */
   got(words: string, thread: string | null): boolean {
     return this.commands.some((c) => (thread === null || c.thread_id === thread) && JSON.stringify(c).includes(words));
   }
@@ -102,11 +71,9 @@ test.beforeAll(async () => {
   };
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const pi = await SimAgent.connect({ binary, env, name: 'Pi', host: 'pi' });
-  // `agent_session` is the session the shim would fill in: the one whose poll above is live.
   const one = await claude.send({ project_path: project, subject: 'Checkout: the sticky footer', body: 'The footer holds on a phone.', agent_session: ONE } as never, { wakes: true });
   await claude.send({ project_path: project, subject: 'Checkout: the promo field', thread: 'composer-two', body: 'First, from Claude Code.', agent_session: TWO_A } as never, { wakes: true });
   const two = await pi.send({ project_path: project, subject: 'Checkout: the promo field', thread: 'composer-two', body: 'Second, from Pi.', agent_session: TWO_B } as never, { wakes: true });
-  // Two sessions of one agent in one thread: the mark alone cannot say which gets the reply.
   await claude.send({ project_path: project, subject: 'Checkout: the totals', thread: 'composer-same', body: 'First, from one Claude Code.', agent_session: ONE } as never, { wakes: true });
   const same = await claude.send({ project_path: project, subject: 'Checkout: the totals', thread: 'composer-same', body: 'Second, from another.', agent_session: TWO_A } as never, { wakes: true });
   const settings = (await (await fetch(new URL('/api/inbox/settings', url))).json()) as { serverSession: string };
@@ -123,7 +90,6 @@ test.afterAll(async () => {
   }
 });
 
-/** Every test starts with no reply draft: a thread opened with one opens its box by itself, holding the words. */
 test.beforeEach(async () => {
   for (const thread of [world.oneThread, world.twoThread, world.sameThread]) {
     const gone = await fetch(new URL(`/api/inbox/threads/${thread}/draft/delete`, world.url), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ serverSession: world.serverSession }) });
@@ -131,7 +97,6 @@ test.beforeEach(async () => {
   }
 });
 
-/** The browser is told voice is on, so the mic is on the row. The server's voice stays off. */
 async function voiceOn(page: Page): Promise<void> {
   await page.route('**/api/inbox/settings*', async (route) => {
     if (route.request().method() !== 'GET') return route.fallback();
@@ -143,7 +108,6 @@ async function voiceOn(page: Page): Promise<void> {
   await page.route('**/api/inbox/voice/intro*', (route) => route.fulfill({ json: { show: false } }));
 }
 
-/** The stand-in for the keyboard: what each browser reports with one up. */
 type Keyboard = (page: Page, height: number) => Promise<void>;
 
 const iosKeyboardUp: Keyboard = async (page, height) => {
@@ -177,7 +141,6 @@ async function keyboardDown(page: Page): Promise<void> {
   await page.evaluate(() => {
     const vv = window.visualViewport!;
     delete (vv as unknown as Record<string, unknown>).height;
-    // Only iOS's readings replaced innerHeight; Chromium keeps its own on the window, and a delete would take it away.
     const stored = window as unknown as { e2eInnerHeight?: PropertyDescriptor };
     if (stored.e2eInnerHeight) Object.defineProperty(window, 'innerHeight', stored.e2eInnerHeight);
     vv.dispatchEvent(new Event('resize'));
@@ -185,7 +148,6 @@ async function keyboardDown(page: Page): Promise<void> {
   await expect(page.locator('html')).not.toHaveAttribute('data-ib-keyboard', /.*/);
 }
 
-/** A picture of the window, with a grey box for the stand-in: in the open dialog (a modal dialog is the top layer), else on <html>. */
 async function shot(page: Page, name: string, keyboard = false): Promise<void> {
   if (keyboard) {
     await page.evaluate(() => {
@@ -205,7 +167,6 @@ const replyField = (page: Page) => pane(page).locator('.ib-rbox textarea').first
 const recipient = (page: Page) => pane(page).locator('.ib-rbox [data-reply-row][data-phone] [data-recipient]');
 const replySheet = (page: Page) => page.locator('[data-sheet][data-recipient-list]');
 
-/** The thread with its reply box open and empty, the field holding focus. */
 async function openBox(page: Page, thread: string): Promise<void> {
   await page.goto(`${world.url}#thread=${thread}`);
   const reply = pane(page).locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).first();
@@ -215,7 +176,6 @@ async function openBox(page: Page, thread: string): Promise<void> {
   await replyField(page).focus();
 }
 
-/** The sheet is open and has stopped moving: shown, no transform left, and its top the same on two reads. */
 async function sheetOpen(sheet: Locator): Promise<void> {
   await expect(sheet, 'the sheet did not open').toHaveAttribute('data-shown', '');
   let last = Number.NaN;
@@ -228,7 +188,6 @@ async function sheetOpen(sheet: Locator): Promise<void> {
   await expect.poll(rest, { message: 'the sheet never came to rest' }).toBe(true);
 }
 
-/** A box (the card, a sheet) against the part of the window that shows (`seen` is the keyboard's top, or the window's bottom). */
 const cardFacts = (card: Locator) =>
   card.evaluate((el) => {
     const r = el.getBoundingClientRect();
@@ -236,7 +195,6 @@ const cardFacts = (card: Locator) =>
     return { left: r.left, fromRight: document.documentElement.clientWidth - r.right, fromSeen: vv.offsetTop + vv.height - r.bottom, seen: vv.offsetTop + vv.height };
   });
 
-/** The card is 8 px from the left and right edges, and ends 8 px over `what`. */
 async function floats(card: Locator, what: string): Promise<void> {
   const c = await cardFacts(card);
   expect(Math.abs(c.left - 8), 'the card is 8 px from the left edge').toBeLessThanOrEqual(1);
@@ -244,7 +202,6 @@ async function floats(card: Locator, what: string): Promise<void> {
   expect(Math.abs(c.fromSeen - 8), `the card ends 8 px over ${what}`).toBeLessThanOrEqual(1.5);
 }
 
-/** A control's box, and whether it is what a press at its own centre lands on. */
 const spot = (control: Locator) =>
   control.evaluate((el) => {
     const r = el.getBoundingClientRect();
@@ -274,8 +231,6 @@ for (const engine of ENGINES) {
       return page;
     }
 
-    // A drag down on the sheet's head, by the mouse: both engines turn it into the pointer events the head listens for.
-    // Should an engine send none (the head never hears the press), the same events are dispatched on the head instead.
     async function dragDown(page: Page, sheet: Locator): Promise<void> {
       const head = sheet.locator('[data-sheet-head]');
       await head.evaluate((el) => el.addEventListener('pointerdown', () => el.setAttribute('data-e2e-pressed', ''), { once: true }));
@@ -332,7 +287,6 @@ for (const engine of ENGINES) {
       await floats(box, 'the window\'s bottom');
       expect(row.sideways, 'the page scrolls sideways').toBeLessThanOrEqual(0);
       await shot(page, `${engine.name}-reply-one`);
-      // The keyboard up: the card ends 8 px over it, and a long reply scrolls inside 40% of what is left.
       const send = box.locator('[data-reply-send]');
       await keyboardUp(page, engine.up);
       await expect.poll(async () => Math.abs((await cardFacts(box)).fromSeen - 8), { message: 'the card does not end 8 px over the keyboard' }).toBeLessThanOrEqual(1.5);
@@ -411,7 +365,6 @@ for (const engine of ENGINES) {
       const sheet = replySheet(page);
       await expect(recipient(page), 'a two-agent thread shows the recipient as a pill').toHaveAttribute('data-agent-pill', '');
       await expect(recipient(page).locator('.ib-apill-n'), 'agents of two kinds: the pill shows words beside the mark').toHaveCount(0);
-      // What a screen reader hears: the agent, and its session's title where it has one.
       const named = async (session: string) => {
         const heard = (await recipient(page).getAttribute('aria-label')) ?? '';
         for (const part of session === TWO_A ? ['Claude Code', LABEL_TWO.slice(0, 40)] : ['Pi']) expect(heard, `the pill's name leaves out "${part}"`).toContain(part);
@@ -449,7 +402,6 @@ for (const engine of ENGINES) {
       await box.getByRole('button', { name: 'Send', exact: true }).tap();
       await expect(pane(page).locator('article.ib-message[data-author="person"]', { hasText: words }), 'the thread does not show the reply').toBeVisible();
       for (const session of [TWO_A, TWO_B]) await expect.poll(() => world.polls[session]!.got(words, world.twoThread), { message: `${session} was not handed the reply`, timeout: 30_000 }).toBe(true);
-      // Two Claude Code sessions: the same look, the mark and the chevron alone. Its name says which, and the sheet lists both.
       await openBox(page, world.sameThread);
       await expect(recipient(page), 'two sessions of one agent: no control in the row').toHaveAttribute('data-agent-pill', '');
       await expect(recipient(page).locator('.ib-apill-n'), 'two sessions of one agent: the pill shows a name').toHaveCount(0);
@@ -504,7 +456,6 @@ for (const engine of ENGINES) {
       const ground = await dialog.evaluate((el) => ({ bottom: el.getBoundingClientRect().bottom, layout: document.documentElement.clientHeight, own: getComputedStyle(el).backgroundColor, backdrop: getComputedStyle(el, '::backdrop').backgroundColor }));
       expect(ground.bottom, 'the dialog stops at the keyboard, so its backdrop can show under the card').toBeGreaterThanOrEqual(ground.layout - 1);
       expect(['transparent', 'rgba(0, 0, 0, 0)'], 'the dialog has no ground of its own').not.toContain(ground.own);
-      // An engine that cannot read `::backdrop` through getComputedStyle gives nothing here: that half is skipped there.
       if (ground.backdrop) expect(ground.backdrop, 'the backdrop is not the dialog\'s own ground').toBe(ground.own);
       await shot(page, `${engine.name}-compose-keyboard`, true);
       const words = `Rename the Quiet section to Done? (${engine.name})`;

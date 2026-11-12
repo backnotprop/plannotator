@@ -1,11 +1,3 @@
-/**
- * The flat PR view's folded sheets in WebKit, against the compiled binary: in Safari a click does not focus a button, so
- * a sheet opened by mouse leaves focus on the page, and Escape has to close it from there. `gh` and `glab` are sh fakes
- * first on PATH. The rest of the view, in Chromium: inbox-pull-requests.spec.ts.
- *
- * Runs in the playwright config's `webkit` project. Build the binary first (see inbox.spec.ts).
- */
-
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -90,7 +82,6 @@ test.beforeAll(async () => {
   expect(started.status, started.stderr).toBe(0);
   rememberInboxOf(dataDir);
   url = started.stdout.trim();
-  // Only the hosts of the Inbox's projects' remotes are asked for pull requests: one project, from one agent's message.
   const project = scratchProject(join(root, 'src'), 'web-app');
   spawnSync('git', ['remote', 'add', 'origin', `https://github.com/${REPO}.git`], { cwd: project, env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
   const agent = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
@@ -119,8 +110,6 @@ test('a sheet opened by mouse, focus still on the page: Escape closes it, back o
   const panel = review.locator('.ib-gpanel');
   await comments.click();
   await expect(panel).toBeVisible();
-  // The case this file is for: Safari leaves focus where it was. Only Apple's WebKit does; Linux's (GTK and WPE, what
-  // CI runs) focuses a clicked button like Chromium, so the page takes focus back here, as Safari leaves it.
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('BODY');
   await page.keyboard.press('Escape');
@@ -128,13 +117,11 @@ test('a sheet opened by mouse, focus still on the page: Escape closes it, back o
   await expect(comments).toBeFocused();
   await expect(review).toBeVisible();
 
-  // The rail is a sheet on a phone only.
   await page.setViewportSize({ width: 390, height: 844 });
   const files = review.locator('[data-pull-review-files-button]');
   const rail = review.locator('.ib-rrail');
   await files.click();
   await expect(rail).toBeVisible();
-  // The head's right end, clear of its Changes | All files switch.
   await review.locator('.ib-prp-fileshead').click({ position: { x: (await review.locator('.ib-prp-fileshead').boundingBox())!.width - 2, y: 6 } });
   await page.keyboard.press('Escape');
   await expect(rail).toBeHidden();

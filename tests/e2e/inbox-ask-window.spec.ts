@@ -1,24 +1,3 @@
-/**
- * Ask AI's window (approval "inbox-ask-ai-flow", Header 2026-11-02), proved in a
- * real browser against the compiled binary (Ask has no switch). The agents are
- * scripted (tests/helpers/inbox-ask-agent.ts: a real connection and the real
- * pull client, never a real agent CLI). Chats from other agents and days are
- * saved conversations, in the format the Inbox writes.
- *
- * Proves: the icon opens a window 420 by 560 at 16 px from the corner, outside
- * the thread's section; a question gets its answer under the real agent's name
- * and icon; the dropdown's rows, states and grouping; a pick moves `#thread=`
- * and marks its answer seen; Mod+Enter and Escape in the window leave the reply
- * draft and the thread alone, from the transcript, the header and a press on
- * the header's plain surface, and bare keys stay out of the Inbox; the window
- * stands on a phone, where Enter is a new line and nothing is sent, and Reply
- * in the thread leaves the reply in sight.
- *
- * Build the binary first (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-ask-window.spec.ts`.
- * 2x PNGs land in PLANNOTATOR_E2E_SHOTS_DIR (default .local/proof/ask-window).
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -51,7 +30,6 @@ interface World {
   target: { port: number; serverSession: string };
   threads: Record<'push' | 'search' | 'invoice' | 'webhook' | 'migration' | 'keys', string>;
   projects: Record<'relay' | 'web' | 'billing', string>;
-  /** The Inbox's token, which a scripted agent's connection reads. */
   token: string;
   send: (project: string, session: string, host: string, name: string, subject: string, body: string) => Promise<string>;
   agents: ScriptedAskAgent[];
@@ -67,7 +45,6 @@ let world: World;
 const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 
 const savedChat = (threadId: string, session: string, host: string, minutes: number, question: string, answer: string | null, seen: boolean): InboxAskConversation => {
-  // One reading of the clock: an answer a millisecond after its seen_at is unread.
   const answeredAt = minutesAgo(minutes);
   return {
     v: 1,
@@ -92,11 +69,9 @@ async function shot(page: Page, name: string, scheme: 'light' | 'dark') {
   await page.screenshot({ path: join(shotsDir, `${name}.png`) });
 }
 
-/** The top bar's Ask icon, gone (the owner, 2026-11-09). */
 const askIcon = (page = world.page) => page.locator('section.ib-pane [data-ask-open], section.ib-pane .ib-phead [aria-label="Ask AI about this thread"]');
 const side = (page = world.page) => page.locator('.annotation-toolbar [data-annotation-side]');
 
-/** Drag over `words` in the thread's messages with the real mouse: the selection bar opens over them. */
 async function selectInThread(page: Page, words: string): Promise<void> {
   const box = await page.evaluate((needle) => {
     const root = document.querySelector('section.ib-pane .ib-body');
@@ -123,7 +98,6 @@ async function selectInThread(page: Page, words: string): Promise<void> {
   await page.mouse.up();
 }
 
-/** Side in the selection bar over `words` starts the thread's chat (no Ask icon in the top bar). */
 async function sideOn(page: Page, words: string): Promise<void> {
   await expect(async () => {
     await selectInThread(page, words);
@@ -150,7 +124,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const trap = join(root, 'trap');
   mkdirSync(home);
   mkdirSync(trap);
-  // Nothing here may reach the real tailscale CLI.
   writeFileSync(join(trap, 'tailscale'), '#!/bin/sh\necho "inbox-ask-window: tailscale must not run" >&2\nexit 97\n');
   chmodSync(join(trap, 'tailscale'), 0o755);
   markTourDecided(dataDir);
@@ -214,7 +187,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const agents = [
     start('ses-push', projects.relay, 'claude-code', () => ANSWER),
     start('ses-keys', projects.web, 'claude-code', () => 'Scripted answer.'),
-    // Answering for as long as the spec runs: the dropdown's spinner.
     start('ses-search', projects.web, 'pi', () => new Promise((done) => held.signal.addEventListener('abort', () => done('Done.'), { once: true }))),
   ];
 
@@ -224,7 +196,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   page.on('pageerror', (error) => errors.push(error.message));
   world = { root, dataDir, url, target: { port: registry.port, serverSession: registry.serverSession }, threads, projects, token: registry.token, send, agents, client, context, page, errors, held };
 
-  // A window elsewhere is mid-answer on the Search chat.
   await expect(async () => {
     const posted = await postAsk(world.target, threads.search, 'held-question-1', 'Is 200 ms enough?');
     expect(posted.status).toBe(200);
@@ -261,7 +232,6 @@ test('Side opens the thread’s chat (no Ask icon in the top bar), and a questio
   expect({ width: rect.width, height: rect.height, right: 1440 - rect.x - rect.width, bottom: 900 - rect.y - rect.height }).toEqual({ width: 420, height: 560, right: 16, bottom: 16 });
 
   await expect(chip()).toContainText('Push retry budget');
-  // Ask's sparkle and "Ask AI · <thread>" (approval "inbox-reply-floaters"), not the agent's mark.
   await expect(chip().locator('[data-ask-sparkle]')).toHaveCount(1);
   await expect(chip()).toContainText('Ask AI · ');
 
@@ -343,7 +313,6 @@ test('Mod+Enter and Escape in the window leave the reply draft and the thread al
   const pressed = async () => {
     await page.keyboard.press('ControlOrMeta+Enter');
     await page.keyboard.press('Escape');
-    // No check on where this key came from: only the window's overlay mark keeps it from the Inbox.
     await page.keyboard.press('Shift+Slash');
     await page.waitForTimeout(200);
     await expect(page.locator('.ib-map')).toHaveCount(0);
@@ -356,7 +325,6 @@ test('Mod+Enter and Escape in the window leave the reply draft and the thread al
   await pressed();
   await chip().focus();
   await pressed();
-  // The header's plain surface: a press there must not drop focus to the page, where the thread's keys listen.
   const header = (await frame().locator('[data-chat-drag-handle]').boundingBox())!;
   await page.mouse.click(header.x + header.width - 110, header.y + header.height / 2);
   await expect.poll(() => page.evaluate(() => document.activeElement?.closest('[data-chat-window]') !== null)).toBe(true);
@@ -372,7 +340,6 @@ test('no Ask on a phone for now; on the desktop, Side reopens a chat and Reply i
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
   const phone = await context.newPage();
   try {
-    // The first test's chat, on a phone: no top bar icon and no round button (the owner, 2026-11-09); its selection bar has no Side (packages/inbox/ask/side.test.tsx).
     await phone.goto(`${url}#thread=${threads.push}`);
     await expect(phone.locator('section.ib-pane .ib-body').first()).toBeVisible();
     await phone.waitForTimeout(1_500);
@@ -383,12 +350,10 @@ test('no Ask on a phone for now; on the desktop, Side reopens a chat and Reply i
     await context.close();
   }
 
-  // Its own session, so its own thread, with a live agent and an unanswered question.
   world.agents.push(startScriptedAskAgent({ port: world.target.port, token: world.token, session: 'ses-phone', project: world.projects.web, reply: () => 'Scripted answer.' }));
   const noted = await world.send(world.projects.web, 'ses-phone', 'claude-code', 'Claude Code', 'Unanswered on a phone', 'Ask me.');
   expect(Object.values(threads)).not.toContain(noted);
   writeInboxAsk(join(world.dataDir, 'inbox'), savedChat(noted, 'ses-phone', 'claude-code', 5, 'What was the plan?', null, false));
-  // A draft first: Reply in the thread joins it, never replaces it. Side reopens the thread's chat.
   const { page } = world;
   await page.goto(`${url}#thread=${noted}`);
   await page.locator('section.ib-pane .ib-pfoot button', { hasText: 'Reply' }).click();

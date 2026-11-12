@@ -1,8 +1,3 @@
-/**
- * String utilities for the Acme API.
- * Common text manipulation functions.
- */
-
 export function capitalize(text: string): string {
   if (!text) return text;
   return text.charAt(0).toUpperCase() + text.slice(1);

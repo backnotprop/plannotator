@@ -1,11 +1,5 @@
-/**
- * Ask AI as the Inbox window asks: its requests with its headers, then a fresh
- * AI session on the provider POST /ask named, then the query. For tests and for
- * tests/manual/inbox-ask-claude.ts, which aims them at a real Claude Code session.
- */
 import type { InboxAskConversation, InboxAskTurn } from "../../packages/shared/inbox/ask";
 
-/** A running Inbox: an `InboxServer`, or what the registry says. */
 export interface AskWindowTarget {
   port: number;
   serverSession: string;
@@ -47,7 +41,6 @@ export async function aiSession(target: AskWindowTarget, providerId: string, thr
   return ((await created.json()) as { sessionId: string }).sessionId;
 }
 
-/** Not awaited by callers: the headers go out with the first word, and the agent answers only after this returns. */
 export function runQuery(target: AskWindowTarget, sessionId: string, question: string, busyPolicy?: "wait" | "interrupt") {
   const browser = new AbortController();
   const messages: AskQueryMessage[] = [];
@@ -66,7 +59,6 @@ export function runQuery(target: AskWindowTarget, sessionId: string, question: s
         for (const line of lines) if (line.startsWith("data: {")) messages.push(JSON.parse(line.slice(6)));
       }
     } catch {
-      // The browser dropped.
     }
   })();
   return { sessionId, messages, finished, drop: () => browser.abort() };

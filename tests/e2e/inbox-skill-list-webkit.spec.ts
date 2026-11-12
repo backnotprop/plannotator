@@ -1,39 +1,3 @@
-/**
- * The skill (/) list in the reply box is always whole on screen, proved in
- * WebKit as an iPhone with the keyboard simulated (the owner's report: a
- * thread open on an iPhone, the keyboard up, `/big` typed; the list opened
- * above the reply box and only the bottom of its last row showed, cut at the
- * reply foot's top edge, behind the thread and the header).
- *
- * The keyboard is simulated as tests/e2e/inbox-ios-keyboard-shell.spec.ts
- * does (the owner's iOS 26 probe): the visual viewport loses the keyboard's
- * height and `innerHeight` follows it; phone.ts then pins the page and the
- * reply foot scrolls in its own box. The skills come from a route stub, so
- * nothing is read from a home folder.
- *
- * For each case the list is measured in the page: no ancestor cuts it, it lies
- * inside the visual viewport and under the thread's header, and the point at
- * the middle of every row that shows hits that row (nothing covers it).
- *
- * - an iPhone 16 Pro, keyboard 330 px, `/b` then `/big` typed at the end of a
- *   sentence (it opens above, between the header and the box);
- * - an iPhone 15, keyboard 403 px (257 px left), one match (it opens below);
- * - the keyboard opening after the list is open (it moves with it);
- * - a phone on its side with the keyboard up (113 and 140 px visible): the
- *   list is one row that scrolls, and that first row shows whole;
- * - a name wider than a phone's row: the icon, the name (cut with an ellipsis)
- *   and its source stay on one line, the row two lines tall;
- * - full view opening over the reply box while the list is open (desktop):
- *   the list goes with the box it belongs to (at the Inbox's root it is above
- *   the whole shell, and it stayed over the document, its rows still pressable).
- *
- * What emulation cannot prove: a headless WebKit has no keyboard and no Safari
- * bars, and cannot pan its page; only an iPhone shows Safari's own behaviour.
- *
- * Build the binary first (see inbox.spec.ts). PLANNOTATOR_E2E_SHOTS_DIR names
- * a folder for the pictures (default .local/proof/skill-list).
- */
-
 import { devices, expect, test, webkit, type Browser, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -66,7 +30,6 @@ interface World {
   url: string;
   thread: string;
   agent: SimAgent;
-  /** A thread with an HTML page attached, to open in full view. */
   page: { thread: string; file: string };
 }
 
@@ -133,7 +96,6 @@ async function phone(device: 'iPhone 15' | 'iPhone 16 Pro'): Promise<Page> {
   return page;
 }
 
-/** iOS 26 Safari's keyboard (inbox-ios-keyboard-shell.spec.ts): the visual viewport and innerHeight lose `keyboard` px. */
 async function iosKeyboardUp(page: Page, keyboard: number): Promise<void> {
   await page.evaluate((keyboard) => {
     const vv = window.visualViewport!;
@@ -169,7 +131,6 @@ async function typeAtEnd(page: Page, field: ReturnType<Page['locator']>, before:
   await frames(page);
 }
 
-/** A grey box where the keyboard is, for the picture only. */
 async function shot(page: Page, name: string): Promise<void> {
   await page.evaluate(() => {
     const vv = window.visualViewport!;
@@ -182,7 +143,6 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.evaluate(() => document.getElementById('e2e-keyboard')?.remove());
 }
 
-/** The list, measured: what cuts it, where it is against the visible part and the header, and which shown rows are covered. */
 async function expectWhole(page: Page, name: string, opts: { overHeader?: boolean } = {}): Promise<{ placement: string; shown: number }> {
   await frames(page);
   const m = await page.evaluate(() => {
@@ -214,8 +174,6 @@ async function expectWhole(page: Page, name: string, opts: { overHeader?: boolea
   });
   expect(m, `${name}: the list is open`).not.toBeNull();
   expect.soft(m!.cutBy, `${name}: nothing cuts the list`).toEqual([]);
-  // Under the header, but where not even the caret's line leaves one whole row there (a phone on its side, the
-  // keyboard up), the one row may lie over it: a whole row over the header beats a sliver of one.
   if (!opts.overHeader) expect.soft(m!.top, `${name}: the list starts under the header`).toBeGreaterThanOrEqual(m!.headBottom - 0.5);
   expect.soft(m!.top, `${name}: the list starts on screen`).toBeGreaterThanOrEqual(m!.seenTop - 0.5);
   expect.soft(m!.bottom, `${name}: the list ends above the keyboard`).toBeLessThanOrEqual(m!.seenBottom + 0.5);
@@ -237,7 +195,6 @@ test('the owner case: an iPhone, the keyboard up, "/b" then "/big" typed in the 
   await field.pressSequentially('ig', { delay: 20 });
   await shot(page, 'iphone-owner-big');
   await expectWhole(page, '/big');
-  // A tap on a row inserts it, the keyboard (focus) stays.
   await page.locator('[data-skill-item="big-picture"]').dispatchEvent('pointerdown');
   await expect(field).toHaveValue('Yea. Sharpen and refine and present a /big-picture ');
   await expect(field).toBeFocused();
@@ -258,7 +215,6 @@ test('257 px left (iPhone 15, keyboard 403): one match shows whole, so do 84', a
   await typeAtEnd(page, field, 'Yea. ', '/');
   await shot(page, 'iphone-tight-all');
   await expectWhole(page, 'all skills');
-  // Escape closes the list, not the box (with a query typed: a bare `/` leaves Escape to the box, as before).
   await field.pressSequentially('b', { delay: 20 });
   await expect(page.locator('[data-skill-menu]')).toHaveCount(1);
   await field.press('Escape');
@@ -295,7 +251,6 @@ test('a name wider than a phone row: icon, name and source stay on one line, the
     const r = row.getBoundingClientRect();
     return { iconMid: (icon.top + icon.bottom) / 2, nameMid: (name.top + name.bottom) / 2, rootMid: (root.top + root.bottom) / 2, nameRight: name.right, rootLeft: root.left, rowRight: r.right, height: r.height, cut: (row.querySelector('[data-skill-item-part="name"]') as HTMLElement).scrollWidth > name.width + 1 };
   });
-  // One first line: the name used to drop to a line of its own (icon / name… / source / description, 83 px).
   expect.soft(Math.abs(m.nameMid - m.iconMid), 'the name sits on the icon\'s line').toBeLessThanOrEqual(3);
   expect.soft(Math.abs(m.rootMid - m.nameMid), 'the source sits on the name\'s line').toBeLessThanOrEqual(3);
   expect.soft(m.nameRight, 'the name stops before its source').toBeLessThanOrEqual(m.rootLeft + 0.5);
@@ -320,7 +275,6 @@ test('full view opening over the reply box takes the open list away (desktop)', 
   await frames(page);
   await shot(page, 'desktop-full-view-over-list');
   await expect(page.locator('[data-skill-menu]')).toHaveCount(0);
-  // Where the first row was, the full view is what a press reaches: nothing writes into the hidden reply.
   const hit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('[data-skill-item], .ib-view.ib-full') ? (document.elementFromPoint(x, y)!.closest('[data-skill-item]') ? 'row' : 'full view') : 'other', { x: row!.x + 40, y: row!.y + row!.height / 2 });
   expect(hit).not.toBe('row');
   await expect(field).toHaveValue('Hi /b');
@@ -334,7 +288,6 @@ test('a phone on its side, the keyboard up (113 and 140 px visible): the first r
   await field.focus();
   let left = 390;
   for (const visible of [140, 113]) {
-    // Down to `visible`, from what the last pass left.
     await iosKeyboardUp(page, left - visible);
     left = visible;
     await typeAtEnd(page, field, 'Yea. ', '/b');
@@ -349,7 +302,6 @@ test('a phone on its side, the keyboard up (113 and 140 px visible): the first r
       const hit = document.elementFromPoint(r.left + 30, (r.top + r.bottom) / 2);
       return { rowTop: r.top, rowBottom: r.bottom, listTop: l.top, listBottom: l.bottom, seenTop: vv.offsetTop, seenBottom: vv.offsetTop + vv.height, onTop: hit?.closest('[data-skill-item]') === row, rowHeight: r.height };
     });
-    // The whole first row: inside the list's scroll box (not a sliver of it), inside what shows, and on top.
     expect.soft(m.rowTop, `${visible}: the first row starts inside the list`).toBeGreaterThanOrEqual(m.listTop - 0.5);
     expect.soft(m.rowBottom, `${visible}: the first row ends inside the list`).toBeLessThanOrEqual(m.listBottom + 0.5);
     expect.soft(m.rowTop, `${visible}: the first row starts on screen`).toBeGreaterThanOrEqual(m.seenTop - 0.5);

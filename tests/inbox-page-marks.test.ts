@@ -1,12 +1,3 @@
-/**
- * The Inbox window's page marks (build/inbox-page-marks.ts) over the window's real sheets. What regresses if these fail:
- * - a sheet gains (or changes) a `:has()` anchored on html, body, :root or .pn-inbox and the window ships it, so every
- *   DOM change on a long thread costs a pass over the whole page again (about 40 ms on 440,000 elements);
- * - a mark weighs more or less than the `:has()` it stands for, so a rule wins or loses against one it tied with;
- * - the build drops a rule that can match in the Inbox (only the plan and code review apps' attributes may go), or
- *   one of those apps' attributes starts being set somewhere the Inbox draws;
- * - the rewrite moves or loses what is around a rule (comments, strings with braces, `@layer` order, empty groups).
- */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -15,7 +6,6 @@ import { NEVER_IN_THE_INBOX, PAGE_MARKS, normalizeSelector, rewriteInboxCss } fr
 const repoRoot = resolve(import.meta.dir, '..');
 const ENTRY = join(repoRoot, 'apps/inbox/index.css');
 
-/** The window's own sheets: every relative `@import` of its entry, followed. */
 function windowSheets(file = ENTRY, seen = new Set<string>()): string[] {
   if (seen.has(file)) return [];
   seen.add(file);
@@ -24,7 +14,6 @@ function windowSheets(file = ENTRY, seen = new Set<string>()): string[] {
   return [file, ...nested];
 }
 
-/** Every style rule's selectors in `css` (comments out, at-rule preludes skipped). */
 function selectors(css: string): string[] {
   const text = css.replace(/\/\*[\s\S]*?\*\//g, '').replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g, '""');
   const out: string[] = [];
@@ -36,10 +25,8 @@ function selectors(css: string): string[] {
   return out;
 }
 
-/** `:has()` whose subject is the page or the window's root: html, body, :root, .pn-inbox (with any classes or attributes). */
 const ANCHORED = /(?:^|[\s>+~(,])(?:html|body|:root|\.pn-inbox)(?:\[[^\]]*\]|\.[\w-]+|:root)*:has\(/;
 
-/** A simple selector's specificity as [ids, classes/attributes/pseudo-classes, types]; `:has(x)` weighs x. */
 function specificity(selector: string): [number, number, number] {
   const flat = selector.replace(/:has\(/g, ' (').replace(/[()]/g, ' ');
   const ids = flat.match(/#[\w-]+/g)?.length ?? 0;
@@ -89,7 +76,6 @@ describe('the window\'s sheets, rewritten', () => {
   });
 
   test('the parts each mark stands for are drawn only by the components that hold it', () => {
-    // A new place drawing one of these without its holder: the look keyed on it would not come in the window.
     const holders: Record<string, string[]> = {
       'ib-dm-pill': ['packages/inbox/decisions/entry.tsx'],
       'ib-imgcompose': ['packages/inbox/components/ImageAttachmentView.tsx', 'packages/inbox/components/VideoAttachmentView.tsx'],
@@ -108,7 +94,6 @@ describe('the window\'s sheets, rewritten', () => {
     for (const file of files) {
       const text = readFileSync(join(repoRoot, file), 'utf8');
       for (const name of Object.keys(holders)) {
-        // In a className string: the class itself, not `ib-fcomp-x`.
         if (new RegExp(`className=\\{?[\`"'][^\`"']*(?<![\\w-])${name}(?![\\w-])`).test(text)) drawn[name]!.push(file);
       }
     }

@@ -1,27 +1,3 @@
-/**
- * A Send skips a question only when the person presses a Skip, and one Send
- * to one session is ONE reply (owner approval "inbox-explicit-skip",
- * 2026-10-21). The owner's thread that led to it: one Claude Code session
- * posted 8 messages holding 11 questions; the person answered the newest one
- * and pressed Send; the old rule skipped the other 10 in 8 replies.
- *
- * Proved in a real browser against the compiled binary, with the agent writing
- * through `plannotator inbox mcp` (scripts/inbox-sim.ts):
- *  - the open questions list's first row (approval "reply-bar-pairs") says
- *    "10 stay open when you send · Skip them" by default; a Send with the one
- *    pick is ONE reply, the other 10 stay open, and the agent's read_thread
- *    gets "You have 10 other questions open in this thread…";
- *  - "Skip them" turns it into "10 skipped when you send · Keep open" and the
- *    button into "10 to skip"; that Send is still ONE reply, skipping exactly
- *    those 10;
- *  - the same on a phone (390 by 844, touch).
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * PNGs of the foot (desktop 1440 and a phone, light and dark, before Send by
- * default and after Skip them) land in .local/proof/explicit-skip/, or
- * PLANNOTATOR_EXPLICIT_SKIP_SHOTS.
- */
-
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
@@ -60,7 +36,6 @@ let world: World;
 type Model = { thread: { messages: { id: string; author: { kind: string }; reply_to: string | null; body: string; questions?: { state: string; answer: { skipped?: boolean } | null }[] }[] } };
 const readThread = async (threadId: string) => (await (await fetch(new URL(`/api/inbox/threads/${threadId}`, world.url))).json()) as Model;
 
-/** The owner's thread: one session, 8 messages, 11 questions. */
 async function ownersThread(subject: string): Promise<{ threadId: string; last: string }> {
   const { claude, project } = world;
   const first = await claude.send({ project_path: project, subject, thread: subject.toLowerCase().replace(/[^a-z]+/g, '-').slice(0, 40), body: FIRST });
@@ -78,7 +53,6 @@ async function footShots(page: Page, name: string): Promise<void> {
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 }
 
-/** Pick Yes on the newest message's question, then wait for the foot to offer Send. */
 async function pickLast(page: Page, last: string): Promise<void> {
   const card = page.locator(`[data-message-id="${last}"] [data-question-key]`).first();
   await card.scrollIntoViewIfNeeded();
@@ -120,7 +94,6 @@ test("desktop: answer 1 of 11 and Send: one reply, the other 10 stay open, and t
     await page.goto(`${world.url}#thread=${threadId}`);
     await expect(page.locator('section.ib-pane').getByRole('heading', { name: 'Triage: the backlog is sorted' })).toBeVisible();
     await pickLast(page, last);
-    // The skip for this Send is the open questions list's first row (approval "reply-bar-pairs").
     const oq = page.locator('.ib-pfoot [data-open-questions]');
     await expect(oq).toHaveAccessibleName('10 open questions');
     await oq.click();
@@ -134,7 +107,6 @@ test("desktop: answer 1 of 11 and Send: one reply, the other 10 stay open, and t
     await expect(row).toContainText('10 skipped when you send');
     await expect(oq).toHaveText(/10 to skip/);
     await footShots(page, 'desktop-2-skip-them');
-    // Back to the default, and Send: nothing is skipped.
     await row.getByRole('menuitem', { name: /^Keep open/ }).click();
     await expect(row).toHaveAttribute('data-open-questions-skip-row', 'keep');
     await page.keyboard.press('Escape');
@@ -169,7 +141,6 @@ test('a phone: the foot by default and after Skip them; that Send is one reply s
     await page.goto(`${world.url}#thread=${threadId}`);
     await expect(page.locator('section.ib-pane').getByRole('heading', { name: 'Triage on a phone' })).toBeVisible();
     await pickLast(page, last);
-    // The foot counts the 10 unanswered once; the sheet's first row holds this Send's skip (approval "reply-bar-pairs").
     const oq = page.locator('.ib-pfoot [data-open-questions]');
     await expect(oq).toHaveAccessibleName('10 open questions');
     await footShots(page, 'phone-1-default');

@@ -1,23 +1,8 @@
-/**
- * Writes apps/hook/hooks/mod/inbox-default-tools.ts: the tool list a real
- * Plannotator Inbox answers on `/mcp` `tools/list`, as the Claude Code mod
- * parses it (parseInboxToolList). The mod registers `plannotator_inbox` from
- * that list when no Inbox has run yet on this computer, so Claude Code has the
- * tool before the first run (the first call starts the Inbox).
- *
- *   bun run scripts/sync-mod-inbox-tools.ts
- *
- * Run after changing an Inbox MCP tool (packages/server/inbox-mcp.ts);
- * apps/hook/hooks/mod/inbox-default-tools.test.ts fails until you do.
- *
- * Starts an in-process Inbox in a fresh temp data dir (never the person's).
- */
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const dataDir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-sync-mod-tools-")));
-// The Inbox reads config.json through the env even when given dataDir.
 process.env.PLANNOTATOR_DATA_DIR = dataDir;
 
 const { startInboxServer } = await import("../packages/server/inbox");

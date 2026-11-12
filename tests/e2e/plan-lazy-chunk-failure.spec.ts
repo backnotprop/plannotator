@@ -1,20 +1,3 @@
-/**
- * Since #1618 the plan page loads its diagram and embed components as chunks
- * from `/assets/*`, where they used to be inlined. A chunk that cannot load
- * (a flaky link, a server that stopped, a tab older than the server's build)
- * used to blank the whole app and take the reviewer's unsent comments and
- * edits off the screen. Proved in Chromium against the compiled binary:
- *
- *  - one aborted request for the Mermaid block's chunk leaves the app
- *    mounted: the diagram's source shows under "Couldn't load this view" with
- *    a Reload action, and a comment added before it is still there;
- *  - the chunk answered with 404 (an old tab after an upgrade on the same
- *    port) says "This page was updated" instead.
- *
- * Every CLI runs under a temp PLANNOTATOR_DATA_DIR and HOME, opens no browser,
- * and is closed by this test. Build the binary first (see inbox.spec.ts), then
- * `bun run test:e2e:inbox`.
- */
 import { expect, test, type Browser, type Page, type Route } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
@@ -32,7 +15,6 @@ const PLAN = ['# Lazy chunk plan', '', 'Prose before the diagram.', ''].join('\n
 const FENCE = '\n```mermaid\nflowchart LR\n  Kept-->Source\n```\n';
 const MERMAID_CHUNK = /\/assets\/MermaidBlock-[^/]*\.js$/;
 
-/** Plan review (`plannotator` reading a PermissionRequest on stdin) in a scratch project. */
 async function startPlanReview(): Promise<{ url: string; close: () => Promise<void> }> {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const root = inboxScratch('plannotator-plan-lazy-chunk-e2e-');
@@ -67,7 +49,6 @@ async function startPlanReview(): Promise<{ url: string; close: () => Promise<vo
   const url = (JSON.parse(readFileSync(readyFile, 'utf8').trim().split('\n')[0]!) as { url: string }).url;
   const close = async () => {
     if (child.exitCode === null) {
-      // A plan review ends with a decision; deny what is left so the CLI exits.
       await fetch(new URL('/api/deny', url), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -88,7 +69,6 @@ async function startPlanReview(): Promise<{ url: string; close: () => Promise<vo
   return { url, close };
 }
 
-/** The plan page, with the chunk requests for the Mermaid block sent to `onChunk`. */
 async function openReview(browser: Browser, url: string, onChunk: (route: Route) => Promise<void>): Promise<{ page: Page; pageErrors: string[] }> {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   await context.addCookies(
@@ -111,7 +91,6 @@ async function openReview(browser: Browser, url: string, onChunk: (route: Route)
   return { page, pageErrors };
 }
 
-/** A global comment, then a Mermaid fence typed in Edit mode: the diagram's chunk is asked for only now. */
 async function commentThenAddDiagram(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Global comment', exact: true }).click();
   const composer = page.locator('[data-comment-popover]');
@@ -132,11 +111,8 @@ async function expectAppKeptWithFallback(page: Page, pageErrors: string[], messa
   await expect(notice).toContainText(message);
   const reload = notice.getByRole('button', { name: action, exact: true });
   await expect(reload).toBeVisible();
-  // A tap target, not just the word: at least 24px tall (44px on touch screens).
   expect((await reload.boundingBox())!.height).toBeGreaterThanOrEqual(24);
-  // The fence's source stands in for the diagram.
   await expect(block.locator('pre')).toHaveText(/flowchart LR\s+Kept-->Source/);
-  // The rest of the app is still there, comment included.
   await expect(page.locator('article').getByRole('heading', { name: 'Lazy chunk plan' })).toBeVisible();
   await expect(page.getByText('Prose before the diagram.')).toBeVisible();
   await expect(page.getByText(NOTE).first()).toBeVisible();
@@ -149,7 +125,6 @@ test('plan review: an aborted diagram chunk shows the source with Reload and kee
   try {
     let aborted = 0;
     const { page, pageErrors } = await openReview(browser, session.url, async (route) => {
-      // One flaky request; anything after it (the notice's HEAD check) goes through.
       if (aborted++ === 0) await route.abort('connectionreset');
       else await route.continue();
     });

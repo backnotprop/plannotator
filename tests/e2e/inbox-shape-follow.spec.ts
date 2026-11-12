@@ -1,24 +1,3 @@
-/**
- * Follow an example's card in a real browser, on the compiled binary: what
- * only real layout can show. The example is invented, and its long step sits at
- * the format's limits (12 inputs, 12 checks).
- *
- * What it proves:
- *  - a normal row reads on one line with its file name whole; a cut name has no gap before ":line";
- *  - stepping never moves the board, the arrows or the path, and a short step in a tall example ends the card under it;
- *  - the long step keeps its signature and its deciding line in view;
- *  - folded, the arrows and the picture still step;
- *  - a phone's open sheet: one row of controls that stays, the rule that decided it and what comes out; the rest opens on request, and a full sheet leaves no slice of the board;
- *  - one column beside a board: what decided it first, nothing on top of anything, the dock's every button on screen;
- *  - a path too long for its room keeps the stop on now in view, on the rail and on a phone;
- *  - a signature too long for its room gives way before the line that decided it, and what comes out stays on the card;
- *  - with a panel open the dock stays whole beside it, on a board with examples;
- *  - a window made only shorter lays out again;
- *  - the keys never fall to the page, and Esc stops following before it closes the board;
- *  - the board's status stays in view and clickable above the card.
- *
- * Build first: see inbox.spec.ts.
- */
 import { devices, expect, test, type Browser, type Page } from '@playwright/test';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -78,7 +57,6 @@ const LONG_STEP = {
 const steps = [SHORT, NORMAL, LONG_STEP, { ...SHORT, part: 'd', tag: 'nothing shows', text: 'Nothing shows for the guest', inputs: [{ name: 'decision.show', value: 'false', from: { step: 3 } }] }];
 const parts = ['a', 'b', 'c', 'd'].map((p, i) => part(p, i + 1, box(20 + i * 220, 60, 190, 90), text(40 + i * 220, 110, `Part ${p}`))).join('');
 const longWay = Array.from({ length: 12 }, (_, i) => ({ ...SHORT, part: 'abcd'[i % 4], tag: `stop ${i + 1}`, text: `Stop ${i + 1} on the long way` }));
-// A real long signature: ten parameters, and one at the format's limit of 600 characters.
 const TEN = 'decideEverything(request: AuthenticatedRequest<ClaimBody>, saved: Saved | undefined, now: Date, release: string, policy: GuestPolicy, node: NodeIdentity, session: SessionDescriptor, gate: Gate, rows: Row[], overlay: OverlayState): Promise<Decision>';
 const AT_LIMIT = `atTheLimit(${Array.from({ length: 35 }, (_, i) => `param${i}: Type${i}`).join(', ')}): boolean`;
 const threeChecks = [check('gate.open'), check('gate.rows.length > 0', { decides: true }), { code: 'rule(gate)', result: 'not-reached' }];
@@ -89,7 +67,6 @@ const wideSteps = [
 const board = {
   title: 'Follow one example',
   claim: 'Built. Nothing waits on you.',
-  // Every view and a reference, so the dock is as wide as it gets.
   views: {
     picture: { html: '<p>The picture</p>', css: '' },
     know: 'What to know.[^1]',
@@ -144,7 +121,6 @@ test.afterAll(async () => {
 
 test('the path: rows read on one line, stepping moves nothing, a short step ends the card under it', async ({ browser }) => {
   const { context, page } = await openBoard(browser);
-  // Opening goes straight to the rail: the one-column strip must not flash on the way.
   await page.evaluate(() => {
     const seen = window as unknown as { stripSeen?: boolean };
     new MutationObserver(() => {
@@ -154,20 +130,17 @@ test('the path: rows read on one line, stepping moves nothing, a short step ends
   await press(page, 'Inputs and outputs');
   await expect(page.locator('.shp-ex-rail .shp-ex-stop')).toHaveCount(steps.length);
   expect(await page.evaluate(() => (window as unknown as { stripSeen?: boolean }).stripSeen ?? false)).toBe(false);
-  // The selected stop is marked by its row's band alone: no accent bar on its edge.
   expect(await page.locator('.shp-ex-rail .shp-ex-stop.on').evaluate((el) => getComputedStyle(el, '::before').content)).toBe('none');
 
   const held = () => Promise.all([rect(page, '.shp-view.v-how .shp-drawn-fit'), rect(page, '.shp-ex-rail .shp-ex-stop'), rect(page, '[aria-label="Next step"]'), rect(page, '.shp-ex-card')]);
   const first = await held();
   expect(first.every(Boolean)).toBe(true);
 
-  // A short step: the surface ends under it, and everything it shows is on the surface.
   const short = (await rect(page, '.shp-ex-skin'))!;
   const card = (await rect(page, '.shp-ex-card'))!;
   expect(card.height - short.height).toBeGreaterThanOrEqual(96);
   for (const part of ['.shp-ex-io.cur .shp-ex-ret', '.shp-ex-rail .shp-ex-note', '.shp-ex-rail .shp-ex-stop:last-child']) expect((await rect(page, part))!.bottom).toBeLessThanOrEqual(short.bottom);
 
-  // A normal step: the row and its file name whole, on one line.
   await press(page, 'Next step');
   expect(await held()).toEqual(first);
   const row = page.locator('.shp-ex-io.cur .shp-ex-vars > li', { hasText: 'readAndLeft' });
@@ -176,7 +149,6 @@ test('the path: rows read on one line, stepping moves nothing, a short step ends
   const tops = await row.evaluate((li) => [...li.children].map((c) => Math.round(c.getBoundingClientRect().top)));
   expect(Math.max(...tops) - Math.min(...tops)).toBeLessThanOrEqual(5);
 
-  // The long step: the whole surface again, the signature and the deciding line both in view.
   await press(page, 'Next step');
   expect(await held()).toEqual(first);
   expect((await rect(page, '.shp-ex-skin'))!.height).toBe(card.height);
@@ -188,7 +160,6 @@ test('the path: rows read on one line, stepping moves nothing, a short step ends
   expect(signature.bottom).toBeLessThanOrEqual(scroller.top + 1);
   expect(signature.top).toBeGreaterThanOrEqual((await rect(page, '.shp-ex-ios'))!.top);
 
-  // A cut file name meets its line: every character it shows fits, so no gap opens before ":line".
   const cut = page.locator('.shp-ex-io.cur .shp-ex-vars .shp-ex-src .f').first();
   await expect(cut).toHaveText(/…$/);
   expect(await cut.evaluate((f) => f.closest<HTMLElement>('.shp-ex-src')!.title)).toContain('inbox-tailnet-guest-policy-middleware-for-claims.ts');
@@ -202,10 +173,8 @@ test('the path: rows read on one line, stepping moves nothing, a short step ends
 
 test('folded: a small card with no path, and the arrows still step', async ({ browser }) => {
   const { context, page } = await openBoard(browser);
-  // Every number that steps the example is whole in the view: a long tag on the first part does not run past its edge.
   const inside = await page.evaluate(() => {
     const view = document.querySelector('.shp-view.v-how')!.getBoundingClientRect();
-    // The drawing's frame clips 24 px outside itself.
     const frame = document.querySelector('.shp-view.v-how .shp-drawn')!.getBoundingClientRect();
     const left = Math.max(view.left, frame.left - 24);
     const right = Math.min(view.right, frame.right + 24);
@@ -223,7 +192,6 @@ test('folded: a small card with no path, and the arrows still step', async ({ br
   const folded = (await rect(page, '.shp-ex-card'))!;
   expect(folded.width).toBeLessThanOrEqual(640);
   expect(folded.height).toBeLessThan(opened.height);
-  // The surface is the whole card again: no cut is left over from the short step it was opened on.
   expect((await rect(page, '.shp-ex-skin'))!.height).toBe(folded.height);
   await press(page, 'Next step');
   await expect(page.locator('.shp-ex-text.cur .shp-ex-count')).toHaveText('2 of 4');
@@ -241,7 +209,6 @@ for (const [size, viewport] of [['390', { width: 390, height: 844 }], ['320', { 
     const cur = page.locator('.shp-ex-io.cur');
     await expect(page.locator('.shp-ex-strip .shp-ex-stop')).toHaveCount(steps.length);
 
-    // The stops, the arrows and the close are one row.
     const mid = async (s: string) => {
       const r = (await rect(page, s))!;
       return r.top + r.height / 2;
@@ -249,7 +216,6 @@ for (const [size, viewport] of [['390', { width: 390, height: 844 }], ['320', { 
     const row = await mid('.shp-ex-strip');
     for (const s of ['[aria-label="Next step"]', '[aria-label="Previous step"]', '[aria-label="Stop following"]']) expect(Math.abs((await mid(s)) - row)).toBeLessThanOrEqual(4);
 
-    // A rule with something to say beside it: the value and the constant read on the next line, under the rule.
     await press(page, 'Next step');
     const line = cur.locator('.decides');
     await expect(line.locator('.cond')).not.toContainText('//');
@@ -258,9 +224,7 @@ for (const [size, viewport] of [['390', { width: 390, height: 844 }], ['320', { 
     expect(got!.top).toBeGreaterThanOrEqual(rule!.bottom - 2);
     expect(Math.abs(got!.left - rule!.left)).toBeLessThanOrEqual(2);
 
-    // The long step, calm: of its twelve checks only the one that decided it, what comes out, and no signature or inputs.
     await press(page, 'Next step');
-    // Its long sentence is whole: the sentence is the step.
     expect(await cur.page().locator('.shp-ex-text.cur .shp-ex-does').evaluate((p) => p.scrollHeight - p.clientHeight)).toBeLessThanOrEqual(0);
     await expect(cur.locator('.shp-ex-checks > li')).toHaveCount(1);
     await expect(cur.locator('.decides')).toHaveCount(1);
@@ -268,11 +232,9 @@ for (const [size, viewport] of [['390', { width: 390, height: 844 }], ['320', { 
     await expect(cur.locator('.shp-ex-sig')).toHaveCount(0);
     await expect(cur.locator('.shp-ex-vars')).toHaveCount(0);
 
-    // The rest opens where it belongs.
     await press(page, 'What happens');
     await expect(cur.locator('.shp-ex-checks > li')).toHaveCount(12);
     await expect(cur.locator('.shp-ex-sig')).toHaveCount(1);
-    // A long function name breaks where its words meet, never mid-word.
     const midWord = await cur.locator('.shp-ex-sig').evaluate((sig) => {
       const walk = document.createTreeWalker(sig, NodeFilter.SHOW_TEXT);
       const found: string[] = [];
@@ -297,14 +259,12 @@ for (const [size, viewport] of [['390', { width: 390, height: 844 }], ['320', { 
     await press(page, 'Goes in');
     await expect(cur.locator('.shp-ex-vars > li')).toHaveCount(12);
 
-    // Full, the sheet owns the screen under the title: no slice of the board, nothing over the title, nothing off the side.
     await expect(page.locator('.shp-view.v-how')).toHaveCSS('opacity', '0');
     await expect(page.locator('.shp-view.v-how')).toHaveAttribute('inert', '');
     expect((await rect(page, '.shp-ex-card'))!.top).toBeGreaterThanOrEqual((await rect(page, '.shp-head'))!.bottom);
     expect(await page.locator('.shp-ex-in').evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
     expect((await rect(page, '[aria-label="Stop following"]'))!.right).toBeLessThanOrEqual(viewport.width);
 
-    // The controls stay while it scrolls; a new step starts at its top, with its stop on screen.
     await page.locator('.shp-ex-in').evaluate((el) => el.scrollTo({ top: 400 }));
     await settle(page);
     const sheet = (await rect(page, '.shp-ex-in'))!;
@@ -317,7 +277,6 @@ for (const [size, viewport] of [['390', { width: 390, height: 844 }], ['320', { 
     expect(on.left).toBeGreaterThanOrEqual(0);
     expect(on.right).toBeLessThanOrEqual(viewport.width);
 
-    // Folding comes back calm, the board back in view.
     await press(page, 'Hide inputs and outputs');
     await expect(page.locator('.shp-view.v-how')).toHaveCSS('opacity', '1');
     await press(page, 'Inputs and outputs');
@@ -357,7 +316,6 @@ test('a path too long for its room keeps the stop on now in view, on the rail an
     expect(await page.locator(room).evaluate((el) => el.scrollLeft + el.scrollTop)).toBe(0);
     for (let i = 1; i < longWay.length; i++) await press(page, 'Next step');
     await expect(page.locator('.shp-ex-stop.on')).toHaveAttribute('aria-label', 'Step 12: stop 12');
-    // The room scrolls: the last stop is only in it because the path followed.
     const on = (await rect(page, '.shp-ex-stop.on'))!;
     const box = (await rect(page, room))!;
     expect(on.top).toBeGreaterThanOrEqual(box.top);
@@ -387,7 +345,6 @@ for (const height of [700, 900]) {
       expect(sig.height).toBeGreaterThanOrEqual(20);
       expect(sig.top).toBeGreaterThanOrEqual((await rect(page, '.shp-ex-ios'))!.top);
       expect(sig.bottom).toBeLessThanOrEqual(scroller.top + 1);
-      // What does not fit is a scroll away; ten parameters fit a tall window whole.
       const hidden = await signature.evaluate((el) => el.scrollHeight - el.clientHeight);
       if (i === 1 || height === 700) expect(hidden).toBeGreaterThan(0);
       else expect(hidden).toBe(0);
@@ -447,7 +404,6 @@ test('the keys never fall to the page, and Esc stops following before it closes 
   await expect(page.locator('.shp-ex-text.cur .shp-ex-count')).toHaveText('4 of 4');
   expect(await focused()).toBe('Previous step');
 
-  // From the rail, the tab moves with the card and keeps the keys.
   await press(page, 'Inputs and outputs');
   await page.locator('.shp-ex-rail .shp-ex-tabs button').nth(1).focus();
   await enter();
@@ -459,7 +415,6 @@ test('the keys never fall to the page, and Esc stops following before it closes 
   await expect(page.locator('.shp-ex-card:not(.leaving)')).toHaveCount(0);
   expect(await focused()).toBe('Follow an example');
 
-  // Esc: the example goes first, with the keys back on the dock; the next one closes the board.
   await enter();
   await expect(page.locator('.shp-ex-card:not(.leaving)')).toHaveCount(1);
   await page.keyboard.press('Escape');
@@ -513,7 +468,6 @@ test('the status slides with the dock when a panel opens, never ahead of it', as
   expect(again.status, again.stderr).toBe(0);
   await expect(page.locator('.shp-pill')).toBeVisible();
   await settle(page);
-  // Every frame of the slide: where the dock's middle is, and how far the status is from it.
   const frames = await page.evaluate(async () => {
     const mid = (s: string) => {
       const r = document.querySelector(s)!.getBoundingClientRect();
@@ -529,17 +483,14 @@ test('the status slides with the dock when a panel opens, never ahead of it', as
     return seen;
   });
   const docks = frames.map(([d]) => d);
-  // The dock did slide, through frames in between ...
   const [from, to] = [docks[0]!, docks.at(-1)!];
   expect(Math.abs(to - from)).toBeGreaterThan(40);
   expect(docks.some((d) => Math.min(Math.abs(d - from), Math.abs(d - to)) > 8 && (d - from) * (to - d) > 0)).toBe(true);
-  // ... and the status never left its side.
   expect(Math.max(...frames.map(([, gap]) => gap))).toBeLessThan(4);
   await context.close();
 });
 
 test("a number never covers the drawing's own words, like a frame's label, or another number", async ({ browser }) => {
-  // A frame's label right where the second step's number would sit, on the top edge of its part.
   const label = text(250, 52, 'How · all must hold', { size: 13, mono: true, tone: 'soft' });
   const dir = join(w.root, 'boards', 'follow-label');
   mkdirSync(dir, { recursive: true });
@@ -572,7 +523,6 @@ test("a number never covers the drawing's own words, like a frame's label, or an
     });
     expect(covered.words).toBeGreaterThan(4);
     expect(covered.onWords, `at ${page.viewportSize()!.width}`).toEqual([]);
-    // Four numbers in a row of 358 px have nowhere free to go: only the desk promises they never meet.
     if (page.viewportSize()!.width > 390) expect(covered.onTags).toEqual([]);
     await context.close();
   }

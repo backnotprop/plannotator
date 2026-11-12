@@ -26,7 +26,6 @@ function bindServer(server: Server, port: number): Promise<void> {
   });
 }
 
-/** Close a listening test server, or resolve immediately if it is already closed. */
 export function closeServer(server: Server): Promise<void> {
   if (!server.listening) return Promise.resolve();
   return new Promise((resolve, reject) => {
@@ -34,10 +33,6 @@ export function closeServer(server: Server): Promise<void> {
   });
 }
 
-/**
- * Reserve a contiguous loopback port range for network fallback tests.
- * Retries with new ephemeral starting ports when a neighboring port is busy.
- */
 export async function occupyConsecutivePorts(count: number): Promise<{
   start: number;
   servers: Server[];

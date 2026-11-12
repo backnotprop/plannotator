@@ -1,32 +1,3 @@
-/**
- * Remote launch in the window (approval "remote-launch", the picker's A): two compiled Inboxes, "MacBook" and
- * "Mac mini", each in its own scratch HOME and data dir under the test sandbox (Phones, Connect, notes and the update
- * check off, no browser), linked both ways through the real CLI pairing over loopback. Launch is on in both, and each
- * finds only its own fake `claude` (tests/helpers/fake-claude, through PLANNOTATOR_TEST_LAUNCH_PATH). A `tailscale`
- * stand-in fails any call.
- *
- * Driven through MacBook's real window:
- *  1. New message → New Claude Code session → the folder menu groups the projects by machine, billing-svc under both;
- *     picking Mac mini's infra makes To read "in infra · Mac mini"; Send starts the agent on Mac mini (its fake gets
- *     `--bg` in its own folder) and MacBook's fake starts nothing.
- *  2. "Another folder on MacBook…" (approval addendum "existing folders"): this computer's own folder route, and the
- *     agent starts here.
- *  3. "Another folder on Mac mini…": a folder in Mac mini's home that is no project yet, typed and picked through
- *     Mac mini's own folder route; Start puts "billing-api · Mac mini" in To and Send starts Claude Code there on Mac
- *     mini (MacBook's fake starts nothing); a name Mac mini doesn't have offers Create, with the folders that are
- *     there under its line.
- *  4. An untrusted folder picked that way (Mac mini's fake checks Claude's folder trust): the Send still goes, the
- *     start stops on trust, and the thread's run line Trust folder (through the forward) starts it there.
- *  5. Mac mini stopped: its last read still lists its projects ("Mac mini · asleep"); Send reads "Start when Mac mini
- *     is back" with the note; the Send is held, the toast says Claude Code starts on Mac mini when it's back, and
- *     Cancel takes it back (the outbox entry `cancelled`, nothing started). Its group offers no "Another folder on
- *     Mac mini…" (nothing is read); MacBook's still does.
- *
- * `RL_PICKER_SHOTS` saves the picker's pictures (default /tmp/remote-launch-picker/build), 1440×900 and a 390 phone,
- * light; `RL_PICKER_DARK_SHOTS` their dark ones at 1440 (default /tmp/remote-launch-picker/build-dark);
- * `RL_FOLDER_SHOTS` the folder browser's, `folder-<state>-<1440|390>-<light|dark>.png` (default
- * /tmp/remote-launch-picker/other-folder).
- */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -65,7 +36,6 @@ function machine(name: string): Machine {
   const dataDir = join(root, 'data');
   mkdirSync(dataDir, { recursive: true });
   const fake = installFakeClaude({ bin: join(root, 'fakes'), state: join(root, 'fake-claude'), config: { workMs: 60_000, hold: true } });
-  // Launch on, and Plannotator's Claude Code plugin on in the sandbox's own agent home (launch needs its mod).
   writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxLaunch: { enabled: true } }));
   markTourDecided(dataDir);
   mkdirSync(join(dataDir, 'agents-home', '.claude'), { recursive: true });
@@ -117,7 +87,6 @@ function link(from: Machine, to: Machine): void {
   expect(linked.status, linked.err).toBe(0);
 }
 
-/** An agent writes from `folder` (a git repository), so the folder is one of this machine's projects; trusted there. */
 async function projectOn(m: Machine, name: string, body: string): Promise<string> {
   const folder = join(m.root, 'code', name);
   mkdirSync(folder, { recursive: true });
@@ -135,7 +104,6 @@ async function projectOn(m: Machine, name: string, body: string): Promise<string
   return root;
 }
 
-/** Claude trusts every folder in `m.projects` (the sandbox's agents' home `.claude.json`). */
 function trustProjects(m: Machine): void {
   const trusted = Object.fromEntries(Object.values(m.projects).map((p) => [p, { hasTrustDialogAccepted: true }]));
   writeFileSync(join(m.dataDir, 'agents-home', '.claude.json'), JSON.stringify({ projects: trusted }));
@@ -150,17 +118,14 @@ async function shot(page: Page, name: string, options: { scheme?: 'light' | 'dar
   if (dark) await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
 }
 
-/** The picker's picture again in dark (1440), beside the light ones. */
 const darkShot = (page: Page, name: string) => shot(page, `${name}-dark`, { scheme: 'dark', dir: darkShots });
 
-/** A folder browser picture, light and dark: `folder-<state>-<1440|390>-<light|dark>.png`. */
 async function folderShot(page: Page, state: string): Promise<void> {
   const width = page.viewportSize()?.width === 390 ? '390' : '1440';
   await shot(page, `folder-${state}-${width}-light`, { dir: folderShots });
   await shot(page, `folder-${state}-${width}-dark`, { scheme: 'dark', dir: folderShots });
 }
 
-/** The folder reads a window makes (`…/launch/folders?path=`), by route: `self` or the machine id. */
 function watchFolderReads(page: Page): { machine: string; path: string }[] {
   const seen: { machine: string; path: string }[] = [];
   page.on('request', (request) => {
@@ -177,7 +142,6 @@ const contexts: BrowserContext[] = [];
 const errors: string[] = [];
 
 test.describe.configure({ mode: 'serial' });
-// A step that cannot happen fails where it is, not at the test's end.
 test.use({ actionTimeout: 20_000 });
 
 test.beforeAll(async () => {
@@ -207,7 +171,6 @@ test.afterAll(async () => {
     for (const context of contexts) await context.close().catch(() => {});
     for (const m of [macbook, mini]) {
       m?.fake.stopAll();
-      // Nothing here may change the system's Tailscale.
       if (m) expect(existsSync(m.calls)).toBe(false);
     }
   } finally {
@@ -222,7 +185,6 @@ async function window(browser: Browser, phone: boolean): Promise<Page> {
   contexts.push(context);
   const page = await context.newPage();
   page.on('pageerror', (e) => errors.push(e.message));
-  // The one-time "Add the note to Claude Code?" dialog can open at any moment once a launch went: not this test's.
   await page.addLocatorHandler(page.locator('[data-dialog="agent-note"]'), async (note) => {
     await note.getByRole('button', { name: 'Not now' }).click();
   });
@@ -233,8 +195,6 @@ async function window(browser: Browser, phone: boolean): Promise<Page> {
 
 const dialog = (page: Page) => page.locator('dialog[data-compose]');
 
-/** New message → To → New Claude Code session → words → the folder menu, open once Mac mini's group is in. */
-/** Close compose keeping nothing: closing with words keeps a draft (approval "inbox-compose-escape-keeps"), so empty it first. */
 async function closeEmpty(page: Page, how: 'cancel' | 'escape'): Promise<void> {
   const d = dialog(page);
   await d.getByRole('textbox', { name: 'Message' }).fill('');
@@ -252,7 +212,6 @@ async function openFolderMenu(page: Page, words: string, wantGroup: string): Pro
   await d.getByRole('textbox', { name: 'Thread name' }).fill('Staging certs');
   await d.locator('[data-compose-to]').click();
   await d.locator('[data-compose-start="claude-code"]').click();
-  // Mac mini's read lands on its own; the menu shows it once it is in.
   await expect
     .poll(async () => {
       await d.locator('[data-compose-folder]').click();
@@ -266,10 +225,8 @@ async function openFolderMenu(page: Page, words: string, wantGroup: string): Pro
 test('1. the folder menu groups projects by machine; a Mac mini project starts Claude Code on Mac mini', async ({ browser }) => {
   const page = await window(browser, false);
   const phone = await window(browser, true);
-  // The phone first, so both windows have read Mac mini while it is awake.
   await openFolderMenu(phone, 'The staging certs expire in a week. Rotate them and update the three cron jobs that read them.', 'Mac mini');
   await shot(phone, 'menu-390');
-  // "Another folder on Mac mini…" ends Mac mini's group.
   const otherRow = phone.locator(`[data-compose-folder-other="${mini.id}"]`);
   await expect(otherRow).toHaveText('Another folder on Mac mini…');
   await otherRow.scrollIntoViewIfNeeded();
@@ -281,7 +238,6 @@ test('1. the folder menu groups projects by machine; a Mac mini project starts C
   await openFolderMenu(page, 'The staging certs expire in a week. Rotate them and update the three cron jobs that read them.', 'Mac mini');
   const groups = page.locator('[data-compose-folder-group]');
   await expect(groups).toHaveText(['MacBook · this computer', 'Mac mini']);
-  // billing-svc is on both machines: it shows under each.
   await expect(page.locator('[data-compose-folder-option]').filter({ hasText: 'billing-svc' })).toHaveCount(2);
   await shot(page, 'menu-1440');
   await darkShot(page, 'menu-1440');
@@ -305,10 +261,8 @@ test('1. the folder menu groups projects by machine; a Mac mini project starts C
   await shot(page, 'sent-1440');
 });
 
-/** The home folder a sandboxed Inbox lists and starts in (`PLANNOTATOR_TEST_SANDBOX`: its agents' home). */
 const homeOf = (m: Machine) => join(m.dataDir, 'agents-home');
 
-/** In the open folder menu: "Another folder on <machine>…", then a path typed in its field. */
 async function browse(page: Page, machine: string, path: string): Promise<void> {
   await page.locator(`[data-compose-folder-other="${machine}"]`).click();
   await expect(page.locator('[data-home-folders-path]')).toBeFocused();
@@ -338,21 +292,18 @@ test("2. Another folder on MacBook…: this computer's own folder route, and the
   expect(sent.request().postDataJSON().to).toEqual({ launch: { agent: 'claude-code', folder: '~/code/notes-local' } });
   await waitFor('--bg on MacBook in ~/code/notes-local', () => macbook.fake.starts().some((s) => s.cwd === target && s.argv.includes('--bg')));
   expect(mini.fake.starts().length).toBe(there);
-  // A project of MacBook's now; trusted like the others, so later pictures don't show its Trust and start.
   macbook.projects['notes-local'] = target;
   trustProjects(macbook);
 });
 
 test('3. Another folder on Mac mini…: a folder that is no project yet, read and started on Mac mini; a missing name offers Create there', async () => {
   const [page, phone] = contexts.map((c) => c.pages()[0]!) as [Page, Page];
-  // Folders in Mac mini's home that are no project of its Inbox (the sandboxed Inbox's home is its agents' home).
   for (const name of ['billing-api', 'billing-reports', 'billing-svc']) mkdirSync(join(homeOf(mini), 'code', name), { recursive: true });
   const target = realpathSync(join(homeOf(mini), 'code', 'billing-api'));
   const words = 'The refund webhook retries forever on a 409. Make it retry with the same key three times, then alert.';
   const reads = watchFolderReads(page);
   const phoneReads = watchFolderReads(phone);
 
-  // The phone: typing, chosen, To, missing.
   await page.locator('.ib-toast [data-toast-dismiss]').click({ timeout: 2000 }).catch(() => {});
   await openFolderMenu(phone, words, 'Mac mini');
   await browse(phone, mini.id, '~/code/bil');
@@ -367,8 +318,6 @@ test('3. Another folder on Mac mini…: a folder that is no project yet, read an
   await folderShot(phone, 'to-line');
   await dialog(phone).locator('[data-compose-folder]').click();
   await browse(phone, mini.id, '~/code/biling-svc');
-  // A name Mac mini doesn't have: Create leads (read there: its ~/code has no such folder), and under its line Mac mini's
-  // folders in ~/code, the closest to what was typed first.
   await expect(phone.locator('[data-home-folder-row]').first()).toHaveAttribute('data-home-folder-create', '~/code/biling-svc');
   await expect(phone.locator('[data-home-folders-after]')).toHaveText("A new, empty folder. Or pick one that's there:");
   await expect(phone.locator('[data-home-folder-option]').first()).toHaveAttribute('data-home-folder-option', 'billing-svc');
@@ -380,7 +329,6 @@ test('3. Another folder on Mac mini…: a folder that is no project yet, read an
   expect(phoneReads.length).toBeGreaterThan(0);
   expect(phoneReads.every((r) => r.machine === mini.id)).toBe(true);
 
-  // The desktop: the same, then Send.
   await openFolderMenu(page, words, 'Mac mini');
   await browse(page, mini.id, '~/code/biling-svc');
   await expect(page.locator('[data-home-folder-row]').first()).toHaveAttribute('data-home-folder-create', '~/code/biling-svc');
@@ -413,7 +361,6 @@ test('3. Another folder on Mac mini…: a folder that is no project yet, read an
   await expect(page.locator('.ib-toast')).toContainText('in billing-api · Mac mini');
   await waitFor('--bg on Mac mini in ~/code/billing-api', () => mini.fake.starts().some((s) => s.cwd === target && s.argv.includes('--bg')));
   expect(macbook.fake.starts().length).toBe(here);
-  // The folder is Mac mini's project now.
   await waitFor("Mac mini's project for billing-api", async () => JSON.stringify(await getJson(mini, '/api/inbox/projects')).includes(target));
 });
 
@@ -426,7 +373,6 @@ test('4. an untrusted folder picked there: the start stops on trust, and the run
     await openFolderMenu(page, 'Add the monthly refunds report to the billing reports.', 'Mac mini');
     await browse(page, mini.id, '~/code/billing-reports/');
     await page.locator('[data-home-folder-start="~/code/billing-reports"]').click();
-    // No Trust and start: a typed folder has no reading before the Send.
     await expect(dialog(page).locator('[data-compose-send]')).toContainText('Send');
     await expect(dialog(page).locator('[data-compose-send]')).not.toContainText('Trust');
     const answer = page.waitForResponse((r) => r.url().endsWith(`/api/inbox/m/${mini.id}/messages`) && r.request().method() === 'POST');
@@ -445,7 +391,6 @@ test('4. an untrusted folder picked there: the start stops on trust, and the run
   } finally {
     mini.fake.configure({ trustCheck: false });
   }
-  // Both windows read Mac mini once more while it is awake, so billing-reports is in the read they keep for its sleep.
   for (const window of contexts.map((c) => c.pages()[0]!)) {
     await openFolderMenu(window, 'Nothing to send.', 'Mac mini');
     await expect(window.locator(`[data-compose-folder-option][data-compose-folder-machine="${mini.id}"]`).filter({ hasText: 'billing-reports' })).toHaveCount(1, { timeout: 20_000 });
@@ -461,12 +406,10 @@ test("5. Mac mini asleep: Send waits for it, the toast says so, and Cancel takes
   await stopScratchInbox(mini.dataDir);
   await waitFor('MacBook sees Mac mini asleep', async () => (await stateOf(macbook, mini)) === 'offline');
 
-  // The phone: the asleep compose (no Send).
   await openFolderMenu(phone!, 'Rotate the staging database password and update the three cron jobs that read it.', 'asleep');
   await phone!.locator(`[data-compose-folder-option][data-compose-folder-machine="${mini.id}"]`).filter({ hasText: 'infra' }).click();
   await expect(dialog(phone!).locator('[data-compose-send]')).toContainText('Start when Mac mini is back');
   await shot(phone!, 'asleep-390');
-  // Its group offers no folder browser (its folders can't be read); this computer's still does.
   const phoneReads = watchFolderReads(phone!);
   await dialog(phone!).locator('[data-compose-folder]').click();
   await expect(phone!.locator('[data-compose-folder-other]')).toHaveCount(1);
@@ -476,16 +419,13 @@ test("5. Mac mini asleep: Send waits for it, the toast says so, and Cancel takes
   expect(phoneReads).toEqual([]);
 
   const page = desktop!;
-  // The earlier "Starting Claude Code" toast is not this picture's.
   await page.locator('.ib-toast [data-toast-dismiss]').click({ timeout: 2000 }).catch(() => {});
   await openFolderMenu(page, 'Rotate the staging database password and update the three cron jobs that read it.', 'asleep');
-  // The person started an agent on Mac mini last (billing-reports, case 4): its group leads, its last project first.
   await expect(page.locator('[data-compose-folder-group]')).toHaveText(['Mac mini · asleep', 'MacBook · this computer']);
   await expect(page.locator('[data-compose-folder-option]').first()).toContainText('billing-reports · you started it here last');
   await shot(page, 'menu-asleep-1440');
   await darkShot(page, 'menu-asleep-1440');
   const reads = watchFolderReads(page);
-  // No "Another folder on Mac mini…" while it sleeps; MacBook's row is still there.
   await expect(page.locator(`[data-compose-folder-other="${mini.id}"]`)).toHaveCount(0);
   await expect(page.locator('[data-compose-folder-other="self"]')).toBeVisible();
   await folderShot(page, 'asleep');

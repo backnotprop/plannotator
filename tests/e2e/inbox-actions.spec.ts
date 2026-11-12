@@ -1,38 +1,3 @@
-/**
- * Action items an agent needs the person to go do (approval "inbox-next-actions",
- * 2026-10-21, direction "In the thread"), proved in a real browser against the
- * compiled binary, with an agent writing through `plannotator inbox mcp`
- * (scripts/inbox-sim.ts):
- *
- *  - an agent's `:::action` block with `Stopped:` puts its thread under
- *    Stopped on you, and the row counts it in the box pill ("1 action to do", and the
- *    question count beside it): no new section, page or strip;
- *  - the thread draws the checklist card in place of the block (approval
- *    "action-items-checklist", option A): adjacent blocks are one card, blocks
- *    separated by prose are two; one row open at a time; the open row shows
- *    why, the Holds up words, Open for its link and the whole command with
- *    Copy (both when an item has both), then Done / Can't do it…;
- *  - Done goes into the reply draft (approval "inbox-action-items-in-reply",
- *    option A): the row is struck with its note field and "in your draft", no
- *    toast, the foot reads "Draft · 1 done" beside Send, the thread stays in
- *    Stopped on you, a reload keeps it, and nothing reaches the agent until
- *    Send; then read_thread returns ONE reply whose first line joins the
- *    answers' ("Answered 1 question, did 1 action item."), with "Action items
- *    you asked for" and the note, and the sent message reads "You did 1
- *    action item";
- *  - the tick takes a Done back out of the draft;
- *  - Can't do it asks for the reason, which goes with the Send word for word;
- *  - the agent marks its own action item done (`done`): the card reads "Claude
- *    Code saw it done" and nothing is sent; over a Done waiting in the draft,
- *    the person's note still goes with their Send;
- *  - light and dark, desktop and a phone (WebKit, iPhone 15: 44 px targets).
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * PNGs land in <PLANNOTATOR_E2E_PROOF_DIR or .local/proof>/actions/.
- * The agent's sim never waits for a reply it should not have: `readThread`
- * checks that nothing of the person's landed before the Send.
- */
-
 import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
@@ -201,11 +166,8 @@ test('the list: no new section; the action item sits in Stopped on you and its r
   const { page, threads } = world;
   await page.goto(world.url);
   const stopped = page.locator('section[aria-label="Stopped on you"], .ib-group').filter({ hasText: 'Stopped on you' }).first();
-  // The row's grey line is the message's first words (approval "inbox-row-latest-preview"); the action item is in its pill.
   await expect(row(page, threads.vercel)).toContainText('Release 4.2 is built and every check passed.');
   await expect(stopped.locator(`[data-thread-id="${threads.vercel}"]`)).toHaveCount(1);
-  // The open action items' pill and the open questions' count (approval "inbox-row-action-icon"), named in words: a
-  // blocked row's marks say its state first (approval "inbox-question-mark", #2929).
   for (const [id, actions, questions] of [[threads.vercel, 1, 0], [threads.npm, 1, 1], [threads.staging, 3, 0]] as const) {
     await expect(row(page, id).locator('[data-action-count]')).toHaveAttribute('data-action-count', String(actions));
     await expect(row(page, id).locator('.ib-qn')).toHaveCount(questions);
@@ -213,7 +175,6 @@ test('the list: no new section; the action item sits in Stopped on you and its r
   await expect(row(page, threads.vercel)).toHaveAccessibleName(/Stopped on you: 1 action item/);
   await expect(row(page, threads.npm)).toHaveAccessibleName(/1 action item.*1 question/);
   await expect(row(page, threads.staging)).toHaveAccessibleName(/3 action items/);
-  // No "Action item" section band, page or strip.
   await expect(page.getByText('Action item', { exact: true })).toHaveCount(0);
   await shot(page, '01-list');
 });
@@ -230,12 +191,9 @@ test('the thread draws the checklist in place of the block: the open row shows w
   await expect(card.locator('[data-action-stopped]')).toHaveText('Stopped release 4.2 cannot go out until it is approved');
   await expect(card.locator('[data-action-open]')).toHaveAttribute('href', 'https://vercel.com/acme/web/deployments/dpl_8Hk2mQ');
   await expect(card.locator('[data-action-watching]')).toHaveText('Claude Code is watching: the deployment; I go on by myself once it is Ready.');
-  // A Done goes with the person's Send: no timer words.
   await expect(card.locator('[data-action-hint]')).toHaveCount(0);
   await expect(card).not.toContainText('10 s');
-  // The block's own lines are not drawn beside the card.
   await expect(page.locator('section.ib-pane')).not.toContainText('Where: [Vercel]');
-  // 👍 Looks good waits while the action item does.
   await expect(page.locator('section.ib-pane [data-ack]')).toHaveCount(0);
   await shot(page, '02-thread-open');
   await page.goto(`${world.url}#thread=${threads.npm}`);
@@ -261,7 +219,6 @@ test('adjacent action items are one checklist, one row open at a time; prose bet
   const toggle = (i: number) => rows.nth(i).locator('[data-action-toggle]');
   await expect(toggle(0)).toHaveAttribute('aria-expanded', 'true');
   await expect(toggle(1)).toHaveAttribute('aria-expanded', 'false');
-  // One open at a time.
   await toggle(1).click();
   await expect(toggle(1)).toHaveAttribute('aria-expanded', 'true');
   await expect(toggle(0)).toHaveAttribute('aria-expanded', 'false');
@@ -269,7 +226,6 @@ test('adjacent action items are one checklist, one row open at a time; prose bet
   await expect(open.locator('[data-action-open]')).toHaveText('Open github.com');
   await expect(open.locator('[data-action-copy]')).toBeVisible();
   await expect(open.locator('[data-action-holds]')).toHaveText('Holds up the agent opening PRs on staging');
-  // The command whole: every character, wrapped, nothing cut or scrolled away.
   const cmd = open.locator('[data-action-cmd]');
   expect((await cmd.textContent())!.replace(/^\$\s/, '')).toBe(LONG_RUN);
   const fit = await cmd.evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth, lines: Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)) }));
@@ -293,23 +249,19 @@ test('Done goes into the reply draft: struck, its note, "in your draft", no toas
   await expect(card.locator('[data-action-undo]')).toHaveCount(0);
   await expect(page.locator('.ib-toast')).toHaveCount(0);
   await expect(pane.locator('[data-foot-status] [data-draft-foot]')).toContainText('1 done');
-  await expect(pane.locator('[data-reply-actions="draft"]')).toHaveCount(0); // the box is closed: the foot counts it
-  // The note, saved as it is typed.
+  await expect(pane.locator('[data-reply-actions="draft"]')).toHaveCount(0);
   const note = card.locator('[data-action-draft-note]');
   await expect(note).toHaveAttribute('placeholder', 'Add a note for Claude Code');
   await note.fill('Signed in with the YubiKey; the token is good for 30 days.');
   await note.blur();
   await page.waitForTimeout(800);
-  // Q2: the thread stays where the item put it.
   const holding = page.locator('.ib-group').filter({ hasText: 'Holding up work' }).first();
   await expect(holding.locator(`[data-thread-id="${threads.npm}"]`)).toBeVisible();
   await shot(page, '04-done-in-draft');
-  // A reload keeps the Done and its note in the draft.
   await page.reload();
   await expect(card).toHaveAttribute('data-action-state', 'pending');
   await expect(card.locator('[data-action-draft-note]')).toHaveValue('Signed in with the YubiKey; the token is good for 30 days.');
   await expect(pane.locator('[data-foot-status] [data-draft-foot]')).toContainText('1 done');
-  // Far past the old 10 s window: nothing of the person's reached the agent.
   await page.waitForTimeout(11_000);
   expect(await personMessages(threads.npm)).toBe(0);
 });
@@ -320,7 +272,6 @@ test('Send carries the Done and its note with the answer: one first line, the se
   await pane.locator('[data-question-option]').filter({ hasText: 'next first' }).first().click();
   await expect(pane.locator('[data-foot-status] [data-draft-foot]')).toContainText('1 pick, 1 done');
   await shot(page, '05-draft-foot', ['light']);
-  // The reply box lists what goes with the reply (approved A-03): the item, its Done and its note.
   await pane.locator('[data-reply-button]').click();
   const going = pane.locator('[data-reply-actions="draft"]');
   await expect(going).toContainText('Your action item goes with this reply');
@@ -344,7 +295,6 @@ test('Send carries the Done and its note with the answer: one first line, the se
   const sent = pane.locator('[data-reply-actions="sent"]');
   await expect(sent).toContainText('You did 1 action item');
   await expect(sent).toContainText('Done · Note: Signed in with the YubiKey');
-  // The person's message shows their words and answers, not the agent-facing section.
   const mine = pane.locator('[data-message-id]').last();
   await expect(mine).not.toContainText('Action items you asked for');
   await expect(mine).not.toContainText('1 of 1 done.');
@@ -381,7 +331,6 @@ test("Can't do it: the reason, with the Send, word for word", async () => {
   await card.locator('[data-action-cant-send]').click();
   await expect(card.locator('[data-action-draft-line]')).toContainText("Can't do it");
   await expect(pane.locator('[data-foot-status] [data-draft-foot]')).toContainText("1 can't do");
-  // Q2: a Stopped item's mark waiting in the draft keeps the thread in Stopped on you.
   const stopped = page.locator('.ib-group').filter({ hasText: 'Stopped on you' }).first();
   await expect(stopped.locator(`[data-thread-id="${threads.vercel}"]`)).toBeVisible();
   await shot(page, '08b-cant-in-draft');
@@ -416,10 +365,8 @@ test("the agent marks its own action item done while the person's Done waits in 
   await expect(card.locator('[data-action-settled]')).toContainText('Claude Code saw it done');
   await expect(card.locator('[data-action-draft-note]')).toHaveValue('Merged with a squash; kept the changelog line.');
   await expect(card.locator('[data-action-draft-line]')).toHaveText('Your note · in your draft');
-  // The note is a draft: the row's Draft label says so (the open row stays where it is while it is open).
   await expect(row(page, threads.merge)).toContainText('1 done');
   await shot(page, '09-agent-saw-it-done-note');
-  // Nothing from the person yet: the agent's two messages only.
   expect(await personMessages(threads.merge)).toBe(0);
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
   const answer = await claude.nextReply(threads.merge, 40);
@@ -450,13 +397,11 @@ test('phone (WebKit, iPhone 15): the checklist, 44 px targets', async () => {
       expect(box.width).toBeGreaterThanOrEqual(44);
     }
     await shot(page, '10-phone');
-    // Done into the draft: the note field is a 44 px target with 16 px text (no zoom on focus).
     await card.locator('[data-action-done]').tap();
     const note = card.locator('[data-action-draft-note]');
     await expect(note).toBeVisible();
     expect((await note.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     expect(await note.evaluate((el) => getComputedStyle(el).fontSize)).toBe('16px');
-    // A phone's foot draws no status (approval "reply-bar-pairs"): Edit draft counts it and names it.
     const draft = page.locator('section.ib-pane .ib-pfoot [data-edit-draft]');
     await expect(draft).toHaveAccessibleName(/^Draft 1: 1 done\. Edit draft$/);
     await expect(draft.locator('[data-draft-count]')).toHaveText('1');

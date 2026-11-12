@@ -1,25 +1,3 @@
-/**
- * Picks made while the reply box is open, in a real browser against the
- * compiled binary (the owner, 2026-10-21: "When i edit a reply, and then add
- * new answers... do they get added to the reply? Because I dont see them").
- * Nothing is mocked: `plannotator inbox --background` under a temp
- * PLANNOTATOR_DATA_DIR and HOME, a Claude Code agent asking six pick-one
- * questions through `plannotator inbox mcp` (scripts/inbox-sim.ts).
- *
- * The person picks one answer, opens the reply (Edit draft), types words,
- * then clicks more answers with the mouse while the words have focus. Every
- * click saves a pick (read back from the server), and the box lists every
- * answer live under the words; the words are never rewritten. Then Send: the
- * words once, the answers once. Last, the box on an iPhone 15's screen
- * (touch and mobile layout, in the config's Chromium).
- *
- * `PLANNOTATOR_PICKS_LEGACY=1` runs only the save half (no list asserted),
- * for an older binary (`PLANNOTATOR_E2E_BINARY=~/.local/bin/plannotator`).
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * PNGs land in .local/proof/picks-composing/ (or PLANNOTATOR_PICKS_SHOTS).
- */
-
 import { devices, expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -80,7 +58,6 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 }
 
-/** Each test asks in a thread of its own, by name. */
 async function ask(subject: string, thread: string): Promise<string> {
   const sent = await world.claude.send({ project_path: world.billing, subject, thread, body: BODY }, { wakes: true });
   return sent.thread_id as string;
@@ -149,7 +126,6 @@ test('desktop: answers clicked while writing the reply save, and the box lists t
   await box.pressSequentially(' Cards: the list is short, a table hides the totals.', { delay: 5 });
   const words = await box.inputValue();
 
-  // More answers, each a mouse click on the card while the words have focus.
   for (const [n, label] of [
     [1, 'Yes'],
     [2, 'Symbol first'],
@@ -162,7 +138,6 @@ test('desktop: answers clicked while writing the reply save, and the box lists t
   await expect(pane.locator('[data-picks-chip]')).toContainText('4 picks');
   await expect(box).toHaveValue(words);
   if (legacy) {
-    // The box as an older Inbox draws it: the words seeded once with the first answer, never updated.
     await pane.locator('.ib-rbox').scrollIntoViewIfNeeded();
     await shot(page, '0-before-legacy');
     return;
@@ -178,16 +153,13 @@ test('desktop: answers clicked while writing the reply save, and the box lists t
   await list.scrollIntoViewIfNeeded();
   await shot(page, '1-desktop-composing');
 
-  // A row goes to its card.
   await list.locator('[data-reply-answer]').nth(2).click();
   await expect(cards.nth(2)).toBeFocused();
 
-  // Changing an answer shows at once.
   await choice(0, 'A dense table').click();
   await expect(list.locator('[data-reply-answer]').first()).toContainText('A dense table');
   await expect.poll(async () => (await messages(threadId))[0]!.questions![0]!.answer?.selected?.[0]).toBe('A dense table');
 
-  // Send: the words once, every answer once, no summary line in the words.
   await pane.locator('.ib-rbox').scrollIntoViewIfNeeded();
   await pane.locator('.ib-rbox [data-reply-send]').click();
   await expect.poll(async () => (await messages(threadId)).filter((m) => m.author.kind === 'person').length).toBe(1);
@@ -210,7 +182,6 @@ test('a long "Other" answer behind slow saves: a few saves, and Send carries the
   await cards.nth(0).locator('[data-question-option]').filter({ hasText: 'Cards' }).click();
   await expect.poll(() => states(threadId)).toEqual(['picked', 'open', 'open', 'open', 'open', 'open']);
 
-  // The owner's phone over a tailnet: each save takes a while, and the answer changes faster than that.
   let saves = 0;
   await page.route('**/picks', async (route) => {
     saves += 1;
@@ -226,14 +197,10 @@ test('a long "Other" answer behind slow saves: a few saves, and Send carries the
   await page.unroute('**/picks');
   const reply = (await messages(threadId)).find((m) => m.author.kind === 'person')!.body;
   expect(reply).toContain(`Answer: Other: ${words}`);
-  // One save per key would be about 90, a Send 27 s behind them. A slow runner types slower, so not an exact count.
   expect(saves).toBeLessThan(45);
   expect(world.errors).toEqual([]);
 });
 
-// The iPhone 15's screen, touch and mobile layout in the config's own browser: launching WebKit by hand
-// from this Chromium project dies on the CI runner (as inbox-refresh.spec.ts notes). inbox-mobile.spec.ts
-// covers the window in WebKit itself.
 const { defaultBrowserType: _phoneBrowser, ...iPhone } = devices['iPhone 15'];
 test.describe('a phone (iPhone 15 screen)', () => {
   test.use(iPhone);
@@ -258,10 +225,6 @@ test.describe('a phone (iPhone 15 screen)', () => {
     const row = await list.locator('[data-reply-answer]').first().boundingBox();
     expect(row!.height).toBeGreaterThanOrEqual(44);
     await expect(box).toHaveValue('Cards: the list is short.');
-    // More answers than fit: the list holds about two and a half rows and scrolls, so the box
-    // never eats the thread with the keyboard up.
-    // Quick taps, as a thumb makes them: the browser counts a tap near the last one as its second click, and a tap
-    // on another card's answer still picks (only a second tap on the same answer is a double tap).
     await choice(2, 'Code after').tap();
     await choice(3, 'Footer').tap();
     await expect.poll(() => states(threadId)).toEqual(['picked', 'picked', 'picked', 'picked', 'picked', 'open']);
@@ -270,7 +233,6 @@ test.describe('a phone (iPhone 15 screen)', () => {
     const [shown, whole] = await rows.evaluate((el) => [el.clientHeight, el.scrollHeight]);
     expect(shown).toBeLessThanOrEqual(112);
     expect(whole).toBeGreaterThan(shown);
-    // The keyboard up: the words focused, the window as tall as iOS leaves above the keyboard.
     await page.setViewportSize({ width: 393, height: 470 });
     await box.focus();
     await page.waitForTimeout(300);

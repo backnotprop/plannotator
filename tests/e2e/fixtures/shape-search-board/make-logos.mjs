@@ -1,5 +1,3 @@
-// Four plain letter tiles as PNGs for the test board, one per engine row: a letter on a flat colour, no engine's
-// real or look-alike mark (the repo is public). Run: node make-logos.mjs <repo> <out folder>.
 import { createRequire } from 'node:module';
 const [repo, out] = process.argv.slice(2);
 const { chromium } = createRequire(`${repo}/package.json`)('@playwright/test');

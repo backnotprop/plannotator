@@ -1,26 +1,3 @@
-/**
- * A long paste is a file (approval "inbox-paste-attachment", option A), proved
- * in a real browser against the compiled binary. The binary runs
- * `plannotator inbox --background` under a temp PLANNOTATOR_DATA_DIR and HOME
- * (and temp agent config dirs), an agent writes through `plannotator inbox mcp`
- * (scripts/inbox-sim.ts), a connection's long-poll keeps one session live for
- * compose, and Chromium pastes real ClipboardEvents carrying 40 KB of text.
- *
- *  1. The reply box: the paste becomes a tile with Undo; the platform's undo
- *     (a real ⌘Z / Ctrl+Z) puts it back where it was, caret after it; after
- *     another edit it stands down; after 10 s hover shows Put back in box,
- *     which puts it back; Send carries the file, the agent reads its bytes.
- *  2. CRLF text: ⌘Z puts back what the box shows (`\n` line ends), the caret
- *     right after it, the next key in place, and Send carries those words;
- *     focus on Undo stays on the control at the 10 s swap, named for its tile.
- *  3. New message: a tile and no words sends; the thread shows the file.
- *  4. A phone (390 and 320 px): Undo, then Put back, beside the ×; the tile
- *     fits; Put back works.
- *
- * Build the binary first (see inbox.spec.ts). PNGs land in
- * .local/proof/paste-text/ (and PASTE_TEXT_SHOTS_DIR when set).
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -37,7 +14,6 @@ const extraShots = process.env.PASTE_TEXT_SHOTS_DIR ? resolve(process.env.PASTE_
 const PASTED = /^pasted-text-\d{4}-\d\d-\d\d-\d{4}(-\d+)?\.txt$/;
 const UNDO_KEY = process.platform === 'darwin' ? 'Meta+z' : 'Control+z';
 
-/** About 40 KB of a worker's log: over the 32 KB threshold. */
 const LOG = Array.from({ length: 700 }, (_, i) => `2026-11-01T21:${String(10 + (i % 50)).padStart(2, '0')}:04Z worker-3 retry ${i % 4} job=${4100 + i} status=failed\n`).join('');
 
 interface World {
@@ -58,7 +34,6 @@ function registry(dataDir: string): { port: number; token: string } {
   return JSON.parse(readFileSync(join(dataDir, 'inbox', 'inbox.json'), 'utf8'));
 }
 
-/** A connection's long-poll, saying where the session works: it stays live for compose. */
 function keepLive(dataDir: string, session: string, host: string, project: string): () => Promise<void> {
   let stopped = false;
   const startedAt = Date.now() - 20 * 60_000;
@@ -89,7 +64,6 @@ async function shot(page: Page, name: string, schemes: readonly ('light' | 'dark
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 }
 
-/** A real ClipboardEvent of text on the focused element. True when the browser's own paste was prevented. */
 async function pasteText(page: Page, text: string): Promise<boolean> {
   return page.evaluate((text) => {
     const data = new DataTransfer();
@@ -100,7 +74,6 @@ async function pasteText(page: Page, text: string): Promise<boolean> {
   }, text);
 }
 
-/** The field's value and caret. */
 async function field(page: Page, selector: string): Promise<{ value: string; caret: number; end: number; focused: boolean }> {
   return page.evaluate((selector) => {
     const el = document.querySelector(selector) as HTMLTextAreaElement;
@@ -126,8 +99,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const root = inboxScratch('plannotator-inbox-paste-text-e2e-');
   const dataDir = join(root, 'data');
   for (const dir of ['claude', 'codex', 'opencode']) mkdirSync(join(root, dir), { recursive: true });
-  // The Inbox child's HOME is the scratch root too (as the other Inbox specs), so nothing it resolves from
-  // the home (~/.pi, ~/.config, ~/.gemini, ~/.cursor) is the real account's.
   const env = {
     PATH: process.env.PATH ?? '',
     HOME: root,
@@ -163,10 +134,6 @@ test.afterAll(async () => {
   }
 });
 
-/**
- * A thread of its own for each test: named by `subject`, so no test opens another's reply draft
- * (a saved draft reopens the reply box, and the footer's Reply button is gone).
- */
 async function newThread(subject: string): Promise<string> {
   const sent = await world.agent.send({ project_path: world.ledger, subject, thread: subject, body: 'The nightly import failed on worker-3. Can you send me the log?' });
   return sent.thread_id as string;
@@ -188,7 +155,6 @@ test('the reply box: Undo and ⌘Z put the paste back where it was, ⌘Z stands 
   await text.pressSequentially(`${BEFORE}${AFTER}`);
   await caretAt(page, BOX, BEFORE.length);
 
-  // The paste is a file: the browser's own paste is prevented, the words stay as they were.
   expect(await pasteText(page, LOG)).toBe(true);
   const tile = box.locator('[data-pasted-text]');
   await expect(tile).toHaveCount(1);
@@ -198,7 +164,6 @@ test('the reply box: Undo and ⌘Z put the paste back where it was, ⌘Z stands 
   expect((await field(page, BOX)).value).toBe(`${BEFORE}${AFTER}`);
   await shot(page, '01-reply-tile-undo');
 
-  // The platform's undo, as the very next edit: the exact text back between the words, the caret after it.
   await page.keyboard.press(UNDO_KEY);
   await expect(tile).toHaveCount(0);
   let now = await field(page, BOX);
@@ -207,7 +172,6 @@ test('the reply box: Undo and ⌘Z put the paste back where it was, ⌘Z stands 
   expect(now.end).toBe(now.caret);
   expect(now.focused).toBe(true);
 
-  // Again, then another edit: undo is the browser's again (the typing goes), the tile stays.
   await text.fill(`${BEFORE}${AFTER}`);
   await caretAt(page, BOX, BEFORE.length);
   expect(await pasteText(page, LOG)).toBe(true);
@@ -218,10 +182,8 @@ test('the reply box: Undo and ⌘Z put the paste back where it was, ⌘Z stands 
   await expect(tile).toHaveCount(1);
   expect((await field(page, BOX)).value).not.toContain(LOG);
 
-  // After 10 s the line is the size; hover swaps it in place for Put back in box, with no layout shift.
   await expect(tile).not.toHaveAttribute('data-pasted-fresh', /.*/, { timeout: 15_000 });
   await page.mouse.move(0, 0);
-  // The control's cell (`.ib-pt-back`, around the one Undo / Put back button) is what fades in.
   const backCell = tile.locator('.ib-pt-back:has([data-pasted-put-back])');
   await expect(backCell).toHaveCSS('opacity', '0');
   const rest = await tile.boundingBox();
@@ -230,8 +192,6 @@ test('the reply box: Undo and ⌘Z put the paste back where it was, ⌘Z stands 
   await expect(backCell).toHaveCSS('opacity', '1');
   expect(await tile.boundingBox()).toEqual(rest);
   await shot(page, '03-reply-tile-hover');
-  // What the browser's undo left of the typing stays after the paste's place: words typed at the
-  // caret right after a paste come after it, so Put back puts the paste ahead of them.
   const typed = (await field(page, BOX)).value;
   expect(typed.startsWith(BEFORE)).toBe(true);
   expect(typed.endsWith(AFTER)).toBe(true);
@@ -241,7 +201,6 @@ test('the reply box: Undo and ⌘Z put the paste back where it was, ⌘Z stands 
   expect(now.value).toBe(`${BEFORE}${LOG}${typed.slice(BEFORE.length)}`);
   expect(now.caret).toBe(BEFORE.length + LOG.length);
 
-  // A paste that goes: Send carries it, the agent reads the exact bytes.
   await text.fill(`${BEFORE}${AFTER}`);
   await caretAt(page, BOX, BEFORE.length);
   expect(await pasteText(page, LOG)).toBe(true);
@@ -278,7 +237,6 @@ test('CRLF text: ⌘Z puts back what the box shows, the caret right after it, th
   const now = await field(page, BOX);
   expect(now.value).toBe(`${BEFORE}${LOG}${AFTER}`);
   expect(now.caret).toBe(BEFORE.length + LOG.length);
-  // The next key lands right after the paste, and is in what Send carries.
   await page.keyboard.type('Z');
   expect((await field(page, BOX)).value).toBe(`${BEFORE}${LOG}Z${AFTER}`);
   await pane.getByRole('button', { name: 'Send', exact: true }).click();
@@ -287,7 +245,6 @@ test('CRLF text: ⌘Z puts back what the box shows, the caret right after it, th
   expect(answer.body).toContain(`${LOG}Z${AFTER}`);
   expect(answer.body).not.toContain('\r');
 
-  // A keyboard user on Undo as its 10 s pass: focus stays on that control, now Put back in box, named for its tile.
   await pane.getByRole('button', { name: 'Reply', exact: true }).last().click();
   await expect(text).toBeFocused();
   expect(await pasteText(page, LOG)).toBe(true);
@@ -303,13 +260,11 @@ test('CRLF text: ⌘Z puts back what the box shows, the caret right after it, th
   expect(world.errors).toEqual([]);
 });
 
-/** The thread's reply draft as the Inbox holds it (null: none). */
 async function serverDraft(threadId: string): Promise<{ body: string; files?: { upload_id: string }[] } | null> {
   const answer = await fetch(new URL(`/api/inbox/threads/${threadId}/draft`, world.url));
   return ((await answer.json()) as { draft: { body: string; files?: { upload_id: string }[] } | null }).draft;
 }
 
-/** Type `words` at the end of a long draft in a fresh page, close that page at once (within the 500 ms save pause), and reopen. */
 async function closeRightAfterEdit(threadId: string, draft: string, words: string): Promise<Page> {
   const tab = await world.context.newPage();
   await tab.goto(`${world.url}#thread=${threadId}`);
@@ -326,7 +281,6 @@ async function closeRightAfterEdit(threadId: string, draft: string, words: strin
 }
 
 test('a long draft edited and its page closed within the save pause keeps the edit: the draft read back after reopening holds it', async () => {
-  // Over 32 KB: the words, and the last save's words beside them (`base_body`), are more than a keepalive carries.
   const threadId = await newThread('Long draft closed at once');
   const again = await closeRightAfterEdit(threadId, LOG, ' Sent from the train.');
   try {
@@ -338,7 +292,6 @@ test('a long draft edited and its page closed within the save pause keeps the ed
 });
 
 test('words alone over a keepalive (64 KiB), edited and closed at once: the edit still reaches the Inbox', async () => {
-  // Too big for a keepalive even without `base_body`: the save goes as a plain request.
   const threadId = await newThread('Huge draft closed at once');
   const again = await closeRightAfterEdit(threadId, LOG + LOG, ' Huge edit.');
   try {
@@ -415,7 +368,6 @@ test('a phone: Undo, then Put back, beside the × with a 44 px target; the tile 
     const side = tile.locator('[data-pasted-side]');
     await expect(side).toBeVisible();
     await expect(side).toHaveText('Undo');
-    // The line keeps the size; the link is beside the ×.
     await expect(tile.locator('[data-pasted-undo]')).toBeHidden();
     const target = await side.evaluate((el) => {
       const after = getComputedStyle(el, '::after');

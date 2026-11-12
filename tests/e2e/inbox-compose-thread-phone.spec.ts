@@ -1,25 +1,3 @@
-/**
- * New message on a phone: the Thread row (the thread's name, what the owner calls the subject line) stays on screen,
- * with what was typed in it, once an agent is picked (the owner, 2026-11-02: "Whenever I select the agent for creating
- * a new thread I lose the subject line on mobile. This is critical error.").
- *
- * A pick moves focus to the message, so a phone's keyboard comes up, and 0.28.45's fold hid the Thread row for as long
- * as the keyboard stayed up (inbox.css, `:root[data-ib-keyboard] … .ib-cp-thread { display: none }`). Picking the agent
- * was the moment it went.
- *
- * The keyboard cannot exist in a headless browser, so it is a stand-in, as in inbox-phone-compose-send.spec.ts: WebKit
- * replays the owner's iOS readings (390 x 660 less 403), Chromium the Android ones; 320 x 568 less 353 is the narrowest
- * phone. Proved against the compiled binary under a temp PLANNOTATOR_DATA_DIR (PLANNOTATOR_INBOX_CONNECT=0, no browser):
- *
- * - A name typed first, then the agent picked (To is the pill in the foot's row, its list a bottom sheet): the row is on
- *   screen with the keyboard up, under the top bar, over the message, and holds the typed name; To and Send stay in reach.
- * - The agent picked first, then the message typed: the row is on screen with its suggestion.
- * - A narrow desktop window (Chromium, 600 x 800, so the phone's layout): the row and its name survive the pick.
- *
- * Build the binary first (see inbox.spec.ts). PLANNOTATOR_E2E_SHOTS_DIR names a folder for the pictures (default
- * .local/proof/compose-thread-phone), the keyboard's stand-in drawn in grey.
- */
-
 import { chromium, devices, expect, test, webkit, type Browser, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
@@ -76,7 +54,6 @@ test.beforeAll(async () => {
   const { port, token } = JSON.parse(readFileSync(join(dataDir, 'inbox', 'inbox.json'), 'utf8')) as { port: number; token: string };
   world = { url: started.stdout.trim(), agent, stop: false, loop: null };
 
-  // One live Claude Code session in "plannotator", as the mod's connection holds it.
   const startedAt = Date.now() - 45 * 60_000;
   world.loop = (async () => {
     while (!world.stop) {
@@ -101,7 +78,6 @@ test.afterAll(async () => {
   }
 });
 
-/** The stand-in for the keyboard: what each browser reports with one up. */
 type Keyboard = (page: Page, height: number) => Promise<void>;
 
 const iosKeyboardUp: Keyboard = async (page, height) => {
@@ -133,7 +109,6 @@ async function openCompose(page: Page): Promise<void> {
   await expect(sheetOf(page).locator('[data-compose-to]')).not.toHaveAttribute('data-loading', /.*/);
 }
 
-/** Opens To's sheet from the pill in the foot's row and picks the live session, as a finger does. Focus then goes to the message. */
 async function pickAgent(page: Page, tap: boolean): Promise<void> {
   const sheet = sheetOf(page);
   const to = sheet.locator('.ib-cp-foot [data-compose-to]');
@@ -160,7 +135,6 @@ interface Seen {
   send: { bottom: number; onTop: boolean };
 }
 
-/** Where the Thread row, its chip, the top bar, To, the foot and Send are. A part not drawn is null. */
 async function read(page: Page): Promise<Seen> {
   return page.evaluate(() => {
     const dialog = document.querySelector('dialog[data-compose]')!;
@@ -186,7 +160,6 @@ async function read(page: Page): Promise<Seen> {
   });
 }
 
-/** The Thread row and its whole chip are on screen, under the top bar and over the foot, where To is. */
 function threadOnScreen(l: Seen, name: string): void {
   expect(l.thread, `${name}: the Thread row is drawn`).toBeTruthy();
   expect(l.chip, `${name}: the Thread chip is drawn`).toBeTruthy();
@@ -204,7 +177,6 @@ function sendInReach(l: Seen, name: string): void {
   expect(l.send.bottom, `${name}: Send ends above the keyboard`).toBeLessThanOrEqual(l.seen + 0.5);
 }
 
-/** A picture of the window, with a grey box for the keyboard's stand-in. In the dialog: a modal dialog is the top layer. */
 async function shot(page: Page, name: string): Promise<void> {
   const keyboard = await page.evaluate(() => document.documentElement.hasAttribute('data-ib-keyboard'));
   if (keyboard) {
@@ -256,7 +228,6 @@ for (const engine of ENGINES) {
         await shot(page, `${engine.name}-${size.width}-1-name-typed`);
 
         await pickAgent(page, true);
-        // Focus is in the message now, so the phone's keyboard comes up.
         await engine.up(page, size.keyboard);
         await expect(page.locator('html')).toHaveAttribute('data-ib-keyboard', '');
         await sheet.locator('[data-compose-text] textarea').fill(MESSAGE);
@@ -279,7 +250,6 @@ for (const engine of ENGINES) {
         await expect(page.locator('html')).toHaveAttribute('data-ib-keyboard', '');
         await sheet.locator('[data-compose-text] textarea').fill(MESSAGE);
         const chip = sheet.locator('.ib-cp-tname-in');
-        // The suggestion follows the message 250 ms after typing stops.
         await expect(chip).not.toHaveValue('');
         await shot(page, `${engine.name}-${size.width}-3-picked-first-keyboard-up`);
         await expect(chip).toBeVisible();

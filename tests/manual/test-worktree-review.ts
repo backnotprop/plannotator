@@ -1,45 +1,3 @@
-// Manual QA: runs with your real HOME and Plannotator config on purpose. For an isolated test run, use `bun run test:sandbox`.
-/**
- * Test script for worktree support and expandable diff context in Code Review
- *
- * Creates a temporary git repo with multiple worktrees, each with different
- * kinds of changes, then launches the review server so you can manually test
- * the worktree dropdown, diff switching, and expandable context features.
- *
- * Usage:
- *   bun run tests/manual/test-worktree-review.ts [--keep]
- *
- * Options:
- *   --keep  Don't clean up the temp repo on exit (for debugging)
- *
- * What to test:
- *
- * WORKTREE FEATURES:
- *   1. Context dropdown appears above View dropdown, listing available worktrees
- *   2. Selecting a worktree in Context switches files; pill gets highlighted border
- *   3. View dropdown (Uncommitted/Last commit/vs main) stays the same in any context
- *   4. Can switch directly between worktrees without going "back to main" first
- *   5. Selecting main branch in Context restores the main repo view
- *   6. Empty worktree shows appropriate empty state messages
- *   7. Detached HEAD worktree uses directory name as label
- *
- * EXPANDABLE DIFF CONTEXT:
- *   8.  service-registry.ts — 4 disjoint hunks with gaps of 10-30 lines between them.
- *       Each gap shows "N unmodified lines" separator with expand up/down/both buttons.
- *   9.  Expand up/down reveals 100 lines at a time; small gaps (<100 lines) show
- *       a single "expand all" button instead.
- *   10. Top of file (above first hunk) and bottom of file (below last hunk) are expandable.
- *   11. deprecated-helper.ts — a deleted file. Should show expansion above hunks only
- *       (newContent is null, so newLines = []).
- *   12. string-utils.ts → text-utils.ts — a renamed file. Expansion should use
- *       oldPath for old content and filePath for new content.
- *   13. event-emitter.ts — a brand-new file with only additions. Expansion above
- *       the single hunk only (oldContent is null, so oldLines = []).
- *   14. Switching diff types (uncommitted → last-commit → vs main) re-fetches
- *       file contents for expansion — verify separators appear in all modes.
- *   15. Split and unified views both show expansion separators.
- */
-
 import { $ } from "bun";
 import { tmpdir } from "os";
 import path from "path";
@@ -54,11 +12,8 @@ import html from "../../apps/review/dist/index.html" with { type: "text" };
 
 const KEEP = process.argv.includes("--keep");
 
-// --- Load fixtures ---
 const FIXTURES_DIR = path.join(import.meta.dir, "fixtures");
 const fixture = (name: string) => Bun.file(path.join(FIXTURES_DIR, name)).text();
-
-// --- Setup temp repo with worktrees ---
 
 const sandbox = path.join(tmpdir(), `plannotator-wt-test-${Date.now()}`);
 const mainRepo = path.join(sandbox, "main-repo");
@@ -68,13 +23,10 @@ console.error("");
 console.error(`Sandbox: ${sandbox}`);
 console.error("");
 
-// Create main repo with initial content
 await $`mkdir -p ${mainRepo}`.quiet();
 await $`git init`.quiet().cwd(mainRepo);
 await $`git checkout -b main`.quiet().cwd(mainRepo);
 
-// Initial commit — a realistic small TypeScript project
-// Large files loaded from fixtures, small ones inlined
 const files: Record<string, string> = {
   "src/index.ts": [
     `import { App } from './app';`,
@@ -329,7 +281,6 @@ const files: Record<string, string> = {
     `- \`src/utils/\` — Shared utilities (logging, parsing, formatting)`,
     ``,
   ].join("\n"),
-  // Large files from fixtures — test expandable diff context
   "src/services/registry.ts": await fixture("service-registry.ts"),
   "src/utils/deprecated-helper.ts": await fixture("deprecated-helper.ts"),
   "src/utils/string-utils.ts": await fixture("string-utils.ts"),
@@ -344,7 +295,6 @@ for (const [filePath, content] of Object.entries(files)) {
 await $`git add -A`.quiet().cwd(mainRepo);
 await $`git commit -m "initial commit"`.quiet().cwd(mainRepo);
 
-// Make uncommitted changes in main repo — a few small edits across files
 await Bun.write(
   path.join(mainRepo, "src/index.ts"),
   [
@@ -392,23 +342,19 @@ await Bun.write(
   ].join("\n"),
 );
 
-// Disjoint hunks: service-registry.ts with 4 scattered edits (from fixture)
 await Bun.write(
   path.join(mainRepo, "src/services/registry.ts"),
   await fixture("service-registry-modified.ts"),
 );
 
-// Deleted file: deprecated-helper.ts removed entirely
 await $`git rm src/utils/deprecated-helper.ts`.quiet().cwd(mainRepo);
 
-// Renamed file: string-utils.ts → text-utils.ts with additions
 await $`git mv src/utils/string-utils.ts src/utils/text-utils.ts`.quiet().cwd(mainRepo);
 await Bun.write(
   path.join(mainRepo, "src/utils/text-utils.ts"),
   await fixture("text-utils.ts"),
 );
 
-// New file (only additions): event-emitter.ts — brand new with no old version
 await $`mkdir -p ${path.join(mainRepo, "src/events")}`.quiet();
 await Bun.write(
   path.join(mainRepo, "src/events/emitter.ts"),
@@ -423,14 +369,9 @@ console.error("  - src/utils/deprecated-helper.ts — deleted file")
 console.error("  - src/utils/string-utils.ts → text-utils.ts — renamed + additions")
 console.error("  - src/events/emitter.ts — brand new file");
 
-// --- Worktree 1: feature-auth ---
-// Tests the basic case: a new untracked file (auth.ts) and a modified tracked
-// file (app.ts). Both should appear in the diff when this worktree is selected,
-// exercising both `git diff HEAD` and `getUntrackedFileDiffs()` with cwd.
 const wt1 = path.join(sandbox, "wt-feature-auth");
 await $`git worktree add ${wt1} -b feature-auth`.quiet().cwd(mainRepo);
 
-// New file: full auth module with JWT + password hashing
 await Bun.write(
   path.join(wt1, "src/auth/index.ts"),
   [
@@ -566,7 +507,6 @@ await Bun.write(
   ].join("\n"),
 );
 
-// Modified: app.ts — wire up auth routes
 await Bun.write(
   path.join(wt1, "src/app.ts"),
   [
@@ -631,7 +571,6 @@ await Bun.write(
   ].join("\n"),
 );
 
-// Modified: add password_hash column to users migration
 await Bun.write(
   path.join(wt1, "src/db/migrations.ts"),
   [
@@ -682,11 +621,9 @@ await Bun.write(
   ].join("\n"),
 );
 
-// Commit some changes so "Last commit" has content in this worktree
 await $`git add -A`.quiet().cwd(wt1);
 await $`git commit -m "feat: add authentication module"`.quiet().cwd(wt1);
 
-// Add one more uncommitted change on top so both "Uncommitted" and "Last commit" have content
 await Bun.write(
   path.join(wt1, "src/auth/rate-limit.ts"),
   [
@@ -711,14 +648,9 @@ await Bun.write(
 
 console.error("Created worktree: feature-auth (committed + 1 uncommitted file)");
 
-// --- Worktree 2: fix-parser ---
-// Tests that untracked files (validator.ts) show up alongside tracked changes
-// (parser.ts). The untracked file is never `git add`-ed, so it exercises the
-// `git ls-files --others` → `git diff --no-index` path in getUntrackedFileDiffs.
 const wt2 = path.join(sandbox, "wt-fix-parser");
 await $`git worktree add ${wt2} -b fix-parser`.quiet().cwd(mainRepo);
 
-// Modified: parser.ts — fix empty input bug, add CSV/URL parsing
 await Bun.write(
   path.join(wt2, "src/utils/parser.ts"),
   [
@@ -783,7 +715,6 @@ await Bun.write(
   ].join("\n"),
 );
 
-// Modified: logger.ts — add structured logging and log levels
 await Bun.write(
   path.join(wt2, "src/utils/logger.ts"),
   [
@@ -836,7 +767,6 @@ await Bun.write(
   ].join("\n"),
 );
 
-// Untracked new file (never git-added) — exercises getUntrackedFileDiffs
 await Bun.write(
   path.join(wt2, "src/utils/validator.ts"),
   [
@@ -871,7 +801,6 @@ await Bun.write(
   ].join("\n"),
 );
 
-// Another untracked new file
 await Bun.write(
   path.join(wt2, "src/utils/retry.ts"),
   [
@@ -914,30 +843,20 @@ await Bun.write(
   ].join("\n"),
 );
 
-// Commit tracked changes so "Last commit" and "vs main" have content.
-// The untracked files (validator.ts, retry.ts) stay uncommitted.
 await $`git add src/utils/parser.ts src/utils/logger.ts`.quiet().cwd(wt2);
 await $`git commit -m "fix: handle empty input and add CSV/URL parsing"`.quiet().cwd(wt2);
 
 console.error("Created worktree: fix-parser (2 committed + 2 untracked files)");
 
-// --- Worktree 3: empty worktree ---
-// Tests the empty state. No files are modified, so selecting this worktree
-// should show "No uncommitted changes in this worktree." in the UI.
 const wt3 = path.join(sandbox, "wt-empty");
 await $`git worktree add ${wt3} -b empty-branch`.quiet().cwd(mainRepo);
 
 console.error("Created worktree: empty-branch (no changes — tests empty state)");
 
-// --- Worktree 4: detached HEAD ---
-// Tests the label fallback. When a worktree has no branch (detached HEAD),
-// getWorktrees() returns branch=null and the dropdown label should use
-// the directory basename ("wt-detached") instead of a branch name.
 const wt4 = path.join(sandbox, "wt-detached");
 const headSha = (await $`git rev-parse HEAD`.quiet().cwd(mainRepo)).text().trim();
 await $`git worktree add --detach ${wt4} ${headSha}`.quiet().cwd(mainRepo);
 
-// Hotfix: patch the router to handle 404s and add request logging
 await Bun.write(
   path.join(wt4, "src/router.ts"),
   [
@@ -996,7 +915,6 @@ await Bun.write(
   ].join("\n"),
 );
 
-// Hotfix: connection pool with retry logic
 await Bun.write(
   path.join(wt4, "src/db/connection.ts"),
   [
@@ -1054,16 +972,12 @@ await Bun.write(
   ].join("\n"),
 );
 
-// Commit the hotfix so "Last commit" and "vs main" have content
 await $`git add -A`.quiet().cwd(wt4);
 await $`git commit -m "hotfix: add 404 handling and connection retry logic"`.quiet().cwd(wt4);
 
 console.error("Created worktree: detached HEAD (2 committed files — hotfix)");
 console.error("");
 
-// --- Run the review server from the main repo directory ---
-
-// Change process.cwd so git commands run in the sandbox main repo
 process.chdir(mainRepo);
 
 const gitContext = await getGitContext();
@@ -1131,12 +1045,9 @@ console.error("");
 console.error("Feedback received:");
 console.log(JSON.stringify(result, null, 2));
 
-// --- Cleanup ---
-
 if (!KEEP) {
   console.error("");
   console.error("Cleaning up sandbox...");
-  // Remove worktrees before deleting the directory
   await $`git worktree remove ${wt1} --force`.quiet().cwd(mainRepo).nothrow();
   await $`git worktree remove ${wt2} --force`.quiet().cwd(mainRepo).nothrow();
   await $`git worktree remove ${wt3} --force`.quiet().cwd(mainRepo).nothrow();

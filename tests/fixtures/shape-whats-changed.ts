@@ -1,8 +1,3 @@
-/**
- * A made-up board that still carries `views.changed` (once What's changed; accepted, never shown since approval
- * "shape-whats-changed-removed"): a kettle that now whistles once, for the format, store, server and board tests.
- * Invented content only.
- */
 import type { ShapeBoard, ShapeChanged } from '../../packages/core/shape';
 
 export const KETTLE_CHANGED: ShapeChanged = {
@@ -32,7 +27,6 @@ export const KETTLE_CHANGED: ShapeChanged = {
   also: 'Tests: 3 new cases in `kettle.test.ts`.',
 };
 
-/** A board before What's changed: what an older agent writes, stored as it was. */
 export const KETTLE_OLD_BOARD: ShapeBoard = {
   title: 'The kettle whistles once',
   claim: 'Built. Nothing waits on you.',
@@ -42,7 +36,6 @@ export const KETTLE_OLD_BOARD: ShapeBoard = {
   },
 };
 
-/** The kettle board with What's changed (or another What's changed, or one changed field of it). */
 export function kettleBoard(changed: Partial<ShapeChanged> | Record<string, unknown> = {}): ShapeBoard {
   return {
     ...structuredClone(KETTLE_OLD_BOARD),

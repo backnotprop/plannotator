@@ -1,23 +1,3 @@
-/**
- * Trust and start in New message (approval "inbox-launch-trust-compose"; docs/agent-guides/inbox-launch.md, "Trusting a
- * folder"), pressed through in a real browser against the compiled binary. The only fake is the program launch runs:
- * tests/helpers/fake-claude/ with Claude's folder trust on, so `--bg` refuses until the key is in
- * `$CLAUDE_CONFIG_DIR/.claude.json` and nothing passes by accident. Temp HOME, CLAUDE_CONFIG_DIR and
- * PLANNOTATOR_DATA_DIR, PLANNOTATOR_INBOX_CONNECT=0, NO_BROWSER; the real Claude Code, the real `~/.claude.json` and the
- * person's Inbox are never touched.
- *
- *  1. A linked worktree with everything: warning circle, details, one press trusts the main checkout and starts once.
- *  2. A clean folder: the button and no circle. Only the whole repository: a quiet circle. Trusted: plain Send.
- *  3. Home: no offer.
- *  4. The folder changed: nothing saved or sent, the details open on what changed, the next press works.
- *  5. A config that isn't JSON: nothing sent, the words stay, it works once fixed.
- *  6. Cmd+Enter does what the button does; Escape closes the details and keeps the words.
- *  7. A phone at 390 and 320 wide: bottom bar, 44 x 44 circle, the bottom sheet, the press.
- *  8. An agent's bare call is refused on the real binary.
- *
- * Pictures: LAUNCH_TRUST_COMPOSE_SHOTS_DIR (default .local/proof/launch-trust-compose), the approved pictures' names.
- * Build the binary first, then `bunx playwright test -c tests/e2e/playwright.config.ts inbox-launch-trust-compose.spec.ts`.
- */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -47,7 +27,6 @@ interface World {
   context: BrowserContext;
   page: Page;
   errors: string[];
-  /** The circle's computed color on a folder with warnings. */
   warmCircle: string;
 }
 let world: World;
@@ -57,7 +36,6 @@ function git(cwd: string, ...args: string[]): void {
   expect(done.status, done.stderr).toBe(0);
 }
 
-/** A repository with a commit, under `code/<name>`, holding `files`. */
 function repository(name: string, files: Record<string, unknown> = {}): string {
   const dir = join(world.home, 'code', name);
   mkdirSync(join(dir, '.claude'), { recursive: true });
@@ -77,10 +55,6 @@ async function agentWrites(folder: string, session: string, body: string): Promi
   await response.text();
 }
 
-/**
- * A project of its own that is a linked worktree of `main`: a new worktree folds into its repository's project, so,
- * as one kept from before worktrees folded, the project is made while the folder is plain and the worktree comes after.
- */
 async function worktreeProject(main: string, name: string): Promise<string> {
   const dir = join(world.home, 'code', name);
   mkdirSync(dir, { recursive: true });
@@ -103,7 +77,6 @@ async function shot(page: Page, name: string, scale?: string): Promise<void> {
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 }
 
-/** New message to a new Claude Code session in `name`, the words written. */
 async function compose(page: Page, name: string, words: string, threadName: string, open = '.ib-side [data-open-compose]'): Promise<void> {
   await page.goto(world.url);
   await page.locator(open).click();
@@ -137,7 +110,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   markTourDecided(dataDir);
   writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxLaunch: { enabled: true, fullPermissions: false } }));
   const env: Record<string, string> = {
-    // Only the fakes and the system's own tools: never the agents installed on the machine running the spec.
     PATH: `${bin}:/usr/bin:/bin`,
     HOME: home,
     SHELL: fake.shell,
@@ -228,7 +200,6 @@ test('a linked worktree with everything: the warning circle, the details, and on
   await page.reload();
   await expect(pane(page).locator('article.ib-message[data-author="agent"]')).toHaveCount(1, { timeout: 30_000 });
 
-  // The key is the main checkout's, the folder the details named; the rest of the file is byte for byte what it was.
   expect(projects()).toEqual({ [main]: { hasTrustDialogAccepted: true } });
   const saved = readFileSync(world.config, 'utf8');
   expect(saved).toContain('"oauthAccount": {"emailAddress": "person@example.com"}');
@@ -248,7 +219,6 @@ test('a clean folder: the button and no circle. Only the whole repository: a qui
   await expect(d.locator(SEND)).toContainText('Trust and start');
   await expect(d.locator(CIRCLE)).toHaveCount(0);
 
-  // billing-platform's folder is trusted now; a new repository's linked worktree brings nothing else.
   const atlas = repository('atlas');
   await worktreeProject(atlas, 'atlas-maps');
   await compose(page, 'atlas-maps', 'Label the maps.', 'Label maps');
@@ -276,7 +246,6 @@ test('home: no offer, whatever it holds', async () => {
   await expect(dialog(page).locator(SEND)).toContainText('Send');
   await expect(dialog(page).locator(SEND)).not.toContainText('Trust');
   await expect(dialog(page).locator(CIRCLE)).toHaveCount(0);
-  // Every folder below reads a `.mcp.json` above it.
   rmSync(join(home, '.mcp.json'));
 });
 
@@ -301,7 +270,6 @@ test('the folder changed after its reading: nothing is saved or sent, the detail
   await expect(d.getByRole('textbox', { name: 'Message' })).toHaveValue('Map the apple rows.');
 
   await page.waitForTimeout(700);
-  // A real press: the pointer goes down, the details close on it, and the button has not moved when it comes up.
   const answer = sendAnswer(page);
   await d.locator(SEND).click();
   expect((await answer).status()).toBe(200);

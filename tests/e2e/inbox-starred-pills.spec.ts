@@ -1,22 +1,3 @@
-/**
- * Starred threads as pills above the list (approval "inbox-starred-pills") in a real browser against the compiled
- * binary, with agents writing through `plannotator inbox mcp` (scripts/inbox-sim.ts):
- *
- *  - off in an untouched browser: the sidebar's Starred section, no pills;
- *  - "Keep starred above the list" in the list's ⋮ menu puts the pills above the first section and takes the
- *    sidebar's section away, and a reload keeps it;
- *  - a pill's state (Stopped, Holds N, a question count, a dot), its name, its tooltip's agent;
- *  - a click on the star unstars with the toast and opens nothing; Undo puts it back in place; a click on the pill
- *    opens the thread and its pill stays pressed;
- *  - the right-click menu's Move right and Move left change the server's order, which the sidebar shows again
- *    with the choice off;
- *  - Shift+F10 on a focused pill opens the menu (Unstar without a pointer);
- *  - 24 starred in the narrow list: two lines at most, then "+N" and its menu, whose rows have the star to unstar;
- *  - an iPhone in WebKit: one line that scrolls sideways and never widens the page; a tap on the star opens.
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- */
-
 import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -70,7 +51,6 @@ async function serverPins(page: Page): Promise<string[]> {
   });
 }
 
-/** The list's ⋮ menu, then its "Keep starred above the list" item. */
 async function tickStarredAbove(page: Page) {
   await page.locator('.ib-listcol [data-tidy-menu]').click();
   await page.locator('[data-starred-above-option]').click();
@@ -140,7 +120,6 @@ test('off by default; the ⋮ menu item moves the starred threads from the sideb
 
   await expect.poll(() => pillOrder(page)).toEqual(starred);
   await expect(page.locator('[data-pinned-section]')).toHaveCount(0);
-  // Above the first section, under the header.
   const nav = (await page.locator('[data-starred-pills]').boundingBox())!;
   const head = (await page.locator('.ib-listcol .ib-lhead').boundingBox())!;
   const band = (await page.locator('.ib-listcol .ib-band').first().boundingBox())!;
@@ -161,7 +140,6 @@ test("a pill: the gold star, the name, the state, the agent in its tooltip", asy
   await expect(pill(page, threads.nightly).locator('.ib-pdot')).toBeVisible();
   await expect(pill(page, threads.diff)).toHaveAccessibleName('Diff style, plannotator, 1 question, starred');
   await expect(page.getByRole('navigation', { name: 'Starred' })).toBeVisible();
-  // No agent mark on a pill, and no native title anywhere on it.
   await expect(page.locator('[data-starred-pills] li[data-pill-item] .ib-mk')).toHaveCount(0);
   expect(await page.locator('[data-starred-pills] [title]').count()).toBe(0);
   await pill(page, threads.diff).hover({ position: { x: 60, y: 13 } });
@@ -204,7 +182,6 @@ test("the right-click menu: Move right and Move left change the stars' one order
   const moved = [threads.postings, threads.apns, threads.diff, threads.nightly];
   await expect.poll(() => serverPins(page)).toEqual(moved);
   await expect.poll(() => pillOrder(page)).toEqual(moved);
-  // Focus stays on the pill that moved.
   await expect(pill(page, threads.apns)).toBeFocused();
 
   await pill(page, threads.nightly).click({ button: 'right' });
@@ -213,7 +190,6 @@ test("the right-click menu: Move right and Move left change the stars' one order
   const again = [threads.postings, threads.apns, threads.nightly, threads.diff];
   await expect.poll(() => serverPins(page)).toEqual(again);
 
-  // The keyboard: Shift+F10 on a focused pill, Unstar first.
   await pill(page, threads.nightly).focus();
   await page.keyboard.press('Shift+F10');
   await expect(menu).toBeVisible();
@@ -223,7 +199,6 @@ test("the right-click menu: Move right and Move left change the stars' one order
   await page.locator('[data-inbox-toast]').getByRole('button', { name: /Undo/ }).click();
   await expect.poll(() => serverPins(page)).toEqual(again);
 
-  // Off again: the sidebar's Starred section shows the same order.
   await tickStarredAbove(page);
   await expect.poll(() => sidebarOrder(page)).toEqual(again);
   await expect(page.locator('[data-starred-pills]')).toHaveCount(0);
@@ -248,15 +223,12 @@ test('24 starred in the narrow list: two lines at most, then "+N" and its menu',
   expect(tops.length).toBe(2);
   const shown = await shownPills(page).count();
   await expect(more).toHaveText(`+${24 - shown}`);
-  // Nothing spills past the list column.
   const nav = (await page.locator('[data-starred-pills]').boundingBox())!;
   const column = (await page.locator('.ib-listcol').boundingBox())!;
   expect(nav.x + nav.width).toBeLessThanOrEqual(column.x + column.width + 1);
   await more.click();
   const items = page.locator('[data-pills-more-item]');
   await expect(items).toHaveCount(24 - shown);
-  // A row has the pill's star, not an agent mark: it unstars from the menu, which stays open without that row;
-  // the count drops and no thread opens.
   await expect(page.locator('[data-pills-more-menu] .ib-mk')).toHaveCount(0);
   const first = (await items.first().getAttribute('data-pills-more-item'))!;
   await expect(page.locator(`[data-pills-more-unstar="${first}"]`)).toHaveAccessibleName(/^Unstar /);
@@ -274,7 +246,6 @@ test('24 starred in the narrow list: two lines at most, then "+N" and its menu',
 });
 
 test('an iPhone in WebKit: one line that scrolls sideways; a tap on the star opens the thread and unstars nothing', async () => {
-  // No launch args: the project's are Chromium's, which WebKit refuses.
   const phoneBrowser = await webkit.launch({ args: [] });
   try {
     const context = await phoneBrowser.newContext({ ...devices['iPhone 13'] });
@@ -289,7 +260,6 @@ test('an iPhone in WebKit: one line that scrolls sideways; a tap on the star ope
     const line = await nav.locator('ul').evaluate((ul) => ({ scroll: ul.scrollWidth, client: ul.clientWidth, tops: [...new Set([...ul.children].map((el) => (el as HTMLElement).offsetTop))].length }));
     expect(line.tops).toBe(1);
     expect(line.scroll).toBeGreaterThan(line.client);
-    // The line scrolls inside itself: the page is no wider than the phone.
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(await page.evaluate(() => window.innerWidth));
     const before = await serverPins(page);
     const first = before[0]!;

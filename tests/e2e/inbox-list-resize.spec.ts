@@ -1,17 +1,3 @@
-/**
- * The list column beside an open thread has the sidebar's resize edge
- * (packages/inbox/shell/ListColumnEdge.tsx), proved in a real Chromium against
- * the compiled binary under a temp PLANNOTATOR_DATA_DIR: the column opens at
- * 380px with two-line rows; a drag widens it, the rows switch to the wide
- * shape exactly once as it crosses 900px (sampled every frame); it never
- * leaves the thread pane less than 480px; the width survives a reload; the
- * keyboard resizes it; a narrower window draws it clamped; and the full list
- * and a phone get no edge.
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * The PNGs land in .local/proof/list-resize/.
- */
-
 import { chromium, expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs';
@@ -23,17 +9,13 @@ import { NO_BROWSER } from '../helpers/no-browser';
 const repo = resolve(__dirname, '../..');
 const builtBinary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'list-resize');
-// Wide enough that a widened list can pass the wide rows' 900px beside the sidebar.
 const VIEWPORT = { width: 1920, height: 1000 };
 const SIDEBAR = 232;
 const LIST_MIN = 380;
 const PANE_MIN = 480;
 const WIDE_ROWS = 900;
-// The panes float on the ground (inbox.css --ib-gutter): 8px around .ib-main and between the list and the thread.
 const GUTTER = 8;
-/** The list column's left edge: past the sidebar and one gutter. */
 const LIST_X = SIDEBAR + GUTTER;
-/** What the list and the thread pane share in a window this wide. */
 const room = (windowWidth: number) => windowWidth - SIDEBAR - 3 * GUTTER;
 
 interface World {
@@ -41,7 +23,6 @@ interface World {
   dataDir: string;
   url: string;
   agent: SimAgent;
-  /** The thread that carries a guided review. */
   guideThread: string;
   context: BrowserContext;
   page: Page;
@@ -83,7 +64,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const home = join(root, 'home');
   mkdirSync(home);
   const env = { PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER };
-  // The data dir this run hands the binary is its own temp folder, never the person's.
   expect(env.PLANNOTATOR_DATA_DIR.startsWith(root)).toBe(true);
   const started = spawnSync(builtBinary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
@@ -114,7 +94,6 @@ test.afterAll(async () => {
     await world.agent.close().catch(() => {});
     await world.context.close();
   } finally {
-    // Every Inbox this spec started, then its folders (inbox-scratch.ts).
     await removeInboxScratch();
   }
 });
@@ -125,7 +104,6 @@ test('the full list has no edge; an open thread narrows it to 380px with the edg
   await expect(page.locator('.ib-lbody .ib-row').first()).toBeVisible();
   await expect(edge(page)).toHaveCount(0);
   await shot('full-list');
-  // The first aria-valuemax the separator ever carries: measured before paint, not corrected after it.
   await page.evaluate(() => {
     const w = window as unknown as { firstMax?: string | null };
     const observer = new MutationObserver(() => {
@@ -142,7 +120,6 @@ test('the full list has no edge; an open thread narrows it to 380px with the edg
   await expect(edge(page)).toHaveAttribute('aria-valuemin', String(LIST_MIN));
   await expect(edge(page)).toHaveAttribute('aria-valuemax', String(room(VIEWPORT.width) - PANE_MIN));
   expect(await page.evaluate(() => (window as unknown as { firstMax?: string }).firstMax)).toBe(String(room(VIEWPORT.width) - PANE_MIN));
-  // Each edge names the panel it resizes.
   const listId = await list(page).getAttribute('id');
   expect(listId).toBeTruthy();
   await expect(edge(page)).toHaveAttribute('aria-controls', listId!);
@@ -152,8 +129,6 @@ test('the full list has no edge; an open thread narrows it to 380px with the edg
   expect(await width(page, '.ib-listcol')).toBe(LIST_MIN);
   expect(await page.locator('.ib-lbody .ib-row').count()).toBe(0);
   expect(await page.locator('.ib-lbody .ib-nrow').count()).toBeGreaterThan(0);
-  // The handle's grab area starts on the column's right edge and lies over the
-  // gutter and the pane's side, with the sidebar's col-resize cursor.
   const hit = page.locator('.ib-listedge .ib-handle-hit');
   const box = (await hit.boundingBox())!;
   expect(Math.abs(box.x - (LIST_X + LIST_MIN))).toBeLessThanOrEqual(1);
@@ -166,10 +141,6 @@ test('a drag widens it; the rows switch to the wide shape once, as it crosses 90
   const { page } = world;
   const x0 = LIST_X + LIST_MIN + 4;
   const target = 1000;
-  // Every frame of the drag: the list's width and which row shape is drawn.
-  // Sampling runs until the drag has finished (mouse.up resolved, flagged below)
-  // and two more frames have been drawn, not for a fixed time: a slow runner
-  // stretches the drag past any fixed window.
   const sampling = page.evaluate(
     () =>
       new Promise<Array<[number, boolean]>>((done) => {
@@ -197,13 +168,11 @@ test('a drag widens it; the rows switch to the wide shape once, as it crosses 90
   const samples = await sampling;
   const flips = samples.filter((s, i) => i > 0 && s[1] !== samples[i - 1]![1]).length;
   expect(flips).toBe(1);
-  // Two-line rows the whole way below the boundary (one frame of lag at the crossing is allowed).
   for (const [w, wide] of samples) if (w < WIDE_ROWS - 20) expect(wide).toBe(false);
   expect(samples.at(-1)).toEqual([target, true]);
 
   await expect(edge(page)).toHaveAttribute('aria-valuenow', String(target));
   expect(await cookie(page, 'plannotator-inbox-list-width')).toBe(String(target));
-  // The open thread stays marked in the wide rows.
   await expect(page.locator('.ib-lbody .ib-row.ib-sel')).toHaveCount(1);
   expect(await width(page, '.ib-pane')).toBe(room(VIEWPORT.width) - target);
   await shot('widened');
@@ -254,9 +223,7 @@ test('a narrower window draws it clamped, keeping the thread pane its 480px', as
   await expect.poll(() => width(page, '.ib-pane')).toBe(PANE_MIN);
   expect(await width(page, '.ib-listcol')).toBe(shared - PANE_MIN);
   await expect(edge(page)).toHaveAttribute('aria-valuenow', String(shared - PANE_MIN));
-  // The stored preference is kept for a wider window.
   expect(await cookie(page, 'plannotator-inbox-list-width')).toBe(String(room(VIEWPORT.width) - PANE_MIN));
-  // A drag starts from the drawn width: the first pixels move the edge.
   await page.mouse.move(LIST_X + shared - PANE_MIN + 4, 500);
   await page.mouse.down();
   await page.mouse.move(LIST_X + shared - PANE_MIN - 96, 500, { steps: 10 });
@@ -267,7 +234,6 @@ test('a narrower window draws it clamped, keeping the thread pane its 480px', as
 
 test('a window that leaves no room to widen into keeps the edge beside a thread only to hide the list', async () => {
   const { page } = world;
-  // 232 + 380 + 480 and three 8px gutters = 1116: at 1080 there is nothing to drag, but a click still hides the list.
   await page.setViewportSize({ width: 1080, height: 900 });
   await expect(edge(page)).toHaveAttribute('aria-valuemax', String(LIST_MIN));
   await expect(edge(page)).toHaveAttribute('aria-valuenow', String(LIST_MIN));
@@ -278,10 +244,6 @@ test('a window that leaves no room to widen into keeps the edge beside a thread 
 });
 
 test('with a classic scrollbar on the list, the whole scrollbar stays the listâ€™s, and the grab area is beside it', async () => {
-  // Headless Chromium hides scrollbars (--hide-scrollbars) and macOS draws
-  // overlay ones: this browser keeps them, and the list gets a classic 15px
-  // scrollbar (the app's `scrollbar-width: thin` would win over the
-  // ::-webkit-scrollbar rules, so it is set back to auto here).
   const browser = await chromium.launch({ ignoreDefaultArgs: ['--hide-scrollbars'] });
   try {
     const page = await browser.newPage({ viewport: { width: VIEWPORT.width, height: 300 } });
@@ -298,12 +260,10 @@ test('with a classic scrollbar on the list, the whole scrollbar stays the listâ€
     });
     expect(bar.scrolls).toBe(true);
     expect(bar.width).toBe(15);
-    // The column keeps today's 1px line on its right, transparent on the floating pane.
     expect(bar.right).toBe(LIST_X + LIST_MIN - 1);
     const y = Math.round(bar.top + 40);
     const at = (x: number) => page.evaluate(([x, y]) => document.elementFromPoint(x, y)?.className, [x, y] as const);
     for (let x = bar.right - bar.width; x < bar.right; x += 1) expect(await at(x), `x=${x}`).toBe('ib-lbody');
-    // Just past the line, over the thread pane's side, the edge takes the pointer.
     expect(await at(bar.right + 5)).toBe('ib-handle-hit');
   } finally {
     await browser.close();

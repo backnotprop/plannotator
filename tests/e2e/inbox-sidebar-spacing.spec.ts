@@ -1,17 +1,3 @@
-/**
- * One spacing rule for the sidebar's Pinned, Agents and Projects, proved in a
- * real Chromium against the compiled binary under a temp HOME and data dir: a
- * header sits 2 px under a closed section with no row left and 12 px (8 on a
- * phone) under rows, a closed section's kept row included, and rows sit directly
- * under their header. Agents is a section like the others (no panel), its rows 2 px under its header.
- * The row around the Projects header is exactly that header,
- * so the gap above it is no hover.
- *
- * A real pin. Machines come from the list's answer, the one field stood in for:
- * linking real Inboxes is inbox-machines.spec.ts's job, and only the layout is
- * read here. Build the binary first (see inbox.spec.ts).
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
@@ -35,7 +21,6 @@ interface World {
 }
 let world: World;
 
-/** The sections top to bottom, as one line: `Pin -2- Ag -0- rows -12- Proj`. Agents' rows are its groups, or its empty line. */
 const layout = (page: Page, scope: string) =>
   page.evaluate((selector) => {
     const root = document.querySelector(selector)!;
@@ -112,7 +97,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     json.machines = [{ ...machine, id: SELF, name: 'Studio', self: true }, { ...machine, id: OTHER, name: 'MacBook', self: false }];
     await route.fulfill({ response, json });
   });
-  // The stream's own snapshot would say nothing is linked and take the section away again.
   await page.route(/\/api\/inbox\/events\?/, async (route) => {
     const stream = new URL(route.request().url());
     stream.searchParams.delete('agents');
@@ -130,11 +114,6 @@ test.afterAll(async () => {
   }
 });
 
-// Agents is a section like the others, straight on the sidebar's ground (the owner, 2026-11-09: no panel behind it):
-// its header keeps the sections' gaps, and its rows sit 2 px under it. No agent runs here, so its one row is its
-// empty line (a machine with no agent shows nothing).
-// A phone's sheet (approval "inbox-phone-sidebar-sheet"): every heading sits 8 px under what is above it, closed or open
-// (a 44 px heading every 52 px), since each heading is a sticky row of its own there.
 for (const [device, phone, set, shut] of [['desktop', false, 12, 2], ['phone', true, 8, 8]] as const) {
   test(`${device}: closed headers sit evenly, and rows stay with their header and set off the next`, async () => {
     const { page } = world;

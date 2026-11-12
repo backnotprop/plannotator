@@ -143,11 +143,6 @@ export function buildApplicability(lock) {
     if (runtimeNames.has(name)) continue;
     runtimeNames.add(name);
 
-    // Bun can lock several versions under dependent-prefixed keys. Treat every
-    // locked instance of a runtime package name as runtime and walk every one
-    // of their dependency sets. This is intentionally conservative: it may
-    // gate a dev-only duplicate, but it will not silently label a shipped
-    // instance as development-only because version resolution was ambiguous.
     for (const entry of entriesByName.get(name) ?? []) {
       enqueueDependencies(entry[2]);
     }
@@ -339,9 +334,6 @@ export async function finalizeSbom(options) {
     ],
   };
 
-  // Syft models the lockfile itself as a component and records its source
-  // directory in that component name. Keep the evidence while removing the
-  // runner-specific prefix from the public document.
   for (const component of cyclonedx.components) {
     if (component?.type === "file" && path.basename(component.name ?? "") === "bun.lock") {
       component.name = "/bun.lock";

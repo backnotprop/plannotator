@@ -1,26 +1,3 @@
-/**
- * Audio attachments (the owner's ask, 2026-11-09: "the ability to like
- * annotate an audio file … right now audio file is just download instead of
- * play"), proved in a real browser against the compiled binary. Nothing is
- * mocked: `plannotator inbox --background` runs under a temp
- * PLANNOTATOR_DATA_DIR and HOME; the recording is made in the test (a 2-second
- * 8 kHz PCM WAV of about 16 KB, tests/helpers/audio-fixtures.ts; no binary is
- * committed); an agent attaches it through `plannotator inbox mcp`
- * (scripts/inbox-sim.ts); Chromium drives the window.
- *
- * Proves: the recording is kind `audio` with its length, and its tile offers
- * Play; it plays in the pane's player card from the `audio` route by HTTP
- * Range, with its waveform drawn from the decoded file; typing pauses it and
- * pins the moment; Comment lists the comment with its time and puts a dot on
- * the bar, which seeks back to it; Send carries "At 0:01 (1.2 s of 0:02)"
- * with no frame, read back by the agent; and on a phone the row sits in full
- * screen's composer, where a tap in the field pins the moment.
- *
- * Build the binary first (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-audio.spec.ts`.
- * PNGs land in PLANNOTATOR_E2E_SHOTS_DIR (default .local/proof/audio).
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -57,7 +34,6 @@ async function shot(name: string, page: Page = world.page): Promise<void> {
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 }
 
-/** The pane's audio element, once it has its metadata. */
 async function audioReady(page: Page): Promise<void> {
   await page.waitForFunction(() => {
     const audio = document.querySelector<HTMLAudioElement>('audio[data-video-player]');
@@ -65,7 +41,6 @@ async function audioReady(page: Page): Promise<void> {
   }, undefined, { timeout: 30_000 });
 }
 
-/** Seek the pane's recording and wait until it is there. */
 async function seekTo(page: Page, time: number): Promise<void> {
   await page.evaluate(
     (t) =>
@@ -167,9 +142,7 @@ test('it plays in the pane by HTTP Range, with its waveform; typing pauses it an
   const pane = page.locator(`[data-attachment-pane="${world.noteId}"]`);
   await expect(pane.locator('[data-audio-player]')).toBeVisible();
   await audioReady(page);
-  // The waveform: the recording decoded in the window, drawn as bars.
   await expect(pane.locator('[data-audio-scrub][data-waveform] rect').first()).toBeAttached();
-  // Chromium's media loader asked for a byte range and got a 206.
   await expect.poll(() => world.ranges.some((r) => r.status === 206 && r.range !== null)).toBe(true);
 
   const play = pane.locator('[data-audio-play]');
@@ -186,7 +159,6 @@ test('it plays in the pane by HTTP Range, with its waveform; typing pauses it an
   const chip = pane.locator('[data-video-composer] [data-video-time]');
   await expect(chip).toHaveAttribute('data-pinned', '');
   await expect(chip).toHaveText('0:01');
-  // A recording has no frame and nothing to draw on.
   await expect(pane.locator('[data-video-frame]')).toHaveCount(0);
   await expect(pane.locator('[data-markup-open]')).toHaveCount(0);
   await expect(pane.locator('[data-video-draft-dot]')).toBeVisible();
@@ -207,7 +179,6 @@ test('the dot on the bar and the panel time pill seek back to the comment; a pre
   await pane.locator('[data-video-dot]').click();
   await expect.poll(() => currentTime(page)).toBeGreaterThan(1.1);
   expect(await currentTime(page)).toBeLessThan(1.3);
-  // A press near the end of the bar.
   const bar = (await pane.locator('[data-audio-scrub]').boundingBox())!;
   await page.mouse.click(bar.x + bar.width * 0.9, bar.y + bar.height / 2);
   await expect.poll(() => currentTime(page)).toBeGreaterThan(1.6);
@@ -220,7 +191,6 @@ test("a narrow tile's line drops whole parts and never cuts one: the length and 
   const tiles = page.locator('section.ib-pane .ib-attachments:not(.ib-hatts-tiles) .ib-tiles');
   const line = tiles.locator(`button[data-attachment-id="${world.noteId}"] .ib-kd`);
   await expect(line).toHaveText(/^WAV audio · 0:02 · 1 comment · [\d.]+ KB$/);
-  // Each part of the line at this width: drawn whole ('whole'), out of sight ('gone'), or cut ('cut').
   const partsAt = (width: number) =>
     tiles.evaluate((grid, width) => {
       (grid.firstElementChild as HTMLElement).style.width = `${width}px`;
@@ -237,14 +207,12 @@ test("a narrow tile's line drops whole parts and never cuts one: the length and 
     }, width);
   try {
     const seen = new Set<string>();
-    // From a tile wide enough for the whole line down to one that holds only the length and the count.
     for (let width = 560; width >= 300 && !seen.has('gone gone'); width -= 4) {
       const [kind, length, count, size] = await partsAt(width);
       expect([kind, size], `at ${width}px`).not.toContain('cut');
       expect([length, count], `at ${width}px`).toEqual(['whole', 'whole']);
       seen.add(`${kind} ${size}`);
     }
-    // The size goes first, then the kind: never the kind while the size still shows.
     expect([...seen].sort()).toEqual(['gone gone', 'whole gone', 'whole whole']);
   } finally {
     await tiles.evaluate((grid) => (grid.firstElementChild as HTMLElement).style.removeProperty('width'));
@@ -276,7 +244,6 @@ test("on a phone: the player card on top, and the comment row in full screen's c
     await expect(pane.locator('[data-audio-player]')).toBeVisible();
     await audioReady(page);
     await expect(pane.locator('[data-video-meta]')).toContainText('0 comments');
-    // The play button is a 44 px target.
     const play = (await pane.locator('[data-audio-play]').boundingBox())!;
     expect(play.width).toBeGreaterThanOrEqual(44);
     expect(play.height).toBeGreaterThanOrEqual(44);

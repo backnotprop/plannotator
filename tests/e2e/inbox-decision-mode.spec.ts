@@ -1,32 +1,3 @@
-/**
- * Decision mode (experimental; approval "inbox-decision-mode", the Queue
- * direction), proved in a real browser against the compiled binary. Nothing
- * is mocked: the binary runs `plannotator inbox --background` under a temp
- * PLANNOTATOR_DATA_DIR and HOME, and agents ask through `plannotator inbox
- * mcp` (scripts/inbox-sim.ts), one shim per agent session.
- *
- * Desktop (Chromium, 1440 by 900): nothing of decision mode shows until
- * Settings → Capabilities → Experimental turns it on; then still no global way in
- * (no sidebar row, no list-header button): decision mode is thread only, and
- * its one way in is "Decide these N" in a thread's open-questions list. In one
- * thread, Claude Code asks two questions in one message (one Stopped), Codex
- * one two-way question with a picture in its context, Pi a pick-any. The
- * dialog from that thread opens Stopped first; picks save at once; once Claude
- * Code's two are answered its chip says "Sending in N s · Hold", and after the
- * Hold the agent reads its reply with read_thread as ONE reply carrying
- * both answers; Codex replaces its question while it is on screen and the card
- * swaps under a banner; the end screen. Then a phone (WebKit, iPhone 15).
- * Then the agent contract lines (approval "inbox-decision-mode", "Agent
- * contract lines"): a picture choice drawn as the thread card's tiles (the
- * picture answers, its zoom opens the viewer and answers nothing), its Stakes
- * and Why lines, and a `Reversible: no` question whose pick asks once more
- * (Cancel answers nothing; the confirm counts), on a desktop and a phone.
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * PNGs, light and dark, land in PLANNOTATOR_DECISION_SHOTS, or
- * /Users/ramos/plannotator/.ops/shots/decision-mode-build/ when that folder's parent exists, else .local/proof/decision-mode/.
- */
-
 import { chromium, devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -48,7 +19,6 @@ const proofDir = resolve(
 const q = (prompt: string, choices: string[], extra: string[] = [], kind = 'question') =>
   [`:::${kind}`, prompt, '', ...extra, ...(extra.length ? [''] : []), ...choices.map((c) => `- [ ] ${c}`), ':::'].join('\n');
 
-/** A real PNG mock (a phone frame: a light screen, a dark header and a coloured pay bar), so the card has a picture to lead with. */
 function mockPng(width = 240, height = 360, accent: [number, number, number] = [91, 63, 230]): Buffer {
   const table = new Uint32Array(256).map((_, n) => {
     let c = n;
@@ -91,7 +61,6 @@ function mockPng(width = 240, height = 360, accent: [number, number, number] = [
 interface World {
   root: string;
   dataDir: string;
-  /** Agent CLI stubs first on the Inbox's PATH: each call is recorded. */
   stubs: string;
   env: Record<string, string>;
   url: string;
@@ -105,7 +74,6 @@ interface World {
   errors: string[];
 }
 let world: World;
-/** The thread test 1 seeds (Claude Code, Codex and Pi ask in it). */
 let stripeThread = '';
 
 function port(): number {
@@ -131,9 +99,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-decide-e2e-');
   const dataDir = join(root, 'data');
-  // Codex sends with a wake, so the person's reply to it is queued through `codex queue`: under the test sandbox
-  // the Inbox looks for no codex (an empty agent PATH, never the apps' own CLIs), and the stubs first on PATH
-  // record any lookup that gets past it (the last test). Never the codex on the runner's PATH.
   const stubs = writeAgentCliStubs(join(root, 'agent-clis'));
   const env = { PATH: `${stubs}:${process.env.PATH ?? ''}`, HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_TEST_SANDBOX: root };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
@@ -168,7 +133,6 @@ test.afterAll(async () => {
 
 test('off by default: nothing of decision mode until Settings → Capabilities → Experimental turns it on', async () => {
   const { page, url, claude, codex, pi } = world;
-  // One thread, three agents (decision mode is thread only): Codex and Pi write in Claude Code's thread.
   const asked = await claude.send(
     {
       project_path: world.billing,
@@ -197,7 +161,6 @@ test('off by default: nothing of decision mode until Settings → Capabilities �
   await shot(page, 'settings-experimental');
   await sw.click();
   await expect(sw).toHaveAttribute('aria-checked', 'true');
-  // The switch shows on before the save lands; poll the file (a read between the two sees no config yet).
   await expect
     .poll(() => {
       try {
@@ -209,21 +172,17 @@ test('off by default: nothing of decision mode until Settings → Capabilities �
     .toEqual({ decisionMode: true });
 
   await page.goto(url);
-  // On, and still no global way in: no sidebar row, no list-header button.
   await expect(page.locator('[data-thread-id]', { hasText: 'Stripe 409 retries' }).first()).toBeVisible();
   await expect(page.locator('[data-decide-nav]')).toHaveCount(0);
   await expect(page.locator('[data-decide-head]')).toHaveCount(0);
-  // The thread's open-questions list: "Decide these 4" on top.
   await page.locator('[data-thread-id]', { hasText: 'Stripe 409 retries' }).first().click();
   await page.locator('section.ib-pane [data-open-questions]').click();
   await expect(page.locator('[data-thread-decide]')).toHaveText('Decide these 4');
   await shot(page, 'entry-points');
 });
 
-/** Decision mode's one way in: the thread, its open-questions list, then "Decide these N". */
 async function decideIn(page: Page, threadId: string): Promise<void> {
   await page.goto(`${world.url}#thread=${threadId}`);
-  // A goto that changes only the hash keeps the page: the list may still be open from before.
   await expect(page.locator('section.ib-pane [data-open-questions]')).toBeVisible();
   if (!(await page.locator('[data-open-questions-list]').isVisible())) await page.locator('section.ib-pane [data-open-questions]').click();
   await page.locator('[data-thread-decide]').click();
@@ -239,7 +198,6 @@ test('the queue: Stopped first, a pick saves at once, the session replies once a
   await expect(promptOf(page)).toHaveText('Which way should the worker go on a Stripe 409?');
   await expect(dialog.locator('[data-decision-stopped]')).toContainText('the refund worker cannot ship without this.');
   await expect(dialog.locator('[data-decision-head]')).toContainText('1 of 4 · 3 agents waiting');
-  // No native title anywhere in the dialog (component tooltips only).
   expect(await dialog.locator('[title]').count()).toBe(0);
   await shot(page, 'queue-stopped');
 
@@ -247,14 +205,11 @@ test('the queue: Stopped first, a pick saves at once, the session replies once a
   await expect(promptOf(page)).toHaveText('Page on-call after 5 tries?');
   await shot(page, 'queue-two-way');
   await card(page).locator('.ib-dm-choice', { hasText: 'Yes, page on-call' }).click();
-  // Claude Code's last decision in that thread is handled: its chip holds the reply.
   const hold = dialog.locator('[data-decision-hold]');
   await expect(hold).toContainText(/Sending in \d s · Hold/);
   await shot(page, 'queue-hold');
-  // The reply goes by itself after the Hold: one reply, both answers, into Claude Code's wait.
   await expect(dialog.locator('[data-decision-chip-state]').first()).toHaveText(/Sending|Queued|Saved|Delivered|Working|Replied/, { timeout: 15_000 });
 
-  // Codex's picture question, on screen; then Codex replaces it.
   await expect(promptOf(page)).toHaveText('Ship drawer B to all of checkout?');
   await expect(card(page).locator('[data-decision-pictures] img')).toBeVisible();
   await shot(page, 'queue-picture');
@@ -266,18 +221,15 @@ test('the queue: Stopped first, a pick saves at once, the session replies once a
   await shot(page, 'queue-replaced');
   await card(page).locator('.ib-dm-choice', { hasText: 'Yes, Thursday' }).click();
 
-  // Pi's pick-any starts with the recommendation ticked.
   await expect(promptOf(page)).toHaveText('Which exports should the ledger keep?');
   await expect(card(page).locator('[data-decision-answer]')).toHaveText('Answer with 2');
   await shot(page, 'queue-multi');
   await card(page).locator('[data-decision-answer]').click();
   await expect(dialog.locator('[data-decision-end]')).toBeVisible();
   await expect(dialog.locator('[data-decision-end]')).toContainText('Nothing waits on you');
-  // Every reply goes (after each Hold) and lands: the store holds no open question.
   await expect.poll(async () => ((await (await fetch(`http://127.0.0.1:${port()}/api/inbox/decisions`)).json()) as { decisions: unknown[] }).decisions.length, { timeout: 20_000 }).toBe(0);
   await expect(dialog.locator('[data-decision-end-row] .ib-dm-endstate').first()).toHaveText(/Delivered|Sending|Queued|Saved|Working|Replied|Nothing to send/);
 
-  // The thread got ONE reply per agent session: Claude Code's carries both its answers.
   const threads = (await (await fetch(`http://127.0.0.1:${port()}/api/inbox/threads`)).json()) as { sections: { threads: { thread_id: string; subject: string | null }[] }[] };
   const claudeThread = threads.sections.flatMap((s) => s.threads).find((t) => t.subject === 'Stripe 409 retries')!;
   const thread = (await (await fetch(`http://127.0.0.1:${port()}/api/inbox/threads/${claudeThread.thread_id}`)).json()) as { thread: { messages: { author: { kind: string }; body: string }[] } };
@@ -287,7 +239,6 @@ test('the queue: Stopped first, a pick saves at once, the session replies once a
   expect(claudes).toHaveLength(1);
   expect(claudes[0]!.body).toContain('Yes, page on-call');
   expect(JSON.stringify(await claude.readThread(claudeThread.thread_id))).toContain('Yes, page on-call');
-  // The agent answers: its chip and its end row go to Replied.
   await claude.send({ project_path: world.billing, reply_to: claudeThread.thread_id, body: 'Retrying 409s with the same key now; paging on-call after 5 tries.' }, { wakes: true });
   await expect(dialog.locator('[data-decision-end-row] .ib-dm-endstate').first()).toHaveText('Replied');
   await shot(page, 'end');
@@ -296,18 +247,15 @@ test('the queue: Stopped first, a pick saves at once, the session replies once a
   expect(world.errors).toEqual([]);
 });
 
-/** Longer than any phone's pill has room for, so the Resume pill has to cut it. */
 const REFUNDS_SUBJECT = 'Refund emails for partial refunds, the JPY rounding rule and the finance export before 4.2 ships';
 
 test('a phone (WebKit, iPhone 15): the card is a full-screen column with 44 px targets', async () => {
   const { claude, pi } = world;
   const refunds = await claude.send({ project_path: world.billing, thread: 'refund-emails', subject: REFUNDS_SUBJECT, body: q('Send the partial-refund email?', ['Yes, send it', 'No, not yet'], ['Stopped: the email job waits on this.']) }, { wakes: true });
   await pi.send({ project_path: world.billing, reply_to: refunds.message_id, body: q('Round half-even or half-up for JPY refunds?', ['Half-even — matches Stripe', 'Half-up — what finance does today']) }, { wakes: true });
-  // Its own thread, so the Stripe thread is another one to open while the sitting is tucked.
   expect(refunds.thread_id).not.toBe(stripeThread);
   const own = await webkit.launch({ args: [] });
   try {
-    // Dark first: the light pass then answers (a saved pick is handled, so a later sitting starts after it).
     for (const scheme of ['dark', 'light'] as const) {
       const context = await own.newContext({ ...devices['iPhone 15'], colorScheme: scheme, reducedMotion: 'reduce' });
       const page = await context.newPage();
@@ -325,7 +273,6 @@ test('a phone (WebKit, iPhone 15): the card is a full-screen column with 44 px t
       await page.waitForTimeout(300);
       await page.screenshot({ path: join(proofDir, `phone-card-${scheme}.png`) });
       if (scheme === 'dark') {
-        // Open the thread: decision mode tucks into its pill, which never covers the thread's foot (Reply, Send).
         await card(page).locator('[data-decision-open-thread]').tap();
         const pill = page.locator('[data-decision-pill]');
         await expect(pill).toBeVisible();
@@ -338,8 +285,6 @@ test('a phone (WebKit, iPhone 15): the card is a full-screen column with 44 px t
           })
           .toBe(true);
         await page.screenshot({ path: join(proofDir, `phone-pill-${scheme}.png`) });
-        // Another thread on screen: the pill names the sitting's thread, and a long subject is what gives way.
-        // The pill stays inside the screen with the count and Resume whole.
         await page.evaluate((id) => {
           location.hash = `thread=${id}`;
         }, stripeThread);
@@ -361,7 +306,6 @@ test('a phone (WebKit, iPhone 15): the card is a full-screen column with 44 px t
         await card(page).locator('.ib-dm-choice', { hasText: 'Yes, send it' }).tap();
         await expect(promptOf(page)).toHaveText('Round half-even or half-up for JPY refunds?');
         await page.screenshot({ path: join(proofDir, `phone-next-${scheme}.png`) });
-        // Close with Claude Code answered and its Hold running: the question.
         await dialog.locator('[data-decision-close]').tap();
         await expect(dialog.locator('[data-decision-confirm]')).toBeVisible();
         await page.screenshot({ path: join(proofDir, `phone-close-${scheme}.png`) });
@@ -375,7 +319,6 @@ test('a phone (WebKit, iPhone 15): the card is a full-screen column with 44 px t
   }
 });
 
-/** The card of this prompt, through the read-only overview ("All"). */
 async function goToCard(page: Page, prompt: string): Promise<void> {
   const dialog = page.locator('[data-decision-mode]');
   await dialog.locator('[data-decision-overview]').click();
@@ -445,8 +388,6 @@ test('the contract lines: picture tiles (the picture answers, its zoom never doe
     { wakes: true },
   );
 
-  // A phone first (nothing is answered there): two tiles across, the one-way confirm. A context per scheme
-  // (WebKit repaints a scheme switched mid-page only in part).
   const own = await webkit.launch({ args: [] });
   try {
     for (const scheme of ['light', 'dark'] as const) {
@@ -464,7 +405,6 @@ test('the contract lines: picture tiles (the picture answers, its zoom never doe
       await phone.screenshot({ path: join(proofDir, `contract-phone-tiles-${scheme}.png`) });
       await goToCard(phone, INVOICES);
       const del = card(phone).locator('.ib-dm-choice', { hasText: 'Delete now' });
-      // Stacked, each choice holds its own words (its description never spills over the next one).
       const [a, b] = [await del.boundingBox(), await card(phone).locator('.ib-dm-choice', { hasText: 'Wait for month-end close' }).boundingBox()];
       const words = await del.locator('.ib-dm-chd').boundingBox();
       expect(words!.y + words!.height).toBeLessThanOrEqual(a!.y + a!.height);
@@ -484,9 +424,6 @@ test('the contract lines: picture tiles (the picture answers, its zoom never doe
   }
   expect((await stateOf(INVOICES))?.state).toBe('open');
 
-  // The pictures' viewer on a phone (Chromium, real touches; approval "inbox-image-swipe"): only the picture follows
-  // the finger (the viewer's header and its image area stay put), two quick flicks step twice (the second, while the
-  // first still slides, is not lost), and a drag down closes it. Nothing is answered.
   const real = await chromium.launch();
   try {
     const { defaultBrowserType: _ignored, ...pixel } = devices['Pixel 7'];
@@ -505,7 +442,6 @@ test('the contract lines: picture tiles (the picture answers, its zoom never doe
     const touch = await finger(phone, 'chromium');
     const header = viewer.locator('[data-lightbox-count]');
     const headerBefore = await header.boundingBox();
-    // Slow and short of a third: it follows, then springs back.
     await touch.down(at.x, at.y, -box.width * 0.15, 0);
     expect(await viewer.locator('[data-lightbox-track]').evaluate((el) => (el as HTMLElement).style.transform)).toMatch(/^translateX\(-\d/);
     expect(await swipeArea.evaluate((el) => (el as HTMLElement).style.transform)).toBe('');
@@ -538,13 +474,11 @@ test('the contract lines: picture tiles (the picture answers, its zoom never doe
   await expect(card(page).locator('[data-decision-why]')).toHaveText('Why Claude Code recommends it: On a 320 px screen only B keeps the total next to the button.');
   const tiles = card(page).locator('[data-decision-tiles] [data-question-tile]');
   await expect(tiles).toHaveCount(3);
-  // Each tile's picture loaded (the captured file), and no choice picture is the hero.
   for (let i = 0; i < 3; i++) await expect.poll(() => tiles.nth(i).locator('[data-question-picture]').evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
   await expect(card(page).locator('[data-decision-pictures]')).toHaveCount(0);
   expect(await dialog.locator('[title]').count()).toBe(0);
   await shot(page, 'contract-tiles');
 
-  // The zoom opens the viewer and answers nothing.
   await tiles.nth(2).locator('[data-question-zoom]').click();
   await expect(page.locator('[data-image-lightbox]')).toBeVisible();
   await shot(page, 'contract-zoom');
@@ -554,12 +488,10 @@ test('the contract lines: picture tiles (the picture answers, its zoom never doe
   await expect(promptOf(page)).toHaveText(DRAWERS);
   expect((await stateOf(DRAWERS))?.state).toBe('open');
 
-  // The picture answers, with its label, and the viewer stays shut.
   await tiles.nth(1).locator('[data-question-picture]').click();
   await expect(page.locator('[data-image-lightbox]')).toHaveCount(0);
   await expect.poll(async () => (await stateOf(DRAWERS))?.selected).toEqual(['B · Total pinned with Pay']);
 
-  // A one-way question: the badge, and a confirm for every answer (the grammar does not say which choice is one-way).
   await goToCard(page, INVOICES);
   await expect(card(page).locator('[data-decision-one-way]')).toContainText('One-way');
   await expect(card(page).locator('[data-decision-irreversible]')).toHaveCount(0);
@@ -573,7 +505,6 @@ test('the contract lines: picture tiles (the picture answers, its zoom never doe
   await card(page).locator('[data-decision-confirm-cancel]').click();
   await expect(confirm).toHaveCount(0);
   expect((await stateOf(INVOICES))?.state).toBe('open');
-  // The recommended (safe) choice asks too; Cancel again.
   await card(page).locator('.ib-dm-choice', { hasText: 'Wait for month-end close' }).click();
   await expect(confirm).toContainText('Wait for month-end close?');
   await card(page).locator('[data-decision-confirm-cancel]').click();
@@ -590,11 +521,8 @@ test('the contract lines: picture tiles (the picture answers, its zoom never doe
 });
 
 test('the Codex session it answered is never woken through a codex CLI: none is looked up or run', async () => {
-  // Test 2 answers Codex's question (its session sent with a wake): without that answer this proves nothing.
   const thread = (await (await fetch(`http://127.0.0.1:${port()}/api/inbox/threads/${stripeThread}`)).json()) as { thread?: { messages: { author: { kind: string }; body: string }[] } };
   const answered = thread.thread?.messages.some((m) => m.author.kind === 'person' && m.body.includes('Yes, Thursday')) ?? false;
   expect(answered, "Codex's question was answered (run this with the queue test)").toBe(true);
-  // Without the sandbox the Inbox ran `codex --version` and `codex queue` from PATH: here, the stubs in front of
-  // the runner's own codex.
   expect(agentCliCalls(world.stubs)).toEqual([]);
 });

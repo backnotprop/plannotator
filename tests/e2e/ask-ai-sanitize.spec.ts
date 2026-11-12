@@ -1,11 +1,3 @@
-/**
- * Ask AI answers through the real DOMPurify in a real browser (happy-dom
- * cannot host DOMPurify, so aiChatFormat.test.ts cannot prove this): a class,
- * data-* and aria-* on raw HTML do not survive; a table keeps its column
- * alignment and a link keeps its href; a badly nested answer falls back to
- * plain text instead of throwing. Bundles renderChatMarkdown for the browser
- * and loads it into a blank page; no server, no binary.
- */
 import { expect, test } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
@@ -18,7 +10,6 @@ test('Ask AI output is sanitized and never throws', async ({ page }) => {
   const dir = mkdtempSync(join(tmpdir(), 'ask-ai-'));
   const entry = join(dir, 'entry.ts');
   const out = join(dir, 'bundle.js');
-  // A React element's props hold the sanitized markup, or the fallback text.
   writeFileSync(entry, `import { renderChatMarkdown } from ${JSON.stringify(module)};
 (window as any).render = (t: string) => { const p = (renderChatMarkdown(t) as any).props; return { html: p.dangerouslySetInnerHTML?.__html ?? null, text: p.children ?? null }; };`);
   execFileSync('bun', ['build', entry, '--target=browser', '--define', 'process.env.NODE_ENV="production"', '--outfile', out]);

@@ -1,25 +1,3 @@
-/**
- * "Fit the page": the size control on an HTML page on a phone (approval
- * "inbox-html-attachments-phone", part B; packages/inbox/pageSize.ts), proved
- * against the compiled binary under a temp data dir, on an iPhone 15 (WebKit)
- * and a Pixel 7 (Chromium), plus a desktop that does not change.
- *
- * What it proves, with real layout: a page wider than the phone opens on
- * Desktop size by itself (laid out at 1280 px, scaled to the phone's width,
- * the page keeping the window's full height); the control is one small icon
- * in the page's top right corner with a 44 px target, no words, its name and
- * tooltip the approved "Desktop size" / "Phone size"; a page that fits opens
- * on Phone size and one tap fits it; the tap is remembered for the
- * file across a reload; a pin placed with the pen on a fitted page lands on
- * the element under the finger; a desktop shows no control and no scale.
- * The icon gets out of the way (addendum 17:53Z): shown when the page opens,
- * faded after about 3 seconds, and faded a tap at its corner reaches the page;
- * a scroll back up in the page brings it back, and it fades again.
- *
- * Build the binary first (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-html-fit.spec.ts`.
- */
-
 import { chromium, devices, expect, test, webkit, type Browser, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -31,9 +9,7 @@ import { NO_BROWSER } from '../helpers/no-browser';
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 
-/** Made for a laptop: a fixed 1200 px layout, wider than any phone. */
 const widePage = `<!doctype html><html><head><meta charset="utf-8"><title>Fleet</title><style>body{margin:0;font:14px system-ui}main{width:1200px;padding:16px;display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.kpi{border:1px solid #ddd;padding:12px;font-size:22px}</style></head><body><main><div class="kpi" id="k0">48,210</div><div class="kpi" id="k1">212 ms</div><div class="kpi" id="k2">0.42%</div><div class="kpi" id="k3">311 / 320</div></main></body></html>`;
-/** Squeezes into any width: nothing is wider than the frame. */
 const fluidPage = `<!doctype html><html><head><meta charset="utf-8"><title>Costs</title><style>body{margin:16px;font:15px system-ui}.grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}.c{border:1px solid #ddd;padding:6px;overflow-wrap:anywhere}</style></head><body><h1 id="title">Costs</h1><div class="grid"><div class="c">$18,420</div><div class="c">$6,212</div><div class="c">$3,980</div><div class="c">$9,104</div><div class="c">$1,330</div><div class="c">$742</div></div></body></html>`;
 
 const iPhone = (() => {
@@ -94,7 +70,6 @@ const frame = (page: Page) => page.frameLocator('.ib-htmlframe iframe');
 const toggle = (page: Page) => page.locator('[data-page-size-toggle]');
 const corner = (page: Page) => page.locator('[data-page-size-corner]');
 
-/** The icon fades after about 3 seconds (sizeIconFade.ts): a tap near the page's top left brings it back first. */
 async function iconShown(page: Page) {
   if (await corner(page).getAttribute('data-faded') !== null) await page.touchscreen.tap(24, 24);
   await expect(corner(page)).not.toHaveAttribute('data-faded', /.*/);
@@ -118,12 +93,10 @@ for (const phone of [
       await expect(toggle(page)).toHaveAttribute('title', 'Phone size');
       await expect(toggle(page)).toHaveText('');
       await expect(toggle(page).locator('svg')).toHaveAttribute('data-icon', 'laptop');
-      // Laid out at 1280 and drawn at the phone's width.
       const viewport = page.viewportSize()!;
       const scaled = await frameBox(page).locator(':scope > div').first().boundingBox();
       expect(Math.abs(scaled!.width - viewport.width)).toBeLessThanOrEqual(2);
       expect(await frame(page).locator('body').evaluate(() => document.documentElement.clientWidth)).toBe(1280);
-      // The page keeps the window's full height; the icon is small, in the top right corner, and easy to press.
       expect((await frameBox(page).boundingBox())!.y).toBeLessThanOrEqual(1);
       const icon = (await toggle(page).boundingBox())!;
       expect(icon.width).toBeLessThanOrEqual(40);
@@ -165,10 +138,8 @@ for (const phone of [
       expect(await hit()).toBe('BUTTON');
       await expect(corner(page)).toHaveAttribute('data-faded', '', { timeout: 6000 });
       await expect.poll(() => toggle(page).evaluate((el) => Number(getComputedStyle(el).opacity))).toBe(0);
-      // Faded: a tap there lands on the page. Its name stays for a screen reader.
       expect(await hit()).toBe('IFRAME');
       await expect(toggle(page)).toHaveAttribute('aria-label', 'Phone size');
-      // Down the page, then back up: the icon comes back, then fades again.
       await frame(page).locator('body').evaluate(() => {
         document.body.style.minHeight = '4000px';
         window.scrollTo(0, 1200);
@@ -187,7 +158,6 @@ for (const phone of [
       await open(w, page, 'wide.html', '#k1');
       await expect(frameBox(page)).toHaveAttribute('data-page-size', 'desktop');
       await page.locator('[data-full-view-bar] button[aria-pressed]').first().tap();
-      // Where #k1 is drawn on screen: its box in the page, through the frame's scale.
       const scale = Number(await frameBox(page).evaluate((el) => (el as HTMLElement).style.getPropertyValue('--ib-fit-scale')));
       expect(scale).toBeGreaterThan(0.2);
       expect(scale).toBeLessThan(0.5);

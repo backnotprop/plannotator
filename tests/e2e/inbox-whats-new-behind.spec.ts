@@ -1,21 +1,3 @@
-/**
- * What's new when you are behind, in a real browser against the CLI from
- * source, run as 0.28.50 (bun --define __CLI_VERSION__) under a temp
- * PLANNOTATOR_DATA_DIR and HOME. GitHub is a small fake in this spec, reached
- * through PLANNOTATOR_UPDATE_API_URL: 0.28.53 is the latest, and the release
- * list names 0.28.53 back to 0.28.50 (the real GitHub is never asked).
- *
- * Proved:
- * - 1440: "You have 0.28.50 · 2 releases in between" (0.28.51 and 0.28.52)
- *   takes the panel's list to your row and leaves the notes where they are.
- * - 390 with touch: the bar holds back, the version picker, GitHub and Update,
- *   all inside the screen, with "Inbox" whole (it was squeezed to "I…" and
- *   Update ran off the edge); the meta opens the sheet at your row.
- *
- * Needs the built apps (apps/hook/dist), as the other specs do; then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-whats-new-behind.spec.ts`.
- */
-
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { execSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
@@ -62,7 +44,6 @@ test.beforeAll(async () => {
   const root = inboxScratch('plannotator-inbox-whatsnew-behind-e2e-');
   const dataDir = join(root, 'data');
   mkdirSync(dataDir, { recursive: true });
-  // Someone who has used 0.28.50 here: no tour, no first-run asks.
   writeFileSync(join(dataDir, 'update-state.json'), JSON.stringify({ inboxVersion: RUNNING }));
   writeFileSync(
     join(dataDir, 'config.json'),
@@ -72,9 +53,7 @@ test.beforeAll(async () => {
       inboxAgentNotes: { offered: true },
       inboxSound: { dialogShownFor: RUNNING },
       inboxListIntro: { shownAt: '2026-10-01T10:00:00.000Z' },
-      // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
       favicon: 'glass',
-      // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
       inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' },
     }),
   );

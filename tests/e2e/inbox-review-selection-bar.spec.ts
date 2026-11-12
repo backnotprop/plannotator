@@ -1,28 +1,3 @@
-/**
- * The bar selected lines open in the Inbox's code review (Comment · Ask · Show me),
- * in a real browser against the compiled binary. What regresses if these fail: the
- * bar lands on the lines it is about, drifts off them, falls off the screen, or
- * the diff's + mark sits against it.
- *
- * Proves, with lines the diff really painted (read from its shadow DOM, as the bar does):
- *  1. Unified: words only, under the last selected line, at the start of its code,
- *     wherever the pointer is; the + mark is gone while it is open and back after.
- *  2. Split: under the side the selection ends on (new or old).
- *  3. The bottom of a card: under the file's last line, on screen, nothing clipped.
- *  4. The bottom of the viewport: above the first selected line, not on them.
- *  5. More selected lines than the screen holds: on screen (the one case it may cover them).
- *  6. A scroll: it stays with its lines.
- *  7. Comment after the bar: the comment box opens and the + mark is back.
- *  8. All files: the same bar, the same place.
- *  9. A phone at 390 px: touch-sized, on screen, not on the lines.
- *
- * HOME is a scratch folder and the sandbox env keeps the binary off the person's agents;
- * the agent is scripted (tests/helpers/inbox-ask-agent.ts). Build the binary first (see
- * inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-review-selection-bar.spec.ts`.
- * 2x PNGs land in PLANNOTATOR_E2E_SHOTS_DIR (default .local/proof/selection-bar).
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -40,10 +15,8 @@ const shotsDir = resolve(process.env.PLANNOTATOR_E2E_SHOTS_DIR ?? join(repo, '.l
 
 const LONG = 'src/jobs/long-worker.ts';
 const TAIL = 'src/jobs/tail.ts';
-/** In no chapter of the first review: the file the two-file review holds after the worker. */
 const NEXT = 'src/jobs/next-worker.ts';
 
-/** Odd lines change, even ones don't: Unified draws old beside new as it goes, and both layouts have lines near the top. */
 const lineOf = (word: string, n: number) => `export const ${n % 2 ? word : 'same'}${n} = await step(${n}); // a line of the worker, number ${n}`;
 const longFile = (word: string) => Array.from({ length: 70 }, (_, i) => lineOf(word, i + 1));
 const tailFile = (word: string) => Array.from({ length: 9 }, (_, i) => lineOf(word, i + 1));
@@ -102,9 +75,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const dataDir = join(root, 'data');
   markTourDecided(dataDir);
   const config = JSON.parse(readFileSync(join(dataDir, 'config.json'), 'utf8')) as Record<string, unknown>;
-  // Show me in the bar rides Shape's own switch too (approval "code-review-029-shape-off").
   writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...config, inboxCodeReview: true, inboxShape: true }));
-  // Nothing here may reach the real gh, glab or tailscale.
   const trap = join(root, 'trap');
   mkdirSync(trap);
   for (const name of ['gh', 'glab', 'tailscale']) {
@@ -114,7 +85,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   for (const dir of ['claude', 'codex', 'xdg', 'opencode', 'home']) mkdirSync(join(root, dir), { recursive: true });
   const env: Record<string, string> = {
     PATH: `${trap}:${process.env.PATH ?? ''}`,
-    // A scratch home: the skills route reads folders under it (`~/.agents/skills`).
     HOME: join(root, 'home'),
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_INBOX_CONNECT: '0',
@@ -140,7 +110,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const { path, patch } = project(join(root, 'src'));
   const client = new Client({ name: 'selection-bar', version: '1.0.0' });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${registry.port}/mcp`)));
-  // A connected agent that can take a question: Ask and Show me are offered.
   const agent = startScriptedAskAgent({ port: registry.port, token: registry.token, session: 'ses-bar', project: path, reply: async () => 'An answer.' });
   const sent = (await client.callTool({ name: 'submit_guide', arguments: { project_path: path, guide, patch, review: true, subject: 'A long worker', body: 'Ready for review.', agent_session: 'ses-bar', agent_host: 'claude-code', agent_name: 'Claude Code' } })) as { isError?: boolean; content?: { text: string }[]; structuredContent: { thread_id: string } };
   if (sent.isError) throw new Error(sent.content?.map((c) => c.text).join(' '));
@@ -161,9 +130,7 @@ test.afterAll(async () => {
 });
 
 const bar = (page: Page) => page.locator('[data-selection-chooser]');
-/** The bar whether it shows or not: hidden, it isn't `bar` (the + mark comes back). */
 const selpop = (page: Page) => page.locator('.review-selpop');
-/** What a press at the middle of this element really reaches. */
 const free = (page: Page, name: string, el: ReturnType<Page['locator']>) =>
   el.evaluate((node, label) => {
     const r = node.getBoundingClientRect();
@@ -173,7 +140,6 @@ const free = (page: Page, name: string, el: ReturnType<Page['locator']>) =>
 
 interface Box { top: number; bottom: number; left: number; right: number }
 
-/** What the diff really painted, on each side, and the bar's box: read in the page, as the bar reads it. */
 const geometry = (page: Page) =>
   page.evaluate(() => {
     const boxOf = (el: Element) => {
@@ -201,7 +167,6 @@ const geometry = (page: Page) =>
     };
   });
 
-/** The bar on screen and over none of the painted lines (either column). */
 function clearOfLines(g: Awaited<ReturnType<typeof geometry>>): Box {
   const box = g.bar!;
   expect(box.top, 'on screen, top').toBeGreaterThanOrEqual(0);
@@ -218,10 +183,6 @@ function clearOfLines(g: Awaited<ReturnType<typeof geometry>>): Box {
 const line = (page: Page, file: string, n: number, type = 'change-addition') =>
   page.locator(`[data-guide-file-shell="${file}"]`).first().locator(`[data-line-type="${type}"][data-column-number="${n}"]`).first();
 
-/**
- * A line the diff may not have drawn yet (a mounted diff draws only the rows near the viewport): scrolled to as a
- * person does, by the wheel, `by` pixels a step, until the diff draws it; then placed.
- */
 async function bringLine(page: Page, file: string, n: number, by: number, block: ScrollLogicalPosition = 'center'): Promise<void> {
   await page.mouse.move(1000, 500);
   for (let i = 0; i < 40 && !(await line(page, file, n).count()); i += 1) {
@@ -231,10 +192,6 @@ async function bringLine(page: Page, file: string, n: number, by: number, block:
   await line(page, file, n).evaluate((el, at) => el.scrollIntoView({ block: at }), block);
 }
 
-/**
- * Wheels the page, as a person does, until the line is drawn and wholly on screen under the file's sticky header: real
- * scrolls, which the diff's drawn rows follow. Down while the line is not drawn yet or is below; up once it is above.
- */
 async function wheelOnScreen(page: Page, file: string, n: number): Promise<void> {
   const height = page.viewportSize()!.height;
   await page.mouse.move(1000, Math.floor(height / 2));
@@ -258,7 +215,6 @@ async function select(page: Page, file: string, from: number, to: number, type =
   await settled(page);
 }
 
-/** The bar is up, the lines are painted, and neither has moved for a moment (a click may have scrolled them). */
 async function settled(page: Page): Promise<void> {
   await expect(bar(page)).toBeVisible();
   await expect.poll(async () => {
@@ -269,13 +225,11 @@ async function settled(page: Page): Promise<void> {
   }).toBe(true);
 }
 
-/** Dismiss the bar as a person does: a press on nothing. */
 async function closeBar(page: Page): Promise<void> {
   await page.mouse.click(4, 4);
   await expect(bar(page)).toHaveCount(0);
 }
 
-/** The review's chapter menu in its top bar (ReviewJump): go to a chapter, by its index. */
 async function pickChapter(page: Page, chapter: number): Promise<void> {
   await page.locator('[data-review-message] [data-review-jump]').click();
   await page.locator(`[data-review-chapters] [data-review-jump-row="${chapter}"]`).click();
@@ -289,7 +243,6 @@ async function openReview(page: Page, chapter = 0, thread = world.thread): Promi
   await pickChapter(page, chapter);
 }
 
-/** The top bar's one Split / Unified button (DiffControls): it names the layout on screen, and a press flips it. */
 async function setStyle(page: Page, style: 'split' | 'unified'): Promise<void> {
   const toggle = page.locator('[data-diff-controls] [data-diff-layout-toggle]').first();
   if ((await toggle.getAttribute('data-diff-layout-toggle')) !== style) await toggle.click();
@@ -322,7 +275,6 @@ test('Unified: words only, under the last line at the start of its code, whereve
   const words = bar(page).getByRole('button');
   await expect(words).toHaveText(['Comment', 'Ask', 'Show me']);
   await expect(bar(page).locator('svg')).toHaveCount(0);
-  // The accent is Show me's text; nothing is filled. Hairlines split the words.
   const look = await bar(page).evaluate((el) => {
     const [comment, ask, show] = [...el.querySelectorAll('button')].map((b) => getComputedStyle(b));
     const probe = document.createElement('i');
@@ -346,7 +298,6 @@ test('Unified: words only, under the last line at the start of its code, whereve
   await page.mouse.move(700, 150);
   await pictures(page, 'unified', box, true);
 
-  // The pointer moved far away: the bar stays with its lines. The + mark is gone, on any hovered line.
   await line(page, LONG, 23).hover();
   await expect.poll(async () => (await geometry(page)).plus).toBe(0);
   await expect.poll(async () => {
@@ -367,8 +318,6 @@ test('Split: under the side the selection ends on', async () => {
   await setStyle(page, 'split');
 
   await select(page, LONG, 17, 19);
-  // The click left focus on the diff's root (tabindex -1) and the Shift press made it :focus-visible. It draws no
-  // ring: the clipping around the diff left only two lines, one above the file and one below it.
   const ring = await page.evaluate(() => {
     const el = document.activeElement as HTMLElement;
     return { holdsDiff: !!el.querySelector('diffs-container'), focusVisible: el.matches(':focus-visible'), outline: getComputedStyle(el).outlineStyle };
@@ -402,10 +351,7 @@ test('the bottom of a card: under the file\'s last line, on screen, nothing clip
     const box = clearOfLines(g);
     expect(box.top, 'below the last line').toBeGreaterThan(g.bottom);
     const shell = (await page.locator(`[data-guide-file-shell="${TAIL}"]`).first().boundingBox())!;
-    // It starts inside the file's box and may reach past it (the box now keeps room under its last line, so it
-    // need not).
     expect(box.top, 'starts inside the file').toBeLessThan(shell.y + shell.height);
-    // No box around it cuts it off (the file's card included), and every word is still there to press.
     const clippedBy = await bar(page).evaluate((el) => {
       const r = el.getBoundingClientRect();
       for (let p = el.parentElement; p; p = p.parentElement) {
@@ -429,10 +375,6 @@ test('the bottom of a card: under the file\'s last line, on screen, nothing clip
   }
 });
 
-/**
- * Puts a line's bottom on the window's bottom: scrolled there (the page may still be laying the file out, so it is
- * measured again), else, at the top of the page where nothing scrolls it lower, the window ends at it.
- */
 async function lineAtBottom(page: Page, file: string, n: number): Promise<void> {
   const gap = () => line(page, file, n).evaluate((el) => window.innerHeight - el.getBoundingClientRect().bottom);
   await page.mouse.move(700, 450);
@@ -458,7 +400,6 @@ test('the bottom of the viewport: above the first selected line, not on them, in
   for (const style of ['split', 'unified'] as const) {
     await page.setViewportSize(size);
     await setStyle(page, style);
-    // The last selected line is the last on screen: lines near the top of a file the page has only begun to show.
     await page.locator(`[data-guide-file-shell="${NEXT}"]`).first().scrollIntoViewIfNeeded();
     await expect(line(page, NEXT, 5)).toBeVisible({ timeout: 30_000 });
     await line(page, NEXT, 5).evaluate((el) => el.scrollIntoView({ block: 'end' }));
@@ -489,7 +430,6 @@ test('more selected lines than the screen holds: it stays on screen', async () =
     await line(page, LONG, 5).evaluate((el) => el.scrollIntoView({ block: 'start' }));
     await page.waitForTimeout(300);
     await line(page, LONG, 5).click();
-    // Down to line 25 by the wheel, as a person does: the diff draws the rows the page brings near.
     await wheelOnScreen(page, LONG, 25);
     await line(page, LONG, 25).click({ modifiers: ['Shift'] });
     await line(page, LONG, 15).evaluate((el) => el.scrollIntoView({ block: 'center' }));
@@ -498,7 +438,6 @@ test('more selected lines than the screen holds: it stays on screen', async () =
       const box = (await geometry(page)).bar!;
       return box.top >= 0 && box.bottom <= 420;
     }).toBe(true);
-    // All of them scrolled off the top: nothing to sit by, so it is gone, and the page's header stays free.
     await line(page, LONG, 25).evaluate((el) => el.scrollIntoView({ block: 'start' }));
     await page.mouse.move(1000, 300);
     await page.mouse.wheel(0, 200);
@@ -521,11 +460,9 @@ test('a scroll: it stays with its lines', async () => {
   const before = await geometry(page);
   clearOfLines(before);
   await page.mouse.move(700, 450);
-  // A scroll that keeps them on screen: down the file when they are low, up it when they are high.
   const by = before.top > 450 ? 120 : -120;
   await page.mouse.wheel(0, by);
   await expect.poll(async () => Math.abs((await geometry(page)).top - before.top)).toBeGreaterThan(60);
-  // Right against the lines still, on whichever side has the room.
   await expect.poll(async () => {
     const g = await geometry(page);
     return Math.min(Math.abs(g.bar!.top - g.bottom), Math.abs(g.top - g.bar!.bottom));
@@ -574,7 +511,6 @@ test('a phone at 390 px: touch-sized, on screen, not on the lines, at the bottom
     await expect(line(page, LONG, 1)).toBeVisible({ timeout: 30_000 });
     await line(page, LONG, 17).evaluate((el) => el.scrollIntoView({ block: 'center' }));
     await page.waitForTimeout(300);
-    // A real tap on one line; the range below uses clicks, as a touch has no shift key.
     await line(page, LONG, 17).tap();
     await settled(page);
     await expect(bar(page).getByRole('button')).toHaveText(['Comment', 'Ask', 'Show me']);
@@ -585,8 +521,6 @@ test('a phone at 390 px: touch-sized, on screen, not on the lines, at the bottom
     expect(box.top).toBeGreaterThan(g.bottom);
     expect(box.top - g.bottom).toBeLessThan(12);
     await pictures(page, 'phone', box);
-    // A tap on nothing: the page's margin beside the chapter's card. Not the top bar: on a phone its row is all
-    // buttons (Comments there opens the sheet, which hides the review under it).
     const nothing = { x: 4, y: 200 };
     expect(
       await page.evaluate(({ x, y }) => {
@@ -607,11 +541,8 @@ test('a phone at 390 px: touch-sized, on screen, not on the lines, at the bottom
     const lowBox = clearOfLines(low);
     expect(lowBox.bottom, 'above the first line').toBeLessThanOrEqual(low.top);
     await pictures(page, 'phone-viewport-bottom', lowBox);
-    // Scrolled off: Thread and Comments are free.
-    // A touch scroll of the page, past the lines.
     await page.locator('.ib-gbody').first().evaluate((body) => { body.scrollTop += 700; });
     await page.waitForTimeout(300);
-    // And the diff's own scroller under it, which takes over at the page's end.
     await line(page, LONG, 25).evaluate((row) => {
       for (let el: Element | null = row; el; el = el.parentElement ?? (el.getRootNode() as ShadowRoot).host ?? null) {
         if (el.scrollHeight > el.clientHeight + 200 && /auto|scroll/.test(getComputedStyle(el).overflowY)) {
@@ -631,7 +562,6 @@ test('a phone at 390 px: touch-sized, on screen, not on the lines, at the bottom
 
 test('two files with the same line numbers: scrolled to the next file, the lines and the bar stay with the first', async () => {
   const { page } = world;
-  // One chapter holding both: scrolling down it hands focus to the next file.
   const both = { ...guide, sections: [{ title: 'Both files', overview: 'Both.', diffs: [{ file: LONG, summary: 'The worker.' }, { file: NEXT, summary: 'The next one.' }] }] };
   const sent = (await world.client.callTool({ name: 'submit_guide', arguments: { project_path: world.path, guide: both, patch: world.patch, review: true, thread: 'two-files', subject: 'Two files', body: 'Ready for review.', agent_session: 'ses-bar', agent_host: 'claude-code', agent_name: 'Claude Code' } })) as { isError?: boolean; content?: { text: string }[]; structuredContent: { thread_id: string } };
   if (sent.isError) throw new Error(sent.content?.map((c) => c.text).join(' '));
@@ -644,7 +574,6 @@ test('two files with the same line numbers: scrolled to the next file, the lines
   const inFile = (file: string) => page.locator(`[data-guide-file-shell="${file}"]`).first().locator('[data-line][data-selected-line]');
   await expect(inFile(LONG).first()).toBeAttached();
 
-  // Scroll with the bar open until the next file takes focus.
   await page.mouse.move(1000, 500);
   for (let i = 0; i < 40 && !(await inFile(NEXT).count()) && !(await line(page, NEXT, 9).isVisible()); i += 1) {
     await page.mouse.wheel(0, 300);
@@ -656,8 +585,6 @@ test('two files with the same line numbers: scrolled to the next file, the lines
   await expect(inFile(NEXT), 'its numbers painted on the next file').toHaveCount(0);
   await expect(selpop(page)).toBeHidden();
 
-  // Back, by the wheel (the first file's top rows are no longer drawn): the same lines, the bar under them, and
-  // Comment goes to this file.
   await bringLine(page, LONG, 1, -300);
   await settled(page);
   const g = await geometry(page);
@@ -689,20 +616,17 @@ test('its lines gone: the bar hides, the header is free, the + rule lifts, and i
     expect(await free(page, 'Approve', pane.getByRole('button', { name: /Approve|Send Feedback/ }).first())).toBe('free');
     expect(await free(page, 'Thread', pane.getByRole('button', { name: 'Thread' }).first())).toBe('free');
   };
-  // Just off the top of what the page shows, then far away, past where the diff draws rows.
   await bring(17, 400, 'start');
   await page.mouse.wheel(0, 10);
   await headerFree();
   await bring(61, 400);
   await headerFree();
-  // The + is free to come back while the bar is hidden (comments.css keys it on the bar showing).
   const plusRule = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--review-selection-plus').trim());
   expect(await plusRule()).toBe('');
   await bring(7, -400);
   await settled(page);
   expect(await plusRule()).toBe('none');
   clearOfLines(await geometry(page));
-  // Dismissed while hidden: a press on nothing closes it for good.
   await bring(61, 400);
   await expect(selpop(page)).toBeHidden();
   await page.mouse.click(4, 4);

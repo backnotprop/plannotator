@@ -1,23 +1,3 @@
-/**
- * Add a file already in the Inbox to the message being written, proved in a
- * real browser against the compiled binary (approval "reuse-attachments"). Two
- * sandboxed Inboxes, linked as machines; agents are SimAgent over each one's
- * own `inbox mcp`, never a real agent.
- *
- * Proves: the button on a tile, a big preview and a picture in the text moves
- * nothing when it shows; one click adds, the place in the thread and the focus
- * stay, the check shows wherever those bytes show, and a second click or the
- * tile's × undoes it; Tab reaches it and Enter adds; a draft keeps it; Send
- * writes no bytes, and the fake agent reads the same bytes at a read-only path
- * of its own; the version on screen is the one fixed; deleting the original
- * touches nothing; a phone adds from the viewer's toolbar and only a download
- * tile, which opens no viewer, has the button rest on it; full screen's card
- * shows the file under Reply; a linked machine's thread offers none of it. The
- * next thread: New message over an open thread offers that thread's files, sends
- * to an agent in another project with no word of the first; an archived thread's
- * button opens New message with the file. A picture copied from this Inbox pastes
- * as that file, and anything else as a plain paste.
- */
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -50,7 +30,6 @@ function machine(name: string): Machine {
   mkdirSync(bin, { recursive: true });
   fakeTailscale(bin);
   const dataDir = join(root, 'data');
-  // A PATH of the stand-in and the system's git, never an agent; PLANNOTATOR_TEST_SANDBOX: no agent lookups at all.
   const env = {
     HOME: root,
     PATH: `${bin}:/usr/bin:/bin`,
@@ -72,7 +51,6 @@ function machine(name: string): Machine {
 const cli = (m: Machine, ...args: string[]) => spawnSync(binary, ['inbox', ...args], { env: m.env, cwd: m.root, encoding: 'utf8', timeout: 60_000 });
 const base = (m: Machine) => `http://127.0.0.1:${(JSON.parse(readFileSync(join(m.dataDir, 'inbox', 'inbox.json'), 'utf8')) as { port: number }).port}`;
 
-/** A real PNG of one colour, large enough to be a picture. */
 function png(width: number, height: number, [r, g, b]: [number, number, number]): Buffer {
   const crcTable = Array.from({ length: 256 }, (_, n) => {
     let c = n;
@@ -103,7 +81,6 @@ function png(width: number, height: number, [r, g, b]: [number, number, number])
 const sha = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
 const blobsOf = (m: Machine) => readdirSync(join(m.dataDir, 'inbox', 'blobs')).filter((n) => /^[0-9a-f]{64}$/.test(n)).sort();
 
-/** A live session, as a connection plays one: it polls, and what it is woken with lands in `commands`. */
 class LiveSession {
   readonly commands: InboxReplyCommand[] = [];
   private stopped = false;
@@ -153,7 +130,6 @@ function art(name: string, bytes: Buffer | string): string {
   return join(dir, name);
 }
 
-/** A new thread of the agent's, so each test starts with an empty reply box. */
 async function threadWithFiles(extra: { body?: string; attachments?: string[] } = {}): Promise<{ thread_id: string; id: string }> {
   threadCount += 1;
   const sent = await agent.send({
@@ -179,16 +155,11 @@ const tile = (p: Page, name: string) => p.locator(`.ib-attachments:not(.ib-hatts
 const button = (p: Page, surface: string, name: string) => p.locator(`[data-reuse-surface="${surface}"][data-reuse][aria-label*="${name}"]`).first();
 const replyTiles = (p: Page) => p.locator('[data-reply-files] [data-compose-file]');
 const sendReply = (p: Page) => p.locator('section.ib-pane .ib-rbox [data-reply-send]').click();
-/**
- * The thread's draft on the Inbox holds the box's file. A computer saves without a word (approval "inbox-reply-box",
- * T6: no "Saved" under the box), so the draft itself is read.
- */
 const draftSaved = (threadId: string, url = studio.url) =>
   expect
     .poll(async () => ((await (await fetch(`${url}/api/inbox/threads/${threadId}/draft`)).json()) as { draft: { files?: unknown[] } | null }).draft?.files?.length ?? 0, { timeout: 10_000 })
     .toBeGreaterThan(0);
 
-/** Where every element of the pane's attachments and text is. */
 const boxes = (p: Page) =>
   p.evaluate(() => {
     const out: string[] = [];
@@ -247,7 +218,6 @@ test.afterAll(async () => {
 test('the button shows on hover and moves nothing, on a tile, a big preview and a picture in the text', async () => {
   const { thread_id } = await threadWithFiles({ body: 'Here it is.\n\n![Inline](art/inline-a.png)\n\nAnd the rest of the words.' });
   await open(page, thread_id);
-  /** Scrolled to it and at rest, then hovered: every box is where it was. */
   const hoverMovesNothing = async (target: ReturnType<Page['locator']>) => {
     await target.scrollIntoViewIfNeeded();
     await page.mouse.move(2, 2);
@@ -274,7 +244,6 @@ test('the button shows on hover and moves nothing, on a tile, a big preview and 
   const spot = (await onPicture.boundingBox())!;
   expect(spot.x + spot.width).toBeLessThanOrEqual(picture.x + picture.width);
   expect(spot.y).toBeGreaterThanOrEqual(picture.y);
-  // Each opens what it did: the frame and the tile still open the file.
   await preview(page, REF_A).click();
   await expect(page.locator('[data-reuse-surface="pane"]').first()).toBeVisible();
 });
@@ -289,22 +258,18 @@ test('one click adds, the place and the focus stay, the check shows everywhere; 
   await expect(replyTiles(page)).toHaveCount(1);
   await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
   await expect(page.locator(`[data-compose-file-name="${REF_B}"]`)).toBeVisible();
-  // Focus did not jump to the box, so the next file is one more click (Safari focuses no button on a click at all).
   expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe('TEXTAREA');
   expect(await page.evaluate(() => document.querySelector('section.ib-pane .ib-scroll, section.ib-pane [data-thread-scroll]')?.scrollTop ?? 0)).toBe(top);
-  // Both of this file's buttons turn; another file's does not.
   await expect(pane.locator(`[data-reuse-state="added"][aria-label*="${REF_B}"]`)).toHaveCount(2);
   await expect(pane.locator(`[data-reuse-state="added"][aria-label*="${REF_A}"]`)).toHaveCount(0);
   await expect(button(page, 'tile', REF_B)).toHaveAttribute('aria-pressed', 'true');
   await expect(button(page, 'tile', REF_B)).toHaveCSS('opacity', '1');
 
-  // The second click: from the tile, a different surface for the same bytes.
   await tile(page, REF_B).hover();
   await button(page, 'tile', REF_B).click();
   await expect(replyTiles(page)).toHaveCount(0);
   await expect(pane.locator('[data-reuse-state="added"]')).toHaveCount(0);
 
-  // The tile's ×.
   await preview(page, REF_A).hover();
   await button(page, 'gallery', REF_A).click();
   await expect(replyTiles(page)).toHaveCount(1);
@@ -369,7 +334,6 @@ test('Send writes no bytes; the agent reads the same bytes at a read-only path o
     for (const source of sources) expect(JSON.stringify(file)).not.toContain(source);
   }
   await expect(replyTiles(page)).toHaveCount(0);
-  // An ordinary message, whose files can be added again.
   await expect(page.locator(`[data-reuse-surface="tile"][aria-label="Add ${REF_A} to your reply"]`)).toHaveCount(2);
 });
 
@@ -402,18 +366,15 @@ test('deleting the original touches nothing of the new message', async () => {
   const { thread_id: original } = await threadWithFiles({ attachments: [path] });
   const session = (JSON.parse(readFileSync(join(studio.dataDir, 'inbox', 'inbox.json'), 'utf8')) as { serverSession: string }).serverSession;
   const post = (route: string, body: Record<string, unknown>) => fetch(`${studio.url}${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverSession: session, ...body }) });
-  // The reply goes to a second thread, added while the first is open: the draft's tile is what the window holds.
   await open(page, original);
   await tile(page, name).hover();
   await button(page, 'tile', name).click();
   await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
   await sendReply(page);
   const copy = ((await agent.nextReply(original)).attachments as { path: string }[])[0]!.path;
-  // Another thread reuses the same bytes through the route the window calls; then the original's thread goes.
   const sourceId = (await (await fetch(`${studio.url}/api/inbox/threads/${original}`)).json() as { thread: { messages: { attachments?: { id: string }[] }[] } }).thread.messages[0]!.attachments![0]!.id;
   const held = (await (await post('/api/inbox/uploads/reuse', { attachment_id: sourceId, version: 'sent' })).json()) as { upload: { upload_id: string; sha256: string } };
   expect((await post(`/api/inbox/threads/${original}/delete`, {})).status).toBe(200);
-  // That thread's own file went; the blob stays, held by the pending upload, and the draft-to-be still has its bytes.
   expect(() => statSync(copy)).toThrow();
   expect(blobsOf(studio)).toContain(sha(bytes));
   expect(held.upload.sha256).toBe(sha(bytes));
@@ -440,7 +401,6 @@ test('a phone: nothing new on a file that opens; the viewer holds a 44 px button
   try {
     await open(phone, thread_id);
     await expect(phone.locator('section.ib-pane [data-reuse-surface="gallery"]:visible, section.ib-pane [data-reuse-surface="inline"]:visible')).toHaveCount(0);
-    // Only the file that opens no viewer: the same tiles, drawn in the foot and the header's band.
     const resting = phone.locator('section.ib-pane [data-reuse-surface="tile"]:visible');
     await expect(resting.first()).toHaveAttribute('aria-label', `Add ${SHEET} to your reply`);
     for (const label of await resting.evaluateAll((all) => all.map((el) => el.getAttribute('aria-label')))) expect(label).toBe(`Add ${SHEET} to your reply`);
@@ -472,7 +432,6 @@ test("a phone's HTML page opens clear: the pill keeps its room; the button comes
     const pill = phone.locator('[data-fcomp-pill]');
     await expect(pill).toBeVisible();
     const bar = phone.locator('[data-reuse-surface="bar"]').first();
-    // Not drawn, not merely hidden: every button in the bar stays a 44 px target (inbox-phone-stepping.spec.ts).
     await expect(phone.locator('[data-reuse-surface="bar"]')).toHaveCount(0);
     const pillBox = (await pill.boundingBox())!;
     const toolbar = (await phone.locator('[data-full-view-bar]').boundingBox())!;
@@ -492,7 +451,6 @@ test("a phone's tiles keep their place: Open sits at the tile's edge, a size is 
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
   const phone = await context.newPage();
   const cue = (name: string) => tile(phone, name).locator('.ib-open');
-  /** How far the tile's word sits from its right edge. Today's tile, before reuse: 20 px, at any width. */
   const gap = async (name: string) => {
     const box = (await tile(phone, name).boundingBox())!;
     const word = (await cue(name).boundingBox())!;
@@ -580,7 +538,6 @@ for (const [width, height, more] of [[320, 700, false], [1366, 900, true]] as co
         await item.scrollIntoViewIfNeeded();
         const size = item.locator('.ib-kd-n');
         await expect(size).toHaveText(', 12.4 MB');
-        // The number is drawn whole: nothing clips it, and it ends before the word Download.
         const [line, number, word] = [(await item.locator('.ib-kd').boundingBox())!, (await size.boundingBox())!, (await item.locator('.ib-open').boundingBox())!];
         expect(number.x + number.width).toBeLessThanOrEqual(line.x + line.width + 0.5);
         expect(number.x + number.width).toBeLessThanOrEqual(word.x);
@@ -591,11 +548,9 @@ for (const [width, height, more] of [[320, 700, false], [1366, 900, true]] as co
         expect(word.x + word.width).toBeLessThanOrEqual(box.x);
         expect(await add.locator('xpath=..').evaluate((el) => el.classList.contains('ib-att-w-more'))).toBe(more);
       }
-      // A kind no tile holds: its words give way and show that they did, and the comma stays with the number.
       const words = tile(touch, long).locator('.ib-kd-w');
       expect(await words.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
       expect((await tile(touch, long).locator('.ib-kd').textContent())).toBe(`${long.split('.')[1]!.toUpperCase()} file, 12.4 MB`);
-      // The tight names: the long one keeps a start before its end, and at 320 the short one is whole, extension and all.
       const start = tile(touch, sheet).locator('.ib-fname-h');
       expect(await start.evaluate((el) => el.getBoundingClientRect().width)).toBeGreaterThanOrEqual(width === 320 ? 20 : 14);
       if (width === 320) {
@@ -653,13 +608,11 @@ for (const width of [1440, 390]) {
       const line = (name: string) => dialog.locator(`[data-compose-file-name="${name}"] .ib-kd-split`);
       await expect(line('hero-direction-long-name.jpg')).toHaveText('JPEG image, 329.0 KB');
       await expect(line('hero-direction-large.jpg')).toHaveText('JPEG image, 12.4 MB');
-      // Neither the kind nor the size is cut, and each tile holds a line of this length with room to spare.
       for (const name of ['hero-direction-long-name.jpg', 'hero-direction-large.jpg']) {
         const words = line(name).locator('.ib-kd-w');
         expect(await words.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
         expect(await line(name).evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
       }
-      // A kind no tile can hold: the words give way, and the number stays whole and clear of the ×.
       const long = 'report.averyveryverylongextensionforafile';
       const words = line(long).locator('.ib-kd-w');
       expect(await words.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
@@ -703,7 +656,6 @@ test('a tab that read the thread before the agent changed the file adds what it 
   await open(page, thread_id);
   await tile(page, 'stale.png').scrollIntoViewIfNeeded();
   await expect(tile(page, 'stale.png')).not.toContainText('Changed');
-  // This tab misses every later read of the thread's files: what it shows now is what it keeps showing.
   const reads = /\/api\/inbox\/threads\/[^/]+\/attachments/;
   await page.route(reads, (route) => route.abort());
   writeFileSync(path, png(400, 300, [10, 80, 200]));
@@ -744,7 +696,6 @@ test('a reload keeps the check: the restored tile is known by its bytes, and the
   await tile(page, REF_A).hover();
   await button(page, 'tile', REF_A).click();
   await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
-  // The draft has saved it.
   await draftSaved(thread_id);
   await page.reload();
   await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
@@ -755,10 +706,6 @@ test('a reload keeps the check: the restored tile is known by its bytes, and the
   await expect(replyTiles(page)).toHaveCount(0);
 });
 
-/**
- * A big changed file. Once the add has read it the Inbox caches its hash, so only an Inbox started since lists it by
- * its stat again: `listedByStat` draws that listing for this tab, the stat name the Inbox itself answered before the read.
- */
 async function bigChanged(name: string, tint: [number, number, number]) {
   const path = art(name, png(400, 300, [200, 200, 200]));
   const { thread_id } = await threadWithFiles({ attachments: [path] });
@@ -800,7 +747,6 @@ test('the draft already holds those bytes under another name: one tile, and the 
   const name = 'big-held.png';
   const big = await bigChanged(name, [90, 10, 200]);
   await open(page, big.thread_id);
-  // A tile that knows only the bytes, as one pasted has.
   const reuse = '**/api/inbox/uploads/reuse';
   await page.route(reuse, async (route) => {
     const { sha256: _shown, ...body } = route.request().postDataJSON() as Record<string, unknown>;
@@ -873,10 +819,6 @@ test("a linked machine's thread offers no button, on any surface", async () => {
 });
 
 const composeDialog = (p: Page) => p.locator('dialog[data-compose]');
-/**
- * Leaves New message with files in it, keeping nothing: Escape closes it and keeps a draft (approval
- * "inbox-compose-escape-keeps"), so the toast's Reopen and the draft's Delete draft throw it away.
- */
 const discardCompose = async (p: Page) => {
   await p.keyboard.press('Escape');
   await expect(composeDialog(p)).toHaveCount(0);
@@ -894,7 +836,6 @@ const post = (route: string, body: Record<string, unknown>) => {
   return fetch(`${studio.url}${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverSession, ...body }) });
 };
 
-/** A paste as a browser's Copy image writes it: `html` beside a re-encoded PNG. The native menu cannot be driven headless. */
 const paste = (p: Page, selector: string, html: string | null, name = 'image.png') =>
   p.evaluate(
     async ({ selector, html, name }) => {
@@ -908,7 +849,6 @@ const paste = (p: Page, selector: string, html: string | null, name = 'image.png
       data.items.add(new File([png], name, { type: 'image/png' }));
       const field = document.querySelector(selector) as HTMLTextAreaElement;
       field.focus();
-      // Firefox's constructor ignores `clipboardData`, so the data is set on the event itself.
       const event = new ClipboardEvent('paste', { bubbles: true, cancelable: true });
       Object.defineProperty(event, 'clipboardData', { value: data });
       field.dispatchEvent(event);
@@ -943,8 +883,6 @@ test("New message with a file: the next thread's agent gets the same bytes and n
   const attached = [...wake.matchAll(/Attached: (\S+) \((.+)\)/g)].map((m) => [m[1]!, m[2]!] as const);
   expect(attached.map(([name]) => name)).toEqual([REF_B]);
   for (const [name, path] of attached) {
-    // A fake agent, a process of its own and on a Mac inside a sandbox that can write nothing: it reads the path it was
-    // given and its own copy is read-only.
     const script = `const fs = require('fs'); const b = fs.readFileSync(process.argv[1]); let wrote = true; try { fs.writeFileSync(process.argv[1], 'x'); } catch { wrote = false; } process.stdout.write(require('crypto').createHash('sha256').update(b).digest('hex') + ' ' + wrote);`;
     const node = [process.execPath, '-e', script, path];
     const run = process.platform === 'darwin' ? spawnSync('/usr/bin/sandbox-exec', ['-p', '(version 1)(allow default)(deny file-write*)', ...node], { encoding: 'utf8' }) : spawnSync(node[0]!, node.slice(1), { encoding: 'utf8' });
@@ -966,7 +904,6 @@ test("an archived thread's button opens New message with the file, To empty", as
   await expect(composeDialog(page)).toBeVisible();
   await expect(composeDialog(page).locator(`[data-compose-file="done"][data-compose-file-name="${REF_B}"]`)).toBeVisible();
   await expect(composeDialog(page).locator('.ib-cp-tobtn')).toHaveAttribute('data-compose-to', 'choose');
-  // The archived thread itself did not change.
   await expect(replyTiles(page)).toHaveCount(0);
   await discardCompose(page);
 });
@@ -1025,7 +962,6 @@ test("a linked machine's thread: a paste there is a plain paste", async () => {
     if (request.url().includes('/uploads/reuse')) seen.push(request.url());
   };
   page.on('request', watch);
-  // A local thread's file, so a paste there would have something to point at.
   const { thread_id } = await threadWithFiles();
   await open(page, thread_id);
   await page.goto(`${studio.url}/#thread=${macbookThread}`);

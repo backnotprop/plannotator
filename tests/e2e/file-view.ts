@@ -1,10 +1,3 @@
-/**
- * The remembered file view (packages/inbox/fileView.ts) in specs that share
- * one browser context across serial tests: pressing "Side by side" or "Full
- * screen" saves the choice in a cookie, which would change how every later
- * test's files open. Those specs call this in `test.afterEach`, so each test
- * starts with today's rule; given a page, the toast the pick raised goes too.
- */
 import type { BrowserContext, Page } from '@playwright/test';
 
 export const FILE_VIEW_COOKIE = 'plannotator-inbox-file-view';

@@ -1,34 +1,5 @@
-/**
- * Reuse of main's passed Test run for a version-only release tag
- * (.github/workflows/release.yml, the `test` job).
- *
- *   bun run scripts/release-test-reuse.ts
- *
- * A release tag points at the version bump commit, which sits on top of a main
- * commit that the Test workflow already ran in full (sharded, about 7 min).
- * The release's own `bun test` is one unsharded process of about 40 min, and
- * it tested the same code again. So the `test` job asks this script first:
- *
- *  - X is the nearest commit in the checked-out commit's ancestry that has a
- *    passed Test run (`test.yml`) on a push to main.
- *  - When `git diff X HEAD` changes only the release bump files (BUMP_FILES:
- *    the 10 version files that scripts/check-release-version.mjs checks, and
- *    the Feedback form's search index), changes nothing but the version in the
- *    version files, and leaves the search index valid JSON, the job reuses that
- *    run and skips `bun test`. It still runs the type check, and the search
- *    index's own test when the index changed. Root RELEASE_NOTES*.md files are
- *    allowed too (they are untracked by design, but a stray one changes no
- *    test).
- *  - Anything else runs the full `bun test` as before: another changed file, a
- *    version file whose other fields changed, no passed run in the ancestry, a
- *    pull_request event, or any error (the GitHub API, git, a parse). The
- *    script never fails the job and prints why it decided what it did.
- *
- * scripts/release-test-reuse.test.ts checks the decision and its fallbacks.
- */
 import { appendFileSync } from 'node:fs';
 
-/** The JSON files whose top-level `version` a release bumps (scripts/check-release-version.mjs JSON_VERSION_PATHS). */
 export const JSON_VERSION_FILES = [
   'package.json',
   'apps/opencode-plugin/package.json',
@@ -39,39 +10,25 @@ export const JSON_VERSION_FILES = [
   'apps/copilot/plugin.json',
   'packages/server/package.json',
 ];
-/** The marketplace whose `plannotator-copilot` entry's `version` a release bumps. */
 export const MARKETPLACE_FILE = '.github/plugin/marketplace.json';
 export const MARKETPLACE_PLUGIN = 'plannotator-copilot';
-/** The YAML file whose top-level `version:` line a release bumps. */
 export const OPENPACKAGE_FILE = 'openpackage.yml';
-/** The Feedback form's search index, which `bun scripts/feedback-search-index.ts` rewrites at release time. */
 export const FEEDBACK_INDEX_FILE = 'packages/inbox/feedbackSearch.data.json';
-/** The test that reads the shipped search index; it runs on a reused tag when the index changed. */
 export const FEEDBACK_INDEX_TEST = 'packages/inbox/feedbackSearch.test.ts';
-/** Every file a bump commit may change. */
 export const BUMP_FILES = [...JSON_VERSION_FILES, MARKETPLACE_FILE, OPENPACKAGE_FILE, FEEDBACK_INDEX_FILE];
-/** Release notes at the repo root (untracked by design). */
 const RELEASE_NOTES = /^RELEASE_NOTES[^/]*\.md$/;
-/** How many passed Test runs on main the lookup reads (one API call). */
 export const LOOKBACK_RUNS = 100;
 
 export interface Decision {
   reuse: boolean;
-  /** Why, in one line. */
   why: string;
-  /** The reused run, when reuse is true. */
   run?: { id: number; url: string; sha: string };
-  /** The search index changed, so its test runs. */
   indexChanged: boolean;
 }
 
-/** What the decision needs from git and GitHub; injected so the tests run on a scratch repo. */
 export interface Deps {
-  /** `git <args>` in the checkout; throws on a non-zero exit. */
   git(args: string[]): string;
-  /** Exit code of `git <args>` (for `merge-base --is-ancestor`). */
   gitCode(args: string[]): number;
-  /** A GitHub REST GET; throws on failure. */
   api(path: string): unknown;
 }
 
@@ -89,7 +46,6 @@ type Run = {
 
 const full = (why: string): Decision => ({ reuse: false, why, indexChanged: false });
 
-/** The passed Test runs of pushes to main, newest first, checked again here whatever the API's filters did. */
 export function passedMainRuns(api: Deps['api'], repo: string): Run[] {
   const body = api(`repos/${repo}/actions/workflows/test.yml/runs?branch=main&event=push&status=success&per_page=${LOOKBACK_RUNS}`) as { workflow_runs?: Run[] };
   if (!body || !Array.isArray(body.workflow_runs)) throw new Error('the runs list has no workflow_runs');
@@ -107,7 +63,6 @@ export function passedMainRuns(api: Deps['api'], repo: string): Run[] {
   );
 }
 
-/** Of `runs`, the one on the nearest ancestor of `head` (fewest commits between), or null. */
 export function nearestAncestorRun(runs: Run[], head: string, deps: Pick<Deps, 'git' | 'gitCode'>): Run | null {
   let best: { run: Run; distance: number } | null = null;
   const seen = new Set<string>();
@@ -115,7 +70,6 @@ export function nearestAncestorRun(runs: Run[], head: string, deps: Pick<Deps, '
     const sha = run.head_sha!;
     if (seen.has(sha)) continue;
     seen.add(sha);
-    // 0: an ancestor (or head itself). 1: not one. Anything else (a commit this clone lacks): not one either.
     if (deps.gitCode(['merge-base', '--is-ancestor', sha, head]) !== 0) continue;
     const distance = Number(deps.git(['rev-list', '--count', `${sha}..${head}`]).trim());
     if (!Number.isInteger(distance)) throw new Error(`rev-list --count ${sha}..${head} gave no number`);
@@ -130,7 +84,6 @@ function parseObject(text: string, file: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
-/** The file without its release version, to compare the two sides; throws when the version is not where a bump puts it. */
 function withoutVersion(file: string, text: string): string {
   if (file === OPENPACKAGE_FILE) {
     const lines = text.split('\n');
@@ -152,22 +105,17 @@ function withoutVersion(file: string, text: string): string {
   return JSON.stringify(json);
 }
 
-/**
- * Why the change from `base` to `head` is not a release bump, or '' when it is
- * one. Also says whether the search index changed.
- */
 export function bumpOnly(base: string, head: string, git: Deps['git']): { problem: string; indexChanged: boolean } {
   const changed = git(['diff', '--name-only', '--no-renames', '-z', base, head]).split('\0').filter(Boolean);
   let indexChanged = false;
   for (const file of changed) {
     if (RELEASE_NOTES.test(file)) continue;
     if (!BUMP_FILES.includes(file)) return { problem: `${file} changed, and it is not a release bump file`, indexChanged };
-    // `git show` throws for a file that one side lacks (added or deleted): not a bump.
     const after = git(['show', `${head}:${file}`]);
     if (file === FEEDBACK_INDEX_FILE) {
       const index = parseObject(after, file);
       if (!Array.isArray(index.features) || !Array.isArray(index.links)) return { problem: `${file} has no features and links lists`, indexChanged };
-      git(['show', `${base}:${file}`]); // a rewrite, not a new file
+      git(['show', `${base}:${file}`]);
       indexChanged = true;
       continue;
     }
@@ -177,7 +125,6 @@ export function bumpOnly(base: string, head: string, git: Deps['git']): { proble
   return { problem: '', indexChanged };
 }
 
-/** The decision for this run. Never throws: any failure runs the full tests. */
 export function decide(env: Record<string, string | undefined>, deps: Deps): Decision {
   try {
     const event = env.GITHUB_EVENT_NAME;
@@ -197,7 +144,6 @@ export function decide(env: Record<string, string | undefined>, deps: Deps): Dec
   }
 }
 
-/** The step outputs: `reuse` and `index-changed`, each true or false. */
 export function outputs(d: Decision): string {
   return `reuse=${d.reuse}\nindex-changed=${d.indexChanged}\n`;
 }

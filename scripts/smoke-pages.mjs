@@ -1,33 +1,4 @@
 #!/usr/bin/env node
-/**
- * Release smoke (smoke-binaries, every OS): the compiled CLI serves its
- * embedded pages exactly as built, and replacing the binary under a running
- * process (what `plannotator update`, Update now and the installers do) does
- * not change what that process serves.
- *
- * usage: node scripts/smoke-pages.mjs --binary <cli> --replacement <other file>
- *          --digests <scripts/page-digests.ts output from the build job>
- *          [--bun <bun>] [--port-base <n>]
- *
- * 1. review and annotate answer `/` with the built review.html / index.html
- *    page, byte for byte, and only `Content-Type: text/html` (a local
- *    session); in remote mode a gzip answer decompresses to the same bytes.
- *    The Shapes server (`shape serve`, Shape turned on in the sandbox) answers
- *    `/` with the built shape.html: gzip as embedded to a browser that takes
- *    it, unzipped to one that does not.
- *    The chunks and stylesheet the page loads up front (packed behind it,
- *    build/pack-app.ts) are served as built, `nosniff`. Review's diagram
- *    engine files are served as built.
- * 2. annotate runs from a copy of the binary in an install dir; that copy is
- *    then replaced the way the installer does it on this OS (POSIX: stage
- *    next to it, rename over it; Windows: move the running exe aside to
- *    .old, move the new one in), and only then is `/` fetched: still the
- *    built page.
- * 3. With --bun: a probe compiled on this runner embeds a file
- *    (`type: "file"`), is replaced the same way while running, and only then
- *    reads that file for the first time: it must read its own bytes, not the
- *    replacement's (Bun reads embedded files from what it loaded at start).
- */
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -44,7 +15,6 @@ const arg = (name, fallback) => {
 const binary = resolve(arg("binary"));
 const replacement = resolve(arg("replacement"));
 const digestsFile = resolve(arg("digests"));
-// A bare name (`bun`) is looked up on PATH; a path is used as given.
 const bunArg = arg("bun");
 const bun = !bunArg ? null : /[\\/]/.test(bunArg) ? resolve(bunArg) : bunArg;
 let port = Number(arg("port-base", "19560"));
@@ -78,7 +48,6 @@ const env = {
 };
 mkdirSync(env.HOME, { recursive: true });
 
-/** GET with exactly the headers given (node:http adds no Accept-Encoding). */
 function get(p, path, headers = {}) {
   return new Promise((done, reject) => {
     const req = request({ host: "127.0.0.1", port: p, path, headers }, (res) => {
@@ -124,17 +93,16 @@ function stop(child) {
   }
 }
 
-/** Replace `target` with `source` the way this OS's installer does, while `target` runs. */
 function replaceLikeInstaller(target, source) {
   const dir = resolve(target, "..");
   const staged = join(dir, `.plannotator.new.${process.pid}`);
   copyFileSync(source, staged);
   if (isWindows) {
-    renameSync(target, `${target}.old`); // install.ps1 / install.cmd: the running exe moves aside
+    renameSync(target, `${target}.old`);
     renameSync(staged, target);
   } else {
     chmodSync(staged, 0o755);
-    renameSync(staged, target); // install.sh: rename(2) over the old path
+    renameSync(staged, target);
   }
   if (sha256(readFileSync(target)) !== sha256(readFileSync(source))) throw new Error("the replacement did not land");
 }
@@ -157,7 +125,6 @@ function checkPage(label, res, digest, encoding, contentType = "text/html") {
   return body.toString("utf8");
 }
 
-/** The files a served page loads up front (its entry chunk, its stylesheet): each as built. */
 async function checkPageAssets(label, p, page, headers, encoding) {
   if (typeof page !== "string") return;
   const paths = [...page.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map((m) => m[1]);
@@ -196,7 +163,6 @@ function scratchRepo() {
 }
 
 async function servedPages(repo) {
-  // Code review: the review page, and its diagram engine as built.
   {
     const p = port++;
     const child = start(binary, ["review"], { PLANNOTATOR_PORT: String(p) }, repo);
@@ -222,7 +188,6 @@ async function servedPages(repo) {
       stop(child);
     }
   }
-  // Annotate: the plan/annotate page; then remote mode, gzip.
   for (const [label, extra, headers, encoding] of [
     ["annotate /", {}, {}, "identity"],
     ["annotate / (remote, gzip)", { PLANNOTATOR_REMOTE: "1" }, { "Accept-Encoding": "gzip" }, "gzip"],
@@ -242,7 +207,6 @@ async function servedPages(repo) {
 }
 
 async function shapePage(repo) {
-  // Shape is off by default: turn it on in the sandbox, and give the server its port the way a stopped one keeps it.
   const p = port++;
   const shapes = join(env.PLANNOTATOR_DATA_DIR, "shapes");
   mkdirSync(shapes, { recursive: true });

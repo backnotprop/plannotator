@@ -1,15 +1,3 @@
-/**
- * No shipped skill, command or CLI help names ~/.plannotator as a path to
- * read or write (#2305).
- *
- * The failure this catches: the compound skill told agents to create
- * `~/.plannotator/hooks/compound/...`. On an install that keeps its data
- * under $XDG_DATA_HOME, that made a new ~/.plannotator, and every Plannotator
- * process then used it, so the person's plans and history went out of
- * reach. Agent-facing text must send the agent to `plannotator data-dir`
- * instead. The allowlist holds only text that describes the default (or warns
- * against writing it); every entry must still match, so a stale one fails.
- */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -17,20 +5,10 @@ import { formatTopLevelHelp, SUBCOMMAND_HELP } from "../apps/hook/server/cli";
 
 const REPO = resolve(import.meta.dir, "..");
 
-/** A home-relative data-dir path: `~/.plannotator`, `$HOME/.plannotator`, `${HOME}/...`, `%USERPROFILE%\.plannotator`. */
 const HARDCODED = /(?:~|\$HOME|\$\{HOME\}|%USERPROFILE%|\$env:USERPROFILE)[/\\]\.plannotator/;
 
-/**
- * Where agent instructions ship from: skills, slash commands and agent
- * definitions of every host. Tracked files only (`git ls-files`): builds copy
- * the skills into gitignored folders (apps/pi-extension/skills/,
- * apps/opencode-plugin/skills/), which are generated from these sources and
- * may be stale in a checkout.
- */
 function shippedFiles(): string[] {
   const listed = Bun.spawnSync({
-    // `:(glob)`: `*` stops at a slash, so `apps/*/commands` is a host's
-    // command folder, not apps/marketing/src/content/docs/commands.
     cmd: [
       "git", "ls-files", "-z", "--",
       ":(glob)apps/skills/**", ":(glob).agents/**",
@@ -45,7 +23,6 @@ function shippedFiles(): string[] {
     .filter((file) => file && !/\.test\.[cm]?[jt]sx?$/.test(file));
 }
 
-/** Text that describes the default data dir, or warns against writing it. `source` is a repo path or `cli:<subcommand>`. */
 const ALLOWED: Array<{ source: string; contains: string; why: string }> = [
   {
     source: "apps/skills/core/plannotator/SKILL.md",
@@ -95,8 +72,6 @@ describe("shipped agent instructions never hardcode the data directory", () => {
   const hits = allHits();
 
   test("the scan reaches the skills it guards", () => {
-    // The compound skill is the one that broke installs; if the walk stops
-    // reaching it, every other assertion here passes vacuously.
     const files = shippedFiles();
     expect(files).toContain("apps/skills/extra/plannotator-compound/SKILL.md");
     expect(files).toContain("apps/skills/core/plannotator/SKILL.md");

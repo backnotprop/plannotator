@@ -1,36 +1,3 @@
-/**
- * On desktop Linux, Inter's stylistic sets reach Inter only (#1961). They are
- * set with `font-feature-settings` on body, which every element inherits,
- * whatever font it renders in: on Linux, code review's diffs and line-number
- * gutters fall back to Ubuntu Mono, whose `ss02` turns digits into
- * superscripts. Under `pn-os-linux` (put on <html> by ThemeProvider, from the
- * navigator) theme.css instead names the sets for Inter's families
- * (`@font-feature-values`) and applies them with `font-variant-alternates`,
- * which a font not named there ignores. macOS, iOS and Windows keep the body
- * rule unchanged (SF Pro, the system-ui themes' font, draws its open 4 and
- * straight 6 and 9 with it).
- *
- * Proved in real browsers against the built apps (apps/hook/dist: run
- * `bun run --cwd apps/review build && bun run build:hook` first), served on
- * loopback so the review app falls back to its demo diff. Each page is told
- * its platform by a navigator stub (init script), so the Linux and macOS
- * paths both run on any host:
- *  - Linux: every monospace surface computes `font-feature-settings: normal`:
- *    the diff's gutter numbers and code inside Pierre's shadow roots, and the
- *    plan's fenced code, `.font-mono` and `kbd`; body asks for Inter's named
- *    sets. (The bundled Inter subset has no ss01, ss02 or cv01 glyphs, so
- *    nothing here claims a pixel difference on Inter.)
- *  - macOS and Windows: body and the monospace text compute the body rule's
- *    `"ss01", "ss02", "cv01"`, exactly as before, with no alternates;
- *  - Linux, with a font whose `ss02` is superscript digits
- *    (PLANNOTATOR_E2E_SS02_FONT: a path to Ubuntu Mono, from google/fonts
- *    `ufl/ubuntumono`) standing in for the monospace font: the gutter and a
- *    fenced code block render exactly as the font does with no features, while
- *    the old body rule, put back, changes them. Skipped when the variable is unset.
- * Browsers: chromium and webkit (what CI installs), or PLANNOTATOR_E2E_FONT_BROWSERS
- * (comma list, e.g. "chromium,firefox,webkit").
- */
-
 import { chromium, expect, firefox, test, webkit, type Locator, type Page } from '@playwright/test';
 import { createServer, type Server } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
@@ -44,11 +11,6 @@ const pages: Record<string, string> = {
 };
 const ss02FontPath = process.env.PLANNOTATOR_E2E_SS02_FONT;
 const TEST_FONT = 'PN SS02 Test';
-/**
- * The body rule: what theme.css carried everywhere before #1961, and still
- * carries outside Linux. Put back on a Linux page, so `!important` to beat
- * `:root.pn-os-linux body`.
- */
 const OLD_BODY_RULE = 'body { font-feature-settings: "ss01", "ss02", "cv01" !important; }';
 const browsers = (process.env.PLANNOTATOR_E2E_FONT_BROWSERS ?? 'chromium,webkit')
   .split(',')
@@ -57,23 +19,15 @@ const browsers = (process.env.PLANNOTATOR_E2E_FONT_BROWSERS ?? 'chromium,webkit'
 
 const engines = { chromium, firefox, webkit };
 
-/** What each platform's browser reports; the page's CSS keys off the class rootPlatform derives from it. */
 const NAVIGATORS = {
   linux: { platform: 'Linux x86_64', hint: 'Linux', userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36' },
   mac: { platform: 'MacIntel', hint: 'macOS', userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36' },
   windows: { platform: 'Win32', hint: 'Windows', userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36' },
 };
 type Os = keyof typeof NAVIGATORS;
-/** The tags macOS, iOS and Windows keep. */
 const KEPT_FEATURES = ['cv01', 'ss01', 'ss02'];
-/** A computed font-feature-settings as its sorted tags (Chromium sorts them, WebKit keeps the authored order). */
 const tags = (value: string) => (value === 'normal' ? [] : value.split(',').map((tag) => tag.trim().replace(/^"|"$/g, '')).sort());
 
-/**
- * A fresh browser of that engine per test (the config's own browser is chromium only).
- * The config's launch args are Chromium's (`--use-mock-keychain`, `--password-store=basic`),
- * and WebKit and Firefox refuse to start with them, so the other engines get none.
- */
 async function withPage(name: keyof typeof engines, os: Os, run: (page: Page) => Promise<void>) {
   const browser = await engines[name].launch(name === 'chromium' ? { headless: true } : { headless: true, args: [] });
   try {
@@ -97,7 +51,6 @@ test.beforeAll(async () => {
   for (const file of Object.values(pages)) {
     if (!existsSync(file)) throw new Error(`${file} is missing: run bun run --cwd apps/review build && bun run build:hook`);
   }
-  // Served as the CLI serves them: each page, and the chunks packed behind it.
   const apps: PackedApp[] = Object.values(pages).map((file) => openPackedApp(readFileSync(file, 'utf8')));
   server = createServer(async (req, res) => {
     const path = (req.url ?? '/').split('?')[0];
@@ -117,7 +70,6 @@ test.beforeAll(async () => {
     }
     const file = pages[path];
     if (!file) {
-      // No Plannotator server: the review app shows its demo diff, the editor its demo plan.
       res.writeHead(404, { 'content-type': 'application/json' });
       res.end('{}');
       return;
@@ -138,7 +90,6 @@ test.afterAll(async () => {
 const GUTTER = 'diffs-container [data-column-number]';
 const FENCE = 'pre > code.pn-code';
 
-/** Click through the first-run announcements (a fresh browser sees them all), so nothing covers the page. */
 async function dismissFirstRun(page: Page) {
   await page.waitForTimeout(1500);
   for (let i = 0; i < 10; i++) {
@@ -170,7 +121,6 @@ async function openPlan(page: Page) {
   await page.evaluate(() => document.fonts.ready);
 }
 
-/** What the browser paints at the element's place once the page has settled (Pierre re-renders on a font change). */
 async function paintedAt(page: Page, locator: Locator): Promise<Buffer> {
   await page.evaluate(() => document.fonts.ready);
   await page.waitForTimeout(600);
@@ -180,7 +130,6 @@ async function paintedAt(page: Page, locator: Locator): Promise<Buffer> {
   return page.screenshot({ clip: box, animations: 'disabled', caret: 'hide' });
 }
 
-/** Computed font-feature-settings of every match, shadow roots included. */
 async function featureSettings(page: Page, selector: string): Promise<string[]> {
   return page.evaluate((sel) => {
     const out: string[] = [];
@@ -193,7 +142,6 @@ async function featureSettings(page: Page, selector: string): Promise<string[]> 
   }, selector);
 }
 
-/** Selector inside Pierre's shadow roots: `diffs-container X` → X under each root. */
 async function shadowSettings(page: Page, inner: string): Promise<string[]> {
   return page.evaluate((sel) => {
     const out: string[] = [];
@@ -245,7 +193,6 @@ for (const browserName of browsers) {
       expect(gutter.length).toBeGreaterThan(0);
       expect(code.length).toBeGreaterThan(0);
       expect(new Set([...gutter, ...code])).toEqual(new Set(['normal']));
-      // The prose around them still asks Inter for its sets.
       const body = await page.evaluate(() => {
         const style = getComputedStyle(document.body);
         return { alternates: style.fontVariantAlternates, features: style.fontFeatureSettings, family: style.fontFamily };
@@ -283,9 +230,7 @@ for (const browserName of browsers) {
         const removePlain = await addStyle(page, ':root:root { --diffs-font-features: normal !important; }');
         const explicitNormal = await paintedAt(page, gutter);
         await removePlain();
-        // The test font does turn these digits into superscripts under the old rule...
         expect(old.equals(fixed)).toBe(false);
-        // ...and now they render exactly as the font draws them with no features.
         expect(fixed.equals(explicitNormal)).toBe(true);
       }));
 
@@ -293,8 +238,6 @@ for (const browserName of browsers) {
         await openPlan(page);
         await addStyle(page, useTestFont);
         await page.evaluate(() => document.fonts.load('16px "PN SS02 Test"'));
-        // Fenced code was already shielded (Tailwind's preflight resets code and pre),
-        // so the old rule reached `.font-mono` text outside them: the plan's own.
         const mono = page.locator('.font-mono:not(pre, code, pre *, code *)').filter({ visible: true }).first();
         await mono.evaluate((el) => {
           el.textContent = '0123456789';
@@ -310,7 +253,6 @@ for (const browserName of browsers) {
         expect(old.equals(fixed)).toBe(false);
         expect(fixed.equals(explicitNormal)).toBe(true);
 
-        // The fence, with digits, renders as the font draws them too.
         const fence = page.locator(FENCE).first();
         await fence.evaluate((el) => {
           el.textContent = '0123456789 = 42';

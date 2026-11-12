@@ -1,25 +1,3 @@
-/**
- * Rename… in the project menu (OPTIONS.md option A, picked 2026-10-31), in a
- * real browser against the compiled binary, with agents writing through
- * `plannotator inbox mcp` (scripts/inbox-sim.ts). The person's layout: a
- * repository checked out at `<scratch>/code/acme/main` with two linked
- * worktrees beside it (`acme/feat-x`, `acme/fix-y`), all one project that
- * reads "main", plus two other projects.
- *
- *  - Rename… from the sidebar's menu: the sidebar, the thread rows' project
- *    name, search and the project's own list all read the new name;
- *  - the name survives a reload;
- *  - Escape cancels; an empty or too long name (65 emoji, counted as
- *    characters, never cut) is refused and said in the live region;
- *  - a click into the reply box closes the field and keeps focus there;
- *  - keyboard only: ⋯, the arrows, Enter, typing, Enter;
- *  - Reset name brings back "main";
- *  - a phone: the item in the menu's sheet, the field in the navigation sheet.
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * PNGs land in .local/proof/project-rename/ (1440×900 @2x, a phone 390×844 @3x).
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
@@ -71,10 +49,6 @@ async function lightContext(browser: Browser, url: string, scheme: 'light' | 'da
   return context;
 }
 
-/**
- * The field's focus ring lies inside the clip of the sidebar's scroll area on every side. `overflow-y: auto`
- * makes that area clip sideways too, and the field fills its width, so a ring reaching past the field is cut.
- */
 async function expectWholeRing(page: Page): Promise<void> {
   const room = await field(page).evaluate((el) => {
     const style = getComputedStyle(el);
@@ -93,7 +67,6 @@ async function expectWholeRing(page: Page): Promise<void> {
   for (const side of ['left', 'right', 'top', 'bottom'] as const) expect(room[side], `the ring's ${side} edge`).toBeGreaterThanOrEqual(0);
 }
 
-/** The row's project name for one thread in the list (wide rows name the project when the list is not filtered). */
 async function rowProject(page: Page, threadId: string): Promise<string> {
   return (await page.locator(`.ib-lbody [data-row="${threadId}"] .ib-p`).first().textContent())?.trim() ?? '';
 }
@@ -104,7 +77,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-rename-e2e-');
   const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
-  // acme/main holds the repository; its two worktrees sit beside it.
   const main = join(root, 'code', 'acme', 'main');
   mkdirSync(main, { recursive: true });
   git(main, 'init', '-q');
@@ -144,12 +116,10 @@ test.afterAll(async () => {
 test('Rename… from the sidebar menu: the sidebar, the rows, search and the project page read the new name', async ({ browser }: { browser: Browser }) => {
   const { page, threads } = world;
   await page.goto(world.url);
-  // The worktrees are one project, and it reads "main".
   await expect.poll(() => sidebarNames(page)).toEqual(expect.arrayContaining(['main', 'billing-svc', 'field-notes']));
   expect((await sidebarNames(page)).filter((name) => name === 'main')).toHaveLength(1);
   for (const id of [threads.main, threads.featX, threads.fixY]) await expect.poll(() => rowProject(page, id)).toBe('main');
 
-  // ⋯ on the row: the menu, Rename… after a separator, no Reset name yet.
   const main = row(page, 'main');
   await main.hover();
   await main.locator('.ib-pmore').click();
@@ -159,13 +129,11 @@ test('Rename… from the sidebar menu: the sidebar, the rows, search and the pro
   await page.screenshot({ path: join(proofDir, '01-menu-rename-light.png') });
   await menu(page).locator('[data-project-action="rename"]').click();
 
-  // The field holds the name, all of it selected, with the folder's name behind it.
   await expect(field(page)).toBeFocused();
   await expect(field(page)).toHaveValue('main');
   await expect(field(page)).toHaveAttribute('placeholder', 'main');
   await page.keyboard.type('acme');
   await expect(field(page)).toHaveValue('acme');
-  // The pointer off the list (where the menu item was), so no row shows its hover.
   await page.mouse.move(900, 700);
   await expect(field(page)).toBeFocused();
   await page.screenshot({ path: join(proofDir, '02-field-typing-light.png') });
@@ -176,18 +144,15 @@ test('Rename… from the sidebar menu: the sidebar, the rows, search and the pro
   await expect(row(page, 'main')).toHaveCount(0);
   await expect(row(page, 'acme').locator('.ib-pmore')).toBeFocused();
   await expect(page.locator('[data-inbox-live]')).toHaveText('Renamed to acme.');
-  // Every thread of the project, the worktrees' included, reads it in the list.
   for (const id of [threads.main, threads.featX, threads.fixY]) await expect.poll(() => rowProject(page, id)).toBe('acme');
   await page.mouse.move(900, 600);
   await page.waitForTimeout(250);
   await page.screenshot({ path: join(proofDir, '03-sidebar-renamed-light.png') });
 
-  // Search: the project by its new name, and its threads named with it.
   await page.locator('.ib-side .ib-sp-entry').first().click();
   const palette = page.locator('dialog[data-search-palette]');
   await expect(palette).toBeVisible();
   await page.keyboard.type('acme');
-  // Its root holds "acme" too: the project's name line is what proves the rename.
   await expect(palette.locator('[data-search-group="projects"] [data-result="project"] .ib-sp-p').first()).toHaveText('acme');
   await palette.getByRole('combobox').fill('worktree');
   const hit = palette.locator('[data-result]').filter({ hasText: 'feat-x passes' }).first();
@@ -196,11 +161,9 @@ test('Rename… from the sidebar menu: the sidebar, the rows, search and the pro
   await page.keyboard.press('Escape');
   await expect(palette).toBeHidden();
 
-  // The project's own list: its title.
   await row(page, 'acme').locator('.ib-proj').click();
   await expect(page.locator('.ib-lhead-tt')).toHaveText('acme');
 
-  // Dark: the sidebar after the rename.
   const dark = await lightContext(browser, world.url, 'dark');
   const darkPage = await dark.newPage();
   await darkPage.goto(world.url);
@@ -229,7 +192,6 @@ test('Escape cancels: the name stays, focus is back on ⋯', async () => {
   await expect(row(page, 'acme')).toBeVisible();
   await expect(row(page, 'zzz')).toHaveCount(0);
   await expect(row(page, 'acme').locator('.ib-pmore')).toBeFocused();
-  // An empty name is not saved either: the field stays, marked, and the live region says why.
   await row(page, 'acme').locator('.ib-proj').click({ button: 'right' });
   await page.locator('[data-project-action="rename"]').click();
   await page.keyboard.press('Backspace');
@@ -237,7 +199,6 @@ test('Escape cancels: the name stays, focus is back on ⋯', async () => {
   await expect(field(page)).toBeVisible();
   await expect(field(page)).toHaveAttribute('aria-invalid', 'true');
   await expect(page.locator('[data-inbox-live]')).toHaveText('A name cannot be empty.');
-  // The cap counts characters as the server does: 65 emoji are all kept in the field, and refused on Enter.
   const emoji = '🚀'.repeat(65);
   await field(page).fill(emoji);
   await expect(field(page)).toHaveValue(emoji);
@@ -261,7 +222,6 @@ test('clicking into the reply box closes the field and leaves focus in the reply
   await reply.click();
   await expect(field(page)).toHaveCount(0);
   await expect(reply).toBeFocused();
-  // Still focused a moment later: nothing takes it back to ⋯.
   await page.waitForTimeout(200);
   await expect(reply).toBeFocused();
   await expect(row(page, 'acme')).toBeVisible();
@@ -275,7 +235,6 @@ test('keyboard only: ⋯, the arrows to Rename…, typing, Enter', async () => {
   await page.keyboard.press('Tab');
   await expect(acme.locator('.ib-pmore')).toBeFocused();
   await page.keyboard.press('Enter');
-  // A name is set now: Reset name follows Rename….
   await expect(menu(page).getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all', 'Rename…', 'Reset name']);
   await expect(page.locator('[data-project-action="read"]')).toBeFocused();
   await page.keyboard.press('End');
@@ -288,7 +247,6 @@ test('keyboard only: ⋯, the arrows to Rename…, typing, Enter', async () => {
   await page.keyboard.press('Enter');
   await expect(row(page, 'Acme Platform')).toBeVisible();
   await expect(row(page, 'Acme Platform').locator('.ib-pmore')).toBeFocused();
-  // Its list, opened from the keyboard: Shift+Tab back to the row, Enter.
   await page.keyboard.press('Shift+Tab');
   await page.keyboard.press('Enter');
   await expect(page.locator('.ib-lhead-tt')).toHaveText('Acme Platform');
@@ -305,7 +263,6 @@ test('the focus ring is whole on every side: on the first and last rows, light a
       await page.locator('[data-project-action="rename"]').click();
       await expect(field(page)).toBeFocused();
       await expectWholeRing(page);
-      // The pointer off the row, then the field and a little around it at 2x: what the owner's screenshot showed cut.
       await page.mouse.move(900, 700);
       const box = (await field(page).boundingBox())!;
       await page.screenshot({ path: join(proofDir, `ring-${scheme}-${where}.png`), clip: { x: Math.max(0, box.x - 12), y: box.y - 12, width: box.width + 24, height: box.height + 24 } });
@@ -325,7 +282,6 @@ test('Reset name brings back "main", and the item goes until a name is set again
   await expect(page.locator('.ib-lhead-tt')).toHaveText('main');
   await expect(page.locator('[data-inbox-live]')).toHaveText('Name reset to main.');
   await page.locator('.ib-nav', { hasText: 'Inbox' }).first().click();
-  // The feat-x thread was opened (the reply box case), so it sits in the folded Quiet section: the other two are drawn.
   for (const id of [threads.main, threads.fixY]) await expect.poll(() => rowProject(page, id)).toBe('main');
   await row(page, 'main').locator('.ib-proj').click({ button: 'right' });
   await expect(menu(page).getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all', 'Rename…']);
@@ -349,7 +305,6 @@ test('a phone: Rename… in the menu sheet, the field in the navigation sheet', 
   await page.waitForTimeout(300);
   await page.screenshot({ path: join(proofDir, '05-phone-menu.png') });
   await page.locator('[data-project-action="rename"]').tap();
-  // The navigation sheet stays open: the field is in it, the phone's 44 px row.
   await expect(field(page)).toBeVisible();
   await expect(field(page)).toBeFocused();
   expect((await field(page).boundingBox())!.height).toBeGreaterThanOrEqual(44);

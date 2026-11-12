@@ -1,43 +1,8 @@
 #!/usr/bin/env node
-/**
- * A fake `pi` for launch tests (never the real Pi). It follows the contract the
- * Pi launch host relies on, as recorded against Pi 0.85.1 in
- * .ops/work/launch-pi/ (smoke-2):
- *
- *  - `pi --version` prints the version alone.
- *  - `pi --mode rpc --session-id <uuid> --name <name>`: strict JSONL on stdin
- *    and stdout. `get_state` answers `{ sessionId, sessionFile, messageCount }`;
- *    `abort` answers at once. The session file is
- *    `<agent dir>/sessions/--<cwd with / as ->--/<stamp>_<uuid>.jsonl`, its
- *    first line the header `{ type: "session", id, cwd }`; an existing file
- *    for the id is reopened (its lines are the context); with none, Pi's
- *    warning on stderr and a new one. stdin's end ends the process with exit 0,
- *    as Pi's RPC mode does (exits.jsonl says whether `abort` came first).
- *  - `pi --session-id <uuid>` alone: Pi in a terminal on the session (Open in
- *    Terminal). No RPC; the extension below only; it ends on SIGTERM or SIGINT.
- *  - It acts as Plannotator's Pi extension: it polls the bridge of the Inbox in
- *    `$PLANNOTATOR_DATA_DIR` (else ~/.plannotator) as host `pi`, session
- *    `<uuid>`, only when `PLANNOTATOR_INBOX_TOOL` is on. A command: `delivered`,
- *    `agent_start`, busy, an optional extension dialog (`extension_ui_request`,
- *    waiting for the `extension_ui_response`), then the answer through the
- *    Inbox's MCP `send_message`, idle, `agent_settled`. With `turnError` the
- *    turn instead ends as a provider error does (no answer; `agent_end` whose
- *    last assistant message has `stopReason: "error"` and `errorMessage`).
- *  - Its title is `pi`, as Pi sets it, so `ps` lists neither `--mode rpc` nor
- *    `--session-id`. As the extension does, it claims its session in
- *    `<data dir>/inbox/pi-sessions/<uuid>.<pid>.json` as it starts (the Inbox
- *    tool on or off, only where `inbox/inbox.json` exists) and removes the
- *    claim as it ends.
- *
- * State in $FAKE_PI_STATE: config.json (read on each use), calls.jsonl (argv,
- * cwd, env names, the data dir and Inbox-tool values it got), pids.log,
- * delivered.log, dialogs.jsonl (each dialog and the answer it got), exits.jsonl.
- */
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 
-// As Pi does (cli/setup.js, bundle/cli-runtime.js): `ps` then shows this process as `pi` alone, never its argv.
 process.title = "pi";
 
 const STATE = process.env.FAKE_PI_STATE;
@@ -63,7 +28,6 @@ append("calls.jsonl", {
   dataDir: process.env.PLANNOTATOR_DATA_DIR ?? null,
   inboxTool: process.env.PLANNOTATOR_INBOX_TOOL ?? null,
   pid: process.pid,
-  // When this process started (for the helper's `alive`: a pid another program reused started later).
   startedAt: Date.now() - Math.round(process.uptime() * 1000),
   at: Date.now(),
 });
@@ -73,8 +37,6 @@ if (args[0] === "--version") {
   process.exit(0);
 }
 
-// Without `--mode rpc`: Pi in a terminal on `--session-id` (Open in Terminal, Copy attach command). No RPC;
-// the extension's bridge poll only (with the Inbox tool on, as there); it runs until SIGTERM or SIGINT.
 const terminal = flag("--mode") !== "rpc";
 if (terminal && !flag("--session-id")) {
   process.stderr.write("fake pi: only --version, --mode rpc and a terminal on --session-id\n");
@@ -88,7 +50,6 @@ if (!terminal && config().startFail) {
 }
 fs.appendFileSync(path.join(STATE, "pids.log"), `${process.pid}\n`);
 
-// ── The session file ──
 const home = process.env.HOME || "";
 const agentDir = process.env.PI_CODING_AGENT_DIR || path.join(home, ".pi", "agent");
 const cwd = path.resolve(process.cwd());
@@ -97,15 +58,12 @@ fs.mkdirSync(sessionDir, { recursive: true });
 let sessionFile = fs.readdirSync(sessionDir).find((name) => name.endsWith(`_${sessionId}.jsonl`));
 if (sessionFile) sessionFile = path.join(sessionDir, sessionFile);
 else {
-  // As Pi 0.85.1 (main.js): no file for the id, so a new session with that id, and this warning.
   process.stderr.write(`Warning: No project session found with id '${sessionId}'; creating a new session with that id.\n`);
   sessionFile = path.join(sessionDir, `${new Date().toISOString().replace(/[:.]/g, "-")}_${sessionId}.jsonl`);
   fs.writeFileSync(sessionFile, `${JSON.stringify({ type: "session", version: 3, id: sessionId, timestamp: new Date().toISOString(), cwd })}\n`);
 }
 const messageCount = () => fs.readFileSync(sessionFile, "utf8").split("\n").filter(Boolean).length - 1;
 
-// ── The extension: the session claim (packages/shared/inbox/pi-session-claim.ts) ──
-// The default data dir only inside a scratch HOME: never the account's real ~/.plannotator.
 const scratchHome = (() => {
   try {
     const real = fs.realpathSync(home);
@@ -121,7 +79,6 @@ const scratchHome = (() => {
   }
 })();
 const claimDataDir = process.env.PLANNOTATOR_DATA_DIR || (scratchHome ? path.join(home, ".plannotator") : null);
-// As the extension: only on a computer that has run the Inbox (`inbox/inbox.json`).
 const claimFile = claimDataDir && fs.existsSync(path.join(claimDataDir, "inbox", "inbox.json")) ? path.join(claimDataDir, "inbox", "pi-sessions", `${sessionId}.${process.pid}.json`) : null;
 if (claimFile) {
   try {
@@ -135,14 +92,12 @@ if (claimFile) {
   });
 }
 
-// ── RPC ──
 const out = (event) => process.stdout.write(`${JSON.stringify(event)}\n`);
 const dialogs = new Map();
 let stopped = false;
 let aborted = false;
 let input = "";
 if (terminal) {
-  // Pi in a terminal: it reads keys, never RPC; it ends when the person quits (a signal here).
   for (const signal of ["SIGTERM", "SIGINT"]) {
     process.on(signal, () => {
       stopped = true;
@@ -150,7 +105,6 @@ if (terminal) {
       process.exit(0);
     });
   }
-  // Up until the person quits, connected or not (the Inbox tool off: no bridge poll keeps it running).
   setInterval(() => {}, 1 << 30);
 } else process.stdin.setEncoding("utf8");
 if (!terminal) process.stdin.on("data", (chunk) => {
@@ -171,14 +125,12 @@ if (!terminal) process.stdin.on("data", (chunk) => {
       continue;
     }
     if (command.type === "prompt") {
-      // A prompt over RPC: a turn of its own here (its dialog, if configured), with no Inbox answer.
       out({ id: command.id, type: "response", command: "prompt", success: true });
       void localTurn();
       continue;
     }
     if (command.type === "get_state") {
       const answer = () => out({ id: command.id, type: "response", command: "get_state", success: true, data: { sessionId, sessionFile, messageCount: messageCount(), isStreaming: busy, sessionName: flag("--name") } });
-      // A Pi slow to come up (config `readyDelayMs`): its first answer waits.
       const delay = config().readyDelayMs ?? 0;
       if (delay > 0) setTimeout(answer, delay);
       else answer();
@@ -200,7 +152,6 @@ if (!terminal) {
   });
 }
 
-// ── A turn's extension dialog: asked over RPC, answered (or not) by the client ──
 let busy = false;
 async function askDialog() {
   const spec = config().dialog;
@@ -222,12 +173,6 @@ async function localTurn() {
   out({ type: "agent_settled" });
 }
 
-/**
- * A turn that ends in an error (config `turnError`), as Pi's agent loop ends one: the run's last assistant
- * message has `stopReason: "error"` and the provider's `errorMessage`, and nothing is answered. `retries`
- * runs end in the same error with `willRetry: true` first (each followed by `auto_retry_start` and a new
- * `agent_start`), then `auto_retry_end`; `settles: false` is a Pi before 0.80.4 (no `agent_settled`).
- */
 async function errorEnd() {
   const { turnError, retries = 0, settles } = config();
   if (!turnError) return false;
@@ -246,10 +191,8 @@ async function errorEnd() {
   return true;
 }
 
-// ── The extension: the bridge poll ──
 const on = (value) => ["1", "true", "on"].includes(String(value || "").toLowerCase());
 async function extension() {
-  // `noConnect` is the RPC process's; a terminal's Pi connects whenever the Inbox tool is on.
   if (!on(process.env.PLANNOTATOR_INBOX_TOOL) || (!terminal && config().noConnect)) return;
   if (!process.env.PLANNOTATOR_DATA_DIR && !scratchHome) {
     process.stderr.write(`fake pi: no PLANNOTATOR_DATA_DIR and HOME (${home || "unset"}) is not a scratch folder; not connecting\n`);
@@ -291,7 +234,6 @@ async function extension() {
     while (!stopped && (Date.now() < until || config().hold)) await sleep(100);
     if (stopped) return;
     if (!terminal && config().turnError) {
-      // The provider refused the turn: no answer through the Inbox, only the run's end on RPC.
       idleSince = new Date().toISOString();
       await post("/api/inbox/bridge/event", { type: "state", busy: false }).catch(() => {});
       await errorEnd();
@@ -333,7 +275,5 @@ async function extension() {
   }
 }
 void extension();
-// An extension that asks as the session starts (config `dialogOnStart`), before any turn.
 if (!terminal && config().dialogOnStart) void askDialog();
-// A turn as the session starts (config `turnOnStart`), as an extension's own prompt would run one.
 if (!terminal && config().turnOnStart) setTimeout(() => void localTurn(), 200);

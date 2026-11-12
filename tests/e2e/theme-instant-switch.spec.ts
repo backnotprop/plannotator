@@ -1,29 +1,3 @@
-/**
- * A theme switch lands in one frame (owner, 2026-11-02). theme.css gives every
- * element a 150 ms colour transition; a switch changes every colour, so it
- * used to start one transition per element at once, and the page froze for
- * about 0.4 s before the fade even began. ThemeProvider now holds
- * `pn-theme-switching` on <html> while a switch lands, and theme.css sets
- * every transition's duration and delay to 0 s under it.
- *
- * Proved in Chromium by counting `transitionrun` events for colour properties
- * while the theme flips: none, wherever the switch comes from.
- *  - The Inbox (compiled binary, temp PLANNOTATOR_DATA_DIR and HOME): the
- *    sidebar's toggle, Settings' Theme row, Match system and then the
- *    computer's own scheme changing, and the toggle again under reduced motion.
- *  - Plan review and code review (the packed apps from apps/hook/dist, served
- *    on loopback so they show their demo plan and diff), on Match system,
- *    following the computer's scheme both ways.
- * And what must not change with it: a transition already running (here a
- * transform, as a sheet or menu runs) keeps running through the switch, and
- * once it has landed every element has its 150 ms colour transition back, so
- * hovers fade as before.
- *
- * Build first: `bun run --cwd apps/review build && bun run build:hook`, and
- * the binary (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts theme-instant-switch.spec.ts`.
- */
-
 import { expect, test, type Browser, type BrowserContextOptions, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
@@ -41,13 +15,6 @@ const pages: Record<string, string> = {
   '/review': join(repo, 'apps/hook/dist/review.html'),
 };
 
-/**
- * Counts every colour transition the page starts, from the first script on.
- * Left out: an element styled with Tailwind's `dark:`, which here follows the
- * computer's scheme by media query, not the theme; the browser restyles it
- * when the scheme flips, before any script hears of the change, so no hold
- * can reach it (a separate matter: it ignores an explicit Light or Dark too).
- */
 function countColourTransitions(): void {
   const w = window as unknown as { __colourRuns: number };
   w.__colourRuns = 0;
@@ -62,7 +29,6 @@ function countColourTransitions(): void {
   );
 }
 
-/** How many colour transitions `flip` starts, counted until any would have ended. */
 async function colourRunsDuring(page: Page, flip: () => Promise<unknown>): Promise<number> {
   await page.evaluate(() => ((window as unknown as { __colourRuns: number }).__colourRuns = 0));
   await flip();
@@ -70,7 +36,6 @@ async function colourRunsDuring(page: Page, flip: () => Promise<unknown>): Promi
   return page.evaluate(() => (window as unknown as { __colourRuns: number }).__colourRuns);
 }
 
-/** A click on the one shown, with no pointer move, so no hover starts a fade of its own. */
 const press = (page: Page, selector: string) =>
   page.evaluate((s) => {
     const shown = [...document.querySelectorAll<HTMLElement>(s)].find((el) => el.getClientRects().length > 0 || el.closest('label')?.getClientRects().length);
@@ -79,7 +44,6 @@ const press = (page: Page, selector: string) =>
   }, selector);
 const shownLight = (page: Page) => page.evaluate(() => document.documentElement.classList.contains('light'));
 
-/** Settled: the hold is gone and an ordinary element has theme.css's colour transition again. */
 async function expectHoverFadesBack(page: Page) {
   await expect.poll(() => page.evaluate(() => document.documentElement.classList.contains('pn-theme-switching'))).toBe(false);
   expect(await page.evaluate(() => getComputedStyle(document.body).transitionDuration)).toBe('0.15s');
@@ -106,7 +70,6 @@ test.beforeAll(async () => {
     }
     const index = Object.keys(pages).indexOf(path);
     if (index < 0) {
-      // No Plannotator server: the editor shows its demo plan, the review app its demo diff.
       res.writeHead(404, { 'content-type': 'application/json' });
       res.end('{}');
       return;
@@ -125,7 +88,6 @@ test.afterAll(async () => {
   await removeInboxScratch();
 });
 
-/** A fresh Inbox in its own scratch folder, tour decided, on its list. */
 async function openInbox(browser: Browser, options: BrowserContextOptions) {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const root = inboxScratch('plannotator-theme-instant-e2e-');
@@ -149,13 +111,11 @@ test('the Inbox: the toggle, Settings, Match system and the computer changing sc
   try {
     expect(await shownLight(page)).toBe(true);
 
-    // The sidebar's toggle, both ways.
     expect(await colourRunsDuring(page, () => press(page, 'button[data-theme-toggle]'))).toBe(0);
     expect(await shownLight(page)).toBe(false);
     expect(await colourRunsDuring(page, () => press(page, 'button[data-theme-toggle]'))).toBe(0);
     expect(await shownLight(page)).toBe(true);
 
-    // Settings' Theme row: Dark, then Match system (this computer is light).
     await page.evaluate(() => (location.hash = '#settings'));
     await expect(page.locator('[data-settings-theme]')).toBeVisible();
     await page.waitForTimeout(300);
@@ -164,7 +124,6 @@ test('the Inbox: the toggle, Settings, Match system and the computer changing sc
     expect(await colourRunsDuring(page, () => press(page, '[data-settings-theme] input[value="system"]'))).toBe(0);
     expect(await shownLight(page)).toBe(true);
 
-    // The computer turns dark at sunset, with no click at all.
     expect(await colourRunsDuring(page, () => page.emulateMedia({ colorScheme: 'dark' }))).toBe(0);
     expect(await shownLight(page)).toBe(false);
 

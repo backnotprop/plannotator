@@ -1,24 +1,3 @@
-/**
- * Live smoke test for Bitbucket Cloud PR review. NOT run in CI.
- * Run through scripts/bitbucket-live-smoke.sh, which maps and checks the env.
- *
- * Against a real Bitbucket Cloud workspace it:
- *   1. creates a throwaway private repo (plannotator-smoke-<stamp>),
- *   2. commits a base and two feature commits through the REST API (/src, so
- *      no git push credentials are needed) and opens a PR,
- *   3. seeds an existing general comment and an inline comment on the PR,
- *   4. runs this checkout's `plannotator review <PR URL>` headlessly and checks
- *      the diff, the metadata and the seeded comments it serves,
- *   5. posts an inline + general review with Approve through /api/pr-action,
- *      then a second session posts Request changes, and verifies each through
- *      the Bitbucket API,
- *   6. optionally (BITBUCKET_SMOKE_LOCAL=1) waits for the --local checkout and
- *      (BITBUCKET_SMOKE_GUIDE=1) runs a Guided Review on the PR,
- *   7. deletes the repo (unless BITBUCKET_SMOKE_KEEP=1).
- *
- * The token is read from PLANNOTATOR_BITBUCKET_TOKEN and never printed: every
- * line this script writes goes through redact().
- */
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -93,9 +72,6 @@ async function startReview(prUrl: string, local: boolean): Promise<Session> {
       PLANNOTATOR_READY_FILE: ready,
       PLANNOTATOR_SKIP_BROWSER_OPEN: "1",
       PLANNOTATOR_REMOTE: "0",
-      // Git over HTTPS with an API token (the --local clone): the helper reads
-      // the token from the environment at call time, so it never appears in
-      // argv, a URL, or git config on disk.
       GIT_TERMINAL_PROMPT: "0",
       GIT_CONFIG_COUNT: "1",
       GIT_CONFIG_KEY_0: `credential.https://bitbucket.org.helper`,
@@ -222,8 +198,6 @@ try {
   check("inline new-side anchor", byBody("Smoke inline (new side).")?.inline?.to === 10 && byBody("Smoke inline (new side).")?.inline?.path === "src/math.ts", byBody("Smoke inline (new side).")?.inline);
   check("inline old-side anchor", byBody("Smoke inline (old side).")?.inline?.from === 1, byBody("Smoke inline (old side).")?.inline);
   check("multi-line anchor", byBody("Smoke multi-line.")?.inline?.start_to === 1 && byBody("Smoke multi-line.")?.inline?.to === 3, byBody("Smoke multi-line.")?.inline);
-  // #1583: Activity lists newest first, so the general comment must be the
-  // newest of the review's comments to show above its inline comments.
   const reviewIds = ["Smoke inline (new side).", "Smoke inline (old side).", "Smoke multi-line.", "Smoke review: general comment."]
     .map((raw) => byBody(raw)?.id ?? 0);
   check("general comment posted after the inline comments", reviewIds[3] > Math.max(...reviewIds.slice(0, 3)), reviewIds);

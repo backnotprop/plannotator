@@ -1,16 +1,3 @@
-/**
- * jj tests never write to the developer's config folder.
- *
- * jj keeps a `<config dir>/jj/repos/<id>/` entry for every repository it
- * opens, and the test suite makes throwaway repos by the hundred: before
- * tests/helpers/jj-scratch-config.ts, each run left them in the real config
- * folder. This file proves the folder jj resolves under the helper is the
- * helper's temp folder (for a test's own spawn and for both review runtimes'
- * jj children), and fails on a test file that spawns jj without the helper.
- *
- * It never reads or lists the real config folder: it asks jj where its repo
- * config lives and checks that path.
- */
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
@@ -24,10 +11,8 @@ import { stripComments } from "./helpers/real-inbox-scan";
 const jjConfig = useScratchJjConfig();
 const hasJj = Bun.which("jj") !== null;
 
-/** A spawn of jj (Bun or node:child_process, or a file's own `run("jj", …)`) other than `jj --version`, which opens no repo. */
 const JJ_SPAWN = /\b(?:spawn|spawnSync|execFile|execFileSync|run)\(\s*\[?\s*["'`]jj["'`]\s*(?:,|\])(?!\s*\[?\s*["'`]--version["'`])/;
 
-/** Whether a test file's source spawns jj without calling useScratchJjConfig. */
 function spawnsJjWithoutScratchConfig(source: string): boolean {
   const code = stripComments(source);
   return JJ_SPAWN.test(code) && !/\buseScratchJjConfig\(\)/.test(code);
@@ -49,7 +34,6 @@ describe("the scratch jj config folder", () => {
         expect(result.exitCode).toBe(0);
         expect(result.stdout.trim()).toBe(own.stdout.trim());
       }
-      // Not vacuous: jj really records the repo there, once.
       expect(readdirSync(reposRoot)).toHaveLength(1);
     } finally {
       rmSync(repo, { recursive: true, force: true });

@@ -1,18 +1,3 @@
-/**
- * Guard for the Test workflow's lanes (scripts/ci-test-lane.ts).
- *
- * The suite runs as parallel jobs, one lane each. Each failure this catches
- * would make CI pass while running fewer tests than before:
- *  - a lane in the script but missing from the workflow's matrix (its files
- *    never run), or a matrix entry the script does not know;
- *  - the plain shards losing a bunfig.toml ignore pattern (a CLI
- *    `--path-ignore-patterns` replaces bunfig's, so the e2e and relay specs
- *    would run where they cannot pass) or not leaving out a heavy file;
- *  - a heavy file that is gone, listed twice, or inside an ignored folder;
- *  - the DOM list naming a missing or repeated file, or a file the workflow
- *    runs in its own process (the real @pierre/diffs files must never share a
- *    process with the list, whose mocks are process-global).
- */
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -30,7 +15,6 @@ import {
 
 const workflow = readFileSync(join(repoRoot, '.github/workflows/test.yml'), 'utf8');
 
-/** Every `lane: [a, b, ...]` matrix entry in the workflow, in order. */
 function matrixLanes(): string[] {
   return [...workflow.matchAll(/^\s*lane:\s*\[([^\]]*)\]/gm)].flatMap((m) =>
     m[1].split(',').map((lane) => lane.trim()).filter(Boolean),
@@ -46,8 +30,6 @@ describe('Test workflow lanes', () => {
   });
 
   test('the unit and dom jobs run their lane through the script, after vendor.sh', () => {
-    // A matrix that names every lane runs nothing if its job stops calling the
-    // script (or calls it before the Pi extension's shared copies exist).
     const jobs = (Bun.YAML.parse(workflow) as { jobs: Record<string, { steps?: { run?: string; env?: Record<string, string> }[] }> }).jobs;
     for (const name of ['unit', 'dom']) {
       const runs = (jobs[name]?.steps ?? []).map((step) => step.run?.trim());

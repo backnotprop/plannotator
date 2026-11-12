@@ -1,16 +1,3 @@
-/**
- * Guided reviews from agents (PLAN step 5), proved in a real browser against
- * the compiled binary. Nothing is mocked: the binary runs
- * `plannotator inbox --background` under a temp PLANNOTATOR_DATA_DIR (and
- * HOME), agents call get_guide_brief and submit_guide through
- * `plannotator inbox mcp` with the MCP SDK's stdio client
- * (scripts/inbox-sim.ts), and Chromium opens the guides the person sees.
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * PNGs of every proved state, light and dark at 1440 by 900, land in
- * .local/proof/guides/ with a contact sheet.
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -117,7 +104,6 @@ test.afterAll(async () => {
         .join('\n')}`,
     );
   } finally {
-    // Every Inbox this spec started, then its folders (inbox-scratch.ts).
     await removeInboxScratch();
   }
 });
@@ -133,16 +119,12 @@ test('get_guide_brief returns the method, the shape, the diff steps, the rules a
 
 test('the AUTHORED guide plus patch and a shipped snapshot land as rows with the Guided review mark', async () => {
   const { page, pi, claude } = world;
-  // The brief's worked example, sent as it is: the AUTHORED fixture and its patch.
   const { example } = await pi.guideBrief();
   const authored = await pi.submitGuide({ project_path: world.ledger, ...example, idempotency_key: 'guide-retry-1' });
   expect(authored.guide).toMatchObject({ title: 'Token refresh', sections: 1, files: 2, additions: 2, deletions: 2 });
-  // A retry of the same call answers the first message (the built snapshot carries
-  // the time it was built; the retry is compared on what the agent sent).
   const retry = await pi.submitGuide({ project_path: world.ledger, ...example, idempotency_key: 'guide-retry-1' });
   expect(retry).toMatchObject({ replayed: true, message_id: authored.message_id, thread_id: authored.thread_id });
   expect(retry.guide.sha256).toBe(authored.guide.sha256);
-  // A shipped fixture as a whole snapshot, from another session (its own thread).
   const snapshot = await claude.submitGuide({
     project_path: world.ledger,
     snapshot: FIXTURE_V1_LOCAL,
@@ -154,8 +136,6 @@ test('the AUTHORED guide plus patch and a shipped snapshot land as rows with the
   world.authored = authored as World['authored'];
   world.snapshot = snapshot as World['snapshot'];
 
-  // Opened after both sends: a list already on screen holds a later arrival
-  // behind "N new" (held order), so opening first raced the two sends.
   await page.goto(world.url);
   for (const sent of [authored, snapshot]) {
     const row = page.locator(`.ib-row[data-thread-id="${sent.thread_id}"]`);
@@ -180,19 +160,15 @@ test('the thread shows the guide at the foot of its message, and Open renders se
   await card.click();
   await expect(page).toHaveURL(new RegExp(`#thread=${world.snapshot.thread_id}&guide=${world.snapshot.message_id}$`));
   const viewer = page.getByRole('region', { name: 'Review', exact: true });
-  // Every guide opens the full-window review: its title in the top bar, its intent as the heading, one line of facts.
   await expect(viewer.locator('[data-review-title]')).toHaveText('Auth token refresh');
   await expect(viewer.getByRole('heading', { level: 1, name: 'Harden the refresh path and bump the package version.' })).toBeVisible();
   for (const section of FIXTURE_V1_LOCAL.guide.sections) await expect(viewer.getByText(section.title, { exact: true }).first()).toBeVisible();
-  // The snapshot's own reviewed state holds: its first section came reviewed, so it is folded.
   await expect(viewer.getByRole('button', { name: 'Un-mark as reviewed' })).toHaveCount(1);
   const facts = viewer.locator('[data-guide-facts]');
   for (const fact of ['Written by Claude', 'sonnet', 'acme/demo', 'feat/refresh', 'origin/main..HEAD']) await expect(facts).toContainText(fact);
-  // A guide sent without `review: true` (and Code review off here): no verdict, the way back to the reply instead.
   await expect(viewer.locator('[data-review-decision]')).toHaveCount(0);
   await expect(viewer.locator('[data-review-write-reply]')).toBeVisible();
   await expect(viewer.getByRole('button', { name: /^package\.json/ })).toBeVisible();
-  // The diff itself, drawn by Plannotator's renderer.
   await expect(viewer.getByText('"version": "1.0.1"').first()).toBeVisible({ timeout: 30_000 });
   await shot('4.2-guide-open');
 });
@@ -202,7 +178,6 @@ test('a reviewed tick is kept with the thread, across a restart on another port;
   const viewer = page.getByRole('region', { name: 'Review', exact: true });
   await viewer.getByRole('button', { name: 'Reviewed', exact: true }).click();
   await expect(viewer.getByRole('button', { name: 'Un-mark as reviewed' })).toHaveCount(2);
-  // Kept on the message in the store, not in the page.
   await expect
     .poll(async () => {
       const answer = await (await page.request.get(`${world.url}api/inbox/threads/${world.snapshot.thread_id}`)).json();
@@ -210,10 +185,7 @@ test('a reviewed tick is kept with the thread, across a restart on another port;
     })
     .toEqual([true, true]);
 
-  // The Inbox stops, its last port is taken, and it comes back on another port:
-  // a new origin, so nothing the page kept could carry the ticks over.
   const before = registry();
-  // The old page loses its event stream and its reconnects are refused while the Inbox is down, by design.
   const mark = world.errors.length;
   await stopScratchInbox(world.dataDir);
   const squatter = createServer();
@@ -230,7 +202,6 @@ test('a reviewed tick is kept with the thread, across a restart on another port;
   await page.goto(`${world.url}#thread=${world.snapshot.thread_id}&guide=${world.snapshot.message_id}`);
   await expect(page.getByRole('region', { name: 'Review', exact: true }).getByRole('button', { name: 'Un-mark as reviewed' })).toHaveCount(2);
   world.errors.splice(mark, world.errors.length - mark, ...world.errors.slice(mark).filter((e) => !/^Failed to load resource: net::ERR_(CONNECTION_REFUSED|CONNECTION_RESET|INCOMPLETE_CHUNKED_ENCODING)$/.test(e)));
-  // Un-tick the first again: the sections open as the person left them.
   await page.getByRole('region', { name: 'Review', exact: true }).getByRole('button', { name: 'Un-mark as reviewed' }).first().click();
   await expect(page.getByRole('region', { name: 'Review', exact: true }).getByRole('button', { name: 'Un-mark as reviewed' })).toHaveCount(1);
   await expect(page.getByRole('region', { name: 'Review', exact: true }).getByText('if (!token) throw new Error("missing token");').first()).toBeVisible({ timeout: 30_000 });
@@ -265,8 +236,6 @@ test('the authored guide opens with its file left out under "Everything else"', 
 test('a guide naming a file not in the patch, or a file twice, is refused by name and lands nothing', async () => {
   const { pi, claude, page } = world;
   const { example } = await pi.guideBrief();
-  // The last test closed a thread: the list settles a beat later (packages/inbox/settle.ts). Count once
-  // no settle animation runs and the count holds across more than the beat.
   const rows = page.locator('.ib-lbody [data-thread-id]');
   await expect
     .poll(async () => {
@@ -285,7 +254,6 @@ test('a guide naming a file not in the patch, or a file twice, is refused by nam
   await expect(
     pi.submitGuide({ project_path: world.ledger, guide: { ...example.guide, sections: [section, { title: 'Again', overview: 'The same file.', diffs: section.diffs }] }, patch: example.patch }),
   ).rejects.toThrow(/src\/auth\.ts is placed twice/);
-  // A snapshot gets the same strict checks.
   await expect(
     claude.submitGuide({
       project_path: world.ledger,
@@ -300,7 +268,6 @@ test('a guide naming a file not in the patch, or a file twice, is refused by nam
 
 test('deleting a thread removes its guide blob only when no other record uses it', async () => {
   const { claude, page } = world;
-  // Two threads whose guides are the same snapshot, so the same blob.
   const twin = { ...FIXTURE_V1_LOCAL, guide: { ...FIXTURE_V1_LOCAL.guide, title: 'Twin guide' } };
   const a = await claude.submitGuide({ project_path: world.ledger, snapshot: twin, thread: 'twin-a' });
   const b = await claude.submitGuide({ project_path: world.ledger, snapshot: twin, thread: 'twin-b' });
@@ -314,14 +281,11 @@ test('deleting a thread removes its guide blob only when no other record uses it
   };
 
   await remove(a.thread_id);
-  // twin-b's guide still names the blob: kept.
   expect(existsSync(blob)).toBe(true);
   expect((await (await page.request.get(`${world.url}api/inbox/messages/${b.message_id}/guide`)).json()).snapshot.guide.title).toBe('Twin guide');
 
   await remove(b.thread_id);
-  // No record names it any more: removed.
   expect(existsSync(blob)).toBe(false);
-  // The other guides' blobs are untouched.
   expect(existsSync(join(world.dataDir, 'inbox', 'blobs', world.snapshot.guide.sha256 as string))).toBe(true);
   expect(existsSync(join(world.dataDir, 'inbox', 'blobs', world.authored.guide.sha256 as string))).toBe(true);
 });
@@ -337,15 +301,12 @@ test('a comment on the guide\'s diffs: a line and a range, listed beside the gui
   const auth = viewer.locator('[data-guide-file-shell="src/auth.ts"]');
   const added = (line: number) => auth.locator(`[data-line-type="change-addition"][data-column-number="${line}"]`);
   await expect(added(2)).toBeVisible({ timeout: 30_000 });
-  // The file's box is as tall as its lines and the arrow row after them (32 px): no empty band (the guided review in a
-  // thread, as on the PR page).
   await expect.poll(async () => {
     const box = (await auth.locator('[data-guide-code-view-mounted]').boundingBox())!;
     const rows = await auth.locator('[data-line-type][data-column-number]').evaluateAll((els) => Math.max(...els.map((el) => el.getBoundingClientRect().bottom)));
     return box.y + box.height - rows;
   }).toBeLessThan(24 + 32);
 
-  // A range: drag across the new side's line numbers 2 to 3, as in the review app.
   const from = await diffRowBox(added(2));
   const to = await diffRowBox(added(3));
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
@@ -361,7 +322,6 @@ test('a comment on the guide\'s diffs: a line and a range, listed beside the gui
   await expect(panel).toHaveAttribute('data-guide-comments', '1');
   await expect(auth.getByText('Throw a typed error the caller can catch.')).toBeVisible();
 
-  // A line on the other file: click its line number.
   const pkg = viewer.locator('[data-guide-file-shell="package.json"]');
   await pkg.hover();
   await pkg.locator('[data-line-type="change-addition"][data-column-number="3"]').click();
@@ -371,30 +331,25 @@ test('a comment on the guide\'s diffs: a line and a range, listed beside the gui
   await expect(panel).toHaveAttribute('data-guide-comments', '2');
   await expect(panel).toContainText('auth.ts · lines 2-3');
   await expect(panel).toContainText('package.json · line 3');
-  // At 1440 px the comments fold into the header's button: open them, with what rides the next Send at their foot.
   await viewer.locator('[data-guide-comments-sheet]').click();
   await expect(viewer.locator('[data-review-rides]')).toHaveText('2 comments go with your next reply to Claude Code.');
   await expect(viewer.locator('[data-review-write-reply]')).toBeVisible();
   await shot('4.3-guide-comments-in-the-panel');
   await viewer.getByRole('button', { name: 'Close the comments' }).click();
 
-  // Kept in the store with the thread's annotations, keyed to the message and the file.
   const model = (await (await page.request.get(`${world.url}api/inbox/threads/${sent.thread_id}/attachments`)).json()) as { annotations: { message_id: string; path: string; guide: { side: string; line_start: number; line_end: number } }[] };
   expect(model.annotations.map((r) => [r.message_id, r.path, r.guide.side, r.guide.line_start, r.guide.line_end])).toEqual([
     [sent.message_id, 'src/auth.ts', 'new', 2, 3],
     [sent.message_id, 'package.json', 'new', 3, 3],
   ]);
 
-  // Reviewed ticks keep working beside the comments.
   await viewer.getByRole('button', { name: 'Reviewed', exact: true }).first().click();
   await expect(viewer.getByRole('button', { name: 'Un-mark as reviewed' })).toHaveCount(1);
 
-  // The same thread also carries an attached file: the file's pane lists only its own annotations.
   writeFileSync(join(world.ledger, 'notes.md'), '# Notes\n\nRefresh tokens a minute early.\n');
   const notes = await claude.send({ project_path: world.ledger, thread: 'guide-comments', body: 'And my notes.', attachments: ['notes.md'] });
   expect(notes.thread_id).toBe(sent.thread_id);
 
-  // Back to the thread: the reply's chip counts them; edit one there.
   await viewer.getByRole('button', { name: 'Thread', exact: true }).click();
   await expect(viewer).toHaveCount(0);
   const tile = page.locator(`.ib-att-t[data-attachment-id="${notes.attachments[0].id}"]`);
@@ -422,7 +377,6 @@ test('a comment on the guide\'s diffs: a line and a range, listed beside the gui
   await shot('4.3-guide-comments-in-the-reply');
   await page.keyboard.press('Escape');
 
-  // Send: the agent's read_thread returns the comments as the review app's export.
   await page.getByRole('textbox', { name: 'Reply to Claude Code' }).fill('Two notes on the diff.');
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
   const reply = await claude.nextReply(sent.thread_id, 40);
@@ -441,7 +395,6 @@ test('a comment on the guide\'s diffs: a line and a range, listed beside the gui
   ]) {
     expect(body).toContain(part);
   }
-  // Sent with the reply: no longer waiting, and the guide's panel is empty again.
   await expect(chip).toHaveCount(0);
   const after = (await (await page.request.get(`${world.url}api/inbox/threads/${sent.thread_id}/attachments`)).json()) as { annotations: unknown[] };
   expect(after.annotations).toHaveLength(0);
@@ -452,7 +405,6 @@ test('a comment on the guide\'s diffs: a line and a range, listed beside the gui
 
 test('a long thread name plus the Guided review mark never pushes a row out of shape, in every project or one, at any width', async () => {
   const { claude, page } = world;
-  // A name that is long (35 characters) and the longest send_message takes (120).
   const names = ['refund-webhooks-retry-on-stripe-409', `release-train-${'checkout-refunds-ledger-'.repeat(5)}`.slice(0, 120)];
   expect(names.map((n) => n.length)).toEqual([35, 120]);
   const threads: string[] = [];
@@ -468,12 +420,6 @@ test('a long thread name plus the Guided review mark never pushes a row out of s
   const projects = (await (await page.request.get(`${world.url}api/inbox/projects`)).json()).projects as { id: string; name: string }[];
   const ledger = projects.find((p) => p.name === 'ledger')!;
   for (const [i, name] of names.entries()) {
-    // Every project below 900px of list draws the three-line row; one project
-    // keeps the wide row. The wide row's title cell holds the name (one line,
-    // cut with "…"), the subject and the mark. The three-line row and, below
-    // 768px (a phone, packages/inbox/phone.ts), the mail row put the name on
-    // line 2, whole (it wraps), and the subject and the mark on line 3
-    // (approval "list-rows-mail-icons").
     const row = page.locator(`.ib-lbody [data-thread-id="${threads[i]}"]`);
     for (const route of ['', `#project=${ledger.id}`]) {
       await page.setViewportSize({ width: 1440, height: 900 });
@@ -481,14 +427,9 @@ test('a long thread name plus the Guided review mark never pushes a row out of s
       await expect(row).toBeVisible();
       await expect(row.locator('.ib-title, .ib-m2').first()).toHaveText(name);
       await expect(row.locator('[data-guide-mark]')).toHaveCount(1);
-      // One project keeps the wide row down to a phone's width, then the mail row: also 360, 500 and 520px there.
       for (const width of route ? [360, 500, 520, 556, 656, 820] : [556, 656, 820]) {
         await page.setViewportSize({ width, height: 900 });
         await expect(row).toBeVisible();
-        // Measure the settled layout: below 768px the sidebar leaves the row
-        // (off-canvas) a moment after the resize, and every project's rows change
-        // shape at 900px of list; wait for the list to stop moving. Read from the
-        // list itself: a row element is replaced when its shape changes.
         const listWidth = () => page.locator('.ib-lbody').evaluate((el) => el.clientWidth);
         if (width < 768) await expect.poll(listWidth).toBe(width);
         await expect
@@ -501,7 +442,6 @@ test('a long thread name plus the Guided review mark never pushes a row out of s
         const measured = await row.evaluate((el) => {
           const body = el.closest('.ib-lbody')!;
           const wideRow = el.querySelector('.ib-subj') !== null;
-          // The line with the mark: the wide row's title cell, else line 3.
           const line = el.querySelector(':is(.ib-subj, .ib-l3, .ib-m3)')!.getBoundingClientRect();
           const box = (sel: string) => el.querySelector(sel)!.getBoundingClientRect();
           const title = el.querySelector<HTMLElement>(':is(.ib-title, .ib-m2)')!;
@@ -511,7 +451,6 @@ test('a long thread name plus the Guided review mark never pushes a row out of s
             listOverflow: body.scrollWidth - body.clientWidth,
             rowOverflow: el.scrollWidth - el.clientWidth,
             lineRight: line.right,
-            // What the mark's line must end before: the count words' column, or the row's own edge.
             limit: wideRow ? box('.ib-cw').left : el.getBoundingClientRect().right,
             titleShown: Math.min(t.right, line.right) - t.left,
             titleRight: t.right,
@@ -528,11 +467,9 @@ test('a long thread name plus the Guided review mark never pushes a row out of s
         expect(measured.rowOverflow, `the row spills ${where}`).toBe(0);
         expect(measured.lineRight, `the title cell runs into the count ${where}`).toBeLessThanOrEqual(measured.limit);
         if (measured.wideRow) {
-          // The wide row is one line: the long name ends in "…" (its tooltip shows it whole).
           expect(measured.titleLines, `the wide row's name runs past its line ${where}`).toBe(1);
           if (name.length === 120) expect(measured.titleCut, `the wide row's name keeps its ellipsis ${where}`).toBe(true);
         } else {
-          // Beside a thread and on a phone the name is never cut: it wraps inside the row.
           expect(measured.titleCut, `the name is cut ${where}`).toBe(false);
           expect(measured.titleRight, `the name leaves the row ${where}`).toBeLessThanOrEqual(measured.rowRight + 0.5);
           if (name.length === 120) expect(measured.titleLines, `the long name wraps ${where}`).toBeGreaterThan(1);
@@ -553,17 +490,14 @@ test('the guided review\'s bar holds one Split / Unified button and the Diff dis
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto(`${world.url}#thread=${sent.thread_id}&guide=${sent.message_id}`);
   const viewer = page.getByRole('region', { name: 'Review', exact: true });
-  // Pierre's layout per diff, read through its open shadow roots (Unified is `single` there).
   const layouts = () => viewer.locator('pre[data-diff]').evaluateAll((pres) => pres.map((p) => p.getAttribute('data-diff-type')));
   const auth = viewer.locator('[data-guide-file-shell="src/auth.ts"]');
   await expect(auth.locator('[data-line-type="change-addition"]').first()).toBeVisible({ timeout: 30_000 });
 
-  // No card has a tab; the bar has the controls, right before Close.
   await expect(viewer.locator('[data-guide-section-tab]')).toHaveCount(0);
   const bar = viewer.locator('.ib-vhead');
   const controls = bar.locator('[data-diff-controls]');
   await expect(controls).toBeVisible();
-  // Before Close (the one review screen's bar: Comments and Write the reply sit between them).
   expect(await bar.evaluate((el) => {
     const controls = el.querySelector('[data-diff-controls]');
     const close = el.querySelector('[aria-label="Close the review"]');
@@ -577,12 +511,10 @@ test('the guided review\'s bar holds one Split / Unified button and the Diff dis
   await toggle.click();
   await expect.poll(layouts).toEqual(['single', 'single']);
   await expect(toggle).toHaveAccessibleName('Switch to Split view');
-  // Kept where code review reads it: the cookie, and config.json `diffOptions.diffStyle`.
   await expect.poll(styleOnDisk).toBe('unified');
   expect((await world.context.cookies()).find((c) => c.name === 'plannotator-diff-style')?.value).toBe('unified');
   await shot('4.4-guide-diff-layout-unified');
 
-  // The gear: code review's popover without the two rows that need the repository; Wrap reaches config.json.
   await controls.getByRole('button', { name: 'Diff display options' }).click();
   const popup = page.locator('[data-diff-display-popup]');
   await expect(popup.getByRole('switch')).toHaveText(['Wrap long lines', 'Line numbers', 'Backgrounds']);
@@ -592,7 +524,6 @@ test('the guided review\'s bar holds one Split / Unified button and the Diff dis
   await page.keyboard.press('Escape');
   await expect(popup).toHaveCount(0);
 
-  // A comment on a line in Unified: the review app's selection, kept by file, side and line.
   const panel = viewer.locator('[data-guide-comments]');
   await auth.hover();
   await auth.locator('[data-line-type="change-addition"][data-column-number="3"]').first().click();
@@ -605,7 +536,6 @@ test('the guided review\'s bar holds one Split / Unified button and the Diff dis
   expect(model.annotations.map((r) => [r.path, r.guide.side, r.guide.line_start, r.guide.line_end])).toEqual([['src/auth.ts', 'new', 3, 3]]);
   await shot('4.4-guide-diff-layout-unified-comment');
 
-  // Back to Split, then a phone: no controls, every diff in one column, the saved layout left as it is.
   await toggle.click();
   await expect.poll(styleOnDisk).toBe('split');
   await page.setViewportSize({ width: 390, height: 844 });
@@ -650,7 +580,6 @@ test('a thread\'s guided review with Code review off: arrows open a long file in
   await page.goto(`${world.url}#thread=${sent.thread_id}&guide=${sent.message_id}`);
   const shell = page.locator(`[data-guide-file-shell="${path}"]`);
   const box = shell.locator('[data-guide-code-view-mounted]');
-  // Read from the project's own git: Code review is off in this world.
   const arrow = shell.locator('[data-expand-button][data-expand-down]').first();
   await expect(arrow).toBeVisible({ timeout: 30_000 });
 
@@ -659,8 +588,6 @@ test('a thread\'s guided review with Code review off: arrows open a long file in
   const height = async () => (await box.boundingBox())!.height;
   const closed = await height();
   const place = await scrollTop();
-  // A box is its content: no band of empty space above the header (the box's 8 px and its border) or under the last
-  // row (those, and the 4 px under a last arrow row).
   const slack = await box.evaluate((el) => {
     const outer = el.getBoundingClientRect();
     const code = el.querySelector('diffs-container')!.getBoundingClientRect();
@@ -669,13 +596,11 @@ test('a thread\'s guided review with Code review off: arrows open a long file in
   });
   expect(slack.above).toBeLessThanOrEqual(9);
   expect(slack.below).toBeLessThanOrEqual(13);
-  // The line under a file header shows only while the header is stuck.
   expect(slack.line).toBe('none');
   await arrow.click();
   await expect.poll(height).toBeGreaterThan(closed);
   expect(await scrollTop()).toBe(place);
 
-  // A comment on a line no hunk has: posted through the store, listed, and no alert.
   const opened = shell.locator('[data-column-number="20"]').last();
   await expect(opened).toBeVisible({ timeout: 10_000 });
   await shell.hover();
@@ -685,7 +610,6 @@ test('a thread\'s guided review with Code review off: arrows open a long file in
   await page.getByRole('button', { name: 'Add Comment' }).click();
   expect((await saved).status()).toBe(200);
 
-  // The whole long file is one box, far taller than any screen: the page scrolls, nothing inside it does.
   const longShell = page.locator('[data-guide-file-shell="src/changed.ts"]');
   await longShell.scrollIntoViewIfNeeded();
   const longBox = longShell.locator('[data-guide-code-view-mounted]');
@@ -719,7 +643,6 @@ test('a thread\'s guided review with Code review off: arrows open a long file in
   expect(seen.headerFromTop).toBe(0);
   expect(seen.headerLine).toBe('1px');
   expect(seen.onScreen).toBeGreaterThan(10);
-  // Pierre's own window: only rows near the viewport are drawn.
   expect(seen.rows).toBeLessThan(900);
   await page.keyboard.press('Escape');
 });
@@ -749,7 +672,6 @@ test('a guided review whose blobs are nowhere: the first click takes the arrows 
   await page.goto(`${world.url}#thread=${sent.thread_id}&guide=${sent.message_id}`);
   const shell = page.locator('[data-guide-file-shell="src/gone.ts"]');
   await expect(shell.locator('[data-column-number]').first()).toBeVisible({ timeout: 30_000 });
-  // Whether a blob is there is known only by asking, and nobody asks before an arrow is opened.
   const answered = page.waitForResponse((response) => response.url().includes('/guide/file'));
   await shell.locator('[data-expand-button]').first().click();
   expect((await answered).status()).toBe(200);
@@ -758,9 +680,6 @@ test('a guided review whose blobs are nowhere: the first click takes the arrows 
 });
 
 test('no page errors and no CSP refusals along the way', async () => {
-  // FIXTURE_PATCH_TS_JSON's first hunk declares 4/6 lines and carries 3/5.
-  // It shipped that way and fixtures are never edited; @pierre/diffs 1.5
-  // repairs such a hunk and says so with console.error, which is expected here.
   const miscountedFixtureHunk = 'parsePatchContent: hunk line count mismatch: "@@ -1,4 +1,6 @@", declared old/new 4/6, parsed old/new 3/5';
   expect(world.errors.filter((e) => e !== miscountedFixtureHunk)).toEqual([]);
 });

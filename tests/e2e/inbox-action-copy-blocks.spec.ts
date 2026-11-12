@@ -1,28 +1,3 @@
-/**
- * Commands in an action item, and selecting text in a card (the owner: "some
- * of the action items create like a copy block, which is perfect. But
- * sometimes agents put in raw commands I need to manually copy, and it
- * doesn't work, because something's eating the select"), proved in a real
- * browser against the compiled binary:
- *
- *  - an action item whose why carries two fenced commands draws two code
- *    blocks, each with its own copy button, in order, and a copy button puts
- *    its own command on the clipboard;
- *  - an action item written as a task list item with indented fences under
- *    it (the coordinator's report) keeps both fences with the action item,
- *    each with a copy button, and its task reads without the `[ ]`;
- *  - the owner's own case, a command written as prose ("Run in Terminal on
- *    this MacBook: npm publish …"), draws it as a code block with a copy
- *    button that copies the command alone;
- *  - dragging a selection across an action item's why, and across a question
- *    card's prompt, leaves the selection in place after mouseup, on a desktop
- *    and on a phone viewport (touch emulation), so Cmd+C or the copy menu
- *    works.
- *
- * Build the binary first (see inbox.spec.ts). PNGs land in
- * <PLANNOTATOR_E2E_PROOF_DIR or .local/proof>/action-copy-blocks/.
- */
-
 import { devices, expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
@@ -69,7 +44,6 @@ const NPM = [
 const COPY_ID = 'ssh-copy-id -i ~/.ssh/id_ed25519.pub user@host';
 const MKDIR = 'mkdir -p ~/.ssh && chmod 700 ~/.ssh';
 
-/** The coordinator's markdown, word for word: a task list item with indented fences under it. */
 const SSH = [
   ':::action',
   "- [ ] Let this MacBook's key into the Mac mini — **Easiest, on this MacBook:** run this in Terminal, then type the Mini's login password once when it asks:",
@@ -88,7 +62,6 @@ const SSH = [
 
 const UI_PUBLISH = 'npm publish /path/to/plannotator-ui-0.55.0.tgz --access public';
 
-/** The owner's case, word for word: "this needed to be something in a copy block". */
 const OWNER = [
   ':::action',
   'Publish @plannotator/ui 0.55.0 to npm',
@@ -136,7 +109,6 @@ async function openThread(page: Page, threadId: string): Promise<Locator> {
   return card;
 }
 
-/** Drag the mouse from the start of `el`'s first text to its end, as a person selects with a mouse. */
 async function dragAcross(page: Page, el: Locator): Promise<void> {
   await el.scrollIntoViewIfNeeded();
   const box = await el.boundingBox();
@@ -221,7 +193,6 @@ test('desktop: a drag across the why, and across a question prompt, keeps its se
     expect(await selected(page)).toContain('registry wants your security key');
     await page.keyboard.press('ControlOrMeta+c');
     expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('registry wants your security key');
-    // The full-window shot of a selection held in the action item's text.
     await page.screenshot({ path: join(proofDir, 'desktop-selection-light.png') });
 
     const prompt = page.locator('section.ib-pane [data-question-key] [data-question-part="prompt"]').first();
@@ -229,14 +200,12 @@ test('desktop: a drag across the why, and across a question prompt, keeps its se
     await page.waitForTimeout(300);
     expect(await selected(page)).toContain('Tag 0.29');
 
-    // A click with no selection still does what it did: the row's toggle closes and opens it.
     await page.evaluate(() => window.getSelection()?.removeAllRanges());
     const toggle = card.locator('[data-action-toggle]').first();
     await toggle.click();
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await toggle.click();
     await expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    // The message's own text still takes a comment: a drag there opens the comment toolbar.
     await dragAcross(page, page.locator('section.ib-pane [data-message-id] p', { hasText: 'Both tarballs are built.' }).first());
     await expect(page.locator('.annotation-toolbar')).toBeVisible();
   } finally {
@@ -256,8 +225,6 @@ test('phone (touch emulation): a drag, and a long-press selection the system men
     await page.waitForTimeout(300);
     expect(await selected(page)).toContain('registry wants your security key');
 
-    // A long press: the system selects a word range, then the finger lifts (touchend) and the
-    // highlighter's touch bridge looks at the selection 400 ms later.
     await page.evaluate(() => window.getSelection()?.removeAllRanges());
     await why.evaluate((p) => {
       const text = [...p.childNodes].find((n) => n.nodeType === Node.TEXT_NODE && n.textContent!.includes('security key'))!;
@@ -297,7 +264,6 @@ test('shots: the two commands with their copy buttons, desktop light and dark, a
     const card = await openThread(page, npmThread);
     const buttons = card.locator('[data-action-why] button[title="Copy code"]');
     await expect(buttons).toHaveCount(2);
-    // Both buttons show without a hover on a phone.
     for (const i of [0, 1]) expect(await buttons.nth(i).evaluate((b) => getComputedStyle(b).opacity)).toBe('1');
     await card.locator('[data-action-why] pre').first().scrollIntoViewIfNeeded();
     await page.waitForTimeout(300);

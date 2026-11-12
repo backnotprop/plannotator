@@ -1,20 +1,3 @@
-/**
- * The window's project names (owner's pick, 2026-10-29), in a real browser
- * against the compiled binary, with an agent writing through
- * `plannotator inbox mcp` (scripts/inbox-sim.ts):
- *
- *  - a project reads its folder's name; the parent is added only while
- *    another project on screen shares it ("plannotator · plannotator" while
- *    the old clone is listed, "plannotator" once it is archived), while the
- *    server's name, what agents read, keeps the parent;
- *  - a checkout in a `worktrees` folder (Workspaces' `<repo>/worktrees/main`)
- *    reads as its repository, in the sidebar, the rows and one project's
- *    list title, and in the server's name agents read (one rule, 2026-11-02).
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * PNGs land in .local/proof/project-labels/.
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
@@ -94,13 +77,11 @@ test('a clash on screen adds the parent; archived, it goes, while agents keep th
   expect(new Set(await rowNames(page))).toEqual(new Set(['appnotes', 'plannotator', 'workspaces', 'workspaces-cli']));
   await page.screenshot({ path: join(proofDir, 'inbox.png') });
 
-  // The server's name is unchanged: it still weighs the archived clone (what agents and search read).
   const served = await page.evaluate(async () => {
     const model = (await (await fetch('/api/inbox/threads')).json()) as { projects: { root: string; name: string }[] };
     return model.projects.map((p) => p.name).sort();
   });
   expect(served).toContain('plannotator · plannotator');
-  // A checkout in a `worktrees` folder reads as its repository for agents too (one rule since 2026-11-02).
   expect(served).toContain('appnotes');
   expect(served.filter((name) => /^main\b/.test(name))).toEqual([]);
   expect(world.errors).toEqual([]);

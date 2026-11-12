@@ -1,11 +1,3 @@
-/**
- * The window's project names (`shortProjectNames`, packages/inbox/projectLabels.ts) and the server's
- * (`inboxProjectLabels`, packages/shared/inbox/project-name.ts), which agents, search and
- * `plannotator inbox projects` read, are ONE rule (`@plannotator/core/inbox-project-labels`; the owner,
- * 2026-11-02: the window said "appnotes" while agents said "main"). Given the same projects, the two must
- * name them the same. Only the set differs: the window names the projects on screen, the server every
- * stored one. A change that gives either its own copy again fails here.
- */
 import { expect, test } from 'bun:test';
 import { inboxProjectLabels } from '../packages/shared/inbox/project-name';
 import { shortProjectNames } from '../packages/inbox/projectLabels';

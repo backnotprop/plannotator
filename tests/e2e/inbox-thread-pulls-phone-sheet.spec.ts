@@ -1,19 +1,3 @@
-/**
- * A thread's pull requests on a phone, in a real browser against the compiled
- * binary: the thread header's PR button opens the list as a bottom sheet that
- * floats as the thread's ⋯ sheet does: the same inset from the screen's sides
- * and bottom edge, all corners rounded alike.
- *
- * What regresses: the Pull requests page's popover (prs/prs.css) also uses the
- * `.ib-prpop` class, and its rules come later than the thread card's own, so
- * on a phone the sheet was drawn 352 px wide from the left edge (the thread
- * showing down the right side), with all four corners rounded and an outline
- * all round. A tablet gets the card anchored to the button, as its ⋯ menus
- * do, not a sheet.
- *
- * Build the binary first (see inbox.spec.ts). PLANNOTATOR_E2E_BINARY names
- * another binary (an older release, to see the bug).
- */
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -37,8 +21,6 @@ test.beforeAll(async () => {
   const root = inboxScratch('plannotator-thread-pulls-sheet-');
   const dataDir = join(root, 'data');
   markTourDecided(dataDir);
-  // Every first-run and update-day dialog settled, as the other phone specs settle them: nothing may cover the thread
-  // or draw its own list (the list intro's demo) while the test opens the PRs. The CI binary is 0.0.0-dev.
   const past = '2026-10-01T10:00:00.000Z';
   writeFileSync(join(dataDir, 'update-state.json'), JSON.stringify({ inboxVersion: '0.0.0-dev' }));
   writeFileSync(
@@ -56,7 +38,6 @@ test.beforeAll(async () => {
     }),
   );
   for (const dir of ['claude', 'codex', 'xdg']) mkdirSync(join(root, dir), { recursive: true });
-  // Nothing reaches a forge: gh and glab are signed-out fakes.
   const stubs = join(root, 'stubs');
   mkdirSync(stubs, { recursive: true });
   writeFileSync(join(stubs, 'gh'), `#!/bin/sh\necho 'You are not logged into any GitHub hosts.' >&2\nexit 1\n`);
@@ -83,7 +64,6 @@ test.beforeAll(async () => {
   expect(started.status, started.stderr).toBe(0);
   rememberInboxOf(dataDir);
   const url = started.stdout.trim();
-  // Never the person's own Inbox.
   expect(url).not.toContain(':49606');
   expect(url).not.toContain(':59812');
   const project = scratchProject(join(root, 'src'), 'widgets');
@@ -102,7 +82,6 @@ test.afterAll(async () => {
 
 async function openPulls(browser: Browser, viewport: { width: number; height: number }): Promise<Page> {
   const page = await (await browser.newContext({ viewport, isMobile: true, hasTouch: true, reducedMotion: 'reduce' })).newPage();
-  // Straight to the thread, as the other phone specs open one: never through the list, whose rows group and fold.
   await page.goto(`${world.url}#thread=${world.threadId}`);
   await expect(page.locator('section.ib-pane').getByRole('heading', { name: SUBJECT })).toBeVisible();
   const button = page.locator('[data-pr-button]').first();
@@ -112,10 +91,6 @@ async function openPulls(browser: Browser, viewport: { width: number; height: nu
   return page;
 }
 
-/**
- * A sheet's gaps to the window's left, right and bottom edges, and its corners. It runs in the page
- * (`locator.evaluate`), so it reads nothing from this file's scope: only the element it is given.
- */
 function placeOf(el: Element) {
   const r = el.getBoundingClientRect();
   const cs = getComputedStyle(el);
@@ -129,27 +104,22 @@ test("a phone: the thread's PRs open as a sheet that floats as the thread's ⋯ 
     await expect(sheet).toHaveAttribute('data-sheet', '');
     const pulls = await sheet.evaluate(placeOf);
     const field = (await page.locator('[data-pr-add-input]').boundingBox())!;
-    // A tap on the scrim closes it.
     await page.locator('[data-pr-scrim]').tap({ position: { x: 20, y: 20 } });
     await expect(sheet).toHaveCount(0);
-    // The thread's ⋯ sheet, in the same window.
     await page.locator('[data-thread-more]').first().tap();
     const menu = page.locator('.ib-pm-pos[data-phone] .ib-pm');
     await expect(menu).toBeVisible();
     await page.waitForTimeout(400);
     const more = await menu.evaluate(placeOf);
     const seen = JSON.stringify({ viewport, pulls, more });
-    // The same inset on each side and at the bottom, a small one (not flush, not the old 352 px card from the left).
     expect(pulls.left, seen).toBe(more.left);
     expect(pulls.right, seen).toBe(more.right);
     expect(pulls.bottom, seen).toBe(more.bottom);
     expect(pulls.left, seen).toBeGreaterThan(0);
     expect(pulls.left, seen).toBeLessThan(24);
     expect(pulls.left, seen).toBe(pulls.right);
-    // Every corner rounded, as the ⋯ sheet's.
     expect(pulls.corners, seen).toEqual(more.corners);
     expect(pulls.corners[2], seen).not.toBe('0px');
-    // The Add field has the row's width beside Add.
     expect(field.width, seen).toBeGreaterThan(viewport.width * 0.65);
     await page.context().close();
   }

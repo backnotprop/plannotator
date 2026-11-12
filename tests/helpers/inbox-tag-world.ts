@@ -1,30 +1,14 @@
-/**
- * A scratch Inbox world for tagging agents (approval "inbox-tag-agents"): the
- * sample threads of the approved mock, and live agent connections that poll
- * the bridge as the Claude Code mod, Pi and OpenCode do (with the tags
- * capability), plus one session on an older Plannotator (no capability) and
- * an agent that reads the Inbox through MCP only (Codex). Used by the DOM
- * tests' server (inbox-dom-server.ts `tags` mode) and the e2e spec; never the
- * person's Inbox: every caller passes the scratch port it started.
- */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { INBOX_BRIDGE_EVENT_PATH, INBOX_BRIDGE_POLL_PATH, parseInboxBridgeCommands, type InboxReplyCommand } from '../../packages/shared/inbox/connection';
 
 export const TAG_SESSIONS = {
-  /** Claude Code in billing-api: owns the threads. */
   owner: 'cc-owner-6f2c9e14',
-  /** Another Claude Code session in billing-api. */
   claudeTwo: 'cc-two-91b0d3aa',
-  /** Claude Code in plannotator. */
   claudeElsewhere: 'cc-plan-44e1c7f0',
-  /** Pi in infra. */
   pi: 'pi-0193',
-  /** OpenCode in plannotator. */
   opencode: 'ses_oc_7d21',
-  /** A Pi session on an older Plannotator: polls without the tags capability. */
   oldPi: 'pi-old-55aa',
-  /** Codex through MCP only (never polls). */
   codex: 'ses_docs_codex',
 } as const;
 
@@ -36,7 +20,6 @@ export interface TagWorld {
   stop: () => Promise<void>;
 }
 
-/** One agent session's connection: long-polls the bridge, remembers what it was handed, delivers when asked. */
 export class TagConnection {
   readonly commands: InboxReplyCommand[] = [];
   private stopped = false;
@@ -94,11 +77,6 @@ export class TagConnection {
   }
 }
 
-/**
- * Seed the scratch Inbox at `base` (its registry token for the bridge) with
- * the mock's threads, and start the connections. `projectsDir` is a scratch
- * folder for the projects.
- */
 export async function seedTagWorld(base: string, token: string, projectsDir: string, options: { connections?: boolean } = {}): Promise<TagWorld> {
   let rpc = 1;
   const send = async (args: Record<string, unknown>, wakes = true): Promise<{ message_id: string; thread_id: string }> => {
@@ -166,10 +144,8 @@ export async function seedTagWorld(base: string, token: string, projectsDir: str
     connect(S.opencode, 'opencode', plannotator, { busy: true, startedAt: now - 7 * 3600_000 });
     connect(S.oldPi, 'pi', infra, { tags: false, sendNow: false, startedAt: now - 6 * 3600_000 });
   }
-  // Codex reads the Inbox through MCP only: it wrote once, in docs-site.
   await send({ agent_host: 'codex', agent_name: 'Codex', project_path: docs, agent_session: S.codex, subject: 'Install page moved under /docs/install', body: 'The install page lives under /docs/install now; the old path redirects.' }, false);
 
-  // T1: the thread the reply box is open in (and the file comment).
   const t1 = await send({
     ...cc,
     project_path: billing,
@@ -190,7 +166,6 @@ export async function seedTagWorld(base: string, token: string, projectsDir: str
       ':::',
     ].join('\n'),
   });
-  // Wait until the live sessions polled once, so tags resolve.
   if (options.connections !== false) {
     for (let i = 0; i < 100; i++) {
       const res = (await (await fetch(`${base}/api/inbox/threads/${t1.thread_id}/taggable`)).json()) as { sessions: { session: string }[] };
@@ -198,7 +173,6 @@ export async function seedTagWorld(base: string, token: string, projectsDir: str
       await new Promise((r) => setTimeout(r, 100));
     }
   }
-  // T2: the person's reply tagged two more agents (the sent state).
   const t2 = await send({
     ...cc,
     project_path: billing,
@@ -212,7 +186,6 @@ export async function seedTagWorld(base: string, token: string, projectsDir: str
     words: 'Turn it on once the timeout is fixed. @Pi please raise the visibility timeout in infra/queue.tf to 30 s and reply here. @Codex FYI, the runbook in docs-site needs the new dead-letter alert.',
     tags: options.connections === false ? [] : [{ session: S.pi, label: 'Pi' }, { session: S.codex, label: 'Codex' }],
   });
-  // T3: a cross reply. The person tagged Pi; Pi answered in the thread; Claude Code went on.
   const t3 = await send({
     ...cc,
     project_path: billing,

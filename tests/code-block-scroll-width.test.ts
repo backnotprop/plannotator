@@ -3,12 +3,6 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseSheet } from '../packages/ui/scripts/build-inbox-thread-css';
 
-// A fence laid out as a grid (`data-keep-layout`) does not wrap: its <pre>
-// scrolls sideways. The <code> inside is a block and carries the block's
-// background, so unless it is sized to its longest line it stops at the
-// scroller's width and every line scrolled into view sits on another shade.
-// Each app keeps its own copy of the rule; every copy has to size the box.
-
 const ROOT = resolve(import.meta.dir, '..');
 const KNOWN = ['packages/editor/index.css', 'packages/inbox/inbox.css', 'packages/review-editor/index.css'];
 

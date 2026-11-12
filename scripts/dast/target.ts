@@ -17,15 +17,9 @@ if (process.env.PLANNOTATOR_DAST_ISOLATED !== "1") {
   );
 }
 
-// The data dir: required, and never the person's real one (resolved the way
-// Plannotator resolves its default: ~/.plannotator, $XDG_DATA_HOME/plannotator).
 refuseRealDataDir(process.env.PLANNOTATOR_DATA_DIR, "scripts/dast/target.ts");
 const inboxDataDir = getPlannotatorDataDir();
 
-// These are defense-in-depth defaults for the test target. The Docker network
-// is the primary outbound boundary; the application is also configured so an
-// accidentally reached feature cannot invoke agents, share content, persist
-// review data, open a browser, or install optional runtimes.
 Object.assign(process.env, {
   PLANNOTATOR_REMOTE: "0",
   PLANNOTATOR_PORT: String(APP_PORT),
@@ -41,9 +35,6 @@ Object.assign(process.env, {
   PLANNOTATOR_SKIP_SEM_INSTALL: "1",
   PLANNOTATOR_FILE_BROWSER_MAX_FILES: "64",
   BROWSER: "true",
-  // The read-only guards below forward the scanner's Host
-  // (`plannotator-dast-target:<port>`) unchanged; every server's Host
-  // allowlist refuses names it does not know, so name this one.
   PLANNOTATOR_ALLOWED_HOSTS: "plannotator-dast-target",
 });
 
@@ -76,12 +67,6 @@ const forwardedPaths = new Set([
 ]);
 const readOnlyMethods = new Set(["GET", "HEAD"]);
 
-// Place a read-only route guard in front of the real annotate server. ZAP's
-// baseline spider requests crawler metadata such as /robots.txt and
-// /sitemap.xml; the application's browser fallback correctly serves the SPA
-// for those paths, but feeding the 20+ MiB bundle back to a static spider is
-// both wasteful and misleading. The guard also makes it impossible for this
-// passive workflow to reach state-changing application endpoints.
 const scanTarget = Bun.serve({
   hostname: "0.0.0.0",
   port: SCAN_PORT,
@@ -89,7 +74,6 @@ const scanTarget = Bun.serve({
     const sourceUrl = new URL(request.url);
     if (
       !readOnlyMethods.has(request.method) ||
-      // The page's packed chunks, so the scan sees their responses too.
       !(forwardedPaths.has(sourceUrl.pathname) || sourceUrl.pathname.startsWith("/assets/"))
     ) {
       return new Response("Not found", {
@@ -120,18 +104,11 @@ const scanTarget = Bun.serve({
   },
 });
 
-// The Plannotator Inbox, seeded with one thread that asks a question, behind
-// the same kind of read-only guard. It always binds loopback itself.
-// binaryPath null: no restart-to-update probe of the bun binary every minute.
 const inbox = await startInboxServer({
-  // Always the scratch data dir the workflow names, never the default: run on
-  // a workstation, a default would be the person's own ~/.plannotator Inbox.
   dataDir: inboxDataDir,
   version: "dast",
   binaryPath: null,
-  // The door's refusals are scanned too: phones on, as the iPhone app's proofs run them.
   phones: true,
-  // The real window, built by build:hook like the plan page above.
   htmlContent: readFileSync(resolve("apps/hook/dist/inbox.html"), "utf8"),
 });
 const inboxProject = inbox.store.ensureProject({ name: "dast-fixture", root: "/workspace" });
@@ -156,7 +133,6 @@ const inboxForwardedPaths = new Set([
   "/api/inbox/threads",
   `/api/inbox/threads/${inboxThread.message.thread_id}`,
   "/api/definitely-missing",
-  // The phone door (mobile contract section 2): with no token it refuses every route.
   "/api/inbox/device/health",
   "/api/inbox/device/threads",
   "/api/inbox/device/settings",
@@ -193,9 +169,6 @@ const inboxScanTarget = Bun.serve({
   },
 });
 
-// A harmless detector-health target. Its deliberately absent defensive
-// headers should trigger ZAP rule 10020 (anti-clickjacking header missing).
-// It is separate from the application report and never enters a product build.
 const sentinel = Bun.serve({
   hostname: "0.0.0.0",
   port: SENTINEL_PORT,

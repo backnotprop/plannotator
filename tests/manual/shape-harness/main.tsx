@@ -1,14 +1,3 @@
-// The Shape dev harness: ShapeSurface over the in-memory fixture host, for
-// screenshots and trying the board by hand. Nothing ships this page.
-//
-//   ?view=picture|how|know|code   the view to open on
-//   ?panel=ask|thread|refs        open the panel
-//   ?theme=light|dark
-//   ?stage=before                 the Code view before implementation
-//   ?since=1                      open on v2 and move to v3 ("since you looked")
-//   ?session=gone|busy            the drawing session ended / is mid-turn
-//   ?notes=1                      seed an answered ask (and, with gone, a waiting change)
-//   ?diagram=1                    ShapeDiagram alone: How it works with code links
 import React, { useMemo, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { configurePlannotatorUI } from '@plannotator/ui/configure';

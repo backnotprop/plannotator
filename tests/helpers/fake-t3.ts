@@ -1,29 +1,6 @@
-/**
- * A scripted T3 Code environment on loopback: the slice of T3's external MCP
- * API (`<env>/mcp`, streamable HTTP, a Bearer grant) the Inbox's T3 wake uses,
- * `t3_thread_read` and `t3_thread_send`. No T3 is ever run.
- *
- * - `threads`: the threads this environment has (any other is "not found").
- * - `token`: the access token it accepts; anything else is a 401, as a lapsed
- *   or revoked grant is.
- * - `access`: the mode the grant was approved with (default full-access). A
- *   send is denied as T3 denies it: `capability_denied` for Read only,
- *   `runtime_mode_escalation_denied` into a thread whose mode (`modes`, default
- *   auto; `t3_thread_read` returns it) is broader. `t3ScopeOf` is the scope T3
- *   grants for an access, as `plannotator t3 login` saves it.
- * - `deny`: answer every send with this typed failure instead.
- * - `readFailure`: answer every `t3_thread_read` with this typed failure
- *   (`orchestration_error` is T3's "could not be completed").
- * - `stallMs`: hold every request this long first, as a T3 that black-holes.
- *
- * A send is idempotent by `clientRequestId`, as T3's is: a retry under the
- * same id returns the first receipt and records no second turn.
- */
 export interface FakeT3 {
   endpoint: URL;
-  /** Every t3_thread_send T3 took as a new turn. */
   turns: { threadId: string; message: string; clientRequestId: string; mode: string }[];
-  /** Every t3_thread_send call, a retry or a denied one included. */
   sendCalls: number;
   threads: string[];
   state: {
@@ -41,7 +18,6 @@ export type T3RuntimeMode = "approval-required" | "auto-accept-edits" | "auto" |
 export type T3Access = "read-only" | T3RuntimeMode;
 const RANK: Record<T3RuntimeMode, number> = { "approval-required": 0, "auto-accept-edits": 1, auto: 2, "full-access": 3 };
 
-/** The OAuth scope T3 grants for an access (T3's `mcpClientScopes`). */
 export function t3ScopeOf(access: T3Access): string {
   if (access === "read-only") return "orchestration:read";
   if (access === "full-access") return "orchestration:read orchestration:operate settings:write source-control:write";

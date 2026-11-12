@@ -1,22 +1,3 @@
-/**
- * A phone's opened Board card keeps its top bar on one line with nothing cut
- * (the owner, 2026-11-02, from a phone: the status pill read "● In / progress ⌄"
- * on two lines and "+ Create thread" ran off the right edge; at 320 px it ended
- * at 350.8 px). The bar is "‹ Board", the column pill and the card's thread
- * action (Create thread, or Open thread). When the row is short it gives way
- * (cardTopFit.ts): the action shows its icon alone ("Create thread" stays its
- * name), then the way back its chevron alone ("Board" stays its name). The
- * pill's label is never broken.
- *
- * Proved against the compiled binary at 320, 360, 375, 390 and 430 px, at the
- * default text size and the largest (15), on an In progress card with no
- * thread (Create thread), one with a thread (Open thread) and a sent card (the
- * pill "Todo · sent"); at 280 and 240 px, where the way back gives way too; on
- * a phone resized 320 → 430 → 320 (the bar gives way, takes its words back,
- * gives way again); and at 1440 px, where nothing gives way. Build the binary first (see inbox.spec.ts). PNGs
- * land in .local/proof/card-panel-phone/ (PLANNOTATOR_E2E_PROOF_DIR).
- */
-
 import { devices, expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -33,13 +14,9 @@ const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo
 interface World {
   url: string;
   claude: SimAgent;
-  /** An In progress card with no thread: Create thread. */
   create: string;
-  /** An In progress card with a thread: Open thread. */
   open: string;
-  /** A Todo card sent to the agent: the pill reads "Todo · sent". */
   sent: string;
-  /** The live session's poll, so Create thread has somewhere to go. */
   stop: boolean;
   loop: Promise<void> | null;
 }
@@ -69,7 +46,6 @@ test.beforeAll(async () => {
   const project = scratchProject(join(root, 'src'), 'plannotator');
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   world.claude = claude;
-  // One live session in the project, as the mod's connection holds it: Create thread is enabled.
   const { port, token } = JSON.parse(readFileSync(join(env.PLANNOTATOR_DATA_DIR, 'inbox', 'inbox.json'), 'utf8')) as { port: number; token: string };
   const startedAt = Date.now() - 45 * 60_000;
   world.loop = (async () => {
@@ -81,14 +57,11 @@ test.beforeAll(async () => {
       }).catch(() => null);
     }
   })();
-  // A message makes the project; the second card links its thread (Open thread), the first none (Create thread).
   const sent = await claude.send({ project_path: project, subject: 'Checkout drawer', thread: 'drawer', body: 'Starting on the drawer.' });
   const make = async (title: string, fields: Record<string, unknown> = {}) =>
     ((await claude.card({ op: 'create', project_path: project, title, column: 'in_progress', say: 'Option 3 of 6 rendered', ...fields })).card as { id: string }).id;
   world.create = await make('Hero scene timers, easing');
   world.open = await make('Checkout drawer redesign', { thread_id: sent.thread_id });
-  // Sent from the window: the person starts a thread to the live session (compose's Send) and the card is sent in it,
-  // so it waits in Todo, "· sent" on its pill.
   world.sent = await make('Promo field on the cart', { column: 'todo' });
   let personThread = '';
   await expect
@@ -122,7 +95,6 @@ async function phone(browser: Browser, width: number, colorScheme: 'light' | 'da
   return browser.newContext({ ...pixel, viewport: { width, height: 760 }, colorScheme, reducedMotion: 'reduce' });
 }
 
-/** The bar as the person sees it: its overflow, the pill label's lines, and every control's box. */
 async function readBar(page: Page) {
   return page.locator('[data-card-panel] .ib-crdp-top').evaluate((top) => {
     const box = top.getBoundingClientRect();
@@ -133,7 +105,6 @@ async function readBar(page: Page) {
       .filter((b) => b.r.width > 0)
       .sort((a, b) => a.r.x - b.r.x)
       .map(({ el, r }) => ({ name: el.getAttribute('aria-label') ?? el.textContent?.trim() ?? '', left: r.left, right: r.right, top: r.top, w: r.width, h: r.height }));
-    // The pill's words ("In progress", "Todo · sent"): one line box per line they are drawn on.
     const pill = top.querySelector<HTMLElement>('.ib-crdp-col');
     const tops = new Set<number>();
     const walker = document.createTreeWalker(pill ?? top, NodeFilter.SHOW_TEXT);
@@ -151,7 +122,6 @@ async function readBar(page: Page) {
 
 type Bar = Awaited<ReturnType<typeof readBar>>;
 
-/** One line with nothing past its edge, none over another, each control a 44 px target; the pill's words on one line (and whole, unless the bar is narrower than any phone). */
 function expectOneLine(m: Bar, { pillWhole }: { pillWhole: boolean }): void {
   expect(m.scrollWidth, `the bar scrolls ${m.scrollWidth} in ${m.clientWidth} (${JSON.stringify(m.controls)})`).toBeLessThanOrEqual(m.clientWidth);
   expect(m.controls.at(-1)!.right, 'the last control ends inside the bar').toBeLessThanOrEqual(m.end + 0.5);
@@ -165,7 +135,6 @@ function expectOneLine(m: Bar, { pillWhole }: { pillWhole: boolean }): void {
   }
 }
 
-/** Opens a card on the page and waits for its bar to be drawn at the text size asked. */
 async function openCard(page: Page, id: string, size: number) {
   await page.goto(`${world.url}#board&card=${id}`);
   const panel = page.locator(`[data-card-panel="${id}"]`);
@@ -203,7 +172,6 @@ for (const size of [14, 15]) {
           await page.emulateMedia({ colorScheme: scheme });
 
           expectOneLine(await readBar(page), { pillWhole: true });
-          // Whatever gave way keeps its name.
           await expect(action).toHaveAccessibleName(which === 'create' ? 'Create thread' : 'Open thread');
           await expect(panel.locator('[data-card-back]')).toHaveAccessibleName(/Board/);
         } finally {
@@ -214,7 +182,6 @@ for (const size of [14, 15]) {
   }
 }
 
-// The longest pill a card shows: its column and "· sent".
 for (const size of [14, 15]) {
   for (const width of [320, 390]) {
     test(`${width} px, text ${size}, a sent card: "Todo · sent" on one line, nothing cut`, async ({ browser }) => {
@@ -234,7 +201,6 @@ for (const size of [14, 15]) {
   }
 }
 
-// Narrower than a phone in portrait: the second step, the way back's chevron alone; at 240 px every control still 44 px.
 for (const width of [280, 240]) {
   test(`${width} px, text 15: the way back gives way too, every control 44 px`, async ({ browser }) => {
     await post('settings', { text_size: 15 });
@@ -287,7 +253,6 @@ test('the widest phone keeps every word: "‹ Board", "In progress" and "Create 
     await expect(top.locator('[data-card-create-thread]')).toBeVisible();
     await page.evaluate(() => document.fonts.ready);
     await expect(top).not.toHaveAttribute('data-fit', /./);
-    // Each word drawn whole, not kept only for a screen reader.
     const drawn = await top.evaluate((el) =>
       [...el.querySelectorAll<HTMLElement>('button')].map((b) => ({ text: b.textContent?.trim(), shown: [...b.querySelectorAll('span, b')].every((s) => s.getBoundingClientRect().width > 1) })),
     );
@@ -301,7 +266,6 @@ test('the widest phone keeps every word: "‹ Board", "In progress" and "Create 
   }
 });
 
-// The phone's rules stay on the phone: in a narrow desktop window the pill is drawn as before, never cut to "● … ⌄".
 test('a narrow desktop window, text 15: the pill keeps its words', async ({ browser }) => {
   await post('settings', { text_size: 15 });
   const context = await browser.newContext({ viewport: { width: 800, height: 900 }, colorScheme: 'light', reducedMotion: 'reduce' });

@@ -1,23 +1,3 @@
-/**
- * Launch PR 1, day-one proofs against the REAL `claude` (PLAN section 6).
- * Manual, never in CI. Run by hand:
- *
- *   bun scripts/launch-smoke/day1.ts <scratch dir under .ops/work/launch-pr1-smoke/>
- *
- * Risk 1: our env and permissions reach a `--bg` worker through the settings
- * FILE: a `CLAUDE_*` value from the (stand-in) login shell is present, full
- * permissions give a bypass session with no dialog blocking it, and both
- * survive `respawn`.
- * Risk 2: the id handshake under a busy supervisor: two launches in one
- * folder at once, plus the person's own `claude --bg` there; the short-id
- * prefix picks the right session every time.
- *
- * Isolation: a test Inbox in this process on <scratch>/data (never the
- * person's), a stand-in login shell with a clean env, `model: haiku` and
- * everything else only through the per-launch settings file. Every session
- * is stopped and removed at the end; the token file is deleted.
- */
-
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
@@ -36,13 +16,11 @@ const log = (line: string) => {
   writeFileSync(join(logDir, "day1.log"), `${stamped}\n`, { flag: "a" });
 };
 
-// The Inbox in this process reads its data dir and config through the env.
 process.env.PLANNOTATOR_DATA_DIR = dataDir;
 process.env.PLANNOTATOR_UPDATE_CHECK = "0";
 process.env.PLANNOTATOR_INBOX_CONNECT = "0";
 const { NO_BROWSER } = await import("../../tests/helpers/no-browser");
 process.env.PLANNOTATOR_BROWSER = NO_BROWSER;
-// The smoke's folder is under .ops/work (kept for the report), so the temp-folder rule does not apply; the real data dirs are still refused.
 const { isRealDataDir } = await import("../../tests/helpers/real-data-dir");
 if (isRealDataDir(dataDir)) throw new Error(`refusing the real data dir ${dataDir}`);
 
@@ -51,7 +29,6 @@ const { createAgentEnvironmentFor } = await import("../../packages/server/inbox-
 const { createClaudeHost } = await import("../../packages/server/inbox-launch-claude");
 const { createLoginEnv, launchSettingsEnv, launchSpawnEnv } = await import("../../packages/server/inbox-launch-env");
 
-// A stand-in login shell: a clean env with one CLAUDE_* marker, so the person's real rc files never decide the result.
 const marker = `smoke-${Math.random().toString(36).slice(2, 10)}`;
 const claudeBin = Bun.which("claude");
 if (!claudeBin) throw new Error("claude is not on PATH");
@@ -123,7 +100,6 @@ const agentReplies = async (threadId: string) =>
 
 const results: Record<string, unknown> = {};
 try {
-  // ── Risk 1 ──
   const a = await host.start({ folder: work, shownFolder: work, name: "smoke-A", settingsPath: writeSettings("lch_smokeA", true), fullPermissions: true, environment: await environment() });
   writeFileSync(join(logDir, "A.start.log"), a.output);
   if (!a.ok) throw new Error(`A did not start: ${a.text}`);
@@ -162,7 +138,6 @@ try {
   results.modes_after_respawn = [...new Set(transcriptModes(a.session))];
   log(`A after respawn: marker ${results.second_marker}, modes ${results.modes_after_respawn}`);
 
-  // ── Risk 2 ──
   const own = join(root, "own-settings.json");
   writeFileSync(own, JSON.stringify({ model: "haiku", env: { PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_CLAUDE_MOD: "0" }, enabledPlugins: { "plannotator@plannotator": false } }), { mode: 0o600 });
   const e = await environment();

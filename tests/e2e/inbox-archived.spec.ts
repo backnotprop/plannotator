@@ -1,26 +1,3 @@
-/**
- * Archived threads leave the list for Settings (owner ruling 2026-10-12:
- * "Archived messages should move out of the Quiet list … only visible within
- * a panel on the Settings page … the ability to unarchive them"). Proved in a
- * real browser against the compiled binary, with agents writing through
- * `plannotator inbox mcp` (scripts/inbox-sim.ts):
- *
- *  - Settings says "Nothing archived." before anything is;
- *  - archiving the open thread keeps its row in place, shown archived, until
- *    the person leaves the thread; then it is in no section, Quiet included,
- *    while a thread marked read stays in Quiet;
- *  - Settings' Archived block lists the archived threads newest first, with a
- *    small header per project ("billing · 2") when several projects have
- *    some, and no dropdown;
- *  - Unarchive opens the thread back in the main list;
- *  - an agent's reply_to reply into an archived thread brings it back to the
- *    list (placed by its question) and out of the Archived block; its foot
- *    says it came back, and the person answers it without unarchiving.
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * PNGs at 1440 by 900 land in .local/proof/archived/.
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
@@ -57,16 +34,10 @@ async function shot(name: string, schemes: readonly ('light' | 'dark')[] = ['lig
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 }
 
-/** Every thread id in the list, in any section. */
 async function listed(page: Page): Promise<string[]> {
   return page.locator('.ib-lbody [data-row]').evaluateAll((rows) => rows.map((r) => r.getAttribute('data-row') ?? ''));
 }
 
-/**
- * Unfold Quiet, every caller's list holds it. Waits for the band first: right
- * after a reload the list may not be drawn yet, and a bare count() then read 0,
- * skipped the click, and left Quiet folded (its rows missing from `listed`).
- */
 const openQuiet = async (page: Page) => {
   const band = page.locator('[data-section-id="quiet"] .ib-band');
   await expect(band).toBeVisible();
@@ -74,7 +45,6 @@ const openQuiet = async (page: Page) => {
   await expect(band).toHaveAttribute('aria-expanded', 'true');
 };
 
-/** Archive a thread through the window's own route (the thread id is its first message's). */
 async function archive(page: Page, threadId: string): Promise<void> {
   const status = await page.evaluate(async (id) => {
     const health = (await (await fetch('/api/inbox/health')).json()) as { serverSession: string };
@@ -161,7 +131,6 @@ test('the archived open thread keeps its row until the person leaves; then no se
   const { page, threads } = world;
   await page.goto(world.url);
   await expect(page.locator(`.ib-lbody [data-row="${threads.search}"]`)).toBeVisible();
-  // Mark read (stays in Quiet) and archive three others from behind the window, through its own routes.
   await page.evaluate(async (id) => {
     const health = (await (await fetch('/api/inbox/health')).json()) as { serverSession: string };
     await fetch(`/api/inbox/threads/${id}/read`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverSession: health.serverSession }) });
@@ -200,7 +169,6 @@ test('Settings lists the archived threads newest first, grouped by project with 
   const block = page.locator('[data-settings-archived]');
   await expect(block.locator('[data-archived-thread]')).toHaveCount(3);
   const order = await block.locator('[data-archived-thread]').evaluateAll((rows) => rows.map((r) => r.getAttribute('data-archived-thread')));
-  // Grouped by project (newest archived project first), newest archived first inside each.
   expect(order).toEqual([threads.notes, threads.build, threads.deploy]);
   await expect(block.locator('[data-archived-count]')).toHaveText('3 archived threads');
   await expect(block.locator('select')).toHaveCount(0);
@@ -219,7 +187,6 @@ test('Unarchive opens the thread back in the main list', async () => {
   await expect(page).toHaveURL(new RegExp(`#thread=${threads.deploy}$`));
   await expect(page.locator('section.ib-pane').getByRole('heading', { name: 'Preview deploy is up' })).toBeVisible();
   await expect(page.locator('[data-inbox-toast]')).toContainText('Back in your Inbox');
-  // Back in the list, in whatever section its state puts it: opening it was a look, so a news-only thread is Quiet.
   await openQuiet(page);
   await expect(page.locator(`.ib-lbody [data-row="${threads.deploy}"]`)).toBeVisible();
   await shot('06-unarchived-open', ['light']);
@@ -239,10 +206,8 @@ test("an agent's reply into an archived thread brings it back to the list and ou
     reply_to: threads.build,
     body: 'The nightly build broke again.\n\n:::question\nRoll back the last deploy?\n\n- [ ] Yes\n- [ ] No\n:::',
   });
-  // The block reads again as the store moves: the thread leaves it.
   await expect(block.locator(`[data-archived-thread="${threads.build}"]`)).toHaveCount(0);
   await expect(block.locator('[data-archived-thread]')).toHaveCount(1);
-  // Leaving Settings is an action: the list on screen catches up (held order).
   await page.locator('[data-settings-back]').click();
   const row = page.locator(`.ib-lbody [data-row="${threads.build}"]`);
   await expect(row).toBeVisible();
@@ -254,7 +219,6 @@ test("an agent's reply into an archived thread brings it back to the list and ou
   await expect(pane).toContainText('Roll back the last deploy?');
   await shot('08-agent-reply-thread', ['light']);
 
-  // Answered without unarchiving: pick, then Send.
   await pane.getByRole('radio', { name: /^Yes/ }).click();
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
   await expect(pane.getByText(/^Sent /).first()).toBeVisible();

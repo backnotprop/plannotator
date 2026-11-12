@@ -1,18 +1,3 @@
-/**
- * The files named in the person's own sent reply are links (replyFileLinks.ts;
- * the owner's ask, 2026-10-29: "When I comment on an image… or any
- * attachment in the same way… the reply body should ideally make a link for
- * me to click"). Proved against the compiled binary: an agent attaches an
- * image, code, Markdown, an HTML page and a video and shows an image in its
- * text; the person comments on each, draws on the image, and sends from the
- * window. In the sent reply each file's heading opens THAT file beside the
- * thread, the drawing's name shows the drawing, and a file deleted on disk
- * since links to the version that was sent. What the agent got is unchanged
- * (no link in its text). Also at a phone's width.
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- */
-
 import { expect, test } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -86,7 +71,6 @@ test('each file the sent reply commented on opens from its heading; a drawing sh
     await save('admin.html', { id: 'c-html', type: 'COMMENT', text: 'Ask first.', originalText: 'Retry all', blockId: 'block-0', startOffset: 0, endOffset: 0, createdA: 2 });
     await save('walkthrough.mp4', videoCommentAnnotation({ id: 'c-vid', name: 'walkthrough.mp4', time: 4.2, text: 'Cut the pause.' }));
 
-    // The person sends from the window: the window writes the feedback text.
     const page = await context.newPage();
     await page.goto(`${url}/#thread=${sent.thread_id}`);
     await expect(page.locator('.ib-pfoot [data-draft-foot], .ib-pfoot').first()).toBeVisible();
@@ -95,7 +79,6 @@ test('each file the sent reply commented on opens from its heading; a drawing sh
     await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
     const reply = await agent.nextReply(sent.thread_id, 40);
     const body = reply.body as string;
-    // The agent's text is unchanged: the headings name the files, no link the window draws.
     expect(body).toContain('## design/checkout.png\n');
     expect(body).not.toContain('.inbox-reply/');
     const messages = ((await (await fetch(`${url}/api/inbox/threads/${sent.thread_id}`)).json()) as { thread: { messages: { id: string; body: string }[] } }).thread.messages;
@@ -111,32 +94,26 @@ test('each file the sent reply commented on opens from its heading; a drawing sh
       'media/walkthrough.mp4': idOf('walkthrough.mp4'),
       'design/hero.png (image in your': idOf('hero.png'),
     };
-    // Each heading's link is the window's own deep link to THAT file.
     for (const [name, id] of Object.entries(hrefs)) {
       await expect(heading(name)).toHaveAttribute('href', `#thread=${sent.thread_id}&file=${id}`);
     }
 
-    // A click opens the file beside the thread: the image, then the image the agent's text showed.
     await heading('design/checkout.png').click();
     await expect(page.locator(`[data-attachment-pane="${idOf('checkout.png')}"]`)).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`file=${idOf('checkout.png')}`));
     await heading('design/hero.png').click();
     await expect(page.locator(`[data-attachment-pane="${idOf('hero.png')}"]`)).toBeVisible();
-    // Back to the thread alone (the image may have opened full screen).
     await page.goto(`${url}/#thread=${sent.thread_id}`);
     await expect(page.locator('[data-attachment-pane]')).toHaveCount(0);
 
-    // The drawing on the image: its name shows it.
     const drawn = sentReply.getByRole('link', { name: 'checkout markup' });
     await expect(drawn).toHaveAttribute('href', `/api/inbox/markups/${markup.name}`);
-    // The drawing's data-dir path is the agent's: in its text, not drawn in the window once the name links.
     expect(body).toContain(markup.path);
     await expect(sentReply).not.toContainText(markup.path);
     await drawn.click();
     await expect(page.locator(`img[src="/api/inbox/markups/${markup.name}"]`).last()).toBeVisible();
     await page.keyboard.press('Escape');
 
-    // The code file is deleted on disk: its heading opens the version that was sent, never a dead link.
     rmSync(join(project, 'src', 'retry.ts'));
     await page.reload();
     await expect(heading('src/retry.ts')).toHaveAttribute('href', `#thread=${sent.thread_id}&file=${idOf('retry.ts')}&v=sent`);
@@ -145,7 +122,6 @@ test('each file the sent reply commented on opens from its heading; a drawing sh
     await expect(page).toHaveURL(/v=sent/);
     await expect(page.locator(`[data-attachment-pane="${idOf('retry.ts')}"]`)).toContainText('run()');
 
-    // A phone's width: the same link opens the file over the thread.
     await page.goto(`${url}/#thread=${sent.thread_id}`);
     await page.setViewportSize({ width: 390, height: 844 });
     await heading('docs/plan.md').scrollIntoViewIfNeeded();

@@ -1,31 +1,8 @@
-/**
- * Release gate: every compiled binary must carry a Bun runtime that does not
- * trust the compromised eMudhra chain (Oct 2026).
- *
- * `bun build --compile` copies the Bun runtime, and with it Bun's root
- * certificates and TLS checks, into every release binary. Bun 1.3.14 trusts
- * "emSign ECC Root CA - G3", which the eight compromised eMudhra intermediate
- * keys chain to. Bun 1.4.4 drops that root (NSS 3.131.1) and rejects any chain
- * holding one of those keys (oven-sh/bun#46300).
- *
- * A binary fails the gate when:
- *  - its embedded Bun version (`Bun vX.Y.Z (rev)`) is missing or below 1.4.4;
- *  - it holds emSign ECC Root CA - G3 in any form: an embedded PEM block
- *    (Bun 1.3 embeds roots as PEM text), the certificate's DER (Bun 1.4
- *    embeds DER), or its public key (SPKI DER);
- *  - it lacks the blocked-key check: `addBlockedSPKIForTesting`, the test
- *    hook #46300 added beside it. The eight key hashes themselves are not
- *    searchable: the compiler folds the constant array into code.
- *
- * Reads the files only; runs on any host (cross-compiled binaries never run).
- * usage: bun scripts/check-bun-runtime-trust.ts <binary>...
- */
 import { X509Certificate } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 export const MIN_BUN_VERSION = "1.4.4";
 
-/** emSign ECC Root CA - G3. SHA-256 86:A1:EC:BA:08:9C:4A:8D:3B:BE:27:34:C6:12:BA:34:1D:81:3E:04:3C:F9:E8:A8:62:CD:5C:57:A3:6B:BE:6B */
 export const EMSIGN_ECC_G3_PEM = `-----BEGIN CERTIFICATE-----
 MIICTjCCAdOgAwIBAgIKPPYHqWhwDtqLhDAKBggqhkjOPQQDAzBrMQswCQYDVQQGEwJJTjETMBEG
 A1UECxMKZW1TaWduIFBLSTElMCMGA1UEChMcZU11ZGhyYSBUZWNobm9sb2dpZXMgTGltaXRlZDEg
@@ -56,7 +33,6 @@ function compareVersions(a: readonly number[], b: readonly number[]): number {
   return 0;
 }
 
-/** Decode a PEM body as Bun embeds it (it may sit in C string text: `\n`, quotes). */
 function pemBodyDer(body: Buffer): Buffer | null {
   const cleaned = body.toString("latin1").replace(/\\n|["\s]/g, "");
   if (!/^[A-Za-z0-9+/]+=*$/.test(cleaned)) return null;
@@ -75,7 +51,6 @@ function holdsG3Pem(bytes: Buffer): boolean {
   return false;
 }
 
-/** What is wrong with one binary's Bun runtime; empty when it passes. */
 export function bunRuntimeTrustProblems(bytes: Buffer): string[] {
   const problems: string[] = [];
   const text = bytes.toString("latin1");

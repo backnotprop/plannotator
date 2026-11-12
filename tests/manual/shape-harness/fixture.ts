@@ -1,8 +1,3 @@
-// The harness's board: "Snooze announcement", the Inbox feature that merged as
-// PR #2547, in the Shape format (@plannotator/core/shape). The drawn views are
-// the approved prototype's Picture and How it works rewritten as agent HTML;
-// the code files and patch are #2547's own (files/). Thread messages are
-// invented for the harness.
 import type { ShapeBoard, ShapeCodeView, ShapeRef } from '@plannotator/core/shape';
 import patch from './files/snooze.patch.txt?raw';
 import intro from './files/snoozeIntro.ts.txt?raw';
@@ -29,7 +24,6 @@ const P = {
   tour: 'packages/inbox/tour/model.ts',
 };
 
-/** The files the whole-file viewer can open. */
 export const SOURCES: Record<string, string> = {
   [P.when]: intro,
   [P.who]: server,
@@ -38,13 +32,11 @@ export const SOURCES: Record<string, string> = {
   [P.tryIt]: tryIt,
 };
 
-/** What the stand-in agent can change. */
 export interface SnoozeModel {
   calmKnown: boolean;
   onceLabel: string;
   neverLabel: string;
   calmReq: boolean;
-  /** v2 said "Not now? Snooze it."; v3 says it is new. */
   words: 'old' | 'new';
 }
 
@@ -61,8 +53,6 @@ export const V2: SnoozeModel = { ...V3, words: 'old' };
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const clock = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>';
-
-// ───────────────────────── Picture ─────────────────────────
 
 const PICTURE_CSS = `
 .pic { max-width: 1180px; margin: 0 auto; }
@@ -144,11 +134,6 @@ function picture(m: SnoozeModel): string {
   </div>
 </div>`;
 }
-
-// ───────────────────────── How it works ─────────────────────────
-// When (a ruler over the flow), how (the rules, inside "all must hold") and
-// what (the dialog, then each way out). Wide: a 1180 × 520 canvas the board
-// scales to fit. Narrow: the same parts stacked (`tall`).
 
 const HOW_CSS = `
 .c { position: relative; width: 1180px; height: 520px; }
@@ -269,13 +254,9 @@ function howTall(m: SnoozeModel): string {
 </div>`;
 }
 
-// ───────────────────────── views.know ─────────────────────────
-
 function know(m: SnoozeModel): string {
   return `It shows at a quiet moment, after you leave a thread that still waits on you, and never over a half-typed reply${m.calmReq ? ', and only when the page is calm' : ''}. You get it **2 days** after you started, unless you already snoozed.[^4][^9]\n\nTry it opens the real Snooze menu on the thread you just left. Nothing is snoozed until you pick. ${m.onceLabel}.[^5] It goes out with 0.28.48 ([#2547](${PR_URL})); no question waits on you.`;
 }
-
-// ───────────────────────── Code ─────────────────────────
 
 export function code(stage: 'before' | 'after'): ShapeCodeView {
   const files = [P.who, P.when, P.rows, P.dialog, P.tryIt].map((path) => ({ path, line: path === P.who ? 14 : path === P.when ? 3 : 1 }));
@@ -352,8 +333,6 @@ export function code(stage: 'before' | 'after'): ShapeCodeView {
   };
 }
 
-// ───────────────────────── references and the board ─────────────────────────
-
 export const REFS: ShapeRef[] = [
   { n: 1, kind: 'message', title: '“The picture is right.”', sub: 'You · 02:25 · in this thread', target: 'm-0225' },
   { n: 2, kind: 'image', title: 'Approved: B, “The real menu”', sub: 'approval shots · desktop and phone', target: 'files/B-desktop-light.png',
@@ -382,7 +361,6 @@ export function snoozeBoard(m: SnoozeModel, stage: 'before' | 'after' = 'after')
   };
 }
 
-/** The harness Thread: invented messages, so a message reference has somewhere to land. */
 export const THREAD = [
   { id: 'm-2205', who: 'You', at: '22:05', text: 'Make it 2 days before anyone sees it.' },
   { id: 'm-0225', who: 'You', at: '02:25', text: 'The picture is right. Ship B.' },

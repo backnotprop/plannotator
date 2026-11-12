@@ -1,24 +1,3 @@
-/**
- * The Pull requests list's filter (approval "pr-list-filters", round 7 take B "One filter button", with the owner's
- * "highlights when open"), proved in a real browser against the compiled binary. The same sandbox as
- * inbox-pull-requests.spec.ts: `plannotator inbox --background` under a temp PLANNOTATOR_DATA_DIR, `gh` and `glab` sh
- * fakes first on PATH (nothing reaches GitHub or GitLab; the real CLIs never run), simulated agents through
- * `plannotator inbox mcp`. HOME is the scratch folder.
- *
- * What is proved, in order:
- *  1. The read: the person's own lists, then Others as a call of its own scoped to the projects (never unscoped).
- *  2. At 1440: the head is "Reviews" and the filter mark only; the menu's views and projects with counts, the picked rows
- *     tinted; a view and a project narrow the rows, the mark says so, one quiet line names them; the address keeps
- *     them over a reload; × clears both and focus comes back to the mark.
- *  3. The keys: the mark's tooltip on keyboard focus; Enter opens; the arrows walk the rows; Enter picks; Escape
- *     closes; focus comes back to the mark each time. No shortcut of its own.
- *  4. The menu open while narrowed to To review and "customer-billing-portal-v2-migration", light and dark.
- *  5. At 390: the modal sheet titled "Filter" (a scrim, no page scroll behind it), 48px rows, tinted picks.
- *  6. At 320: narrowed with the long name: one line, the name cut short, nothing past the edge, 44px targets.
- *
- * Shots land in PLANNOTATOR_E2E_PROOF_DIR/pull-filters (1440 rest, the menu narrowed light and dark, the 390 sheet,
- * 320 narrowed, and sheet.png, the contact sheet). Fails if a "Tell your agents" dialog appears.
- */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -32,7 +11,6 @@ const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'pull-filters');
 
-/** The real person's Inbox port: a spec's Inbox never takes it. */
 const OWNER_INBOX_PORT = '59812';
 
 const GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.com' };
@@ -51,11 +29,6 @@ function project(parent: string, name: string, origin: string): string {
   return dir;
 }
 
-/**
- * The fake gh / glab (list answers only): each list read is one file of its own in `calls/`, its arguments on one line,
- * written aside and moved in whole. Not one shared file: gh and glab read at the same time, and a long line appended in
- * parts by two of them at once comes out as one merged line, the other call lost.
- */
 function writeForge(dir: string) {
   mkdirSync(dir, { recursive: true });
   mkdirSync(join(dir, 'calls'), { recursive: true });
@@ -129,7 +102,6 @@ function ghPull(repoName: string, number: number, fields: Record<string, unknown
 
 const requestedOf = (who: string) => ({ reviewRequests: { nodes: [{ requestedReviewer: { __typename: 'User', login: who } }] } });
 
-/** The person's own PRs: Claude Code's stack of three on a merged layer, Codex's approved Vite 8, one waiting on Jun. */
 const MINE = [
   ghPull(BILLING, 412, { title: 'Retry schedule table and next-attempt time', headRefName: 'retry/schedule', baseRefName: 'retry/charge-client', updatedAt: ago(9), additions: 58, deletions: 0, changedFiles: 3 }),
   ghPull(BILLING, 413, { title: 'Jitter on the retry backoff', headRefName: 'retry/backoff', baseRefName: 'retry/schedule', updatedAt: ago(8), additions: 4, deletions: 2, changedFiles: 1 }),
@@ -138,15 +110,12 @@ const MINE = [
   ghPull(WEB, 869, { title: 'Fall back to English for missing strings', headRefName: 'locale-fallback', ...requestedOf('jun'), updatedAt: ago(180) }),
 ];
 const MERGED = [ghPull(BILLING, 411, { title: 'Idempotency keys on the charge client', state: 'MERGED', headRefName: 'retry/charge-client', mergedAt: ago(26 * 60), updatedAt: ago(26 * 60) })];
-/** Review asked of the person: Tomas directly, Mara through the payments team, Sam in the portal. */
 const REQUESTED = [
   ghPull(WEB, 880, { title: 'RTL layout for the settings pages', author: { login: 'tomas' }, headRefName: 'tomas/rtl-settings', updatedAt: ago(4), ...requestedOf('dana') }),
   ghPull(BILLING, 905, { title: 'Retry refunds when the webhook answers 5xx', author: { login: 'mara-lee' }, headRefName: 'mara/refund-retry', updatedAt: ago(41), reviewRequests: { nodes: [{ requestedReviewer: { __typename: 'Team', slug: 'payments' } }] } }),
   ghPull(PORTAL, 77, { title: 'Show unpaid invoices first', author: { login: 'sam' }, headRefName: 'sam/unpaid-first', updatedAt: ago(12), ...requestedOf('dana') }),
 ];
-/** Assigned to the person, review asked of Priya. */
 const ASSIGNED = [ghPull(WEB, 891, { title: 'Keyboard support in the date picker', author: { login: 'jun' }, headRefName: 'jun/datepicker-keys', updatedAt: ago(95), ...requestedOf('priya') })];
-/** Teammates' PRs in the projects' repositories: a stack of two, a draft, an approved one, one waiting on review. */
 const TEAMMATES = [
   ghPull(WEB, 902, { title: 'Chart colors for dark mode', author: { login: 'mara-lee' }, headRefName: 'mara/chart-dark', updatedAt: ago(22), ...requestedOf('jun') }),
   ghPull(BILLING, 903, { title: 'Invoice PDF: line items', author: { login: 'sam' }, headRefName: 'sam/invoice-lines', updatedAt: ago(130), ...requestedOf('priya') }),
@@ -166,7 +135,6 @@ const GH_ANSWER = {
     merged: { nodes: MERGED },
   },
 };
-// Others, a read of its own: every open PR in the projects' repositories, the person's own and the asked ones among them.
 const GH_OTHERS = { data: { viewer: { login: 'dana' }, rateLimit: { cost: 3, remaining: 4977, resetAt: ago(-40) }, others0: { issueCount: OPEN.length, nodes: OPEN } } };
 
 const mr = (iid: number, fields: Record<string, unknown>) => ({
@@ -237,7 +205,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const billing = project(src, 'billing-svc', 'https://github.com/northwind/billing-svc.git');
   const web = project(src, 'web-app', 'https://github.com/northwind/web-app.git');
   const ledger = project(src, 'ledger', 'git@gitlab.com:northwind/ledger.git');
-  // A project with a long name, for the fit at narrow widths.
   const portal = project(src, 'customer-billing-portal-v2-migration', 'https://github.com/northwind/customer-billing-portal-v2.git');
 
   const env: Record<string, string> = {
@@ -285,7 +252,6 @@ test.afterAll(async () => {
   }
 });
 
-/** Fails the run when the "Tell your agents" dialog shows. */
 async function noAgentsDialog(page: Page): Promise<void> {
   if ((await page.getByText('Tell your agents', { exact: false }).count()) > 0) throw new Error('"Tell your agents" dialog appeared');
 }
@@ -297,10 +263,6 @@ async function snap(page: Page, name: string, scheme: 'light' | 'dark'): Promise
   await page.screenshot({ path: join(proofDir, `${name}.png`) });
 }
 
-/**
- * Loads the page and waits for a list answer with Others in it: Others is read in the background (the list never waits
- * for it), and the window asks again while it is on its way.
- */
 async function landed(page: Page, load: () => Promise<unknown>): Promise<void> {
   const whole = page.waitForResponse(async (r) => {
     if (!/\/api\/inbox\/pulls(\?|$)/.test(r.url())) return false;
@@ -313,10 +275,8 @@ async function landed(page: Page, load: () => Promise<unknown>): Promise<void> {
 
 const TRIGGER = '[data-pulls-filter-trigger]';
 const MENU = '[data-pulls-filter-menu]';
-/** The worst real name: a project folder named past what any head could hold. */
 const LONG = 'customer-billing-portal-v2-migration';
 
-/** Opens the filter's menu and picks a row by its words (a row's name is its words and its count, "To review 4"). */
 async function choose(page: Page, item: string): Promise<void> {
   const menu = page.locator(MENU);
   await page.locator(TRIGGER).click();
@@ -326,25 +286,18 @@ async function choose(page: Page, item: string): Promise<void> {
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
 }
 
-/** The menu's rows, as "words count" (✓ on the chosen one). */
 async function menuRows(page: Page, selector: string): Promise<string[]> {
   return page.locator(`${MENU} ${selector}`).evaluateAll((rows) =>
     rows.map((r) => `${r.querySelector('.ib-pmi-l')!.textContent} ${r.querySelector('.ib-pmi-n')!.textContent}${r.getAttribute('aria-checked') === 'true' ? ' ✓' : ''}`),
   );
 }
 
-/** Every row the list shows, the folded ones opened. */
 async function rows(page: Page): Promise<string[]> {
   const fold = page.locator('[data-reviews-fold="not_reviewed"]');
   if ((await fold.count()) > 0 && (await fold.getAttribute('aria-expanded')) === 'false') await fold.click();
   return (await page.locator('[data-pulls-row]').evaluateAll((els) => els.map((el) => el.getAttribute('data-pulls-row')!))).sort();
 }
 
-/**
- * The head and the quiet line now: the head one line with nothing past it, the line one line, the targets. `head` leaves
- * out the Risk chip, which comes in when the risk answer does (inbox-pull-risk.spec.ts checks it); it still counts
- * for "past the edge".
- */
 async function fit(page: Page) {
   return page.evaluate(() => {
     const list = document.querySelector('[data-pulls-list]')!.getBoundingClientRect();
@@ -380,7 +333,6 @@ function fits(f: Awaited<ReturnType<typeof fit>>, phone: boolean): void {
   }
 }
 
-/** The picked rows are tinted (the owner's "highlights when open"); the others are not. */
 async function tinted(page: Page): Promise<{ checked: string[]; plain: string[] }> {
   return page.locator(`${MENU} [role="menuitemradio"]`).evaluateAll((els) => {
     const out = { checked: [] as string[], plain: [] as string[] };
@@ -399,7 +351,6 @@ function highlighted(t: Awaited<ReturnType<typeof tinted>>): void {
   for (const c of t.plain) expect(clear(c), `an unpicked row is not (${c})`).toBe(true);
 }
 
-/** Project ids, read from the address after a pick. */
 const ids: Record<string, string> = {};
 
 test('the read: the person\'s own lists, then Others as a call of its own scoped to the projects; GitLab the same', async () => {
@@ -407,7 +358,6 @@ test('the read: the person\'s own lists, then Others as a call of its own scoped
   await landed(page, async () => (await page.goto('about:blank'), page.goto(`${world.url}#pulls`)));
   await expect(page.locator('[data-pulls-row]').first()).toBeVisible();
   const read = () => readdirSync(join(world.forge, 'calls')).map((f) => readFileSync(join(world.forge, 'calls', f), 'utf8'));
-  // The first row shows when one forge has answered; the other calls may still be on their way.
   await expect
     .poll(() => ['gh pulls', 'glab pulls', 'gh others', 'glab others'].filter((name) => read().some((c) => c.startsWith(name))))
     .toEqual(['gh pulls', 'glab pulls', 'gh others', 'glab others']);
@@ -452,7 +402,6 @@ test('1440: "Reviews" and the filter mark; the menu; a view and a project narrow
   await expect(page.locator(`${MENU} [data-pulls-filter-clear-item]`)).toHaveCount(0);
   await page.mouse.move(1438, 898);
   highlighted(await tinted(page));
-  // Escape closes it and focus is back on the mark.
   await page.keyboard.press('Escape');
   await expect(page.locator(MENU)).toHaveCount(0);
   await expect(trigger).toBeFocused();
@@ -471,13 +420,11 @@ test('1440: "Reviews" and the filter mark; the menu; a view and a project narrow
   await expect(list.locator('[data-pulls-row="github.com/northwind/web-app#891"]')).toContainText('assigned to you');
   fits(await fit(page), false);
 
-  // The address keeps both: a reload draws the same list.
   expect(await page.evaluate(() => location.hash)).toMatch(/^#reviews&project=prj_[^&]+&view=review$/);
   await landed(page, () => page.reload());
   await expect(trigger).toHaveAccessibleName('Filter: To review, web-app');
   expect(await rows(page)).toHaveLength(2);
 
-  // × clears both in one step, and focus goes back to the mark.
   await list.locator('[data-pulls-filter-clear]').click();
   await expect(trigger).toHaveAccessibleName('Filter');
   await expect(trigger).toBeFocused();
@@ -490,7 +437,6 @@ test('1440, the keys: the mark says its name on keyboard focus; Enter opens, the
   const { page } = world;
   await landed(page, async () => (await page.goto('about:blank'), page.goto(`${world.url}#pulls`)));
   const trigger = page.locator(TRIGGER);
-  // Keyboard focus (Tab from the title): the tooltip names it, as a hover does.
   await page.locator('[data-pulls-heading]').focus();
   await page.keyboard.press('Tab');
   await expect(trigger).toBeFocused();
@@ -499,9 +445,7 @@ test('1440, the keys: the mark says its name on keyboard focus; Enter opens, the
   const menu = page.locator(MENU);
   await expect(menu).toBeVisible();
   await expect(page.locator('[data-pn-tooltip]')).toHaveCount(0);
-  // The keys walk the rows: from the first, two down is To review.
   await expect(menu.locator('[data-highlighted]')).toHaveAttribute('data-pulls-filter', 'all');
-  // The first row has focus before the first key (the menu moves focus in after it draws).
   await expect(menu.locator('[data-pulls-filter="all"]')).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowDown');
@@ -514,7 +458,6 @@ test('1440, the keys: the mark says its name on keyboard focus; Enter opens, the
   await expect(trigger).toBeFocused();
   await expect(trigger).toHaveAccessibleName('Filter: To review');
   expect(await page.evaluate(() => location.hash)).toBe('#reviews&view=review');
-  // Escape from the open menu also brings focus back.
   await page.keyboard.press('Enter');
   await expect(menu).toBeVisible();
   await page.keyboard.press('Escape');
@@ -559,11 +502,9 @@ test('390 (a phone): the sheet titled Filter, modal, open while narrowed; its pi
     await expect(menu.locator('.ib-pm-title')).toHaveText('Filter');
     await expect(page.locator('.ib-pm-pos[data-phone]')).toBeVisible();
     for (const box of await menu.locator('[role="menuitemradio"], [role="menuitem"]').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height))) {
-      // A row's measured height can land a sliver under 48 from subpixel layout.
       expect(Math.round(box)).toBeGreaterThanOrEqual(48);
     }
     await expect(menu.locator('[data-pulls-filter-clear-item]')).toBeVisible();
-    // Modal: a scrim over the page, and the page behind does not scroll.
     await expect(page.locator('.ib-pm-scrim')).toBeVisible();
     expect(await page.evaluate(() => getComputedStyle(document.documentElement).overflow + getComputedStyle(document.body).overflow)).toContain('hidden');
     highlighted(await tinted(page));

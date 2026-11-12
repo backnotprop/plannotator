@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// Manual QA: runs with your real HOME and Plannotator config on purpose. For an isolated test run, use `bun run test:sandbox`.
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";

@@ -91,7 +91,6 @@ test('a fixed issue takes the release that shipped its PR (the latest, when seve
   const issue = { number: 12, title: 'Oars', stateReason: 'COMPLETED' };
   expect(fixedIn({ ...issue, closedByPullRequestsReferences: [{ number: 30 }, { number: 40 }] }, first)).toBe('1.10.0');
   expect(fixedIn(issue, first)).toBe('1.9.0');
-  // A PR in a fork never shipped here; a draft release is not a release.
   expect(fixedIn({ ...issue, number: 13, closedByPullRequestsReferences: [{ number: 40, repository: { name: 'plannotator', owner: { login: 'someone' } } }] }, first)).toBeNull();
   expect(fixedIn({ ...issue, number: 41 }, first)).toBeNull();
   expect(fixedIn({ ...issue, stateReason: 'NOT_PLANNED' }, first)).toBeNull();

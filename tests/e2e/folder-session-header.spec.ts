@@ -1,19 +1,3 @@
-/**
- * A folder session's header names the folder, and its tab names the open
- * file. Before, the header named the open file too (#2075), so the folder was
- * on screen only in the Files tab's root row, cut and in capitals.
- *
- * The header shows the folder's path cut from the start: when the header runs
- * short the parent folders give way and the folder's own name stays whole,
- * with the path in order up to it. Failures to catch: the header naming the
- * file again, the tab losing the file name (several tabs of one folder stay
- * apart only by it, #2061), the folder's name cut, and the path's separators
- * jumping to the far end (a right-to-left box without its isolate).
- *
- * Annotate a folder at 1440 by 900 and in a 560 by 800 window. Against the
- * compiled binary under a temp HOME and PLANNOTATOR_DATA_DIR, headless. Build
- * the binary first (see inbox.spec.ts).
- */
 import { expect, test, type Page } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -26,7 +10,6 @@ const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/
 
 const FOLDER = 'add-refund-flow';
 
-// Every first-run dialog already seen, so the page opens on the session.
 const COOKIES: [string, string][] = [
   ['plannotator-plan-look-choice-resolved', 'true'],
   ['plannotator-plan-look-v2', 'resolved'],
@@ -46,18 +29,14 @@ const COOKIES: [string, string][] = [
 
 interface HeaderFit {
   text: string;
-  /** The folder's own name, and whether it is cut. */
   last: string;
   lastCut: boolean;
-  /** Whether the parent folders give way (cut at their start). */
   foldersCut: boolean;
-  /** Whether the parent folders read in order up to the name: their last separator is their rightmost character, against the name. */
   inOrder: boolean;
 }
 
-/** The header's name beside the logo, split into its start-cut parts. */
 async function headerFit(page: Page): Promise<HeaderFit> {
-  await page.waitForTimeout(500); // fonts and the header settle
+  await page.waitForTimeout(500);
   return page.evaluate(() => {
     const name = document.querySelector<HTMLElement>('[data-header-document-name]');
     const folders = name?.querySelector<HTMLElement>('[data-start-cut-path-folders]');
@@ -109,7 +88,6 @@ test('annotate a folder: the header names the folder, cut from the start, and th
     await page.getByText('proposal', { exact: true }).first().click();
     await expect(page.locator('article[data-print-region="article"]:visible h1')).toHaveText(/^Proposal/);
 
-    // Room for the whole path: the header names the folder, the tab the file.
     let f = await headerFit(page);
     expect(f.text, '1440: the header names the folder, as its path').toBe(folder);
     expect(f.last).toBe(FOLDER);
@@ -117,7 +95,6 @@ test('annotate a folder: the header names the folder, cut from the start, and th
     expect(f.inOrder, '1440: the path reads in order').toBe(true);
     await expect(page).toHaveTitle(/^proposal\.md · /);
 
-    // A narrow window: the parent folders give way, the folder's name stays whole.
     await page.setViewportSize({ width: 560, height: 800 });
     f = await headerFit(page);
     expect(f.foldersCut, '560: the parent folders give way').toBe(true);

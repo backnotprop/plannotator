@@ -1,15 +1,3 @@
-/**
- * Guard for the reuse of passed e2e specs (scripts/ci-e2e-reuse.ts).
- *
- * Each failure this catches would let a PR's e2e skip a spec it should run:
- * a key that stays the same when the PR's source (a moved line, a whitespace
- * edit) or the harness changed, a spec counted as passed when a test failed in
- * one browser or never ran, a changed spec or a changed quarantine left out, a
- * pass older than a day or passed on as new, a plan that drops a spec from
- * every shard, a lookup that takes another PR's run, or a failure in the
- * lookup that does not give a full run. The others would make reuse never
- * happen (a merge of main changing the key).
- */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -65,13 +53,11 @@ describe('the reuse key', () => {
     git('commit', '-q', '-m', message);
     return git('rev-parse', 'HEAD');
   };
-  /** GitHub's merge commit of the PR into main: parents main, then the PR's head. Returns the key of a run on it. */
   const runKey = (main: string, head: string) => {
     git('checkout', '-q', '--detach', main);
     git('merge', '-q', '--no-ff', '--no-edit', head);
     return reuseKey('HEAD^1', 'HEAD^2', 'HEAD', repo);
   };
-  /** A new repo with `files` on main and a `pr` branch checked out. */
   const fresh = (files: Record<string, string>) => {
     repo = scratch('key');
     git('init', '-q');
@@ -103,7 +89,6 @@ describe('the reuse key', () => {
     const pr1 = commit({ 'packages/inbox/a.ts': 'export const a = 2;\n' }, 'pr: change a');
     const key = runKey(base, pr1);
 
-    // main moves on elsewhere and the PR merges it: the PR's own change is the same.
     git('checkout', '-q', 'main');
     const main2 = commit({ 'packages/inbox/b.ts': 'export const b = 2;\n' }, 'main: change b');
     git('checkout', '-q', 'pr');
@@ -111,12 +96,10 @@ describe('the reuse key', () => {
     const pr2 = git('rev-parse', 'HEAD');
     expect(runKey(main2, pr2)).toBe(key);
 
-    // Edits to a spec file or a unit test file leave the key alone (the plan checks each spec's blob).
     git('checkout', '-q', 'pr');
     const pr3 = commit({ 'tests/e2e/x.spec.ts': "test('x2', () => {});\n", 'packages/inbox/a.test.ts': 'test;\n' }, 'pr: spec and unit test');
     expect(runKey(main2, pr3)).toBe(key);
 
-    // A change to source or to a test helper is a new key.
     git('checkout', '-q', 'pr');
     const pr4 = commit({ 'packages/inbox/a.ts': 'export const a = 3;\n' }, 'pr: change a again');
     expect(runKey(main2, pr4)).not.toBe(key);
@@ -124,7 +107,6 @@ describe('the reuse key', () => {
     const pr5 = commit({ 'packages/inbox/a.ts': 'export const a = 2;\n', 'tests/e2e/world.ts': 'export const world = 2;\n' }, 'pr: helper');
     expect(runKey(main2, pr5)).not.toBe(key);
 
-    // main changing the harness (the Playwright config, the lockfile) is a new key for an unchanged PR.
     git('checkout', '-q', 'main');
     const main3 = commit({ 'tests/e2e/playwright.config.ts': 'export default { retries: 1 };\n' }, 'main: harness');
     expect(runKey(main3, pr3)).not.toBe(key);
@@ -137,7 +119,6 @@ describe('the reuse key', () => {
     const first = commit({ 'packages/inbox/f.ts': body(['export function f() {', '  return;', '  a();', '  b();', '  c();', '}', 'export const s = "xy";', ...tail]) }, 'pr: return first');
     const key = runKey(base, first);
 
-    // main changes the same file outside the PR's context; the PR merges it: same key.
     git('checkout', '-q', 'main');
     const mainTail = [...tail.slice(0, 19), 'export const t19 = 190;'];
     const main2 = commit({ 'packages/inbox/f.ts': body(['export function f() {', '  a();', '  b();', '  c();', '}', 'export const s = "x y";', ...mainTail]) }, 'main: tail');
@@ -146,12 +127,10 @@ describe('the reuse key', () => {
     const merged = git('rev-parse', 'HEAD');
     expect(runKey(main2, merged)).toBe(key);
 
-    // The same `return;` moved to the end of f(): a different program, a new key.
     git('checkout', '-q', 'pr');
     const moved = commit({ 'packages/inbox/f.ts': body(['export function f() {', '  a();', '  b();', '  c();', '  return;', '}', 'export const s = "xy";', ...mainTail]) }, 'pr: return last');
     expect(runKey(main2, moved)).not.toBe(key);
 
-    // "xy" -> "x  y": only whitespace changed, inside a string.
     git('checkout', '-q', 'pr');
     git('reset', '-q', '--hard', merged);
     const spaced = commit({ 'packages/inbox/f.ts': body(['export function f() {', '  return;', '  a();', '  b();', '  c();', '}', 'export const s = "x  y";', ...mainTail]) }, 'pr: spaces');
@@ -166,7 +145,6 @@ describe('the specs a shard passed', () => {
   const failed = { status: 'unexpected', results: [{ status: 'failed' }] };
   const skippedAtRuntime = { status: 'skipped', results: [{ status: 'skipped' }] };
   const neverRan = { status: 'skipped', results: [] };
-  // What Playwright 1.64 writes for the test running when the shard is stopped.
   const interrupted = { status: 'skipped', results: [{ status: 'interrupted' }] };
 
   test('a file passes only when every test of it passed in every browser, nested describes included', () => {
@@ -174,9 +152,7 @@ describe('the specs a shard passed', () => {
       config: { rootDir },
       suites: [
         { file: 'a.spec.ts', specs: [{ tests: [ok, skippedAtRuntime] }], suites: [{ specs: [{ tests: [ok] }] }] },
-        // Chromium passed, WebKit failed.
         { file: 'b.spec.ts', specs: [{ tests: [ok, failed] }] },
-        // A failure inside a describe.
         { file: 'c.spec.ts', specs: [{ tests: [ok] }], suites: [{ suites: [{ specs: [{ tests: [failed] }] }] }] },
       ],
       errors: [],
@@ -217,11 +193,8 @@ describe('the quarantine hash', () => {
 
   test("changes when a spec's quarantine entries change, not for another spec's or for an entry's reason", () => {
     const before = quarantineHashes(files, [entry]);
-    // Taken out of quarantine on main: the spec's hash changes, so it runs again.
     expect(quarantineHashes(files, [])['tests/e2e/a.spec.ts']).not.toBe(before['tests/e2e/a.spec.ts']);
-    // A new dependent left out with it.
     expect(quarantineHashes(files, [{ ...entry, dependents: [{ title: 'next one' }] }])['tests/e2e/a.spec.ts']).not.toBe(before['tests/e2e/a.spec.ts']);
-    // An entry for another spec, or more evidence, changes nothing for a.spec.ts.
     const other = quarantineHashes(files, [entry, { spec: 'b.spec.ts', title: 't', why: 'w', evidence: [3, 4] }]);
     expect(other['tests/e2e/a.spec.ts']).toBe(before['tests/e2e/a.spec.ts']);
     expect(other['tests/e2e/b.spec.ts']).not.toBe(before['tests/e2e/b.spec.ts']);
@@ -294,7 +267,6 @@ describe('the plan', () => {
 });
 
 type FakeRun = { id: number; event?: string; branch?: string; fromRepo?: string; conclusion?: string; artifacts: Record<string, object> };
-/** A GitHub with these runs (newest first); each artifact is one JSON file, as the workflow uploads it. */
 function fakeGitHub(runs: FakeRun[], repo = 'o/r', calls: string[] = []): GitHub {
   return {
     api: (path) => {
@@ -352,10 +324,8 @@ describe('the earlier run it reuses', () => {
     expect(findEarlier('K', scratch('find'), ctx, fakeGitHub(others))).toBeNull();
     const noKey = Array.from({ length: LOOKBACK_RUNS }, (_, i): FakeRun => ({ id: 80 - i, artifacts: {} }));
     expect(findEarlier('K', scratch('find'), ctx, fakeGitHub([...noKey, { id: 1, artifacts: same }]))).toBeNull();
-    // Runs that skipped every job do not use up the lookback.
     const skipped = Array.from({ length: LOOKBACK_RUNS }, (_, i): FakeRun => ({ id: 60 - i, conclusion: 'skipped', artifacts: {} }));
     expect(findEarlier('K', scratch('find'), ctx, fakeGitHub([...skipped, { id: 3, artifacts: same }]))?.run).toBe('3');
-    // A run whose plan found no key (it could not compute one) is never a match.
     expect(findEarlier('', scratch('find'), ctx, fakeGitHub([{ id: 2, artifacts: { 'e2e-reuse-1': { key: '', passed: {} } } }]))).toBeNull();
   });
 });
@@ -373,7 +343,6 @@ describe('deciding the plan', () => {
       {
         id: 99,
         artifacts: {
-          // Run 99 had left out a; a really ran in run 90, 20 hours ago.
           'e2e-reuse-1': { key: 'K', passed: { [a!]: { blob: 'B', quarantine: 'q', run: '90', ranAt: hoursAgo(20) } } },
           'e2e-passed-1-1': { passed: { [b!]: { blob: 'B', quarantine: 'q', run: '99', ranAt: hoursAgo(1) } } },
         },
@@ -385,7 +354,6 @@ describe('deciding the plan', () => {
       key: 'K',
       passed: { [a!]: { blob: 'B', quarantine: 'q', run: '90', ranAt: hoursAgo(20) }, [b!]: { blob: 'B', quarantine: 'q', run: '99', ranAt: hoursAgo(1) } },
     });
-    // Five hours later run 90's pass of a is over a day old: a runs again, b is still left out.
     const later = decidePlan(pr, { ...deps(fakeGitHub([{ id: 101, artifacts: { 'e2e-reuse-1': reuse } }])), current: { ...current, now: NOW + 5 * 3600_000 } });
     expect(later.plan.specs).toContain(a!);
     expect(later.plan.reused).toEqual([b!]);

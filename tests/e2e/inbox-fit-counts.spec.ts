@@ -1,26 +1,3 @@
-/**
- * The wide list's open counts column, with the pin's column (`fitCountsColumn` in InboxList.tsx), has the width the
- * per-row measure gave before it read one cell for each different counts: in a real Chromium, against the compiled
- * binary under a temp HOME and PLANNOTATOR_DATA_DIR; agents write through `plannotator inbox mcp`
- * (scripts/inbox-sim.ts). Nothing is mocked.
- *
- * The data: one project with a pinned thread and counts from none to "[□ 99+] ?99+" (one question, 12 questions,
- * an action item and a question, 12 and 12, three action items alone, 99+ questions alone, 99+ and 99+, and above
- * that last one 99+ action items with one question), and one project with no pin and wide counts. The palette's
- * halves draw different fonts (GitHub's system-ui in light, Plannotator's Inter in dark). For light and dark, every
- * text size (12 to 15 px), and each shape (the wide list with the full words at 1440 px, with the short words at
- * 1280 px, one project's list at 1024 px, the three-line rows of the whole list at 1024 px, the column beside an
- * open thread, the list with no pin, a 390 px phone), the column's width (`--ib-cq-w` on the list) is the per-row
- * measure's (`perRow` below, the code before), and again after the colour scheme changes on the open page. A scheme
- * change on the open page, then a list render that changes nothing else, keep the new font's width.
- *
- * Then in the wide list: opening a thread reads no counts cell's box, and the way back reads one cell for each
- * different counts, never one per row.
- *
- * Build the binary first (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-fit-counts.spec.ts`.
- */
-
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -56,7 +33,6 @@ test.beforeAll(async () => {
   const ask = (q: string) => [':::question', q, '', '- [ ] Yes', '- [ ] No', ':::'].join('\n');
   const questions = (n: number) => Array.from({ length: n }, (_, i) => ask(`Question ${i}?`)).join('\n\n');
   const actions = (n: number) => Array.from({ length: n }, (_, i) => [':::action', `Approve thing ${i}`, ':::'].join('\n')).join('\n\n');
-  // Each its own thread, named by its subject.
   const say = async (agent: SimAgent, project: string, subject: string, body: string) =>
     (await agent.send({ project_path: scratchProject(src, project), thread: subject, subject, body })).thread_id as string;
   opener = await say(codex, 'billing-svc', 'Token refresh fails after the laptop sleeps', 'Retry on wake is in.');
@@ -69,8 +45,6 @@ test.beforeAll(async () => {
   await say(claude, 'workspaces', 'Three action items', actions(3));
   await say(codex, 'workspaces', 'A hundred questions', questions(100));
   await say(claude, 'workspaces', 'Backlog triage', `${actions(100)}\n\n${questions(100)}`);
-  // Newest, so drawn above the widest: its action pill is the widest's, its `?1` narrower. A measure that took one
-  // row for each action count (or each pill) would take this one and miss the widest.
   await say(codex, 'workspaces', 'Audit follow-ups', `${actions(100)}\n\n${ask('Close the audit?')}`);
   const health = (await (await fetch(new URL('/api/inbox/health', url))).json()) as { serverSession: string };
   post = async (path: string, body: object) => {
@@ -78,8 +52,6 @@ test.beforeAll(async () => {
     expect(res.ok, `${path}: ${res.status} ${await res.text()}`).toBe(true);
   };
   await post(`/api/inbox/threads/${pinned}/pin`, { pinned: true });
-  // Halves whose fonts differ (GitHub's system-ui in light, Plannotator's Inter in dark), so a change of scheme on
-  // an open page changes the counts' width.
   await post('/api/inbox/settings', { theme: { mode: 'system', light: 'github', dark: 'plannotator' } });
   const model = (await (await fetch(new URL('/api/inbox/projects', url))).json()) as { projects: { id: string; name: string }[] };
   projects.pinned = model.projects.find((p) => p.name === 'workspaces')!.id;
@@ -96,19 +68,12 @@ test.afterAll(async () => {
 });
 
 interface Fit {
-  /** The column the list draws (`--ib-cq-w`, '' for its 84px). */
   app: string;
-  /** The per-row measure's width for the same rows. */
   perRow: string;
   pinColumn: boolean;
-  /** Counts cells that draw something. */
   cells: number;
 }
 
-/**
- * The column's width as the list sets it, and as the per-row measure (InboxList's fitCountsColumn before it read one
- * cell for each different counts) gives it for the rows drawn now. Both after the fonts are in and two frames.
- */
 async function fit(page: Page): Promise<Fit> {
   await page.evaluate(() => document.fonts.ready.then(() => new Promise((ok) => requestAnimationFrame(() => requestAnimationFrame(ok)))));
   return page.evaluate(() => {
@@ -141,7 +106,6 @@ const SHAPES: { shape: Shape; width: number; hash: () => string; row: string; pi
 async function page(browser: Browser, width: number, scheme: 'light' | 'dark') {
   const phone = width < 600;
   const context = await browser.newContext({ viewport: { width, height: phone ? 844 : 900 }, deviceScaleFactor: 2, isMobile: phone, hasTouch: phone, colorScheme: scheme, reducedMotion: 'reduce' });
-  // Count the counts cells whose box (or a part's) is read.
   await context.addInitScript(() => {
     const reads = new Set<Element>();
     (window as unknown as { __cqReads: Set<Element> }).__cqReads = reads;
@@ -169,10 +133,8 @@ for (const size of [12, 13, 14, 15]) {
           const at = await fit(p);
           expect(at.pinColumn, `${label}: the pin's column`).toBe(pinColumn);
           expect(at.app, `${label}: the per-row measure's width`).toBe(at.perRow);
-          // The data passes 84px wherever the pin's column is drawn, so the widened column is what is compared.
           if (pinColumn) expect(at.app, `${label}: widened`).not.toBe('');
           if (pinColumn) expect(at.cells, `${label}: counts drawn`).toBeGreaterThan(5);
-          // The colour scheme changes on the open page.
           await p.emulateMedia({ colorScheme: scheme === 'light' ? 'dark' : 'light' });
           const switched = await fit(p);
           expect(switched.app, `${label}, then the other scheme`).toBe(switched.perRow);
@@ -200,12 +162,10 @@ test('a scheme change between halves with different fonts fits the column to the
     expect(await font(), 'the light half draws another font').not.toBe(darkFont);
     const light = await fit(p);
     expect(light.app, 'light (system-ui)').toBe(light.perRow);
-    // A list render that changes nothing the column depends on (a row's menu, opened and closed) keeps it.
     await p.locator('.ib-lbody .ib-row').first().click({ button: 'right' });
     await p.keyboard.press('Escape');
     const after = await fit(p);
     expect(after.app, 'after an unrelated render').toBe(after.perRow);
-    // And back to the dark half.
     await p.emulateMedia({ colorScheme: 'dark' });
     await expect.poll(() => p.evaluate(() => document.documentElement.classList.contains('theme-plannotator'))).toBe(true);
     const back = await fit(p);

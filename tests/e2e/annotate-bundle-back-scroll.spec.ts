@@ -1,17 +1,3 @@
-/**
- * Back in a review of several files keeps the reader's place (#2128, the
- * bundle follow-up of #2082), proved in a real browser against the compiled
- * binary. `plannotator annotate review-alpha.md review-beta.md` (the issue's
- * fixture): from the middle of review-alpha.md, follow a link to a linked
- * markdown document and use the sidebar's "Back to review-alpha.md", then
- * follow a link to a local HTML page and use the header's Back. Both times
- * the bundle file comes back where it was left, not at its top.
- *
- * Each annotate CLI runs under a temp PLANNOTATOR_DATA_DIR and HOME and is
- * closed with /api/exit. Build the binary first (see inbox.spec.ts), then
- * `bun run test:e2e:inbox`.
- */
-
 import { expect, test, type Page } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -22,7 +8,6 @@ import { NO_BROWSER } from '../helpers/no-browser';
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 
-/** The issue's fixture: a long bundle file whose every section links out. */
 function writeFixture(dir: string) {
   mkdirSync(dir, { recursive: true });
   const sections = ['# Review document\n\n'];
@@ -84,10 +69,8 @@ async function annotateBundle() {
   return { url, close };
 }
 
-/** The document's scroll container (`<main>` on desktop). */
 const scrollTop = (page: Page) => page.evaluate(() => document.querySelector('main')!.scrollTop);
 
-/** Where "Section 40" sits from the top of the scroll container. */
 const section40Offset = (page: Page) =>
   page.evaluate(() => {
     const main = document.querySelector('main')!;
@@ -121,7 +104,6 @@ test('Back to a bundle file restores the reading position, from a linked markdow
     await page.goto(session.url);
     await expect(page.locator('main h2', { hasText: 'Section 80' })).toBeAttached();
 
-    // 1. Linked markdown, sidebar Back.
     await scrollToSection40(page);
     const before = await scrollTop(page);
     const offsetBefore = await section40Offset(page);
@@ -136,7 +118,6 @@ test('Back to a bundle file restores the reading position, from a linked markdow
     expect(Math.abs(afterMarkdown - before)).toBeLessThan(80);
     expect(Math.abs((await section40Offset(page)) - offsetBefore)).toBeLessThan(80);
 
-    // 2. Linked HTML page, header Back.
     await scrollToSection40(page);
     const beforeHtml = await scrollTop(page);
     const offsetBeforeHtml = await section40Offset(page);

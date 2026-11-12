@@ -1,10 +1,3 @@
-/**
- * Runs Droid's `/plannotator-inbox` script (apps/droid-plugin/commands/
- * plannotator-inbox.js) against a stand-in `plannotator` first on PATH, from a
- * scratch folder with a scratch data dir, and returns what the agent would
- * read. The stand-in answers with `body` (shell), so no Inbox starts and no
- * browser opens; the real CLI is never reached.
- */
 import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

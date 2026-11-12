@@ -1,74 +1,25 @@
-/**
- * The full browser suite's runs on main (.github/workflows/inbox-e2e.yml).
- *
- *   bun run scripts/ci-e2e-main.ts head                          # the head job of a scheduled run
- *   bun run scripts/ci-e2e-main.ts failed <k> <report.json> <out> # a shard that failed, on main
- *   bun run scripts/ci-e2e-main.ts blame                         # the blame job of a red run on main
- *
- * PRs run only a smoke slice (browser-smoke.yml); the whole suite runs on
- * main every two hours, by a schedule, and by hand (a release dispatches it on
- * its bump commit).
- *
- * `head`: a scheduled run goes on only when main's head has had no full run
- * yet: no earlier scheduled or manual run of this workflow on that commit that
- * ran its specs (one that is still going counts). Otherwise its jobs skip
- * quietly. Any failure in the lookup lets the run go on.
- *
- * `failed`: the spec files a failed shard did not pass: those with a failed
- * test in its Playwright report, or all of the shard's specs when there is no
- * report (the shard died or a step before the specs failed).
- *
- * `blame`: when a run on main is red, finds the merge that turned it red. It
- * takes the newest earlier run on main that ran its specs and passed (the green
- * one), lists main's first-parent commits after it up to the red one, and
- * reruns only the failed spec files on them, each commit built as the e2e build
- * job builds it, the specs in the Playwright image the shards use
- * (scripts/ci-e2e-in-image.sh): first on the red commit (a spec that passes
- * there is flaky and is left out), then a bisection for the first commit where
- * any of them fails. When that commit fails only some of them, the search goes
- * on from there for the rest, so two breaks give two commits. The result goes
- * to the run summary and to blame.json:
- *
- *   { verdict, pr, sha, specs, culprits, flaky, green, red, note }
- *
- * `verdict` is `pinned` (one merge: `pr` and `sha` name it, `specs` are the
- * specs it turned red), `several` (more than one merge broke specs: see
- * `culprits`), `flaky` (no failed spec fails again on the red commit) or
- * `unpinned` (no green run to start from, a commit that cannot be built, no
- * failed spec file to rerun; `note` says which). It never comments on a PR or
- * opens an issue.
- *
- * scripts/ci-e2e-main.test.ts checks the head check, the green run lookup,
- * the report reading, the PR numbers and the search.
- */
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { E2E_CONFIG, fileFilter, repoRoot, shardOf } from './ci-e2e-shard';
 import type { Report } from './ci-e2e-reuse';
 
-/** The workflow's build job: a run in which it did not run (a scheduled run that skipped) ran no specs. */
 export const BUILD_JOB = 'Inbox window (build the apps)';
-/** How many of main's runs the green run lookup reads, newest first. */
 export const LOOKBACK_RUNS = 100;
-/** The events of main's full runs. */
 export const MAIN_EVENTS = ['schedule', 'workflow_dispatch'];
 
 export type Run = { id: number; event: string; head_branch: string; head_sha: string; status: string; conclusion: string | null };
 export type Job = { name: string; status: string; conclusion: string | null };
 
-/** What the script needs from GitHub: a REST call. */
 export interface GitHub {
   api(path: string): unknown;
 }
 
-/** A run on main that ran its specs, or is still going. */
 function ranSpecs(run: Run, jobsOf: (id: number) => Job[]): boolean {
   if (run.status !== 'completed') return true;
   if (run.conclusion === 'cancelled' || run.conclusion === 'skipped') return false;
   return jobsOf(run.id).some((job) => job.name === BUILD_JOB && job.conclusion === 'success');
 }
 
-/** Whether main's head already had a full run: an earlier scheduled or manual run on it that ran its specs, or is going. */
 export function headCovered(runs: Run[], sha: string, selfId: number, jobsOf: (id: number) => Job[]): Run | null {
   for (const run of runs) {
     if (run.id === selfId || run.head_sha !== sha || run.head_branch !== 'main' || !MAIN_EVENTS.includes(run.event)) continue;
@@ -77,7 +28,6 @@ export function headCovered(runs: Run[], sha: string, selfId: number, jobsOf: (i
   return null;
 }
 
-/** The newest run on main before this one that ran its specs and passed, whose commit `isAncestor` of the red one. */
 export function lastGreen(runs: Run[], selfId: number, jobsOf: (id: number) => Job[], isAncestor: (sha: string) => boolean): Run | null {
   for (const run of runs) {
     if (run.id >= selfId || run.head_branch !== 'main' || !MAIN_EVENTS.includes(run.event)) continue;
@@ -92,7 +42,6 @@ type ReportTest = { status?: string };
 type ReportSpec = { file?: string; tests?: ReportTest[] };
 type ReportSuite = { file?: string; specs?: ReportSpec[]; suites?: ReportSuite[] };
 
-/** The spec files of a Playwright JSON report with a failed test, relative to `root`. */
 export function failedSpecs(report: Report, root = repoRoot): string[] {
   const real = (path: string) => (existsSync(path) ? realpathSync(path) : path);
   root = real(root);
@@ -111,7 +60,6 @@ export function failedSpecs(report: Report, root = repoRoot): string[] {
   return [...failed].sort();
 }
 
-/** The PR a commit on main's first-parent line merged, from its subject: a merge, a train merge or a squash. */
 export function prOfSubject(subject: string): number | null {
   const m = /^Merge pull request #(\d+)\b/.exec(subject) ?? /^Merge #(\d+)\b/.exec(subject) ?? /\(#(\d+)\)\s*$/.exec(subject);
   return m ? Number(m[1]) : null;
@@ -123,25 +71,15 @@ export interface Culprit {
   specs: string[];
 }
 export interface Search {
-  /** The failed specs that fail again on the red commit. */
   confirmed: string[];
-  /** The failed specs that pass on the red commit. */
   flaky: string[];
-  /** Each first commit where some of the confirmed specs fail, oldest first. */
   culprits: Culprit[];
-  /** Specs whose first failing commit could not be told apart, and the commits that could hold it. */
   unpinned: { shas: string[]; specs: string[]; why: string } | null;
 }
 
 const minus = (a: string[], b: string[]) => a.filter((x) => !b.includes(x));
 const both = (a: string[], b: string[]) => a.filter((x) => b.includes(x));
 
-/**
- * The first commits that turn `specs` red. `commits` are main's first-parent
- * commits after the green one, oldest first, the red one last. `probe` reruns
- * specs on a commit: the specs that failed, or an error when the commit could
- * not be built or run.
- */
 export function findCulprits(commits: string[], specs: string[], probe: (sha: string, specs: string[]) => ProbeResult): Search {
   const out: Search = { confirmed: [], flaky: [], culprits: [], unpinned: null };
   const n = commits.length;
@@ -154,7 +92,6 @@ export function findCulprits(commits: string[], specs: string[], probe: (sha: st
   out.confirmed = both(specs, atRed.failing);
   out.flaky = minus(specs, out.confirmed);
   let remaining = out.confirmed;
-  // Every spec in `remaining` passes at `lo` (the green commit at first) and fails on the red commit.
   let lo = -1;
   while (remaining.length > 0) {
     let good = lo;
@@ -200,7 +137,6 @@ export interface Blame {
   note: string;
 }
 
-/** The blame of a search. */
 export function blameOf(search: Search, failed: string[], describe: (sha: string) => { pr: number | null; subject: string }, green: Blame['green'], red: Blame['red']): Blame {
   const culprits = search.culprits.map((c) => ({ ...describe(c.sha), sha: c.sha, specs: c.specs }));
   const base = { culprits, flaky: search.flaky, green, red };
@@ -223,7 +159,6 @@ export function unpinned(note: string, failed: string[], green: Blame['green'], 
   return { verdict: 'unpinned', pr: null, sha: null, specs: failed, culprits: [], flaky: [], green, red, note };
 }
 
-/** The run summary of a blame. */
 export function summaryOf(blame: Blame, repo: string): string {
   const link = (sha: string) => `[${sha.slice(0, 9)}](https://github.com/${repo}/commit/${sha})`;
   const prLink = (pr: number | null) => (pr ? `#${pr}` : 'no PR found');
@@ -281,7 +216,6 @@ function head(): void {
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `run=${run}\n`);
 }
 
-/** Records the spec files a failed shard did not pass, for the blame job. Never fails the shard. */
 function failed(shard: string, reportPath: string, outPath: string): void {
   let out: { shard: number; specs: string[]; note: string } = { shard: Number(shard), specs: [], note: '' };
   try {
@@ -302,7 +236,6 @@ function failed(shard: string, reportPath: string, outPath: string): void {
   console.log(`e2e: shard ${shard} failed ${out.specs.length} spec files${out.note ? ` (${out.note})` : ''}.`);
 }
 
-/** Reruns specs on a commit in a worktree of its own: built as the build job builds it, run in the shards' image. */
 function realProbe(dir: string): (sha: string, specs: string[]) => ProbeResult {
   const helper = join(repoRoot, 'scripts/ci-e2e-in-image.sh');
   let count = 0;
@@ -312,7 +245,6 @@ function realProbe(dir: string): (sha: string, specs: string[]) => ProbeResult {
     try {
       const step = (cmd: string[], env?: Record<string, string>) => Bun.spawnSync(cmd, { cwd: dir, stdin: 'ignore', stdout: 'inherit', stderr: 'inherit', env: { ...process.env, ...env } }).exitCode === 0;
       if (!step(['git', 'checkout', '--detach', '--force', sha])) return { error: `git checkout ${sha} failed` };
-      // A spec added after this commit has nothing to fail here.
       const present = specs.filter((f) => existsSync(join(dir, f)));
       if (present.length === 0) return { failing: [] };
       const build: string[][] = [
@@ -326,7 +258,6 @@ function realProbe(dir: string): (sha: string, specs: string[]) => ProbeResult {
       step(['bash', helper, dir, 'bunx', 'playwright', 'test', '-c', E2E_CONFIG, '--reporter=list,json', ...present.map(fileFilter)], { PLAYWRIGHT_JSON_OUTPUT_NAME: out });
       if (!existsSync(out)) return { error: 'Playwright wrote no report' };
       const rep = JSON.parse(readFileSync(out, 'utf8')) as Report;
-      // A spec that does not load (or a global setup that fails) is a break too.
       if ((rep.errors ?? []).length > 0) return { failing: present };
       return { failing: both(present, failedSpecs(rep, dir)) };
     } finally {

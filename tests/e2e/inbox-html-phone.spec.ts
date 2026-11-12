@@ -1,24 +1,3 @@
-/**
- * HTML attachments on a phone, first step (approval
- * "inbox-html-attachments-phone"), proved against the compiled binary under a
- * temp data dir, on an iPhone 15 (WebKit) and a Pixel 7 (Chromium), plus a
- * desktop that does not change.
- *
- * What each engine can show, and what is forced here:
- * - Chromium gets real input through the DevTools protocol: a real pinch, and
- *   the browser's own long press, which selects a word in the frame.
- * - WebKit has no such channel. A tap (Playwright's `tap`) is its own tap event.
- *   On Linux (CI) it keeps iOS's rule: a tap clicks only an element that, or
- *   whose ancestor up to body, listens for clicks. The pin tests guard the
- *   bridge's armed body listener with it; macOS WebKit clicks either way.
- *   It cannot pinch and it cannot make a touch selection, so on WebKit the
- *   selection is set by script and the zoom is a stubbed `visualViewport.scale`.
- *   Those two are FORCED, and the tests that use them say so in their names.
- *
- * Build the binary first (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-html-phone.spec.ts`.
- */
-
 import { chromium, devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -49,7 +28,6 @@ const pixel = (() => {
 
 interface World {
   root: string;
-  /** Where the sent files are on disk: a test can change one after it was sent. */
   dir: string;
   url: string;
   agent: SimAgent;
@@ -116,7 +94,6 @@ const composer = (page: Page) => page.locator('[data-fcomp]');
 const tools = (page: Page) => pane(page).getAttribute('data-tools');
 const scale = (page: Page) => page.evaluate(() => window.visualViewport!.scale);
 
-/** Text set by script in the frame: a FORCED selection (no finger made it). */
 const forceSelection = (page: Page, id: string, from: number, to: number) =>
   frame(page)
     .locator(`#${id}`)
@@ -132,11 +109,9 @@ const forceSelection = (page: Page, id: string, from: number, to: number) =>
       [from, to],
     );
 
-/** A real pinch over the frame, out from the middle. */
 const pinchIn = (page: Page) => pinch(page, [{ x: 170, y: 300 }, { x: 230, y: 300 }], [{ x: 130, y: 300 }, { x: 270, y: 300 }]);
 const pinchOut = (page: Page) => pinch(page, [{ x: 120, y: 300 }, { x: 280, y: 300 }], [{ x: 180, y: 300 }, { x: 220, y: 300 }]);
 
-/** How much of the window's height stands clear above whatever floats on the page. */
 const clearShare = async (page: Page) => {
   const height = page.viewportSize()!.height;
   const barBox = (await bar(page).boundingBox())!;
@@ -151,7 +126,6 @@ for (const phone of [
   test(`${phone.name}: HTML opens clear, the reply in the pill on the toolbar's row, and a tap reaches the page`, async () => {
     await withPhone(phone.engine, async (w, page) => {
       await open(w, page, 'report.html');
-      // The frame takes the window, nothing but the toolbar's row sits on it.
       await expect(replyPill(page)).toBeVisible();
       await expect(composer(page)).toHaveCount(0);
       const barBox = (await bar(page).boundingBox())!;
@@ -160,14 +134,11 @@ for (const phone of [
       expect(pillBox.x + pillBox.width).toBeLessThanOrEqual(barBox.x);
       expect(await clearShare(page)).toBeGreaterThan(0.88);
 
-      // The pen starts off: the tap is the page's.
       await expect(pen(page)).toHaveAttribute('aria-pressed', 'false');
       await frame(page).locator('#tap').tap();
       await expect(frame(page).locator('#tap')).toHaveText('tapped');
       await expect(card(page)).toHaveCount(0);
 
-      // The pill opens the reply. Its ⌄ gathers the card with the toolbar into the corner control (approval
-      // "inbox-fullscreen-gather"); one tap brings both back, the card open.
       await replyPill(page).tap();
       await expect(composer(page)).toBeVisible();
       await page.locator('[data-fcomp-minimize]').tap();
@@ -195,7 +166,6 @@ for (const phone of [
       await expect(page.locator('[data-fcomp-mode="comment"]')).toHaveAttribute('aria-checked', 'true');
       await expect(field(page)).toBeFocused();
 
-      // No dimmed box over the page: the frame still has the window, the card takes the bottom.
       await expect(page.locator('.ib-htmlframe [role="dialog"]')).toHaveCount(0);
       const cardBox = (await composer(page).boundingBox())!;
       const height = page.viewportSize()!.height;
@@ -207,10 +177,8 @@ for (const phone of [
         expect(box.width, control).toBeGreaterThanOrEqual(44);
       }
 
-      // The toolbar makes room for the card, and comes back after it.
       await expect(bar(page)).toBeHidden();
 
-      // Parent and Child move the pin, keep the words and keep focus in the field.
       await field(page).fill('This hop is slow');
       await page.locator('[data-html-comment-step="parent"]').tap();
       await expect(target(page)).not.toHaveText('74 ms');
@@ -223,7 +191,6 @@ for (const phone of [
       await page.locator('[data-html-comment-save]').tap();
       await expect(card(page)).toHaveCount(0);
       await expect(bar(page).getByRole('button', { name: /^Comments, 1/ })).toBeVisible();
-      // Back as it found it: the toolbar, the page clear, the reply in the pill.
       await expect(composer(page)).toHaveCount(0);
       await expect(replyPill(page)).toBeVisible();
     });
@@ -233,7 +200,6 @@ for (const phone of [
     await withPhone(phone.engine, async (w, page) => {
       await open(w, page, 'report.html');
       await pen(page).tap();
-      // At the foot of the window, with the page scrolled to put it there.
       await frame(page).locator('#p3').evaluate((el) => {
         const box = el.getBoundingClientRect();
         document.scrollingElement!.scrollTop += box.bottom - window.innerHeight + 6;
@@ -254,7 +220,6 @@ for (const phone of [
       await pen(page).tap();
       await frame(page).locator('#n1').tap();
       await expect(card(page)).toBeVisible();
-      // ⌄ gathers everything into the corner control (approval "inbox-fullscreen-gather"); the comment with no words is dropped.
       await page.locator('[data-fcomp-minimize]').tap();
       await expect.poll(() => tools(page)).toBe('tucked');
       await expect(card(page)).toHaveCount(0);
@@ -267,14 +232,11 @@ for (const phone of [
       await page.locator('[data-fcomp-minimize]').tap();
       await expect.poll(() => tools(page)).toBe('tucked');
       await expect(composer(page)).toBeHidden();
-      // With words it stays: one tap on the corner control brings the card back on them.
       await page.locator('[data-full-view-handle]').tap();
       await expect.poll(() => tools(page)).toBe('pinned');
       await page.locator('[data-fcomp-mode="comment"]').tap();
       await expect(field(page)).toHaveValue('Keep this');
 
-      // Words waiting: a step to the next file goes at once (nothing asks), and the words wait as report.html's
-      // draft, back on the same pin when it opens again. (The Reply tab brings the toolbar back; the pin's draft is held.)
       await page.locator('[data-fcomp-mode="reply"]').tap();
       await bar(page).locator('[data-full-view-position]').tap();
       await page.locator('[data-image-peek-sheet]').getByRole('gridcell', { name: /^second\.html/ }).tap();
@@ -298,7 +260,6 @@ for (const phone of [
       await expect(page.locator('[data-fcomp-pillwrap]')).not.toHaveAttribute('inert', /.*/);
       await replyPill(page).tap();
       await expect(composer(page)).toBeVisible();
-      // The card opens on Comment (no reply draft waits), as an image's does.
       await page.locator('[data-fcomp-mode="reply"]').tap();
       await page.locator('[data-fcomp-field] textarea').fill('Still typing');
       await expect(page.locator('[data-fcomp-field] textarea')).toHaveValue('Still typing');
@@ -308,7 +269,6 @@ for (const phone of [
   test(`${phone.name}: forced selection (set by script): it opens the card once it rests, without taking focus`, async () => {
     await withPhone(phone.engine, async (w, page) => {
       await open(w, page, 'report.html');
-      // Pen off on purpose: selecting works in Interact, as a drag does on a desktop.
       await expect(pen(page)).toHaveAttribute('aria-pressed', 'false');
       await forceSelection(page, 'p1', 5, 20);
       await page.waitForTimeout(250);
@@ -335,7 +295,6 @@ for (const phone of [
       await pen(page).tap();
       await frame(page).locator('#n1').tap();
       await expect(card(page)).toBeVisible();
-      // The Reply tab brings the toolbar back; the pin's draft, with no words, is still held.
       await page.locator('[data-fcomp-mode="reply"]').tap();
       await bar(page).locator('[data-full-view-position]').tap();
       await page.locator('[data-image-peek-sheet]').getByRole('gridcell', { name: /^second\.html/ }).tap();
@@ -355,12 +314,7 @@ for (const phone of [
   });
 }
 
-// (A later tap does not clear Chromium's emulated long-press selection, so closing by a tap on the page is left to a real phone.)
 test('Pixel 7 (Chromium), real long press: a finger selects a word and the card opens on it, focus left in the page', async () => {
-  // Chromium on Linux (CI) recognizes no long press from DevTools touches: a held
-  // synthesizeTapGesture, or a touchStart held 1.5 s, ends as pointerup and touchend
-  // with no contextmenu and no selection, so there is nothing for the bridge to read.
-  // The forced-selection tests above cover the bridge there; this one runs on macOS.
   test.skip(process.platform === 'linux', 'Chromium on Linux makes no long press from DevTools touches');
   await withPhone('chromium', async (w, page) => {
     await open(w, page, 'report.html');
@@ -384,7 +338,6 @@ test('Pixel 7 (Chromium), real pinch: the tools tuck while zoomed and come back,
     await expect.poll(() => scale(page)).toBeLessThanOrEqual(1.05);
     await expect.poll(() => tools(page)).toBe('pinned');
 
-    // Hidden by hand stays hidden through a pinch.
     await bar(page).getByRole('button', { name: 'Hide tools' }).tap();
     await pinchIn(page);
     await expect.poll(() => scale(page)).toBeGreaterThan(1.05);
@@ -393,7 +346,6 @@ test('Pixel 7 (Chromium), real pinch: the tools tuck while zoomed and come back,
     await expect.poll(() => tools(page)).toBe('tucked');
     await page.locator('[data-full-view-handle]').tap();
 
-    // Zoomed with a comment open, the card stays: the person is writing.
     await pen(page).tap();
     await frame(page).locator('#n1').tap();
     await expect(card(page)).toBeVisible();
@@ -410,7 +362,6 @@ test('Pixel 7 (Chromium), real pinch: the next file opens at full view, and pinc
     const before = await page.evaluate(() => document.querySelector<HTMLMetaElement>('meta[name=viewport]')!.content);
     await pinchIn(page);
     await expect.poll(() => scale(page)).toBeGreaterThan(1.05);
-    // The tools are out of the view, where a tap by locator hangs: these three clicks are dispatched. A finger pans to them.
     await page.locator('[data-full-view-handle]').dispatchEvent('click');
     await expect.poll(() => tools(page)).not.toBe('tucked');
     await bar(page).locator('[data-full-view-position]').dispatchEvent('click');
@@ -418,7 +369,6 @@ test('Pixel 7 (Chromium), real pinch: the next file opens at full view, and pinc
     await expect(pane(page)).toHaveAttribute('data-attachment-pane', w.ids['second.html']!);
     await expect.poll(() => scale(page)).toBeLessThanOrEqual(1.05);
     await expect.poll(() => tools(page)).not.toBe('tucked');
-    // The lever put the meta back: zoom is not switched off.
     await expect.poll(() => page.evaluate(() => document.querySelector<HTMLMetaElement>('meta[name=viewport]')!.content)).toBe(before);
     await pinchIn(page);
     await expect.poll(() => scale(page)).toBeGreaterThan(1.05);
@@ -432,14 +382,11 @@ test('Pixel 7 (Chromium): words in the card wait for their version: the other ve
     await pen(page).tap();
     await frame(page).locator('#n1').tap();
     await field(page).fill('Keep this');
-    // ⌄ gathers the tools; the changed chip stays (a fact about the file), and its link still works.
     await page.locator('[data-fcomp-minimize]').tap();
     await expect.poll(() => tools(page)).toBe('tucked');
     await page.getByRole('button', { name: 'Open the version it sent' }).tap();
-    // Nothing asks: the sent version opens on that tap.
     await expect(page.locator('.ib-fvver-t')).toHaveText('Showing the sent version');
     await expect(page.locator('.ib-stepguard')).toHaveCount(0);
-    // Back on the file as it is now: the page pins the same element again, and the card holds the words.
     await page.getByRole('button', { name: 'Open the file as it is now' }).tap();
     await expect(page.locator('.ib-fvver-t')).toHaveText('Changed since sent');
     await expect(field(page)).toHaveValue('Keep this');
@@ -494,7 +441,6 @@ test('desktop: nothing changed: pen on, the reply card open, the selection bridg
       expect(await frame(page).locator('body').evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(false);
       await forceSelection(page, 'p1', 5, 20);
       await page.waitForTimeout(700);
-      // A selection the bridge reported would open the selection toolbar here (no mouseup made this one).
       await expect(page.locator('[data-pn-annotation-toolbar-row]')).toHaveCount(0);
       await expect(page.locator('[data-comment-popover]')).toHaveCount(0);
       await expect(card(page)).toHaveCount(0);

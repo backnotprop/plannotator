@@ -1,33 +1,3 @@
-/**
- * The row you open stays put (design record "inbox-open-stays-put", variant
- * B, approved 2026-10-12; not in this repo), proved in real browsers against
- * the compiled binary, with agents writing through `plannotator inbox mcp`
- * (scripts/inbox-sim.ts):
- *
- * - Desktop (Chromium, 1440 by 900): opening a "New since you looked" row
- *   unbolds it in place, with keyboard focus kept on it, and no frame moves
- *   it; opening the next row moves nothing; an agent's message that arrives
- *   meanwhile waits behind "1 new". Closing the thread widens the list, then,
- *   after the beat, the rows slide (sampled every frame: nothing moves in the
- *   beat, a row passes through positions between where it was and where it
- *   lands, every settle animation and fading copy is gone by the end), focus
- *   lands on the row now in the read row's slot, and the agent's message
- *   still waits for Show.
- * - Reduced motion: the close settles in one frame with no animation.
- * - A phone (WebKit, iPhone 15) and a stacked window (Chromium, 900 px):
- *   Back shows the list exactly as it was left, with focus on the row read;
- *   it settles while the next thread covers it.
- * - A phone and a stacked window: questions an agent asked while the list was
- *   held, read and left with Back, land in Holding up work, never in Quiet.
- * - A stacked window: questions that arrive while the thread is open, seen on
- *   sight, and a thread opened wide whose window narrows to stacked: Back puts
- *   the row in Holding up work, never in Quiet (after Escape, focus on the row).
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * Proof (frames of the settle slowed tenfold, a video of it at full speed,
- * light and dark PNGs) lands in .local/proof/open-stays-put/.
- */
-
 import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -40,7 +10,6 @@ const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'open-stays-put');
 
-/** settle.ts: the beat after the list widens, and the slide. */
 const BEAT_MS = 160;
 
 const NEWS = ['Search index built', 'Install page links fixed', 'Changelog drafted', 'Docs deploy finished'];
@@ -60,7 +29,6 @@ let world: World;
 async function seed(agent: SimAgent, path: string, key: string): Promise<string[]> {
   const threads: string[] = [];
   for (const [n, subject] of NEWS.entries()) {
-    // One agent session per thread, so each message starts its own thread (no name chips).
     const sent = await agent.send({ project_path: path, subject, body: `${subject}. Nothing to answer.`, agent_session: `ses_${key}_${n}` } as Parameters<SimAgent['send']>[0]);
     threads.push(String(sent.thread_id));
     await new Promise((r) => setTimeout(r, 15));
@@ -75,7 +43,6 @@ test.beforeAll(async () => {
   rmSync(proofDir, { recursive: true, force: true });
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-staysput-e2e-');
-  // Never a real agent's CLI: no connection runs (PLANNOTATOR_INBOX_CONNECT=0), and stubs that refuse come first on PATH.
   const stubs = join(root, 'bin');
   mkdirSync(stubs, { recursive: true });
   for (const name of ['claude', 'codex', 'opencode', 'pi', 'gemini', 'cursor-agent', 'amp']) writeFileSync(join(stubs, name), '#!/bin/sh\necho "this stub never runs" >&2\nexit 1\n', { mode: 0o755 });
@@ -88,7 +55,6 @@ test.beforeAll(async () => {
     const path = scratchProject(join(root, 'src'), key === 'desk' ? 'docs-site' : `docs-${key}`);
     const threads = await seed(agent, path, key);
     if (key === 'held') {
-      // Newest, so first in New: a thread with a file, for the sidebar #1871 holds closed beside it.
       writeFileSync(join(path, 'notes.md'), '# Notes\n\nThe plan, in short.\n');
       const filed = await agent.send({ project_path: path, subject: 'Notes attached', body: 'The notes are attached.', attachments: ['notes.md'], agent_session: 'ses_held_file' } as Parameters<SimAgent['send']>[0]);
       threads.unshift(String(filed.thread_id));
@@ -115,7 +81,6 @@ const sectionOf = (page: Page, id: string) =>
 const focused = (page: Page) => page.evaluate(() => document.activeElement?.closest('[data-thread-id]')?.getAttribute('data-thread-id') ?? document.activeElement?.tagName ?? null);
 const isBold = (page: Page, id: string) => page.locator(`.ib-listcol .ib-lbody [data-thread-id="${id}"]`).evaluate((r) => r.classList.contains('ib-u'));
 
-/** Open a row the keyboard's way, and wait for the look to be recorded and the list read again. */
 async function openWithKeyboard(page: Page, id: string): Promise<void> {
   const row = page.locator(`.ib-listcol .ib-lbody [data-thread-id="${id}"]`);
   await row.focus();
@@ -139,12 +104,10 @@ interface Frame {
   tops: Record<string, number>;
   anims: number;
   ghosts: number;
-  /** A thread pane is on screen. */
   pane: boolean;
   listWidth: number;
 }
 
-/** Sample every frame for `ms` from now (rows' tops, settle animations, fading copies). */
 async function sampleFrames(page: Page, ms: number): Promise<void> {
   await page.evaluate((duration) => {
     const frames: Frame[] = [];
@@ -180,7 +143,6 @@ test('desktop: opening rows moves nothing; closing settles with a slide; agent n
   const before = await rowsOf(page);
   await shot(page, '01-before-open');
 
-  // Open the top row: sample every frame for 600 ms; it never leaves New, the order never changes.
   const first = before[0]!;
   await sampleFrames(page, 600);
   await openWithKeyboard(page, first);
@@ -191,32 +153,26 @@ test('desktop: opening rows moves nothing; closing settles with a slide; agent n
   await expect(page.locator(`.ib-lbody [data-thread-id="${first}"]`)).toHaveAttribute('aria-current', 'true');
   await shot(page, '02-opened-stays-unbold');
 
-  // The next row: nothing moves.
   const second = before[1]!;
   await openWithKeyboard(page, second);
   expect(await rowsOf(page)).toEqual(before);
   expect(await sectionOf(page, first)).toBe('new');
 
-  // An agent writes while the person reads: it waits behind "1 new".
   const late = await world.agent.send({ project_path: path, subject: 'Payout export', body: 'The payout export is ready to review.', agent_session: 'ses_desk_late' } as Parameters<SimAgent['send']>[0]);
   await expect(page.locator('[data-inbox-notice]')).toContainText('1 new in docs-site');
   expect(await rowsOf(page)).toEqual(before);
   await shot(page, '03-two-read-and-an-agent-wrote');
 
-  // Close: sample every frame of the settle.
   await sampleFrames(page, 1000);
   await page.keyboard.press('Escape');
   await page.waitForTimeout(1100);
   const sampled = await framesOf(page);
-  // From the first frame after the close (the pane gone), in ms since then.
   const closedAt = sampled.find((f) => !f.pane)!.t;
   const frames = sampled.filter((f) => !f.pane).map((f) => ({ ...f, t: f.t - closedAt }));
-  // In the beat the list has widened and nothing moves.
   for (const frame of frames.filter((f) => f.t < BEAT_MS - 30)) {
     expect(frame.anims).toBe(0);
     if (frame.order.length) expect(frame.order).toEqual(before);
   }
-  // Then the rows slide: settle animations run, and a row passes between where it was and where it lands.
   expect(frames.some((f) => f.anims > 0)).toBe(true);
   const last = frames.at(-1)!;
   const moved = last.order.find((rowId) => {
@@ -231,7 +187,6 @@ test('desktop: opening rows moves nothing; closing settles with a slide; agent n
   expect(frames.some((f) => f.ghosts > 0), 'the read rows fade where they were').toBe(true);
   expect(last.anims).toBe(0);
   expect(last.ghosts).toBe(0);
-  // Settled: the two read rows are in folded Quiet, focus is on the row now in the slot, the agent's message still waits.
   expect(await sectionOf(page, first)).toBeNull();
   expect(await sectionOf(page, second)).toBeNull();
   const slot = before.slice(before.indexOf(second) + 1).find((rowId) => last.order.includes(rowId))!;
@@ -240,8 +195,6 @@ test('desktop: opening rows moves nothing; closing settles with a slide; agent n
   expect(await sectionOf(page, String(late.thread_id))).toBeNull();
   await shot(page, '04-after-close');
 
-  // Show from the keyboard brings the agent's message in; its line goes away and focus goes to that row,
-  // whose Mark read action shows for the keyboard.
   await page.locator('[data-inbox-notice]').focus();
   await page.keyboard.press('Enter');
   await expect.poll(() => sectionOf(page, String(late.thread_id))).toBe('new');
@@ -291,7 +244,6 @@ test('reduced motion: the close settles in one frame, with nothing animated', as
   const frames = (await framesOf(page)).filter((f) => !f.pane);
   expect(frames.length).toBeGreaterThan(5);
   expect(frames.every((f) => f.anims === 0 && f.ghosts === 0)).toBe(true);
-  // Settled from the first frame after the close.
   expect(frames.every((f) => f.order.length > 0 && !f.order.includes(first))).toBe(true);
   expect(await focused(page)).not.toBe('BODY');
   await context.close();
@@ -319,7 +271,6 @@ for (const layout of [
       const news = await page.locator('[data-section-id="new"] [data-thread-id]').evaluateAll((rows) => rows.map((r) => r.getAttribute('data-thread-id')!));
       expect(news.length).toBeGreaterThanOrEqual(2);
       const [first, second] = news;
-      // A tap on a phone, the mouse on the stacked window (a keyboard path is the desktop test's).
       if (layout.key === 'phone') await page.locator(`.ib-lbody [data-thread-id="${first}"]`).tap();
       else await page.locator(`.ib-lbody [data-thread-id="${first}"]`).click();
       await expect(page.locator('section.ib-pane')).toBeVisible();
@@ -328,12 +279,9 @@ for (const layout of [
       await page.locator(`section.ib-pane ${layout.back}`).click();
       await expect(page.locator('section.ib-pane')).toHaveCount(0);
       await page.waitForTimeout(BEAT_MS + 300);
-      // As left: same order, the read row in New, no longer bold.
       expect(await rowsOf(page)).toEqual(before);
       expect(await sectionOf(page, first!)).toBe('new');
       expect(await isBold(page, first!)).toBe(false);
-      // A tap hands no row focus. The stacked window returns focus to the row (as it did before), but a
-      // mouse Back is no keyboard focus: the row's Mark read action stays hidden.
       if (layout.key === 'phone') expect(await focused(page)).not.toBe(first);
       else {
         expect(await focused(page)).toBe(first);
@@ -341,7 +289,6 @@ for (const layout of [
         await expect(page.locator('.ib-lbody [data-row-mark-read]:visible')).toHaveCount(0);
       }
       await shot(page, `06-${layout.key}-after-back`);
-      // The next thread covers the list, and the first read row settles behind it.
       if (layout.key === 'phone') await page.locator(`.ib-lbody [data-thread-id="${second}"]`).tap();
       else await page.locator(`.ib-lbody [data-thread-id="${second}"]`).click();
       await expect(page.locator('section.ib-pane')).toBeVisible();
@@ -358,7 +305,6 @@ for (const layout of [
   });
 }
 
-/** Four open questions, each with Stakes before its choices, then Recommended and Holds up after them (the shape the owner saw land in Quiet). */
 const HOLDING_QUESTIONS = [
   'I read the channel code. Four decisions before I go on.',
   ...[1, 2, 3, 4].flatMap((n) => [
@@ -401,27 +347,21 @@ for (const layout of [
     try {
       const page = await context.newPage();
       const { id, path, threads } = world.projects[layout.key];
-      // The newest thread (the seed's last), top of New, and the session that wrote it.
       const first = threads[threads.length - 1]!;
       await page.goto(`${world.url}/#project=${id}`);
       await expect(page.locator(`[data-section-id="new"] [data-thread-id="${first}"]`)).toBeVisible();
-      // Read, then Back: the list as left, the row in New, no longer bold.
       await open(page, first);
       await expect.poll(() => isBold(page, first)).toBe(false);
       await back(page);
       expect(await sectionOf(page, first)).toBe('new');
-      // The agent asks four questions there that hold up work: the list holds still, the news waits behind "1 new".
       await world.agent.send({ project_path: path, reply_to: first, body: HOLDING_QUESTIONS, agent_session: `ses_${layout.key}_${NEWS.length - 1}` } as Parameters<SimAgent['send']>[0]);
       await expect(page.locator('[data-inbox-notice]')).toContainText('1 new');
       expect(await sectionOf(page, first)).toBe('new');
-      // The person opens it and reads the questions (the look is recorded), then goes Back.
       await open(page, first);
       await expect(page.locator('section.ib-pane fieldset[data-question-key]')).toHaveCount(4);
       await expect.poll(() => serverRow(first)).toEqual({ section: 'holding', unseen: 0 });
       await back(page);
-      // Where its open questions put it: Holding up work, as the server says; not folded away in Quiet.
       expect(await sectionOf(page, first)).toBe('holding');
-      // The stacked window's mouse Back hands focus to the row (#1866), which keeps it as the row moves; a phone's tap hands none.
       if (layout.key === 'stackedAsks') expect(await focused(page)).toBe(first);
       else expect(await focused(page)).not.toBe(first);
       await shot(page, `08-${layout.key}-questions-read-after-back`);
@@ -432,14 +372,12 @@ for (const layout of [
   });
 }
 
-/** The thread's row as the server reads it. */
 async function serverRow(id: string): Promise<{ section: string; unseen: number } | null> {
   const list = (await (await fetch(`${world.url}/api/inbox/threads?archived=exclude`)).json()) as { sections: { id: string; threads: { thread_id: string; unseen: number }[] }[] };
   for (const section of list.sections) for (const row of section.threads) if (row.thread_id === id) return { section: section.id, unseen: row.unseen };
   return null;
 }
 
-/** The group a row is drawn in, unfolding Quiet first when the row is not drawn (folded Quiet draws no rows). */
 async function drawnIn(page: Page, id: string): Promise<string | null> {
   const section = await sectionOf(page, id);
   if (section) return section;
@@ -448,7 +386,6 @@ async function drawnIn(page: Page, id: string): Promise<string | null> {
   return sectionOf(page, id);
 }
 
-// Chromium only: seen on sight needs the page focused and visible, which headless WebKit does not report.
 test('stacked window (Chromium, 900 px): questions that arrive while the thread is open, seen on sight, put the row in Holding up work on a keyboard Back, focus with it, never in Quiet', async ({ browser }: { browser: Browser }) => {
   const context = await browser.newContext({ viewport: { width: 900, height: 900 }, colorScheme: 'dark' });
   try {
@@ -467,7 +404,6 @@ test('stacked window (Chromium, 900 px): questions that arrive while the thread 
     };
     await page.goto(`${world.url}/#project=${id}`);
     await expect(page.locator(`[data-section-id="new"] [data-thread-id="${first}"]`)).toBeVisible();
-    // Read the first, Back; read the second (the first settles behind it, to Quiet), Back.
     await open(first);
     await expect.poll(() => serverRow(first)).toEqual({ section: 'quiet', unseen: 0 });
     await back();
@@ -475,18 +411,14 @@ test('stacked window (Chromium, 900 px): questions that arrive while the thread 
     await expect.poll(() => serverRow(second)).toEqual({ section: 'quiet', unseen: 0 });
     await back();
     expect(await drawnIn(page, first)).toBe('quiet');
-    // Open the first from Quiet; the agent asks there while it is open; the questions are seen on sight.
     await open(first);
     await world.agent.send({ project_path: path, reply_to: first, body: HOLDING_QUESTIONS, agent_session: `ses_stackedSeen_${NEWS.length - 1}` } as Parameters<SimAgent['send']>[0]);
     await expect(page.locator('section.ib-pane fieldset[data-question-key]')).toHaveCount(4);
     await page.locator('section.ib-pane fieldset[data-question-key]').first().scrollIntoViewIfNeeded();
     await expect.poll(() => serverRow(first), { timeout: 15_000 }).toEqual({ section: 'holding', unseen: 0 });
-    // Back with the keyboard (Escape).
     await page.keyboard.press('Escape');
     await expect(page.locator('section.ib-pane')).toHaveCount(0);
     await page.waitForTimeout(BEAT_MS + 300);
-    // Where its open questions put it, as the server says; not left drawn in Quiet. Focus moved with the row
-    // (redrawn in Holding up work), never dropped to the page.
     expect(await sectionOf(page, first)).toBe('holding');
     expect(await focused(page)).toBe(first);
     await shot(page, '09-stackedSeen-arrival-while-open-after-back');
@@ -503,7 +435,6 @@ test('a thread opened wide, its window narrowed to stacked while it is open: Bac
     const first = threads[threads.length - 1]!;
     await page.goto(`${world.url}/#project=${id}`);
     await expect(page.locator(`[data-section-id="new"] [data-thread-id="${first}"]`)).toBeVisible();
-    // Read it wide and close it: it settles to Quiet.
     await page.locator(`.ib-lbody [data-thread-id="${first}"]`).click();
     await expect(page.locator('section.ib-pane')).toBeVisible();
     await expect.poll(() => serverRow(first)).toEqual({ section: 'quiet', unseen: 0 });
@@ -512,19 +443,16 @@ test('a thread opened wide, its window narrowed to stacked while it is open: Bac
     await expect(page.locator('section.ib-pane')).toHaveCount(0);
     await page.waitForTimeout(BEAT_MS + 300);
     expect(await drawnIn(page, first)).toBe('quiet');
-    // The agent asks there: held behind "1 new". The person opens it from Quiet, wide, and reads it.
     await world.agent.send({ project_path: path, reply_to: first, body: HOLDING_QUESTIONS, agent_session: `ses_resized_${NEWS.length - 1}` } as Parameters<SimAgent['send']>[0]);
     await expect(page.locator('[data-inbox-notice]')).toContainText('1 new');
     await page.locator(`.ib-lbody [data-thread-id="${first}"]`).click();
     await expect(page.locator('section.ib-pane fieldset[data-question-key]')).toHaveCount(4);
     await expect.poll(() => serverRow(first)).toEqual({ section: 'holding', unseen: 0 });
-    // The window narrows: the thread now covers the list. Back.
     await page.setViewportSize({ width: 900, height: 900 });
     await page.locator('section.ib-pane [data-stack-back]').click();
     await expect(page.locator('section.ib-pane')).toHaveCount(0);
     await page.waitForTimeout(BEAT_MS + 300);
     expect(await sectionOf(page, first)).toBe('holding');
-    // A mouse Back in a stacked window hands focus to the row (#1866); redrawn in Holding up work, it keeps it.
     expect(await focused(page)).toBe(first);
     await shot(page, '10-resized-after-back');
   } finally {
@@ -542,7 +470,6 @@ test('desktop, the mouse: a close hands no row focus, no Mark read action shows,
   const { id, threads } = world.projects.mouse;
   await page.goto(`${world.url}/#project=${id}`);
   await expect(page.locator('[data-section-id="new"] [data-thread-id]')).toHaveCount(4);
-  // Clicked, never by position: the row opened is named.
   await page.locator(`.ib-lbody [data-thread-id="${threads[0]}"]`).click();
   await expect.poll(() => isBold(page, threads[0]!)).toBe(false);
   await page.locator('section.ib-pane [aria-label="Close the thread"]').click();
@@ -557,9 +484,6 @@ test('desktop, the mouse: a close hands no row focus, no Mark read action shows,
   await context.close();
 });
 
-// A plain update the person opened: Quiet on the server (the look), still drawn in New while the thread is
-// open. Mark read stays on it (the row menu, E) and moves the row to Quiet now; the row's hover action and the
-// header's button are Mark unread (the owner, 2026-11-02: the person read it).
 test('desktop: a seen update held in New keeps Mark read; it moves the row to Quiet now, and Undo puts it back', async ({ browser }: { browser: Browser }) => {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark' });
   const page = await context.newPage();
@@ -587,14 +511,12 @@ test('desktop: a seen update held in New keeps Mark read; it moves the row to Qu
   await shot(page, 'seen-held-01-opened');
   await expect(page.locator(`.ib-lbody [data-row="${first}"] [data-row-mark-unread]`)).toBeVisible();
   await expect(page.locator(`.ib-lbody [data-row="${first}"] [data-row-mark-read]`)).toHaveCount(0);
-  // Read by opening it: the header's ⋯ offers Mark unread, as the row does.
   await more.click();
   await expect(page.locator('[data-thread-menu] [data-thread-unread-item]')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.locator('[data-thread-menu]')).toHaveCount(0);
   const moreBox = (await more.boundingBox())!;
 
-  // E: the row moves to Quiet now, the toast says so with Undo; nothing in the header moves.
   await page.locator('section.ib-pane h2.ib-subject').click();
   await page.keyboard.press('e');
   await expect(row).toHaveCount(0);
@@ -603,14 +525,12 @@ test('desktop: a seen update held in New keeps Mark read; it moves the row to Qu
   await expect(page.locator('[data-toast-undo]')).toBeVisible();
   expect(await more.boundingBox()).toEqual(moreBox);
   await shot(page, 'seen-held-02-moved');
-  // Undo: back between the same neighbours.
   await page.locator('[data-toast-undo]').click();
   await expect.poll(() => sectionOf(page, first)).toBe('new');
   expect(await rowsOf(page)).toEqual(before);
   expect(await more.boundingBox()).toEqual(moreBox);
   await shot(page, 'seen-held-03-undone');
 
-  // E, then Z.
   await page.locator('section.ib-pane h2.ib-subject').click();
   await page.keyboard.press('e');
   await expect(row).toHaveCount(0);
@@ -619,8 +539,6 @@ test('desktop: a seen update held in New keeps Mark read; it moves the row to Qu
   expect(await rowsOf(page)).toEqual(before);
   expect(markedUnread).toEqual([]);
 
-  // The row menu's Mark read (the hover action is Mark unread here). Bounded tries: on CI the row once
-  // was still settling back from the Undo as the pointer arrived, and an action waits with no time limit.
   const rowMarkRead = page.locator(`[data-row-menu="${first}"] [data-row-action="read"]`);
   await expect(async () => {
     await row.click({ button: 'right', timeout: 2_000 });
@@ -630,7 +548,6 @@ test('desktop: a seen update held in New keeps Mark read; it moves the row to Qu
   await expect(row).toHaveCount(0);
   await expect(quietCount).toHaveText('1');
 
-  // Nothing was written (the thread was already Quiet), and the close settles it where it is.
   expect(written).toEqual([]);
   await page.keyboard.press('Escape');
   await expect(page.locator('section.ib-pane')).toHaveCount(0);
@@ -651,7 +568,6 @@ test('a window of about 1000 px with the sidebar held closed beside a file: the 
   await page.locator(`.ib-lbody [data-thread-id="${filed}"]`).click();
   await page.locator('section.ib-pane [data-attachment-name="notes.md"]').first().click();
   await page.locator('section.ib-pane [data-file-back]').click();
-  // The file closed; the list is beside the thread, the sidebar held closed.
   await expect(page.locator('.ib-listcol')).toBeVisible();
   await expect(page.locator('section.ib-pane')).toBeVisible();
   await page.waitForTimeout(700);
@@ -662,7 +578,6 @@ test('a window of about 1000 px with the sidebar held closed beside a file: the 
   const last = frames.at(-1)!;
   const firstSlide = frames.find((f) => f.anims > 0);
   expect(firstSlide, 'the rows slid').toBeTruthy();
-  // The slide starts from the column's final width: the sidebar's spring is over.
   expect(Math.abs(firstSlide!.listWidth - last.listWidth)).toBeLessThan(1.5);
   expect(await sectionOf(page, filed)).toBeNull();
   await context.close();

@@ -1,9 +1,3 @@
-/**
- * The release gate in scripts/check-bun-runtime-trust.ts. What regresses if
- * this fails: a release binary built on a Bun that still trusts emSign ECC
- * Root CA - G3 (or lacks the blocked-key check) passes the gate and ships.
- * Synthetic bytes stand in for binaries; the gate reads bytes, not runtimes.
- */
 import { describe, expect, test } from "bun:test";
 import { X509Certificate } from "node:crypto";
 import { BLOCKED_KEY_CHECK_MARKER, EMSIGN_ECC_G3_PEM, bunRuntimeTrustProblems } from "./check-bun-runtime-trust.ts";
@@ -13,7 +7,6 @@ const fixed = (version = "1.4.4") => Buffer.from(`\0Bun v${version} (38afee6c8)\
 const binary = (...parts: Buffer[]) => Buffer.concat([filler, ...parts, filler]);
 const g3 = new X509Certificate(EMSIGN_ECC_G3_PEM);
 
-/** The PEM as Bun 1.3 embeds roots: 64-column lines. */
 function pem64(): Buffer {
   const b64 = g3.raw.toString("base64").match(/.{1,64}/g)!.join("\n");
   return Buffer.from(`-----BEGIN CERTIFICATE-----\n${b64}\n-----END CERTIFICATE-----\n`, "latin1");

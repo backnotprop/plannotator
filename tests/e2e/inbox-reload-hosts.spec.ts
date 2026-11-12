@@ -1,25 +1,3 @@
-/**
- * Pi, Oh My Pi and OpenCode 2 sessions that need a reload after an update
- * (owner approval "reload-hosts", 2026-10-26), proved in a real browser
- * against the compiled binary.
- *
- * Nothing is mocked: the binary runs `plannotator inbox --background` under a
- * temp PLANNOTATOR_DATA_DIR and HOME. Agents write through
- * `plannotator inbox mcp` with the wake meta; their connections are the
- * bridge's real poll, driven as the Pi extension and the OpenCode 2 plugin
- * drive it, saying what they loaded and what is on disk now
- * (`plugin: { version, on_disk, host? }`). The person replies in the window.
- * What is proved: under the reply, Pi's `/reload`, Oh My Pi's `/restart` and
- * OpenCode 2's `opencode2 reload` lead with a Copy for exactly that command
- * (never `/reload-plugins`); the sidebar's "Reload agents N"; Settings →
- * Agents' "Open sessions" leading with each runtime's command; a phone at
- * 390 px, where nothing overflows; and the row going away by itself once the
- * sessions reload onto the version on disk.
- *
- * PNGs (desktop and phone, light and dark) land in .local/proof/reload-hosts/,
- * or in PLANNOTATOR_RELOAD_SHOTS when it names a folder.
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
@@ -59,7 +37,6 @@ function registry(): { port: number; token: string } {
   return JSON.parse(readFileSync(join(world.dataDir, 'inbox', 'inbox.json'), 'utf8'));
 }
 
-/** One session's connection, as the Pi extension or the OpenCode 2 plugin runs it. */
 class Connection {
   private stopped = false;
   private loop: Promise<void>;
@@ -169,10 +146,8 @@ test.afterAll(async () => {
   }
 });
 
-/** A plugin from before Send now, the newer one on disk since an update. */
 const PI_STALE: Plugin = { version: '0.28.23', on_disk: '0.28.26', host: 'pi' };
 const OMP_STALE: Plugin = { version: '0.28.23', on_disk: '0.28.26', host: 'oh-my-pi' };
-/** OpenCode 2 after the install script deleted the plugin's generation folder. */
 const OC_STALE: Plugin = { version: '0.28.23', on_disk: null };
 
 async function ask(agent: SimAgent, session: string, project: string, subject: string, body: string): Promise<string> {
@@ -243,7 +218,6 @@ test('the sidebar: "Reload agents 3" opens Settings → Agents, each runtime lea
   await expect(pi.locator('[data-reload-sessions="oh-my-pi"] [data-reload-lead="restart"] code')).toHaveText('/restart');
   const oc = page.locator('[data-agent-sessions="opencode"]');
   await expect(oc.locator('[data-reload-sessions="opencode"] [data-reload-lead="restart"] code')).toHaveText('opencode2 reload');
-  // One quiet line under each OpenCode command; nothing about quitting.
   await expect(oc.locator('[data-reload-sessions="opencode"] [data-opencode-quiet]')).toHaveCount(1);
   await expect(oc.locator('[data-opencode-quit-note]')).toHaveCount(0);
   await oc.locator('[data-reload-sessions="opencode"] [data-reload-lead="restart"]').getByRole('button', { name: 'Copy opencode2 reload' }).click();

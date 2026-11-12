@@ -1,18 +1,3 @@
-/**
- * The List view's one-time choice, Smart groups or Simple list (approval "inbox-list-view", the owner's ask, 2026-11-05) in Chromium against
- * a release build of the binary: a dev or test build never shows it (reveal.ts `releaseVersion`), so this spec runs
- * only with PLANNOTATOR_E2E_RELEASE_BINARY naming one, built with the root package.json's version (a newer one puts
- * the page's "Inbox updated" line in the pictures), for example:
- *
- *   bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig \
- *     --define '__CLI_VERSION__="0.28.50"' --outfile .local/plannotator-release
- *
- * A grouped list of six threads, a page a minute old, a thread opened, read and left: the dialog opens over the list
- * (1440 px and a 390 px phone, light and dark); "Use Simple list" switches the list at once and is remembered; "Use Smart groups"
- * keeps the groups; neither browser sees it again. HOME and the data dir are temp folders. PNGs land in
- * PLANNOTATOR_LIST_VIEW_SHOTS; with PLANNOTATOR_LIST_VIEW_VIDEO set, the desktop page is recorded (list-view-intro.webm).
- */
-
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, renameSync } from 'node:fs';
@@ -28,9 +13,6 @@ const shots = resolve(process.env.PLANNOTATOR_LIST_VIEW_SHOTS ?? join(repo, '.lo
 
 test.describe.configure({ mode: 'serial' });
 test.skip(!binary, 'set PLANNOTATOR_E2E_RELEASE_BINARY to a release build');
-// The choice now goes through the Inbox's schedule (packages/shared/inbox/reveals.ts `list_view`): this world needs
-// a seeded line (first use two days back, 15 threads or more, a list taller than the window) before it runs again.
-// packages/inbox/listViewReveal.test.tsx guards the wiring meanwhile.
 test.skip(true, 'needs a world seeded for the dialog schedule (list_view next or ahead)');
 
 let url = '';
@@ -82,11 +64,6 @@ test.afterAll(async () => {
 
 const dialog = (page: Page) => page.locator('dialog[data-dialog="list-view-intro"]');
 
-/** Headless Chromium's "blocks notifications" line: hidden first, as a person would. */
-/**
- * This spec proves the leave moment ("back on the list"), so the page is never idle (idleClock.ts: 20 s without input
- * is also the moment, and Playwright tells every page it is focused): a pointer move every 3 s, from the first paint.
- */
 const neverIdle = () => {
   setInterval(() => window.dispatchEvent(new Event('pointermove')), 3_000);
 };
@@ -98,7 +75,6 @@ async function settled(page: Page): Promise<void> {
   if (await hide.count()) await hide.click();
 }
 
-/** Read a thread for six seconds, then back to the list. */
 async function readAndLeave(page: Page, phone: boolean, id = first): Promise<void> {
   const row = page.locator(`.ib-listcol .ib-lbody [data-thread-id="${id}"]`);
   await (phone ? row.tap({ timeout: 10_000 }) : row.click({ timeout: 10_000 }));
@@ -132,24 +108,19 @@ test('a minute in, back on the grouped list after reading a thread: the choice, 
     await phone.goto(`${url}/`);
     await settled(page);
     await settled(phone);
-    // Grouped, as every browser starts.
     await expect(page.locator('.ib-listcol .ib-lbody [data-section-id="waiting"]')).toBeVisible();
-    // Never at load: a minute passes with nothing.
     await page.waitForTimeout(61_000);
     await expect(dialog(page)).toHaveCount(0);
     await expect(dialog(phone)).toHaveCount(0);
-    // Desktop: read a thread, back to the list.
     await readAndLeave(page, false);
     await expect(dialog(page)).toBeVisible({ timeout: 10_000 });
     await expect(dialog(page)).toHaveAccessibleName('Which view do you prefer?');
-    // Focus on the question; Smart groups is marked In use (the list is grouped) and its button is the primary one.
     await expect(dialog(page).locator('#ib-lvc-title')).toBeFocused();
     await expect(dialog(page).locator('[data-list-view-in-use]')).toHaveCount(1);
     await expect(dialog(page).locator('.ib-lvc-col').first().locator('[data-list-view-in-use]')).toHaveText('In use');
     await expect(dialog(page).locator('[data-list-view-choice="smart"]')).toHaveClass(/ib-pri/);
     await page.waitForTimeout(2600);
     if (!video) await both(page, 'intro-1440');
-    // Phone: the same moment.
     await readAndLeave(phone, true);
     await expect(dialog(phone)).toBeVisible({ timeout: 10_000 });
     for (const button of ['[data-list-view-choice="smart"]', '[data-list-view-choice="simple"]']) {
@@ -158,7 +129,6 @@ test('a minute in, back on the grouped list after reading a thread: the choice, 
     }
     await phone.waitForTimeout(2600);
     await both(phone, 'intro-390');
-    // Use Simple list: the list is List at once, remembered as the ⋮ menu's choice.
     await page.locator('[data-list-view-choice="simple"]').click({ timeout: 10_000 });
     await expect(dialog(page)).toHaveCount(0);
     await expect(page.locator('.ib-listcol .ib-lbody [data-flat-list]')).toBeVisible();
@@ -168,16 +138,14 @@ test('a minute in, back on the grouped list after reading a thread: the choice, 
     await page.mouse.move(1200, 780);
     await page.waitForTimeout(800);
     if (!video) await both(page, 'list-after-choosing');
-    // Use Smart groups: the groups stay, and the choice is not written.
     await phone.locator('[data-list-view-choice="smart"]').tap({ timeout: 10_000 });
     await expect(dialog(phone)).toHaveCount(0);
     await expect(phone.locator('.ib-listcol .ib-lbody [data-section-id="waiting"]')).toBeVisible();
     expect((await phoneContext.cookies()).some((c) => c.name === 'plannotator-inbox-list-view')).toBe(false);
-    // Once: a reload and the same moment again show nothing.
     await phone.reload();
     await settled(phone);
     await phone.waitForTimeout(61_000);
-    await readAndLeave(phone, true, second); // the first thread is read now, folded into Quiet
+    await readAndLeave(phone, true, second);
     await phone.waitForTimeout(5000);
     await expect(dialog(phone)).toHaveCount(0);
   } finally {

@@ -1,18 +1,3 @@
-/**
- * The sidebar's Usage row, its peek and the phone's bottom sheet (approval
- * "accounts-page") in a real browser against the compiled binary, under a temp
- * PLANNOTATOR_DATA_DIR and HOME. The Inbox's whole PATH is a fake `cswap`'s
- * folder (tests/helpers/fake-cswap.ts), so no real claude-swap can be reached:
- * that one goes to the Keychain.
- *
- * What only a browser can show: nothing in the sidebar's foot moving when a
- * slow read answers, where the row sits, the amber at 90% and nowhere else, the
- * peek beside the row and the sheet along a phone's bottom edge, inside the
- * window. The rules behind them are packages/inbox/accountsSection.test.tsx.
- *
- * PNGs, light and dark, land in .local/proof/inbox-accounts-step2/.
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
@@ -59,7 +44,6 @@ test.beforeAll(async () => {
     PATH: bin,
     HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
-    // Each window here reads another answer, seconds apart: the 30 s between two runs would stand in the way.
     PLANNOTATOR_TEST_SANDBOX: root,
     PLANNOTATOR_TEST_CSWAP_DIR: bin,
     PLANNOTATOR_TEST_ACCOUNTS_CACHE_MS: '0',
@@ -84,7 +68,6 @@ const scheme = (page: Page, name: 'light' | 'dark') => page.emulateMedia({ color
 const color = (target: ReturnType<Page['locator']>, property: 'color' | 'fill' = 'color') => target.evaluate((el, name) => getComputedStyle(el)[name as 'color'], property);
 
 async function shot(page: Page, name: string) {
-  // Off the left edge's 20 px strip, which slides the sidebar in over the page.
   await page.mouse.move(40, 0);
   for (const colors of ['light', 'dark'] as const) {
     await scheme(page, colors);
@@ -93,7 +76,6 @@ async function shot(page: Page, name: string) {
   }
 }
 
-/** The next window gets `stdout`. */
 async function replaceAnswer(page: Page, stdout: string | null) {
   if (stdout === null) removeFakeCswap(bin);
   else writeFakeCswap(bin, { stdout });
@@ -101,10 +83,8 @@ async function replaceAnswer(page: Page, stdout: string | null) {
   expect((await answer.json()).state).toBe(stdout === null ? 'not_installed' : 'accounts');
 }
 
-/** A fresh window over this answer, past its first read. */
 async function open(page: Page, stdout: string | null) {
   await replaceAnswer(page, stdout);
-  // By way of a blank page, so this load is the only one that can answer the wait.
   await page.goto('about:blank');
   const read = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/inbox/accounts');
   await page.goto(url);
@@ -120,7 +100,6 @@ async function expectInsideWindow(page: Page) {
   expect(box.y + box.height).toBeLessThanOrEqual(view.height);
 }
 
-/** A fresh window whose first read stays out, as a slow `cswap`'s does, until the returned call lets it answer 92%. */
 async function openWithReadHeld(page: Page) {
   await replaceAnswer(page, HIGH);
   await page.goto('about:blank');
@@ -188,7 +167,6 @@ test('phone: the row is in the sheet during a slow read, nothing moves when it a
   test.setTimeout(60_000);
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   const page = await context.newPage();
-  // The sheet slides up as it opens: without this the check below can catch it on its way.
   await scheme(page, 'light');
   const answer = await openWithReadHeld(page);
   await page.locator('.ib-lhead .ib-sb-trigger').click();
@@ -218,8 +196,6 @@ test('desktop: the row sits above Settings, plain until 90%, and its peek opens 
   await open(page, NORMAL);
   await expect(row(page)).toHaveText('Usage');
   await expect(page.locator('[data-usage-figure]')).toHaveCount(0);
-  // At the bottom, between Feedback and Settings, not in the top area.
-  // Each item sits in its sidebar-layout slot (`.ib-side-item`, approval "inbox-sidebar-customize").
   const labels = await page.locator('.ib-side-foot > button, .ib-side-foot > .ib-side-item > button, .ib-side-foot > .ib-side-item > .ib-setrow > button.ib-nav').allTextContents();
   expect(labels.slice(-3)).toEqual(['Feedback', 'Usage', 'Settings']);
   await expect(page.locator('.ib-side-foot [data-usage-nav]')).toHaveCount(1);
@@ -234,7 +210,6 @@ test('desktop: the row sits above Settings, plain until 90%, and its peek opens 
   const rowBox = (await row(page).boundingBox())!;
   expect((await peek(page).boundingBox())!.x).toBeGreaterThanOrEqual(rowBox.x + rowBox.width);
   await shot(page, 'desktop-normal-peek');
-  // The row closes what it opened.
   await row(page).click();
   await expect(peek(page)).toHaveCount(0);
 
@@ -242,7 +217,6 @@ test('desktop: the row sits above Settings, plain until 90%, and its peek opens 
   const figure = page.locator('[data-usage-figure]');
   await expect(figure).toHaveText('92%');
   await scheme(page, 'dark');
-  // The logo and the figure take the same amber, and it is not the row's own color.
   const amber = await color(figure);
   expect(await color(figure.locator('path'), 'fill')).toBe(amber);
   expect(amber).not.toBe(await color(row(page)));
@@ -292,7 +266,6 @@ test('phone: the row in the sidebar opens the same content in the bottom sheet',
   await expect(row(page)).toHaveCount(0);
   await expect(peek(page).locator('.ib-usage-k')).toHaveText(['5h', 'Fable', 'week']);
   await expectInsideWindow(page);
-  // Along the bottom edge, nearly the window's width, as Tidy's sheet is.
   const sheet = (await peek(page).boundingBox())!;
   expect(sheet.width).toBeGreaterThanOrEqual(370);
   expect(844 - (sheet.y + sheet.height)).toBeLessThanOrEqual(16);

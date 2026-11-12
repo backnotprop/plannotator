@@ -1,29 +1,3 @@
-/**
- * The floating box over a file in full screen, on a phone (the owner's iPhone: "the floating box has mobile responsive
- * issues"), proved against the compiled binary on WebKit and Chromium, with a 1920 × 1080 image and an HTML page:
- *
- *  - The foot is one row at 360 and 390, the mic on: the "N comments" pill is one line inside its pill, the open
- *    questions chip beside it, nothing past the box. The mic used to take half the row's free room at every width,
- *    so this broke up to 430. At 320 round 3's row (Send's word, the 44 px clip) does not fit: the chips take their own
- *    row over the clip, the mic and the link, and every press stays 44 px (the owner's call, train C: tap size first).
- *  - What yields is decided: the questions' words, then the comment count's word (its name stays whole), then "Open in
- *    thread" becomes "Thread". Only at text sizes the row cannot hold, or under 360 px, do the chips take their own row.
- *    Round 3's row needs "Thread" at 360 (the full link is about 30 px short there), so the spec reads what the fitter
- *    drew (the foot's `data-fit`) and checks the words on screen match it and that one step less would not fit.
- *  - Every control in the box is 44 px to press, measured by hit test: the controls keep their size, an overlay
- *    takes the press.
- *  - A long agent's name is cut on one line, in the header and in "Sent to …".
- *  - The comments sheet covers the file: the box and its pill step aside from Write the reply. Write the reply closes
- *    the file and gives the thread's box focus, a comment being written kept for the file (back in its row when it
- *    opens again), never asked about.
- *  - A folded pill never lies under the toolbar: it shares the row when both fit, else it sits above (360 px overlapped by 24).
- *  - A desktop window's foot takes none of this. A window too narrow for a view beside the thread leaves the file as a
- *    phone does: R and Write the reply close it at once (an unsaved comment waits as the file's draft).
- *
- * Voice is on but not ready in this sandbox, so the box also carries its note: the mic shows, dimmed, as it does on a
- * phone that cannot record. Build the binary first (see inbox.spec.ts).
- */
-
 import { chromium, devices, expect, test, webkit, type Browser, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -72,13 +46,11 @@ async function seed(agent: SimAgent, comments: number, questions = true): Promis
 const fileUrl = (t: Thread, name: string) => `${url}#thread=${t.thread}&file=${t.ids[name]}&view=full`;
 const card = (page: Page) => page.locator('[data-fcomp]');
 
-/** What is wrong with the foot right now: a pill on two lines, its words past its box, a control past the box, two rows. */
 async function footProblems(page: Page, oneRow = true): Promise<string[]> {
   return card(page).evaluate((root, oneRow) => {
     const out: string[] = [];
     const box = root.getBoundingClientRect();
     const foot = root.querySelector<HTMLElement>('[data-fcomp-foot]')!;
-    // The words the eye sees: visually hidden text (clipped) is the name, not the row.
     const seen = (el: Element) => {
       const rects: DOMRect[] = [];
       const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
@@ -108,7 +80,6 @@ async function footProblems(page: Page, oneRow = true): Promise<string[]> {
   }, oneRow);
 }
 
-/** Controls whose press does not reach 44 px around their middle, by hit test (an overlay takes the press). */
 async function shortTargets(page: Page, selectors: readonly string[]): Promise<string[]> {
   return card(page).evaluate((root, selectors) => {
     const out: string[] = [];
@@ -130,16 +101,9 @@ async function shortTargets(page: Page, selectors: readonly string[]): Promise<s
   }, selectors);
 }
 
-/** The step before each of the foot's fits (footFit.ts `cardFootFitCandidates`), with the open questions at their count. */
 const FIT_BEFORE: Record<string, string> = { chips: '', 'chips link': 'chips', 'stack chips': 'stack', 'stack chips link wrap': 'stack chips' };
-/** The one-row fits from 360 px up, in the order the row yields them. */
 const ONE_ROW_FITS = ['', 'chips', 'chips link'];
 
-/**
- * What the card's foot gave up: its `data-fit` (footFit.ts), the words on screen of the pill, the open questions and the
- * link, and whether the step before that fit would have held the row, asked as the fitter asks it (the chips one line,
- * nothing past the chips or the foot). Null where there is no step before (nothing yielded, or the first stacked fit).
- */
 async function footYield(page: Page): Promise<{ fit: string; commentWord: boolean; questions: string; link: string; before: boolean | null }> {
   return card(page).evaluate((root, FIT_BEFORE) => {
     const foot = root.querySelector<HTMLElement>('[data-fcomp-foot]')!;
@@ -168,7 +132,6 @@ async function footYield(page: Page): Promise<{ fit: string; commentWord: boolea
   }, FIT_BEFORE);
 }
 
-/** The words on screen are the ones the fit leaves, and the row gave up no more than it had to. */
 function expectYield(y: Awaited<ReturnType<typeof footYield>>, where: string): void {
   const tokens = y.fit.split(' ');
   expect(y.commentWord, `${where}: the comments' word (fit "${y.fit}")`).toBe(!tokens.includes('chips'));
@@ -254,25 +217,20 @@ for (const phone of PHONES) {
               await page.locator('[data-fcomp-pill]').tap();
             }
             await card(page).waitFor();
-            // The card opens on Comment (no reply draft waits), an HTML page's as an image's: the foot is the Reply tab's.
             await page.locator('[data-fcomp-mode="reply"]').tap();
             const where = `${width} px, ${file}, ${t === seeded.two ? 2 : 12} comments`;
             await expect(card(page).locator('[data-fcomp-questions]'), where).toBeVisible();
             await expect(card(page).locator('[data-voice-mic]'), where).toBeVisible();
             await expect.poll(() => footProblems(page, oneRow), { message: where }).toEqual([]);
             if (!oneRow) {
-              // Under 360 px the chips take a row of their own, above the clip and the link (footFit.ts `stack`).
               const [chip, clip, link] = await Promise.all(['[data-fcomp-comments]', '.ib-fcomp-clip', '[data-fcomp-open-thread]'].map(async (sel) => (await card(page).locator(sel).boundingBox())!));
               expect(chip!.y + chip!.height, where).toBeLessThanOrEqual(clip!.y + 1);
               expect(chip!.y + chip!.height, where).toBeLessThanOrEqual(link!.y + 1);
             }
             expect(await shortTargets(page, [...FOOT_TARGETS, '.ib-vnote .ib-dtlink']), where).toEqual([]);
             expect(await shortTargets(page, file === 'shot.png' ? TOP_TARGETS : ['[data-fcomp-minimize]', '[data-fcomp-send]']), where).toEqual([]);
-            // The names are whole, however little of them shows. What shows is what the fit left (the comments' word goes
-            // before the link's), one row from 360 px up, and the row gave up no more than it had to.
             await expect(card(page).locator('[data-fcomp-comments]'), where).toHaveAccessibleName(`${t === seeded.two ? 2 : 12} comments`);
             await expect(card(page).locator('[data-fcomp-open-thread]'), where).toHaveAccessibleName('Open in thread');
-            // A fit drawn before the font loaded or the width changed is drawn again (a resize observer): wait for it.
             await expect.poll(async () => (await footYield(page)).before, { message: where }).not.toBe(true);
             const y = await footYield(page);
             if (oneRow) expect(ONE_ROW_FITS, `${where}: fit "${y.fit}"`).toContain(y.fit);
@@ -325,8 +283,6 @@ for (const phone of PHONES) {
       const at360 = await footYield(page);
       expectYield(at360, '360 px, 12 comments');
       expect(ONE_ROW_FITS, `360 px, 12 comments: fit "${at360.fit}"`).toContain(at360.fit);
-      // Wider, the row gives words back in the order it gave them up, never more yielded than at 360. Which words come
-      // back depends on the font (round 3's row, with Send's word and the 44 px clip, is tight at 390); the order does not.
       await page.setViewportSize({ width: 390, height: 844 });
       await expect.poll(() => footProblems(page)).toEqual([]);
       await expect.poll(async () => (await footYield(page)).before).not.toBe(true);
@@ -337,7 +293,6 @@ for (const phone of PHONES) {
       await expect(card(page).locator('[data-fcomp-questions]')).toHaveAccessibleName('3 open questions');
       await expect(card(page).locator('[data-fcomp-comments]')).toHaveAccessibleName('12 comments');
       await expect(card(page).locator('[data-fcomp-open-thread]')).toHaveAccessibleName('Open in thread');
-      // With 2 comments at 390 the words shown are the fit's, and a shorter count never gives up more than a longer one.
       await open(seeded.two);
       await expect.poll(async () => (await footYield(page)).before).not.toBe(true);
       const two = await footYield(page);
@@ -369,9 +324,6 @@ for (const phone of PHONES) {
         await page.goto(fileUrl(t, 'shot.png'));
         await card(page).waitFor();
         await page.locator('[data-fcomp-mode="reply"]').tap();
-        // The comment count comes with the file's model, after the card: at 320 px the "12" chip is what stacks the
-        // chips (round 3), so both cards are measured once their chips are in, or the foot's rows differ, not the field.
-        // Both threads were seeded alike (12 comments, 3 questions) and nothing sends on them.
         await expect(card(page).locator('[data-fcomp-comments]')).toHaveAccessibleName('12 comments');
         await expect(card(page).locator('[data-fcomp-questions]')).toBeVisible();
         await page.waitForTimeout(250);
@@ -382,8 +334,6 @@ for (const phone of PHONES) {
 
     test('a long agent: its name is cut on one line, in the header and in “Sent to …”', async () => {
       await page.setViewportSize({ width: 320, height: 568 });
-      // A thread of its own: the Send below takes the thread's comments with it, and the shared long-name thread must
-      // keep its 12 for the other browser's pass ("the empty field stays one line" compares it with twelve's card).
       const t = await seed(long, 12);
       await page.goto('about:blank');
       await page.goto(fileUrl(t, 'page.html'));
@@ -391,7 +341,6 @@ for (const phone of PHONES) {
       await page.locator('[data-fcomp-pill]').tap();
       await card(page).waitFor();
       await page.locator('[data-fcomp-mode="reply"]').tap();
-      /** The text's lines: the middles of its words' boxes, apart by more than a line's slack, count as another line. */
       const lines = (selector: string) =>
         card(page).locator(selector).evaluate((el) => {
           const middles: number[] = [];
@@ -403,7 +352,6 @@ for (const phone of PHONES) {
           }
           return 1 + Math.round((Math.max(...middles) - Math.min(...middles)) / 16);
         });
-      // The page's card has Comment and Reply, as an image's (a phone's tabs read the words alone): one line, inside the card.
       expect(await lines('.ib-fcomp-tabs')).toBe(1);
       const tabs = (await card(page).locator('.ib-fcomp-tabs').boundingBox())!;
       const box = (await card(page).boundingBox())!;
@@ -415,7 +363,6 @@ for (const phone of PHONES) {
       const sent = (await card(page).locator('[data-fcomp-sent]').boundingBox())!;
       const link = (await card(page).locator('[data-fcomp-open-thread]').boundingBox())!;
       expect(sent.x + sent.width).toBeLessThanOrEqual(link.x);
-      // The fit went with the chips: the link has its words.
       await expect(card(page).locator('[data-fcomp-foot]')).not.toHaveAttribute('data-fit', /.*/);
     });
 
@@ -443,7 +390,6 @@ for (const phone of PHONES) {
       await card(page).locator('[data-fcomp-field] textarea').fill('Words wait here.');
       await card(page).locator('[data-fcomp-minimize]').tap();
       await page.locator('[data-full-view-handle]').tap();
-      // The corner control brings the card back: this time the card's words fold into the pill of a fresh page.
       await page.goto('about:blank');
       await page.goto(fileUrl(t, 'page.html'));
       await page.locator('.ib-htmlframe iframe').waitFor();
@@ -471,7 +417,6 @@ for (const phone of PHONES) {
       }
     });
 
-    /** Writes in the card's Reply tab, when there are words to carry. */
     const openSheet = async (t: Thread, file: 'shot.png' | 'page.html', words: string | null) => {
       await page.goto('about:blank');
       await page.goto(fileUrl(t, file));
@@ -512,8 +457,6 @@ for (const phone of PHONES) {
       await page.locator('[data-full-view-foot]').getByRole('button', { name: 'Write the reply' }).tap();
       const box = page.locator('section.ib-pane textarea.ib-rtext');
       await expect(box).toBeFocused();
-      // The words scroll in the box's capped region (approval "inbox-reply-box", D1), not in the field: the region
-      // scrolls, and the field's end (the caret's line) is inside what it shows.
       const region = page.locator('section.ib-pane [data-reply-scroll]');
       await expect.poll(() => region.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
       await expect
@@ -554,7 +497,6 @@ for (const phone of PHONES) {
         await page.locator('[data-fcomp-pill]').waitFor();
         await page.locator('[data-full-view-hide]').tap();
         await page.locator('[data-full-view-handle]').waitFor();
-        // Past the flight out (340 ms).
         await page.waitForTimeout(600);
       };
       await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -562,7 +504,6 @@ for (const phone of PHONES) {
         for (const width of [390, 430]) {
           await away(width);
           await page.locator('[data-full-view-handle]').tap();
-          // Every frame of the flight back (360 ms) and past it.
           const raisedBy = await page.evaluate(
             () =>
               new Promise<number>((done) => {
@@ -577,10 +518,8 @@ for (const phone of PHONES) {
                 frame();
               }),
           );
-          // 14 px off the window's foot, on the row; raised, 74.
           expect(raisedBy, `${width} px`).toBeLessThan(40);
         }
-        // A phone turned while the tools were away: it lands above, not under the toolbar.
         await away(430);
         await page.setViewportSize({ width: 320, height: 700 });
         await page.locator('[data-full-view-handle]').tap();
@@ -626,7 +565,6 @@ for (const width of [500, 768, 900]) {
     await expect(page.locator('[data-step-guard]')).toHaveCount(0);
     await page.keyboard.press('Escape');
 
-    // The address may say beside the thread; this window still shows the file alone, so R closes it all the same.
     await page.goto('about:blank');
     await page.goto(fileUrl(thread, 'shot.png').replace('view=full', 'view=side'));
     await card(page).waitFor();

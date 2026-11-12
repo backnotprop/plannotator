@@ -1,14 +1,3 @@
-/**
- * The event log of an Inbox used for a few days, for tests/e2e/inbox-snooze-intro.spec.ts (run with bun, before the
- * Inbox starts):
- *
- *   bun tests/e2e/inbox-snooze-intro-seed.ts <data dir> <projects dir> <days ago>
- *
- * Four threads an agent asked in, `<days ago>` days back, each looked at by the person then (so each is read and left
- * that long): refund-window (billing-svc), release-notes (pando), old-flags (docs-site) and cache-rate (pando), written
- * a minute apart in that order. Prints `{ "<thread name>": "<thread id>" }`. Nothing else is written: the release
- * Inbox's first start rebuilds first use from this log (the backfill under test).
- */
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { InboxStore } from '../../packages/shared/inbox/store';

@@ -1,14 +1,3 @@
-/**
- * Happy-dom as a host for DOMPurify, for the chat folder's sanitizer tests. As it
- * stands happy-dom cannot host it, for two reasons, and both are bridged here: its
- * NodeIterator loses its place when the node under it goes, so here the walk is a
- * list taken up front; and `Node.prototype.nodeName`, which DOMPurify reads
- * directly, is blank there, so here it answers as a browser's does. The rest is
- * DOMPurify's own code, and if either bridge stops working the sanitizer fails its
- * proof and those tests fail.
- *
- * Call it inside `beforeAll`, and call what it returns in `afterAll`.
- */
 export function bridgeSanitizerDom(): () => void {
   const realNodeName = Object.getOwnPropertyDescriptor(Node.prototype, 'nodeName');
 

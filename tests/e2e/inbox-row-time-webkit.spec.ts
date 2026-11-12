@@ -1,16 +1,3 @@
-/**
- * A phone row's time stays on one line, in WebKit (an iPhone's engine) against
- * the compiled binary: "2:00 PM" with the clock of a thread back from a snooze
- * once wrapped to "PM" underneath while the project had room to give. Chromium
- * never wrapped it, so this spec runs in the `webkit` project only.
- *
- * Threads come back from a real snooze. The return's time is whatever the
- * snooze said, so the list's `last_at` is rewritten on its way to the page to
- * show the hard words ("12:00 PM", a date). Set PLANNOTATOR_ROW_TIME_SHOTS to a
- * folder for pictures, named with PLANNOTATOR_ROW_TIME_TAG. Build the binary first (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-row-time-webkit`.
- */
-
 import { devices, expect, test, type BrowserContext, type Browser, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
@@ -25,15 +12,14 @@ const shots = process.env.PLANNOTATOR_ROW_TIME_SHOTS ? resolve(process.env.PLANN
 const tag = process.env.PLANNOTATOR_ROW_TIME_TAG ?? 'row-time';
 
 const LONG_PROJECT = 'a-very-long-project-name-that-never-seems-to-end-at-all';
-const LINE = 17; // `.ib-m1 .ib-t`'s line height at every text size; a delivery tick's cell is a pixel taller, a wrap twice it.
-const ROW_PADDING = 16; // `.ib-mrow`'s padding on the right.
+const LINE = 17;
+const ROW_PADDING = 16;
 
 const today = (hours: number) => {
   const date = new Date();
   date.setHours(hours, 0, 0, 0);
   return date.toISOString();
 };
-/** A date in this year that is not today, so the row says "Nov 12". */
 const novemberDay = () => {
   const now = new Date();
   return new Date(now.getFullYear(), 10, now.getMonth() === 10 && now.getDate() === 12 ? 13 : 12, 9).toISOString();
@@ -97,7 +83,6 @@ test.beforeAll(async () => {
   back.set(rows.longDate!, novemberDay());
   back.set(rows.pinned!, today(14));
 
-  // A real return for each, then two rows with no clock: one read, one the person replied to (its delivery tick).
   const until = new Date(Date.now() + 3_000).toISOString();
   for (const id of back.keys()) await post(`/api/inbox/threads/${id}/snooze`, { until });
   await post(`/api/inbox/threads/${rows.pinned}/pin`, { pinned: true });
@@ -114,7 +99,6 @@ test.afterAll(async () => {
   }
 });
 
-/** The list as the server sends it, with each returned row's time set to the words under test. */
 function withBackTimes(value: unknown): void {
   if (Array.isArray(value)) return value.forEach(withBackTimes);
   if (!value || typeof value !== 'object') return;
@@ -144,7 +128,6 @@ async function openList(page: Page) {
   await page.evaluate(() => document.fonts.ready);
 }
 
-/** Line 1 of a row: the time's box, the row's, and the lead (project and agents) to its left. */
 async function lineOf(page: Page, id: string) {
   const row = page.locator(`.ib-lbody .ib-mrow[data-thread-id="${id}"]`);
   await row.scrollIntoViewIfNeeded();
@@ -190,7 +173,6 @@ test('every row, every look, 320 and 390, at the largest text size: the time is 
         for (const look of [[], ['compact'], ['titleFirst'], ['highlight', 'compact', 'hideAgents']]) {
           await post('/api/inbox/settings', { rows: look, text_size });
           await openList(page);
-          // The read row is in Quiet, folded by default.
           const quiet = page.locator('[data-section-id="quiet"] .ib-band');
           if ((await quiet.getAttribute('aria-expanded')) !== 'true') await quiet.click();
           for (const [name, id] of Object.entries(rows)) {

@@ -1,42 +1,18 @@
-/**
- * Writes the generated parts of the plannotator skill
- * (apps/skills/core/plannotator/SKILL.md) from their one source:
- *
- *   - Shape (packages/core/shape-skill.ts): the description phrase
- *     SHAPE_SKILL_DESCRIPTION_PHRASE, after "Guided Reviews,", and the section
- *     SHAPE_SKILL_SECTION, before "## Other subcommands". Both only while
- *     `shape` is released (not in HIDDEN_SUBCOMMANDS, apps/hook/server/cli.ts);
- *     while it is hidden they are taken out, so the skill names no unreleased
- *     command.
- *
- *   bun run gen:skills
- *
- * SKILL.md stays committed (the installers copy it from the release tag, and
- * Pi's vendor.sh and OpenCode's build:skill copy it from this folder).
- * apps/hook/server/plannotator-skill-reference.test.ts fails until you run this
- * after changing a source.
- */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { SHAPE_SKILL_DESCRIPTION_PHRASE, SHAPE_SKILL_SECTION } from "../packages/core/shape-skill";
 
 export const PLANNOTATOR_SKILL_MD = join(import.meta.dir, "..", "apps", "skills", "core", "plannotator", "SKILL.md");
 
-/** Where the description phrase goes: right after this. */
 const DESCRIPTION_ANCHOR = "Guided Reviews, ";
-/** Where the section goes: right before this heading. */
 const SECTION_ANCHOR = "## Other subcommands\n";
-/** The section's heading. An old copy is found by it, whatever its text, and replaced. */
 export const SHAPE_SECTION_HEADING = "## plannotator shape";
-/** An old copy of the phrase, whatever its words: "Shape boards (…), " right after the anchor: every copy, one after another or not. */
 const OLD_PHRASE = /(?<=Guided Reviews, )(?:Shape boards \([^)]*\), )+/g;
 
 export interface SkillSectionOptions {
-  /** `shape` is released (not in HIDDEN_SUBCOMMANDS). */
   shapeReleased: boolean;
 }
 
-/** The level-2 section that starts with `heading`, up to the next level-2 heading outside a code fence; null when absent. */
 export function skillSectionOf(doc: string, heading: string): { start: number; end: number } | null {
   const at = doc.indexOf(`\n${heading}\n`);
   if (at < 0) return null;
@@ -51,7 +27,6 @@ export function skillSectionOf(doc: string, heading: string): { start: number; e
   return { start, end: doc.length };
 }
 
-/** SKILL.md with its generated parts written from their sources. Pure; the same input gives the same output. */
 export function renderSkillSections(doc: string, options: SkillSectionOptions): string {
   const descriptionLine = doc.split("\n").find((line) => line.startsWith("description: "));
   if (!descriptionLine?.includes(DESCRIPTION_ANCHOR)) throw new Error(`SKILL.md's description has no "${DESCRIPTION_ANCHOR.trim()}" to put the Shape phrase after`);
@@ -60,7 +35,6 @@ export function renderSkillSections(doc: string, options: SkillSectionOptions): 
   if (!SHAPE_SKILL_SECTION.startsWith(`${SHAPE_SECTION_HEADING}\n`)) throw new Error(`SHAPE_SKILL_SECTION must start with "${SHAPE_SECTION_HEADING}"`);
   if (`${DESCRIPTION_ANCHOR}${SHAPE_SKILL_DESCRIPTION_PHRASE} `.replace(OLD_PHRASE, "") !== DESCRIPTION_ANCHOR) throw new Error("SHAPE_SKILL_DESCRIPTION_PHRASE no longer matches the pattern that removes an old copy");
 
-  // Take both out first, by heading and by shape, not by text: a run after a source change (or a release) replaces them.
   let out = doc.replace(OLD_PHRASE, "");
   const old = skillSectionOf(out, SHAPE_SECTION_HEADING);
   if (old) out = out.slice(0, old.start) + out.slice(old.end);

@@ -1,9 +1,3 @@
-/**
- * Droid's `/plannotator-inbox` is a script whose output the agent reads: the
- * address, the CLI's note, then the Inbox briefing. Failure caught: the
- * briefing (or the address) never printed, or a failed open reported as
- * success. Runs the real script against a stand-in `plannotator`.
- */
 import { describe, expect, test } from "bun:test";
 import { INBOX_BRIEFING_FROM_NOW_ON, INBOX_FOLLOW_THROUGH_RULE } from "../packages/shared/inbox/connection";
 import { runDroidInboxCommand } from "./helpers/droid-inbox-command";

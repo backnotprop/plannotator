@@ -1,9 +1,3 @@
-/**
- * Fake forge profile pictures for specs and harnesses: a loopback HTTP server that answers `/<login>.png` with a
- * GitHub-style identicon (a 5×5 mirrored grid in a colour from the login), so a fake gh / glab can give real-looking
- * `avatarUrl`s without anything reaching GitHub or GitLab. The Inbox fetches loopback http pictures only under the
- * test sandbox (`PLANNOTATOR_TEST_SANDBOX`, see `packages/server/inbox-pull-avatars.ts`).
- */
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createHash } from 'node:crypto';
@@ -31,11 +25,9 @@ function chunk(type: string, data: Uint8Array): Buffer {
   return Buffer.concat([head.subarray(0, 4), body, tail]);
 }
 
-/** A 60×60 PNG identicon for a login: the same login, the same picture. */
 export function identiconPng(login: string, size = 60): Buffer {
   const hash = createHash('sha256').update(login.toLowerCase()).digest();
   const hue = (hash[0]! / 255) * 360;
-  // HSL (hue, 55%, 55%) to RGB.
   const f = (n: number) => {
     const k = (n + hue / 30) % 12;
     const a = 0.55 * Math.min(0.55, 1 - 0.55);
@@ -68,16 +60,12 @@ export function identiconPng(login: string, size = 60): Buffer {
 }
 
 export interface FakeAvatars {
-  /** `http://127.0.0.1:<port>`. */
   origin: string;
-  /** A login's picture address. */
   url: (login: string) => string;
-  /** The paths asked, in order (the Inbox's fetches). */
   served: string[];
   close: () => Promise<void>;
 }
 
-/** Serves `/<login>.png` on a free loopback port; any other path is a 404. */
 export async function startFakeAvatars(): Promise<FakeAvatars> {
   const served: string[] = [];
   const server = createServer((req, res) => {

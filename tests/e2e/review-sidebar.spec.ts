@@ -1,25 +1,3 @@
-/**
- * Code review's left panel (approved design record "review-sidebar-aligned"),
- * proved in a real Chromium against the compiled binary, for what a DOM test
- * cannot show:
- *
- *  - the view tabs: Left and Right move focus between the tabs without
- *    switching the view, Enter and Space switch it, and focus stays on the
- *    chosen tab when the panel redraws for the new view;
- *  - a group heading folds and opens with Enter and Space, and says so
- *    (aria-expanded);
- *  - at the default 256 px, Changes | All files and the tools share one line
- *    in both scopes (All files live), so switching scope never moves the list;
- *  - the sticky tools block (Changes | All files, the tools, the progress)
- *    stays on top while the files scroll under it, with its hairline only
- *    while something is under it;
- *  - the +/- numbers end on the same two right edges on every row.
- *
- * Nothing is mocked: `plannotator review` runs in a scratch git repository
- * under a temp PLANNOTATOR_DATA_DIR and HOME, with a PATH of its own (no agent
- * CLI), and opens no browser. Build the binary first (see inbox.spec.ts).
- */
-
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -30,7 +8,6 @@ import { NO_BROWSER } from '../helpers/no-browser';
 const repoRoot = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repoRoot, '.local/plannotator'));
 
-/** The first-run dialogs a fresh browser would show, already answered. */
 const FIRST_RUN: Record<string, string> = {
   'plannotator-announce-agent-tool-seen': '1',
   'plannotator-announce-ask-session-seen': '1',
@@ -45,7 +22,6 @@ const FIRST_RUN: Record<string, string> = {
   'plannotator-token-hover-announcement-seen': '1',
 };
 
-/** The review server's own PATH: a link to git, then /usr/bin:/bin. Never the runner's PATH (see review-explorer.spec.ts). */
 function ownPath(root: string): string {
   const bin = join(root, 'bin');
   mkdirSync(bin, { recursive: true });
@@ -90,7 +66,6 @@ function write(root: string, path: string, content: string) {
   writeFileSync(join(root, path), content);
 }
 
-/** A branch off main that changes code in folders, tests and a lockfile. */
 function buildRepo(root: string): string {
   const repo = join(root, 'repo');
   mkdirSync(repo);
@@ -157,7 +132,6 @@ test('the view tabs: arrows move focus, Enter and Space switch, focus stays on t
     await tab(page, 'tree').focus();
     await page.keyboard.press('ArrowRight');
     expect(await focusedView(page)).toBe('sections');
-    // An arrow only moves focus: the view is still the tree.
     await expect(tab(page, 'tree')).toHaveAttribute('aria-selected', 'true');
     await page.keyboard.press('Enter');
     await expect(tab(page, 'sections')).toHaveAttribute('aria-selected', 'true');
@@ -204,7 +178,6 @@ test('at the default 256 px the scope and the tools share one line in both scope
     await expect(page.locator('[data-repo-listing-dot]')).toBeVisible();
     const all = await geometry();
     expect(all).toEqual(changes);
-    // The label is whole, not cut to fit.
     expect(await page.locator('[data-tree-scope="all"] .truncate').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   });
 });
@@ -214,20 +187,16 @@ test('the tools stay on top while the files scroll under them; the numbers keep 
     const block = page.locator('[data-review-sticky-tools]');
     await expect(block).not.toHaveAttribute('data-stuck', '');
     const before = await block.boundingBox();
-    // Scroll the panel's list.
     await page.locator('[data-review-sidebar] .file-tree-item').first().hover();
     await page.mouse.wheel(0, 400);
     await expect(block).toHaveAttribute('data-stuck', '');
     const after = await block.boundingBox();
     expect(after!.y).toBeLessThan(before!.y);
-    // Still on screen, at the top of the list, with its tools usable.
     await expect(page.locator('[data-tree-scope="all"]')).toBeInViewport();
     await expect(page.getByRole('button', { name: 'List options' })).toBeInViewport();
-    // The first files went under the block.
     const firstRow = await page.locator('[data-review-sidebar] .file-tree-item').first().boundingBox();
     expect(firstRow!.y).toBeLessThan(after!.y);
 
-    // Every + ends on one edge and every - on the next.
     const edges = await page.locator('[data-review-sidebar]').evaluate((aside) => {
       const right = (selector: string) =>
         [...new Set([...aside.querySelectorAll(selector)].map((el) => Math.round(el.getBoundingClientRect().right)))];

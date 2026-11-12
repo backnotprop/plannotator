@@ -1,27 +1,3 @@
-/**
- * Copy a message, copy a thread (design record "inbox-copy-message", option
- * B, approved 2026-10-28), in a real Chromium against the compiled binary,
- * with an agent writing through `plannotator inbox mcp` (scripts/inbox-sim.ts)
- * and the person's reply sent through the window:
- *
- *  - each open message's ⋯ is hidden at rest and shows while the pointer is on
- *    the message; Copy message puts the message's Markdown on the clipboard
- *    (read back here), with the toast;
- *  - Copy link to message copies `#thread=…&msg=…`, and that link opens the
- *    thread on that message, unfolded;
- *  - the header's ⋯ Copy thread copies every message (the question block as
- *    readable lines with the sent answer, the person's words only);
- *  - the keyboard: Tab reaches ⋯ (shown while focused), Enter opens, the
- *    arrows walk, Escape gives focus back; a right-click on the head line
- *    opens the same menu;
- *  - the list row's Copy thread;
- *  - a phone: ⋯ always shown, both menus the bottom sheet.
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * Screenshots, one PNG per state, land in /tmp/copy-menu-shots/ (or
- * PLANNOTATOR_COPY_MENU_SHOTS).
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
@@ -99,19 +75,16 @@ const threadMenu = (page: Page) => page.locator('[data-thread-menu]');
 const toast = (page: Page) => page.locator('[data-inbox-toast]');
 const clipboardText = (page: Page) => page.evaluate(() => navigator.clipboard.readText());
 
-/** A screenshot once the menu's and the toast's entrances have played. */
 async function shot(page: Page, name: string) {
   await page.waitForTimeout(450);
   await page.screenshot({ path: join(shots, name) });
 }
 
-/** The thread open, the pointer parked in a corner, the one-time notifications banner out of the way. */
 async function openThread(page: Page, hash = `#thread=${world.thread}`) {
   await page.goto(`${world.url}${hash}`);
   await expect(article(page, world.ids.last)).toBeVisible();
   const hide = page.getByRole('button', { name: 'Hide', exact: true });
   if (await hide.isVisible().catch(() => false)) await hide.click();
-  // The last test's toast is not part of this one's screenshots.
   const dismiss = page.locator('[data-toast-dismiss]');
   if (await dismiss.isVisible().catch(() => false)) await dismiss.click();
   await expect(toast(page)).toHaveCount(0);
@@ -138,7 +111,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const other = await agent.send({ project_path: docs, subject: 'Install page detects agents', thread: 'install', body: 'The install page now detects the installed agents.' });
   const ask = await agent.send({ project_path: billing, subject: 'Retry worker for Stripe 409s', thread: 'retry', body: ASK });
   const thread = ask.thread_id as string;
-  // The person answers through the window: the recommended pick and their words.
   await page.goto(`${url}#thread=${thread}`);
   await page.getByText(PICK, { exact: true }).first().click();
   const box = page.locator('.ib-rbox textarea').first();
@@ -178,7 +150,6 @@ test("a message's ⋯ shows on hover; Copy message copies its Markdown with the 
   await page.emulateMedia({ colorScheme: 'light' });
   await openThread(page);
   const button = more(page, ids.last);
-  // Quiet at rest: nothing new on screen while reading.
   await expect(button).toHaveCSS('opacity', '0');
   await article(page, ids.last).locator('.ib-body').first().hover({ position: { x: 200, y: 10 } });
   await expect(button).toHaveCSS('opacity', '1');
@@ -196,7 +167,6 @@ test("a message's ⋯ shows on hover; Copy message copies its Markdown with the 
 test('Copy link to message copies #thread=…&msg=…, and the link opens the thread on that message', async () => {
   const { page, ids, thread } = world;
   await openThread(page);
-  // The agent's first message: opened from its folded line when the thread shows it folded.
   const head = article(page, ids.ask).locator('[data-open-head]');
   if (!(await head.isVisible())) await article(page, ids.ask).locator('button').first().click();
   await expect(head).toBeVisible();
@@ -208,7 +178,6 @@ test('Copy link to message copies #thread=…&msg=…, and the link opens the th
   expect(link).toBe(`${new URL(world.url).origin}/#thread=${thread}&msg=${ids.ask}`);
   const landed = await world.context.newPage();
   await landed.goto(link);
-  // Landed: that message is open and holds focus (the search result's landing).
   await expect(article(landed, ids.ask).locator('[data-open-head]')).toBeVisible();
   await expect(article(landed, ids.ask)).toBeFocused();
   await landed.close();
@@ -219,8 +188,6 @@ test("the header's ⋯: Copy thread copies every message, the answer on its ques
   await openThread(page);
   await page.locator('[data-thread-more]').click();
   await expect(threadMenu(page)).toBeVisible();
-  // Off a phone Snooze is the header's clock (approval "inbox-thread-header"), not in this menu.
-  // The read action and Snooze lead the menu (the owner, 2026-11-11); the rest follows in this order.
   await expect(threadMenu(page).locator('[role="menuitem"]:not(:is([data-thread-read-item], [data-thread-move-back-item], [data-thread-unread-item], [data-thread-snooze-item], [data-thread-unsnooze-item]))')).toHaveText(['Star thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Add a pull request…', 'Export decisions', 'Request guided review', 'Archive thread']);
   await shot(page, 'desktop-light-thread-menu-open.png');
   await threadMenu(page).locator('[data-copy-item="thread"]').click();
@@ -247,14 +214,12 @@ test('the keyboard: Tab reaches ⋯ and shows it, Enter opens, the arrows walk, 
   await expect(button).toHaveCSS('opacity', '1');
   await page.keyboard.press('Enter');
   await expect(messageMenu(page)).toBeVisible();
-  // Opened from the keyboard: the first item has focus, then the arrows walk.
   await expect(messageMenu(page).locator('[data-copy-item="message"]')).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(messageMenu(page).locator('[data-copy-item="message-link"]')).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(messageMenu(page)).toHaveCount(0);
   await expect(button).toBeFocused();
-  // A right-click on the head line: the same items, at the pointer.
   await page.mouse.move(5, 895);
   const head = article(page, ids.last).locator('[data-open-head]');
   const box = (await head.boundingBox())!;
@@ -274,7 +239,6 @@ test("the list row's Copy thread copies a thread that is not open", async () => 
   await expect(toast(page)).toContainText('Thread copied');
   await expect(toast(page)).toContainText('1 message');
   expect(await clipboardText(page)).toContain('# Install page detects agents\n\ndocs-site · 1 message');
-  // The open thread is still the one open.
   expect(page.url()).toContain(`thread=${world.thread}`);
 });
 

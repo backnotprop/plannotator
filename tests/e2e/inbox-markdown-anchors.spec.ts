@@ -1,4 +1,3 @@
-/** Heading links scroll the attachment, without replacing the Inbox route (#2229). */
 import { expect, test } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -46,7 +45,6 @@ for (const layout of ['side', 'full', 'phone'] as const) {
       agent = await SimAgent.connect({ binary, env, name: 'Claude', host: 'claude-code' });
       const sent = await agent.send({
         project_path: project, subject: 'Review the guide',
-        // A matching heading in the thread must not shadow the attachment's target.
         body: '## Target section\n\nReview the attached guide.', attachments: ['guide.md'],
       });
       const model = await (await fetch(new URL(`/api/inbox/threads/${sent.thread_id}/attachments`, url))).json() as {

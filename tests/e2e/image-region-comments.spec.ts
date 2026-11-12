@@ -1,19 +1,3 @@
-/**
- * Comments on part of an image (#2100, approval "image-region-comments",
- * variant C), proved in Chromium against the compiled binary, in annotate and
- * in plan review: in the image viewer Region turns a drag into a box, the
- * comment box opens beside it, Save adds a comment whose box is drawn on the
- * image, Region stays on, Escape goes back to Move, the count opens a drawer
- * whose card zooms to the box, the comment lists in the document's panel,
- * survives a reload through the draft, and reaches the agent with the image as
- * written, its line, and the box in the image's own pixels. On a phone the
- * switch sits at the bottom and one finger draws.
- *
- * Every CLI runs under a temp PLANNOTATOR_DATA_DIR and HOME, opens no browser,
- * and is closed by this test. Screenshots go to PLANNOTATOR_IMAGE_REGION_SHOTS
- * when it is set. Build the binary first (see inbox.spec.ts), then
- * `bun run test:e2e:inbox`.
- */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -34,7 +18,6 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: join(shots, `${name}.png`) });
 }
 
-/** A status sheet like the approval's mock, 1832 × 726 CSS px rendered at 2×: 3664 × 1452 image pixels. */
 const SHEET = `<!doctype html><meta charset="utf-8"><style>
 body{margin:0;font:15px system-ui,sans-serif;background:#faf9f6;color:#18181b;padding:40px 56px}
 h1{margin:0 0 4px;font-size:30px}p{margin:0 0 30px;color:#52525b}
@@ -82,7 +65,6 @@ interface Session {
   close: () => Promise<void>;
 }
 
-/** A CLI session in a scratch folder: `annotate <doc>`, or plan review (`plannotator` reading a PermissionRequest on stdin). */
 async function start(kind: 'annotate' | 'plan', browser: Browser): Promise<Session & { root: string }> {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const root = inboxScratch('plannotator-image-regions-e2e-');
@@ -163,7 +145,6 @@ async function open(browser: Browser, url: string, options: Parameters<Browser['
   return { context, page };
 }
 
-/** The viewer's stage, and where an image pixel is on screen now. */
 async function stageGeometry(page: Page) {
   const img = page.locator('[data-image-lightbox] [data-lightbox-image]');
   await expect(img).toBeVisible();
@@ -173,7 +154,6 @@ async function stageGeometry(page: Page) {
   return { at: (x: number, y: number) => ({ x: box.x + x * scale, y: box.y + y * scale }), scale };
 }
 
-/** Drag a box over image pixels (x0, y0) to (x1, y1) with the mouse. */
 async function drawBox(page: Page, from: [number, number], to: [number, number], mid?: () => Promise<void>) {
   const { at } = await stageGeometry(page);
   const a = at(...from);
@@ -192,7 +172,6 @@ test('annotate: draw a box, comment, see it drawn and listed, zoom to it from th
     for (const scheme of ['light', 'dark'] as const) {
       const { context, page } = await open(browser, session.url, { colorScheme: scheme });
       if (scheme === 'dark') {
-        // The draft from the light run comes back: restore it.
         await page.getByRole('button', { name: 'Restore' }).click();
       }
       await page.locator('article img.cursor-zoom-in').click();
@@ -202,7 +181,6 @@ test('annotate: draw a box, comment, see it drawn and listed, zoom to it from th
       const move = viewer.getByRole('radio', { name: 'Move' });
       await expect(viewer.getByRole('radiogroup', { name: 'Image tool' })).toBeVisible();
       await expect(move).toHaveAttribute('aria-checked', 'true');
-      // The radio group moves with the arrows, as a segmented control.
       await move.focus();
       await page.keyboard.press('ArrowRight');
       await expect(region).toHaveAttribute('aria-checked', 'true');
@@ -210,7 +188,6 @@ test('annotate: draw a box, comment, see it drawn and listed, zoom to it from th
 
       const before = scheme === 'light' ? 0 : 1;
       await expect(viewer.locator('[data-region-count]')).toHaveText(String(before));
-      // Light: the "paused" chip; dark: the Legend (image pixels at 2×).
       const target: [[number, number], [number, number]] = scheme === 'light' ? [[1240, 300], [1660, 470]] : [[2380, 290], [2750, 730]];
       await drawBox(page, target[0], target[1], async () => {
         await expect(viewer.locator('[data-region-draft]')).toBeVisible();
@@ -220,22 +197,18 @@ test('annotate: draw a box, comment, see it drawn and listed, zoom to it from th
       const composer = page.locator('[data-comment-popover]');
       await expect(composer).toBeVisible();
       await expect(composer).toContainText(`Region ${before + 1} · `);
-      // Beside the box, not over it.
       const pendingBox = (await viewer.locator('[data-region-pending]').boundingBox())!;
       const composerBox = (await composer.boundingBox())!;
       expect(composerBox.x >= pendingBox.x + pendingBox.width || composerBox.x + composerBox.width <= pendingBox.x).toBe(true);
       const text = scheme === 'light' ? 'The paused chip should be grey, not orange.' : 'The legend still lists Blocked; we removed that state in v2.0.';
       await composer.locator('textarea').fill(text);
       await shot(page, `desk-composer-${scheme}`);
-      // The draft autosave is debounced: wait for it to land, so the next
-      // session's Restore finds it (it is not flushed when the page closes).
       const draftSaved = page.waitForResponse((r) => r.url().endsWith('/api/draft') && r.request().method() === 'POST' && r.ok() && (r.request().postData() ?? '').includes(text));
       await composer.getByRole('button', { name: 'Save' }).click();
       await draftSaved;
       await expect(composer).toBeHidden();
       await expect(viewer.locator('[data-region-count]')).toHaveText(String(before + 1));
       await expect(viewer.locator('[data-region-box]')).toHaveCount(before + 1);
-      // Region stays on; Escape goes back to Move and leaves the viewer open.
       await expect(region).toHaveAttribute('aria-checked', 'true');
       await viewer.locator('[data-lightbox-stage]').focus();
       await page.keyboard.press('Escape');
@@ -243,7 +216,6 @@ test('annotate: draw a box, comment, see it drawn and listed, zoom to it from th
       await expect(viewer).toBeVisible();
       await shot(page, `desk-saved-${scheme}`);
 
-      // The count opens the drawer; a card zooms to its box and rings it.
       await viewer.locator('[data-region-count]').click();
       const drawer = viewer.locator('[data-region-drawer]');
       await expect(drawer).toBeVisible();
@@ -256,20 +228,17 @@ test('annotate: draw a box, comment, see it drawn and listed, zoom to it from th
       await expect(viewer.locator('[data-region-selected]')).toHaveCount(1);
       await expect.poll(() => viewer.locator('[data-lightbox-zoom]').textContent()).not.toBe(zoomBefore);
       await shot(page, `desk-drawer-${scheme}`);
-      // Escape from the drawer closes it, then the viewer.
       await card.focus();
       await page.keyboard.press('Escape');
       await expect(drawer).toBeHidden();
       await page.keyboard.press('Escape');
       await expect(viewer).toBeHidden();
 
-      // Listed in the document's panel like any comment, with the region's details.
       const panelCard = page.locator('[data-annotation-panel] [data-annotation-region]');
       await expect(panelCard).toHaveCount(before + 1);
       await context.close();
     }
 
-    // What the agent receives: the export modal's annotations tab.
     const { context, page } = await open(browser, session.url);
     await page.getByRole('button', { name: 'Restore' }).click();
     await page.getByRole('button', { name: 'Options' }).click();
@@ -324,15 +293,12 @@ test('phone: the switch sits at the bottom, one finger draws, the composer and t
       await expect(strip).toBeVisible();
       const stripBox = (await strip.boundingBox())!;
       const stageBox = (await viewer.locator('[data-lightbox-stage]').boundingBox())!;
-      // At the bottom of the stage, in thumb reach.
       expect(stripBox.y).toBeGreaterThan(stageBox.y + stageBox.height / 2);
       await viewer.getByRole('radio', { name: 'Region' }).tap();
       await expect(viewer.locator('[data-region-hint]')).toHaveText('One finger draws · two fingers move the image');
-      // In Region a tap beside the image does not close the viewer (in Move it does, #2067).
       await page.touchscreen.tap(stageBox.x + stageBox.width / 2, stageBox.y + 90);
       await page.waitForTimeout(400);
       await expect(viewer).toBeVisible();
-      // One finger, through the DevTools protocol (a real touch, pointerType "touch").
       const { at } = await stageGeometry(page);
       const a = at(scheme === 'light' ? 1240 : 2400, 300);
       const b = at(scheme === 'light' ? 1700 : 3000, 900);

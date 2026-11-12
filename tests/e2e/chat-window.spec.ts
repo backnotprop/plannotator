@@ -1,11 +1,3 @@
-/**
- * The shared chat window (packages/ui/components/chat) in a real browser, with
- * a real DOMPurify and V8's stack, which the DOM lanes cannot give. No app hosts
- * the window yet, so this bundles the package's own files into a bare page with
- * a host button and a host stylesheet. Text in either role is hostile here:
- * nothing it writes may run, load, reach the host's page or stop the host's
- * React root. No binary is needed.
- */
 import { expect, test, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -58,7 +50,6 @@ test.afterAll(() => {
   if (work) rmSync(work, { recursive: true, force: true });
 });
 
-/** A bare host. Its stylesheet has what agent text would reach for if a class got through. */
 async function open(page: Page) {
   const seen = { requests: [] as string[], errors: [] as string[], dialogs: 0 };
   page.on('pageerror', (error) => seen.errors.push(error.message));
@@ -82,7 +73,6 @@ const say = (id: string, role: string, text: string, state?: 'streaming' | 'done
   parts: [{ type: 'text', text, state }],
 });
 
-/** Draw, and lay it out: most of what a huge DOM costs comes after the commit. */
 const show = (page: Page, messages: unknown[], status = 'ready') =>
   page.evaluate(([next, nextStatus]) => {
     const started = performance.now();
@@ -130,9 +120,6 @@ test('hostile text in either role comes out inert', async ({ page }) => {
   expect(seen).toMatchObject({ requests: [], errors: [], dialogs: 0 });
 });
 
-// The DOM lanes walk a list, not a real NodeIterator, so what the sanitizer's hook
-// does to a node mid-walk is only proved here. A hook that broke the walk would
-// fail the rich proof, and then nothing below would draw.
 test('with richMarkdown what Workspaces draws draws, and hostile text is still inert', async ({ page }) => {
   const seen = await open(page);
   await page.route('https://evil.test/**', (route) => route.abort());
@@ -189,9 +176,6 @@ test('with richMarkdown what Workspaces draws draws, and hostile text is still i
   });
   expect(found.pwned).toBeUndefined();
   expect(found.tags.filter((tag) => /script|iframe|form|button|style|svg/.test(tag))).toEqual([]);
-  // `loading` is not in the sanitizer's allowlist, so a model's own is dropped. The
-  // sanitizer's hook then writes `loading="lazy"` on every image it keeps
-  // (`loadWhenNear` in chatMarkdown.ts), which is why it is the only value here.
   expect(found.attributes.filter((name) => !['href', 'target', 'rel', 'align', 'title', 'start', 'src', 'alt', 'width', 'height', 'type', 'checked', 'disabled', 'loading'].includes(name))).toEqual([]);
   expect(found.loading).toEqual(['img:lazy']);
   expect([...new Set(found.inputs)]).toEqual(['checkbox:true']);
@@ -204,10 +188,8 @@ test('with richMarkdown what Workspaces draws draws, and hostile text is still i
 test.describe('with richMarkdown, images', () => {
   const TALL = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="900"></svg>';
   const PANE = '[aria-label="Conversation"]';
-  /** The bare host has no Tailwind: the pane's scrolling, and the image rule preflight gives every real host. */
   const looks = `${PANE} { overflow-y: auto; height: 200px; display: flex; flex-direction: column } img { display: block; max-width: 100%; height: auto }`;
 
-  /** One tall image that arrives only when the test says so. */
   async function holdAnImage(page: Page) {
     let arrive = () => {};
     const arrival = new Promise<void>((resolve) => { arrive = resolve; });
@@ -243,7 +225,6 @@ test.describe('with richMarkdown, images', () => {
     await page.evaluate(() => (window as any).__chat.rich());
     await show(page, [say('a', 'assistant', 'First.\n\n![x](https://images.test/tall.svg)\n\nThe last line.')]);
 
-    // Scrolled up, with the image on screen: it grows below the line the person is reading.
     await page.locator(PANE).evaluate(async (pane) => {
       pane.scrollTop = 300;
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -270,7 +251,6 @@ test.describe('with richMarkdown, images', () => {
       await show(page, [say('a', 'assistant', Array.from({ length: 500 }, (_, at) => write(at)).join(' '))]);
       await expect(page.locator(`${PANE} img`)).toHaveCount(100);
 
-      // Past the limit there is no element to come near, so scrolling all the way adds none.
       await page.locator(PANE).evaluate(async (pane) => {
         for (let top = 0; top <= pane.scrollHeight; top += 150) {
           pane.scrollTop = top;
@@ -402,7 +382,6 @@ test.describe('text that would stop the page', () => {
     ['unknown tags', `<div>${'<x>'.repeat(80_000)}`],
     ['nested tables', `<div>${'<table><tr><td>'.repeat(15_000)}`],
     ['svg titles', `<div>${'<svg><title>'.repeat(18_000)}`],
-    // A tag `marked` cannot read is text to it, and a real tag to a browser.
     ['unreadable tags after an inline tag, 22 KB', `x <code>${unreadable(300)}${'<p !>x'.repeat(3_000)}`],
     ['unreadable tags after an inline tag, 74 KB', `x <kbd>${unreadable(1_000)}${'<p !>x'.repeat(10_000)}`],
     ['unreadable links over paragraphs', `x <code>\n\n${`${'<a href=x !><div !>'.repeat(1_000)}\n\n`.repeat(11)}`],
@@ -413,7 +392,6 @@ test.describe('text that would stop the page', () => {
       await open(page);
       const took = await show(page, [say('a', 'assistant', text), say('b', 'user', 'still here')]);
       expect(took).toBeLessThan(1_000);
-      // Text with no spaces gets a <wbr> every so often. Those are ours, not the source's.
       expect(await page.locator('[data-text-part] *:not(wbr)').count()).toBeLessThan(20);
       await expect(page.locator('[data-chat-window]')).toContainText('still here');
     });
@@ -432,7 +410,6 @@ test.describe('text that would stop the page', () => {
     test(`${name} draws in a bounded time, with its words`, async ({ page }) => {
       await open(page);
       const took = await show(page, [say('a', 'assistant', text), say('b', 'user', 'still here')]);
-      // Plain text stays linear: a megabyte of it costs four times these, and a CI runner is slower.
       expect(took).toBeLessThan(text.length < 300_000 ? 3_000 : 10_000);
       await expect(page.locator('[data-text-part]').first()).toContainText(text.slice(8, 40));
       await expect(page.locator('[data-chat-window]')).toContainText('still here');
@@ -453,7 +430,6 @@ test.describe('a stream', () => {
 
   const square = (side: number) =>
     `|${' a |'.repeat(side)}\n|${' - |'.repeat(side)}\n${`|${' b |'.repeat(side)}\n`.repeat(side)}`;
-  // The last says how it ends: a table of 300 by 300 is past the limit for good.
   const costly: [string, string, string, number][] = [
     ['a very wide table', `${'|a'.repeat(33_000)}\n${'|-'.repeat(33_000)}\n`, 'th', 33_000],
     ['a table of 200 by 200', square(200), 'tbody tr', 200],

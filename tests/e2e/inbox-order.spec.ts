@@ -1,18 +1,3 @@
-/**
- * The list's order inside a section (owner ruling 2026-10-08): newest first,
- * by the thread's latest message, in every section. Proved in a real browser
- * against the compiled binary: three agents (Pi, then OpenCode, then Claude
- * Code) each ask a question through `plannotator inbox mcp` with the MCP
- * SDK's stdio client (scripts/inbox-sim.ts), and "Waiting on you" reads
- * Claude Code, OpenCode, Pi. A reply to Pi's question moves its row to Sent
- * once the person leaves the thread;
- * a newer agent message waits behind "N new" and, once shown, sits at the top
- * of its section.
- *
- * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * PNGs light and dark at 1440 by 900 land in .local/proof/order/.
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
@@ -52,7 +37,6 @@ async function shot(name: string): Promise<void> {
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 }
 
-/** A section's thread ids, top to bottom. */
 async function sectionOrder(page: Page, section: string): Promise<string[]> {
   return page
     .locator(`[data-section-id="${section}"] [data-thread-id]`)
@@ -82,7 +66,6 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const pi = await SimAgent.connect({ binary, env, name: 'Pi', host: 'pi' });
   const opencode = await SimAgent.connect({ binary, env, name: 'OpenCode', host: 'opencode' });
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
-  // In order A, B, C, a few ms apart so each has its own time.
   const a = await pi.send({ project_path: ledger, subject: 'Keep the CSV header row?', body: question('Keep the CSV header row?') });
   await new Promise((r) => setTimeout(r, 20));
   const b = await opencode.send({ project_path: ledger, subject: 'Ship the export behind a flag?', body: question('Ship the export behind a flag?') });
@@ -108,7 +91,6 @@ test.afterAll(async () => {
     await Promise.all(world.agents.map((a) => a.close().catch(() => {})));
     await world.context.close();
   } finally {
-    // Every Inbox this spec started, then its folders (inbox-scratch.ts).
     await removeInboxScratch();
   }
 });
@@ -132,10 +114,8 @@ test("a reply to A moves A to Sent; Waiting keeps C, B", async () => {
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
   const row = page.locator(`.ib-lbody [data-thread-id="${threads.pi}"]`);
   await expect(row).toHaveAttribute('data-section', 'sent');
-  // Its own subject, and the delivery glyph before the time says where the reply is (approval "inbox-row-delivery").
   await expect(row.locator('.ib-title')).toHaveText('Keep the CSV header row?');
   await expect(row.locator('.ib-tick')).toHaveAttribute('aria-label', 'Saved for Pi,');
-  // While the thread is open the person's own Send does not reorder the list (owner ruling 2026-10-11).
   expect(await sectionOrder(page, 'waiting')).toEqual([threads.claude, threads.opencode, threads.pi]);
   await page.keyboard.press('Escape');
   await expect(pane).toHaveCount(0);
@@ -149,7 +129,6 @@ test('a newer agent message waits behind "N new"; shown, its row is first in its
   const [, opencode] = world.agents;
   const before = await sectionOrder(page, 'waiting');
   await opencode!.send({ project_path: world.ledger, reply_to: world.opencodeMessage, body: question('Also gzip the file?') });
-  // The held rule (PR 1772): the order on screen waits for an action.
   await expect(page.locator('[data-inbox-notice]')).toContainText('1 new in ledger');
   expect(await sectionOrder(page, 'waiting')).toEqual(before);
   await page.locator('[data-inbox-notice]').click();

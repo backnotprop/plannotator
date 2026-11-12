@@ -1,13 +1,3 @@
-/**
- * A test's Inbox or review server never runs on the runner's real home. A temp
- * PLANNOTATOR_DATA_DIR and the sandbox flag do not move `~/.agents/skills` or the
- * `inbox mcp` shim's read of `~/.env` (the server's own Qwen reads are sandboxed).
- * No HOME, or an empty one, counts as real: `os.homedir()` then falls back to the
- * account's home.
- *
- * Nothing here starts a server on a real home: the refusal is the first thing
- * each start does, and it is proved on its own before the starts are tried.
- */
 import { afterEach, describe, expect, mock, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
@@ -24,7 +14,6 @@ import { accountHome, isScratchDataDir } from "./helpers/real-data-dir";
 const account = accountHome()!;
 const flag = { PLANNOTATOR_TEST_SANDBOX: "1" };
 
-/** These tests empty HOME and call a real start: without the preload's flag nothing would refuse it. */
 function requireSandbox(): void {
   if (!process.env.PLANNOTATOR_TEST_SANDBOX) throw new Error("run this from a folder with the bunfig preload: it needs PLANNOTATOR_TEST_SANDBOX");
 }
@@ -91,7 +80,6 @@ describe("the refusal under the sandbox flag", () => {
 
     test("inbox mcp refuses before the shim runs", async () => {
       requireSandbox();
-      // No child and no real shim: without the guard this reaches the stub and then "exit 0".
       const shimPath = "../apps/hook/server/inbox-mcp-shim";
       const realShim = { ...(await import(shimPath)) };
       let shimCalls = 0;
@@ -107,7 +95,6 @@ describe("the refusal under the sandbox flag", () => {
         expect(shimCalls).toBe(0);
       } finally {
         process.exit = realExit;
-        // Bun runs every test file in one process: the next file gets the real shim back.
         mock.module(shimPath, () => realShim);
       }
     });
@@ -116,7 +103,6 @@ describe("the refusal under the sandbox flag", () => {
 
 describe("refuseRealHome", () => {
   test("SimAgent.connect refuses a real or missing HOME without the sandbox flag", async () => {
-    // A program that is not Plannotator: even without the guard, no Inbox could start here.
     const options = { binary: "/usr/bin/false", name: "x", host: "x" };
     const env = { PATH: "/usr/bin:/bin", PLANNOTATOR_DATA_DIR: process.env.PLANNOTATOR_DATA_DIR! };
     await expect(SimAgent.connect({ ...options, env })).rejects.toThrow("HOME must be a scratch folder");

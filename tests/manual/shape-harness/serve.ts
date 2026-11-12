@@ -1,6 +1,3 @@
-// Serves the Shape dev harness: `bun tests/manual/shape-harness/serve.ts [port]`.
-// Vite and the Tailwind plugin come from packages/ui's own install; the
-// harness is no workspace, so no shipped bundle includes it.
 import os from 'node:os';
 import path from 'node:path';
 

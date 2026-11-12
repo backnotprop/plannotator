@@ -1,69 +1,4 @@
 #!/usr/bin/env bun
-// Manual QA: runs with your real HOME on purpose (the real Claude Code login), with a scratch data dir. For an isolated test run, use `bun run test:sandbox`.
-/**
- * Ask AI against a REAL Claude Code session, with this script as the Inbox
- * window. The first real agent test of Ask AI (step 3 of the build plan). It
- * needs an interactive Claude Code 2.1.287+ session: `claude -p` runs no mod,
- * so nothing would ever answer. It logs how long a first question took, and
- * exits 1 when `--expect` is not what happened.
- *
- * One sandbox, from the repo root, for every run below:
- *
- *   export SBX=$(mktemp -d /tmp/plannotator-ask-real.XXXXXX)
- *   export PLANNOTATOR_DATA_DIR=$SBX/data
- *   export PLANNOTATOR_BROWSER=/usr/bin/true
- *   export PLANNOTATOR_INBOX_CONNECT=0
- *   export PLANNOTATOR_UPDATE_CHECK=0
- *   bun run --cwd apps/review build && bun run build:hook && bun run build:opencode
- *   mkdir -p "$SBX/bin" "$SBX/project"
- *   bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig \
- *     --define '__CLI_VERSION__="0.0.0-dev"' --outfile "$SBX/bin/plannotator"
- *   export PATH="$SBX/bin:$PATH"
- *   plannotator inbox --background
- *
- * Then, from "$SBX/project", with those variables set, in a terminal you can
- * type into (the session's own PLANNOTATOR_DATA_DIR is what ties it to this
- * Inbox; a marketplace copy of the plugin in the same session would also poll):
- *
- *   claude --plugin-dir <repo>/apps/hook
- *   > Send one short message to the Plannotator Inbox saying hello.
- *
- * Each case runs from the repo root, with the same variables set. The sandbox's
- * one thread is found by itself; with more, pass `--thread <id>`.
- *
- *   first question, session idle
- *     bun tests/manual/inbox-ask-claude.ts --expect answered
- *     Claude Code answers in the session as a plugin turn, in plain text, and
- *     does not call the Inbox tool. `first_question_ms` is the delay to report.
- *
- *   busy: first tell Claude "Run sleep 60 in the shell", and while that runs:
- *     bun tests/manual/inbox-ask-claude.ts --expect agent_busy
- *     bun tests/manual/inbox-ask-claude.ts --retry-busy --expect answered
- *     Nothing enters the running turn. The second run asks once a second, and
- *     should go in within a second or two of the turn ending.
- *
- *   take-over: ask something long, and type into the session while it answers:
- *     bun tests/manual/inbox-ask-claude.ts --question "Explain this project's README line by line." --expect taken_over
- *     The words so far are saved. Your message runs. Nothing is sent twice.
- *
- *   gone: the same question, and quit Claude Code (/exit) while it answers:
- *     bun tests/manual/inbox-ask-claude.ts --question "Explain this project's README line by line." --expect gone
- *     Ends in a few seconds with the words so far, or at about 30 s if the
- *     process stopped hard. Start the session again with `claude --continue`.
- *
- *   two processes: `claude --continue` in a second terminal (same variables),
- *   and type one short message there so the lease moves to it. Wait 25 s: the
- *   first process reads the lease every 5 s, and a client left from an earlier
- *   case can sit in a poll for 15 s more. Then:
- *     bun tests/manual/inbox-ask-claude.ts --expect answered
- *     The question runs in the second terminal. Asked sooner, it can run in the
- *     first terminal (the first 5 s), or end `gone` with nothing submitted, and
- *     a retry reaches the second.
- *     Then ask a long question, and while the terminal answering it runs, type
- *     into the other one: the answer still ends and is saved.
- *
- * Afterwards: `plannotator inbox stop`, quit Claude Code, `rm -rf "$SBX"`.
- */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
@@ -71,7 +6,6 @@ import { parseInboxRegistry } from "../../packages/shared/inbox/connection";
 import { aiSession, fromWindow, postAsk, readAsk, runQuery, type AskAnswer } from "../helpers/inbox-ask-window";
 import { refuseRealDataDir } from "../helpers/real-data-dir";
 
-/** The owner's own Inbox and trials: never asked, whatever the registry says. */
 const OFF_LIMITS_PORTS: readonly number[] = [59812, 59830, 8787];
 
 const { values } = parseArgs({
@@ -97,7 +31,6 @@ function target() {
   return registry;
 }
 
-/** The thread ids anywhere in the list the window reads. */
 function threadIds(value: unknown, found = new Set<string>()): Set<string> {
   if (Array.isArray(value)) for (const item of value) threadIds(item, found);
   else if (value && typeof value === "object") {
@@ -128,7 +61,6 @@ let firstWordMs: number | null = null;
 while (true) {
   const posted = await postAsk(inbox, threadId, turnId, question);
   console.log(`POST /ask ${posted.status} at ${elapsed()} ms`);
-  // An Inbox from before Ask AI was on for everyone, with its switch off.
   if (posted.status === 404) {
     outcome = "off";
     break;
@@ -138,7 +70,6 @@ while (true) {
     outcome = body.code ?? body.reason ?? `http_${posted.status}`;
     break;
   }
-  // What a person waits through: the agent told, connected, and its first status in.
   firstQuestionMs ??= elapsed();
   const query = runQuery(inbox, await aiSession(inbox, body.provider_id, threadId, "Real Claude Code"), question);
   const words = setInterval(() => {

@@ -1,17 +1,3 @@
-/**
- * Raw HTML printed through the viewer's bridge (`window.print()` inside the
- * frame) carries `injectPrintDefaults`. Proved in Chromium by printing each
- * document to PDF and counting its sheets:
- *  - An app-shell page (`html, body { height: 100vh; overflow: hidden }`) is
- *    not cut off at one sheet: the no-clip rule wins over unlayered author CSS.
- *  - A page with the host-theme marker (Plannotator's own explainers) starts
- *    each of its 8 sections on a new sheet.
- *  - An unmarked page of 30 short sections is not printed one per sheet.
- *  - An unmarked page with a <pre> and a <table> crossing a page prints on as
- *    many sheets as the raw page (keep-together hints are for marked pages).
- *
- * Needs no build: `bunx playwright test -c tests/e2e/playwright.config.ts html-print-defaults.spec.ts`.
- */
 import { expect, test, type Page } from '@playwright/test';
 import { injectPrintDefaults, hasHostThemeOptIn } from '../../packages/ui/components/html-viewer/srcdoc';
 
@@ -30,7 +16,6 @@ const FAQ = `<!doctype html><html><head><title>FAQ</title></head><body>${
   Array.from({ length: 30 }, (_, i) => `<section><h3>Question ${i + 1}?</h3><p>Short answer ${i + 1}.</p></section>`).join('')
 }</body></html>`;
 
-/** What the viewer frames: the document with its print defaults, sections broken only when marked. */
 const framed = (html: string) => injectPrintDefaults(html, { sectionBreaks: hasHostThemeOptIn(html) });
 
 async function sheets(page: Page, html: string): Promise<number> {
@@ -52,10 +37,6 @@ test('an unmarked page of 30 short sections is not printed one per sheet', async
   expect(await sheets(page, framed(FAQ))).toBeLessThan(5);
 });
 
-// An unmarked page prints as it would from a browser tab: a <pre> that
-// crosses a page boundary is split there, not pushed whole onto the next
-// sheet (which turned 2 sheets into 3). The <table> follows the <pre> and only
-// has to stay present; it is not what crosses the page.
 const CROSSING = `<!doctype html><html><head><title>Report</title></head><body>${
   Array.from({ length: 8 }, (_, i) => para(i)).join('')
 }<pre>${Array.from({ length: 60 }, (_, i) => `line ${i + 1}`).join('\n')}</pre><table>${

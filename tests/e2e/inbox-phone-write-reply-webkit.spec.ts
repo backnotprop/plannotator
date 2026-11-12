@@ -1,9 +1,3 @@
-/**
- * "Write the reply" in a phone's Comments sheet, in iPhone WebKit against the
- * compiled binary: the file closes, the thread's reply box takes focus, and the
- * words typed in the file's card are still there. It used to leave full screen
- * in the address only, so nothing moved on screen.
- */
 import { expect, test, devices } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -14,7 +8,6 @@ import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scrat
 
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(__dirname, '../../.local/plannotator'));
 const { defaultBrowserType: _webkit, ...iphone } = devices['iPhone 15'];
-// A real 1x1 PNG.
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
 
 test('Write the reply closes the file on a phone and keeps the typed words: HTML, image, Markdown', async ({ browser }) => {
@@ -61,7 +54,6 @@ test('Write the reply closes the file on a phone and keeps the typed words: HTML
       const pane = page.locator('[data-attachment-pane]');
       await expect(pane).toHaveAttribute('data-full-view', '');
       await page.waitForTimeout(500);
-      // Markdown has no card: the words from the file before it are the draft.
       if (name !== 'plan.md') {
         const pill = page.locator('[data-fcomp-pill]');
         if (await pill.isVisible()) await pill.tap();

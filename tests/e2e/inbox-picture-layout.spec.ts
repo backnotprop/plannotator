@@ -1,32 +1,3 @@
-/**
- * How a question's picture choices are laid out (approval
- * "picture-choices-layout", Adaptive), proved in Chromium against the compiled
- * binary: a Claude Code agent asks through `plannotator inbox mcp`
- * (scripts/inbox-sim.ts) with real PNGs of known sizes beside the project, and
- * the Inbox records each picture's size when the message is sent.
- *
- * What regresses if this fails:
- * - the card moves when its pictures load (every picture is held back 1.5 s:
- *   the tiles' boxes and the card's height are the same before and after);
- * - two wide pictures stop sharing the width, or a phone screenshot set stops
- *   getting narrow columns (three across in a 726 px card, two in a 390 px
- *   window, one in a 320 px one);
- * - two choices where one has no picture stop going to Rows, or in a
- *   right-to-left page its zoom button leaves the picture; three pictures and
- *   a choice without one (the tour's picture step) leave columns, or the bare
- *   choice draws a picture-tall empty box;
- * - three choices with pictures of mixed shapes go Rows;
- * - a recorded picture that fails to load re-lays out its set;
- * - phone screenshots stop going one a row under a 360 px window, or a long
- *   strip is drawn too thin to see, under the zoom button;
- * - one choice stops taking the full width, a small icon is blown up past
- *   its own size, or a picture that failed to load stops saying so;
- * - a panorama set stops taking the full width.
- *
- * Build the binary first (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-picture-layout.spec.ts`.
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -112,7 +83,6 @@ test.afterAll(async () => {
 interface Box { x: number; y: number; w: number; h: number }
 interface Layout { card: number; room: number; tiles: { tile: Box; picture: Box | null; img: Box | null; caption: Box; zoom: Box | null; natural: number }[]; loaded: number }
 
-/** The open card's tiles, the room their grid has, and how many pictures have loaded. */
 function layout(p: Page): Promise<Layout> {
   return p.evaluate(() => {
     const box = (el: Element | null) => {
@@ -166,7 +136,6 @@ test('nothing moves when the pictures load: two wide pictures share the width, b
     const after = await loaded(2);
     expect(after.card).toBe(before.card);
     expect(after.tiles.map((t) => [t.tile, t.picture])).toEqual(before.tiles.map((t) => [t.tile, t.picture]));
-    // Halves, side by side, the picture at its own shape (1200 x 500, not the 16:10 box a picture of unknown size gets).
     expect(rows(after)).toEqual([2]);
     expect(after.tiles[0]!.tile.w).toBeGreaterThan(after.room * 0.45);
     const img = after.tiles[0]!.img!;
@@ -182,7 +151,6 @@ test('phone screenshots: narrow columns, three across in a 726 px card, two in a
   let l = await loaded(6);
   expect(rows(l)).toEqual([3, 3]);
   expect(Math.max(...l.tiles.map((t) => t.tile.w))).toBeLessThanOrEqual(320);
-  // Two across from a 360 px window; one a row below it.
   for (const width of [390, 360]) {
     await page.setViewportSize({ width, height: 1000 });
     await page.waitForTimeout(300);
@@ -212,7 +180,6 @@ test('a choice without a picture: Rows, the picture at the start; right to left,
     if (dir === 'ltr') expect(picture!.x + picture!.w).toBeLessThanOrEqual(caption.x + 1);
     else expect(caption.x + caption.w).toBeLessThanOrEqual(picture!.x + 1);
     expect(inside(zoom!, picture!)).toBe(true);
-    // At the picture's top corner on the words' side, never in its middle.
     const gap = dir === 'ltr' ? picture!.x + picture!.w - (zoom!.x + zoom!.w) : zoom!.x - picture!.x;
     expect(gap).toBeLessThanOrEqual(12);
     expect(zoom!.y - picture!.y).toBeLessThanOrEqual(12);
@@ -240,13 +207,11 @@ test('a small icon is never drawn past its own size; a picture that did not load
   await expect(failed).toHaveCount(1);
   expect((await failed.boundingBox())!.height).toBeGreaterThanOrEqual(120);
   expect(await failed.evaluate((el) => getComputedStyle(el, '::before').content)).toContain('Picture didn’t load');
-  // The words stay out of the choice's name.
   const card = page.locator('section.ib-pane fieldset.question-block');
   await expect(card.getByRole('radio', { name: /B · Gone/ })).toHaveCount(1);
   await expect(card.getByRole('radio', { name: /Picture didn/ })).toHaveCount(0);
 });
 
-/** The "No picture" panel a bare choice draws (null: none), and its height. */
 const panelOf = (p: Page) => p.evaluate(() => {
   const label = document.querySelector('section.ib-pane fieldset.question-block [data-question-tile-no-picture] > label')!;
   const before = getComputedStyle(label, '::before');
@@ -259,19 +224,16 @@ test('three pictures and a choice without one stay columns (the tour\'s picture 
   expect(l.room).toBeGreaterThanOrEqual(560);
   expect(rows(l)).toEqual([2, 2]);
   const [, , pictured, bare] = l.tiles;
-  // Side by side, captions level (the row shares its picture height), the panel 120 px, never picture tall.
   expect(Math.abs(bare!.caption.y - pictured!.caption.y)).toBeLessThanOrEqual(1);
   const panel = await panelOf(page);
   expect(panel?.content).toContain('No picture');
   expect(panel!.height).toBe(120);
-  // A phone: one column, and the bare choice draws no panel.
   await page.setViewportSize({ width: 390, height: 1000 });
   await page.waitForTimeout(300);
   l = await layout(page);
   expect(rows(l)).toEqual([1, 1, 1, 1]);
   expect(await panelOf(page)).toBeNull();
   await page.setViewportSize({ width: 1440, height: 1000 });
-  // Two choices where one has no picture: Rows, no panel.
   await open('bare');
   await loaded(1);
   expect(await panelOf(page)).toBeNull();
@@ -290,7 +252,6 @@ test('three choices with pictures of mixed shapes stay columns in a middling roo
 
 test('a recorded picture that fails to load leaves its set laid out as it was', async () => {
   await open('fails');
-  // Both measured after a reload, so the window around the card is the same.
   const reload = async () => {
     await page.reload();
     await expect(page.locator('section.ib-pane fieldset.question-block [data-question-tile]').first()).toBeVisible();

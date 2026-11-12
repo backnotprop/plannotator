@@ -1,28 +1,3 @@
-/**
- * Snooze (approval "inbox-snooze") in a real browser against the compiled
- * binary, with agents writing through `plannotator inbox mcp`
- * (scripts/inbox-sim.ts):
- *
- *  - the row's right-click menu: Snooze swaps the menu in place for its times;
- *    Tomorrow takes the thread out of its section and the counts into the
- *    folded Snoozed band; the toast's Undo puts it back;
- *  - the thread header's ⋯ menu (Snooze leads it with the read action, the
- *    owner 2026-11-11): Pick a time, two lists, by mouse, wheel and keys;
- *    the row leaves for the band at once while the thread stays open and says
- *    "Snoozed until …" (approval "inbox-snooze-moves-row"); Unsnooze ends it;
- *  - a Stopped thread: the folded band shows the triangle;
- *  - an agent's new question does not end a snooze; the person's reply does;
- *  - the return at its time (a short `until` through the window's own
- *    route): back in New, bold, with the clock until read;
- *  - a restart of the Inbox keeps a snooze;
- *  - a second window follows a snooze made in the first;
- *  - an iPhone in WebKit: ⋯ only, the times as a sheet.
- *
- * Light, dark and phone screenshots land in PLANNOTATOR_SNOOZE_SHOTS (default
- * .local/proof/snooze). Build the binary first (see inbox.spec.ts), then
- * `bun run test:e2e:inbox inbox-snooze`.
- */
-
 import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
@@ -67,7 +42,6 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: join(shots, name) });
 }
 
-/** Snooze or unsnooze through the window's own route, from the page (same origin, its serverSession). */
 async function snoozeFromPage(page: Page, id: string, until: string | null) {
   await page.evaluate(
     async ([threadId, value]) => {
@@ -150,19 +124,15 @@ test('the row menu: Snooze swaps the menu for its times; Tomorrow moves the thre
   await row(page, threads.refund).click({ button: 'right' });
   const menu = page.locator(`[data-row-menu="${threads.refund}"]`);
   await expect(menu).toBeVisible();
-  // Measured once the opening transition is over.
   await menu.evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)));
   const before = await menu.boundingBox();
-  // Hover moves nothing: the same menu, the same place.
   await menu.locator('[data-row-action="snooze"]').hover();
   expect(await menu.boundingBox()).toEqual(before);
   await shot(page, 'row-menu-light.png');
   await menu.locator('[data-row-action="snooze"]').click();
-  // In place: the same popup now holds the times, each with its real time, and nothing else of the menu.
   await expect(menu.locator('[data-snooze-view="times"]')).toBeVisible();
   await expect(menu.locator('[data-row-action="copy-link"]')).toHaveCount(0);
   await expect(menu.locator('[data-snooze-choice="tomorrow"] .ib-zw')).toHaveText(/^\w{3} 8:00 AM$/);
-  // In 3 days is always there (Next week goes when it is the same moment as Tomorrow or In 3 days).
   await expect(menu.locator('[data-snooze-choice="days"] .ib-zw')).toHaveText(/^\w{3} 8:00 AM$/);
   await expect(menu.locator('[data-snooze-pick-time]')).toBeVisible();
   await shot(page, 'row-menu-times-light.png');
@@ -173,7 +143,6 @@ test('the row menu: Snooze swaps the menu for its times; Tomorrow moves the thre
   await expect(menu).toHaveCount(0);
   await expect(toast(page)).toContainText('Snoozed');
   await expect(toast(page)).toContainText(/\w{3} 8:00 AM/);
-  // Out of its section and the counts, into the band, folded.
   await expect(row(page, threads.refund)).toHaveCount(0);
   await expect(bandButton(page)).toHaveAttribute('aria-expanded', 'false');
   await expect(bandButton(page)).toContainText('Snoozed 1');
@@ -204,7 +173,6 @@ test("the header's ⋯ Snooze: Pick a time, two lists by mouse, wheel and keys; 
   const { page, threads } = world;
   await row(page, threads.release).click();
   await expect(page).toHaveURL(new RegExp(`thread=${threads.release}`));
-  // No clock in the bar: Snooze is in ⋯, after the read action; it swaps the menu in place for "‹ Snooze until".
   await expect(page.locator('.ib-phead [data-thread-snooze]')).toHaveCount(0);
   await page.locator('[data-thread-more]').click();
   await page.locator('[data-thread-menu] [data-thread-snooze-item]').click();
@@ -217,7 +185,6 @@ test("the header's ⋯ Snooze: Pick a time, two lists by mouse, wheel and keys; 
   await expect(picker).toBeVisible();
   const days = picker.locator('[data-snooze-list="Day"]');
   const times = picker.locator('[data-snooze-list="Time"]');
-  // The first position: two days out, 3:00 PM, each centred in its list.
   await expect(days).toBeFocused();
   await expect(days.locator('[aria-selected="true"]')).toHaveCount(1);
   await expect(times.locator('[aria-selected="true"]')).toHaveText('3:00 PM');
@@ -225,7 +192,6 @@ test("the header's ⋯ Snooze: Pick a time, two lists by mouse, wheel and keys; 
   await page.emulateMedia({ colorScheme: 'dark' });
   await shot(page, 'picker-dark.png');
   await page.emulateMedia({ colorScheme: 'light' });
-  // Keys: Down a day, Right to the times, Down half an hour.
   const firstDay = await days.locator('[aria-selected="true"]').textContent();
   await page.keyboard.press('ArrowDown');
   await expect(days.locator('[aria-selected="true"]')).not.toHaveText(firstDay!);
@@ -233,29 +199,23 @@ test("the header's ⋯ Snooze: Pick a time, two lists by mouse, wheel and keys; 
   await expect(times).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(times.locator('[aria-selected="true"]')).toHaveText('3:30 PM');
-  // Wheel: the list scrolls, nothing else moves.
   const box = await picker.boundingBox();
   const scrolled = await times.evaluate((el) => el.scrollTop);
   await times.hover();
   await page.mouse.wheel(0, 240);
   await expect.poll(() => times.evaluate((el) => el.scrollTop)).toBeGreaterThan(scrolled);
   expect(await picker.boundingBox()).toEqual(box);
-  // Mouse: a click picks 4:00 PM.
   await times.locator('[role="option"]', { hasText: /^4:00 PM$/ }).click();
   await expect(times.locator('[aria-selected="true"]')).toHaveText('4:00 PM');
   await picker.locator('[data-snooze-go]').click();
   await expect(menu).toHaveCount(0);
   await expect(toast(page)).toContainText('4:00 PM');
-  // Open, it says until when; the thread stays open and snoozed (opening never ends it).
   const line = page.locator('[data-snooze-line]');
   await expect(line).toContainText(/^Snoozed until \w{3} 4:00 PM|^Snoozed until \w{3} \d+, 4:00 PM/);
-  // The person's own snooze moves its row even with the thread open (approval "inbox-snooze-moves-row"): it leaves
-  // Waiting on you at once for the folded band, which counts it, and the thread stays open.
   await expect(row(page, threads.release)).toHaveCount(0);
   await expect(bandButton(page)).toHaveAttribute('aria-expanded', 'false');
   await expect(bandButton(page)).toContainText('Snoozed 1');
   await expect(page).toHaveURL(new RegExp(`thread=${threads.release}`));
-  // A reload keeps it open and snoozed, its row still in the band.
   await page.reload();
   await expect(page.locator('[data-snooze-line]')).toBeVisible();
   await bandButton(page).click();
@@ -276,7 +236,6 @@ test("the header's ⋯ Snooze: Pick a time, two lists by mouse, wheel and keys; 
 
 test('a Stopped thread snoozed: the folded band shows the triangle; open, the row keeps its badge and says until when', async () => {
   const { page, threads } = world;
-  // The last test's "Unsnoozed" toast goes first: it is not part of these pictures.
   if ((await toast(page).count()) > 0) await toast(page).locator('[data-toast-dismiss]').click();
   await expect(toast(page)).toHaveCount(0);
   await snoozeFromPage(page, threads.stopped, inHours(30));
@@ -306,15 +265,12 @@ test("an agent's new question does not end a snooze; the person's own reply does
   await expect(row(page, threads.flags)).toHaveCount(0);
   await expect(inboxCount(page)).toHaveText('3');
   await agents.pi.send({ project_path: projects.docs, reply_to: messages.flags, body: ask('Also drop the flag cleanup cron?') });
-  // The window hears the agent (the row in the band shows its second open question); the thread stays in the band,
-  // out of the count, and nothing says "new".
   await bandButton(page).click();
   await expect(row(page, threads.flags).locator('[data-open-count]')).toHaveAttribute('data-open-count', '2');
   expect(await groupOf(page, threads.flags)).toBe('snoozed');
   await expect(page.locator('[data-inbox-notice]')).toHaveCount(0);
   await expect(bandButton(page)).toContainText('Snoozed 1');
   await expect(inboxCount(page)).toHaveText('3');
-  // The person's reply (the window's own route) ends it: out of the band, into Sent.
   await page.evaluate(
     async ([messageId]) => {
       const list = (await (await fetch('/api/inbox/threads?archived=exclude')).json()) as { serverSession: string };
@@ -329,18 +285,13 @@ test("an agent's new question does not end a snooze; the person's own reply does
 
 test('the return at its time: back in its own section (Quiet comes back as New), bold, the clock until read', async () => {
   const { page, threads } = world;
-  // A thread looked at sits in Quiet; its return brings it back as New.
   await row(page, threads.webhook).click();
   await page.locator('section.ib-pane').getByRole('button', { name: 'Close the thread' }).click();
-  // The list holds a seen row in New where it was read; read fresh, it is in Quiet.
   await page.reload();
   if ((await page.locator('[data-section-id="quiet"] .ib-band').getAttribute('aria-expanded')) !== 'true') await page.locator('[data-section-id="quiet"] .ib-band').click();
   await expect.poll(() => groupOf(page, threads.webhook)).toBe('quiet');
-  // 12 s ahead: room for the band to show it first on a slow runner, before it comes back.
   await snoozeFromPage(page, threads.webhook, new Date(Date.now() + 12_000).toISOString());
   await expect(bandButton(page)).toContainText('Snoozed 1');
-  // No reload, no agent: the server's timer tells the window at the time. The list never moves under the
-  // reader: the return waits behind "1 new", as an agent's message does, and Show brings it in.
   const notice = page.locator('[data-inbox-notice]');
   await expect(notice).toContainText('1 new', { timeout: 30_000 });
   await notice.click();
@@ -349,7 +300,6 @@ test('the return at its time: back in its own section (Quiet comes back as New),
   await expect(row(page, threads.webhook).locator('[data-snooze-back-mark]')).toBeVisible();
   await expect(band(page)).toHaveCount(0);
   await shot(page, 'returned-light.png');
-  // Read, the clock goes.
   await row(page, threads.webhook).click();
   await page.locator('section.ib-pane').getByRole('button', { name: 'Close the thread' }).click();
   await expect(row(page, threads.webhook).locator('[data-snooze-back-mark]')).toHaveCount(0);
@@ -384,7 +334,6 @@ test('a second window follows a snooze made in the first', async () => {
     await menu.locator('[data-snooze-choice="days"]').click();
     await expect(row(second, threads.release)).toHaveCount(0);
     await expect(bandButton(second)).toContainText('Snoozed 1');
-    // Unsnooze from the first's row menu: the second follows again.
     if ((await bandButton(page).getAttribute('aria-expanded')) !== 'true') await bandButton(page).click();
     await row(page, threads.release).click({ button: 'right' });
     await page.locator(`[data-row-menu="${threads.release}"] [data-row-action="unsnooze"]`).click();
@@ -400,7 +349,6 @@ test.describe('iPhone 15 (WebKit)', () => {
   const { defaultBrowserType: _browser, ...device } = devices['iPhone 15'];
   let browser: Browser | null = null;
   test.beforeAll(async () => {
-    // WebKit refuses the config's Chromium flags.
     browser = await webkit.launch({ args: [] });
   });
   test.afterAll(async () => {

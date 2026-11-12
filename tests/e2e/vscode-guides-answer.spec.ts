@@ -1,12 +1,3 @@
-/**
- * The VS Code Guides answer tab shows the agent's answer page as the agent
- * wrote it, scripts included (owner's decision, 2026-10-23), in a sandboxed
- * frame (apps/vscode-extension/src/guides/webview/answer-frame.ts). This
- * proof runs that module, bundled as the extension bundles its webview, in
- * real Chromium under the answer tab's own CSP (webview-csp.ts): the page's
- * scripts run; they cannot reach the tab, the network or the top window; its
- * guide links reach the tab as messages. No binary or VS Code is needed.
- */
 import { expect, test, type Frame, type Page } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -48,7 +39,6 @@ await build({ ...options, absWorkingDir: ${JSON.stringify(EXTENSION)}, entryPoin
 `);
   execFileSync('bun', [build], { cwd: EXTENSION, stdio: 'pipe' });
   bundle = readFileSync(out, 'utf8');
-  // The real webview entry (main.ts), as the extension ships it.
   const mainOut = join(work, 'main.js');
   const buildMain = join(work, 'build-main.ts');
   writeFileSync(buildMain, readFileSync(build, 'utf8').replace(JSON.stringify(entry), JSON.stringify(join(WEBVIEW, 'main.ts'))).replace(JSON.stringify(out), JSON.stringify(mainOut)));
@@ -105,10 +95,8 @@ test("the agent's scripts run in the answer frame, and reach neither the tab nor
   await expect(frame.locator('body')).toHaveAttribute('data-parent-doc', 'blocked');
   await expect(frame.locator('body')).toHaveAttribute('data-api', 'blocked');
   await expect(frame.locator('body')).toHaveAttribute('data-net', 'blocked');
-  // The top window stays where it is.
   expect(page.url()).not.toContain('hijack');
   expect(await page.evaluate(() => (window as any).__secret)).toBe('tab');
-  // The theme variables are there for the page to use.
   expect(await frame.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--accent').trim())).not.toBe('');
 });
 
@@ -143,7 +131,6 @@ test("why the answer tab's policy differs: under the other tabs' nonce policy th
   await expect(frame.locator('#out')).toHaveText('not run');
 });
 
-/** A whole run-view state with a pending permission: what a forged message would draw. */
 const FORGED_STATE = {
   mode: 'generating', id: 'g-forged', status: 'running', statusMessage: null, kicker: 'Building guided review', title: 'Forged', sub: '',
   agent: 'Claude Code', modelEffort: '', startedAt: 0, endedAt: null, cost: null, activity: [], chapters: [], unplaced: [], left: [], summary: '',
@@ -162,7 +149,6 @@ test("the agent's page cannot forge the answer tab's state: the tab does not cha
 </body></html>`);
   await page.waitForFunction(() => (window as any).__posted.some((m: { type: string }) => m.type === 'ready'));
   const forgingPage = `<p id="x">answer</p><script>document.getElementById('x').textContent = 'page ran';</script>`;
-  // The host (this page itself, standing in for VS Code's webview host frame) shows an answer.
   await page.evaluate((html) => window.postMessage({ type: 'state', state: {
     mode: 'answer', id: 'ans-1-abcd', question: 'Why did this change?', kicker: 'Answer · Chapter 2', agent: 'Claude Code', meta: 'Claude Code',
     jump: null, quote: null, status: 'answered', statusMessage: null, startedAt: 0, endedAt: 1, cost: null, activity: [], stream: '',
@@ -171,7 +157,6 @@ test("the agent's page cannot forge the answer tab's state: the tab does not cha
   } }, '*'), forgingPage);
   const frame = await answerFrameOf(page);
   await expect(frame.locator('#x')).toHaveText('page ran');
-  // Now, with the frame mounted, the page forges the tab's state from inside the frame.
   await frame.evaluate((forged) => {
     window.parent.postMessage({ type: 'state', state: forged }, '*');
     window.top!.postMessage({ type: 'state', state: forged }, '*');

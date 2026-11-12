@@ -1,16 +1,3 @@
-// Manual QA: runs with your real HOME and Plannotator config on purpose. For an isolated test run, use `bun run test:sandbox`.
-/**
- * Test script for Code Review server
- *
- * Usage:
- *   bun run tests/manual/test-review-server.ts
- *
- * What it does:
- *   1. Starts the review server with OpenCode origin
- *   2. Opens browser for you to test the UI (should show "OpenCode" badge)
- *   3. Prints the feedback result when submitted
- */
-
 import {
   startReviewServer,
   handleReviewServerReady,
@@ -19,7 +6,6 @@ import {
 // @ts-ignore - Bun import attribute for text
 import html from "../../apps/review/dist/index.html" with { type: "text" };
 
-// Sample git diff for testing
 const sampleDiff = `diff --git a/src/utils/parser.ts b/src/utils/parser.ts
 index 1234567..abcdefg 100644
 --- a/src/utils/parser.ts

@@ -1,19 +1,3 @@
-/**
- * Builds a built-in icon set for the Inbox's agent icons ("Sets" in the face picker) from a curated pack folder:
- *
- *   bun scripts/build-icon-sets.ts <pack folder> [<out folder>]
- *
- * The pack folder holds `manifest.json` ({ id, name, source, licence, credit, pixelated?, size?, mono?, version,
- * icons: [{ id, n, name, file, words?, by? }] }) and `icons/<file>`. The out folder (default
- * packages/inbox/assets/icon-sets/<id>) gets:
- *
- *   manifest.json   what the window lists and searches, plus each icon's place in icons.bin (`at`, `len`)
- *   icons.bin       every icon's bytes, one after the other, in number order
- *
- * One archive per set rather than hundreds of files: the server embeds the two files in the binary the way the Inbox
- * tour's pictures are (packages/server/inbox-icon-sets-content.ts, `type: "file"` imports) and reads one icon's
- * bytes by slice when a window asks. Licence notes and credits are kept beside them by hand.
- */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { sniffImageContentType } from "../packages/shared/review-image";
@@ -76,7 +60,6 @@ for (const part of parts) {
   offset += part.byteLength;
 }
 writeFileSync(join(out, "icons.bin"), bin);
-// One icon per line: a reviewable diff when the curation changes.
 writeFileSync(
   join(out, "manifest.json"),
   `${JSON.stringify({ ...manifest, icons: [] }, null, 1).replace('"icons": []', `"icons": [\n${listed.map((icon) => `  ${JSON.stringify(icon)}`).join(",\n")}\n ]`)}\n`,

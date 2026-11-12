@@ -1,23 +1,3 @@
-/**
- * A sent reply never comes back as a draft (the owner, on a phone: "I sent the
- * message and then it reappeared in draft"), proved in WebKit against the
- * compiled binary. An iPhone 15 context dictates a long reply in three bursts
- * and taps Send inside the 500 ms pause before the save; a desktop context has
- * the same thread open, as the owner's Mac had. Each case breaks the network
- * the way a phone does, then checks that the server holds no draft, that
- * neither window's foot says "Draft", and that a reload opens no box:
- *
- * - the save the Send flushes lands, but its answer never reaches the phone;
- * - the page goes (pagehide, back/forward cache) inside the pause and comes
- *   back (pageshow), then Send: the keepalive save's answer is never read;
- * - a drafts read served before the Send clears the draft is answered after
- *   the reply's answer.
- *
- * Agents write through `plannotator inbox mcp` (scripts/inbox-sim.ts). Runs in
- * the playwright config's `webkit` project. Build the binary first (see
- * inbox.spec.ts), then `bun run test:e2e:inbox`.
- */
-
 import { expect, test, devices, type Browser, type BrowserContext, type Page, type Route } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -29,7 +9,6 @@ import { NO_BROWSER } from '../helpers/no-browser';
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 
-// A long reply, dictated in three bursts (each burst one input event, as dictation delivers it).
 const PARTS = [
   'Okay so here is what I think about the retry worker. ',
   'The 409 from Stripe should be treated as success when the idempotency key matches, and we should log it once. ',
@@ -69,7 +48,6 @@ test.afterAll(async () => {
 const { defaultBrowserType: _webkit, ...iphone } = devices['iPhone 15'];
 const pane = (page: Page) => page.locator('section.ib-pane');
 
-/** A new thread, open on the phone (box open) and on the desktop (box closed). */
 async function world(browser: Browser, name: string) {
   const sent = await agent.send({ project_path: project, subject: `Retry worker ${name}`, body: 'The retry worker is done. What next?' });
   const thread = sent.thread_id as string;
@@ -87,7 +65,6 @@ async function world(browser: Browser, name: string) {
   return { thread, phone, desk };
 }
 
-/** Dictation: three bursts, the last inside the 500 ms pause before the save. */
 async function dictate(phone: Page) {
   const box = pane(phone).locator('textarea');
   let text = '';
@@ -105,10 +82,8 @@ async function serverDraft(thread: string) {
   return ((await res.json()) as { draft: { body: string } | null }).draft;
 }
 
-/** The reply went; once everything has settled, no window and no reload brings its words back as a draft. */
 async function expectNoDraftAfterSend(w: Awaited<ReturnType<typeof world>>) {
   await expect(pane(w.phone).locator('[data-message-article]').last()).toContainText(PARTS[0]!.trim(), { timeout: 15_000 });
-  // Long enough for every late answer and `drafts` frame to land.
   await w.phone.waitForTimeout(2500);
   expect(await serverDraft(w.thread)).toBeNull();
   for (const page of [w.phone, w.desk]) {
@@ -130,8 +105,8 @@ test('the Send\'s own save lands without its answer: no draft of the sent words'
   await w.phone.route('**/api/inbox/threads/*/draft', async (route: Route) => {
     if (armed && lost === 0 && route.request().method() === 'POST' && (route.request().postData() ?? '').includes(PARTS[2]!.slice(0, 30))) {
       lost += 1;
-      await route.fetch(); // the Inbox saves it (and tells every window)
-      return route.abort('failed'); // the phone never sees the answer
+      await route.fetch();
+      return route.abort('failed');
     }
     return route.continue();
   });
@@ -170,7 +145,7 @@ test('a drafts read answered after the reply\'s answer: no draft of the sent wor
   await w.phone.route('**/api/inbox/threads/*/draft', async (route: Route) => {
     if (armed && route.request().method() === 'GET') {
       held += 1;
-      const response = await route.fetch(); // served now, before the reply clears the draft
+      const response = await route.fetch();
       await replied;
       await new Promise((r) => setTimeout(r, 50));
       return route.fulfill({ response });
@@ -178,7 +153,7 @@ test('a drafts read answered after the reply\'s answer: no draft of the sent wor
     return route.continue();
   });
   await w.phone.route('**/api/inbox/messages/*/reply', async (route: Route) => {
-    await new Promise((r) => setTimeout(r, 300)); // the drafts read goes first
+    await new Promise((r) => setTimeout(r, 300));
     const response = await route.fetch();
     await route.fulfill({ response });
     replyAnswered();

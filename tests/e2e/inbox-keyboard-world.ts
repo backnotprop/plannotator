@@ -1,20 +1,3 @@
-/**
- * The scratch Inbox the keyboard journeys run in (inbox-keyboard-journeys.spec.ts):
- * the compiled binary under a temp HOME and PLANNOTATOR_DATA_DIR
- * (inbox-scratch.ts, stopped only once proven to be this world's), no browser
- * opened by the Inbox (NO_BROWSER), no agent connections written
- * (PLANNOTATOR_INBOX_CONNECT=0), the tour decided, and agents writing through
- * `plannotator inbox mcp` (scripts/inbox-sim.ts).
- *
- * The threads: Stopped (two questions), Holding (one question and a saved
- * reply draft), Checkout (an older message with an image and a Markdown file;
- * the newest with a question, an image, an HTML page and a video), Rollout (a
- * long thread: eight messages, the first six read and folded, message 3 with
- * a plan and a page, message 8 with an image and a question), Refund (read:
- * in Quiet), and News. The Board is on with three cards, its first-visit
- * dialog seen; Decide mode is on. JOURNEYS.md (approval
- * "inbox-keyboard-shortcuts") is what the journeys spec walks through.
- */
 import { copyFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
@@ -33,7 +16,6 @@ export interface KeyboardWorld {
   agents: SimAgent[];
   threads: { stopped: string; holding: string; checkout: string; rollout: string; refund: string; news: string };
   files: { olderImage: string; spec: string; image: string; page: string; video: string; plan: string; planPage: string; dashboard: string };
-  /** Holding's saved reply draft. */
   holdingDraft: string;
 }
 
@@ -74,7 +56,6 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Checkout d
 <style>body{font:15px system-ui;margin:0}header{background:#4f46e5;color:#fff;padding:14px 20px}main{padding:20px}label{display:block;margin:10px 0 4px}input{width:320px;padding:6px}</style>
 </head><body><header>Checkout · drawer</header><main><h2>Shipping</h2><label>Name</label><input value="Dana Whitfield"><label>Street</label><input value="418 Larch St"></main></body></html>`;
 
-/** A paragraph long enough that eight of them make the thread scroll about three screens. */
 const para = (n: number, topic: string) =>
   `Step ${n} of the rollout: ${topic}. ` +
   'We watch the error rate and the p95 latency for a full hour before the next step, and roll back by flipping the flag if either moves more than ten percent. '.repeat(3);
@@ -84,7 +65,6 @@ const ROLLOUT_TOPICS = ['the plan', 'staging soak', 'the plan and the page', 'ca
 const ROLLOUT_LAST = [
   para(8, ROLLOUT_TOPICS[7]!),
   '',
-  // Long enough that the newest message alone is taller than the window: the thread always scrolls.
   ...Array.from({ length: 6 }, (_, i) => ['', `Check ${i + 1}: ${'the dashboards stay green, the error budget holds, and support sees no rise in checkout tickets. '.repeat(3)}`]).flat(),
   '',
   ':::question',
@@ -111,7 +91,6 @@ export async function createKeyboardWorld(prefix = 'plannotator-inbox-keyboard-'
   const root = inboxScratch(prefix);
   const dataDir = join(root, 'data');
   markTourDecided(dataDir);
-  // The sibling specs' sandbox switches: no agent configs, no tailnet, phones or notes, no update check, no relay.
   const env = {
     PATH: process.env.PATH ?? '',
     HOME: root,
@@ -146,7 +125,6 @@ export async function createKeyboardWorld(prefix = 'plannotator-inbox-keyboard-'
   const codex = await SimAgent.connect({ binary, env, name: 'Codex', host: 'codex' });
   const pause = () => new Promise((r) => setTimeout(r, 25));
 
-  // Rollout: six messages read (folded when the thread opens), then two new ones.
   let rolloutLast = await claude.send({ project_path: project, subject: 'Checkout drawer rollout', thread: 'rollout', body: para(1, ROLLOUT_TOPICS[0]!) });
   const rolloutId = rolloutLast.thread_id as string;
   for (let n = 2; n <= 6; n++) {
@@ -173,10 +151,8 @@ export async function createKeyboardWorld(prefix = 'plannotator-inbox-keyboard-'
 
   const holdingDraft = 'Detect them, but ask before writing any config';
   await post(url, `/api/inbox/threads/${encodeURIComponent(holding.thread_id as string)}/draft`, { body: holdingDraft, base: null });
-  // Refund is read (Quiet); the Board is on with three cards, its intro seen; Decide mode is on.
   await post(url, `/api/inbox/threads/${encodeURIComponent(refund.thread_id as string)}/read`, {});
   await post(url, '/api/inbox/settings', { board: { on: true } });
-  // The Board's first-visit dialog is claimed here, so G B lands on the Board itself (the dialog is inbox-board.spec.ts's).
   await post(url, '/api/inbox/board/intro', {});
   await post(url, '/api/inbox/settings', { experimental: { decision_mode: true } });
   for (const title of ['Retry worker on Stripe 409', 'Checkout drawer', 'Installer detects agents']) await claude.card({ op: 'create', project_path: project, title });

@@ -2,13 +2,6 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 
-/**
- * Bun reads only the bunfig.toml in the directory `bun test` runs from. Without
- * a package-level copy, `bun test` inside a package skips the root preloads and
- * tests write drafts, history, and feedback into the contributor's real
- * ~/.plannotator. Catches a package that gains tests without a bunfig, or a
- * package bunfig that drifts from the root preload list.
- */
 const repoRoot = resolve(import.meta.dir, "..");
 
 function readPreload(bunfigPath: string): string[] {
@@ -33,12 +26,6 @@ function hasTestFiles(dir: string): boolean {
 
 const rootPreload = readPreload(join(repoRoot, "bunfig.toml")).map((p) => resolve(repoRoot, p));
 
-/**
- * Other folders people run `bun test` from: the CLI's tests (apps/hook/server,
- * which start real Inboxes), the repo-level tests, and the scripts' tests.
- * The Inbox test helpers also sandbox on import (tests/setup/sandbox-data-dir.ts),
- * so a folder missing from here is not a hole, only a slower failure.
- */
 const extraDirs = ["apps/hook/server", "tests", "scripts"].map((dir) => join(repoRoot, dir));
 
 const packageDirs = [
@@ -69,16 +56,6 @@ describe("package-directory bunfig.toml", () => {
   }
 });
 
-/**
- * The asset types (images, video) the source imports are loaded as files by an explicit
- * `[loader]` in every bunfig. Bun 1.3 loses the file treatment of an extension
- * it has no loader for once the file importing it is past 50 KiB and served
- * from the runtime transpiler cache, then parses the asset as JavaScript
- * (`Expected ";"` in packages/inbox/assets/tater-sidebar.webp, #2154's CI,
- * where the plain `bun test` step warms the cache the DOM step reads). Bun
- * 1.4.4 does not; the loader still states the intent. Catches an asset type
- * imported with no loader, and a bunfig whose list drifts from the root's.
- */
 const ASSET_IMPORT_RE = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)(['"])[^'"\n]+?(\.(?:webp|png|jpe?g|gif|svg|avif|ico|bmp|mp3|wav|ogg|mp4|webm|woff2?|ttf|otf))(?:\?[^'"\n]*)?\1/gi;
 
 function readLoader(bunfigPath: string): Record<string, string> {
@@ -101,7 +78,6 @@ describe("bunfig.toml [loader]: asset imports load as files", () => {
 
   test("every asset type the source imports has a file loader at the root", () => {
     const types = importedAssetTypes();
-    // The walk finds what it guards (the Inbox sidebar's sprite).
     expect(types).toContain(".webp");
     expect(types.filter((type) => rootLoader[type] !== "file")).toEqual([]);
   });

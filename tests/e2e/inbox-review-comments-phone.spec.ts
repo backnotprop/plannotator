@@ -1,16 +1,3 @@
-/**
- * Comments in the Inbox's review (a pull request and a guided review), proved
- * in a real browser against the compiled binary, in a scratch world
- * (inbox-review-comments-phone-world.ts).
- *
- * On a phone Comments is the whole screen: nothing of the page shows or takes a
- * tap beside it, its top is one row, its controls are 44 px targets, and Close
- * returns to the same place in the diff. A double tap on Close does not reach
- * the page's bar under it, Escape closes the sheet before it leaves the review,
- * words typed in the sheet stay, and a turn of the phone keeps it whole. A
- * selection bar on the page goes when Comments opens, by a tap or by a key. A
- * desktop's panel stays the 300 px column or edge sheet it was.
- */
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { LONG_FILE, openPull, openReview, seedPull, seedReview, SHORT_FILE, startWorld, stopWorld, windowAt, type Comment, type PhoneWorld } from './inbox-review-comments-phone-world';
 
@@ -43,7 +30,6 @@ const opens = {
   'a guided review': (page: Page) => openReview(world, page),
 };
 
-/** What a tap at each of these points of the window lands on is inside the sheet: nothing of the page shows or takes it. */
 async function expectCovered(page: Page, width: number, height: number): Promise<void> {
   const uncovered = await page.evaluate(
     ([w, h]) => {
@@ -56,7 +42,6 @@ async function expectCovered(page: Page, width: number, height: number): Promise
   expect(uncovered).toBe(0);
 }
 
-/** The control's whole 44 px square, around its centre, is the control: a tap there lands on it and not on a neighbour. */
 async function expectTarget(control: Locator): Promise<void> {
   const box = (await control.boundingBox())!;
   expect(box.width).toBeGreaterThanOrEqual(44);
@@ -95,7 +80,6 @@ for (const [name, open] of Object.entries(opens)) {
         expect(box).toEqual({ x: 0, y: 0, width, height });
         await expectCovered(page, width, height);
 
-        // The sheet's own row is the only one over the list: the page's bars do not show.
         await expect(page.locator('.ib-vhead')).toBeHidden();
         await expect(body).toBeHidden();
         const head = sheet.locator('.ib-sheet-h');
@@ -155,7 +139,6 @@ for (const [name, open] of Object.entries(opens)) {
       await button.tap();
       await expect(sheet.locator('textarea')).toHaveValue(words);
 
-      // Past the moment the same spot is the bar's again.
       await page.touchscreen.tap(x, y);
       await expect(sheet).toBeHidden();
       await page.waitForTimeout(450);
@@ -178,12 +161,10 @@ for (const [name, open] of Object.entries(opens)) {
         await expect(button).toBeFocused();
       };
 
-      // Focus on its close.
       await button.tap();
       await page.keyboard.press('Escape');
       await closedToTheReview();
 
-      // In the edit box: the edit goes, the sheet stays. Focus has dropped to the page, and the next Escape is the sheet's.
       await button.tap();
       await sheet.locator('[data-annotation-panel] .ml-auto button').first().tap();
       await expect(sheet.locator('textarea')).toBeFocused();
@@ -194,7 +175,6 @@ for (const [name, open] of Object.entries(opens)) {
       await page.keyboard.press('Escape');
       await closedToTheReview();
 
-      // The same after a tap on the sheet's title.
       await button.tap();
       await sheet.locator('.ib-sheet-h b').tap();
       await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
@@ -250,7 +230,6 @@ for (const route of ['tap', 'keyboard'] as const) {
   test(`a phone, a guided review: a selection bar on the page goes when Comments opens by ${route === 'tap' ? 'a tap' : 'a key'}, and nothing floats over the sheet`, async ({ browser }) => {
     const { context, page } = await windowAt(browser, 390, 844, true);
     try {
-      // An agent that can answer, as Show me's spec has a live one: only then does a selection open on the bar.
       await page.route(/\/threads\/[^/]+\/ask(\?.*)?$/, (ask) => ask.fulfill({ json: { conversation: null, running: null, can_ask: true } }));
       await openReview(world, page);
       const line = page.locator(`[data-guide-file-shell="${SHORT_FILE}"] [data-line-type="change-addition"][data-column-number="4"]`).first();
@@ -288,7 +267,6 @@ test('a phone: the worst case stays in the sheet, thirty comments and a long one
     const sheet = page.locator('.ib-gpanel');
     await expect(sheet).toBeVisible();
     await expect(sheet.locator('.ib-sheet-h')).toContainText('30');
-    // Nothing runs off the screen sideways, and the list scrolls to its last comment inside the sheet.
     const wide = await sheet.evaluate((el) => [...el.querySelectorAll('*')].filter((child) => child.getBoundingClientRect().right > innerWidth + 0.5 && !child.closest('[data-annotation-panel] [style*="overflow"]')).length);
     expect(wide).toBe(0);
     const last = sheet.getByText('Comment 29.', { exact: true });
@@ -301,8 +279,6 @@ test('a phone: the worst case stays in the sheet, thirty comments and a long one
 });
 
 test('a desktop: the panel is the docked column or the 300 px sheet at the right edge, under the bars', async ({ browser }) => {
-  // The review's own fold is 1500 px wide. A pull request's page sits beside the open sidebar, not over it, so its
-  // window needs the sidebar's width more than that to keep the column docked; the panel's edge is the review's.
   const reviewRight = async (page: Page) => {
     const review = (await page.locator('.ib-review').boundingBox())!;
     return review.x + review.width;
@@ -311,7 +287,6 @@ test('a desktop: the panel is the docked column or the 300 px sheet at the right
     const docked = await windowAt(browser, 1900, 900, false);
     try {
       await open(docked.page);
-      // A pull request's column starts closed, as in the review app: its Comments button opens it.
       if (name === 'a pull request') {
         await expect(docked.page.locator('.ib-gpanel')).toBeHidden();
         await docked.page.locator('.ib-vcomments').click();
@@ -333,7 +308,6 @@ test('a desktop: the panel is the docked column or the 300 px sheet at the right
         const sheet = folded.page.locator('.ib-gpanel');
         await expect(sheet).toBeVisible();
         const box = (await sheet.boundingBox())!;
-        // 300 px, or the diff's width when that is less (a pull request beside the sidebar at 800).
         const diff = (await folded.page.locator('.ib-gbody').boundingBox())!;
         expect(box.width).toBe(Math.min(300, diff.width));
         expect(box.x + box.width).toBe(await reviewRight(folded.page));
@@ -341,7 +315,6 @@ test('a desktop: the panel is the docked column or the 300 px sheet at the right
         expect(await sheet.evaluate((el) => getComputedStyle(el).position)).toBe('absolute');
         await expect(folded.page.locator('.ib-vhead')).toBeVisible();
         await expect(folded.page.locator('.ib-gbody')).toBeVisible();
-        // Its row and its Edit and Delete keep their desktop sizes.
         expect((await sheet.locator('.ib-sheet-h').boundingBox())!.height).toBe(44);
         const action = (await sheet.locator('[data-annotation-panel] .ml-auto button').first().boundingBox())!;
         expect(action.width).toBe(24);

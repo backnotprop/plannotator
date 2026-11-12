@@ -1,9 +1,3 @@
-// The Snooze board's two examples ("Follow an example", approval
-// "trace-it-board" r5), in the board format (`views.how.examples`). Each step
-// names the How it works parts it lights by their ids in fixture.ts: a
-// `data-mark` for a part, a `data-edge` for an arrow. Every function, line and
-// constant is #2547's own (files/): snoozeIntro.ts, inbox-snooze-intro.ts,
-// snoozeIntroRows.ts.
 import type { ShapeExample, ShapeExampleCheck, ShapeExampleInput, ShapeExampleStep } from '@plannotator/core/shape';
 
 const WHEN = 'packages/inbox/snoozeIntro.ts';

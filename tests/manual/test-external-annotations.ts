@@ -1,18 +1,3 @@
-// Manual QA: runs with your real HOME and Plannotator config on purpose. For an isolated test run, use `bun run test:sandbox`.
-/**
- * Test script for External Annotations API
- *
- * Usage:
- *   bun run tests/manual/test-external-annotations.ts
- *
- * What it does:
- *   1. Starts the review server with a sample diff (sandbox mode)
- *   2. Opens browser so you can see annotations arrive in real-time
- *   3. Sends a batch of CodeAnnotation-shaped annotations over timed intervals
- *   4. Demonstrates single add, batch add, delete, and clear operations
- *   5. Prints server decision when you submit feedback
- */
-
 import {
   startReviewServer,
   handleReviewServerReady,
@@ -20,10 +5,6 @@ import {
 
 // @ts-ignore - Bun import attribute for text
 import html from "../../apps/review/dist/index.html" with { type: "text" };
-
-// ---------------------------------------------------------------------------
-// Sample diff (same as test-review-server.ts)
-// ---------------------------------------------------------------------------
 
 const sampleDiff = `diff --git a/src/utils/parser.ts b/src/utils/parser.ts
 index 1234567..abcdefg 100644
@@ -95,12 +76,7 @@ index 1111111..2222222 100644
      "react": "^18.2.0"
 `;
 
-// ---------------------------------------------------------------------------
-// Annotation sequences — CodeAnnotation shape for review mode
-// ---------------------------------------------------------------------------
-
 const ANNOTATIONS = {
-  // Wave 1: Single comment annotation
   wave1: {
     source: "eslint",
     type: "concern",
@@ -112,7 +88,6 @@ const ANNOTATIONS = {
     author: "eslint",
   },
 
-  // Wave 2: Batch of 3 annotations
   wave2: [
     {
       source: "eslint",
@@ -148,7 +123,6 @@ const ANNOTATIONS = {
     },
   ],
 
-  // Wave 3: Coverage comment
   wave3: {
     source: "coverage",
     type: "comment",
@@ -160,7 +134,6 @@ const ANNOTATIONS = {
     author: "coverage",
   },
 
-  // Wave 4: Package.json comment
   wave4: {
     source: "depcheck",
     type: "concern",
@@ -172,10 +145,6 @@ const ANNOTATIONS = {
     author: "depcheck",
   },
 };
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 const BASE = "/api/external-annotations";
 
@@ -200,10 +169,6 @@ function log(msg: string) {
   console.error(`[${ts}] ${msg}`);
 }
 
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
-
 log("Starting Code Review server with external annotations demo...");
 
 const server = await startReviewServer({
@@ -219,44 +184,37 @@ const server = await startReviewServer({
     log("Watch the browser — annotations will arrive in real-time.");
     log("");
 
-    // Schedule annotation waves
     scheduleWaves(port);
   },
 });
 
 async function scheduleWaves(port: number) {
-  // Wave 1: Single annotation after 2s
   await Bun.sleep(2000);
   log("Wave 1: Sending single eslint concern...");
   const r1 = await post(port, ANNOTATIONS.wave1);
   log(`  → Created: ${JSON.stringify(r1.ids)}`);
 
-  // Wave 2: Batch of 3 after 3s
   await Bun.sleep(3000);
   log("Wave 2: Sending batch of 3 annotations (eslint + typescript)...");
   const r2 = await post(port, { annotations: ANNOTATIONS.wave2 });
   log(`  → Created: ${JSON.stringify(r2.ids)}`);
 
-  // Wave 3: Coverage comment after 3s
   await Bun.sleep(3000);
   log("Wave 3: Sending coverage comment...");
   const r3 = await post(port, ANNOTATIONS.wave3);
   log(`  → Created: ${JSON.stringify(r3.ids)}`);
 
-  // Wave 4: One more after 2s
   await Bun.sleep(2000);
   log("Wave 4: Sending depcheck concern...");
   const r4 = await post(port, ANNOTATIONS.wave4);
   log(`  → Created: ${JSON.stringify(r4.ids)}`);
 
-  // Wave 5: Delete the first annotation after 3s
   await Bun.sleep(3000);
   const firstId = r1.ids[0];
   log(`Wave 5: Deleting first annotation (${firstId})...`);
   await del(port, `id=${firstId}`);
   log(`  → Deleted`);
 
-  // Wave 6: Clear all eslint annotations after 4s
   await Bun.sleep(4000);
   log("Wave 6: Clearing all eslint annotations...");
   const r6 = await del(port, "source=eslint");
@@ -268,7 +226,6 @@ async function scheduleWaves(port: number) {
   log("Submit feedback or close the browser when done.");
 }
 
-// Wait for user to submit
 const result = await server.waitForDecision();
 await Bun.sleep(1500);
 server.stop();

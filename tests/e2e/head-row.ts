@@ -1,14 +1,5 @@
-/**
- * A message's head row (design record "inbox-polish", item 5): what is drawn
- * in it must be drawn whole. Node-safe; the specs import it.
- */
 import type { Locator } from '@playwright/test';
 
-/**
- * Why `part` is not drawn whole inside its head row, or null when it is: it
- * has no box, it runs past the row, past an ancestor that clips (up to the
- * thread pane), or into the row's time column.
- */
 export function cutInHeadRow(part: Locator): Promise<string | null> {
   return part.evaluate((el) => {
     const r = el.getBoundingClientRect();

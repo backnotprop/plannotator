@@ -1,29 +1,3 @@
-/**
- * Full screen's composer (approval "inbox-fullscreen-composer", 2A, round 4),
- * proved in a real browser against the compiled binary. Nothing is mocked:
- * `plannotator inbox --background` runs under a temp PLANNOTATOR_DATA_DIR and
- * HOME (PLANNOTATOR_INBOX_CONNECT=0, no browser, a tailscale trap first on
- * PATH); one agent sends a screenshot and an HTML page with a question
- * through `plannotator inbox mcp`; Chromium drives the window.
- *
- * Proves: an image in full screen has one floating card at its foot with two
- * tabs (Comment on this image, Reply to Claude Code); Reply writes the
- * thread's reply draft (saved on the server, the thread's box holds the same
- * words). The card's ⌄ and the toolbar's » do one thing (approval
- * "inbox-fullscreen-gather"): the card, the toolbar and the image's size bar
- * gather into one control in the bottom right corner, which says "Draft"
- * while a reply draft waits and takes focus; one press brings everything back
- * with focus in the field and the words kept. Send goes from full screen,
- * which stays, the card says it went and the draft is gone. An HTML page has
- * Comment (on the whole page) and Reply too. At 390 px (a phone) the card spans the width under the toolbar,
- * the tabs read Comment and Reply, Send is the icon, ⌄ gathers into a 44 px
- * corner control, and the reply comes back working after one tap.
- *
- * Build the binary first (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-fullscreen-composer.spec.ts`.
- * PNGs land in PLANNOTATOR_E2E_SHOTS_DIR (default .local/proof/fullscreen-composer).
- */
-
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -85,7 +59,6 @@ interface World {
 
 let world: World;
 
-/** Dark and light (the approval's shots are dark, one light), with reduced motion so nothing moves. Ends dark. */
 async function shot(page: Page, name: string, schemes: ('light' | 'dark')[] = ['dark', 'light']): Promise<void> {
   for (const scheme of schemes) {
     await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
@@ -101,7 +74,6 @@ const pill = (page = world.page) => page.locator('[data-fcomp-pill]');
 const replyField = (page = world.page) => card(page).locator('[data-fcomp-field] textarea');
 const dock = (page = world.page) => page.locator('[data-full-view-dock]');
 const toolbar = (page = world.page) => page.locator('[data-full-view-bar]');
-/** The corner control everything gathers into (approval "inbox-fullscreen-gather"). */
 const corner = (page = world.page) => page.locator('[data-full-view-handle]');
 const fileUrl = (name: string) => `${world.url}#thread=${world.threadId}&file=${world.ids[name]}&view=full`;
 
@@ -122,13 +94,11 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const trap = join(root, 'trap');
   mkdirSync(home);
   mkdirSync(trap);
-  // Nothing here may reach the real tailscale CLI.
   writeFileSync(join(trap, 'tailscale'), '#!/bin/sh\necho "inbox-fullscreen-composer: tailscale must not run" >&2\nexit 97\n');
   chmodSync(join(trap, 'tailscale'), 0o755);
   const env = {
     PATH: `${trap}:${process.env.PATH ?? ''}`,
     HOME: home,
-    // No agent lookups (the voice setting probes Codex otherwise), and no agent config of the real computer.
     PLANNOTATOR_TEST_SANDBOX: root,
     CLAUDE_CONFIG_DIR: join(root, 'claude'),
     CODEX_HOME: join(root, 'codex'),
@@ -205,12 +175,9 @@ test('an image in full screen: one card at its foot, Comment and Reply as a radi
   await expect(radios).toHaveCount(2);
   await expect(card().getByRole('radio', { name: 'Comment on this image' })).toHaveAttribute('aria-checked', 'true');
   await expect(card().getByRole('radio', { name: 'Reply to Claude Code' })).toHaveAttribute('aria-checked', 'false');
-  // ⌄ is named for what it does: it hides all the tools, as » does.
   await expect(card().getByRole('button', { name: 'Hide tools' })).toBeVisible();
-  // The comment row is the image's own (its field, Mark up, Comment), inside the card; no old band at the foot.
   await expect(card().getByRole('textbox', { name: 'Comment on checkout.png' })).toBeVisible();
   await expect(pane().locator('.ib-imgcompose')).toHaveCount(0);
-  // Bottom centre, 600 px wide (round 3), 20 px above the window’s foot; the 30 px buttons, the picked tab 32 px (carved into the tray).
   const box = (await card().boundingBox())!;
   expect(Math.round(box.width)).toBe(600);
   expect(Math.round(box.x + box.width / 2)).toBe(720);
@@ -226,15 +193,12 @@ test('Reply writes the thread’s reply draft: saved on the server, and the thre
   await card().getByRole('radio', { name: 'Reply to Claude Code' }).click();
   await expect(replyField()).toBeFocused();
   await expect(replyField()).toHaveAttribute('placeholder', 'Reply to Claude Code…');
-  // Empty: Send is dimmed.
   await expect(card().locator('[data-fcomp-send]')).toBeDisabled();
   await page.keyboard.type(WORDS);
   await expect(card().locator('[data-fcomp-send]')).toBeEnabled();
   await expect.poll(draftOnServer).toBe(WORDS);
-  // What rides the Send: the open question, and the way to the thread.
   await expect(card().locator('[data-fcomp-foot]')).toContainText('1 open question');
   await expect(card().locator('[data-fcomp-open-thread]')).toBeVisible();
-  // The thread's own box (behind full screen) holds the same words: one draft.
   await expect(page.locator('.ib-rbox textarea')).toHaveValue(WORDS);
   await page.mouse.move(200, 400);
   await shot(page, '2A-expanded-reply');
@@ -245,8 +209,6 @@ test('Reply writes the thread’s reply draft: saved on the server, and the thre
 
 test('⌄ gathers the card, the toolbar and the size bar into the bottom-right corner control, which says "Draft" and takes focus; one press brings everything back, focus in the field, the words kept', async () => {
   const page = world.page;
-  // The file's foot (`--ib-fvfoot`, the card's height) holds still through the flight: the card scales down on its way
-  // to the corner, and a measure taken then (any change in the pane re-measures) must not shrink the foot.
   await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'no-preference' });
   const foot = () => pane().evaluate((el) => getComputedStyle(el).getPropertyValue('--ib-fvfoot').trim());
   const footBefore = await foot();
@@ -264,18 +226,15 @@ test('⌄ gathers the card, the toolbar and the size bar into the bottom-right c
   expect(await foot(), 'landed').toBe(footBefore);
   await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
   await expect(dock()).toHaveAttribute('data-bar', 'tucked');
-  // Everything went: the card (kept, inert: no pill of its own), the toolbar and the image's size bar.
   await expect(card()).toHaveJSProperty('inert', true);
   await expect(card()).toBeHidden();
   await expect(pill()).toHaveCount(0);
   await expect(toolbar()).toHaveJSProperty('inert', true);
   await expect(toolbar()).toBeHidden();
   await expect(pane().locator('.ib-imgbar')).toBeHidden();
-  // The corner control: focused, bottom right, 32 px, and it says a reply draft waits.
   await expect(corner()).toBeFocused();
   await expect(corner()).toContainText('Draft');
   await expect(corner()).toHaveAccessibleName(/^Show tools, reply draft/);
-  // Landed (it scales in from 0.6 after the tools leave): measured only once it has.
   await expect.poll(async () => Math.round((await corner().boundingBox())!.height)).toBe(32);
   const box = (await corner().boundingBox())!;
   expect(box.x + box.width).toBeGreaterThan(1440 - 40);
@@ -284,7 +243,6 @@ test('⌄ gathers the card, the toolbar and the size bar into the bottom-right c
   await page.mouse.move(200, 400);
   await shot(page, '2A-gathered-draft');
 
-  // One press: the card, the toolbar and the size bar come back; focus is back in the field it was gathered from.
   await corner().click();
   await expect(dock()).toHaveAttribute('data-bar', 'pinned');
   await expect(card()).toHaveJSProperty('inert', false);
@@ -294,7 +252,6 @@ test('⌄ gathers the card, the toolbar and the size bar into the bottom-right c
   await expect(replyField()).toBeFocused();
   await expect(replyField()).toHaveValue(WORDS);
 
-  // Gathered, then away and back: every opening of full screen starts with the tools showing, the draft kept.
   await card().locator('[data-fcomp-minimize]').click();
   await expect(dock()).toHaveAttribute('data-bar', 'tucked');
   await page.goto(`${world.url}#thread=${world.threadId}`);
@@ -324,7 +281,6 @@ test('Hide (») gathers the card and the size bar with the toolbar; one press br
 
 test('the paperclip attaches to the reply; Send goes from full screen with the file: it stays, the card says it went, the reply is in the thread and the draft is gone', async () => {
   const page = world.page;
-  // Round 3: Send first in the reply's row, then the reply box's paperclip (the card's 30 px button).
   await expect(card().locator('[data-fcomp-foot] > :first-child')).toHaveAttribute('data-fcomp-send', '');
   const clip = card().locator('[data-fcomp-foot] .ib-fcomp-clip');
   await expect(clip).toHaveAccessibleName('Attach files');
@@ -334,7 +290,6 @@ test('the paperclip attaches to the reply; Send goes from full screen with the f
   const crop = await page.screenshot({ clip: { x: 60, y: 600, width: 400, height: 240 } });
   await card().locator('input[type="file"][data-fcomp-attach]').setInputFiles({ name: 'footer-over-cvc.png', mimeType: 'image/png', buffer: crop });
   await expect(card().locator('[data-fcomp-files] [data-compose-file="done"]')).toHaveCount(1);
-  // One reply: the thread's box behind full screen holds the same file.
   await expect(page.locator('.ib-rbox [data-reply-files] [data-compose-file-name="footer-over-cvc.png"]')).toHaveCount(1);
   await replyField().focus();
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
@@ -348,11 +303,9 @@ test('the paperclip attaches to the reply; Send goes from full screen with the f
   await expect.poll(draftOnServer).toBeNull();
   const thread = (await world.claude.readThread(world.threadId)) as { messages: { author: { kind: string }; body: string }[] };
   expect(thread.messages.some((m) => m.author.kind === 'person' && m.body.includes('96 px of bottom padding'))).toBe(true);
-  // The file went with the words, and left the card and the box.
   const mine = thread.messages.filter((m) => m.author.kind === 'person').at(-1) as { attachments?: { name: string }[] };
   expect(mine.attachments?.map((a) => a.name)).toEqual(['footer-over-cvc.png']);
   await expect(card().locator('[data-fcomp-files]')).toHaveCount(0);
-  // Empty again: Send is dimmed, and gathered, the corner control no longer says "Draft".
   await expect(card().locator('[data-fcomp-send]')).toBeDisabled();
   await card().getByRole('radio', { name: 'Comment on this image' }).click();
   await card().locator('[data-fcomp-minimize]').click();
@@ -379,7 +332,6 @@ test('an HTML page: Comment on this page and Reply, as on an image; a comment is
   await comment.fill('The footer reads as part of the form.');
   await card().locator('[data-html-page-comment-save]').click();
   await expect(comment).toHaveValue('');
-  // Kept on the page as a general comment (it rides the next Send); taken out again so the later tests' Sends carry none.
   const pageComment = async () => {
     const model = (await (await fetch(new URL(`/api/inbox/threads/${world.threadId}/attachments`, world.url))).json()) as { annotations: { id: string; attachment_id: string; annotation: { type: string; text: string } }[] };
     return model.annotations.find((r) => r.attachment_id === world.ids['checkout.html'] && r.annotation.type === 'GLOBAL_COMMENT' && r.annotation.text === 'The footer reads as part of the form.') ?? null;
@@ -414,7 +366,6 @@ test('a phone (390 px): the card spans the width under the toolbar, Comment and 
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto(fileUrl('checkout.png'));
     await expect(pane(page)).toHaveAttribute('data-full-view', '');
-    // The HTML page's draft is the thread's: the card opens on Reply with it.
     await expect(card(page)).toBeVisible();
     await expect(card(page).getByRole('radio', { name: 'Comment' })).toBeVisible();
     await expect(card(page).getByRole('radio', { name: 'Reply' })).toHaveAttribute('aria-checked', 'true');
@@ -426,17 +377,14 @@ test('a phone (390 px): the card spans the width under the toolbar, Comment and 
     const cardBox = (await card(page).boundingBox())!;
     expect(Math.round(cardBox.x)).toBe(8);
     expect(Math.round(cardBox.width)).toBe(390 - 16);
-    // The toolbar sits above the card.
     const barBox = (await page.locator('[data-full-view-bar]').boundingBox())!;
     expect(barBox.y + barBox.height).toBeLessThanOrEqual(cardBox.y + 1);
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     await shot(page, '2A-phone-open');
-    // Send is at the row's right end, and last in the markup too: Tab follows the screen (WCAG 2.4.3).
     await expect(card(page).locator('[data-fcomp-foot] > :last-child')).toHaveAttribute('data-fcomp-send', '');
     const sendBox = (await card(page).locator('[data-fcomp-send]').boundingBox())!;
     const footBox = (await card(page).locator('[data-fcomp-foot]').boundingBox())!;
     expect(Math.round(footBox.x + footBox.width - (sendBox.x + sendBox.width))).toBeLessThanOrEqual(1);
-    // The phone's paperclip: a 44 px button in the reply's row; a chosen picture is a tile in the card.
     const clip = card(page).locator('[data-fcomp-foot] .ib-fcomp-clip');
     await expect(clip).toHaveAccessibleName('Attach files');
     expect(Math.round((await clip.boundingBox())!.width)).toBe(44);
@@ -447,7 +395,6 @@ test('a phone (390 px): the card spans the width under the toolbar, Comment and 
     await shot(page, '2A-phone-attached');
     await card(page).locator('[data-fcomp-files] [data-compose-file] button').first().tap();
     await expect(card(page).locator('[data-fcomp-files]')).toHaveCount(0);
-    // Many files: the tiles scroll inside a capped area, so the card never pushes the toolbar off the top.
     const many = Array.from({ length: 9 }, (_, i) => ({ name: `IMG_04${20 + i}.png`, mimeType: 'image/png', buffer: crop }));
     await card(page).locator('input[type="file"][data-fcomp-attach]').setInputFiles(many);
     await expect(card(page).locator('[data-fcomp-files] [data-compose-file="done"]')).toHaveCount(9);
@@ -481,11 +428,9 @@ test('a phone (390 px): the card spans the width under the toolbar, Comment and 
   }
 });
 
-/** The open questions pill in the card's foot: one line, inside the row, clear of its neighbours (owner's iPhone, 2026-11-01). */
 async function pillLayout(page: Page) {
   return card(page).evaluate((root) => {
     const q = root.querySelector<HTMLElement>('[data-fcomp-questions]')!;
-    // The words are the text inside the pill, whatever wraps them.
     const range = document.createRange();
     const text = document.createTreeWalker(q, NodeFilter.SHOW_TEXT, { acceptNode: (n) => (n.textContent!.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT) }).nextNode()!;
     range.selectNodeContents(text);
@@ -493,8 +438,6 @@ async function pillLayout(page: Page) {
     const chips = q.parentElement!.getBoundingClientRect();
     const link = root.querySelector('[data-fcomp-open-thread]')!.getBoundingClientRect();
     const mic = root.querySelector('[data-voice-mic]')?.getBoundingClientRect() ?? null;
-    // Round 3 (#2846): the mic comes before what rides the Send, Open in thread after it. A neighbour on another row
-    // (the chips stacked above, footFit.ts `stack`) is not in the pill's way.
     const sameRow = (r: DOMRect) => r.top < box.bottom - 1 && r.bottom > box.top + 1;
     const overlaps = (r: DOMRect) => sameRow(r) && r.left < box.right - 1 && r.right > box.left + 1;
     return {
@@ -564,7 +507,6 @@ test('the open questions pill in the card’s foot never wraps: one line, inside
           await page.setViewportSize({ width, height: 844 });
           await expect.poll(async () => (await pillLayout(page)).mic, { message: `mic ${withMic} at ${width}` }).toBe(withMic);
           const where = `${c.name}, ${width} px, mic ${withMic}`;
-          // The fit runs on a resize: let it settle.
           await expect
             .poll(async () => {
               const now = await pillLayout(page);
@@ -576,7 +518,6 @@ test('the open questions pill in the card’s foot never wraps: one line, inside
           expect(got.right, `${where}: past the row's end (${JSON.stringify(got)})`).toBeLessThanOrEqual(got.chipsRight + 1);
           expect(got.right, `${where}: over the next button (${JSON.stringify(got)})`).toBeLessThanOrEqual(got.next + 1);
           expect(got.overMic, `${where}: over the mic (${JSON.stringify(got)})`).toBe(false);
-          // Short words only when the long ones do not fit: with the room (no mic, 430) the whole words show.
           if (!withMic && width === 430 && c.name === 'one question') expect(got.text, where).toBe(c.full);
           if (got.form && got.form !== 'full') expect(await card(page).locator('[data-fcomp-questions]').getAttribute('aria-label'), where).toBe(c.full);
         }
@@ -609,15 +550,11 @@ test('a phone: » or ⌄ gathers, then one tap on the corner control brings the 
       await expect(card(page)).toBeVisible();
       await page.locator(from).tap({ timeout: 10_000 });
       await expect(dock(page)).toHaveAttribute('data-bar', 'tucked');
-      // Gathered: the reply goes with the tools, whichever bar's button did it.
       await expect(card(page)).toHaveJSProperty('inert', true);
       await expect(toolbar(page)).toHaveJSProperty('inert', true);
       await corner(page).tap({ timeout: 10_000 });
       await expect(dock(page)).toHaveAttribute('data-bar', 'pinned');
-      // The reply works as it is: not inert, and a tap in it types.
       await expect(card(page)).toHaveJSProperty('inert', false);
-      // A tap, then a real finger (touch events from the DevTools protocol), each focus the field and leave the
-      // tools out: nothing gathers them again but a press on » or ⌄.
       await replyField(page).tap({ timeout: 10_000 });
       await expect(replyField(page)).toBeFocused();
       await expect(dock(page)).toHaveAttribute('data-bar', 'pinned');
@@ -629,7 +566,6 @@ test('a phone: » or ⌄ gathers, then one tap on the corner control brings the 
       await expect(replyField(page)).toBeFocused();
       await expect(dock(page)).toHaveAttribute('data-bar', 'pinned');
       await page.keyboard.type(' ok');
-      // The words land where the finger put the caret.
       await expect(replyField(page)).toHaveValue(/ ok/);
       await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     }
@@ -661,7 +597,6 @@ test('an HTML page: the reply box never runs over the drawer’s foot, at any wi
       await expect(foot).toContainText('your next Send');
       for (const words of [WORDS, long]) {
         if (await replyField(page).isVisible()) await replyField(page).fill(words);
-        // Hidden under a phone's sheet is fine; a box that shows must clear the foot.
         if (!(await card(page).isVisible())) {
           expect(phone, `${width}: a computer keeps its reply box beside the drawer`).toBe(true);
           continue;
@@ -672,7 +607,6 @@ test('an HTML page: the reply box never runs over the drawer’s foot, at any wi
         expect(box.x + box.width, `${width}: the reply box ends before the foot starts`).toBeLessThanOrEqual(footBox.x);
       }
       if (width <= 1100 && !phone) {
-        // The comment list over the box: beside the drawer, centred over the box. Zero height by design; x and width are what it is placed by.
         await card(page).locator('[data-fcomp-comments]').click();
         const list = (await page.locator('.ib-anncard').boundingBox())!;
         const box = (await card(page).boundingBox())!;
@@ -688,7 +622,6 @@ test('an HTML page: the reply box never runs over the drawer’s foot, at any wi
 
 type Read = { id: string; author: { kind: string }; body: string; viewing?: string };
 
-/** A thread of its own for what a floating box's Send tells the agent, and the steps those tests repeat. */
 async function takes(name: string, attachments: string[], body = 'Takes of the checkout.') {
   const sent = await world.claude.send({ project_path: world.project, thread: name, body, attachments });
   const threadId = sent.thread_id as string;
@@ -696,7 +629,6 @@ async function takes(name: string, attachments: string[], body = 'Takes of the c
   const open = (file: string) => `${world.url}#thread=${threadId}&file=${model.attachments.find((a) => a.name === file)!.id}&view=full`;
   const people = async (): Promise<Read[]> => ((await world.claude.readThread(threadId)) as { messages: Read[] }).messages.filter((m) => m.author.kind === 'person');
   const newest = async (): Promise<Read> => ((await world.claude.readThread(threadId)) as { messages: Read[] }).messages.at(-1)!;
-  /** Writes `words` in the card over what is on screen and sends them. */
   const send = async (target: Page, words: string): Promise<Read> => {
     await expect(card(target)).toBeVisible();
     const radio = card(target).getByRole('radio', { name: 'Reply', exact: false });
@@ -718,14 +650,11 @@ test('a Send from the floating box tells the agent which file was on screen, and
   const page = world.page;
   const { threadId, messageId, open, newest, reply } = await takes('Which take', ['shots/checkout.png', 'shots/checkout.html']);
 
-  // An image: the words stay the person's, and the agent reads the name beside them.
   const onImage = await reply(page, 'checkout.png', 'This one reads best.');
   expect(onImage.viewing).toContain(`while viewing \`checkout.png\`, from the `);
   expect(onImage.viewing!.endsWith(` message ${messageId}.)`), onImage.viewing).toBe(true);
-  // An HTML page: the same line, naming the page.
   expect((await reply(page, 'checkout.html', 'Or this page.')).viewing).toContain('`checkout.html`');
 
-  // A comment on the file on screen, then the Reply tab: the comment names the file, so no second line.
   await page.goto(open('checkout.png'));
   await card().getByRole('radio', { name: 'Comment on this image' }).click();
   await card().getByRole('textbox', { name: 'Comment on checkout.png' }).fill('The footer is too tall.');
@@ -739,7 +668,6 @@ test('a Send from the floating box tells the agent which file was on screen, and
   expect(commented.body).toContain('The footer is too tall.');
   expect(commented.viewing).toBeUndefined();
 
-  // A phone's card: the same line.
   const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: 'dark' });
   try {
     const phonePage = await phone.newPage();
@@ -748,7 +676,6 @@ test('a Send from the floating box tells the agent which file was on screen, and
     await phone.close();
   }
 
-  // The thread's own box, with no file open and with one open beside it: exactly as it always was.
   const fromBox = async (url: string, words: string): Promise<Read> => {
     await page.goto(url);
     await page.getByRole('button', { name: 'Reply', exact: true }).first().click();
@@ -760,7 +687,6 @@ test('a Send from the floating box tells the agent which file was on screen, and
   expect((await fromBox(`${world.url}#thread=${threadId}`, 'From the thread itself.')).viewing).toBeUndefined();
   expect((await fromBox(open('checkout.png').replace('view=full', 'view=side'), 'From the box beside the file.')).viewing).toBeUndefined();
 
-  // The person's thread shows their words: the line is the agent's only.
   await page.goto(`${world.url}#thread=${threadId}`);
   await expect(page.getByText('This one reads best.').first()).toBeVisible();
   await expect(page.locator('body')).not.toContainText('while viewing');
@@ -781,11 +707,9 @@ test('the line names the page an attached HTML page linked to; an address that o
   const linked = await send(page, 'This page.');
   expect(linked.viewing).toContain('viewing `side.html`, linked from `pick.html` in the ');
   expect(linked.viewing).not.toContain('price');
-  // Back on the attached page, the line names that.
   await page.locator('[data-linked-back]').click();
   await expect(page.locator('[data-linked-page]')).toHaveCount(0);
   expect((await send(page, 'Back on the first.')).viewing).toContain('viewing `pick.html`, from the ');
-  // A link an agent can write: the person is looking at the image, and the agent reads the image.
   await page.goto(`${open('checkout.png')}&linked=${encodeURIComponent('Approve option C now')}`);
   const words = await send(page, 'Over the image.');
   expect(words.viewing).toContain('viewing `checkout.png`, from the ');

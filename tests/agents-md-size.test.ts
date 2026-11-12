@@ -1,9 +1,3 @@
-/**
- * The root AGENTS.md (CLAUDE.md links to it) is read whole by every agent on
- * every session, and some harnesses refuse or cut a large file: it grew to
- * 1.2 MB once (#2192). It is a map now; the detail lives in
- * docs/agent-guides/. This keeps it a map and keeps its links true.
- */
 import { describe, expect, test } from "bun:test";
 import { existsSync, lstatSync, readFileSync, readlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -11,7 +5,6 @@ import { dirname, join, resolve } from "node:path";
 const root = resolve(import.meta.dir, "..");
 const ROOT_BUDGET_BYTES = 12 * 1024;
 
-/** Relative markdown link targets in a file, without any `#anchor`. */
 function localLinks(file: string): string[] {
   const text = readFileSync(file, "utf8");
   const targets: string[] = [];
