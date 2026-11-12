@@ -181,7 +181,7 @@ describe("Settings → Prompts", () => {
   test("Guided reviews: the one guide-instructions.md file the review UI edits; set, read back, capped, deleted, config.json untouched", async () => {
     const { server, dataDir, onDisk } = await world({ displayName: "Ann" });
     const file = join(dataDir, "guide-instructions.md");
-    expect((await read(server)).guide).toEqual({ text: null, max: 12_000 });
+    expect((await read(server)).guide).toEqual({ text: null, max: 12000 });
     const saved = await post(server, { serverSession: server.serverSession, prompts: { guide: "Start with the riskiest change." } });
     expect(saved.status).toBe(200);
     expect(((await saved.json()) as { prompts: InboxPromptsSettings }).prompts.guide?.text).toBe("Start with the riskiest change.");
@@ -189,7 +189,7 @@ describe("Settings → Prompts", () => {
     // Written by the review UI's route, read here.
     writeFileSync(file, "Call the tenant a workspace.\n");
     expect((await read(server)).guide?.text).toBe("Call the tenant a workspace.");
-    const over = await post(server, { serverSession: server.serverSession, prompts: { guide: "x".repeat(12_001) } });
+    const over = await post(server, { serverSession: server.serverSession, prompts: { guide: "x".repeat(12001) } });
     expect([over.status, ((await over.json()) as { field: string }).field]).toEqual([422, "prompts.guide"]);
     expect(readFileSync(file, "utf8")).toBe("Call the tenant a workspace.\n");
     expect((await post(server, { serverSession: server.serverSession, prompts: { guide: null } })).status).toBe(200);

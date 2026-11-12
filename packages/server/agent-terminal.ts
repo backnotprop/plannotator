@@ -280,6 +280,7 @@ async function startNodeAgentTerminalSidecar(
 ): Promise<NodeAgentTerminalSidecar> {
   const proc = Bun.spawn([runtime.nodePath, runtime.sidecarPath], {
     cwd: runtime.sidecarCwd,
+    windowsHide: true,
     env: {
       ...process.env,
       PLANNOTATOR_AGENT_CWD: cwd,

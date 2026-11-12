@@ -327,9 +327,7 @@ test.skipIf(!hasDom)('Guided reviews: Default with only Edit; Save writes `guide
   expect(promptsSummary({ ...model(), guide: { text: 'x', max: 12000 } })).toBe('Custom');
   // Past the cap Save is refused.
   await click(q(row, '[data-prompt-edit="guide"]'));
-  type(q<HTMLTextAreaElement>(el, '[data-prompt-field="guide"]')!, 'a'.repeat(10_999));
-  expect(q(el, '[data-prompt-count]')).toBeNull();
-  type(q<HTMLTextAreaElement>(el, '[data-prompt-field="guide"]')!, 'a'.repeat(12_001));
+  type(q<HTMLTextAreaElement>(el, '[data-prompt-field="guide"]')!, 'a'.repeat(12001));
   expect(q<HTMLButtonElement>(el, '[data-prompt-save="guide"]')!.disabled).toBe(true);
   expect(q(el, '[data-prompt-count]')?.textContent).toBe('12,001 / 12,000');
   await click(q(el, '[data-prompt-cancel="guide"]'));

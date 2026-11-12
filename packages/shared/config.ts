@@ -1205,7 +1205,7 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
  */
 export function detectGitUser(cwd?: string): string | null {
   try {
-    const name = execSync("git config user.name", { cwd, env: childEnv(), encoding: "utf-8", timeout: 3000 }).trim();
+    const name = execSync("git config user.name", { cwd, env: childEnv(), encoding: "utf-8", timeout: 3000, windowsHide: true }).trim();
     return name || null;
   } catch {
     return null;

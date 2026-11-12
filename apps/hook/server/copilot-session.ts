@@ -215,6 +215,7 @@ function getProcessCommand(pid: number): string | null {
   try {
     const result = spawnSync("ps", ["-o", "comm=", "-p", String(pid)], {
       env: childEnv(),
+      windowsHide: true,
       encoding: "utf-8",
       timeout: 2000,
     });

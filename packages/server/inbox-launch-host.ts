@@ -207,8 +207,12 @@ export interface LaunchHost {
   readonly shellNames: readonly string[];
   /** Login-shell names it learns only whether they are set: kept as "1", never their values (a sign-in token). */
   readonly shellFlags?: readonly string[];
-  /** Whether To may offer it. The engine caches it 30 s. */
-  available(): Promise<LaunchAvailability>;
+  /**
+   * Whether To may offer it. The engine caches it 30 s. `folders`: whether it can start in at least one of these
+   * (already checked) folders, by their own settings where the host reads any (Claude Code's project plugin
+   * scopes); not cached. None: the machine's own setup.
+   */
+  available(folders?: readonly string[]): Promise<LaunchAvailability>;
   /** How a launch made now in `folder` starts; fixed on the record at Send. */
   startOf(folder: string): { full: boolean; ownMode: boolean; bypass: boolean };
   /** It starts in `folder` (and every scratch folder in it) without a trust prompt. */

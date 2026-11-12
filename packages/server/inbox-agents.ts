@@ -63,6 +63,7 @@ import { addJsonMember, removeJsonMember } from "./json-edit";
 import {
   agentFileContains,
   describeFsError,
+  placeKey,
   readAgentFile,
   samePlace,
   stripJsonComments,
@@ -820,11 +821,53 @@ function claudeSettingsPluginState(settings: { enabledPlugins?: unknown } | null
   return ours.length > 0 ? false : undefined;
 }
 
-/** Claude Code's settings scopes the Inbox can read, strongest first: managed, then the user's settings.local.json, then settings.json. */
-function claudeSettingsScopes(e: AgentEnvironment): { scope: "managed" | "user"; settings: { enabledPlugins?: unknown; env?: unknown } | null }[] {
+/** A Claude Code settings scope, by Claude's precedence: managed, then the project's local and shared files, then the user's. */
+export type ClaudeSettingsScope = "managed" | "local" | "project" | "user";
+
+/**
+ * Where a launch folder's Claude Code project settings are: `project`, the folder Claude starts in (its
+ * `.claude/settings.json`); `local`, the folder whose `.claude/settings.local.json` Claude reads (the repository's
+ * root, a linked worktree's main checkout, or the folder itself).
+ */
+export type ClaudeProjectSettingsDirs = { project: string; local: string };
+
+/** The most a project's Claude Code settings file may be for the Inbox to read it. */
+export const CLAUDE_PROJECT_SETTINGS_MAX_BYTES = 256 * 1024;
+
+/**
+ * One of a project's Claude Code settings files (`<dir>/.claude/<name>`), parsed, or null: missing, too big, not
+ * JSON, or a symlink (of the file or of `.claude`) that leads out of `dir`. Read only.
+ */
+function readClaudeProjectSettings(dir: string, name: string): { enabledPlugins?: unknown; env?: unknown } | null {
+  const path = join(dir, ".claude", name);
+  const inside = placeKey(dir);
+  const real = placeKey(path);
+  if (!real.startsWith(inside.endsWith(sep) ? inside : `${inside}${sep}`)) return null;
+  const read = readAgentFile(real, CLAUDE_PROJECT_SETTINGS_MAX_BYTES);
+  if (read.kind !== "file") return null;
+  try {
+    const parsed = JSON.parse(stripJsonComments(read.text)) as unknown;
+    return parsed && typeof parsed === "object" ? (parsed as { enabledPlugins?: unknown; env?: unknown }) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Claude Code's settings scopes the Inbox can read, strongest first: managed, then (for a launch folder) the
+ * project's `settings.local.json` and `settings.json`, then the user's settings.local.json and settings.json.
+ * Without `project` (Settings → Agents, which has no folder): managed and the user's only.
+ */
+function claudeSettingsScopes(e: AgentEnvironment, project: ClaudeProjectSettingsDirs | null = null): { scope: ClaudeSettingsScope; settings: { enabledPlugins?: unknown; env?: unknown } | null }[] {
   const managed = claudeManagedSettingsPath(e);
   return [
     ...(managed ? [{ scope: "managed" as const, settings: readClaudeSettings(managed) }] : []),
+    ...(project
+      ? [
+          { scope: "local" as const, settings: readClaudeProjectSettings(project.local, "settings.local.json") },
+          { scope: "project" as const, settings: readClaudeProjectSettings(project.project, "settings.json") },
+        ]
+      : []),
     { scope: "user" as const, settings: readClaudeSettings(join(claudeConfigDir(e), "settings.local.json")) },
     { scope: "user" as const, settings: readClaudeSettings(join(claudeConfigDir(e), "settings.json")) },
   ];
@@ -833,10 +876,11 @@ function claudeSettingsScopes(e: AgentEnvironment): { scope: "managed" | "user";
 /**
  * The plugin's state from the scopes (strongest first) and the registry: the
  * strongest scope that names it decides (managed settings turning it off win
+ * over everything; a project's true wins over the user's false, and its false
  * over the user's true), else the registry. Pure.
  */
 export function claudePluginStateFromScopes(
-  scopes: readonly { scope: "managed" | "user"; on: boolean | undefined }[],
+  scopes: readonly { scope: ClaudeSettingsScope; on: boolean | undefined }[],
   registered: boolean,
 ): { state: "enabled" | "disabled" | "absent"; managed: boolean } {
   const decided = scopes.find((scope) => scope.on !== undefined);
@@ -912,12 +956,14 @@ function claudePluginRegistered(e: AgentEnvironment): boolean {
  * Whether Plannotator's Claude Code plugin is enabled for this user: a
  * settings scope the Inbox can see (user `settings.json` and
  * `settings.local.json`, managed settings) enables it, or Claude Code's plugin
- * registry records it and no scope turns it off. A project's own
- * `.claude/settings.json` and `claude --plugin-dir` are not visible here; the
- * window counts a live Claude Code session as connected for those.
+ * registry records it and no scope turns it off. With `project` (a launch
+ * folder's settings, see ClaudeProjectSettingsDirs) that folder's local and
+ * shared settings count too, by Claude's precedence. `claude --plugin-dir` is
+ * not visible here; the window counts a live Claude Code session as connected
+ * for that.
  */
-export function claudeCodePluginEnabled(e: AgentEnvironment): boolean {
-  return claudeCodePluginState(e) === "enabled";
+export function claudeCodePluginEnabled(e: AgentEnvironment, project: ClaudeProjectSettingsDirs | null = null): boolean {
+  return claudeCodePluginStatus(e, project).state === "enabled";
 }
 
 /**
@@ -930,8 +976,8 @@ export function claudeCodePluginState(e: AgentEnvironment): "enabled" | "disable
 }
 
 /** claudeCodePluginState, and whether managed (enterprise) settings decided it. */
-export function claudeCodePluginStatus(e: AgentEnvironment): { state: "enabled" | "disabled" | "absent"; managed: boolean } {
-  const scopes = claudeSettingsScopes(e).map(({ scope, settings }) => ({ scope, on: claudeSettingsPluginState(settings) }));
+export function claudeCodePluginStatus(e: AgentEnvironment, project: ClaudeProjectSettingsDirs | null = null): { state: "enabled" | "disabled" | "absent"; managed: boolean } {
+  const scopes = claudeSettingsScopes(e, project).map(({ scope, settings }) => ({ scope, on: claudeSettingsPluginState(settings) }));
   return claudePluginStateFromScopes(scopes, claudePluginRegistered(e));
 }
 

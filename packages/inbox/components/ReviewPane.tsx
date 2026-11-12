@@ -52,6 +52,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { GuideReaderPart, ReaderPart } from '../lazyParts';
+import { CommentPictures } from '../commentPictures';
 import { inboxPullIsOpen, inboxPullUrlOfKey, type InboxMessageWire, type InboxPull, type InboxThread } from '@plannotator/core/inbox-types';
 import { parseDiffToFiles, type DiffFile } from '@plannotator/core/diff-files';
 import type { CodeAnnotation } from '@plannotator/ui/types';
@@ -871,7 +872,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
           setRecords([]);
         }
         const parts = verdictReply(plan, message.guide?.title ?? snapshot.guide.title, plan.discard ? [] : records, note);
-        const input = { words: parts.words, questions: [], ...(parts.feedback ? { feedback: parts.feedback, annotation_ids: parts.annotation_ids } : {}), review_verdict: plan.verdict, ...(to ? { to } : {}) };
+        const input = { words: parts.words, questions: [], ...(parts.feedback ? { feedback: parts.feedback, annotation_ids: parts.annotation_ids } : {}), ...(parts.uploads ? { uploads: parts.uploads } : {}), review_verdict: plan.verdict, ...(to ? { to } : {}) };
         await inboxApi.reply(message.id, { idempotency_key: keys.current.keyFor(input), ...input });
         keys.current.done();
         clearReviewNotes(message.id);
@@ -953,6 +954,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
   );
 
   return (
+    <CommentPictures thread={thread.thread_id} records={records}>
     <section
       ref={paneRef}
       className={`ib-viewer ib-wlayer ib-review ib-rv-walk${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}${!folded && !panelOpen ? ' ib-rv-shut' : ''}${showTree ? ' ib-rv-tree' : ''}${filesSheet ? ' ib-files-open' : ''}`}
@@ -1344,5 +1346,6 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
         <ShowMeCorner shape={board} title={boardSummary?.title ?? 'Shape'} picture={boardSummary?.preview?.picture ?? null} part={landed.part} resolveSrc={(src) => shapeHost.assetUrl?.(board, src) ?? src} onGrow={() => setLanded(null)} onClose={() => onBoard(null)} {...(showMeOn ? { onAgain: () => { onBoard(null); showMe.again(board); } } : {})} />
       )}
     </section>
+    </CommentPictures>
   );
 }
