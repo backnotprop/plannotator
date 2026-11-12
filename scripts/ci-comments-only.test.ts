@@ -1,8 +1,8 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { compareSource, verifyCommentsOnly } from './ci-comments-only';
+import { compareShrinkOnly, compareSource, isDirective, isLicense, verifyCommentsOnly } from './ci-comments-only';
 
 const passes: [string, string, string, string][] = [
   ['comment deleted', 'a.ts', 'const a = 1; // why\nexport { a };', 'const a = 1;\nexport { a };'],
@@ -11,6 +11,10 @@ const passes: [string, string, string, string][] = [
   ['catch block emptied', 'a.ts', 'try { f(); } catch {\n  // ignore\n}', 'try { f(); } catch {}'],
   ['JSX comment child removed', 'a.tsx', 'const v = (\n  <div>\n    {/* the list */}\n    <ul />\n  </div>\n);', 'const v = (\n  <div>\n    <ul />\n  </div>\n);'],
   ['comment in multi-line call removed', 'a.ts', 'f(\n  1, // first\n  2,\n);', 'f(\n  1,\n  2,\n);'],
+  ['prose mentioning a tool removed', 'a.ts', '// eslint used to flag this, and @ts-ignore was wrong here\nf();', 'f();'],
+  ['comment between @ts-expect-error and its code removed', 'a.ts', '// @ts-expect-error wrong on purpose\n// the reason\nconst a: number = "x";', '// @ts-expect-error wrong on purpose\nconst a: number = "x";'],
+  ['comment removed in a .mjs file', 'a.mjs', 'export const a = 1; // why', 'export const a = 1;'],
+  ['JSX comment removed in a .jsx file', 'a.jsx', 'const v = <div>{/* c */}<b /></div>;', 'const v = <div><b /></div>;'],
 ];
 
 const fails: [string, string, string, string, RegExp][] = [
@@ -21,7 +25,9 @@ const fails: [string, string, string, string, RegExp][] = [
   ['JSX comment removal joins two words', 'a.tsx', 'const v = (\n  <p>\n    Hello\n    {/* c */}\n    world\n  </p>\n);', 'const v = (\n  <p>\n    Hello\n    world\n  </p>\n);', /code changed/],
   ['@ts-expect-error removed', 'a.ts', '// @ts-expect-error wrong on purpose\nconst a: number = "x";', 'const a: number = "x";', /directive/],
   ['eslint-disable removed', 'a.ts', '/* eslint-disable no-console */\nconsole.log(1);', 'console.log(1);', /directive/],
-  ['comment between @ts-ignore and its line removed', 'a.ts', '// @ts-ignore\n// note\nf();', '// @ts-ignore\nf();', /directive/],
+  ['license block removed', 'a.ts', '/*! lib v1 | MIT */\nf();', 'f();', /directive/],
+  ['@ts-ignore moved to another statement', 'a.ts', 'f();\n// @ts-ignore\ng();', '// @ts-ignore\nf();\ng();', /directive/],
+  ['code changed in a .cjs file', 'a.cjs', 'module.exports = 1;', 'module.exports = 2;', /code changed/],
   ['comment holding a line break after return removed', 'a.ts', 'function f() { return /*\n*/ 1; }', 'function f() { return 1; }', /code changed/],
 ];
 
@@ -33,6 +39,27 @@ describe('compareSource', () => {
   test.each(fails)('fails: %s', (_name, path, before, after, reason) => {
     expect(compareSource(path, before, after)).toMatch(reason);
   });
+});
+
+test('the comment baseline may only lose lines', () => {
+  expect(compareShrinkOnly('3\ta.ts\n5\tb.ts\n', '5\tb.ts\n')).toBeNull();
+  expect(compareShrinkOnly('3\ta.ts\n5\tb.ts\n', '3\ta.ts\n4\tb.ts\n')).toMatch(/added or changed/);
+  expect(compareShrinkOnly('3\ta.ts\n', '3\ta.ts\n1\tc.ts\n')).toMatch(/added or changed/);
+});
+
+const sharedRules = resolve(import.meta.dir, 'no-comments/rules.ts');
+test.skipIf(!existsSync(sharedRules))('keeps the same comments as scripts/no-comments/rules.ts', async () => {
+  const shared = (await import(sharedRules)) as { isDirective: (c: string) => boolean; isLicense: (c: string) => boolean };
+  const samples = [
+    '// @ts-expect-error x', '// @ts-ignore', '/* eslint-disable no-console */', '// eslint is mentioned here',
+    '/// <reference types="bun" />', '/* @__PURE__ */', '// biome-ignore lint: x', '/*! MIT */', '/** @license MIT */',
+    '// Copyright 2024', '// prettier-ignore', '/* istanbul ignore next */', '/** @jsxImportSource react */', '// plain prose',
+    '// inbox-guard: own child', '/* global foo */', '// @deprecated use g', '//# sourceMappingURL=a.js.map',
+  ];
+  for (const comment of samples) {
+    expect(isDirective(comment), comment).toBe(shared.isDirective(comment));
+    expect(isLicense(comment), comment).toBe(shared.isLicense(comment));
+  }
 });
 
 describe('verifyCommentsOnly on a git repo', () => {
@@ -74,7 +101,7 @@ describe('verifyCommentsOnly on a git repo', () => {
   });
 
   test.each([
-    ['a non-ts file changed', { 'src/a.ts': 'const a = 1;\n', 'README.md': '# readme\n' }, 'README.md'],
+    ['a non-source file changed', { 'src/a.ts': 'const a = 1;\n', 'README.md': '# readme\n' }, 'README.md'],
     ['a file added', { 'src/a.ts': 'const a = 1;\n', 'src/b.ts': '// only a comment\n' }, 'src/b.ts'],
     ['a file deleted', { 'src/a.ts': null }, 'src/a.ts'],
   ] as const)('%s is refused', (_name, change, path) => {

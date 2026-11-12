@@ -15,12 +15,41 @@ export interface Verdict {
   problems: FileProblem[];
 }
 
-const DIRECTIVE =
-  /@ts-|^\/\/\/\s*<|eslint|oxlint|biome-ignore|deno-lint|[@#]__[A-Z_]+__|prettier-ignore|@jsx|istanbul|[cv]8 ignore|@license|@preserve|^\/[*/]!|@vite-ignore|webpack[A-Z]|-guard:/;
+const LINE_OR_BLOCK_DIRECTIVE =
+  /^(@ts-(expect-error|ignore|nocheck|check)\b|eslint-(disable|enable)|biome-ignore|oxlint-(disable|enable)|prettier-ignore|deno-(lint|fmt)-ignore|[@#]__(PURE|NO_SIDE_EFFECTS|INLINE|KEY)__|@vite-ignore|webpack[A-Z]\w*\s*:|@jsx(ImportSource|Runtime|Frag)?\b|(istanbul|c8|v8) ignore|@refresh reset|[#@] sourceMappingURL=|@deprecated\b)/;
 
-const LINE_SCOPED_DIRECTIVE = /@ts-expect-error|@ts-ignore|next-line|disable-line|biome-ignore|prettier-ignore|ignore next|-guard:/;
+const BLOCK_ONLY_DIRECTIVE = /^(eslint(-env)?\s|globals?\s|exported\s)/;
 
-const SOURCE_EXTENSION = /\.tsx?$/;
+const TRIPLE_SLASH_DIRECTIVE = /^\/\/\/\s*<(reference|amd-module|amd-dependency)\b/;
+
+const LICENSE = /@license\b|@preserve\b|copyright|SPDX-License-Identifier/i;
+
+function bodyOf(comment: string): string {
+  const inner = comment.startsWith('//') ? comment.replace(/^\/\/+/, '') : comment.replace(/^\/\*+!?/, '').replace(/\*\/$/, '');
+  return inner.replace(/^[\s*]+/, '');
+}
+
+export function isDirective(comment: string): boolean {
+  if (TRIPLE_SLASH_DIRECTIVE.test(comment)) return true;
+  const body = bodyOf(comment);
+  if (LINE_OR_BLOCK_DIRECTIVE.test(body)) return true;
+  return comment.startsWith('/*') && BLOCK_ONLY_DIRECTIVE.test(body);
+}
+
+export function isLicense(comment: string): boolean {
+  return comment.startsWith('/*!') || LICENSE.test(comment);
+}
+
+const SOURCE_EXTENSION = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
+
+const SHRINK_ONLY_DATA_FILES = new Set(['tests/no-comments.baseline.txt']);
+
+function scriptKindOf(path: string): TypeScript.ScriptKind {
+  if (path.endsWith('.tsx')) return ts.ScriptKind.TSX;
+  if (path.endsWith('.jsx')) return ts.ScriptKind.JSX;
+  if (/\.[mc]?js$/.test(path)) return ts.ScriptKind.JS;
+  return ts.ScriptKind.TS;
+}
 
 function isJSDocKind(kind: ts.SyntaxKind): boolean {
   return kind >= ts.SyntaxKind.FirstJSDocNode && kind <= ts.SyntaxKind.LastJSDocNode;
@@ -54,8 +83,7 @@ interface Shape {
 }
 
 function shapeOf(path: string, text: string): Shape {
-  const kind = path.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
-  const file = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, kind);
+  const file = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, scriptKindOf(path));
   const tree: string[] = [];
   const tokens: ts.Node[] = [];
 
@@ -100,20 +128,12 @@ function shapeOf(path: string, text: string): Shape {
   };
   visit(file);
 
-  const lineOf = (position: number) => file.getLineAndCharacterOfPosition(position).line;
   const directives: string[] = [];
   tokens.forEach((token, index) => {
-    const previousEnd = index > 0 ? lineOf(tokens[index - 1].end) : -1;
     for (const range of ts.getLeadingCommentRanges(text, token.pos) ?? []) {
       const comment = text.slice(range.pos, range.end);
-      if (!DIRECTIVE.test(comment)) continue;
-      let placement = `before token ${index}`;
-      if (LINE_SCOPED_DIRECTIVE.test(comment)) {
-        const linesToToken = lineOf(token.getStart(file)) - lineOf(range.end);
-        const trailsCode = lineOf(range.pos) === previousEnd;
-        placement += `, ${linesToToken} lines above it${trailsCode ? ', after code on its line' : ''}`;
-      }
-      directives.push(`${comment.trim()} | ${placement}`);
+      if (!isDirective(comment) && !isLicense(comment)) continue;
+      directives.push(`${comment.trim()} | before token ${index}`);
     }
   });
 
@@ -122,7 +142,7 @@ function shapeOf(path: string, text: string): Shape {
 }
 
 export function compareSource(path: string, before: string, after: string): string | null {
-  if (!SOURCE_EXTENSION.test(path)) return 'not a .ts or .tsx file';
+  if (!SOURCE_EXTENSION.test(path)) return 'not a JavaScript or TypeScript file';
   const old = shapeOf(path, before);
   const next = shapeOf(path, after);
   if (old.parseErrors || next.parseErrors) return 'does not parse cleanly';
@@ -197,10 +217,19 @@ function problemWithChange(change: Change): string | null {
   if (change.status === 'A') return 'file added';
   if (change.status === 'D') return 'file deleted';
   if (change.status !== 'M') return `change of type ${change.status}`;
-  if (!SOURCE_EXTENSION.test(change.path)) return 'not a .ts or .tsx file';
   if (change.oldMode !== change.newMode) return `file mode changed ${change.oldMode} -> ${change.newMode}`;
   if (change.newMode !== '100644' && change.newMode !== '100755') return `not a regular file (mode ${change.newMode})`;
+  if (!SOURCE_EXTENSION.test(change.path) && !SHRINK_ONLY_DATA_FILES.has(change.path)) return 'not a JavaScript or TypeScript file';
   return null;
+}
+
+export function compareShrinkOnly(before: string, after: string): string | null {
+  const remaining = after.split('\n');
+  let next = 0;
+  for (const line of before.split('\n')) {
+    if (next < remaining.length && line === remaining[next]) next++;
+  }
+  return next === remaining.length ? null : `a line was added or changed: ${describe(remaining[next])}`;
 }
 
 export function verifyCommentsOnly(repo: string, base: string, head: string): Verdict {
@@ -214,7 +243,9 @@ export function verifyCommentsOnly(repo: string, base: string, head: string): Ve
   }
   const blobs = comparable.length ? readBlobs(repo, comparable.flatMap((c) => [c.oldBlob, c.newBlob])) : new Map();
   for (const change of comparable) {
-    const reason = compareSource(change.path, blobs.get(change.oldBlob)!, blobs.get(change.newBlob)!);
+    const before = blobs.get(change.oldBlob)!;
+    const after = blobs.get(change.newBlob)!;
+    const reason = SHRINK_ONLY_DATA_FILES.has(change.path) ? compareShrinkOnly(before, after) : compareSource(change.path, before, after);
     if (reason) problems.push({ path: change.path, reason });
   }
   return { commentsOnly: changes.length > 0 && problems.length === 0, files: changes.length, problems };
