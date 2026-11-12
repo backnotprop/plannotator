@@ -12,7 +12,7 @@ import type { ProjectFolder } from '../api';
 import { connectPrompt } from '../connectPrompt';
 import { formatCount } from '../format';
 import { Icon, type IconName } from '../icons';
-import { pinnedState } from '../pins';
+import { pinEnds, pinnedState } from '../pins';
 import { starPopping } from '../starPop';
 import type { MachinesModel } from '../machines';
 import { AgentsSection, GogglesMark } from '../agents/AgentsSection';
@@ -709,8 +709,8 @@ export function Sidebar(props: SidebarProps) {
                   row={row}
                   project={props.projectNames?.get(row.project.id)}
                   on={pinOn(row)}
-                  first={index === 0}
-                  last={index === pins.length - 1}
+                  first={pinEnds(pins, index).first}
+                  last={pinEnds(pins, index).last}
                   phone={phone}
                   onOpen={pick(() => props.onOpenPin?.(row))}
                   onAction={(action) => {

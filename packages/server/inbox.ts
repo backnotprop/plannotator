@@ -39,7 +39,7 @@
  * No CORS headers anywhere, so another site cannot read an answer.
  */
 
-import { INBOX_PROMPT_HOSTS, inboxRowsBy, type InboxRowsBy } from "@plannotator/core/inbox-types";
+import { INBOX_LINKED_MARKS, INBOX_PROMPT_HOSTS, inboxRowsBy, type InboxRowsBy } from "@plannotator/core/inbox-types";
 import { inboxDiffOptionsOf, inboxDiffOptionsSaved, parseInboxDiffOptionsChange } from "./inbox-diff-options";
 import { listIntroAtStart, listIntroDue, listIntroLookPicked } from "./inbox-list-intro";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -1723,10 +1723,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
        * order: every pinned thread whatever the project filter or `archived`
        * (an archived thread stays pinned). Additive: absent from an older Inbox.
        */
-      pins: store
-        .pins()
-        .map((pin) => byId.get(pin.thread_id))
-        .filter((row): row is InboxListRow => row !== undefined),
+      pins: [
+        ...store
+          .pins()
+          .map((pin) => byId.get(pin.thread_id))
+          .filter((row): row is InboxListRow => row !== undefined),
+        // Merged: then each linked machine's own stars, in that machine's order (they live there, inbox-linked-marks).
+        ...(merged ? machines.pinnedIds().flatMap((id) => byId.get(id) ?? []) : []),
+      ],
+      /** The marks a linked machine may send to this Inbox for its own threads and agents (inbox-linked-marks). Additive. */
+      marks: INBOX_LINKED_MARKS,
       ...(merged ? { self: machines.selfId, machines: machines.machinesView() } : {}),
       /**
        * Each machine's agents (additive; the Agents section, inbox-agents-list.ts): one group, this Inbox's own; on the
@@ -3602,9 +3608,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // An Ask AI conversation changed: the window reads it again. Only the owner's own window hears of it.
         const onAsk = (threadId: string) => send(`event: ask\ndata: ${JSON.stringify({ thread_id: threadId })}\n\n`);
         if (windowId && ask.allowed(req, via)) askListeners.add(onAsk);
-        // The sidebar's pins changed (any window's, or a deletion): the list reads `pins` again. Windows only.
+        // The sidebar's pins changed (any window's, a linked machine's, or a deletion): the list reads `pins` again.
+        // Windows, and a linked machine that asks (`pins=1`: a star writes no record, inbox-peer-link.ts).
         const onPins = () => send(`event: pins\ndata: {}\n\n`);
-        if (windowId) pinListeners.add(onPins);
+        if (windowId || url.searchParams.get("pins") === "1") pinListeners.add(onPins);
         // The pinned artifacts changed (any window's, a phone's, or a deletion): the window reads them again. Windows only.
         const onArtifactPins = () => send(`event: artifact-pins\ndata: {}\n\n`);
         if (windowId) artifactPinListeners.add(onArtifactPins);

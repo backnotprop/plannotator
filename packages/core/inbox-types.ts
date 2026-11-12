@@ -3196,6 +3196,14 @@ export const INBOX_DRAFT_PASTED_PREVIEW_MAX = 200;
 export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
 
 /**
+ * The marks a person sets on an agent or a thread that a linked machine may send to this Inbox, the one that owns it
+ * (approval "inbox-linked-marks"). The list says them (`marks`), so a linked machine offers a mark on this Inbox's
+ * rows only once this Inbox takes it; an older Inbox says none.
+ */
+export const INBOX_LINKED_MARKS = ["star"] as const;
+export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
+
+/**
  * A thread pinned to the window's sidebar (approval "inbox-pinned-threads"):
  * window furniture only. Kept in `inbox/pins.json`, in pin order, outside the
  * event log, so agents, the MCP, search and the phone's event stream never
