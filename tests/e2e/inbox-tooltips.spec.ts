@@ -25,7 +25,7 @@
  * PNGs land in .local/proof/tooltips/ (PLANNOTATOR_E2E_PROOF_DIR).
  */
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';

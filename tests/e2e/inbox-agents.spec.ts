@@ -34,7 +34,7 @@
  */
 import { markTourDecided } from '../helpers/tour-decided';
 import { INBOX_NOTE_START } from '../../packages/server/inbox-agent-notes';
-import { expect, test, type Browser, type Page, type Request } from '@playwright/test';
+import { expect, test, type Browser, type Page, type Request } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

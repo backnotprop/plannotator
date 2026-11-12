@@ -25,7 +25,7 @@
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-board-reveal.spec.ts`. PNGs land in
  * PLANNOTATOR_E2E_PROOF_DIR/board-reveal, or .local/proof/board-reveal/.
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

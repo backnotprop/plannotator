@@ -16,7 +16,7 @@
  * PLANNOTATOR_E2E_PROOF_DIR/choice-labels).
  */
 
-import { expect, test, devices, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, devices, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

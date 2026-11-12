@@ -14,7 +14,7 @@
  *    no raw "changed since you read it" error (pickConflict.ts holds that rule).
  */
 
-import { expect, test, type BrowserContext, type Page, type Request } from '@playwright/test';
+import { expect, test, type BrowserContext, type Page, type Request } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';

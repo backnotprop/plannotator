@@ -17,7 +17,7 @@
  * .local/proof/phone-thread-header/.
  */
 
-import { devices, expect, test, type Browser, type BrowserContext } from '@playwright/test';
+import { devices, expect, test, type Browser, type BrowserContext } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

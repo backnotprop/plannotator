@@ -27,7 +27,7 @@
  * `RL_FOLDER_SHOTS` the folder browser's, `folder-<state>-<1440|390>-<light|dark>.png` (default
  * /tmp/remote-launch-picker/other-folder).
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

@@ -18,7 +18,7 @@
  *
  * INBOX_Q_SHOTS names a folder for the video and the legend picture.
  */
-import { expect, test, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext, type Locator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { FIXTURE_V1_LOCAL } from '../../packages/core/guide-format-fixtures';
 import { copyFileSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';

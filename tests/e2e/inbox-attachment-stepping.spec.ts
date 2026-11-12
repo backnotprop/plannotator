@@ -24,7 +24,7 @@
  * PNGs, light and dark, land in PLANNOTATOR_E2E_SHOTS_DIR (default .local/proof/attachment-stepping).
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

@@ -26,7 +26,7 @@
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  * Shots and the video go to PLANNOTATOR_TOUR_SHOTS (default .local/proof/tour).
  */
-import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

@@ -23,7 +23,7 @@ import { ThemeProvider, useTheme } from '@plannotator/ui/components/ThemeProvide
 import { WarmCodeHighlight } from './components/WarmCodeHighlight';
 import { threadDrawReady } from './threadDrawReady';
 import { QueryClientProvider, useQueryClient } from '@tanstack/react-query';
-import { createInboxQueryClient } from './data/client';
+import { probedInboxQueryClient } from './data/heldProbe';
 import { dropThread, heldThread, pruneThreads, putThread, readThread, showableThread, staleThreads, useHeldThread } from './data/queries/thread';
 import { sameThreadFiles } from './data/queries/files';
 import { putList, readList, takeListRead, useListModel } from './data/queries/list';
@@ -8226,7 +8226,7 @@ function Inbox() {
 
 export function InboxApp() {
   // The window's one cache (data/client.ts): threads by id, the writes on their way.
-  const [queryClient] = useState(createInboxQueryClient);
+  const [queryClient] = useState(probedInboxQueryClient);
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider defaultTheme="system">

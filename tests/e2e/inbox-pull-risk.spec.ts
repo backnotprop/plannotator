@@ -18,7 +18,7 @@
  *
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/pull-risk: 1440 and 390, light and dark.
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

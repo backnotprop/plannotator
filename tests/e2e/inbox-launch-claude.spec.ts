@@ -41,7 +41,7 @@
  * 2x, plus 02 and 06 dark, and 01, 02, 06 and 08 on a phone. Build the binary first (see
  * inbox.spec.ts), then `bunx playwright test -c tests/e2e/playwright.config.ts inbox-launch-claude.spec.ts`.
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

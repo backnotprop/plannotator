@@ -18,7 +18,7 @@
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-held-notice-line.spec.ts`.
  */
 
-import { devices, expect, test, type Browser, type Page } from '@playwright/test';
+import { devices, expect, test, type Browser, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

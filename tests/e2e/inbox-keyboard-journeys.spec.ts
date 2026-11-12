@@ -14,7 +14,7 @@
  * F is full screen for now (never saved as the view files open in); S2 also
  * takes the Full screen button, by Tab, which is a choice that is saved.
  */
-import { devices, expect, test, webkit, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { devices, expect, test, webkit, type Browser, type BrowserContext, type Locator, type Page } from './inbox-test';
 import { mkdirSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { createKeyboardWorld, type KeyboardWorld } from './inbox-keyboard-world';

@@ -14,7 +14,7 @@
  *
  * Build first: see inbox.spec.ts.
  */
-import { devices, expect, test, type Browser, type Page } from '@playwright/test';
+import { devices, expect, test, type Browser, type Page } from './inbox-test';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { removeInboxScratch } from './inbox-scratch';

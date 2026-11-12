@@ -35,7 +35,7 @@
  * .local/proof/shared-events/results.json.
  */
 
-import { expect, test, type Browser, type CDPSession, type Page } from '@playwright/test';
+import { expect, test, type Browser, type CDPSession, type Page } from './inbox-test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { removeInboxScratch, stopScratchInbox } from './inbox-scratch';

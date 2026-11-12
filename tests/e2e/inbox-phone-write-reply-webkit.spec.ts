@@ -4,7 +4,7 @@
  * words typed in the file's card are still there. It used to leave full screen
  * in the address only, so nothing moved on screen.
  */
-import { expect, test, devices } from '@playwright/test';
+import { expect, test, devices } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

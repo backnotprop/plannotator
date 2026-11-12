@@ -16,7 +16,7 @@
  * the pictures (default .local/proof/reply-draft-files).
  */
 
-import { devices, expect, test, type Browser } from '@playwright/test';
+import { devices, expect, test, type Browser } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

@@ -25,7 +25,7 @@
  * .local/proof/attachments/ with a contact sheet.
  */
 
-import { expect, test, type Browser, type BrowserContext, type FrameLocator, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type FrameLocator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync, appendFileSync, unlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';

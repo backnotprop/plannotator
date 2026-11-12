@@ -30,7 +30,7 @@
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-pages-only.spec.ts`.
  */
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { createServer as createHttpServer, type Server } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';

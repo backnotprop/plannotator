@@ -26,7 +26,7 @@
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-list-intro.spec.ts`. PNGs and a video of the demo
  * land in PLANNOTATOR_E2E_PROOF_DIR/list-intro, or .local/proof/list-intro/.
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

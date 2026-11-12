@@ -36,7 +36,7 @@
  * Pictures: LAUNCH_PR3_SHOTS_DIR (default .local/proof/launch-pr3), wide light at 2x.
  * Build the binary first, then `bunx playwright test -c tests/e2e/playwright.config.ts inbox-launch-scratch.spec.ts`.
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

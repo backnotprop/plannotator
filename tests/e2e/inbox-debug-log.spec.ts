@@ -14,7 +14,7 @@
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-debug-log.spec.ts`.
  */
 
-import { expect, test, devices, type Browser, type Page } from '@playwright/test';
+import { expect, test, devices, type Browser, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import net from 'node:net';

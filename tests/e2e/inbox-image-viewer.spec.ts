@@ -21,7 +21,7 @@
  * PNGs, light and dark, land in PLANNOTATOR_E2E_SHOTS_DIR (default .local/proof/image-viewer).
  */
 
-import { expect, test, webkit, devices, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, webkit, devices, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

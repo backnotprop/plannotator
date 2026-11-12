@@ -23,7 +23,7 @@
  * apps/review build && bun run build:hook), then `bunx playwright test -c tests/e2e/playwright.config.ts
  * inbox-snooze-intro.spec.ts`. PNGs land in PLANNOTATOR_E2E_PROOF_DIR/snooze-intro, or .local/proof/snooze-intro/.
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

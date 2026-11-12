@@ -23,7 +23,7 @@
  * <PLANNOTATOR_E2E_PROOF_DIR or .local/proof>/action-copy-blocks/.
  */
 
-import { devices, expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { devices, expect, test, type Browser, type BrowserContext, type Locator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
