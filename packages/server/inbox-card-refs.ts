@@ -5,10 +5,11 @@
  *
  * One resolver per source, behind one interface: the source registry's
  * parser (shared/inbox/card-refs.ts) reads a reference, a resolver here says
- * what it is now. GitHub and GitLab go through #2187's hover-card lookup
- * (`createRefCards`: this computer's own gh / glab, github.com, gitlab.com and
- * the hosts they are signed in to only, `--hostname` always passed, read
- * only, its cache). A source with no resolver (Bitbucket today) answers
+ * what it is now. GitHub, GitLab and Bitbucket Cloud go through #2187's
+ * hover-card lookup (`createRefCards`: this computer's own gh / glab,
+ * github.com, gitlab.com and the hosts they are signed in to only,
+ * `--hostname` always passed, read only, its cache; Bitbucket pull requests
+ * through the review app's API token). A source with no resolver answers
  * `unsupported`, and the window shows the reference quietly. A new source
  * (Linear, Jira, Figma, Vercel) adds one entry to CARD_REF_RESOLVERS.
  */
@@ -26,9 +27,9 @@ export interface InboxCardRefResolver {
   resolve(ref: InboxCardRef): Promise<InboxCardRefResult | null>;
 }
 
-/** GitHub and GitLab: #2187's lookup, by the reference's URL. */
+/** GitHub, GitLab and Bitbucket Cloud: #2187's lookup, by the reference's URL. */
 export function forgeCardRefResolver(refCards: RefCards): InboxCardRefResolver {
-  return { sources: ["github", "gitlab"], resolve: (ref) => refCards.get(ref.url) };
+  return { sources: ["github", "gitlab", "bitbucket"], resolve: (ref) => refCards.get(ref.url) };
 }
 
 /**

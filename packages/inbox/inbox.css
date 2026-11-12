@@ -11827,8 +11827,6 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-sbc[data-dragging], .ib-sbc[data-dragging] * { cursor: grabbing; user-select: none; }
 .ib-sbc-lock { width: 34px; flex: none; display: inline-grid; place-items: center; color: color-mix(in oklch, var(--muted-foreground) 75%, transparent); }
 .ib-sbc-lock .ib-ic { width: 13px; height: 13px; }
-.ib-sbc-middle { display: flex; align-items: center; gap: 6px; height: 34px; margin: 8px 0 0; padding: 0 10px; border-radius: var(--ib-rl-sm-s, 7px); background: color-mix(in oklch, var(--muted) 50%, transparent); color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
-.ib-sbc-middle .ib-ic { width: 13px; height: 13px; }
 /* Where a dragged row lands: a gap the size of a row, tinted. */
 .ib-sbc-gap { height: 34px; flex: none; border-radius: var(--ib-rl-sm-s, 7px); background: color-mix(in oklch, var(--primary) 10%, transparent); }
 .ib-sbc-empty { height: 34px; display: flex; align-items: center; padding: 0 10px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }

@@ -264,6 +264,15 @@ test("several linked PRs: the post goes to the one chosen only; a PR the thread 
   expect(idle.calls).toHaveLength(0);
 });
 
+test("a thread's Bitbucket Cloud PR is refused as unsupported: it never reaches glab or gh", async () => {
+  const url = "https://bitbucket.org/acme/notes/pull-requests/12";
+  const world = seed([url]);
+  const forge = fakeForge("gitlab");
+  const result = await postThreadDecisions(world.store, world.thread, { pull: url }, { runtime: forge.runtime, version: "test", destination: "comment" });
+  expect(result).toMatchObject({ status: 422, body: { code: "forge_unsupported" } });
+  expect(forge.calls).toHaveLength(0);
+});
+
 test("GitLab: a note on the merge request, edited in place with PUT; the banner is its words as a link (no <picture> there)", async () => {
   const world = seed(["group/sub/app!45"]);
   const forge = fakeForge("gitlab");

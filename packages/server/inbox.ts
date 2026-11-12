@@ -199,7 +199,7 @@ import { guidePullKey, inboxGuideFileContents, inboxGuideRoute, readInboxReviewS
 import { createInboxRepoCache } from "./inbox-repos";
 import { systemSetupRoute } from "./inbox-system-setup";
 import { SYSTEM_READ_PATHS, systemFilesCache, systemReadRoute, systemSwitch } from "./inbox-system";
-import { createRefCards, refCliRunner, type RefRunner } from "./ref-cards";
+import { bitbucketRefReader, createRefCards, refCliRunner, type BitbucketRefReader, type RefRunner } from "./ref-cards";
 import { mergePull } from "@plannotator/shared/inbox-pull-merge";
 import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
@@ -568,6 +568,8 @@ export interface InboxServerOptions {
   readProjectRepo?: (root: string) => Promise<InboxProjectRepo | null>;
   /** Tests: run the hover cards' `gh` / `glab` through this instead of the real ones (ref-cards.ts). */
   refRunner?: RefRunner;
+  /** Tests: Bitbucket Cloud PRs' cards and states (default: the real API, unless `refRunner` is given). */
+  bitbucketRefReader?: BitbucketRefReader;
   /** Tests: a thread's PRs read their states from this instead of gh / glab (inbox-thread-pulls.ts). */
   threadPullFixture?: () => ThreadPullFixture | null;
   /**
@@ -1040,7 +1042,7 @@ const INBOX_SNOOZE_WRITE = /^\/api\/inbox\/(?:m\/[^/]+\/)?threads\/[^/]+\/snooze
  * Whether an Inbox ran on this machine before this start, from evidence that
  * predates it (read before this start writes the version, the store or the
  * registry): the version an earlier Inbox recorded (0.28.12 and later), the
- * registry every Inbox writes, a project in the store, or a setting the Inbox
+ * registry every Inbox writes, a project in the store (or its database), or a setting the Inbox
  * page wrote. Builds 0.28.7 to 0.28.11 recorded no version, so the version
  * alone would call their people fresh.
  */
@@ -1052,6 +1054,7 @@ export function inboxUsedBefore(dataDir: string): boolean {
   try {
     if (readdirSync(join(dataDir, "inbox", "projects")).length > 0) return true;
   } catch {}
+  if (existsSync(join(dataDir, "inbox", "inbox.db"))) return true;
   const config = loadConfig();
   return config.inboxNotifications !== undefined || config.inboxTool !== undefined;
 }
@@ -1093,7 +1096,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     previousInboxVersion = readUpdateState(dataDir).inboxVersion ?? null;
   } catch {}
   const storeLoadStarted = performance.now();
-  // The SQLite switch (off for everyone): with it off and no inbox.db, this is today's InboxStore.open, nothing more.
+  // The SQLite switch (off by default, for every install): with it off and no inbox.db, this is today's InboxStore.open, nothing more.
   const opened = await openInboxStore(dataDir, {
     sqlite: options.sqlite ?? resolveInboxSqlite(loadConfig(), process.env),
     now: options.storeNow,
@@ -1103,6 +1106,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     checkFilesCommand: options.selfCommand?.length ? options.selfCommand : undefined,
   });
   const store = opened.store;
+  // A move that did not finish leaves the Inbox as it was; why goes to the terminal and inbox.log (never the debug
+  // log, whose values are words from a list: the reason names paths).
+  if (opened.moved && (opened.moved.status === "kept_files" || opened.moved.status === "kept_db")) {
+    const kept = opened.moved.status === "kept_files" ? "into SQLite did not finish; the Inbox stays on its files" : "back to the files did not finish; the Inbox stays on its database";
+    process.stderr.write(`Inbox: the move ${kept} (${opened.moved.reason}: ${opened.moved.detail}).\n`);
+  }
   // Read every project's log and replayed it (store.ts load): the debug log notes how long that took.
   const storeLoadMs = performance.now() - storeLoadStarted;
   // A send a crash interrupted leaves a temp blob; the next start removes it once it is stale.
@@ -1277,7 +1286,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   // Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for.
   // github.com, gitlab.com and the hosts this computer's own gh / glab is signed in to; nothing else.
-  const refCards = createRefCards(options.refRunner ? { run: options.refRunner } : {});
+  // Bitbucket Cloud PRs through the review app's credentials; a test that runs its own CLIs passes its own reader.
+  const refCards = createRefCards(
+    options.refRunner ? { run: options.refRunner, bitbucket: options.bitbucketRefReader } : { bitbucket: options.bitbucketRefReader ?? bitbucketRefReader },
+  );
   // The Board's links, one resolver per source (inbox-card-refs.ts): GitHub and GitLab through the hover cards' lookup.
   const cardRefResolvers = [forgeCardRefResolver(refCards)];
   const cardFavicons = createCardFavicons(options.cardFavicons ?? {});

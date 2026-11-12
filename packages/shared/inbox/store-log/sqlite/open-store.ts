@@ -1,7 +1,7 @@
 /// <reference types="bun-types" />
 /**
  * Which record log an Inbox starts on, behind the SQLite switch (`inboxSqlite` / `PLANNOTATOR_INBOX_SQLITE`, off by
- * default and for everyone; `resolveInboxSqlite` in `../../../config.ts`).
+ * default for every install, new ones included; `resolveInboxSqlite`).
  *
  * - Off, and no `inbox.db`: today's JSONL store, exactly as before (two `existsSync`; a half file a crashed move
  *   left is removed).
@@ -13,12 +13,12 @@
  *
  * Runs before the server listens, as today's load does.
  */
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, rmdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { inboxDir } from "../../schema";
+import { INBOX_PROJECTS_DIR, inboxDir } from "../../schema";
 import { InboxStore } from "../../store";
 import { importJsonlInbox, type InboxImportOutcome, type InboxImportStep } from "./import";
-import { INBOX_DB_IMPORTING, readMeta, removeDb } from "./move-files";
+import { INBOX_DB_IMPORTING, jsonlEntriesPresent, readMeta, removeDb } from "./move-files";
 import { returnToJsonl, type InboxReturnOutcome } from "./return-to-files";
 import { INBOX_DB_FILE, sqliteInboxLog } from "./sqlite-log";
 import { clearStaleUpgradeMarker } from "./upgrade-marker";
@@ -52,37 +52,64 @@ export interface OpenInboxStoreOptions {
 }
 
 /**
- * Test-only, under the test sandbox only: `PLANNOTATOR_INBOX_IMPORT_DELAY_MS` holds a move this long once it has read
- * the files, so a real start can be seen outlasting a starter's wait. Anywhere else, nothing.
+ * Test-only, under the test sandbox only (`PLANNOTATOR_TEST_SANDBOX`), for proofs on a real start of the compiled
+ * binary (`scripts/inbox-sqlite-proof/run.ts`). Anywhere else, nothing.
+ * - `PLANNOTATOR_INBOX_IMPORT_DELAY_MS`: hold a move this long once it has read the files, so a real start can be
+ *   seen outlasting a starter's wait.
+ * - `PLANNOTATOR_INBOX_IMPORT_STOP_AT=<step>[:<n>]`: the process kills itself, hard (SIGKILL; on Windows the same
+ *   call is TerminateProcess), the n-th time the move reaches `<step>` (`InboxImportStep`): a crash at an exact point.
  */
 export function inboxImportDelayFromEnv(env: Record<string, string | undefined>): ((name: InboxImportStep) => void) | undefined {
-  const raw = env.PLANNOTATOR_TEST_SANDBOX ? env.PLANNOTATOR_INBOX_IMPORT_DELAY_MS?.trim() : undefined;
+  if (!env.PLANNOTATOR_TEST_SANDBOX) return undefined;
+  const raw = env.PLANNOTATOR_INBOX_IMPORT_DELAY_MS?.trim();
   const ms = raw && /^\d+$/.test(raw) ? Number(raw) : 0;
-  if (!Number.isSafeInteger(ms) || ms <= 0) return undefined;
+  const delay = Number.isSafeInteger(ms) && ms > 0 ? ms : 0;
+  const [stopAt, nth] = (env.PLANNOTATOR_INBOX_IMPORT_STOP_AT?.trim() ?? "").split(":");
+  const stopNth = nth && /^\d+$/.test(nth) ? Number(nth) : 1;
+  if (!delay && !stopAt) return undefined;
+  let seen = 0;
   return (name) => {
-    if (name === "read") Bun.sleepSync(ms);
+    if (delay && name === "read") Bun.sleepSync(delay);
+    if (stopAt && name === stopAt && ++seen === stopNth) process.kill(process.pid, "SIGKILL");
   };
 }
 
 export async function openInboxStore(dataDir: string, options: OpenInboxStoreOptions): Promise<OpenedInboxStore> {
   const { now } = options;
-  const db = join(inboxDir(dataDir), INBOX_DB_FILE);
+  const dir = inboxDir(dataDir);
+  const db = join(dir, INBOX_DB_FILE);
   const jsonl = () => InboxStore.open(dataDir, now ? { now } : {});
   const sqlite = () => InboxStore.open(dataDir, { ...(now ? { now } : {}), log: sqliteInboxLog });
   if (!options.sqlite) {
-    // A move the switch started and a crash stopped leaves a half file nothing will read: removed.
-    const half = join(inboxDir(dataDir), INBOX_DB_IMPORTING);
+    const half = join(dir, INBOX_DB_IMPORTING);
     if (existsSync(half)) {
       removeDb(half);
-      clearStaleUpgradeMarker(inboxDir(dataDir));
+      clearStaleUpgradeMarker(dir);
     }
     if (!existsSync(db)) return { store: jsonl(), log: "jsonl" };
     const moved = returnToJsonl(dataDir, { now });
     return moved.status === "kept_db" ? { store: sqlite(), log: "sqlite", moved } : { store: jsonl(), log: "jsonl", moved };
   }
-  // A way back that a crash stopped finishes first (it is past its point of no return); then the files move again.
+  const projects = join(dir, INBOX_PROJECTS_DIR);
+  if (!existsSync(db) && emptyFolder(projects) && jsonlEntriesPresent(dir).length === 1) removeEmptyFolder(projects);
   if (existsSync(db) && readMeta(db, "returned_backup")) returnToJsonl(dataDir, { now });
   const moved = await importJsonlInbox(dataDir, { now, onSlow: options.onSlow, step: options.importStep, checkFilesCommand: options.checkFilesCommand });
   if (moved.status === "kept_files") return { store: jsonl(), log: "jsonl", moved };
   return { store: sqlite(), log: "sqlite", moved };
+}
+
+function emptyFolder(path: string): boolean {
+  try {
+    return statSync(path).isDirectory() && readdirSync(path).length === 0;
+  } catch {
+    return false;
+  }
+}
+
+function removeEmptyFolder(path: string): void {
+  try {
+    rmdirSync(path);
+  } catch {
+    // Something was written into it meanwhile: it stays, and the move below takes it as records.
+  }
 }

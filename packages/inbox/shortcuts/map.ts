@@ -4,7 +4,7 @@
  * words come from the registry; this says only where they go.
  */
 import type { ShortcutScopeDefinition } from '@plannotator/ui/shortcuts';
-import { inboxAppShortcuts, inboxArtifactsShortcuts, inboxBoardShortcuts, inboxFileViewerShortcuts, inboxListShortcuts, inboxSearchShortcuts, inboxThreadShortcuts } from './index';
+import { inboxAppShortcuts, inboxArtifactsShortcuts, inboxBoardShortcuts, inboxFileViewerShortcuts, inboxListShortcuts, inboxSearchShortcuts, inboxThreadShortcuts, inboxTileShortcuts } from './index';
 
 export type Ref = { scope: ShortcutScopeDefinition<any>; action: string; only?: number };
 
@@ -28,6 +28,7 @@ const thread = (action: string): Ref => ({ scope: inboxThreadShortcuts, action }
 const file = (action: string, only?: number): Ref => ({ scope: inboxFileViewerShortcuts, action, only });
 const grid = (action: string, only?: number): Ref => ({ scope: inboxArtifactsShortcuts, action, only });
 const board = (action: string, only?: number): Ref => ({ scope: inboxBoardShortcuts, action, only });
+const tiles = (action: string, only?: number): Ref => ({ scope: inboxTileShortcuts, action, only });
 /** The four arrows of a move, each its own keycap with no "or" between them. */
 const arrows = (ref: (action: string, only?: number) => Ref, action: string): Ref[] => [0, 1, 2, 3].map((i) => ref(action, i));
 
@@ -85,6 +86,7 @@ export const MAP_COLUMNS: MapGroup[][] = [
       title: 'Files',
       rows: [
         { keys: [thread('openNewest')] },
+        { keys: arrows(tiles, 'move') },
         { keys: [thread('artifacts')] },
         { keys: arrows(grid, 'move') },
         { keys: [grid('ends')] },

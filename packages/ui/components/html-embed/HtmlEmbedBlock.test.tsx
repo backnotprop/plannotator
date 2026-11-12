@@ -109,6 +109,7 @@ describe.skipIf(!hasDom)('fences a host draws', () => {
     const frame = frameOf(el)!;
     expect(frame).not.toBeNull();
     expect(frame.getAttribute('sandbox')).toBe('allow-scripts allow-forms');
+    expect(frame.hasAttribute('allowfullscreen')).toBe(true);
     expect(frame.getAttribute('loading')).toBe('lazy');
     expect(frame.getAttribute('referrerpolicy')).toBe('no-referrer');
     expect(frame.getAttribute('src')!.startsWith('/api/inbox/embeds/abc#pn=')).toBe(true);

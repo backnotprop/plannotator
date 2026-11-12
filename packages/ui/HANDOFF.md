@@ -3118,3 +3118,9 @@ An `<img>` tag inside a table cell or a sentence is not an HTML block, so `Inlin
 
 - **New context `InlineImageTagsContext`** (`components/ImageResolverContext`, default `false`). With it `true` and an image resolver, an inline `<img>` goes through the resolver as `![alt](src)` does: `src` resolved, `unavailable` is the quiet chip. Only `src`, `alt`, `width` and `height` (whole numbers) are read; nothing else of the tag reaches the page.
 - **A host that provides nothing sees no change.** The Plannotator Inbox turns it on for a PR's text.
+
+## `RenderedMarkdown` `renderParagraph` and fullscreen in HTML frames (unreleased; one opt-in prop, fullscreen for every host)
+
+- **`RenderedMarkdown` `renderParagraph?: (block: Block, fallback: React.ReactNode) => React.ReactNode`**: called for each paragraph block, with the standard rendering as `fallback`. Return `fallback` to keep it. Absent: paragraphs render as before, with the same keys and DOM. Plannotator passes it only for a github.com PR description, where a paragraph that is only a bare `github.com/user-attachments` URL becomes a video player once the attachment proxy answers `video/*`.
+- **`HtmlViewer` and the fenced HTML embed frame now set `allowFullScreen` (no seam).** A video inside a rendered document or embed can enter fullscreen from its own control, which needs a user gesture. The sandbox tokens are unchanged. Every host gets this, Workspaces included.
+- Pinned by `review-editor/components/PRDescriptionVideo.test.tsx` (the prop), `components/html-embed/HtmlEmbedBlock.test.tsx` and `components/html-viewer/HtmlViewer.sandbox.test.tsx` (`allowfullscreen`).

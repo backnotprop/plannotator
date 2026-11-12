@@ -14,7 +14,7 @@ import { Icon } from '../icons';
 import { DECISIONS_POST_TO_WORDS, decisionExportUrl, threadHasQuestionCards } from '../decisionExport';
 import { inboxApi, type DecisionsPostTo } from '../api';
 import { RefMarkIcon } from '../board/RefMark';
-import { useThreadPulls } from '../threadPulls/ThreadPulls';
+import { canPostDecisionsOn, useThreadPulls } from '../threadPulls/ThreadPulls';
 import { Tip } from './Tip';
 import { useThreadTags } from '../threadTags';
 import { AddTagItem, AddTagList } from './AddTagMenu';
@@ -301,7 +301,8 @@ export function ThreadMore(
   const exportBack = useRef(false);
   // The thread's PRs for the Post group: read while the menu is open (the PR button keeps them current otherwise).
   const { answer: pullsAnswer } = useThreadPulls(thread.thread_id, open && exportOffered && !!postDecisions);
-  const linked = pullsAnswer?.pulls ?? [];
+  // Only the PRs decisions can post on (a Bitbucket PR is refused by the server, so it gets no row).
+  const linked = (pullsAnswer?.pulls ?? []).filter(canPostDecisionsOn);
   // Where to post (config.json `inboxDecisionsPostTo`): read when the menu opens, saved on a pick.
   const [postTo, setPostTo] = useState<DecisionsPostTo | null>(null);
   const postOffered = open && exportOffered && !!postDecisions;
