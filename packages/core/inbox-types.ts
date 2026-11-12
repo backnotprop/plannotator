@@ -892,8 +892,8 @@ export interface InboxTag {
   handed_away?: boolean;
 }
 
-/** The most sessions one reply may tag. */
-export const INBOX_TAGS_MAX = 8;
+/** How many sessions one reply may tag: any number (through 0.28.61, at most 8, for no stated reason). Kept so an importer still builds. */
+export const INBOX_TAGS_MAX = Number.POSITIVE_INFINITY;
 
 /**
  * Who a person's last message went to, for the Sent row (`InboxListRow.sent.recipients`):
@@ -3129,7 +3129,7 @@ export interface InboxReplyDraft {
   recipients?: string[];
 }
 
-/** The most sessions a reply draft names as its recipients: the one it answers and as many tags as a reply takes. */
+/** How many sessions a reply draft names as its recipients: the one it answers and as many tags as a reply takes (any number). */
 export const INBOX_REPLY_DRAFT_RECIPIENTS_MAX = INBOX_TAGS_MAX + 1;
 
 /** A session id as a tag (and a reply draft's recipient) names it. */

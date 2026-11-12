@@ -508,7 +508,7 @@ export function createCodexLaunchHost(ctx: LaunchHostContext, options: { readyMs
     const argv = [path, "app-server"];
     let proc: ReturnType<typeof Bun.spawn>;
     try {
-      proc = Bun.spawn(argv, { cwd: launch.folder, env, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+      proc = Bun.spawn(argv, { cwd: launch.folder, env, stdin: "pipe", stdout: "pipe", stderr: "pipe", windowsHide: true });
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
       return { ok: false, cancelled: false, missing: false, text: codexCause(text), output: text };

@@ -39,6 +39,8 @@ export interface ThreadRowMenuProps {
    * where focus goes when the thread closes is App's rule, not the menu's.
    */
   held: boolean;
+  /** A phone: the menu (a held row's, or a right-click's) is a sheet from the bottom edge, the thread's name over it. */
+  phone?: boolean;
   children: ReactNode;
 }
 
@@ -73,7 +75,8 @@ function rowElementOf(target: EventTarget | null): HTMLElement | null {
  * Anywhere else in the list the browser's own menu shows. Opening it never
  * opens the thread or moves the selection. Escape, Tab and an item put focus
  * on the row (wherever focus was before the right-click); a write that takes
- * the row off screen puts it on the row now in its slot. A touch never opens it (no long press: phones have no menu here).
+ * the row off screen puts it on the row now in its slot. On a touch screen a finger held on a row opens it
+ * (`useContextMenuTrigger`'s `longPress`): a sheet from the bottom edge on a phone, the menu under the row elsewhere.
  * The look is the project menu's (`.ib-pm`); the trigger's rules are
  * `useContextMenuTrigger`'s, shared with the Board's card menu.
  */
@@ -100,6 +103,7 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
     disabled: props.disabled,
     held: props.held,
     onTarget: props.onTarget,
+    longPress: true,
   });
   const target = menu.targetId ? props.rowOf(menu.targetId) : null;
   const actions = target ? rowMenuActions(target, props.canMarkRead, props.pinnedOf ? props.pinnedOf(target.thread_id) : null, props.sectionOf?.(target.thread_id) ?? null, props.onSnooze !== undefined && ((props.snoozesOf?.(target) ?? true) || !!props.snoozeBlockedOf?.(target))) : [];
@@ -174,8 +178,15 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
         {props.children}
       </ContextMenu.Trigger>
       <ContextMenu.Portal container={portal ?? undefined}>
-        <ContextMenu.Positioner className="ib-pm-pos">
+        {props.phone && <ContextMenu.Backdrop className="ib-pm-scrim" />}
+        <ContextMenu.Positioner className="ib-pm-pos" data-phone={props.phone ? '' : undefined}>
           <ContextMenu.Popup className="ib-pm" aria-label={target?.subject ?? 'Thread'} data-row-menu={target?.thread_id} {...menu.popup}>
+            {/* The popup is named already (aria-label): the title is for the eye only, on a phone's sheet (the thread's ⋯ sheet's). */}
+            {target && (
+              <div className="ib-pm-title" dir="auto" aria-hidden="true">
+                {target.subject ?? '(no subject)'}
+              </div>
+            )}
             {shownView && target ? (
               <SnoozeTimes
                 view={shownView}

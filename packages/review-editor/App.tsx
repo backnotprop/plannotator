@@ -102,6 +102,7 @@ import type { CommentAskAIHandler } from '@plannotator/ui/components/CommentPopo
 import { useResizablePanel } from '@plannotator/ui/hooks/useResizablePanel';
 import { useCodeAnnotationDraft, type CodeDraftMergeItems, type CodeDraftTargetState } from '@plannotator/ui/hooks/useCodeAnnotationDraft';
 import { useGitAdd } from './hooks/useGitAdd';
+import { useHasSavedGuides } from './hooks/guide/useHasSavedGuides';
 import { generateId } from './utils/generateId';
 import { parseDiagramEngineUrls } from './utils/diagramEngine';
 import type { DiagramEngineUrls } from './utils/diagramEngineContract';
@@ -704,7 +705,10 @@ const ReviewApp: React.FC = () => {
   // discovery from starting before the server reports that AI is enabled.
   const [aiEnabled, setAiEnabled] = useState<boolean | null>(null);
   const aiUIEnabled = aiEnabled === true;
-  const guideVisible = aiUIEnabled && guideOpen;
+  // With AI off, the Guide stays for the saved guides (read only: no launch).
+  const hasSavedGuides = useHasSavedGuides(aiEnabled === false && !!origin);
+  const guideReachable = aiUIEnabled || hasSavedGuides;
+  const guideVisible = guideReachable && guideOpen;
   const [gitUser, setGitUser] = useState<string | undefined>();
   const [isWSL, setIsWSL] = useState(false);
   const [reviewMode, setReviewMode] = useState<string | null>(null);
@@ -5912,7 +5916,7 @@ const ReviewApp: React.FC = () => {
               </>
             )}
             {isCompactTouchLayout && !shouldShowFileTree && <span aria-hidden />}
-            {!isCompactTouchLayout && aiUIEnabled && hasSearchableFiles && (
+            {!isCompactTouchLayout && guideReachable && hasSearchableFiles && (
               <>
                 <button
                   onClick={() => {
@@ -6359,7 +6363,7 @@ const ReviewApp: React.FC = () => {
               onCopyAgentInstructions={handleCopyAgentInstructions}
               onToggleFileTree={toggleNavigator}
               onToggleSidebar={() => reviewSidebar.isOpen ? reviewSidebar.close() : reviewSidebar.open()}
-              onOpenGuide={isCompactTouchLayout && aiUIEnabled && hasSearchableFiles ? () => {
+              onOpenGuide={isCompactTouchLayout && guideReachable && hasSearchableFiles ? () => {
                 if (guideHintActive) {
                   markGuideHintSeen();
                   setGuideHintActive(false);
@@ -6654,6 +6658,7 @@ const ReviewApp: React.FC = () => {
                 onClose={() => setGuideOpen(false)}
                 onOpenFixedGuide={handleOpenGuide}
                 onOpenSavedGuide={handleOpenGuide}
+                launchOff={!aiUIEnabled}
                 onMarkFilesViewed={handleGuideMarkFilesViewed}
                 onAddGlobalComment={submitted || busyWithDecision ? undefined : handleAddGeneralComment}
                 onShowGlobalComment={handleShowGlobalComment}
