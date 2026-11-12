@@ -42,7 +42,7 @@ jobs:
       - name: Compile the binaries for the release's targets
         run: |
           mkdir -p .local/bin
-          for pair in bun-linux-x64-baseline:plannotator-linux-x64 bun-windows-x64-baseline:plannotator-win32-x64.exe bun-darwin-arm64:plannotator-darwin-arm64; do
+          for pair in bun-linux-x64-baseline:plannotator-linux-x64 bun-linux-arm64:plannotator-linux-arm64 bun-windows-x64-baseline:plannotator-win32-x64.exe bun-windows-arm64:plannotator-win32-arm64.exe bun-darwin-arm64:plannotator-darwin-arm64 bun-darwin-x64:plannotator-darwin-x64; do
             bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig --target="${pair%%:*}" \
               --define '__CLI_VERSION__="0.0.0-dev"' --outfile ".local/bin/${pair#*:}"
           done
@@ -73,6 +73,18 @@ jobs:
           - name: macOS
             os: macos-latest
             binary: plannotator-darwin-arm64
+            big: ""
+          - name: Windows ARM64
+            os: windows-11-arm
+            binary: plannotator-win32-arm64.exe
+            big: ""
+          - name: Linux ARM64
+            os: ubuntu-24.04-arm
+            binary: plannotator-linux-arm64
+            big: ""
+          - name: macOS Intel
+            os: macos-15-intel
+            binary: plannotator-darwin-x64
             big: ""
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
