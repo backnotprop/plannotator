@@ -187,7 +187,7 @@ jobs:
 
       - name: Set the Inbox prompt's content type
         run: |
-          for page in prompt.md cloud-agent.md; do
+          for page in prompt.md cloud-agent.md muse.md; do
             if [ -f "apps/marketing/dist/inbox/$page" ]; then
               aws s3 cp "apps/marketing/dist/inbox/$page" "s3://plannotator-marketing/inbox/$page" \
                 --content-type "text/markdown; charset=utf-8"
