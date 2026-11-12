@@ -15,7 +15,9 @@
  *   (`backgrounded · <8 hex> · <name> …`) and the full id from
  *   `agents --json --all --cwd <folder>`, matched as a prefix.
  * - Everything we pass lives in the per-launch settings FILE, never as a
- *   variadic flag (they swallow arguments) and never inline (values in `ps`).
+ *   variadic flag (they swallow arguments) and never inline (values in `ps`),
+ *   but `--model` and `--effort`: `claude respawn` keeps them, and
+ *   `--effort max` exists only as a flag (`effortLevel` stops at xhigh).
  * - `stop` leaves `done` and drops the session from the list without `--all`.
  *
  * Every run goes through `AgentEnvironment` (packages/server/inbox-agents.ts):
@@ -33,7 +35,7 @@ import { inboxLaunchFullPermissions } from "@plannotator/core/inbox-permission";
 import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import { getDefaultPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { INBOX_TOOL_NAME } from "@plannotator/shared/inbox/connection";
-import { placeKey, readAgentFile } from "./agent-files";
+import { placeKey, readAgentFile, samePlace } from "./agent-files";
 import {
   agentVersionRun,
   claudeBypassSetup,
@@ -45,7 +47,11 @@ import {
   createAgentEnvironmentFor,
   type AgentEnvironment,
   type AgentRunResult,
+  type ClaudeProjectSettingsDirs,
 } from "./inbox-agents";
+import { launchChoiceArgs, parseClaudeChoices } from "@plannotator/core/inbox-launch-choice";
+import { LAUNCH_CHOICES_RUN_MS, launchChoiceCache } from "./inbox-launch-choice";
+import { claudeSettingsFilePath, claudeSettingsSignIn, mergeClaudeLaunchSettings, readClaudeSettingsFile, type ClaudeSettingsFileRead } from "./inbox-launch-claude-settings-file";
 import { CLAUDE_NAME, createLaunchPermissions, launchPermissionHooks } from "./inbox-launch-claude-permission";
 import { acceptClaudeTrust, claudeTrustKey, claudeTrustReading, hasGit } from "./inbox-launch-claude-trust";
 import { CLAUDE_SKIP_PERMISSIONS_ENV, launchSettingsEnv, launchSpawnEnv, launchStartOf, shellSkipsPermissions, type LaunchEnv } from "./inbox-launch-env";
@@ -260,6 +266,17 @@ export function claudeRepositoryAbove(folder: string): string | null {
   }
 }
 
+/**
+ * Where Claude Code reads a launch folder's project settings: the shared `.claude/settings.json` in the folder it
+ * starts in, and the local `.claude/settings.local.json` at the repository's root (a linked worktree's main
+ * checkout), or in the folder itself outside a repository, when that root is home, and on Windows.
+ */
+export function claudeProjectSettingsDirs(folder: string, homeDir: string, platform: NodeJS.Platform): ClaudeProjectSettingsDirs {
+  if (platform === "win32") return { project: folder, local: folder };
+  const root = claudeTrustKey(folder);
+  return { project: folder, local: samePlace(root, homeDir) ? folder : root };
+}
+
 /** Claude's transcripts folder name for a project path: every character but a letter or digit as `-`. */
 function claudeProjectDirName(folder: string): string {
   return folder.replace(/[^A-Za-z0-9]/g, "-");
@@ -437,6 +454,7 @@ export function createClaudeHost(options: {
       name: string;
       settingsPath: string;
       mode: ClaudeLaunchMode;
+      choice?: readonly string[];
       allowBypass: boolean;
       environment: AgentEnvironment;
     }): Promise<({ ok: true; session: string; short: string } | ({ ok: false; missing: boolean } & ClaudeStartFailure)) & { output: string; modeRefused?: string }> {
@@ -444,7 +462,7 @@ export function createClaudeHost(options: {
       // Windows: a `claude.cmd` starts through cmd.exe, which can't carry `"`, `%`, `!`, `^` or a line break.
       const plain = process.platform === "win32" ? input.name.replace(/["%!^\u0000-\u001f\u007f]/g, "") : input.name;
       const name = plain.replace(/^-+/, "").trim() || "Inbox";
-      const base = ["--bg", "--name", name, "--settings", input.settingsPath, ...(input.allowBypass ? ["--allow-dangerously-skip-permissions"] : [])];
+      const base = ["--bg", "--name", name, "--settings", input.settingsPath, ...(input.choice ?? []), ...(input.allowBypass ? ["--allow-dangerously-skip-permissions"] : [])];
       let { result, missing } = await run([...base, ...(input.mode ? ["--permission-mode", input.mode] : [])], input.folder, START_TIMEOUT_MS, input.environment);
       let output = `${result.stdout}${result.stderr ? `\n[stderr]\n${result.stderr}` : ""}`;
       let modeRefused: string | undefined;
@@ -473,6 +491,7 @@ export function createClaudeHost(options: {
         output: `${output}\n[not listed: stop ${started.short} exit ${stop.exitCode}, rm exit ${rm.exitCode}]`,
       };
     },
+    help: async () => (await run(["--help"], undefined, LAUNCH_CHOICES_RUN_MS)).result,
     stop: async (short: string) => (await run(["stop", short], undefined)).result,
     respawn: async (short: string, environment: AgentEnvironment) => (await run(["respawn", short], undefined, COMMAND_TIMEOUT_MS, environment)).result,
     rm: async (short: string) => (await run(["rm", short], undefined)).result,
@@ -555,13 +574,15 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
    * folder's hooks held behind it. A server in the person's `disabledMcpjsonServers` still stays off (2.1.316: that
    * list is checked first), and it is here, not `enabledMcpjsonServers`, which Claude moves into the project's files.
    */
-  const writeSettings = (launch: InboxLaunchRecord, login: LaunchEnv, model: string | null): string => {
+  const writeSettings = (launch: InboxLaunchRecord, login: LaunchEnv, person: Record<string, unknown> | null): string => {
     const fullPermissions = inboxLaunchFullPermissions(launch);
     const dir = ctx.launchDir(launch.id);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const path = join(dir, "settings.json");
     const isDefaultDataDir = resolve(ctx.dataDir) === resolve(getDefaultPlannotatorDataDir(ctx.homeDir));
-    const settings = {
+    // Hand-set only, never by the window: the real-CLI smoke pins haiku with it.
+    const model = ctx.config().model;
+    const ours = {
       ...(model ? { model } : {}),
       env: launchSettingsEnv(login, {
         launchId: launch.id,
@@ -575,10 +596,19 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
       // Permission prompts come to the launch thread as questions (inbox-launch-claude-permission.ts).
       hooks: launchPermissionHooks(ctx.selfCommand),
     };
+    // The person's file may hold a secret: it is only ever copied here, 0600.
+    const settings = person ? mergeClaudeLaunchSettings(person, ours) : ours;
     writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
     chmodSync(path, 0o600);
     return path;
   };
+
+  let version: string | null = null;
+  const choiceLists = launchChoiceCache(async () => {
+    // Help with no `--effort` (an older CLI) means no menu, not the fallback lists.
+    const help = await cli.help();
+    return help.exitCode === 0 && !help.timedOut && /--effort <level>/.test(help.stdout) ? parseClaudeChoices(help.stdout) : null;
+  });
 
   // `claude auth status`: kept CLAUDE_AUTH_TTL_MS (signed out, CLAUDE_AUTH_SIGNED_OUT_TTL_MS), and one check at a time,
   // shared, since a Send and every compose read ask availability.
@@ -602,10 +632,18 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
     checking = { key, answer };
     return answer;
   };
-  /** The launched session may sign in another way the check can't see (the login shell's token or key, a cloud provider). */
+  const personSettings = (): ClaudeSettingsFileRead | null => {
+    const typed = ctx.config().settingsFile;
+    if (!typed) return null;
+    const path = claudeSettingsFilePath(typed, ctx.homeDir);
+    return readClaudeSettingsFile(path, ctx.displayFolder(path));
+  };
+  /** The launched session may sign in another way the check can't see (the login shell's token, a cloud provider, a gateway). */
   const signsInOtherwise = (e: AgentEnvironment) => {
     const shell = ctx.shell();
-    return CLAUDE_OTHER_SIGN_IN_ENV.some((name) => !!shell?.[name] || !!e.env[name]);
+    if (CLAUDE_OTHER_SIGN_IN_ENV.some((name) => !!shell?.[name] || !!e.env[name])) return true;
+    const person = personSettings();
+    return !!person?.ok && claudeSettingsSignIn(person.settings);
   };
 
   return {
@@ -616,23 +654,34 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
     // Whether the login shell signs Claude Code in some other way: set or not, never the value.
     shellFlags: CLAUDE_OTHER_SIGN_IN_ENV,
 
-    /** `claude` on the plain env's PATH (the Inbox's, the last login PATH, Claude's install folders), new enough, the plugin's mod and its Inbox tool on. */
-    async available(): Promise<LaunchAvailability> {
+    /**
+     * `claude` on the plain env's PATH (the Inbox's, the last login PATH, Claude's install folders), new enough, the
+     * plugin's mod and its Inbox tool on. With `folders`, the plugin is on for at least one of them, with that
+     * folder's project settings (a project can turn it on, or off, for itself).
+     */
+    async available(folders: readonly string[] = []): Promise<LaunchAvailability> {
       const e = await ctx.environment();
       const path = e.which("claude");
       if (!path) return { ok: false, missing: true, reason: "claude is not on the Inbox's PATH or in ~/.local/bin or ~/.claude/local", code: "missing" };
-      const version = parseClaudeVersion((await agentVersionRun(e, path, { timeoutMs: 10_000 })).stdout);
-      if (!version || !versionAtLeast(version, CLAUDE_LAUNCH_MIN_VERSION)) return { ok: false, missing: false, reason: `Claude Code ${version ?? "?"} is older than ${CLAUDE_LAUNCH_MIN_VERSION}`, code: "too_old" };
+      const found = parseClaudeVersion((await agentVersionRun(e, path, { timeoutMs: 10_000 })).stdout);
+      version = found ? `${path}@${found}` : null;
+      if (!found || !versionAtLeast(found, CLAUDE_LAUNCH_MIN_VERSION)) return { ok: false, missing: false, reason: `Claude Code ${found ?? "?"} is older than ${CLAUDE_LAUNCH_MIN_VERSION}`, code: "too_old" };
       // In the Claude folder a launched session will use: CLAUDE_CONFIG_DIR may be set only in the person's shell.
       const configDir = ctx.shell()?.CLAUDE_CONFIG_DIR;
       const files = configDir ? createAgentEnvironmentFor({ platform: ctx.platform, homeDir: ctx.homeDir, env: { ...e.env, CLAUDE_CONFIG_DIR: configDir } }) : e;
-      if (!claudeCodePluginEnabled(files)) return { ok: false, missing: false, reason: "Plannotator's Claude Code plugin or its Inbox tool is off", code: "plugin_off" };
+      const pluginOn =
+        folders.length === 0
+          ? claudeCodePluginEnabled(files)
+          : folders.some((folder) => claudeCodePluginEnabled(files, claudeProjectSettingsDirs(folder, ctx.homeDir, ctx.platform)));
+      if (!pluginOn) return { ok: false, missing: false, reason: "Plannotator's Claude Code plugin or its Inbox tool is off", code: "plugin_off" };
       if (!claudeCodeInboxToolOn(files)) return { ok: false, missing: false, reason: "Plannotator's Claude Code plugin or its Inbox tool is off", code: "tool_off" };
       // Signed in, as a launched session will be (its Claude folder). Over SSH macOS keeps the login locked, so this
       // reads as signed out; the launch block says the Inbox was started over SSH.
       if ((await authState(files, path, configDir ?? null)) === "signed_out" && !signsInOtherwise(files)) return { ok: false, missing: false, reason: "Claude Code isn't signed in", code: "signed_out" };
-      return { ok: true, version };
+      return { ok: true, version: found };
     },
+
+    choices: () => choiceLists(version),
 
     /** The switch, the person's own Claude setup (with this folder's settings) and the last finished shell read. */
     startOf: (folder: string) => startNow(claudeSetup(folder)),
@@ -683,13 +732,19 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
      * describes. Full permissions: bypass mode; the person's own default mode: no flag; otherwise auto mode.
      */
     async start(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv }) {
-      const settingsPath = writeSettings(launch, input.login, ctx.config().model);
+      const person = personSettings();
+      if (person && !person.ok) {
+        ctx.startLog(launch.id, person.text);
+        return { ok: false as const, code: "failed" as const, text: person.text };
+      }
+      const settingsPath = writeSettings(launch, input.login, person?.settings ?? null);
       const result = await cli.start({
         folder: launch.folder,
         shownFolder: ctx.displayFolder(trustFolderOf(launch)),
         name: input.name,
         settingsPath,
         mode: modeOf(launch),
+        choice: launchChoiceArgs(CLAUDE, { model: launch.model, effort: launch.effort }),
         allowBypass: launch.bypass_available === true,
         environment: loginEnvironment(input.login),
       });
@@ -765,7 +820,10 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
       const setup = claudeSetup();
       const start = startNow(setup);
       const follows = setting === null && start.wantsFull ? (setup.defaultMode === "bypassPermissions" ? "claude" : "shell") : null;
+      const { settingsFile } = ctx.config();
       return {
+        settings_file: settingsFile,
+        ...(settingsFile ? { settings_file_shown: ctx.displayFolder(claudeSettingsFilePath(settingsFile, ctx.homeDir)) } : {}),
         full_permissions: setting ?? start.wantsFull,
         follows,
         own_mode: start.ownMode,

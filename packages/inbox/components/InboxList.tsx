@@ -47,6 +47,7 @@ import { ListNewPill } from './ListNewPill';
 import { useInboxTextSize } from '../textSize';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { relativeTime, relativeWords, useRelativeClock } from '../relativeTime';
+import { RowSlot } from './RowSlot';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { bareKeyAllowed, isComposingKey, keyboardFocused, keyTarget, modalOpen } from '../shortcuts/guards';
 import { listKeyTarget, LIST_STOPS, type ListMove } from '../listKeys';
@@ -204,6 +205,11 @@ export interface InboxListProps {
  */
 export function rowAgent(row: InboxListRow): InboxListRow['author'] {
   return row.addressee ? { kind: 'agent', host: row.addressee.host, session: row.addressee.session, name: null } : row.author;
+}
+
+function slotSession(row: InboxListRow): string | null {
+  const agent = rowAgent(row);
+  return agent.kind === 'agent' ? (agent.session ?? null) : null;
 }
 
 /**
@@ -426,7 +432,7 @@ function FromLine({ row, project, filtered }: { row: InboxListRow; project: stri
     <span className="ib-from">
       <RowAvatar row={row} size={24} />
       {!filtered && <RowProjectMark row={row} />}
-      {!filtered && <ClipText className="ib-p" text={project} />}
+      {!filtered && <RowSlot row={row} session={slotSession(row)} project={project} />}
       <RowAgents participants={row.participants} agent={rowAgent(row)} />
     </span>
   );
@@ -447,14 +453,7 @@ function LeadLine({ row, project, filtered, tip = true }: { row: InboxListRow; p
   return (
     <span className="ib-from ib-lead">
       {withProject && <RowProjectMark row={row} />}
-      {withProject &&
-        (tip ? (
-          <ClipText className="ib-p" text={project} />
-        ) : (
-          <span className="ib-p" dir="auto">
-            {project}
-          </span>
-        ))}
+      {withProject && <RowSlot row={row} session={slotSession(row)} project={project} tip={tip} />}
       <RowAgentTiles participants={row.participants} agent={rowAgent(row)} tip={tip} />
     </span>
   );
@@ -1742,6 +1741,7 @@ export function InboxList(props: InboxListProps) {
           onAction={(row, action) => onRowAction?.(row, action)}
           disabled={!onRowAction}
           held={props.selectedThreadId !== null}
+          phone={props.phone === true}
         >
           {props.stale}
           {props.ask}

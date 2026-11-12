@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/core",
-  "version": "0.25.23",
+  "version": "0.25.28",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
@@ -55,6 +55,7 @@
     "./inbox-folding": "./inbox-folding.ts",
     "./inbox-delivery-line": "./inbox-delivery-line.ts",
     "./inbox-run-line": "./inbox-run-line.ts",
+    "./inbox-launch-choice": "./inbox-launch-choice.ts",
     "./inbox-launch-ready": "./inbox-launch-ready.ts",
     "./inbox-scratch": "./inbox-scratch.ts",
     "./inbox-git-url": "./inbox-git-url.ts",
