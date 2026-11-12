@@ -2517,6 +2517,10 @@ export function inboxElsewhereText(moved: { agent: InboxAgentId; path: string | 
   return `${label} is connected in ${moved.path ?? "another file"}, but ${why}. Plannotator left both as they are; Settings → Agents shows it off here, and turning it on moves it.`;
 }
 
+export function inboxGrantText(grant: { agent: InboxAgentId; setting: string; undo: string }): string {
+  return `Plannotator turned on ${INBOX_AGENT_LABELS[grant.agent]}'s ${grant.setting}, so your replies can start a turn in the session that asked. To turn it off: ${grant.undo}`;
+}
+
 /** What one `plannotator inbox` run did to the agents on this computer. */
 export interface InboxConnectReport {
   at: string;
@@ -2552,6 +2556,7 @@ export interface InboxConnectReport {
    * packages/server/inbox-qwen-trust.ts). Absent from older Inboxes.
    */
   trusted?: InboxAgentId[];
+  granted?: { agent: InboxAgentId; setting: string; undo: string }[];
   /** Why registering as a trusted sender failed this run, said once per reason. */
   trust_failed?: { agent: InboxAgentId; reason: string }[];
 }

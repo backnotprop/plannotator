@@ -17,6 +17,15 @@ export function hermesFound(e: AgentEnvironment): boolean {
   }
 }
 
+export function hermesWakeGranted(e: AgentEnvironment): boolean {
+  try {
+    const config = Bun.YAML.parse(readFileSync(join(hermesHome(e), "config.yaml"), "utf8")) as { plugins?: { entries?: Record<string, { allow_gateway_injection?: unknown } | null> } } | null;
+    return config?.plugins?.entries?.[HERMES_PLUGIN_NAME]?.allow_gateway_injection === true;
+  } catch {
+    return false;
+  }
+}
+
 export function hermesPluginInstalled(e: AgentEnvironment): boolean {
   try {
     const manifest = readFileSync(join(hermesHome(e), "plugins", HERMES_PLUGIN_NAME, "plugin.yaml"), "utf8");
