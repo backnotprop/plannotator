@@ -8,7 +8,6 @@ export interface InboxLaunchChoices {
   models: string[];
   efforts: string[];
   effort_word: string;
-  /** Levels per model, when the agent lists them so (Codex): a model's own list wins over `efforts`. */
   model_efforts?: Record<string, string[]>;
   last?: InboxLaunchChoice;
 }
@@ -56,7 +55,6 @@ export function parsePiChoices(help: string, listModels: string | null): Omit<In
   return { models, efforts: efforts.length > 0 ? efforts : [...PI_CHOICES_FALLBACK.efforts], effort_word: PI_CHOICES_FALLBACK.effort_word };
 }
 
-/** Codex's `model/list` answer, in its order: the models its picker shows, and each one's levels. */
 export function parseCodexModels(answer: unknown): Omit<InboxLaunchChoices, "last"> | null {
   const data = (answer as { data?: unknown } | null)?.data;
   if (!Array.isArray(data)) return null;
@@ -76,7 +74,6 @@ export function parseCodexModels(answer: unknown): Omit<InboxLaunchChoices, "las
   return { models, efforts, effort_word: "Effort", model_efforts: modelEfforts };
 }
 
-/** OpenCode's `GET /api/model`: every enabled model as `provider/model`, each with its own variants. */
 export function parseOpenCodeModels(answer: unknown): Omit<InboxLaunchChoices, "last"> | null {
   const data = (answer as { data?: unknown } | null)?.data;
   if (!Array.isArray(data)) return null;
@@ -95,7 +92,6 @@ export function parseOpenCodeModels(answer: unknown): Omit<InboxLaunchChoices, "
   return { models, efforts, effort_word: "Variant", model_efforts: modelEfforts };
 }
 
-/** The levels offered beside `model`: its own when the agent lists them per model. */
 export function launchEffortsFor(choices: Pick<InboxLaunchChoices, "efforts" | "model_efforts">, model: string | undefined): string[] {
   return (model && choices.model_efforts?.[model]) || choices.efforts;
 }
@@ -134,7 +130,6 @@ export function launchChoiceArgs(agent: string, choice: InboxLaunchChoice): stri
   return args;
 }
 
-/** Codex takes them on `thread/start` and `thread/resume`, not argv; checked again here like `launchChoiceArgs`. */
 export function codexThreadChoice(choice: InboxLaunchChoice): { model?: string; config: Record<string, string> } {
   return {
     ...(inboxLaunchTokenOk(choice.model) ? { model: choice.model } : {}),

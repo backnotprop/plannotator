@@ -38,10 +38,6 @@
  *     header; the next New message starts on them; Default sends neither.
  * 10. Phone: the To picker (01), the To sentence (02), the working line (06),
  *     the permission prompt without Open in Terminal (08), no Delete in ⋯.
- * 11. Codex (tests/helpers/fake-codex-launch.ts, installed only here): its own
- *     models with each one's levels; the pick goes on thread/start and into the header.
- * 12. OpenCode (tests/helpers/fake-opencode-launch.ts, installed only here): the
- *     model and variant go on the new session, its plugin takes the root, the answer shows.
  *
  * Pictures: LAUNCH_SHOTS_DIR (default .local/proof/launch-pr1), wide light at
  * 2x, plus 02 and 06 dark, and 01, 02, 06 and 08 on a phone. Build the binary first (see
@@ -789,7 +785,6 @@ test('Codex: its own models with each one\'s levels; the pick goes on thread/sta
     await d.locator('[data-compose-choice]').click();
     await d.locator('[data-compose-choice-menu="effort"] [data-compose-choice-value="ultra"]').click();
     await d.locator('[data-compose-choice-menu="model"] [data-compose-choice-value="gpt-5.5"]').click();
-    // gpt-5.5 has no ultra: its own levels only, and the effort back on Default.
     await expect(d.locator('[data-compose-choice-menu="effort"] [data-compose-choice-value]')).toHaveText(['Default', 'low', 'medium', 'high', 'xhigh']);
     await expect(d.locator('[data-compose-choice]')).toHaveText('gpt-5.5');
     await d.locator('[data-compose-choice-menu="effort"] [data-compose-choice-value="high"]').click();

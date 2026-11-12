@@ -7,7 +7,6 @@ export function initialLaunchChoice(choices: InboxLaunchChoices | null | undefin
   return { ...(last.model ? { model: last.model } : {}), ...(last.effort && launchEffortsFor(choices, last.model).includes(last.effort) ? { effort: last.effort } : {}) };
 }
 
-/** A model that doesn't take the current effort drops it back to Default. */
 export function pickLaunchModel(choice: InboxLaunchChoice, choices: InboxLaunchChoices, model: string | null): InboxLaunchChoice {
   const next: InboxLaunchChoice = model ? { model } : {};
   if (choice.effort && launchEffortsFor(choices, next.model).includes(choice.effort)) next.effort = choice.effort;

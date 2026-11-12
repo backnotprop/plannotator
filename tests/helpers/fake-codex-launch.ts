@@ -5,8 +5,7 @@
  * `turn/start` (a turn started during another one waits for it, or is refused with `refuseSecondTurn`), `turn/steer`,
  * `turn/interrupt`, with `turn/started` and `turn/completed` notifications. A turn whose text holds `APPROVE` asks a
  * command approval first and waits for the answer; one holding `ASK` asks `item/tool/requestUserInput`; one holding
- * `SLOW` runs until it is interrupted. `model/list` answers `models`; an app-server that only lists is not a start.
- * Every start, call, answer and stop goes to `calls.jsonl`. The real Codex is
+ * `SLOW` runs until it is interrupted. Every start, call, answer and stop goes to `calls.jsonl`. The real Codex is
  * never run, and nothing reads the person's `~/.codex`.
  *
  * Runs under Bun and node. POSIX only.
@@ -31,7 +30,6 @@ export interface FakeCodexLaunchState {
   refuseSecondTurn?: boolean;
   /** `thread/resume` is refused as another Codex holding the thread. */
   heldElsewhere?: boolean;
-  /** `model/list`'s catalog (default: two of Codex 0.167.2's), or "fail". */
   models?: { id: string; efforts: string[]; hidden?: boolean }[] | "fail";
   /** No `codex` at all: the script exits 127. */
   gone?: boolean;

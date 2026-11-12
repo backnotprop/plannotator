@@ -247,7 +247,6 @@ export function codexTrustRoot(folder: string): string | null {
   }
 }
 
-/** The models Codex's own picker shows (`model/list`), from a short-lived app-server; null when it can't say within `ms`. */
 export async function listCodexModels(codex: string, env: Readonly<Record<string, string>>, cwd: string, ms: number): Promise<LaunchChoiceLists | null> {
   let proc: ReturnType<typeof Bun.spawn>;
   try {
